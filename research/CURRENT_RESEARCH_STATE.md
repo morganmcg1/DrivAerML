@@ -21,20 +21,33 @@ and surface the strongest single-delta improvements over it.
   rel-L2 auxiliary loss, and DomainLayerNorm. Best surface val ≈ 3.6%.
   The hardest known levers were `wall_shear` and `volume_pressure`.
 
-## Round 1 — two parallel streams
+## Round 1 — active PRs (all 16 students assigned 2026-04-28)
 
-### Stream 1 — exploit existing evidence (5 students)
+### Stream 1 — exploit existing evidence
 
-Pin the floor with multiple known-good baselines and proven-additive deltas
-(LR schedule, metric-aware aux loss, scale-up). Provides reliable comparison
-points for everything else.
+| PR | Student | Hypothesis |
+|---|---|---|
+| #2 | alphonse | Stock defaults baseline — calibration floor |
+| #3 | askeladd | codex/optimized-lineage config (4L/256d/4h, 65k pts, lr=2e-4) |
+| #4 | chihiro | Large model 4L/512d/8h — radford champion scale-up |
+| #5 | edward | Cosine LR + 5% warmup (proven radford winner family) |
+| #6 | emma | Metric-aware MSE + rel-L2 aux loss (proven 2nd radford winner) |
 
-### Stream 2 — fresh high-variance ideas (11 students)
+### Stream 2 — fresh targeted ideas
 
-Bias toward `wall_shear` (7.29%) and `volume_pressure` (6.08%) — the two
-hardest AB-UPT targets. Researcher-agent generates a ranked hypothesis pool;
-each student tests a single mechanistically distinct delta against the same
-strong base config.
+| PR | Student | Hypothesis | Primary target |
+|---|---|---|---|
+| #7 | fern | Gaussian random Fourier features for coordinates | p_s / tau |
+| #8 | frieren | Per-case geometry FiLM conditioning | all |
+| #9 | gilbert | Volume loss weight sweep 2.0x vs 3.0x | p_v (6.08%) |
+| #10 | haku | Per-axis wall-shear channel loss weights (2x vs 3x) | tau (7.29%) |
+| #11 | kohaku | Tangential wall-shear projection loss (physics-aware) | tau axes |
+| #12 | nezuko | Stochastic depth / DropPath regularization | generalization |
+| #13 | norman | Progressive EMA decay anneal 0.99→0.9999 | test checkpoint |
+| #14 | senku | Deeper model 5L/256d/4h (depth ablation) | all |
+| #15 | tanjiro | SDF-gated volume attention bias (near-wall emphasis) | p_v (6.08%) |
+| #16 | thorfinn | Test-time bilateral symmetry TTA (xz-plane) | tau_y esp. |
+| #17 | violet | Surface-area-weighted MSE loss (physics-consistent) | p_s / tau |
 
 ## Candidate next directions (post round 1)
 
