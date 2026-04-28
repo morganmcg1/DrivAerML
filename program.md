@@ -12,6 +12,12 @@ Research target for CFD surrogate modelling on DrivAerML. Given vehicle surface 
 - `wall_shear`: 3-channel surface wall-shear-stress vector
 - `volume_pressure`: scalar pressure at volume points
 
+## Mission
+
+The research goal is to find the strongest DrivAerML model we can, with particular focus on `volume_pressure` and `wall_shear`. Success is measured on the held-out test metrics logged by `train.py` after the best validation checkpoint is reloaded. Validation metrics are useful for steering, but final claims must be made from `test_primary/*`.
+
+The target is not merely to match the current public reference: the goal is to beat it decisively. Agents should relentlessly search for ways to drive down `test_primary/volume_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct`, the per-axis wall-shear metrics, and the aggregate `test_primary/abupt_axis_mean_rel_l2_pct`, without hiding regressions behind a single averaged number.
+
 The baseline is a plain grouped Transolver with one shared backbone and separate surface/volume heads. Keep the vanilla path simple; more opinionated variants should be explored as separate experiment arms.
 
 ## Codebase
@@ -164,6 +170,21 @@ For DrivAerML, the main paper table reports `p_s`, `u`, and `omega`; Appendix A 
 
 `abupt_axis_mean_rel_l2_pct` is a convenience aggregate for checkpointing and triage. It is not a standalone AB-UPT benchmark column, so paper-facing comparisons should quote the individual test fields above.
 
+### State-Of-The-Art Targets
+
+AB-UPT is the current public DrivAerML reference to beat. Its reported DrivAerML values are relative L2 error in percent, averaged per test case; lower is better. Use these as external SOTA targets, while still reporting this repo's exact held-out `test_primary/*` metrics.
+
+| Target | This repo metric | AB-UPT reference |
+|--------|------------------|-----------------:|
+| Surface pressure `p_s` | `test_primary/surface_pressure_rel_l2_pct` | `3.82` |
+| Vector wall shear `tau` | `test_primary/wall_shear_rel_l2_pct` | `7.29` |
+| Volume pressure `p_v` | `test_primary/volume_pressure_rel_l2_pct` | `6.08` |
+| Wall shear `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | `5.35` |
+| Wall shear `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | `3.65` |
+| Wall shear `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | `3.63` |
+
+The per-axis wall-shear table reports `p_s = 3.76` and `p_v = 6.29` in the same AB-UPT/DoMINO comparison setting. Treat the stricter of the relevant published values as the target band when deciding whether a result is exciting. A run that only improves the internal aggregate but misses `p_v` or wall-shear targets has not solved the problem.
+
 ### Target Scaling
 
 The baseline normalizes each target channel with train-split mean/std only. `surface_cp` is already a pressure coefficient, and the packaged loader does not expose verified per-case freestream or Reynolds metadata for volume pressure or wall shear. Do not add guessed per-case `p / Re^2` or Cp-style rescaling unless that metadata is explicitly plumbed through and final validation/test metrics are still computed on the original target units for AB-UPT alignment.
@@ -179,12 +200,36 @@ Do not run only short experiments; they can discard ideas before the model has s
 
 ## Research Workflow
 
-For substantial architecture or training-strategy changes, preserve main context by using research subagents before implementation. A good advisor pass should split the work like this:
+For substantial architecture or training-strategy changes, preserve main context by using research subagents before implementation. The advisor should deliberately run two complementary streams instead of only local hill-climbing.
+
+### Stream 1: Exploit Existing Evidence
+
+Mine the existing DrivAerML history before assigning a wave of experiments:
+
+- Search this target repo's prior branches and PRs, including `main`, `codex/optimized-lineage`, and any previous DrivAerML experiment branches.
+- Search the `wandb/senpai` `radford` branch, related DrivAerML PRs, W&B runs, analysis files, and advisor notes for mechanisms that already worked or failed.
+- Assign a subset of students to build on the strongest past ideas rather than rediscovering them: useful preprocessing, target transforms, batching choices, normalization, loss weighting, architecture deltas, and optimizer schedules.
+- When reusing a past idea, state the source PR/run/branch in the assignment and explain what is being preserved versus changed.
+
+### Stream 2: Generate New High-Variance Ideas
+
+Reserve another subset of students for fresh, aggressive ideas that may not be present in the history. Search broadly across CFD surrogate literature and adjacent ML:
+
+- DrivAerML and AI-for-CFD work: AB-UPT, UPT, Transolver, Transolver-3, GeoTransolver, DoMINO, GINO/FNO-style operators, graph/mesh transformers, point-cloud networks, geometric encodings, and multi-resolution tokenization.
+- AI-for-science ideas from physics, chemistry, and biology: equivariant or invariant representations, denoising/pretraining, multiscale message passing, latent neural operators, simulator residual modelling, and uncertainty-aware losses.
+- Modern transformer and LLM architecture ideas available at run time: DeepSeek, Kimi, GLM, and other recent papers for MoE routing, latent/linear attention, token compression, normalization, optimizer, curriculum, and distillation tricks that can plausibly transfer to point/field regression.
+
+Wild ideas are welcome, but they must still honor the data split, full-fidelity test evaluation, and telemetry contract. A clever idea that cannot be measured on `test_primary/*` is not useful for this sprint.
+
+### Suggested Subagents
+
+A good advisor pass should split the work like this:
 
 - Architecture research agent: compare vanilla Transolver, grouped surface/volume variants, UPT-style ideas, geometric encodings, and memory-efficient attention choices.
 - Experiment-history research agent: review prior DrivAerML PRs, W&B runs, failures, and merged wins so the next hypothesis is not a duplicate.
+- Frontier-ideas research agent: search outside the repo for recent AI-for-science and transformer/LLM mechanisms that might transfer to DrivAerML.
 - Optimization/data research agent: inspect batch-size, compile, gradient and weight health, validation cadence, target weighting, and preprocessing implications.
-- Synthesis research agent: read the prior research-agent outputs, do any missing checks, and choose the final experiment set.
+- Synthesis research agent: read the prior research-agent outputs, do any missing checks, and choose the final experiment set across both streams.
 
 Use subagents when the task is broad enough to justify them; include their conclusions in the PR body. Keep the train script's logging fidelity intact while iterating.
 
