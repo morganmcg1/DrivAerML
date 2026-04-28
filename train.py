@@ -476,6 +476,7 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    surface_channel_weights: str = ""
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1170,6 +1171,38 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def masked_channel_weighted_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    channel_weights: torch.Tensor,
+) -> torch.Tensor:
+    if not bool(mask.any()):
+        return pred.sum() * 0.0
+    cw = channel_weights.to(dtype=pred.dtype, device=pred.device)
+    diff = (pred - target) ** 2
+    diff = diff * cw.view(1, 1, -1)
+    mask_f = mask.unsqueeze(-1).to(dtype=pred.dtype)
+    n_channels = diff.shape[-1]
+    denom = (mask_f.sum() * n_channels).clamp(min=1.0)
+    return (diff * mask_f).sum() / denom
+
+
+def parse_surface_channel_weights(spec: str, expected_channels: int) -> list[float] | None:
+    spec = spec.strip()
+    if not spec:
+        return None
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    if len(parts) != expected_channels:
+        raise ValueError(
+            f"surface_channel_weights expected {expected_channels} comma-separated values, got {len(parts)}: {spec!r}"
+        )
+    weights = [float(p) for p in parts]
+    if any(w < 0 for w in weights):
+        raise ValueError(f"surface_channel_weights must be non-negative, got {weights}")
+    return weights
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1180,6 +1213,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    surface_channel_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1219,7 +1253,15 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
+        if surface_channel_weights is None:
+            surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
+        else:
+            surface_loss = masked_channel_weighted_mse(
+                surface_pred_used,
+                surface_target_used,
+                batch.surface_mask,
+                surface_channel_weights,
+            )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
     metrics = {
@@ -1532,6 +1574,19 @@ def main(argv: Iterable[str] | None = None) -> None:
         volume_y_std=stats["volume_y_std"].to(device),
     )
 
+    surface_channel_weights_list = parse_surface_channel_weights(
+        config.surface_channel_weights, SURFACE_Y_DIM
+    )
+    surface_channel_weights_tensor: torch.Tensor | None = None
+    if surface_channel_weights_list is not None:
+        surface_channel_weights_tensor = torch.tensor(
+            surface_channel_weights_list, dtype=torch.float32, device=device
+        )
+        print(
+            "Surface channel weights "
+            f"({', '.join(SURFACE_TARGET_NAMES)}): {surface_channel_weights_list}"
+        )
+
     model = build_model(config).to(device)
     if config.compile_model:
         model = torch.compile(model)
@@ -1631,6 +1686,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                surface_channel_weights=surface_channel_weights_tensor,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
