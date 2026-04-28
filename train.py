@@ -478,6 +478,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     use_area_weighted_loss: bool = False  # weight surface MSE by surface_x[..., 6] (area)
     area_weight_clip: float = 10.0  # cap normalized area weight at this multiple of mean (0 disables)
+    max_grad_norm: float = 1.0  # global grad-norm clip; <= 0 disables (bug-fix: previously absent)
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1792,6 +1793,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
+            if config.max_grad_norm > 0:
+                grad_norm_pre_clip = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), config.max_grad_norm
+                )
+                gradient_metrics["train/grad/global_norm_pre_clip"] = float(grad_norm_pre_clip)
+                gradient_metrics["train/grad/clipped"] = float(
+                    grad_norm_pre_clip > config.max_grad_norm
+                )
             optimizer.step()
             if ema is not None:
                 ema.update(model)
