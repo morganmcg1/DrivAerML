@@ -99,3 +99,10 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
   attention scaling) are the main lever for "more update budget".
 - Read-only files: `data/*`, `pyproject.toml`, `instructions/*`. All edits
   go in `train.py`.
+- **Logging cadence (Issue #19, 2026-04-28):** every Round-2+ assignment
+  MUST include `--gradient-log-every 100 --weight-log-every 100` (or 250
+  if needed) in the reproduce command. Per-step gradient/weight logging
+  bottlenecks training to ~0.44 it/s on the 4L/256d/65k-pts/bs=2 base,
+  preventing the run from reaching epoch 1 inside the 6 h timeout. At
+  every-50 the same config runs at ~6.8 it/s. Slope cadence
+  (`--slope-log-fraction 0.05`) is already efficient and stays.
