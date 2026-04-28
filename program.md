@@ -9,7 +9,7 @@ SPDX-PackageName: senpai
 Research target for CFD surrogate modelling on DrivAerML. Given vehicle surface points and volume points, predict three target families:
 
 - `surface_pressure`: surface pressure coefficient `cp`
-- `wall_shear`: 3-channel surface friction / wall shear vector
+- `wall_shear`: 3-channel surface wall-shear-stress vector
 - `volume_pressure`: scalar pressure at volume points
 
 The baseline is a plain grouped Transolver with one shared backbone and separate surface/volume heads. Keep the vanilla path simple; more opinionated variants should be explored as separate experiment arms.
@@ -35,7 +35,7 @@ surface_xyz.npy        # [N_surface, 3]
 surface_normals.npy    # [N_surface, 3]
 surface_area.npy       # [N_surface] or [N_surface, 1]
 surface_cp.npy         # [N_surface] or [N_surface, 1]
-surface_friction.npy   # [N_surface, 3]
+surface_wallshearstress.npy  # [N_surface, 3]
 volume_xyz.npy         # [N_volume, 3]
 volume_sdf.npy         # [N_volume] or [N_volume, 1]
 volume_pressure.npy    # [N_volume] or [N_volume, 1]
@@ -48,10 +48,10 @@ Targets:
 | Tensor | Channels | Description |
 |--------|----------|-------------|
 | `surface_y` | 0 | `surface_pressure` / `surface_cp` |
-| `surface_y` | 1-3 | `wall_shear_x`, `wall_shear_y`, `wall_shear_z` from `surface_friction` |
+| `surface_y` | 1-3 | `wall_shear_x`, `wall_shear_y`, `wall_shear_z` from `surface_wallshearstress` |
 | `volume_y` | 0 | `volume_pressure` |
 
-`normalizers.json` must provide `surface_cp`, `surface_friction`, and `volume_pressure` stats. Losses are computed in normalized space; all MAE and relative-L2 metrics are computed after denormalization.
+`normalizers.json` must provide `surface_cp`, `surface_wallshearstress`, and `volume_pressure` stats. Losses are computed in normalized space; all MAE and relative-L2 metrics are computed after denormalization.
 
 ## Splits
 

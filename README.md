@@ -16,7 +16,7 @@ DrivAerML is an automotive CFD surrogate dataset. The packaged target predicts s
 
 - Surface input: `[x, y, z, nx, ny, nz, area]`
 - Volume input: `[x, y, z, sdf]`
-- Surface targets: `surface_cp` plus 3-channel `surface_friction` / wall shear
+- Surface targets: `surface_cp` plus 3-channel `surface_wallshearstress`
 - Volume target: `volume_pressure`
 - Split: public processed `400 train / 34 val / 50 test`
 - Primary metric: mean per-case relative L2 across surface pressure, wall shear, and volume pressure, logged as `target_mean_rel_l2_pct`
@@ -76,7 +76,7 @@ surface_xyz.npy
 surface_normals.npy
 surface_area.npy
 surface_cp.npy
-surface_friction.npy
+surface_wallshearstress.npy
 volume_xyz.npy
 volume_sdf.npy
 volume_pressure.npy

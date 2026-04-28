@@ -10,7 +10,7 @@ The processed dataset provides one directory per case containing `.npy` arrays:
 - `surface_normals.npy`
 - `surface_area.npy`
 - `surface_cp.npy`
-- `surface_friction.npy`
+- `surface_wallshearstress.npy`
 - `volume_xyz.npy`
 - `volume_sdf.npy`
 - `volume_pressure.npy`
@@ -36,7 +36,7 @@ from .split_utils import expand_pvc_candidates, first_existing
 
 DEFAULT_MANIFEST = Path(__file__).with_name("split_manifest.json")
 SURFACE_X_DIM = 7  # xyz(3) + normals(3) + panel area(1)
-SURFACE_Y_DIM = 4  # cp(1) + surface friction / wall shear(3)
+SURFACE_Y_DIM = 4  # cp(1) + wall shear stress(3)
 VOLUME_X_DIM = 4  # xyz(3) + sdf(1)
 VOLUME_Y_DIM = 1  # volume pressure
 SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")
@@ -281,9 +281,12 @@ def load_case(
     normals = _load_npy_rows(case_dir / "surface_normals.npy", surface_rows)
     area = _column(_load_npy_rows(case_dir / "surface_area.npy", surface_rows))
     cp = _column(_load_npy_rows(case_dir / "surface_cp.npy", surface_rows))
-    friction = _three_column(_load_npy_rows(case_dir / "surface_friction.npy", surface_rows), "surface_friction.npy")
+    wall_shear = _three_column(
+        _load_npy_rows(case_dir / "surface_wallshearstress.npy", surface_rows),
+        "surface_wallshearstress.npy",
+    )
     surface_x = np.concatenate([xyz, normals, area], axis=1)
-    surface_y = np.concatenate([cp, friction], axis=1)
+    surface_y = np.concatenate([cp, wall_shear], axis=1)
     volume_x = np.concatenate(
         [
             _load_npy_rows(case_dir / "volume_xyz.npy", volume_rows),
@@ -522,11 +525,11 @@ def target_stats_from_normalizers(store: DrivAerMLCaseStore) -> dict[str, torch.
         raise FileNotFoundError(f"Missing DrivAerML normalizers file: {store.normalizers_path}")
     raw = store.load_normalizers()
     surface_cp_mean, surface_cp_std = _normalizer_tensor(raw, "surface_cp", 1)
-    surface_friction_mean, surface_friction_std = _normalizer_tensor(raw, "surface_friction", 3)
+    wall_shear_mean, wall_shear_std = _normalizer_tensor(raw, "surface_wallshearstress", 3)
     volume_pressure_mean, volume_pressure_std = _normalizer_tensor(raw, "volume_pressure", 1)
     return {
-        "surface_y_mean": torch.cat([surface_cp_mean, surface_friction_mean]),
-        "surface_y_std": torch.cat([surface_cp_std, surface_friction_std]),
+        "surface_y_mean": torch.cat([surface_cp_mean, wall_shear_mean]),
+        "surface_y_std": torch.cat([surface_cp_std, wall_shear_std]),
         "volume_y_mean": volume_pressure_mean,
         "volume_y_std": volume_pressure_std,
     }
