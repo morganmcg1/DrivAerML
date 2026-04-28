@@ -109,8 +109,8 @@ python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
 
 Defaults are point-limited for memory while still full-fidelity for validation/test:
 
-- `--train-surface-points 40000` and `--train-volume-points 40000` sample random points per training view
-- `--eval-surface-points 40000` and `--eval-volume-points 40000` evaluate deterministic strided chunks that cover every point exactly once
+- `--train-surface-points 65536` and `--train-volume-points 65536` sample random points per training view on this optimized branch
+- `--eval-surface-points 65536` and `--eval-volume-points 65536` evaluate deterministic strided chunks that cover every point exactly once
 - `--validation-every 10` validates sparsely, with an extra epoch-1 and final-epoch validation
 - `--compile-model` is on by default
 - `--slope-log-fraction 0.05` logs key curve slopes every 5% of the estimated update budget

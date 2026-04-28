@@ -156,7 +156,7 @@ Use subagents when the task is broad enough to justify them; include their concl
 
 `main` is the vanilla baseline lineage: simple grouped Transolver, AdamW, EMA, compile enabled, and explicit metrics for all targets.
 
-An optimized lineage should live on branch `codex/optimized-lineage`. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, and slope telemetry. Advisor programs can assign a subset of students to that branch while others continue vanilla-lineage exploration.
+This branch is `codex/optimized-lineage`: a higher-capacity starting point with 4 layers, 256 hidden width, 128 slices, larger point chunks, and slower EMA decay. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, and slope telemetry. Advisor programs can assign a subset of students here while others continue vanilla-lineage exploration on `main`.
 
 ## Reference Targets
 

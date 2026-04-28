@@ -426,14 +426,14 @@ class EMA:
 
 @dataclass
 class Config:
-    lr: float = 3e-4
-    weight_decay: float = 1e-4
+    lr: float = 2e-4
+    weight_decay: float = 5e-4
     batch_size: int = 2
     epochs: int = 50
-    train_surface_points: int = 40_000
-    eval_surface_points: int = 40_000
-    train_volume_points: int = 40_000
-    eval_volume_points: int = 40_000
+    train_surface_points: int = 65_536
+    eval_surface_points: int = 65_536
+    train_volume_points: int = 65_536
+    eval_volume_points: int = 65_536
     validation_every: int = 10
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
@@ -443,11 +443,11 @@ class Config:
     wandb_group: str = ""
     wandb_name: str = ""
     agent: str = ""
-    model_layers: int = 3
-    model_hidden_dim: int = 192
-    model_heads: int = 3
+    model_layers: int = 4
+    model_hidden_dim: int = 256
+    model_heads: int = 4
     model_mlp_ratio: int = 4
-    model_slices: int = 96
+    model_slices: int = 128
     model_dropout: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
@@ -455,7 +455,7 @@ class Config:
     persistent_workers: bool = True
     prefetch_factor: int = 2
     use_ema: bool = True
-    ema_decay: float = 0.999
+    ema_decay: float = 0.9995
     ema_start_step: int = 50
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
