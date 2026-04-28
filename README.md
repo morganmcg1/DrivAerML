@@ -101,13 +101,15 @@ If the PVC is mounted somewhere other than `/mnt/pvc` or `/mnt/new-pvc`, set:
 export PVC_MOUNT_PATH=/your/mount
 ```
 
-## Training
+## Training Reference
+
+`program.md` is the source of truth for the research contract, metrics, SOTA targets, and what agents should optimize. This section is only a quick reference for the current `train.py` interface and defaults.
 
 ```
 python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
 ```
 
-Defaults are point-limited for memory while still full-fidelity for validation/test:
+Current reference defaults are point-limited for memory while preserving full-fidelity validation/test evaluation:
 
 - `--train-surface-points 65536` and `--train-volume-points 65536` sample random points per training view on this optimized branch
 - `--eval-surface-points 65536` and `--eval-volume-points 65536` evaluate deterministic strided chunks that cover every point exactly once
@@ -123,11 +125,6 @@ Training sampling is with replacement inside each random view. For a case with `
 AB-UPT comparison metrics are logged separately. Use `test_primary/surface_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct`, `test_primary/wall_shear_x_rel_l2_pct`, `test_primary/wall_shear_y_rel_l2_pct`, `test_primary/wall_shear_z_rel_l2_pct`, and `test_primary/volume_pressure_rel_l2_pct` for paper-aligned comparisons. `abupt_axis_mean_rel_l2_pct` is only a checkpointing/triage scalar, not a published AB-UPT table column.
 
 The baseline keeps target normalization to train-split mean/std. `surface_cp` is already nondimensionalized; do not add guessed per-case `p / Re^2` rescaling unless verified per-case freestream/Reynolds metadata is plumbed through and the final AB-UPT-style metrics are still computed on the original target units.
-
-Environment:
-
-- `SENPAI_TIMEOUT_MINUTES` — wall-clock cap, default `30`
-- `WANDB_ENTITY`, `WANDB_PROJECT`, `WANDB_MODE` — W&B routing
 
 ## Citation
 
