@@ -123,6 +123,22 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class FourierFeatureTransform(nn.Module):
+    """Gaussian random Fourier features for coordinate encoding (Tancik et al. 2020)."""
+
+    def __init__(self, num_input_dims: int, num_freqs: int, sigma: float = 1.0):
+        super().__init__()
+        self.num_input_dims = num_input_dims
+        self.num_freqs = num_freqs
+        self.sigma = sigma
+        B = torch.randn(num_input_dims, num_freqs) * sigma
+        self.register_buffer("B", B)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        proj = x @ self.B.to(x.dtype)
+        return torch.cat([proj.sin(), proj.cos()], dim=-1)
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -288,6 +304,9 @@ class SurfaceTransolver(nn.Module):
         mlp_ratio: int = 4,
         slice_num: int = 96,
         stochastic_depth_prob: float = 0.0,
+        use_fourier_features: bool = False,
+        fourier_num_freqs: int = 64,
+        fourier_sigma: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -295,18 +314,35 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.use_fourier_features = use_fourier_features
+        self.fourier_num_freqs = fourier_num_freqs
+        self.fourier_sigma = fourier_sigma
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
-        self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
-        self.project_surface_features = (
-            LinearProjection(surface_extra_dim, n_hidden) if surface_extra_dim > 0 else None
-        )
-        self.project_volume_features = (
-            LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
-        )
+
+        if use_fourier_features:
+            # RFF replaces ContinuousSincosEmbed; the entire flat tensor
+            # [fourier_xyz (2F) | extras] feeds a single LinearProjection.
+            self.fourier_surface = FourierFeatureTransform(space_dim, fourier_num_freqs, fourier_sigma)
+            self.fourier_volume = FourierFeatureTransform(space_dim, fourier_num_freqs, fourier_sigma)
+            self.pos_embed = None
+            surface_proj_in = 2 * fourier_num_freqs + surface_extra_dim
+            volume_proj_in = 2 * fourier_num_freqs + volume_extra_dim
+            self.project_surface_features = LinearProjection(surface_proj_in, n_hidden)
+            self.project_volume_features = LinearProjection(volume_proj_in, n_hidden)
+        else:
+            self.fourier_surface = None
+            self.fourier_volume = None
+            self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
+            self.project_surface_features = (
+                LinearProjection(surface_extra_dim, n_hidden) if surface_extra_dim > 0 else None
+            )
+            self.project_volume_features = (
+                LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
+            )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.backbone = Transformer(
@@ -326,14 +362,23 @@ class SurfaceTransolver(nn.Module):
         self,
         x: torch.Tensor,
         *,
+        fourier: FourierFeatureTransform | None,
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
-        pos = x[:, :, : self.space_dim]
-        hidden = self.pos_embed(pos)
-        if project_features is not None and x.shape[-1] > self.space_dim:
-            hidden = hidden + project_features(x[:, :, self.space_dim :])
+        if self.use_fourier_features:
+            xyz_enc = fourier(x[:, :, : self.space_dim])
+            if x.shape[-1] > self.space_dim:
+                x_input = torch.cat([xyz_enc, x[:, :, self.space_dim :]], dim=-1)
+            else:
+                x_input = xyz_enc
+            hidden = project_features(x_input)
+        else:
+            pos = x[:, :, : self.space_dim]
+            hidden = self.pos_embed(pos)
+            if project_features is not None and x.shape[-1] > self.space_dim:
+                hidden = hidden + project_features(x[:, :, self.space_dim :])
         return bias(hidden) + placeholder
 
     def forward(
@@ -361,6 +406,7 @@ class SurfaceTransolver(nn.Module):
             tokens.append(
                 self._encode_group(
                     surface_x,
+                    fourier=self.fourier_surface,
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
@@ -373,6 +419,7 @@ class SurfaceTransolver(nn.Module):
             tokens.append(
                 self._encode_group(
                     volume_x,
+                    fourier=self.fourier_volume,
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
@@ -489,6 +536,9 @@ class Config:
     model_slices: int = 96
     model_dropout: float = 0.0
     stochastic_depth_prob: float = 0.0
+    use_fourier_features: bool = False
+    fourier_num_freqs: int = 64
+    fourier_sigma: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -644,6 +694,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
         stochastic_depth_prob=config.stochastic_depth_prob,
+        use_fourier_features=config.use_fourier_features,
+        fourier_num_freqs=config.fourier_num_freqs,
+        fourier_sigma=config.fourier_sigma,
     )
 
 
