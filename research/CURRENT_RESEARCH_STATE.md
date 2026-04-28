@@ -60,16 +60,37 @@ finalizing hypotheses to avoid duplicating work and to draw inspiration.
 | #16 | thorfinn | Test-time bilateral symmetry TTA (xz-plane) | tau_y esp. |
 | #17 | violet | Surface-area-weighted MSE loss (physics-consistent) | p_s / tau |
 
-## Candidate next directions (post round 1)
+## Round 2 plan — bold architecture replacements
 
-- Geometry-aware conditioning (per-case mesh encoder + FiLM/AdaLN)
-- Equivariant / vector-neuron variants of slice attention for vector targets
-- Latent neural-operator decoders for full-resolution surface/volume queries
-- Physics-residual auxiliary losses (continuity, smoothness, log-magnitude
-  wall-shear targets)
-- Attention scaling: linear / Performer / grouped-query for full-resolution
-- Curriculum sampling and hard-example mining once a stable baseline exists
-- Pretraining via self-supervised denoising on volume/surface points
+Full hypothesis pool: `research/RESEARCH_IDEAS_2026-04-28_ROUND2_ARCHITECTURES.md`
+(16 ideas, generated after mining `wandb/senpai` `noam` and `radford` per Issue #18).
+
+### Top-priority findings to act on
+
+1. **A01 — ANP cross-attention surface decoder is a near-certain win.**
+   noam PR #2379 swapped one head and got -70% in-domain pressure / -48% OOD on a
+   different dataset. Should be among the first Round-2 assignments.
+2. **The Transolver backbone has never been challenged on DrivAerML.** All 200 PRs
+   on `radford` were tuning, not architecture swaps. Backbone-replacement frontier
+   is wide open.
+3. **50 unlabelled test geometries are free pretraining data.** B01 (denoising),
+   B02 (MAE masking), C01 (DPOT transfer) can exploit this — no prior PR has.
+
+### Ranked Round-2 candidates (top 8)
+
+| # | Idea | Backbone change | Target |
+|---|---|---|---|
+| A01 | ANP cross-attention surface decoder | Replace surface MLP head | p_s, tau |
+| A02 | SE(3)-invariant coord features (12-d) | Input augmentation only | all |
+| B04 | Mamba-2 SSM surface decoder (Morton sort) | Replace surface head | p_s, tau |
+| B05 | Soft MoE FFN (4 experts, learned dispatch) | Replace every FFN | all |
+| C02 | Deep Evidential Regression head (NIG) | Replace MSE objective | all |
+| A03 | Perceiver-IO encoder+decoder (1024 latents) | Full backbone swap | all |
+| B01 | Denoising pretraining on geometry then fine-tune | Pretrain stage | all |
+| B02 | MAE 75%-mask point pretraining | Pretrain stage | all |
+
+Round 2 will assign these once Round 1 results come in (so we know which
+loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
 ## Constraints
 
