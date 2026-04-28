@@ -97,9 +97,9 @@ The Transolver backbone must also keep padding masked internally. Slice-attentio
 
 The legacy `out["preds"]` alias still points to `surface_preds` for compatibility, but new work should use the explicit keys.
 
-## Gradient And Slope Telemetry
+## Gradient, Weight, And Slope Telemetry
 
-The trainer intentionally logs high-fidelity gradient telemetry on every optimizer update by default. Future agents must preserve this unless the advisor explicitly asks to change the logging contract.
+The trainer intentionally logs high-fidelity gradient and weight telemetry on every optimizer update by default. Future agents must preserve this unless the advisor explicitly asks to change the logging contract.
 
 The W&B stream includes:
 
@@ -108,8 +108,11 @@ The W&B stream includes:
 - `train/grad_module/<LayerType>/<module_path>/*` — layer-by-layer statistics for every named module with trainable parameters.
 - `train/grad_param/<LayerType>/<parameter_path>/*` — per-parameter statistics for every trainable tensor.
 - `train/grad_hist/all` and `train/grad_hist_param/<LayerType>/<parameter_path>` — gradient histograms for distribution drift, spikes, saturation, dead layers, and collapse detection.
+- `train/weight/*` — aggregate parameter health after each optimizer update: norm, mean, mean absolute value, RMS, standard deviation, min/max, max absolute value, zero fraction, non-finite count, and trainable/frozen tensor counts.
+- `train/weight_type/<LayerType>/*`, `train/weight_module/<LayerType>/<module_path>/*`, and `train/weight_param/<LayerType>/<parameter_path>/*` — the same parameter statistics grouped by module class, layer path, and parameter tensor.
+- `train/weight_hist/all` and `train/weight_hist_param/<LayerType>/<parameter_path>` — optional parameter histograms controlled by `--log-weight-histograms`.
 
-Keep gradient logging close to `loss.backward()` and before `optimizer.step()` so it represents the update that is about to be applied. When adding new model blocks, make sure their parameters remain visible through `named_modules()` / `named_parameters()` so the layer-type and layer-path logging stays useful.
+Keep gradient logging close to `loss.backward()` and before `optimizer.step()` so it represents the update that is about to be applied. Keep weight logging after `optimizer.step()` so it represents the model state after the update. When adding new model blocks, make sure their parameters remain visible through `named_modules()` / `named_parameters()` so the layer-type and layer-path logging stays useful.
 
 Slope telemetry is also part of the contract. Every `--slope-log-fraction 0.05` of the estimated optimizer-step budget, `train.py` logs slopes for key curves under `train/slope/*`: losses, grad norms, grad-to-param ratio, RMS gradients, max gradients, MAE curves, and relative-L2 curves. Validation slopes are logged under `val/slope/*` at validation events; final validation and test use `full_val/slope/*` and `test/slope/*` when enough history exists. If you rename metric keys, preserve or document equivalent slope curves.
 
@@ -172,7 +175,7 @@ This target trains slower than TandemFoilSet. Use a mix of shorter and longer ex
 - Short runs are for viability: does the idea compile, stay stable, produce sane gradients, and improve early validation trends?
 - Longer runs are for confirmation: does a stable idea keep improving once the model has enough update budget to learn surface and volume structure?
 
-Do not run only short experiments; they can discard ideas before the model has started learning. Do not run only long experiments; they burn the time budget before enough hypotheses are screened. Use the slope and gradient logs to decide which short runs deserve a longer confirmation run.
+Do not run only short experiments; they can discard ideas before the model has started learning. Do not run only long experiments; they burn the time budget before enough hypotheses are screened. Use the slope, gradient, and weight logs to decide which short runs deserve a longer confirmation run.
 
 ## Research Workflow
 
@@ -180,7 +183,7 @@ For substantial architecture or training-strategy changes, preserve main context
 
 - Architecture research agent: compare vanilla Transolver, grouped surface/volume variants, UPT-style ideas, geometric encodings, and memory-efficient attention choices.
 - Experiment-history research agent: review prior DrivAerML PRs, W&B runs, failures, and merged wins so the next hypothesis is not a duplicate.
-- Optimization/data research agent: inspect batch-size, compile, gradient health, validation cadence, target weighting, and preprocessing implications.
+- Optimization/data research agent: inspect batch-size, compile, gradient and weight health, validation cadence, target weighting, and preprocessing implications.
 - Synthesis research agent: read the prior research-agent outputs, do any missing checks, and choose the final experiment set.
 
 Use subagents when the task is broad enough to justify them; include their conclusions in the PR body. Keep the train script's logging fidelity intact while iterating.
@@ -189,7 +192,7 @@ Use subagents when the task is broad enough to justify them; include their concl
 
 `main` is the vanilla baseline lineage: simple grouped Transolver, AdamW, EMA, compile enabled, and explicit metrics for all targets.
 
-This branch is `codex/optimized-lineage`: a higher-capacity starting point with 4 layers, 256 hidden width, 128 slices, larger point chunks, and slower EMA decay. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, and slope telemetry. Advisor programs can assign a subset of students here while others continue vanilla-lineage exploration on `main`.
+This branch is `codex/optimized-lineage`: a higher-capacity starting point with 4 layers, 256 hidden width, 128 slices, larger point chunks, and slower EMA decay. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, weight telemetry, and slope telemetry. Advisor programs can assign a subset of students here while others continue vanilla-lineage exploration on `main`.
 
 ## Reference Targets
 
@@ -204,7 +207,7 @@ Treat these as external target bands for surface pressure only, not apples-to-ap
 
 ## Constraints
 
-- GPUs have 96 GB. Prefer larger batch sizes when they use GPU capacity well, but compare gradient health across batch sizes because larger batches can degrade final quality.
+- GPUs have 96 GB. Prefer larger batch sizes when they use GPU capacity well, but compare gradient and weight health across batch sizes because larger batches can degrade final quality.
 - `torch.compile` is enabled by default to improve throughput. If you disable it for an experiment, explain why.
 - Respect `SENPAI_TIMEOUT_MINUTES`; do not override it in experiments.
 - Simpler is better. A small improvement with unreadable complexity is not worth it.
