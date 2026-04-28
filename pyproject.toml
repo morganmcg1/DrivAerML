@@ -1,7 +1,7 @@
 [project]
 name = "drivaerml"
 version = "0.1.0"
-description = "Surface-pressure DrivAerML benchmark package for senpai autoresearch"
+description = "Surface and volume DrivAerML benchmark package for senpai autoresearch"
 authors = [
     { name = "Morgan McGuire" },
 ]

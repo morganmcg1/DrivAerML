@@ -26,9 +26,9 @@ All advisor work lives on `$ADVISOR_BRANCH`, not `main`. PRs target it as base, 
 
 ### Hypothesis Design
 
-Write hypotheses with a crisp predicted delta on `val_primary/surface_rel_l2_pct`. The final ranking metric is `test_primary/surface_rel_l2_pct`, computed at the end of every training run and logged to W&B.
+Write hypotheses with a crisp predicted delta on `val_primary/target_mean_rel_l2_pct`. The final ranking metric is `test_primary/target_mean_rel_l2_pct`, computed at the end of every training run and logged to W&B.
 
-Prefer changes that improve full-surface per-case relative L2 without exploiting point chunking. When chunk-level loss and case-level relative L2 disagree, the case-level metric wins.
+Prefer changes that improve full-fidelity per-case relative L2 across surface pressure, wall shear, and volume pressure without exploiting point chunking. When chunk-level loss and case-level relative L2 disagree, the case-level metric wins.
 
 ## First Order Of Business
 

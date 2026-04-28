@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
 
-"""Train a surface-pressure Transolver on DrivAerML.
+"""Train a grouped surface/volume Transolver on DrivAerML.
 
 Primary metric:
-    val_primary/surface_rel_l2_pct
+    val_primary/target_mean_rel_l2_pct
 
 Usage:
     python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
@@ -31,7 +31,17 @@ import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from data import SURFACE_X_DIM, SURFACE_Y_DIM, SurfaceBatch, load_data, pad_collate
+from data import (
+    SURFACE_TARGET_NAMES,
+    SURFACE_X_DIM,
+    SURFACE_Y_DIM,
+    VOLUME_TARGET_NAMES,
+    VOLUME_X_DIM,
+    VOLUME_Y_DIM,
+    SurfaceBatch,
+    load_data,
+    pad_collate,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -215,14 +225,18 @@ class Transformer(nn.Module):
 
 
 class SurfaceTransolver(nn.Module):
-    """Surface-only Transolver for DrivAerML pressure coefficient prediction."""
+    """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
     def __init__(
         self,
         *,
         space_dim: int = 3,
-        input_dim: int = SURFACE_X_DIM,
-        output_dim: int = SURFACE_Y_DIM,
+        input_dim: int | None = None,
+        output_dim: int | None = None,
+        surface_input_dim: int = SURFACE_X_DIM,
+        surface_output_dim: int = SURFACE_Y_DIM,
+        volume_input_dim: int = VOLUME_X_DIM,
+        volume_output_dim: int = VOLUME_Y_DIM,
         n_layers: int = 3,
         n_hidden: int = 192,
         dropout: float = 0.0,
@@ -232,14 +246,26 @@ class SurfaceTransolver(nn.Module):
     ):
         super().__init__()
         self.space_dim = space_dim
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        extra_dim = max(0, input_dim - space_dim)
+        self.surface_input_dim = input_dim if input_dim is not None else surface_input_dim
+        self.surface_output_dim = output_dim if output_dim is not None else surface_output_dim
+        self.volume_input_dim = volume_input_dim
+        self.volume_output_dim = volume_output_dim
+        self.input_dim = self.surface_input_dim
+        self.output_dim = self.surface_output_dim
+        surface_extra_dim = max(0, self.surface_input_dim - space_dim)
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
-        self.project_features = LinearProjection(extra_dim, n_hidden) if extra_dim > 0 else None
-        self.placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
+        self.project_surface_features = (
+            LinearProjection(surface_extra_dim, n_hidden) if surface_extra_dim > 0 else None
+        )
+        self.project_volume_features = (
+            LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
+        )
+        self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -249,17 +275,103 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.out = LinearProjection(n_hidden, output_dim)
+        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
-    def forward(self, *, x: torch.Tensor, mask: torch.Tensor) -> dict[str, torch.Tensor]:
+    def _encode_group(
+        self,
+        x: torch.Tensor,
+        *,
+        project_features: LinearProjection | None,
+        bias: MLP,
+        placeholder: torch.Tensor,
+    ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
-        if self.project_features is not None and x.shape[-1] > self.space_dim:
-            hidden = hidden + self.project_features(x[:, :, self.space_dim :])
-        hidden = self.surface_bias(hidden) + self.placeholder
-        hidden = self.backbone(hidden, attn_mask=mask)
-        preds = self.out(self.norm(hidden)) * mask.unsqueeze(-1)
-        return {"preds": preds, "hidden": hidden}
+        if project_features is not None and x.shape[-1] > self.space_dim:
+            hidden = hidden + project_features(x[:, :, self.space_dim :])
+        return bias(hidden) + placeholder
+
+    def forward(
+        self,
+        *,
+        surface_x: torch.Tensor | None = None,
+        surface_mask: torch.Tensor | None = None,
+        volume_x: torch.Tensor | None = None,
+        volume_mask: torch.Tensor | None = None,
+        x: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if surface_x is None:
+            surface_x = x
+        if surface_mask is None:
+            surface_mask = mask
+        if surface_x is None and volume_x is None:
+            raise ValueError("SurfaceTransolver requires surface_x or volume_x")
+
+        tokens: list[torch.Tensor] = []
+        masks: list[torch.Tensor] = []
+        surface_tokens = 0
+        volume_tokens = 0
+
+        if surface_x is not None:
+            if surface_mask is None:
+                surface_mask = torch.ones(surface_x.shape[:2], device=surface_x.device, dtype=torch.bool)
+            surface_tokens = surface_x.shape[1]
+            tokens.append(
+                self._encode_group(
+                    surface_x,
+                    project_features=self.project_surface_features,
+                    bias=self.surface_bias,
+                    placeholder=self.surface_placeholder,
+                )
+            )
+            masks.append(surface_mask)
+
+        if volume_x is not None:
+            if volume_mask is None:
+                volume_mask = torch.ones(volume_x.shape[:2], device=volume_x.device, dtype=torch.bool)
+            volume_tokens = volume_x.shape[1]
+            tokens.append(
+                self._encode_group(
+                    volume_x,
+                    project_features=self.project_volume_features,
+                    bias=self.volume_bias,
+                    placeholder=self.volume_placeholder,
+                )
+            )
+            masks.append(volume_mask)
+
+        hidden = torch.cat(tokens, dim=1)
+        attn_mask = torch.cat(masks, dim=1)
+        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        hidden_norm = self.norm(hidden)
+
+        cursor = 0
+        surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
+        cursor += surface_tokens
+        volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if surface_x is not None:
+            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+        else:
+            batch_size = volume_x.shape[0]
+            surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+
+        if volume_x is not None:
+            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+        else:
+            batch_size = surface_x.shape[0]
+            volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+
+        return {
+            "preds": surface_preds,
+            "surface_preds": surface_preds,
+            "volume_preds": volume_preds,
+            "hidden": hidden,
+            "surface_hidden": surface_hidden,
+            "volume_hidden": volume_hidden,
+        }
 
 
 class EMA:
@@ -316,10 +428,15 @@ class EMA:
 class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-4
-    batch_size: int = 1
+    batch_size: int = 2
     epochs: int = 50
     train_surface_points: int = 40_000
     eval_surface_points: int = 40_000
+    train_volume_points: int = 40_000
+    eval_volume_points: int = 40_000
+    validation_every: int = 10
+    surface_loss_weight: float = 1.0
+    volume_loss_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -342,24 +459,60 @@ class Config:
     ema_start_step: int = 50
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
-    compile_model: bool = False
+    slope_log_fraction: float = 0.05
+    compile_model: bool = True
     debug: bool = False
 
 
 class TargetTransform:
-    def __init__(self, *, y_mean: torch.Tensor, y_std: torch.Tensor):
-        self.y_mean = y_mean
-        self.y_std = y_std.clamp(min=1e-6)
+    def __init__(
+        self,
+        *,
+        surface_y_mean: torch.Tensor | None = None,
+        surface_y_std: torch.Tensor | None = None,
+        volume_y_mean: torch.Tensor | None = None,
+        volume_y_std: torch.Tensor | None = None,
+        y_mean: torch.Tensor | None = None,
+        y_std: torch.Tensor | None = None,
+    ):
+        if surface_y_mean is None:
+            if y_mean is None:
+                raise ValueError("TargetTransform requires surface_y_mean or y_mean")
+            surface_y_mean = y_mean
+        if surface_y_std is None:
+            if y_std is None:
+                raise ValueError("TargetTransform requires surface_y_std or y_std")
+            surface_y_std = y_std
+        if volume_y_mean is None:
+            volume_y_mean = torch.zeros(VOLUME_Y_DIM, dtype=torch.float32)
+        if volume_y_std is None:
+            volume_y_std = torch.ones(VOLUME_Y_DIM, dtype=torch.float32)
+        self.surface_y_mean = surface_y_mean
+        self.surface_y_std = surface_y_std.clamp(min=1e-6)
+        self.volume_y_mean = volume_y_mean
+        self.volume_y_std = volume_y_std.clamp(min=1e-6)
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.y_mean.to(y.device)) / self.y_std.to(y.device)
+        return self.apply_surface(y)
 
     def invert(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.y_std.to(y.device) + self.y_mean.to(y.device)
+        return self.invert_surface(y)
+
+    def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
+        return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+
+    def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
+        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+
+    def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
+        return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
+
+    def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
+        return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
-    parser = argparse.ArgumentParser(description="DrivAerML surface-pressure trainer")
+    parser = argparse.ArgumentParser(description="DrivAerML surface/volume trainer")
     defaults = Config()
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -398,6 +551,8 @@ def make_loaders(
         root=config.data_root or None,
         train_surface_points=config.train_surface_points,
         eval_surface_points=config.eval_surface_points,
+        train_volume_points=config.train_volume_points,
+        eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
     num_workers = resolve_num_workers(config)
@@ -627,18 +782,158 @@ def collect_gradient_metrics(
     return metrics
 
 
+def _numeric_metric_items(metrics: dict[str, object]) -> dict[str, float]:
+    numeric: dict[str, float] = {}
+    for key, value in metrics.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            number = float(value)
+        elif isinstance(value, torch.Tensor) and value.numel() == 1:
+            number = float(value.detach().cpu().item())
+        else:
+            continue
+        if math.isfinite(number):
+            numeric[key] = number
+    return numeric
+
+
+def slope_source_metrics(metrics: dict[str, object]) -> dict[str, float]:
+    """Keep slope curves focused on optimization and target-quality signals."""
+
+    keywords = (
+        "loss",
+        "mae",
+        "rel_l2",
+        "global_norm",
+        "grad_to_param_norm",
+        "rms",
+        "max_abs",
+    )
+    numeric = _numeric_metric_items(metrics)
+    return {key: value for key, value in numeric.items() if any(word in key for word in keywords)}
+
+
+class MetricSlopeTracker:
+    """Logs metric slopes over fixed fractions of the estimated update budget."""
+
+    def __init__(self, total_steps: int, fraction: float = 0.05):
+        fraction = max(float(fraction), 1e-6)
+        self.interval = max(1, int(math.ceil(max(total_steps, 1) * fraction)))
+        self.next_step = self.interval
+        self.anchors: dict[str, tuple[int, float]] = {}
+
+    @staticmethod
+    def _curve_name(metric_name: str, namespace: str) -> str:
+        prefix = f"{namespace}/"
+        if metric_name.startswith(prefix):
+            metric_name = metric_name.removeprefix(prefix)
+        return metric_name.replace("/", "_")
+
+    def update(
+        self,
+        *,
+        global_step: int,
+        metrics: dict[str, object],
+        namespace: str,
+        force: bool = False,
+    ) -> dict[str, float]:
+        numeric = slope_source_metrics(metrics)
+        for key, value in numeric.items():
+            self.anchors.setdefault(key, (global_step, value))
+
+        if not force and global_step < self.next_step:
+            return {}
+
+        slopes: dict[str, float] = {}
+        for key, value in numeric.items():
+            previous_step, previous_value = self.anchors[key]
+            step_delta = global_step - previous_step
+            if step_delta > 0:
+                slope = (value - previous_value) / step_delta
+                curve = self._curve_name(key, namespace)
+                slopes[f"{namespace}/slope/{curve}/per_step"] = slope
+                slopes[f"{namespace}/slope/{curve}/per_1k_steps"] = slope * 1000.0
+            self.anchors[key] = (global_step, value)
+
+        while not force and global_step >= self.next_step:
+            self.next_step += self.interval
+        return slopes
+
+
+def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    if bool(mask.any()):
+        return F.mse_loss(pred[mask], target[mask])
+    return pred.sum() * 0.0
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-) -> torch.Tensor:
+    *,
+    surface_loss_weight: float = 1.0,
+    volume_loss_weight: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
-    target = transform.apply(batch.y)
+    surface_target = transform.apply_surface(batch.surface_y)
+    volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
-        pred = model(x=batch.x, mask=batch.mask)["preds"]
-        return F.mse_loss(pred[batch.mask], target[batch.mask])
+        out = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+    return loss, {
+        "surface_loss": float(surface_loss.detach().cpu().item()),
+        "volume_loss": float(volume_loss.detach().cpu().item()),
+    }
+
+
+def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
+    if not bool(mask.any()):
+        return 0.0, 0
+    diff = pred[mask].float() - target[mask].float()
+    return float(diff.square().sum().detach().cpu().item()), int(diff.numel())
+
+
+def _accumulate_case_rel_l2(
+    store: dict[str, list[float]],
+    *,
+    case_id: str,
+    pred: torch.Tensor,
+    target: torch.Tensor,
+) -> None:
+    if pred.numel() == 0:
+        return
+    target_sq = float(target.float().square().sum().detach().cpu().item())
+    if target_sq <= 0.0:
+        return
+    error_sq = float((pred.float() - target.float()).square().sum().detach().cpu().item())
+    state = store.setdefault(case_id, [0.0, 0.0])
+    state[0] += error_sq
+    state[1] += target_sq
+
+
+def _rel_l2(store: dict[str, list[float]]) -> tuple[float, float]:
+    values = [
+        math.sqrt(error_sq / target_sq)
+        for error_sq, target_sq in store.values()
+        if target_sq > 0.0
+    ]
+    value = sum(values) / max(len(values), 1)
+    return value, float(len(values))
+
+
+def _finite_mean(values: Iterable[float]) -> float:
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    return sum(finite) / max(len(finite), 1)
 
 
 @torch.no_grad()
@@ -651,44 +946,141 @@ def evaluate_split(
     amp_mode: str = "none",
 ) -> dict[str, float]:
     model.eval()
-    loss_sum = 0.0
-    loss_count = 0
-    case_sums: dict[str, list[float]] = {}
+    surface_loss_sse = 0.0
+    surface_loss_count = 0
+    volume_loss_sse = 0.0
+    volume_loss_count = 0
+    abs_sums = {
+        "surface_pressure": 0.0,
+        "wall_shear": 0.0,
+        "wall_shear_x": 0.0,
+        "wall_shear_y": 0.0,
+        "wall_shear_z": 0.0,
+        "volume_pressure": 0.0,
+    }
+    abs_counts = {key: 0 for key in abs_sums}
+    wall_shear_vector_abs_sum = 0.0
+    wall_shear_vector_count = 0
+    case_sums = {
+        "surface_pressure": {},
+        "wall_shear": {},
+        "volume_pressure": {},
+    }
 
     for batch in loader:
         batch = batch.to(device)
-        target_norm = transform.apply(batch.y)
+        surface_target_norm = transform.apply_surface(batch.surface_y)
+        volume_target_norm = transform.apply_volume(batch.volume_y)
         with autocast_context(device, amp_mode):
-            pred_norm = model(x=batch.x, mask=batch.mask)["preds"]
-        pred_norm = pred_norm.float()
-        loss_sum += float(F.mse_loss(pred_norm[batch.mask], target_norm[batch.mask]).detach().cpu().item())
-        loss_count += 1
-        pred = transform.invert(pred_norm)
+            out = model(
+                surface_x=batch.surface_x,
+                surface_mask=batch.surface_mask,
+                volume_x=batch.volume_x,
+                volume_mask=batch.volume_mask,
+            )
+        surface_pred_norm = out["surface_preds"].float()
+        volume_pred_norm = out["volume_preds"].float()
+        surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
+        volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
+        surface_loss_sse += surface_sse
+        surface_loss_count += surface_count
+        volume_loss_sse += volume_sse
+        volume_loss_count += volume_count
+        surface_pred = transform.invert_surface(surface_pred_norm)
+        volume_pred = transform.invert_volume(volume_pred_norm)
+
+        if bool(batch.surface_mask.any()):
+            surface_abs = (surface_pred - batch.surface_y).abs()
+            valid_surface_abs = surface_abs[batch.surface_mask]
+            abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
+            abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
+            wall_abs = valid_surface_abs[:, 1:4]
+            abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
+            abs_counts["wall_shear"] += int(wall_abs.numel())
+            for offset, axis in enumerate(("x", "y", "z")):
+                channel = wall_abs[:, offset]
+                abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
+                abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
+            wall_vector_error = torch.linalg.vector_norm(
+                surface_pred[batch.surface_mask][:, 1:4] - batch.surface_y[batch.surface_mask][:, 1:4],
+                dim=-1,
+            )
+            wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
+            wall_shear_vector_count += int(wall_vector_error.numel())
+
+        if bool(batch.volume_mask.any()):
+            volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
+            abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
+            abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
 
         for case_idx, case_id in enumerate(batch.case_ids):
-            valid = batch.mask[case_idx].bool()
-            if not valid.any():
-                continue
-            pred_valid = pred[case_idx][valid]
-            target_valid = batch.y[case_idx][valid]
-            target_sq = float(target_valid.square().sum().detach().cpu().item())
-            if target_sq <= 0.0:
-                continue
-            state = case_sums.setdefault(case_id, [0.0, 0.0])
-            state[0] += float((pred_valid - target_valid).square().sum().detach().cpu().item())
-            state[1] += target_sq
+            surface_valid = batch.surface_mask[case_idx].bool()
+            if bool(surface_valid.any()):
+                surface_pred_valid = surface_pred[case_idx][surface_valid]
+                surface_target_valid = batch.surface_y[case_idx][surface_valid]
+                _accumulate_case_rel_l2(
+                    case_sums["surface_pressure"],
+                    case_id=case_id,
+                    pred=surface_pred_valid[:, 0:1],
+                    target=surface_target_valid[:, 0:1],
+                )
+                _accumulate_case_rel_l2(
+                    case_sums["wall_shear"],
+                    case_id=case_id,
+                    pred=surface_pred_valid[:, 1:4],
+                    target=surface_target_valid[:, 1:4],
+                )
+            volume_valid = batch.volume_mask[case_idx].bool()
+            if bool(volume_valid.any()):
+                _accumulate_case_rel_l2(
+                    case_sums["volume_pressure"],
+                    case_id=case_id,
+                    pred=volume_pred[case_idx][volume_valid],
+                    target=batch.volume_y[case_idx][volume_valid],
+                )
 
-    rel_values = [
-        math.sqrt(error_sq / target_sq)
-        for error_sq, target_sq in case_sums.values()
-        if target_sq > 0.0
-    ]
-    rel_l2 = sum(rel_values) / max(len(rel_values), 1)
+    surface_pressure_rel_l2, surface_cases = _rel_l2(case_sums["surface_pressure"])
+    wall_shear_rel_l2, wall_shear_cases = _rel_l2(case_sums["wall_shear"])
+    volume_pressure_rel_l2, volume_cases = _rel_l2(case_sums["volume_pressure"])
+    rel_l2_mean = _finite_mean([surface_pressure_rel_l2, wall_shear_rel_l2, volume_pressure_rel_l2])
+    mae_values = {
+        key: abs_sums[key] / max(abs_counts[key], 1)
+        for key in abs_sums
+    }
+    wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
+    target_mean_mae = _finite_mean(
+        [
+            mae_values["surface_pressure"],
+            mae_values["wall_shear"],
+            mae_values["volume_pressure"],
+        ]
+    )
+    loss = (surface_loss_sse + volume_loss_sse) / max(surface_loss_count + volume_loss_count, 1)
     return {
-        "loss": loss_sum / max(loss_count, 1),
-        "surface_rel_l2": rel_l2,
-        "surface_rel_l2_pct": rel_l2 * 100.0,
-        "cases": float(len(rel_values)),
+        "loss": loss,
+        "surface_loss": surface_loss_sse / max(surface_loss_count, 1),
+        "volume_loss": volume_loss_sse / max(volume_loss_count, 1),
+        "surface_pressure_mae": mae_values["surface_pressure"],
+        "wall_shear_mae": mae_values["wall_shear"],
+        "wall_shear_vector_mae": wall_shear_vector_mae,
+        "wall_shear_x_mae": mae_values["wall_shear_x"],
+        "wall_shear_y_mae": mae_values["wall_shear_y"],
+        "wall_shear_z_mae": mae_values["wall_shear_z"],
+        "volume_pressure_mae": mae_values["volume_pressure"],
+        "surface_pressure_rel_l2": surface_pressure_rel_l2,
+        "surface_pressure_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
+        "wall_shear_rel_l2": wall_shear_rel_l2,
+        "wall_shear_rel_l2_pct": wall_shear_rel_l2 * 100.0,
+        "volume_pressure_rel_l2": volume_pressure_rel_l2,
+        "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
+        "target_mean_mae": target_mean_mae,
+        "target_mean_rel_l2": rel_l2_mean,
+        "target_mean_rel_l2_pct": rel_l2_mean * 100.0,
+        "surface_rel_l2": surface_pressure_rel_l2,
+        "surface_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
+        "cases": max(surface_cases, wall_shear_cases, volume_cases),
+        "surface_cases": surface_cases,
+        "volume_cases": volume_cases,
     }
 
 
@@ -720,8 +1112,8 @@ def log_model_artifact(
     base = config.wandb_name or config.agent or "drivaerml"
     artifact_name = f"model-{_sanitize_artifact_token(base)}-{run.id}"
     description = (
-        "DrivAerML surface Transolver checkpoint; "
-        f"best val surface_rel_l2_pct = {best_metrics['surface_rel_l2_pct']:.4f}"
+        "DrivAerML surface/volume Transolver checkpoint; "
+        f"best val target_mean_rel_l2_pct = {best_metrics['target_mean_rel_l2_pct']:.4f}"
     )
     metadata = {
         "run_id": run.id,
@@ -731,15 +1123,23 @@ def log_model_artifact(
         "git_commit": _git_commit_short(),
         "n_params": n_params,
         "best_epoch": int(best_metrics["epoch"]),
-        "best_val_primary/surface_rel_l2_pct": best_metrics["surface_rel_l2_pct"],
+        "best_val_primary/target_mean_rel_l2_pct": best_metrics["target_mean_rel_l2_pct"],
+        "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
+        "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
+        "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
         "lr": config.lr,
         "weight_decay": config.weight_decay,
         "batch_size": config.batch_size,
         "train_surface_points": config.train_surface_points,
         "eval_surface_points": config.eval_surface_points,
+        "train_volume_points": config.train_volume_points,
+        "eval_volume_points": config.eval_volume_points,
     }
     for split_name, metrics in test_metrics.items():
-        metadata[f"{split_name}/surface_rel_l2_pct"] = metrics["surface_rel_l2_pct"]
+        metadata[f"{split_name}/target_mean_rel_l2_pct"] = metrics["target_mean_rel_l2_pct"]
+        metadata[f"{split_name}/surface_pressure_mae"] = metrics["surface_pressure_mae"]
+        metadata[f"{split_name}/wall_shear_mae"] = metrics["wall_shear_mae"]
+        metadata[f"{split_name}/volume_pressure_mae"] = metrics["volume_pressure_mae"]
     artifact = wandb.Artifact(
         name=artifact_name,
         type="model",
@@ -756,7 +1156,10 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     print(
         f"{prefix:<14s} "
         f"loss={metrics['loss']:.5f} "
-        f"surface_rel_l2_pct={metrics['surface_rel_l2_pct']:.4f} "
+        f"target_rel_l2_pct={metrics['target_mean_rel_l2_pct']:.4f} "
+        f"surface_p_mae={metrics['surface_pressure_mae']:.5f} "
+        f"volume_p_mae={metrics['volume_pressure_mae']:.5f} "
+        f"wall_shear_mae={metrics['wall_shear_mae']:.5f} "
         f"cases={int(metrics['cases'])}"
     )
 
@@ -770,19 +1173,26 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     train_loader, val_loaders, test_loaders, stats = make_loaders(config)
     transform = TargetTransform(
-        y_mean=stats["y_mean"].to(device),
-        y_std=stats["y_std"].to(device),
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
     )
 
     model = build_model(config).to(device)
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
-    print(f"Model: SurfaceTransolver ({n_params / 1e6:.2f}M params)")
+    print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+    total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+    val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+    full_val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+    test_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
 
     run = wandb.init(
         entity=os.environ.get("WANDB_ENTITY"),
@@ -796,6 +1206,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             "train_views": len(train_loader.dataset),
             "val_views": {k: len(v.dataset) for k, v in val_loaders.items()},
             "test_views": {k: len(v.dataset) for k, v in test_loaders.items()},
+            "surface_targets": SURFACE_TARGET_NAMES,
+            "volume_targets": VOLUME_TARGET_NAMES,
+            "total_estimated_steps": total_estimated_steps,
         },
         mode=os.environ.get("WANDB_MODE", "online"),
     )
@@ -803,8 +1216,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/*", step_metric="global_step")
     wandb.define_metric("val/*", step_metric="global_step")
     wandb.define_metric("val_primary/*", step_metric="global_step")
+    wandb.define_metric("full_val/*", step_metric="global_step")
+    wandb.define_metric("full_val_primary/*", step_metric="global_step")
     wandb.define_metric("test/*", step_metric="global_step")
     wandb.define_metric("test_primary/*", step_metric="global_step")
+    wandb.define_metric("train/slope/*", step_metric="global_step")
+    wandb.define_metric("val/slope/*", step_metric="global_step")
+    wandb.define_metric("full_val/slope/*", step_metric="global_step")
+    wandb.define_metric("test/slope/*", step_metric="global_step")
     wandb.define_metric("train/grad/*", step_metric="global_step")
     wandb.define_metric("train/grad_module/*", step_metric="global_step")
     wandb.define_metric("train/grad_param/*", step_metric="global_step")
@@ -838,7 +1257,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
-            loss = train_loss(model, batch, transform, device, config.amp_mode)
+            loss, batch_loss_metrics = train_loss(
+                model,
+                batch,
+                transform,
+                device,
+                config.amp_mode,
+                surface_loss_weight=config.surface_loss_weight,
+                volume_loss_weight=config.volume_loss_weight,
+            )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             should_log_gradients = (
@@ -859,16 +1286,45 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
-            wandb.log(
-                {
-                    "train/loss": float(loss.detach().cpu().item()),
-                    "global_step": global_step,
-                    **gradient_metrics,
-                }
+            train_log: dict[str, object] = {
+                "train/loss": float(loss.detach().cpu().item()),
+                "train/surface_loss": batch_loss_metrics["surface_loss"],
+                "train/volume_loss": batch_loss_metrics["volume_loss"],
+                "global_step": global_step,
+                **gradient_metrics,
+            }
+            train_log.update(
+                train_slope_tracker.update(
+                    global_step=global_step,
+                    metrics=train_log,
+                    namespace="train",
+                )
             )
+            wandb.log(train_log)
 
         scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
+        dt = time.time() - t0
+        peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
+        should_validate = (
+            epoch == 0
+            or (epoch + 1) % max(config.validation_every, 1) == 0
+            or epoch + 1 == max_epochs
+        )
+
+        log_metrics = {
+            "train/epoch_loss": epoch_train_loss,
+            "lr": scheduler.get_last_lr()[0],
+            "epoch_time_s": dt,
+            "global_step": global_step,
+        }
+        if not should_validate:
+            wandb.log(log_metrics)
+            print(
+                f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                f"train_loss={epoch_train_loss:.5f}"
+            )
+            continue
 
         if ema is not None:
             ema.store(model)
@@ -880,21 +1336,30 @@ def main(argv: Iterable[str] | None = None) -> None:
         if ema is not None:
             ema.restore(model)
 
-        primary_val = val_metrics["val_surface"]["surface_rel_l2_pct"]
-        dt = time.time() - t0
-        peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
-
-        log_metrics = {
-            "train/epoch_loss": epoch_train_loss,
-            "val_primary/surface_rel_l2_pct": primary_val,
-            "val_primary/surface_rel_l2": val_metrics["val_surface"]["surface_rel_l2"],
-            "lr": scheduler.get_last_lr()[0],
-            "epoch_time_s": dt,
-            "global_step": global_step,
-        }
+        primary_val = val_metrics["val_surface"]["target_mean_rel_l2_pct"]
+        log_metrics.update(
+            {
+                "val_primary/target_mean_rel_l2_pct": primary_val,
+                "val_primary/target_mean_rel_l2": val_metrics["val_surface"]["target_mean_rel_l2"],
+                "val_primary/surface_pressure_mae": val_metrics["val_surface"]["surface_pressure_mae"],
+                "val_primary/wall_shear_mae": val_metrics["val_surface"]["wall_shear_mae"],
+                "val_primary/volume_pressure_mae": val_metrics["val_surface"]["volume_pressure_mae"],
+                "val_primary/surface_pressure_rel_l2_pct": val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+                "val_primary/wall_shear_rel_l2_pct": val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+                "val_primary/volume_pressure_rel_l2_pct": val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+            }
+        )
         for split_name, metrics in val_metrics.items():
             for key, value in metrics.items():
                 log_metrics[f"val/{split_name}/{key}"] = value
+        log_metrics.update(
+            val_slope_tracker.update(
+                global_step=global_step,
+                metrics=log_metrics,
+                namespace="val",
+                force=True,
+            )
+        )
         wandb.log(log_metrics)
 
         improved = primary_val < best_val
@@ -922,7 +1387,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(
             f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
             f"train_loss={epoch_train_loss:.5f} "
-            f"val_surface_rel_l2_pct={primary_val:.4f}{tag}"
+            f"val_target_rel_l2_pct={primary_val:.4f}{tag}"
         )
         print_metrics("val_surface", val_metrics["val_surface"])
 
@@ -938,31 +1403,79 @@ def main(argv: Iterable[str] | None = None) -> None:
     model.load_state_dict(checkpoint["model"])
     print(
         f"Best val: epoch {int(best_metrics['epoch'])}, "
-        f"surface_rel_l2_pct={best_metrics['surface_rel_l2_pct']:.4f}"
+        f"target_mean_rel_l2_pct={best_metrics['target_mean_rel_l2_pct']:.4f}"
     )
     wandb.summary.update(
         {
             "best_epoch": int(best_metrics["epoch"]),
-            "best_val_primary/surface_rel_l2_pct": best_metrics["surface_rel_l2_pct"],
+            "best_val_primary/target_mean_rel_l2_pct": best_metrics["target_mean_rel_l2_pct"],
+            "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
+            "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
+            "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
             "total_train_minutes": total_minutes,
         }
     )
+
+    full_val_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in val_loaders.items()
+    }
+    full_val_primary = full_val_metrics["val_surface"]["target_mean_rel_l2_pct"]
+    full_val_log: dict[str, object] = {
+        "full_val_primary/target_mean_rel_l2_pct": full_val_primary,
+        "full_val_primary/target_mean_rel_l2": full_val_metrics["val_surface"]["target_mean_rel_l2"],
+        "full_val_primary/surface_pressure_mae": full_val_metrics["val_surface"]["surface_pressure_mae"],
+        "full_val_primary/wall_shear_mae": full_val_metrics["val_surface"]["wall_shear_mae"],
+        "full_val_primary/volume_pressure_mae": full_val_metrics["val_surface"]["volume_pressure_mae"],
+        "full_val_primary/surface_pressure_rel_l2_pct": full_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+        "full_val_primary/wall_shear_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+        "full_val_primary/volume_pressure_rel_l2_pct": full_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+        "global_step": global_step,
+    }
+    for split_name, metrics in full_val_metrics.items():
+        for key, value in metrics.items():
+            full_val_log[f"full_val/{split_name}/{key}"] = value
+    full_val_log.update(
+        full_val_slope_tracker.update(
+            global_step=global_step,
+            metrics=full_val_log,
+            namespace="full_val",
+            force=True,
+        )
+    )
+    wandb.log(full_val_log)
+    wandb.summary.update(_numeric_metric_items(full_val_log))
+    print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
         name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
         for name, loader in test_loaders.items()
     }
-    test_primary = test_metrics["test_surface"]["surface_rel_l2_pct"]
-    test_log: dict[str, float] = {
-        "test_primary/surface_rel_l2_pct": test_primary,
-        "test_primary/surface_rel_l2": test_metrics["test_surface"]["surface_rel_l2"],
+    test_primary = test_metrics["test_surface"]["target_mean_rel_l2_pct"]
+    test_log: dict[str, object] = {
+        "test_primary/target_mean_rel_l2_pct": test_primary,
+        "test_primary/target_mean_rel_l2": test_metrics["test_surface"]["target_mean_rel_l2"],
+        "test_primary/surface_pressure_mae": test_metrics["test_surface"]["surface_pressure_mae"],
+        "test_primary/wall_shear_mae": test_metrics["test_surface"]["wall_shear_mae"],
+        "test_primary/volume_pressure_mae": test_metrics["test_surface"]["volume_pressure_mae"],
+        "test_primary/surface_pressure_rel_l2_pct": test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+        "test_primary/wall_shear_rel_l2_pct": test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+        "test_primary/volume_pressure_rel_l2_pct": test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
         "global_step": global_step,
     }
     for split_name, metrics in test_metrics.items():
         for key, value in metrics.items():
             test_log[f"test/{split_name}/{key}"] = value
+    test_log.update(
+        test_slope_tracker.update(
+            global_step=global_step,
+            metrics=test_log,
+            namespace="test",
+            force=True,
+        )
+    )
     wandb.log(test_log)
-    wandb.summary.update(test_log)
+    wandb.summary.update(_numeric_metric_items(test_log))
     print_metrics("test_surface", test_metrics["test_surface"])
 
     log_model_artifact(

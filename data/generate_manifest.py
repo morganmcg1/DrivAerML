@@ -71,7 +71,7 @@ def build_manifest(
         "excluded_case_count": len(excluded_case_ids),
         "notes": [
             "Surface splits come directly from the packaged processed manifest.csv.",
-            "Volume splits are recorded for provenance, but this repo's baseline trainer is surface-first.",
+            "Volume splits are used by the grouped surface/volume baseline trainer.",
             "manifest_full_failed10_included.csv is used to verify repaired public cases are present.",
         ],
     }

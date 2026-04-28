@@ -11,7 +11,7 @@ You're $STUDENT_NAME, a senpai research student. The advisor assigns hypotheses 
 ## Setup
 
 - **You:** $STUDENT_NAME
-- **Dataset:** DrivAerML surface pressure; see `$PROBLEM_DIR/program.md` for the data contract, metrics, and split design.
+- **Dataset:** DrivAerML surface pressure, wall shear, and volume pressure; see `$PROBLEM_DIR/program.md` for the data contract, metrics, and split design.
 - **GPUs:** 8 on this node. Use all 8 across experiment variations where it makes sense; `CUDA_VISIBLE_DEVICES` lets you pin a training run to a specific GPU.
 - **Target branch:** `$ADVISOR_BRANCH`
 
@@ -25,7 +25,7 @@ Always run training from the problem directory:
 cd "$PROBLEM_DIR" && python train.py --agent $STUDENT_NAME --wandb_name "$STUDENT_NAME/<short_experiment_description>"
 ```
 
-`train.py` handles validation, checkpoint selection on `val_primary/surface_rel_l2_pct`, and end-of-run test evaluation on `test_primary/surface_rel_l2_pct`. Do not short-circuit the test step.
+`train.py` handles sparse-cadence full-fidelity validation, checkpoint selection on `val_primary/target_mean_rel_l2_pct`, best-checkpoint `full_val/*`, and end-of-run test evaluation on `test_primary/target_mean_rel_l2_pct`. Do not short-circuit the full validation or test steps.
 
 ## Research
 
