@@ -105,6 +105,8 @@ export PVC_MOUNT_PATH=/your/mount
 
 `program.md` is the source of truth for the research contract, metrics, SOTA targets, and what agents should optimize. This section is only a quick reference for the current `train.py` interface and defaults.
 
+Note, a slightlier fancier train.py can be found here based on past SENPAI experiments, it optionally can be used a reference in some experiments https://github.com/morganmcg1/DrivAerML/pull/1
+
 ```
 python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
 ```
