@@ -476,6 +476,8 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    use_area_weighted_loss: bool = False  # weight surface MSE by surface_x[..., 6] (area)
+    area_weight_clip: float = 10.0  # cap normalized area weight at this multiple of mean (0 disables)
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1169,6 +1171,66 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def _area_weighted_surface_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    areas: torch.Tensor,
+    *,
+    weight_clip: float = 0.0,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Surface MSE weighted by per-element area, scale-matched to plain F.mse_loss.
+
+    Each valid token's normalized weight has mean 1.0 per sample (so the loss
+    matches the unweighted MSE magnitude when areas are uniform). Optionally
+    clips weights to ``weight_clip * mean`` to cap heavy-tailed contributions.
+    """
+
+    if not bool(mask.any()):
+        zero = pred.sum() * 0.0
+        return zero, {
+            "area_w_mean": 0.0,
+            "area_w_max": 0.0,
+            "area_w_p99": 0.0,
+            "area_w_clipped_fraction": 0.0,
+        }
+
+    mask_f = mask.unsqueeze(-1).to(pred.dtype)  # [B, N, 1]
+    areas = areas.to(pred.dtype).clamp(min=0)
+    areas_masked = areas * mask_f
+    n_valid = mask_f.sum(dim=1, keepdim=True).clamp(min=1)
+    total_area = areas_masked.sum(dim=1, keepdim=True).clamp(min=1e-6)
+    area_w = areas * n_valid / total_area  # mean 1.0 over valid points per sample
+
+    clipped_count = torch.zeros((), device=pred.device, dtype=pred.dtype)
+    if weight_clip > 0:
+        cap = float(weight_clip)
+        over = (area_w > cap) & mask.unsqueeze(-1)
+        clipped_count = over.to(pred.dtype).sum()
+        area_w = torch.minimum(area_w, area_w.new_tensor(cap))
+
+    diff = (pred - target) ** 2  # [B, N, 4]
+    weighted = diff * area_w * mask_f
+    num_channels = float(diff.shape[-1])
+    surface_loss = weighted.sum() / (mask_f.sum() * num_channels).clamp(min=1)
+
+    valid = mask.unsqueeze(-1)
+    area_w_valid = area_w[valid]
+    area_w_mean = float(area_w_valid.float().mean().detach().cpu().item())
+    area_w_max = float(area_w_valid.float().max().detach().cpu().item())
+    p99 = torch.quantile(area_w_valid.float(), 0.99) if area_w_valid.numel() > 0 else area_w_valid.new_zeros(())
+    area_w_p99 = float(p99.detach().cpu().item())
+    clipped_fraction = float(
+        (clipped_count / mask_f.sum().clamp(min=1)).detach().cpu().item()
+    )
+    return surface_loss, {
+        "area_w_mean": area_w_mean,
+        "area_w_max": area_w_max,
+        "area_w_p99": area_w_p99,
+        "area_w_clipped_fraction": clipped_fraction,
+    }
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1179,6 +1241,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    use_area_weighted_loss: bool = False,
+    area_weight_clip: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1218,15 +1282,36 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
+        unweighted_surface_loss = masked_mse(
+            surface_pred_used, surface_target_used, batch.surface_mask
+        )
+        if use_area_weighted_loss:
+            areas = batch.surface_x[..., 6:7]
+            surface_loss, area_diag = _area_weighted_surface_loss(
+                surface_pred_used,
+                surface_target_used,
+                batch.surface_mask,
+                areas,
+                weight_clip=area_weight_clip,
+            )
+        else:
+            surface_loss = unweighted_surface_loss
+            area_diag = {}
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
     metrics = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss_unweighted": float(unweighted_surface_loss.detach().cpu().item()),
     }
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if use_area_weighted_loss:
+        metrics["area_loss_to_uniform_ratio"] = (
+            metrics["surface_loss"] / max(metrics["surface_loss_unweighted"], 1e-12)
+        )
+        for key, value in area_diag.items():
+            metrics[key] = value
     return loss, metrics
 
 
@@ -1599,6 +1684,62 @@ def main(argv: Iterable[str] | None = None) -> None:
     with config_path.open("w") as f:
         yaml.safe_dump(asdict(config), f)
 
+    if config.use_area_weighted_loss:
+        try:
+            sample_batch = next(iter(train_loader))
+            sample_areas_full = sample_batch.surface_x[..., 6].float()
+            sample_mask = sample_batch.surface_mask.bool()
+            valid_areas = sample_areas_full[sample_mask].clamp(min=0)
+            if valid_areas.numel() > 0:
+                quantiles = torch.tensor(
+                    [0.01, 0.10, 0.50, 0.90, 0.95, 0.99, 0.999],
+                    dtype=torch.float32,
+                )
+                area_qs = torch.quantile(valid_areas, quantiles)
+                # Per-sample normalized weights for weight-distribution diagnostics
+                mask_f = sample_mask.unsqueeze(-1).float()
+                areas_3d = sample_areas_full.unsqueeze(-1).clamp(min=0)
+                areas_masked = areas_3d * mask_f
+                n_valid = mask_f.sum(dim=1, keepdim=True).clamp(min=1)
+                total_area = areas_masked.sum(dim=1, keepdim=True).clamp(min=1e-6)
+                w = (areas_3d * n_valid / total_area)[sample_mask.unsqueeze(-1)]
+                w_qs = torch.quantile(w, quantiles)
+                startup_log: dict[str, object] = {
+                    "train/area_dist/min": float(valid_areas.min().item()),
+                    "train/area_dist/max": float(valid_areas.max().item()),
+                    "train/area_dist/mean": float(valid_areas.mean().item()),
+                    "train/area_dist/std": float(valid_areas.std().item()),
+                    "train/area_dist/p01": float(area_qs[0].item()),
+                    "train/area_dist/p10": float(area_qs[1].item()),
+                    "train/area_dist/p50": float(area_qs[2].item()),
+                    "train/area_dist/p90": float(area_qs[3].item()),
+                    "train/area_dist/p95": float(area_qs[4].item()),
+                    "train/area_dist/p99": float(area_qs[5].item()),
+                    "train/area_dist/p999": float(area_qs[6].item()),
+                    "train/area_w_dist/min": float(w.min().item()),
+                    "train/area_w_dist/max": float(w.max().item()),
+                    "train/area_w_dist/mean": float(w.mean().item()),
+                    "train/area_w_dist/p99": float(w_qs[5].item()),
+                    "train/area_w_dist/p999": float(w_qs[6].item()),
+                    "train/area_w_dist/fraction_above_clip": float(
+                        (w > max(config.area_weight_clip, 0.0)).float().mean().item()
+                    ) if config.area_weight_clip > 0 else 0.0,
+                    "train/area_dist/hist": wandb.Histogram(valid_areas.cpu().numpy()),
+                    "train/area_w_dist/hist": wandb.Histogram(w.cpu().numpy()),
+                    "global_step": 0,
+                }
+                wandb.log(startup_log)
+                print(
+                    f"Area dist: min={startup_log['train/area_dist/min']:.4g} "
+                    f"p50={startup_log['train/area_dist/p50']:.4g} "
+                    f"p99={startup_log['train/area_dist/p99']:.4g} "
+                    f"max={startup_log['train/area_dist/max']:.4g} "
+                    f"| weight max={startup_log['train/area_w_dist/max']:.2f} "
+                    f"p99={startup_log['train/area_w_dist/p99']:.2f}"
+                )
+        except StopIteration:
+            print("WARN: train loader empty, skipping area distribution log.")
+
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
     global_step = 0
@@ -1630,6 +1771,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                use_area_weighted_loss=config.use_area_weighted_loss,
+                area_weight_clip=config.area_weight_clip,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1666,6 +1809,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_log: dict[str, object] = {
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
+                "train/surface_loss_unweighted": batch_loss_metrics["surface_loss_unweighted"],
                 "train/volume_loss": batch_loss_metrics["volume_loss"],
                 "global_step": global_step,
                 **gradient_metrics,
@@ -1675,6 +1819,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            for diag_key in (
+                "area_w_mean",
+                "area_w_max",
+                "area_w_p99",
+                "area_w_clipped_fraction",
+                "area_loss_to_uniform_ratio",
+            ):
+                if diag_key in batch_loss_metrics:
+                    train_log[f"train/{diag_key}"] = batch_loss_metrics[diag_key]
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
