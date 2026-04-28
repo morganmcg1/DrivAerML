@@ -63,6 +63,27 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+class DropPath(nn.Module):
+    """Stochastic depth: drop entire residual branch with probability `drop_prob`."""
+
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        self.drop_prob = float(drop_prob)
+
+    def extra_repr(self) -> str:
+        return f"drop_prob={self.drop_prob:.4f}"
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.training or self.drop_prob == 0.0:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        # Sample in fp32 so the gate is not quantized to ~32 bf16 levels.
+        random_tensor = torch.rand(shape, dtype=torch.float32, device=x.device)
+        random_tensor = torch.floor(random_tensor + keep_prob).to(x.dtype)
+        return x / keep_prob * random_tensor
+
+
 class LinearProjection(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, bias: bool = True):
         super().__init__()
@@ -187,6 +208,7 @@ class TransformerBlock(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        drop_path_prob: float = 0.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -199,12 +221,13 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.drop_path = DropPath(drop_path_prob)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -218,8 +241,15 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        stochastic_depth_prob: float = 0.0,
     ):
         super().__init__()
+        if depth <= 1:
+            drop_path_rates = [stochastic_depth_prob] * depth
+        else:
+            drop_path_rates = [
+                stochastic_depth_prob * i / (depth - 1) for i in range(depth)
+            ]
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -228,8 +258,9 @@ class Transformer(nn.Module):
                     mlp_expansion_factor=mlp_expansion_factor,
                     num_slices=num_slices,
                     dropout=dropout,
+                    drop_path_prob=drop_path_rates[i],
                 )
-                for _ in range(depth)
+                for i in range(depth)
             ]
         )
 
@@ -256,6 +287,7 @@ class SurfaceTransolver(nn.Module):
         n_head: int = 3,
         mlp_ratio: int = 4,
         slice_num: int = 96,
+        stochastic_depth_prob: float = 0.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -284,6 +316,7 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            stochastic_depth_prob=stochastic_depth_prob,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -454,6 +487,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    stochastic_depth_prob: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -607,6 +641,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
+        stochastic_depth_prob=config.stochastic_depth_prob,
     )
 
 
@@ -1523,7 +1558,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_metrics: dict[str, float] = {}
     global_step = 0
     early_stop_reason: str | None = None
+    timeout_hit = False
     train_start = time.time()
+    val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
+    train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
@@ -1605,6 +1643,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             if early_stop_reason is not None:
                 print(early_stop_reason)
                 break
+            if (time.time() - train_start) / 60.0 >= train_timeout_minutes:
+                print(
+                    f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
+                    f"at step {global_step}. Forcing validation and stopping."
+                )
+                timeout_hit = True
+                break
 
         scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
@@ -1614,6 +1659,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             epoch == 0
             or (epoch + 1) % max(config.validation_every, 1) == 0
             or epoch + 1 == max_epochs
+            or (timeout_hit and n_batches > 0)
         )
 
         log_metrics = {
@@ -1721,6 +1767,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("val_surface", val_metrics["val_surface"])
         if early_stop_reason is not None:
             print(early_stop_reason)
+            break
+        if timeout_hit:
             break
 
     total_minutes = (time.time() - train_start) / 60.0
