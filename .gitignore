@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+outputs/
+models/
+wandb/
+*.pt
+*.pth
+*.ckpt
+data/point_counts.json
