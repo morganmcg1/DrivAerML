@@ -101,8 +101,6 @@ volume_pred_norm = out["volume_preds"]    # [B, N_volume, 1]
 
 The reference Transolver backbone must also keep padding masked internally. Slice-attention pooling, residual blocks, final normalization, and output heads should never let padded zero rows contribute to slice tokens or produce nonzero hidden states.
 
-The legacy `out["preds"]` alias still points to `surface_preds` for compatibility, but new work should use the explicit keys.
-
 ## Gradient, Weight, And Slope Telemetry
 
 The reference trainer intentionally logs high-fidelity gradient and weight telemetry on every optimizer update by default. Future agents can preserve this unless the researcher explicitly asked to change the logging contract. It is recommended that if a brand new trainer or model is written, that this telemetry is preserved as it can yield crucial insights into the model's behavior and performance during training.
