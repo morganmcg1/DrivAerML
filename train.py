@@ -5,7 +5,7 @@
 """Train a grouped surface/volume Transolver on DrivAerML.
 
 Primary metric:
-    val_primary/target_mean_rel_l2_pct
+    val_primary/abupt_axis_mean_rel_l2_pct
 
 Usage:
     python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
@@ -55,6 +55,12 @@ def _init_linear(module: nn.Module, std: float = 0.02) -> None:
         nn.init.trunc_normal_(module.weight, std=std)
         if module.bias is not None:
             nn.init.zeros_(module.bias)
+
+
+def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
+    if mask is None:
+        return x
+    return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
 class LinearProjection(nn.Module):
@@ -148,7 +154,10 @@ class TransolverAttention(nn.Module):
         slice_logits = self.in_project_slice(x_mid) / self.temperature
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
-            slice_weights = slice_weights * attn_mask[:, None, :, None].float()
+            slice_weights = slice_weights * attn_mask[:, None, :, None].to(
+                device=slice_weights.device,
+                dtype=slice_weights.dtype,
+            )
         slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
@@ -165,7 +174,9 @@ class TransolverAttention(nn.Module):
         )
         out_x = torch.einsum("bhsc,bhns->bhnc", out_slice, slice_weights)
         out_x = out_x.permute(0, 2, 1, 3).contiguous().view(x.shape[0], x.shape[1], self.hidden_dim)
-        return self.proj_dropout(self.proj(out_x))
+        out_x = _apply_token_mask(out_x, attn_mask)
+        out_x = self.proj_dropout(self.proj(out_x))
+        return _apply_token_mask(out_x, attn_mask)
 
 
 class TransformerBlock(nn.Module):
@@ -190,8 +201,11 @@ class TransformerBlock(nn.Module):
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        x = _apply_token_mask(x, attn_mask)
         x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
+        x = _apply_token_mask(x, attn_mask)
         return x
 
 
@@ -343,10 +357,11 @@ class SurfaceTransolver(nn.Module):
             )
             masks.append(volume_mask)
 
-        hidden = torch.cat(tokens, dim=1)
         attn_mask = torch.cat(masks, dim=1)
+        hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
         hidden = self.backbone(hidden, attn_mask=attn_mask)
-        hidden_norm = self.norm(hidden)
+        hidden = _apply_token_mask(hidden, attn_mask)
+        hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
         cursor = 0
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
@@ -516,14 +531,24 @@ class TargetTransform:
 def parse_args(argv: Iterable[str] | None = None) -> Config:
     parser = argparse.ArgumentParser(description="DrivAerML surface/volume trainer")
     defaults = Config()
+    help_text = {
+        "kill_thresholds": (
+            "Optional early-stop checks. Format: "
+            "'STEP:METRIC<NUMBER[,STEP:METRIC>=NUMBER...]'; commas or semicolons "
+            "separate checks. STEP is a global optimizer step and METRIC must match "
+            "a logged W&B key exactly, for example "
+            "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
+        ),
+    }
     for field in fields(Config):
         value = getattr(defaults, field.name)
         arg_name = f"--{field.name.replace('_', '-')}"
+        help_value = help_text.get(field.name)
         if isinstance(value, bool):
-            parser.add_argument(arg_name, action="store_true", default=value)
+            parser.add_argument(arg_name, action="store_true", default=value, help=help_value)
             parser.add_argument(f"--no-{field.name.replace('_', '-')}", action="store_false", dest=field.name)
         else:
-            parser.add_argument(arg_name, type=type(value), default=value)
+            parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
 
@@ -886,7 +911,21 @@ class KillThreshold:
 
 
 def parse_kill_thresholds(raw: str) -> list[KillThreshold]:
-    """Parse `STEP:metric<value` specs separated by comma or semicolon."""
+    """Parse CLI kill-threshold specs into executable checks.
+
+    Accepted forms are:
+
+    - `STEP:METRIC<NUMBER`
+    - `STEP:METRIC<=NUMBER`
+    - `STEP:METRIC>NUMBER`
+    - `STEP:METRIC>=NUMBER`
+
+    Multiple checks may be separated by commas or semicolons. `STEP` is the
+    global optimizer step where the check becomes active, and `METRIC` must
+    match a logged metric key exactly, for example:
+
+    `500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25`
+    """
 
     if not raw.strip():
         return []
@@ -894,20 +933,40 @@ def parse_kill_thresholds(raw: str) -> list[KillThreshold]:
     for chunk in re.split(r"[;,]\s*", raw.strip()):
         if not chunk:
             continue
+        if ":" not in chunk:
+            raise ValueError(
+                "Kill threshold is missing ':' between STEP and metric condition: "
+                f"{chunk!r}. Expected STEP:METRIC<NUMBER."
+            )
         step_text, condition = chunk.split(":", 1)
-        step = int(step_text)
+        try:
+            step = int(step_text.strip())
+        except ValueError as exc:
+            raise ValueError(f"Kill threshold step must be an integer in {chunk!r}") from exc
         if step < 1:
             raise ValueError(f"Kill threshold step must be >= 1: {chunk}")
         match = re.fullmatch(r"(.+?)(<=|>=|<|>)([-+0-9.eE]+)", condition.strip())
         if match is None:
-            raise ValueError(f"Kill threshold must look like STEP:metric<value, got: {chunk}")
+            raise ValueError(
+                "Kill threshold condition must look like METRIC<NUMBER, "
+                f"METRIC<=NUMBER, METRIC>NUMBER, or METRIC>=NUMBER; got {chunk!r}"
+            )
         metric, operator, value_text = match.groups()
+        metric = metric.strip()
+        if not metric:
+            raise ValueError(f"Kill threshold metric is empty in {chunk!r}")
+        try:
+            value = float(value_text)
+        except ValueError as exc:
+            raise ValueError(f"Kill threshold value must be numeric in {chunk!r}") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"Kill threshold value must be finite in {chunk!r}")
         thresholds.append(
             KillThreshold(
                 step=step,
-                metric=metric.strip(),
+                metric=metric,
                 operator=operator,
-                value=float(value_text),
+                value=value,
             )
         )
     return thresholds
@@ -1126,7 +1185,6 @@ def evaluate_split(
     wall_shear_y_rel_l2, _ = _rel_l2(case_sums["wall_shear_y"])
     wall_shear_z_rel_l2, _ = _rel_l2(case_sums["wall_shear_z"])
     volume_pressure_rel_l2, volume_cases = _rel_l2(case_sums["volume_pressure"])
-    rel_l2_mean = _finite_mean([surface_pressure_rel_l2, wall_shear_rel_l2, volume_pressure_rel_l2])
     abupt_axis_mean_rel_l2 = _finite_mean(
         [
             surface_pressure_rel_l2,
@@ -1141,13 +1199,6 @@ def evaluate_split(
         for key in abs_sums
     }
     wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
-    target_mean_mae = _finite_mean(
-        [
-            mae_values["surface_pressure"],
-            mae_values["wall_shear"],
-            mae_values["volume_pressure"],
-        ]
-    )
     loss = (surface_loss_sse + volume_loss_sse) / max(surface_loss_count + volume_loss_count, 1)
     return {
         "loss": loss,
@@ -1172,9 +1223,6 @@ def evaluate_split(
         "wall_shear_z_rel_l2_pct": wall_shear_z_rel_l2 * 100.0,
         "volume_pressure_rel_l2": volume_pressure_rel_l2,
         "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
-        "target_mean_mae": target_mean_mae,
-        "target_mean_rel_l2": rel_l2_mean,
-        "target_mean_rel_l2_pct": rel_l2_mean * 100.0,
         "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
         "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
         "surface_rel_l2": surface_pressure_rel_l2,
@@ -1214,7 +1262,7 @@ def log_model_artifact(
     artifact_name = f"model-{_sanitize_artifact_token(base)}-{run.id}"
     description = (
         "DrivAerML surface/volume Transolver checkpoint; "
-        f"best val target_mean_rel_l2_pct = {best_metrics['target_mean_rel_l2_pct']:.4f}"
+        f"best val abupt_axis_mean_rel_l2_pct = {best_metrics['abupt_axis_mean_rel_l2_pct']:.4f}"
     )
     metadata = {
         "run_id": run.id,
@@ -1224,11 +1272,10 @@ def log_model_artifact(
         "git_commit": _git_commit_short(),
         "n_params": n_params,
         "best_epoch": int(best_metrics["epoch"]),
-        "best_val_primary/target_mean_rel_l2_pct": best_metrics["target_mean_rel_l2_pct"],
+        "best_val_primary/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
         "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
         "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
         "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
-        "best_val/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
         "lr": config.lr,
         "weight_decay": config.weight_decay,
         "batch_size": config.batch_size,
@@ -1238,7 +1285,6 @@ def log_model_artifact(
         "eval_volume_points": config.eval_volume_points,
     }
     for split_name, metrics in test_metrics.items():
-        metadata[f"{split_name}/target_mean_rel_l2_pct"] = metrics["target_mean_rel_l2_pct"]
         metadata[f"{split_name}/abupt_axis_mean_rel_l2_pct"] = metrics["abupt_axis_mean_rel_l2_pct"]
         metadata[f"{split_name}/surface_pressure_mae"] = metrics["surface_pressure_mae"]
         metadata[f"{split_name}/wall_shear_mae"] = metrics["wall_shear_mae"]
@@ -1259,7 +1305,7 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     print(
         f"{prefix:<14s} "
         f"loss={metrics['loss']:.5f} "
-        f"target_rel_l2_pct={metrics['target_mean_rel_l2_pct']:.4f} "
+        f"abupt_axis_rel_l2_pct={metrics['abupt_axis_mean_rel_l2_pct']:.4f} "
         f"surface_p_mae={metrics['surface_pressure_mae']:.5f} "
         f"volume_p_mae={metrics['volume_pressure_mae']:.5f} "
         f"wall_shear_mae={metrics['wall_shear_mae']:.5f} "
@@ -1269,6 +1315,7 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
 
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
     max_epochs = min(config.epochs, 3) if config.debug else config.epochs
     timeout_minutes = float(os.environ.get("SENPAI_TIMEOUT_MINUTES", "30"))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1292,7 +1339,6 @@ def main(argv: Iterable[str] | None = None) -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
-    kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1468,12 +1514,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         if ema is not None:
             ema.restore(model)
 
-        primary_val = val_metrics["val_surface"]["target_mean_rel_l2_pct"]
+        primary_val = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
         log_metrics.update(
             {
-                "val_primary/target_mean_rel_l2_pct": primary_val,
-                "val_primary/target_mean_rel_l2": val_metrics["val_surface"]["target_mean_rel_l2"],
-                "val_primary/abupt_axis_mean_rel_l2_pct": val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"],
+                "val_primary/abupt_axis_mean_rel_l2_pct": primary_val,
+                "val_primary/abupt_axis_mean_rel_l2": val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
                 "val_primary/surface_pressure_mae": val_metrics["val_surface"]["surface_pressure_mae"],
                 "val_primary/wall_shear_mae": val_metrics["val_surface"]["wall_shear_mae"],
                 "val_primary/volume_pressure_mae": val_metrics["val_surface"]["volume_pressure_mae"],
@@ -1530,7 +1575,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(
             f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
             f"train_loss={epoch_train_loss:.5f} "
-            f"val_target_rel_l2_pct={primary_val:.4f}{tag}"
+            f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
         )
         print_metrics("val_surface", val_metrics["val_surface"])
         if early_stop_reason is not None:
@@ -1561,12 +1606,11 @@ def main(argv: Iterable[str] | None = None) -> None:
     model.load_state_dict(checkpoint["model"])
     print(
         f"Best val: epoch {int(best_metrics['epoch'])}, "
-        f"target_mean_rel_l2_pct={best_metrics['target_mean_rel_l2_pct']:.4f}"
+        f"abupt_axis_mean_rel_l2_pct={best_metrics['abupt_axis_mean_rel_l2_pct']:.4f}"
     )
     wandb.summary.update(
         {
             "best_epoch": int(best_metrics["epoch"]),
-            "best_val_primary/target_mean_rel_l2_pct": best_metrics["target_mean_rel_l2_pct"],
             "best_val_primary/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
             "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
             "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
@@ -1579,11 +1623,10 @@ def main(argv: Iterable[str] | None = None) -> None:
         name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
         for name, loader in val_loaders.items()
     }
-    full_val_primary = full_val_metrics["val_surface"]["target_mean_rel_l2_pct"]
+    full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
     full_val_log: dict[str, object] = {
-        "full_val_primary/target_mean_rel_l2_pct": full_val_primary,
-        "full_val_primary/target_mean_rel_l2": full_val_metrics["val_surface"]["target_mean_rel_l2"],
-        "full_val_primary/abupt_axis_mean_rel_l2_pct": full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"],
+        "full_val_primary/abupt_axis_mean_rel_l2_pct": full_val_primary,
+        "full_val_primary/abupt_axis_mean_rel_l2": full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
         "full_val_primary/surface_pressure_mae": full_val_metrics["val_surface"]["surface_pressure_mae"],
         "full_val_primary/wall_shear_mae": full_val_metrics["val_surface"]["wall_shear_mae"],
         "full_val_primary/volume_pressure_mae": full_val_metrics["val_surface"]["volume_pressure_mae"],
@@ -1614,11 +1657,10 @@ def main(argv: Iterable[str] | None = None) -> None:
         name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
         for name, loader in test_loaders.items()
     }
-    test_primary = test_metrics["test_surface"]["target_mean_rel_l2_pct"]
+    test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
     test_log: dict[str, object] = {
-        "test_primary/target_mean_rel_l2_pct": test_primary,
-        "test_primary/target_mean_rel_l2": test_metrics["test_surface"]["target_mean_rel_l2"],
-        "test_primary/abupt_axis_mean_rel_l2_pct": test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"],
+        "test_primary/abupt_axis_mean_rel_l2_pct": test_primary,
+        "test_primary/abupt_axis_mean_rel_l2": test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
         "test_primary/surface_pressure_mae": test_metrics["test_surface"]["surface_pressure_mae"],
         "test_primary/wall_shear_mae": test_metrics["test_surface"]["wall_shear_mae"],
         "test_primary/volume_pressure_mae": test_metrics["test_surface"]["volume_pressure_mae"],

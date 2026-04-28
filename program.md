@@ -69,8 +69,9 @@ The old failed-case gap has been repaired in this packaged split. `data/loader.p
 
 Full surface and volume cases can be large, so the trainer uses point-limited views.
 
-- Training with `--train-surface-points N --train-volume-points M`: each case is repeated enough times to cover the larger surface/volume view count; each modality participates in its own required number of views and does not get silently duplicated after it is covered.
-- Validation/test with `--eval-surface-points N --eval-volume-points M`: each case is split into deterministic strided chunks. This is full-fidelity evaluation: every loaded surface point and every loaded volume point is evaluated exactly once, then reaggregated by case.
+- Training with `--train-surface-points N --train-volume-points M`: for each case and modality, `view_count = ceil(total_points / points_per_view)` when point-limited. Each view draws `points_per_view` rows uniformly with replacement. Across one epoch the loader draws about `total_points` rows per case per modality, but duplicates and missed points are expected. For example, one epoch of replacement sampling at one full equivalent draw sees about 63% unique points in expectation; subsequent epochs compound coverage.
+- When surface and volume need different numbers of views, the case is repeated enough times to cover the larger count. The smaller modality returns empty tensors after its own views are covered instead of silently repeating full data.
+- Validation/test with `--eval-surface-points N --eval-volume-points M`: each case is split into deterministic strided chunks with `torch.arange(view_index, total_points, view_count)`. This is full-fidelity evaluation: every loaded surface point and every loaded volume point is evaluated exactly once, then reaggregated by case.
 - Set a point limit to `0` only when you intentionally want full-case loading in one batch and have checked memory.
 
 Validation is intentionally sparse by default: `train.py` validates at epoch 1, every `--validation-every 10` epochs, and the final epoch. After loading the best checkpoint, it runs and logs `full_val/*` before `test/*`. Do not replace final validation/test with a random point sample.
@@ -92,6 +93,8 @@ volume_pred_norm = out["volume_preds"]    # [B, N_volume, 1]
 
 `batch.surface_mask` and `batch.volume_mask` are required because cases are padded independently. Do not compute loss or metrics on padding tokens.
 
+The Transolver backbone must also keep padding masked internally. Slice-attention pooling, residual blocks, final normalization, and output heads should never let padded zero rows contribute to slice tokens or produce nonzero hidden states.
+
 The legacy `out["preds"]` alias still points to `surface_preds` for compatibility, but new work should use the explicit keys.
 
 ## Gradient And Slope Telemetry
@@ -110,35 +113,40 @@ Keep gradient logging close to `loss.backward()` and before `optimizer.step()` s
 
 Slope telemetry is also part of the contract. Every `--slope-log-fraction 0.05` of the estimated optimizer-step budget, `train.py` logs slopes for key curves under `train/slope/*`: losses, grad norms, grad-to-param ratio, RMS gradients, max gradients, MAE curves, and relative-L2 curves. Validation slopes are logged under `val/slope/*` at validation events; final validation and test use `full_val/slope/*` and `test/slope/*` when enough history exists. If you rename metric keys, preserve or document equivalent slope curves.
 
-Optional early-stop kill thresholds are available through `--kill-thresholds`. The format is a comma- or semicolon-separated list of `STEP:metric<value` checks, for example:
+Optional early-stop kill thresholds are available through `--kill-thresholds`. The format is a comma- or semicolon-separated list of `STEP:metric<value`, `STEP:metric<=value`, `STEP:metric>value`, or `STEP:metric>=value` checks, for example:
 
 ```
---kill-thresholds "500:train/loss<5,2000:val_primary/target_mean_rel_l2_pct<25"
+--kill-thresholds "500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25"
 ```
 
 Each check is evaluated only when that metric is logged at or after the requested global optimizer step. If the condition fails, the run logs `early_stop/*`, finishes W&B, and skips expensive final validation/test. Use this to discard clearly unstable or hopeless short runs; do not use it to hide final metrics for serious confirmation runs.
 
+The parser intentionally validates the full format before training starts. Accepted operators are `<`, `<=`, `>`, and `>=`; steps must be positive integers; values must be finite numbers; metric keys must be spelled exactly as logged.
+
 ## Metrics
 
-Checkpoint selection uses the mean relative L2 across the three target families:
+Checkpoint selection uses an internal scalar mean over the AB-UPT-aligned scalar relative-L2 columns:
 
 ```
-target_mean_rel_l2_pct = mean(
+abupt_axis_mean_rel_l2_pct = mean(
     surface_pressure_rel_l2_pct,
-    wall_shear_rel_l2_pct,
+    wall_shear_x_rel_l2_pct,
+    wall_shear_y_rel_l2_pct,
+    wall_shear_z_rel_l2_pct,
     volume_pressure_rel_l2_pct,
 )
 ```
 
 Primary logged metrics:
 
-- `val_primary/target_mean_rel_l2_pct` — checkpoint selection metric
-- `full_val_primary/target_mean_rel_l2_pct` — best-checkpoint validation metric after training
-- `test_primary/target_mean_rel_l2_pct` — final held-out result
+- `val_primary/abupt_axis_mean_rel_l2_pct` — checkpoint selection metric
+- `full_val_primary/abupt_axis_mean_rel_l2_pct` — best-checkpoint validation metric after training
+- `test_primary/abupt_axis_mean_rel_l2_pct` — final held-out scalar used for quick run triage
 - `*_primary/surface_pressure_mae`, `*_primary/wall_shear_mae`, `*_primary/volume_pressure_mae` — target-family MAE diagnostics
 - `*_primary/surface_pressure_rel_l2_pct`, `*_primary/wall_shear_rel_l2_pct`, `*_primary/volume_pressure_rel_l2_pct` — target-family relative-L2 diagnostics
+- `*_primary/wall_shear_x_rel_l2_pct`, `*_primary/wall_shear_y_rel_l2_pct`, `*_primary/wall_shear_z_rel_l2_pct` — per-axis wall-shear relative-L2 diagnostics
 
-Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include all three MAEs plus all three relative-L2 percentages. The old `surface_rel_l2_pct` key remains as an alias for `surface_pressure_rel_l2_pct`, not the full problem score.
+Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include the target-family MAEs plus `surface_pressure`, vector `wall_shear`, per-axis wall-shear, and `volume_pressure` relative-L2 percentages. The old `surface_rel_l2_pct` key remains as an alias for `surface_pressure_rel_l2_pct`, not the full problem score.
 
 ### AB-UPT Metric Alignment
 
@@ -151,7 +159,11 @@ For DrivAerML, the main paper table reports `p_s`, `u`, and `omega`; Appendix A 
 - `wall_shear_x_rel_l2_pct`, `wall_shear_y_rel_l2_pct`, `wall_shear_z_rel_l2_pct` map to the per-axis wall-shear columns.
 - `volume_pressure_rel_l2_pct` maps to AB-UPT `p_v`.
 
-`target_mean_rel_l2_pct` and `abupt_axis_mean_rel_l2_pct` are convenience aggregates for checkpointing and triage. They are not standalone AB-UPT benchmark columns, so paper-facing comparisons should quote the individual test fields above.
+`abupt_axis_mean_rel_l2_pct` is a convenience aggregate for checkpointing and triage. It is not a standalone AB-UPT benchmark column, so paper-facing comparisons should quote the individual test fields above.
+
+### Target Scaling
+
+The baseline normalizes each target channel with train-split mean/std only. `surface_cp` is already a pressure coefficient, and the packaged loader does not expose verified per-case freestream or Reynolds metadata for volume pressure or wall shear. Do not add guessed per-case `p / Re^2` or Cp-style rescaling unless that metadata is explicitly plumbed through and final validation/test metrics are still computed on the original target units for AB-UPT alignment.
 
 ## Experiment Length
 
