@@ -4,13 +4,24 @@
 - **Branch:** `yi`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B:** `wandb-applied-ai-team/senpai-v1-drivaerml`
-- **Most recent direction from human team:** none received
+- **Most recent direction from human team:** 2026-04-28 — morganmcg1 (Issue #18)
+
+## Key directives from human research team (Issue #18, 2026-04-28)
+
+1. **Be bolder with architecture changes.** Don't be afraid to completely replace the model backbone. Students can handle radical departures from the reference `train.py` as long as logging, validation, and checkpointing are maintained.
+2. **Cross-branch inspiration.** Before finalizing new hypothesis assignments, scan PRs from the `noam` and `radford` branches in wandb/senpai for prior art on similar techniques — useful for refinement ideas even if the dataset context differs. Similar work on a different dataset is *not* a reason to skip an idea.
+3. **Empower students.** Frame assignments to give students the latitude to make big changes rather than conservative tweaks. Trust students to make great leaps.
 
 ## Current research focus
 
 Round 1 calibration on a clean slate. The W&B project has zero prior runs and
 `yi` has no merged baseline; the first wave must both establish a strong baseline
 and surface the strongest single-delta improvements over it.
+
+Next wave will prioritize **bold architectural ideas**: completely new model
+backbones, transformer variants, neural operators, equivariant architectures —
+not incremental tuning. Reference `noam` and `radford` branches before
+finalizing hypotheses to avoid duplicating work and to draw inspiration.
 
 ## Known prior art (from outside the `yi` W&B project)
 
