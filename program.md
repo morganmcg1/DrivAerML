@@ -153,7 +153,7 @@ Primary logged metrics:
 - `*_primary/surface_pressure_rel_l2_pct`, `*_primary/wall_shear_rel_l2_pct`, `*_primary/volume_pressure_rel_l2_pct` — target-family relative-L2 diagnostics
 - `*_primary/wall_shear_x_rel_l2_pct`, `*_primary/wall_shear_y_rel_l2_pct`, `*_primary/wall_shear_z_rel_l2_pct` — per-axis wall-shear relative-L2 diagnostics
 
-Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include the target-family MAEs plus `surface_pressure`, vector `wall_shear`, per-axis wall-shear, and `volume_pressure` relative-L2 percentages. The old `surface_rel_l2_pct` key remains as an alias for `surface_pressure_rel_l2_pct`, not the full problem score.
+Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include the target-family MAEs plus `surface_pressure`, vector `wall_shear`, per-axis wall-shear, and `volume_pressure` relative-L2 percentages.
 
 ### AB-UPT Metric Alignment
 
