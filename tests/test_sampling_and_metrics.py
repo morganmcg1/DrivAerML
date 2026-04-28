@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data.loader import DrivAerMLCase, DrivAerMLSurfaceDataset, SurfaceBatch  # noqa: E402
-from train import TargetTransform, evaluate_split  # noqa: E402
+from train import SurfaceTransolver, TargetTransform, collect_gradient_metrics, evaluate_split  # noqa: E402
 
 
 class FakeStore:
@@ -123,3 +123,25 @@ def test_chunked_eval_reaggregates_per_case_relative_l2():
     expected = (case_a + case_b) / 2.0
     assert metrics["surface_rel_l2"] == expected
     assert metrics["surface_rel_l2_pct"] == expected * 100.0
+
+
+def test_gradient_telemetry_exposes_aggregate_layer_type_module_and_param_keys():
+    model = SurfaceTransolver(
+        n_layers=1,
+        n_hidden=12,
+        n_head=3,
+        slice_num=4,
+        mlp_ratio=1,
+    )
+    x = torch.randn(2, 5, 7)
+    mask = torch.ones(2, 5, dtype=torch.bool)
+    loss = model(x=x, mask=mask)["preds"].square().mean()
+    loss.backward()
+
+    metrics = collect_gradient_metrics(model, log_histograms=False)
+
+    assert "train/grad/global_norm" in metrics
+    assert "train/grad/grad_to_param_norm" in metrics
+    assert any(key.startswith("train/grad_type/LinearProjection/") for key in metrics)
+    assert any(key.startswith("train/grad_module/TransolverAttention/") for key in metrics)
+    assert any(key.startswith("train/grad_param/LinearProjection/") for key in metrics)

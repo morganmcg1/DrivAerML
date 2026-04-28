@@ -340,6 +340,8 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    gradient_log_every: int = 1
+    log_gradient_histograms: bool = True
     compile_model: bool = False
     debug: bool = False
 
@@ -433,6 +435,196 @@ def build_model(config: Config) -> SurfaceTransolver:
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
     )
+
+
+def _metric_path(name: str) -> str:
+    cleaned = name.removeprefix("_orig_mod.")
+    return cleaned.replace(".", "/") if cleaned else "root"
+
+
+def _empty_grad_accumulator() -> dict[str, float]:
+    return {
+        "sum": 0.0,
+        "sum_abs": 0.0,
+        "sum_sq": 0.0,
+        "max_abs": 0.0,
+        "zero_count": 0.0,
+        "element_count": 0.0,
+        "nonfinite_count": 0.0,
+        "param_sum_sq": 0.0,
+        "param_element_count": 0.0,
+        "tensor_count": 0.0,
+    }
+
+
+def _add_tensor_stats(
+    accumulator: dict[str, float],
+    *,
+    grad: torch.Tensor,
+    param: torch.Tensor,
+) -> None:
+    grad_flat = grad.detach().float().reshape(-1)
+    param_flat = param.detach().float().reshape(-1)
+    finite_grad = grad_flat[torch.isfinite(grad_flat)]
+    finite_param = param_flat[torch.isfinite(param_flat)]
+
+    accumulator["tensor_count"] += 1.0
+    accumulator["element_count"] += float(finite_grad.numel())
+    accumulator["nonfinite_count"] += float(grad_flat.numel() - finite_grad.numel())
+    accumulator["param_element_count"] += float(finite_param.numel())
+    if finite_grad.numel() > 0:
+        abs_grad = finite_grad.abs()
+        accumulator["sum"] += float(finite_grad.sum().item())
+        accumulator["sum_abs"] += float(abs_grad.sum().item())
+        accumulator["sum_sq"] += float(finite_grad.square().sum().item())
+        accumulator["max_abs"] = max(accumulator["max_abs"], float(abs_grad.max().item()))
+        accumulator["zero_count"] += float((finite_grad == 0).sum().item())
+    if finite_param.numel() > 0:
+        accumulator["param_sum_sq"] += float(finite_param.square().sum().item())
+
+
+def _finalize_grad_stats(accumulator: dict[str, float]) -> dict[str, float]:
+    element_count = max(accumulator["element_count"], 1.0)
+    grad_norm = math.sqrt(accumulator["sum_sq"])
+    param_norm = math.sqrt(accumulator["param_sum_sq"])
+    return {
+        "global_norm": grad_norm,
+        "mean": accumulator["sum"] / element_count,
+        "mean_abs": accumulator["sum_abs"] / element_count,
+        "rms": math.sqrt(accumulator["sum_sq"] / element_count),
+        "max_abs": accumulator["max_abs"],
+        "zero_fraction": accumulator["zero_count"] / element_count,
+        "nonfinite_count": accumulator["nonfinite_count"],
+        "element_count": accumulator["element_count"],
+        "tensor_count": accumulator["tensor_count"],
+        "param_norm": param_norm,
+        "grad_to_param_norm": grad_norm / (param_norm + 1e-12),
+    }
+
+
+def _gradient_module_paths(
+    *,
+    base_model: nn.Module,
+    modules: dict[str, nn.Module],
+    module_name: str,
+) -> list[tuple[str, str]]:
+    if not module_name:
+        return [(type(base_model).__name__, "root")]
+
+    paths: list[tuple[str, str]] = []
+    parts = module_name.split(".")
+    for end in range(1, len(parts) + 1):
+        path = ".".join(parts[:end])
+        module = modules.get(path)
+        if module is None or isinstance(module, (nn.ModuleList, nn.Sequential)):
+            continue
+        paths.append((type(module).__name__, _metric_path(path)))
+    return paths
+
+
+def _parameter_display_type(
+    *,
+    base_model: nn.Module,
+    modules: dict[str, nn.Module],
+    module_name: str,
+) -> str:
+    module = modules.get(module_name)
+    if module is None:
+        return type(base_model).__name__
+    if not isinstance(module, nn.Linear):
+        return type(module).__name__
+
+    parts = module_name.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        parent = modules.get(".".join(parts[:end]))
+        if parent is None or isinstance(parent, (nn.Linear, nn.ModuleList, nn.Sequential)):
+            continue
+        return type(parent).__name__
+    return type(module).__name__
+
+
+def collect_gradient_metrics(
+    model: nn.Module,
+    *,
+    log_histograms: bool,
+) -> dict[str, float | wandb.Histogram]:
+    """Collect high-fidelity gradient telemetry immediately after backprop."""
+
+    base_model = getattr(model, "_orig_mod", model)
+    modules = dict(base_model.named_modules())
+    global_acc = _empty_grad_accumulator()
+    by_module: dict[tuple[str, str], dict[str, float]] = {}
+    by_type: dict[str, dict[str, float]] = {}
+    metrics: dict[str, float | wandb.Histogram] = {}
+    finite_grad_chunks: list[torch.Tensor] = []
+    params_with_grad = 0
+    params_without_grad = 0
+
+    for raw_name, param in base_model.named_parameters():
+        module_name, _, _leaf_name = raw_name.rpartition(".")
+        parameter_type = _parameter_display_type(
+            base_model=base_model,
+            modules=modules,
+            module_name=module_name,
+        )
+        safe_param_name = _metric_path(raw_name)
+        grad = param.grad
+        if grad is None:
+            params_without_grad += 1
+            metrics[f"train/grad_param/{parameter_type}/{safe_param_name}/has_grad"] = 0.0
+            continue
+
+        params_with_grad += 1
+        module_paths = _gradient_module_paths(
+            base_model=base_model,
+            modules=modules,
+            module_name=module_name,
+        )
+
+        _add_tensor_stats(global_acc, grad=grad, param=param)
+        for ancestor_type, ancestor_path in module_paths:
+            module_acc = by_module.setdefault((ancestor_type, ancestor_path), _empty_grad_accumulator())
+            type_acc = by_type.setdefault(ancestor_type, _empty_grad_accumulator())
+            _add_tensor_stats(module_acc, grad=grad, param=param)
+            _add_tensor_stats(type_acc, grad=grad, param=param)
+
+        param_acc = _empty_grad_accumulator()
+        _add_tensor_stats(param_acc, grad=grad, param=param)
+        param_stats = _finalize_grad_stats(param_acc)
+        param_prefix = f"train/grad_param/{parameter_type}/{safe_param_name}"
+        for key, value in param_stats.items():
+            metrics[f"{param_prefix}/{key}"] = value
+        metrics[f"{param_prefix}/has_grad"] = 1.0
+
+        finite_grad = grad.detach().float().reshape(-1)
+        finite_grad = finite_grad[torch.isfinite(finite_grad)]
+        if finite_grad.numel() > 0:
+            finite_grad_chunks.append(finite_grad.detach().cpu())
+            if log_histograms:
+                metrics[f"train/grad_hist_param/{parameter_type}/{safe_param_name}"] = wandb.Histogram(
+                    finite_grad.detach().cpu().numpy()
+                )
+
+    global_stats = _finalize_grad_stats(global_acc)
+    for key, value in global_stats.items():
+        metrics[f"train/grad/{key}"] = value
+    metrics["train/grad/params_with_grad"] = float(params_with_grad)
+    metrics["train/grad/params_without_grad"] = float(params_without_grad)
+
+    for (module_type, safe_module_name), accumulator in by_module.items():
+        module_prefix = f"train/grad_module/{module_type}/{safe_module_name}"
+        for key, value in _finalize_grad_stats(accumulator).items():
+            metrics[f"{module_prefix}/{key}"] = value
+
+    for module_type, accumulator in by_type.items():
+        type_prefix = f"train/grad_type/{module_type}"
+        for key, value in _finalize_grad_stats(accumulator).items():
+            metrics[f"{type_prefix}/{key}"] = value
+
+    if log_histograms and finite_grad_chunks:
+        metrics["train/grad_hist/all"] = wandb.Histogram(torch.cat(finite_grad_chunks).numpy())
+
+    return metrics
 
 
 def train_loss(
@@ -613,6 +805,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("val_primary/*", step_metric="global_step")
     wandb.define_metric("test/*", step_metric="global_step")
     wandb.define_metric("test_primary/*", step_metric="global_step")
+    wandb.define_metric("train/grad/*", step_metric="global_step")
+    wandb.define_metric("train/grad_module/*", step_metric="global_step")
+    wandb.define_metric("train/grad_param/*", step_metric="global_step")
+    wandb.define_metric("train/grad_type/*", step_metric="global_step")
+    wandb.define_metric("train/grad_hist/*", step_metric="global_step")
+    wandb.define_metric("train/grad_hist_param/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
@@ -643,13 +841,31 @@ def main(argv: Iterable[str] | None = None) -> None:
             loss = train_loss(model, batch, transform, device, config.amp_mode)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            should_log_gradients = (
+                config.gradient_log_every > 0
+                and (global_step + 1) % config.gradient_log_every == 0
+            )
+            gradient_metrics = (
+                collect_gradient_metrics(
+                    model,
+                    log_histograms=config.log_gradient_histograms,
+                )
+                if should_log_gradients
+                else {}
+            )
             optimizer.step()
             if ema is not None:
                 ema.update(model)
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
-            wandb.log({"train/loss": float(loss.detach().cpu().item()), "global_step": global_step})
+            wandb.log(
+                {
+                    "train/loss": float(loss.detach().cpu().item()),
+                    "global_step": global_step,
+                    **gradient_metrics,
+                }
+            )
 
         scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)

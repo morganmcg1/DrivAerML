@@ -91,6 +91,20 @@ pred_cp = pred_norm * y_std + y_mean
 
 Keep this contract intact unless your PR deliberately changes both training and evaluation.
 
+## Gradient Telemetry
+
+The trainer intentionally logs high-fidelity gradient telemetry on every optimizer update by default. Future agents must preserve this unless the advisor explicitly asks to change the logging contract.
+
+The W&B stream includes:
+
+- `train/grad/*` — aggregate gradient health: global norm, RMS, mean absolute gradient, max absolute gradient, zero fraction, non-finite count, parameter norm, and grad-to-parameter norm ratio.
+- `train/grad_type/<LayerType>/*` — the same statistics grouped by module class, for example `LinearProjection`, `TransolverAttention`, `LayerNorm`, or `TransformerBlock`.
+- `train/grad_module/<LayerType>/<module_path>/*` — layer-by-layer statistics for every named module with trainable parameters.
+- `train/grad_param/<LayerType>/<parameter_path>/*` — per-parameter statistics for every trainable tensor.
+- `train/grad_hist/all` and `train/grad_hist_param/<LayerType>/<parameter_path>` — gradient histograms for distribution drift, spikes, saturation, dead layers, and collapse detection.
+
+Keep gradient logging close to `loss.backward()` and before `optimizer.step()` so it represents the update that is about to be applied. When adding new model blocks, make sure their parameters remain visible through `named_modules()` / `named_parameters()` so the layer-type and layer-path logging stays useful. If you rename metric keys, document the migration in the PR because downstream agents compare these histories over time.
+
 ## Metrics
 
 Primary metric is the AB-UPT-style per-case relative L2 on unnormalized `surface_cp`, percent-scaled:
