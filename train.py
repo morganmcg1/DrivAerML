@@ -246,8 +246,6 @@ class SurfaceTransolver(nn.Module):
         self,
         *,
         space_dim: int = 3,
-        input_dim: int | None = None,
-        output_dim: int | None = None,
         surface_input_dim: int = SURFACE_X_DIM,
         surface_output_dim: int = SURFACE_Y_DIM,
         volume_input_dim: int = VOLUME_X_DIM,
@@ -261,12 +259,10 @@ class SurfaceTransolver(nn.Module):
     ):
         super().__init__()
         self.space_dim = space_dim
-        self.surface_input_dim = input_dim if input_dim is not None else surface_input_dim
-        self.surface_output_dim = output_dim if output_dim is not None else surface_output_dim
+        self.surface_input_dim = surface_input_dim
+        self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
-        self.input_dim = self.surface_input_dim
-        self.output_dim = self.surface_output_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -314,15 +310,13 @@ class SurfaceTransolver(nn.Module):
         surface_mask: torch.Tensor | None = None,
         volume_x: torch.Tensor | None = None,
         volume_mask: torch.Tensor | None = None,
-        x: torch.Tensor | None = None,
-        mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        if surface_x is None:
-            surface_x = x
-        if surface_mask is None:
-            surface_mask = mask
         if surface_x is None and volume_x is None:
             raise ValueError("SurfaceTransolver requires surface_x or volume_x")
+        if surface_x is not None and surface_mask is None:
+            raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
+        if volume_x is not None and volume_mask is None:
+            raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
@@ -330,8 +324,6 @@ class SurfaceTransolver(nn.Module):
         volume_tokens = 0
 
         if surface_x is not None:
-            if surface_mask is None:
-                surface_mask = torch.ones(surface_x.shape[:2], device=surface_x.device, dtype=torch.bool)
             surface_tokens = surface_x.shape[1]
             tokens.append(
                 self._encode_group(
@@ -344,8 +336,6 @@ class SurfaceTransolver(nn.Module):
             masks.append(surface_mask)
 
         if volume_x is not None:
-            if volume_mask is None:
-                volume_mask = torch.ones(volume_x.shape[:2], device=volume_x.device, dtype=torch.bool)
             volume_tokens = volume_x.shape[1]
             tokens.append(
                 self._encode_group(
@@ -381,7 +371,6 @@ class SurfaceTransolver(nn.Module):
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
         return {
-            "preds": surface_preds,
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
@@ -1360,8 +1349,6 @@ def evaluate_split(
         "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
         "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
         "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
-        "surface_rel_l2": surface_pressure_rel_l2,
-        "surface_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
         "cases": max(surface_cases, wall_shear_cases, volume_cases),
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,

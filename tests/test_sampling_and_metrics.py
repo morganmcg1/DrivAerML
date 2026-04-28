@@ -86,12 +86,9 @@ class IdentityModel(torch.nn.Module):
     def eval(self):
         return self
 
-    def forward(self, *, surface_x=None, surface_mask=None, volume_x=None, volume_mask=None, x=None, mask=None):
-        del surface_mask, volume_mask, mask
-        if surface_x is None:
-            surface_x = x
+    def forward(self, *, surface_x=None, surface_mask=None, volume_x=None, volume_mask=None):
+        del surface_mask, volume_mask
         return {
-            "preds": surface_x[..., :4],
             "surface_preds": surface_x[..., :4],
             "volume_preds": volume_x[..., :1],
         }
@@ -222,7 +219,6 @@ def test_chunked_eval_reaggregates_per_case_relative_l2_for_surface_and_volume()
     case_a = math.sqrt(1.0 / 30.0)
     case_b = math.sqrt(4.0 / 8.0)
     expected = (case_a + case_b) / 2.0
-    assert metrics["surface_rel_l2"] == expected
     assert metrics["surface_pressure_rel_l2"] == expected
     assert metrics["volume_pressure_rel_l2"] == expected
     assert metrics["wall_shear_rel_l2"] == 0.0
@@ -297,7 +293,7 @@ def test_gradient_telemetry_exposes_aggregate_layer_type_module_and_param_keys()
     )
     x = torch.randn(2, 5, 7)
     mask = torch.ones(2, 5, dtype=torch.bool)
-    loss = model(x=x, mask=mask)["preds"].square().mean()
+    loss = model(surface_x=x, surface_mask=mask)["surface_preds"].square().mean()
     loss.backward()
 
     metrics = collect_gradient_metrics(model, log_histograms=False)
