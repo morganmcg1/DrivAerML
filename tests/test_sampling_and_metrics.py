@@ -15,8 +15,10 @@ from train import (  # noqa: E402
     MetricSlopeTracker,
     SurfaceTransolver,
     TargetTransform,
+    check_kill_thresholds,
     collect_gradient_metrics,
     evaluate_split,
+    parse_kill_thresholds,
 )
 
 
@@ -223,6 +225,9 @@ def test_chunked_eval_reaggregates_per_case_relative_l2_for_surface_and_volume()
     assert metrics["surface_pressure_rel_l2"] == expected
     assert metrics["volume_pressure_rel_l2"] == expected
     assert metrics["wall_shear_rel_l2"] == 0.0
+    assert metrics["wall_shear_x_rel_l2"] == 0.0
+    assert metrics["wall_shear_y_rel_l2"] == 0.0
+    assert metrics["wall_shear_z_rel_l2"] == 0.0
     assert metrics["surface_pressure_mae"] == 0.5
     assert metrics["volume_pressure_mae"] == 0.5
     assert metrics["wall_shear_mae"] == 0.0
@@ -236,6 +241,30 @@ def test_slope_tracker_logs_five_percent_update_slope():
 
     assert slopes["train/slope/loss/per_step"] == -1.0
     assert slopes["train/slope/loss/per_1k_steps"] == -1000.0
+
+
+def test_kill_thresholds_trigger_on_current_logged_metric_after_step():
+    thresholds = parse_kill_thresholds(
+        "5:train/loss<1.0,10:val_primary/target_mean_rel_l2_pct<20"
+    )
+
+    assert check_kill_thresholds(
+        global_step=4,
+        metrics={"train/loss": 2.0},
+        thresholds=thresholds,
+    ) is None
+    assert check_kill_thresholds(
+        global_step=5,
+        metrics={"train/loss": 0.5},
+        thresholds=thresholds,
+    ) is None
+    reason = check_kill_thresholds(
+        global_step=10,
+        metrics={"val_primary/target_mean_rel_l2_pct": 25.0},
+        thresholds=thresholds,
+    )
+    assert reason is not None
+    assert "val_primary/target_mean_rel_l2_pct=25" in reason
 
 
 def test_gradient_telemetry_exposes_aggregate_layer_type_module_and_param_keys():

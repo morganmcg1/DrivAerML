@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import subprocess
 import time
 from contextlib import nullcontext
@@ -460,6 +461,7 @@ class Config:
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     slope_log_fraction: float = 0.05
+    kill_thresholds: str = ""
     compile_model: bool = True
     debug: bool = False
 
@@ -861,6 +863,75 @@ class MetricSlopeTracker:
         return slopes
 
 
+@dataclass(frozen=True)
+class KillThreshold:
+    step: int
+    metric: str
+    operator: str
+    value: float
+
+    def passes(self, observed: float) -> bool:
+        if self.operator == "<":
+            return observed < self.value
+        if self.operator == "<=":
+            return observed <= self.value
+        if self.operator == ">":
+            return observed > self.value
+        if self.operator == ">=":
+            return observed >= self.value
+        raise ValueError(f"Unsupported kill-threshold operator: {self.operator}")
+
+    def describe(self) -> str:
+        return f"step>={self.step} {self.metric}{self.operator}{self.value:g}"
+
+
+def parse_kill_thresholds(raw: str) -> list[KillThreshold]:
+    """Parse `STEP:metric<value` specs separated by comma or semicolon."""
+
+    if not raw.strip():
+        return []
+    thresholds: list[KillThreshold] = []
+    for chunk in re.split(r"[;,]\s*", raw.strip()):
+        if not chunk:
+            continue
+        step_text, condition = chunk.split(":", 1)
+        step = int(step_text)
+        if step < 1:
+            raise ValueError(f"Kill threshold step must be >= 1: {chunk}")
+        match = re.fullmatch(r"(.+?)(<=|>=|<|>)([-+0-9.eE]+)", condition.strip())
+        if match is None:
+            raise ValueError(f"Kill threshold must look like STEP:metric<value, got: {chunk}")
+        metric, operator, value_text = match.groups()
+        thresholds.append(
+            KillThreshold(
+                step=step,
+                metric=metric.strip(),
+                operator=operator,
+                value=float(value_text),
+            )
+        )
+    return thresholds
+
+
+def check_kill_thresholds(
+    *,
+    global_step: int,
+    metrics: dict[str, object],
+    thresholds: list[KillThreshold],
+) -> str | None:
+    numeric = _numeric_metric_items(metrics)
+    for threshold in thresholds:
+        if global_step < threshold.step or threshold.metric not in numeric:
+            continue
+        observed = numeric[threshold.metric]
+        if not math.isfinite(observed) or not threshold.passes(observed):
+            return (
+                f"kill threshold failed at step {global_step}: "
+                f"{threshold.metric}={observed:.6g} did not satisfy {threshold.describe()}"
+            )
+    return None
+
+
 def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     if bool(mask.any()):
         return F.mse_loss(pred[mask], target[mask])
@@ -964,6 +1035,9 @@ def evaluate_split(
     case_sums = {
         "surface_pressure": {},
         "wall_shear": {},
+        "wall_shear_x": {},
+        "wall_shear_y": {},
+        "wall_shear_z": {},
         "volume_pressure": {},
     }
 
@@ -1030,6 +1104,13 @@ def evaluate_split(
                     pred=surface_pred_valid[:, 1:4],
                     target=surface_target_valid[:, 1:4],
                 )
+                for channel, axis in enumerate(("x", "y", "z"), start=1):
+                    _accumulate_case_rel_l2(
+                        case_sums[f"wall_shear_{axis}"],
+                        case_id=case_id,
+                        pred=surface_pred_valid[:, channel : channel + 1],
+                        target=surface_target_valid[:, channel : channel + 1],
+                    )
             volume_valid = batch.volume_mask[case_idx].bool()
             if bool(volume_valid.any()):
                 _accumulate_case_rel_l2(
@@ -1041,8 +1122,20 @@ def evaluate_split(
 
     surface_pressure_rel_l2, surface_cases = _rel_l2(case_sums["surface_pressure"])
     wall_shear_rel_l2, wall_shear_cases = _rel_l2(case_sums["wall_shear"])
+    wall_shear_x_rel_l2, _ = _rel_l2(case_sums["wall_shear_x"])
+    wall_shear_y_rel_l2, _ = _rel_l2(case_sums["wall_shear_y"])
+    wall_shear_z_rel_l2, _ = _rel_l2(case_sums["wall_shear_z"])
     volume_pressure_rel_l2, volume_cases = _rel_l2(case_sums["volume_pressure"])
     rel_l2_mean = _finite_mean([surface_pressure_rel_l2, wall_shear_rel_l2, volume_pressure_rel_l2])
+    abupt_axis_mean_rel_l2 = _finite_mean(
+        [
+            surface_pressure_rel_l2,
+            wall_shear_x_rel_l2,
+            wall_shear_y_rel_l2,
+            wall_shear_z_rel_l2,
+            volume_pressure_rel_l2,
+        ]
+    )
     mae_values = {
         key: abs_sums[key] / max(abs_counts[key], 1)
         for key in abs_sums
@@ -1071,11 +1164,19 @@ def evaluate_split(
         "surface_pressure_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
         "wall_shear_rel_l2": wall_shear_rel_l2,
         "wall_shear_rel_l2_pct": wall_shear_rel_l2 * 100.0,
+        "wall_shear_x_rel_l2": wall_shear_x_rel_l2,
+        "wall_shear_x_rel_l2_pct": wall_shear_x_rel_l2 * 100.0,
+        "wall_shear_y_rel_l2": wall_shear_y_rel_l2,
+        "wall_shear_y_rel_l2_pct": wall_shear_y_rel_l2 * 100.0,
+        "wall_shear_z_rel_l2": wall_shear_z_rel_l2,
+        "wall_shear_z_rel_l2_pct": wall_shear_z_rel_l2 * 100.0,
         "volume_pressure_rel_l2": volume_pressure_rel_l2,
         "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
         "target_mean_mae": target_mean_mae,
         "target_mean_rel_l2": rel_l2_mean,
         "target_mean_rel_l2_pct": rel_l2_mean * 100.0,
+        "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
+        "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
         "surface_rel_l2": surface_pressure_rel_l2,
         "surface_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
         "cases": max(surface_cases, wall_shear_cases, volume_cases),
@@ -1127,6 +1228,7 @@ def log_model_artifact(
         "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
         "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
         "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
+        "best_val/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
         "lr": config.lr,
         "weight_decay": config.weight_decay,
         "batch_size": config.batch_size,
@@ -1137,6 +1239,7 @@ def log_model_artifact(
     }
     for split_name, metrics in test_metrics.items():
         metadata[f"{split_name}/target_mean_rel_l2_pct"] = metrics["target_mean_rel_l2_pct"]
+        metadata[f"{split_name}/abupt_axis_mean_rel_l2_pct"] = metrics["abupt_axis_mean_rel_l2_pct"]
         metadata[f"{split_name}/surface_pressure_mae"] = metrics["surface_pressure_mae"]
         metadata[f"{split_name}/wall_shear_mae"] = metrics["wall_shear_mae"]
         metadata[f"{split_name}/volume_pressure_mae"] = metrics["volume_pressure_mae"]
@@ -1189,6 +1292,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
+    if kill_thresholds:
+        print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
     val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
     full_val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1242,6 +1348,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
     global_step = 0
+    early_stop_reason: str | None = None
     train_start = time.time()
 
     for epoch in range(max_epochs):
@@ -1300,7 +1407,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     namespace="train",
                 )
             )
+            early_stop_reason = check_kill_thresholds(
+                global_step=global_step,
+                metrics=train_log,
+                thresholds=kill_thresholds,
+            )
+            if early_stop_reason is not None:
+                train_log["early_stop/triggered"] = 1.0
             wandb.log(train_log)
+            if early_stop_reason is not None:
+                print(early_stop_reason)
+                break
 
         scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
@@ -1318,12 +1435,27 @@ def main(argv: Iterable[str] | None = None) -> None:
             "epoch_time_s": dt,
             "global_step": global_step,
         }
+        if early_stop_reason is not None:
+            log_metrics["early_stop/triggered"] = 1.0
+            wandb.log(log_metrics)
+            break
+
         if not should_validate:
+            early_stop_reason = early_stop_reason or check_kill_thresholds(
+                global_step=global_step,
+                metrics=log_metrics,
+                thresholds=kill_thresholds,
+            )
+            if early_stop_reason is not None:
+                log_metrics["early_stop/triggered"] = 1.0
             wandb.log(log_metrics)
             print(
                 f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
                 f"train_loss={epoch_train_loss:.5f}"
             )
+            if early_stop_reason is not None:
+                print(early_stop_reason)
+                break
             continue
 
         if ema is not None:
@@ -1341,11 +1473,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             {
                 "val_primary/target_mean_rel_l2_pct": primary_val,
                 "val_primary/target_mean_rel_l2": val_metrics["val_surface"]["target_mean_rel_l2"],
+                "val_primary/abupt_axis_mean_rel_l2_pct": val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"],
                 "val_primary/surface_pressure_mae": val_metrics["val_surface"]["surface_pressure_mae"],
                 "val_primary/wall_shear_mae": val_metrics["val_surface"]["wall_shear_mae"],
                 "val_primary/volume_pressure_mae": val_metrics["val_surface"]["volume_pressure_mae"],
                 "val_primary/surface_pressure_rel_l2_pct": val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
                 "val_primary/wall_shear_rel_l2_pct": val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+                "val_primary/wall_shear_x_rel_l2_pct": val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+                "val_primary/wall_shear_y_rel_l2_pct": val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+                "val_primary/wall_shear_z_rel_l2_pct": val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
                 "val_primary/volume_pressure_rel_l2_pct": val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
             }
         )
@@ -1360,6 +1496,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 force=True,
             )
         )
+        early_stop_reason = early_stop_reason or check_kill_thresholds(
+            global_step=global_step,
+            metrics=log_metrics,
+            thresholds=kill_thresholds,
+        )
+        if early_stop_reason is not None:
+            log_metrics["early_stop/triggered"] = 1.0
         wandb.log(log_metrics)
 
         improved = primary_val < best_val
@@ -1390,9 +1533,24 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"val_target_rel_l2_pct={primary_val:.4f}{tag}"
         )
         print_metrics("val_surface", val_metrics["val_surface"])
+        if early_stop_reason is not None:
+            print(early_stop_reason)
+            break
 
     total_minutes = (time.time() - train_start) / 60.0
     print(f"\nTraining done in {total_minutes:.1f} min")
+
+    if early_stop_reason is not None:
+        wandb.summary.update(
+            {
+                "early_stop/triggered": 1.0,
+                "early_stop/reason": early_stop_reason,
+                "early_stop/global_step": global_step,
+                "total_train_minutes": total_minutes,
+            }
+        )
+        wandb.finish()
+        return
 
     if not best_metrics:
         print("No validation checkpoint was saved.")
@@ -1409,6 +1567,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         {
             "best_epoch": int(best_metrics["epoch"]),
             "best_val_primary/target_mean_rel_l2_pct": best_metrics["target_mean_rel_l2_pct"],
+            "best_val_primary/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
             "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
             "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
             "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
@@ -1424,11 +1583,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     full_val_log: dict[str, object] = {
         "full_val_primary/target_mean_rel_l2_pct": full_val_primary,
         "full_val_primary/target_mean_rel_l2": full_val_metrics["val_surface"]["target_mean_rel_l2"],
+        "full_val_primary/abupt_axis_mean_rel_l2_pct": full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"],
         "full_val_primary/surface_pressure_mae": full_val_metrics["val_surface"]["surface_pressure_mae"],
         "full_val_primary/wall_shear_mae": full_val_metrics["val_surface"]["wall_shear_mae"],
         "full_val_primary/volume_pressure_mae": full_val_metrics["val_surface"]["volume_pressure_mae"],
         "full_val_primary/surface_pressure_rel_l2_pct": full_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
         "full_val_primary/wall_shear_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+        "full_val_primary/wall_shear_x_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+        "full_val_primary/wall_shear_y_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+        "full_val_primary/wall_shear_z_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
         "full_val_primary/volume_pressure_rel_l2_pct": full_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
         "global_step": global_step,
     }
@@ -1455,11 +1618,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     test_log: dict[str, object] = {
         "test_primary/target_mean_rel_l2_pct": test_primary,
         "test_primary/target_mean_rel_l2": test_metrics["test_surface"]["target_mean_rel_l2"],
+        "test_primary/abupt_axis_mean_rel_l2_pct": test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"],
         "test_primary/surface_pressure_mae": test_metrics["test_surface"]["surface_pressure_mae"],
         "test_primary/wall_shear_mae": test_metrics["test_surface"]["wall_shear_mae"],
         "test_primary/volume_pressure_mae": test_metrics["test_surface"]["volume_pressure_mae"],
         "test_primary/surface_pressure_rel_l2_pct": test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
         "test_primary/wall_shear_rel_l2_pct": test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+        "test_primary/wall_shear_x_rel_l2_pct": test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+        "test_primary/wall_shear_y_rel_l2_pct": test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+        "test_primary/wall_shear_z_rel_l2_pct": test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
         "test_primary/volume_pressure_rel_l2_pct": test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
         "global_step": global_step,
     }
