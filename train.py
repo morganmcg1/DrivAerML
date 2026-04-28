@@ -505,6 +505,7 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
+    grad_clip_skip_threshold: float = 0.0
     compile_model: bool = True
     debug: bool = False
 
@@ -1706,16 +1707,38 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
+            skip_step = False
+            skip_reason = ""
             if config.clip_grad_norm > 0:
                 pre_clip_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=config.clip_grad_norm
                 )
+                pre_clip_val = float(pre_clip_norm)
+                if not math.isfinite(pre_clip_val):
+                    skip_step = True
+                    skip_reason = "nonfinite"
+                elif (
+                    config.grad_clip_skip_threshold > 0.0
+                    and pre_clip_val > config.grad_clip_skip_threshold
+                ):
+                    skip_step = True
+                    skip_reason = "above_threshold"
                 if should_log_gradients:
-                    gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
-                    gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
-            optimizer.step()
-            if ema is not None:
-                ema.update(model)
+                    gradient_metrics["train/grad/pre_clip_norm"] = pre_clip_val
+                    gradient_metrics["train/grad/clip_threshold"] = float(config.clip_grad_norm)
+                    gradient_metrics["train/grad/skip_threshold"] = float(
+                        config.grad_clip_skip_threshold
+                    )
+            if skip_step:
+                gradient_metrics["train/grad/skipped_step"] = 1.0
+                gradient_metrics[f"train/grad/skip_{skip_reason}"] = 1.0
+                optimizer.zero_grad(set_to_none=True)
+            else:
+                if config.clip_grad_norm > 0:
+                    gradient_metrics["train/grad/skipped_step"] = 0.0
+                optimizer.step()
+                if ema is not None:
+                    ema.update(model)
             weight_metrics = (
                 collect_weight_metrics(
                     model,
@@ -1851,7 +1874,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             log_metrics["early_stop/triggered"] = 1.0
         wandb.log(log_metrics)
 
-        improved = primary_val < best_val
+        primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0
+        improved = primary_val_is_valid and primary_val < best_val
         if improved:
             best_val = primary_val
             best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
