@@ -25,7 +25,7 @@ Always run training from the problem directory:
 cd "$PROBLEM_DIR" && python train.py --agent $STUDENT_NAME --wandb_name "$STUDENT_NAME/<short_experiment_description>"
 ```
 
-`train.py` handles sparse-cadence full-fidelity validation, checkpoint selection on `val_primary/target_mean_rel_l2_pct`, best-checkpoint `full_val/*`, and end-of-run test evaluation on `test_primary/target_mean_rel_l2_pct`. Do not short-circuit the full validation or test steps.
+`train.py` handles sparse-cadence full-fidelity validation, checkpoint selection on `val_primary/abupt_axis_mean_rel_l2_pct`, best-checkpoint `full_val/*`, and end-of-run test evaluation on `test_primary/abupt_axis_mean_rel_l2_pct`. Do not short-circuit the full validation or test steps, and report the individual AB-UPT-aligned columns from `test_primary/*`.
 
 ## Research
 

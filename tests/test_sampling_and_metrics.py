@@ -231,6 +231,8 @@ def test_chunked_eval_reaggregates_per_case_relative_l2_for_surface_and_volume()
     assert metrics["surface_pressure_mae"] == 0.5
     assert metrics["volume_pressure_mae"] == 0.5
     assert metrics["wall_shear_mae"] == 0.0
+    assert math.isclose(metrics["abupt_axis_mean_rel_l2"], (expected + expected) / 5.0)
+    assert not any(key.startswith("target_mean") for key in metrics)
 
 
 def test_slope_tracker_logs_five_percent_update_slope():
@@ -245,7 +247,7 @@ def test_slope_tracker_logs_five_percent_update_slope():
 
 def test_kill_thresholds_trigger_on_current_logged_metric_after_step():
     thresholds = parse_kill_thresholds(
-        "5:train/loss<1.0,10:val_primary/target_mean_rel_l2_pct<20"
+        "5:train/loss<1.0,10:val_primary/abupt_axis_mean_rel_l2_pct<20"
     )
 
     assert check_kill_thresholds(
@@ -260,11 +262,28 @@ def test_kill_thresholds_trigger_on_current_logged_metric_after_step():
     ) is None
     reason = check_kill_thresholds(
         global_step=10,
-        metrics={"val_primary/target_mean_rel_l2_pct": 25.0},
+        metrics={"val_primary/abupt_axis_mean_rel_l2_pct": 25.0},
         thresholds=thresholds,
     )
     assert reason is not None
-    assert "val_primary/target_mean_rel_l2_pct=25" in reason
+    assert "val_primary/abupt_axis_mean_rel_l2_pct=25" in reason
+
+
+def test_kill_threshold_parser_rejects_malformed_specs_with_clear_errors():
+    bad_specs = {
+        "5train/loss<1": "missing ':'",
+        "0:train/loss<1": "step must be >= 1",
+        "5:train/loss=1": "condition must look like",
+        "abc:train/loss<1": "step must be an integer",
+    }
+
+    for spec, expected_message in bad_specs.items():
+        try:
+            parse_kill_thresholds(spec)
+        except ValueError as exc:
+            assert expected_message in str(exc)
+        else:
+            raise AssertionError(f"Expected malformed kill threshold to fail: {spec}")
 
 
 def test_gradient_telemetry_exposes_aggregate_layer_type_module_and_param_keys():
@@ -287,3 +306,40 @@ def test_gradient_telemetry_exposes_aggregate_layer_type_module_and_param_keys()
     assert any(key.startswith("train/grad_type/LinearProjection/") for key in metrics)
     assert any(key.startswith("train/grad_module/TransolverAttention/") for key in metrics)
     assert any(key.startswith("train/grad_param/LinearProjection/") for key in metrics)
+
+
+def test_transolver_masks_padded_tokens_through_attention_and_norm():
+    torch.manual_seed(0)
+    model = SurfaceTransolver(
+        n_layers=2,
+        n_hidden=12,
+        n_head=3,
+        slice_num=4,
+        mlp_ratio=1,
+    )
+    surface_x = torch.randn(2, 5, 7)
+    volume_x = torch.randn(2, 4, 4)
+    surface_mask = torch.tensor(
+        [
+            [True, True, True, False, False],
+            [True, True, True, True, True],
+        ]
+    )
+    volume_mask = torch.tensor(
+        [
+            [True, False, False, False],
+            [True, True, True, True],
+        ]
+    )
+
+    out = model(
+        surface_x=surface_x,
+        surface_mask=surface_mask,
+        volume_x=volume_x,
+        volume_mask=volume_mask,
+    )
+
+    assert torch.all(out["surface_hidden"][0, 3:].abs() == 0)
+    assert torch.all(out["volume_hidden"][0, 1:].abs() == 0)
+    assert torch.all(out["surface_preds"][0, 3:].abs() == 0)
+    assert torch.all(out["volume_preds"][0, 1:].abs() == 0)

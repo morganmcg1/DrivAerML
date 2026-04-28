@@ -19,21 +19,21 @@ DrivAerML is an automotive CFD surrogate dataset. The packaged target predicts s
 - Surface targets: `surface_cp` plus 3-channel `surface_wallshearstress`
 - Volume target: `volume_pressure`
 - Split: public processed `400 train / 34 val / 50 test`
-- Primary metric: mean per-case relative L2 across surface pressure, wall shear, and volume pressure, logged as `target_mean_rel_l2_pct`
+- Internal checkpoint scalar: mean per-case relative L2 across the AB-UPT-aligned scalar columns `p_s`, `tau_x`, `tau_y`, `tau_z`, and `p_v`, logged as `abupt_axis_mean_rel_l2_pct`
 
 The validation scalar used for checkpoint selection is:
 
 ```
-val_primary/target_mean_rel_l2_pct
+val_primary/abupt_axis_mean_rel_l2_pct
 ```
 
 The final held-out test scalar is:
 
 ```
-test_primary/target_mean_rel_l2_pct
+test_primary/abupt_axis_mean_rel_l2_pct
 ```
 
-Lower is better. Final reports should also include `surface_pressure_mae`, `wall_shear_mae`, and `volume_pressure_mae`.
+Lower is better. Final reports should include the individual AB-UPT comparison columns and the target MAEs, not only this aggregate checkpoint scalar.
 
 ## Files Layout
 
@@ -114,11 +114,15 @@ Defaults are point-limited for memory while still full-fidelity for validation/t
 - `--validation-every 10` validates sparsely, with an extra epoch-1 and final-epoch validation
 - `--compile-model` is on by default
 - `--slope-log-fraction 0.05` logs key curve slopes every 5% of the estimated update budget
-- `--kill-thresholds "500:train/loss<5,2000:val_primary/target_mean_rel_l2_pct<25"` stops a poor run early once a logged metric misses a step-gated threshold
+- `--kill-thresholds "500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25"` stops a poor run early once a logged metric misses a step-gated threshold
 
 Gradient telemetry is intentionally high fidelity: aggregate norms, layer/type/parameter stats, and histograms are logged around every optimizer update by default.
 
-AB-UPT comparison metrics are logged separately. Use `test_primary/surface_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct`, `test_primary/wall_shear_x_rel_l2_pct`, `test_primary/wall_shear_y_rel_l2_pct`, `test_primary/wall_shear_z_rel_l2_pct`, and `test_primary/volume_pressure_rel_l2_pct` for paper-aligned comparisons. `target_mean_rel_l2_pct` is an internal checkpointing aggregate, not a published AB-UPT table column.
+Training sampling is with replacement inside each random view. For a case with `N` points and `K` points per view, an epoch creates `ceil(N / K)` views and draws `K` random rows for each view, so it draws about `N` rows per case per epoch but may contain duplicates and omissions. Validation and test use deterministic chunks without replacement across views, so a full eval covers every available point exactly once.
+
+AB-UPT comparison metrics are logged separately. Use `test_primary/surface_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct`, `test_primary/wall_shear_x_rel_l2_pct`, `test_primary/wall_shear_y_rel_l2_pct`, `test_primary/wall_shear_z_rel_l2_pct`, and `test_primary/volume_pressure_rel_l2_pct` for paper-aligned comparisons. `abupt_axis_mean_rel_l2_pct` is only a checkpointing/triage scalar, not a published AB-UPT table column.
+
+The baseline keeps target normalization to train-split mean/std. `surface_cp` is already nondimensionalized; do not add guessed per-case `p / Re^2` rescaling unless verified per-case freestream/Reynolds metadata is plumbed through and the final AB-UPT-style metrics are still computed on the original target units.
 
 Environment:
 
