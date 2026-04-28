@@ -475,6 +475,8 @@ class Config:
     ema_start_step: int = 50
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
+    weight_log_every: int = 1
+    log_weight_histograms: bool = False
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     compile_model: bool = True
@@ -684,6 +686,61 @@ def _finalize_grad_stats(accumulator: dict[str, float]) -> dict[str, float]:
     }
 
 
+def _empty_weight_accumulator() -> dict[str, float]:
+    return {
+        "sum": 0.0,
+        "sum_abs": 0.0,
+        "sum_sq": 0.0,
+        "max_abs": 0.0,
+        "min": float("inf"),
+        "max": float("-inf"),
+        "zero_count": 0.0,
+        "element_count": 0.0,
+        "nonfinite_count": 0.0,
+        "tensor_count": 0.0,
+    }
+
+
+def _add_weight_tensor_stats(accumulator: dict[str, float], param: torch.Tensor) -> torch.Tensor:
+    param_flat = param.detach().float().reshape(-1)
+    finite_param = param_flat[torch.isfinite(param_flat)]
+
+    accumulator["tensor_count"] += 1.0
+    accumulator["element_count"] += float(finite_param.numel())
+    accumulator["nonfinite_count"] += float(param_flat.numel() - finite_param.numel())
+    if finite_param.numel() > 0:
+        abs_param = finite_param.abs()
+        accumulator["sum"] += float(finite_param.sum().item())
+        accumulator["sum_abs"] += float(abs_param.sum().item())
+        accumulator["sum_sq"] += float(finite_param.square().sum().item())
+        accumulator["max_abs"] = max(accumulator["max_abs"], float(abs_param.max().item()))
+        accumulator["min"] = min(accumulator["min"], float(finite_param.min().item()))
+        accumulator["max"] = max(accumulator["max"], float(finite_param.max().item()))
+        accumulator["zero_count"] += float((finite_param == 0).sum().item())
+    return finite_param
+
+
+def _finalize_weight_stats(accumulator: dict[str, float]) -> dict[str, float]:
+    element_count = max(accumulator["element_count"], 1.0)
+    mean = accumulator["sum"] / element_count
+    mean_square = accumulator["sum_sq"] / element_count
+    variance = max(0.0, mean_square - mean * mean)
+    return {
+        "global_norm": math.sqrt(accumulator["sum_sq"]),
+        "mean": mean,
+        "mean_abs": accumulator["sum_abs"] / element_count,
+        "rms": math.sqrt(mean_square),
+        "std": math.sqrt(variance),
+        "max_abs": accumulator["max_abs"],
+        "min": accumulator["min"] if math.isfinite(accumulator["min"]) else 0.0,
+        "max": accumulator["max"] if math.isfinite(accumulator["max"]) else 0.0,
+        "zero_fraction": accumulator["zero_count"] / element_count,
+        "nonfinite_count": accumulator["nonfinite_count"],
+        "element_count": accumulator["element_count"],
+        "tensor_count": accumulator["tensor_count"],
+    }
+
+
 def _gradient_module_paths(
     *,
     base_model: nn.Module,
@@ -805,6 +862,84 @@ def collect_gradient_metrics(
 
     if log_histograms and finite_grad_chunks:
         metrics["train/grad_hist/all"] = wandb.Histogram(torch.cat(finite_grad_chunks).numpy())
+
+    return metrics
+
+
+def collect_weight_metrics(
+    model: nn.Module,
+    *,
+    log_histograms: bool,
+) -> dict[str, float | wandb.Histogram]:
+    """Collect parameter telemetry after the optimizer update."""
+
+    base_model = getattr(model, "_orig_mod", model)
+    modules = dict(base_model.named_modules())
+    global_acc = _empty_weight_accumulator()
+    by_module: dict[tuple[str, str], dict[str, float]] = {}
+    by_type: dict[str, dict[str, float]] = {}
+    metrics: dict[str, float | wandb.Histogram] = {}
+    finite_weight_chunks: list[torch.Tensor] = []
+    trainable_tensors = 0
+    frozen_tensors = 0
+
+    for raw_name, param in base_model.named_parameters():
+        if param.requires_grad:
+            trainable_tensors += 1
+        else:
+            frozen_tensors += 1
+
+        module_name, _, _leaf_name = raw_name.rpartition(".")
+        parameter_type = _parameter_display_type(
+            base_model=base_model,
+            modules=modules,
+            module_name=module_name,
+        )
+        safe_param_name = _metric_path(raw_name)
+        module_paths = _gradient_module_paths(
+            base_model=base_model,
+            modules=modules,
+            module_name=module_name,
+        )
+
+        finite_param = _add_weight_tensor_stats(global_acc, param)
+        for ancestor_type, ancestor_path in module_paths:
+            module_acc = by_module.setdefault((ancestor_type, ancestor_path), _empty_weight_accumulator())
+            type_acc = by_type.setdefault(ancestor_type, _empty_weight_accumulator())
+            _add_weight_tensor_stats(module_acc, param)
+            _add_weight_tensor_stats(type_acc, param)
+
+        param_acc = _empty_weight_accumulator()
+        _add_weight_tensor_stats(param_acc, param)
+        param_prefix = f"train/weight_param/{parameter_type}/{safe_param_name}"
+        for key, value in _finalize_weight_stats(param_acc).items():
+            metrics[f"{param_prefix}/{key}"] = value
+        metrics[f"{param_prefix}/requires_grad"] = float(param.requires_grad)
+
+        if finite_param.numel() > 0:
+            finite_weight_chunks.append(finite_param.detach().cpu())
+            if log_histograms:
+                metrics[f"train/weight_hist_param/{parameter_type}/{safe_param_name}"] = wandb.Histogram(
+                    finite_param.detach().cpu().numpy()
+                )
+
+    for key, value in _finalize_weight_stats(global_acc).items():
+        metrics[f"train/weight/{key}"] = value
+    metrics["train/weight/trainable_tensors"] = float(trainable_tensors)
+    metrics["train/weight/frozen_tensors"] = float(frozen_tensors)
+
+    for (module_type, safe_module_name), accumulator in by_module.items():
+        module_prefix = f"train/weight_module/{module_type}/{safe_module_name}"
+        for key, value in _finalize_weight_stats(accumulator).items():
+            metrics[f"{module_prefix}/{key}"] = value
+
+    for module_type, accumulator in by_type.items():
+        type_prefix = f"train/weight_type/{module_type}"
+        for key, value in _finalize_weight_stats(accumulator).items():
+            metrics[f"{type_prefix}/{key}"] = value
+
+    if log_histograms and finite_weight_chunks:
+        metrics["train/weight_hist/all"] = wandb.Histogram(torch.cat(finite_weight_chunks).numpy())
 
     return metrics
 
@@ -1382,6 +1517,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/grad_type/*", step_metric="global_step")
     wandb.define_metric("train/grad_hist/*", step_metric="global_step")
     wandb.define_metric("train/grad_hist_param/*", step_metric="global_step")
+    wandb.define_metric("train/weight/*", step_metric="global_step")
+    wandb.define_metric("train/weight_module/*", step_metric="global_step")
+    wandb.define_metric("train/weight_param/*", step_metric="global_step")
+    wandb.define_metric("train/weight_type/*", step_metric="global_step")
+    wandb.define_metric("train/weight_hist/*", step_metric="global_step")
+    wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
@@ -1425,6 +1566,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 config.gradient_log_every > 0
                 and (global_step + 1) % config.gradient_log_every == 0
             )
+            should_log_weights = (
+                config.weight_log_every > 0
+                and (global_step + 1) % config.weight_log_every == 0
+            )
             gradient_metrics = (
                 collect_gradient_metrics(
                     model,
@@ -1436,6 +1581,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             optimizer.step()
             if ema is not None:
                 ema.update(model)
+            weight_metrics = (
+                collect_weight_metrics(
+                    model,
+                    log_histograms=config.log_weight_histograms,
+                )
+                if should_log_weights
+                else {}
+            )
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
@@ -1445,6 +1598,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/volume_loss": batch_loss_metrics["volume_loss"],
                 "global_step": global_step,
                 **gradient_metrics,
+                **weight_metrics,
             }
             train_log.update(
                 train_slope_tracker.update(

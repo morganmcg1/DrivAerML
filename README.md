@@ -116,7 +116,7 @@ Defaults are point-limited for memory while still full-fidelity for validation/t
 - `--slope-log-fraction 0.05` logs key curve slopes every 5% of the estimated update budget
 - `--kill-thresholds "500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25"` stops a poor run early once a logged metric misses a step-gated threshold
 
-Gradient telemetry is intentionally high fidelity: aggregate norms, layer/type/parameter stats, and histograms are logged around every optimizer update by default.
+Gradient and weight telemetry are intentionally high fidelity: aggregate norms, layer/type/parameter stats, and gradient histograms are logged around every optimizer update by default. Weight scalar stats are logged after each update; weight histograms can be enabled with `--log-weight-histograms`.
 
 Training sampling is with replacement inside each random view. For a case with `N` points and `K` points per view, an epoch creates `ceil(N / K)` views and draws `K` random rows for each view, so it draws about `N` rows per case per epoch but may contain duplicates and omissions. Validation and test use deterministic chunks without replacement across views, so a full eval covers every available point exactly once.
 

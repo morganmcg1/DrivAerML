@@ -17,6 +17,7 @@ from train import (  # noqa: E402
     TargetTransform,
     check_kill_thresholds,
     collect_gradient_metrics,
+    collect_weight_metrics,
     evaluate_split,
     parse_kill_thresholds,
 )
@@ -306,6 +307,25 @@ def test_gradient_telemetry_exposes_aggregate_layer_type_module_and_param_keys()
     assert any(key.startswith("train/grad_type/LinearProjection/") for key in metrics)
     assert any(key.startswith("train/grad_module/TransolverAttention/") for key in metrics)
     assert any(key.startswith("train/grad_param/LinearProjection/") for key in metrics)
+
+
+def test_weight_telemetry_exposes_aggregate_layer_type_module_and_param_keys():
+    model = SurfaceTransolver(
+        n_layers=1,
+        n_hidden=12,
+        n_head=3,
+        slice_num=4,
+        mlp_ratio=1,
+    )
+
+    metrics = collect_weight_metrics(model, log_histograms=False)
+
+    assert "train/weight/global_norm" in metrics
+    assert "train/weight/zero_fraction" in metrics
+    assert "train/weight/trainable_tensors" in metrics
+    assert any(key.startswith("train/weight_type/LinearProjection/") for key in metrics)
+    assert any(key.startswith("train/weight_module/TransolverAttention/") for key in metrics)
+    assert any(key.startswith("train/weight_param/LinearProjection/") for key in metrics)
 
 
 def test_transolver_masks_padded_tokens_through_attention_and_norm():
