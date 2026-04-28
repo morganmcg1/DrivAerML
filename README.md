@@ -114,8 +114,11 @@ Defaults are point-limited for memory while still full-fidelity for validation/t
 - `--validation-every 10` validates sparsely, with an extra epoch-1 and final-epoch validation
 - `--compile-model` is on by default
 - `--slope-log-fraction 0.05` logs key curve slopes every 5% of the estimated update budget
+- `--kill-thresholds "500:train/loss<5,2000:val_primary/target_mean_rel_l2_pct<25"` stops a poor run early once a logged metric misses a step-gated threshold
 
 Gradient telemetry is intentionally high fidelity: aggregate norms, layer/type/parameter stats, and histograms are logged around every optimizer update by default.
+
+AB-UPT comparison metrics are logged separately. Use `test_primary/surface_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct`, `test_primary/wall_shear_x_rel_l2_pct`, `test_primary/wall_shear_y_rel_l2_pct`, `test_primary/wall_shear_z_rel_l2_pct`, and `test_primary/volume_pressure_rel_l2_pct` for paper-aligned comparisons. `target_mean_rel_l2_pct` is an internal checkpointing aggregate, not a published AB-UPT table column.
 
 Environment:
 

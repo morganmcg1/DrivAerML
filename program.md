@@ -110,6 +110,14 @@ Keep gradient logging close to `loss.backward()` and before `optimizer.step()` s
 
 Slope telemetry is also part of the contract. Every `--slope-log-fraction 0.05` of the estimated optimizer-step budget, `train.py` logs slopes for key curves under `train/slope/*`: losses, grad norms, grad-to-param ratio, RMS gradients, max gradients, MAE curves, and relative-L2 curves. Validation slopes are logged under `val/slope/*` at validation events; final validation and test use `full_val/slope/*` and `test/slope/*` when enough history exists. If you rename metric keys, preserve or document equivalent slope curves.
 
+Optional early-stop kill thresholds are available through `--kill-thresholds`. The format is a comma- or semicolon-separated list of `STEP:metric<value` checks, for example:
+
+```
+--kill-thresholds "500:train/loss<5,2000:val_primary/target_mean_rel_l2_pct<25"
+```
+
+Each check is evaluated only when that metric is logged at or after the requested global optimizer step. If the condition fails, the run logs `early_stop/*`, finishes W&B, and skips expensive final validation/test. Use this to discard clearly unstable or hopeless short runs; do not use it to hide final metrics for serious confirmation runs.
+
 ## Metrics
 
 Checkpoint selection uses the mean relative L2 across the three target families:
@@ -131,6 +139,19 @@ Primary logged metrics:
 - `*_primary/surface_pressure_rel_l2_pct`, `*_primary/wall_shear_rel_l2_pct`, `*_primary/volume_pressure_rel_l2_pct` — target-family relative-L2 diagnostics
 
 Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include all three MAEs plus all three relative-L2 percentages. The old `surface_rel_l2_pct` key remains as an alias for `surface_pressure_rel_l2_pct`, not the full problem score.
+
+### AB-UPT Metric Alignment
+
+AB-UPT reports relative L2 error in percent, averaged per sample across the split. The paper defines the relative L2 over all points and output dimensions for a target vector, then averages those per-sample values across test cases.
+
+For DrivAerML, the main paper table reports `p_s`, `u`, and `omega`; Appendix A reports `p_s`, vector wall shear `tau`, and `p_v`; Appendix B also reports the DoMINO comparison with wall shear split into `tau_x`, `tau_y`, and `tau_z`. This repo logs the matching columns it can compute:
+
+- `surface_pressure_rel_l2_pct` maps to AB-UPT `p_s`.
+- `wall_shear_rel_l2_pct` maps to vector `tau`.
+- `wall_shear_x_rel_l2_pct`, `wall_shear_y_rel_l2_pct`, `wall_shear_z_rel_l2_pct` map to the per-axis wall-shear columns.
+- `volume_pressure_rel_l2_pct` maps to AB-UPT `p_v`.
+
+`target_mean_rel_l2_pct` and `abupt_axis_mean_rel_l2_pct` are convenience aggregates for checkpointing and triage. They are not standalone AB-UPT benchmark columns, so paper-facing comparisons should quote the individual test fields above.
 
 ## Experiment Length
 
@@ -156,7 +177,7 @@ Use subagents when the task is broad enough to justify them; include their concl
 
 `main` is the vanilla baseline lineage: simple grouped Transolver, AdamW, EMA, compile enabled, and explicit metrics for all targets.
 
-An optimized lineage should live on branch `codex/optimized-lineage`. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, and slope telemetry. Advisor programs can assign a subset of students to that branch while others continue vanilla-lineage exploration.
+The optimized lineage lives on branch `codex/optimized-lineage`. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, and slope telemetry. Advisor programs can assign a subset of students to that branch while others continue vanilla-lineage exploration.
 
 ## Reference Targets
 
