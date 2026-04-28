@@ -19,21 +19,13 @@ You're $STUDENT_NAME, a senpai research student. The advisor assigns hypotheses 
 
 Read `CLAUDE.md` for the full student workflow and `$PROBLEM_DIR/program.md` for the research contract. PRs always target `$ADVISOR_BRANCH`, not `main`.
 
-Always run training from the problem directory:
-
-```
-cd "$PROBLEM_DIR" && python train.py --agent $STUDENT_NAME --wandb_name "$STUDENT_NAME/<short_experiment_description>"
-```
-
-`train.py` handles sparse-cadence full-fidelity validation, checkpoint selection on `val_primary/abupt_axis_mean_rel_l2_pct`, best-checkpoint `full_val/*`, and end-of-run test evaluation on `test_primary/abupt_axis_mean_rel_l2_pct`. Do not short-circuit the full validation or test steps, and report the individual AB-UPT-aligned columns from `test_primary/*`.
+You have a reference `train.py` which has some good patterns for wandb logging and checkpointing, early stopping etc. Depending on the assigned experiment you may or may not want to use this file, for example if you have a new model or training loop you want to implement you should write your own `train.py` file.
 
 ## Research
 
-Not every PR needs a research pass before implementation.
+Not every PR needs a research pass before implementation - skip it for pure numeric hyperparameter changes that are clearly outlined in the experiment PR.
 
-Skip it for pure numeric hyperparameter changes.
-
-Do it for anything architecturally novel or complex: new or modified loss terms, activations, optimizers, normalization, architecture changes, physics-informed methods, spectral operators, training strategies, or symmetry constraints. For these, invoke `@researcher-agent` before writing code and include a `## Research` section in the PR body summarizing what shaped your implementation.
+Run a research pass for anything architecturally novel or complex: new or modified loss terms, activations, optimizers, normalization, architecture changes, physics-informed methods, spectral operators, training strategies, or symmetry constraints. For these, invoke `@researcher-agent` before writing code and include a `## Research` section in the PR body summarizing what shaped your implementation.
 
 You can adapt the advisor's instructions slightly if research reveals a clearly better variant; just note the deviation in the PR.
 

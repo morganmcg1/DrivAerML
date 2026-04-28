@@ -6,7 +6,7 @@ SPDX-PackageName: senpai
 
 # DrivAerML Research Target
 
-Research target for CFD surrogate modelling on DrivAerML. Given vehicle surface points and volume points, predict three target families:
+Research target for CFD surrogate modelling on DrivAerML. Given vehicle surface points and volume points, predict three target metrics:
 
 - `surface_pressure`: surface pressure coefficient `cp`
 - `wall_shear`: 3-channel surface wall-shear-stress vector
@@ -14,21 +14,21 @@ Research target for CFD surrogate modelling on DrivAerML. Given vehicle surface 
 
 ## Mission
 
-The research goal is to find the strongest DrivAerML model we can, with particular focus on `volume_pressure` and `wall_shear`. Success is measured on the held-out test metrics logged by `train.py` after the best validation checkpoint is reloaded. Validation metrics are useful for steering, but final claims must be made from `test_primary/*`.
+The research goal is to find the strongest DrivAerML model we can across all three target metrics. Success is measured on the held-out test metrics logged by `train.py` after the best validation checkpoint is reloaded. Validation metrics are useful for steering, but final claims must be made from `test_primary/*`.
 
-The target is not merely to match the current public reference: the goal is to beat it decisively. Agents should relentlessly search for ways to drive down `test_primary/volume_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct`, the per-axis wall-shear metrics, and the aggregate `test_primary/abupt_axis_mean_rel_l2_pct`, without hiding regressions behind a single averaged number.
+The target is not merely to match the current public reference: the goal is to beat it decisively. Agents should relentlessly search for ways to drive down `test_primary/surface_pressure_rel_l2_pct`, `test_primary/volume_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct` without hiding regressions behind a single averaged number.
 
-The baseline is a plain grouped Transolver with one shared backbone and separate surface/volume heads. Keep the vanilla path simple; more opinionated variants should be explored as separate experiment arms.
+The baseline model given in `train.py` is a plain grouped Transolver with one shared backbone and separate surface/volume heads. This is only a starting reference, we also need to explore more opinionated variants as separate experiment arms in order to crush the current public reference metrics.
 
 ## Codebase
 
-- `train.py` — trainer, model, training loop, sparse-cadence full-fidelity validation, end-of-run full-fidelity test evaluation, W&B artifact upload. **Primary editable entrypoint.**
+- `train.py` — [REFERENCE]trainer, model, training loop, sparse-cadence full-fidelity validation, end-of-run full-fidelity test evaluation, W&B artifact upload. **Primary editable entrypoint.**
 - `data/loader.py` — PVC-backed DrivAerML case store, point-view sampling, batching, target stats. **Read-only during normal experiment PRs.**
-- `data/generate_manifest.py` — regenerates `data/split_manifest.json` from the processed PVC manifests. **Read-only.**
+- `data/generate_manifest.py` — regenerates `data/split_manifest.json` from the processed PVC manifests. **Read-only. Never touch this file.**
 - `data/preload.py` — validates packaged arrays and writes point counts. **Read-only.**
-- `data/split_manifest.json` — pinned public processed split. **Read-only.**
-- `instructions/prompt-advisor.md`, `instructions/prompt-student.md` — senpai role prompts.
-- `pyproject.toml` — runtime deps. Add any new package in the same PR that uses it.
+- `data/split_manifest.json` — pinned public processed split. **Read-only. Never touch this file.**
+- `instructions/prompt-advisor.md`, `instructions/prompt-student.md` — senpai role prompts. **Read-only.**
+- `pyproject.toml` — runtime deps. Add any new package in the same PR that uses it. **Read-only.**
 
 ## Data
 
@@ -69,11 +69,11 @@ The pinned split follows the packaged public processed DrivAerML manifest:
 | val | 34 |
 | test | 50 |
 
-The old failed-case gap has been repaired in this packaged split. `data/loader.py` validates that the split is exactly `400 / 34 / 50`, has no overlap, and includes the restored public case IDs.
+`data/loader.py` validates that the split is exactly `400 / 34 / 50`, has no overlap, and includes the restored public case IDs.
 
-## Point-View Sampling
+## Point-View Sampling in the Reference train.py
 
-Full surface and volume cases can be large, so the trainer uses point-limited views.
+Full surface and volume cases can be large, so the reference trainer uses point-limited views. This can be modified at any point, it is just a baseline to get you started.
 
 - Training with `--train-surface-points N --train-volume-points M`: for each case and modality, `view_count = ceil(total_points / points_per_view)` when point-limited. Each view draws `points_per_view` rows uniformly with replacement. Across one epoch the loader draws about `total_points` rows per case per modality, but duplicates and missed points are expected. For example, one epoch of replacement sampling at one full equivalent draw sees about 63% unique points in expectation; subsequent epochs compound coverage.
 - When surface and volume need different numbers of views, the case is repeated enough times to cover the larger count. The smaller modality returns empty tensors after its own views are covered instead of silently repeating full data.
@@ -82,9 +82,9 @@ Full surface and volume cases can be large, so the trainer uses point-limited vi
 
 Validation is intentionally sparse by default: `train.py` validates at epoch 1, every `--validation-every 10` epochs, and the final epoch. After loading the best checkpoint, it runs and logs `full_val/*` before `test/*`. Do not replace final validation/test with a random point sample.
 
-## Model Contract
+## Model Contract in the Reference train.py
 
-The baseline model interface is:
+The reference model interface is:
 
 ```python
 out = model(
@@ -97,15 +97,15 @@ surface_pred_norm = out["surface_preds"]  # [B, N_surface, 4]
 volume_pred_norm = out["volume_preds"]    # [B, N_volume, 1]
 ```
 
-`batch.surface_mask` and `batch.volume_mask` are required because cases are padded independently. Do not compute loss or metrics on padding tokens.
+`batch.surface_mask` and `batch.volume_mask` are required because cases are padded independently. **Do not compute loss or metrics on padding tokens.**
 
-The Transolver backbone must also keep padding masked internally. Slice-attention pooling, residual blocks, final normalization, and output heads should never let padded zero rows contribute to slice tokens or produce nonzero hidden states.
+The reference Transolver backbone must also keep padding masked internally. Slice-attention pooling, residual blocks, final normalization, and output heads should never let padded zero rows contribute to slice tokens or produce nonzero hidden states.
 
 The legacy `out["preds"]` alias still points to `surface_preds` for compatibility, but new work should use the explicit keys.
 
 ## Gradient, Weight, And Slope Telemetry
 
-The trainer intentionally logs high-fidelity gradient and weight telemetry on every optimizer update by default. Future agents must preserve this unless the advisor explicitly asks to change the logging contract.
+The reference trainer intentionally logs high-fidelity gradient and weight telemetry on every optimizer update by default. Future agents can preserve this unless the researcher explicitly asked to change the logging contract. It is recommended that if a brand new trainer or model is written, that this telemetry is preserved as it can yield crucial insights into the model's behavior and performance during training.
 
 The W&B stream includes:
 
@@ -155,9 +155,9 @@ Primary logged metrics:
 - `*_primary/surface_pressure_rel_l2_pct`, `*_primary/wall_shear_rel_l2_pct`, `*_primary/volume_pressure_rel_l2_pct` — target-family relative-L2 diagnostics
 - `*_primary/wall_shear_x_rel_l2_pct`, `*_primary/wall_shear_y_rel_l2_pct`, `*_primary/wall_shear_z_rel_l2_pct` — per-axis wall-shear relative-L2 diagnostics
 
-Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include the target-family MAEs plus `surface_pressure`, vector `wall_shear`, per-axis wall-shear, and `volume_pressure` relative-L2 percentages. The old `surface_rel_l2_pct` key remains as an alias for `surface_pressure_rel_l2_pct`, not the full problem score.
+Lower is better. For paper-facing reporting, use the final `test_primary/*` metrics and include the target-family MAEs plus `surface_pressure`, vector `wall_shear`, per-axis wall-shear, and `volume_pressure` relative-L2 percentages.
 
-### AB-UPT Metric Alignment
+### TARGET METRIC ALIGNMENT WITH AB-UPT
 
 AB-UPT reports relative L2 error in percent, averaged per sample across the split. The paper defines the relative L2 over all points and output dimensions for a target vector, then averages those per-sample values across test cases.
 
@@ -191,12 +191,12 @@ The baseline normalizes each target channel with train-split mean/std only. `sur
 
 ## Experiment Length
 
-This target trains slower than TandemFoilSet. Use a mix of shorter and longer experiments:
+Use a mix of shorter and longer experiments:
 
 - Short runs are for viability: does the idea compile, stay stable, produce sane gradients, and improve early validation trends?
 - Longer runs are for confirmation: does a stable idea keep improving once the model has enough update budget to learn surface and volume structure?
 
-Do not run only short experiments; they can discard ideas before the model has started learning. Do not run only long experiments; they burn the time budget before enough hypotheses are screened. Use the slope, gradient, and weight logs to decide which short runs deserve a longer confirmation run.
+Do not run only short experiments; they can discard ideas before the model has started learning. Do not run only long experiments; they burn the time budget before enough hypotheses are screened. Use the metrics' slope, gradient, and weight logs etc to decide which short runs deserve a longer confirmation run.
 
 ## Research Workflow
 
@@ -204,61 +204,38 @@ For substantial architecture or training-strategy changes, preserve main context
 
 ### Stream 1: Exploit Existing Evidence
 
-Mine the existing DrivAerML history before assigning a wave of experiments:
+Mine the existing DrivAerML history of experiments before assigning a wave of experiments:
 
 - Search this target repo's prior branches and PRs, including `main`, `codex/optimized-lineage`, and any previous DrivAerML experiment branches.
-- Search the `wandb/senpai` `radford` branch, related DrivAerML PRs, W&B runs, analysis files, and advisor notes for mechanisms that already worked or failed.
+- Search the PRs from the `wandb/senpai` github repo's `radford` branch which also contains a wealth of previous DrivAerML experiments and analysis.
 - Assign a subset of students to build on the strongest past ideas rather than rediscovering them: useful preprocessing, target transforms, batching choices, normalization, loss weighting, architecture deltas, and optimizer schedules.
 - When reusing a past idea, state the source PR/run/branch in the assignment and explain what is being preserved versus changed.
 
 ### Stream 2: Generate New High-Variance Ideas
 
-Reserve another subset of students for fresh, aggressive ideas that may not be present in the history. Search broadly across CFD surrogate literature and adjacent ML:
+Reserve another subset of students for fresh, aggressive ideas that may not be present in the history. Just focussing on past results above might result in getting stuck in a local optimum. Search broadly across CFD surrogate literature and adjacent ML:
 
 - DrivAerML and AI-for-CFD work: AB-UPT, UPT, Transolver, Transolver-3, GeoTransolver, DoMINO, GINO/FNO-style operators, graph/mesh transformers, point-cloud networks, geometric encodings, and multi-resolution tokenization.
-- AI-for-science ideas from physics, chemistry, and biology: equivariant or invariant representations, denoising/pretraining, multiscale message passing, latent neural operators, simulator residual modelling, and uncertainty-aware losses.
-- Modern transformer and LLM architecture ideas available at run time: DeepSeek, Kimi, GLM, and other recent papers for MoE routing, latent/linear attention, token compression, normalization, optimizer, curriculum, and distillation tricks that can plausibly transfer to point/field regression.
+- AI-for-science ideas from physics, chemistry, and biology: equivariant or invariant representations, denoising/pretraining, multiscale message passing, latent neural operators, simulator residual modelling, and uncertainty-aware losses --> there is a lot of interesting work in the broader AI-for-science literature that can be applied to DrivAerML.
+- Modern transformer and LLM architecture ideas available at run time: Arcee, OLMO, DeepSeek v4, Kimi 2.5 / 2.6, GLM 5.1, and other recent papers for MoE routing, latent/linear attention, token compression, normalization, optimizer, curriculum, and distillation tricks that can plausibly transfer to point/field regression.
 
 Wild ideas are welcome, but they must still honor the data split, full-fidelity test evaluation, and telemetry contract. A clever idea that cannot be measured on `test_primary/*` is not useful for this sprint.
-
-### Suggested Subagents
-
-A good advisor pass should split the work like this:
-
-- Architecture research agent: compare vanilla Transolver, grouped surface/volume variants, UPT-style ideas, geometric encodings, and memory-efficient attention choices.
-- Experiment-history research agent: review prior DrivAerML PRs, W&B runs, failures, and merged wins so the next hypothesis is not a duplicate.
-- Frontier-ideas research agent: search outside the repo for recent AI-for-science and transformer/LLM mechanisms that might transfer to DrivAerML.
-- Optimization/data research agent: inspect batch-size, compile, gradient and weight health, validation cadence, target weighting, and preprocessing implications.
-- Synthesis research agent: read the prior research-agent outputs, do any missing checks, and choose the final experiment set across both streams.
-
-Use subagents when the task is broad enough to justify them; include their conclusions in the PR body. Keep the train script's logging fidelity intact while iterating.
-
-## Lineages
-
-`main` is the vanilla baseline lineage: simple grouped Transolver, AdamW, EMA, compile enabled, and explicit metrics for all targets.
-
-The optimized lineage lives on branch `codex/optimized-lineage`. It may explore more opinionated model and optimizer choices, but it must keep the same data targets, final full-fidelity validation/test metrics, gradient telemetry, weight telemetry, and slope telemetry. Advisor programs can assign a subset of students to that branch while others continue vanilla-lineage exploration.
-
-## Reference Targets
-
-There is no exact published number for this repo's packaged three-target trainer path. Closest public DrivAerML surface-pressure references are low-single-digit relative-L2 percent:
-
-- AB-UPT: `p_s = 3.82`
-- Transolver baseline reported by AB-UPT: `p_s = 4.81`
-- Transolver-3: `p_s = 3.71`
-- Transolver++ row inside Transolver-3: `p_s = 4.12`
-
-Treat these as external target bands for surface pressure only, not apples-to-apples multi-target baselines.
-
-## Constraints
-
-- GPUs have 96 GB. Prefer larger batch sizes when they use GPU capacity well, but compare gradient and weight health across batch sizes because larger batches can degrade final quality.
-- `torch.compile` is enabled by default to improve throughput. If you disable it for an experiment, explain why.
-- Respect `SENPAI_TIMEOUT_MINUTES`; do not override it in experiments.
-- Simpler is better. A small improvement with unreadable complexity is not worth it.
-- Data loaders and split files are read-only for normal research PRs.
-- No new packages outside `pyproject.toml`.
 
 ## Roles
 
 Research is coordinated through GitHub PRs with an advisor/student model. GitHub Issues are used for communication with the human researcher team. See `instructions/prompt-advisor.md` and `instructions/prompt-student.md`.
+
+## To Sum up: do everything you possibly can to crush the current public reference metrics
+
+Here are the current public reference metrics: 
+
+| Target | This repo metric | AB-UPT reference |
+|--------|------------------|-----------------:|
+| Surface pressure `p_s` | `test_primary/surface_pressure_rel_l2_pct` | `3.82` |
+| Vector wall shear `tau` | `test_primary/wall_shear_rel_l2_pct` | `7.29` |
+| Volume pressure `p_v` | `test_primary/volume_pressure_rel_l2_pct` | `6.08` |
+| Wall shear `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | `5.35` |
+| Wall shear `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | `3.65` |
+| Wall shear `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | `3.63` |
+
+Your test metrics MUST beat these targets. We have put a massive amount of effort into this research programme to get this far, now is the time for you to step up and deliver the results we need and claim victory for the worlds best result on DrivAerML.
