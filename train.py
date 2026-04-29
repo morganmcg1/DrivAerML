@@ -553,6 +553,7 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    normal_suppression_weight: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1263,6 +1264,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    normal_suppression_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1276,6 +1278,8 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
+        normal_suppression_loss_val = float("nan")
+        normal_suppression_term: torch.Tensor | None = None
         if use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
@@ -1296,13 +1300,22 @@ def train_loss(
             if bool(batch.surface_mask.any()):
                 n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
                 normal_dot = (ws_pred_phys.float() * n_hat).sum(dim=-1)
+                mask_f = batch.surface_mask.float()
+                denom = mask_f.sum().clamp_min(1.0)
+                normal_sq = normal_dot.square() * mask_f
+                normal_suppression_term = normal_sq.sum() / denom
+                normal_suppression_loss_val = float(
+                    normal_suppression_term.detach().cpu().item()
+                )
                 normal_rms = float(
-                    normal_dot[batch.surface_mask].square().mean().sqrt().detach().cpu().item()
+                    normal_suppression_term.detach().sqrt().cpu().item()
                 )
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
         surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
+        if normal_suppression_weight > 0.0 and normal_suppression_term is not None:
+            surface_loss = surface_loss + normal_suppression_weight * normal_suppression_term.to(surface_loss.dtype)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
     metrics: dict[str, float] = {
@@ -1311,6 +1324,8 @@ def train_loss(
     }
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+        if normal_suppression_weight > 0.0:
+            metrics["wallshear_normal_suppression_loss"] = normal_suppression_loss_val
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -1723,6 +1738,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                normal_suppression_weight=config.normal_suppression_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1782,6 +1798,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "wallshear_normal_suppression_loss" in batch_loss_metrics:
+                train_log["train/wallshear_normal_suppression_loss"] = batch_loss_metrics[
+                    "wallshear_normal_suppression_loss"
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
