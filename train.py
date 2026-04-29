@@ -424,6 +424,9 @@ class EMA:
         }
         self.backup: dict[str, torch.Tensor] | None = None
 
+    def set_decay(self, new_decay: float) -> None:
+        self.decay = float(new_decay)
+
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
         self.step_counter += 1
@@ -497,6 +500,8 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    ema_decay_start: float = 0.0
+    ema_decay_end: float = 0.9999
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -1658,7 +1663,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
             optimizer.step()
+            ema_decay_now: float | None = None
             if ema is not None:
+                if config.ema_decay_start > 0.0:
+                    progress = min(global_step / max(total_estimated_steps, 1), 1.0)
+                    cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
+                    ema_decay_now = config.ema_decay_start + cos_val * (
+                        config.ema_decay_end - config.ema_decay_start
+                    )
+                    ema.set_decay(ema_decay_now)
                 ema.update(model)
             weight_metrics = (
                 collect_weight_metrics(
@@ -1683,6 +1696,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            if ema_decay_now is not None:
+                train_log["train/ema_decay"] = ema_decay_now
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
