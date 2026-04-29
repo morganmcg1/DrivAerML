@@ -2,27 +2,51 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: PR #30 — 2026-04-29 15:21 UTC
+## Status: PR #33 — 2026-04-29 16:39 UTC
 
-First tay/DDP8 baseline established by alphonse's calibration (yi PR #4
-reproduce: 4L/512d/8h, lr=5e-5, bs=4, `--no-compile-model` workaround).
-**Under-trained at 9 epochs** due to torch.compile + drop_last=False bug —
-conservative floor. Compile-fixed re-calibration will supersede this.
+New tay SOTA set by fern's RFF coordinate encoding: Gaussian random Fourier
+features (sigma=1.0, 32 features per modality) appended to surface and volume
+coord inputs. Lifts every surface/wall-shear axis by 10-15%, volume pressure
+flat (expected — far-field coords saturate sigma=1.0 RFF). Run under
+`--no-compile-model` (torch.compile bug open), 9 compiled-equiv epochs.
 
-**W&B run:** `0vi9tm5h` (rank 0) — group `tay-round1-calibrate`
-**Best-val checkpoint:** epoch 9 (val_abupt=18.70)
+**W&B run:** `u43lik5d` (rank 0) — group `fern-rff-sigma-sweep`
+**Best-val checkpoint:** epoch 9 (val_abupt=17.06)
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #30) | yi best | AB-UPT |
-|---|---|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **19.81** | 15.82 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **12.86** | 9.99 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **21.27** | 16.60 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **15.91** | 14.21 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **18.24** | 14.27 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **25.50** | 19.49 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **26.53** | 21.12 | 3.63 |
+| Metric | This-repo key | tay best (PR #33) | PR #30 | yi best | AB-UPT |
+|---|---|---:|---:|---:|---:|
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **17.77** | 19.81 | 15.82 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **11.20** | 12.86 | 9.99 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **18.68** | 21.27 | 16.60 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **16.13** | 15.91 | 14.21 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **16.20** | 18.24 | 14.27 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **21.81** | 25.50 | 19.49 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **23.54** | 26.53 | 21.12 | 3.63 |
+
+### Reproduce PR #33 config
+
+```bash
+cd target/
+torchrun --standalone --nproc_per_node=8 train.py \
+  --volume-loss-weight 2.0 --batch-size 4 --validation-every 1 \
+  --lr 5e-5 --weight-decay 5e-4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --ema-decay 0.9995 \
+  --rff-num-features 32 --rff-sigma 1.0 \
+  --gradient-log-every 100 --weight-log-every 100 \
+  --no-log-gradient-histograms --no-compile-model
+```
+
+### Compounding wins so far
+
+| PR | Who | Delta | Lever |
+|---|---|---:|---|
+| #30 | alphonse | baseline (19.81) | yi calibration config (4L/512d/8h, vol_w=2.0) |
+| #33 | fern | **−2.04 (−10.3%)** | RFF coord features (sigma=1.0, 32 feats) |
 
 ### INFRA NOTE — torch.compile bug (high priority fix)
 
