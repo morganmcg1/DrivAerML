@@ -103,6 +103,48 @@ After compile fix merges, Round 2 baselines reset.
 
 ---
 
+## 2026-04-29 16:39 UTC — PR #33 MERGED: fern RFF win — new tay SOTA 17.77
+
+**Student:** fern | **W&B run:** `u43lik5d` (rank 0) | **Hypothesis:** Gaussian RFF coord
+features (sigma=1.0, 32 features per modality) appended to surface and volume coord inputs.
+Model unchanged; input dim grows from 7 to 7+64 (surface and volume each get separate RFF).
+
+### Results
+
+| Metric | tay (PR #33) | PR #30 | yi best | AB-UPT |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean` | **17.77** | 19.81 | 15.82 | — |
+| `surface_pressure` | **11.20** | 12.86 | 9.99 | 3.82 |
+| `wall_shear` | **18.68** | 21.27 | 16.60 | 7.29 |
+| `volume_pressure` | 16.13 | 15.91 | 14.21 | 6.08 |
+| `tau_x` | **16.20** | 18.24 | 14.27 | 5.35 |
+| `tau_y` | **21.81** | 25.50 | 19.49 | 3.65 |
+| `tau_z` | **23.54** | 26.53 | 21.12 | 3.63 |
+
+### Analysis
+
+RFF lifts every surface and shear axis (−10–15%). tau_y: −14.5%, tau_z: −11.3%. The
+primary mechanism is spectral bias bypass: RFF encodes multi-frequency coordinate
+content that the existing sincos pos_embed provides less of for surface coords at
+meter-scale. volume_pressure flat (+0.22 = noise) because volume far-field coords
+[-40,80]m saturate the sigma=1.0 projection — documented and preserved for H01.
+
+Best-val checkpoint: epoch 9, val_abupt 17.06. Run ~4.78h without compile.
+
+---
+
+## 2026-04-29 16:39 UTC — PR #32 CLOSED: edward cosine LR + warmup — loss
+
+**Student:** edward | **W&B run:** `uqziai5z` (Arm A: warmup-on) | **Result:** test_abupt 20.99
+(+1.18 vs baseline, +6%). Uniform regression all axes.
+
+Diagnosis: `T_max=50` at 9 effective epochs → cosine schedule only 18% engaged (5e-5 → 4.97e-5).
+Warmup front-loads cost with no recovery time. Not a dead end — the question is
+*"more epochs"*, not *"wrong schedule."* After alphonse #40 compile fix lands (→ 16–22
+compiled epochs), cosine LR with T_max matched to compiled budget becomes the right revisit.
+
+---
+
 ## 2026-04-29 16:25 UTC — Round 1 first wave: 3 results confirmed in W&B (PRs not yet ready)
 
 Three Round-1 students completed primary arms. None have marked PRs ready

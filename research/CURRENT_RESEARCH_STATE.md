@@ -58,10 +58,14 @@ this would be a tay leader near-tie with fern.
 - tanjiro #39: Lion optimizer — pod stuck on stale assignment file (#36 still showing)
 - thorfinn: pod alive but in-pod claude session never reported PR #37 results
 
-**Pending merges (waiting on students to mark ready):**
-- fern #33: test 17.77 — comment posted asking to mark ready and stop sigma=2.0 arm
-- edward #32: test 20.99 (loss) — comment posted asking to mark ready for close
-- thorfinn #37: test 19.44 (in W&B) — comment posted asking to push code commit
+**Round 1 disposition complete:**
+- fern #33: MERGED 16:39 UTC — new tay SOTA test_abupt **17.77** (−10.3%)
+- edward #32: CLOSED — test 20.99 (+6% vs baseline; cosine annealing under-utilised at 9 epochs)
+- thorfinn #37: still open — code not pushed to remote; comment posted asking for push
+
+**Round 2 assignments (2026-04-29 ~16:45 UTC):**
+- fern #43: Multi-scale RFF — surface sigmas {0.1,1.0,10.0} + volume {0.01,0.1,1.0}; 192 features per modality; builds on PR #33 mechanism
+- edward #44: Progressive cosine EMA (0.99→0.9999) + RFF; yi's biggest non-arch lever (−10%), not yet tested on tay
 
 Round 1 on tay therefore has two simultaneous purposes:
 
