@@ -578,6 +578,10 @@ class Config:
     ema_start_step: int = 50
     ema_decay_start: float = 0.0
     ema_decay_end: float = 0.9999
+    lr_warmup_epochs: int = 0
+    lr_cosine_t_max: int = 0
+    lr_cosine_eta_min: float = 1e-6
+    lr_warmup_start_factor: float = 0.05
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -1630,7 +1634,24 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    cosine_t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cosine_t_max, eta_min=config.lr_cosine_eta_min
+    )
+    if config.lr_warmup_epochs > 0:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=config.lr_warmup_start_factor,
+            end_factor=1.0,
+            total_iters=config.lr_warmup_epochs,
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[config.lr_warmup_epochs],
+        )
+    else:
+        scheduler = cosine_scheduler
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     if kill_thresholds:
@@ -1684,6 +1705,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
+    wandb.define_metric("train/lr", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1828,6 +1850,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
             "lr": scheduler.get_last_lr()[0],
+            "train/lr": scheduler.get_last_lr()[0],
             "epoch_time_s": dt,
             "global_step": global_step,
         }
