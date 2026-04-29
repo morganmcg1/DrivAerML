@@ -48,7 +48,7 @@ finalizing hypotheses to avoid duplicating work and to draw inspiration.
 
 | PR | Student | Hypothesis | Primary target |
 |---|---|---|---|
-| #7 | fern | Gaussian RFF for coordinates — sent back v5 (coord-norm + cosine EMA) | p_s / tau |
+| ~~#7~~ | ~~fern~~ | ~~Gaussian RFF for coordinates~~ — CLOSED 2026-04-29 v5 (bf16 cascade non-viable; per-stream σ + fp32 saved for future) |
 | #8 | frieren | Per-case geometry FiLM conditioning | all |
 | #9 | gilbert | Volume loss weight sweep 2.0x vs 3.0x | p_v (6.08%) |
 | #10 | haku | Per-axis wall-shear channel loss weights (2x vs 3x) | tau (7.29%) |
@@ -106,6 +106,7 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 | #28 | norman | A02 — SE(3) equivariant local-frame coord features |
 | #29 | chihiro | B06 — width × FiLM × cosine EMA composition at 512d |
 | #38 | violet | C02 — Deep Evidential Regression (NIG head, lambda sweep 0.01 / 0.1) |
+| #45 | fern | B04 — Mamba-2 SSM Morton-sorted surface decoder |
 
 **Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
 SE(3) local-frame coordinate features. Now reassigned to norman as PR #28.

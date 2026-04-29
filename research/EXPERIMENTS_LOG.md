@@ -365,3 +365,35 @@ There is no run in this experiment where area-weighted MSE beats unweighted MSE 
 **Bug-fix commit `14e4668` (gradient clipping, `--max-grad-norm`):** Compatible with PR #22 (gilbert) canonical version. No separate landing needed.
 
 **Round-2 follow-up assigned to violet:** **C02 — Deep Evidential Regression head** (replace MSE with NIG-based negative log-likelihood; per-cell uncertainty; addresses heavy-tail target distributions at the loss-formulation level). Bold direction, plays to violet's demonstrated loss-analysis strength.
+
+## 2026-04-29 — PR #7 v5: Fourier features with coord-normalization (fern) — CLOSED
+
+- Branch: `fern/round1-fourier-coordinate-features`
+- Hypothesis (v5 revision): coord-normalize xyz to [-1, 1] using separate surface (~7m bbox) and volume (~120m bbox) bboxes, σ=1.0, compose with cosine EMA, add NaN-skip-step protection.
+- W&B run: `udgrnpvq` (`fern-fourier-v5-normalized`), state=finished, 6h budget, best_epoch=3, 31,474 NaN-skipped steps after epoch-4 divergence
+
+**v5 test_primary/* (best EMA epoch 3):**
+
+| Metric | v5 | v4 (raw, σ=0.5) | yi merged (PR #4) | Δ vs PR #4 |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean` | **21.10** | 22.67 | 16.64 | **+26.8%** |
+| `surface_pressure` | 11.09 | 14.88 | 10.65 | +4.1% |
+| `wall_shear` | 18.44 | 23.96 | 17.66 | +4.4% |
+| `volume_pressure` | **33.09** | 19.17 | 14.37 | **+130%** |
+| `wall_shear_x/y/z` | 15.60 / 22.12 / 23.61 | 20.42 / 29.02 / 29.84 | 14.87 / 19.89 / 21.73 | +4.9 / +11.2 / +8.7% |
+
+**Key findings:**
+- **Coord normalization clearly helps Fourier.** v5 vs v4 (with all else equal): −7% abupt, −25% surface_pressure, −18 to −24% wall-shear axes. Surface metrics now within +4% of merged baseline.
+- **Volume regression is mechanistic.** Surface bbox (~7m) and volume bbox (~120m, sim domain) need different σ. Single shared σ=1.0 → volume Fourier wavelengths too coarse for sim domain. v5 used per-stream bbox normalization but not per-stream σ. **Per-stream σ is the obvious fix.**
+- **bf16 forward-pass amplification cascade is fundamental.** v3/v4 diverged epoch 1; v5 made it through 3 healthy epochs of monotonic val improvement, then exponential blow-up over ~14 steps (preclip grad 6.6e11 → 5.0e18) in epoch 4. Pattern: gradient clipping bounds optimizer step, but activation drift accumulates and crosses ~3e38 bf16 overflow threshold. Identical mode in all 3 substantive Fourier runs.
+- **NaN-skip-step (commit `d194ba8`) saved the run.** 31,474 corrupted steps caught after divergence; EMA frozen at epoch-3 weights produced valid `test_primary/*` instead of NaN.
+
+**Decision: CLOSE.** +27% regression on headline metric; remaining gap-closure path (per-stream σ + fp32 input projection + FiLM composition) is multi-week scope; better to deploy fern's analytical strengths on Round-2 architecture.
+
+**Salvageable for future revisits:**
+1. Per-stream σ (surface=1.0, volume=0.25) — clean fix to volume regression
+2. fp32 input projection — clean fix to bf16 overflow
+3. Per-axis σ — addresses anisotropic wall-shear residuals
+4. NaN-skip-step pattern — for any future divergence-prone run
+
+**Round-2 follow-up assigned to fern:** B04 — Mamba-2 SSM surface decoder. Plays to fern's mathematical strengths (state-space model kernel math, stability analysis, numerical diagnostics).
