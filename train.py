@@ -547,6 +547,7 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    grad_clip_max_norm: float = 1.0
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -1687,6 +1688,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            preclip_grad_norm = (
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    max_norm=config.grad_clip_max_norm,
+                )
+                if config.grad_clip_max_norm > 0
+                else None
+            )
             should_log_gradients = (
                 config.gradient_log_every > 0
                 and (global_step + 1) % config.gradient_log_every == 0
@@ -1736,6 +1745,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            if preclip_grad_norm is not None:
+                train_log["train/grad/preclip_global_norm"] = float(
+                    preclip_grad_norm.detach()
+                )
+                train_log["train/grad/clip_max_norm"] = float(
+                    config.grad_clip_max_norm
+                )
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
