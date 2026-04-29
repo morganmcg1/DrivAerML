@@ -94,26 +94,35 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
 ## Round 1 — reviewed results (2026-04-29)
 
-### MERGED — yi baseline progression
+### VERIFIED WIN (pending merge) + MERGED — yi baseline progression
 
-- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) MERGED 03:57 UTC — new yi best.**
-  `abupt_axis_mean = 17.39` (vs prior 35.12 = 50.5% reduction). Wall-shear
-  axes -50% to -70%. Surface pressure +1pp. Run A `y2gigs61`, state=finished,
-  6 epochs reached, best_epoch=3. PR was CLI-flag-only (no code diff).
-  Win came primarily from **protocol fixes** (bs=8, validation-every=1,
-  gradient-log-every=100), not from vol_w (which is at worst neutral).
+- **PR #8 (frieren, per-block FiLM conditioning) — VERIFIED WIN, pending merge.**
+  `abupt_axis_mean = 16.53` (vs 17.39 baseline = −4.9%). Run `hltti2ec`,
+  state=finished, 1 epoch, best_epoch=1, bs=2 only. Beats baseline in every
+  test_primary axis. Apples-to-apples vs PR #3 (no FiLM, same config): 30.47 → 16.53
+  = 46% reduction. FiLM mechanistically confirmed (token norm 70× growth, FiLM weights
+  1.8–3.6×). Merge blocked on rebase conflict — frieren rebasing now.
+  **Will be the new yi best once merged.**
+  - Follow-up PR #23 (frieren): full composition — FiLM + vol_w=2.0 + projection + bs=8.
+- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) MERGED 03:57 UTC — current yi best.**
+  `abupt_axis_mean = 17.39` (vs prior 35.12 = 50.5% reduction). Run `y2gigs61`,
+  state=finished, 6 epochs reached, best_epoch=3.
+  Win came primarily from **protocol fixes** (bs=8, validation-every=1, log-cadence).
   - **Infrastructure bug flagged:** `train.py` has no gradient clipping.
-    Multiple Round-1 PRs diverged on this mechanism (chihiro, emma, fern,
-    haku, gilbert run B). Follow-up PR #22 (gilbert) adds it.
-- **PR #11 (kohaku, tangential wall-shear projection) — MERGED earlier,
-  superseded as baseline by PR #9.** Code remains on yi (default off);
-  expected to compose with gilbert's config for further gains.
+    Follow-up PR #22 (gilbert) adds it.
+- **PR #11 (kohaku, tangential wall-shear projection) — MERGED earlier.**
+  Code remains on yi (default off). Expected to compose for further gains.
 - **Follow-up PR #21 (kohaku, normal-component suppression sweep)** —
-  λ ∈ {0.0, 0.01, 0.1, 1.0} of `λ * mean((ws_pred · n_hat)^2)` on top of
-  projection.
+  λ ∈ {0.0, 0.01, 0.1, 1.0} on top of projection.
 - **Follow-up PR #22 (gilbert, gradient clipping)** — adds
   `torch.nn.utils.clip_grad_norm_` + 4-arm sweep. Infrastructure win
   blocking high-LR / high-weight / high-batch sweeps.
+
+**Three independent wins now compounding (next big leap from stacking all):**
+1. Tangential projection (PR #11, default off, `--use-tangential-wallshear-loss`)
+2. Protocol fixes: vol_w=2.0, bs=8, validation-every=1 (PR #9)
+3. Per-block FiLM conditioning (PR #8, pending merge)
+→ PR #23 (frieren) will test all three together.
 
 ### CLOSED
 

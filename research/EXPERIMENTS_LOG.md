@@ -9,6 +9,37 @@ Targets to beat (lower is better): `surface_pressure 3.82`, `wall_shear 7.29`,
 Round 1 launches 16 parallel experiments: 5 known-good baselines / proven-additive
 deltas (Stream 1) and 11 fresh single-delta hypotheses (Stream 2).
 
+## 2026-04-29 — PR #8: per-case geometry FiLM conditioning (frieren) — VERIFIED WIN, pending merge (rebase required)
+
+- Branch: `frieren/round1-geometry-film-conditioning`
+- Hypothesis: condition each Transolver block on a per-geometry latent vector via AdaLN-zero FiLM (feature-wise linear modulation), so the model can specialize its weights to the car geometry rather than treating all geometries uniformly.
+- W&B run: `hltti2ec` (state=finished, 1 full epoch reached, best_epoch=1)
+- Param count: 3,388K (+142K = +4.4% vs baseline)
+- Deviation from PR pseudocode: frieren applied FiLM per-block (all 4 layers) with AdaLN-zero init, not just the final layer — correct empirical decision.
+
+**test_primary/* (frieren PR #8 vs current yi baseline PR #9):**
+
+| Metric | PR #8 frieren | PR #9 gilbert (yi baseline) | Δ | AB-UPT |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | **16.53** | 17.39 | **−4.9%** | — |
+| `surface_pressure_rel_l2_pct` | **10.38** | 11.07 | **−6.2%** | 3.82 |
+| `wall_shear_rel_l2_pct` | **17.29** | 18.32 | **−5.6%** | 7.29 |
+| `volume_pressure_rel_l2_pct` | **14.91** | 15.21 | **−2.0%** | 6.08 |
+| `wall_shear_x_rel_l2_pct` | **14.76** | 15.65 | **−5.7%** | 5.35 |
+| `wall_shear_y_rel_l2_pct` | **20.59** | 21.86 | **−5.8%** | 3.65 |
+| `wall_shear_z_rel_l2_pct` | **22.00** | 23.18 | **−5.1%** | 3.63 |
+
+**Apples-to-apples vs PR #3 (no-FiLM, same config, 1-epoch comparator):** `abupt_axis_mean` 30.47 → 16.53 = **46% reduction**. FiLM is a real lever.
+
+**Diagnostic confirmation:** geometry token L2 norm grew 70× during the epoch (0.18 → 12.4); FiLM weights grew 1.8–3.6×. Layer is being actively used, not bypassed.
+
+**Critical confound:** frieren ran bs=2, 1 epoch only — while gilbert's baseline used bs=8, 6 epochs (with protocol fixes). FiLM reached 16.53 at 1 epoch vs gilbert's 17.39 at 6 epochs. This implies the FiLM conditioning adds real architectural capacity that compounds with convergence.
+
+**Status:** Merge blocked on rebase conflict (yi was updated after frieren's branch was cut). Squash-merge will complete once frieren rebases onto yi. Results verified and accepted.
+
+**Round-2 follow-up triggered (frieren PR #23):** Full composition run stacking all yi wins:
+FiLM + vol_w=2.0 + tangential projection + bs=8 + validation-every=1 + gradient clipping (once PR #22 lands).
+
 ## 2026-04-29 03:57 — PR #9: volume loss weight sweep (gilbert) — MERGED, NEW yi BASELINE
 
 - Branch: `gilbert/round1-volume-loss-reweight`
