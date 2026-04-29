@@ -167,8 +167,17 @@ class TransolverAttention(nn.Module):
         self.qkv = LinearProjection(self.dim_head, self.dim_head * 3, bias=False)
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
+        # ALiBi-style learnable scalar that converts per-token gate values into
+        # an additive pre-softmax slice logit bias. Init 0 so the gate is a
+        # null-op at start; training decides whether the bias helps.
+        self.slice_gate_alpha = nn.Parameter(torch.zeros(1))
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        slice_gate: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
@@ -179,12 +188,27 @@ class TransolverAttention(nn.Module):
                 device=slice_weights.device,
                 dtype=slice_weights.dtype,
             )
+        if slice_gate is not None:
+            # Post-softmax token-level multiplicative bias: high-gate tokens
+            # contribute more to slice aggregation. (1 + alpha*gate) ensures
+            # alpha=0 → identity, far-field gate=0 → multiplier=1 (preserved).
+            slice_weights = slice_weights * (
+                1.0 + self.slice_gate_alpha * slice_gate[:, None, :, None].to(
+                    device=slice_weights.device,
+                    dtype=slice_weights.dtype,
+                )
+            )
         slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        slice_gate: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask, slice_gate=slice_gate)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         out_slice = F.scaled_dot_product_attention(
@@ -223,9 +247,14 @@ class TransformerBlock(nn.Module):
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path = DropPath(drop_path_prob)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        slice_gate: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask, slice_gate=slice_gate))
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -319,9 +348,10 @@ class Transformer(nn.Module):
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
         geom_token: torch.Tensor | None = None,
+        slice_gate: torch.Tensor | None = None,
     ) -> torch.Tensor:
         for index, block in enumerate(self.blocks):
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, slice_gate=slice_gate)
             if self.film_layers is not None and geom_token is not None:
                 x = self.film_layers[index](x, geom_token)
                 x = _apply_token_mask(x, attn_mask)
@@ -348,6 +378,8 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        sdf_gate_volume: bool = False,
+        sdf_gate_sigma: float = 0.05,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -355,6 +387,8 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.sdf_gate_volume = sdf_gate_volume
+        self.sdf_gate_sigma = sdf_gate_sigma
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
@@ -403,6 +437,26 @@ class SurfaceTransolver(nn.Module):
         if project_features is not None and x.shape[-1] > self.space_dim:
             hidden = hidden + project_features(x[:, :, self.space_dim :])
         return bias(hidden) + placeholder
+
+    def _build_slice_gate(
+        self,
+        *,
+        surface_tokens: int,
+        volume_x: torch.Tensor | None,
+        reference: torch.Tensor,
+    ) -> torch.Tensor | None:
+        if not self.sdf_gate_volume or volume_x is None or volume_x.shape[-1] <= self.space_dim:
+            return None
+        sdf_vals = volume_x[..., self.space_dim].abs()
+        sigma = max(float(self.sdf_gate_sigma), 1e-6)
+        volume_gate = torch.exp(-0.5 * (sdf_vals / sigma) ** 2).to(
+            device=reference.device,
+            dtype=reference.dtype,
+        )
+        if surface_tokens == 0:
+            return volume_gate
+        surface_gate = volume_gate.new_zeros(volume_gate.shape[0], surface_tokens)
+        return torch.cat([surface_gate, volume_gate], dim=1)
 
     def forward(
         self,
@@ -453,7 +507,17 @@ class SurfaceTransolver(nn.Module):
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
             geom_token = self.geom_encoder(surface_x, surface_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
+        slice_gate = self._build_slice_gate(
+            surface_tokens=surface_tokens,
+            volume_x=volume_x,
+            reference=hidden,
+        )
+        hidden = self.backbone(
+            hidden,
+            attn_mask=attn_mask,
+            geom_token=geom_token,
+            slice_gate=slice_gate,
+        )
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -553,6 +617,8 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    sdf_gate_volume: bool = False
+    sdf_gate_sigma: float = 0.05
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -727,6 +793,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        sdf_gate_volume=config.sdf_gate_volume,
+        sdf_gate_sigma=config.sdf_gate_sigma,
     )
 
 
@@ -1595,6 +1663,36 @@ def log_model_artifact(
     print(f"Logged model artifact '{artifact_name}'")
 
 
+def collect_sdf_gate_metrics(model: nn.Module) -> dict[str, float]:
+    """Snapshot the per-block learnable SDF gate scalars."""
+    base_model = getattr(model, "_orig_mod", model)
+    metrics: dict[str, float] = {}
+    backbone = getattr(base_model, "backbone", None)
+    if backbone is None:
+        return metrics
+    blocks = getattr(backbone, "blocks", None)
+    if blocks is None:
+        return metrics
+    values: list[float] = []
+    for idx, block in enumerate(blocks):
+        attention = getattr(block, "attention", None)
+        if attention is None:
+            continue
+        alpha = getattr(attention, "slice_gate_alpha", None)
+        if alpha is None:
+            continue
+        scalar = float(alpha.detach().float().reshape(-1)[0].item())
+        metrics[f"sdf_gate/alpha_block_{idx}"] = scalar
+        values.append(scalar)
+    if values:
+        metrics["sdf_gate/alpha_mean"] = float(sum(values) / len(values))
+        metrics["sdf_gate/alpha_max_abs"] = float(max(abs(v) for v in values))
+    sigma = getattr(base_model, "sdf_gate_sigma", None)
+    if sigma is not None:
+        metrics["sdf_gate/sigma"] = float(sigma)
+    return metrics
+
+
 def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     print(
         f"{prefix:<14s} "
@@ -1683,6 +1781,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("sdf_gate/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
@@ -1696,6 +1795,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_metrics: dict[str, float] = {}
     global_step = 0
     early_stop_reason: str | None = None
+    sdf_distribution_logged = False
     timeout_hit = False
     train_start = time.time()
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
@@ -1714,6 +1814,37 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if config.sdf_gate_volume and not sdf_distribution_logged:
+                volume_x = getattr(batch, "volume_x", None)
+                volume_mask = getattr(batch, "volume_mask", None)
+                if volume_x is not None and volume_mask is not None and volume_x.shape[-1] > 3:
+                    sdf_vals = volume_x[..., 3].abs()
+                    mask_bool = volume_mask.bool()
+                    if mask_bool.any():
+                        sdf_finite = sdf_vals[mask_bool].float().detach().cpu()
+                        sigma = max(float(config.sdf_gate_sigma), 1e-6)
+                        gate_vals = torch.exp(-0.5 * (sdf_finite / sigma) ** 2)
+                        sdf_init_log: dict[str, object] = {
+                            "global_step": global_step,
+                            "sdf_gate/init_abs_sdf_mean": float(sdf_finite.mean().item()),
+                            "sdf_gate/init_abs_sdf_std": float(sdf_finite.std().item()),
+                            "sdf_gate/init_abs_sdf_min": float(sdf_finite.min().item()),
+                            "sdf_gate/init_abs_sdf_max": float(sdf_finite.max().item()),
+                        }
+                        quantile_levels = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99)
+                        quantile_vals = sdf_finite.quantile(torch.tensor(list(quantile_levels))).tolist()
+                        for q, v in zip(quantile_levels, quantile_vals):
+                            sdf_init_log[f"sdf_gate/init_abs_sdf_q{int(q * 100):02d}"] = v
+                        sdf_init_log["sdf_gate/init_gate_mean"] = float(gate_vals.mean().item())
+                        sdf_init_log["sdf_gate/init_gate_frac_above_0p5"] = float((gate_vals > 0.5).float().mean().item())
+                        sdf_init_log["sdf_gate/init_gate_frac_above_0p1"] = float((gate_vals > 0.1).float().mean().item())
+                        try:
+                            sdf_init_log["sdf_gate/init_abs_sdf_hist"] = wandb.Histogram(sdf_finite.numpy())
+                            sdf_init_log["sdf_gate/init_gate_hist"] = wandb.Histogram(gate_vals.numpy())
+                        except Exception:
+                            pass
+                        wandb.log(sdf_init_log)
+                        sdf_distribution_logged = True
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1831,6 +1962,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             "epoch_time_s": dt,
             "global_step": global_step,
         }
+        if config.sdf_gate_volume:
+            log_metrics.update(collect_sdf_gate_metrics(model))
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
             wandb.log(log_metrics)
