@@ -2,36 +2,39 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: PR #40 — 2026-04-29 19:56 UTC
+## Status: PR #39 — 2026-04-29 22:05 UTC
 
-New tay SOTA set by alphonse's torch.compile fix + recalibration. The compile
-bug (`drop_last=False` + `unwrap_model` in eval) was patched, enabling compiled
-training at ~1.7× throughput. Same 4L/512d/8h config as PR #30/33 but 12 epochs
-instead of 9 (more epochs still descending at cutoff). No `--no-compile-model`
-needed from now on.
+New tay SOTA set by tanjiro's Lion optimizer (paper config `lr=1.7e-5, wd=5e-3`).
+Drop-in AdamW replacement using sign-based updates with momentum. Lion's sign-update
+sidesteps the per-coordinate gradient-magnitude compression caused by our
+`grad-clip-norm=1.0` binding at every step. Best-val at epoch 9 (of 50 configured);
+val curve still descending at cutoff — more budget or compile would improve further.
 
-**W&B run:** `ae4zsaly` (rank 0) — group `tay-round1-calibrate-compiled`
-**Best-val checkpoint:** epoch 12 (val_abupt=16.09)
+**W&B run:** `xonbs83i` (rank 0) — group `tay-lion-lr-sweep`
+**Best-val checkpoint:** epoch 9 (val_abupt=14.22)
+
+**NEW: tay crosses below yi frontier (15.82 → 15.43)**
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #40) | PR #33 | yi best | AB-UPT |
+| Metric | This-repo key | tay best (PR #39) | PR #40 | yi best | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **17.25** | 17.77 | 15.82 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **10.92** | 11.20 | 9.99 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **18.33** | 18.68 | 16.60 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **14.71** | 16.13 | 14.21 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **15.73** | 16.20 | 14.27 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **21.80** | 21.81 | 19.49 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **23.07** | 23.54 | 21.12 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **15.43** | 17.25 | 15.82 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **9.45** | 10.92 | 9.99 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **16.28** | 18.33 | 16.60 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **13.83** | 14.71 | 14.21 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **13.91** | 15.73 | 14.27 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **19.58** | 21.80 | 19.49 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **20.40** | 23.07 | 21.12 | 3.63 |
 
-### Reproduce PR #40 config
+### Reproduce PR #39 config
 
 ```bash
 cd target/
 torchrun --standalone --nproc_per_node=8 train.py \
+  --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
+  --lr 1.7e-5 --weight-decay 5e-3 \
   --volume-loss-weight 2.0 --batch-size 4 --validation-every 1 \
-  --lr 5e-5 --weight-decay 5e-4 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
@@ -40,6 +43,9 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --no-log-gradient-histograms
 ```
 
+Note: run `xonbs83i` did NOT use `--compile-model` (pod was on pre-compile-fix commit).
+Future Lion runs should add compile for ~5-15% additional throughput gain.
+
 ### Compounding wins so far
 
 | PR | Who | Delta | Lever |
@@ -47,6 +53,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #30 | alphonse | baseline (19.81) | yi calibration config (4L/512d/8h, vol_w=2.0) |
 | #33 | fern | **−2.04 (−10.3%)** | RFF coord features (sigma=1.0, 32 feats) — uncompiled |
 | #40 | alphonse | **−0.52 (−2.9%) vs #33** | torch.compile fix → 12 epochs vs 9; beats #33 without RFF |
+| #39 | tanjiro | **−1.82 (−10.5%) vs #40** | Lion optimizer lr=1.7e-5 — sign-based update, crosses yi frontier |
 
 ### INFRA NOTE — torch.compile bug FIXED (PR #40)
 
