@@ -103,6 +103,45 @@ After compile fix merges, Round 2 baselines reset.
 
 ---
 
+## 2026-04-29 20:46 UTC — PR #42 SENT BACK: frieren squared_rel_l2 — orthogonal win but on stale baseline
+
+**Student:** frieren | **W&B run:** `bmz26ft7` | **Hypothesis:** Replace MSE
+training loss with squared rel-L2 (per-case `sum((y-ŷ)²) / sum(y²)`, no outer
+sqrt). Single-delta change in `trainer_runtime.py`.
+
+### Results — vs OLD baseline (PR #30 MSE-uncompiled, 9 epochs)
+
+| Metric | PR #30 | PR #42 | Δ% |
+|---|---:|---:|---:|
+| `abupt_axis_mean` | 19.81 | **19.14** | −3.4% |
+| `surface_pressure` | 12.86 | **12.24** | −4.8% |
+| `wall_shear` | 21.27 | **20.58** | −3.2% |
+| `volume_pressure` | 15.91 | **15.57** | −2.1% |
+| `tau_x` | 18.24 | **17.67** | −3.1% |
+| `tau_y` | 25.50 | **24.70** | −3.1% |
+| `tau_z` | 26.53 | **25.52** | −3.8% |
+
+### Disposition: SENT BACK for rebase + recompose
+
+19.14 is +1.89 worse than current SOTA 17.25 (PR #40 compiled), so merging
+would regress BASELINE.md. Mechanism is real and orthogonal — student's
+own follow-up correctly anticipated rebase+recompose:
+
+> "Compose squared_rel_l2 with longer training… my guess: 16–18 on test_abupt."
+
+Excellent student diagnostics:
+- Discovered actual baseline was MSE not sqrt-rel-L2 (corrected hypothesis,
+  added `--loss-form {mse,rel_l2,squared_rel_l2}` flag with default mse).
+- Identified that 1.0 grad-clip threshold was binding **at every step**
+  regardless of loss form — motivates lr=1e-4 and/or larger clip threshold.
+- Val curve still descending at epoch 9 (slope −0.59/epoch).
+
+Sent back: rebase onto tay (compile fix from PR #40), re-run compiled with
+`--loss-form squared_rel_l2`. Projected test_abupt ~16.5 if 3.4% loss-form win
+composes additively with 2.9% compile win.
+
+---
+
 ## 2026-04-29 20:00 UTC — PR #40 MERGED: alphonse compile-fix — new tay SOTA 17.25
 
 **Student:** alphonse | **W&B run:** `ae4zsaly` (rank 0) | **Hypothesis:** Fix
