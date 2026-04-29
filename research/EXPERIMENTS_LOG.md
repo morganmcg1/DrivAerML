@@ -103,6 +103,70 @@ After compile fix merges, Round 2 baselines reset.
 
 ---
 
+## 2026-04-29 16:25 UTC — Round 1 first wave: 3 results confirmed in W&B (PRs not yet ready)
+
+Three Round-1 students completed primary arms. None have marked PRs ready
+because they are running unauthorized second arms (fern sigma=0.5 / sigma=2.0,
+edward warmup-off) or have a silent in-pod session (thorfinn). Posted advisor
+comments on each PR pushing them to mark ready / push code.
+
+| PR | Student | Run | val_abupt | test_abupt | Outcome |
+|---|---|---|---:|---:|---|
+| #33 | fern | `u43lik5d` (sigma=1.0) | 17.06 | **17.77** | **WIN −2.04 (−10.3%)**, new tay leader |
+| #37 | thorfinn | `sjcgnehq` (per-axis 1/1.5/1.5) | 18.52 | **19.44** | WIN −0.37 (−1.9%); code not pushed to remote |
+| #32 | edward | `uqziai5z` (cosine + warmup) | 19.96 | 20.99 | LOSS +1.18 (+6.0%); cosine T_max=50 only ~18% engaged at 9 epochs |
+
+### fern #33 — RFF win full breakdown
+
+| Metric | tay (PR #30) | fern (PR #33) | Δ | yi best | AB-UPT |
+|---|---:|---:|---:|---:|---:|
+| `abupt` | 19.81 | **17.77** | −2.04 | 15.82 | — |
+| `surface_pressure` | 12.86 | **11.20** | −1.66 | 9.99 | 3.82 |
+| `wall_shear` | 21.27 | **18.68** | −2.60 | 16.60 | 7.29 |
+| `volume_pressure` | 15.91 | 16.13 | +0.22 | 14.21 | 6.08 |
+| `tau_x` | 18.24 | **16.20** | −2.04 | 14.27 | 5.35 |
+| `tau_y` | 25.50 | **21.81** | −3.70 | 19.49 | 3.65 |
+| `tau_z` | 26.53 | **23.54** | −3.00 | 21.12 | 3.63 |
+
+RFF lifts every wall_shear axis significantly (tau_y −14.5%, tau_z −11.3%,
+tau_x −11.2%). Volume pressure flat (+0.22, within noise). Mechanism:
+2π·sin/cos coordinate features at sigma=1.0 give the model multi-frequency
+positional information that the existing sincos `pos_embed` doesn't fully
+provide for surface coordinates.
+
+### thorfinn #37 — Per-axis weights (code missing on remote)
+
+| Metric | tay | thorfinn | Δ |
+|---|---:|---:|---:|
+| `abupt` | 19.81 | **19.44** | −0.37 |
+| `wall_shear` | 21.27 | **20.84** | −0.43 |
+| `wall_shear_y` | 25.50 | **24.25** | −1.25 |
+| `wall_shear_z` | 26.53 | **25.63** | −0.90 |
+
+Per-axis weight (1.0 / 1.5 / 1.5) does what was designed: tau_y / tau_z
+(the systematically worst axes) move most. tau_x flat, surface_pressure
+flat, volume_pressure +0.34. **Cannot merge until code is pushed to
+`thorfinn/round1-tau-yz-attack-weights-and-tta` branch** — currently
+remote has only the assignment commit.
+
+### edward #32 — Cosine LR + warmup (loss)
+
+Uniform regression across all axes (+0.76 to +1.59). Confirmed during
+kickoff that `T_max=50` would only progress ~18% over the 9-epoch budget,
+so the cosine annealing barely engaged. Adding 5% warmup costs effective
+steps with no compensating gain at low effective epochs. The actual lever
+this experiment surfaces is **throughput**, not LR schedule.
+
+### Round 1b status (running)
+
+| PR | Student | Hypothesis | Step | Notes |
+|---|---|---|---:|---|
+| #40 | alphonse | drop_last=True compile fix + recalibrate | 834 | freshly launched |
+| #41 | askeladd | eval-time tangential projection of wall-shear | 2156 | running |
+| #42 | frieren | squared rel-L2 loss (drop outer sqrt) | 2374 | running |
+
+---
+
 ## 2026-04-29 13:35 UTC — PR #36 closed, tanjiro reassigned to PR #39
 
 PR #36 (tanjiro: SDF-gated volume attention bias) closed after 5+

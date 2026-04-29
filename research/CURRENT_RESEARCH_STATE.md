@@ -14,22 +14,25 @@
 proven wins have landed in code yet — the trainer defaults are 3L/192d/3h,
 lr=3e-4, bs=2, 40k points, no FiLM, no projection loss, fixed-decay EMA.
 
-**Update (2026-04-29 15:51 UTC) — Round 1 first wave results landing:**
+**Update (2026-04-29 16:25 UTC) — Round 1 first wave RESULTS CONFIRMED:**
 
 Test results on 50-case test split (best-val checkpoint), all under the
 torch.compile-bug-limited 9-epoch budget (alphonse calibration baseline
 established at PR #30, test_abupt 19.81):
 
-| Student | Hypothesis | test_abupt | Δ vs baseline | Outcome |
-|---|---|---:|---:|---|
-| fern | RFF coord features | **17.77** | **−2.04** | **NEW LEADER** (PR ready pending) |
-| thorfinn | Per-axis weights + sym-TTA | **19.44** | −0.37 | Win (pod hung, code lost) |
-| alphonse | Calibration (yi PR #4) | **19.81** | baseline | MERGED PR #30 |
-| frieren | FiLM AdaLN-zero | 20.07 | +0.26 | CLOSED (1.3% noise floor) |
-| edward | Cosine LR + warmup | 20.99 | +1.18 | Close pending (PR ready imminent) |
-| askeladd | Full composition stack | 38.02 | +18.21 | CLOSED (tangential proj broken tau_z) |
-| nezuko | ANP cross-attn decoder | (val 18.48) | (running) | TBD, val close to alphonse |
-| tanjiro | SDF gate / Lion | — | — | Pod stuck before either ran |
+| Student | Hypothesis | val_abupt | test_abupt | Δ vs baseline | Outcome |
+|---|---|---:|---:|---:|---|
+| fern | RFF coord features (sigma=1.0) | 17.06 | **17.77** | **−2.04** | **NEW LEADER**; pushed comment to mark ready (kill sigma=2.0 sweep) |
+| thorfinn | Per-axis tau weights (1/1.5/1.5) | 18.52 | **19.44** | −0.37 | Win in W&B; **code not pushed** (asked to push) |
+| alphonse | Calibration (yi PR #4) | 18.70 | 19.81 | baseline | MERGED PR #30 |
+| frieren | FiLM AdaLN-zero | 19.86 | 20.07 | +0.26 | CLOSED (1.3% noise floor) |
+| edward | Cosine LR + warmup | 19.96 | 20.99 | +1.18 | Loss; comment sent to close on Arm A |
+| askeladd | Full composition stack | 36.x | 38.02 | +18.21 | CLOSED (tangential proj broken tau_z) |
+| nezuko | ANP cross-attn decoder | **17.85*** | — | — | Running, val tracking close to fern; slope still descending |
+| tanjiro | SDF gate / Lion | — | — | — | Pod stuck on stale assignment file |
+
+*nezuko val 17.85 at step 20591, runtime 4.6h — still running; if test tracks val,
+this would be a tay leader near-tie with fern.
 
 **Key learnings**:
 1. **RFF features (fern) are a real win** — drop test_abupt by 10% over
@@ -49,11 +52,16 @@ established at PR #30, test_abupt 19.81):
    ALL future experiments. PR #40 alphonse working on this now.
 
 **Round 1b assignments (after first wave):**
-- alphonse #40: Fix compile bug (drop_last=True) + recalibrate
-- askeladd #41: Eval-time tangential projection of wall-shear
-- frieren #42: Squared rel-L2 loss (drop outer sqrt for smooth backward)
-- tanjiro #39: Lion optimizer (waiting on pod recovery)
-- thorfinn: Pod hung — needs admin restart
+- alphonse #40: Fix compile bug (drop_last=True) + recalibrate — running (step 834)
+- askeladd #41: Eval-time tangential projection of wall-shear — running (step 2156)
+- frieren #42: Squared rel-L2 loss (drop outer sqrt for smooth backward) — running (step 2374)
+- tanjiro #39: Lion optimizer — pod stuck on stale assignment file (#36 still showing)
+- thorfinn: pod alive but in-pod claude session never reported PR #37 results
+
+**Pending merges (waiting on students to mark ready):**
+- fern #33: test 17.77 — comment posted asking to mark ready and stop sigma=2.0 arm
+- edward #32: test 20.99 (loss) — comment posted asking to mark ready for close
+- thorfinn #37: test 19.44 (in W&B) — comment posted asking to push code commit
 
 Round 1 on tay therefore has two simultaneous purposes:
 
