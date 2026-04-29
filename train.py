@@ -503,6 +503,7 @@ class Config:
     log_weight_histograms: bool = False
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
+    clip_grad_norm: float = 0.0
     compile_model: bool = True
     debug: bool = False
 
@@ -1649,6 +1650,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
+            if config.clip_grad_norm > 0:
+                pre_clip_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=config.clip_grad_norm
+                )
+                if should_log_gradients:
+                    gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
+                    gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
             optimizer.step()
             if ema is not None:
                 ema.update(model)
