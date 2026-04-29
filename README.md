@@ -109,21 +109,17 @@ export PVC_MOUNT_PATH=/your/mount
 python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
 ```
 
-For 8-GPU DDP on PAI2:
+For 8-GPU DDP:
 
 ```
-torchrun --standalone --nproc-per-node=8 train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
+torchrun --standalone --nproc-per-node=8 train.py --epochs <epochs> --agent <name> --wandb_name "<name>/<experiment>"
 ```
-
-This trainer-hardening pass deliberately does not import scientific recipe changes from SENPAI experiment PRs. Defaults are operational/stability defaults only: logging throttle, clipping, timeout-aware harvesting, finite guards, scheduler plumbing, and DDP support.
-
-Current reference defaults are point-limited for memory while preserving exact validation/test evaluation:
 
 - `--train-surface-points 40000` and `--train-volume-points 40000` sample random points per training view
 - `--eval-surface-points 40000` and `--eval-volume-points 40000` evaluate deterministic strided chunks that cover every point exactly once
 - `--validation-every 1` validates every epoch by default, because short SENPAI budget runs otherwise hide the checkpoint trajectory
 - `--grad-clip-norm 1.0` clips gradients by default and logs the pre-clip norm plus whether clipping engaged
-- `--gradient-log-every 250`, `--weight-log-every 250`, and `--no-log-gradient-histograms` are the defaults; weight histograms remain opt-in with `--log-weight-histograms`
+- Adjust the gradient/weight telemetry defaults to the run length: short debug runs can log more often, while long runs should log less often.
 - `--lr-warmup-epochs`, `--lr-cosine-t-max`, and `--lr-min` control the built-in linear-warmup plus cosine scheduler
 - `--compile-model` is on by default
 - `--slope-log-fraction 0.05` logs key curve slopes every 5% of the estimated update budget

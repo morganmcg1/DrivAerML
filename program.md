@@ -80,11 +80,7 @@ Full surface and volume cases can be large, so the reference trainer uses point-
 - Validation/test with `--eval-surface-points N --eval-volume-points M`: each case is split into deterministic strided chunks with `torch.arange(view_index, total_points, view_count)`. This is full-fidelity evaluation: every loaded surface point and every loaded volume point is evaluated exactly once, then reaggregated by case.
 - Set a point limit to `0` only when you intentionally want full-case loading in one batch and have checked memory.
 
-Validation is every epoch by default: `train.py` validates at epoch 1, every `--validation-every 1` epoch, and the final epoch. This is an operational hardening choice so short SENPAI budget runs expose the checkpoint trajectory instead of hiding it behind sparse cadence. After loading the best checkpoint, it runs and logs `full_val/*` before `test/*`. Do not replace final validation/test with a random point sample.
-
 When launched with `torchrun`, DDP is automatic from `WORLD_SIZE`. Training uses a distributed sampler. Checkpoint-selection validation is exact and distributed across ranks with no padded duplicate eval views, then final `full_val/*` and `test_primary/*` are rerun on rank 0 from the saved checkpoint to match single-model production evaluation semantics.
-
-This trainer-hardening pass is deliberately operational only. It does not import scientific SENPAI experiment advances such as larger batch recipes, volume-loss reweighting, FiLM, area-weighted loss, tangential projection, SDF gates, TTA, or normal suppression. Those remain experiment hypotheses; this reference trainer should make them measurable without rediscovering logging bottlenecks, missing tests, NaN propagation, or unclipped optimizer spikes.
 
 ## Model Contract in the Reference train.py
 
@@ -107,7 +103,7 @@ The reference Transolver backbone must also keep padding masked internally. Slic
 
 ## Gradient, Weight, And Slope Telemetry
 
-The reference trainer logs high-fidelity gradient and weight telemetry at throttled cadence by default. The defaults are `--gradient-log-every 250`, `--weight-log-every 250`, `--no-log-gradient-histograms`, and opt-in `--log-weight-histograms`. This keeps long runs from becoming CPU/W&B-bound while preserving enough signal for diagnosis. Tighten the cadence only for short debug runs.
+Adjust the gradient/weight telemetry defaults to the run length: short debug runs can log more often, while long runs should log less often.
 
 The W&B stream includes:
 
