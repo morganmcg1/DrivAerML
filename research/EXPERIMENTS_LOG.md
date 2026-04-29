@@ -9,6 +9,38 @@ Targets to beat (lower is better): `surface_pressure 3.82`, `wall_shear 7.29`,
 Round 1 launches 16 parallel experiments: 5 known-good baselines / proven-additive
 deltas (Stream 1) and 11 fresh single-delta hypotheses (Stream 2).
 
+## 2026-04-29 — PR #20: EMA decay sweep diagnostic (nezuko) — CLOSED, diagnostic value (verdict (B) confirmed)
+
+- Branch: `nezuko/round2-ema-decay-sweep`
+- Hypothesis: disambiguate (A) EMA-too-slow vs (B) genuine post-epoch-1 instability for the train→val divergence pattern observed across multiple Round-1 runs.
+- 4-arm sweep: `--ema-decay ∈ {0.99, 0.999, 0.9995, 0.99995}` parallel across 4 GPUs, all with `--validation-every 1`. ~2 full epochs + truncated epoch 3 each. Peak GPU 13.3 GB.
+- W&B group: [`nezuko-ema-sweep`](https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml/groups/nezuko-ema-sweep)
+
+| EMA decay | best_epoch | abupt_axis_mean (test_primary) | full_val_primary abupt | E1 train | E2 train | E1 val_abupt | E2 val_abupt |
+|---|:---:|---:|---:|---:|---:|---:|---:|
+| 0.99 | 1 | 27.67 | 26.93 | 0.278 | 1.217 | 26.93 ⭐ | 79.26 |
+| 0.999 | 3 | 69.54 | 69.01 | 0.222 | 0.923 | 76.29 | 73.41 |
+| 0.9995 | **1** | **24.74** | **24.46** | 0.228 | 0.411 | 24.46 ⭐ | 41.26 |
+| 0.99995 | 1 | 36.63 | 36.19 | 0.180 | 0.763 | 36.19 ⭐ | 124.32 |
+
+**Verdict: (B) genuine post-epoch-1 divergence. Decisive.**
+
+Evidence:
+1. **Even the most aggressive EMA arm (0.99, window ~100 steps) peaks at epoch 1.** If (A) were true, this arm — whose shadow ≈ live model — should have kept improving. It did not.
+2. **Train loss is non-monotonic across all four seeds:** every arm has live train loss 5–7× *higher* in epoch 2 vs epoch 1 (e.g. 0.99: 0.278 → 1.217). EMA cannot manufacture this; live optimization is diverging.
+3. **Per-step train/loss spikes hit 6–22× the median** in every arm; min train_loss reached at step 20–45k, then climbs. Divergence onset dates to step ~45–60k — exactly where missing gradient clipping becomes load-bearing under no-warmup, near-constant LR.
+4. The 0.999 outlier (best_val=76.29 at epoch 1) is consistent with this: its specific seed had divergence start *during* epoch 1 so the EMA shadow at step 43k is contaminated by the chaotic post-divergence tail.
+
+**Implications for ongoing work:**
+- **PR #22 (gilbert, gradient clipping) is the cure** for the binding constraint. When that lands, the entire fleet should re-evaluate.
+- **PR #5 (edward, cosine LR + warmup)** is complementary on the LR-schedule side — nezuko's data shows current `T_max=999` makes LR essentially constant at 2e-4 throughout, so the cosine decay is doing nothing.
+- `--ema-decay 0.9995` confirmed as the right default for this step regime; no change needed.
+- **Avoid 0.99995 and progressive 0.999→0.9999 schedule (norman PR #13)** for this step budget — the 0.9999 tail (window ~10k steps) over-averages into the divergent regime.
+
+**Note:** Best arm 24.74 abupt_axis_mean is well above current yi baseline (16.53/17.39). No code changes (CLI sweep only). Closed because it's diagnostic, not competitive.
+
+**Round-2 follow-up:** A01 (ANP cross-attention surface decoder) assigned to nezuko — the largest architectural win from noam branch (PR #2379 MERGED on TandemFoil: −70% in-domain p_s, −48% OOD).
+
 ## 2026-04-29 06:00 — PR #6: relative-L2 auxiliary loss (emma) — CLOSED, dead end
 
 - Branch: `emma/round1-metric-aware-aux-loss`

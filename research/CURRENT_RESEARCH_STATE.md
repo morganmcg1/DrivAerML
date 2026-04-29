@@ -96,11 +96,12 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
 | PR | Student | Hypothesis |
 |---|---|---|
-| #20 | nezuko | EMA decay sweep — diagnose train→val divergence |
+| ~~#20~~ | ~~nezuko~~ | ~~EMA decay sweep~~ — CLOSED, verdict (B) confirmed |
 | #21 | kohaku | Normal-component suppression on top of tangential projection |
 | #22 | gilbert | Add gradient clipping to train.py + 4-arm sweep |
 | #23 | frieren | Full composition: FiLM + projection + vol_w=2.0 + bs=8 |
 | #24 | emma | Squared rel-L2 aux loss (drop sqrt, smooth backward) |
+| #26 | nezuko | A01 — ANP cross-attention surface decoder (architecture swap) |
 
 **Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
 SE(3) local-frame coordinate features. Hypothesis remains a top-priority Round-2
@@ -147,9 +148,18 @@ candidate (A02) and will be reassigned to a real idle student.
   timeout fix (`train.py`); cherry-picked onto `yi` as `af92e9a`. Reserves
   `SENPAI_VAL_BUDGET_MINUTES` (default 90). Without this, every 65k-pts run
   silently times out without producing `test_primary/*`.
-- **Follow-up PR #20 (nezuko, EMA decay sweep)** — disambiguates "EMA too
-  slow for our step density" vs "genuine post-epoch-1 degradation". Uses
-  `--validation-every 1`.
+- **PR #20 (nezuko, EMA decay sweep) — CLOSED 2026-04-29 with diagnostic value.**
+  4-arm sweep across `--ema-decay ∈ {0.99, 0.999, 0.9995, 0.99995}`. Verdict:
+  **(B) genuine post-epoch-1 instability**, not EMA lag. Even the most aggressive
+  decay (0.99, window ~100 steps) peaks at epoch 1; train loss is non-monotonic
+  across all four seeds (5–7× higher in epoch 2). Per-step spikes hit 6–22× the
+  median around steps 45–60k — exactly where missing gradient clipping bites.
+  Best arm 0.9995 → abupt 24.74 (above yi baseline; closed because diagnostic
+  not competitive). Confirms `--ema-decay 0.9995` as right default; PR #22
+  (gradient clipping) is the cure for the binding constraint.
+- **Follow-up: nezuko assigned A01 (ANP cross-attention surface decoder)** — the
+  largest architectural win from noam (PR #2379 MERGED, −70% in-domain p_s on
+  TandemFoil). Direct port to DrivAerML.
 
 ### Cross-cutting directives broadcast to all active PRs
 
@@ -165,12 +175,14 @@ candidate (A02) and will be reassigned to a real idle student.
    the hypothesis.
 5. Report any train→val divergence observed.
 
-### Open question
+### Resolved question (2026-04-29)
 
-Train loss decreases while EMA-val degrades after epoch 1 on multiple runs.
-EMA decay too slow for fast initial fit? LR-warmup interplay? Genuine
-overfit? PR #20 (nezuko EMA sweep) and PR #21 (kohaku normsupp sweep, λ=0
-arm) will provide multi-epoch trajectories under different EMA settings.
+**Train→val divergence after epoch 1 = (B) genuine post-epoch-1 instability**,
+diagnosed by PR #20 (nezuko EMA sweep). Train loss explodes 5–7× from epoch 1
+to epoch 2 across all 4 EMA arms; per-step train_loss spikes hit 6–22× median.
+The cure is **gradient clipping** (PR #22 in flight) and likely **LR warmup**
+(PR #5 edward in flight). Both fixes should land before drawing conclusions
+from any other Round-1 PR with `best_epoch=1` lock-in.
 
 ## Constraints
 
