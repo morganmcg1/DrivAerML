@@ -112,6 +112,7 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     compile_model: bool = True
+    project_wallshear_at_eval: bool = False
     debug: bool = False
 
 
@@ -483,6 +484,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        project_wallshear_at_eval=config.project_wallshear_at_eval,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -497,6 +499,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    project_wallshear_at_eval=config.project_wallshear_at_eval,
                 )
                 for name, loader in val_loaders.items()
             }

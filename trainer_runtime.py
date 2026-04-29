@@ -868,9 +868,33 @@ class EvalAccumulator:
     abs_counts: dict[str, int] = field(default_factory=lambda: {key: 0 for key in EVAL_KEYS})
     wall_shear_vector_abs_sum: float = 0.0
     wall_shear_vector_count: int = 0
+    wallshear_pred_normal_sq_sum: float = 0.0
+    wallshear_pred_normal_count: int = 0
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
+
+
+def project_wallshear_tangential(
+    pred_wallshear: torch.Tensor,
+    surface_normals: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Project predicted wall-shear onto the surface tangent plane.
+
+    Ground-truth wall-shear is by physics tangential to a no-slip wall, so
+    any predicted normal-direction component is definitionally wrong. This
+    helper removes that component and also returns the projected-out normal
+    component for diagnostic logging.
+
+    Inputs may carry a leading batch dim — broadcasting handles both
+    [N, 3] and [B, N, 3] layouts.
+    """
+    normal_unit = torch.nn.functional.normalize(surface_normals.float(), dim=-1, eps=1e-12)
+    pred = pred_wallshear.float()
+    normal_component_scalar = (pred * normal_unit).sum(dim=-1, keepdim=True)
+    normal_component = normal_component_scalar * normal_unit
+    pred_tangential = pred - normal_component
+    return pred_tangential.to(pred_wallshear.dtype), normal_component.to(pred_wallshear.dtype)
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -921,6 +945,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    project_wallshear_at_eval: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -942,6 +967,24 @@ def accumulate_eval_batch(
     accumulator.volume_loss_count += volume_count
     surface_pred = transform.invert_surface(surface_pred_norm)
     volume_pred = transform.invert_volume(volume_pred_norm)
+
+    if project_wallshear_at_eval and bool(batch.surface_mask.any()):
+        surface_normals = batch.surface_x[..., 3:6]
+        pred_wallshear = surface_pred[..., 1:4]
+        pred_tangential, normal_component = project_wallshear_tangential(
+            pred_wallshear, surface_normals
+        )
+        surface_pred = surface_pred.clone()
+        surface_pred[..., 1:4] = pred_tangential
+        # Match train/wallshear_pred_normal_rms (PR #31): per-point RMS of the
+        # scalar projection pred·n_hat. |normal_component_i|^2 == scalar_i^2
+        # because n_hat is unit, so summing component-squared per point gives
+        # scalar^2; count rows (points), not numel (3*points).
+        sq_per_point = normal_component[batch.surface_mask].float().square().sum(dim=-1)
+        accumulator.wallshear_pred_normal_sq_sum += float(
+            sq_per_point.sum().detach().cpu().item()
+        )
+        accumulator.wallshear_pred_normal_count += int(sq_per_point.numel())
 
     if bool(batch.surface_mask.any()):
         surface_abs = (surface_pred - batch.surface_y).abs()
@@ -1010,6 +1053,8 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
         merged.volume_loss_count += accumulator.volume_loss_count
         merged.wall_shear_vector_abs_sum += accumulator.wall_shear_vector_abs_sum
         merged.wall_shear_vector_count += accumulator.wall_shear_vector_count
+        merged.wallshear_pred_normal_sq_sum += accumulator.wallshear_pred_normal_sq_sum
+        merged.wallshear_pred_normal_count += accumulator.wallshear_pred_normal_count
         for key in EVAL_KEYS:
             merged.abs_sums[key] += accumulator.abs_sums[key]
             merged.abs_counts[key] += accumulator.abs_counts[key]
@@ -1043,6 +1088,13 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     wall_shear_vector_mae = accumulator.wall_shear_vector_abs_sum / max(
         accumulator.wall_shear_vector_count, 1
     )
+    if accumulator.wallshear_pred_normal_count > 0:
+        wallshear_pred_normal_rms = math.sqrt(
+            accumulator.wallshear_pred_normal_sq_sum
+            / max(accumulator.wallshear_pred_normal_count, 1)
+        )
+    else:
+        wallshear_pred_normal_rms = 0.0
     loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
         accumulator.surface_loss_count + accumulator.volume_loss_count, 1
     )
@@ -1053,6 +1105,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "surface_pressure_mae": mae_values["surface_pressure"],
         "wall_shear_mae": mae_values["wall_shear"],
         "wall_shear_vector_mae": wall_shear_vector_mae,
+        "wallshear_pred_normal_rms": wallshear_pred_normal_rms,
         "wall_shear_x_mae": mae_values["wall_shear_x"],
         "wall_shear_y_mae": mae_values["wall_shear_y"],
         "wall_shear_z_mae": mae_values["wall_shear_z"],
@@ -1086,6 +1139,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    project_wallshear_at_eval: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1097,6 +1151,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            project_wallshear_at_eval=project_wallshear_at_eval,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1416,8 +1471,16 @@ def run_final_evaluation(
         }
     )
 
+    project_wallshear_at_eval = bool(getattr(config, "project_wallshear_at_eval", False))
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            project_wallshear_at_eval=project_wallshear_at_eval,
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1437,7 +1500,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            project_wallshear_at_eval=project_wallshear_at_eval,
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {
