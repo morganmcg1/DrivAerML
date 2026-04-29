@@ -73,13 +73,16 @@ this would be a tay leader near-tie with fern.
 
 **Round 2 active assignments:**
 - alphonse #46: Compose RFF (sigma=1.0, 32 feats) + compile-fix — most important next composition test; if additive, projects to ~15.5 abupt below yi's 15.82
-- fern #43: Multi-scale RFF 3-band {0.1,1.0,10.0} — 3rd attempt running (crashed at step ~12980 twice), currently step ~1550
+- fern #43: Multi-scale RFF 3-band {0.1,1.0,10.0} — 3rd attempt running (crashed at step ~12980 twice), currently step ~5442
 - edward #44: Progressive cosine EMA (0.99→0.9999) + RFF — running, early training
-- askeladd #41: Eval-time tangential wall-shear projection — running step ~16851
-- frieren #42: Squared rel-L2 loss — running step ~19053, val 19.79
-- thorfinn #37: Per-axis tau weights + bilateral TTA — running step ~21160, val 20.18
-- nezuko #35: ANP cross-attn decoder + RFF + vol_w=3 — running step ~12517
-- tanjiro #39: Lion optimizer — running step ~14200
+- askeladd #41: Eval-time tangential wall-shear projection — running step ~20832
+- frieren #42: Squared rel-L2 loss — running step ~23459, val 18.04 (descending)
+- thorfinn #47: Bilateral symmetry **train-time** augmentation — fresh assignment after closing #37
+- nezuko #35: ANP cross-attn decoder + RFF + vol_w=3 — running step ~16031
+- tanjiro #39: Lion optimizer — running step ~18210
+
+**Round 1b/2 dispositions:**
+- thorfinn #37: CLOSED ~20:30 UTC — bilateral-tta-eval-only finished test_abupt 19.71 (regression vs SOTA 17.25); per-axis weights code never pushed. Reassigned to PR #47.
 
 Round 1 on tay therefore has two simultaneous purposes:
 
