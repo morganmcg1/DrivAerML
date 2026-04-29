@@ -14,6 +14,14 @@
 proven wins have landed in code yet — the trainer defaults are 3L/192d/3h,
 lr=3e-4, bs=2, 40k points, no FiLM, no projection loss, fixed-decay EMA.
 
+**Update (2026-04-29 14:55 UTC):** alphonse calibration confirmed healthy
+on tay/DDP8. Live leaderboard at ~7 vals (mid-training, no test_primary
+yet): fern 19.7 (RFF features), alphonse 20.5 (calibration), thorfinn
+20.3 (per-axis weights), frieren 21.6 (FiLM), edward 22.3 (cosine warmup),
+nezuko 24.7 (ANP, slow per-step), askeladd 37.4 (composition stack
+plateaued — tangential projection regression confirmed). yi merged is
+16.64; ~3-5 vals away on current trajectory.
+
 Round 1 on tay therefore has two simultaneous purposes:
 
 1. **Calibrate** the tay/DDP8 baseline against the yi numbers (16.64 merged,
@@ -54,7 +62,7 @@ changes that yi only got as far as Round-2 assignments for.
 | #33 | fern | exploit | Gaussian random Fourier features + 512d composition |
 | #34 | frieren | exploit | AdaLN-zero per-block FiLM + 512d composition |
 | #35 | nezuko | explore | A01 — ANP cross-attention surface decoder (replace head) |
-| #36 | tanjiro | explore | SDF-gated volume attention bias (near-wall p_v emphasis) |
+| #36 | tanjiro | explore | SDF-gated volume attention bias — **CLOSED** (5+ deterministic eval-path crashes at step 2719); reassigned to **PR #39 Lion optimizer** (single-delta train.py-only). Pod stuck on iteration 9 since 11:53 UTC; PR #39 not yet picked up. |
 | #37 | thorfinn | explore | Per-axis wall-shear loss weighting + bilateral-symmetry TTA |
 
 ## Next research directions (Round 2 candidates, queued)
