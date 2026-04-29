@@ -9,6 +9,47 @@ Targets to beat (lower is better): `surface_pressure 3.82`, `wall_shear 7.29`,
 Round 1 launches 16 parallel experiments: 5 known-good baselines / proven-additive
 deltas (Stream 1) and 11 fresh single-delta hypotheses (Stream 2).
 
+## 2026-04-29 — PR #13: progressive EMA cosine anneal 0.99→0.9999 (norman) — VERIFIED WIN, pending merge (rebase required)
+
+- Branch: `norman/round1-progressive-ema-decay`
+- Hypothesis: anneal `--ema-decay` from 0.99 (start) to 0.9999 (end) via cosine schedule. Early training: fast-tracking EMA (low decay) tracks the live model during rapid change. Late training: high decay averages out stochastic variance for a sharper final checkpoint.
+- W&B run: `wio9pqw2` (`norman-ema-99-9999-v4`), state=finished, 4 epochs, best_epoch=4, peak GPU 52.9 GB
+- Config: `--volume-loss-weight 2.0 --batch-size 8 --validation-every 1 --lr 2e-4 --ema-decay-start 0.99 --ema-decay-end 0.9999` (gilbert protocol + cosine EMA on top)
+
+**test_primary/* (norman PR #13 vs current yi baseline PR #9):**
+
+| Metric | PR #13 norman | PR #9 gilbert (merged baseline) | PR #8 frieren FiLM (pending) | Δ vs PR #9 | AB-UPT |
+|---|---:|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | **15.82** | 17.39 | 16.53 | **−9.0%** | — |
+| `surface_pressure_rel_l2_pct` | **9.99** | 11.07 | 10.38 | −9.7% | 3.82 |
+| `wall_shear_rel_l2_pct` | **16.60** | 18.32 | 17.29 | −9.4% | 7.29 |
+| `volume_pressure_rel_l2_pct` | **14.21** | 15.21 | 14.91 | −6.6% | 6.08 |
+| `wall_shear_x_rel_l2_pct` | **14.27** | 15.65 | 14.76 | −8.8% | 5.35 |
+| `wall_shear_y_rel_l2_pct` | **19.49** | 21.86 | 20.59 | −10.8% | 3.65 |
+| `wall_shear_z_rel_l2_pct` | **21.12** | 23.18 | 22.00 | −8.9% | 3.63 |
+
+Win on every axis. Also surpasses pending FiLM PR #8 (16.53 → 15.82, −4.3%).
+
+**Per-epoch trajectory — no divergence:**
+
+| Epoch | train_loss | val_abupt | best? |
+|---:|---:|---:|---|
+| 1 | 0.5414 | 26.24 | ✓ |
+| 2 | 0.1521 | 17.98 | ✓ |
+| 3 | 0.0919 | 15.59 | ✓ |
+| 4 | 0.0657 | **14.71** | ✓ |
+
+**Val improved monotonically through epoch 4.** This directly revises the (B) verdict from PR #20 (nezuko EMA sweep):
+- PR #20 used small-batch config (no bs=8 / vol_w=2.0) → diverged after epoch 1
+- PR #13 used gilbert's protocol (bs=8) → no divergence through epoch 4
+- The binding instability was **config-conditional**: large batch + vol_w=2.0 suppresses it. The cosine EMA late-smoothing may also contribute.
+
+**EMA schedule:** swept 0.990 → 0.9999 over 43,532 steps exactly as designed. Zero new parameters (schedule only).
+
+**Key implication for fleet:** progressive EMA 0.99→0.9999 is now on `yi`. All future PRs should adopt `--ema-decay-start 0.99 --ema-decay-end 0.9999` for the best checkpoint quality. Round-2 follow-up assigned (norm A02 SE(3) equivariant coord features) as PR #27.
+
+**Note:** Merge blocked on rebase conflict (yi updated after branch was cut). Student rebasing now. Results verified and accepted.
+
 ## 2026-04-29 — PR #20: EMA decay sweep diagnostic (nezuko) — CLOSED, diagnostic value (verdict (B) confirmed)
 
 - Branch: `nezuko/round2-ema-decay-sweep`

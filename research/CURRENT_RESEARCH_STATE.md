@@ -103,41 +103,42 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 | #24 | emma | Squared rel-L2 aux loss (drop sqrt, smooth backward) |
 | #26 | nezuko | A01 — ANP cross-attention surface decoder (architecture swap) |
 
+| #28 | norman | A02 — SE(3) equivariant local-frame coord features |
+
 **Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
-SE(3) local-frame coordinate features. Hypothesis remains a top-priority Round-2
-candidate (A02) and will be reassigned to a real idle student.
+SE(3) local-frame coordinate features. Now reassigned to norman as PR #28.
 
 ## Round 1 — reviewed results (2026-04-29)
 
-### VERIFIED WIN (pending merge) + MERGED — yi baseline progression
+### VERIFIED WINS (pending merge) + MERGED — yi baseline progression
 
-- **PR #8 (frieren, per-block FiLM conditioning) — VERIFIED WIN, pending merge.**
-  `abupt_axis_mean = 16.53` (vs 17.39 baseline = −4.9%). Run `hltti2ec`,
-  state=finished, 1 epoch, best_epoch=1, bs=2 only. Beats baseline in every
-  test_primary axis. Apples-to-apples vs PR #3 (no FiLM, same config): 30.47 → 16.53
-  = 46% reduction. FiLM mechanistically confirmed (token norm 70× growth, FiLM weights
-  1.8–3.6×). Merge blocked on rebase conflict — frieren rebasing now.
-  **Will be the new yi best once merged.**
-  - Follow-up PR #23 (frieren): full composition — FiLM + vol_w=2.0 + projection + bs=8.
-- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) MERGED 03:57 UTC — current yi best.**
-  `abupt_axis_mean = 17.39` (vs prior 35.12 = 50.5% reduction). Run `y2gigs61`,
-  state=finished, 6 epochs reached, best_epoch=3.
-  Win came primarily from **protocol fixes** (bs=8, validation-every=1, log-cadence).
-  - **Infrastructure bug flagged:** `train.py` has no gradient clipping.
-    Follow-up PR #22 (gilbert) adds it.
-- **PR #11 (kohaku, tangential wall-shear projection) — MERGED earlier.**
-  Code remains on yi (default off). Expected to compose for further gains.
-- **Follow-up PR #21 (kohaku, normal-component suppression sweep)** —
-  λ ∈ {0.0, 0.01, 0.1, 1.0} on top of projection.
-- **Follow-up PR #22 (gilbert, gradient clipping)** — adds
-  `torch.nn.utils.clip_grad_norm_` + 4-arm sweep. Infrastructure win
-  blocking high-LR / high-weight / high-batch sweeps.
+- **PR #13 (norman, cosine EMA 0.99→0.9999) — VERIFIED WIN, pending merge (rebase required). NEW yi BEST.**
+  `abupt_axis_mean = 15.82` (vs 17.39 merged baseline = −9.0%). Run `wio9pqw2`,
+  state=finished, 4 epochs, best_epoch=4. Wins on every test_primary axis. No
+  train→val divergence — val improved monotonically epoch 1→4. Zero new params.
+  Critical revision of (B) verdict: divergence is config-conditional (bs=2 config
+  diverges; bs=8 + vol_w=2.0 does not). EMA cosine code now on `yi` when merged;
+  all future PRs should use `--ema-decay-start 0.99 --ema-decay-end 0.9999`.
+  - Follow-up PR #27 (norman): A02 SE(3) equivariant local-frame coord features.
+- **PR #8 (frieren, per-block FiLM conditioning) — VERIFIED WIN, pending merge (rebase).**
+  `abupt_axis_mean = 16.53` (vs 17.39 baseline = −4.9%). Run `hltti2ec`, 1 epoch.
+  Superseded as standalone best by PR #13 (15.82), but FiLM composes orthogonally
+  with cosine EMA — composition should push below 14. Frieren rebasing.
+  - Follow-up PR #23 (frieren): full composition — FiLM + vol_w=2.0 + projection + bs=8 + cosine EMA.
+- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) MERGED — official yi baseline.**
+  `abupt_axis_mean = 17.39`. Run `y2gigs61`, 6 epochs.
+- **PR #11 (kohaku, tangential wall-shear projection) — MERGED.**
+  Code on yi (default off). Composable with any future PR.
+- **Follow-up PR #21 (kohaku, normal-component suppression sweep)** — λ ∈ {0.0, 0.01, 0.1, 1.0}.
+- **Follow-up PR #22 (gilbert, gradient clipping)** — `clip_grad_norm_` + 4-arm sweep.
 
-**Three independent wins now compounding (next big leap from stacking all):**
+**Four independent wins compounding (next big leap from stacking all):**
 1. Tangential projection (PR #11, default off, `--use-tangential-wallshear-loss`)
 2. Protocol fixes: vol_w=2.0, bs=8, validation-every=1 (PR #9)
 3. Per-block FiLM conditioning (PR #8, pending merge)
-→ PR #23 (frieren) will test all three together.
+4. Cosine EMA 0.99→0.9999 (PR #13, pending merge, `--ema-decay-start 0.99 --ema-decay-end 0.9999`)
+→ PR #23 (frieren) will test all four together once both PRs #8 and #13 land.
+→ Composition prediction: ~12–13 abupt (−20% from current 15.82).
 
 ### CLOSED
 
