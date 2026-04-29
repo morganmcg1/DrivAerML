@@ -2,30 +2,30 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: PR #33 — 2026-04-29 16:39 UTC
+## Status: PR #40 — 2026-04-29 19:56 UTC
 
-New tay SOTA set by fern's RFF coordinate encoding: Gaussian random Fourier
-features (sigma=1.0, 32 features per modality) appended to surface and volume
-coord inputs. Lifts every surface/wall-shear axis by 10-15%, volume pressure
-flat (expected — far-field coords saturate sigma=1.0 RFF). Run under
-`--no-compile-model` (torch.compile bug open), 9 compiled-equiv epochs.
+New tay SOTA set by alphonse's torch.compile fix + recalibration. The compile
+bug (`drop_last=False` + `unwrap_model` in eval) was patched, enabling compiled
+training at ~1.7× throughput. Same 4L/512d/8h config as PR #30/33 but 12 epochs
+instead of 9 (more epochs still descending at cutoff). No `--no-compile-model`
+needed from now on.
 
-**W&B run:** `u43lik5d` (rank 0) — group `fern-rff-sigma-sweep`
-**Best-val checkpoint:** epoch 9 (val_abupt=17.06)
+**W&B run:** `ae4zsaly` (rank 0) — group `tay-round1-calibrate-compiled`
+**Best-val checkpoint:** epoch 12 (val_abupt=16.09)
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #33) | PR #30 | yi best | AB-UPT |
+| Metric | This-repo key | tay best (PR #40) | PR #33 | yi best | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **17.77** | 19.81 | 15.82 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **11.20** | 12.86 | 9.99 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **18.68** | 21.27 | 16.60 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **16.13** | 15.91 | 14.21 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **16.20** | 18.24 | 14.27 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **21.81** | 25.50 | 19.49 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **23.54** | 26.53 | 21.12 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **17.25** | 17.77 | 15.82 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **10.92** | 11.20 | 9.99 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **18.33** | 18.68 | 16.60 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **14.71** | 16.13 | 14.21 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **15.73** | 16.20 | 14.27 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **21.80** | 21.81 | 19.49 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **23.07** | 23.54 | 21.12 | 3.63 |
 
-### Reproduce PR #33 config
+### Reproduce PR #40 config
 
 ```bash
 cd target/
@@ -36,9 +36,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
   --ema-decay 0.9995 \
-  --rff-num-features 32 --rff-sigma 1.0 \
   --gradient-log-every 100 --weight-log-every 100 \
-  --no-log-gradient-histograms --no-compile-model
+  --no-log-gradient-histograms
 ```
 
 ### Compounding wins so far
@@ -46,23 +45,17 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
 | #30 | alphonse | baseline (19.81) | yi calibration config (4L/512d/8h, vol_w=2.0) |
-| #33 | fern | **−2.04 (−10.3%)** | RFF coord features (sigma=1.0, 32 feats) |
+| #33 | fern | **−2.04 (−10.3%)** | RFF coord features (sigma=1.0, 32 feats) — uncompiled |
+| #40 | alphonse | **−0.52 (−2.9%) vs #33** | torch.compile fix → 12 epochs vs 9; beats #33 without RFF |
 
-### INFRA NOTE — torch.compile bug (high priority fix)
+### INFRA NOTE — torch.compile bug FIXED (PR #40)
 
-`compile_model=True` default in `train.py` + `drop_last=False` in
-`trainer_runtime.py:293` → last partial batch of each epoch kills all ranks
-via `torch._inductor.exc.InductorError` at the epoch-boundary step.
+Two-line patch in `trainer_runtime.py`:
+1. `drop_last=True` on `DistributedSampler` and `DataLoader` (lines 293, 301) — fixes partial-batch crash.
+2. `unwrap_model(model)` in `accumulate_eval_batch` (line 929) — bypasses compile during eval because `pad_collate` produces variable-shape batches that trigger a symbolic-sum codegen bug in torch.inductor.
 
-**Fix (either in train.py or trainer_runtime.py — both editable per program.md):**
-- Option A (train.py): pass `dynamic=True` to `torch.compile(model, ...)`
-- Option B (trainer_runtime.py): set `drop_last=True` on the train DataLoader
-
-Without the fix, `--no-compile-model` is required, costing ~50% of training
-throughput and limiting tay runs to ~9 epochs per budget slot.
-
-The yi advisor's best results (different W&B project) are informational targets
-to match or beat on tay/DDP8:
+**All future runs should use `--compile-model` (the default) without `--no-compile-model`.**
+Throughput: ~16 min/epoch compiled vs ~18 min uncompiled. 270-min budget → 12 epochs.
 
 ## Reference baseline targets — must beat (AB-UPT public reference)
 
@@ -106,25 +99,6 @@ informational targets to match or beat on tay/DDP8:
    independent +5% on every axis at 256d.
 5. Cosine EMA decay 0.99 → 0.9999 (yi PR #13 norman) — single largest
    non-architectural lever in yi (−9% on every axis).
-
-## DDP8 calibration reproduce (tay round 1, alphonse #?)
-
-```bash
-cd target/
-torchrun --standalone --nproc_per_node=8 train.py \
-  --volume-loss-weight 2.0 \
-  --batch-size 4 \
-  --validation-every 1 \
-  --lr 5e-5 --weight-decay 5e-4 \
-  --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
-  --ema-decay 0.9995 \
-  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
-```
-
-Effective batch size = 4 × 8 GPUs = 32. The yi winning per-GPU config is
-preserved verbatim; per-GPU memory limit (96 GB) still binds at 512d.
 
 ## Update protocol
 
