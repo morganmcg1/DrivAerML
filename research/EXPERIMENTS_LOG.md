@@ -103,6 +103,40 @@ After compile fix merges, Round 2 baselines reset.
 
 ---
 
+## 2026-04-29 21:25 UTC — PR #41 CLOSED: askeladd eval-tangential projection — clear regression
+
+**Student:** askeladd | **W&B run:** `p3lxbg6t` (rank 0) | **Hypothesis:** Project
+predicted wall-shear vector onto surface tangent at eval time only (vs yi PR #11
+kohaku's training-time projection that broke tau_z).
+
+### Results — vs current SOTA (PR #40 compiled, 12 epochs)
+
+| Metric | PR #41 | PR #40 SOTA | Δ vs SOTA |
+|---|---:|---:|---:|
+| `val_abupt` | 20.25 | 16.09 | +4.16 (+25.9%) |
+| `test_abupt` | **21.13** | 17.25 | **+3.88 (+22.5%)** |
+
+Even vs the OLD uncompiled baseline (PR #30: 19.81), this is +1.32 worse (+6.7%).
+
+### Disposition: CLOSED
+
+The eval-time projection mechanism is wrong-shaped. Mechanism analysis:
+- Trained model predicts `tau` ≈ `α · n_normal + β · n_tangent` (some normal-component
+  contribution that helps rel-L2 even though it's physically anomalous on flat panels).
+- Projecting onto tangent removes the α component.
+- Remaining `β · n_tangent` is now a worse predictor than the unprojected `tau` was.
+
+**Combined with yi PR #11 kohaku results, this closes the door on tangential-projection-on-output**.
+Future wall-shear constraints should consider:
+- Predicting in tangent-frame intrinsic coordinates (projection built into the head).
+- Joint loss penalizing `tau · n_normal` rather than projecting at eval.
+
+Reassigning askeladd to **PR #49: grad-clip-norm 1.0 → 5.0 single delta** (motivated
+by frieren's diagnostic that clip rate was 1.0 every step, late-training median
+grad_norm ~4 — 1.0 clip is throwing away ~75% of gradient magnitude).
+
+---
+
 ## 2026-04-29 20:46 UTC — PR #42 SENT BACK: frieren squared_rel_l2 — orthogonal win but on stale baseline
 
 **Student:** frieren | **W&B run:** `bmz26ft7` | **Hypothesis:** Replace MSE
