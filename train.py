@@ -442,6 +442,8 @@ class Config:
     validation_every: int = 10
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    aux_rel_l2_weight: float = 0.0
+    grad_clip_norm: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -517,6 +519,34 @@ class TargetTransform:
 
     def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
         return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+
+
+def relative_l2_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Mean per-sample relative L2 over masked points. pred/target: [B, N, C]."""
+    sample_valid = mask.any(dim=1)  # [B]
+    if not bool(sample_valid.any()):
+        return pred.sum() * 0.0
+    mask_f = mask.to(pred.dtype)
+    diff_sq = ((pred - target) ** 2).sum(dim=-1) * mask_f  # [B, N]
+    tgt_sq = (target ** 2).sum(dim=-1) * mask_f  # [B, N]
+    diff_sum = diff_sq.sum(dim=1)  # [B]
+    tgt_sum = tgt_sq.sum(dim=1)  # [B]
+    # eps acts as a safety floor on the denominator so that samples with degenerate
+    # (near-zero) targets do not produce explosive gradients ∝ 1/||target||. We use
+    # 1e-4 (≪ typical sum_target² which is O(1e2-1e6) in dn units for our fields)
+    # so it only kicks in for pathological samples. The (diff_sum+eps) numerator
+    # also avoids sqrt(0) backward on all-padding samples (which the sample_valid
+    # mask later zeros, but the gradient path needs to stay finite).
+    eps = pred.new_tensor(1e-4)
+    ratio = (diff_sum + eps) / (tgt_sum + eps)
+    # Cap the per-sample relative L2 at 100% (rel-L2 above 1.0 is already pathological;
+    # caps the loss value AND blocks gradient through the clamp, preventing the
+    # huge gradients that come from very high rel-L2 ratios).
+    ratio = ratio.clamp(max=1.0)
+    per_sample = ratio.sqrt()  # [B]
+    sample_valid_f = sample_valid.to(per_sample.dtype)
+    n_valid = sample_valid_f.sum().clamp(min=1.0)
+    return (per_sample * sample_valid_f).sum() / n_valid
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -1130,6 +1160,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    aux_rel_l2_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1141,12 +1172,32 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        surface_pred_norm = out["surface_preds"]
+        volume_pred_norm = out["volume_preds"]
+        surface_loss = masked_mse(surface_pred_norm, surface_target, batch.surface_mask)
+        volume_loss = masked_mse(volume_pred_norm, volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+    # Compute aux rel-L2 in fp32 OUTSIDE autocast to avoid bf16 underflow in the
+    # very small ratios / huge intermediate values that the rel-L2 path can hit.
+    aux_surf_loss = surface_pred_norm.sum() * 0.0
+    aux_vol_loss = volume_pred_norm.sum() * 0.0
+    if aux_rel_l2_weight > 0.0:
+        surf_pred_dn = transform.invert_surface(surface_pred_norm.float())
+        surf_true_dn = batch.surface_y.float()
+        aux_surf_loss = relative_l2_loss(surf_pred_dn, surf_true_dn, batch.surface_mask)
+        vol_pred_dn = transform.invert_volume(volume_pred_norm.float())
+        vol_true_dn = batch.volume_y.float()
+        aux_vol_loss = relative_l2_loss(vol_pred_dn, vol_true_dn, batch.volume_mask)
+        aux_loss = aux_rel_l2_weight * (aux_surf_loss + aux_vol_loss)
+        loss = loss + aux_loss
     return loss, {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
+        "aux_surf_rel_l2": float(aux_surf_loss.detach().cpu().item()),
+        "aux_vol_rel_l2": float(aux_vol_loss.detach().cpu().item()),
+        "aux_rel_l2_loss": float(
+            (aux_rel_l2_weight * (aux_surf_loss + aux_vol_loss)).detach().cpu().item()
+        ),
     }
 
 
@@ -1546,6 +1597,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 config.amp_mode,
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
+                aux_rel_l2_weight=config.aux_rel_l2_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1565,7 +1617,27 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
-            optimizer.step()
+            loss_finite = bool(torch.isfinite(loss).item())
+            grad_finite = True
+            if config.grad_clip_norm > 0.0:
+                pre_clip_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    max_norm=config.grad_clip_norm,
+                    error_if_nonfinite=False,
+                )
+                grad_finite = bool(torch.isfinite(pre_clip_norm).item())
+                gradient_metrics["train/grad/pre_clip_norm"] = (
+                    float(pre_clip_norm) if grad_finite else float("nan")
+                )
+                gradient_metrics["train/grad/clip_triggered"] = (
+                    1.0 if grad_finite and float(pre_clip_norm) > config.grad_clip_norm else 0.0
+                )
+            step_skipped = not (loss_finite and grad_finite)
+            gradient_metrics["train/grad/step_skipped"] = 1.0 if step_skipped else 0.0
+            if step_skipped:
+                optimizer.zero_grad(set_to_none=True)
+            else:
+                optimizer.step()
             if ema is not None:
                 ema.update(model)
             weight_metrics = (
@@ -1583,6 +1655,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
                 "train/volume_loss": batch_loss_metrics["volume_loss"],
+                "train/aux_surf_rel_l2": batch_loss_metrics["aux_surf_rel_l2"],
+                "train/aux_vol_rel_l2": batch_loss_metrics["aux_vol_rel_l2"],
+                "train/aux_rel_l2_loss": batch_loss_metrics["aux_rel_l2_loss"],
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
