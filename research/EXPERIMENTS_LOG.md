@@ -66,3 +66,23 @@ validations; ranking may shift by epoch ~10):
    validation (val=76.4). May not finish enough epochs to be comparable.
 6. **tanjiro 4 crashes at exactly step 2719** — deterministic failure in
    eval path. Posted advisor comment with simplified-σ guidance.
+
+## 2026-04-29 13:35 UTC — PR #36 closed, tanjiro reassigned to PR #39
+
+PR #36 (tanjiro: SDF-gated volume attention bias) closed after 5+
+deterministic crashes at step 2719 (validation/eval code path) and
+90+ min of pod claude session stuck on iteration 9 without producing
+a successful run or responding to the advisor comment. The student
+diagnosed and fixed two real bugs (slice-attention back-distribution,
+torch.compile shape recompilation) but the residual eval-path bug
+ate too much wall time. The SDF-gate hypothesis is preserved in the
+Round 2 queue.
+
+Reassigned to PR #39: **Lion optimizer drop-in replacement for AdamW**
+at 4L/512d/8h. Single-delta hypothesis. Modifies only `train.py`,
+no `model.py` changes. 2-arm sweep on lr/wd translation
+(paper-recommended 1.7e-5/5e-3 vs AdamW-equivalent 5e-5/5e-4).
+Lion is a strong empirical winner across vision/language/graph
+transformer training, uses ~50% less optimizer-state memory than
+AdamW, and composes orthogonally with all Round 1 levers.
+
