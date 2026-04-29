@@ -476,6 +476,7 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    use_tta_symmetry: bool = False
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1271,6 +1272,50 @@ def _finite_mean(values: Iterable[float]) -> float:
     return sum(finite) / max(len(finite), 1)
 
 
+def _forward_with_optional_tta(
+    model: nn.Module,
+    batch: SurfaceBatch,
+    *,
+    use_tta: bool,
+    device: torch.device,
+    amp_mode: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run the model; optionally average with the xz-mirrored geometry.
+
+    Bilateral xz-plane reflection negates y-coordinate, y-component of normals
+    (n_y), and the y-component of the wall-shear vector (tau_y). cp and the
+    volume scalar pressure are reflection-invariant.
+    """
+    with autocast_context(device, amp_mode):
+        out = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+    if not use_tta:
+        return out["surface_preds"], out["volume_preds"]
+
+    surface_x_mirror = batch.surface_x.clone()
+    surface_x_mirror[..., 1] = -surface_x_mirror[..., 1]
+    surface_x_mirror[..., 4] = -surface_x_mirror[..., 4]
+    volume_x_mirror = batch.volume_x.clone()
+    volume_x_mirror[..., 1] = -volume_x_mirror[..., 1]
+    with autocast_context(device, amp_mode):
+        out_mirror = model(
+            surface_x=surface_x_mirror,
+            surface_mask=batch.surface_mask,
+            volume_x=volume_x_mirror,
+            volume_mask=batch.volume_mask,
+        )
+    surface_orig = out["surface_preds"].float()
+    surface_mirror_pred = out_mirror["surface_preds"].float().clone()
+    surface_mirror_pred[..., 2] = -surface_mirror_pred[..., 2]
+    surface_avg = 0.5 * (surface_orig + surface_mirror_pred)
+    volume_avg = 0.5 * (out["volume_preds"].float() + out_mirror["volume_preds"].float())
+    return surface_avg, volume_avg
+
+
 @torch.no_grad()
 def evaluate_split(
     model: nn.Module,
@@ -1279,6 +1324,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    use_tta: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1309,15 +1355,15 @@ def evaluate_split(
         batch = batch.to(device)
         surface_target_norm = transform.apply_surface(batch.surface_y)
         volume_target_norm = transform.apply_volume(batch.volume_y)
-        with autocast_context(device, amp_mode):
-            out = model(
-                surface_x=batch.surface_x,
-                surface_mask=batch.surface_mask,
-                volume_x=batch.volume_x,
-                volume_mask=batch.volume_mask,
-            )
-        surface_pred_norm = out["surface_preds"].float()
-        volume_pred_norm = out["volume_preds"].float()
+        surface_pred_raw, volume_pred_raw = _forward_with_optional_tta(
+            model,
+            batch,
+            use_tta=use_tta,
+            device=device,
+            amp_mode=amp_mode,
+        )
+        surface_pred_norm = surface_pred_raw.float()
+        volume_pred_norm = volume_pred_raw.float()
         surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
@@ -1933,6 +1979,111 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.log(test_log)
     wandb.summary.update(_numeric_metric_items(test_log))
     print_metrics("test_surface", test_metrics["test_surface"])
+
+    if config.use_tta_symmetry:
+        full_val_tta_metrics = {
+            name: evaluate_split(
+                model,
+                loader,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                use_tta=True,
+            )
+            for name, loader in val_loaders.items()
+        }
+        full_val_tta_log: dict[str, object] = {
+            "full_val_primary_tta/abupt_axis_mean_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "abupt_axis_mean_rel_l2_pct"
+            ],
+            "full_val_primary_tta/abupt_axis_mean_rel_l2": full_val_tta_metrics["val_surface"][
+                "abupt_axis_mean_rel_l2"
+            ],
+            "full_val_primary_tta/surface_pressure_mae": full_val_tta_metrics["val_surface"][
+                "surface_pressure_mae"
+            ],
+            "full_val_primary_tta/wall_shear_mae": full_val_tta_metrics["val_surface"]["wall_shear_mae"],
+            "full_val_primary_tta/volume_pressure_mae": full_val_tta_metrics["val_surface"][
+                "volume_pressure_mae"
+            ],
+            "full_val_primary_tta/surface_pressure_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "surface_pressure_rel_l2_pct"
+            ],
+            "full_val_primary_tta/wall_shear_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "wall_shear_rel_l2_pct"
+            ],
+            "full_val_primary_tta/wall_shear_x_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "wall_shear_x_rel_l2_pct"
+            ],
+            "full_val_primary_tta/wall_shear_y_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "wall_shear_y_rel_l2_pct"
+            ],
+            "full_val_primary_tta/wall_shear_z_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "wall_shear_z_rel_l2_pct"
+            ],
+            "full_val_primary_tta/volume_pressure_rel_l2_pct": full_val_tta_metrics["val_surface"][
+                "volume_pressure_rel_l2_pct"
+            ],
+            "global_step": global_step,
+        }
+        for split_name, metrics in full_val_tta_metrics.items():
+            for key, value in metrics.items():
+                full_val_tta_log[f"full_val_tta/{split_name}/{key}"] = value
+        wandb.log(full_val_tta_log)
+        wandb.summary.update(_numeric_metric_items(full_val_tta_log))
+        print_metrics("full_val_tta", full_val_tta_metrics["val_surface"])
+
+        test_tta_metrics = {
+            name: evaluate_split(
+                model,
+                loader,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                use_tta=True,
+            )
+            for name, loader in test_loaders.items()
+        }
+        test_tta_log: dict[str, object] = {
+            "test_primary_tta/abupt_axis_mean_rel_l2_pct": test_tta_metrics["test_surface"][
+                "abupt_axis_mean_rel_l2_pct"
+            ],
+            "test_primary_tta/abupt_axis_mean_rel_l2": test_tta_metrics["test_surface"][
+                "abupt_axis_mean_rel_l2"
+            ],
+            "test_primary_tta/surface_pressure_mae": test_tta_metrics["test_surface"][
+                "surface_pressure_mae"
+            ],
+            "test_primary_tta/wall_shear_mae": test_tta_metrics["test_surface"]["wall_shear_mae"],
+            "test_primary_tta/volume_pressure_mae": test_tta_metrics["test_surface"][
+                "volume_pressure_mae"
+            ],
+            "test_primary_tta/surface_pressure_rel_l2_pct": test_tta_metrics["test_surface"][
+                "surface_pressure_rel_l2_pct"
+            ],
+            "test_primary_tta/wall_shear_rel_l2_pct": test_tta_metrics["test_surface"][
+                "wall_shear_rel_l2_pct"
+            ],
+            "test_primary_tta/wall_shear_x_rel_l2_pct": test_tta_metrics["test_surface"][
+                "wall_shear_x_rel_l2_pct"
+            ],
+            "test_primary_tta/wall_shear_y_rel_l2_pct": test_tta_metrics["test_surface"][
+                "wall_shear_y_rel_l2_pct"
+            ],
+            "test_primary_tta/wall_shear_z_rel_l2_pct": test_tta_metrics["test_surface"][
+                "wall_shear_z_rel_l2_pct"
+            ],
+            "test_primary_tta/volume_pressure_rel_l2_pct": test_tta_metrics["test_surface"][
+                "volume_pressure_rel_l2_pct"
+            ],
+            "global_step": global_step,
+        }
+        for split_name, metrics in test_tta_metrics.items():
+            for key, value in metrics.items():
+                test_tta_log[f"test_tta/{split_name}/{key}"] = value
+        wandb.log(test_tta_log)
+        wandb.summary.update(_numeric_metric_items(test_tta_log))
+        print_metrics("test_tta", test_tta_metrics["test_surface"])
 
     log_model_artifact(
         run=run,
