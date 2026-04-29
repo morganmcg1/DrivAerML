@@ -2,7 +2,27 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: gilbert PR #9 wins — new baseline 2026-04-29 03:57 UTC
+## Status: chihiro PR #4 wins — new baseline 2026-04-29
+
+PR #4 (chihiro, 4L/512d/8h large-model scale-up) reduced
+`test_primary/abupt_axis_mean_rel_l2_pct` from 17.39 (gilbert PR #9) to
+**16.64** — a 4.3% improvement on the headline metric. Run `pejudvyd`,
+state=finished, 3 best epochs, params ~12.7M. Width upgrade used `lr=5e-5`
+(3 prior runs at 2e-4 diverged) and `bs=4` (largest power-of-2 fitting 96GB).
+Standout gain: `volume_pressure` 14.37 vs 15.21 — orthogonal to FiLM and
+cosine-EMA wins still pending merge (PRs #8, #13).
+
+**Compounding wins so far (all landed on `yi`):**
+1. PR #11 kohaku — tangential wall-shear projection loss
+2. PR #9 gilbert — protocol fixes (bs=8, vol_w=2.0, validation-every=1)
+3. PR #4 chihiro — width scale-up to 512d/8h (this PR)
+
+PRs #8 (frieren FiLM, 16.53) and #13 (norman cosine EMA, 15.82) are pending
+rebase+merge and should push the composite lower still.
+
+---
+
+## Previous: gilbert PR #9 — baseline 2026-04-29 03:57 UTC
 
 PR #9 (gilbert, vol_w=2.0 + protocol fixes) reduced
 `test_primary/abupt_axis_mean_rel_l2_pct` from 35.12 (kohaku PR #11) to
@@ -40,20 +60,43 @@ checkpoint reload.
 
 | Metric | Best | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **17.3933** | #9 | y2gigs61 | 2026-04-29 |
-| `test_primary/surface_pressure_rel_l2_pct` | **11.0733** | #9 | y2gigs61 | 2026-04-29 |
-| `test_primary/wall_shear_rel_l2_pct` | **18.3180** | #9 | y2gigs61 | 2026-04-29 |
-| `test_primary/volume_pressure_rel_l2_pct` | **15.2059** | #9 | y2gigs61 | 2026-04-29 |
-| `test_primary/wall_shear_x_rel_l2_pct` | **15.6465** | #9 | y2gigs61 | 2026-04-29 |
-| `test_primary/wall_shear_y_rel_l2_pct` | **21.8605** | #9 | y2gigs61 | 2026-04-29 |
-| `test_primary/wall_shear_z_rel_l2_pct` | **23.1803** | #9 | y2gigs61 | 2026-04-29 |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **16.64** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/surface_pressure_rel_l2_pct` | **10.65** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/wall_shear_rel_l2_pct` | **17.66** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/volume_pressure_rel_l2_pct` | **14.37** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/wall_shear_x_rel_l2_pct` | **14.87** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/wall_shear_y_rel_l2_pct` | **19.89** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/wall_shear_z_rel_l2_pct` | **21.73** | #4 | pejudvyd | 2026-04-29 |
+
+Note: PRs #8 (frieren FiLM, abupt=16.53) and #13 (norman cosine EMA, abupt=15.82)
+are verified wins currently pending rebase — once merged the headline metric
+will drop further, with #13 as projected new best.
 
 (`p_s = 10.07` from PR #11 is a marginally better single-axis number, but the
 abupt_axis_mean win is decisive and `tau_*` improvements dominate the
 composite metric.)
 
-**Reproduce (PR #9 winning config — recommended for all future PRs):**
+**Reproduce (PR #4 winning config — new recommended base for 512d experiments):**
 
+```bash
+cd target/
+python train.py \
+  --volume-loss-weight 2.0 \
+  --batch-size 4 \
+  --validation-every 1 \
+  --lr 5e-5 --weight-decay 5e-4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --ema-decay 0.9995 \
+  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
+```
+
+**Note:** `lr=5e-5` is necessary for 512d — three runs at 2e-4 diverged.
+`bs=4` is the largest batch fitting 96GB VRAM at 512d. For 256d experiments
+still use `bs=8 lr=2e-4` (gilbert PR #9 config).
+
+**Previous 256d baseline reproduce (PR #9):**
 ```bash
 cd target/
 python train.py \
@@ -75,14 +118,14 @@ experiments should layer on top of the gilbert config and add
 
 **Distance from AB-UPT targets (multiple of target):**
 
-| Metric | yi best | AB-UPT | Ratio |
+| Metric | yi best (PR #4) | AB-UPT | Ratio |
 |---|---:|---:|---:|
-| surface_pressure | 11.07 | 3.82 | 2.9× |
-| wall_shear | 18.32 | 7.29 | 2.5× |
-| volume_pressure | 15.21 | 6.08 | 2.5× |
-| wall_shear_x | 15.65 | 5.35 | 2.9× |
-| wall_shear_y | 21.86 | 3.65 | 6.0× |
-| wall_shear_z | 23.18 | 3.63 | 6.4× |
+| surface_pressure | 10.65 | 3.82 | 2.8× |
+| wall_shear | 17.66 | 7.29 | 2.4× |
+| volume_pressure | 14.37 | 6.08 | 2.4× |
+| wall_shear_x | 14.87 | 5.35 | 2.8× |
+| wall_shear_y | 19.89 | 3.65 | 5.5× |
+| wall_shear_z | 21.73 | 3.63 | 6.0× |
 
 The wall-shear axes (esp. `tau_y`, `tau_z`) remain the largest gap to AB-UPT
 but have collapsed by ~60–70% from where we started. Volume pressure and
