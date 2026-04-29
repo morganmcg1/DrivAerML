@@ -585,6 +585,7 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
+    aux_rel_l2_weight: float = 0.0
     compile_model: bool = True
     debug: bool = False
 
@@ -1241,6 +1242,28 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return pred.sum() * 0.0
 
 
+def squared_rel_l2_loss(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """Squared relative-L2 auxiliary loss. No sqrt — numerically stable.
+
+    ratio = sum_valid(||pred - target||^2) / sum_valid(||target||^2 + eps)
+    Returns mean over batch.
+    """
+    if pred.numel() == 0 or not bool(mask.any()):
+        return pred.sum() * 0.0
+    pred_f = pred.float()
+    target_f = target.float()
+    mask_f = mask.float()
+    eps = pred_f.new_tensor(1e-8)
+    diff_sq = ((pred_f - target_f) ** 2).sum(dim=-1)  # [B, N]
+    tgt_sq = (target_f ** 2).sum(dim=-1)  # [B, N]
+    diff_sq = diff_sq * mask_f
+    tgt_sq = tgt_sq * mask_f
+    per_sample = diff_sq.sum(dim=1) / (tgt_sq.sum(dim=1) + eps)  # [B] — no sqrt
+    return per_sample.mean().to(pred.dtype)
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -1263,6 +1286,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    aux_rel_l2_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1304,11 +1328,29 @@ def train_loss(
             surface_target_used = surface_target
         surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        base_loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        loss = base_loss
+        aux_surface = None
+        aux_volume = None
+        if aux_rel_l2_weight > 0.0:
+            aux_surface = squared_rel_l2_loss(
+                surface_pred_norm, surface_target, batch.surface_mask
+            )
+            aux_volume = squared_rel_l2_loss(
+                out["volume_preds"], volume_target, batch.volume_mask
+            )
+            loss = loss + aux_rel_l2_weight * (aux_surface + aux_volume)
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
+        "base_mse_loss": float(base_loss.detach().cpu().item()),
     }
+    if aux_surface is not None:
+        metrics["aux_rel_l2_surface"] = float(aux_surface.detach().cpu().item())
+        metrics["aux_rel_l2_volume"] = float(aux_volume.detach().cpu().item())
+        metrics["aux_rel_l2_loss"] = float(
+            (aux_rel_l2_weight * (aux_surface + aux_volume)).detach().cpu().item()
+        )
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1723,6 +1765,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                aux_rel_l2_weight=config.aux_rel_l2_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1782,6 +1825,16 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "base_mse_loss" in batch_loss_metrics:
+                train_log["train/base_mse_loss"] = batch_loss_metrics["base_mse_loss"]
+            if "aux_rel_l2_loss" in batch_loss_metrics:
+                train_log["train/aux_rel_l2_loss"] = batch_loss_metrics["aux_rel_l2_loss"]
+                train_log["train/aux_rel_l2_surface"] = batch_loss_metrics[
+                    "aux_rel_l2_surface"
+                ]
+                train_log["train/aux_rel_l2_volume"] = batch_loss_metrics[
+                    "aux_rel_l2_volume"
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
