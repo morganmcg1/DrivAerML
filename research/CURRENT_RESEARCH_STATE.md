@@ -42,7 +42,7 @@ finalizing hypotheses to avoid duplicating work and to draw inspiration.
 | #3 | askeladd | codex/optimized-lineage config (4L/256d/4h, 65k pts, lr=2e-4) |
 | #4 | chihiro | Large model 4L/512d/8h — radford champion scale-up |
 | #5 | edward | Cosine LR + 5% warmup (proven radford winner family) |
-| #6 | emma | Metric-aware MSE + rel-L2 aux loss (proven 2nd radford winner) |
+| ~~#6~~ | ~~emma~~ | ~~Metric-aware MSE + rel-L2 aux loss~~ — CLOSED (sqrt instability) |
 
 ### Stream 2 — fresh targeted ideas
 
@@ -91,6 +91,13 @@ Full hypothesis pool: `research/RESEARCH_IDEAS_2026-04-28_ROUND2_ARCHITECTURES.m
 
 Round 2 will assign these once Round 1 results come in (so we know which
 loss/optim/EMA/data-weighting wins to compose with the new backbone).
+
+## Round 2 — active assignments (2026-04-29)
+
+| PR | Student | Hypothesis |
+|---|---|---|
+| #24 | emma | Squared rel-L2 aux loss (drop sqrt, smooth backward) |
+| #25 | stark | SE(3) local-frame coordinate features (equivariant input augmentation) |
 
 ## Round 1 — reviewed results (2026-04-29)
 

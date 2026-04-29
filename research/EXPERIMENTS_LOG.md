@@ -9,6 +9,19 @@ Targets to beat (lower is better): `surface_pressure 3.82`, `wall_shear 7.29`,
 Round 1 launches 16 parallel experiments: 5 known-good baselines / proven-additive
 deltas (Stream 1) and 11 fresh single-delta hypotheses (Stream 2).
 
+## 2026-04-29 06:00 — PR #6: relative-L2 auxiliary loss (emma) — CLOSED, dead end
+
+- Branch: `emma/round1-metric-aware-aux-loss`
+- Hypothesis: add a metric-aligned auxiliary loss `aux_rel_l2_weight * relative_l2_loss(pred, target, mask)` so training optimizes a quantity directly proportional to the AB-UPT eval metric, with `loss = MSE + 0.05 * rel_l2`.
+- W&B runs (all five state=crashed/diverged, no `test_primary/*` produced):
+  - `ylg9cc8h` (Run 1, w=0.05, original snippet) — NaN at step 1 (sqrt(0) backward).
+  - `tq2cs2vo` (Run 2, w=0.05, dual-eps fix) — diverged step ~115700 mid-epoch 3 (grad norm 1.7 → 7e+5 → 2.85e+16).
+  - `*` Run 3a/3b (w=0.01, w=0.02) — diverged step 50600 / 59100. Smaller weight diverged earlier — confirms backward-path instability is the controlling factor, not weight magnitude.
+  - `*` Run 4a/4b (`clip_grad_norm_(1.0)` added) — `total_norm=Inf → coef=0` mathematically still propagates NaN.
+  - `*` Run 5a/5b (full stability stack: ratio.clamp(max=1.0), eps=1e-4, fp32 outside autocast, NaN-skip step) — entered 100% skip-step regime by ~step 30000, training frozen.
+- **Conclusion:** the rel-L2 auxiliary loss as formulated is fundamentally unstable in this codebase. The `sqrt((diff_sum + ε)/(tgt_sum + ε))` backward path produces Inf grads when surface target norms are small in denormalized space; even gradient masking and skip-step cannot rescue it once the regime is reached.
+- **Salvage value:** emma's diagnostic infrastructure (`grad_clip_norm` config + NaN-resistant skip-step pattern) corroborates the design landing in PR #22 (gilbert). Closed in favor of squared-rel-L2 reformulation (drop the sqrt → `ratio.mean()`) as a Round-2 follow-up assigned to emma.
+
 ## 2026-04-29 — PR #8: per-case geometry FiLM conditioning (frieren) — VERIFIED WIN, pending merge (rebase required)
 
 - Branch: `frieren/round1-geometry-film-conditioning`
