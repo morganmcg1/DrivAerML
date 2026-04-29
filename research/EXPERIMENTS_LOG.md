@@ -67,6 +67,42 @@ validations; ranking may shift by epoch ~10):
 6. **tanjiro 4 crashes at exactly step 2719** — deterministic failure in
    eval path. Posted advisor comment with simplified-σ guidance.
 
+## 2026-04-29 15:21 UTC — PR #30 merged: first tay/DDP8 baseline (alphonse calibration)
+
+**Student:** alphonse | **W&B run:** `0vi9tm5h` | **Hypothesis:** Reproduce yi PR #4 (4L/512d/8h, lr=5e-5, bs=4, vol_w=2.0) on tay/DDP8.
+
+### Results
+
+| Metric | tay val | tay test | yi best | AB-UPT |
+|---|---:|---:|---:|---:|
+| abupt | 18.70 | **19.81** | 15.82 | — |
+| surface_pressure | 12.93 | 12.86 | 9.99 | 3.82 |
+| wall_shear | 21.24 | 21.27 | 16.60 | 7.29 |
+| volume_pressure | 9.69 | 15.91 | 14.21 | 6.08 |
+| tau_x | 18.09 | 18.24 | 14.27 | 5.35 |
+| tau_y | 25.54 | 25.50 | 19.49 | 3.65 |
+| tau_z | 27.26 | 26.53 | 21.12 | 3.63 |
+
+### Analysis
+
+This establishes tay's **first concrete test baseline at 19.81 abupt**. Run
+was under-trained at 9 epochs (of 50) — loss still steeply descending at
+end (val slope −0.37/1k steps). Root cause: `torch.compile + drop_last=False`
+interaction crashes all 8 ranks at the epoch-boundary step. Student used
+`--no-compile-model` workaround (1.5–2× per-step cost), limiting epochs to
+~9 within the 270-min budget.
+
+**Critical infra finding**: Fix is `drop_last=True` in `trainer_runtime.py:293`
+(editable per program.md). Estimated ~2× throughput gain = ~14–22 compiled
+epochs in budget instead of 9 uncompiled. Alphonse reassigned to PR #40 to
+land the fix and re-calibrate.
+
+**Round 2 implication**: All 7 concurrent Round-1 students ran without compile.
+Results from this round should be compared apples-to-apples (all uncompiled).
+After compile fix merges, Round 2 baselines reset.
+
+---
+
 ## 2026-04-29 13:35 UTC — PR #36 closed, tanjiro reassigned to PR #39
 
 PR #36 (tanjiro: SDF-gated volume attention bias) closed after 5+
