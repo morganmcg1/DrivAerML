@@ -40,6 +40,7 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    cosine_ema_decay,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -54,6 +55,7 @@ from trainer_runtime import (
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
+    project_tangential,
     run_final_evaluation,
     should_update_best_checkpoint,
     timeout_budget_minutes,
@@ -99,7 +101,10 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    ema_decay_start: float = 0.0
+    ema_decay_end: float = 0.9999
     eval_raw_vs_ema: bool = False
+    use_tangential_wallshear_loss: bool = False
     lr_warmup_epochs: int = 0
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
@@ -160,6 +165,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    use_tangential_wallshear_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -171,19 +177,63 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_pred_norm = out["surface_preds"]
+        normal_rms_value = float("nan")
+        if use_tangential_wallshear_loss:
+            # Wall-shear stds are non-uniform, so projecting in normalized space
+            # does NOT equal physical-space tangent projection. Denormalize the
+            # vector wall-shear channels, project onto the per-point tangent
+            # plane, then renormalize before the MSE.
+            normals = batch.surface_x[..., 3:6]
+            ws_std = transform.surface_y_std[1:4].to(surface_pred_norm.device)
+            ws_mean = transform.surface_y_mean[1:4].to(surface_pred_norm.device)
+            ws_pred_norm = surface_pred_norm[..., 1:4]
+            ws_true_norm = surface_target[..., 1:4]
+            ws_pred_phys = ws_pred_norm * ws_std + ws_mean
+            ws_true_phys = ws_true_norm * ws_std + ws_mean
+            ws_pred_tan = project_tangential(ws_pred_phys, normals)
+            ws_true_tan = project_tangential(ws_true_phys, normals)
+            ws_pred_tan_norm = (ws_pred_tan - ws_mean) / ws_std
+            ws_true_tan_norm = (ws_true_tan - ws_mean) / ws_std
+            surface_pred_used = torch.cat(
+                [surface_pred_norm[..., :1], ws_pred_tan_norm.to(surface_pred_norm.dtype)],
+                dim=-1,
+            )
+            surface_target_used = torch.cat(
+                [surface_target[..., :1], ws_true_tan_norm.to(surface_target.dtype)],
+                dim=-1,
+            )
+            if bool(batch.surface_mask.any()):
+                n_hat = torch.nn.functional.normalize(normals.float(), dim=-1, eps=1e-8)
+                normal_dot = (ws_pred_phys.float() * n_hat).sum(dim=-1)
+                normal_rms_value = float(
+                    normal_dot[batch.surface_mask]
+                    .square()
+                    .mean()
+                    .sqrt()
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+        else:
+            surface_pred_used = surface_pred_norm
+            surface_target_used = surface_target
+        surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if use_tangential_wallshear_loss:
+        metrics["wallshear_pred_normal_rms"] = normal_rms_value
+    return loss, metrics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -296,6 +346,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -333,6 +384,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if "wallshear_pred_normal_rms" in batch_loss_metrics:
+                        train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
+                            "wallshear_pred_normal_rms"
+                        ]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
@@ -374,6 +429,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     else:
                         optimizer.step()
                         if ema is not None:
+                            if config.ema_decay_start > 0.0:
+                                ema_decay_now = cosine_ema_decay(
+                                    global_step=global_step,
+                                    total_steps=total_estimated_steps,
+                                    decay_start=config.ema_decay_start,
+                                    decay_end=config.ema_decay_end,
+                                )
+                                ema.set_decay(ema_decay_now)
+                                train_log["train/ema_decay"] = ema_decay_now
                             ema.update(base_model)
                         weight_metrics = (
                             collect_weight_metrics(

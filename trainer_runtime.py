@@ -45,6 +45,9 @@ class EMA:
         }
         self.backup: dict[str, torch.Tensor] | None = None
 
+    def set_decay(self, new_decay: float) -> None:
+        self.decay = float(new_decay)
+
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
         self.step_counter += 1
@@ -816,6 +819,21 @@ def check_kill_thresholds(
     return None
 
 
+def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
+    """Project per-point 3-vectors onto the local tangent plane.
+
+    Args:
+        vec: [B, N, 3] vector field in physical units (matches `normals` frame).
+        normals: [B, N, 3] unit-norm surface normals (will be renormalized for safety).
+
+    Returns vec - (vec . n_hat) * n_hat. fp32 internally for bf16 stability.
+    """
+    vec_f = vec.float()
+    n_hat = torch.nn.functional.normalize(normals.float(), dim=-1, eps=1e-8)
+    dot = (vec_f * n_hat).sum(dim=-1, keepdim=True)
+    return (vec_f - dot * n_hat).to(vec.dtype)
+
+
 def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     expanded_mask = mask
     while expanded_mask.ndim < values.ndim:
@@ -1243,6 +1261,22 @@ def timeout_budget_minutes(env: Mapping[str, str] = os.environ) -> tuple[float, 
     val_budget_minutes = float(env.get("SENPAI_VAL_BUDGET_MINUTES", str(default_val_budget)))
     train_timeout_minutes = max(0.0, timeout_minutes - max(0.0, val_budget_minutes))
     return timeout_minutes, val_budget_minutes, train_timeout_minutes
+
+
+def cosine_ema_decay(
+    *,
+    global_step: int,
+    total_steps: int,
+    decay_start: float,
+    decay_end: float,
+) -> float:
+    """Cosine-anneal EMA decay from `decay_start` to `decay_end` over `total_steps`.
+
+    Standard cosine increasing schedule: progress=0 -> decay_start, progress=1 -> decay_end.
+    """
+    progress = min(max(global_step / max(total_steps, 1), 0.0), 1.0)
+    cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
+    return decay_start + cos_val * (decay_end - decay_start)
 
 
 def build_lr_scheduler(
