@@ -849,6 +849,24 @@ def squared_relative_l2_loss(
     return pred.sum() * 0.0
 
 
+def relative_l2_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    mask_float = mask.to(device=pred.device, dtype=pred.dtype)
+    diff_sq = (pred.float() - target.float()).square().sum(dim=-1) * mask_float
+    target_sq = target.float().square().sum(dim=-1) * mask_float
+    denominator = target_sq.sum(dim=1)
+    valid = denominator > 0
+    if bool(valid.any()):
+        ratio = diff_sq.sum(dim=1)[valid] / denominator[valid].clamp_min(1e-12)
+        return ratio.clamp_min(0.0).sqrt().mean()
+    return pred.sum() * 0.0
+
+
 EVAL_KEYS = (
     "surface_pressure",
     "wall_shear",

@@ -54,11 +54,16 @@ from trainer_runtime import (
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
+    relative_l2_loss,
     run_final_evaluation,
     should_update_best_checkpoint,
+    squared_relative_l2_loss,
     timeout_budget_minutes,
     unwrap_model,
 )
+
+
+LOSS_FORMS = ("mse", "rel_l2", "squared_rel_l2")
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +122,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    loss_form: str = "mse"
     debug: bool = False
 
 
@@ -131,6 +137,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
         ),
+        "loss_form": (
+            f"Training loss form. One of {LOSS_FORMS}. 'mse' is the per-element "
+            "masked MSE baseline. 'rel_l2' is per-case sqrt(sum_pts((y-y_hat)²)/sum_pts(y²)) "
+            "averaged across cases. 'squared_rel_l2' drops the outer sqrt for smoother "
+            "gradients. Eval metrics (test_primary/*, val_primary/*) always use the "
+            "standard rel-L2 sqrt form regardless of this flag."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -139,6 +152,8 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         if isinstance(value, bool):
             parser.add_argument(arg_name, action="store_true", default=value, help=help_value)
             parser.add_argument(f"--no-{field.name.replace('_', '-')}", action="store_false", dest=field.name)
+        elif field.name == "loss_form":
+            parser.add_argument(arg_name, type=str, choices=LOSS_FORMS, default=value, help=help_value)
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
@@ -188,6 +203,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    loss_form: str = "mse",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -199,12 +215,23 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        surface_mse = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        volume_mse = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if loss_form == "mse":
+            surface_loss = surface_mse
+            volume_loss = volume_mse
+        elif loss_form == "rel_l2":
+            surface_loss = relative_l2_loss(out["surface_preds"], surface_target, batch.surface_mask)
+            volume_loss = relative_l2_loss(out["volume_preds"], volume_target, batch.volume_mask)
+        elif loss_form == "squared_rel_l2":
+            surface_loss = squared_relative_l2_loss(out["surface_preds"], surface_target, batch.surface_mask)
+            volume_loss = squared_relative_l2_loss(out["volume_preds"], volume_target, batch.volume_mask)
+        else:
+            raise ValueError(f"Unknown loss_form: {loss_form!r}; expected one of {LOSS_FORMS}")
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
+        base_mse_loss = surface_mse + volume_mse
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
@@ -324,6 +351,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    loss_form=config.loss_form,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
