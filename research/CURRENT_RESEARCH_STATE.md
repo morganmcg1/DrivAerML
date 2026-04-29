@@ -94,20 +94,26 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
 ## Round 1 — reviewed results (2026-04-29)
 
-### MERGED — first yi baseline established
+### MERGED — yi baseline progression
 
-- **PR #11 (kohaku, tangential wall-shear projection) MERGED.**
-  `test_primary/abupt_axis_mean = 35.12` — ~46% better than nearest
-  comparator (norman 64.66). Run `uy0ds6iz`, 1 epoch only (pre-fix), state=finished.
-  All future PRs measured against this baseline.
-  - kohaku correctly deviated from the PR pseudocode (denormalize → project →
-    renormalize), since per-axis stds are non-uniform.
-  - Diagnostic `train/wallshear_pred_normal_rms` exposed predicted normal
-    component growing 2.4× during 1 epoch — the regularization gap.
+- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) MERGED 03:57 UTC — new yi best.**
+  `abupt_axis_mean = 17.39` (vs prior 35.12 = 50.5% reduction). Wall-shear
+  axes -50% to -70%. Surface pressure +1pp. Run A `y2gigs61`, state=finished,
+  6 epochs reached, best_epoch=3. PR was CLI-flag-only (no code diff).
+  Win came primarily from **protocol fixes** (bs=8, validation-every=1,
+  gradient-log-every=100), not from vol_w (which is at worst neutral).
+  - **Infrastructure bug flagged:** `train.py` has no gradient clipping.
+    Multiple Round-1 PRs diverged on this mechanism (chihiro, emma, fern,
+    haku, gilbert run B). Follow-up PR #22 (gilbert) adds it.
+- **PR #11 (kohaku, tangential wall-shear projection) — MERGED earlier,
+  superseded as baseline by PR #9.** Code remains on yi (default off);
+  expected to compose with gilbert's config for further gains.
 - **Follow-up PR #21 (kohaku, normal-component suppression sweep)** —
   λ ∈ {0.0, 0.01, 0.1, 1.0} of `λ * mean((ws_pred · n_hat)^2)` on top of
-  projection. λ=0 arm is the first multi-epoch projection run (with timeout
-  fix + validation-every 1).
+  projection.
+- **Follow-up PR #22 (gilbert, gradient clipping)** — adds
+  `torch.nn.utils.clip_grad_norm_` + 4-arm sweep. Infrastructure win
+  blocking high-LR / high-weight / high-batch sweeps.
 
 ### CLOSED
 
@@ -125,12 +131,15 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 ### Cross-cutting directives broadcast to all active PRs
 
 1. Rebase onto `yi` to pick up `af92e9a` + projection code (default off).
-2. `--validation-every 1` (or 2) — `validation_every=10` only gives one usable
-   checkpoint inside the 6 h budget.
-3. `--gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms` (Issue #19).
-4. Wall-shear targeted PRs (haku #10, tanjiro #15, thorfinn #16) should
+2. **New recommended base config (PR #9 winner):**
+   `--volume-loss-weight 2.0 --batch-size 8 --validation-every 1
+    --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms`
+3. Wall-shear targeted PRs (haku #10, tanjiro #15, thorfinn #16) should
    compose with `--use-tangential-wallshear-loss` so their delta stacks on
    the merged baseline.
+4. **Training-stability bug flagged:** until PR #22 lands gradient clipping,
+   sudden train-loss spikes followed by best_epoch lock-in are the bug, not
+   the hypothesis.
 5. Report any train→val divergence observed.
 
 ### Open question

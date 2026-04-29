@@ -9,7 +9,54 @@ Targets to beat (lower is better): `surface_pressure 3.82`, `wall_shear 7.29`,
 Round 1 launches 16 parallel experiments: 5 known-good baselines / proven-additive
 deltas (Stream 1) and 11 fresh single-delta hypotheses (Stream 2).
 
-## 2026-04-29 03:13 — PR #11: tangential wall-shear projection loss (kohaku) — MERGED, FIRST yi BASELINE
+## 2026-04-29 03:57 — PR #9: volume loss weight sweep (gilbert) — MERGED, NEW yi BASELINE
+
+- Branch: `gilbert/round1-volume-loss-reweight`
+- Hypothesis: upweight volume loss to 2.0–3.0 to focus gradient budget on
+  the hardest target (`volume_pressure`).
+- Run A (vol_w=2.0): `y2gigs61`, state=finished, 6 epochs reached, best_epoch=3.
+- Run B (vol_w=3.0): `s45dwv6i`, state=finished, 6 epochs reached, best_epoch=1.
+
+**test_primary/* (Run A new yi best vs prior PR #11 baseline):**
+
+| Metric | Run A (vol_w=2.0) | PR #11 (kohaku, prior) | Δ | AB-UPT |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | **17.39** | 35.12 | **−50.5%** | — |
+| `surface_pressure_rel_l2_pct` | 11.07 | 10.07 | +9.9% | 3.82 |
+| `wall_shear_rel_l2_pct` | **18.32** | 43.05 | **−57.4%** | 7.29 |
+| `volume_pressure_rel_l2_pct` | 15.21 | 14.99 | +1.5% | 6.08 |
+| `wall_shear_x_rel_l2_pct` | **15.65** | 30.85 | **−49.3%** | 5.35 |
+| `wall_shear_y_rel_l2_pct` | **21.86** | 42.06 | **−48.0%** | 3.65 |
+| `wall_shear_z_rel_l2_pct` | **23.18** | 77.65 | **−70.1%** | 3.63 |
+
+Run B (vol_w=3.0): `abupt=30.08`, diverged at epoch 2 (best_epoch=1).
+**vol_w=3.0 strictly worse than vol_w=2.0**, confirming the PR's question.
+
+**The big confound:** gilbert's run did **not** include
+`--use-tangential-wallshear-loss` (kohaku's projection code is on yi but
+default off). Yet still beat kohaku's projection-loss run by 50%. The bulk
+of the win came from the **protocol fixes**:
+
+- `--batch-size 8` (vs default 2)
+- `--validation-every 1` (vs default 10)
+- `--gradient-log-every 100 --weight-log-every 100` (Issue #19 throughput)
+
+vol_w=2.0 vs vol_w=1.0 single-delta is therefore untested, but vol_w=2.0
+appears at worst neutral. Combining gilbert's config with kohaku's
+projection should compose for further gains.
+
+**Critical bug uncovered (gilbert PR comment):** `train.py` has no gradient
+clipping. Run B and several other Round-1 runs (chihiro, emma, fern, haku)
+diverged on the exact same mechanism. **Round-2 follow-up PR #22 (gilbert)
+adds `torch.nn.utils.clip_grad_norm_` + sweeps clip values.**
+
+**Round-2 follow-ups triggered:**
+- PR #22 (gilbert): add gradient clipping to `train.py` — infrastructure
+  win blocking high-LR / high-weight / high-batch sweeps.
+- BASELINE.md: new winning reproduce config recorded with all four protocol
+  flags + vol_w=2.0.
+
+## 2026-04-29 03:13 — PR #11: tangential wall-shear projection loss (kohaku) — MERGED, prior baseline (superseded by PR #9)
 
 - Branch: `kohaku/round1-tangential-wallshear-loss`
 - Hypothesis: project predicted/target wall-shear onto surface tangent plane
