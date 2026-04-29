@@ -114,6 +114,9 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     compile_model: bool = True
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
     debug: bool = False
 
 
@@ -140,6 +143,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    optimizer_name = config.optimizer.lower()
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+    if optimizer_name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
 
 
 def build_model(config: Config) -> SurfaceTransolver:
@@ -229,7 +253,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
