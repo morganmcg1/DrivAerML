@@ -20,16 +20,19 @@ import re
 import subprocess
 import time
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 import yaml
-from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader, Sampler
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import (
@@ -439,7 +442,7 @@ class Config:
     eval_surface_points: int = 40_000
     train_volume_points: int = 40_000
     eval_volume_points: int = 40_000
-    validation_every: int = 10
+    validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
@@ -462,14 +465,102 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
-    gradient_log_every: int = 1
-    log_gradient_histograms: bool = True
-    weight_log_every: int = 1
+    eval_raw_vs_ema: bool = False
+    lr_warmup_epochs: int = 0
+    lr_cosine_t_max: int = 0
+    lr_min: float = 1e-6
+    grad_clip_norm: float = 1.0
+    gradient_log_every: int = 250
+    log_gradient_histograms: bool = False
+    weight_log_every: int = 250
     log_weight_histograms: bool = False
+    ddp_log_model_telemetry_all_ranks: bool = False
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     compile_model: bool = True
     debug: bool = False
+
+
+@dataclass(frozen=True)
+class DistributedState:
+    enabled: bool
+    rank: int
+    local_rank: int
+    world_size: int
+    device: torch.device
+
+    @property
+    def is_main(self) -> bool:
+        return self.rank == 0
+
+
+def init_distributed() -> DistributedState:
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    enabled = world_size > 1
+    if torch.cuda.is_available():
+        if enabled:
+            torch.cuda.set_device(local_rank)
+            device = torch.device("cuda", local_rank)
+        else:
+            device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    if enabled:
+        if not dist.is_available():
+            raise RuntimeError("torch.distributed is not available, but WORLD_SIZE > 1")
+        backend = "nccl" if device.type == "cuda" else "gloo"
+        dist.init_process_group(backend=backend)
+    return DistributedState(
+        enabled=enabled,
+        rank=rank,
+        local_rank=local_rank,
+        world_size=world_size,
+        device=device,
+    )
+
+
+def cleanup_distributed(state: DistributedState) -> None:
+    if state.enabled and dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def distributed_any(state: DistributedState, value: bool, device: torch.device) -> bool:
+    if not state.enabled:
+        return bool(value)
+    flag = torch.tensor(1 if value else 0, device=device, dtype=torch.int32)
+    dist.all_reduce(flag, op=dist.ReduceOp.MAX)
+    return bool(flag.item())
+
+
+def distributed_barrier(state: DistributedState) -> None:
+    if state.enabled:
+        dist.barrier()
+
+
+def unwrap_model(model: nn.Module) -> nn.Module:
+    current = model
+    while isinstance(current, DistributedDataParallel):
+        current = current.module
+    return getattr(current, "_orig_mod", current)
+
+
+class StridedDistributedSampler(Sampler[int]):
+    """Shard eval indices without padding or duplication."""
+
+    def __init__(self, dataset, *, num_replicas: int, rank: int):
+        self.dataset = dataset
+        self.num_replicas = num_replicas
+        self.rank = rank
+
+    def __iter__(self):
+        return iter(range(self.rank, len(self.dataset), self.num_replicas))
+
+    def __len__(self) -> int:
+        if len(self.dataset) <= self.rank:
+            return 0
+        return (len(self.dataset) - 1 - self.rank) // self.num_replicas + 1
 
 
 class TargetTransform:
@@ -561,8 +652,54 @@ def resolve_num_workers(config: Config) -> int:
     return min(4, os.cpu_count() or 4)
 
 
+def loader_kwargs(config: Config) -> dict[str, object]:
+    num_workers = resolve_num_workers(config)
+    kwargs: dict[str, object] = {
+        "collate_fn": pad_collate,
+        "num_workers": num_workers,
+        "pin_memory": config.pin_memory and torch.cuda.is_available(),
+    }
+    if num_workers > 0:
+        kwargs["persistent_workers"] = config.persistent_workers
+        kwargs["prefetch_factor"] = config.prefetch_factor
+    return kwargs
+
+
+def eval_loader_for_dataset(
+    dataset,
+    config: Config,
+    *,
+    distributed_state: DistributedState | None = None,
+) -> DataLoader:
+    sampler = None
+    if distributed_state is not None and distributed_state.enabled:
+        sampler = StridedDistributedSampler(
+            dataset,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+        )
+    return DataLoader(
+        dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        sampler=sampler,
+        **loader_kwargs(config),
+    )
+
+
+def full_eval_loaders_from(
+    loaders: dict[str, DataLoader],
+    config: Config,
+) -> dict[str, DataLoader]:
+    return {
+        name: eval_loader_for_dataset(loader.dataset, config, distributed_state=None)
+        for name, loader in loaders.items()
+    }
+
+
 def make_loaders(
     config: Config,
+    distributed_state: DistributedState | None = None,
 ) -> tuple[DataLoader, dict[str, DataLoader], dict[str, DataLoader], dict[str, torch.Tensor]]:
     train_ds, val_splits, test_splits, stats = load_data(
         manifest_path=config.manifest,
@@ -573,27 +710,30 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
-    num_workers = resolve_num_workers(config)
-    loader_kwargs = {
-        "collate_fn": pad_collate,
-        "num_workers": num_workers,
-        "pin_memory": config.pin_memory and torch.cuda.is_available(),
-    }
-    if num_workers > 0:
-        loader_kwargs["persistent_workers"] = config.persistent_workers
-        loader_kwargs["prefetch_factor"] = config.prefetch_factor
+    train_sampler = None
+    train_shuffle = True
+    if distributed_state is not None and distributed_state.enabled:
+        train_sampler = DistributedSampler(
+            train_ds,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+            shuffle=True,
+            drop_last=False,
+        )
+        train_shuffle = False
     train_loader = DataLoader(
         train_ds,
         batch_size=config.batch_size,
-        shuffle=True,
-        **loader_kwargs,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        **loader_kwargs(config),
     )
     val_loaders = {
-        name: DataLoader(ds, batch_size=config.batch_size, shuffle=False, **loader_kwargs)
+        name: eval_loader_for_dataset(ds, config, distributed_state=distributed_state)
         for name, ds in val_splits.items()
     }
     test_loaders = {
-        name: DataLoader(ds, batch_size=config.batch_size, shuffle=False, **loader_kwargs)
+        name: eval_loader_for_dataset(ds, config, distributed_state=distributed_state)
         for name, ds in test_splits.items()
     }
     return train_loader, val_loaders, test_loaders, stats
@@ -778,7 +918,7 @@ def collect_gradient_metrics(
 ) -> dict[str, float | wandb.Histogram]:
     """Collect high-fidelity gradient telemetry immediately after backprop."""
 
-    base_model = getattr(model, "_orig_mod", model)
+    base_model = unwrap_model(model)
     modules = dict(base_model.named_modules())
     global_acc = _empty_grad_accumulator()
     by_module: dict[tuple[str, str], dict[str, float]] = {}
@@ -862,7 +1002,7 @@ def collect_weight_metrics(
 ) -> dict[str, float | wandb.Histogram]:
     """Collect parameter telemetry after the optimizer update."""
 
-    base_model = getattr(model, "_orig_mod", model)
+    base_model = unwrap_model(model)
     modules = dict(base_model.named_modules())
     global_acc = _empty_weight_accumulator()
     by_module: dict[tuple[str, str], dict[str, float]] = {}
@@ -1115,9 +1255,35 @@ def check_kill_thresholds(
     return None
 
 
+def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    expanded_mask = mask
+    while expanded_mask.ndim < values.ndim:
+        expanded_mask = expanded_mask.unsqueeze(-1)
+    expanded_mask = expanded_mask.to(device=values.device, dtype=values.dtype)
+    denominator = expanded_mask.expand_as(values).sum()
+    if bool(denominator.detach().cpu().item() > 0):
+        return (values * expanded_mask).sum() / denominator.clamp_min(1.0)
+    return values.sum() * 0.0
+
+
 def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    if bool(mask.any()):
-        return F.mse_loss(pred[mask], target[mask])
+    return masked_mean((pred - target).square(), mask)
+
+
+def squared_relative_l2_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    mask_float = mask.to(device=pred.device, dtype=pred.dtype)
+    diff_sq = (pred.float() - target.float()).square().sum(dim=-1) * mask_float
+    target_sq = target.float().square().sum(dim=-1) * mask_float
+    denominator = target_sq.sum(dim=1)
+    valid = denominator > 0
+    if bool(valid.any()):
+        return (diff_sq.sum(dim=1)[valid] / denominator[valid].clamp_min(1e-12)).mean()
     return pred.sum() * 0.0
 
 
@@ -1143,11 +1309,42 @@ def train_loss(
         )
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        weighted_surface_loss = surface_loss_weight * surface_loss
+        weighted_volume_loss = volume_loss_weight * volume_loss
+        loss = weighted_surface_loss + weighted_volume_loss
+        base_mse_loss = surface_loss + volume_loss
     return loss, {
+        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
+        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+
+
+EVAL_KEYS = (
+    "surface_pressure",
+    "wall_shear",
+    "wall_shear_x",
+    "wall_shear_y",
+    "wall_shear_z",
+    "volume_pressure",
+)
+
+
+@dataclass
+class EvalAccumulator:
+    surface_loss_sse: float = 0.0
+    surface_loss_count: int = 0
+    volume_loss_sse: float = 0.0
+    volume_loss_count: int = 0
+    abs_sums: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in EVAL_KEYS})
+    abs_counts: dict[str, int] = field(default_factory=lambda: {key: 0 for key in EVAL_KEYS})
+    wall_shear_vector_abs_sum: float = 0.0
+    wall_shear_vector_count: int = 0
+    case_sums: dict[str, dict[str, list[float]]] = field(
+        default_factory=lambda: {key: {} for key in EVAL_KEYS}
+    )
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -1190,125 +1387,120 @@ def _finite_mean(values: Iterable[float]) -> float:
     return sum(finite) / max(len(finite), 1)
 
 
-@torch.no_grad()
-def evaluate_split(
+def accumulate_eval_batch(
+    accumulator: EvalAccumulator,
+    *,
     model: nn.Module,
-    loader,
+    batch: SurfaceBatch,
     transform: TargetTransform,
     device: torch.device,
-    *,
-    amp_mode: str = "none",
-) -> dict[str, float]:
-    model.eval()
-    surface_loss_sse = 0.0
-    surface_loss_count = 0
-    volume_loss_sse = 0.0
-    volume_loss_count = 0
-    abs_sums = {
-        "surface_pressure": 0.0,
-        "wall_shear": 0.0,
-        "wall_shear_x": 0.0,
-        "wall_shear_y": 0.0,
-        "wall_shear_z": 0.0,
-        "volume_pressure": 0.0,
-    }
-    abs_counts = {key: 0 for key in abs_sums}
-    wall_shear_vector_abs_sum = 0.0
-    wall_shear_vector_count = 0
-    case_sums = {
-        "surface_pressure": {},
-        "wall_shear": {},
-        "wall_shear_x": {},
-        "wall_shear_y": {},
-        "wall_shear_z": {},
-        "volume_pressure": {},
-    }
+    amp_mode: str,
+) -> None:
+    batch = batch.to(device)
+    surface_target_norm = transform.apply_surface(batch.surface_y)
+    volume_target_norm = transform.apply_volume(batch.volume_y)
+    with autocast_context(device, amp_mode):
+        out = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+    surface_pred_norm = out["surface_preds"].float()
+    volume_pred_norm = out["volume_preds"].float()
+    surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
+    volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
+    accumulator.surface_loss_sse += surface_sse
+    accumulator.surface_loss_count += surface_count
+    accumulator.volume_loss_sse += volume_sse
+    accumulator.volume_loss_count += volume_count
+    surface_pred = transform.invert_surface(surface_pred_norm)
+    volume_pred = transform.invert_volume(volume_pred_norm)
 
-    for batch in loader:
-        batch = batch.to(device)
-        surface_target_norm = transform.apply_surface(batch.surface_y)
-        volume_target_norm = transform.apply_volume(batch.volume_y)
-        with autocast_context(device, amp_mode):
-            out = model(
-                surface_x=batch.surface_x,
-                surface_mask=batch.surface_mask,
-                volume_x=batch.volume_x,
-                volume_mask=batch.volume_mask,
+    if bool(batch.surface_mask.any()):
+        surface_abs = (surface_pred - batch.surface_y).abs()
+        valid_surface_abs = surface_abs[batch.surface_mask]
+        accumulator.abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
+        accumulator.abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
+        wall_abs = valid_surface_abs[:, 1:4]
+        accumulator.abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
+        accumulator.abs_counts["wall_shear"] += int(wall_abs.numel())
+        for offset, axis in enumerate(("x", "y", "z")):
+            channel = wall_abs[:, offset]
+            accumulator.abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
+            accumulator.abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
+        wall_vector_error = torch.linalg.vector_norm(
+            surface_pred[batch.surface_mask][:, 1:4] - batch.surface_y[batch.surface_mask][:, 1:4],
+            dim=-1,
+        )
+        accumulator.wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
+        accumulator.wall_shear_vector_count += int(wall_vector_error.numel())
+
+    if bool(batch.volume_mask.any()):
+        volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
+        accumulator.abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
+        accumulator.abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
+
+    for case_idx, case_id in enumerate(batch.case_ids):
+        surface_valid = batch.surface_mask[case_idx].bool()
+        if bool(surface_valid.any()):
+            surface_pred_valid = surface_pred[case_idx][surface_valid]
+            surface_target_valid = batch.surface_y[case_idx][surface_valid]
+            _accumulate_case_rel_l2(
+                accumulator.case_sums["surface_pressure"],
+                case_id=case_id,
+                pred=surface_pred_valid[:, 0:1],
+                target=surface_target_valid[:, 0:1],
             )
-        surface_pred_norm = out["surface_preds"].float()
-        volume_pred_norm = out["volume_preds"].float()
-        surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
-        volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
-        surface_loss_sse += surface_sse
-        surface_loss_count += surface_count
-        volume_loss_sse += volume_sse
-        volume_loss_count += volume_count
-        surface_pred = transform.invert_surface(surface_pred_norm)
-        volume_pred = transform.invert_volume(volume_pred_norm)
-
-        if bool(batch.surface_mask.any()):
-            surface_abs = (surface_pred - batch.surface_y).abs()
-            valid_surface_abs = surface_abs[batch.surface_mask]
-            abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
-            abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
-            wall_abs = valid_surface_abs[:, 1:4]
-            abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
-            abs_counts["wall_shear"] += int(wall_abs.numel())
-            for offset, axis in enumerate(("x", "y", "z")):
-                channel = wall_abs[:, offset]
-                abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
-                abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
-            wall_vector_error = torch.linalg.vector_norm(
-                surface_pred[batch.surface_mask][:, 1:4] - batch.surface_y[batch.surface_mask][:, 1:4],
-                dim=-1,
+            _accumulate_case_rel_l2(
+                accumulator.case_sums["wall_shear"],
+                case_id=case_id,
+                pred=surface_pred_valid[:, 1:4],
+                target=surface_target_valid[:, 1:4],
             )
-            wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
-            wall_shear_vector_count += int(wall_vector_error.numel())
-
-        if bool(batch.volume_mask.any()):
-            volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
-            abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
-            abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
-
-        for case_idx, case_id in enumerate(batch.case_ids):
-            surface_valid = batch.surface_mask[case_idx].bool()
-            if bool(surface_valid.any()):
-                surface_pred_valid = surface_pred[case_idx][surface_valid]
-                surface_target_valid = batch.surface_y[case_idx][surface_valid]
+            for channel, axis in enumerate(("x", "y", "z"), start=1):
                 _accumulate_case_rel_l2(
-                    case_sums["surface_pressure"],
+                    accumulator.case_sums[f"wall_shear_{axis}"],
                     case_id=case_id,
-                    pred=surface_pred_valid[:, 0:1],
-                    target=surface_target_valid[:, 0:1],
+                    pred=surface_pred_valid[:, channel : channel + 1],
+                    target=surface_target_valid[:, channel : channel + 1],
                 )
-                _accumulate_case_rel_l2(
-                    case_sums["wall_shear"],
-                    case_id=case_id,
-                    pred=surface_pred_valid[:, 1:4],
-                    target=surface_target_valid[:, 1:4],
-                )
-                for channel, axis in enumerate(("x", "y", "z"), start=1):
-                    _accumulate_case_rel_l2(
-                        case_sums[f"wall_shear_{axis}"],
-                        case_id=case_id,
-                        pred=surface_pred_valid[:, channel : channel + 1],
-                        target=surface_target_valid[:, channel : channel + 1],
-                    )
-            volume_valid = batch.volume_mask[case_idx].bool()
-            if bool(volume_valid.any()):
-                _accumulate_case_rel_l2(
-                    case_sums["volume_pressure"],
-                    case_id=case_id,
-                    pred=volume_pred[case_idx][volume_valid],
-                    target=batch.volume_y[case_idx][volume_valid],
-                )
+        volume_valid = batch.volume_mask[case_idx].bool()
+        if bool(volume_valid.any()):
+            _accumulate_case_rel_l2(
+                accumulator.case_sums["volume_pressure"],
+                case_id=case_id,
+                pred=volume_pred[case_idx][volume_valid],
+                target=batch.volume_y[case_idx][volume_valid],
+            )
 
-    surface_pressure_rel_l2, surface_cases = _rel_l2(case_sums["surface_pressure"])
-    wall_shear_rel_l2, wall_shear_cases = _rel_l2(case_sums["wall_shear"])
-    wall_shear_x_rel_l2, _ = _rel_l2(case_sums["wall_shear_x"])
-    wall_shear_y_rel_l2, _ = _rel_l2(case_sums["wall_shear_y"])
-    wall_shear_z_rel_l2, _ = _rel_l2(case_sums["wall_shear_z"])
-    volume_pressure_rel_l2, volume_cases = _rel_l2(case_sums["volume_pressure"])
+
+def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccumulator:
+    merged = EvalAccumulator()
+    for accumulator in accumulators:
+        merged.surface_loss_sse += accumulator.surface_loss_sse
+        merged.surface_loss_count += accumulator.surface_loss_count
+        merged.volume_loss_sse += accumulator.volume_loss_sse
+        merged.volume_loss_count += accumulator.volume_loss_count
+        merged.wall_shear_vector_abs_sum += accumulator.wall_shear_vector_abs_sum
+        merged.wall_shear_vector_count += accumulator.wall_shear_vector_count
+        for key in EVAL_KEYS:
+            merged.abs_sums[key] += accumulator.abs_sums[key]
+            merged.abs_counts[key] += accumulator.abs_counts[key]
+            for case_id, values in accumulator.case_sums[key].items():
+                state = merged.case_sums[key].setdefault(case_id, [0.0, 0.0])
+                state[0] += values[0]
+                state[1] += values[1]
+    return merged
+
+
+def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
+    surface_pressure_rel_l2, surface_cases = _rel_l2(accumulator.case_sums["surface_pressure"])
+    wall_shear_rel_l2, wall_shear_cases = _rel_l2(accumulator.case_sums["wall_shear"])
+    wall_shear_x_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_x"])
+    wall_shear_y_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_y"])
+    wall_shear_z_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_z"])
+    volume_pressure_rel_l2, volume_cases = _rel_l2(accumulator.case_sums["volume_pressure"])
     abupt_axis_mean_rel_l2 = _finite_mean(
         [
             surface_pressure_rel_l2,
@@ -1319,15 +1511,19 @@ def evaluate_split(
         ]
     )
     mae_values = {
-        key: abs_sums[key] / max(abs_counts[key], 1)
-        for key in abs_sums
+        key: accumulator.abs_sums[key] / max(accumulator.abs_counts[key], 1)
+        for key in EVAL_KEYS
     }
-    wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
-    loss = (surface_loss_sse + volume_loss_sse) / max(surface_loss_count + volume_loss_count, 1)
+    wall_shear_vector_mae = accumulator.wall_shear_vector_abs_sum / max(
+        accumulator.wall_shear_vector_count, 1
+    )
+    loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
+        accumulator.surface_loss_count + accumulator.volume_loss_count, 1
+    )
     return {
         "loss": loss,
-        "surface_loss": surface_loss_sse / max(surface_loss_count, 1),
-        "volume_loss": volume_loss_sse / max(volume_loss_count, 1),
+        "surface_loss": accumulator.surface_loss_sse / max(accumulator.surface_loss_count, 1),
+        "volume_loss": accumulator.volume_loss_sse / max(accumulator.volume_loss_count, 1),
         "surface_pressure_mae": mae_values["surface_pressure"],
         "wall_shear_mae": mae_values["wall_shear"],
         "wall_shear_vector_mae": wall_shear_vector_mae,
@@ -1353,6 +1549,36 @@ def evaluate_split(
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
     }
+
+
+@torch.no_grad()
+def evaluate_split(
+    model: nn.Module,
+    loader,
+    transform: TargetTransform,
+    device: torch.device,
+    *,
+    amp_mode: str = "none",
+    distributed_state: DistributedState | None = None,
+) -> dict[str, float]:
+    model.eval()
+    accumulator = EvalAccumulator()
+    for batch in loader:
+        accumulate_eval_batch(
+            accumulator,
+            model=model,
+            batch=batch,
+            transform=transform,
+            device=device,
+            amp_mode=amp_mode,
+        )
+    if distributed_state is not None and distributed_state.enabled:
+        gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
+        dist.all_gather_object(gathered, accumulator)
+        if not distributed_state.is_main:
+            return {}
+        accumulator = merge_eval_accumulators(acc for acc in gathered if acc is not None)
+    return finalize_eval_accumulator(accumulator)
 
 
 def _sanitize_artifact_token(value: str) -> str:
@@ -1435,409 +1661,671 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     )
 
 
+PRIMARY_METRIC_KEYS = (
+    "abupt_axis_mean_rel_l2_pct",
+    "abupt_axis_mean_rel_l2",
+    "surface_pressure_mae",
+    "wall_shear_mae",
+    "volume_pressure_mae",
+    "surface_pressure_rel_l2_pct",
+    "wall_shear_rel_l2_pct",
+    "wall_shear_x_rel_l2_pct",
+    "wall_shear_y_rel_l2_pct",
+    "wall_shear_z_rel_l2_pct",
+    "volume_pressure_rel_l2_pct",
+)
+
+
+def primary_metric_log(prefix: str, metrics: dict[str, float]) -> dict[str, float]:
+    return {
+        f"{prefix}/{key}": metrics[key]
+        for key in PRIMARY_METRIC_KEYS
+    }
+
+
+def assert_required_finite_metrics(log: dict[str, object], prefix: str) -> None:
+    required = [f"{prefix}/{key}" for key in PRIMARY_METRIC_KEYS]
+    missing = [key for key in required if key not in log]
+    nonfinite = []
+    for key in required:
+        value = log.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            nonfinite.append(key)
+            continue
+        if not math.isfinite(float(value)):
+            nonfinite.append(key)
+    if missing or nonfinite:
+        parts = []
+        if missing:
+            parts.append(f"missing={missing}")
+        if nonfinite:
+            parts.append(f"nonfinite={nonfinite}")
+        raise RuntimeError(f"Invalid final metric contract for {prefix}: " + ", ".join(parts))
+
+
+def is_valid_primary_metric(value: float) -> bool:
+    return math.isfinite(float(value)) and float(value) > 0.0
+
+
+def should_update_best_checkpoint(primary_val: float, best_val: float) -> bool:
+    return is_valid_primary_metric(primary_val) and primary_val < best_val
+
+
+def timeout_budget_minutes(env: Mapping[str, str] = os.environ) -> tuple[float, float, float]:
+    timeout_minutes = float(env.get("SENPAI_TIMEOUT_MINUTES", "30"))
+    default_val_budget = min(90.0, max(1.0, timeout_minutes * 0.25))
+    val_budget_minutes = float(env.get("SENPAI_VAL_BUDGET_MINUTES", str(default_val_budget)))
+    train_timeout_minutes = max(0.0, timeout_minutes - max(0.0, val_budget_minutes))
+    return timeout_minutes, val_budget_minutes, train_timeout_minutes
+
+
+def build_lr_scheduler(
+    optimizer: torch.optim.Optimizer,
+    config: Config,
+    max_epochs: int,
+) -> torch.optim.lr_scheduler.LRScheduler:
+    t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=max(1, t_max),
+        eta_min=config.lr_min,
+    )
+    if config.lr_warmup_epochs <= 0:
+        return cosine_scheduler
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer,
+        start_factor=0.05,
+        end_factor=1.0,
+        total_iters=max(1, config.lr_warmup_epochs),
+    )
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[warmup_scheduler, cosine_scheduler],
+        milestones=[config.lr_warmup_epochs],
+    )
+
+
+def global_grad_norm(parameters: Iterable[torch.nn.Parameter], device: torch.device) -> torch.Tensor:
+    total = torch.zeros((), device=device, dtype=torch.float32)
+    for param in parameters:
+        if param.grad is None:
+            continue
+        grad = param.grad.detach().float()
+        total = total + grad.square().sum()
+    return total.sqrt()
+
+
+def run_name_for_rank(config: Config, state: DistributedState) -> str | None:
+    if not state.enabled:
+        return config.wandb_name or None
+    base = config.wandb_name or config.agent or "drivaerml"
+    return f"{base}-rank{state.rank}"
+
+
+def wandb_group_for_rank(config: Config, state: DistributedState) -> str | None:
+    if config.wandb_group:
+        return config.wandb_group
+    if state.enabled:
+        return config.wandb_name or config.agent or "drivaerml-ddp"
+    return None
+
+
+def metric_namespace(prefix: str, split_name: str, metrics: dict[str, float]) -> dict[str, float]:
+    return {
+        f"{prefix}/{split_name}/{key}": value
+        for key, value in metrics.items()
+    }
+
+
 def main(argv: Iterable[str] | None = None) -> None:
-    config = parse_args(argv)
-    kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
-    max_epochs = min(config.epochs, 3) if config.debug else config.epochs
-    timeout_minutes = float(os.environ.get("SENPAI_TIMEOUT_MINUTES", "30"))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}" + (" [DEBUG]" if config.debug else ""))
+    state = init_distributed()
+    run = None
+    try:
+        config = parse_args(argv)
+        kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
+        requested_epochs = config.epochs
+        if os.environ.get("SENPAI_MAX_EPOCHS"):
+            requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
+        max_epochs = min(requested_epochs, 3) if config.debug else requested_epochs
+        timeout_minutes, val_budget_minutes, train_timeout_minutes = timeout_budget_minutes()
+        device = state.device
+        if state.is_main:
+            ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
+            print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
-    train_loader, val_loaders, test_loaders, stats = make_loaders(config)
-    transform = TargetTransform(
-        surface_y_mean=stats["surface_y_mean"].to(device),
-        surface_y_std=stats["surface_y_std"].to(device),
-        volume_y_mean=stats["volume_y_mean"].to(device),
-        volume_y_std=stats["volume_y_std"].to(device),
-    )
+        train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
+        final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+        transform = TargetTransform(
+            surface_y_mean=stats["surface_y_mean"].to(device),
+            surface_y_std=stats["surface_y_std"].to(device),
+            volume_y_mean=stats["volume_y_mean"].to(device),
+            volume_y_std=stats["volume_y_std"].to(device),
+        )
 
-    model = build_model(config).to(device)
-    if config.compile_model:
-        model = torch.compile(model)
-    n_params = sum(param.numel() for param in model.parameters())
-    print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+        model: nn.Module = build_model(config).to(device)
+        n_params = sum(param.numel() for param in model.parameters())
+        if config.compile_model:
+            model = torch.compile(model)
+        if state.enabled:
+            ddp_kwargs = {}
+            if device.type == "cuda":
+                ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            model = DistributedDataParallel(model, **ddp_kwargs)
+        base_model = unwrap_model(model)
+        if state.is_main:
+            print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
-    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
-    total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
-    if kill_thresholds:
-        print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
-    train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
-    val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
-    full_val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
-    test_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        scheduler = build_lr_scheduler(optimizer, config, max_epochs)
+        ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+        if kill_thresholds and state.is_main:
+            print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
+        train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+        val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+        full_val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+        test_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
 
-    run = wandb.init(
-        entity=os.environ.get("WANDB_ENTITY"),
-        project=os.environ.get("WANDB_PROJECT"),
-        group=config.wandb_group or None,
-        name=config.wandb_name or None,
-        tags=[config.agent] if config.agent else [],
-        config={
-            **asdict(config),
-            "n_params": n_params,
-            "train_views": len(train_loader.dataset),
-            "val_views": {k: len(v.dataset) for k, v in val_loaders.items()},
-            "test_views": {k: len(v.dataset) for k, v in test_loaders.items()},
-            "surface_targets": SURFACE_TARGET_NAMES,
-            "volume_targets": VOLUME_TARGET_NAMES,
-            "total_estimated_steps": total_estimated_steps,
-        },
-        mode=os.environ.get("WANDB_MODE", "online"),
-    )
-    wandb.define_metric("global_step")
-    wandb.define_metric("train/*", step_metric="global_step")
-    wandb.define_metric("val/*", step_metric="global_step")
-    wandb.define_metric("val_primary/*", step_metric="global_step")
-    wandb.define_metric("full_val/*", step_metric="global_step")
-    wandb.define_metric("full_val_primary/*", step_metric="global_step")
-    wandb.define_metric("test/*", step_metric="global_step")
-    wandb.define_metric("test_primary/*", step_metric="global_step")
-    wandb.define_metric("train/slope/*", step_metric="global_step")
-    wandb.define_metric("val/slope/*", step_metric="global_step")
-    wandb.define_metric("full_val/slope/*", step_metric="global_step")
-    wandb.define_metric("test/slope/*", step_metric="global_step")
-    wandb.define_metric("train/grad/*", step_metric="global_step")
-    wandb.define_metric("train/grad_module/*", step_metric="global_step")
-    wandb.define_metric("train/grad_param/*", step_metric="global_step")
-    wandb.define_metric("train/grad_type/*", step_metric="global_step")
-    wandb.define_metric("train/grad_hist/*", step_metric="global_step")
-    wandb.define_metric("train/grad_hist_param/*", step_metric="global_step")
-    wandb.define_metric("train/weight/*", step_metric="global_step")
-    wandb.define_metric("train/weight_module/*", step_metric="global_step")
-    wandb.define_metric("train/weight_param/*", step_metric="global_step")
-    wandb.define_metric("train/weight_type/*", step_metric="global_step")
-    wandb.define_metric("train/weight_hist/*", step_metric="global_step")
-    wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
-    wandb.define_metric("lr", step_metric="global_step")
+        tags = [config.agent] if config.agent else []
+        if state.enabled:
+            tags.extend(["ddp", f"rank:{state.rank}"])
+        run = wandb.init(
+            entity=os.environ.get("WANDB_ENTITY"),
+            project=os.environ.get("WANDB_PROJECT"),
+            group=wandb_group_for_rank(config, state),
+            name=run_name_for_rank(config, state),
+            tags=tags,
+            config={
+                **asdict(config),
+                "n_params": n_params,
+                "train_views": len(train_loader.dataset),
+                "val_views": {k: len(v.dataset) for k, v in val_loaders.items()},
+                "test_views": {k: len(v.dataset) for k, v in test_loaders.items()},
+                "surface_targets": SURFACE_TARGET_NAMES,
+                "volume_targets": VOLUME_TARGET_NAMES,
+                "total_estimated_steps": total_estimated_steps,
+                "max_epochs_effective": max_epochs,
+                "ddp_enabled": state.enabled,
+                "ddp_rank": state.rank,
+                "ddp_world_size": state.world_size,
+                "train_timeout_minutes": train_timeout_minutes,
+                "val_budget_minutes": val_budget_minutes,
+            },
+            mode=os.environ.get("WANDB_MODE", "online"),
+        )
+        wandb.define_metric("global_step")
+        for metric_prefix in (
+            "train/*",
+            "val/*",
+            "val_raw/*",
+            "val_primary/*",
+            "val_raw_primary/*",
+            "full_val/*",
+            "full_val_primary/*",
+            "test/*",
+            "test_primary/*",
+            "train/slope/*",
+            "val/slope/*",
+            "full_val/slope/*",
+            "test/slope/*",
+            "train/grad/*",
+            "train/grad_module/*",
+            "train/grad_param/*",
+            "train/grad_type/*",
+            "train/grad_hist/*",
+            "train/grad_hist_param/*",
+            "train/weight/*",
+            "train/weight_module/*",
+            "train/weight_param/*",
+            "train/weight_type/*",
+            "train/weight_hist/*",
+            "train/weight_hist_param/*",
+            "lr",
+        ):
+            wandb.define_metric(metric_prefix, step_metric="global_step")
 
-    output_dir = Path(config.output_dir) / f"run-{run.id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / "checkpoint.pt"
-    config_path = output_dir / "config.yaml"
-    with config_path.open("w") as f:
-        yaml.safe_dump(asdict(config), f)
+        output_dir = Path(config.output_dir) / f"run-{run.id}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        model_path = output_dir / "checkpoint.pt"
+        config_path = output_dir / "config.yaml"
+        with config_path.open("w") as f:
+            yaml.safe_dump(asdict(config), f)
 
-    best_val = float("inf")
-    best_metrics: dict[str, float] = {}
-    global_step = 0
-    early_stop_reason: str | None = None
-    train_start = time.time()
+        best_val = float("inf")
+        best_metrics: dict[str, float] = {}
+        best_checkpoint_source = "ema" if ema is not None else "raw"
+        global_step = 0
+        early_stop_reason: str | None = None
+        timeout_hit = False
+        train_start = time.time()
 
-    for epoch in range(max_epochs):
-        if (time.time() - train_start) / 60.0 >= timeout_minutes:
-            print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
-            break
-
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
-        t0 = time.time()
-        model.train()
-        train_loss_sum = 0.0
-        n_batches = 0
-
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
-            loss, batch_loss_metrics = train_loss(
-                model,
-                batch,
-                transform,
+        for epoch in range(max_epochs):
+            if isinstance(train_loader.sampler, DistributedSampler):
+                train_loader.sampler.set_epoch(epoch)
+            timeout_hit = distributed_any(
+                state,
+                (time.time() - train_start) / 60.0 >= timeout_minutes,
                 device,
-                config.amp_mode,
-                surface_loss_weight=config.surface_loss_weight,
-                volume_loss_weight=config.volume_loss_weight,
             )
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            should_log_gradients = (
-                config.gradient_log_every > 0
-                and (global_step + 1) % config.gradient_log_every == 0
-            )
-            should_log_weights = (
-                config.weight_log_every > 0
-                and (global_step + 1) % config.weight_log_every == 0
-            )
-            gradient_metrics = (
-                collect_gradient_metrics(
+            if timeout_hit:
+                if state.is_main:
+                    print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
+                break
+
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats(device)
+            t0 = time.time()
+            model.train()
+            train_loss_sum = 0.0
+            n_batches = 0
+
+            for batch in tqdm(
+                train_loader,
+                desc=f"Epoch {epoch + 1}/{max_epochs}",
+                leave=False,
+                disable=not state.is_main,
+            ):
+                loss, batch_loss_metrics = train_loss(
                     model,
-                    log_histograms=config.log_gradient_histograms,
+                    batch,
+                    transform,
+                    device,
+                    config.amp_mode,
+                    surface_loss_weight=config.surface_loss_weight,
+                    volume_loss_weight=config.volume_loss_weight,
                 )
-                if should_log_gradients
-                else {}
-            )
-            optimizer.step()
-            if ema is not None:
-                ema.update(model)
-            weight_metrics = (
-                collect_weight_metrics(
-                    model,
-                    log_histograms=config.log_weight_histograms,
+                optimizer.zero_grad(set_to_none=True)
+                global_step += 1
+                current_lr = scheduler.get_last_lr()[0]
+                loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
+                skip_step = distributed_any(state, loss_is_nonfinite, device)
+                should_log_model_telemetry = (
+                    state.is_main or config.ddp_log_model_telemetry_all_ranks
                 )
-                if should_log_weights
-                else {}
-            )
-            train_loss_sum += float(loss.detach().cpu().item())
-            n_batches += 1
-            global_step += 1
-            train_log: dict[str, object] = {
-                "train/loss": float(loss.detach().cpu().item()),
-                "train/surface_loss": batch_loss_metrics["surface_loss"],
-                "train/volume_loss": batch_loss_metrics["volume_loss"],
-                "global_step": global_step,
-                **gradient_metrics,
-                **weight_metrics,
-            }
-            train_log.update(
-                train_slope_tracker.update(
+                should_log_gradients = (
+                    should_log_model_telemetry
+                    and config.gradient_log_every > 0
+                    and global_step % config.gradient_log_every == 0
+                )
+                should_log_weights = (
+                    should_log_model_telemetry
+                    and config.weight_log_every > 0
+                    and global_step % config.weight_log_every == 0
+                )
+                train_log: dict[str, object] = {
+                    "global_step": global_step,
+                    "train/lr": current_lr,
+                    "lr": current_lr,
+                    "train/step_skipped": 1.0 if skip_step else 0.0,
+                    "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                }
+                if not loss_is_nonfinite:
+                    train_log.update(
+                        {
+                            "train/loss": float(loss.detach().cpu().item()),
+                            "train/base_mse_loss": batch_loss_metrics["base_mse_loss"],
+                            "train/surface_loss": batch_loss_metrics["surface_loss"],
+                            "train/volume_loss": batch_loss_metrics["volume_loss"],
+                            "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
+                            "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                        }
+                    )
+
+                if skip_step:
+                    optimizer.zero_grad(set_to_none=True)
+                else:
+                    loss.backward()
+                    if config.grad_clip_norm > 0.0:
+                        grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
+                            base_model.parameters(),
+                            max_norm=config.grad_clip_norm,
+                        )
+                    else:
+                        grad_norm_tensor = global_grad_norm(base_model.parameters(), device)
+                    grad_norm_pre_clip = float(grad_norm_tensor.detach().cpu().item())
+                    grad_is_nonfinite = not math.isfinite(grad_norm_pre_clip)
+                    skip_step = distributed_any(state, grad_is_nonfinite, device)
+                    clipped = (
+                        config.grad_clip_norm > 0.0
+                        and math.isfinite(grad_norm_pre_clip)
+                        and grad_norm_pre_clip > config.grad_clip_norm
+                    )
+                    train_log.update(
+                        {
+                            "train/grad/global_norm_pre_clip": grad_norm_pre_clip,
+                            "train/grad/clipped": 1.0 if clipped else 0.0,
+                            "train/nonfinite_grad": 1.0 if grad_is_nonfinite else 0.0,
+                            "train/step_skipped": 1.0 if skip_step else 0.0,
+                        }
+                    )
+                    gradient_metrics = (
+                        collect_gradient_metrics(
+                            model,
+                            log_histograms=config.log_gradient_histograms,
+                        )
+                        if should_log_gradients and not skip_step
+                        else {}
+                    )
+                    if skip_step:
+                        optimizer.zero_grad(set_to_none=True)
+                    else:
+                        optimizer.step()
+                        if ema is not None:
+                            ema.update(base_model)
+                        weight_metrics = (
+                            collect_weight_metrics(
+                                model,
+                                log_histograms=config.log_weight_histograms,
+                            )
+                            if should_log_weights
+                            else {}
+                        )
+                        train_loss_sum += float(loss.detach().cpu().item())
+                        n_batches += 1
+                        train_log.update(gradient_metrics)
+                        train_log.update(weight_metrics)
+
+                train_log.update(
+                    train_slope_tracker.update(
+                        global_step=global_step,
+                        metrics=train_log,
+                        namespace="train",
+                    )
+                )
+                local_stop_reason = check_kill_thresholds(
                     global_step=global_step,
                     metrics=train_log,
-                    namespace="train",
+                    thresholds=kill_thresholds,
                 )
-            )
-            early_stop_reason = check_kill_thresholds(
-                global_step=global_step,
-                metrics=train_log,
-                thresholds=kill_thresholds,
-            )
-            if early_stop_reason is not None:
-                train_log["early_stop/triggered"] = 1.0
-            wandb.log(train_log)
-            if early_stop_reason is not None:
-                print(early_stop_reason)
-                break
+                if local_stop_reason is not None:
+                    early_stop_reason = local_stop_reason
+                stop_requested = distributed_any(state, early_stop_reason is not None, device)
+                if stop_requested and early_stop_reason is None:
+                    early_stop_reason = "distributed peer requested early stop"
+                if early_stop_reason is not None:
+                    train_log["early_stop/triggered"] = 1.0
+                wandb.log(train_log)
+                if early_stop_reason is not None:
+                    if state.is_main:
+                        print(early_stop_reason)
+                    break
+                timeout_hit = distributed_any(
+                    state,
+                    (time.time() - train_start) / 60.0 >= train_timeout_minutes,
+                    device,
+                )
+                if timeout_hit:
+                    if state.is_main:
+                        print(
+                            f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
+                            f"at step {global_step}. Forcing validation and stopping."
+                        )
+                    break
 
-        scheduler.step()
-        epoch_train_loss = train_loss_sum / max(n_batches, 1)
-        dt = time.time() - t0
-        peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
-        should_validate = (
-            epoch == 0
-            or (epoch + 1) % max(config.validation_every, 1) == 0
-            or epoch + 1 == max_epochs
-        )
-
-        log_metrics = {
-            "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
-            "epoch_time_s": dt,
-            "global_step": global_step,
-        }
-        if early_stop_reason is not None:
-            log_metrics["early_stop/triggered"] = 1.0
-            wandb.log(log_metrics)
-            break
-
-        if not should_validate:
-            early_stop_reason = early_stop_reason or check_kill_thresholds(
-                global_step=global_step,
-                metrics=log_metrics,
-                thresholds=kill_thresholds,
+            scheduler.step()
+            epoch_train_loss = train_loss_sum / max(n_batches, 1)
+            dt = time.time() - t0
+            peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
+            should_validate = (
+                epoch == 0
+                or (epoch + 1) % max(config.validation_every, 1) == 0
+                or epoch + 1 == max_epochs
+                or (timeout_hit and n_batches > 0)
             )
+
+            log_metrics: dict[str, object] = {
+                "train/epoch_loss": epoch_train_loss,
+                "train/lr": scheduler.get_last_lr()[0],
+                "lr": scheduler.get_last_lr()[0],
+                "epoch_time_s": dt,
+                "global_step": global_step,
+            }
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
-            wandb.log(log_metrics)
-            print(
-                f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
-                f"train_loss={epoch_train_loss:.5f}"
-            )
-            if early_stop_reason is not None:
-                print(early_stop_reason)
+                wandb.log(log_metrics)
                 break
-            continue
 
-        if ema is not None:
-            ema.store(model)
-            ema.copy_to(model)
-        val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
-            for name, loader in val_loaders.items()
-        }
-        if ema is not None:
-            ema.restore(model)
+            if not should_validate:
+                local_stop_reason = check_kill_thresholds(
+                    global_step=global_step,
+                    metrics=log_metrics,
+                    thresholds=kill_thresholds,
+                )
+                if local_stop_reason is not None:
+                    early_stop_reason = local_stop_reason
+                stop_requested = distributed_any(state, early_stop_reason is not None, device)
+                if stop_requested and early_stop_reason is None:
+                    early_stop_reason = "distributed peer requested early stop"
+                if early_stop_reason is not None:
+                    log_metrics["early_stop/triggered"] = 1.0
+                wandb.log(log_metrics)
+                if state.is_main:
+                    print(
+                        f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                        f"train_loss={epoch_train_loss:.5f}"
+                    )
+                if early_stop_reason is not None:
+                    if state.is_main:
+                        print(early_stop_reason)
+                    break
+                continue
 
-        primary_val = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
-        log_metrics.update(
-            {
-                "val_primary/abupt_axis_mean_rel_l2_pct": primary_val,
-                "val_primary/abupt_axis_mean_rel_l2": val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
-                "val_primary/surface_pressure_mae": val_metrics["val_surface"]["surface_pressure_mae"],
-                "val_primary/wall_shear_mae": val_metrics["val_surface"]["wall_shear_mae"],
-                "val_primary/volume_pressure_mae": val_metrics["val_surface"]["volume_pressure_mae"],
-                "val_primary/surface_pressure_rel_l2_pct": val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
-                "val_primary/wall_shear_rel_l2_pct": val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
-                "val_primary/wall_shear_x_rel_l2_pct": val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
-                "val_primary/wall_shear_y_rel_l2_pct": val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
-                "val_primary/wall_shear_z_rel_l2_pct": val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
-                "val_primary/volume_pressure_rel_l2_pct": val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+            raw_val_metrics = None
+            if config.eval_raw_vs_ema and ema is not None:
+                raw_val_metrics = {
+                    name: evaluate_split(
+                        model,
+                        loader,
+                        transform,
+                        device,
+                        amp_mode=config.amp_mode,
+                        distributed_state=state,
+                    )
+                    for name, loader in val_loaders.items()
+                }
+            if ema is not None:
+                ema.store(base_model)
+                ema.copy_to(base_model)
+            val_metrics = {
+                name: evaluate_split(
+                    model,
+                    loader,
+                    transform,
+                    device,
+                    amp_mode=config.amp_mode,
+                    distributed_state=state,
+                )
+                for name, loader in val_loaders.items()
             }
-        )
-        for split_name, metrics in val_metrics.items():
-            for key, value in metrics.items():
-                log_metrics[f"val/{split_name}/{key}"] = value
-        log_metrics.update(
-            val_slope_tracker.update(
-                global_step=global_step,
-                metrics=log_metrics,
-                namespace="val",
-                force=True,
-            )
-        )
-        early_stop_reason = early_stop_reason or check_kill_thresholds(
-            global_step=global_step,
-            metrics=log_metrics,
-            thresholds=kill_thresholds,
-        )
-        if early_stop_reason is not None:
-            log_metrics["early_stop/triggered"] = 1.0
-        wandb.log(log_metrics)
 
-        improved = primary_val < best_val
-        if improved:
-            best_val = primary_val
-            best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
-            save_model = model
+            if state.is_main:
+                if raw_val_metrics is not None:
+                    raw_surface = raw_val_metrics["val_surface"]
+                    log_metrics.update(primary_metric_log("val_raw_primary", raw_surface))
+                    for split_name, metrics in raw_val_metrics.items():
+                        log_metrics.update(metric_namespace("val_raw", split_name, metrics))
+                primary_val = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
+                for split_name, metrics in val_metrics.items():
+                    log_metrics.update(metric_namespace("val", split_name, metrics))
+                log_metrics.update(
+                    val_slope_tracker.update(
+                        global_step=global_step,
+                        metrics=log_metrics,
+                        namespace="val",
+                        force=True,
+                    )
+                )
+                local_stop_reason = check_kill_thresholds(
+                    global_step=global_step,
+                    metrics=log_metrics,
+                    thresholds=kill_thresholds,
+                )
+                if local_stop_reason is not None:
+                    early_stop_reason = local_stop_reason
+                if early_stop_reason is not None:
+                    log_metrics["early_stop/triggered"] = 1.0
+                improved = should_update_best_checkpoint(primary_val, best_val)
+                if improved:
+                    best_val = primary_val
+                    best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
+                    torch.save(
+                        {
+                            "model": base_model.state_dict(),
+                            "config": asdict(config),
+                            "epoch": epoch + 1,
+                            "val_metrics": val_metrics,
+                            "checkpoint_source": best_checkpoint_source,
+                            "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                        },
+                        model_path,
+                    )
+                log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
+                log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+                wandb.log(log_metrics)
+                tag = " *" if improved else ""
+                print(
+                    f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                    f"train_loss={epoch_train_loss:.5f} "
+                    f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
+                )
+                print_metrics("val_surface", val_metrics["val_surface"])
+            else:
+                wandb.log(log_metrics)
             if ema is not None:
-                ema.store(model)
-                ema.copy_to(model)
-                save_model = model
-            torch.save(
+                ema.restore(base_model)
+            stop_requested = distributed_any(state, early_stop_reason is not None, device)
+            if stop_requested and early_stop_reason is None:
+                early_stop_reason = "rank 0 requested early stop"
+            if early_stop_reason is not None:
+                if state.is_main:
+                    print(early_stop_reason)
+                break
+            if timeout_hit:
+                break
+
+        total_minutes = (time.time() - train_start) / 60.0
+        if state.is_main:
+            print(f"\nTraining done in {total_minutes:.1f} min")
+
+        if early_stop_reason is not None:
+            wandb.summary.update(
                 {
-                    "model": save_model.state_dict(),
-                    "config": asdict(config),
-                    "epoch": epoch + 1,
-                    "val_metrics": val_metrics,
-                },
-                model_path,
+                    "early_stop/triggered": 1.0,
+                    "early_stop/reason": early_stop_reason,
+                    "early_stop/global_step": global_step,
+                    "total_train_minutes": total_minutes,
+                }
             )
-            if ema is not None:
-                ema.restore(model)
+            wandb.finish()
+            return
 
-        tag = " *" if improved else ""
+        distributed_barrier(state)
+        if not state.is_main:
+            wandb.summary.update({"total_train_minutes": total_minutes})
+            wandb.finish()
+            return
+
+        if not best_metrics:
+            wandb.summary.update(
+                {
+                    "run_invalid": 1.0,
+                    "run_invalid/reason": "no finite positive validation checkpoint was saved",
+                    "total_train_minutes": total_minutes,
+                }
+            )
+            print("No finite positive validation checkpoint was saved.")
+            wandb.finish()
+            return
+
+        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+        base_model.load_state_dict(checkpoint["model"])
         print(
-            f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
-            f"train_loss={epoch_train_loss:.5f} "
-            f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
+            f"Best val: epoch {int(best_metrics['epoch'])}, "
+            f"abupt_axis_mean_rel_l2_pct={best_metrics['abupt_axis_mean_rel_l2_pct']:.4f}"
         )
-        print_metrics("val_surface", val_metrics["val_surface"])
-        if early_stop_reason is not None:
-            print(early_stop_reason)
-            break
-
-    total_minutes = (time.time() - train_start) / 60.0
-    print(f"\nTraining done in {total_minutes:.1f} min")
-
-    if early_stop_reason is not None:
         wandb.summary.update(
             {
-                "early_stop/triggered": 1.0,
-                "early_stop/reason": early_stop_reason,
-                "early_stop/global_step": global_step,
+                "best_epoch": int(best_metrics["epoch"]),
+                "best_checkpoint/source": best_checkpoint_source,
+                "best_checkpoint/selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                "best_val_primary/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
+                "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
+                "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
+                "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
                 "total_train_minutes": total_minutes,
             }
         )
-        wandb.finish()
-        return
 
-    if not best_metrics:
-        print("No validation checkpoint was saved.")
-        wandb.finish()
-        return
-
-    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-    model.load_state_dict(checkpoint["model"])
-    print(
-        f"Best val: epoch {int(best_metrics['epoch'])}, "
-        f"abupt_axis_mean_rel_l2_pct={best_metrics['abupt_axis_mean_rel_l2_pct']:.4f}"
-    )
-    wandb.summary.update(
-        {
-            "best_epoch": int(best_metrics["epoch"]),
-            "best_val_primary/abupt_axis_mean_rel_l2_pct": best_metrics["abupt_axis_mean_rel_l2_pct"],
-            "best_val/surface_pressure_mae": best_metrics["surface_pressure_mae"],
-            "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
-            "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
-            "total_train_minutes": total_minutes,
+        full_val_metrics = {
+            name: evaluate_split(base_model, loader, transform, device, amp_mode=config.amp_mode)
+            for name, loader in final_val_loaders.items()
         }
-    )
-
-    full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
-        for name, loader in val_loaders.items()
-    }
-    full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
-    full_val_log: dict[str, object] = {
-        "full_val_primary/abupt_axis_mean_rel_l2_pct": full_val_primary,
-        "full_val_primary/abupt_axis_mean_rel_l2": full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
-        "full_val_primary/surface_pressure_mae": full_val_metrics["val_surface"]["surface_pressure_mae"],
-        "full_val_primary/wall_shear_mae": full_val_metrics["val_surface"]["wall_shear_mae"],
-        "full_val_primary/volume_pressure_mae": full_val_metrics["val_surface"]["volume_pressure_mae"],
-        "full_val_primary/surface_pressure_rel_l2_pct": full_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
-        "full_val_primary/wall_shear_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
-        "full_val_primary/wall_shear_x_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
-        "full_val_primary/wall_shear_y_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
-        "full_val_primary/wall_shear_z_rel_l2_pct": full_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
-        "full_val_primary/volume_pressure_rel_l2_pct": full_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
-        "global_step": global_step,
-    }
-    for split_name, metrics in full_val_metrics.items():
-        for key, value in metrics.items():
-            full_val_log[f"full_val/{split_name}/{key}"] = value
-    full_val_log.update(
-        full_val_slope_tracker.update(
-            global_step=global_step,
-            metrics=full_val_log,
-            namespace="full_val",
-            force=True,
+        full_val_log: dict[str, object] = {
+            "global_step": global_step,
+            **primary_metric_log("full_val_primary", full_val_metrics["val_surface"]),
+        }
+        for split_name, metrics in full_val_metrics.items():
+            full_val_log.update(metric_namespace("full_val", split_name, metrics))
+        full_val_log.update(
+            full_val_slope_tracker.update(
+                global_step=global_step,
+                metrics=full_val_log,
+                namespace="full_val",
+                force=True,
+            )
         )
-    )
-    wandb.log(full_val_log)
-    wandb.summary.update(_numeric_metric_items(full_val_log))
-    print_metrics("full_val", full_val_metrics["val_surface"])
+        try:
+            assert_required_finite_metrics(full_val_log, "full_val_primary")
+        except RuntimeError as exc:
+            wandb.summary.update({"run_invalid": 1.0, "run_invalid/reason": str(exc)})
+            wandb.finish()
+            raise
+        wandb.log(full_val_log)
+        wandb.summary.update(_numeric_metric_items(full_val_log))
+        print_metrics("full_val", full_val_metrics["val_surface"])
 
-    test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
-        for name, loader in test_loaders.items()
-    }
-    test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
-    test_log: dict[str, object] = {
-        "test_primary/abupt_axis_mean_rel_l2_pct": test_primary,
-        "test_primary/abupt_axis_mean_rel_l2": test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
-        "test_primary/surface_pressure_mae": test_metrics["test_surface"]["surface_pressure_mae"],
-        "test_primary/wall_shear_mae": test_metrics["test_surface"]["wall_shear_mae"],
-        "test_primary/volume_pressure_mae": test_metrics["test_surface"]["volume_pressure_mae"],
-        "test_primary/surface_pressure_rel_l2_pct": test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
-        "test_primary/wall_shear_rel_l2_pct": test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
-        "test_primary/wall_shear_x_rel_l2_pct": test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
-        "test_primary/wall_shear_y_rel_l2_pct": test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
-        "test_primary/wall_shear_z_rel_l2_pct": test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
-        "test_primary/volume_pressure_rel_l2_pct": test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
-        "global_step": global_step,
-    }
-    for split_name, metrics in test_metrics.items():
-        for key, value in metrics.items():
-            test_log[f"test/{split_name}/{key}"] = value
-    test_log.update(
-        test_slope_tracker.update(
-            global_step=global_step,
-            metrics=test_log,
-            namespace="test",
-            force=True,
+        test_metrics = {
+            name: evaluate_split(base_model, loader, transform, device, amp_mode=config.amp_mode)
+            for name, loader in final_test_loaders.items()
+        }
+        test_log: dict[str, object] = {
+            "global_step": global_step,
+            **primary_metric_log("test_primary", test_metrics["test_surface"]),
+        }
+        for split_name, metrics in test_metrics.items():
+            test_log.update(metric_namespace("test", split_name, metrics))
+        test_log.update(
+            test_slope_tracker.update(
+                global_step=global_step,
+                metrics=test_log,
+                namespace="test",
+                force=True,
+            )
         )
-    )
-    wandb.log(test_log)
-    wandb.summary.update(_numeric_metric_items(test_log))
-    print_metrics("test_surface", test_metrics["test_surface"])
+        try:
+            assert_required_finite_metrics(test_log, "test_primary")
+        except RuntimeError as exc:
+            wandb.summary.update({"run_invalid": 1.0, "run_invalid/reason": str(exc)})
+            wandb.finish()
+            raise
+        wandb.log(test_log)
+        wandb.summary.update(_numeric_metric_items(test_log))
+        print_metrics("test_surface", test_metrics["test_surface"])
 
-    log_model_artifact(
-        run=run,
-        model_path=model_path,
-        config_path=config_path,
-        config=config,
-        best_metrics=best_metrics,
-        test_metrics=test_metrics,
-        n_params=n_params,
-    )
-    wandb.finish()
+        log_model_artifact(
+            run=run,
+            model_path=model_path,
+            config_path=config_path,
+            config=config,
+            best_metrics=best_metrics,
+            test_metrics=test_metrics,
+            n_params=n_params,
+        )
+        wandb.finish()
+    finally:
+        cleanup_distributed(state)
 
 
 if __name__ == "__main__":

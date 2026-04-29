@@ -105,22 +105,35 @@ export PVC_MOUNT_PATH=/your/mount
 
 `program.md` is the source of truth for the research contract, metrics, SOTA targets, and what agents should optimize. This section is only a quick reference for the current `train.py` interface and defaults.
 
-Note, a slightlier fancier train.py can be found here based on past SENPAI experiments, it optionally can be used a reference in some experiments https://github.com/morganmcg1/DrivAerML/pull/1
-
 ```
 python train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
 ```
 
-Current reference defaults are point-limited for memory while preserving full-fidelity validation/test evaluation:
+For 8-GPU DDP on PAI2:
+
+```
+torchrun --standalone --nproc-per-node=8 train.py --epochs 50 --agent <name> --wandb_name "<name>/<experiment>"
+```
+
+This trainer-hardening pass deliberately does not import scientific recipe changes from SENPAI experiment PRs. Defaults are operational/stability defaults only: logging throttle, clipping, timeout-aware harvesting, finite guards, scheduler plumbing, and DDP support.
+
+Current reference defaults are point-limited for memory while preserving exact validation/test evaluation:
 
 - `--train-surface-points 40000` and `--train-volume-points 40000` sample random points per training view
 - `--eval-surface-points 40000` and `--eval-volume-points 40000` evaluate deterministic strided chunks that cover every point exactly once
-- `--validation-every 10` validates sparsely, with an extra epoch-1 and final-epoch validation
+- `--validation-every 1` validates every epoch by default, because short SENPAI budget runs otherwise hide the checkpoint trajectory
+- `--grad-clip-norm 1.0` clips gradients by default and logs the pre-clip norm plus whether clipping engaged
+- `--gradient-log-every 250`, `--weight-log-every 250`, and `--no-log-gradient-histograms` are the defaults; weight histograms remain opt-in with `--log-weight-histograms`
+- `--lr-warmup-epochs`, `--lr-cosine-t-max`, and `--lr-min` control the built-in linear-warmup plus cosine scheduler
 - `--compile-model` is on by default
 - `--slope-log-fraction 0.05` logs key curve slopes every 5% of the estimated update budget
 - `--kill-thresholds "500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25"` stops a poor run early once a logged metric misses a step-gated threshold
 
-Gradient and weight telemetry are intentionally high fidelity: aggregate norms, layer/type/parameter stats, and gradient histograms are logged around every optimizer update by default. Weight scalar stats are logged after each update; weight histograms can be enabled with `--log-weight-histograms`.
+When launched with `torchrun`, DDP is detected from `WORLD_SIZE`. Training uses `DistributedSampler`; validation during training is exact and distributed with no padded duplicate eval views; final `full_val/*` and `test_primary/*` are rerun on rank 0 from the saved checkpoint so the held-out metrics match a single-model production evaluation. Each rank creates its own W&B run in the same group with a rank suffix. Rank 0 logs global validation/test metrics and artifacts; nonzero ranks log rank-local train/runtime diagnostics.
+
+`SENPAI_TIMEOUT_MINUTES` is treated as the total wall-clock budget. `SENPAI_VAL_BUDGET_MINUTES` reserves time for validation/checkpoint/final test harvesting, and the trainer checks the budget between optimizer steps so long epochs can still produce `full_val_primary/*` and `test_primary/*`.
+
+The end-of-run metric contract is strict: all required `full_val_primary/*` and `test_primary/*` keys must be present and finite. Invalid final metrics mark the W&B run invalid and raise instead of silently producing malformed summaries.
 
 Training sampling is with replacement inside each random view. For a case with `N` points and `K` points per view, an epoch creates `ceil(N / K)` views and draws `K` random rows for each view, so it draws about `N` rows per case per epoch but may contain duplicates and omissions. Validation and test use deterministic chunks without replacement across views, so a full eval covers every available point exactly once.
 

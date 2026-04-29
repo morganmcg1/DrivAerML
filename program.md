@@ -80,7 +80,11 @@ Full surface and volume cases can be large, so the reference trainer uses point-
 - Validation/test with `--eval-surface-points N --eval-volume-points M`: each case is split into deterministic strided chunks with `torch.arange(view_index, total_points, view_count)`. This is full-fidelity evaluation: every loaded surface point and every loaded volume point is evaluated exactly once, then reaggregated by case.
 - Set a point limit to `0` only when you intentionally want full-case loading in one batch and have checked memory.
 
-Validation is intentionally sparse by default: `train.py` validates at epoch 1, every `--validation-every 10` epochs, and the final epoch. After loading the best checkpoint, it runs and logs `full_val/*` before `test/*`. Do not replace final validation/test with a random point sample.
+Validation is every epoch by default: `train.py` validates at epoch 1, every `--validation-every 1` epoch, and the final epoch. This is an operational hardening choice so short SENPAI budget runs expose the checkpoint trajectory instead of hiding it behind sparse cadence. After loading the best checkpoint, it runs and logs `full_val/*` before `test/*`. Do not replace final validation/test with a random point sample.
+
+When launched with `torchrun`, DDP is automatic from `WORLD_SIZE`. Training uses a distributed sampler. Checkpoint-selection validation is exact and distributed across ranks with no padded duplicate eval views, then final `full_val/*` and `test_primary/*` are rerun on rank 0 from the saved checkpoint to match single-model production evaluation semantics.
+
+This trainer-hardening pass is deliberately operational only. It does not import scientific SENPAI experiment advances such as larger batch recipes, volume-loss reweighting, FiLM, area-weighted loss, tangential projection, SDF gates, TTA, or normal suppression. Those remain experiment hypotheses; this reference trainer should make them measurable without rediscovering logging bottlenecks, missing tests, NaN propagation, or unclipped optimizer spikes.
 
 ## Model Contract in the Reference train.py
 
@@ -103,7 +107,7 @@ The reference Transolver backbone must also keep padding masked internally. Slic
 
 ## Gradient, Weight, And Slope Telemetry
 
-The reference trainer intentionally logs high-fidelity gradient and weight telemetry on every optimizer update by default. Future agents can preserve this unless the researcher explicitly asked to change the logging contract. It is recommended that if a brand new trainer or model is written, that this telemetry is preserved as it can yield crucial insights into the model's behavior and performance during training.
+The reference trainer logs high-fidelity gradient and weight telemetry at throttled cadence by default. The defaults are `--gradient-log-every 250`, `--weight-log-every 250`, `--no-log-gradient-histograms`, and opt-in `--log-weight-histograms`. This keeps long runs from becoming CPU/W&B-bound while preserving enough signal for diagnosis. Tighten the cadence only for short debug runs.
 
 The W&B stream includes:
 
@@ -115,8 +119,13 @@ The W&B stream includes:
 - `train/weight/*` — aggregate parameter health after each optimizer update: norm, mean, mean absolute value, RMS, standard deviation, min/max, max absolute value, zero fraction, non-finite count, and trainable/frozen tensor counts.
 - `train/weight_type/<LayerType>/*`, `train/weight_module/<LayerType>/<module_path>/*`, and `train/weight_param/<LayerType>/<parameter_path>/*` — the same parameter statistics grouped by module class, layer path, and parameter tensor.
 - `train/weight_hist/all` and `train/weight_hist_param/<LayerType>/<parameter_path>` — optional parameter histograms controlled by `--log-weight-histograms`.
+- `train/grad/global_norm_pre_clip` and `train/grad/clipped` — pre-clip gradient norm and whether the default `--grad-clip-norm 1.0` threshold engaged.
+- `train/step_skipped`, `train/nonfinite_loss`, and `train/nonfinite_grad` — finite guard diagnostics for poisoned batches.
+- `train/lr`, `train/base_mse_loss`, `train/surface_loss_weighted`, and `train/volume_loss_weighted` — standard optimization and loss-component diagnostics.
 
 Keep gradient logging close to `loss.backward()` and before `optimizer.step()` so it represents the update that is about to be applied. Keep weight logging after `optimizer.step()` so it represents the model state after the update. When adding new model blocks, make sure their parameters remain visible through `named_modules()` / `named_parameters()` so the layer-type and layer-path logging stays useful.
+
+The final metric contract is mandatory. End-of-run `full_val_primary/*` and `test_primary/*` keys must all be present and finite. A run with missing, NaN, or infinite final primary metrics is invalid and should fail loudly rather than being treated as a usable result.
 
 Slope telemetry is also part of the contract. Every `--slope-log-fraction 0.05` of the estimated optimizer-step budget, `train.py` logs slopes for key curves under `train/slope/*`: losses, grad norms, grad-to-param ratio, RMS gradients, max gradients, MAE curves, and relative-L2 curves. Validation slopes are logged under `val/slope/*` at validation events; final validation and test use `full_val/slope/*` and `test/slope/*` when enough history exists. If you rename metric keys, preserve or document equivalent slope curves.
 
