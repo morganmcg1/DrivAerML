@@ -63,6 +63,162 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+def _spread_bits(x: torch.Tensor) -> torch.Tensor:
+    """Spread the lowest 10 bits of x into every 3rd position (Morton encode)."""
+    x = x & 0x3FF
+    x = (x | (x << 16)) & 0x30000FF
+    x = (x | (x << 8)) & 0x0300F00F
+    x = (x | (x << 4)) & 0x30C30C3
+    x = (x | (x << 2)) & 0x9249249
+    return x
+
+
+def morton_sort(xyz: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+    """Per-sample sort indices for 3D Morton (Z-order) traversal.
+
+    xyz: [B, N, 3] floats; coords are quantized to 10 bits per axis.
+    mask: optional [B, N] mask of valid (=1) tokens. If provided, the
+        per-sample min/max ignore padded entries so padding cannot shrink
+        the valid coordinate range.
+    Returns: [B, N] int64 sort indices (apply with .gather along dim=1).
+    """
+    if mask is not None:
+        m3 = mask.bool().unsqueeze(-1)
+        big = torch.full_like(xyz, float("inf"))
+        small = torch.full_like(xyz, float("-inf"))
+        xyz_for_min = torch.where(m3, xyz, big)
+        xyz_for_max = torch.where(m3, xyz, small)
+    else:
+        xyz_for_min = xyz
+        xyz_for_max = xyz
+    mn = xyz_for_min.amin(dim=1, keepdim=True)
+    mx = xyz_for_max.amax(dim=1, keepdim=True)
+    xyz_n = ((xyz - mn) / (mx - mn + 1e-8) * 1023).long().clamp(0, 1023)
+    ix = _spread_bits(xyz_n[..., 0])
+    iy = _spread_bits(xyz_n[..., 1])
+    iz = _spread_bits(xyz_n[..., 2])
+    code = ix | (iy << 1) | (iz << 2)
+    return code.argsort(dim=1)
+
+
+class S4DSurfacePostProcessor(nn.Module):
+    """Diagonal S4 (S4D-Lin) sequence mixer for Morton-sorted surface tokens.
+
+    Stand-in for the unavailable Mamba-2 SSD block (mamba-ssm requires nvcc which
+    is not present in this environment). Implements a single gated diagonal
+    state-space layer applied along the Morton-sorted surface sequence:
+
+        h := h + out_proj( SSM(in_proj(LN(h))) * silu(v) )
+
+    The SSM is parameterized as A = exp(log_A_re + i*A_im) with B,C as real
+    learnable projections; the kernel is computed in fp32 via Vandermonde and
+    applied as a length-2N FFT convolution. Padding tokens are zeroed before
+    the SSM and re-zeroed in the residual to prevent garbage propagation.
+    """
+
+    def __init__(self, hidden_dim: int, d_state: int = 64):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.d_state = d_state
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.in_proj = nn.Linear(hidden_dim, 2 * hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+
+        log_A_re_init = torch.linspace(math.log(0.99), math.log(0.5), d_state)
+        log_A_re_init = log_A_re_init.unsqueeze(0).expand(hidden_dim, -1).contiguous()
+        A_im_init = torch.arange(d_state, dtype=torch.float32) * (math.pi / max(d_state, 1))
+        A_im_init = A_im_init.unsqueeze(0).expand(hidden_dim, -1).contiguous()
+        self.log_A_re = nn.Parameter(log_A_re_init)
+        self.A_im = nn.Parameter(A_im_init)
+        self.B = nn.Parameter(torch.randn(hidden_dim, d_state) * 0.02)
+        self.C = nn.Parameter(torch.randn(hidden_dim, d_state) * 0.02)
+        self.D = nn.Parameter(torch.zeros(hidden_dim))
+
+        nn.init.trunc_normal_(self.in_proj.weight, std=0.02)
+        nn.init.zeros_(self.in_proj.bias)
+        nn.init.trunc_normal_(self.out_proj.weight, std=0.02)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def _ssm_kernel_impl(
+        self,
+        log_A_re: torch.Tensor,
+        A_im: torch.Tensor,
+        BC: torch.Tensor,
+        n_idx: torch.Tensor,
+    ) -> torch.Tensor:
+        # K[t, d] = sum_s BC[d,s] * exp(t*log_A_re[d,s]) * cos(t*A_im[d,s])
+        n = n_idx.shape[0]
+        chunks: list[torch.Tensor] = []
+        chunk_size = max(1, min(n, 1024))
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            n_c = n_idx[start:end].view(-1, 1, 1)
+            decay = torch.exp(n_c * log_A_re.unsqueeze(0))
+            phase = torch.cos(n_c * A_im.unsqueeze(0))
+            chunks.append((BC.unsqueeze(0) * decay * phase).sum(-1))
+        return torch.cat(chunks, dim=0).T.contiguous()
+
+    def _ssm_kernel(self, n: int, device: torch.device) -> torch.Tensor:
+        log_A_re = self.log_A_re.float().clamp(max=0.0)
+        A_im = self.A_im.float()
+        BC = self.B.float() * self.C.float()
+        n_idx = torch.arange(n, device=device, dtype=torch.float32)
+        if self.training and torch.is_grad_enabled():
+            return torch.utils.checkpoint.checkpoint(
+                self._ssm_kernel_impl,
+                log_A_re,
+                A_im,
+                BC,
+                n_idx,
+                use_reentrant=False,
+            )
+        return self._ssm_kernel_impl(log_A_re, A_im, BC, n_idx)
+
+    def _ssm_conv(self, u: torch.Tensor) -> torch.Tensor:
+        # u: [B, N, D]
+        n = u.shape[1]
+        kernel = self._ssm_kernel(n, u.device)
+        L = 2 * n
+        kernel_f = torch.fft.rfft(kernel, n=L, dim=-1)
+        u_fp32 = u.permute(0, 2, 1).float()
+        u_f = torch.fft.rfft(u_fp32, n=L, dim=-1)
+        y = torch.fft.irfft(kernel_f.unsqueeze(0) * u_f, n=L, dim=-1)[..., :n]
+        y = y + u_fp32 * self.D.float().view(1, -1, 1)
+        return y.permute(0, 2, 1).to(u.dtype)
+
+    def _forward_impl(
+        self,
+        h: torch.Tensor,
+        surf_xyz: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        b_size, n, dim = h.shape
+        sort_idx = morton_sort(surf_xyz, mask=mask)
+        unsort_idx = sort_idx.argsort(dim=1)
+        sort_idx_e = sort_idx.unsqueeze(-1).expand(-1, -1, dim)
+        h_s = h.gather(1, sort_idx_e)
+        mask_s_h = mask.gather(1, sort_idx).to(h.dtype).unsqueeze(-1)
+        h_s = h_s * mask_s_h
+        x_v = self.in_proj(self.norm(h_s))
+        x, v = x_v.chunk(2, dim=-1)
+        x_mixed = self._ssm_conv(x) * F.silu(v)
+        h_s = h_s + self.out_proj(x_mixed) * mask_s_h
+        unsort_idx_e = unsort_idx.unsqueeze(-1).expand(-1, -1, dim)
+        return h_s.gather(1, unsort_idx_e)
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        surf_xyz: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.training and h.requires_grad:
+            return torch.utils.checkpoint.checkpoint(
+                self._forward_impl, h, surf_xyz, mask, use_reentrant=False
+            )
+        return self._forward_impl(h, surf_xyz, mask)
+
+
 class DropPath(nn.Module):
     """Stochastic depth: drop entire residual branch with probability `drop_prob`."""
 
@@ -288,6 +444,8 @@ class SurfaceTransolver(nn.Module):
         mlp_ratio: int = 4,
         slice_num: int = 96,
         stochastic_depth_prob: float = 0.0,
+        use_mamba_surface: bool = False,
+        mamba_d_state: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -321,6 +479,12 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.use_mamba_surface = use_mamba_surface
+        self.surface_post = (
+            S4DSurfacePostProcessor(hidden_dim=n_hidden, d_state=mamba_d_state)
+            if use_mamba_surface
+            else None
+        )
 
     def _encode_group(
         self,
@@ -390,6 +554,14 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if self.surface_post is not None and surface_x is not None and surface_tokens > 0:
+            surface_hidden = self.surface_post(
+                surface_hidden,
+                surface_x[..., : self.space_dim],
+                surface_mask,
+            )
+            surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
@@ -489,6 +661,8 @@ class Config:
     model_slices: int = 96
     model_dropout: float = 0.0
     stochastic_depth_prob: float = 0.0
+    use_mamba_surface: bool = False
+    mamba_d_state: int = 64
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -644,6 +818,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
         stochastic_depth_prob=config.stochastic_depth_prob,
+        use_mamba_surface=config.use_mamba_surface,
+        mamba_d_state=config.mamba_d_state,
     )
 
 
