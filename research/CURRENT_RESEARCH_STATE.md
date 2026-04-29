@@ -14,13 +14,46 @@
 proven wins have landed in code yet — the trainer defaults are 3L/192d/3h,
 lr=3e-4, bs=2, 40k points, no FiLM, no projection loss, fixed-decay EMA.
 
-**Update (2026-04-29 14:55 UTC):** alphonse calibration confirmed healthy
-on tay/DDP8. Live leaderboard at ~7 vals (mid-training, no test_primary
-yet): fern 19.7 (RFF features), alphonse 20.5 (calibration), thorfinn
-20.3 (per-axis weights), frieren 21.6 (FiLM), edward 22.3 (cosine warmup),
-nezuko 24.7 (ANP, slow per-step), askeladd 37.4 (composition stack
-plateaued — tangential projection regression confirmed). yi merged is
-16.64; ~3-5 vals away on current trajectory.
+**Update (2026-04-29 15:51 UTC) — Round 1 first wave results landing:**
+
+Test results on 50-case test split (best-val checkpoint), all under the
+torch.compile-bug-limited 9-epoch budget (alphonse calibration baseline
+established at PR #30, test_abupt 19.81):
+
+| Student | Hypothesis | test_abupt | Δ vs baseline | Outcome |
+|---|---|---:|---:|---|
+| fern | RFF coord features | **17.77** | **−2.04** | **NEW LEADER** (PR ready pending) |
+| thorfinn | Per-axis weights + sym-TTA | **19.44** | −0.37 | Win (pod hung, code lost) |
+| alphonse | Calibration (yi PR #4) | **19.81** | baseline | MERGED PR #30 |
+| frieren | FiLM AdaLN-zero | 20.07 | +0.26 | CLOSED (1.3% noise floor) |
+| edward | Cosine LR + warmup | 20.99 | +1.18 | Close pending (PR ready imminent) |
+| askeladd | Full composition stack | 38.02 | +18.21 | CLOSED (tangential proj broken tau_z) |
+| nezuko | ANP cross-attn decoder | (val 18.48) | (running) | TBD, val close to alphonse |
+| tanjiro | SDF gate / Lion | — | — | Pod stuck before either ran |
+
+**Key learnings**:
+1. **RFF features (fern) are a real win** — drop test_abupt by 10% over
+   calibration. Compose orthogonally with everything in queue.
+2. **FiLM did not transfer to 4L/512d at 9 epochs** — reproduces yi's mechanism
+   (geom_token L2 ×180, scale_w L2 ×38) but no metric lift. Revisit after
+   compile fix when we have ~16-22 compiled epochs.
+3. **Tangential projection has structural tau_z bug** — z-aligned panels
+   lose gradient signal because GT wall-shear is mostly normal-direction
+   on roof/hood/floor. Tau_z monotonically *increased* during training in
+   PR #31. Eval-time projection is the correct fix (PR #41 askeladd).
+4. **Cosine EMA budget miscalibration** — schedule is over max_epochs but
+   we only run 17% of it in the budget. Effective decay ~0.991 vs
+   alphonse's 0.9995. Cosine EMA was effectively neutralized.
+5. **Compile + drop_last=False bug** — the largest single throughput lever.
+   Fixing this in trainer_runtime.py recovers 50% of training budget for
+   ALL future experiments. PR #40 alphonse working on this now.
+
+**Round 1b assignments (after first wave):**
+- alphonse #40: Fix compile bug (drop_last=True) + recalibrate
+- askeladd #41: Eval-time tangential projection of wall-shear
+- frieren #42: Squared rel-L2 loss (drop outer sqrt for smooth backward)
+- tanjiro #39: Lion optimizer (waiting on pod recovery)
+- thorfinn: Pod hung — needs admin restart
 
 Round 1 on tay therefore has two simultaneous purposes:
 
