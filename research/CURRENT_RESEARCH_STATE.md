@@ -58,7 +58,7 @@ finalizing hypotheses to avoid duplicating work and to draw inspiration.
 | #14 | senku | Deeper model 5L/256d/4h (depth ablation) | all |
 | #15 | tanjiro | SDF-gated volume attention bias (near-wall emphasis) | p_v (6.08%) |
 | #16 | thorfinn | Test-time bilateral symmetry TTA (xz-plane) | tau_y esp. |
-| #17 | violet | Surface-area-weighted MSE loss (physics-consistent) | p_s / tau |
+| ~~#17~~ | ~~violet~~ | ~~Surface-area-weighted MSE loss~~ — CLOSED 2026-04-29 (heavy-tail variance non-viable) |
 
 ## Round 2 plan — bold architecture replacements
 
@@ -105,6 +105,7 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
 | #28 | norman | A02 — SE(3) equivariant local-frame coord features |
 | #29 | chihiro | B06 — width × FiLM × cosine EMA composition at 512d |
+| #38 | violet | C02 — Deep Evidential Regression (NIG head, lambda sweep 0.01 / 0.1) |
 
 **Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
 SE(3) local-frame coordinate features. Now reassigned to norman as PR #28.

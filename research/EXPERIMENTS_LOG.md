@@ -331,3 +331,37 @@ Beats merged baseline on every axis. Squash-merged into `yi` 2026-04-29.
 **Bug-fix commit `fdef51e` (gradient clipping with `--grad-clip-max-norm`):** Acknowledged. Compatible with PR #22 (gilbert) which is landing officially. Will inherit on rebase.
 
 **Pass/fail bar for v5:** must beat `abupt_axis_mean = 16.64` (current merged baseline). Stretch target: beat 15.82 (pending PR #13). If v5 also fails, Fourier closes and goes back to idea pool for revisit (per-axis σ, learnable σ, or σ-scheduled annealing).
+
+## 2026-04-29 — PR #17: surface-area-weighted MSE loss (violet) — CLOSED
+
+- Branch: `violet/round1-surface-area-weighted-loss`
+- Hypothesis: weight surface MSE loss by per-cell area (`surface_x` channel 6) so large-area patches contribute proportionally more — physically consistent with integrated drag/lift force computation. Precedent: DoMINO and AB-UPT use area weighting.
+- W&B runs: 8 attempts (`4eewknus`, `0gzvmuk9`, `92ioz6fu`, `t3083tfa`, `adia7jt4`, `pnrrdczx`, `u227tnfi`, `bfx7ktnc`); 7 diverged, 1 stable but uncompetitive
+
+**Final stable run `bfx7ktnc` (only run with `test_primary/*`):**
+
+| Metric | violet area-weighted | yi merged (PR #4) | Δ vs PR #4 |
+|---|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | 24.60 | 16.64 | **+47.6%** |
+| `surface_pressure` | 15.22 | 10.65 | +43% |
+| `wall_shear` | 28.52 | 17.66 | +62% |
+| `volume_pressure` | 14.06 | 14.37 | −2.2% (plausibly noise) |
+| `wall_shear_x/y/z` | 24.60 / 34.72 / 34.39 | 14.87 / 19.89 / 21.73 | +66% / +75% / +58% |
+
+**Required deviations for stability:** `lr=1e-4` (PR spec was 2e-4), `--area-weight-clip 2.0` (clips 17% of points), `--max-grad-norm 0.5`. 7 prior runs at lr=2e-4 all diverged regardless of grad-clip config.
+
+**Key diagnostic finding from violet:** DrivAerML mesh area distribution is heavy-tailed (max=22× mean, p99=13× mean). Heavy clipping (`area-weight-clip 2.0`) saturates 17% of points and the renormalized effective weight collapses to mean=0.568 — the physics signal is erased. So either:
+- area-weight without clipping → diverges (variance overflow into Adam state)
+- area-weight with clipping → no signal (top cells get same weight as median)
+
+There is no run in this experiment where area-weighted MSE beats unweighted MSE at matched config.
+
+**Decision: CLOSE.** +47% regression on the headline metric meets the close threshold; 8-attempt thorough mapping confirms hypothesis is non-viable on this training recipe. Volume_pressure gain (−2.2%) is plausibly noise on n=50.
+
+**Salvageable directions (filed for future):**
+1. **Log-area weighting** `w = log(1 + area / area_med)`: tames heavy tail without saturating, preserves rank order. Different hypothesis worth a fresh PR.
+2. **EMA-based loss reweighting**: focal-loss-style adaptive per-cell weights based on running per-point loss variance. Decouples physics from variance amplification.
+
+**Bug-fix commit `14e4668` (gradient clipping, `--max-grad-norm`):** Compatible with PR #22 (gilbert) canonical version. No separate landing needed.
+
+**Round-2 follow-up assigned to violet:** **C02 — Deep Evidential Regression head** (replace MSE with NIG-based negative log-likelihood; per-cell uncertainty; addresses heavy-tail target distributions at the loss-formulation level). Bold direction, plays to violet's demonstrated loss-analysis strength.
