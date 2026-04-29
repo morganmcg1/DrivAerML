@@ -297,3 +297,37 @@ Beats merged baseline on every axis. Squash-merged into `yi` 2026-04-29.
 - PR #13 norman cosine EMA (15.82) — projected new best once merged
 
 **Round-2 follow-up assigned to chihiro:** composition run — width 512d × FiLM × cosine EMA at the gilbert base config. Hypothesis: if 256d gains are ~16.53 (FiLM) and ~15.82 (EMA), 512d should push below 15 given orthogonal capacity axes.
+
+## 2026-04-29 — PR #7: Gaussian random Fourier features (fern) — REQUEST CHANGES (sent back v5)
+
+- Branch: `fern/round1-fourier-coordinate-features`
+- Hypothesis: Gaussian RFF replaces raw `(x, y, z)` with `[sin(Bx), cos(Bx)]` to give the input projection a richer spectrum and learn fine spatial frequencies. Proven in radford-branch champion config.
+- W&B runs: `fl3mawj9` (v1, killed for logging cadence), `8fm90m9i` (v2, NaN), `2fqms6xu` (v3 σ=1.0, NaN), `7jm8iurm` (v4 σ=0.5, **only 1 healthy epoch**)
+
+**v4 test_primary/* (σ=0.5, EMA epoch-1 checkpoint):**
+
+| Metric | v4 fern Fourier σ=0.5 | yi merged (PR #4) | PR #3 baseline (matched config) | Δ vs PR #3 | Δ vs PR #4 |
+|---|---:|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | 22.67 | 16.64 | 30.47 | **−25.6%** | +36.2% |
+| `surface_pressure` | 14.88 | 10.65 | 21.65 | −31.3% | +39.7% |
+| `wall_shear` | 23.96 | 17.66 | 32.51 | −26.3% | +35.7% |
+| `volume_pressure` | 19.17 | 14.37 | 23.73 | −19.2% | +33.4% |
+
+**Result vs current baseline:** +36% regression (above 5% close threshold). However:
+
+**Matched-config delta is positive:** vs PR #3 (same arch, no Fourier, no protocol fixes), Fourier adds **−25 to −30% on every axis**. Fourier hypothesis has real signal.
+
+**Epoch-1 advantage at matched protocol:** fern's val_abupt at epoch 1 = 22.10 vs norman's epoch-1 val of 26.24 (PR #13, no Fourier). That's **−16% relative at the same epoch from Fourier alone**, a real composition signal.
+
+**Binding constraint: bf16 numerical instability.** Both σ=1.0 and σ=0.5 diverged in epoch 2 even with `clip_grad_norm=1.0`. Pattern: clean epoch 1, single-step preclip-norm spike (80–710), runaway, NaN/Inf. Per-step gradient clipping caps optimizer step size but does **not** prevent activation drift past bf16 representable range. Raw-meter coords compound the issue — DrivAerML coords span ~7m × 4m × 3m, so σ=1.0 gives Fourier wavelength ~6m (coarser than the car body) and per-axis grad-norm asymmetry from the anisotropic bbox.
+
+**Decision:** REQUEST CHANGES — sent back as v5 with specific instructions:
+1. Coordinate normalization to [-1, 1] before Fourier (bounds Fourier output regardless of σ)
+2. σ=1.0 on normalized coords (puts wavelength at car-feature scale)
+3. Compose with cosine EMA (`--ema-decay-start 0.99 --ema-decay-end 0.9999`, port from norman PR #13)
+4. NaN-skip-step protection (defensive)
+5. Stay at 256d for v5 (test stability first; width × Fourier as separate composition later)
+
+**Bug-fix commit `fdef51e` (gradient clipping with `--grad-clip-max-norm`):** Acknowledged. Compatible with PR #22 (gilbert) which is landing officially. Will inherit on rebase.
+
+**Pass/fail bar for v5:** must beat `abupt_axis_mean = 16.64` (current merged baseline). Stretch target: beat 15.82 (pending PR #13). If v5 also fails, Fourier closes and goes back to idea pool for revisit (per-axis σ, learnable σ, or σ-scheduled annealing).

@@ -48,7 +48,7 @@ finalizing hypotheses to avoid duplicating work and to draw inspiration.
 
 | PR | Student | Hypothesis | Primary target |
 |---|---|---|---|
-| #7 | fern | Gaussian random Fourier features for coordinates | p_s / tau |
+| #7 | fern | Gaussian RFF for coordinates — sent back v5 (coord-norm + cosine EMA) | p_s / tau |
 | #8 | frieren | Per-case geometry FiLM conditioning | all |
 | #9 | gilbert | Volume loss weight sweep 2.0x vs 3.0x | p_v (6.08%) |
 | #10 | haku | Per-axis wall-shear channel loss weights (2x vs 3x) | tau (7.29%) |
