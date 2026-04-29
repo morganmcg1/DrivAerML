@@ -18,11 +18,13 @@ The research goal is to find the strongest DrivAerML model we can across all thr
 
 The target is not merely to match the current public reference: the goal is to beat it decisively. Agents should relentlessly search for ways to drive down `test_primary/surface_pressure_rel_l2_pct`, `test_primary/volume_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct` without hiding regressions behind a single averaged number.
 
-The baseline model given in `train.py` is a plain grouped Transolver with one shared backbone and separate surface/volume heads. This is only a starting reference, we also need to explore more opinionated variants as separate experiment arms in order to crush the current public reference metrics.
+The baseline model given in `model.py` and trained by `train.py` is a plain grouped Transolver with one shared backbone and separate surface/volume heads. This is only a starting reference, we also need to explore more opinionated variants as separate experiment arms in order to crush the current public reference metrics.
 
 ## Codebase
 
-- `train.py` — [REFERENCE]trainer, model, training loop, sparse-cadence full-fidelity validation, end-of-run full-fidelity test evaluation, W&B artifact upload. **Primary editable entrypoint.**
+- `train.py` — [REFERENCE]trainer CLI, config, loss, and training loop. **Primary editable entrypoint.**
+- `model.py` — grouped surface/volume Transolver architecture. **Editable for experiment PRs.**
+- `trainer_runtime.py` — DDP, evaluation, W&B, scheduler, telemetry, masking, and checkpoint/runtime helpers. **Editable for experiment PRs.**
 - `data/loader.py` — PVC-backed DrivAerML case store, point-view sampling, batching, target stats. **Read-only during normal experiment PRs.**
 - `data/generate_manifest.py` — regenerates `data/split_manifest.json` from the processed PVC manifests. **Read-only. Never touch this file.**
 - `data/preload.py` — validates packaged arrays and writes point counts. **Read-only.**
@@ -80,7 +82,7 @@ Full surface and volume cases can be large, so the reference trainer uses point-
 - Validation/test with `--eval-surface-points N --eval-volume-points M`: each case is split into deterministic strided chunks with `torch.arange(view_index, total_points, view_count)`. This is full-fidelity evaluation: every loaded surface point and every loaded volume point is evaluated exactly once, then reaggregated by case.
 - Set a point limit to `0` only when you intentionally want full-case loading in one batch and have checked memory.
 
-Validation is intentionally sparse by default: `train.py` validates at epoch 1, every `--validation-every 10` epochs, and the final epoch. After loading the best checkpoint, it runs and logs `full_val/*` before `test/*`. Do not replace final validation/test with a random point sample.
+When launched with `torchrun`, DDP is automatic from `WORLD_SIZE`. Training uses a distributed sampler. Checkpoint-selection validation is exact and distributed across ranks with no padded duplicate eval views, then final `full_val/*` and `test_primary/*` are rerun on rank 0 from the saved checkpoint to match single-model production evaluation semantics.
 
 ## Model Contract in the Reference train.py
 
@@ -103,7 +105,7 @@ The reference Transolver backbone must also keep padding masked internally. Slic
 
 ## Gradient, Weight, And Slope Telemetry
 
-The reference trainer intentionally logs high-fidelity gradient and weight telemetry on every optimizer update by default. Future agents can preserve this unless the researcher explicitly asked to change the logging contract. It is recommended that if a brand new trainer or model is written, that this telemetry is preserved as it can yield crucial insights into the model's behavior and performance during training.
+Adjust the gradient/weight telemetry defaults to the run length: short debug runs can log more often, while long runs should log less often.
 
 The W&B stream includes:
 
@@ -115,8 +117,13 @@ The W&B stream includes:
 - `train/weight/*` — aggregate parameter health after each optimizer update: norm, mean, mean absolute value, RMS, standard deviation, min/max, max absolute value, zero fraction, non-finite count, and trainable/frozen tensor counts.
 - `train/weight_type/<LayerType>/*`, `train/weight_module/<LayerType>/<module_path>/*`, and `train/weight_param/<LayerType>/<parameter_path>/*` — the same parameter statistics grouped by module class, layer path, and parameter tensor.
 - `train/weight_hist/all` and `train/weight_hist_param/<LayerType>/<parameter_path>` — optional parameter histograms controlled by `--log-weight-histograms`.
+- `train/grad/global_norm_pre_clip` and `train/grad/clipped` — pre-clip gradient norm and whether the default `--grad-clip-norm 1.0` threshold engaged.
+- `train/step_skipped`, `train/nonfinite_loss`, and `train/nonfinite_grad` — finite guard diagnostics for poisoned batches.
+- `train/lr`, `train/base_mse_loss`, `train/surface_loss_weighted`, and `train/volume_loss_weighted` — standard optimization and loss-component diagnostics.
 
 Keep gradient logging close to `loss.backward()` and before `optimizer.step()` so it represents the update that is about to be applied. Keep weight logging after `optimizer.step()` so it represents the model state after the update. When adding new model blocks, make sure their parameters remain visible through `named_modules()` / `named_parameters()` so the layer-type and layer-path logging stays useful.
+
+The final metric contract is mandatory. End-of-run `full_val_primary/*` and `test_primary/*` keys must all be present and finite. A run with missing, NaN, or infinite final primary metrics is invalid and should fail loudly rather than being treated as a usable result.
 
 Slope telemetry is also part of the contract. Every `--slope-log-fraction 0.05` of the estimated optimizer-step budget, `train.py` logs slopes for key curves under `train/slope/*`: losses, grad norms, grad-to-param ratio, RMS gradients, max gradients, MAE curves, and relative-L2 curves. Validation slopes are logged under `val/slope/*` at validation events; final validation and test use `full_val/slope/*` and `test/slope/*` when enough history exists. If you rename metric keys, preserve or document equivalent slope curves.
 
