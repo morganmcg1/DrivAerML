@@ -91,6 +91,8 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    use_film_conditioning: bool = False
+    film_geom_dim: int = 64
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -148,6 +150,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
+        use_film_conditioning=config.use_film_conditioning,
+        film_geom_dim=config.film_geom_dim,
     )
 
 
@@ -177,13 +181,51 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    geom_token = out.get("geom_token")
+    if geom_token is not None:
+        token = geom_token.detach().float()
+        metrics["film_geom_token_l2"] = float(token.norm(dim=-1).mean().cpu().item())
+        metrics["film_geom_token_abs_mean"] = float(token.abs().mean().cpu().item())
+    return loss, metrics
+
+
+def collect_film_scale_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-block AdaLN-zero scale/shift L2 norms — confirms FiLM is being used."""
+    metrics: dict[str, float] = {}
+    base = model.module if hasattr(model, "module") else model
+    base = base._orig_mod if hasattr(base, "_orig_mod") else base
+    backbone = getattr(base, "backbone", None)
+    film_layers = getattr(backbone, "film_layers", None) if backbone is not None else None
+    if film_layers is None:
+        return metrics
+    with torch.no_grad():
+        scale_norms: list[float] = []
+        for index, layer in enumerate(film_layers):
+            weight = layer.to_gamma_beta.weight.detach()
+            bias = layer.to_gamma_beta.bias.detach()
+            hidden_dim = weight.shape[0] // 2
+            scale_w = weight[:hidden_dim]
+            shift_w = weight[hidden_dim:]
+            scale_b = bias[:hidden_dim]
+            shift_b = bias[hidden_dim:]
+            scale_norm = float(scale_w.float().norm().cpu().item())
+            shift_norm = float(shift_w.float().norm().cpu().item())
+            metrics[f"train/film/block_{index}/scale_w_l2"] = scale_norm
+            metrics[f"train/film/block_{index}/shift_w_l2"] = shift_norm
+            metrics[f"train/film/block_{index}/scale_b_l2"] = float(scale_b.float().norm().cpu().item())
+            metrics[f"train/film/block_{index}/shift_b_l2"] = float(shift_b.float().norm().cpu().item())
+            scale_norms.append(scale_norm)
+        if scale_norms:
+            metrics["train/film/scale_w_l2_mean"] = float(sum(scale_norms) / len(scale_norms))
+            metrics["train/film/scale_w_l2_max"] = float(max(scale_norms))
+    return metrics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -333,6 +375,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if "film_geom_token_l2" in batch_loss_metrics:
+                        train_log["train/film_geom_token_l2"] = batch_loss_metrics["film_geom_token_l2"]
+                        train_log["train/film_geom_token_abs_mean"] = batch_loss_metrics["film_geom_token_abs_mean"]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
@@ -383,10 +428,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             if should_log_weights
                             else {}
                         )
+                        film_metrics = (
+                            collect_film_scale_metrics(model)
+                            if should_log_weights and config.use_film_conditioning
+                            else {}
+                        )
                         train_loss_sum += float(loss.detach().cpu().item())
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        train_log.update(film_metrics)
 
                 train_log.update(
                     train_slope_tracker.update(

@@ -179,6 +179,46 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class GeomEncoder(nn.Module):
+    """Mean-pooled MLP encoder over surface points to a per-case geometry token."""
+
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, out_dim),
+        )
+        self.net.apply(_init_linear)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        mask_f = mask.to(dtype=x.dtype).unsqueeze(-1)
+        x_masked = x * mask_f
+        n_valid = mask_f.sum(dim=1).clamp(min=1.0)
+        x_mean = x_masked.sum(dim=1) / n_valid
+        return self.net(x_mean)
+
+
+class FiLMLayer(nn.Module):
+    """Per-block AdaLN-zero FiLM modulation conditioned on a geometry token.
+
+    h_out = h * (1 + gamma) + beta where gamma, beta are produced by a single
+    Linear(geom_dim -> 2 * hidden_dim) zero-initialised at startup so the layer
+    is identity at training start.
+    """
+
+    def __init__(self, geom_dim: int, hidden_dim: int):
+        super().__init__()
+        self.to_gamma_beta = nn.Linear(geom_dim, 2 * hidden_dim)
+        nn.init.zeros_(self.to_gamma_beta.weight)
+        nn.init.zeros_(self.to_gamma_beta.bias)
+
+    def forward(self, h: torch.Tensor, geom: torch.Tensor) -> torch.Tensor:
+        gb = self.to_gamma_beta(geom.to(dtype=h.dtype))
+        gamma, beta = gb.chunk(2, dim=-1)
+        return h * (1.0 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
+
+
 class Transformer(nn.Module):
     def __init__(
         self,
@@ -188,6 +228,7 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        film_geom_dim: int = 0,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -202,10 +243,23 @@ class Transformer(nn.Module):
                 for _ in range(depth)
             ]
         )
+        self.film_layers = (
+            nn.ModuleList([FiLMLayer(film_geom_dim, hidden_dim) for _ in range(depth)])
+            if film_geom_dim > 0
+            else None
+        )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        for block in self.blocks:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        geom_token: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        for index, block in enumerate(self.blocks):
             x = block(x, attn_mask=attn_mask)
+            if self.film_layers is not None and geom_token is not None:
+                x = self.film_layers[index](x, geom_token)
+                x = _apply_token_mask(x, attn_mask)
         return x
 
 
@@ -226,6 +280,8 @@ class SurfaceTransolver(nn.Module):
         n_head: int = 3,
         mlp_ratio: int = 4,
         slice_num: int = 96,
+        use_film_conditioning: bool = False,
+        film_geom_dim: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -235,6 +291,8 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        self.use_film_conditioning = use_film_conditioning
+        self.film_geom_dim = film_geom_dim if use_film_conditioning else 0
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -247,6 +305,11 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.geom_encoder = (
+            GeomEncoder(self.surface_input_dim, film_geom_dim * 2, film_geom_dim)
+            if use_film_conditioning
+            else None
+        )
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -254,6 +317,7 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            film_geom_dim=film_geom_dim if use_film_conditioning else 0,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -319,7 +383,12 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        geom_token: torch.Tensor | None = None
+        if self.use_film_conditioning and self.geom_encoder is not None and surface_x is not None:
+            geom_token = self.geom_encoder(surface_x, surface_mask)
+
+        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -340,10 +409,13 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if geom_token is not None:
+            out["geom_token"] = geom_token
+        return out
