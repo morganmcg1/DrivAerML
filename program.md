@@ -18,11 +18,13 @@ The research goal is to find the strongest DrivAerML model we can across all thr
 
 The target is not merely to match the current public reference: the goal is to beat it decisively. Agents should relentlessly search for ways to drive down `test_primary/surface_pressure_rel_l2_pct`, `test_primary/volume_pressure_rel_l2_pct`, `test_primary/wall_shear_rel_l2_pct` without hiding regressions behind a single averaged number.
 
-The baseline model given in `train.py` is a plain grouped Transolver with one shared backbone and separate surface/volume heads. This is only a starting reference, we also need to explore more opinionated variants as separate experiment arms in order to crush the current public reference metrics.
+The baseline model given in `model.py` and trained by `train.py` is a plain grouped Transolver with one shared backbone and separate surface/volume heads. This is only a starting reference, we also need to explore more opinionated variants as separate experiment arms in order to crush the current public reference metrics.
 
 ## Codebase
 
-- `train.py` — [REFERENCE]trainer, model, training loop, sparse-cadence full-fidelity validation, end-of-run full-fidelity test evaluation, W&B artifact upload. **Primary editable entrypoint.**
+- `train.py` — [REFERENCE]trainer CLI, config, loss, and training loop. **Primary editable entrypoint.**
+- `model.py` — grouped surface/volume Transolver architecture. **Editable for experiment PRs.**
+- `trainer_runtime.py` — DDP, evaluation, W&B, scheduler, telemetry, masking, and checkpoint/runtime helpers. **Editable for experiment PRs.**
 - `data/loader.py` — PVC-backed DrivAerML case store, point-view sampling, batching, target stats. **Read-only during normal experiment PRs.**
 - `data/generate_manifest.py` — regenerates `data/split_manifest.json` from the processed PVC manifests. **Read-only. Never touch this file.**
 - `data/preload.py` — validates packaged arrays and writes point counts. **Read-only.**
