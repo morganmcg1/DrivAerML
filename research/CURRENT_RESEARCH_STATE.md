@@ -40,7 +40,7 @@ finalizing hypotheses to avoid duplicating work and to draw inspiration.
 |---|---|---|
 | #2 | alphonse | Stock defaults baseline — calibration floor |
 | #3 | askeladd | codex/optimized-lineage config (4L/256d/4h, 65k pts, lr=2e-4) |
-| #4 | chihiro | Large model 4L/512d/8h — radford champion scale-up |
+| ~~#4~~ | ~~chihiro~~ | ~~Large model 4L/512d/8h~~ — MERGED (new yi baseline 16.64) |
 | #5 | edward | Cosine LR + 5% warmup (proven radford winner family) |
 | ~~#6~~ | ~~emma~~ | ~~Metric-aware MSE + rel-L2 aux loss~~ — CLOSED (sqrt instability) |
 
@@ -104,6 +104,7 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 | #26 | nezuko | A01 — ANP cross-attention surface decoder (architecture swap) |
 
 | #28 | norman | A02 — SE(3) equivariant local-frame coord features |
+| #29 | chihiro | B06 — width × FiLM × cosine EMA composition at 512d |
 
 **Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
 SE(3) local-frame coordinate features. Now reassigned to norman as PR #28.
@@ -125,20 +126,27 @@ SE(3) local-frame coordinate features. Now reassigned to norman as PR #28.
   Superseded as standalone best by PR #13 (15.82), but FiLM composes orthogonally
   with cosine EMA — composition should push below 14. Frieren rebasing.
   - Follow-up PR #23 (frieren): full composition — FiLM + vol_w=2.0 + projection + bs=8 + cosine EMA.
-- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) MERGED — official yi baseline.**
+- **PR #4 (chihiro, 4L/512d/8h large model) — MERGED 2026-04-29. NEW yi OFFICIAL BASELINE.**
+  `abupt_axis_mean = 16.64` (vs 17.39 prev = −4.3%). Run `pejudvyd`, 3 best epochs.
+  Best per-axis: `volume_pressure = 14.37` (standout win, orthogonal to FiLM/EMA).
+  Key: `lr=5e-5` required (3 runs at 2e-4 diverged), `bs=4` (VRAM limit at 512d).
+  BASELINE.md updated. chihiro reassigned → Round-2 composition run.
+- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) — MERGED, now superseded by PR #4.**
   `abupt_axis_mean = 17.39`. Run `y2gigs61`, 6 epochs.
 - **PR #11 (kohaku, tangential wall-shear projection) — MERGED.**
   Code on yi (default off). Composable with any future PR.
 - **Follow-up PR #21 (kohaku, normal-component suppression sweep)** — λ ∈ {0.0, 0.01, 0.1, 1.0}.
 - **Follow-up PR #22 (gilbert, gradient clipping)** — `clip_grad_norm_` + 4-arm sweep.
 
-**Four independent wins compounding (next big leap from stacking all):**
+**Five independent wins compounding (next big leap from stacking all):**
 1. Tangential projection (PR #11, default off, `--use-tangential-wallshear-loss`)
 2. Protocol fixes: vol_w=2.0, bs=8, validation-every=1 (PR #9)
-3. Per-block FiLM conditioning (PR #8, pending merge)
-4. Cosine EMA 0.99→0.9999 (PR #13, pending merge, `--ema-decay-start 0.99 --ema-decay-end 0.9999`)
-→ PR #23 (frieren) will test all four together once both PRs #8 and #13 land.
-→ Composition prediction: ~12–13 abupt (−20% from current 15.82).
+3. **Width scale-up 512d/8h (PR #4, MERGED)**
+4. Per-block FiLM conditioning (PR #8, pending merge)
+5. Cosine EMA 0.99→0.9999 (PR #13, pending merge, `--ema-decay-start 0.99 --ema-decay-end 0.9999`)
+→ PR #23 (frieren) will test FiLM + projection + vol_w + cosine EMA once PRs #8 and #13 land.
+→ chihiro Round-2: 512d × FiLM × cosine EMA composition.
+→ Composition prediction: ~12–13 abupt (−20% from current best pending 15.82).
 
 ### CLOSED
 

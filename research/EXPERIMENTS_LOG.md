@@ -253,3 +253,47 @@ trapped the prior `u38zaxeg` attempt.
 - Recommend `--validation-every 1` (or 2) for all Round-1 runs.
 - Flagged the train→val divergence pattern across runs for all students to
   report and investigate.
+
+## 2026-04-29 — PR #4: large model scale-up 4L/512d/8h (chihiro) — MERGED
+
+- Branch: `chihiro/round1-large-model-512d`
+- Hypothesis: scaling the Transolver width from 256→512d and heads from 4→8h increases model capacity and improves all output fields, especially volume pressure which requires richer volumetric representation than surface fields.
+- W&B run: `pejudvyd` (Run B), state=finished, best_epoch=3, params ~12.7M
+
+**Config deviations from gilbert base:**
+- `--model-hidden-dim 512 --model-heads 8` (hypothesis test)
+- `--lr 5e-5` (3 prior runs at 2e-4 diverged; larger models need smaller LR)
+- `--batch-size 4` (largest power-of-2 fitting 96GB VRAM at 512d)
+- `--clip-grad-norm 1.0` opt-in flag added (overlaps with PR #22, accepted as compatible)
+
+**test_primary/* (PR #4 chihiro vs PR #9 gilbert merged baseline):**
+
+| Metric | PR #4 chihiro Run B (`pejudvyd`) | PR #9 gilbert (prev baseline) | Δ | AB-UPT target |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | **16.64** | 17.39 | **−4.3%** | — |
+| `surface_pressure_rel_l2_pct` | **10.65** | 11.07 | −3.8% | 3.82 |
+| `wall_shear_rel_l2_pct` | **17.66** | 18.32 | −3.6% | 7.29 |
+| `volume_pressure_rel_l2_pct` | **14.37** | 15.21 | **−5.5%** | 6.08 |
+| `wall_shear_x_rel_l2_pct` | **14.87** | 15.65 | −5.0% | 5.35 |
+| `wall_shear_y_rel_l2_pct` | **19.89** | 21.86 | −9.0% | 3.65 |
+| `wall_shear_z_rel_l2_pct` | **21.73** | 23.18 | −6.3% | 3.63 |
+
+Beats merged baseline on every axis. Squash-merged into `yi` 2026-04-29.
+
+**Analysis:**
+- Width improvement is orthogonal to FiLM (targets surface token conditioning) and to cosine EMA (targets checkpoint quality). `volume_pressure` win (14.37 vs 15.21) is most notable — the 512d volume is the binding capacity constraint for volumetric fields, as expected.
+- vs pending FiLM (PR #8, 16.53 abupt): chihiro is slightly worse on the headline (16.64 > 16.53) but wins on `volume_pressure` (14.37 < 14.91). The two effects are complementary.
+- vs pending cosine EMA (PR #13, 15.82 abupt): chihiro is worse on every axis — cosine EMA is the dominant improvement in flight. A composition (512d + cosine EMA + FiLM) should push below 15.
+- LR sensitivity is important: µP scaling or explicit LR search needed for any further width increase. Divergence at 2e-4 confirms the 512d model has ≥2× sharper loss landscape.
+- `--clip-grad-norm` flag added to `train.py` as opt-in; will become default when PR #22 (gilbert) lands.
+
+**Compounding wins on yi after this merge:**
+1. PR #11 (kohaku) — tangential wall-shear projection loss
+2. PR #9 (gilbert) — protocol fixes + vol_w=2.0
+3. **PR #4 (chihiro) — width 512d/8h** ← this entry
+
+**Pending merges in rebase queue:**
+- PR #8 frieren FiLM (16.53) — surface geometry conditioning
+- PR #13 norman cosine EMA (15.82) — projected new best once merged
+
+**Round-2 follow-up assigned to chihiro:** composition run — width 512d × FiLM × cosine EMA at the gilbert base config. Hypothesis: if 256d gains are ~16.53 (FiLM) and ~15.82 (EMA), 512d should push below 15 given orthogonal capacity axes.
