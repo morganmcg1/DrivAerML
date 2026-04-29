@@ -96,8 +96,15 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
 | PR | Student | Hypothesis |
 |---|---|---|
+| #20 | nezuko | EMA decay sweep — diagnose train→val divergence |
+| #21 | kohaku | Normal-component suppression on top of tangential projection |
+| #22 | gilbert | Add gradient clipping to train.py + 4-arm sweep |
+| #23 | frieren | Full composition: FiLM + projection + vol_w=2.0 + bs=8 |
 | #24 | emma | Squared rel-L2 aux loss (drop sqrt, smooth backward) |
-| #25 | stark | SE(3) local-frame coordinate features (equivariant input augmentation) |
+
+**Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
+SE(3) local-frame coordinate features. Hypothesis remains a top-priority Round-2
+candidate (A02) and will be reassigned to a real idle student.
 
 ## Round 1 — reviewed results (2026-04-29)
 
