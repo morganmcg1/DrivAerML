@@ -288,6 +288,7 @@ class SurfaceTransolver(nn.Module):
         mlp_ratio: int = 4,
         slice_num: int = 96,
         stochastic_depth_prob: float = 0.0,
+        use_evidential: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -295,6 +296,7 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.use_evidential = use_evidential
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -319,8 +321,31 @@ class SurfaceTransolver(nn.Module):
             stochastic_depth_prob=stochastic_depth_prob,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        out_multiplier = 4 if use_evidential else 1
+        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim * out_multiplier)
+        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim * out_multiplier)
+        if use_evidential:
+            self._init_evidential_bias()
+
+    def _init_evidential_bias(self) -> None:
+        """Bias init for the NIG head per Amini et al.
+
+        Layout per channel: [gamma | nu_raw | alpha_raw | beta_raw]. Gamma keeps
+        the zero init from `_init_linear`. Raw nu/alpha/beta biases are chosen so
+        softplus gives roughly unit-scale evidence at the start of training:
+        nu = softplus(0.5) ~ 0.97, alpha = softplus(1.0) + 1 ~ 2.31,
+        beta = softplus(0.5) ~ 0.97. This matches the published reference impl.
+        """
+
+        with torch.no_grad():
+            for head, c in (
+                (self.surface_out, self.surface_output_dim),
+                (self.volume_out, self.volume_output_dim),
+            ):
+                bias = head.project.bias
+                bias[c : 2 * c].fill_(0.5)
+                bias[2 * c : 3 * c].fill_(1.0)
+                bias[3 * c : 4 * c].fill_(0.5)
 
     def _encode_group(
         self,
@@ -391,25 +416,56 @@ class SurfaceTransolver(nn.Module):
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
+        surface_nig: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+        volume_nig: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            raw_surface = self.surface_out(surface_hidden)
+            if self.use_evidential:
+                gamma_s, nu_raw_s, alpha_raw_s, beta_raw_s = raw_surface.split(
+                    self.surface_output_dim, dim=-1
+                )
+                surface_preds = gamma_s * surface_mask.unsqueeze(-1)
+                surface_nig = (
+                    F.softplus(nu_raw_s.float()),
+                    F.softplus(alpha_raw_s.float()) + 1.0,
+                    F.softplus(beta_raw_s.float()),
+                )
+            else:
+                surface_preds = raw_surface * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            raw_volume = self.volume_out(volume_hidden)
+            if self.use_evidential:
+                gamma_v, nu_raw_v, alpha_raw_v, beta_raw_v = raw_volume.split(
+                    self.volume_output_dim, dim=-1
+                )
+                volume_preds = gamma_v * volume_mask.unsqueeze(-1)
+                volume_nig = (
+                    F.softplus(nu_raw_v.float()),
+                    F.softplus(alpha_raw_v.float()) + 1.0,
+                    F.softplus(beta_raw_v.float()),
+                )
+            else:
+                volume_preds = raw_volume * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        result: dict[str, torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if self.use_evidential:
+            result["surface_nig"] = surface_nig
+            result["volume_nig"] = volume_nig
+        return result
 
 
 class EMA:
@@ -476,6 +532,8 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    use_evidential: bool = False
+    evidential_lambda: float = 0.01
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -553,6 +611,38 @@ class TargetTransform:
 
     def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
         return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+
+
+def nig_nll_loss(
+    y: torch.Tensor,
+    gamma: torch.Tensor,
+    nu: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Normal-Inverse-Gamma negative log-likelihood (Amini et al., NeurIPS 2020).
+
+    Operates in fp32 for numerical stability under bf16 autocast. Returns
+    `(mean_nll, mean_reg)` so callers can apply the lambda weight separately.
+    The regularization is the |y-gamma| * (2 nu + alpha) penalty from the paper
+    that prevents the model from inflating evidence to explain prediction error.
+    """
+    y = y.float()
+    gamma = gamma.float()
+    nu = nu.float().clamp(min=1e-6)
+    alpha = alpha.float().clamp(min=1.0 + 1e-6)
+    beta = beta.float().clamp(min=1e-6)
+    omega = 2.0 * beta * (1.0 + nu)
+    inner = ((y - gamma).square() * nu + omega).clamp(min=1e-8)
+    nll = (
+        0.5 * torch.log(math.pi / nu)
+        - alpha * torch.log(omega)
+        + (alpha + 0.5) * torch.log(inner)
+        + torch.lgamma(alpha)
+        - torch.lgamma(alpha + 0.5)
+    )
+    reg = (y - gamma).abs() * (2.0 * nu + alpha)
+    return nll.mean(), reg.mean()
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -644,6 +734,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
         stochastic_depth_prob=config.stochastic_depth_prob,
+        use_evidential=config.use_evidential,
     )
 
 
@@ -1180,6 +1271,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    use_evidential: bool = False,
+    evidential_lambda: float = 0.01,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1193,6 +1286,42 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
+        if use_evidential:
+            surface_loss, surface_extra = _evidential_branch_loss(
+                target=surface_target,
+                gamma=surface_pred_norm,
+                nig=out["surface_nig"],
+                mask=batch.surface_mask,
+                lambda_reg=evidential_lambda,
+                channel_names=SURFACE_TARGET_NAMES,
+            )
+            volume_loss, volume_extra = _evidential_branch_loss(
+                target=volume_target,
+                gamma=out["volume_preds"],
+                nig=out["volume_nig"],
+                mask=batch.volume_mask,
+                lambda_reg=evidential_lambda,
+                channel_names=VOLUME_TARGET_NAMES,
+            )
+            loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+            metrics: dict[str, float] = {
+                "surface_loss": float(surface_loss.detach().cpu().item()),
+                "volume_loss": float(volume_loss.detach().cpu().item()),
+            }
+            for prefix, extra in (("surface", surface_extra), ("volume", volume_extra)):
+                metrics[f"{prefix}_nll"] = extra["nll"]
+                metrics[f"{prefix}_reg"] = extra["reg"]
+                for axis_name, value in extra["aleatoric"].items():
+                    metrics[f"uncertainty_aleatoric_{axis_name}"] = value
+                for axis_name, value in extra["epistemic"].items():
+                    metrics[f"uncertainty_epistemic_{axis_name}"] = value
+                for axis_name, value in extra["nu_mean"].items():
+                    metrics[f"nig_nu_mean_{axis_name}"] = value
+                for axis_name, value in extra["alpha_mean"].items():
+                    metrics[f"nig_alpha_mean_{axis_name}"] = value
+                for axis_name, value in extra["beta_mean"].items():
+                    metrics[f"nig_beta_mean_{axis_name}"] = value
+            return loss, metrics
         if use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
@@ -1229,6 +1358,68 @@ def train_loss(
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     return loss, metrics
+
+
+def _evidential_branch_loss(
+    *,
+    target: torch.Tensor,
+    gamma: torch.Tensor,
+    nig: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None,
+    mask: torch.Tensor,
+    lambda_reg: float,
+    channel_names: tuple[str, ...],
+) -> tuple[torch.Tensor, dict[str, object]]:
+    """Compute NIG NLL + lambda*reg on a masked per-point prediction.
+
+    Returns the scalar loss and a metrics dict with raw nll, reg, and per-axis
+    aleatoric/epistemic uncertainty means computed in fp32 over valid points.
+    """
+
+    empty: dict[str, float] = {name: float("nan") for name in channel_names}
+    if nig is None or not bool(mask.any()):
+        zero = gamma.sum() * 0.0
+        return zero, {
+            "nll": 0.0,
+            "reg": 0.0,
+            "aleatoric": empty,
+            "epistemic": empty,
+            "nu_mean": empty,
+            "alpha_mean": empty,
+            "beta_mean": empty,
+        }
+    nu_full, alpha_full, beta_full = nig
+    mask_bool = mask.bool()
+    target_v = target[mask_bool]
+    gamma_v = gamma[mask_bool]
+    nu_v = nu_full[mask_bool]
+    alpha_v = alpha_full[mask_bool]
+    beta_v = beta_full[mask_bool]
+    nll, reg = nig_nll_loss(target_v, gamma_v, nu_v, alpha_v, beta_v)
+    loss = nll + lambda_reg * reg
+    # Per-axis uncertainty + parameter diagnostics (fp32, over valid points only).
+    alpha_minus_one = (alpha_v - 1.0).clamp(min=1e-6)
+    aleatoric = beta_v / alpha_minus_one
+    epistemic = beta_v / (nu_v.clamp(min=1e-6) * alpha_minus_one)
+    aleatoric_per_axis: dict[str, float] = {}
+    epistemic_per_axis: dict[str, float] = {}
+    nu_per_axis: dict[str, float] = {}
+    alpha_per_axis: dict[str, float] = {}
+    beta_per_axis: dict[str, float] = {}
+    for idx, axis_name in enumerate(channel_names):
+        aleatoric_per_axis[axis_name] = float(aleatoric[..., idx].mean().detach().cpu().item())
+        epistemic_per_axis[axis_name] = float(epistemic[..., idx].mean().detach().cpu().item())
+        nu_per_axis[axis_name] = float(nu_v[..., idx].mean().detach().cpu().item())
+        alpha_per_axis[axis_name] = float(alpha_v[..., idx].mean().detach().cpu().item())
+        beta_per_axis[axis_name] = float(beta_v[..., idx].mean().detach().cpu().item())
+    return loss, {
+        "nll": float(nll.detach().cpu().item()),
+        "reg": float(reg.detach().cpu().item()),
+        "aleatoric": aleatoric_per_axis,
+        "epistemic": epistemic_per_axis,
+        "nu_mean": nu_per_axis,
+        "alpha_mean": alpha_per_axis,
+        "beta_mean": beta_per_axis,
+    }
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -1631,6 +1822,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                use_evidential=config.use_evidential,
+                evidential_lambda=config.evidential_lambda,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1683,6 +1876,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            for evidential_key in (
+                "surface_nll",
+                "surface_reg",
+                "volume_nll",
+                "volume_reg",
+            ):
+                if evidential_key in batch_loss_metrics:
+                    train_log[f"train/{evidential_key}"] = batch_loss_metrics[evidential_key]
+            for evidential_key, evidential_value in batch_loss_metrics.items():
+                if (
+                    evidential_key.startswith("uncertainty_")
+                    or evidential_key.startswith("nig_")
+                ):
+                    train_log[f"train/{evidential_key}"] = evidential_value
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
