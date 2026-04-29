@@ -2,16 +2,43 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: tay-bootstrap — 2026-04-29
+## Status: PR #30 — 2026-04-29 15:21 UTC
 
-Tay is a fresh advisor branch on top of `main` + the DDP8-hardened trainer
-(commit `ceca448`, *Harden trainer defaults and add DDP8 support*). No tay
-runs have completed yet, so the first wave establishes our baseline by
-porting yi's proven configs onto DDP8 hardware.
+First tay/DDP8 baseline established by alphonse's calibration (yi PR #4
+reproduce: 4L/512d/8h, lr=5e-5, bs=4, `--no-compile-model` workaround).
+**Under-trained at 9 epochs** due to torch.compile + drop_last=False bug —
+conservative floor. Compile-fixed re-calibration will supersede this.
 
-The yi advisor's best results (different W&B project) are documented as our
-reference floor while we calibrate. We will replace this section the moment
-the first tay run finishes.
+**W&B run:** `0vi9tm5h` (rank 0) — group `tay-round1-calibrate`
+**Best-val checkpoint:** epoch 9 (val_abupt=18.70)
+
+### tay current best — `test_primary/*`
+
+| Metric | This-repo key | tay best (PR #30) | yi best | AB-UPT |
+|---|---|---:|---:|---:|
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **19.81** | 15.82 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **12.86** | 9.99 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **21.27** | 16.60 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **15.91** | 14.21 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **18.24** | 14.27 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **25.50** | 19.49 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **26.53** | 21.12 | 3.63 |
+
+### INFRA NOTE — torch.compile bug (high priority fix)
+
+`compile_model=True` default in `train.py` + `drop_last=False` in
+`trainer_runtime.py:293` → last partial batch of each epoch kills all ranks
+via `torch._inductor.exc.InductorError` at the epoch-boundary step.
+
+**Fix (either in train.py or trainer_runtime.py — both editable per program.md):**
+- Option A (train.py): pass `dynamic=True` to `torch.compile(model, ...)`
+- Option B (trainer_runtime.py): set `drop_last=True` on the train DataLoader
+
+Without the fix, `--no-compile-model` is required, costing ~50% of training
+throughput and limiting tay runs to ~9 epochs per budget slot.
+
+The yi advisor's best results (different W&B project) are informational targets
+to match or beat on tay/DDP8:
 
 ## Reference baseline targets — must beat (AB-UPT public reference)
 
