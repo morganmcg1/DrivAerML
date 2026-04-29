@@ -290,7 +290,7 @@ def make_loaders(
             num_replicas=distributed_state.world_size,
             rank=distributed_state.rank,
             shuffle=True,
-            drop_last=False,
+            drop_last=True,
         )
         train_shuffle = False
     train_loader = DataLoader(
@@ -298,6 +298,7 @@ def make_loaders(
         batch_size=config.batch_size,
         shuffle=train_shuffle,
         sampler=train_sampler,
+        drop_last=True,
         **loader_kwargs(config),
     )
     val_loaders = {
@@ -925,8 +926,9 @@ def accumulate_eval_batch(
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
     volume_target_norm = transform.apply_volume(batch.volume_y)
+    eval_module = unwrap_model(model)
     with autocast_context(device, amp_mode):
-        out = model(
+        out = eval_module(
             surface_x=batch.surface_x,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
