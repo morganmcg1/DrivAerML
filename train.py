@@ -124,17 +124,50 @@ class ContinuousSincosEmbed(nn.Module):
 
 
 class FourierFeatureTransform(nn.Module):
-    """Gaussian random Fourier features for coordinate encoding (Tancik et al. 2020)."""
+    """Gaussian random Fourier features for coordinate encoding (Tancik et al. 2020).
 
-    def __init__(self, num_input_dims: int, num_freqs: int, sigma: float = 1.0):
+    If normalize_coords=True, inputs are mapped to [-1, 1] via fixed bbox before
+    sin/cos projection. Bbox is registered as a buffer so it stays consistent across
+    train/eval/checkpointing.
+    """
+
+    def __init__(
+        self,
+        num_input_dims: int,
+        num_freqs: int,
+        sigma: float = 1.0,
+        normalize_coords: bool = False,
+        coord_min: tuple[float, ...] | None = None,
+        coord_max: tuple[float, ...] | None = None,
+    ):
         super().__init__()
         self.num_input_dims = num_input_dims
         self.num_freqs = num_freqs
         self.sigma = sigma
+        self.normalize_coords = normalize_coords
         B = torch.randn(num_input_dims, num_freqs) * sigma
         self.register_buffer("B", B)
+        if normalize_coords:
+            if coord_min is None or coord_max is None:
+                raise ValueError("normalize_coords requires coord_min and coord_max")
+            cmin = torch.tensor(coord_min, dtype=torch.float32)
+            cmax = torch.tensor(coord_max, dtype=torch.float32)
+            if cmin.shape[0] != num_input_dims or cmax.shape[0] != num_input_dims:
+                raise ValueError(
+                    f"coord_min/coord_max must have {num_input_dims} entries, "
+                    f"got {cmin.shape[0]}/{cmax.shape[0]}"
+                )
+            self.register_buffer("coord_min", cmin)
+            self.register_buffer("coord_max", cmax)
+            self.register_buffer("coord_scale", 2.0 / (cmax - cmin))
+        else:
+            self.coord_min = None
+            self.coord_max = None
+            self.coord_scale = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.normalize_coords:
+            x = (x - self.coord_min.to(x.dtype)) * self.coord_scale.to(x.dtype) - 1.0
         proj = x @ self.B.to(x.dtype)
         return torch.cat([proj.sin(), proj.cos()], dim=-1)
 
@@ -307,6 +340,11 @@ class SurfaceTransolver(nn.Module):
         use_fourier_features: bool = False,
         fourier_num_freqs: int = 64,
         fourier_sigma: float = 1.0,
+        normalize_coords: bool = False,
+        surface_coord_min: tuple[float, ...] | None = None,
+        surface_coord_max: tuple[float, ...] | None = None,
+        volume_coord_min: tuple[float, ...] | None = None,
+        volume_coord_max: tuple[float, ...] | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -317,6 +355,7 @@ class SurfaceTransolver(nn.Module):
         self.use_fourier_features = use_fourier_features
         self.fourier_num_freqs = fourier_num_freqs
         self.fourier_sigma = fourier_sigma
+        self.normalize_coords = normalize_coords
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -326,8 +365,25 @@ class SurfaceTransolver(nn.Module):
         if use_fourier_features:
             # RFF replaces ContinuousSincosEmbed; the entire flat tensor
             # [fourier_xyz (2F) | extras] feeds a single LinearProjection.
-            self.fourier_surface = FourierFeatureTransform(space_dim, fourier_num_freqs, fourier_sigma)
-            self.fourier_volume = FourierFeatureTransform(space_dim, fourier_num_freqs, fourier_sigma)
+            # Surface and volume use SEPARATE bboxes — surface is the car body
+            # (~7m), volume is the simulation domain (~120m), so a single shared
+            # bbox would either compress car features or blow up volume gradients.
+            self.fourier_surface = FourierFeatureTransform(
+                space_dim,
+                fourier_num_freqs,
+                fourier_sigma,
+                normalize_coords=normalize_coords,
+                coord_min=surface_coord_min,
+                coord_max=surface_coord_max,
+            )
+            self.fourier_volume = FourierFeatureTransform(
+                space_dim,
+                fourier_num_freqs,
+                fourier_sigma,
+                normalize_coords=normalize_coords,
+                coord_min=volume_coord_min,
+                coord_max=volume_coord_max,
+            )
             self.pos_embed = None
             surface_proj_in = 2 * fourier_num_freqs + surface_extra_dim
             volume_proj_in = 2 * fourier_num_freqs + volume_extra_dim
@@ -471,6 +527,9 @@ class EMA:
         }
         self.backup: dict[str, torch.Tensor] | None = None
 
+    def set_decay(self, new_decay: float) -> None:
+        self.decay = float(new_decay)
+
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
         self.step_counter += 1
@@ -539,6 +598,22 @@ class Config:
     use_fourier_features: bool = False
     fourier_num_freqs: int = 64
     fourier_sigma: float = 1.0
+    normalize_coords: bool = False
+    # Surface bbox (covers car body; advisor analysis)
+    coord_min_x: float = -2.0
+    coord_min_y: float = -2.0
+    coord_min_z: float = -1.5
+    coord_max_x: float = 5.5
+    coord_max_y: float = 2.0
+    coord_max_z: float = 1.8
+    # Volume bbox (covers ~99% of train-set volume points; outliers are far-field
+    # cells whose spatial detail does not affect surface prediction)
+    volume_coord_min_x: float = -40.0
+    volume_coord_min_y: float = -25.0
+    volume_coord_min_z: float = -2.0
+    volume_coord_max_x: float = 80.0
+    volume_coord_max_y: float = 25.0
+    volume_coord_max_z: float = 20.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -547,6 +622,9 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    ema_decay_start: float = 0.0
+    ema_decay_end: float = 0.9999
+    skip_nonfinite_loss: bool = True
     grad_clip_max_norm: float = 1.0
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
@@ -687,6 +765,23 @@ def make_loaders(
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    surface_coord_min: tuple[float, ...] | None = None
+    surface_coord_max: tuple[float, ...] | None = None
+    volume_coord_min: tuple[float, ...] | None = None
+    volume_coord_max: tuple[float, ...] | None = None
+    if config.normalize_coords:
+        surface_coord_min = (config.coord_min_x, config.coord_min_y, config.coord_min_z)
+        surface_coord_max = (config.coord_max_x, config.coord_max_y, config.coord_max_z)
+        volume_coord_min = (
+            config.volume_coord_min_x,
+            config.volume_coord_min_y,
+            config.volume_coord_min_z,
+        )
+        volume_coord_max = (
+            config.volume_coord_max_x,
+            config.volume_coord_max_y,
+            config.volume_coord_max_z,
+        )
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -698,6 +793,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_fourier_features=config.use_fourier_features,
         fourier_num_freqs=config.fourier_num_freqs,
         fourier_sigma=config.fourier_sigma,
+        normalize_coords=config.normalize_coords,
+        surface_coord_min=surface_coord_min,
+        surface_coord_max=surface_coord_max,
+        volume_coord_min=volume_coord_min,
+        volume_coord_max=volume_coord_max,
     )
 
 
@@ -1657,6 +1757,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
     global_step = 0
+    nonfinite_skip_count = 0
+    coords_logged = False
     early_stop_reason: str | None = None
     timeout_hit = False
     train_start = time.time()
@@ -1676,6 +1778,41 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if not coords_logged:
+                with torch.no_grad():
+                    if batch.surface_x is not None:
+                        sx = batch.surface_x[..., :3].float()
+                        s_min = sx.amin(dim=(0, 1)).cpu().tolist()
+                        s_max = sx.amax(dim=(0, 1)).cpu().tolist()
+                        print(
+                            f"[coord-check] surface xyz min={s_min} max={s_max}"
+                        )
+                        wandb.log({
+                            "coords/surface_x_min": s_min[0],
+                            "coords/surface_y_min": s_min[1],
+                            "coords/surface_z_min": s_min[2],
+                            "coords/surface_x_max": s_max[0],
+                            "coords/surface_y_max": s_max[1],
+                            "coords/surface_z_max": s_max[2],
+                            "global_step": global_step,
+                        }, commit=False)
+                    if batch.volume_x is not None:
+                        vx = batch.volume_x[..., :3].float()
+                        v_min = vx.amin(dim=(0, 1)).cpu().tolist()
+                        v_max = vx.amax(dim=(0, 1)).cpu().tolist()
+                        print(
+                            f"[coord-check] volume  xyz min={v_min} max={v_max}"
+                        )
+                        wandb.log({
+                            "coords/volume_x_min": v_min[0],
+                            "coords/volume_y_min": v_min[1],
+                            "coords/volume_z_min": v_min[2],
+                            "coords/volume_x_max": v_max[0],
+                            "coords/volume_y_max": v_max[1],
+                            "coords/volume_z_max": v_max[2],
+                            "global_step": global_step,
+                        }, commit=False)
+                    coords_logged = True
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1686,6 +1823,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
             )
+            if config.skip_nonfinite_loss and not torch.isfinite(loss):
+                nonfinite_skip_count += 1
+                optimizer.zero_grad(set_to_none=True)
+                wandb.log({
+                    "train/skipped_nonfinite": 1.0,
+                    "train/nonfinite_skip_total": float(nonfinite_skip_count),
+                    "global_step": global_step,
+                }, commit=True)
+                global_step += 1
+                continue
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             preclip_grad_norm = (
@@ -1696,6 +1843,23 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if config.grad_clip_max_norm > 0
                 else None
             )
+            if (
+                config.skip_nonfinite_loss
+                and preclip_grad_norm is not None
+                and not torch.isfinite(preclip_grad_norm)
+            ):
+                nonfinite_skip_count += 1
+                optimizer.zero_grad(set_to_none=True)
+                wandb.log({
+                    "train/skipped_nonfinite": 1.0,
+                    "train/nonfinite_skip_total": float(nonfinite_skip_count),
+                    "train/grad/preclip_global_norm_skipped": float(
+                        preclip_grad_norm.detach()
+                    ),
+                    "global_step": global_step,
+                }, commit=True)
+                global_step += 1
+                continue
             should_log_gradients = (
                 config.gradient_log_every > 0
                 and (global_step + 1) % config.gradient_log_every == 0
@@ -1720,7 +1884,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
             optimizer.step()
+            ema_decay_now: float | None = None
             if ema is not None:
+                if config.ema_decay_start > 0.0:
+                    progress = min(global_step / max(total_estimated_steps - 1, 1), 1.0)
+                    cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
+                    ema_decay_now = config.ema_decay_start + cos_val * (
+                        config.ema_decay_end - config.ema_decay_start
+                    )
+                    ema.set_decay(ema_decay_now)
                 ema.update(model)
             weight_metrics = (
                 collect_weight_metrics(
@@ -1752,6 +1924,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/grad/clip_max_norm"] = float(
                     config.grad_clip_max_norm
                 )
+            if ema_decay_now is not None:
+                train_log["train/ema_decay"] = float(ema_decay_now)
+            if nonfinite_skip_count > 0:
+                train_log["train/nonfinite_skip_total"] = float(nonfinite_skip_count)
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
