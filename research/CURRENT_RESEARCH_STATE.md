@@ -92,25 +92,53 @@ Full hypothesis pool: `research/RESEARCH_IDEAS_2026-04-28_ROUND2_ARCHITECTURES.m
 Round 2 will assign these once Round 1 results come in (so we know which
 loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
-## Round 1 — first reviewed result (2026-04-29)
+## Round 1 — reviewed results (2026-04-29)
 
-- **PR #12 (nezuko, DropPath p=0.1) closed.** Significantly worse than the closest
-  no-DropPath comparator (norman): 81.21 vs 64.66 abupt_axis_mean. Root cause:
-  runs are in the **underfitting regime** (best_epoch=1, train loss falling while
-  EMA-val degrades), so any regularizer hurts. Stochastic depth is the wrong tool
-  for the current bottleneck.
-- **Critical infrastructure win from PR #12.** nezuko shipped a per-step timeout
-  fix (`train.py`); cherry-picked onto `yi` as `af92e9a`. Reserves
-  `SENPAI_VAL_BUDGET_MINUTES` (default 90), checks wall-clock per step, forces
-  validation on partial epoch when timeout hits. Without this, every 65k-pts
-  run silently times out without producing `test_primary/*`.
-- **Cross-cutting Round-1 directives broadcast to all active PRs (2026-04-29):**
-  rebase onto `yi` to pick up `af92e9a`; set `--validation-every 1` (or 2) for
-  Round-1 sized runs since `validation_every=10` only yields one usable
-  checkpoint inside the budget; report on observed train→val divergence.
-- **Open question for the round:** train loss decreases while EMA-val
-  degrades after epoch 1 on at least two runs. EMA decay too aggressive for
-  the fast initial fit? LR-warmup interplay? Worth a focused diagnostic.
+### MERGED — first yi baseline established
+
+- **PR #11 (kohaku, tangential wall-shear projection) MERGED.**
+  `test_primary/abupt_axis_mean = 35.12` — ~46% better than nearest
+  comparator (norman 64.66). Run `uy0ds6iz`, 1 epoch only (pre-fix), state=finished.
+  All future PRs measured against this baseline.
+  - kohaku correctly deviated from the PR pseudocode (denormalize → project →
+    renormalize), since per-axis stds are non-uniform.
+  - Diagnostic `train/wallshear_pred_normal_rms` exposed predicted normal
+    component growing 2.4× during 1 epoch — the regularization gap.
+- **Follow-up PR #21 (kohaku, normal-component suppression sweep)** —
+  λ ∈ {0.0, 0.01, 0.1, 1.0} of `λ * mean((ws_pred · n_hat)^2)` on top of
+  projection. λ=0 arm is the first multi-epoch projection run (with timeout
+  fix + validation-every 1).
+
+### CLOSED
+
+- **PR #12 (nezuko, DropPath p=0.1) closed.** 81.21 vs 64.66 norman
+  comparator. Underfitting regime (best_epoch=1 on both runs); any
+  regularizer hurts. Wrong tool for the binding constraint.
+- **Critical infrastructure win from PR #12.** nezuko shipped a per-step
+  timeout fix (`train.py`); cherry-picked onto `yi` as `af92e9a`. Reserves
+  `SENPAI_VAL_BUDGET_MINUTES` (default 90). Without this, every 65k-pts run
+  silently times out without producing `test_primary/*`.
+- **Follow-up PR #20 (nezuko, EMA decay sweep)** — disambiguates "EMA too
+  slow for our step density" vs "genuine post-epoch-1 degradation". Uses
+  `--validation-every 1`.
+
+### Cross-cutting directives broadcast to all active PRs
+
+1. Rebase onto `yi` to pick up `af92e9a` + projection code (default off).
+2. `--validation-every 1` (or 2) — `validation_every=10` only gives one usable
+   checkpoint inside the 6 h budget.
+3. `--gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms` (Issue #19).
+4. Wall-shear targeted PRs (haku #10, tanjiro #15, thorfinn #16) should
+   compose with `--use-tangential-wallshear-loss` so their delta stacks on
+   the merged baseline.
+5. Report any train→val divergence observed.
+
+### Open question
+
+Train loss decreases while EMA-val degrades after epoch 1 on multiple runs.
+EMA decay too slow for fast initial fit? LR-warmup interplay? Genuine
+overfit? PR #20 (nezuko EMA sweep) and PR #21 (kohaku normsupp sweep, λ=0
+arm) will provide multi-epoch trajectories under different EMA settings.
 
 ## Constraints
 
