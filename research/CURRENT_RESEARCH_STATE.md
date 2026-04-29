@@ -1,156 +1,97 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-29 20:00 UTC
+- **Date:** 2026-04-29 22:15 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Most recent direction from human team:** _(none on tay yet — yi advisor
-  carried Issue #18: "be bolder; replace the backbone; mine `noam`/`radford`
-  branches; trust students to take big leaps")_
+- **Most recent direction from human team:** Issue #48 (2026-04-29 20:54 UTC) —
+  "How's it going? We making progress?" — replied with full status. No new directives.
+  Previous: Issue #18 from yi advisor: "be bolder; replace the backbone; mine noam/radford branches."
 
-## Calibration status — PR #40 MERGED 2026-04-29 ~20:00 UTC
+## Current SOTA — PR #39 MERGED 2026-04-29 22:05 UTC
 
-**New tay SOTA: test_abupt 17.25 (−2.9% vs PR #33, −12.9% vs PR #30)**
+**tay crosses below yi frontier: test_abupt 15.43 vs yi best 15.82**
 
 | PR | Student | test_abupt | Key lever |
 |---|---|---:|---|
 | #30 | alphonse | 19.81 | yi calibration config (4L/512d/8h) |
 | #33 | fern | 17.77 | RFF coord features sigma=1.0, no-compile |
-| **#40** | **alphonse** | **17.25** | **torch.compile fix → 12 epochs vs 9; every axis improved** |
+| #40 | alphonse | 17.25 | torch.compile fix → 12 epochs vs 9 |
+| **#39** | **tanjiro** | **15.43** | **Lion optimizer lr=1.7e-5, wd=5e-3 — sign-based updates** |
 
-**torch.compile bug is now FIXED** (`trainer_runtime.py:293,301,929`). All future runs should use compile by default (no `--no-compile-model`). Throughput: ~16 min/epoch compiled → 270-min budget yields 12 epochs.
+**W&B run:** `xonbs83i` (rank 0) — group `tay-lion-lr-sweep` — 287.1 min, best_epoch=9
+val curve still descending at cutoff → compile would give 12 epochs, further improvement expected.
 
-Key insight from PR #40: compile fix alone (no RFF) already beats RFF-without-compile. Volume pressure improved most: 16.13 → 14.71. Val curve still descending at epoch 12 — more budget would improve further.
+## Active assignments (8 students, all DDP8)
 
-**Update (2026-04-29 16:25 UTC) — Round 1 first wave RESULTS CONFIRMED:**
-
-Test results on 50-case test split (best-val checkpoint), all under the
-torch.compile-bug-limited 9-epoch budget (alphonse calibration baseline
-established at PR #30, test_abupt 19.81):
-
-| Student | Hypothesis | val_abupt | test_abupt | Δ vs baseline | Outcome |
-|---|---|---:|---:|---:|---|
-| fern | RFF coord features (sigma=1.0) | 17.06 | **17.77** | **−2.04** | **NEW LEADER**; pushed comment to mark ready (kill sigma=2.0 sweep) |
-| thorfinn | Per-axis tau weights (1/1.5/1.5) | 18.52 | **19.44** | −0.37 | Win in W&B; **code not pushed** (asked to push) |
-| alphonse | Calibration (yi PR #4) | 18.70 | 19.81 | baseline | MERGED PR #30 |
-| frieren | FiLM AdaLN-zero | 19.86 | 20.07 | +0.26 | CLOSED (1.3% noise floor) |
-| edward | Cosine LR + warmup | 19.96 | 20.99 | +1.18 | Loss; comment sent to close on Arm A |
-| askeladd | Full composition stack | 36.x | 38.02 | +18.21 | CLOSED (tangential proj broken tau_z) |
-| nezuko | ANP cross-attn decoder | **17.85*** | — | — | Running, val tracking close to fern; slope still descending |
-| tanjiro | SDF gate / Lion | — | — | — | Pod stuck on stale assignment file |
-
-*nezuko val 17.85 at step 20591, runtime 4.6h — still running; if test tracks val,
-this would be a tay leader near-tie with fern.
-
-**Key learnings**:
-1. **RFF features (fern) are a real win** — drop test_abupt by 10% over
-   calibration. Compose orthogonally with everything in queue.
-2. **FiLM did not transfer to 4L/512d at 9 epochs** — reproduces yi's mechanism
-   (geom_token L2 ×180, scale_w L2 ×38) but no metric lift. Revisit after
-   compile fix when we have ~16-22 compiled epochs.
-3. **Tangential projection has structural tau_z bug** — z-aligned panels
-   lose gradient signal because GT wall-shear is mostly normal-direction
-   on roof/hood/floor. Tau_z monotonically *increased* during training in
-   PR #31. Eval-time projection is the correct fix (PR #41 askeladd).
-4. **Cosine EMA budget miscalibration** — schedule is over max_epochs but
-   we only run 17% of it in the budget. Effective decay ~0.991 vs
-   alphonse's 0.9995. Cosine EMA was effectively neutralized.
-5. **Compile + drop_last=False bug** — the largest single throughput lever.
-   Fixing this in trainer_runtime.py recovers 50% of training budget for
-   ALL future experiments. PR #40 alphonse working on this now.
-
-**Round 1b assignments (after first wave):**
-- alphonse #40: Fix compile bug (drop_last=True) + recalibrate — running (step 834)
-- askeladd #41: Eval-time tangential projection of wall-shear — running (step 2156)
-- frieren #42: Squared rel-L2 loss (drop outer sqrt for smooth backward) — running (step 2374)
-- tanjiro #39: Lion optimizer — pod stuck on stale assignment file (#36 still showing)
-- thorfinn: pod alive but in-pod claude session never reported PR #37 results
-
-**Round 1b/2 disposition:**
-- fern #33: MERGED 16:39 UTC — tay SOTA test_abupt **17.77** (−10.3%)
-- edward #32: CLOSED — test 20.99
-- alphonse #40: **MERGED ~20:00 UTC** — new tay SOTA test_abupt **17.25** (−2.9% vs #33)
-
-**Round 2 active assignments:**
-- alphonse #46: Compose RFF (sigma=1.0, 32 feats) + compile-fix — most important next composition test; if additive, projects to ~15.5 abupt below yi's 15.82
-- fern #43: Multi-scale RFF 3-band {0.1,1.0,10.0} — 3rd attempt running (crashed at step ~12980 twice), currently step ~5442
-- edward #44: Progressive cosine EMA (0.99→0.9999) + RFF — running, early training
-- askeladd #41: Eval-time tangential wall-shear projection — running step ~20832
-- frieren #42: Squared rel-L2 loss — running step ~23459, val 18.04 (descending)
-- thorfinn #47: Bilateral symmetry **train-time** augmentation — fresh assignment after closing #37
-- nezuko #35: ANP cross-attn decoder + RFF + vol_w=3 — running step ~16031
-- tanjiro #39: Lion optimizer — running step ~18210
-
-**Round 1b/2 dispositions:**
-- thorfinn #37: CLOSED ~20:30 UTC — bilateral-tta-eval-only finished test_abupt 19.71 (regression vs SOTA 17.25); per-axis weights code never pushed. Reassigned to PR #47.
-
-Round 1 on tay therefore has two simultaneous purposes:
-
-1. **Calibrate** the tay/DDP8 baseline against the yi numbers (16.64 merged,
-   15.82 pending) so we can claim genuine improvements.
-2. **Compose orthogonal wins** that yi never finished merging together
-   (FiLM × cosine-EMA × 512d × tangential-loss is the obvious composition).
-
-A subset of students push beyond yi with bold architecture or training
-changes that yi only got as far as Round-2 assignments for.
-
-## Active research themes
-
-1. **Composition of yi orthogonal wins on DDP8.** Width 512d (chihiro),
-   FiLM AdaLN-zero (frieren), cosine EMA 0.99→0.9999 (norman), vol_w=2.0
-   (gilbert), tangential wall-shear projection (kohaku). Yi predicted ~12-13
-   abupt for the full stack; we run that on DDP8 and verify.
-2. **Schedule and feature engineering.** Cosine LR + warmup, Gaussian
-   Fourier coordinate features. Both were Round-1 ideas in yi that never
-   produced clean comparable results because of stability bugs that have
-   since been patched (gradient clipping is now default in the trainer).
-3. **Architectural swap.** Replace the Transolver surface MLP head with an
-   ANP-style cross-attention decoder. Largest single architectural win
-   identified from `noam`'s prior work; never tested on DrivAerML.
-4. **Volume-targeted attention.** SDF-gated volume attention bias for
-   near-wall p_v emphasis. p_v is one of the hardest targets to move and
-   AB-UPT's 6.08 reference is a real gap from yi's 14.21.
-5. **Wall-shear axis disparity.** tau_y and tau_z are systematically worse
-   than tau_x. Per-axis loss weighting + bilateral-symmetry TTA both
-   directly attack this gap with low-risk single deltas.
-
-## Round 1 — assignments (8 students, all DDP8) — opened 2026-04-29
-
-| PR | Student | Stream | Hypothesis |
+| PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #30 | alphonse | calibrate | Reproduce yi PR #4 winning config (4L/512d/8h, lr=5e-5, bs=4) on DDP8 — establishes tay baseline |
-| #31 | askeladd | exploit | Full yi composition stack: 512d × cosine-EMA × tangential proj × vol_w=2.0 |
-| #32 | edward | exploit | Cosine LR + 5% warmup on top of 512d composition |
-| #33 | fern | exploit | Gaussian random Fourier features + 512d composition |
-| #34 | frieren | exploit | AdaLN-zero per-block FiLM + 512d composition |
-| #35 | nezuko | explore | A01 — ANP cross-attention surface decoder (replace head) |
-| #36 | tanjiro | explore | SDF-gated volume attention bias — **CLOSED** (5+ deterministic eval-path crashes at step 2719); reassigned to **PR #39 Lion optimizer** (single-delta train.py-only). Pod stuck on iteration 9 since 11:53 UTC; PR #39 not yet picked up. |
-| #37 | thorfinn | explore | Per-axis wall-shear loss weighting + bilateral-symmetry TTA |
+| #46 | alphonse | RFF (sigma=1.0, 32 feats) + compile | Running (post-compile-fix baseline, not Lion) |
+| #43 | fern | Multi-scale RFF 3-band {0.1,1.0,10.0} | Running 3rd attempt ~4.5h in (~23:45 finish) |
+| #47 | thorfinn | Bilateral train-time augmentation | Running |
+| #42 | frieren | Squared rel-L2 loss + compile (rebased) | Running rebased version |
+| #49 | askeladd | Grad-clip-norm 1.0 → 5.0 (single delta) | Running or just starting |
+| #35 nezuko R2 → | nezuko | **PR #50: Lion + compile (single delta)** | Just assigned |
+| #44 edward R2 → | edward | **PR #51: Lion + RFF sigma=1.0 (single delta)** | Just assigned |
+| tanjiro arm B | tanjiro | Lion lr=5e-5 sweep (follow-up, automatic) | Running `vnb7oheo` ~00:45 finish |
 
-## Next research directions (Round 2 candidates, queued)
+## Key closed experiments this round
 
-These are the strongest ideas to try after Round 1 lands:
+| PR | Outcome | Why |
+|---|---|---|
+| #41 askeladd | CLOSED — regression +22.5% | Eval-time tangential projection destroys normal-component of tau that helps rel-L2 |
+| #37 thorfinn | CLOSED — regression +14.2% | Bilateral TTA-eval only (no train aug); per-axis weights code never pushed |
+| #35 nezuko | CLOSED — regression +13.7% vs new SOTA | ANP uncompilable (inductor dynamic-shapes bug); surface wins not sustained in composition |
+| #44 edward | CLOSED — regression +18.8% vs new SOTA | Cosine EMA over max_epochs=50 → only 18% of schedule run → EMA=0.991 below fixed 0.9995 |
+| #34 frieren | CLOSED Round-1 — +0.26% noise | FiLM didn't transfer at 9 uncompiled epochs |
+| #32 edward | CLOSED Round-1 — regression | LR schedule over 50 epochs, same budget miscalibration |
 
-- **Backbone replacement** — Perceiver-IO, Mamba-2 SSM surface decoder, full
-  GeoTransolver/Transolver-3 backbone, GINO/FNO operator on the volume
-  channel.
-- **Pretraining** — denoising on 50 unlabelled test geometries; MAE 75%
-  point masking; DPOT transfer.
-- **Loss reformulation** — squared rel-L2 (no sqrt, smooth backward);
-  deep-evidential-regression head with NIG; uncertainty-aware loss.
-- **MoE / routing** — Soft-MoE FFN with 4 experts; dispatcher conditioned
-  on geometry token.
-- **Data representation** — Morton/Hilbert ordering for SSM-friendly
-  sequences; multi-resolution patch tokens; equivariant local frames.
-- **Optimization** — µP scaling so width sweeps don't need per-width LR
-  retuning; AdamW + Sophia/Lion comparisons.
+## Critical learnings
 
-## Constraints
+1. **Lion optimizer is the dominant new lever** — sign-based updates sidestep grad-clip-norm=1.0 compression. `lr=1.7e-5, wd=5e-3` (paper config) wins by −10.5%.
+2. **RFF is orthogonal to optimizer** — composition Lion+RFF is the next highest-priority test (PR #51).
+3. **Compile gives ~12 vs 9 epochs** — val curve still descending at epoch 9 (Lion). Lion+compile (PR #50) is the second highest-priority test.
+4. **Cosine EMA needs `--ema-total-epochs` calibrated to actual budget** (12, not 50). Without this it's a regression.
+5. **ANP decoder can't be compiled** — inductor dynamic-shapes bug specific to backbone-then-split flow. Dead end until that patch lands.
+6. **eval-time tangential projection destroys normal-component tau** — closed door with yi PR #11.
+7. **Budget miscalibration compounds** — any schedule-dependent hyperparameter (EMA, LR warmup, etc.) must be set to `T = actual_epochs_expected`, not `max_epochs`.
 
-- `SENPAI_MAX_EPOCHS` and `SENPAI_TIMEOUT_MINUTES` set by harness —
-  do not override. Throughput improvements (compile, AMP, point-count,
-  attention scaling, DDP8 communication tuning) are the lever for "more
-  update budget" inside the budget.
-- DDP8 = 8 GPUs per student × 96 GB each. Effective batch size at 512d/bs=4
-  per-GPU = 32. Use `--wandb_group` whenever a hypothesis needs multiple
-  arms.
+## Next priority compositions (after Lion win)
+
+High priority (single-delta from Lion SOTA):
+1. **Lion + compile** (PR #50 nezuko) — val curve still descending at epoch 9; 12 epochs should yield −5-10%
+2. **Lion + RFF** (PR #51 edward) — each lever was −10% independently; composition ~−13.5-14.0 if orthogonal
+3. **Lion + FiLM** (not yet assigned) — FiLM failed at uncompiled 9 epochs; Lion+compile gives FiLM another chance
+4. **Lion + cosine EMA (correct T_max=12)** — yi's biggest non-arch lever, correctly calibrated
+
+Active but possibly suboptimal vs Lion:
+5. **RFF + compile (PR #46 alphonse)** — tests RFF without Lion; important for decomposing gains
+6. **Bilateral train-aug (PR #47 thorfinn)** — physical symmetry augmentation; still worth knowing
+7. **Squared rel-L2 (PR #42 frieren)** — may compose with Lion; wait for result
+8. **Grad-clip 5.0 (PR #49 askeladd)** — motivated by frieren's AdamW diagnostic; less relevant for Lion
+
+## Longer-horizon ideas (post-Lion composition)
+
+- **FiLM + Lion + compile** — full composition when #50 and #51 land
+- **Cosine EMA (correct T_max) + Lion** — full optimizer+schedule composition
+- **Progressive cosine EMA decay** with T_max = actual expected epochs
+- **Backbone replacement** — Perceiver-IO, Mamba-2, Transolver-3, GINO on volume channel
+- **Width increase** — 512d is current; try 768d with µP-scaled LR
+- **Deeper supervision** — intermediate layer predictions à la deep supervision
+- **Uncertainty head** — NIG or evidential regression for training stability signal
+- **Multi-resolution patches** — coarse + fine surface tokenization
+- **Pretraining** — denoising on 50 unlabelled test geometries; MAE 75% masking
+
+## Reference
+
+| Target | AB-UPT | tay SOTA | Gap |
+|---|---:|---:|---:|
+| `abupt` mean | — | **15.43** | — |
+| `surface_pressure` | 3.82 | 9.45 | ×2.5 |
+| `wall_shear` | 7.29 | 16.28 | ×2.2 |
+| `volume_pressure` | 6.08 | 13.83 | ×2.3 |
+| `tau_x` | 5.35 | 13.91 | ×2.6 |
+| `tau_y` | 3.65 | 19.58 | ×5.4 |
+| `tau_z` | 3.63 | 20.40 | ×5.6 |
+
+tau_y and tau_z remain the hardest gap targets — need physical symmetry or per-axis weighting.

@@ -137,6 +137,131 @@ grad_norm ~4 — 1.0 clip is throwing away ~75% of gradient magnitude).
 
 ---
 
+## 2026-04-29 22:05 UTC — PR #39 MERGED: tanjiro Lion lr=1.7e-5 — NEW SOTA 15.43, crosses yi frontier
+
+**Student:** tanjiro | **W&B run:** `xonbs83i` (rank 0) | **Group:** `tay-lion-lr-sweep`
+**Hypothesis:** Drop-in Lion optimizer (paper config `lr=1.7e-5, wd=5e-3`) in place of AdamW.
+
+Note: student's in-pod claude hung since iteration 5 (17:42 UTC); training ran autonomously.
+Results verified directly from W&B summary. PR readied and merged by advisor.
+
+### Results — vs PR #40 SOTA (compiled, 12 epochs)
+
+| Metric | PR #39 Lion | PR #40 SOTA | Δ abs | Δ % |
+|---|---:|---:|---:|---:|
+| `val_primary/abupt` | **14.22** | 16.09 | −1.87 | **−11.6%** |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **15.43** | 17.25 | −1.82 | **−10.5%** |
+| `test_primary/surface_pressure_rel_l2_pct` | **9.45** | 10.92 | −1.47 | **−13.5%** |
+| `test_primary/wall_shear_rel_l2_pct` | **16.28** | 18.33 | −2.05 | **−11.2%** |
+| `test_primary/volume_pressure_rel_l2_pct` | **13.83** | 14.71 | −0.88 | **−6.0%** |
+| `test_primary/wall_shear_x_rel_l2_pct` | **13.91** | 15.73 | −1.82 | **−11.6%** |
+| `test_primary/wall_shear_y_rel_l2_pct` | **19.58** | 21.80 | −2.22 | **−10.2%** |
+| `test_primary/wall_shear_z_rel_l2_pct` | **20.40** | 23.07 | −2.67 | **−11.6%** |
+
+**Best_epoch = 9 / 50 configured** — val curve still descending at cutoff.
+
+**tay crosses below yi frontier: 15.43 vs yi best 15.82 (PR #13 norman).**
+
+### Config
+
+- optimizer: `lion`, lr: `1.7e-5`, wd: `5e-3`, beta1/beta2: `0.9/0.99`
+- base: 4L/512d/8h/128slices, ema_decay=0.9995, vol_w=2.0, bs=4×8GPU
+- **No compile** (pod on pre-compile-fix commit `269cb09`)
+- **No RFF**
+- Runtime: 287.1 min, DDP8
+
+### Mechanism analysis
+
+1. **Sign-update sidesteps clip compression.** With `grad-clip-norm=1.0` binding at every
+   step (frieren's diagnostic: clip_rate=1.0/23458 steps), AdamW's per-coordinate
+   magnitude scaling is being compressed. Lion uses `torch.sign(momentum)` — each
+   coordinate gets a step of exactly `lr`, independent of gradient magnitude. The
+   clip still fires but only scales the momentum update, not the step direction.
+
+2. **Larger weight decay tolerated.** `wd=5e-3` is 10× our default `5e-4`. Lion's
+   documented sweet spot; provides stronger implicit regularization against overfitting
+   on 400 CFD training cases.
+
+3. **val curve still descending at epoch 9** → compile (12 epochs) or longer budget
+   should further improve. Lion + compile is the next highest-priority test.
+
+### Disposition: MERGED — new tay SOTA
+
+Reassigning tanjiro to follow-up arm: arm B (Lion lr=5e-5, `vnb7oheo`) launched
+automatically and still running as of merge.
+
+---
+
+## 2026-04-29 22:10 UTC — PR #35 CLOSED: nezuko ANP cross-attention decoder — two rounds, no win
+
+**Student:** nezuko | **Round-1 run:** `2fqts0v8` | **Round-2 run:** `ochavw4i`
+**Hypothesis:** Replace Transolver surface MLP head with ANP-style cross-attention decoder.
+
+### Results (both rounds)
+
+| Run | Config | test_abupt | vs SOTA at time |
+|---|---|---:|---:|
+| Round-1 ANP | standalone, no RFF, vol_w=2 | 18.76 | −5.3% vs #30 calibration |
+| Round-2 ANP+RFF | ANP + RFF sigma=1.0 + vol_w=3 | **17.55** | **+1.7% vs PR #40 SOTA** |
+| **PR #39 SOTA** | Lion lr=1.7e-5 | **15.43** | — |
+
+### Key findings
+
+1. **Surface wins are real but partial.** Standalone ANP: p_s −7.2%, tau axes −7-8%.
+   With RFF composition: p_s −2.5%, tau_x −1% (RFF captures same non-local spatial
+   structure — not fully orthogonal).
+2. **p_v regression is structural.** ANP's cross-attention over slice tokens focuses
+   on surface geometry; volume targets need backbone-level volume processing that
+   isn't helped by a surface head replacement.
+3. **Cannot be compiled.** `torch.inductor` dynamic-shapes `AssertionError` at
+   epoch 1 (backbone-then-split `s24 + 65536` codegen bug). Stuck at ~9 uncompiled
+   epochs vs 12 compiled — fundamental throughput disadvantage.
+4. **vol_w=3 didn't help p_v.** Round-2 p_v = 17.26 vs Round-1 (not logged final).
+   Increasing vol_w amplified a weak signal; the head needs a different fix.
+
+### Disposition: CLOSED
+
+Slice tokens (post-SDPA) are high-quality local-geometry embeddings — future head
+replacements should read those, not pre-SDPA tokens. But for now, composition
+wins from Lion + compile are more tractable.
+
+Reassigning nezuko to **PR #50: Lion + compile (single delta)**.
+
+---
+
+## 2026-04-29 22:12 UTC — PR #44 CLOSED: edward cosine EMA (0.99→0.9999) — budget miscalibration regression
+
+**Student:** edward | **W&B run:** `51yrbxxj` | **Group:** cosine-ema + RFF
+**Hypothesis:** Progressive cosine EMA decay 0.99→0.9999 (replicating yi PR #13 norman win)
++ RFF coord features.
+
+### Results
+
+| Metric | PR #44 | PR #40 SOTA | PR #39 new SOTA | Δ vs PR #40 |
+|---|---:|---:|---:|---:|
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **18.33** | 17.25 | 15.43 | **+6.3%** |
+| surface_pressure | 11.69 | 10.92 | 9.45 | +7.1% |
+| wall_shear | 19.35 | 18.33 | 16.28 | +5.6% |
+| volume_pressure | 16.12 | 14.71 | 13.83 | +9.6% |
+
+### Root cause: EMA schedule mapped to max_epochs=50, not actual epochs
+
+Cosine EMA sweeps 0.99→0.9999 over `ema_total_epochs` (defaults to `max_epochs=50`).
+At epoch 9 of 50 (18% through schedule): `ema_decay ≈ 0.9910`. Fixed default is 0.9995.
+**The cosine EMA spent the entire run below the fixed EMA baseline.**
+
+Yi's norman PR #13 (which won with this schedule) ran with a longer effective budget.
+With `T_max=12` (our actual compiled epoch count), the schedule would reach ~0.9960 by
+end — still below 0.9995. Fix: `--ema-total-epochs 12` for our budget.
+
+### Disposition: CLOSED
+
+Cosine EMA is worth revisiting on top of Lion with `--ema-total-epochs` set to
+actual expected epoch count (12 for compiled runs). Reassigning edward to
+**PR #51: Lion + RFF (single delta)** — cleaner first composition test.
+
+---
+
 ## 2026-04-29 20:46 UTC — PR #42 SENT BACK: frieren squared_rel_l2 — orthogonal win but on stale baseline
 
 **Student:** frieren | **W&B run:** `bmz26ft7` | **Hypothesis:** Replace MSE
