@@ -1,10 +1,10 @@
 # SENPAI Research State
 
-- **Date:** 2026-04-28
+- **Date:** 2026-04-29
 - **Branch:** `yi`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B:** `wandb-applied-ai-team/senpai-v1-drivaerml`
-- **Most recent direction from human team:** 2026-04-28 — morganmcg1 (Issue #18)
+- **Most recent direction from human team:** 2026-04-28 — morganmcg1 (Issue #19)
 
 ## Key directives from human research team (Issue #18, 2026-04-28)
 
@@ -92,6 +92,26 @@ Full hypothesis pool: `research/RESEARCH_IDEAS_2026-04-28_ROUND2_ARCHITECTURES.m
 Round 2 will assign these once Round 1 results come in (so we know which
 loss/optim/EMA/data-weighting wins to compose with the new backbone).
 
+## Round 1 — first reviewed result (2026-04-29)
+
+- **PR #12 (nezuko, DropPath p=0.1) closed.** Significantly worse than the closest
+  no-DropPath comparator (norman): 81.21 vs 64.66 abupt_axis_mean. Root cause:
+  runs are in the **underfitting regime** (best_epoch=1, train loss falling while
+  EMA-val degrades), so any regularizer hurts. Stochastic depth is the wrong tool
+  for the current bottleneck.
+- **Critical infrastructure win from PR #12.** nezuko shipped a per-step timeout
+  fix (`train.py`); cherry-picked onto `yi` as `af92e9a`. Reserves
+  `SENPAI_VAL_BUDGET_MINUTES` (default 90), checks wall-clock per step, forces
+  validation on partial epoch when timeout hits. Without this, every 65k-pts
+  run silently times out without producing `test_primary/*`.
+- **Cross-cutting Round-1 directives broadcast to all active PRs (2026-04-29):**
+  rebase onto `yi` to pick up `af92e9a`; set `--validation-every 1` (or 2) for
+  Round-1 sized runs since `validation_every=10` only yields one usable
+  checkpoint inside the budget; report on observed train→val divergence.
+- **Open question for the round:** train loss decreases while EMA-val
+  degrades after epoch 1 on at least two runs. EMA decay too aggressive for
+  the fast initial fit? LR-warmup interplay? Worth a focused diagnostic.
+
 ## Constraints
 
 - `SENPAI_MAX_EPOCHS` and `SENPAI_TIMEOUT_MINUTES` are fixed by harness — do
@@ -106,3 +126,7 @@ loss/optim/EMA/data-weighting wins to compose with the new backbone).
   preventing the run from reaching epoch 1 inside the 6 h timeout. At
   every-50 the same config runs at ~6.8 it/s. Slope cadence
   (`--slope-log-fraction 0.05`) is already efficient and stays.
+- **Per-step timeout fix (commit `af92e9a` on `yi`, 2026-04-29):**
+  `SENPAI_VAL_BUDGET_MINUTES` (default 90) is reserved out of
+  `SENPAI_TIMEOUT_MINUTES` for in-loop val + post-loop full_val + test.
+  All new student work must rebase onto `yi` to pick this up.
