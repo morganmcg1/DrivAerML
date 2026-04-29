@@ -91,6 +91,8 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    rff_num_features: int = 0
+    rff_sigma: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -148,6 +150,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
+        rff_num_features=config.rff_num_features,
+        rff_sigma=config.rff_sigma,
     )
 
 

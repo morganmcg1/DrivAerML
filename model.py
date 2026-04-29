@@ -46,6 +46,31 @@ class LinearProjection(nn.Module):
         return self.project(x)
 
 
+class RFFEncoding(nn.Module):
+    """Gaussian random Fourier feature coordinate encoding (Tancik et al. 2020).
+
+    Lifts ``in_dim`` raw coordinates into a ``2 * num_features`` basis via a fixed
+    random Gaussian projection followed by sin/cos. ``B`` is registered as a
+    buffer so it is non-trainable but follows the model across devices and is
+    broadcast across DDP ranks (DDP default ``broadcast_buffers=True``).
+    """
+
+    def __init__(self, in_dim: int, num_features: int = 32, sigma: float = 1.0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features = num_features
+        self.sigma = sigma
+        self.register_buffer("B", torch.randn(in_dim, num_features) * sigma)
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.num_features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        proj = 2.0 * math.pi * (x @ self.B.to(dtype=x.dtype))
+        return torch.cat([proj.sin(), proj.cos()], dim=-1)
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -226,6 +251,8 @@ class SurfaceTransolver(nn.Module):
         n_head: int = 3,
         mlp_ratio: int = 4,
         slice_num: int = 96,
+        rff_num_features: int = 0,
+        rff_sigma: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -233,17 +260,35 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.rff_num_features = rff_num_features
+        self.rff_sigma = rff_sigma
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
+
+        if rff_num_features > 0:
+            self.surface_rff = RFFEncoding(
+                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+            )
+            self.volume_rff = RFFEncoding(
+                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+            )
+            rff_out_dim = 2 * rff_num_features
+        else:
+            self.surface_rff = None
+            self.volume_rff = None
+            rff_out_dim = 0
+
+        surface_proj_in = surface_extra_dim + rff_out_dim
+        volume_proj_in = volume_extra_dim + rff_out_dim
         self.project_surface_features = (
-            LinearProjection(surface_extra_dim, n_hidden) if surface_extra_dim > 0 else None
+            LinearProjection(surface_proj_in, n_hidden) if surface_proj_in > 0 else None
         )
         self.project_volume_features = (
-            LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
+            LinearProjection(volume_proj_in, n_hidden) if volume_proj_in > 0 else None
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
@@ -263,14 +308,23 @@ class SurfaceTransolver(nn.Module):
         self,
         x: torch.Tensor,
         *,
+        rff: nn.Module | None,
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
-        if project_features is not None and x.shape[-1] > self.space_dim:
-            hidden = hidden + project_features(x[:, :, self.space_dim :])
+        feature_parts: list[torch.Tensor] = []
+        if x.shape[-1] > self.space_dim:
+            feature_parts.append(x[:, :, self.space_dim :])
+        if rff is not None:
+            feature_parts.append(rff(pos))
+        if project_features is not None and feature_parts:
+            features = (
+                feature_parts[0] if len(feature_parts) == 1 else torch.cat(feature_parts, dim=-1)
+            )
+            hidden = hidden + project_features(features)
         return bias(hidden) + placeholder
 
     def forward(
@@ -298,6 +352,7 @@ class SurfaceTransolver(nn.Module):
             tokens.append(
                 self._encode_group(
                     surface_x,
+                    rff=self.surface_rff,
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
@@ -310,6 +365,7 @@ class SurfaceTransolver(nn.Module):
             tokens.append(
                 self._encode_group(
                     volume_x,
+                    rff=self.volume_rff,
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
