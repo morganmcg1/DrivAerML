@@ -16,11 +16,11 @@ that yi only got as far as Round-2 assignments for.
 
 | PR | Student | Hypothesis |
 |---|---|---|
-| TBD | alphonse | yi PR #4 reproduce (4L/512d/8h, lr=5e-5, bs=4) — calibration |
-| TBD | askeladd | Full composition stack: 512d × cosine-EMA × tangential × vol_w=2.0 |
-| TBD | edward | Cosine LR + 5% warmup on top of 512d composition |
-| TBD | fern | Gaussian Fourier coord features + 512d composition |
-| TBD | frieren | AdaLN-zero per-block FiLM + 512d composition |
-| TBD | nezuko | A01 — ANP cross-attention surface decoder |
-| TBD | tanjiro | SDF-gated volume attention bias for near-wall p_v |
-| TBD | thorfinn | Per-axis wall-shear loss weighting + bilateral-symmetry TTA |
+| #30 | alphonse | yi PR #4 reproduce (4L/512d/8h, lr=5e-5, bs=4) — calibration |
+| #31 | askeladd | Full composition stack: 512d × cosine-EMA × tangential × vol_w=2.0 |
+| #32 | edward | Cosine LR + 5% warmup on top of 512d composition |
+| #33 | fern | Gaussian Fourier coord features + 512d composition |
+| #34 | frieren | AdaLN-zero per-block FiLM + 512d composition |
+| #35 | nezuko | A01 — ANP cross-attention surface decoder |
+| #36 | tanjiro | SDF-gated volume attention bias for near-wall p_v |
+| #37 | thorfinn | Per-axis wall-shear loss weighting + bilateral-symmetry TTA |

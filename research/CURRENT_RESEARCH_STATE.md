@@ -44,18 +44,18 @@ changes that yi only got as far as Round-2 assignments for.
    than tau_x. Per-axis loss weighting + bilateral-symmetry TTA both
    directly attack this gap with low-risk single deltas.
 
-## Round 1 — assignments (8 students, all DDP8)
+## Round 1 — assignments (8 students, all DDP8) — opened 2026-04-29
 
-| Student | Stream | Hypothesis |
-|---|---|---|
-| alphonse | calibrate | Reproduce yi PR #4 winning config (4L/512d/8h, lr=5e-5, bs=4) on DDP8 — establishes tay baseline |
-| askeladd | exploit | Full yi composition stack: 512d × cosine-EMA × tangential proj × vol_w=2.0 |
-| edward | exploit | Cosine LR + 5% warmup on top of 512d composition |
-| fern | exploit | Gaussian random Fourier features + 512d composition |
-| frieren | exploit | AdaLN-zero per-block FiLM + 512d composition |
-| nezuko | explore | A01 — ANP cross-attention surface decoder (replace head) |
-| tanjiro | explore | SDF-gated volume attention bias (near-wall p_v emphasis) |
-| thorfinn | explore | Per-axis wall-shear loss weighting + bilateral-symmetry TTA |
+| PR | Student | Stream | Hypothesis |
+|---|---|---|---|
+| #30 | alphonse | calibrate | Reproduce yi PR #4 winning config (4L/512d/8h, lr=5e-5, bs=4) on DDP8 — establishes tay baseline |
+| #31 | askeladd | exploit | Full yi composition stack: 512d × cosine-EMA × tangential proj × vol_w=2.0 |
+| #32 | edward | exploit | Cosine LR + 5% warmup on top of 512d composition |
+| #33 | fern | exploit | Gaussian random Fourier features + 512d composition |
+| #34 | frieren | exploit | AdaLN-zero per-block FiLM + 512d composition |
+| #35 | nezuko | explore | A01 — ANP cross-attention surface decoder (replace head) |
+| #36 | tanjiro | explore | SDF-gated volume attention bias (near-wall p_v emphasis) |
+| #37 | thorfinn | explore | Per-axis wall-shear loss weighting + bilateral-symmetry TTA |
 
 ## Next research directions (Round 2 candidates, queued)
 
