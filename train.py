@@ -93,6 +93,10 @@ class Config:
     model_dropout: float = 0.0
     rff_num_features: int = 0
     rff_sigma: float = 1.0
+    surface_decoder: str = "mlp"
+    surface_decoder_layers: int = 2
+    surface_decoder_heads: int = 8
+    surface_decoder_dropout: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -152,6 +156,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        surface_decoder=config.surface_decoder,
+        surface_decoder_layers=config.surface_decoder_layers,
+        surface_decoder_heads=config.surface_decoder_heads,
+        surface_decoder_dropout=config.surface_decoder_dropout,
     )
 
 
@@ -181,13 +189,17 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    for key, value in out.items():
+        if isinstance(key, str) and key.startswith("aux/") and torch.is_tensor(value):
+            metrics[key[len("aux/") :]] = float(value.detach().cpu().item())
+    return loss, metrics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -337,6 +349,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    for aux_key, aux_value in batch_loss_metrics.items():
+                        if aux_key.startswith("anp_"):
+                            train_log[f"train/{aux_key}"] = aux_value
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
