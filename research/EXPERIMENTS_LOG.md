@@ -103,6 +103,47 @@ After compile fix merges, Round 2 baselines reset.
 
 ---
 
+## 2026-04-29 20:00 UTC — PR #40 MERGED: alphonse compile-fix — new tay SOTA 17.25
+
+**Student:** alphonse | **W&B run:** `ae4zsaly` (rank 0) | **Hypothesis:** Fix
+`torch.compile` crash (`drop_last=False` + variable-shape eval batches) so all
+runs can use compiled training at ~1.7× throughput. Recalibrate with same 4L/512d/8h
+config as PR #30.
+
+Two-line patch in `trainer_runtime.py`:
+1. `drop_last=True` on `DistributedSampler` + `DataLoader` (lines 293, 301) — fixes partial last-batch epoch crash.
+2. `unwrap_model(model)` in `accumulate_eval_batch` (line 929) — bypasses compile during eval because `pad_collate` produces variable-shape batches; `model.py:321` `torch.cat([surf, vol], dim=1)` creates sum-of-symbolic-dims (`s24+s39`) that inductor can't verify; `dynamic=True` did not help.
+
+### Results
+
+| Metric | PR #40 | PR #33 (SOTA) | PR #30 | yi best | AB-UPT |
+|---|---:|---:|---:|---:|---:|
+| `abupt_axis_mean` | **17.25** | 17.77 | 19.81 | 15.82 | — |
+| `surface_pressure` | **10.92** | 11.20 | 12.86 | 9.99 | 3.82 |
+| `wall_shear` | **18.33** | 18.68 | 21.27 | 16.60 | 7.29 |
+| `volume_pressure` | **14.71** | 16.13 | 15.91 | 14.21 | 6.08 |
+| `tau_x` | **15.73** | 16.20 | 18.24 | 14.27 | 5.35 |
+| `tau_y` | **21.80** | 21.81 | 25.50 | 19.49 | 3.65 |
+| `tau_z` | **23.07** | 23.54 | 26.53 | 21.12 | 3.63 |
+
+Δ vs PR #33: abupt −2.9%, surface_p −2.5%, wall_shear −1.9%, **volume_p −8.8%**, tau_x −2.9%, tau_y flat, tau_z −2.0%.
+
+### Analysis
+
+Biggest surprise: compile fix alone beats RFF (17.25 vs 17.77) despite no feature change.
+The mechanism: compile gives ~1.7× throughput → 12 epochs vs 9 in same 270-min budget. Val
+curve still steeply descending at epoch 12 (Δ epoch11→12 = −0.57) — more budget would improve
+further. Volume pressure improved most (−8.8%) suggesting early-epoch vol gradient was most
+starved of training time.
+
+The PR #40 student correctly diagnosed that RFF+compile composition (PR #46 alphonse) is the
+next priority, projecting ~15.5 abupt if additive. The remaining gap to yi (17.25 vs 15.82) is
+consistent with missing progressive cosine EMA (edward #44 testing this).
+
+Best-val: epoch 12, val_abupt 16.09. Peak GPU mem 53.1 GB / 96 GB available.
+
+---
+
 ## 2026-04-29 16:39 UTC — PR #33 MERGED: fern RFF win — new tay SOTA 17.77
 
 **Student:** fern | **W&B run:** `u43lik5d` (rank 0) | **Hypothesis:** Gaussian RFF coord

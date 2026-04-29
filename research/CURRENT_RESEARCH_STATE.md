@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-29
+- **Date:** 2026-04-29 20:00 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -8,11 +8,19 @@
   carried Issue #18: "be bolder; replace the backbone; mine `noam`/`radford`
   branches; trust students to take big leaps")_
 
-## Calibration status
+## Calibration status — PR #40 MERGED 2026-04-29 ~20:00 UTC
 
-`tay` was just bootstrapped from `main` + DDP8 hardening. None of yi's
-proven wins have landed in code yet — the trainer defaults are 3L/192d/3h,
-lr=3e-4, bs=2, 40k points, no FiLM, no projection loss, fixed-decay EMA.
+**New tay SOTA: test_abupt 17.25 (−2.9% vs PR #33, −12.9% vs PR #30)**
+
+| PR | Student | test_abupt | Key lever |
+|---|---|---:|---|
+| #30 | alphonse | 19.81 | yi calibration config (4L/512d/8h) |
+| #33 | fern | 17.77 | RFF coord features sigma=1.0, no-compile |
+| **#40** | **alphonse** | **17.25** | **torch.compile fix → 12 epochs vs 9; every axis improved** |
+
+**torch.compile bug is now FIXED** (`trainer_runtime.py:293,301,929`). All future runs should use compile by default (no `--no-compile-model`). Throughput: ~16 min/epoch compiled → 270-min budget yields 12 epochs.
+
+Key insight from PR #40: compile fix alone (no RFF) already beats RFF-without-compile. Volume pressure improved most: 16.13 → 14.71. Val curve still descending at epoch 12 — more budget would improve further.
 
 **Update (2026-04-29 16:25 UTC) — Round 1 first wave RESULTS CONFIRMED:**
 
@@ -58,14 +66,20 @@ this would be a tay leader near-tie with fern.
 - tanjiro #39: Lion optimizer — pod stuck on stale assignment file (#36 still showing)
 - thorfinn: pod alive but in-pod claude session never reported PR #37 results
 
-**Round 1 disposition complete:**
-- fern #33: MERGED 16:39 UTC — new tay SOTA test_abupt **17.77** (−10.3%)
-- edward #32: CLOSED — test 20.99 (+6% vs baseline; cosine annealing under-utilised at 9 epochs)
-- thorfinn #37: still open — code not pushed to remote; comment posted asking for push
+**Round 1b/2 disposition:**
+- fern #33: MERGED 16:39 UTC — tay SOTA test_abupt **17.77** (−10.3%)
+- edward #32: CLOSED — test 20.99
+- alphonse #40: **MERGED ~20:00 UTC** — new tay SOTA test_abupt **17.25** (−2.9% vs #33)
 
-**Round 2 assignments (2026-04-29 ~16:45 UTC):**
-- fern #43: Multi-scale RFF — surface sigmas {0.1,1.0,10.0} + volume {0.01,0.1,1.0}; 192 features per modality; builds on PR #33 mechanism
-- edward #44: Progressive cosine EMA (0.99→0.9999) + RFF; yi's biggest non-arch lever (−10%), not yet tested on tay
+**Round 2 active assignments:**
+- alphonse #46: Compose RFF (sigma=1.0, 32 feats) + compile-fix — most important next composition test; if additive, projects to ~15.5 abupt below yi's 15.82
+- fern #43: Multi-scale RFF 3-band {0.1,1.0,10.0} — 3rd attempt running (crashed at step ~12980 twice), currently step ~1550
+- edward #44: Progressive cosine EMA (0.99→0.9999) + RFF — running, early training
+- askeladd #41: Eval-time tangential wall-shear projection — running step ~16851
+- frieren #42: Squared rel-L2 loss — running step ~19053, val 19.79
+- thorfinn #37: Per-axis tau weights + bilateral TTA — running step ~21160, val 20.18
+- nezuko #35: ANP cross-attn decoder + RFF + vol_w=3 — running step ~12517
+- tanjiro #39: Lion optimizer — running step ~14200
 
 Round 1 on tay therefore has two simultaneous purposes:
 
