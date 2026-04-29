@@ -232,6 +232,41 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class GeomEncoder(nn.Module):
+    """Mean-pooled MLP encoder over surface points to a per-case geometry token."""
+
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, out_dim),
+        )
+        self.net.apply(_init_linear)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        mask_f = mask.to(dtype=x.dtype).unsqueeze(-1)
+        x_masked = x * mask_f
+        n_valid = mask_f.sum(dim=1).clamp(min=1.0)
+        x_mean = x_masked.sum(dim=1) / n_valid
+        return self.net(x_mean)
+
+
+class FiLMLayer(nn.Module):
+    """FiLM with AdaLN-zero init: gamma=0, beta=0 at start so output equals input."""
+
+    def __init__(self, geom_dim: int, hidden_dim: int):
+        super().__init__()
+        self.to_gamma_beta = nn.Linear(geom_dim, 2 * hidden_dim)
+        nn.init.zeros_(self.to_gamma_beta.weight)
+        nn.init.zeros_(self.to_gamma_beta.bias)
+
+    def forward(self, h: torch.Tensor, geom: torch.Tensor) -> torch.Tensor:
+        gb = self.to_gamma_beta(geom)
+        gamma, beta = gb.chunk(2, dim=-1)
+        return h * (1 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
+
+
 class Transformer(nn.Module):
     def __init__(
         self,
@@ -242,6 +277,7 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
+        film_geom_dim: int = 0,
     ):
         super().__init__()
         if depth <= 1:
@@ -263,10 +299,25 @@ class Transformer(nn.Module):
                 for i in range(depth)
             ]
         )
+        self.film_layers = (
+            nn.ModuleList(
+                [FiLMLayer(film_geom_dim, hidden_dim) for _ in range(depth)]
+            )
+            if film_geom_dim > 0
+            else None
+        )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        for block in self.blocks:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        geom_token: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        for index, block in enumerate(self.blocks):
             x = block(x, attn_mask=attn_mask)
+            if self.film_layers is not None and geom_token is not None:
+                x = self.film_layers[index](x, geom_token)
+                x = _apply_token_mask(x, attn_mask)
         return x
 
 
@@ -288,6 +339,8 @@ class SurfaceTransolver(nn.Module):
         mlp_ratio: int = 4,
         slice_num: int = 96,
         stochastic_depth_prob: float = 0.0,
+        use_film: bool = False,
+        film_encoder_dim: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -297,6 +350,8 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        self.use_film = use_film
+        self.film_encoder_dim = film_encoder_dim
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -309,6 +364,11 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.geom_encoder = (
+            GeomEncoder(self.surface_input_dim, film_encoder_dim * 2, film_encoder_dim)
+            if use_film
+            else None
+        )
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -317,6 +377,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
+            film_geom_dim=film_encoder_dim if use_film else 0,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -382,7 +443,10 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        geom_token: torch.Tensor | None = None
+        if self.use_film and self.geom_encoder is not None and surface_x is not None:
+            geom_token = self.geom_encoder(surface_x, surface_mask)
+        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -423,6 +487,9 @@ class EMA:
             if param.requires_grad
         }
         self.backup: dict[str, torch.Tensor] | None = None
+
+    def set_decay(self, new_decay: float) -> None:
+        self.decay = float(new_decay)
 
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
@@ -497,6 +564,10 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    ema_decay_start: float = 0.0
+    ema_decay_end: float = 0.9999
+    use_film: bool = False
+    film_encoder_dim: int = 64
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -644,6 +715,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
         stochastic_depth_prob=config.stochastic_depth_prob,
+        use_film=config.use_film,
+        film_encoder_dim=config.film_encoder_dim,
     )
 
 
@@ -1658,7 +1731,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
             optimizer.step()
+            ema_decay_now: float | None = None
             if ema is not None:
+                if config.ema_decay_start > 0.0:
+                    progress = min(global_step / max(total_estimated_steps, 1), 1.0)
+                    cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
+                    ema_decay_now = config.ema_decay_start + cos_val * (
+                        config.ema_decay_end - config.ema_decay_start
+                    )
+                    ema.set_decay(ema_decay_now)
                 ema.update(model)
             weight_metrics = (
                 collect_weight_metrics(
@@ -1683,6 +1764,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            if ema_decay_now is not None:
+                train_log["train/ema_decay"] = ema_decay_now
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
