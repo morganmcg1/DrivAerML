@@ -93,6 +93,8 @@ class Config:
     model_dropout: float = 0.0
     rff_num_features: int = 0
     rff_sigma: float = 1.0
+    rff_sigmas: str = ""
+    rff_volume_sigmas: str = ""
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -128,6 +130,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
         ),
+        "rff_sigmas": (
+            "Comma-separated RFF sigma values for surface coords (and volume coords "
+            "when --rff-volume-sigmas is empty). When >1 value, the model uses "
+            "MultiScaleRFF, concatenating one RFFEncoding per sigma. Each band gets "
+            "--rff-num-features features. Falls back to [--rff-sigma] when empty."
+        ),
+        "rff_volume_sigmas": (
+            "Comma-separated RFF sigma values for volume coords. Falls back to "
+            "--rff-sigmas (then --rff-sigma) when empty. Lets surface and volume "
+            "use different multi-scale frequency bands, since their coordinate "
+            "ranges differ by ~50x on DrivAerML."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -142,7 +156,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def _parse_sigma_list(sigma_str: str) -> list[float] | None:
+    sigma_str = (sigma_str or "").strip()
+    if not sigma_str:
+        return None
+    return [float(token.strip()) for token in sigma_str.split(",") if token.strip()]
+
+
 def build_model(config: Config) -> SurfaceTransolver:
+    surface_sigmas = _parse_sigma_list(config.rff_sigmas)
+    volume_sigmas = _parse_sigma_list(config.rff_volume_sigmas) or surface_sigmas
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -152,6 +175,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        rff_surface_sigmas=surface_sigmas,
+        rff_volume_sigmas=volume_sigmas,
     )
 
 

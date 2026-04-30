@@ -71,6 +71,36 @@ class RFFEncoding(nn.Module):
         return torch.cat([proj.sin(), proj.cos()], dim=-1)
 
 
+class MultiScaleRFF(nn.Module):
+    """Concatenate ``RFFEncoding`` outputs at multiple frequency scales.
+
+    Motivated by spectral-bias theory (Tancik et al. 2020): a single sigma
+    cannot simultaneously represent low- and high-frequency spatial variation.
+    Concatenating bands with different sigmas exposes both regimes to the
+    downstream linear projection without changing depth.
+
+    Output dim is ``2 * num_features * len(sigmas)``.
+    """
+
+    def __init__(self, in_dim: int, num_features: int, sigmas: list[float]):
+        super().__init__()
+        if len(sigmas) == 0:
+            raise ValueError("MultiScaleRFF requires at least one sigma value")
+        self.in_dim = in_dim
+        self.num_features = num_features
+        self.sigmas = list(sigmas)
+        self.encoders = nn.ModuleList(
+            [RFFEncoding(in_dim, num_features, sigma=float(s)) for s in self.sigmas]
+        )
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.num_features * len(self.sigmas)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.cat([enc(x) for enc in self.encoders], dim=-1)
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -253,6 +283,8 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
+        rff_surface_sigmas: list[float] | None = None,
+        rff_volume_sigmas: list[float] | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -262,6 +294,10 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         self.rff_num_features = rff_num_features
         self.rff_sigma = rff_sigma
+        surface_sigmas = list(rff_surface_sigmas) if rff_surface_sigmas else [rff_sigma]
+        volume_sigmas = list(rff_volume_sigmas) if rff_volume_sigmas else [rff_sigma]
+        self.rff_surface_sigmas = surface_sigmas
+        self.rff_volume_sigmas = volume_sigmas
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -270,20 +306,18 @@ class SurfaceTransolver(nn.Module):
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
 
         if rff_num_features > 0:
-            self.surface_rff = RFFEncoding(
-                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
-            )
-            self.volume_rff = RFFEncoding(
-                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
-            )
-            rff_out_dim = 2 * rff_num_features
+            self.surface_rff = self._build_rff(space_dim, rff_num_features, surface_sigmas)
+            self.volume_rff = self._build_rff(space_dim, rff_num_features, volume_sigmas)
+            surface_rff_out_dim = self.surface_rff.output_dim
+            volume_rff_out_dim = self.volume_rff.output_dim
         else:
             self.surface_rff = None
             self.volume_rff = None
-            rff_out_dim = 0
+            surface_rff_out_dim = 0
+            volume_rff_out_dim = 0
 
-        surface_proj_in = surface_extra_dim + rff_out_dim
-        volume_proj_in = volume_extra_dim + rff_out_dim
+        surface_proj_in = surface_extra_dim + surface_rff_out_dim
+        volume_proj_in = volume_extra_dim + volume_rff_out_dim
         self.project_surface_features = (
             LinearProjection(surface_proj_in, n_hidden) if surface_proj_in > 0 else None
         )
@@ -303,6 +337,12 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+    @staticmethod
+    def _build_rff(in_dim: int, num_features: int, sigmas: list[float]) -> nn.Module:
+        if len(sigmas) == 1:
+            return RFFEncoding(in_dim=in_dim, num_features=num_features, sigma=sigmas[0])
+        return MultiScaleRFF(in_dim=in_dim, num_features=num_features, sigmas=sigmas)
 
     def _encode_group(
         self,
