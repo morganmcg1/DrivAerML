@@ -448,6 +448,74 @@ this experiment surfaces is **throughput**, not LR schedule.
 
 ---
 
+## 2026-04-30 04:50 UTC — PR #42 CLOSED: frieren squared rel-L2 — three arms, AdamW arm clean +40% regression, Lion arm DIVERGED with mechanistic explanation
+
+**Student:** frieren | **W&B runs:** `uwt74mip` (AdamW arm) / `24bdfcnz` (Lion paper-config, killed) / `8ubarr6a` (Lion 5e-5, diverged)
+**Hypothesis:** Replace MSE training loss with `(y−ŷ)²/y²` (squared rel-L2). Adds CLI flag `--loss-form {mse,rel_l2,squared_rel_l2}`.
+
+### Arm 1 — AdamW + compile + sq_rel_l2 (finished cleanly)
+
+W&B `uwt74mip`, group `tay-round2-squared-rel-l2-compiled`. 284 min, best epoch 16.
+
+| Metric | PR #40 (compile only, MSE) | This (Arm 1, sq_rel_l2) | Δ vs PR #40 | tay SOTA `vnb7oheo` (Lion 5e-5, MSE) | Δ vs SOTA |
+|---|---:|---:|---:|---:|---:|
+| `test_abupt` | 17.25 | **15.819** | −1.43 (−8.3%) | 11.303 | **+40.0%** |
+| surface_pressure | 10.92 | 9.756 | −10.6% | 6.216 | +57.0% |
+| wall_shear | 18.33 | 16.742 | −8.7% | 11.315 | +47.9% |
+| volume_pressure | 14.71 | 14.063 | −4.4% | 12.755 | +10.3% |
+| tau_x | 15.73 | 14.412 | −8.4% | 9.563 | +50.7% |
+| tau_y | 21.80 | 19.859 | −8.9% | 13.831 | +43.6% |
+| tau_z | 23.07 | 21.003 | −9.0% | 14.147 | +48.5% |
+
+**Mechanism validated:** uniform −8% across all six axes vs PR #40's MSE baseline. Consistent with original
+PR #42 round-1 result (−3.4% on uncompiled). The compile-fix doubled the effective wall budget so the
+mechanism delta also compounded.
+
+### Arm 3 — Lion (lr=5e-5/wd=5e-4 SOTA recipe) + compile + sq_rel_l2 → DIVERGED
+
+W&B `8ubarr6a`. Killed at step 8959 / 56 min after clean divergence at step 5000.
+
+| Step | Lion + MSE (`vnb7oheo`) | Lion + sq_rel_l2 (this) |
+|---:|---|---|
+| 4000 | loss=0.18 grad=2.3 | loss=0.23 grad=6.5 |
+| **5000** | **loss=0.16 grad=2.7** | **loss=1.40 grad=240** ← divergence |
+| 8000 | loss=0.08 grad=1.8 | loss=2.59 grad=505 |
+
+Val curve: epoch 1 = 82.55%, epoch 2 = 83.30%, epoch 3 = 112.97%.
+
+### Mechanism (frieren's diagnosis — preserved as closed-door insight)
+
+> Lion is sign-update: each parameter step is `±lr` per coordinate, magnitude is unit. sq_rel_l2 is a
+> per-case ratio `(y−ŷ)²/y²`; for a batch where `mean(y²)` is small, the ratio (and its gradient) blows
+> up. AdamW's per-coordinate variance EMA dampens this — a single bad batch barely moves the second-
+> moment estimate, so the effective step size is bounded. Lion has **no per-coordinate magnitude
+> memory** — a single bad gradient direction sets the sign of every coordinate to ±1 at full LR,
+> permanently corrupting the parameter state. The model cannot recover because Lion will keep flipping
+> signs at the same magnitude.
+
+### Arm 2 — Lion paper-config (lr=1.7e-5/wd=5e-3) + sq_rel_l2 (control)
+
+W&B `24bdfcnz`. Killed at epoch 8 (val 16.30, best ~14) when BASELINE.md updated revealed the recipe was
+suboptimal. **Did not diverge** — confirms the divergence in Arm 3 is **LR-magnitude-dependent** (smaller
+LR → bounded sign-step recovery within 1–2 steps; larger LR → unrecoverable).
+
+### Closed-door insights (now in advisor playbook)
+
+1. **Lion + per-case-normalized loss family is unstable at SOTA LR.** Never compose sq_rel_l2 / rel_l2
+   / any `1/y²` loss with Lion at `lr ≥ 5e-5`.
+2. **squared_rel_l2 is a real ~−8% mechanism on AdamW** (uniform across all axes). If AdamW path ever
+   competes again (e.g. larger model where AdamW's adaptivity helps), revisit.
+3. **paper-config Lion stable with sq_rel_l2.** Divergence is LR-dependent.
+
+### Disposition: CLOSED (+40% regression vs SOTA; infra not merged)
+
+The `--loss-form` flag from `64481fa` is preserved on the branch. Branch retained for future cherry-pick;
+no current SOTA recipe wants it (RFF + AdamW + compile dominates the AdamW path; Lion + sq_rel_l2 is
+provably unstable). Frieren reassigned to **PR #58: Lion (5e-5) + volume-loss-weight 3.0** — direct attack
+on the second-worst gap (volume_pressure ×2.1 vs AB-UPT) under the winning optimizer.
+
+---
+
 ## 2026-04-30 02:55 UTC — PR #49 CLOSED: askeladd grad-clip 5.0 — +35% regression vs new SOTA
 
 **Student:** askeladd | **W&B run:** `x09udzj3` | **Group:** `tay-round2-grad-clip-sweep`
