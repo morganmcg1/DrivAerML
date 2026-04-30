@@ -553,6 +553,8 @@ class Config:
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
     use_tangential_wallshear_loss: bool = False
+    wallshear_y_weight: float = 1.0
+    wallshear_z_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1241,6 +1243,35 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return pred.sum() * 0.0
 
 
+def weighted_masked_mse_per_channel(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    channel_weights: Iterable[float],
+) -> tuple[torch.Tensor, list[float]]:
+    """Per-channel weighted masked MSE for surface predictions.
+
+    pred, target: [B, N, C]. mask: [B, N] bool.
+    Returns the weighted scalar loss plus an unweighted per-channel mean for
+    diagnostic logging. With all weights == 1 this is numerically equivalent
+    to F.mse_loss(pred[mask], target[mask]).
+    """
+    weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
+    if not bool(mask.any()):
+        per_axis = [0.0] * int(weights.numel())
+        return pred.sum() * 0.0, per_axis
+    diff_sq = (pred - target).pow(2)  # [B, N, C]
+    mask_f = mask.unsqueeze(-1).to(pred.dtype)
+    valid = mask_f.sum().clamp_min(1)
+    n_channels = diff_sq.shape[-1]
+    weighted_diff = diff_sq * weights.view(1, 1, -1)
+    weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
+    per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
+    per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
+    return weighted_loss, per_axis_mean
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -1263,6 +1294,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    wallshear_y_weight: float = 1.0,
+    wallshear_z_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1302,12 +1335,21 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss = masked_mse(surface_pred_used, surface_target_used, batch.surface_mask)
+        surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
+            surface_pred_used,
+            surface_target_used,
+            batch.surface_mask,
+            channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+        )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
+        "loss_cp": per_axis_unweighted[0],
+        "loss_tau_x": per_axis_unweighted[1],
+        "loss_tau_y": per_axis_unweighted[2],
+        "loss_tau_z": per_axis_unweighted[3],
     }
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
@@ -1723,6 +1765,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                wallshear_y_weight=config.wallshear_y_weight,
+                wallshear_z_weight=config.wallshear_z_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1775,6 +1819,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
                 "train/volume_loss": batch_loss_metrics["volume_loss"],
+                "train/loss_cp": batch_loss_metrics["loss_cp"],
+                "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
+                "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
+                "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
