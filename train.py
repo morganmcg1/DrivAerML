@@ -348,6 +348,9 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        use_tangent_frame_wallshear: bool = False,
+        wallshear_mean: torch.Tensor | None = None,
+        wallshear_std: torch.Tensor | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -359,6 +362,19 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.use_tangent_frame_wallshear = use_tangent_frame_wallshear
+        if use_tangent_frame_wallshear:
+            if wallshear_mean is None or wallshear_std is None:
+                raise ValueError(
+                    "use_tangent_frame_wallshear requires wallshear_mean and wallshear_std"
+                )
+            ws_mean = wallshear_mean.detach().to(torch.float32).reshape(3)
+            ws_std = wallshear_std.detach().to(torch.float32).reshape(3).clamp(min=1e-6)
+        else:
+            ws_mean = torch.zeros(3, dtype=torch.float32)
+            ws_std = torch.ones(3, dtype=torch.float32)
+        self.register_buffer("wallshear_mean", ws_mean, persistent=False)
+        self.register_buffer("wallshear_std", ws_std, persistent=False)
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -464,6 +480,17 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.use_tangent_frame_wallshear:
+                normals = surface_x[..., 3:6]
+                ws_global_norm = rotate_to_tangent_frame_global(
+                    surface_preds[..., 1:4],
+                    normals,
+                    wallshear_mean=self.wallshear_mean,
+                    wallshear_std=self.wallshear_std,
+                )
+                surface_preds = torch.cat(
+                    [surface_preds[..., 0:1], ws_global_norm], dim=-1
+                ) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -554,6 +581,7 @@ class Config:
     volume_loss_weight: float = 1.0
     aux_rel_l2_weight: float = 0.0
     use_tangential_wallshear_loss: bool = False
+    use_tangent_frame_wallshear: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
@@ -719,7 +747,18 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
-def build_model(config: Config) -> SurfaceTransolver:
+def build_model(
+    config: Config, stats: dict[str, torch.Tensor] | None = None
+) -> SurfaceTransolver:
+    wallshear_mean: torch.Tensor | None = None
+    wallshear_std: torch.Tensor | None = None
+    if config.use_tangent_frame_wallshear:
+        if stats is None:
+            raise ValueError(
+                "build_model requires stats when use_tangent_frame_wallshear is True"
+            )
+        wallshear_mean = stats["surface_y_mean"][1:4].detach().clone()
+        wallshear_std = stats["surface_y_std"][1:4].detach().clone()
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -730,6 +769,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        use_tangent_frame_wallshear=config.use_tangent_frame_wallshear,
+        wallshear_mean=wallshear_mean,
+        wallshear_std=wallshear_std,
     )
 
 
@@ -1285,6 +1327,69 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def build_tangent_frame_duff(normals: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Branchless orthonormal tangent frame from unit normals (Duff et al. 2017, JCGT).
+
+    normals: [..., 3] expected to be unit-length (will be re-normalized for safety).
+    Returns t1, t2 each [..., 3], orthonormal to each other and to ``normals``.
+    Continuous w.r.t. the normal field (no reference-axis discontinuity), avoiding
+    the gauge-flip artifacts of the simpler |n_x|>0.9 fallback construction.
+    """
+    n = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    nx = n[..., 0]
+    ny = n[..., 1]
+    nz = n[..., 2]
+    sign = torch.where(nz >= 0.0, torch.ones_like(nz), -torch.ones_like(nz))
+    a = -1.0 / (sign + nz)
+    b = nx * ny * a
+    t1 = torch.stack(
+        [1.0 + sign * nx * nx * a, sign * b, -sign * nx],
+        dim=-1,
+    )
+    t2 = torch.stack(
+        [b, sign + ny * ny * a, -ny],
+        dim=-1,
+    )
+    return t1, t2
+
+
+def rotate_to_tangent_frame_global(
+    wallshear_norm: torch.Tensor,
+    normals: torch.Tensor,
+    *,
+    wallshear_mean: torch.Tensor,
+    wallshear_std: torch.Tensor,
+) -> torch.Tensor:
+    """Reinterpret normalized wall-shear channels [a, b, _] as physical tangent-frame
+    scalars and rotate to global Cartesian, returning normalized global wall shear.
+
+    The first two raw output channels are treated as (a, b) tangent-frame scalars
+    along the local basis (t1, t2) built from ``normals`` via Duff branchless ONB.
+    The third raw channel is dropped — by construction the normal component of the
+    rotated vector is zero (no-slip enforcement at inference and training time).
+
+    Tangent scalars use an isotropic scale (RMS of the per-axis stds) and zero
+    mean: per-Cartesian-axis stats describe projections onto fixed axes, but
+    (a, b) live in a spatially-varying tangent frame whose orientation has no
+    fixed-axis identity. Re-normalization to global Cartesian after rotation
+    uses the per-axis stats so the loss matches the existing target-normalized
+    Cartesian frame.
+
+    wallshear_norm: [B, N, 3] model output (normalized space).
+    normals: [B, N, 3] unit surface normals from the input features.
+    wallshear_mean, wallshear_std: [3] tensors for the global Cartesian frame.
+    """
+    std_f = wallshear_std.float()
+    sigma_iso = std_f.square().mean().sqrt()
+    ws_norm_f = wallshear_norm.float()
+    t1, t2 = build_tangent_frame_duff(normals)
+    a = ws_norm_f[..., 0:1] * sigma_iso
+    b = ws_norm_f[..., 1:2] * sigma_iso
+    ws_global_phys = a * t1 + b * t2
+    ws_global_norm = (ws_global_phys - wallshear_mean) / std_f
+    return ws_global_norm.to(wallshear_norm.dtype)
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1298,6 +1403,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    log_wallshear_normal_rms: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1367,6 +1473,15 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    elif log_wallshear_normal_rms and bool(batch.surface_mask.any()):
+        ws_std = transform.surface_y_std[1:4].to(surface_pred_norm.device)
+        ws_mean = transform.surface_y_mean[1:4].to(surface_pred_norm.device)
+        ws_pred_phys = surface_pred_norm[..., 1:4].detach().float() * ws_std + ws_mean
+        n_hat = F.normalize(batch.surface_x[..., 3:6].float(), dim=-1, eps=1e-8)
+        normal_dot = (ws_pred_phys * n_hat).sum(dim=-1)
+        metrics["wallshear_pred_normal_rms"] = float(
+            normal_dot[batch.surface_mask].square().mean().sqrt().cpu().item()
+        )
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -1679,7 +1794,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         volume_y_std=stats["volume_y_std"].to(device),
     )
 
-    model = build_model(config).to(device)
+    model = build_model(config, stats=stats).to(device)
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
@@ -1782,6 +1897,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                log_wallshear_normal_rms=config.use_tangent_frame_wallshear,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
