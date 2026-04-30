@@ -552,6 +552,9 @@ class Config:
     validation_every: int = 10
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    volume_loss_weight_start: float = 0.0
+    volume_loss_weight_end: float = 0.0
+    volume_loss_weight_schedule_epochs: int = 0
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
@@ -1755,6 +1758,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        if config.volume_loss_weight_start > 0 and config.volume_loss_weight_end > 0:
+            schedule_epochs = (
+                config.volume_loss_weight_schedule_epochs
+                if config.volume_loss_weight_schedule_epochs > 0
+                else max_epochs
+            )
+            t = min(epoch / max(schedule_epochs - 1, 1), 1.0)
+            effective_vol_w = (
+                config.volume_loss_weight_start * (1 - t)
+                + config.volume_loss_weight_end * t
+            )
+        else:
+            effective_vol_w = config.volume_loss_weight
+
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
             loss, batch_loss_metrics = train_loss(
                 model,
@@ -1763,7 +1780,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 device,
                 config.amp_mode,
                 surface_loss_weight=config.surface_loss_weight,
-                volume_loss_weight=config.volume_loss_weight,
+                volume_loss_weight=effective_vol_w,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
@@ -1819,6 +1836,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
                 "train/volume_loss": batch_loss_metrics["volume_loss"],
+                "train/volume_loss_weight": float(effective_vol_w),
                 "train/loss_cp": batch_loss_metrics["loss_cp"],
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
