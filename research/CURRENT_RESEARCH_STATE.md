@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 07:45 UTC
+- **Date:** 2026-04-30 09:30 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,14 +37,14 @@ traverse the loss landscape inside a 270-min budget.
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| **#69** | thorfinn | Lion (lr=3.3e-5 µP) + width 768d / 12h — architectural capacity uplift | JUST ASSIGNED |
-| **#50** | nezuko | Lion (lr=5e-5) + compile (single delta) | Running `r6mn2x5c`, val 25% at epoch 3 |
-| **#51** | edward | Lion (lr=5e-5) + RFF sigma=1.0 (single delta) | Running `ftg0ci0p`, val 35% at epoch 2 |
-| **#52** | tanjiro | Lion (lr=5e-5) + RFF + compile (full triple-stack) | Running `5o1frm3u`, DIVERGED (best 12.22), awaiting test eval |
-| **#54** | fern | Lion (lr=5e-5) + per-axis tau_y/tau_z loss weighting (2×/2×) | Running `8zhjetjt`, DIVERGED (best 26.38), awaiting test eval |
-| **#55** | alphonse | RFF + compile + volume-loss-weight 3.0 (AdamW base) | Running `lahk19ws`, val 30% at epoch 3 |
-| **#57** | askeladd | Lion (lr=5e-5) + compile + cosine T_max=16 | Running `zz07t1sh`, DIVERGED (best 42.58 at epoch 2 → 93% at epoch 4) |
-| **#68** | frieren | Lion (lr=5e-5) + vol_w=3.0 | Running `daayn9kb`, DIVERGED (best 14.43 at epoch 5 → 88% at epoch 6) |
+| **#71** | fern | AdamW + RFF + compile + per-axis tau_y/tau_z weights (2×) — stable base for per-axis mechanism | JUST ASSIGNED |
+| **#70** | tanjiro | Lion (lr=2.5e-5) + RFF + compile — half-LR to suppress divergence | Running ~56min, val 22.84 (ep3), healthy descent |
+| **#69** | thorfinn | Lion (lr=3.3e-5 µP) + width 768d / 12h — architectural capacity uplift | Running ~78min, val 71.04 (ep2), uncompiled |
+| **#55** | alphonse | AdamW + RFF + compile + volume-loss-weight 3.0 | Running ~182min, val 16.56 (ep10), descending |
+| **#51** | edward | Lion (lr=5e-5) + RFF sigma=1.0 (uncompiled) — **SOTA CONTENDER** | Running ~181min, val **13.46** (ep5), descending |
+| **#68** | frieren | Lion (lr=5e-5) + vol_w=3.0 | Running ~229min, DIVERGED (best 14.43 ep5), finishing |
+| **#57** | askeladd | Recovery nocompile run after #57 diverged | Running nocompile fallback ~56min |
+| **#50** | nezuko | Recovery nocompile run after #50 Lion+compile diverged | Running nocompile fallback ~74min |
 
 ## Key closed/merged experiments
 
@@ -52,39 +52,42 @@ traverse the loss landscape inside a 270-min budget.
 |---|---|---|
 | **arm B** (no PR) | **NEW SOTA 11.30** | Lion lr=5e-5/wd=5e-4 — paper config was wrong by −27% |
 | #46 alphonse | MERGED — 14.55 | AdamW + RFF + compile → epoch 16 |
+| #54 fern | CLOSED — +137% regression | Lion + per-axis tau_y/tau_z weights (2×): diverged ep4 test 26.83; mechanism works but Lion fragile |
+| #52 tanjiro | CLOSED — +16.8% vs SOTA | Lion+RFF+compile: RFF+compile add zero orthogonal signal; compile diverges |
 | #56 thorfinn | CLOSED — +13% vs #46 | Cosine T_max=16 on AdamW; schedule miscalib was load-bearing, not a bug |
 | #42 frieren | CLOSED — +40% regression | Lion + sq_rel_l2: Lion sign-update + per-case ratio variance = divergence |
 | #49 askeladd | CLOSED — +35% regression | Grad-clip 5.0; doesn't compose with Lion |
 | #47 thorfinn | CLOSED — +36% regression | Bilateral aug → off asymmetric test distribution |
 | #43 fern | CLOSED — +15.7% regression | Multi-scale RFF redundant on `[−1,4]m` domain |
 | #41 askeladd | CLOSED — +22.5% regression | Eval-time tangential projection destroys tau |
-| #37 thorfinn | CLOSED — +14.2% regression | Bilateral TTA-eval only |
 | #35 nezuko | CLOSED — +13.7% regression | ANP uncompilable (inductor bug) |
 | #44 edward | CLOSED — +18.8% regression | Cosine EMA over 50 epochs → 18% of schedule |
-| #34 frieren | CLOSED Round-1 | FiLM didn't transfer at 9 uncompiled epochs |
-| #32 edward | CLOSED Round-1 | LR schedule over 50 epochs, budget miscalibration |
 
 ## Critical learnings
 
 1. **Lion paper config is wrong for this dataset** — `lr=5e-5, wd=5e-4` (AdamW-equivalent) crushes paper config by −27%.
-2. **Lion+compile DIVERGES late-training** — observed across PRs #42, #52, #68, #57. Lion's sign-based update produces constant per-step movement bounded only by `lr`. With compile's precision, gradient noise is lower → signs more correlated across steps → effectively higher LR than uncompiled. Late-training divergence when loss gradients become small. **SOTA Lion (vnb7oheo, 11.30) was UNCOMPILED**. Compose Lion with architecture changes on uncompiled base first.
-3. **Cosine T_max=16 on AdamW is a regression** (PR #56: +13% vs #46). The PR #46 "miscalibration" (T_max=50 over 16 epochs → LR still ~88% at end) was load-bearing. The model is UNDERTRAINED at 16 epochs with AdamW lr=5e-5, not overoptimized. Cosine should only be tried with T_max≥24 or budget extension.
-4. **Compile gives epoch 16** (vs ~28 uncompiled in 290 min). T_max for schedules should be 16 if compile, not 50.
-5. **Volume_pressure regression from AdamW + compile** — Lion's sign-update normalizes per-channel gradient; already gives vol_p=12.76 < PR #39's 13.83.
-6. **RFF orthogonal to optimizer** — Lion+RFF (PR #51) in-flight; expect ~10.5–10.8.
+2. **Lion is fragile to ALL non-trivial modifications** — confirmed 7× across PRs #42, #50, #52, #54, #57, #68, #56. Any change to: compile, loss function (sq_rel_l2, per-axis weighting, vol_w increase), or schedule (cosine T_max=16) diverges. Stable Lion variants: vanilla Lion (vnb7oheo, 11.30) and Lion+RFF (PR #51 edward, descending at val 13.46).
+3. **Lion+compile mechanism:** sign() update bounded only by lr. Compile's reduced gradient noise → more deterministically biased signs → effectively higher LR than uncompiled. Late-training divergence when loss gradients small. Onset: epoch 4-7 depending on modification.
+4. **Cosine T_max=16 on AdamW is a regression** (PR #56: +13% vs #46). T_max=50 fallback (LR ≈88% at end) was load-bearing — model is undertrained at 16 epochs. Future cosine: T_max≥24 or budget extension only.
+5. **Compile gives epoch 16** (vs ~8-9 uncompiled in 270 min). T_max for schedules = 16 if compiled.
+6. **Per-axis loss weighting mechanism works at gradient level** — PR #54 showed tau_y/tau_x ratio improved (1.33 vs 1.45) before divergence. Test on stable AdamW base (PR #71 fern).
 7. **Multi-scale RFF redundant** on DrivAerML surface domain — `[−1,4]m` already covered by σ=1.0.
-8. **Cosine EMA needs `--ema-total-epochs 16`** (not 50). Edward #44 used 50 → 18% of schedule.
+8. **Cosine EMA needs `--ema-total-epochs 16`** (not 50).
 9. **ANP decoder uncompilable** — inductor dynamic-shapes bug.
-10. **Bilateral aug pushes model off the asymmetric test distribution** — closed door.
-11. **Lion + per-case-normalized loss diverges** — sign-update + high-tail per-batch ratio variance permanently corrupts parameter state. Never compose sq_rel_l2 / rel_l2 / any 1/y² loss with Lion at lr ≥ 5e-5.
+10. **Bilateral aug pushes model off asymmetric test distribution** — closed door.
+11. **Lion + per-case-normalized loss** — never compose sq_rel_l2 / rel_l2 / any 1/y² loss with Lion at lr ≥ 5e-5.
 
-## Current research focus (Round 4)
+## Current research focus (Round 4/5)
 
-**Lion+compile divergence is a dominant failure mode.** 4 of 8 active runs have diverged (PRs #52, #54, #57, #68). This is not random — Lion's sign-update + compile's precision = systematically higher effective LR. Near-term priority:
+**Lion divergence landscape is fully mapped.** 7 independent observations confirm Lion is fragile to ANY non-trivial modification at lr=5e-5. Three parallel strategies now running:
 
-1. **PR #69 thorfinn** — width 768d (µP lr=3.3e-5), **uncompiled** (deliberately). Bold architectural lever targeting capacity-bound binding gaps (vol ×2.1, tau_y/tau_z ×3.8/3.9). AB-UPT reference itself uses 768d.
-2. **PRs #50 #51 #55** (nezuko, edward, alphonse) — early-stage runs (50-67 min), val 25-35%. All on different subsets of the lever stack. Need to monitor whether Lion+compile (#50) diverges like #52/#57.
-3. **Diverged runs #52 #54 #57 #68** — await test eval from best-val checkpoint. Predicted test from best-val: tanjiro #52 ~13.4%, fern #54 ~28%, askeladd #57 ~44%, frieren #68 ~16%.
+1. **Edward #51** (Lion+RFF uncompiled, val 13.46% at ep5) — the only stable Lion+delta to date. This is the **SOTA contender** for the round. If it beats 11.30, we have a new SOTA from RFF alone on Lion.
+2. **Tanjiro #70** (Lion+compile+half-LR 2.5e-5) — testing whether halving LR suppresses Lion+compile divergence. Stable at epoch 3 (val 22.84). If stable through epoch 6, this opens the Lion+compile frontier.
+3. **Thorfinn #69** (width 768d uncompiled, µP lr=3.3e-5) — architectural capacity lever. Epoch 2 val 71% (expected, high early). 768d is the AB-UPT reference width. This is the highest-upside lever if model is capacity-bound.
+4. **Fern #71** (AdamW+RFF+compile + per-axis tau_y/tau_z 2×) — tests per-axis weighting on stable base. Should beat PR #46 (14.55) if tau_y/tau_z gap is attentional.
+5. **Alphonse #55** (AdamW+RFF+compile+vol_w=3, ep10 val 16.56%) — trajectory similar to PR #46, converging toward 14-15%.
+6. **Frieren #68** (Lion+vol_w=3, diverged best 14.43) — awaiting test eval from best-val checkpoint, expected ~16%.
+7. **Askeladd #57, Nezuko #50** — autonomous nocompile fallback recoveries in progress.
 
 ## Next architecture experiments (if current round continues diverging)
 
