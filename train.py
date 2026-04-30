@@ -552,6 +552,7 @@ class Config:
     validation_every: int = 10
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    aux_rel_l2_weight: float = 0.0
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
@@ -1293,6 +1294,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    aux_rel_l2_weight: float = 0.0,
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
@@ -1343,6 +1345,16 @@ def train_loss(
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        aux_rel_l2_value: float | None = None
+        if aux_rel_l2_weight > 0.0:
+            surf_pred_f = surface_pred_norm.float()
+            surf_true_f = surface_target.float()
+            mask_f = batch.surface_mask.float().unsqueeze(-1)
+            num = ((surf_pred_f - surf_true_f) ** 2 * mask_f).sum()
+            den = (surf_true_f ** 2 * mask_f).sum().clamp_min(1e-8)
+            aux_rel_l2 = num / den
+            loss = loss + aux_rel_l2_weight * aux_rel_l2
+            aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -1351,6 +1363,8 @@ def train_loss(
         "loss_tau_y": per_axis_unweighted[2],
         "loss_tau_z": per_axis_unweighted[3],
     }
+    if aux_rel_l2_value is not None:
+        metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1764,6 +1778,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 config.amp_mode,
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
+                aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
@@ -1830,6 +1845,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "aux_rel_l2_loss" in batch_loss_metrics:
+                train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
+                    "aux_rel_l2_loss"
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
