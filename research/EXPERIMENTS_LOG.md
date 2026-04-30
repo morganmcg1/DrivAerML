@@ -6,6 +6,55 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 16:05 UTC — PR #51 CLOSED: edward Lion+RFF σ=1.0 reproducer — RFF doesn't compose with vanilla Lion uncompiled
+
+- **Branch:** `edward/edward/round2-lion-rff-512d`
+- **W&B run:** `iocqp761` rank 0 — group `tay-round2-lion-rff`, 286 min, 9 val epochs, ep9 best
+- **Hypothesis:** Lion uncompiled + RFF σ=1.0 reproduces ftg0ci0p val 10.665 and lands missing test eval. Test expected ~11.0 (within +5% of val).
+- **Result:** test_abupt **11.741** vs SOTA 11.208 (+4.7% regression)
+
+| Metric | PR #51 (RFF σ=1.0) | SOTA PR #50 (vanilla Lion) | Δ |
+|---|---:|---:|---:|
+| test_abupt | **11.741** | 11.208 | +4.7% |
+| best val | 10.703 | 10.083 | +6.1% |
+| val→test gap | +9.7% | +11.2% | similar |
+
+**Per-epoch comparison vs vanilla Lion SOTA:**
+
+| Ep | Lion+RFF σ=1.0 | vanilla Lion |
+|---:|---:|---:|
+| 1 | 72.96 | 80.68 |
+| 5 | 13.53 | 14.25 |
+| 6 | 12.31 | 12.29 |
+| 7 | 11.56 | 11.11 |
+| 8 | 11.01 | 10.38 |
+| 9 | **10.70** | **10.08** |
+
+- **Mechanism:** RFF accelerates early-phase fitting (high-freq detail dominates gradient signal) but the redundant Fourier basis interferes with finer convergence late. Vanilla Lion converges to lower minimum without the inductive bias.
+- **Closed-door for round 7:** σ=1.0 RFF on Lion uncompiled is a regression. alphonse #91 σ=2.0 (ep8 val 10.63 vs vanilla 10.38) showing same crossover pattern, will likely also regress.
+- **Reproducibility confirmed:** edward val 10.703 ≈ ftg0ci0p val 10.665. Run is reliable.
+
+## 2026-04-30 15:30 UTC — PR #73 CLOSED: frieren AdamW+RFF+compile + 6L depth — 6L+compile budget-limited at 11 epochs
+
+- **Branch:** `frieren/round5-adamw-rff-compile-depth6`
+- **W&B run:** `162ulxek` rank 0 — group `tay-round5-depth6`, 271 min, 11 epochs (vs 16 for 4L compile)
+- **Hypothesis:** 6L compile gives more capacity per epoch — would the steeper per-epoch descent beat 4L's longer epoch budget?
+- **Result:** test_abupt **14.785** vs SOTA 11.208 (+32%). Best val 13.90 ep11.
+
+| Metric | PR #73 6L | PR #46 4L compile | tay SOTA `vnb7oheo` (Lion 4L) | AB-UPT (768d/4L) |
+|---|---:|---:|---:|---:|
+| `abupt` mean | **14.785** | 14.550 | 11.303 | — |
+| surface_pressure | 8.875 | 8.628 | 6.216 | 3.82 |
+| wall_shear | 15.220 | 14.882 | 11.315 | 7.29 |
+| volume_pressure | 14.737 | 15.032 | 12.755 | 6.08 |
+| tau_x | 13.110 | 12.901 | 9.563 | 5.35 |
+| tau_y | 17.810 | 17.281 | 13.831 | 3.65 |
+| tau_z | 19.394 | 18.907 | 14.147 | 3.63 |
+
+- **Capacity is BUDGET-LIMITED for compile path:** 6L compile gets 11 epochs (vs 16 for 4L compile) at 270m. Per-epoch +45%. Linear extrapolation: 6 more epochs at slope −0.46/ep would reach val ~11.1, but the budget caps at 11.
+- **Same lesson as PR #69 (768d uncompiled, 5 epochs vs 9 = test 12.35):** Adding capacity (depth or width) costs epochs proportionally. SOTA path stays 4L.
+- **Closed-door:** Increasing model size in the compile path does NOT pay off within 270m. AdamW+compile at 4L (PR #46 14.55) is the AdamW frontier.
+
 ## 2026-04-30 08:05 UTC — PR #52 CLOSED: tanjiro Lion+RFF+compile triple-stack — Lion+compile divergence is now confirmed across 6 runs
 
 - **Branch:** `tanjiro/tanjiro/round2-lion-rff-compile-512d`
