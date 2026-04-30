@@ -10,3 +10,4 @@ wandb/
 *.pth
 *.ckpt
 data/point_counts.json
+logs/
