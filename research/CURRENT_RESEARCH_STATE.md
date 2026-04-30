@@ -1,6 +1,24 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 18:04 UTC
+- **Date:** 2026-04-30 18:13 UTC
+
+## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
+
+Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
+
+| ep | val |
+|---|---:|
+| 1 | 80.68 |
+| 2 | **46.76** |
+| 3 | 24.60 |
+| 4 | 17.31 |
+| 5 | 14.25 |
+| 6 | 12.29 |
+| 7 | 11.11 |
+| 8 | 10.38 |
+| 9 | 10.08 |
+
+(I had been incorrectly using vanilla ep2 = 36.5, which was wrong — actual is 46.76. Some prior poll comparisons need correction.)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -23,14 +41,14 @@
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep2 val 45.09** (vs vanilla 36.5, **+24% — overshooting**) | Running (rt=67m) — looking poor |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | ep3 val 22.17 (vs vanilla 24.60, **−10% better**) | Running (rt=96m) — actually competitive |
 | **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | — | Just assigned (rt=0m) |
 | **#94** | askeladd | Lion+RFF σ=0.5 | **ep9 val 10.405** (vs vanilla 10.083, +3.2%) | In test eval (rt=276m) |
-| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep3 val 18.09** (vs vanilla ep4 19.74 — AHEAD by ~1 epoch) | Running (rt=104m) — **MAJOR WIN PROJECTED** |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep3 val 39.62 (vs vanilla ep3 ~25, costs ~1 epoch) | Running (rt=115m) |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | ep2 val 46.58 (vs vanilla 36.5, slower) | Running (rt=90m) |
+| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep3 val 18.09** (vs vanilla 24.60, **−26% better**) | Running (rt=110m) — **MAJOR WIN PROJECTED** |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep4 val 21.11 (vs vanilla ep4 17.31, +22%) | Running (rt=145m) — warmup hurting |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | ep3 val 24.22 (vs vanilla 24.60, ~equal) | Running (rt=119m) — tracking vanilla |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep2 val 41.28 | Running (rt=43m) |
-| **#92** | thorfinn | AdamW+RFF+768d+compile | ep1 val 67.95 | Running (rt=35m) |
+| **#92** | thorfinn | AdamW+RFF+768d+compile | ep2 val 31.73 | Running (rt=65m) |
 
 ## CRITICAL HEAD-TO-HEAD: RFF sigma sweep vs vanilla Lion (uncompiled)
 
@@ -117,14 +135,16 @@
   - **Perceiver-IO backbone** — yi #18 directive, if current levers plateau
   - **Batch size 8** — 2× effective batch, may compound with any LR winner
 
-## Round 7-8 status (17:57 UTC) — quick read
+## Round 7-8 status (18:13 UTC) — re-baselined vs CORRECT vanilla per-epoch values
 
-- **Schedule sweep CLOSED.** nezuko #93 T_max=24 finished test 11.524 (+2.8%) — closed-door confirmed alongside T_max=16 (wash, #57). Edward #110 T_max=50 still running (ep3 24.22), expected regression.
-- **RFF σ=0.5 still running (ep8 10.77, finishing soon)**. Tracking similar to σ=1.0/2.0 — RFF remains closed-door across all sigma.
-- **EMA=0.999 IS NOW ~1 EPOCH AHEAD OF VANILLA** (ep1: 55.06 vs 80.7; ep2: 27.00 vs 36.5; ep3: **18.09 vs vanilla ep4 19.74**). Tanjiro at ep3 has already exceeded vanilla's ep4. If this continues, projected ep9 val ~9.5-9.7 → test ~10.5-10.7 (vs SOTA 11.208) = **5-6% SOTA improvement** would be a major win. Most-important run in flight.
-- **lr=1e-4 overshooting** (ep2 45.09 vs vanilla 36.5, +24%). Likely regression. lr=3e-5 (nezuko #113) assigned as counterpoint.
-- **Warmup at ep4** (frieren #109): 21.11 vs vanilla 19.74 (+6.9%) — largely recovered from ep3 loss. Warmup may only cost half-an-epoch by ep4.
-- **Fern + thorfinn** (ep1 73.24/67.95) — fresh starts post-recovery, AdamW+compile branches, orthogonal to Lion.
+**Correction:** earlier polls used vanilla ep2=36.5 (wrong); actual vanilla ep2=46.76. All comparisons re-run below.
+
+- **Schedule sweep T_max=24 CLOSED** (nezuko #93 test 11.524, +2.8%). T_max=50 (edward #110) ep3 24.22 ≈ vanilla 24.60 — running ON PAR through ep3. **Verdict on T_max=50 still open** — could be wash or marginal swing.
+- **RFF σ=0.5 (askeladd #94)** in test eval (rt=276m). Final val 10.405 vs vanilla 10.083 (+3.2%). Test imminent ~+2-4% range.
+- **EMA=0.999 (tanjiro #111) DOMINANT SIGNAL** — ep1: 55.06 vs 80.68 (32% better); ep2: 27.00 vs 46.76 (**42% better**); ep3: 18.09 vs 24.60 (**26% better**). Tanjiro at ep3 18.09 already approaching vanilla ep4 17.31. Trajectory ~1 epoch ahead. **Projected ep9 val ~9.0-9.5 → test ~10.4-10.7 (5-7% SOTA improvement).**
+- **lr=1e-4 (alphonse #112) BETTER than vanilla through ep3** (78.80 / 45.09 / 22.17 vs vanilla 80.68 / 46.76 / 24.60). Earlier "overshooting" verdict was WRONG — was using bad ep2 baseline. Currently tracking ~10% better than vanilla. Continue running.
+- **Warmup (frieren #109) hurting** — ep4 21.11 vs vanilla 17.31 (+22%). Warmup costs >1 epoch.
+- **Fern + thorfinn** AdamW+RFF+compile branches at ep2 41.28/31.73 — orthogonal experiments.
 
 ## Next architecture experiments (if current levers plateau)
 
