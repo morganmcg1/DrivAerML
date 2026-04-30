@@ -2,23 +2,27 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: senku PR #14 wins — new baseline 2026-04-29
+## Status: thorfinn PR #66 wins — new baseline 2026-04-30
 
-PR #14 (senku, 6L/256d/4h/128sl depth scale-up) reduced
-`test_primary/abupt_axis_mean_rel_l2_pct` from 16.64 (chihiro PR #4) to
-**13.15** — a 21.0% improvement on the headline metric. Both 5L (13.52, −18.7%)
-and 6L (13.15, −21.0%) beat all pending PRs. W&B runs: `t5tv01ch` (5L) and
-`et4ajeqj` (6L). Config: bs=8, vol_w=2.0, lr=2e-4, clip=1.0, 65536 pts,
-validation-every=1. Key finding: depth is more parameter-efficient than width —
-6L/256d (4.73M params) crushes 4L/512d (12.7M params).
+PR #66 (thorfinn, per-axis tau_y/z loss upweighting W_y=2, W_z=2 on 6L/256d base) reduced
+`test_primary/abupt_axis_mean_rel_l2_pct` from 13.15 (senku PR #14) to
+**12.74** — a 3.1% improvement on the headline metric. Tau_y dropped from 16.23→15.15
+(−6.7%) and tau_z from 16.75→15.05 (−10.2%). W&B run: `gvigs86q`.
+
+Key finding: upweighting the two hardest wall-shear axes (tau_y and tau_z) by 2×
+improves the composite metric without hurting surface_pressure or volume_pressure.
+W_y=2, W_z=2 beats W_y=1.5, W_z=1.5 and the equal-weight arms. Thorfinn's code
+adds `--wallshear-y-weight` and `--wallshear-z-weight` flags to `train.py`.
 
 **Compounding wins so far (all landed on `yi`):**
-1. PR #11 kohaku — tangential wall-shear projection loss
+1. PR #11 kohaku — tangential wall-shear projection loss code
 2. PR #9 gilbert — protocol fixes (bs=8, vol_w=2.0, validation-every=1)
 3. PR #4 chihiro — width scale-up to 512d/8h
-4. PR #14 senku — depth scale-up to 6L/256d (this PR)
+4. PR #14 senku — depth scale-up to 6L/256d
+5. PR #58 alphonse — NaN-safe checkpoint guard (bugfix)
+6. PR #66 thorfinn — per-axis tau_y/z loss upweighting W_y=2, W_z=2 (this PR)
 
-**6L winning config (new recommended base):**
+**New recommended base config (PR #66 winning arm):**
 
 ```bash
 cd target/
@@ -32,13 +36,21 @@ python train.py \
   --model-layers 6 --model-hidden-dim 256 --model-heads 4 --model-slices 128 \
   --ema-decay 0.9995 \
   --clip-grad-norm 1.0 \
+  --wallshear-y-weight 2.0 \
+  --wallshear-z-weight 2.0 \
   --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
 ```
 
-**Note:** Grad clipping (clip=1.0) was active on 6L (pre-clip norm ~2.53 at end).
-5L did not need clipping (pre-clip norm ~0.79). Use clip=1.0 as default for deeper
-configs. Both runs were still descending at timeout — more epochs would improve further.
-Volume pressure shows val→test gap (6.93→13.6) — orthogonal to depth, needs SDF gating.
+---
+
+## Previous: senku PR #14 — baseline 2026-04-29
+
+PR #14 (senku, 6L/256d depth scale-up) reduced
+`test_primary/abupt_axis_mean_rel_l2_pct` from 16.64 (chihiro PR #4) to
+**13.15** — a 21.0% improvement on the headline metric. Both 5L (13.52, −18.7%)
+and 6L (13.15, −21.0%) beat all pending PRs. W&B runs: `t5tv01ch` (5L) and
+`et4ajeqj` (6L). Key finding: depth is more parameter-efficient than width —
+6L/256d (4.73M params) crushes 4L/512d (12.7M params).
 
 ---
 
@@ -100,13 +112,13 @@ checkpoint reload.
 
 | Metric | Best | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **13.15** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **12.74** | #66 | gvigs86q | 2026-04-30 |
 | `test_primary/surface_pressure_rel_l2_pct` | **7.64** | #14 | et4ajeqj | 2026-04-29 |
-| `test_primary/wall_shear_rel_l2_pct` | **13.47** | #14 | et4ajeqj | 2026-04-29 |
-| `test_primary/volume_pressure_rel_l2_pct` | **13.58** | #14 | et4ajeqj | 2026-04-29 |
-| `test_primary/wall_shear_x_rel_l2_pct` | **11.53** | #14 | et4ajeqj | 2026-04-29 |
-| `test_primary/wall_shear_y_rel_l2_pct` | **16.23** | #14 | et4ajeqj | 2026-04-29 |
-| `test_primary/wall_shear_z_rel_l2_pct` | **16.75** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/wall_shear_rel_l2_pct` | **12.86** | #66 | gvigs86q | 2026-04-30 |
+| `test_primary/volume_pressure_rel_l2_pct` | **13.14** | #66 | gvigs86q | 2026-04-30 |
+| `test_primary/wall_shear_x_rel_l2_pct` | **11.29** | #66 | gvigs86q | 2026-04-30 |
+| `test_primary/wall_shear_y_rel_l2_pct` | **15.15** | #66 | gvigs86q | 2026-04-30 |
+| `test_primary/wall_shear_z_rel_l2_pct` | **15.05** | #66 | gvigs86q | 2026-04-30 |
 
 Note: Additional code wins pending merge (all superseded on headline metric by
 PR #14 but contain orthogonal code contributions) — PRs #22 (gilbert clip=1.0,
@@ -160,18 +172,18 @@ experiments should layer on top of the gilbert config and add
 
 **Distance from AB-UPT targets (multiple of target):**
 
-| Metric | yi best (PR #14) | AB-UPT | Ratio |
+| Metric | yi best (PR #66) | AB-UPT | Ratio |
 |---|---:|---:|---:|
 | surface_pressure | 7.64 | 3.82 | 2.0× |
-| wall_shear | 13.47 | 7.29 | 1.8× |
-| volume_pressure | 13.58 | 6.08 | 2.2× |
-| wall_shear_x | 11.53 | 5.35 | 2.2× |
-| wall_shear_y | 16.23 | 3.65 | 4.4× |
-| wall_shear_z | 16.75 | 3.63 | 4.6× |
+| wall_shear | 12.86 | 7.29 | 1.8× |
+| volume_pressure | 13.14 | 6.08 | 2.2× |
+| wall_shear_x | 11.29 | 5.35 | 2.1× |
+| wall_shear_y | 15.15 | 3.65 | 4.2× |
+| wall_shear_z | 15.05 | 3.63 | 4.1× |
 
-All axes have improved substantially. Wall_shear_y and wall_shear_z remain the
-largest gap at ~4-5× AB-UPT. Volume pressure shows a known val→test gap
-(val 6.93 ≈ AB-UPT level, test 13.58 = 2×) — test generalization is the
+Wall_shear_y and wall_shear_z remain the largest gap at ~4× AB-UPT despite
+thorfinn's W_y=W_z=2 win. Volume pressure shows a known val→test gap (val
+~6.9 ≈ AB-UPT level, test 13.14 = 2.2×) — test generalization is the
 remaining challenge, not model capacity per se.
 
 **Known training-stability bug (gilbert flagged in PR #9):** `train.py` has
