@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 01:13 UTC
+- **Date:** 2026-04-30 01:55 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -27,8 +27,8 @@ Note: volume_pressure **regressed** to 15.032 (vs PR #39 Lion 13.83) — Lion's 
 |---|---|---|---|
 | **#55** | **alphonse** | **RFF + compile + volume-loss-weight 3.0 (recover vol regression from PR #46)** | **Just assigned** |
 | **#54** | **fern** | **Lion + per-axis tau_y/tau_z loss weighting (2×/2× vs 1×)** | **Just assigned — addresses binding 5×+ gap** |
-| #47 | thorfinn | Bilateral train-time augmentation | Running, val 21.87, 210 min |
-| #42 | frieren | Squared rel-L2 loss + compile (rebased) | Running, run `uwt74mip`, ~207 min |
+| **#56** | **thorfinn** | **AdamW + RFF + compile + cosine LR T_max=16** | **Just assigned — fixes schedule miscalibration** |
+| #42 | frieren | Lion + compile + squared_rel_l2 arm | Running run `24bdfcnz`, ~270 min budget. AdamW arm finished test 15.82, didn't beat SOTA |
 | #49 | askeladd | Grad-clip-norm 1.0 → 5.0 (single delta) | Running, val 17.08, ~3h in |
 | #50 | nezuko | Lion + compile (single delta) | Queued — pod hung, Issue #53 pending restart |
 | #51 | edward | Lion + RFF sigma=1.0 (single delta) | Queued — pod hung, Issue #53 pending restart |
@@ -39,6 +39,7 @@ Note: volume_pressure **regressed** to 15.032 (vs PR #39 Lion 13.83) — Lion's 
 | PR | Outcome | Why |
 |---|---|---|
 | #46 alphonse | **MERGED — NEW SOTA 14.550** | AdamW + RFF + compile → epoch 16, −5.7% vs Lion |
+| #47 thorfinn | CLOSED — +36% regression vs SOTA | Bilateral aug pushes model to less-accurate point on real (mildly asymmetric) test cars |
 | #43 fern | CLOSED — +15.7% vs SOTA, noise vs own baseline | Multi-scale RFF redundant on [−1,4]m surface domain; σ=1.0 already at local optimum |
 | #41 askeladd | CLOSED — regression +22.5% | Eval-time tangential projection destroys normal-component of tau that helps rel-L2 |
 | #37 thorfinn | CLOSED — regression +14.2% | Bilateral TTA-eval only (no train aug); per-axis weights code never pushed |

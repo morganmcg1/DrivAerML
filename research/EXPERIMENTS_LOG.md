@@ -448,6 +448,61 @@ this experiment surfaces is **throughput**, not LR schedule.
 
 ---
 
+## 2026-04-30 01:55 UTC — PR #47 CLOSED: thorfinn bilateral train-aug — +36% regression
+
+**Student:** thorfinn | **W&B run:** `fn8pyav5` | **Group:** `thorfinn-tau-yz-attack`
+**Hypothesis:** Bilateral symmetry train-time augmentation. Mirror-flip y-axis with antisymmetric
+sign on tau_y to exploit DrivAerML's left-right symmetry.
+
+### Results — clear regression on every axis
+
+| Metric | PR #47 | tay SOTA (PR #46) | Δ |
+|---|---:|---:|---:|
+| `abupt` | **19.786** | 14.550 | +36.0% |
+| surface_pressure | 13.258 | 8.628 | +53.7% |
+| wall_shear | 21.107 | 14.882 | +41.8% |
+| volume_pressure | 16.525 | 15.032 | +9.9% |
+| tau_x | 18.524 | 12.901 | +43.6% |
+| tau_y | 24.461 | 17.281 | +41.5% |
+| tau_z | 26.163 | 18.907 | +38.4% |
+
+Best val_abupt: 18.84. Runtime: 5h 13m. Best epoch: not specified.
+
+### Diagnosis: bilateral aug introduces a mismatch
+
+DrivAerML cars have weak (driver-side mirrors, exhaust placement, cabin layout) but real
+left-right asymmetry. Mirror-augmenting symmetrically tells the model to expect identity
+behavior on flipped geometries, but the **test set has those asymmetries** — so the
+augmented model has been pushed to a less-accurate point on real cars.
+
+This is the augmentation-as-prior failure mode: an inductive bias that contradicts the
+test distribution causes regression even on the hypothesized target axes (tau_y/tau_z
+both 41-38% worse than SOTA).
+
+### Disposition: CLOSED
+
+Pod hung post-train, advisor-closed from W&B-verified metrics. If symmetry exploitation
+is worth revisiting, it should be at the **architecture level** (antisymmetric/symmetric
+heads, geometry-aware coordinate pre-processing), not the augmentation level.
+
+Reassigned thorfinn to **PR #56: AdamW + RFF + compile + cosine LR T_max=16** —
+calibration fix for the schedule miscalibration we identified during PR #44 closure.
+
+---
+
+## 2026-04-30 01:53 UTC — PR #42 status update: frieren launched Lion arm
+
+**Student:** frieren | **AdamW arm complete** (`uwt74mip`): `test_abupt = 15.82` — confirmed
+the squared_rel_l2 + compile composition (−8.3% vs PR #40 baseline 17.25) but does not
+beat SOTA. Frieren proactively launched a **Lion + compile + squared_rel_l2** arm
+(run `24bdfcnz`, group `tay-round2-squared-rel-l2-compiled`) using the new SOTA-class
+optimizer + compile + their loss-form change.
+
+Advisor-side comment posted to update frieren's comparison goalpost (PR #46 SOTA = 14.55,
+not PR #39's 15.43; T_max calibration should be 16 not 12).
+
+---
+
 ## 2026-04-30 01:12 UTC — PR #46 MERGED: alphonse AdamW + RFF + compile — NEW SOTA 14.550
 
 **Student:** alphonse | **W&B run:** `28l4yanr` | **Group:** `tay-round2-rff-compiled`
