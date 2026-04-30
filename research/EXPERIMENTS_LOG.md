@@ -36,6 +36,28 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Best-checkpoint mechanism saved the result** — the test eval auto-loaded epoch 6's EMA weights, giving a usable test_abupt=13.20. Without the best-val checkpoint, every Lion+compile run would post the diverged final-epoch metrics.
 - **Per-axis pattern matches SOTA proportionally** — all axes scale ~1.17x SOTA, suggesting no axis-specific gain or loss from RFF/compile in the stable regime.
 
+## 2026-04-30 10:25 UTC — PR #68 CLOSED: frieren Lion + vol_w=3.0 — 8th Lion+modification divergence, vol_w lever inert when run diverges
+
+- **Branch:** `frieren/lion-vol-weight-3`
+- **W&B run:** `daayn9kb` — finished 285min
+- **Hypothesis:** Lion (lr=5e-5/wd=5e-4) + volume_loss_weight 3.0 targets the volume_pressure ×2.1 binding gap. Single delta from SOTA arm B.
+- **Result: DIVERGED — test_abupt 15.572 (+37.7% vs SOTA 11.30, +1.0 ppt vs PR #46 14.55, best-val ckpt epoch 5)**
+
+| Metric | PR #68 (best-val ep5) | SOTA `vnb7oheo` | PR #46 | Δ vs SOTA |
+|---|---:|---:|---:|---:|
+| `test/abupt_axis_mean_rel_l2_pct` | **15.572** | 11.303 | 14.550 | +37.7% |
+| surface_pressure | 9.752 | 6.216 | 8.628 | +57% |
+| wall_shear | 16.338 | 11.315 | 14.882 | +44% |
+| volume_pressure | 14.003 | 12.755 | 15.032 | +9.7% |
+| tau_x | 13.985 | 9.563 | 12.901 | +46% |
+| tau_y | 19.359 | 13.831 | 17.281 | +40% |
+| tau_z | 20.761 | 14.147 | 18.907 | +47% |
+
+- **Mechanism:** Lion+vol_w=3 diverged at epoch 6 (val explosion 14.43 → 88-100%). Same Lion-fragility pattern. Critically, **volume_pressure ended at 14.00 — barely better than SOTA's 12.76**. The vol_w=3 lever didn't get to act because divergence killed the run. So the gap-targeting hypothesis is untestable on Lion.
+- **Lion-fragility envelope (8 confirmed observations):** compile, sq_rel_l2, per-axis weighting, vol_w=3.0, cosine T_max=16, grad-clip 5.0, RFF+compile (composition), per-axis-weighting+compile (composition). The only stable Lion variants: vanilla Lion (vnb7oheo, 11.30 SOTA) and Lion+RFF (PR #51 edward, descending at val 11.48 ep7).
+- **Comparison signal:** alphonse #55 currently running AdamW+RFF+compile+vol_w=3.0 (lahk19ws, val 15.49 ep12) — direct comparison of vol_w=3 effect on the stable AdamW base. Will reveal if vol_w=3 actually helps volume_pressure when training stays stable.
+- **Reassignment:** frieren → PR #73 (AdamW+RFF+compile + depth 6L). Architectural capacity lever, orthogonal to thorfinn #69's width 768d. Branch: `frieren/round5-adamw-rff-compile-depth6`.
+
 ## 2026-04-30 09:25 UTC — PR #54 CLOSED: fern Lion + per-axis tau_y/tau_z weighting (2×) — diverged, 7th Lion+modification failure
 
 - **Branch:** `fern/round3-lion-tauyz-weights` → recovered as v2 (`fern/round3-lion-tauyz-weights-v2`)
