@@ -32,6 +32,7 @@ from tqdm import tqdm
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
+    DistributedState,
     MetricSlopeTracker,
     TargetTransform,
     autocast_context,
@@ -40,6 +41,7 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    define_wandb_metrics,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -59,6 +61,45 @@ from trainer_runtime import (
     timeout_budget_minutes,
     unwrap_model,
 )
+
+
+TASK_NAMES = (
+    "surface_pressure",
+    "wall_shear_x",
+    "wall_shear_y",
+    "wall_shear_z",
+    "volume_pressure",
+)
+
+
+class UncertaintyWeightedLoss(nn.Module):
+    """Homoscedastic uncertainty multi-task weighting (Kendall & Gal 2018).
+
+    Holds a learnable log_var per task and combines per-task losses as
+        L = sum_i [ 0.5 * exp(-log_var_i) * L_i + 0.5 * log_var_i ].
+    log_vars are clamped to [log_var_min, log_var_max] for numerical stability.
+    """
+
+    def __init__(
+        self,
+        n_tasks: int = 5,
+        init_log_var: float = -0.5,
+        log_var_min: float = -10.0,
+        log_var_max: float = 10.0,
+    ):
+        super().__init__()
+        self.log_vars = nn.Parameter(torch.full((n_tasks,), float(init_log_var)))
+        self.log_var_min = log_var_min
+        self.log_var_max = log_var_max
+
+    def clamped_log_vars(self) -> torch.Tensor:
+        return self.log_vars.clamp(self.log_var_min, self.log_var_max)
+
+    def forward(self, losses: list[torch.Tensor]) -> torch.Tensor:
+        clamped = self.clamped_log_vars()
+        precisions = torch.exp(-clamped)
+        stacked = torch.stack(losses)
+        return (0.5 * precisions * stacked + 0.5 * clamped).sum()
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +154,13 @@ class Config:
     kill_thresholds: str = ""
     compile_model: bool = True
     debug: bool = False
+    uncertainty_weighting: bool = False
+    uncertainty_init_log_var: float = 0.0
+    uncertainty_log_var_min: float = -5.0
+    uncertainty_log_var_max: float = 5.0
+    uncertainty_lr_scale: float = 1.0
+    eval_only: bool = False
+    eval_only_run_id: str = ""
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -160,7 +208,8 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    uncertainty_loss: UncertaintyWeightedLoss | None = None,
+) -> tuple[torch.Tensor, dict[str, object]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -171,19 +220,123 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        surface_pred = out["surface_preds"]
+        volume_pred = out["volume_preds"]
+        per_task_losses = [
+            masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask),
+            masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask),
+            masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask),
+            masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask),
+            masked_mse(volume_pred, volume_target, batch.volume_mask),
+        ]
+        surface_loss = sum(per_task_losses[:4]) / 4.0
+        volume_loss = per_task_losses[4]
+        if uncertainty_loss is not None:
+            loss = uncertainty_loss(per_task_losses)
+            weighted_surface_loss = loss.detach() * 0.0
+            weighted_volume_loss = loss.detach() * 0.0
+        else:
+            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_volume_loss = volume_loss_weight * volume_loss
+            loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, object] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "per_task_losses": [float(l.detach().cpu().item()) for l in per_task_losses],
     }
+    if uncertainty_loss is not None:
+        clamped = uncertainty_loss.clamped_log_vars().detach()
+        precisions = torch.exp(-clamped)
+        effective_weights = 0.5 * precisions
+        metrics["log_vars"] = clamped.cpu().tolist()
+        metrics["effective_weights"] = effective_weights.cpu().tolist()
+    return loss, metrics
+
+
+def run_eval_only(config: Config, state: DistributedState) -> None:
+    """Load a saved best checkpoint and emit full_val/test_primary metrics.
+
+    Resumes the original W&B run so post-hoc test metrics land on the same run
+    as the training that produced the checkpoint.
+    """
+    if state.enabled:
+        raise RuntimeError(
+            "--eval-only must be launched as a single process (not via torchrun)."
+        )
+    if not config.eval_only_run_id:
+        raise ValueError("--eval-only requires --eval-only-run-id <wandb_run_id>")
+
+    device = state.device
+    output_dir = Path(config.output_dir) / f"run-{config.eval_only_run_id}"
+    model_path = output_dir / "checkpoint.pt"
+    config_path = output_dir / "config.yaml"
+    if not model_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found at {model_path}")
+
+    train_loader, val_loaders, test_loaders, stats = make_loaders(
+        config, distributed_state=None
+    )
+    final_val_loaders = full_eval_loaders_from(val_loaders, config)
+    final_test_loaders = full_eval_loaders_from(test_loaders, config)
+    transform = TargetTransform(
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
+    )
+
+    model = build_model(config).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Eval-only: built SurfaceTransolver ({n_params / 1e6:.2f}M params) on {device}")
+
+    tags = [config.agent, "eval-only"] if config.agent else ["eval-only"]
+    run = wandb.init(
+        entity=os.environ.get("WANDB_ENTITY"),
+        project=os.environ.get("WANDB_PROJECT"),
+        id=config.eval_only_run_id,
+        resume="allow",
+        group=config.wandb_group or None,
+        name=config.wandb_name or None,
+        tags=tags,
+        config={
+            **asdict(config),
+            "n_params": n_params,
+            "eval_only": True,
+        },
+        mode=os.environ.get("WANDB_MODE", "online"),
+    )
+    define_wandb_metrics()
+
+    ckpt = torch.load(model_path, map_location=device, weights_only=True)
+    best_val_surface = ckpt["val_metrics"]["val_surface"]
+    best_metrics = {"epoch": float(ckpt["epoch"]), **best_val_surface}
+    best_checkpoint_source = ckpt.get("checkpoint_source", "raw")
+    print(
+        f"Loaded checkpoint epoch={ckpt['epoch']}, "
+        f"val_primary/abupt_axis_mean_rel_l2_pct={best_val_surface['abupt_axis_mean_rel_l2_pct']:.4f}"
+    )
+
+    run_final_evaluation(
+        run=run,
+        model=model,
+        model_path=model_path,
+        config_path=config_path,
+        config=config,
+        transform=transform,
+        device=device,
+        final_val_loaders=final_val_loaders,
+        final_test_loaders=final_test_loaders,
+        best_metrics=best_metrics,
+        best_checkpoint_source=best_checkpoint_source,
+        n_params=n_params,
+        global_step=0,
+        total_minutes=0.0,
+    )
+    wandb.finish()
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -191,6 +344,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        if config.eval_only:
+            run_eval_only(config, state)
+            return
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
@@ -225,7 +381,32 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        uncertainty_loss: UncertaintyWeightedLoss | None = None
+        if config.uncertainty_weighting:
+            uncertainty_loss = UncertaintyWeightedLoss(
+                n_tasks=len(TASK_NAMES),
+                init_log_var=config.uncertainty_init_log_var,
+                log_var_min=config.uncertainty_log_var_min,
+                log_var_max=config.uncertainty_log_var_max,
+            ).to(device)
+            if state.is_main:
+                print(
+                    f"UncertaintyWeightedLoss enabled: {len(TASK_NAMES)} tasks, "
+                    f"init log_var={config.uncertainty_init_log_var}"
+                )
+
+        optimizer_param_groups: list[dict[str, object]] = [
+            {"params": list(base_model.parameters()), "weight_decay": config.weight_decay},
+        ]
+        if uncertainty_loss is not None:
+            optimizer_param_groups.append(
+                {
+                    "params": list(uncertainty_loss.parameters()),
+                    "weight_decay": 0.0,
+                    "lr": config.lr * config.uncertainty_lr_scale,
+                }
+            )
+        optimizer = torch.optim.AdamW(optimizer_param_groups, lr=config.lr, weight_decay=config.weight_decay)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -296,6 +477,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    uncertainty_loss=uncertainty_loss,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -333,11 +515,35 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    per_task = batch_loss_metrics.get("per_task_losses")
+                    if per_task is not None:
+                        for name, value in zip(TASK_NAMES, per_task):
+                            train_log[f"train/per_task_loss/{name}"] = value
+                    log_var_values = batch_loss_metrics.get("log_vars")
+                    if log_var_values is not None:
+                        effective_weights = batch_loss_metrics.get("effective_weights") or []
+                        for name, value in zip(TASK_NAMES, log_var_values):
+                            train_log[f"train/log_var/{name}"] = value
+                            train_log[f"train/sigma_sq/{name}"] = math.exp(float(value))
+                        for name, value in zip(TASK_NAMES, effective_weights):
+                            train_log[f"train/effective_weight/{name}"] = value
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
+                    if (
+                        uncertainty_loss is not None
+                        and state.enabled
+                        and uncertainty_loss.log_vars.grad is not None
+                    ):
+                        # DDP only all-reduces grads on the wrapped model; log_vars
+                        # live outside DDP so we average them manually to keep ranks
+                        # in lockstep.
+                        torch.distributed.all_reduce(
+                            uncertainty_loss.log_vars.grad,
+                            op=torch.distributed.ReduceOp.AVG,
+                        )
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
