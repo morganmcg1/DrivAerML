@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 17:34 UTC
+- **Date:** 2026-04-30 17:40 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -23,14 +23,14 @@
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | ep1 val 78.80 (vs vanilla 80.7) | Running (rt=48m) |
-| **#93** | nezuko | Lion+cosine T_max=24 nocompile | **ep8 val 10.636** (vs vanilla 10.38, +2.5%) | Running (rt=254m, finishing soon) |
-| **#94** | askeladd | Lion+RFF σ=0.5 | ep7 val 11.495 (vs vanilla 11.11, +3.5%) | Running (rt=237m, finishing soon) |
-| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep2 val 27.00** (vs vanilla ep2 36.5, **26% better**) | Running (rt=72m) — STRONG SIGNAL |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep3 val 39.62 (vs vanilla ep3 ~25, costs ~1 epoch) | Running (rt=97m) |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | ep2 val 46.58 (vs vanilla 36.5, slower) | Running (rt=72m) |
-| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | — | **Running (rt=13m, RECOVERED)** |
-| **#92** | thorfinn | AdamW+RFF+768d+compile | — | **Running (rt=18m, RECOVERED)** |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep2 val 45.09** (vs vanilla 36.5, **+24% — overshooting**) | Running (rt=67m) — looking poor |
+| **#93** | nezuko | Lion+cosine T_max=24 nocompile | **ep9 val 10.301** (vs vanilla 10.083, +2.2%) | Running (rt=271m, in test eval) |
+| **#94** | askeladd | Lion+RFF σ=0.5 | ep8 val 10.767 (vs vanilla 10.38, +3.7%) | Running (rt=255m, finishing) |
+| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep2 val 27.00** (vs vanilla 36.5, **26% better**) | Running (rt=81m) — STRONG SIGNAL |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep3 val 39.62 (vs vanilla ep3 ~25, costs ~1 epoch) | Running (rt=115m) |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | ep2 val 46.58 (vs vanilla 36.5, slower) | Running (rt=90m) |
+| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep1 val 73.24 | Running (rt=20m) |
+| **#92** | thorfinn | AdamW+RFF+768d+compile | ep1 val 67.95 | Running (rt=35m) |
 
 ## CRITICAL HEAD-TO-HEAD: RFF sigma sweep vs vanilla Lion (uncompiled)
 
@@ -121,7 +121,7 @@
 - **RFF σ=0.5 closed-door**. ep7 val 11.495 (+3.5% vs vanilla 11.11). Tracking similar to σ=1.0. Confirms RFF is closed-door across all sigma values.
 - **Warmup costs ~1 epoch**. frieren ep3 39.62 ≈ vanilla ep2 36.5. May still recover, but in 9-epoch budget that's ~10% of training lost.
 - **EMA=0.999 STRONG SIGNAL CONFIRMED at ep2** (ep1: 55.06 vs 80.7 = 32% better; ep2: 27.00 vs 36.5 = 26% better). Two epochs of consistent ~30% improvement vs vanilla. Pattern is real, not ep1 noise. Most-watched run — if this holds, projected ep9 val ~7-8 (vs vanilla 10.083) → SOTA −20-30%. **ema_decay=0.999 sweep is the highest-value frontier.**
-- **lr=1e-4 marginal at ep1** (78.80 vs 80.7, 2.4% better). Could compound or could be noise.
+- **lr=1e-4 OVERSHOOTING at ep2** (ep1 78.80, ep2 45.09 vs vanilla 36.5 = +24%). Lion at lr=1e-4 looks too aggressive. Likely will regress. Next test should be lr=3e-5 (lower than current SOTA).
 - **Fern + thorfinn** just started (rt=13/18m), no val data yet. Both AdamW+RFF+compile branches — orthogonal to Lion experiments.
 
 ## Next architecture experiments (if current levers plateau)
