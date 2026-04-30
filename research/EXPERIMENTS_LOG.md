@@ -448,6 +448,43 @@ this experiment surfaces is **throughput**, not LR schedule.
 
 ---
 
+## 2026-04-30 00:49 UTC — PR #43 CLOSED: fern multi-scale RFF — null result vs own baseline
+
+**Student:** fern | **W&B run:** `5bx6zsio` | **Group:** `fern-multiscale-rff`
+**Hypothesis:** 3-band Gaussian RFF (`sigma = {0.1, 1.0, 10.0}` surface; `{0.01, 0.1, 1.0}` volume)
+to address spectral bias on tau_y/tau_z.
+
+### Results vs PR #33 (single-scale RFF) and current SOTA PR #39 (Lion)
+
+| Metric | PR #33 single-scale | PR #43 multi-scale | vs PR #33 | tay SOTA PR #39 |
+|---|---:|---:|---:|---:|
+| `test_abupt` | 17.77 | **17.86** | +0.09 | **15.43** |
+| surface_pressure | 11.20 | 11.28 | +0.08 | 9.45 |
+| wall_shear | 18.68 | 18.69 | +0.01 | 16.28 |
+| volume_pressure | 16.13 | 16.30 | +0.17 | 13.83 |
+| tau_x | 16.20 | 16.14 | −0.06 | 13.91 |
+| tau_y | 21.81 | 21.84 | +0.03 | 19.58 |
+| tau_z | 23.54 | 23.73 | +0.19 | 20.40 |
+
+Best epoch: 9 (8 full + 1 partial forced at 270-min timeout). Val volume_p improved
+(9.84→9.40, −4.4%) but **did not transfer to test** (+0.17). Throughput −14% (step
+throughput 1.7→1.49 it/s) from 3× RFF compute, compressing to 8 full epochs vs 9.
+
+### Diagnosis
+
+Multi-scale RFF on the standard surface-coord domain is **parameter-redundant** with
+sigma=1.0 single-scale. Surface domain `[−1,4] m` is already well-covered by sigma=1.0.
+Adding sigma=0.1 (low band) and sigma=10.0 (high band) provides no new spectral information
+at the Transolver input layer. The val volume_p gain overfits to the 34-case val split.
+
+### Disposition: CLOSED (+15.7% regression vs new SOTA)
+
+Baseline has moved to PR #39 Lion (15.43). Multi-scale RFF on AdamW base cannot compete.
+Assigned fern to **PR #54: Lion + per-axis tau_y/tau_z loss weighting** — directly
+targets the binding 5×+ gap on the two worst axes.
+
+---
+
 ## 2026-04-29 13:35 UTC — PR #36 closed, tanjiro reassigned to PR #39
 
 PR #36 (tanjiro: SDF-gated volume attention bias) closed after 5+

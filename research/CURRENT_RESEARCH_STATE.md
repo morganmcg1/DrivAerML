@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-29 22:15 UTC
+- **Date:** 2026-04-30 00:50 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -26,19 +26,20 @@ val curve still descending at cutoff → compile would give 12 epochs, further i
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #46 | alphonse | RFF (sigma=1.0, 32 feats) + compile | Running (post-compile-fix baseline, not Lion) |
-| #43 | fern | Multi-scale RFF 3-band {0.1,1.0,10.0} | Running 3rd attempt ~4.5h in (~23:45 finish) |
-| #47 | thorfinn | Bilateral train-time augmentation | Running |
-| #42 | frieren | Squared rel-L2 loss + compile (rebased) | Running rebased version |
-| #49 | askeladd | Grad-clip-norm 1.0 → 5.0 (single delta) | Running or just starting |
-| #35 nezuko R2 → | nezuko | **PR #50: Lion + compile (single delta)** | Just assigned |
-| #44 edward R2 → | edward | **PR #51: Lion + RFF sigma=1.0 (single delta)** | Just assigned |
-| tanjiro arm B | tanjiro | Lion lr=5e-5 sweep (follow-up, automatic) | Running `vnb7oheo` ~00:45 finish |
+| #46 | alphonse | RFF (sigma=1.0, 32 feats) + compile | Running, val 14.446, 234 min (~01:00 finish) |
+| **#54** | **fern** | **Lion + per-axis tau_y/tau_z loss weighting (2×/2× vs 1×)** | **Just assigned — addresses binding 5×+ gap** |
+| #47 | thorfinn | Bilateral train-time augmentation | Running, val 21.87, 210 min |
+| #42 | frieren | Squared rel-L2 loss + compile (rebased) | Running, run `uwt74mip`, ~207 min |
+| #49 | askeladd | Grad-clip-norm 1.0 → 5.0 (single delta) | Running, val 17.08, ~3h in |
+| #50 | nezuko | Lion + compile (single delta) | Queued — pod hung, Issue #53 pending restart |
+| #51 | edward | Lion + RFF sigma=1.0 (single delta) | Queued — pod hung, Issue #53 pending restart |
+| #52 | tanjiro | Lion + RFF + compile (triple-stack) | Queued — waiting for tanjiro arm B `vnb7oheo` |
 
 ## Key closed experiments this round
 
 | PR | Outcome | Why |
 |---|---|---|
+| #43 fern | CLOSED — +15.7% vs SOTA, noise vs own baseline | Multi-scale RFF redundant on [−1,4]m surface domain; σ=1.0 already at local optimum |
 | #41 askeladd | CLOSED — regression +22.5% | Eval-time tangential projection destroys normal-component of tau that helps rel-L2 |
 | #37 thorfinn | CLOSED — regression +14.2% | Bilateral TTA-eval only (no train aug); per-axis weights code never pushed |
 | #35 nezuko | CLOSED — regression +13.7% vs new SOTA | ANP uncompilable (inductor dynamic-shapes bug); surface wins not sustained in composition |
@@ -59,10 +60,12 @@ val curve still descending at cutoff → compile would give 12 epochs, further i
 ## Next priority compositions (after Lion win)
 
 High priority (single-delta from Lion SOTA):
-1. **Lion + compile** (PR #50 nezuko) — val curve still descending at epoch 9; 12 epochs should yield −5-10%
-2. **Lion + RFF** (PR #51 edward) — each lever was −10% independently; composition ~−13.5-14.0 if orthogonal
-3. **Lion + FiLM** (not yet assigned) — FiLM failed at uncompiled 9 epochs; Lion+compile gives FiLM another chance
-4. **Lion + cosine EMA (correct T_max=12)** — yi's biggest non-arch lever, correctly calibrated
+1. **Lion + compile** (PR #50 nezuko) — queued, pod restart needed
+2. **Lion + RFF** (PR #51 edward) — queued, pod restart needed
+3. **Lion + per-axis tau_y/tau_z weights** (PR #54 fern) — just assigned, addresses 5×+ binding gap
+4. **Lion + RFF + compile** (PR #52 tanjiro) — queued after arm B finishes
+5. **Lion + FiLM** (not yet assigned) — FiLM failed at uncompiled 9 epochs; Lion+compile gives FiLM another chance
+6. **Lion + cosine EMA (correct T_max=12)** — yi's biggest non-arch lever, correctly calibrated
 
 Active but possibly suboptimal vs Lion:
 5. **RFF + compile (PR #46 alphonse)** — tests RFF without Lion; important for decomposing gains
