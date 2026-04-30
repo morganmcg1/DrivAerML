@@ -328,6 +328,344 @@ class Transformer(nn.Module):
         return x
 
 
+class PerceiverCrossAttention(nn.Module):
+    """Pre-norm cross-attention block with FFN. Queries attend to key/value context.
+
+    Uses F.scaled_dot_product_attention to access fused / memory-efficient
+    kernels and supports key padding masks for variable-size point clouds.
+    """
+
+    def __init__(
+        self,
+        query_dim: int,
+        context_dim: int,
+        num_heads: int,
+        mlp_ratio: int | float = 4,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if query_dim % num_heads != 0:
+            raise ValueError("query_dim must be divisible by num_heads")
+        self.num_heads = num_heads
+        self.head_dim = query_dim // num_heads
+        self.dropout = dropout
+        self.norm_q = nn.LayerNorm(query_dim, eps=1e-6)
+        self.norm_kv = nn.LayerNorm(context_dim, eps=1e-6)
+        self.to_q = nn.Linear(query_dim, query_dim, bias=False)
+        self.to_kv = nn.Linear(context_dim, query_dim * 2, bias=False)
+        self.to_out = nn.Linear(query_dim, query_dim)
+        nn.init.trunc_normal_(self.to_q.weight, std=0.02)
+        nn.init.trunc_normal_(self.to_kv.weight, std=0.02)
+        _init_linear(self.to_out)
+
+        self.norm_ff = nn.LayerNorm(query_dim, eps=1e-6)
+        mlp_hidden_dim = int(math.ceil(query_dim * mlp_ratio))
+        self.ff = UpActDownMlp(hidden_dim=query_dim, mlp_hidden_dim=mlp_hidden_dim)
+
+    def forward(
+        self,
+        queries: torch.Tensor,
+        context: torch.Tensor,
+        key_padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        batch_size, num_queries, _ = queries.shape
+        num_keys = context.shape[1]
+        q_normed = self.norm_q(queries)
+        kv_normed = self.norm_kv(context)
+        q = self.to_q(q_normed).view(batch_size, num_queries, self.num_heads, self.head_dim).transpose(1, 2)
+        kv = self.to_kv(kv_normed).view(batch_size, num_keys, 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        k, v = kv[0], kv[1]
+
+        attn_mask: torch.Tensor | None = None
+        if key_padding_mask is not None:
+            # key_padding_mask: [B, N_kv] with True = ignore.
+            # Build additive float mask broadcast to [B, 1, 1, N_kv].
+            mask_value = torch.finfo(q.dtype).min
+            attn_mask = torch.zeros(batch_size, 1, 1, num_keys, dtype=q.dtype, device=q.device)
+            attn_mask = attn_mask.masked_fill(key_padding_mask.view(batch_size, 1, 1, num_keys), mask_value)
+
+        out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        out = out.transpose(1, 2).contiguous().view(batch_size, num_queries, self.num_heads * self.head_dim)
+        out = self.to_out(out)
+        queries = queries + out
+        queries = queries + self.ff(self.norm_ff(queries))
+        return queries
+
+
+class PerceiverSelfAttention(nn.Module):
+    """Standard pre-norm multi-head self-attention used inside the latent processor."""
+
+    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.0):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.dropout = dropout
+        self.qkv = nn.Linear(hidden_dim, 3 * hidden_dim, bias=False)
+        self.to_out = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.trunc_normal_(self.qkv.weight, std=0.02)
+        _init_linear(self.to_out)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, num_tokens, _ = x.shape
+        qkv = self.qkv(x).view(batch_size, num_tokens, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        out = out.transpose(1, 2).contiguous().view(batch_size, num_tokens, self.num_heads * self.head_dim)
+        return self.to_out(out)
+
+
+class PerceiverSelfAttentionBlock(nn.Module):
+    """Pre-norm transformer block (self-attention + FFN) for the latent processor."""
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        mlp_expansion_factor: int | float,
+        dropout: float = 0.0,
+        drop_path_prob: float = 0.0,
+    ):
+        super().__init__()
+        mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
+        self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.attn = PerceiverSelfAttention(hidden_dim, num_heads, dropout=dropout)
+        self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.drop_path = DropPath(drop_path_prob)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.drop_path(self.attn(self.norm1(x)))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class PerceiverLatentTransformer(nn.Module):
+    """Stack of self-attention blocks operating on the (small) latent array."""
+
+    def __init__(
+        self,
+        depth: int,
+        hidden_dim: int,
+        num_heads: int,
+        mlp_expansion_factor: int | float,
+        dropout: float = 0.0,
+        stochastic_depth_prob: float = 0.0,
+    ):
+        super().__init__()
+        if depth <= 1:
+            drop_path_rates = [stochastic_depth_prob] * depth
+        else:
+            drop_path_rates = [
+                stochastic_depth_prob * i / (depth - 1) for i in range(depth)
+            ]
+        self.blocks = nn.ModuleList(
+            [
+                PerceiverSelfAttentionBlock(
+                    hidden_dim=hidden_dim,
+                    num_heads=num_heads,
+                    mlp_expansion_factor=mlp_expansion_factor,
+                    dropout=dropout,
+                    drop_path_prob=drop_path_rates[i],
+                )
+                for i in range(depth)
+            ]
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        for block in self.blocks:
+            x = block(x)
+        return x
+
+
+class PerceiverIOSurrogate(nn.Module):
+    """Perceiver-IO backbone for grouped surface + volume CFD prediction.
+
+    Cross-attention encoder maps padded surface and volume points into a
+    fixed-size latent array; self-attention transformer processes the latents;
+    cross-attention decoders map the latents back to per-point predictions.
+    """
+
+    def __init__(
+        self,
+        *,
+        space_dim: int = 3,
+        surface_input_dim: int = SURFACE_X_DIM,
+        surface_output_dim: int = SURFACE_Y_DIM,
+        volume_input_dim: int = VOLUME_X_DIM,
+        volume_output_dim: int = VOLUME_Y_DIM,
+        latent_dim: int = 256,
+        num_latents: int = 512,
+        n_layers: int = 6,
+        n_head: int = 8,
+        cross_attn_heads: int = 4,
+        mlp_ratio: int | float = 4,
+        dropout: float = 0.0,
+        stochastic_depth_prob: float = 0.0,
+    ):
+        super().__init__()
+        self.space_dim = space_dim
+        self.surface_input_dim = surface_input_dim
+        self.surface_output_dim = surface_output_dim
+        self.volume_input_dim = volume_input_dim
+        self.volume_output_dim = volume_output_dim
+        self.latent_dim = latent_dim
+        self.num_latents = num_latents
+        surface_extra_dim = max(0, self.surface_input_dim - space_dim)
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+
+        self.pos_embed = ContinuousSincosEmbed(hidden_dim=latent_dim, input_dim=space_dim)
+        self.surface_bias = MLP(input_dim=latent_dim, hidden_dim=latent_dim, output_dim=latent_dim)
+        self.volume_bias = MLP(input_dim=latent_dim, hidden_dim=latent_dim, output_dim=latent_dim)
+        self.project_surface_features = (
+            LinearProjection(surface_extra_dim, latent_dim) if surface_extra_dim > 0 else None
+        )
+        self.project_volume_features = (
+            LinearProjection(volume_extra_dim, latent_dim) if volume_extra_dim > 0 else None
+        )
+        self.surface_placeholder = nn.Parameter(torch.rand(1, 1, latent_dim) / latent_dim)
+        self.volume_placeholder = nn.Parameter(torch.rand(1, 1, latent_dim) / latent_dim)
+
+        # Latent array (small, learnable).
+        self.latents = nn.Parameter(torch.empty(1, num_latents, latent_dim))
+        nn.init.trunc_normal_(self.latents, std=0.02)
+
+        # Encoders: latents cross-attend to each modality (sequential).
+        self.encode_surface = PerceiverCrossAttention(
+            query_dim=latent_dim,
+            context_dim=latent_dim,
+            num_heads=cross_attn_heads,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+        )
+        self.encode_volume = PerceiverCrossAttention(
+            query_dim=latent_dim,
+            context_dim=latent_dim,
+            num_heads=cross_attn_heads,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+        )
+
+        # Latent processor: self-attention over the M latents (the bulk of compute).
+        self.backbone = PerceiverLatentTransformer(
+            depth=n_layers,
+            hidden_dim=latent_dim,
+            num_heads=n_head,
+            mlp_expansion_factor=mlp_ratio,
+            dropout=dropout,
+            stochastic_depth_prob=stochastic_depth_prob,
+        )
+        self.norm = nn.LayerNorm(latent_dim, eps=1e-6)
+
+        # Decoders: per-point queries cross-attend to processed latents.
+        self.decode_surface = PerceiverCrossAttention(
+            query_dim=latent_dim,
+            context_dim=latent_dim,
+            num_heads=cross_attn_heads,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+        )
+        self.decode_volume = PerceiverCrossAttention(
+            query_dim=latent_dim,
+            context_dim=latent_dim,
+            num_heads=cross_attn_heads,
+            mlp_ratio=mlp_ratio,
+            dropout=dropout,
+        )
+        self.decode_norm_surface = nn.LayerNorm(latent_dim, eps=1e-6)
+        self.decode_norm_volume = nn.LayerNorm(latent_dim, eps=1e-6)
+
+        self.surface_out = LinearProjection(latent_dim, self.surface_output_dim)
+        self.volume_out = LinearProjection(latent_dim, self.volume_output_dim)
+
+    def _encode_group(
+        self,
+        x: torch.Tensor,
+        *,
+        project_features: LinearProjection | None,
+        bias: MLP,
+        placeholder: nn.Parameter,
+    ) -> torch.Tensor:
+        pos = x[:, :, : self.space_dim]
+        hidden = self.pos_embed(pos)
+        if project_features is not None and x.shape[-1] > self.space_dim:
+            hidden = hidden + project_features(x[:, :, self.space_dim :])
+        return bias(hidden) + placeholder
+
+    def forward(
+        self,
+        *,
+        surface_x: torch.Tensor | None = None,
+        surface_mask: torch.Tensor | None = None,
+        volume_x: torch.Tensor | None = None,
+        volume_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if surface_x is None or volume_x is None:
+            raise ValueError("PerceiverIOSurrogate requires both surface_x and volume_x")
+        if surface_mask is None or volume_mask is None:
+            raise ValueError("PerceiverIOSurrogate requires both surface_mask and volume_mask")
+
+        batch_size = surface_x.shape[0]
+
+        surface_tokens = self._encode_group(
+            surface_x,
+            project_features=self.project_surface_features,
+            bias=self.surface_bias,
+            placeholder=self.surface_placeholder,
+        )
+        volume_tokens = self._encode_group(
+            volume_x,
+            project_features=self.project_volume_features,
+            bias=self.volume_bias,
+            placeholder=self.volume_placeholder,
+        )
+        # Zero-out padded positions before they reach cross-attention keys.
+        surface_tokens = _apply_token_mask(surface_tokens, surface_mask)
+        volume_tokens = _apply_token_mask(volume_tokens, volume_mask)
+
+        # PyTorch convention: True = ignore.
+        surface_kpm = ~surface_mask.bool()
+        volume_kpm = ~volume_mask.bool()
+
+        latents = self.latents.expand(batch_size, -1, -1)
+        latents = self.encode_surface(latents, surface_tokens, key_padding_mask=surface_kpm)
+        latents = self.encode_volume(latents, volume_tokens, key_padding_mask=volume_kpm)
+
+        latents = self.backbone(latents)
+        latents = self.norm(latents)
+
+        surface_decoded = self.decode_surface(surface_tokens, latents)
+        volume_decoded = self.decode_volume(volume_tokens, latents)
+        surface_decoded = self.decode_norm_surface(surface_decoded)
+        volume_decoded = self.decode_norm_volume(volume_decoded)
+        surface_decoded = _apply_token_mask(surface_decoded, surface_mask)
+        volume_decoded = _apply_token_mask(volume_decoded, volume_mask)
+
+        surface_preds = self.surface_out(surface_decoded) * surface_mask.unsqueeze(-1)
+        volume_preds = self.volume_out(volume_decoded) * volume_mask.unsqueeze(-1)
+
+        return {
+            "surface_preds": surface_preds,
+            "volume_preds": volume_preds,
+            "hidden": latents,
+            "surface_hidden": surface_decoded,
+            "volume_hidden": volume_decoded,
+            "latent_hidden": latents,
+        }
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -571,6 +909,12 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
+    use_perceiver_backbone: bool = False
+    model_num_latents: int = 512
+    model_latent_dim: int = 256
+    model_perceiver_layers: int = 6
+    model_perceiver_heads: int = 8
+    model_cross_attn_heads: int = 4
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -719,7 +1063,18 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
-def build_model(config: Config) -> SurfaceTransolver:
+def build_model(config: Config) -> nn.Module:
+    if config.use_perceiver_backbone:
+        return PerceiverIOSurrogate(
+            latent_dim=config.model_latent_dim,
+            num_latents=config.model_num_latents,
+            n_layers=config.model_perceiver_layers,
+            n_head=config.model_perceiver_heads,
+            cross_attn_heads=config.model_cross_attn_heads,
+            mlp_ratio=config.model_mlp_ratio,
+            dropout=config.model_dropout,
+            stochastic_depth_prob=config.stochastic_depth_prob,
+        )
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -1375,6 +1730,17 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    if "latent_hidden" in out:
+        latent_hidden = out["latent_hidden"].detach().float()
+        metrics["perceiver/latent_norm_mean"] = float(
+            latent_hidden.norm(dim=-1).mean().cpu().item()
+        )
+        metrics["perceiver/latent_abs_mean"] = float(
+            latent_hidden.abs().mean().cpu().item()
+        )
+        metrics["perceiver/latent_std_mean"] = float(
+            latent_hidden.std(dim=-1).mean().cpu().item()
+        )
     return loss, metrics
 
 
@@ -1683,7 +2049,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
-    print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+    model_name = "PerceiverIOSurrogate" if config.use_perceiver_backbone else "SurfaceTransolver"
+    print(f"Model: {model_name} grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
@@ -1739,6 +2106,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/perceiver/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
@@ -1853,7 +2221,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
-                if key.startswith("film/"):
+                if key.startswith("film/") or key.startswith("perceiver/"):
                     train_log[f"train/{key}"] = value
             train_log.update(
                 train_slope_tracker.update(
