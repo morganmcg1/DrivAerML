@@ -955,3 +955,29 @@ Val trajectory (only 5 points): 71.04→30.65→16.42→12.50→11.23. Val 11.23
 - **Root cause: budget-limited, not capacity-limited.** 768d uncompiled takes ~58min/epoch vs ~30min/epoch for 512d. Only 5 epochs in 270min vs 9 for 512d. The model hasn't converged — it's at the 512d ep7 equivalent. **If 768d were compiled** (→16 epochs in budget), it would likely converge further.
 - **Closed-door config:** 768d uncompiled within 270 budget. Next test: 768d + compile (will it diverge like 512d?). If Lion+compile fragility applies regardless of width, 768d+compile is a dead end. If µP LR scaling somehow stabilizes Lion+compile, 768d+compile could be the capacity win.
 - **Status:** CLOSED.
+
+## 2026-04-30 13:14 UTC — PR #57 CLOSED: askeladd Lion+cosine T_max=16 nocompile — wash with vanilla Lion (no improvement)
+
+- **Branch:** `askeladd/lion-cosine-tmax16`
+- **W&B run:** `jh1j9uq4` — finished 287min, 9 val epochs
+- **Hypothesis:** Cosine T_max=16 schedule with Lion uncompiled (after Lion+compile failed at T_max=16). Test if cosine schedule provides benefit when applied to the stable Lion uncompiled base.
+- **Result: WASH — test_abupt 11.229 (+0.19% vs new SOTA 11.208 from PR #50, within noise)**
+
+| Metric | PR #57 (cosine T_max=16) | SOTA PR #50 (no schedule) | Δ |
+|---|---:|---:|---:|
+| **abupt_mean** | **11.229** | 11.208 | +0.19% |
+| surface_pressure | 6.285 | 6.193 | +1.5% |
+| wall_shear | 11.278 | 11.199 | +0.7% |
+| volume_pressure | 12.611 | 12.726 | **−0.9%** |
+| tau_x | 9.656 | 9.512 | +1.5% |
+| tau_y | 13.572 | 13.592 | −0.1% |
+| tau_z | 14.019 | 14.017 | flat |
+
+Val trajectory: 78.56→43.75→23.68→16.92→13.80→12.01→11.03→10.41→10.13 (mirrors PR #50 trajectory closely).
+
+- **Findings:**
+  1. **Lion+cosine T_max=16 nocompile is stable** (no divergence — different from compiled where it diverges at ep4). NEW finding this round.
+  2. **No improvement over vanilla Lion** within 9-epoch budget. Cosine T_max=16 decays LR to ~40% of peak by ep9, trading exploration for refinement too early.
+  3. Volume_pressure marginally improved (−0.9%) but every other axis regressed marginally — net wash.
+- **Follow-up:** Nezuko PR #93 (Lion+cosine T_max=24) tests longer schedule. If T_max=24 also doesn't beat vanilla Lion, cosine is closed lever for Lion uncompiled at this budget.
+- **Status:** CLOSED.
