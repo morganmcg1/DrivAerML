@@ -6,6 +6,27 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 16:45 UTC — PR #90 CLOSED: tanjiro Lion+RFF + EMA decay 0.9999 — budget-incompatible
+
+- **Branch:** `tanjiro/round6-lion-rff-ema9999`
+- **W&B run:** `ocubvc23` rank 0 — group `tanjiro/round6-lion-rff-ema9999-rank0`, 285 min, 9 val epochs
+- **Hypothesis:** EMA decay 0.9999 (vs baseline 0.9995) on Lion+RFF uncompiled — slower EMA smoothing may reduce late-stage oscillations and improve generalization.
+- **Result:** test_abupt **30.203** vs SOTA 11.208 (+169% regression). Best val 29.540.
+
+| Metric | PR #90 (EMA 0.9999) | Edward #51 (EMA 0.9995) | SOTA PR #50 | AB-UPT ref |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | **30.203** | 11.741 | 11.208 | — |
+| `surface_pressure_rel_l2_pct` | 20.821 | 6.394 | 6.193 | 3.82 |
+| `wall_shear_rel_l2_pct` | 31.519 | 11.837 | 11.199 | 7.29 |
+| `volume_pressure_rel_l2_pct` | 25.057 | 13.111 | 12.726 | 6.08 |
+| `wall_shear_x` | 26.216 | — | 9.512 | 5.35 |
+| `wall_shear_y` | 39.381 | — | 13.592 | 3.65 |
+| `wall_shear_z` | 39.543 | — | 14.017 | 3.63 |
+
+- **Mechanism:** EMA decay 0.9999 requires ~10× more steps than the 9-epoch / ~23K-step budget provides. The EMA snapshot at best-val is still dominated by early-epoch (effectively random-init) weights. Best-val checkpoint reloads a snapshot that was never a valid EMA of converged weights.
+- **Closed-door for this budget:** EMA ≥ 0.9999 is incompatible with 270m budget. EMA 0.999 (5× faster tracking) assigned next to tanjiro PR #111.
+- **Contrast:** EMA 0.9995 baseline is fine — at ~23K steps, the EMA half-life is ~14K steps ≈ 5 epochs. EMA 0.9999 half-life is ~140K steps ≈ 50 epochs.
+
 ## 2026-04-30 16:05 UTC — PR #51 CLOSED: edward Lion+RFF σ=1.0 reproducer — RFF doesn't compose with vanilla Lion uncompiled
 
 - **Branch:** `edward/edward/round2-lion-rff-512d`
