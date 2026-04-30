@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 19:14 UTC
+- **Date:** 2026-04-30 19:20 UTC
 
 ## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
 
@@ -46,7 +46,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | — | Just assigned (rt=0m) |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep5 val 12.71** (vs vanilla ep5 14.25, **−10.8% better**) | Running (rt=160m) — strong, advantage tightening |
 | **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep6 val 12.90 (vs vanilla ep6 12.29, +5.0%) | Running (rt=195m) — warmup penalty shrinking |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep5 val 13.52** (vs vanilla 14.25, **−5.1% better**) | Running (rt=157m) — solidly ahead |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep6 val 11.84** (vs vanilla 12.29, **−3.6% better**) | Running (rt=188m) — confirmed winner |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep3 val 28.86 | Running (rt=68m) |
 | **#92** | thorfinn | AdamW+RFF+768d+compile | ep2 val 31.73 | Running (rt=65m) |
 
