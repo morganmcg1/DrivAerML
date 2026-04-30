@@ -1252,3 +1252,24 @@ Val trajectory: 78.56→43.75→23.68→16.92→13.80→12.01→11.03→10.41→
   3. Volume_pressure marginally improved (−0.9%) but every other axis regressed marginally — net wash.
 - **Follow-up:** Nezuko PR #93 (Lion+cosine T_max=24) tests longer schedule. If T_max=24 also doesn't beat vanilla Lion, cosine is closed lever for Lion uncompiled at this budget.
 - **Status:** CLOSED.
+
+## 2026-04-30 23:55 UTC — PR #72 CLOSED: fern AdamW+RFF+per-axis tau — diverged loser test 15.443 (+38.6%)
+
+- fern/round5b-adamw-rff-tauyz
+- Hypothesis: AdamW+RFF+compile base + per-channel wall_shear weights [1.0, 2.0, 2.0] for tau_x/y/z. Idea: force model to attend to tau_y/tau_z binding gaps without Lion's instability (Lion+per-axis diverged in PR #54 ep4).
+- W&B run: yi9l0ica, group tay-round5b-adamw-rff-tauyz
+
+| Metric | PR #72 (fern AdamW+RFF+axisw) | Current SOTA PR #111 | Δ |
+|---|---:|---:|---:|
+| test_abupt | 15.443 | 11.142 | **+38.6%** |
+| surface_pressure | 9.648 | 6.209 | +55.4% |
+| wall_shear | 15.955 | 11.138 | +43.3% |
+| volume_pressure | 15.836 | 12.548 | +26.2% |
+| tau_x | 14.338 | 9.436 | +51.9% |
+| tau_y | 17.919 | 13.525 | +32.5% |
+| tau_z | 19.475 | 13.992 | +39.2% |
+| best val | 14.442 (ep13) | 9.989 (ep9) | +44.6% |
+
+- **Trajectory:** 72.29, 41.51, 29.01, 24.13, 21.39, 19.63, 18.24, 17.25, 16.48, 15.80, 15.26, 14.80, 14.44, 14.83, 17.31, **35.19** (ep16 catastrophic divergence)
+- **Conclusion:** AdamW+RFF+per-axis weighting is fundamentally weaker than Lion uncompiled. The per-axis weighting did NOT close the binding gap — tau_y/tau_z REGRESSED +33%/+39%. Combined with PR #54 (Lion+per-axis diverged ep4), per-axis weighting at sw=2.0 ratio is closed-door on both stacks. Future attempts need conservative weights (sw_y/z ≤ 1.5) AND likely selective application (only after a warmup phase).
+- **Fern reassigned** to round10 model-slices=256 sweep (architecture lever — current SOTA uses 128 slices).
