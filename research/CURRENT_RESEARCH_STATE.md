@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 19:20 UTC
+- **Date:** 2026-04-30 19:30 UTC
 
 ## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
 
@@ -45,7 +45,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 | **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | — | Just assigned (rt=0m) |
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | — | Just assigned (rt=0m) |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep5 val 12.71** (vs vanilla ep5 14.25, **−10.8% better**) | Running (rt=160m) — strong, advantage tightening |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep6 val 12.90 (vs vanilla ep6 12.29, +5.0%) | Running (rt=195m) — warmup penalty shrinking |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep7 val 11.555 (vs vanilla ep7 11.11, +4.0%) | Running (rt=222m) — warmup penalty holding ~4% behind, will not catch up |
 | **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep6 val 11.84** (vs vanilla 12.29, **−3.6% better**) | Running (rt=188m) — confirmed winner |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep3 val 28.86 | Running (rt=68m) |
 | **#92** | thorfinn | AdamW+RFF+768d+compile | ep2 val 31.73 | Running (rt=65m) |
@@ -143,7 +143,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 - **RFF σ=0.5 (askeladd #94) CLOSED** — test 11.353 (+1.3% regression). Best sigma tested (vs σ=1.0: +4.7%, σ=2.0: +1.5%) but RFF is **fully closed-door** across all sigma values. Askeladd reassigned to PR #114 EMA=0.998.
 - **EMA=0.999 (tanjiro #111) STRONG SIGNAL, advantage tightening** — ep1: 55.06 (32% better); ep2: 27.00 (42% better); ep3: 18.09 (26% better); ep4: 14.61 (16% better); ep5: 12.71 (11% better). The EMA advantage is real but compressing late-epoch (vanilla closes the gap as both hit the same plateau). Now ~0.5 epoch ahead, not 1 full epoch. **Revised projection: ep9 val ~9.4-9.7 → test ~10.5-10.8 (3-6% SOTA improvement).**
 - **lr=1e-4 (alphonse #112) CONFIRMED WINNER trajectory** — ep1: 78.80, ep2: 45.09, ep3: 22.17, ep4: 15.85, ep5: 13.28. Consistent 7-9% lead vs vanilla. Projected test ~10.4 = 7% SOTA improvement. **lr=1e-4 + EMA=0.999 compound stack is the obvious next experiment after tanjiro/alphonse complete.**
-- **Warmup (frieren #109) hurting** — ep4 21.11 vs vanilla 17.31 (+22%). Warmup costs >1 epoch.
+- **Warmup (frieren #109) hurting** — ep4 21.11 → ep7 11.555 (vs vanilla 17.31 → 11.11, +22% → +4%). Warmup gap closing but not catching SOTA. Projected ep9 ~10.5 → test ~11.6 (+3% regression).
 - **Fern + thorfinn** AdamW+RFF+compile branches at ep2 41.28/31.73 — orthogonal experiments.
 
 ## Next architecture experiments (if current levers plateau)
