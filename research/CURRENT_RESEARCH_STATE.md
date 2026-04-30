@@ -1,215 +1,101 @@
 # SENPAI Research State
+- 2026-04-29 (Round-2 assignments complete)
 
-- **Date:** 2026-04-29
-- **Branch:** `yi`
-- **Target repo:** `morganmcg1/DrivAerML`
-- **W&B:** `wandb-applied-ai-team/senpai-v1-drivaerml`
-- **Most recent direction from human team:** 2026-04-28 — morganmcg1 (Issue #19)
+## Most Recent Research Direction from Human Researcher Team
 
-## Key directives from human research team (Issue #18, 2026-04-28)
+From Issue #18 (open):
+- Use ALL W&B logged metrics — gradient norms, weight histograms, loss slope — not just final val loss
+- Flag epoch-limited runs (still on a downward trajectory at the epoch cap) as promising, not closed
+- Differentiate failure modes: flat/diverging gradients early = fundamental; healthy slope at cutoff = epoch-limited
+- Prioritize convergence speed in new hypotheses (warmup schedules, better init, fast-converging architectures)
 
-1. **Be bolder with architecture changes.** Don't be afraid to completely replace the model backbone. Students can handle radical departures from the reference `train.py` as long as logging, validation, and checkpointing are maintained.
-2. **Cross-branch inspiration.** Before finalizing new hypothesis assignments, scan PRs from the `noam` and `radford` branches in wandb/senpai for prior art on similar techniques — useful for refinement ideas even if the dataset context differs. Similar work on a different dataset is *not* a reason to skip an idea.
-3. **Empower students.** Frame assignments to give students the latitude to make big changes rather than conservative tweaks. Trust students to make great leaps.
+## Current Research Focus and Themes
 
-## Current research focus
+### Yi Best: 13.15 abupt (PR #14, senku 6L/256d, 2026-04-29)
 
-Round 1 calibration on a clean slate. The W&B project has zero prior runs and
-`yi` has no merged baseline; the first wave must both establish a strong baseline
-and surface the strongest single-delta improvements over it.
+**Breakthrough:** Depth is more parameter-efficient than width at this scale.
+6L/256d (4.73M params) crushed 4L/512d (12.7M params) by 21%. Both 5L and 6L
+were still descending at timeout — significant untapped improvement available with
+longer training.
 
-Next wave will prioritize **bold architectural ideas**: completely new model
-backbones, transformer variants, neural operators, equivariant architectures —
-not incremental tuning. Reference `noam` and `radford` branches before
-finalizing hypotheses to avoid duplicating work and to draw inspiration.
+**Key findings from Round-1/2 reviews:**
+1. Depth scaling law: 4L→5L = −18.7%, 5L→6L = −2.7% (diminishing returns, but 7L/8L not yet tested)
+2. Cosine EMA (PR #13) adds 9% orthogonally — now standard on yi
+3. Gradient clipping clip=1.0 is now standard and essential for stability at 6L
+4. FiLM geometry conditioning: 46% relative improvement at 1 epoch on 4L (frieren PR #8 pending rebase)
+5. Volume pressure shows val→test gap (6.93 val ≈ AB-UPT, 13.58 test = 2×) — generalization problem
+6. Wall-shear y/z remain the largest gap (4.4-4.6× AB-UPT) despite 60-70% improvement from Round-1 start
 
-## Known prior art (from outside the `yi` W&B project)
+**Distance to AB-UPT (current best):**
 
-- `codex/optimized-lineage` branch ships a heavier baseline: 4L/256d/4h/128sl,
-  lr 2e-4, wd 5e-4, 65k points, EMA 0.9995. Treated as the proven floor.
-- `wandb/senpai` `radford` branch converged on a 4L/512d/8h champion with
-  fourier features, cosine-T_max=36 LR schedule, EMA 0.9995, metric-aware
-  rel-L2 auxiliary loss, and DomainLayerNorm. Best surface val ≈ 3.6%.
-  The hardest known levers were `wall_shear` and `volume_pressure`.
+| Metric | yi best | AB-UPT | Ratio |
+|---|---:|---:|---:|
+| surface_pressure | 7.64 | 3.82 | 2.0× |
+| wall_shear | 13.47 | 7.29 | 1.8× |
+| volume_pressure | 13.58 | 6.08 | 2.2× |
+| wall_shear_x | 11.53 | 5.35 | 2.2× |
+| wall_shear_y | 16.23 | 3.65 | 4.4× |
+| wall_shear_z | 16.75 | 3.63 | 4.6× |
 
-## Round 1 — active PRs (all 16 students assigned 2026-04-28)
-
-### Stream 1 — exploit existing evidence
-
-| PR | Student | Hypothesis |
-|---|---|---|
-| #2 | alphonse | Stock defaults baseline — calibration floor |
-| #3 | askeladd | codex/optimized-lineage config (4L/256d/4h, 65k pts, lr=2e-4) |
-| ~~#4~~ | ~~chihiro~~ | ~~Large model 4L/512d/8h~~ — MERGED (new yi baseline 16.64) |
-| #5 | edward | Cosine LR + 5% warmup (proven radford winner family) |
-| ~~#6~~ | ~~emma~~ | ~~Metric-aware MSE + rel-L2 aux loss~~ — CLOSED (sqrt instability) |
-
-### Stream 2 — fresh targeted ideas
-
-| PR | Student | Hypothesis | Primary target |
-|---|---|---|---|
-| ~~#7~~ | ~~fern~~ | ~~Gaussian RFF for coordinates~~ — CLOSED 2026-04-29 v5 (bf16 cascade non-viable; per-stream σ + fp32 saved for future) |
-| #8 | frieren | Per-case geometry FiLM conditioning | all |
-| #9 | gilbert | Volume loss weight sweep 2.0x vs 3.0x | p_v (6.08%) |
-| #10 | haku | Per-axis wall-shear channel loss weights (2x vs 3x) | tau (7.29%) |
-| #11 | kohaku | Tangential wall-shear projection loss (physics-aware) | tau axes |
-| #12 | nezuko | Stochastic depth / DropPath regularization | generalization |
-| #13 | norman | Progressive EMA decay anneal 0.99→0.9999 | test checkpoint |
-| #14 | senku | Deeper model 5L/256d/4h (depth ablation) | all |
-| #15 | tanjiro | SDF-gated volume attention bias (near-wall emphasis) | p_v (6.08%) |
-| #16 | thorfinn | Test-time bilateral symmetry TTA (xz-plane) | tau_y esp. |
-| ~~#17~~ | ~~violet~~ | ~~Surface-area-weighted MSE loss~~ — CLOSED 2026-04-29 (heavy-tail variance non-viable) |
-
-## Round 2 plan — bold architecture replacements
-
-Full hypothesis pool: `research/RESEARCH_IDEAS_2026-04-28_ROUND2_ARCHITECTURES.md`
-(16 ideas, generated after mining `wandb/senpai` `noam` and `radford` per Issue #18).
-
-### Top-priority findings to act on
-
-1. **A01 — ANP cross-attention surface decoder is a near-certain win.**
-   noam PR #2379 swapped one head and got -70% in-domain pressure / -48% OOD on a
-   different dataset. Should be among the first Round-2 assignments.
-2. **The Transolver backbone has never been challenged on DrivAerML.** All 200 PRs
-   on `radford` were tuning, not architecture swaps. Backbone-replacement frontier
-   is wide open.
-3. **50 unlabelled test geometries are free pretraining data.** B01 (denoising),
-   B02 (MAE masking), C01 (DPOT transfer) can exploit this — no prior PR has.
-
-### Ranked Round-2 candidates (top 8)
-
-| # | Idea | Backbone change | Target |
-|---|---|---|---|
-| A01 | ANP cross-attention surface decoder | Replace surface MLP head | p_s, tau |
-| A02 | SE(3)-invariant coord features (12-d) | Input augmentation only | all |
-| B04 | Mamba-2 SSM surface decoder (Morton sort) | Replace surface head | p_s, tau |
-| B05 | Soft MoE FFN (4 experts, learned dispatch) | Replace every FFN | all |
-| C02 | Deep Evidential Regression head (NIG) | Replace MSE objective | all |
-| A03 | Perceiver-IO encoder+decoder (1024 latents) | Full backbone swap | all |
-| B01 | Denoising pretraining on geometry then fine-tune | Pretrain stage | all |
-| B02 | MAE 75%-mask point pretraining | Pretrain stage | all |
-
-Round 2 will assign these once Round 1 results come in (so we know which
-loss/optim/EMA/data-weighting wins to compose with the new backbone).
-
-## Round 2 — active assignments (2026-04-29)
+## Active WIP PRs (Round-2)
 
 | PR | Student | Hypothesis |
 |---|---|---|
-| ~~#20~~ | ~~nezuko~~ | ~~EMA decay sweep~~ — CLOSED, verdict (B) confirmed |
-| #21 | kohaku | Normal-component suppression on top of tangential projection |
-| #22 | gilbert | Add gradient clipping to train.py + 4-arm sweep |
-| #23 | frieren | Full composition: FiLM + projection + vol_w=2.0 + bs=8 |
-| #24 | emma | Squared rel-L2 aux loss (drop sqrt, smooth backward) |
-| #26 | nezuko | A01 — ANP cross-attention surface decoder (architecture swap) |
+| #58 | alphonse | NaN checkpoint guard bugfix (correctness) |
+| #59 | senku | 7L/8L depth sweep beyond 6L win |
+| #60 | chihiro | 6L/512d depth × width composition |
+| #61 | gilbert | Tangential wall-shear projection on 6L |
+| #62 | norman | FiLM geometry conditioning on 6L |
+| #63 | askeladd | Squared rel-L2 aux loss on 6L (w∈{0.1,0.5,1.0}) |
+| #64 | fern | Stochastic depth regularization (p∈{0.05,0.1,0.2}) |
+| #65 | violet | Volume loss weight sweep (1.5/2.0/3.0/4.0) |
+| #66 | thorfinn | Per-axis tau_y/z loss upweighting |
+| #67 | kafka | LR warmup + cosine decay schedule |
+| #21 | kohaku | Normal-suppression rerun on 6L (WIP — sent back) |
+| #15 | tanjiro | SDF-gated volume attention (sigma=0.005, sent back) |
 
-| #28 | norman | A02 — SE(3) equivariant local-frame coord features |
-| #29 | chihiro | B06 — width × FiLM × cosine EMA composition at 512d |
-| #38 | violet | C02 — Deep Evidential Regression (NIG head, lambda sweep 0.01 / 0.1) |
-| #45 | fern | B04 — Mamba-2 SSM Morton-sorted surface decoder |
+## Pending Code Merges
 
-**Closed in error 2026-04-29:** PR #25 (assigned to non-existent student `stark`) —
-SE(3) local-frame coordinate features. Now reassigned to norman as PR #28.
+| PR | Student | Code | Status |
+|---|---|---|---|
+| #8 | frieren | FiLM geometry conditioning code | Needs rebase |
+| #24 | emma | Squared rel-L2 aux loss code | Needs rebase |
+| #28 | norman | SE(3) local-frame features (A02) | Draft, no-status |
+| #23 | frieren | FiLM+projection+protocol composition | Draft, no-status |
 
-## Round 1 — reviewed results (2026-04-29)
+## Potential Next Research Directions
 
-### VERIFIED WINS (pending merge) + MERGED — yi baseline progression
+### Priority 1: Compositional wins on 6L base (highest expected value)
+- FiLM + 6L (norman PR #62) — if FiLM's 46% gain at 1-epoch composes with depth, expect abupt < 11
+- Tangential projection + 6L (gilbert PR #61) — projection may finally work stably with clip=1.0
+- 7L/8L depth (senku PR #59) — depth scaling law may still hold; both 5L/6L descending at timeout
+- 6L/512d (chihiro PR #60) — test if width+depth is additive (hypothesis: abupt ~11-12)
 
-- **PR #13 (norman, cosine EMA 0.99→0.9999) — VERIFIED WIN, pending merge (rebase required). NEW yi BEST.**
-  `abupt_axis_mean = 15.82` (vs 17.39 merged baseline = −9.0%). Run `wio9pqw2`,
-  state=finished, 4 epochs, best_epoch=4. Wins on every test_primary axis. No
-  train→val divergence — val improved monotonically epoch 1→4. Zero new params.
-  Critical revision of (B) verdict: divergence is config-conditional (bs=2 config
-  diverges; bs=8 + vol_w=2.0 does not). EMA cosine code now on `yi` when merged;
-  all future PRs should use `--ema-decay-start 0.99 --ema-decay-end 0.9999`.
-  - Follow-up PR #27 (norman): A02 SE(3) equivariant local-frame coord features.
-- **PR #8 (frieren, per-block FiLM conditioning) — VERIFIED WIN, pending merge (rebase).**
-  `abupt_axis_mean = 16.53` (vs 17.39 baseline = −4.9%). Run `hltti2ec`, 1 epoch.
-  Superseded as standalone best by PR #13 (15.82), but FiLM composes orthogonally
-  with cosine EMA — composition should push below 14. Frieren rebasing.
-  - Follow-up PR #23 (frieren): full composition — FiLM + vol_w=2.0 + projection + bs=8 + cosine EMA.
-- **PR #4 (chihiro, 4L/512d/8h large model) — MERGED 2026-04-29. NEW yi OFFICIAL BASELINE.**
-  `abupt_axis_mean = 16.64` (vs 17.39 prev = −4.3%). Run `pejudvyd`, 3 best epochs.
-  Best per-axis: `volume_pressure = 14.37` (standout win, orthogonal to FiLM/EMA).
-  Key: `lr=5e-5` required (3 runs at 2e-4 diverged), `bs=4` (VRAM limit at 512d).
-  BASELINE.md updated. chihiro reassigned → Round-2 composition run.
-- **PR #9 (gilbert, vol_w=2.0 + protocol fixes) — MERGED, now superseded by PR #4.**
-  `abupt_axis_mean = 17.39`. Run `y2gigs61`, 6 epochs.
-- **PR #11 (kohaku, tangential wall-shear projection) — MERGED.**
-  Code on yi (default off). Composable with any future PR.
-- **Follow-up PR #21 (kohaku, normal-component suppression sweep)** — λ ∈ {0.0, 0.01, 0.1, 1.0}.
-- **Follow-up PR #22 (gilbert, gradient clipping)** — `clip_grad_norm_` + 4-arm sweep.
+### Priority 2: Loss formulation and training dynamics
+- Squared rel-L2 aux loss on 6L (askeladd PR #63) — emma's w=0.5 showed +11% on 4L
+- Per-axis tau_y/z loss weighting (thorfinn PR #66) — direct attack on largest remaining gap
+- Volume loss weight sweep (violet PR #65) — vw=3.0 now safe with clip=1.0
+- LR warmup + cosine decay (kafka PR #67) — convergence speed is rate-limiting
 
-**Five independent wins compounding (next big leap from stacking all):**
-1. Tangential projection (PR #11, default off, `--use-tangential-wallshear-loss`)
-2. Protocol fixes: vol_w=2.0, bs=8, validation-every=1 (PR #9)
-3. **Width scale-up 512d/8h (PR #4, MERGED)**
-4. Per-block FiLM conditioning (PR #8, pending merge)
-5. Cosine EMA 0.99→0.9999 (PR #13, pending merge, `--ema-decay-start 0.99 --ema-decay-end 0.9999`)
-→ PR #23 (frieren) will test FiLM + projection + vol_w + cosine EMA once PRs #8 and #13 land.
-→ chihiro Round-2: 512d × FiLM × cosine EMA composition.
-→ Composition prediction: ~12–13 abupt (−20% from current best pending 15.82).
+### Priority 3: Generalization (volume pressure val→test gap)
+- Stochastic depth regularization (fern PR #64) — drop path targets the generalization gap
+- SDF-gated volume attention with sigma=0.005 (tanjiro PR #15) — near-wall focus
+- Data augmentation: point cloud jitter, geometry reflection during training (not yet tested)
 
-### CLOSED
+### Priority 4: Architecture exploration (longer horizon)
+- SE(3) local-frame coordinate features (norman PR #28 draft) — equivariant features
+- Longer training runs (10-12h) on 6L or 7L — both still descending at 4.5h timeout
+- 6L with all current wins composed (projection + FiLM + EMA + clip + aux_loss)
 
-- **PR #12 (nezuko, DropPath p=0.1) closed.** 81.21 vs 64.66 norman
-  comparator. Underfitting regime (best_epoch=1 on both runs); any
-  regularizer hurts. Wrong tool for the binding constraint.
-- **Critical infrastructure win from PR #12.** nezuko shipped a per-step
-  timeout fix (`train.py`); cherry-picked onto `yi` as `af92e9a`. Reserves
-  `SENPAI_VAL_BUDGET_MINUTES` (default 90). Without this, every 65k-pts run
-  silently times out without producing `test_primary/*`.
-- **PR #20 (nezuko, EMA decay sweep) — CLOSED 2026-04-29 with diagnostic value.**
-  4-arm sweep across `--ema-decay ∈ {0.99, 0.999, 0.9995, 0.99995}`. Verdict:
-  **(B) genuine post-epoch-1 instability**, not EMA lag. Even the most aggressive
-  decay (0.99, window ~100 steps) peaks at epoch 1; train loss is non-monotonic
-  across all four seeds (5–7× higher in epoch 2). Per-step spikes hit 6–22× the
-  median around steps 45–60k — exactly where missing gradient clipping bites.
-  Best arm 0.9995 → abupt 24.74 (above yi baseline; closed because diagnostic
-  not competitive). Confirms `--ema-decay 0.9995` as right default; PR #22
-  (gradient clipping) is the cure for the binding constraint.
-- **Follow-up: nezuko assigned A01 (ANP cross-attention surface decoder)** — the
-  largest architectural win from noam (PR #2379 MERGED, −70% in-domain p_s on
-  TandemFoil). Direct port to DrivAerML.
+## Known Correctness Issues
+1. **NaN checkpoint guard bug**: when EMA becomes NaN, `_finite_mean()` returns 0.0
+   which incorrectly passes the `< best_val` check and overwrites a valid checkpoint.
+   Fix: `improved = math.isfinite(primary_val) and primary_val > 0.0 and primary_val < best_val`.
+   Assigned to alphonse PR #58.
 
-### Cross-cutting directives broadcast to all active PRs
-
-1. Rebase onto `yi` to pick up `af92e9a` + projection code (default off).
-2. **New recommended base config (PR #9 winner):**
-   `--volume-loss-weight 2.0 --batch-size 8 --validation-every 1
-    --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms`
-3. Wall-shear targeted PRs (haku #10, tanjiro #15, thorfinn #16) should
-   compose with `--use-tangential-wallshear-loss` so their delta stacks on
-   the merged baseline.
-4. **Training-stability bug flagged:** until PR #22 lands gradient clipping,
-   sudden train-loss spikes followed by best_epoch lock-in are the bug, not
-   the hypothesis.
-5. Report any train→val divergence observed.
-
-### Resolved question (2026-04-29)
-
-**Train→val divergence after epoch 1 = (B) genuine post-epoch-1 instability**,
-diagnosed by PR #20 (nezuko EMA sweep). Train loss explodes 5–7× from epoch 1
-to epoch 2 across all 4 EMA arms; per-step train_loss spikes hit 6–22× median.
-The cure is **gradient clipping** (PR #22 in flight) and likely **LR warmup**
-(PR #5 edward in flight). Both fixes should land before drawing conclusions
-from any other Round-1 PR with `best_epoch=1` lock-in.
-
-## Constraints
-
-- `SENPAI_MAX_EPOCHS` and `SENPAI_TIMEOUT_MINUTES` are fixed by harness — do
-  not override. Throughput improvements (compile, AMP, point-count tuning,
-  attention scaling) are the main lever for "more update budget".
-- Read-only files: `data/*`, `pyproject.toml`, `instructions/*`. All edits
-  go in `train.py`.
-- **Logging cadence (Issue #19, 2026-04-28):** every Round-2+ assignment
-  MUST include `--gradient-log-every 100 --weight-log-every 100` (or 250
-  if needed) in the reproduce command. Per-step gradient/weight logging
-  bottlenecks training to ~0.44 it/s on the 4L/256d/65k-pts/bs=2 base,
-  preventing the run from reaching epoch 1 inside the 6 h timeout. At
-  every-50 the same config runs at ~6.8 it/s. Slope cadence
-  (`--slope-log-fraction 0.05`) is already efficient and stays.
-- **Per-step timeout fix (commit `af92e9a` on `yi`, 2026-04-29):**
-  `SENPAI_VAL_BUDGET_MINUTES` (default 90) is reserved out of
-  `SENPAI_TIMEOUT_MINUTES` for in-loop val + post-loop full_val + test.
-  All new student work must rebase onto `yi` to pick this up.
+## Key Constraints
+- Training budget: ~270 min training + ~90 min val/test = 360 min total
+- VRAM: 96 GB per GPU; 6L/256d at bs=8 uses 75.5 GB; 6L/512d at bs=4 estimated ~80-90 GB
+- Epoch budget: ~3-4 epochs at 6L/256d throughput (~2.1 it/s)
+- Gradient clipping: clip_grad_norm=1.0 is now standard (anything without it is unstable)
+- Baseline: 6L/256d, lr=2e-4, ema-decay-start=0.99/end=0.9999, vol_w=2.0, bs=8, clip=1.0
