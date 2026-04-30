@@ -196,6 +196,8 @@ Use a mix of shorter and longer experiments:
 
 Do not run only short experiments; they can discard ideas before the model has started learning. Do not run only long experiments; they burn the time budget before enough hypotheses are screened. Use the metrics' slope, gradient, and weight logs etc to decide which short runs deserve a longer confirmation run.
 
+The launch wall-clock limit is a hard cutoff, not a target duration; choose `--epochs` and any step limits according to the evidence needed for the experiment.
+
 ## Research Workflow
 
 For substantial architecture or training-strategy changes, preserve main context by using research subagents before implementation. The advisor should deliberately run two complementary streams instead of only local hill-climbing.
