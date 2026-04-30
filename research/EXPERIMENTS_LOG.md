@@ -910,3 +910,48 @@ AdamW, and composes orthogonally with all Round 1 levers.
 - **Combined with frieren #68 (Lion+vol_w=3, test 15.57):** vol_w=3 lever is **closed-door at 4L/512d for both AdamW and Lion**. Volume_pressure recovery requires architectural change (deeper/wider model) or different data representation.
 - **Reassignment:** alphonse → PR #91 (Lion+RFF+sigma=2.0 — RFF frequency sweep targeting tau_y/tau_z).
 
+
+## 2026-04-30 12:56 UTC — PR #50 MERGED: nezuko Lion uncompiled fallback — NEW SOTA 11.208
+
+- **Branch:** `nezuko/nezuko/round2-lion-compile-512d`
+- **W&B run:** `g2n4fyta` — finished 287min, 9 val epochs, best-val checkpoint reload
+- **Hypothesis:** Reproduce SOTA arm B (Lion lr=5e-5/wd=5e-4, no compile) as a clean control — confirms reproducibility and provides baseline for round 6 extensions.
+- **Result: NEW SOTA — test_abupt 11.208 (−0.84% vs prior SOTA 11.303 from vnb7oheo)**
+
+| Metric | PR #50 nezuko | Prior SOTA arm B | PR #46 (RFF+compile) | AB-UPT |
+|---|---:|---:|---:|---:|
+| **abupt_mean** | **11.208** | 11.303 | 14.550 | — |
+| surface_pressure | **6.193** | 6.216 | 8.628 | 3.82 |
+| wall_shear | **11.199** | 11.315 | 14.882 | 7.29 |
+| volume_pressure | **12.726** | 12.755 | 15.032 | 6.08 |
+| tau_x | **9.512** | 9.563 | 12.901 | 5.35 |
+| tau_y | **13.592** | 13.831 | 17.281 | 3.65 |
+| tau_z | **14.017** | 14.147 | 18.907 | 3.63 |
+
+Val trajectory: 80.68→46.76→24.60→17.31→14.25→12.29→11.10→10.37→10.08 (still descending at ep9 budget cut).
+
+- **Interpretation:** Every axis marginally better than arm B vnb7oheo. Confirms Lion uncompiled lr=5e-5/wd=5e-4 as the stable SOTA config. Val 10.08 still descending at ep9 — within a larger budget, this config could improve further. The run also replicated arm B's initial compile divergence (early Lion+compile diverged at ep5) before pivoting to the no-compile fallback, providing direct confirmation of the Lion+compile divergence mechanism.
+- **Status:** MERGED as new SOTA baseline.
+
+## 2026-04-30 12:58 UTC — PR #69 CLOSED: thorfinn 768d uncompiled (µP lr=3.3e-5) — budget-limited regression
+
+- **Branch:** `thorfinn/round4-lion-width768d`
+- **W&B run:** `mmbry5md` — finished 293min, 5 val epochs
+- **Hypothesis:** Scale width to 768d (AB-UPT reference width) with µP LR scaling (lr=3.3e-5). Expected architectural capacity uplift from 512d→768d at ~2.25× params.
+- **Result: REGRESSION — test_abupt 12.351 (+9.3% vs new SOTA 11.208)**
+
+| Metric | PR #69 thorfinn | SOTA PR #50 | AB-UPT |
+|---|---:|---:|---:|
+| **abupt_mean** | **12.351** | 11.208 | — |
+| surface_pressure | 7.179 | 6.193 | 3.82 |
+| wall_shear | 12.487 | 11.199 | 7.29 |
+| volume_pressure | 13.201 | 12.726 | 6.08 |
+| tau_x | 10.653 | 9.512 | 5.35 |
+| tau_y | 14.951 | 13.592 | 3.65 |
+| tau_z | 15.770 | 14.017 | 3.63 |
+
+Val trajectory (only 5 points): 71.04→30.65→16.42→12.50→11.23. Val 11.23 at ep5 is comparable to 512d at ep7 (11.10), confirming the model is on a similar convergence curve but 4 epochs behind.
+
+- **Root cause: budget-limited, not capacity-limited.** 768d uncompiled takes ~58min/epoch vs ~30min/epoch for 512d. Only 5 epochs in 270min vs 9 for 512d. The model hasn't converged — it's at the 512d ep7 equivalent. **If 768d were compiled** (→16 epochs in budget), it would likely converge further.
+- **Closed-door config:** 768d uncompiled within 270 budget. Next test: 768d + compile (will it diverge like 512d?). If Lion+compile fragility applies regardless of width, 768d+compile is a dead end. If µP LR scaling somehow stabilizes Lion+compile, 768d+compile could be the capacity win.
+- **Status:** CLOSED.
