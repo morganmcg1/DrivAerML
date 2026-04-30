@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 18:30 UTC
+- **Date:** 2026-04-30 18:42 UTC
 
 ## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
 
@@ -41,7 +41,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | ep3 val 22.17 (vs vanilla 24.60, **−10% better**) | Running (rt=96m) — actually competitive |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep4 val 15.85** (vs vanilla 17.31, **−8.4% better**) | Running (rt=127m) — strong signal |
 | **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | — | Just assigned (rt=0m) |
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | — | Just assigned (rt=0m) |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep4 val 14.61** (vs vanilla ep5 14.25 — DRAFTING vanilla ep5) | Running (rt=129m) — **MAJOR WIN PROJECTED** |
@@ -142,7 +142,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 - **Schedule sweep T_max=24 CLOSED** (nezuko #93 test 11.524, +2.8%). T_max=50 (edward #110) ep3 24.22 ≈ vanilla 24.60 — running ON PAR through ep3. **Verdict on T_max=50 still open** — could be wash or marginal swing.
 - **RFF σ=0.5 (askeladd #94) CLOSED** — test 11.353 (+1.3% regression). Best sigma tested (vs σ=1.0: +4.7%, σ=2.0: +1.5%) but RFF is **fully closed-door** across all sigma values. Askeladd reassigned to PR #114 EMA=0.998.
 - **EMA=0.999 (tanjiro #111) DOMINANT SIGNAL** — ep1: 55.06 vs 80.68 (32% better); ep2: 27.00 vs 46.76 (**42% better**); ep3: 18.09 vs 24.60 (**26% better**). Tanjiro at ep3 18.09 already approaching vanilla ep4 17.31. Trajectory ~1 epoch ahead. **Projected ep9 val ~9.0-9.5 → test ~10.4-10.7 (5-7% SOTA improvement).**
-- **lr=1e-4 (alphonse #112) BETTER than vanilla through ep3** (78.80 / 45.09 / 22.17 vs vanilla 80.68 / 46.76 / 24.60). Earlier "overshooting" verdict was WRONG — was using bad ep2 baseline. Currently tracking ~10% better than vanilla. Continue running.
+- **lr=1e-4 (alphonse #112) BETTER than vanilla through ep4** (78.80 / 45.09 / 22.17 / **15.85** vs 80.68 / 46.76 / 24.60 / 17.31). 8% better at ep4. Second-strongest signal after tanjiro. Possible LR-EMA compound stack target.
 - **Warmup (frieren #109) hurting** — ep4 21.11 vs vanilla 17.31 (+22%). Warmup costs >1 epoch.
 - **Fern + thorfinn** AdamW+RFF+compile branches at ep2 41.28/31.73 — orthogonal experiments.
 
