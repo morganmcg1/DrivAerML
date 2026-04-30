@@ -711,6 +711,7 @@ class Config:
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
     grad_skip_threshold: float = 0.0
+    grad_skip_warmup_steps: int = 0
     grad_skip_nonfinite: bool = True
     use_anp_surface_decoder: bool = False
     anp_surface_decoder_layers: int = 2
@@ -1892,6 +1893,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 skip_reason = "nonfinite"
             elif (
                 config.grad_skip_threshold > 0
+                and global_step >= config.grad_skip_warmup_steps
                 and pre_clip_norm_finite
                 and pre_clip_norm_value > config.grad_skip_threshold
             ):
