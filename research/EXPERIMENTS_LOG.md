@@ -37,6 +37,27 @@ Trajectory comparison (ep1 onward, both Lion uncompiled lr=5e-5):
 - **Verdict:** **Warmup closed-door on Lion uncompiled.** Constant LR is correct for this 9-epoch budget.
 - **Frieren reassigned** to PR #120: batch=8 (2× batch lever).
 
+## 2026-04-30 21:48 UTC — PR #112 CLOSED: alphonse Lion+lr=1e-4 — confounded test 11.324 (+1%)
+
+- **Branch:** `alphonse/round8-lr-sweep`
+- **W&B run:** `4x8hfam8` rank 0 — group `tay-round8-lion-lr-1e4`, 270 min, 9 val epochs
+- **Hypothesis:** lr=1e-4 (2× current SOTA) on Lion uncompiled. LR sweep upper bound.
+- **Result:** test_abupt **11.324** vs SOTA 11.208 (+1.0% regression). 2-variable confound: lr=1e-4 AND vol_w=1.0 (default, not 2.0). Student correctly flagged mid-run; advisor failed to reply.
+
+| Metric | PR #112 (lr=1e-4, vol_w=1) | SOTA PR #50 | Δ | AB-UPT |
+|---|---:|---:|---:|---:|
+| abupt_mean | **11.324** | 11.208 | +0.116 | — |
+| surface_pressure | 6.116 | 6.193 | −0.078 | 3.82 |
+| wall_shear | 11.240 | 11.199 | +0.040 | 7.29 |
+| volume_pressure | 13.226 | 12.726 | **+0.500** | 6.08 |
+| tau_x | 9.476 | 9.512 | −0.036 | 5.35 |
+| tau_y | 13.884 | 13.592 | +0.292 | 3.65 |
+| tau_z | 13.919 | 14.017 | −0.099 | 3.63 |
+
+- **Analysis:** lr=1e-4 trajectory: ep1-7 ahead, ep8-9 BEHIND. Lion's sign(.) update buys 2× initial step at lr=1e-4 but overshoots the loss minimum at the plateau. PR #50 ep9 slope was −0.30/ep; this run was −0.21/ep — closer to plateau. Volume_pressure regression dominated by missing vol_w=2.0.
+- **Conclusion:** lr=5e-5 is at the upper bound of viable LR for Lion uncompiled in 9-epoch budget. lr=3e-5 (nezuko #113) testing the lower side. **Compound stack thorfinn #115 (lr=1e-4 + EMA=0.999) will give the cleaner data point on whether lr=1e-4 helps in compound.**
+- **Alphonse reassigned** to PR #136: surface_loss_weight=2.0 (direct attack on tau_y/tau_z binding gap).
+
 ## 2026-04-30 21:38 UTC — PR #111 MERGED: tanjiro EMA=0.999 — new SOTA 11.142
 
 - **Branch:** `tanjiro/round7-ema-fast`
