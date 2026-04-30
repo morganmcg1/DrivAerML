@@ -6,6 +6,36 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 08:05 UTC — PR #52 CLOSED: tanjiro Lion+RFF+compile triple-stack — Lion+compile divergence is now confirmed across 6 runs
+
+- **Branch:** `tanjiro/tanjiro/round2-lion-rff-compile-512d`
+- **W&B run:** `5o1frm3u` — group `tay-round2-lion-rff-compile`, 270min full budget, 16 epochs
+- **Hypothesis:** Compose Lion (lr=5e-5/wd=5e-4) + RFF σ=1.0 + compile to stack three orthogonal wins → expected ~9.8-10.3% test_abupt (additive on PR #39 base 15.43).
+- **Result: ALL THREE LEVERS NON-ORTHOGONAL — test_abupt 13.199 (+16.8% vs SOTA 11.30, but -9.3% vs PR #46 14.55)**
+
+| Metric | PR #52 | SOTA `vnb7oheo` | PR #46 |
+|---|---:|---:|---:|
+| `test/abupt_axis_mean_rel_l2_pct` | **13.199** | 11.303 | 14.550 |
+| surface_pressure | 7.532 | 6.216 | 8.628 |
+| wall_shear | 13.351 | 11.315 | 14.882 |
+| volume_pressure | 14.297 | 12.755 | 15.032 |
+| tau_x | 11.418 | 9.563 | 12.901 |
+| tau_y | 16.036 | 13.831 | 17.281 |
+| tau_z | 16.714 | 14.147 | 18.907 |
+
+- **CRITICAL DIAGNOSTIC** (from tanjiro's analysis): Triple-stack at epoch 6 (val 12.22) tracks vanilla Lion Arm B at epoch 6 (val 12.14) within 0.08 ppt. **RFF and compile add ZERO orthogonal signal in the stable Lion regime.** The lift from PR #39 (lr=1.7e-5 → 15.43) to SOTA (lr=5e-5 → 11.30) was the LR change alone. RFF+compile only matter as horizon extenders — and the extension is exactly what kills Lion+compile.
+- **Mechanism (now confirmed across 6 runs):** Lion's `sign()` update has constant per-coordinate step magnitude bounded only by `lr`. Compile's reduced gradient noise → signs become deterministically biased → small-gradient noise (epoch 6+) gets amplified into full-step LR moves → train loss explodes (no NaN, slow blow-up: 0.041 → 1.05 → 5.43 → 3.07 across epochs 7-9). Same root cause as PR #42's per-case ratio variance forcing.
+- **Six independent observations of Lion+compile divergence at lr=5e-5:**
+  - PR #42 (frieren, sq_rel_l2 forcing) — diverged
+  - PR #50 (nezuko, vanilla Lion+compile) — diverged at epoch 5
+  - PR #52 (tanjiro, Lion+RFF+compile) — diverged at epoch 7
+  - PR #54 (fern, Lion+per-axis-weights+compile) — diverged
+  - PR #57 (askeladd, Lion+compile+cosine T_max=16) — diverged at epoch 4 (cosine did NOT fix it)
+  - PR #68 (frieren, Lion+vol_w=3+compile) — diverged at epoch 6
+- **Closed-door insight:** **Lion+compile at lr=5e-5 is unstable past epoch 6 in 100% of observed runs.** SOTA `vnb7oheo` (uncompiled) is at the natural Lion floor, with the slow uncompiled cadence acting as an implicit step-size budget. Cosine T_max=16 does NOT fix the divergence (#57 confirmed). Future Lion+compile experiments must either (a) halve LR to 2.5e-5, (b) use aggressive cosine T_max≤8 with proper warmup, or (c) implement a Lion-specific soft-restart on train_loss_relative_to_min plateau.
+- **Best-checkpoint mechanism saved the result** — the test eval auto-loaded epoch 6's EMA weights, giving a usable test_abupt=13.20. Without the best-val checkpoint, every Lion+compile run would post the diverged final-epoch metrics.
+- **Per-axis pattern matches SOTA proportionally** — all axes scale ~1.17x SOTA, suggesting no axis-specific gain or loss from RFF/compile in the stable regime.
+
 ## 2026-04-30 07:30 UTC — PR #56 CLOSED: thorfinn AdamW + cosine T_max=16 — schedule miscalibration was load-bearing
 
 - **Branch:** `thorfinn/round3-rff-compile-cosine-lr16`
