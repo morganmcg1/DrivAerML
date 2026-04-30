@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 16:30 UTC
+- **Date:** 2026-04-30 16:50 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -22,12 +22,12 @@
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#91** | alphonse | Lion+RFF σ=2.0 — leads σ=1.0 by 1.8% but trails vanilla Lion ep8 | ep8 val 10.634 | Near budget (rt=270m), test eval imminent |
-| **#93** | nezuko | Lion+cosine T_max=24 nocompile | ep5 val 14.587 | Running (rt=178m) |
-| **#94** | askeladd | Lion+RFF σ=0.5 | ep5 val 13.834 | Running (rt=161m) |
-| **#90** | tanjiro | Lion+RFF + EMA decay 0.9999 | ep8 val 32.053 | Running (rt=259m), won't beat baseline |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | — | Running (rt=20m) |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | — | Newly assigned |
+| **#91** | alphonse | Lion+RFF σ=2.0 — ep9 val 10.321, crossover with vanilla confirmed | ep9 val 10.321 | Test eval in progress (rt=276m) |
+| **#93** | nezuko | Lion+cosine T_max=24 nocompile | ep5 val 14.587 | Running (rt=183m) |
+| **#94** | askeladd | Lion+RFF σ=0.5 | ep5 val 13.834 | Running (rt=167m) |
+| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | — | Newly assigned (PR #90 closed +169%) |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | — | Running (rt=25m) |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | — | Running (rt=5m) |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | — | Pod stuck (issue #53) |
 | **#92** | thorfinn | AdamW+RFF+768d+compile | — | Pod stuck (issue #53) |
 
@@ -47,7 +47,7 @@
 **KEY FINDING: RFF accelerates early-phase fitting (ep1-5) but vanilla Lion catches up by ep6 and DOMINATES from ep6 onward. RFF inductive bias interferes with finer convergence.**
 
 - **σ=1.0 (edward, FINAL):** test 11.741, +4.7% regression. RFF closed-door at σ=1.0.
-- **σ=2.0 (alphonse, ep8):** val 10.634 vs vanilla Lion ep8 10.38 (+2.5%). Will likely also regress, but smaller margin than σ=1.0.
+- **σ=2.0 (alphonse, ep9):** val 10.321 vs vanilla Lion ep9 10.083 (+2.4%). Test eval running — projected test ~11.4-11.5 (+2-3% regression vs SOTA).
 - **σ=0.5 (askeladd, ep5):** val 13.83 — tracks σ=1.0/σ=2.0 closely; RFF basis less informative than σ=1/2.
 
 ## Key closed/merged experiments (full history)
@@ -57,6 +57,7 @@
 | **#50 nezuko** | **MERGED — SOTA 11.208** | Lion lr=5e-5/wd=5e-4 uncompiled |
 | arm B (no PR) | SOTA 11.303 (prior) | Lion lr=5e-5/wd=5e-4 baseline |
 | #46 alphonse | MERGED — 14.55 | AdamW + RFF + compile → epoch 16 |
+| #90 tanjiro | CLOSED — test 30.203 | EMA 0.9999 budget-incompatible: half-life ~50 epochs vs 9 available |
 | #51 edward | CLOSED — test 11.741 | Lion+RFF σ=1.0 reproducer: +4.7% — RFF doesn't compose with vanilla Lion uncompiled |
 | #73 frieren | CLOSED — test 14.785 | 6L+compile budget-limited: 11ep vs 16ep for 4L. val still descending at cutoff |
 | #57 askeladd | CLOSED — test 11.229 | Lion+cosine T_max=16 nocompile: stable but wash vs SOTA |
@@ -78,7 +79,8 @@
 5. **Budget-limited depth/width:** 768d uncompiled = 5ep (PR #69), 6L compile = 11ep (PR #73). Both fail vs 4L SOTA. Deeper/wider needs more epochs than 270m provides.
 6. **Lion+cosine nocompile is STABLE but a wash** — T_max=16 wash; T_max=24 (nezuko) pending; T_max=50 (edward #110) gentle schedule trial.
 7. **RFF closed-door on Lion uncompiled** — σ=1.0 (edward #51 FINAL) regresses test by 4.7%. σ=2.0 leads σ=1.0 by ~3% but trails vanilla Lion ep8 by 2.5%. Mechanism: RFF accelerates early-phase fitting (ep1-5) but inductive bias interferes with late convergence (ep6+).
-8. **Warmup untested** — 1-epoch LR warmup running on frieren (#109), first time on Lion uncompiled.
+8. **EMA 0.9999 budget-incompatible** — half-life ~50 epochs vs 9 available. EMA 0.9995 is calibrated correctly for this budget. EMA 0.999 (tanjiro #111) is the next test — faster tracking, may help late convergence.
+9. **Warmup untested** — 1-epoch LR warmup running on frieren (#109), first time on Lion uncompiled.
 
 ## Current research focus (Round 7)
 
