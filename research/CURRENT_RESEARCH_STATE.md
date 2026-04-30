@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 19:40 UTC
+- **Date:** 2026-04-30 19:55 UTC
 
 ## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
 
@@ -41,14 +41,14 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep5 val 13.28** (vs vanilla 14.25, **−6.8% better**) | Running (rt=159m) — confirmed winner trajectory |
-| **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | — | Just assigned (rt=0m) |
-| **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | — | Just assigned (rt=0m) |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep6 val 11.822** (vs vanilla 12.29, **−3.8% better**) | Running (rt=187m) — winner, gap compressing |
+| **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | ep3 val 25.84 (vs vanilla 24.60, +5.0%) | Running (rt=94m) — slightly behind vanilla |
+| **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | **ep2 val 20.41** (vs vanilla 46.76, **−56% better**) | Running (rt=76m) — DRAMATIC early lead, biggest yet |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep6 val 11.556** (vs vanilla ep6 12.29, **−6.0% better**) | Running (rt=195m) — strong winner trajectory, gap compressing late |
 | **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep7 val 11.555 (vs vanilla ep7 11.11, +4.0%) | Running (rt=222m) — warmup penalty holding ~4% behind, will not catch up |
 | **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep6 val 11.84** (vs vanilla 12.29, **−3.6% better**) | Running (rt=188m) — confirmed winner |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep3 val 28.86 | Running (rt=68m) |
-| **#92** | thorfinn | AdamW+RFF+768d+compile | ep5 val 31.48 ⚠️ DIVERGED from ep4 17.33 | Running (rt=150m) — monitoring for recovery at ep6 |
+| **#92** | thorfinn | AdamW+RFF+768d+compile | ep5 val 31.48 ⚠️ DIVERGED from ep4 17.33 | Running (rt=157m) — close if no recovery by ep6 |
 
 ## CRITICAL HEAD-TO-HEAD: RFF sigma sweep vs vanilla Lion (uncompiled)
 
