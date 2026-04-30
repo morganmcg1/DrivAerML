@@ -36,6 +36,28 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Best-checkpoint mechanism saved the result** — the test eval auto-loaded epoch 6's EMA weights, giving a usable test_abupt=13.20. Without the best-val checkpoint, every Lion+compile run would post the diverged final-epoch metrics.
 - **Per-axis pattern matches SOTA proportionally** — all axes scale ~1.17x SOTA, suggesting no axis-specific gain or loss from RFF/compile in the stable regime.
 
+## 2026-04-30 09:25 UTC — PR #54 CLOSED: fern Lion + per-axis tau_y/tau_z weighting (2×) — diverged, 7th Lion+modification failure
+
+- **Branch:** `fern/round3-lion-tauyz-weights` → recovered as v2 (`fern/round3-lion-tauyz-weights-v2`)
+- **W&B runs:** `6p4k0280` (crashed 111min), `8zhjetjt` (v2, finished 285min)
+- **Hypothesis:** Per-channel wall_shear loss weighting (tau_y ×2, tau_z ×2, tau_x ×1) on Lion (lr=5e-5/wd=5e-4) forces proportional attention toward the binding tau_y/tau_z gap (×3.8/×3.9 vs AB-UPT). Expected: target those axes specifically while preserving Lion's optimizer advantage.
+- **Result: DIVERGED — test_abupt 26.827 (+137% vs SOTA 11.30, best-val checkpoint at epoch 3)**
+
+| Metric | PR #54 (best-val ep3) | SOTA `vnb7oheo` | AB-UPT |
+|---|---:|---:|---:|
+| `test/abupt_axis_mean_rel_l2_pct` | **26.827** | 11.303 | — |
+| surface_pressure | 20.655 | 6.216 | 3.82 |
+| wall_shear | 28.560 | 11.315 | 7.29 |
+| volume_pressure | 19.436 | 12.755 | 6.08 |
+| tau_x | 24.835 | 9.563 | 5.35 |
+| tau_y | 33.109 | 13.831 | 3.65 |
+| tau_z | 36.104 | 14.147 | 3.63 |
+
+- **Val trajectory:** ep1=75 → ep2=46 → ep3=26 (best) → **ep4=220 (DIVERGED)** → settled at 93%. Same divergence onset pattern as PRs #42, #52, #57, #68.
+- **Diagnostic insight:** Per-axis breakdown showed weighting *did* reduce tau_y/tau_x ratio (1.33 vs vanilla Lion's 1.45), confirming the loss mechanism works at the gradient level. The divergence is entirely Lion's instability to loss modification — adding 2× per-axis weighting changes the effective gradient magnitudes per-channel, which pushes the sign-update into a new regime. Lion is now confirmed fragile to: compile, sq_rel_l2, per-axis weighting, vol_w=3.0, cosine T_max=16, and vol_w=3.0. The only stable Lion variants are vanilla Lion and Lion+RFF (PR #51 edward, stable at epoch 5).
+- **Conclusion:** The per-axis weighting *mechanism* is valid — test it on AdamW+RFF+compile (PR #46 base) where the optimizer is stable. Assigned as PR #71 (fern, round5).
+- **PR #71 — fern: AdamW + RFF + compile + per-axis tau_y/tau_z weighting (2×):** Tests the same weighting mechanism on the stable AdamW base. Expected: beat PR #46 (14.55) by closing tau_y/tau_z gap. Branch: `fern/round5-adamw-rff-compile-tauyz`.
+
 ## 2026-04-30 07:30 UTC — PR #56 CLOSED: thorfinn AdamW + cosine T_max=16 — schedule miscalibration was load-bearing
 
 - **Branch:** `thorfinn/round3-rff-compile-cosine-lr16`
