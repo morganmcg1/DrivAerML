@@ -6,6 +6,36 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 18:19 UTC — PR #94 CLOSED: askeladd Lion+RFF σ=0.5 — RFF sigma sweep fully closed-door
+
+- **Branch:** `askeladd/round7-lion-rff-sigma0.5`
+- **W&B run:** `zmrwhsw4` rank 0 — group `askeladd-round7-rff-freq-sweep`, 285 min, 9 val epochs
+- **Hypothesis:** RFF σ=0.5 (lower freq than σ=1.0) — lower-frequency features may reduce inductive-bias mismatch. Third point in RFF sigma sweep.
+- **Result:** test_abupt **11.353** vs SOTA 11.208 (+1.3% regression). Best val 10.405 (ep9).
+
+| Metric | PR #94 σ=0.5 | SOTA PR #50 (vanilla) | AB-UPT |
+|---|---:|---:|---:|
+| abupt_mean | **11.353** | 11.208 | — |
+| surface_pressure | 6.263 | 6.193 | 3.82 |
+| wall_shear | 11.343 | 11.199 | 7.29 |
+| volume_pressure | 12.943 | 12.726 | 6.08 |
+| tau_x | 9.613 | 9.512 | 5.35 |
+| tau_y | 13.877 | 13.592 | 3.65 |
+| tau_z | 14.070 | 14.017 | 3.63 |
+
+RFF sigma sweep results (all vs SOTA 11.208):
+
+| σ | test_abupt | regression |
+|---:|---:|---:|
+| 0.5 (this) | 11.353 | +1.3% |
+| 1.0 (#51) | 11.741 | +4.7% |
+| 2.0 (#91) | 11.376 | +1.5% |
+| no RFF (SOTA) | **11.208** | baseline |
+
+- **Pattern:** σ=0.5 is best RFF sigma tested, but still regresses. Lower frequency may be marginally better but cannot overcome the fundamental RFF-limits-late-convergence problem.
+- **Mechanism confirmed:** RFF accelerates early-phase fitting (ep1-5 consistently better) but the inductive bias interferes with fine convergence from ep6 onward.
+- **RFF is fully closed-door** across 3 sigma values. Next direction: EMA sweep (askeladd reassigned to PR #114, EMA=0.998).
+
 ## 2026-04-30 17:57 UTC — PR #93 CLOSED: nezuko Lion+cosine T_max=24 — schedule sweep closed-door on Lion uncompiled
 
 - **Branch:** `nezuko/round7-lion-cosine-tmax24`
