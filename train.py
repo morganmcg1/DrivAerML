@@ -556,6 +556,8 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_target_transform: str = "none"
+    wallshear_target_transform_eps: float = 0.01
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -592,6 +594,20 @@ class Config:
     debug: bool = False
 
 
+WALLSHEAR_TARGET_TRANSFORM_CHOICES = ("none", "logmag")
+LOGMAG_DENORM_CLAMP = 30.0
+
+
+def log_mag_normalize(x: torch.Tensor, eps: float) -> torch.Tensor:
+    abs_x = x.abs()
+    return torch.sign(x) * torch.log1p(abs_x / eps)
+
+
+def log_mag_denormalize(y: torch.Tensor, eps: float) -> torch.Tensor:
+    abs_y = y.abs().clamp(max=LOGMAG_DENORM_CLAMP)
+    return torch.sign(y) * torch.expm1(abs_y) * eps
+
+
 class TargetTransform:
     def __init__(
         self,
@@ -602,6 +618,8 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        wallshear_target_transform: str = "none",
+        wallshear_target_transform_eps: float = 0.01,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -615,10 +633,19 @@ class TargetTransform:
             volume_y_mean = torch.zeros(VOLUME_Y_DIM, dtype=torch.float32)
         if volume_y_std is None:
             volume_y_std = torch.ones(VOLUME_Y_DIM, dtype=torch.float32)
+        if wallshear_target_transform not in WALLSHEAR_TARGET_TRANSFORM_CHOICES:
+            raise ValueError(
+                f"wallshear_target_transform must be one of {WALLSHEAR_TARGET_TRANSFORM_CHOICES}, "
+                f"got {wallshear_target_transform!r}"
+            )
+        if wallshear_target_transform != "none" and wallshear_target_transform_eps <= 0.0:
+            raise ValueError("wallshear_target_transform_eps must be > 0")
         self.surface_y_mean = surface_y_mean
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.wallshear_target_transform = wallshear_target_transform
+        self.wallshear_target_transform_eps = float(wallshear_target_transform_eps)
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -627,16 +654,78 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+        mean = self.surface_y_mean.to(y.device)
+        std = self.surface_y_std.to(y.device)
+        if self.wallshear_target_transform == "none":
+            return (y - mean) / std
+        cp_norm = (y[..., 0:1] - mean[0:1]) / std[0:1]
+        ws = y[..., 1:4]
+        ws_norm = log_mag_normalize(ws, self.wallshear_target_transform_eps)
+        return torch.cat([cp_norm, ws_norm], dim=-1)
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        mean = self.surface_y_mean.to(y.device)
+        std = self.surface_y_std.to(y.device)
+        if self.wallshear_target_transform == "none":
+            return y * std + mean
+        cp_phys = y[..., 0:1] * std[0:1] + mean[0:1]
+        ws_phys = log_mag_denormalize(y[..., 1:4], self.wallshear_target_transform_eps)
+        return torch.cat([cp_phys, ws_phys], dim=-1)
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
         return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
 
     def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
         return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+
+
+def _log_wallshear_transform_diagnostics(
+    train_loader: DataLoader,
+    transform: TargetTransform,
+    device: torch.device,
+) -> None:
+    """Log a one-shot histogram of |tau_x|, |tau_y|, |tau_z| pre and post transform.
+
+    Drains a single batch to confirm tail compression visually in W&B and to
+    record the magnitude statistics that motivate the eps choice.
+    """
+    iterator = iter(train_loader)
+    batch = next(iterator)
+    batch = batch.to(device)
+    surface_y = batch.surface_y
+    surface_mask = batch.surface_mask.bool()
+    if not bool(surface_mask.any()):
+        return
+    raw_ws = surface_y[surface_mask][..., 1:4].detach().to(torch.float32).cpu()
+    if raw_ws.numel() == 0:
+        return
+    transformed = transform.apply_surface(surface_y)
+    transformed_ws = transformed[surface_mask][..., 1:4].detach().to(torch.float32).cpu()
+    log_payload: dict[str, object] = {
+        "diagnostics/wallshear_transform_step": 0,
+    }
+    for axis_idx, axis_name in enumerate(("x", "y", "z")):
+        raw_axis = raw_ws[..., axis_idx]
+        post_axis = transformed_ws[..., axis_idx]
+        log_payload[f"diagnostics/raw_abs_{axis_name}/hist"] = wandb.Histogram(
+            raw_axis.abs().numpy()
+        )
+        log_payload[f"diagnostics/post_transform_{axis_name}/hist"] = wandb.Histogram(
+            post_axis.numpy()
+        )
+        log_payload[f"diagnostics/raw_abs_{axis_name}/median"] = float(
+            raw_axis.abs().median().item()
+        )
+        log_payload[f"diagnostics/raw_abs_{axis_name}/p99"] = float(
+            raw_axis.abs().quantile(0.99).item()
+        )
+        log_payload[f"diagnostics/post_transform_{axis_name}/std"] = float(
+            post_axis.std(unbiased=False).item()
+        )
+        log_payload[f"diagnostics/post_transform_{axis_name}/abs_max"] = float(
+            post_axis.abs().max().item()
+        )
+    wandb.log(log_payload)
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -1665,6 +1754,22 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
 
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    if config.wallshear_target_transform not in WALLSHEAR_TARGET_TRANSFORM_CHOICES:
+        raise ValueError(
+            f"--wallshear-target-transform must be one of "
+            f"{WALLSHEAR_TARGET_TRANSFORM_CHOICES}, got "
+            f"{config.wallshear_target_transform!r}"
+        )
+    if (
+        config.use_tangential_wallshear_loss
+        and config.wallshear_target_transform != "none"
+    ):
+        raise ValueError(
+            "--use-tangential-wallshear-loss is incompatible with "
+            "--wallshear-target-transform != none; the tangential code path "
+            "renormalizes via mean/std and is not aware of the log-magnitude "
+            "transform."
+        )
     kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
     max_epochs = min(config.epochs, 3) if config.debug else config.epochs
     timeout_minutes = float(os.environ.get("SENPAI_TIMEOUT_MINUTES", "30"))
@@ -1677,6 +1782,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         surface_y_std=stats["surface_y_std"].to(device),
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
+        wallshear_target_transform=config.wallshear_target_transform,
+        wallshear_target_transform_eps=config.wallshear_target_transform_eps,
     )
 
     model = build_model(config).to(device)
@@ -1747,6 +1854,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     config_path = output_dir / "config.yaml"
     with config_path.open("w") as f:
         yaml.safe_dump(asdict(config), f)
+
+    if config.wallshear_target_transform != "none":
+        try:
+            _log_wallshear_transform_diagnostics(train_loader, transform, device)
+        except Exception as exc:  # diagnostic-only; never block training
+            print(f"[diagnostics] wallshear transform histogram skipped: {exc}")
 
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
