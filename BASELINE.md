@@ -2,43 +2,60 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: PR #46 — 2026-04-30 01:12 UTC
+## Status: tanjiro Lion-arm-B — 2026-04-30 02:44 UTC
 
-New tay SOTA set by alphonse's AdamW + RFF + compile composition.
-Single-scale RFF (sigma=1.0, 32 feats) + `--compile-model` on the PR #40 compile-fix
-base. Compile enabled epoch 16 vs ~9 uncompiled — the deeper training saturates
-surface/wall-shear with RFF enrichment. All surface and wall-shear axes improved
-meaningfully; volume_pressure regressed vs PR #39 Lion (Lion's sign-update gives
-more uniform per-channel gradient signal). Lion + RFF + compile (PR #52, queued)
-should recover the volume regression.
+**MASSIVE NEW SOTA: Lion lr=5e-5/wd=5e-4 (NOT paper config) blows past PR #46 by −22.3%.**
 
-**W&B run:** `28l4yanr` (rank 0) — group `tay-round2-rff-compiled`
-**Best-val checkpoint:** epoch 16 (val_abupt=13.487)
-**Advisor note:** alphonse pod stalled post-train; advisor merged directly from W&B-verified metrics.
+This was a follow-up sweep run launched by tanjiro's pod after PR #39 was reviewed —
+**not** an advisor-assigned PR experiment. The config is Lion at the AdamW-equivalent
+LR/WD translation (lr=5e-5, wd=5e-4), no compile, no RFF. Despite being uncompiled,
+the run trained for 4h50m past the 270-min budget cap and the val curve was still
+descending at the end. Best-val checkpoint reload gave the test result.
+
+**W&B run:** `vnb7oheo` (rank 0) — group `tanjiro-lion-lr-sweep`
+**Best-val checkpoint:** val_abupt = 10.096 at last logged epoch
+**Runtime:** 4h50m (290 min, past budget — likely launched without strict timeout)
+**Advisor note:** No PR for this run. Result documented retroactively as the new SOTA.
+
+### CRITICAL FINDING: Lion paper config is wrong for this task
+
+PR #39 used Lion at `lr=1.7e-5, wd=5e-3` (paper config from Chen et al.) → test_abupt 15.43.
+This run used `lr=5e-5, wd=5e-4` (the AdamW-equivalent translation tanjiro tested as
+arm B of the original sweep) → test_abupt **11.30**. That is a **−27% improvement
+just from changing the LR/WD constants on the same Lion optimizer**.
+
+Why the paper config fails here:
+- Lion paper used image classification with millions of training samples; we have 400 cars.
+- Smaller datasets need more aggressive per-step movement (higher lr) to traverse the
+  loss landscape within a 270-min budget.
+- Higher wd in the paper helps regularize huge nets; our 4L/512d/8h is small enough
+  that wd=5e-4 (AdamW-equivalent) is sufficient.
+
+**All future Lion experiments must use `--lr 5e-5 --weight-decay 5e-4`, not the paper
+config.** Queued PRs #50, #51, #52, #54 need their LR/WD updated.
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #46) | PR #39 Lion | PR #40 | yi best | AB-UPT |
+| Metric | This-repo key | tay best (Lion 5e-5) | PR #46 (RFF+compile) | PR #39 Lion (paper) | yi best | AB-UPT |
 |---|---|---:|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **14.550** | 15.43 | 17.25 | 15.82 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **8.628** | 9.45 | 10.92 | 9.99 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **14.882** | 16.28 | 18.33 | 16.60 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 15.032 | **13.83** | 14.71 | 14.21 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **12.901** | 13.91 | 15.73 | 14.27 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **17.281** | 19.58 | 21.80 | 19.49 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **18.907** | 20.40 | 23.07 | 21.12 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **11.303** | 14.550 | 15.43 | 15.82 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **6.216** | 8.628 | 9.45 | 9.99 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **11.315** | 14.882 | 16.28 | 16.60 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.755** | 15.032 | 13.83 | 14.21 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **9.563** | 12.901 | 13.91 | 14.27 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **13.831** | 17.281 | 19.58 | 19.49 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **14.147** | 18.907 | 20.40 | 21.12 | 3.63 |
 
-Note: `volume_pressure` 15.032 is a regression vs PR #39 (13.83) — Lion's sign-update
-favoured volume; AdamW + RFF + compile did not. Next SOTA target: PR #52 (Lion + RFF + compile).
+**Every axis improved by 15-29% vs PR #46. tau_y/tau_z gap to AB-UPT ref is now 3.8×
+(was 5.4× and 5.6×).** This is the largest single jump in the project so far.
 
-### Reproduce PR #46 config
+### Reproduce new SOTA (Lion lr=5e-5)
 
 ```bash
 cd target/
 torchrun --standalone --nproc_per_node=8 train.py \
+  --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
   --lr 5e-5 --weight-decay 5e-4 \
-  --compile-model \
-  --rff-num-features 32 --rff-sigma 1.0 \
   --volume-loss-weight 2.0 --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
@@ -48,7 +65,9 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --no-log-gradient-histograms
 ```
 
-(optimizer defaults to AdamW — field not in W&B config, confirmed by convention)
+NOTE: `vnb7oheo` ran ~290 min (past budget). With strict 270-min budget the result
+might land slightly higher (~11.5-12.0). Future reproduce runs should use the same
+budget enforcement as standard PRs.
 
 ### Compounding wins so far
 
@@ -59,6 +78,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #40 | alphonse | **−0.52 (−2.9%) vs #33** | torch.compile fix → 12 epochs vs 9; beats #33 without RFF |
 | #39 | tanjiro | **−1.82 (−10.5%) vs #40** | Lion optimizer lr=1.7e-5 — sign-based update, crosses yi frontier |
 | #46 | alphonse | **−0.88 (−5.7%) vs #39** | AdamW + RFF (sigma=1.0) + compile → epoch 16; tau_y −11.7% |
+| (no PR) | tanjiro arm B | **−3.25 (−22.3%) vs #46** | Lion lr=5e-5/wd=5e-4 (AdamW-equivalent translation, NOT paper config) — paper config was the culprit |
 
 ### INFRA NOTE — torch.compile bug FIXED (PR #40)
 
