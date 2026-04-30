@@ -41,7 +41,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep7 val 10.987** (vs vanilla 11.11, **−1.1% better**) | Running (rt=224m) — winner, gap compressing fast |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep8 val 10.386** (vs vanilla 10.38, **WASH**) | Running (rt=253m) — early lead fully compressed at convergence |
 | **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | ep4 val 18.86 (vs vanilla 17.31, +9.0%) | Running (rt=130m) — gap widening, low-LR confirming undertrained |
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | **ep1 val 41.81 v2** (vs vanilla 80.68, **−48% better**) | Running v2 after restart (rt=38m) — early lead replicating |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep8 val 10.242** (vs vanilla ep8 10.38, **−1.3% better**) | Running (rt=252m) — winner, gap compressing |
