@@ -6,6 +6,25 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 20:23 UTC — PR #92 CLOSED: thorfinn AdamW+RFF+768d+compile — diverged ep5-6
+
+- **Branch:** `thorfinn/round7-adamw-rff-768d-compile`
+- **W&B run:** `thorfinn/round7-adamw-rff-768d-compile-rank0-rank0` — group `thorfinn-round7-768d-adamw-compile`, running, rt=175m
+- **Hypothesis:** Scale width to 768d on AdamW+RFF+compile stable base — wider model within 270m budget, building on PR #46 foundation.
+- **Result:** CLOSED — fundamentally diverged. ep4 best val 17.33 (near vanilla 17.31), ep5 31.48, ep6 41.20. Diverged after ep4, trajectory going in wrong direction.
+
+| ep | val | vanilla |
+|---|---:|---:|
+| 1 | 67.95 | 80.68 |
+| 2 | 31.73 | 46.76 |
+| 3 | 20.94 | 24.60 |
+| **4** | **17.33** | **17.31** |
+| 5 | 31.48 | 14.25 |
+| 6 | 41.20 | 12.29 |
+
+- **Analysis:** 4-way combo (AdamW + RFF + 768d + compile) is unstable on this stack. Adds to the compile divergence pattern (9 confirmed Lion+compile failures). Even AdamW+compile appears vulnerable at large width. Mechanistically: larger width amplifies the variance in compiled gradient computations.
+- **Thorfinn reassigned** to PR #115: compound stack (lr=1e-4 + EMA=0.999) combining round8 winners.
+
 ## 2026-04-30 18:19 UTC — PR #94 CLOSED: askeladd Lion+RFF σ=0.5 — RFF sigma sweep fully closed-door
 
 - **Branch:** `askeladd/round7-lion-rff-sigma0.5`
