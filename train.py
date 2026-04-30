@@ -555,6 +555,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    use_area_weighted_surface_loss: bool = False
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1249,13 +1250,17 @@ def weighted_masked_mse_per_channel(
     mask: torch.Tensor,
     *,
     channel_weights: Iterable[float],
+    point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked MSE for surface predictions.
 
     pred, target: [B, N, C]. mask: [B, N] bool.
-    Returns the weighted scalar loss plus an unweighted per-channel mean for
-    diagnostic logging. With all weights == 1 this is numerically equivalent
-    to F.mse_loss(pred[mask], target[mask]).
+    point_weights: optional [B, N, 1] non-negative tensor normalized so that the
+    mean over each case's valid points is 1; allows physically motivated
+    re-weighting (e.g. by surface patch area) without changing the global scale
+    of the loss. Returns the weighted scalar loss plus an unweighted per-channel
+    mean for diagnostic logging. With all weights == 1 this is numerically
+    equivalent to F.mse_loss(pred[mask], target[mask]).
     """
     weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
     if not bool(mask.any()):
@@ -1266,6 +1271,8 @@ def weighted_masked_mse_per_channel(
     valid = mask_f.sum().clamp_min(1)
     n_channels = diff_sq.shape[-1]
     weighted_diff = diff_sq * weights.view(1, 1, -1)
+    if point_weights is not None:
+        weighted_diff = weighted_diff * point_weights.to(pred.dtype)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
@@ -1296,6 +1303,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    use_area_weighted_surface_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1335,11 +1343,35 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
+        area_weights: torch.Tensor | None = None
+        area_weight_max = float("nan")
+        area_weight_min = float("nan")
+        area_weight_mean = float("nan")
+        if use_area_weighted_surface_loss:
+            # surface_x channels: [x, y, z, nx, ny, nz, area]; channel 6 is the
+            # per-point patch area. Normalize per case so the mean of the
+            # weight over each case's valid points is 1: this preserves the
+            # global magnitude of the surface loss (so other axis weights and
+            # surface_loss_weight stay calibrated) while reshaping the
+            # gradient toward physically larger surface patches.
+            mask_f = batch.surface_mask.unsqueeze(-1).to(batch.surface_x.dtype)
+            area_raw = batch.surface_x[..., 6:7].clamp(min=0.0) * mask_f
+            area_sum = area_raw.sum(dim=1, keepdim=True).clamp_min(1e-8)
+            valid_per_case = batch.surface_mask.sum(dim=1, keepdim=True).unsqueeze(-1).to(area_raw.dtype)
+            # area_weights: per-case mean over valid points ≈ 1, padding rows are 0.
+            area_weights = area_raw / area_sum * valid_per_case
+            if bool(batch.surface_mask.any()):
+                valid_area_weights = area_weights[batch.surface_mask.unsqueeze(-1).expand_as(area_weights)].detach().float()
+                if valid_area_weights.numel() > 0:
+                    area_weight_max = float(valid_area_weights.max().cpu().item())
+                    area_weight_min = float(valid_area_weights.min().cpu().item())
+                    area_weight_mean = float(valid_area_weights.mean().cpu().item())
         surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
             surface_pred_used,
             surface_target_used,
             batch.surface_mask,
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+            point_weights=area_weights,
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -1353,6 +1385,10 @@ def train_loss(
     }
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if use_area_weighted_surface_loss:
+        metrics["area_weight_max"] = area_weight_max
+        metrics["area_weight_min"] = area_weight_min
+        metrics["area_weight_mean"] = area_weight_mean
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -1767,6 +1803,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                use_area_weighted_surface_loss=config.use_area_weighted_surface_loss,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1831,6 +1868,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            if "area_weight_max" in batch_loss_metrics:
+                train_log["train/area_weight_max"] = batch_loss_metrics["area_weight_max"]
+                train_log["train/area_weight_min"] = batch_loss_metrics["area_weight_min"]
+                train_log["train/area_weight_mean"] = batch_loss_metrics["area_weight_mean"]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
