@@ -1,170 +1,101 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 20:50 UTC
-
-## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
-
-Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
-
-| ep | val |
-|---|---:|
-| 1 | 80.68 |
-| 2 | **46.76** |
-| 3 | 24.60 |
-| 4 | 17.31 |
-| 5 | 14.25 |
-| 6 | 12.29 |
-| 7 | 11.11 |
-| 8 | 10.38 |
-| 9 | 10.08 |
-
-(I had been incorrectly using vanilla ep2 = 36.5, which was wrong — actual is 46.76. Some prior poll comparisons need correction.)
+- **Date:** 2026-04-30 21:55 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Most recent direction from human team:** Issue #48 (2026-04-29 20:54 UTC) —
-  "How's it going? We making progress?" — replied with full status. No new directives.
-  Previous: Issue #18 from yi advisor: "be bolder; replace the backbone; mine noam/radford branches."
-- **Infra (issue #53):** Fern + thorfinn pods RECOVERED 17:14-17:18 UTC. **Full 8-student fleet active.** Issue posted recovery comment.
 
-## Current SOTA — edward PR #110 MERGED, test_abupt 11.170 (Lion + cosine T_max=50)
+## Current SOTA — PR #111 (tanjiro EMA=0.999), test_abupt 11.142
 
-| Lever | Student | test_abupt | Note |
-|---|---|---:|---|
-| #46 | alphonse | 14.55 | AdamW + RFF + compile, epoch 16 |
-| arm B | tanjiro (no PR) | 11.303 | Lion lr=5e-5/wd=5e-4 |
-| **#50** | **nezuko (MERGED)** | **11.208** | **Lion uncompiled — confirms arm B + marginally better** |
+Two consecutive merges in last 90 min: PR #110 (T_max=50) → PR #111 (EMA=0.999). Total improvement: **−0.59% from 11.208 (PR #50) → 11.142**.
 
-**W&B run:** `g2n4fyta` (rank 0) — 287 min runtime, 9 val epochs, best val 10.08.
+| Metric | tay SOTA (PR #111) | AB-UPT | Gap |
+|---|---:|---:|---:|
+| `abupt` mean | **11.142** | — | — |
+| `surface_pressure` | 6.209 | 3.82 | ×1.6 |
+| `wall_shear` | 11.138 | 7.29 | ×1.5 |
+| `volume_pressure` | 12.548 | 6.08 | **×2.1** |
+| `tau_x` | 9.436 | 5.35 | ×1.8 |
+| `tau_y` | 13.525 | 3.65 | **×3.7** |
+| `tau_z` | 13.992 | 3.63 | **×3.9** |
 
-## Active assignments (8 students, all DDP8 — ALL ACTIVE as of 17:18 UTC)
+W&B run: `ab3y4ej7` — best val 9.989 (ep9, first sub-10 on tay)
 
-| PR | Student | Hypothesis | Latest val | Status |
-|---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep8 val 10.386** (vs vanilla 10.38, **WASH**) | Running (rt=253m) — early lead fully compressed at convergence |
-| **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | ep4 val 18.86 (vs vanilla 17.31, +9.0%) | Running (rt=130m) — gap widening, low-LR confirming undertrained |
-| **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | **ep1 val 41.81 v2** (vs vanilla 80.68, **−48% better**) | Running v2 after restart (rt=38m) — early lead replicating |
-| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep9 val 9.989** (vs vanilla ep9 10.083, **−0.9% better**) | Running (rt=271m) — completed 9 epochs, FIRST SUB-10 VAL, test imminent |
-| **#120** | frieren | Lion uncompiled SOTA + batch=8 (2× batch lever) | — | Just assigned (#109 closed: warmup test 11.596, +3.5%) |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep9 val 10.063** (vs vanilla 10.083, **−0.2% better**) | Running (rt=276m) — 9 epochs complete, test imminent |
-| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep5 val 21.39 | Running (rt=90m) |
-| **#115** | thorfinn | Compound: Lion lr=1e-4 + EMA=0.999 (combining alphonse + tanjiro winners) | ep1 val 53.75 (vs vanilla ep1 80.68, −33%; vs tanjiro alone 55.06, ~tied) | Running (rt=36m) — compound starting at tanjiro-alone level, lr=1e-4 ep1 contribution minimal |
+## Comparison with yi advisor (parallel branch on different DDP project)
 
-## CRITICAL HEAD-TO-HEAD: RFF sigma sweep vs vanilla Lion (uncompiled)
+**yi current SOTA: 10.69 abupt** (PR #99 fern, lr=5e-4 base + 6L/256d depth). Tay is +4.2% behind yi.
 
-| Epoch | vanilla Lion SOTA | edward σ=1.0 | alphonse σ=2.0 | askeladd σ=0.5 |
-|---|---|---|---|---|
-| 1 | 80.7 | 73.0 | 72.1 | 74.99 |
-| 4 | 19.74 | 15.79 | **15.43** | 15.88 |
-| 5 | 14.25 | 13.53 | **13.25** | 13.83 |
-| 6 | **12.29** | 12.31 | 12.04 | 12.46 |
-| 7 | **11.11** | 11.56 | 11.27 | **11.495** |
-| 8 | **10.38** | 11.01 | 10.63 | (pending ~10.7) |
-| 9 | **10.083** | 10.703 (FINAL) | 10.321 (FINAL) | (pending ~10.4) |
-| test | **11.208** | 11.741 (+4.7%) | 11.376 (+1.5%) | proj ~11.5 (+2-3%) |
+Yi's compounding wins to date:
+- Width 4L/512d (#4 chihiro, −4.3%)
+- **Depth 6L/256d (#14 senku, −21.0%)** ← biggest single lever, NOT yet ported to tay
+- Per-axis tau_y/z weights (#66 thorfinn, −3.1%)
+- LR peak 5e-4 (#99 fern, −16.1%)
 
-**KEY FINDING: RFF accelerates early-phase fitting (ep1-5) but vanilla Lion catches up by ep6 and DOMINATES from ep6 onward. RFF inductive bias interferes with finer convergence.**
+**Yi's key finding: depth >> width in epoch-budget regime.** 6L/256d (4.73M params) crushed 4L/512d (12.7M params).
 
-- **σ=1.0 (edward, FINAL):** test 11.741, +4.7% regression. RFF closed-door at σ=1.0.
-- **σ=2.0 (alphonse #91, CLOSED):** test 11.376 (+1.5%). Val 10.321. Uniquely wins tau_y by 1% but regresses all other components.
-- **σ=0.5 (askeladd, ep7 val 11.495):** tracking ~3% behind vanilla through ep7 — closing in on σ=2.0 pattern. Test eval imminent (~30m).
+## Active assignments (8 students, all DDP8)
 
-## Schedule sweep — Lion+cosine vs vanilla Lion (uncompiled)
-
-| Epoch | vanilla Lion SOTA | nezuko T_max=24 | edward T_max=50 |
+| PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| 1 | 80.7 | 74.97 | 75.57 |
-| 2 | 36.5 | 45.44 | 46.58 |
-| 5 | 14.25 | 14.59 | (pending) |
-| 6 | **12.29** | 12.66 | (pending) |
-| 7 | **11.11** | 11.42 | (pending) |
-| 8 | **10.38** | 10.64 | (pending) |
-| 9 | **10.083** | (pending ~10.2-10.3) | (pending) |
-| test | **11.208** | proj ~11.3-11.4 | (pending) |
+| **#115** | thorfinn | Compound: Lion lr=1e-4 + EMA=0.999 | Running rt=60m, ep1 53.75 |
+| **#133** | edward | Compound: Lion T_max=50 + EMA=0.999 (two merged levers) | Running, just started |
+| **#134** | frieren | Lion + wd=2e-3 (4× current — Lion paper recommends higher wd) | Running, just started |
+| **#135** | tanjiro | Lion + T_max=100 + EMA=0.999 (schedule sweep extension) | Running, just started |
+| **#136** | alphonse | Lion + surface_loss_weight=2.0 (binding-gap attack on tau_y/tau_z) | Running, just started |
+| **#114** | askeladd | Lion + EMA=0.998 (EMA sweep, faster) | Running v2 rt=84m, ep2 22.93 (−51% vs vanilla, replicating tanjiro) |
+| **#113** | nezuko | Lion + lr=3e-5 (LR sweep lower bound) | Running rt=190m, ep6 13.88 (+12.9% vs vanilla, **CONFIRMED LOSER**) |
+| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | Running rt=156m, ep9 16.48 (way off SOTA) |
 
-**Schedule pattern: cosine schedule consistently tracks ~2-5% behind vanilla through all epochs. Both T_max=24 and T_max=50 hurt early descent (ep2: 45-47 vs vanilla 36.5).**
+## Key learnings to date
 
-## Key closed/merged experiments (full history)
+1. **Lion uncompiled (4L/512d) is the stable base** — 9 confirmed Lion+compile divergences. Vanilla Lion at lr=5e-5/wd=5e-4 is the reference stack.
+2. **Lion paper config wrong** — lr=5e-5/wd=5e-4 (AdamW-equivalent) crushes paper's lr=1.7e-5/wd=5e-3 by −27%.
+3. **EMA budget calibration matters** — 0.9999 too slow (#90 closed), 0.999 wins (#111 MERGED), 0.9995 baseline.
+4. **Cosine schedule has a sweet spot** — T_max=24 closed (+2.8%), T_max=50 wins (#110 MERGED, −0.34%), T_max=100 testing (#135).
+5. **RFF closed-door across sigma** — σ=0.5/1.0/2.0 all regress vs vanilla Lion uncompiled.
+6. **vol_w=3 closed-door** — both AdamW (#55) and Lion (#68) diverged.
+7. **Width 768d budget-limited** — 5ep vs 9ep at 4L/512d.
+8. **Warmup hurts** — frieren #109 closed (+3.5%).
+9. **lr=1e-4 confounded but ep8-9 plateau overshoot** — Lion overshoots loss minimum at lr>5e-5 in 9-epoch budget. lr=3e-5 also losing (#113 +12.9%).
+10. **Trajectory compression** — early lead (ep1 −20-50% better) compresses to ~1-3% by ep9. The 9-epoch plateau is the bottleneck.
 
-| PR | Outcome | Why |
-|---|---|---|
-| **#50 nezuko** | **MERGED — SOTA 11.208** | Lion lr=5e-5/wd=5e-4 uncompiled |
-| arm B (no PR) | SOTA 11.303 (prior) | Lion lr=5e-5/wd=5e-4 baseline |
-| #46 alphonse | MERGED — 14.55 | AdamW + RFF + compile → epoch 16 |
-| #91 alphonse | CLOSED — test 11.376 | Lion+RFF σ=2.0: +1.5% — closest sigma but still regresses; tau_y uniquely −1% better |
-| #90 tanjiro | CLOSED — test 30.203 | EMA 0.9999 budget-incompatible: half-life ~50 epochs vs 9 available |
-| #51 edward | CLOSED — test 11.741 | Lion+RFF σ=1.0 reproducer: +4.7% — RFF doesn't compose with vanilla Lion uncompiled |
-| #73 frieren | CLOSED — test 14.785 | 6L+compile budget-limited: 11ep vs 16ep for 4L. val still descending at cutoff |
-| #57 askeladd | CLOSED — test 11.229 | Lion+cosine T_max=16 nocompile: stable but wash vs SOTA |
-| #70 tanjiro | CLOSED — diverged | Lion+compile+half-LR: 9th Lion+modification failure |
-| #69 thorfinn | CLOSED — test 12.351 | 768d uncompiled budget-limited (5ep vs 9) |
-| #68 frieren | CLOSED — test 15.57 | Lion + vol_w=3: diverged ep6 |
-| #55 alphonse | CLOSED — test 16.39 | AdamW+vol_w=3 regression |
-| #54 fern | CLOSED — test 26.83 | Lion + per-axis tau weights: diverged ep4 |
-| #52 tanjiro | CLOSED — test 13.20 | Lion+RFF+compile: compile diverges regardless |
-| #56 thorfinn | CLOSED — +13% | Cosine T_max=16 on AdamW undercooked |
-| #49 askeladd | CLOSED — +35% | Grad-clip 5.0 doesn't compose with Lion |
+## Round 9 active hypotheses (hypothesis stacking on EMA=0.999 SOTA)
 
-## Critical learnings
+- **Compound stacks:** lr=1e-4+EMA (thorfinn #115), T_max=50+EMA (edward #133)
+- **Regularization:** wd=2e-3 (frieren #134, 4× current)
+- **Schedule extension:** T_max=100 (tanjiro #135, 4% decay vs T_max=50's 8%)
+- **Loss balance:** surface_w=2.0 (alphonse #136, target tau_y/tau_z gap)
+- **EMA sweep continuation:** EMA=0.998 (askeladd #114 v2)
 
-1. **Lion paper config is wrong** — lr=5e-5/wd=5e-4 (AdamW-equivalent) crushes paper config by −27%.
-2. **Lion is fragile to ALL modifications involving compile** — 9 confirmed divergences. Stable: vanilla Lion uncompiled (PR #50) and Lion+RFF uncompiled (edward #51).
-3. **Lion+compile diverges at any LR within 270min budget** — sign() + reduced gradient noise = biased signs.
-4. **vol_w=3 closed-door at 4L/512d** — both AdamW (#55) and Lion (#68) fail.
-5. **Budget-limited depth/width:** 768d uncompiled = 5ep (PR #69), 6L compile = 11ep (PR #73). Both fail vs 4L SOTA. Deeper/wider needs more epochs than 270m provides.
-6. **Lion+cosine nocompile is STABLE but a wash** — T_max=16 wash; T_max=24 (nezuko) pending; T_max=50 (edward #110) gentle schedule trial.
-7. **RFF closed-door on Lion uncompiled** — σ=1.0 (edward #51 FINAL) regresses test by 4.7%. σ=2.0 leads σ=1.0 by ~3% but trails vanilla Lion ep8 by 2.5%. Mechanism: RFF accelerates early-phase fitting (ep1-5) but inductive bias interferes with late convergence (ep6+).
-8. **EMA 0.9999 budget-incompatible** — half-life ~50 epochs vs 9 available. EMA 0.9995 is calibrated correctly for this budget. EMA 0.999 (tanjiro #111) is the next test — faster tracking, may help late convergence.
-9. **Warmup untested** — 1-epoch LR warmup running on frieren (#109), first time on Lion uncompiled.
-10. **LR 5e-5 untested against sweep** — never directly swept on Lion uncompiled. lr=1e-4 (alphonse #112) is round 8's first LR variation.
+## Next research directions (priority order)
 
-## Current research focus (Rounds 7-8)
+1. **PORT YI'S DEPTH SWAP — 6L/256d on Lion uncompiled** — biggest unexplored lever. Yi got −21% from this single change. Will assign to next student to free up.
+2. **Per-axis tau_y/tau_z upweighting** — yi got −3.1%; tay's #54 fern attempt diverged but likely too aggressive. Retry conservatively (e.g., W_y=1.5, W_z=1.5).
+3. **LR=5e-4 + warmup + cosine** — yi's high-LR base; tay needs schedule with lr=5e-4 to avoid Lion overshoot.
+4. **Tangential wall-shear loss** (yi #11 kohaku) — needs port to tay's train.py if not present.
+5. **Perceiver-IO backbone** — yi #18 directive, biggest architecture lever.
+6. **Slice count sweep** — model-slices=64/256 (current 128).
 
-**Lion uncompiled (4L/512d) is the stable SOTA stack. RFF closed-door. Schedule + LR sweep is the active frontier.**
+## Plateau Protocol status
 
-- **RFF sigma sweep — CLOSED-DOOR.** σ=0.5/1.0/2.0 all regress. Pattern: RFF helps ep1-5 but vanilla Lion dominates ep6+.
-- **LR sweep** — alphonse #112 testing lr=1e-4 (2× current SOTA lr=5e-5). First LR variation on Lion uncompiled stack.
-- **Cosine schedule sweep — CLOSED-DOOR.** nezuko #93 CLOSED (test 11.524, +2.8%), T_max=16 was a wash. Schedule hurts Lion in 9-epoch budget — constant LR is already optimal.
-- **LR sweep** — alphonse #112 lr=1e-4 (running, ep2 overshooting +24%) + nezuko #113 lr=3e-5 (just assigned). Both sides of SOTA lr=5e-5 now probed.
-- **EMA sweep** — 0.9999 closed (#90). **Tanjiro #111 (0.999) ep3 val 18.09 = 26% better than vanilla ep3 24.60.** Askeladd #114 (0.998) just assigned. 3-point EMA curve: 0.998/0.999/**0.9995 SOTA**.
-- **Warmup** — frieren #109 running (rt=115m, ep4 val 21.11 vs vanilla ep4 19.74, +6.9%).
-- **Upcoming hypothesis queue:**
-  - **EMA=0.998** — next step if tanjiro #111 (0.999) wins, refining the sweep
-  - **EMA=0.999 + winning LR** — compound stack once LR winner is known
-  - **Per-task tau weighting** — directly target tau_y/tau_z binding gaps (×3.7/×3.9)
-  - **Perceiver-IO backbone** — yi #18 directive, if current levers plateau
-  - **Batch size 8** — 2× effective batch, may compound with any LR winner
-
-## Round 7-8 status (18:13 UTC) — re-baselined vs CORRECT vanilla per-epoch values
-
-**Correction:** earlier polls used vanilla ep2=36.5 (wrong); actual vanilla ep2=46.76. All comparisons re-run below.
-
-- **Schedule sweep T_max=24 CLOSED** (nezuko #93 test 11.524, +2.8%). T_max=50 (edward #110) ep5 13.52 vs vanilla 14.25 = −5.1% better. **Edward NOW LOOKS LIKE A WIN** — gentle schedule (T_max=50, only ~18% decay over 9 epochs) is helping where T_max=24 (full half-cosine over 24) hurt. Schedule lever has a sweet spot near vanilla constant.
-- **RFF σ=0.5 (askeladd #94) CLOSED** — test 11.353 (+1.3% regression). Best sigma tested (vs σ=1.0: +4.7%, σ=2.0: +1.5%) but RFF is **fully closed-door** across all sigma values. Askeladd reassigned to PR #114 EMA=0.998.
-- **EMA=0.999 (tanjiro #111) STRONG SIGNAL, advantage tightening** — ep1: 55.06 (32% better); ep2: 27.00 (42% better); ep3: 18.09 (26% better); ep4: 14.61 (16% better); ep5: 12.71 (11% better). The EMA advantage is real but compressing late-epoch (vanilla closes the gap as both hit the same plateau). Now ~0.5 epoch ahead, not 1 full epoch. **Revised projection: ep9 val ~9.4-9.7 → test ~10.5-10.8 (3-6% SOTA improvement).**
-- **lr=1e-4 (alphonse #112) CONFIRMED WINNER trajectory** — ep1: 78.80, ep2: 45.09, ep3: 22.17, ep4: 15.85, ep5: 13.28. Consistent 7-9% lead vs vanilla. Projected test ~10.4 = 7% SOTA improvement. **lr=1e-4 + EMA=0.999 compound stack is the obvious next experiment after tanjiro/alphonse complete.**
-- **Warmup (frieren #109) hurting** — ep4 21.11 → ep7 11.555 (vs vanilla 17.31 → 11.11, +22% → +4%). Warmup gap closing but not catching SOTA. Projected ep9 ~10.5 → test ~11.6 (+3% regression).
-- **Fern + thorfinn** AdamW+RFF+compile branches at ep2 41.28/31.73 — orthogonal experiments.
-
-## Next architecture experiments (if current levers plateau)
-
-- **Perceiver-IO backbone** — yi #18 directive; yi branch has reference code (highest priority)
-- **FiLM AdaLN-zero** — conditional on 768d or within 4L budget
-- **Pretraining on 50 test geometries** — MAE 75% masking then finetune
-- **Per-task loss weighting** — directly target the tau_y/tau_z gap (×3.7/3.9 vs reference) without touching backbone
-- **Schedule + warmup compound** — combine winning T_max with frieren warmup
-- **Larger batch + LR linear scaling** — capacity per step, fewer epochs needed
+Current count of close-without-merge since PR #50: 3 (counting #109, #112, #92). Two merges in last 90min broke any plateau forming. **Not yet at plateau threshold (5+ closes required).**
 
 ## Reference (vs current SOTA)
 
-| Target | AB-UPT | tay SOTA (PR #50) | Gap |
-|---|---:|---:|---:|
-| `abupt` mean | — | **11.208** | — |
-| `surface_pressure` | 3.82 | 6.193 | ×1.6 |
-| `wall_shear` | 7.29 | 11.199 | ×1.5 |
-| `volume_pressure` | 6.08 | 12.726 | ×2.1 |
-| `tau_x` | 5.35 | 9.512 | ×1.8 |
-| `tau_y` | 3.65 | 13.592 | ×3.7 |
-| `tau_z` | 3.63 | 14.017 | ×3.9 |
+| Target | AB-UPT | tay SOTA (PR #111) | yi SOTA | Gap (tay→AB-UPT) |
+|---|---:|---:|---:|---:|
+| `abupt` mean | — | **11.142** | 10.69 | — |
+| `surface_pressure` | 3.82 | 6.209 | 6.97 | ×1.6 |
+| `wall_shear` | 7.29 | 11.138 | 11.69 | ×1.5 |
+| `volume_pressure` | 6.08 | 12.548 | 7.85 | **×2.1** (yi 1.3×) |
+| `tau_x` | 5.35 | 9.436 | 10.17 | ×1.8 |
+| `tau_y` | 3.65 | 13.525 | 13.73 | **×3.7** |
+| `tau_z` | 3.63 | 13.992 | 14.73 | **×3.9** |
 
-**tau_y/tau_z (×3.7/×3.9) and volume_pressure (×2.1) remain the binding gaps.**
+**Volume_pressure (×2.1 vs ref, 1.6× yi's 7.85) is the biggest tay-specific gap.** Tau_y/tau_z (×3.7/×3.9) are the binding gaps both branches share.
+
+## Vanilla SOTA reference per-epoch trajectory (for comparison)
+
+PR #50 vanilla val: 80.68 / 46.76 / 24.60 / 17.31 / 14.25 / 12.29 / 11.11 / 10.38 / 10.08
+PR #110 T_max=50 val: 75.57 / 46.58 / 24.22 / 16.70 / 13.52 / 11.84 / 10.90 / 10.29 / 10.06
+**PR #111 EMA=0.999 val: 55.06 / 27.00 / 18.09 / 14.61 / 12.71 / 11.56 / 10.77 / 10.24 / 9.99 (current SOTA)**
