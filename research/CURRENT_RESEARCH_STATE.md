@@ -27,7 +27,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
   Previous: Issue #18 from yi advisor: "be bolder; replace the backbone; mine noam/radford branches."
 - **Infra (issue #53):** Fern + thorfinn pods RECOVERED 17:14-17:18 UTC. **Full 8-student fleet active.** Issue posted recovery comment.
 
-## Current SOTA — nezuko PR #50 MERGED, test_abupt 11.208
+## Current SOTA — edward PR #110 MERGED, test_abupt 11.170 (Lion + cosine T_max=50)
 
 | Lever | Student | test_abupt | Note |
 |---|---|---:|---|
