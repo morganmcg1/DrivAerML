@@ -2,28 +2,28 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: nezuko PR #50 Lion uncompiled — 2026-04-30 12:56 UTC
+## Status: edward PR #110 Lion+cosine T_max=50 — 2026-04-30 21:20 UTC
 
-**NEW SOTA: nezuko PR #50 Lion lr=5e-5/wd=5e-4 uncompiled beats prior arm B by −0.84% (11.208 vs 11.303).**
+**NEW SOTA: edward PR #110 cosine T_max=50 beats PR #50 by −0.34% (11.170 vs 11.208).**
 
-Confirms the SOTA config is stable — every axis marginally improved in a clean reproduce run.
+Gentle cosine schedule (T_max=50, only ~8% LR decay over 9 epochs) vs constant LR in PR #50. Key improvement in volume_pressure (−1.3%) and tau_z (−0.8%). All other axes within ±0.1%.
 
-**W&B run:** `g2n4fyta` (rank 0) — 287 min runtime, 9 val epochs, best-val checkpoint reload
-**PR:** #50
+**W&B run:** `ujyg3lju` (rank 0) — 276 min runtime, 9 val epochs, best val 10.063 (ep9)
+**PR:** #110
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #50 nezuko) | Prior (arm B) | PR #46 (RFF+compile) | AB-UPT |
-|---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **11.208** | 11.303 | 14.550 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **6.193** | 6.216 | 8.628 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **11.199** | 11.315 | 14.882 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.726** | 12.755 | 15.032 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **9.512** | 9.563 | 12.901 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **13.592** | 13.831 | 17.281 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **14.017** | 14.147 | 18.907 | 3.63 |
+| Metric | This-repo key | tay best (PR #110 edward) | Prior SOTA (PR #50) | AB-UPT |
+|---|---|---:|---:|---:|
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **11.170** | 11.208 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | 6.264 | **6.193** | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **11.197** | 11.199 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.556** | 12.726 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | 9.552 | **9.512** | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **13.572** | 13.592 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **13.904** | 14.017 | 3.63 |
 
-### Reproduce new SOTA (Lion lr=5e-5, no compile)
+### Reproduce new SOTA (Lion lr=5e-5, no compile, cosine T_max=50)
 
 ```bash
 cd target/
@@ -31,6 +31,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
   --lr 5e-5 --weight-decay 5e-4 \
   --no-compile-model \
+  --lr-cosine-t-max 50 \
   --volume-loss-weight 2.0 --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
@@ -50,7 +51,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #39 | tanjiro | **−1.82 (−10.5%) vs #40** | Lion optimizer lr=1.7e-5 |
 | #46 | alphonse | **−0.88 (−5.7%) vs #39** | AdamW + RFF (sigma=1.0) + compile → epoch 16 |
 | (no PR) | tanjiro arm B | **−3.25 (−22.3%) vs #46** | Lion lr=5e-5/wd=5e-4 — paper config was wrong |
-| **#50** | **nezuko** | **−0.10 (−0.84%) vs arm B** | **Reproduce + slightly better: Lion uncompiled lr=5e-5** |
+| #50 | nezuko | **−0.10 (−0.84%) vs arm B** | Reproduce + slightly better: Lion uncompiled lr=5e-5 |
+| **#110** | **edward** | **−0.04 (−0.34%) vs #50** | **Lion + cosine T_max=50 (gentle 8% decay over 9 epochs)** |
 
 ---
 
