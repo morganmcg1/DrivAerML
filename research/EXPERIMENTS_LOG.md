@@ -6,6 +6,30 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 07:30 UTC — PR #56 CLOSED: thorfinn AdamW + cosine T_max=16 — schedule miscalibration was load-bearing
+
+- **Branch:** `thorfinn/round3-rff-compile-cosine-lr16`
+- **W&B run:** `ko1hrdau` — group `tay-round3-rff-compile-cosine-lr16`, 270min full budget, 16 epochs
+- **Hypothesis:** PR #46's `--lr-cosine-t-max 0` fallback to `max_epochs=50` left LR at ~88% of init throughout. Calibrating `T_max=16` to actual budget should give Lion(/AdamW) the late-training fine-tuning it never got.
+- **Result: HYPOTHESIS REJECTED — +13.0% regression vs PR #46 (test_abupt 16.44 vs 14.55)**
+
+| Metric | PR #56 | PR #46 | Δ vs #46 | AB-UPT |
+|---|---:|---:|---:|---:|
+| `test/abupt_axis_mean_rel_l2_pct` | **16.440** | 14.550 | +1.890 (+13.0%) | — |
+| surface_pressure | 10.042 | 8.628 | +1.414 (+16.4%) | 3.82 |
+| wall_shear | 17.076 | 14.882 | +2.194 (+14.7%) | 7.29 |
+| volume_pressure | 15.959 | 15.032 | +0.927 (+6.2%) | 6.08 |
+| tau_x | 14.862 | 12.901 | +1.961 (+15.2%) | 5.35 |
+| tau_y | 19.837 | 17.281 | +2.556 (+14.8%) | 3.65 |
+| tau_z | 21.502 | 18.907 | +2.595 (+13.7%) | 3.63 |
+
+- **Mechanism:** Cosine T_max=16 collapsed LR to ~6% of init by epoch 14 and 0.6% by epoch 16. PR #46's val curve was still descending at epoch 16, meaning the model was undertrained, not overoptimized. The aggressive LR decay starved it of the late-training optimization power that was load-bearing for the 14.55 result. val→test gap shrunk +18% (sharper minima generalize slightly better) but this was swamped by the +2.0 absolute val regression.
+- **Closed-door insight (DO NOT REVISIT WITHOUT BUDGET EXTENSION):** AdamW lr=5e-5 at 16-epoch budget is undertrained, not overoptimized. Cosine T_max calibrated to actual budget is a regression. Future cosine experiments must (a) use generous T_max≥24 with proper warmup, or (b) extend budget rather than compress LR. The "miscalibration" in PR #46 was effectively a constant-ish LR schedule and was load-bearing.
+- **Per-axis pattern:** All axes regressed 6-16%. Volume_pressure least affected, surface_pressure / tau_y / tau_z worst — consistent with a global LR-too-low-too-fast effect, not axis-specific.
+- **Suggested follow-ups (deferred):** thorfinn's #5 ablation (PR #46 with explicit T_max=50) would confirm the fallback was load-bearing — but lever is now low priority since Lion is the active SOTA arm.
+
+
+
 ## Round 1 — opened 2026-04-29
 
 8 students assigned in parallel on DDP8 (8 GPUs each, 96 GB VRAM, effective
