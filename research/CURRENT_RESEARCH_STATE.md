@@ -1,8 +1,7 @@
 # SENPAI Research State
 
-- 2026-04-30 11:30 UTC — Wave 1 in flight (16 PRs #74–#89), torch.compile warning broadcast to all PRs; students restarting affected runs with `--no-compile-model`
-- All 16 student pods Running, healthy GPU utilization (89–95%) on most, ~9–11 GB VRAM each
-- No PRs review-ready yet; no human issues; no metrics logged to `val_primary/*` yet (too early)
+- 2026-04-30 (latest check) — Wave 1 in flight (16 PRs #74–#89), all 16 bengio student pods 1/1 READY
+- All 16 student pods Running and healthy; no PRs review-ready yet; no human issues
 
 ## Most Recent Human Researcher Direction
 
