@@ -380,6 +380,7 @@ class SurfaceTransolver(nn.Module):
         film_encoder_dim: int = 64,
         sdf_gate_volume: bool = False,
         sdf_gate_sigma: float = 0.05,
+        sdf_gate_mode: str = "gaussian",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -389,6 +390,11 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         self.sdf_gate_volume = sdf_gate_volume
         self.sdf_gate_sigma = sdf_gate_sigma
+        if sdf_gate_mode not in ("gaussian", "quantile"):
+            raise ValueError(
+                f"sdf_gate_mode must be 'gaussian' or 'quantile', got {sdf_gate_mode!r}"
+            )
+        self.sdf_gate_mode = sdf_gate_mode
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
@@ -443,13 +449,41 @@ class SurfaceTransolver(nn.Module):
         *,
         surface_tokens: int,
         volume_x: torch.Tensor | None,
+        volume_mask: torch.Tensor | None,
         reference: torch.Tensor,
     ) -> torch.Tensor | None:
         if not self.sdf_gate_volume or volume_x is None or volume_x.shape[-1] <= self.space_dim:
             return None
         sdf_vals = volume_x[..., self.space_dim].abs()
         sigma = max(float(self.sdf_gate_sigma), 1e-6)
-        volume_gate = torch.exp(-0.5 * (sdf_vals / sigma) ** 2).to(
+        if self.sdf_gate_mode == "quantile":
+            # Rank-space gate: scale-invariant, exact target fraction.
+            # Padded tokens get +inf so they sort to the end and do not pollute
+            # ranks of valid tokens. Per-sample normalization by N_valid keeps
+            # the rank in [0, 1] for valid tokens regardless of padding ratio.
+            if volume_mask is not None:
+                valid = volume_mask.to(dtype=torch.bool)
+                masked_sdf = torch.where(
+                    valid, sdf_vals, torch.full_like(sdf_vals, float("inf"))
+                )
+                n_valid = valid.sum(dim=1, keepdim=True).clamp(min=2)
+            else:
+                masked_sdf = sdf_vals
+                n_valid = torch.full(
+                    (sdf_vals.shape[0], 1),
+                    sdf_vals.shape[1],
+                    device=sdf_vals.device,
+                    dtype=torch.long,
+                ).clamp(min=2)
+            sorted_indices = masked_sdf.argsort(dim=1)
+            ranks = sorted_indices.argsort(dim=1).to(sdf_vals.dtype)
+            rank_norm = ranks / (n_valid - 1).to(ranks.dtype)
+            volume_gate = torch.exp(-0.5 * (rank_norm / sigma) ** 2)
+            if volume_mask is not None:
+                volume_gate = volume_gate.masked_fill(~valid, 0.0)
+        else:
+            volume_gate = torch.exp(-0.5 * (sdf_vals / sigma) ** 2)
+        volume_gate = volume_gate.to(
             device=reference.device,
             dtype=reference.dtype,
         )
@@ -510,6 +544,7 @@ class SurfaceTransolver(nn.Module):
         slice_gate = self._build_slice_gate(
             surface_tokens=surface_tokens,
             volume_x=volume_x,
+            volume_mask=volume_mask,
             reference=hidden,
         )
         hidden = self.backbone(
@@ -619,6 +654,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     sdf_gate_volume: bool = False
     sdf_gate_sigma: float = 0.05
+    sdf_gate_mode: str = "gaussian"
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -795,6 +831,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         film_encoder_dim=config.film_encoder_dim,
         sdf_gate_volume=config.sdf_gate_volume,
         sdf_gate_sigma=config.sdf_gate_sigma,
+        sdf_gate_mode=config.sdf_gate_mode,
     )
 
 
@@ -1823,9 +1860,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if mask_bool.any():
                         sdf_finite = sdf_vals[mask_bool].float().detach().cpu()
                         sigma = max(float(config.sdf_gate_sigma), 1e-6)
-                        gate_vals = torch.exp(-0.5 * (sdf_finite / sigma) ** 2)
+                        if config.sdf_gate_mode == "quantile":
+                            ranks = sdf_finite.argsort().argsort().to(torch.float32)
+                            denom = max(int(sdf_finite.numel()) - 1, 1)
+                            rank_norm = ranks / float(denom)
+                            gate_vals = torch.exp(-0.5 * (rank_norm / sigma) ** 2)
+                        else:
+                            gate_vals = torch.exp(-0.5 * (sdf_finite / sigma) ** 2)
                         sdf_init_log: dict[str, object] = {
                             "global_step": global_step,
+                            "sdf_gate/init_mode": config.sdf_gate_mode,
+                            "sdf_gate/init_sigma": sigma,
                             "sdf_gate/init_abs_sdf_mean": float(sdf_finite.mean().item()),
                             "sdf_gate/init_abs_sdf_std": float(sdf_finite.std().item()),
                             "sdf_gate/init_abs_sdf_min": float(sdf_finite.min().item()),
