@@ -1,12 +1,13 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 16:32 UTC
+- **Date:** 2026-04-30 17:18 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 - **Most recent direction from human team:** Issue #48 (2026-04-29 20:54 UTC) —
   "How's it going? We making progress?" — replied with full status. No new directives.
   Previous: Issue #18 from yi advisor: "be bolder; replace the backbone; mine noam/radford branches."
+- **Infra (issue #53):** Fern + thorfinn pods RECOVERED 17:14-17:18 UTC. **Full 8-student fleet active.** Issue posted recovery comment.
 
 ## Current SOTA — nezuko PR #50 MERGED, test_abupt 11.208
 
@@ -18,37 +19,52 @@
 
 **W&B run:** `g2n4fyta` (rank 0) — 287 min runtime, 9 val epochs, best val 10.08.
 
-## Active assignments (8 students, all DDP8)
+## Active assignments (8 students, all DDP8 — ALL ACTIVE as of 17:18 UTC)
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | — | Running (rt=1m) |
-| **#93** | nezuko | Lion+cosine T_max=24 nocompile | ep6 val 12.659 (+3% vs vanilla 12.29) | Running (rt=207m) |
-| **#94** | askeladd | Lion+RFF σ=0.5 | ep6 val 12.462 (+1.4% vs vanilla 12.29) | Running (rt=190m) |
-| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | — | Running (rt=16m) |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep1 val 84.62 | Running (rt=50m) |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | — | Running (rt=25m) |
-| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | — | Pod stuck (issue #53) |
-| **#92** | thorfinn | AdamW+RFF+768d+compile | — | Pod stuck (issue #53) |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | ep1 val 78.80 (vs vanilla 80.7) | Running (rt=48m) |
+| **#93** | nezuko | Lion+cosine T_max=24 nocompile | **ep8 val 10.636** (vs vanilla 10.38, +2.5%) | Running (rt=254m, finishing soon) |
+| **#94** | askeladd | Lion+RFF σ=0.5 | ep7 val 11.495 (vs vanilla 11.11, +3.5%) | Running (rt=237m, finishing soon) |
+| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep1 val 55.06** (32% better than vanilla 80.7) | Running (rt=62m) |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep3 val 39.62 (vs vanilla ep3 ~25, costs ~1 epoch) | Running (rt=97m) |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | ep2 val 46.58 (vs vanilla 36.5, slower) | Running (rt=72m) |
+| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | — | **Running (rt=13m, RECOVERED)** |
+| **#92** | thorfinn | AdamW+RFF+768d+compile | — | **Running (rt=18m, RECOVERED)** |
 
 ## CRITICAL HEAD-TO-HEAD: RFF sigma sweep vs vanilla Lion (uncompiled)
 
 | Epoch | vanilla Lion SOTA | edward σ=1.0 | alphonse σ=2.0 | askeladd σ=0.5 |
 |---|---|---|---|---|
-| 1 | 80.7 | 73.0 | 72.1 | 75.0 |
+| 1 | 80.7 | 73.0 | 72.1 | 74.99 |
 | 4 | 19.74 | 15.79 | **15.43** | 15.88 |
 | 5 | 14.25 | 13.53 | **13.25** | 13.83 |
-| 6 | **12.29** | 12.31 | 12.04 | (pending) |
-| 7 | **11.11** | 11.56 | 11.27 | (pending) |
-| 8 | **10.38** | 11.01 | 10.63 | (pending) |
-| 9 | **10.083** | 10.703 (FINAL) | (pending ~10.30) | (pending) |
-| test | **11.208** | 11.741 (+4.7%) | proj ~11.4-11.5 (+2-3%) | proj? |
+| 6 | **12.29** | 12.31 | 12.04 | 12.46 |
+| 7 | **11.11** | 11.56 | 11.27 | **11.495** |
+| 8 | **10.38** | 11.01 | 10.63 | (pending ~10.7) |
+| 9 | **10.083** | 10.703 (FINAL) | 10.321 (FINAL) | (pending ~10.4) |
+| test | **11.208** | 11.741 (+4.7%) | 11.376 (+1.5%) | proj ~11.5 (+2-3%) |
 
 **KEY FINDING: RFF accelerates early-phase fitting (ep1-5) but vanilla Lion catches up by ep6 and DOMINATES from ep6 onward. RFF inductive bias interferes with finer convergence.**
 
 - **σ=1.0 (edward, FINAL):** test 11.741, +4.7% regression. RFF closed-door at σ=1.0.
 - **σ=2.0 (alphonse #91, CLOSED):** test 11.376 (+1.5%). Val 10.321. Uniquely wins tau_y by 1% but regresses all other components.
-- **σ=0.5 (askeladd, running ep5 val 13.83):** tracking worse than σ=1.0/σ=2.0, expected regression.
+- **σ=0.5 (askeladd, ep7 val 11.495):** tracking ~3% behind vanilla through ep7 — closing in on σ=2.0 pattern. Test eval imminent (~30m).
+
+## Schedule sweep — Lion+cosine vs vanilla Lion (uncompiled)
+
+| Epoch | vanilla Lion SOTA | nezuko T_max=24 | edward T_max=50 |
+|---|---|---|---|
+| 1 | 80.7 | 74.97 | 75.57 |
+| 2 | 36.5 | 45.44 | 46.58 |
+| 5 | 14.25 | 14.59 | (pending) |
+| 6 | **12.29** | 12.66 | (pending) |
+| 7 | **11.11** | 11.42 | (pending) |
+| 8 | **10.38** | 10.64 | (pending) |
+| 9 | **10.083** | (pending ~10.2-10.3) | (pending) |
+| test | **11.208** | proj ~11.3-11.4 | (pending) |
+
+**Schedule pattern: cosine schedule consistently tracks ~2-5% behind vanilla through all epochs. Both T_max=24 and T_max=50 hurt early descent (ep2: 45-47 vs vanilla 36.5).**
 
 ## Key closed/merged experiments (full history)
 
@@ -99,9 +115,14 @@
   - **Perceiver-IO backbone** — yi #18 directive, if current levers plateau
   - **Batch size 8** — 2× effective batch, may compound with any LR winner
 
-**Two pod slots idle (issue #53 open, no human response since 13:33 UTC):**
-- thorfinn (#92 AdamW+768d+compile) — GPU 0%, stuck on PR #69 cache
-- fern (#72 AdamW+RFF+compile+tau weights) — stuck on PR #54 cache
+## Round 7 status (17:18 UTC) — quick read
+
+- **Schedule sweep is closed-door**. nezuko T_max=24 and edward T_max=50 both ~2-5% behind vanilla mid-run. nezuko ep8 val 10.636 (vs vanilla 10.38). No mechanism by which it catches up at ep9. Schedule lever exhausted on Lion uncompiled.
+- **RFF σ=0.5 closed-door**. ep7 val 11.495 (+3.5% vs vanilla 11.11). Tracking similar to σ=1.0. Confirms RFF is closed-door across all sigma values.
+- **Warmup costs ~1 epoch**. frieren ep3 39.62 ≈ vanilla ep2 36.5. May still recover, but in 9-epoch budget that's ~10% of training lost.
+- **EMA=0.999 looks promising at ep1** (55.06 vs 80.7, 32% better). Need ep2-3 trajectory to confirm — could be just EMA's averaging trickery (lower variance) rather than true convergence speedup. Most-watched run.
+- **lr=1e-4 marginal at ep1** (78.80 vs 80.7, 2.4% better). Could compound or could be noise.
+- **Fern + thorfinn** just started (rt=13/18m), no val data yet. Both AdamW+RFF+compile branches — orthogonal to Lion experiments.
 
 ## Next architecture experiments (if current levers plateau)
 
