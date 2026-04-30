@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 18:22 UTC
+- **Date:** 2026-04-30 18:30 UTC
 
 ## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
 
@@ -44,10 +44,10 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 | **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | ep3 val 22.17 (vs vanilla 24.60, **−10% better**) | Running (rt=96m) — actually competitive |
 | **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | — | Just assigned (rt=0m) |
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | — | Just assigned (rt=0m) |
-| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep3 val 18.09** (vs vanilla 24.60, **−26% better**) | Running (rt=110m) — **MAJOR WIN PROJECTED** |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep4 val 21.11 (vs vanilla ep4 17.31, +22%) | Running (rt=145m) — warmup hurting |
+| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep4 val 14.61** (vs vanilla ep5 14.25 — DRAFTING vanilla ep5) | Running (rt=129m) — **MAJOR WIN PROJECTED** |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep5 val 15.43 (vs vanilla ep5 14.25, +8.3%) | Running (rt=163m) — warmup hurting |
 | **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep4 val 16.70** (vs vanilla 17.31, **−3.5% better**) | Running (rt=128m) — now ahead of vanilla |
-| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep3 val 28.86 | Running (rt=59m) |
+| **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep3 val 28.86 | Running (rt=68m) |
 | **#92** | thorfinn | AdamW+RFF+768d+compile | ep2 val 31.73 | Running (rt=65m) |
 
 ## CRITICAL HEAD-TO-HEAD: RFF sigma sweep vs vanilla Lion (uncompiled)
