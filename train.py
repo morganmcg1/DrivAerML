@@ -114,6 +114,7 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     compile_model: bool = True
+    bilateral_aug: bool = False
     debug: bool = False
 
 
@@ -153,6 +154,30 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
     )
+
+
+def bilateral_aug_batch(batch):
+    """Per-sample bilateral y-flip with p=0.5.
+
+    Negates: y coord (surface ch1, volume ch1), n_y normal (surface ch4),
+    and tau_y target (surface_y ch2). All other fields unchanged.
+    Only applied to training batches — validation/test callers skip this.
+    """
+    B = batch.surface_x.shape[0]
+    flip = torch.rand(B) < 0.5  # [B] CPU bool, independent per sample
+    if not flip.any():
+        return batch
+    surface_x = batch.surface_x.clone()
+    surface_x[flip, :, 1] = -surface_x[flip, :, 1]  # y coord
+    surface_x[flip, :, 4] = -surface_x[flip, :, 4]  # n_y normal
+    volume_x = batch.volume_x.clone()
+    volume_x[flip, :, 1] = -volume_x[flip, :, 1]  # y coord
+    surface_y = batch.surface_y.clone()
+    surface_y[flip, :, 2] = -surface_y[flip, :, 2]  # tau_y (anti-symmetric under y-flip)
+    batch.surface_x = surface_x
+    batch.volume_x = volume_x
+    batch.surface_y = surface_y
+    return batch
 
 
 def train_loss(
@@ -292,6 +317,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                if config.bilateral_aug:
+                    batch = bilateral_aug_batch(batch)
                 loss, batch_loss_metrics = train_loss(
                     model,
                     batch,
