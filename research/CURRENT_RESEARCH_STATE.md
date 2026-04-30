@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 18:42 UTC
+- **Date:** 2026-04-30 18:49 UTC
 
 ## Vanilla SOTA reference (PR #50, run `g2n4fyta`, test 11.208)
 
@@ -46,7 +46,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | — | Just assigned (rt=0m) |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep4 val 14.61** (vs vanilla ep5 14.25 — DRAFTING vanilla ep5) | Running (rt=129m) — **MAJOR WIN PROJECTED** |
 | **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep5 val 15.43 (vs vanilla ep5 14.25, +8.3%) | Running (rt=163m) — warmup hurting |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep4 val 16.70** (vs vanilla 17.31, **−3.5% better**) | Running (rt=128m) — now ahead of vanilla |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep5 val 13.52** (vs vanilla 14.25, **−5.1% better**) | Running (rt=157m) — solidly ahead |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep3 val 28.86 | Running (rt=68m) |
 | **#92** | thorfinn | AdamW+RFF+768d+compile | ep2 val 31.73 | Running (rt=65m) |
 
@@ -139,7 +139,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 
 **Correction:** earlier polls used vanilla ep2=36.5 (wrong); actual vanilla ep2=46.76. All comparisons re-run below.
 
-- **Schedule sweep T_max=24 CLOSED** (nezuko #93 test 11.524, +2.8%). T_max=50 (edward #110) ep3 24.22 ≈ vanilla 24.60 — running ON PAR through ep3. **Verdict on T_max=50 still open** — could be wash or marginal swing.
+- **Schedule sweep T_max=24 CLOSED** (nezuko #93 test 11.524, +2.8%). T_max=50 (edward #110) ep5 13.52 vs vanilla 14.25 = −5.1% better. **Edward NOW LOOKS LIKE A WIN** — gentle schedule (T_max=50, only ~18% decay over 9 epochs) is helping where T_max=24 (full half-cosine over 24) hurt. Schedule lever has a sweet spot near vanilla constant.
 - **RFF σ=0.5 (askeladd #94) CLOSED** — test 11.353 (+1.3% regression). Best sigma tested (vs σ=1.0: +4.7%, σ=2.0: +1.5%) but RFF is **fully closed-door** across all sigma values. Askeladd reassigned to PR #114 EMA=0.998.
 - **EMA=0.999 (tanjiro #111) DOMINANT SIGNAL** — ep1: 55.06 vs 80.68 (32% better); ep2: 27.00 vs 46.76 (**42% better**); ep3: 18.09 vs 24.60 (**26% better**). Tanjiro at ep3 18.09 already approaching vanilla ep4 17.31. Trajectory ~1 epoch ahead. **Projected ep9 val ~9.0-9.5 → test ~10.4-10.7 (5-7% SOTA improvement).**
 - **lr=1e-4 (alphonse #112) BETTER than vanilla through ep4** (78.80 / 45.09 / 22.17 / **15.85** vs 80.68 / 46.76 / 24.60 / 17.31). 8% better at ep4. Second-strongest signal after tanjiro. Possible LR-EMA compound stack target.
