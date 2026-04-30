@@ -233,9 +233,16 @@ class TransformerBlock(nn.Module):
 
 
 class GeomEncoder(nn.Module):
-    """Mean-pooled MLP encoder over surface points to a per-case geometry token."""
+    """Mean-pooled MLP encoder over surface points to a per-case geometry token.
 
-    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int):
+    When ``output_norm`` is True, applies LayerNorm to the output. This bounds the
+    geom-token magnitude so the downstream FiLM Linear cannot push tanh into
+    saturation: with an unbounded encoder the model can learn ever-larger geom
+    tokens that drive `(1 + clip*tanh(...))` to ±clip per case (memorizing case
+    identity), which manifests as train-loss-down / val-loss-up divergence.
+    """
+
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, output_norm: bool = False):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
@@ -243,34 +250,39 @@ class GeomEncoder(nn.Module):
             nn.Linear(hidden_dim, out_dim),
         )
         self.net.apply(_init_linear)
+        self.out_norm = nn.LayerNorm(out_dim, eps=1e-6) if output_norm else nn.Identity()
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        # x: [B, N, in_dim], mask: [B, N] (1=valid, 0=padding)
         mask_f = mask.to(dtype=x.dtype).unsqueeze(-1)
         x_masked = x * mask_f
-        n_valid = mask_f.sum(dim=1).clamp(min=1.0)  # [B, 1]
-        x_mean = x_masked.sum(dim=1) / n_valid  # [B, in_dim]
-        return self.net(x_mean)  # [B, out_dim]
+        n_valid = mask_f.sum(dim=1).clamp(min=1.0)
+        x_mean = x_masked.sum(dim=1) / n_valid
+        return self.out_norm(self.net(x_mean))
 
 
 class FiLMLayer(nn.Module):
-    """FiLM with AdaLN-zero init: gamma=0, beta=0 at start so output equals input.
+    """AdaLN-zero FiLM: gamma=0, beta=0 at start so output equals input.
 
-    Applies h' = h * (1 + gamma) + beta where (gamma, beta) come from a linear
-    projection of the per-case geometry token. Final linear is zero-initialized
-    so the layer is identity at training start (residual modulation).
+    When gamma_clip > 0, gamma and beta are tanh-bounded to (-clip, +clip).
+    This prevents per-layer gamma compounding from blowing activations up over
+    deep stacks (the unbounded form diverged at 6L; clip keeps each layer's
+    multiplicative factor in (1-clip, 1+clip) so the worst-case 6L compound
+    stays well-bounded).
     """
 
-    def __init__(self, geom_dim: int, hidden_dim: int):
+    def __init__(self, geom_dim: int, hidden_dim: int, gamma_clip: float = 0.0):
         super().__init__()
         self.to_gamma_beta = nn.Linear(geom_dim, 2 * hidden_dim)
         nn.init.zeros_(self.to_gamma_beta.weight)
         nn.init.zeros_(self.to_gamma_beta.bias)
+        self.gamma_clip = float(gamma_clip)
 
     def forward(self, h: torch.Tensor, geom: torch.Tensor) -> torch.Tensor:
-        # h: [B, N, hidden_dim], geom: [B, geom_dim]
-        gb = self.to_gamma_beta(geom)  # [B, 2*hidden_dim]
+        gb = self.to_gamma_beta(geom)
         gamma, beta = gb.chunk(2, dim=-1)
+        if self.gamma_clip > 0.0:
+            gamma = self.gamma_clip * torch.tanh(gamma)
+            beta = self.gamma_clip * torch.tanh(beta)
         return h * (1 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
 
 
@@ -285,6 +297,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        film_gamma_clip: float = 0.0,
     ):
         super().__init__()
         if depth <= 1:
@@ -308,7 +321,7 @@ class Transformer(nn.Module):
         )
         self.film_layers = (
             nn.ModuleList(
-                [FiLMLayer(film_geom_dim, hidden_dim) for _ in range(depth)]
+                [FiLMLayer(film_geom_dim, hidden_dim, gamma_clip=film_gamma_clip) for _ in range(depth)]
             )
             if film_geom_dim > 0
             else None
@@ -348,6 +361,8 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        film_gamma_clip: float = 0.0,
+        film_geom_norm: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -359,6 +374,8 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.film_gamma_clip = film_gamma_clip
+        self.film_geom_norm = film_geom_norm
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -372,7 +389,12 @@ class SurfaceTransolver(nn.Module):
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.geom_encoder = (
-            GeomEncoder(self.surface_input_dim, film_encoder_dim * 2, film_encoder_dim)
+            GeomEncoder(
+                self.surface_input_dim,
+                film_encoder_dim * 2,
+                film_encoder_dim,
+                output_norm=film_geom_norm,
+            )
             if use_film
             else None
         )
@@ -385,6 +407,7 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            film_gamma_clip=film_gamma_clip if use_film else 0.0,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -570,6 +593,8 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
+    film_gamma_clip: float = 0.0
+    film_geom_norm: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -729,6 +754,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        film_gamma_clip=config.film_gamma_clip,
+        film_geom_norm=config.film_geom_norm,
     )
 
 
