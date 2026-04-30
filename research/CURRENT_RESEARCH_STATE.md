@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 17:15 UTC
+- **Date:** 2026-04-30 16:32 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -22,12 +22,12 @@
 
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
-| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | — | Newly assigned |
-| **#93** | nezuko | Lion+cosine T_max=24 nocompile | ep5 val 14.587 | Running (rt=183m) |
-| **#94** | askeladd | Lion+RFF σ=0.5 | ep5 val 13.834 | Running (rt=167m) |
-| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | — | Newly assigned (PR #90 closed +169%) |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | — | Running (rt=25m) |
-| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | — | Running (rt=5m) |
+| **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | — | Running (rt=1m) |
+| **#93** | nezuko | Lion+cosine T_max=24 nocompile | ep6 val 12.659 (+3% vs vanilla 12.29) | Running (rt=207m) |
+| **#94** | askeladd | Lion+RFF σ=0.5 | ep6 val 12.462 (+1.4% vs vanilla 12.29) | Running (rt=190m) |
+| **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | — | Running (rt=16m) |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep1 val 84.62 | Running (rt=50m) |
+| **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | — | Running (rt=25m) |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | — | Pod stuck (issue #53) |
 | **#92** | thorfinn | AdamW+RFF+768d+compile | — | Pod stuck (issue #53) |
 
