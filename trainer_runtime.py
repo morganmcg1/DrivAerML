@@ -913,6 +913,22 @@ def _finite_mean(values: Iterable[float]) -> float:
     return sum(finite) / max(len(finite), 1)
 
 
+def _bilateral_mirror_inputs(
+    surface_x: torch.Tensor,
+    volume_x: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reflect inputs across the xz symmetry plane (y -> -y, n_y -> -n_y)."""
+
+    surface_mirror = surface_x.clone()
+    # surface_x channels: [x, y, z, n_x, n_y, n_z, area]
+    surface_mirror[..., 1] = -surface_mirror[..., 1]
+    surface_mirror[..., 4] = -surface_mirror[..., 4]
+    volume_mirror = volume_x.clone()
+    # volume_x channels: [x, y, z, sdf]
+    volume_mirror[..., 1] = -volume_mirror[..., 1]
+    return surface_mirror, volume_mirror
+
+
 def accumulate_eval_batch(
     accumulator: EvalAccumulator,
     *,
@@ -921,6 +937,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    bilateral_tta: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -934,14 +951,38 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    surface_pred = transform.invert_surface(surface_pred_norm)
+    volume_pred = transform.invert_volume(volume_pred_norm)
+
+    if bilateral_tta:
+        surface_x_mirror, volume_x_mirror = _bilateral_mirror_inputs(
+            batch.surface_x,
+            batch.volume_x,
+        )
+        with autocast_context(device, amp_mode):
+            out_mirror = model(
+                surface_x=surface_x_mirror,
+                surface_mask=batch.surface_mask,
+                volume_x=volume_x_mirror,
+                volume_mask=batch.volume_mask,
+            )
+        surface_pred_mirror = transform.invert_surface(out_mirror["surface_preds"].float())
+        volume_pred_mirror = transform.invert_volume(out_mirror["volume_preds"].float())
+        # Un-mirror outputs: tau_y (channel 2) is bilaterally anti-symmetric.
+        surface_pred_mirror = surface_pred_mirror.clone()
+        surface_pred_mirror[..., 2] = -surface_pred_mirror[..., 2]
+        # Average in denormalized space and re-normalize for SSE accumulation.
+        surface_pred = (surface_pred + surface_pred_mirror) * 0.5
+        volume_pred = (volume_pred + volume_pred_mirror) * 0.5
+        surface_pred_norm = transform.apply_surface(surface_pred)
+        volume_pred_norm = transform.apply_volume(volume_pred)
+
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
     accumulator.surface_loss_count += surface_count
     accumulator.volume_loss_sse += volume_sse
     accumulator.volume_loss_count += volume_count
-    surface_pred = transform.invert_surface(surface_pred_norm)
-    volume_pred = transform.invert_volume(volume_pred_norm)
 
     if bool(batch.surface_mask.any()):
         surface_abs = (surface_pred - batch.surface_y).abs()
@@ -1086,6 +1127,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    bilateral_tta: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1097,6 +1139,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            bilateral_tta=bilateral_tta,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1416,8 +1459,16 @@ def run_final_evaluation(
         }
     )
 
+    bilateral_tta = bool(getattr(config, "use_bilateral_tta", False))
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            bilateral_tta=bilateral_tta,
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1437,7 +1488,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            bilateral_tta=bilateral_tta,
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

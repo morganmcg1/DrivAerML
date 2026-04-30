@@ -79,6 +79,8 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    wall_shear_axis_weights: str = "1.0,1.0,1.0"
+    use_bilateral_tta: bool = False
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -151,6 +153,25 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def parse_wall_shear_axis_weights(raw: str) -> tuple[float, float, float]:
+    parts = [chunk.strip() for chunk in raw.split(",") if chunk.strip()]
+    if len(parts) != 3:
+        raise ValueError(
+            f"--wall-shear-axis-weights expects three comma-separated floats, got {raw!r}"
+        )
+    try:
+        weights = tuple(float(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError(
+            f"--wall-shear-axis-weights must be three floats, got {raw!r}"
+        ) from exc
+    if any(not math.isfinite(w) or w < 0.0 for w in weights):
+        raise ValueError(
+            f"--wall-shear-axis-weights values must be finite and non-negative, got {weights}"
+        )
+    return weights  # type: ignore[return-value]
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -160,6 +181,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    wall_shear_axis_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -171,7 +193,14 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_pred = out["surface_preds"]
+        pressure_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
+        wsx_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
+        wsy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
+        wsz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+        wx, wy, wz = wall_shear_axis_weights
+        # Divide by 4 so uniform weights match the baseline 4-channel mean exactly.
+        surface_loss = (pressure_loss + wx * wsx_loss + wy * wsy_loss + wz * wsz_loss) / 4.0
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -183,6 +212,10 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "surface_loss_pressure": float(pressure_loss.detach().cpu().item()),
+        "surface_loss_wallshear_x": float(wsx_loss.detach().cpu().item()),
+        "surface_loss_wallshear_y": float(wsy_loss.detach().cpu().item()),
+        "surface_loss_wallshear_z": float(wsz_loss.detach().cpu().item()),
     }
 
 
@@ -192,6 +225,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     try:
         config = parse_args(argv)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
+        wall_shear_axis_weights = parse_wall_shear_axis_weights(config.wall_shear_axis_weights)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -296,6 +330,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    wall_shear_axis_weights=wall_shear_axis_weights,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -331,6 +366,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/surface_loss_pressure": batch_loss_metrics["surface_loss_pressure"],
+                            "train/surface_loss_wallshear_x": batch_loss_metrics["surface_loss_wallshear_x"],
+                            "train/surface_loss_wallshear_y": batch_loss_metrics["surface_loss_wallshear_y"],
+                            "train/surface_loss_wallshear_z": batch_loss_metrics["surface_loss_wallshear_z"],
                         }
                     )
 
@@ -483,6 +522,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        bilateral_tta=config.use_bilateral_tta,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -497,6 +537,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    bilateral_tta=config.use_bilateral_tta,
                 )
                 for name, loader in val_loaders.items()
             }
