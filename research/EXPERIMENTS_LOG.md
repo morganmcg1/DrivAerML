@@ -6,6 +6,37 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 21:00 UTC — PR #109 CLOSED: frieren Lion uncompiled + 1-epoch warmup — warmup closed-door
+
+- **Branch:** `frieren/round7-lion-warmup`
+- **W&B run:** `frieren-rank0` — group `tay-round7-lion-warmup-1ep`, 285 min, 9 val epochs
+- **Hypothesis:** Add 1-epoch LR warmup to Lion uncompiled SOTA stack — potentially smoother early descent.
+- **Result:** test_abupt **11.596** vs SOTA 11.208 (+3.5% regression). Best val 10.415 (ep9). Worse on every axis.
+
+| Metric | PR #109 warmup | SOTA PR #50 | Δ |
+|---|---:|---:|---:|
+| abupt_mean | **11.596** | 11.208 | +3.5% |
+| surface_pressure | 6.540 | 6.193 | +5.6% |
+| wall_shear | 11.647 | 11.199 | +4.0% |
+| volume_pressure | 12.857 | 12.726 | +1.0% |
+| tau_x | 9.910 | 9.512 | +4.2% |
+| tau_y | 14.100 | 13.592 | +3.7% |
+| tau_z | 14.572 | 14.017 | +4.0% |
+
+Trajectory comparison (ep1 onward, both Lion uncompiled lr=5e-5):
+
+| ep | warmup (#109) | vanilla (#50) | gap |
+|---:|---:|---:|---:|
+| 1 | 84.62 | 80.68 | +5% |
+| 4 | 21.11 | 17.31 | +22% |
+| 7 | 11.55 | 11.11 | +4% |
+| 9 | 10.42 | 10.08 | +3% |
+
+- **Pattern:** warmup costs >1 full epoch of progress. By ep4 the warmup model is 22% behind. Gap closes by ep9 to +3% but the deficit is permanent — the ep1 LR ramp wastes a full epoch's worth of update magnitude.
+- **Mechanism:** Lion's sign-based updates are already low-magnitude relative to AdamW. Warmup further reduces effective learning during a phase where we cannot afford slow descent (only 9 epochs in budget).
+- **Verdict:** **Warmup closed-door on Lion uncompiled.** Constant LR is correct for this 9-epoch budget.
+- **Frieren reassigned** to PR #120: batch=8 (2× batch lever).
+
 ## 2026-04-30 20:23 UTC — PR #92 CLOSED: thorfinn AdamW+RFF+768d+compile — diverged ep5-6
 
 - **Branch:** `thorfinn/round7-adamw-rff-768d-compile`
