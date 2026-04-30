@@ -45,7 +45,7 @@ Per-epoch val_primary/abupt_axis_mean_rel_l2_pct:
 | **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | ep4 val 18.86 (vs vanilla 17.31, +9.0%) | Running (rt=130m) — gap widening, low-LR confirming undertrained |
 | **#114** | askeladd | Lion uncompiled SOTA + EMA=0.998 (EMA sweep faster) | **ep1 val 41.81 v2** (vs vanilla 80.68, **−48% better**) | Running v2 after restart (rt=38m) — early lead replicating |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep8 val 10.242** (vs vanilla ep8 10.38, **−1.3% better**) | Running (rt=252m) — winner, gap compressing |
-| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | **ep9 val 10.415** (vs vanilla 10.083, +3.3%) | Running (rt=271m) — completed 9 epochs, test imminent |
+| **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | **FINISHED test 11.596 (+3.5% regression)** | Awaiting student PR ready-for-review |
 | **#110** | edward | Lion uncompiled SOTA + cosine T_max=50 (gentle schedule) | **ep8 val 10.290** (vs vanilla 10.38, **−0.9% better**) | Running (rt=254m) — winner, gap compressing |
 | **#72** | fern | AdamW+RFF+compile + per-axis tau_y/tau_z | ep5 val 21.39 | Running (rt=90m) |
 | **#115** | thorfinn | Compound: Lion lr=1e-4 + EMA=0.999 (combining alphonse + tanjiro winners) | — | Just assigned |
