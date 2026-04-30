@@ -37,6 +37,28 @@ Trajectory comparison (ep1 onward, both Lion uncompiled lr=5e-5):
 - **Verdict:** **Warmup closed-door on Lion uncompiled.** Constant LR is correct for this 9-epoch budget.
 - **Frieren reassigned** to PR #120: batch=8 (2× batch lever).
 
+## 2026-04-30 21:38 UTC — PR #111 MERGED: tanjiro EMA=0.999 — new SOTA 11.142
+
+- **Branch:** `tanjiro/round7-ema-fast`
+- **W&B run:** `ab3y4ej7` rank 0 — group `tay-round7-ema-fast`, 285 min, 9 val epochs, best val 9.989 (ep9, first sub-10)
+- **Hypothesis:** EMA decay 0.999 on Lion uncompiled SOTA — faster tracking captures rapid late-stage convergence better under 9-epoch budget.
+- **Result:** test_abupt **11.142** vs prior SOTA 11.170 (**−0.25%, new SOTA**). Best val 9.989 (first sub-10 val on tay).
+
+| Metric | PR #111 (MERGED) | PR #110 prior | PR #50 | Δ vs #110 | AB-UPT |
+|---|---:|---:|---:|---:|---:|
+| abupt_mean | **11.142** | 11.170 | 11.208 | **−0.028** | — |
+| surface_pressure | 6.209 | 6.264 | 6.193 | −0.055 | 3.82 |
+| wall_shear | **11.138** | 11.197 | 11.199 | −0.059 | 7.29 |
+| volume_pressure | **12.548** | 12.556 | 12.726 | −0.008 | 6.08 |
+| tau_x | **9.436** | 9.552 | 9.512 | −0.116 | 5.35 |
+| tau_y | **13.525** | 13.572 | 13.592 | −0.047 | 3.65 |
+| tau_z | 13.992 | **13.904** | 14.017 | +0.088 | 3.63 |
+
+- **Analysis:** EMA=0.999 beats 0.9995 on 6/7 axes. Only tau_z regressed slightly (+0.088). Mechanism: under a 9-epoch budget, EMA=0.9995 has half-life ~1388 steps — too slow to fully track the rapid late-stage descent. EMA=0.999 (half-life ~693 steps) is better calibrated to this budget.
+- **First sub-10 best val on tay** — ep9 val 9.989 vs vanilla 10.083.
+- **Tanjiro reassigned** to PR #135: T_max=100 + EMA=0.999 (schedule sweep extension on new SOTA stack).
+- **New SOTA: 11.142**
+
 ## 2026-04-30 21:22 UTC — PR #110 MERGED: edward Lion+cosine T_max=50 — new SOTA 11.170
 
 - **Branch:** `edward/round7-lion-cosine-t50`
