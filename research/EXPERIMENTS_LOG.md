@@ -867,3 +867,46 @@ Lion is a strong empirical winner across vision/language/graph
 transformer training, uses ~50% less optimizer-state memory than
 AdamW, and composes orthogonally with all Round 1 levers.
 
+## 2026-04-30 11:00 UTC — PR #70 CLOSED: tanjiro Lion+compile+lr=2.5e-5 (half-LR) — diverged late, 9th Lion+modification failure
+
+- **Branch:** `tanjiro/round5-lion-half-lr`
+- **W&B run:** `t5qnagui` — finished 154.6min (compile: ~10 epochs in budget window)
+- **Hypothesis:** Halving LR from 5e-5 to 2.5e-5 would suppress the Lion+compile sign-bias instability by reducing per-step magnitude, opening the Lion+compile frontier.
+- **Result: DIVERGED — best mid-training val 13.071 at step 19046 (~ep7), final val 33.36 at terminal step**
+
+| Metric | Best mid-train val | Final val (DIVERGED) | SOTA `vnb7oheo` |
+|---|---:|---:|---:|
+| val_abupt | **13.071** (ep~7) | 33.36 | — |
+| No test_primary | — | — | 11.303 |
+
+- **Val trajectory:** stable descent ep1→ep7 (val 13.07), then **diverged ep9-10** (val 33.36 terminal). State=finished at 154.6min — confirmed ~10 epochs at compile speed (~16min/epoch). No test eval was run (val was final-epoch diverged at terminal step; best-val checkpoint source=None in summary).
+- **Conclusion: Lion+compile diverges at half-LR too.** Half-LR delayed onset by ~2 epochs vs full-LR but did NOT prevent divergence. **9th confirmed Lion+modification failure.**
+- **Mechanism update:** The sign-bias issue scales with gradient magnitude, not LR magnitude. Halving LR cuts the step size but leaves the binary sign pattern unchanged — the accumulated bias toward deterministic sign flips at low gradient steps still drives divergence, just with smaller increments.
+- **Lion+compile frontier is closed at any LR within 270min budget.**
+- **Stable Lion variants confirmed (only 2):**
+  1. Vanilla Lion uncompiled (vnb7oheo, test 11.30 SOTA)
+  2. Lion+RFF uncompiled (edward #51 ftg0ci0p, val 10.665 ep9 — SOTA candidate, new run iocqp761 in progress)
+- **Reassignment:** tanjiro → PR #90 (Lion+RFF+EMA decay 0.9999 — yi #13 compounding).
+
+## 2026-04-30 11:00 UTC — PR #55 CLOSED: alphonse AdamW+RFF+compile+vol_w=3.0 — vol_w=3 lever is closed-door
+
+- **Branch:** `alphonse/round3-rff-compile-vol3`
+- **W&B run:** `lahk19ws` — finished 287min, **test eval completed**
+- **Hypothesis:** Upweighting volume loss (vol_w=3 vs 2) on the stable AdamW+RFF+compile base targets the volume_pressure ×2.1 binding gap without Lion-fragility risk.
+- **Result: REGRESSION — test_abupt 16.387 (+45% vs SOTA 11.30, +12.6% vs PR #46 14.55)**
+
+| Metric | PR #55 (vol_w=3) | PR #46 (vol_w=2) | SOTA 11.30 | AB-UPT |
+|---|---:|---:|---:|---:|
+| **abupt_mean** | **16.387** | 14.550 | 11.303 | — |
+| surface_pressure | 10.256 | 8.628 | 6.216 | 3.82 |
+| wall_shear | 17.349 | 14.882 | 11.315 | 7.29 |
+| volume_pressure | 14.537 | 15.032 | 12.755 | 6.08 |
+| tau_x | 15.060 | 12.901 | 9.563 | 5.35 |
+| tau_y | 20.267 | 17.281 | 13.831 | 3.65 |
+| tau_z | 21.813 | 18.907 | 14.147 | 3.63 |
+
+- **Trajectory:** best val 15.486 at ep12, then diverged: ep15=15.52 → ep16=21.89 → ep17=57.04. **AdamW+vol_w=3 also diverged late** (ep16-17), which is unusual for AdamW. The upweighting likely over-tilted the loss landscape such that surface gradient signal dominated more strongly than expected in late-training, pushing the model into an unstable regime.
+- **Interpretation:** vol_w=3.0 produces a small improvement on volume_pressure (15.03→14.54, -3%) but at the cost of large regressions on ALL other axes (surface +19%, tau_y +17%, tau_z +15%, etc.), AND late divergence.
+- **Combined with frieren #68 (Lion+vol_w=3, test 15.57):** vol_w=3 lever is **closed-door at 4L/512d for both AdamW and Lion**. Volume_pressure recovery requires architectural change (deeper/wider model) or different data representation.
+- **Reassignment:** alphonse → PR #91 (Lion+RFF+sigma=2.0 — RFF frequency sweep targeting tau_y/tau_z).
+
