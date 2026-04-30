@@ -1810,7 +1810,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             log_metrics["early_stop/triggered"] = 1.0
         wandb.log(log_metrics)
 
-        improved = primary_val < best_val
+        primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0
+        improved = primary_val_is_valid and primary_val < best_val
         if improved:
             best_val = primary_val
             best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
