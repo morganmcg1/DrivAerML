@@ -6,6 +6,36 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 17:05 UTC — PR #91 CLOSED: alphonse Lion+RFF σ=2.0 — sigma sweep complete, RFF definitively closed on Lion uncompiled
+
+- **Branch:** `alphonse/round6-lion-rff-sigma2`
+- **W&B run:** `ip8tf46r` rank 0 — group `alphonse/round6-lion-rff-sigma2-rank0`, 285 min, 9 val epochs, SENPAI_TIMEOUT=360
+- **Hypothesis:** RFF σ=2.0 (higher freq than σ=1.0) on Lion uncompiled — higher freq features may better capture tau_y/tau_z geometry.
+- **Result:** test_abupt **11.376** vs SOTA 11.208 (+1.5% regression). Best val 10.321 (ep9).
+
+| Metric | PR #91 σ=2.0 | SOTA PR #50 (vanilla) | Δ |
+|---|---:|---:|---:|
+| abupt_mean | **11.376** | 11.208 | +1.5% |
+| surface_pressure | 6.311 | 6.193 | +1.9% |
+| wall_shear | 11.342 | 11.199 | +1.3% |
+| volume_pressure | 13.090 | 12.726 | +2.9% |
+| wall_shear_x | 9.739 | 9.512 | +2.4% |
+| **wall_shear_y** | **13.450** | 13.592 | **−1.0% BETTER** |
+| wall_shear_z | 14.289 | 14.017 | +1.9% |
+
+**Full sigma sweep summary (Lion uncompiled, vanilla SOTA = 11.208):**
+
+| σ | ep5 val | ep9 val | test | Δ |
+|---|---:|---:|---:|---:|
+| vanilla (no RFF) | 14.25 | 10.083 | **11.208** | SOTA |
+| σ=0.5 (askeladd, running) | 13.83 | TBD | TBD | >+1.5% |
+| σ=1.0 (edward #51) | 13.53 | 10.703 | 11.741 | +4.7% |
+| σ=2.0 (this PR) | 13.25 | 10.321 | 11.376 | +1.5% |
+
+- **Pattern:** RFF accelerates ep1-5 (all σ values beat vanilla early), but vanilla catches up by ep6 and dominates from ep6 onward. Higher σ reduces the regression penalty but no σ beats vanilla.
+- **Notable:** σ=2.0 wins on tau_y by 1% (13.450 vs 13.592). Higher freq encoding may be meaningful for tau components — worth revisiting if other levers plateau.
+- **Closed-door:** RFF on Lion uncompiled at any tested σ (0.5, 1.0, 2.0) is a regression. Schedule sweep is the active focus.
+
 ## 2026-04-30 16:45 UTC — PR #90 CLOSED: tanjiro Lion+RFF + EMA decay 0.9999 — budget-incompatible
 
 - **Branch:** `tanjiro/round6-lion-rff-ema9999`
