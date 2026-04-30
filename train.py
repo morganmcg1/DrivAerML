@@ -710,6 +710,8 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
+    grad_skip_threshold: float = 0.0
+    grad_skip_nonfinite: bool = True
     use_anp_surface_decoder: bool = False
     anp_surface_decoder_layers: int = 2
     anp_surface_decoder_heads: int = 8
@@ -1871,16 +1873,48 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
-            if config.clip_grad_norm > 0:
-                pre_clip_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), max_norm=config.clip_grad_norm
+            grad_tensors = [p.grad for p in model.parameters() if p.grad is not None]
+            if grad_tensors:
+                pre_clip_total_norm = torch.norm(
+                    torch.stack([g.detach().norm(2) for g in grad_tensors]),
+                    2,
                 )
-                if should_log_gradients:
-                    gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
-                    gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
-            optimizer.step()
-            if ema is not None:
-                ema.update(model)
+            else:
+                pre_clip_total_norm = torch.zeros((), device=device)
+            pre_clip_norm_finite = bool(torch.isfinite(pre_clip_total_norm))
+            pre_clip_norm_value = (
+                float(pre_clip_total_norm) if pre_clip_norm_finite else float("inf")
+            )
+            skip_step = False
+            skip_reason = ""
+            if config.grad_skip_nonfinite and not pre_clip_norm_finite:
+                skip_step = True
+                skip_reason = "nonfinite"
+            elif (
+                config.grad_skip_threshold > 0
+                and pre_clip_norm_finite
+                and pre_clip_norm_value > config.grad_skip_threshold
+            ):
+                skip_step = True
+                skip_reason = "spike"
+            if skip_step:
+                optimizer.zero_grad(set_to_none=True)
+            else:
+                if config.clip_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(),
+                        max_norm=config.clip_grad_norm,
+                        error_if_nonfinite=False,
+                    )
+                optimizer.step()
+                if ema is not None:
+                    ema.update(model)
+            if should_log_gradients:
+                gradient_metrics["train/grad/pre_clip_norm"] = pre_clip_norm_value
+                gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
+                gradient_metrics["train/grad/skip_threshold"] = (
+                    config.grad_skip_threshold
+                )
             weight_metrics = (
                 collect_weight_metrics(
                     model,
@@ -1896,6 +1930,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
                 "train/volume_loss": batch_loss_metrics["volume_loss"],
+                "train/grad/pre_clip_norm_step": pre_clip_norm_value,
+                "train/grad/step_skipped": float(skip_step),
+                "train/grad/step_skipped_nonfinite": float(
+                    skip_step and skip_reason == "nonfinite"
+                ),
+                "train/grad/step_skipped_spike": float(
+                    skip_step and skip_reason == "spike"
+                ),
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
