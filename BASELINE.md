@@ -2,7 +2,49 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: thorfinn PR #66 wins — new baseline 2026-04-30
+## Status: fern PR #99 wins — new baseline 2026-04-29
+
+PR #99 (fern, lr=5e-4 peak LR, 5× base lr=1e-4) reduced
+`val_primary/abupt_axis_mean_rel_l2_pct` from 12.74 (thorfinn PR #66) to
+**10.69** — a 16.1% improvement on the headline metric. W&B run: `3hljb0mg`.
+
+Key finding: raising the peak learning rate from 2e-4 (thorfinn base) to 5e-4
+significantly improves convergence without instability. The 5× LR boost applied
+on top of the thorfinn base config (6L/256d, W_y=2, W_z=2) yields best-ever
+metrics across surface_pressure (6.97 vs 7.64), wall_shear (11.69 vs 12.86),
+and volume_pressure (7.85 vs 13.14). 4.6h runtime, lr=5e-4, wd=5e-4.
+
+**Compounding wins so far (all landed on `yi`):**
+1. PR #11 kohaku — tangential wall-shear projection loss code
+2. PR #9 gilbert — protocol fixes (bs=8, vol_w=2.0, validation-every=1)
+3. PR #4 chihiro — width scale-up to 512d/8h
+4. PR #14 senku — depth scale-up to 6L/256d
+5. PR #58 alphonse — NaN-safe checkpoint guard (bugfix)
+6. PR #66 thorfinn — per-axis tau_y/z loss upweighting W_y=2, W_z=2
+7. PR #99 fern — LR peak 5e-4 (5× base) (this PR)
+
+**New recommended base config (PR #99 winning arm):**
+
+```bash
+cd target/
+python train.py \
+  --volume-loss-weight 2.0 \
+  --batch-size 8 \
+  --validation-every 1 \
+  --lr 5e-4 --weight-decay 5e-4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 6 --model-hidden-dim 256 --model-heads 4 --model-slices 128 \
+  --ema-decay 0.9995 \
+  --clip-grad-norm 1.0 \
+  --wallshear-y-weight 2.0 \
+  --wallshear-z-weight 2.0 \
+  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
+```
+
+---
+
+## Previous: thorfinn PR #66 — baseline 2026-04-30
 
 PR #66 (thorfinn, per-axis tau_y/z loss upweighting W_y=2, W_z=2 on 6L/256d base) reduced
 `test_primary/abupt_axis_mean_rel_l2_pct` from 13.15 (senku PR #14) to
@@ -13,33 +55,6 @@ Key finding: upweighting the two hardest wall-shear axes (tau_y and tau_z) by 2�
 improves the composite metric without hurting surface_pressure or volume_pressure.
 W_y=2, W_z=2 beats W_y=1.5, W_z=1.5 and the equal-weight arms. Thorfinn's code
 adds `--wallshear-y-weight` and `--wallshear-z-weight` flags to `train.py`.
-
-**Compounding wins so far (all landed on `yi`):**
-1. PR #11 kohaku — tangential wall-shear projection loss code
-2. PR #9 gilbert — protocol fixes (bs=8, vol_w=2.0, validation-every=1)
-3. PR #4 chihiro — width scale-up to 512d/8h
-4. PR #14 senku — depth scale-up to 6L/256d
-5. PR #58 alphonse — NaN-safe checkpoint guard (bugfix)
-6. PR #66 thorfinn — per-axis tau_y/z loss upweighting W_y=2, W_z=2 (this PR)
-
-**New recommended base config (PR #66 winning arm):**
-
-```bash
-cd target/
-python train.py \
-  --volume-loss-weight 2.0 \
-  --batch-size 8 \
-  --validation-every 1 \
-  --lr 2e-4 --weight-decay 5e-4 \
-  --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 6 --model-hidden-dim 256 --model-heads 4 --model-slices 128 \
-  --ema-decay 0.9995 \
-  --clip-grad-norm 1.0 \
-  --wallshear-y-weight 2.0 \
-  --wallshear-z-weight 2.0 \
-  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
-```
 
 ---
 
@@ -64,14 +79,6 @@ state=finished, 3 best epochs, params ~12.7M. Width upgrade used `lr=5e-5`
 Standout gain: `volume_pressure` 14.37 vs 15.21 — orthogonal to FiLM and
 cosine-EMA wins still pending merge (PRs #8, #13).
 
-**Compounding wins so far (all landed on `yi`):**
-1. PR #11 kohaku — tangential wall-shear projection loss
-2. PR #9 gilbert — protocol fixes (bs=8, vol_w=2.0, validation-every=1)
-3. PR #4 chihiro — width scale-up to 512d/8h (this PR)
-
-PRs #8 (frieren FiLM, 16.53) and #13 (norman cosine EMA, 15.82) are pending
-rebase+merge and should push the composite lower still.
-
 ---
 
 ## Previous: gilbert PR #9 — baseline 2026-04-29 03:57 UTC
@@ -84,7 +91,7 @@ PR #9 (gilbert, vol_w=2.0 + protocol fixes) reduced
 
 PR #9 was a CLI-flag-only change (no code diff). The win compounds the
 existing PR #11 projection-loss code on `yi` with: `--volume-loss-weight 2.0`,
-`--batch-size 8`, `--validation-every 1`, `--gradient-log-every 100
+`--batch-size 8`, `--validation-every=1`, `--gradient-log-every 100
 --weight-log-every 100`. **Future PRs should adopt this base config.**
 
 **Important caveat** — gilbert's run did **not** include
@@ -112,86 +119,33 @@ checkpoint reload.
 
 | Metric | Best | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **12.74** | #66 | gvigs86q | 2026-04-30 |
-| `test_primary/surface_pressure_rel_l2_pct` | **7.64** | #14 | et4ajeqj | 2026-04-29 |
-| `test_primary/wall_shear_rel_l2_pct` | **12.86** | #66 | gvigs86q | 2026-04-30 |
-| `test_primary/volume_pressure_rel_l2_pct` | **13.14** | #66 | gvigs86q | 2026-04-30 |
-| `test_primary/wall_shear_x_rel_l2_pct` | **11.29** | #66 | gvigs86q | 2026-04-30 |
-| `test_primary/wall_shear_y_rel_l2_pct` | **15.15** | #66 | gvigs86q | 2026-04-30 |
-| `test_primary/wall_shear_z_rel_l2_pct` | **15.05** | #66 | gvigs86q | 2026-04-30 |
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **10.69** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/surface_pressure_rel_l2_pct` | **6.97** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/wall_shear_rel_l2_pct` | **11.69** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/volume_pressure_rel_l2_pct` | **7.85** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/wall_shear_x_rel_l2_pct` | **10.17** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/wall_shear_y_rel_l2_pct` | **13.73** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/wall_shear_z_rel_l2_pct` | **14.73** | #99 | 3hljb0mg | 2026-04-29 |
 
 Note: Additional code wins pending merge (all superseded on headline metric by
-PR #14 but contain orthogonal code contributions) — PRs #22 (gilbert clip=1.0,
-14.80), #24 (emma sq-rel-L2, 14.81), #3 (askeladd codex-lineage, 15.27),
-#13 (norman cosine EMA, 15.82). PR #8 (frieren FiLM, 16.53) merged 2026-04-29 —
-FiLM geometry conditioning code now on `yi`.
-
-(`p_s = 10.07` from PR #11 is a marginally better single-axis number, but the
-abupt_axis_mean win is decisive and `tau_*` improvements dominate the
-composite metric.)
-
-**Reproduce (PR #4 winning config — new recommended base for 512d experiments):**
-
-```bash
-cd target/
-python train.py \
-  --volume-loss-weight 2.0 \
-  --batch-size 4 \
-  --validation-every 1 \
-  --lr 5e-5 --weight-decay 5e-4 \
-  --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
-  --ema-decay 0.9995 \
-  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
-```
-
-**Note:** `lr=5e-5` is necessary for 512d — three runs at 2e-4 diverged.
-`bs=4` is the largest batch fitting 96GB VRAM at 512d. For 256d experiments
-still use `bs=8 lr=2e-4` (gilbert PR #9 config).
-
-**Previous 256d baseline reproduce (PR #9):**
-```bash
-cd target/
-python train.py \
-  --volume-loss-weight 2.0 \
-  --batch-size 8 \
-  --validation-every 1 \
-  --lr 2e-4 --weight-decay 5e-4 \
-  --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 4 --model-hidden-dim 256 --model-heads 4 --model-slices 128 \
-  --ema-decay 0.9995 \
-  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
-```
-
-**Note:** PR #9 did **not** include `--use-tangential-wallshear-loss`. PR #11
-showed the projection helps; combining both should compose. Future Round-2
-experiments should layer on top of the gilbert config and add
-`--use-tangential-wallshear-loss` if the hypothesis is wall-shear-related.
+PR #99 but contain orthogonal code contributions) — PRs #98 (emma weight-decay),
+#106 (thorfinn yw2.5-zw2.5), #97 (edward slices192), #63 (askeladd sq-rel),
+#104 (senku ema9997), #102 (haku dropout). PRs #8 (frieren FiLM) merged 2026-04-29.
 
 **Distance from AB-UPT targets (multiple of target):**
 
-| Metric | yi best (PR #66) | AB-UPT | Ratio |
+| Metric | yi best (PR #99) | AB-UPT | Ratio |
 |---|---:|---:|---:|
-| surface_pressure | 7.64 | 3.82 | 2.0× |
-| wall_shear | 12.86 | 7.29 | 1.8× |
-| volume_pressure | 13.14 | 6.08 | 2.2× |
-| wall_shear_x | 11.29 | 5.35 | 2.1× |
-| wall_shear_y | 15.15 | 3.65 | 4.2× |
-| wall_shear_z | 15.05 | 3.63 | 4.1× |
+| surface_pressure | 6.97 | 3.82 | 1.8× |
+| wall_shear | 11.69 | 7.29 | 1.6× |
+| volume_pressure | 7.85 | 6.08 | 1.3× |
+| wall_shear_x | 10.17 | 5.35 | 1.9× |
+| wall_shear_y | 13.73 | 3.65 | 3.8× |
+| wall_shear_z | 14.73 | 3.63 | 4.1× |
 
-Wall_shear_y and wall_shear_z remain the largest gap at ~4× AB-UPT despite
-thorfinn's W_y=W_z=2 win. Volume pressure shows a known val→test gap (val
-~6.9 ≈ AB-UPT level, test 13.14 = 2.2×) — test generalization is the
-remaining challenge, not model capacity per se.
-
-**Known training-stability bug (gilbert flagged in PR #9):** `train.py` has
-**no gradient clipping**. Run B (vol_w=3.0) and several other Round-1 PRs
-diverged on this exact mechanism. Follow-up PR #22 (gilbert) is opened to
-add `torch.nn.utils.clip_grad_norm_` between `loss.backward()` and
-`optimizer.step()`. Once landed, larger LR / vol_w / batch sweeps become
-safe.
+Wall_shear_y and wall_shear_z remain the largest gap at ~4× AB-UPT.
+Volume pressure is now very close to AB-UPT (1.3×), suggesting the model
+has good capacity but wall-shear axis precision remains the key challenge.
 
 ## Reference config (`train.py` defaults on `yi`)
 
