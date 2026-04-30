@@ -556,6 +556,12 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_y_weight_start: float = -1.0
+    wallshear_y_weight_end: float = -1.0
+    wallshear_z_weight_start: float = -1.0
+    wallshear_z_weight_end: float = -1.0
+    wallshear_weight_warmup_frac: float = 0.5
+    wallshear_weight_warmup_steps: int = 0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1285,6 +1291,42 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def curriculum_wallshear_weight(
+    step: int,
+    total_steps: int,
+    *,
+    static_value: float,
+    start_value: float,
+    end_value: float,
+    warmup_frac: float,
+    warmup_steps_override: int = 0,
+) -> float:
+    """Linear curriculum schedule for a wallshear axis weight.
+
+    A negative ``start_value``/``end_value`` falls back to ``static_value``,
+    preserving backward compatibility with the static ``--wallshear-{y,z}-weight``
+    flags. Ramps linearly from start->end over the first ``warmup_frac`` of
+    ``total_steps`` and holds at end thereafter. ``warmup_steps_override>0``
+    bypasses ``warmup_frac * total_steps`` so the schedule horizon can be set
+    in actual-training step units (useful when timeout cuts training short of
+    the configured ``--epochs`` budget).
+    """
+    s = static_value if start_value < 0 else start_value
+    e = static_value if end_value < 0 else end_value
+    if s == e:
+        return s
+    if warmup_steps_override > 0:
+        warmup_steps = float(warmup_steps_override)
+    elif warmup_frac <= 0.0:
+        return e
+    else:
+        warmup_steps = max(1.0, warmup_frac * float(total_steps))
+    if warmup_steps <= 0.0:
+        return e
+    progress = min(1.0, float(step) / warmup_steps)
+    return s + (e - s) * progress
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1770,6 +1812,24 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            current_wallshear_y_weight = curriculum_wallshear_weight(
+                global_step,
+                total_estimated_steps,
+                static_value=config.wallshear_y_weight,
+                start_value=config.wallshear_y_weight_start,
+                end_value=config.wallshear_y_weight_end,
+                warmup_frac=config.wallshear_weight_warmup_frac,
+                warmup_steps_override=config.wallshear_weight_warmup_steps,
+            )
+            current_wallshear_z_weight = curriculum_wallshear_weight(
+                global_step,
+                total_estimated_steps,
+                static_value=config.wallshear_z_weight,
+                start_value=config.wallshear_z_weight_start,
+                end_value=config.wallshear_z_weight_end,
+                warmup_frac=config.wallshear_weight_warmup_frac,
+                warmup_steps_override=config.wallshear_weight_warmup_steps,
+            )
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1780,8 +1840,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
-                wallshear_y_weight=config.wallshear_y_weight,
-                wallshear_z_weight=config.wallshear_z_weight,
+                wallshear_y_weight=current_wallshear_y_weight,
+                wallshear_z_weight=current_wallshear_z_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1838,6 +1898,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "train/wallshear_y_weight": current_wallshear_y_weight,
+                "train/wallshear_z_weight": current_wallshear_z_weight,
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
