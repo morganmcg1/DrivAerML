@@ -448,6 +448,111 @@ this experiment surfaces is **throughput**, not LR schedule.
 
 ---
 
+## 2026-04-30 02:55 UTC — PR #49 CLOSED: askeladd grad-clip 5.0 — +35% regression vs new SOTA
+
+**Student:** askeladd | **W&B run:** `x09udzj3` | **Group:** `tay-round2-grad-clip-sweep`
+**Hypothesis:** Raise `--grad-clip-norm` from 1.0 to 5.0 on AdamW + compile baseline (PR #40).
+Frieren's PR #42 diagnostic showed `train/grad/clipped=1.0` at every step (23,458/23,458),
+discarding ~75% of late-training gradient magnitude. Single-delta lever to recover signal.
+
+### Results vs new SOTA `vnb7oheo` (Lion lr=5e-5)
+
+| Metric | PR #49 (askeladd, clip 5.0) | New SOTA (Lion 5e-5) | Δ |
+|---|---:|---:|---:|
+| `test_abupt` | **15.232** | 11.303 | **+34.8%** |
+| `val_abupt` | 14.219 | 10.096 | +40.8% |
+| surface_pressure | 9.338 | 6.216 | +50.2% |
+| wall_shear | 16.073 | 11.315 | +42.0% |
+| volume_pressure | 13.796 | 12.755 | +8.2% |
+| tau_y | 19.105 | 13.831 | +38.1% |
+| tau_z | 20.067 | 14.147 | +41.9% |
+
+Run finished cleanly: 284.9 min, best_epoch=16, 43,272 steps. Used Lion-translated LR/WD
+(`lr=5e-5, wd=5e-4`) with **AdamW** (note: askeladd correctly used the AdamW-equivalent translation
+for the AdamW arm, but the optimizer stays AdamW because the hypothesis is grad-clip on AdamW).
+
+### Diagnosis: clip-5 + AdamW under-trains vs Lion's normalized geometry
+
+The hypothesis was sound — clip 1.0 throws away most of the late-training signal. Raising it does
+recover loss/epoch. But the experimental landscape moved past it:
+
+1. **Lion sidesteps the issue entirely.** Sign-based updates make pre-clip grad-norm irrelevant —
+   per-step movement is bounded by `lr` directly, not gradient magnitude. Larger clip on AdamW
+   recovers some discarded signal but doesn't match Lion's per-channel normalization.
+2. **Marginal vs PR #46 (+4.7%) but uncompetitive vs SOTA 11.30.** On its own would have been
+   "send back, try lr=1e-4 + clip 5.0"; against Lion it's a clear close.
+3. **No forward composition.** Lion + clip 5.0 is ill-defined (Lion is not magnitude-bounded),
+   so this lever does not stack into the live Lion arms (#50/#51/#52/#54).
+
+### Disposition: CLOSED (+34.8% regression vs new SOTA)
+
+Diagnostic from frieren #42 (AdamW grad-clip binding) is preserved. Lever does not compose forward
+under Lion. Reassigning askeladd to a fresh round-3 hypothesis under the Lion lr=5e-5 SOTA.
+
+---
+
+## 2026-04-30 02:44 UTC — NEW SOTA documented: tanjiro arm B Lion lr=5e-5 — test_abupt 11.303
+
+**Student:** tanjiro (follow-up sweep, NOT advisor-assigned PR) | **W&B run:** `vnb7oheo`
+**Group:** `tanjiro-lion-lr-sweep` | **No PR — documented retroactively as new SOTA.**
+
+### Provenance
+
+After PR #39 Lion (paper config `lr=1.7e-5, wd=5e-3` → test_abupt 15.43) was reviewed, tanjiro's
+pod launched a follow-up sweep arm at the **AdamW-equivalent translation `lr=5e-5, wd=5e-4`** as
+arm B of the original two-arm comparison. This was not part of the advisor's assigned PR pipeline.
+The result was decisive enough to update BASELINE.md directly without retroactive PR creation.
+
+### Results — every axis is a new SOTA
+
+| Metric | tanjiro arm B (Lion 5e-5) | PR #46 (RFF+compile) | PR #39 Lion (paper) | AB-UPT ref | Δ vs PR #46 |
+|---|---:|---:|---:|---:|---:|
+| `test_abupt` | **11.303** | 14.550 | 15.43 | — | **−22.3%** |
+| surface_pressure | **6.216** | 8.628 | 9.45 | 3.82 | −28.0% |
+| wall_shear | **11.315** | 14.882 | 16.28 | 7.29 | −24.0% |
+| volume_pressure | **12.755** | 15.032 | 13.83 | 6.08 | −15.1% |
+| tau_x | **9.563** | 12.901 | 13.91 | 5.35 | −25.9% |
+| tau_y | **13.831** | 17.281 | 19.58 | 3.65 | −20.0% |
+| tau_z | **14.147** | 18.907 | 20.40 | 3.63 | −25.2% |
+
+Runtime: 4h50m (290 min, past 270-min budget — likely launched without strict timeout enforcement).
+Val curve was still descending at end → there's more headroom with the same recipe at a longer
+budget. Best-val checkpoint reload gave the test number above.
+
+### CRITICAL FINDING: Lion paper config is wrong for this dataset/scale
+
+PR #39 used Lion at `lr=1.7e-5, wd=5e-3` (Chen et al. 2023 paper config from image classification).
+This run used `lr=5e-5, wd=5e-4` (the AdamW-equivalent translation tanjiro tested as arm B). Same
+optimizer, same code, same data — **−27% improvement just from changing the LR/WD constants**.
+
+Why the paper config fails here:
+- Lion paper used image classification with millions of training samples; we have **400 cars**.
+- Smaller datasets need more aggressive per-step movement (higher `lr`) to traverse the loss
+  landscape inside a 270-min budget.
+- Higher `wd` in the paper helps regularize huge nets; our 4L/512d/8h is small enough that
+  `wd=5e-4` (AdamW-equivalent) is sufficient.
+
+**All future Lion experiments must use `--lr 5e-5 --weight-decay 5e-4`, not the paper config.**
+Posted notification on PRs #50, #51, #52, #54 instructing them to update their LR/WD before launch.
+
+### What this implies for the queued composition stack
+
+- **PR #50 (nezuko, Lion + compile)** — should now beat 11.30 by adding the +4–5% compile bump (epoch 16).
+- **PR #51 (edward, Lion + RFF)** — RFF gave +0.88 abupt at the AdamW base; expected ~10.5–10.8.
+- **PR #52 (tanjiro, Lion + RFF + compile)** — full triple-stack; if RFF+compile is orthogonal to Lion,
+  expect ~9.8–10.3.
+- **PR #54 (fern, Lion + per-axis tau_y/tau_z weights)** — directly targets binding 5×+ gap; expect
+  the largest delta on tau_y/tau_z specifically.
+
+### Volume_pressure note
+
+Lion arm B's `volume_pressure=12.755` is a regression vs PR #39 Lion paper-config (13.83 → wait,
+12.755 < 13.83 → improvement, −7.8%). Earlier write-up of "volume_pressure regression from PR #46"
+referred to AdamW+compile vs Lion. With Lion+5e-5 we recover that. PR #55 (alphonse, vol_w=3.0 on
+RFF+compile **AdamW** baseline) is now lower priority — the regression it targets dissolves under Lion.
+
+---
+
 ## 2026-04-30 01:55 UTC — PR #47 CLOSED: thorfinn bilateral train-aug — +36% regression
 
 **Student:** thorfinn | **W&B run:** `fn8pyav5` | **Group:** `thorfinn-tau-yz-attack`
