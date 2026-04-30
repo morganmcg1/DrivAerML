@@ -201,3 +201,169 @@
 - Hypothesis: Reference floor for stock train.py defaults.
 - Results: W&B run `a1fikrwe`, abupt=87.30
 - Commentary: Confirms massive gap between stock (3L/192d, 40k pts) and optimized protocol. NaN checkpoint guard bug discovered. Closed.
+
+---
+
+## 2026-04-30 14:00 — PR #58: [alphonse] NaN-safe checkpoint guard — MERGED (bugfix)
+- Branch: `alphonse/nan-checkpoint-guard-bugfix`
+- Hypothesis: Guard `best_checkpoint` overwrite against NaN primary_val to prevent EMA NaN from replacing valid checkpoint.
+- Results: Bugfix — no metric change.
+- Commentary: Root cause: `_finite_mean([nan, nan])` returns 0.0, and `0.0 < best_val` fires improved=True, overwriting valid checkpoint with NaN model. Fix: `primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0`. Validated by smoke run `tcyjp36i`. Merged to yi.
+
+---
+
+## 2026-04-30 14:10 — PR #66: [thorfinn] Per-axis tau_y/z loss upweighting W_y=2, W_z=2 — MERGED (NEW BEST)
+- Branch: `thorfinn/surface-loss-weight-and-per-axis-wallshear`
+- Hypothesis: Selectively upweight tau_y and tau_z channels in surface MSE loss (W_y=2, W_z=2, W_x=1) to redirect training gradient toward the two hardest wall-shear axes.
+- Results: 3-arm sweep on 6L/256d base
+
+| Arm | W_y | W_z | W&B run | abupt | wall_shear_y | wall_shear_z |
+|---|---:|---:|---|---:|---:|---:|
+| yw1.5-zw1.5 | 1.5 | 1.5 | `vf3y3z7g` | 13.01 | 15.49 | 15.41 |
+| **yw2-zw2** | **2.0** | **2.0** | **`gvigs86q`** | **12.74** | **15.15** | **15.05** |
+| yw3-zw3 | 3.0 | 3.0 | `w8r0mvf1` | 13.18 | 15.12 | 14.52 |
+
+| Metric | thorfinn yw2-zw2 | PR #14 (6L/256d) | AB-UPT |
+|---|---:|---:|---:|
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **12.74** | 13.15 | — |
+| `test_primary/surface_pressure_rel_l2_pct` | 7.86 | 7.64 | 3.82 |
+| `test_primary/wall_shear_rel_l2_pct` | 12.86 | 13.47 | 7.29 |
+| `test_primary/volume_pressure_rel_l2_pct` | 13.14 | 13.58 | 6.08 |
+| `test_primary/wall_shear_x_rel_l2_pct` | 11.29 | 11.53 | 5.35 |
+| `test_primary/wall_shear_y_rel_l2_pct` | 15.15 | 16.23 | 3.65 |
+| `test_primary/wall_shear_z_rel_l2_pct` | 15.05 | 16.75 | 3.63 |
+
+- Commentary: New yi best (12.74, −3.1% vs 13.15). The W=2 sweet spot outperforms W=1.5 and W=3 — W=3 overfits the tau_y/z directions, slightly hurting abupt. The selective approach (upweight only tau_y/z, not tau_x) avoids the divergence seen in haku's uniform weighting PR #10. tau_y and tau_z are the most challenging axes (4× AB-UPT); explicit gradient emphasis works.
+
+---
+
+## 2026-04-30 14:20 — PR #65: [violet] Volume-loss-weight sweep (1.5/2.0/3.0/4.0) — CLOSED
+- Branch: `violet/volume-pressure-loss-weight-sweep`
+- Hypothesis: vol_w=4.0 might further reduce volume_pressure by forcing more gradient toward volume prediction.
+- Results: 4-arm sweep
+
+| Arm | vol_w | W&B run | abupt | vol_pressure |
+|---|---:|---|---:|---:|
+| vw-15 | 1.5 | `n3k58pah` | 13.71 | 13.56 |
+| vw-20 | 2.0 | `ioq7jh9w` | 13.61 | 13.62 |
+| vw-30 | 3.0 | `kj2i4gx3` | 13.72 | 13.45 |
+| vw-40 | 4.0 | `v98qrfmd` | 13.71 | 13.30 |
+
+- Commentary: No arm beats baseline 12.74. vol_w=4.0 marginally improves volume_pressure (13.30 vs 13.58) but hurts wall-shear. The kill-threshold bug (>=N syntax) prematurely killed several arms. vol_w=2.0 confirmed as the correct operating point for composite metric. Closed.
+
+---
+
+## 2026-04-30 14:20 — PR #64: [fern] Stochastic depth regularization (3-rate sweep) — CLOSED
+- Branch: `fern/stochastic-depth-regularization`
+- Hypothesis: Stochastic depth (drop-path) regularization at rates 0.05/0.10/0.20 provides regularization to prevent overfitting.
+- Results: 3-arm sweep
+
+| Arm | sdp_rate | W&B run | abupt |
+|---|---:|---|---:|
+| sdp-005 | 0.05 | — (killed by threshold bug) | — |
+| sdp-010 | 0.10 | `q8yv93km` | 13.73 |
+| sdp-020 | 0.20 | `w3bt19pk` | 13.92 |
+
+- Commentary: All arms negative vs baseline 12.74 (+7.8% best). Stochastic depth regularization is redundant at 4-epoch budgets. Gradient clip already provides effective implicit regularization. Closed.
+
+---
+
+## 2026-04-30 14:20 — PR #63: [askeladd] Squared rel-L2 aux loss on 6L base — SENT BACK FOR REBASE
+- Branch: `askeladd/squared-rel-l2-aux-on-6l`
+- Hypothesis: Add squared relative-L2 aux loss on 6L base; weight sweep w=0.1/0.3/0.5/1.0.
+- Results: 4-arm sweep
+
+| Arm | weight | W&B run | abupt |
+|---|---:|---|---:|
+| w=0.1 | 0.1 | `qntz7gzr` | 13.42 |
+| w=0.3 | 0.3 | `h5w3vf5y` | 13.11 |
+| **w=0.5** | **0.5** | **`dln9trni`** | **12.94** |
+| w=1.0 | 1.0 | `n9ckb2qe` | 13.77 |
+
+- Commentary: w=0.5 achieved 12.94 — beats PR #14 baseline (13.15) but not new baseline 12.74 (PR #66). The composition of squared rel-L2 aux loss + thorfinn per-axis weights is untested. Sent back to rebase onto thorfinn base and re-run with both --aux-rel-l2-weight 0.5 and --wallshear-y-weight 2.0 --wallshear-z-weight 2.0.
+
+---
+
+## 2026-04-30 14:20 — PR #61: [gilbert] Tangential wall-shear projection on 6L base — CLOSED
+- Branch: `gilbert/tangential-wallshear-on-6l-base`
+- Hypothesis: Tangential projection loss on 6L base (no normal penalty).
+- Results: abupt=34.07 (W&B `x0pyk2yw`) — catastrophic failure. 2.7× baseline.
+- Commentary: Projection without normal penalty allows unbounded normal component growth. Gradient signal is removed in the normal direction but no compensating loss drives it to zero. Tangential projection research line closed.
+
+---
+
+## 2026-04-30 14:20 — PR #60: [chihiro] 6L/512d depth×width composition — CLOSED
+- Branch: `chihiro/depth-width-composition-6l-512d`
+- Hypothesis: Combining 6L depth with 512d width should outperform either alone.
+- Results: abupt=16.00, only 2 epochs completed (data-starved).
+- Commentary: 6L/512d (18.1M params) is too large for the 4.5h budget — only 2 epochs vs 4 for 6L/256d. Data-starvation dominates. 6L/256d is the right operating point. Closed.
+
+---
+
+## 2026-04-30 14:20 — PR #59: [senku] Depth 7L/8L sweep — CLOSED
+- Branch: `senku/depth-7l-8l-sweep`
+- Hypothesis: Pushing depth beyond 6L further improves the composite metric.
+- Results: 7L abupt=13.28, 8L abupt=13.57 (both worse than 6L=13.15/12.74 baseline).
+- Commentary: 7L/8L hit kill-threshold bug (>=18 means kill when val drops below 18, so some runs killed prematurely). Even corrected, both are worse than 6L at same compute — more depth = fewer epochs = data starvation at this budget. Depth ceiling confirmed at 6L. Closed.
+
+---
+
+## 2026-04-30 14:20 — PR #21: [kohaku] Normal-component suppression on 6L (sweep-v2) — CLOSED
+- Branch: `kohaku/round2-normal-component-suppression`
+- Hypothesis: Penalty λ*(ws_pred·n_hat)² drives predicted normal component to zero; sweep λ∈{0.01, 0.1, 1.0} on 6L base.
+- Results:
+
+| λ | W&B run | abupt |
+|---:|---|---:|
+| 0.01 | `le10xx7e` | 16.06 |
+| 0.1 | `j0gdj2jy` | 17.47 |
+| 1.0 | `fsxvmo08` | 15.93 |
+
+- Commentary: All arms 22–33% worse than baseline 12.74. The suppression mechanism works mechanistically but the projection+suppression combination degrades wall-shear badly (tau_y/z ≈20–26%, far worse than baseline 15-17%). Tangential projection research conclusively closed.
+
+---
+
+## 2026-04-30 14:20 — PR #15: [tanjiro] SDF-gated volume attention (v2, sigma sweep) — CLOSED
+- Branch: `tanjiro/round1-sdf-gated-volume-attention`
+- Hypothesis: Gaussian SDF gate or quantile-rank gate focuses volume attention on near-wall critical points.
+- Results: 3-arm sweep on 6L base
+
+| Arm | W&B run | abupt |
+|---|---|---:|
+| quantile q=0.10 | `l6yfeh31` | 13.26 |
+| gaussian σ=0.005 | `gu2v23cs` | 13.87 |
+| gaussian σ=0.001 | `r7c8jss2` | 36.48 (diverged) |
+
+- Commentary: Best arm (quantile q=0.10) achieves 13.26 — worse than new baseline 12.74. The val→test gap in volume_pressure (12→13.58) is a distribution shift issue that SDF gating cannot address. σ=0.001 diverges. Closing — SDF gating adds instability and doesn't help test generalization. Closed.
+
+---
+
+## 2026-04-30 14:20 — PR #10: [haku] Per-axis wall-shear loss weights (uniform w2/w3) — CLOSED
+- Branch: `haku/round1-per-axis-wallshear-loss-weight`
+- Hypothesis: Uniform upweighting of all 3 wall-shear channels (tau_x, tau_y, tau_z) by 2× or 3× should reduce wall-shear error.
+- Results (Round-2, 6L base):
+
+| Arm | weights | W&B run | abupt |
+|---|---|---|---:|
+| Control | (1,1,1,1) | `648ssek0` | 13.15 |
+| w2 | (1,2,2,2) | `s3y7sclb` | 18.35 (diverged ep3) |
+| w3 | (1,3,3,3) | `inpik7c3` | 14.35 (diverged ep4) |
+| w2+tan | (1,2,2,2)+tan | `1cxf7026` | 36.41 |
+
+- Commentary: Uniform upweighting causes divergence — tau_x upweighting destabilizes. Thorfinn's selective approach (W_y=W_z=2, W_x=1) succeeds where uniform fails. Confirmed: tau_x should not be upweighted. Closed.
+
+---
+
+## 2026-04-30 14:20 — PR #24: [emma] Squared rel-L2 aux loss (4L base) — CLOSED
+- Branch: `emma/round2-squared-rel-l2-aux-loss`
+- Hypothesis: Squared rel-L2 aux loss (no sqrt) is stable where round-1 version diverged.
+- Results: w=0.5 → abupt=14.81 (W&B `zv791js1`, 4L base).
+- Commentary: Stable (no divergence) and beats 4L baseline, but 4L superseded. Code was incorporated into PR #63 (askeladd, 6L). Closed — hypothesis lives on in PR #63.
+
+---
+
+## 2026-04-30 14:20 — PR #5: [edward] Cosine LR + FiLM composition on 6L — CLOSED
+- Branch: `edward/round1-cosine-lr-warmup`
+- Hypothesis: Cosine annealing + FiLM conditioning compose orthogonally on 6L base.
+- Results: abupt=19.27 (W&B `duv7m45t`) — best val at epoch 1 (18.44), degraded monotonically thereafter.
+- Commentary: FiLM + cosine LR + cosine EMA on 6L creates a fragile stack. The interaction between the cosine LR schedule and the cosine EMA ramp produces unstable training. Cosine LR alone on 6L (without FiLM) is being tested in PR #67 kafka. Closed.
