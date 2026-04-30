@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 17:40 UTC
+- **Date:** 2026-04-30 17:57 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -24,7 +24,7 @@
 | PR | Student | Hypothesis | Latest val | Status |
 |---|---|---|---|---|
 | **#112** | alphonse | Lion uncompiled SOTA + lr=1e-4 (LR sweep, 2× current) | **ep2 val 45.09** (vs vanilla 36.5, **+24% — overshooting**) | Running (rt=67m) — looking poor |
-| **#93** | nezuko | Lion+cosine T_max=24 nocompile | **ep9 val 10.301** (vs vanilla 10.083, +2.2%) | Running (rt=271m, in test eval) |
+| **#113** | nezuko | Lion uncompiled SOTA + lr=3e-5 (LR sweep lower bound) | — | Just assigned (rt=0m) |
 | **#94** | askeladd | Lion+RFF σ=0.5 | ep8 val 10.767 (vs vanilla 10.38, +3.7%) | Running (rt=255m, finishing) |
 | **#111** | tanjiro | Lion uncompiled SOTA + EMA decay 0.999 (faster tracking) | **ep2 val 27.00** (vs vanilla 36.5, **26% better**) | Running (rt=81m) — STRONG SIGNAL |
 | **#109** | frieren | Lion uncompiled SOTA + 1-epoch warmup | ep3 val 39.62 (vs vanilla ep3 ~25, costs ~1 epoch) | Running (rt=115m) |
@@ -106,23 +106,25 @@
 
 - **RFF sigma sweep — CLOSED-DOOR.** σ=0.5/1.0/2.0 all regress. Pattern: RFF helps ep1-5 but vanilla Lion dominates ep6+.
 - **LR sweep** — alphonse #112 testing lr=1e-4 (2× current SOTA lr=5e-5). First LR variation on Lion uncompiled stack.
-- **Cosine schedule sweep** — nezuko #93 T_max=24 (running, ep6 val 12.659), edward #110 T_max=50 (running). 2-point schedule curve.
-- **EMA sweep** — tanjiro #90 (0.9999) closed. Tanjiro #111 (0.999) running.
-- **Warmup** — frieren #109 running (rt=37m, ep1 val 84.6).
+- **Cosine schedule sweep — CLOSED-DOOR.** nezuko #93 CLOSED (test 11.524, +2.8%), T_max=16 was a wash. Schedule hurts Lion in 9-epoch budget — constant LR is already optimal.
+- **LR sweep** — alphonse #112 lr=1e-4 (running, ep2 overshooting +24%) + nezuko #113 lr=3e-5 (just assigned). Both sides of SOTA lr=5e-5 now probed.
+- **EMA sweep** — tanjiro #90 (0.9999) closed. **Tanjiro #111 (0.999) ep2 val 27.00 = 26% better than vanilla ep2 36.5 — strong signal.**
+- **Warmup** — frieren #109 running (rt=115m, ep4 val 21.11 vs vanilla ep4 19.74, +6.9%).
 - **Upcoming hypothesis queue:**
-  - **lr=3e-5** — if lr=1e-4 diverges/regresses, lower-than-SOTA sweep
-  - **Per-task tau weighting** — directly target tau_y/tau_z binding gaps
+  - **EMA=0.998** — next step if tanjiro #111 (0.999) wins, refining the sweep
+  - **EMA=0.999 + winning LR** — compound stack once LR winner is known
+  - **Per-task tau weighting** — directly target tau_y/tau_z binding gaps (×3.7/×3.9)
   - **Perceiver-IO backbone** — yi #18 directive, if current levers plateau
   - **Batch size 8** — 2× effective batch, may compound with any LR winner
 
-## Round 7 status (17:18 UTC) — quick read
+## Round 7-8 status (17:57 UTC) — quick read
 
-- **Schedule sweep is closed-door**. nezuko T_max=24 and edward T_max=50 both ~2-5% behind vanilla mid-run. nezuko ep8 val 10.636 (vs vanilla 10.38). No mechanism by which it catches up at ep9. Schedule lever exhausted on Lion uncompiled.
-- **RFF σ=0.5 closed-door**. ep7 val 11.495 (+3.5% vs vanilla 11.11). Tracking similar to σ=1.0. Confirms RFF is closed-door across all sigma values.
-- **Warmup costs ~1 epoch**. frieren ep3 39.62 ≈ vanilla ep2 36.5. May still recover, but in 9-epoch budget that's ~10% of training lost.
-- **EMA=0.999 STRONG SIGNAL CONFIRMED at ep2** (ep1: 55.06 vs 80.7 = 32% better; ep2: 27.00 vs 36.5 = 26% better). Two epochs of consistent ~30% improvement vs vanilla. Pattern is real, not ep1 noise. Most-watched run — if this holds, projected ep9 val ~7-8 (vs vanilla 10.083) → SOTA −20-30%. **ema_decay=0.999 sweep is the highest-value frontier.**
-- **lr=1e-4 OVERSHOOTING at ep2** (ep1 78.80, ep2 45.09 vs vanilla 36.5 = +24%). Lion at lr=1e-4 looks too aggressive. Likely will regress. Next test should be lr=3e-5 (lower than current SOTA).
-- **Fern + thorfinn** just started (rt=13/18m), no val data yet. Both AdamW+RFF+compile branches — orthogonal to Lion experiments.
+- **Schedule sweep CLOSED.** nezuko #93 T_max=24 finished test 11.524 (+2.8%) — closed-door confirmed alongside T_max=16 (wash, #57). Edward #110 T_max=50 still running (ep3 24.22), expected regression.
+- **RFF σ=0.5 still running (ep8 10.77, finishing soon)**. Tracking similar to σ=1.0/2.0 — RFF remains closed-door across all sigma.
+- **EMA=0.999 STRONG SIGNAL at ep2** (ep1: 55.06 vs 80.7 = 32%; ep2: 27.00 vs 36.5 = 26%). Most-watched run — projected ep9 val ~7-8 if trend holds → SOTA −20-30%.
+- **lr=1e-4 overshooting** (ep2 45.09 vs vanilla 36.5, +24%). Likely regression. lr=3e-5 (nezuko #113) assigned as counterpoint.
+- **Warmup at ep4** (frieren #109): 21.11 vs vanilla 19.74 (+6.9%) — largely recovered from ep3 loss. Warmup may only cost half-an-epoch by ep4.
+- **Fern + thorfinn** (ep1 73.24/67.95) — fresh starts post-recovery, AdamW+compile branches, orthogonal to Lion.
 
 ## Next architecture experiments (if current levers plateau)
 

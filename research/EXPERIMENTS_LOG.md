@@ -6,6 +6,33 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-04-30 17:57 UTC — PR #93 CLOSED: nezuko Lion+cosine T_max=24 — schedule sweep closed-door on Lion uncompiled
+
+- **Branch:** `nezuko/round7-lion-cosine-tmax24`
+- **W&B run:** `ooho1daw` rank 0 — group `nezuko-round7-lion-cosine-tmax`, 285 min, 9 val epochs
+- **Hypothesis:** Lion+cosine T_max=24 nocompile — does cosine decay over 24 epochs (longer warm-up-to-decay vs T_max=16) improve final convergence vs vanilla constant LR?
+- **Result:** test_abupt **11.524** vs SOTA 11.208 (+2.8% regression). Best val 10.301 (ep9).
+
+| Metric | nezuko T=24 (#93) | SOTA PR #50 (vanilla) | Δ |
+|---|---:|---:|---:|
+| abupt_mean | **11.524** | 11.208 | +2.8% |
+| best val | 10.301 (ep9) | 10.083 (ep9) | +2.2% |
+
+Epoch-by-epoch trajectory (vs vanilla Lion SOTA):
+
+| ep | nezuko T=24 | vanilla SOTA | gap |
+|---|---:|---:|---:|
+| 1 | 74.97 | 80.7 | −7% (faster start!) |
+| 2 | 45.44 | 36.5 | +24% |
+| 5 | 14.59 | **14.25** | +2.4% |
+| 6 | 12.66 | **12.29** | +3.0% |
+| 7 | 11.42 | **11.11** | +2.8% |
+| 8 | 10.64 | **10.38** | +2.5% |
+| 9 | 10.30 | **10.08** | +2.2% |
+
+- **Conclusion:** Cosine annealing hurts beyond ep1. Vanilla Lion's constant LR is already near-optimal for the 9-epoch budget. Adding decay takes useful LR away before convergence is reached. Combined with #57 (T_max=16, wash) this closes the entire schedule sweep on Lion uncompiled.
+- **Nezuko reassigned to PR #113: lr=3e-5 LR sweep lower bound.**
+
 ## 2026-04-30 17:05 UTC — PR #91 CLOSED: alphonse Lion+RFF σ=2.0 — sigma sweep complete, RFF definitively closed on Lion uncompiled
 
 - **Branch:** `alphonse/round6-lion-rff-sigma2`
