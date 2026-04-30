@@ -37,6 +37,27 @@ Trajectory comparison (ep1 onward, both Lion uncompiled lr=5e-5):
 - **Verdict:** **Warmup closed-door on Lion uncompiled.** Constant LR is correct for this 9-epoch budget.
 - **Frieren reassigned** to PR #120: batch=8 (2× batch lever).
 
+## 2026-04-30 21:22 UTC — PR #110 MERGED: edward Lion+cosine T_max=50 — new SOTA 11.170
+
+- **Branch:** `edward/round7-lion-cosine-t50`
+- **W&B run:** `ujyg3lju` rank 0 — group `tay-round7-lion-cosine-t50`, 276 min, 9 val epochs, best val 10.063 (ep9)
+- **Hypothesis:** Cosine T_max=50 on Lion uncompiled SOTA — gentle annealing, only ~8% LR decay by ep9 (midpoint between T_max=24 and constant LR). Tests whether very gentle schedule helps late convergence.
+- **Result:** test_abupt **11.170** vs SOTA 11.208 (**−0.34%, new SOTA**). Best val 10.063.
+
+| Metric | PR #110 (MERGED) | Prior SOTA PR #50 | Δ | AB-UPT |
+|---|---:|---:|---:|---:|
+| abupt_mean | **11.170** | 11.208 | **−0.038** | — |
+| surface_pressure | 6.264 | 6.193 | +0.071 | 3.82 |
+| wall_shear | **11.197** | 11.199 | −0.002 | 7.29 |
+| volume_pressure | **12.556** | 12.726 | **−0.170** | 6.08 |
+| tau_x | 9.552 | 9.512 | +0.040 | 5.35 |
+| tau_y | **13.572** | 13.592 | −0.020 | 3.65 |
+| tau_z | **13.904** | 14.017 | **−0.113** | 3.63 |
+
+- **Analysis:** T_max=50 is the "sweet spot" of gentle cosine annealing — just enough decay to help late convergence without the early-descent penalty of T_max=24. Key: volume_pressure −1.3%, tau_z −0.8%. Both are binding-gap components (volume_pressure ×2.1, tau_z ×3.8 vs reference). Surface_pressure regressed slightly (+1.1%) — expected tradeoff of volume emphasis.
+- **Conclusion:** T_max=50 is a confirmed lever. Compounding with EMA=0.999 (tanjiro, ep9 9.989) is the natural next step → PR #133 edward.
+- **New SOTA: 11.170**
+
 ## 2026-04-30 20:23 UTC — PR #92 CLOSED: thorfinn AdamW+RFF+768d+compile — diverged ep5-6
 
 - **Branch:** `thorfinn/round7-adamw-rff-768d-compile`
