@@ -108,11 +108,11 @@ checkpoint reload.
 | `test_primary/wall_shear_y_rel_l2_pct` | **16.23** | #14 | et4ajeqj | 2026-04-29 |
 | `test_primary/wall_shear_z_rel_l2_pct` | **16.75** | #14 | et4ajeqj | 2026-04-29 |
 
-Note: Additional wins pending merge — PRs #22 (gilbert clip=1.0, 14.80),
-#24 (emma sq-rel-L2, 14.81), #3 (askeladd codex-lineage, 15.27),
-#13 (norman cosine EMA, 15.82), #8 (frieren FiLM, 16.53). All are now
-superseded on headline metric by PR #14 but may contain orthogonal code
-contributions worth extracting.
+Note: Additional code wins pending merge (all superseded on headline metric by
+PR #14 but contain orthogonal code contributions) — PRs #22 (gilbert clip=1.0,
+14.80), #24 (emma sq-rel-L2, 14.81), #3 (askeladd codex-lineage, 15.27),
+#13 (norman cosine EMA, 15.82). PR #8 (frieren FiLM, 16.53) merged 2026-04-29 —
+FiLM geometry conditioning code now on `yi`.
 
 (`p_s = 10.07` from PR #11 is a marginally better single-axis number, but the
 abupt_axis_mean win is decisive and `tau_*` improvements dominate the
