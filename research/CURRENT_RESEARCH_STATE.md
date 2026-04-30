@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 09:30 UTC
+- **Date:** 2026-04-30 10:30 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,14 +37,14 @@ traverse the loss landscape inside a 270-min budget.
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| **#71** | fern | AdamW + RFF + compile + per-axis tau_y/tau_z weights (2×) — stable base for per-axis mechanism | JUST ASSIGNED |
-| **#70** | tanjiro | Lion (lr=2.5e-5) + RFF + compile — half-LR to suppress divergence | Running ~56min, val 22.84 (ep3), healthy descent |
-| **#69** | thorfinn | Lion (lr=3.3e-5 µP) + width 768d / 12h — architectural capacity uplift | Running ~78min, val 71.04 (ep2), uncompiled |
-| **#55** | alphonse | AdamW + RFF + compile + volume-loss-weight 3.0 | Running ~182min, val 16.56 (ep10), descending |
-| **#51** | edward | Lion (lr=5e-5) + RFF sigma=1.0 (uncompiled) — **SOTA CONTENDER** | Running ~181min, val **13.46** (ep5), descending |
-| **#68** | frieren | Lion (lr=5e-5) + vol_w=3.0 | Running ~229min, DIVERGED (best 14.43 ep5), finishing |
-| **#57** | askeladd | Recovery nocompile run after #57 diverged | Running nocompile fallback ~56min |
-| **#50** | nezuko | Recovery nocompile run after #50 Lion+compile diverged | Running nocompile fallback ~74min |
+| **#73** | frieren | AdamW + RFF + compile + depth 6L — architectural capacity (orthogonal to width) | JUST ASSIGNED |
+| **#72** | fern | AdamW + RFF + compile + per-axis tau_y/tau_z weights (2×) | Pod stuck (issue #53) — awaiting infra restart |
+| **#70** | tanjiro | Lion (lr=2.5e-5) + RFF + compile — half-LR to suppress divergence | Running ~115min, val **14.00** (ep6), **first stable Lion+compile** |
+| **#69** | thorfinn | Lion (lr=3.3e-5 µP) + width 768d / 12h — architectural capacity uplift | Running ~137min, val 30.65 (ep3), uncompiled |
+| **#55** | alphonse | AdamW + RFF + compile + volume-loss-weight 3.0 | Running ~241min, val 15.49 (ep12), descending slowly |
+| **#51** | edward | Lion (lr=5e-5) + RFF sigma=1.0 (uncompiled) — **SOTA CONTENDER** | Running ~240min, val **11.48** (ep7), **0.18 ppt from SOTA** |
+| **#57** | askeladd | nocompile fallback after Lion+compile diverged | Running ~116min, val 23.68 (ep3) |
+| **#50** | nezuko | nocompile fallback after Lion+compile diverged | Running ~135min, val 17.31 (ep4) |
 
 ## Key closed/merged experiments
 
@@ -52,6 +52,7 @@ traverse the loss landscape inside a 270-min budget.
 |---|---|---|
 | **arm B** (no PR) | **NEW SOTA 11.30** | Lion lr=5e-5/wd=5e-4 — paper config was wrong by −27% |
 | #46 alphonse | MERGED — 14.55 | AdamW + RFF + compile → epoch 16 |
+| #68 frieren | CLOSED — +37.7% regression | Lion + vol_w=3.0: diverged ep6 test 15.57; vol_w lever inert when run diverges (8th Lion+modification failure) |
 | #54 fern | CLOSED — +137% regression | Lion + per-axis tau_y/tau_z weights (2×): diverged ep4 test 26.83; mechanism works but Lion fragile |
 | #52 tanjiro | CLOSED — +16.8% vs SOTA | Lion+RFF+compile: RFF+compile add zero orthogonal signal; compile diverges |
 | #56 thorfinn | CLOSED — +13% vs #46 | Cosine T_max=16 on AdamW; schedule miscalib was load-bearing, not a bug |
