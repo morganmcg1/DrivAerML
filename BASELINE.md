@@ -2,38 +2,43 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: PR #39 — 2026-04-29 22:05 UTC
+## Status: PR #46 — 2026-04-30 01:12 UTC
 
-New tay SOTA set by tanjiro's Lion optimizer (paper config `lr=1.7e-5, wd=5e-3`).
-Drop-in AdamW replacement using sign-based updates with momentum. Lion's sign-update
-sidesteps the per-coordinate gradient-magnitude compression caused by our
-`grad-clip-norm=1.0` binding at every step. Best-val at epoch 9 (of 50 configured);
-val curve still descending at cutoff — more budget or compile would improve further.
+New tay SOTA set by alphonse's AdamW + RFF + compile composition.
+Single-scale RFF (sigma=1.0, 32 feats) + `--compile-model` on the PR #40 compile-fix
+base. Compile enabled epoch 16 vs ~9 uncompiled — the deeper training saturates
+surface/wall-shear with RFF enrichment. All surface and wall-shear axes improved
+meaningfully; volume_pressure regressed vs PR #39 Lion (Lion's sign-update gives
+more uniform per-channel gradient signal). Lion + RFF + compile (PR #52, queued)
+should recover the volume regression.
 
-**W&B run:** `xonbs83i` (rank 0) — group `tay-lion-lr-sweep`
-**Best-val checkpoint:** epoch 9 (val_abupt=14.22)
-
-**NEW: tay crosses below yi frontier (15.82 → 15.43)**
+**W&B run:** `28l4yanr` (rank 0) — group `tay-round2-rff-compiled`
+**Best-val checkpoint:** epoch 16 (val_abupt=13.487)
+**Advisor note:** alphonse pod stalled post-train; advisor merged directly from W&B-verified metrics.
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #39) | PR #40 | yi best | AB-UPT |
-|---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **15.43** | 17.25 | 15.82 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **9.45** | 10.92 | 9.99 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **16.28** | 18.33 | 16.60 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **13.83** | 14.71 | 14.21 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **13.91** | 15.73 | 14.27 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **19.58** | 21.80 | 19.49 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **20.40** | 23.07 | 21.12 | 3.63 |
+| Metric | This-repo key | tay best (PR #46) | PR #39 Lion | PR #40 | yi best | AB-UPT |
+|---|---|---:|---:|---:|---:|---:|
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **14.550** | 15.43 | 17.25 | 15.82 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **8.628** | 9.45 | 10.92 | 9.99 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **14.882** | 16.28 | 18.33 | 16.60 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 15.032 | **13.83** | 14.71 | 14.21 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **12.901** | 13.91 | 15.73 | 14.27 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **17.281** | 19.58 | 21.80 | 19.49 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **18.907** | 20.40 | 23.07 | 21.12 | 3.63 |
 
-### Reproduce PR #39 config
+Note: `volume_pressure` 15.032 is a regression vs PR #39 (13.83) — Lion's sign-update
+favoured volume; AdamW + RFF + compile did not. Next SOTA target: PR #52 (Lion + RFF + compile).
+
+### Reproduce PR #46 config
 
 ```bash
 cd target/
 torchrun --standalone --nproc_per_node=8 train.py \
-  --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
-  --lr 1.7e-5 --weight-decay 5e-3 \
+  --lr 5e-5 --weight-decay 5e-4 \
+  --compile-model \
+  --rff-num-features 32 --rff-sigma 1.0 \
   --volume-loss-weight 2.0 --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
@@ -43,8 +48,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --no-log-gradient-histograms
 ```
 
-Note: run `xonbs83i` did NOT use `--compile-model` (pod was on pre-compile-fix commit).
-Future Lion runs should add compile for ~5-15% additional throughput gain.
+(optimizer defaults to AdamW — field not in W&B config, confirmed by convention)
 
 ### Compounding wins so far
 
@@ -54,6 +58,7 @@ Future Lion runs should add compile for ~5-15% additional throughput gain.
 | #33 | fern | **−2.04 (−10.3%)** | RFF coord features (sigma=1.0, 32 feats) — uncompiled |
 | #40 | alphonse | **−0.52 (−2.9%) vs #33** | torch.compile fix → 12 epochs vs 9; beats #33 without RFF |
 | #39 | tanjiro | **−1.82 (−10.5%) vs #40** | Lion optimizer lr=1.7e-5 — sign-based update, crosses yi frontier |
+| #46 | alphonse | **−0.88 (−5.7%) vs #39** | AdamW + RFF (sigma=1.0) + compile → epoch 16; tau_y −11.7% |
 
 ### INFRA NOTE — torch.compile bug FIXED (PR #40)
 
