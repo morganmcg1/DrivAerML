@@ -828,8 +828,48 @@ def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return values.sum() * 0.0
 
 
-def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    return masked_mean((pred - target).square(), mask)
+def masked_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    per_channel_weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    sq_err = (pred - target).square()
+    if per_channel_weights is None:
+        return masked_mean(sq_err, mask)
+    expanded_mask = mask
+    while expanded_mask.ndim < sq_err.ndim:
+        expanded_mask = expanded_mask.unsqueeze(-1)
+    expanded_mask = expanded_mask.to(device=sq_err.device, dtype=sq_err.dtype)
+    weights = per_channel_weights.to(device=sq_err.device, dtype=sq_err.dtype)
+    weights_view = weights.view(*([1] * (sq_err.ndim - 1)), -1)
+    weighted_masked_sum = (sq_err * weights_view * expanded_mask).sum()
+    denominator = expanded_mask.expand_as(sq_err).sum()
+    if bool(denominator.detach().cpu().item() > 0):
+        return weighted_masked_sum / denominator.clamp_min(1.0)
+    return sq_err.sum() * 0.0
+
+
+def masked_per_channel_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    """Per-channel MSE diagnostic: returns a 1-D tensor of length C.
+
+    For each channel c, returns mean over masked points of (pred_c - target_c)^2.
+    """
+    sq_err = (pred - target).square()
+    expanded_mask = mask
+    while expanded_mask.ndim < sq_err.ndim:
+        expanded_mask = expanded_mask.unsqueeze(-1)
+    expanded_mask = expanded_mask.to(device=sq_err.device, dtype=sq_err.dtype)
+    n_channels = sq_err.shape[-1]
+    other_dims = tuple(range(sq_err.ndim - 1))
+    per_channel_sum = (sq_err * expanded_mask).sum(dim=other_dims)
+    per_channel_count = expanded_mask.expand_as(sq_err).sum(dim=other_dims).clamp_min(1.0)
+    return per_channel_sum / per_channel_count
 
 
 def squared_relative_l2_loss(

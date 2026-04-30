@@ -50,6 +50,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     make_loaders,
     masked_mse,
+    masked_per_channel_mse,
     metric_namespace,
     parse_kill_thresholds,
     primary_metric_log,
@@ -58,6 +59,18 @@ from trainer_runtime import (
     should_update_best_checkpoint,
     timeout_budget_minutes,
     unwrap_model,
+)
+
+
+# Per-channel loss weights for surface predictions (4 channels: pressure, tau_x, tau_y, tau_z).
+# tau_y/tau_z are the binding constraints on `abupt` (PR #72: gap ×3.8/×3.9 vs AB-UPT).
+# Up-weight tau_y and tau_z 2x to redirect optimization pressure where it matters.
+_SURFACE_PER_CHANNEL_LOSS_WEIGHTS: tuple[float, ...] = (1.0, 1.0, 2.0, 2.0)
+_SURFACE_PER_CHANNEL_NAMES: tuple[str, ...] = (
+    "surface_pressure",
+    "wall_shear_x",
+    "wall_shear_y",
+    "wall_shear_z",
 )
 
 
@@ -199,19 +212,38 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        per_channel_weights = torch.tensor(
+            _SURFACE_PER_CHANNEL_LOSS_WEIGHTS,
+            device=out["surface_preds"].device,
+            dtype=out["surface_preds"].dtype,
+        )
+        surface_loss = masked_mse(
+            out["surface_preds"],
+            surface_target,
+            batch.surface_mask,
+            per_channel_weights=per_channel_weights,
+        )
+        surface_per_channel = masked_per_channel_mse(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )
+        surface_base_mse = surface_per_channel.mean()
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        base_mse_loss = surface_base_mse + volume_loss
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
+        "surface_base_mse": float(surface_base_mse.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    surface_per_channel_list = surface_per_channel.detach().cpu().tolist()
+    for name, value in zip(_SURFACE_PER_CHANNEL_NAMES, surface_per_channel_list):
+        metrics[f"surface_mse_{name}"] = float(value)
+    return loss, metrics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -356,11 +388,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/loss": float(loss.detach().cpu().item()),
                             "train/base_mse_loss": batch_loss_metrics["base_mse_loss"],
                             "train/surface_loss": batch_loss_metrics["surface_loss"],
+                            "train/surface_base_mse": batch_loss_metrics["surface_base_mse"],
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    for name in _SURFACE_PER_CHANNEL_NAMES:
+                        key = f"surface_mse_{name}"
+                        train_log[f"train/{key}"] = batch_loss_metrics[key]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
