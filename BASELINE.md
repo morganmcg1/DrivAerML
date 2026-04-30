@@ -2,7 +2,47 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: chihiro PR #4 wins — new baseline 2026-04-29
+## Status: senku PR #14 wins — new baseline 2026-04-29
+
+PR #14 (senku, 6L/256d/4h/128sl depth scale-up) reduced
+`test_primary/abupt_axis_mean_rel_l2_pct` from 16.64 (chihiro PR #4) to
+**13.15** — a 21.0% improvement on the headline metric. Both 5L (13.52, −18.7%)
+and 6L (13.15, −21.0%) beat all pending PRs. W&B runs: `t5tv01ch` (5L) and
+`et4ajeqj` (6L). Config: bs=8, vol_w=2.0, lr=2e-4, clip=1.0, 65536 pts,
+validation-every=1. Key finding: depth is more parameter-efficient than width —
+6L/256d (4.73M params) crushes 4L/512d (12.7M params).
+
+**Compounding wins so far (all landed on `yi`):**
+1. PR #11 kohaku — tangential wall-shear projection loss
+2. PR #9 gilbert — protocol fixes (bs=8, vol_w=2.0, validation-every=1)
+3. PR #4 chihiro — width scale-up to 512d/8h
+4. PR #14 senku — depth scale-up to 6L/256d (this PR)
+
+**6L winning config (new recommended base):**
+
+```bash
+cd target/
+python train.py \
+  --volume-loss-weight 2.0 \
+  --batch-size 8 \
+  --validation-every 1 \
+  --lr 2e-4 --weight-decay 5e-4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 6 --model-hidden-dim 256 --model-heads 4 --model-slices 128 \
+  --ema-decay 0.9995 \
+  --clip-grad-norm 1.0 \
+  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
+```
+
+**Note:** Grad clipping (clip=1.0) was active on 6L (pre-clip norm ~2.53 at end).
+5L did not need clipping (pre-clip norm ~0.79). Use clip=1.0 as default for deeper
+configs. Both runs were still descending at timeout — more epochs would improve further.
+Volume pressure shows val→test gap (6.93→13.6) — orthogonal to depth, needs SDF gating.
+
+---
+
+## Previous: chihiro PR #4 — baseline 2026-04-29
 
 PR #4 (chihiro, 4L/512d/8h large-model scale-up) reduced
 `test_primary/abupt_axis_mean_rel_l2_pct` from 17.39 (gilbert PR #9) to
@@ -60,17 +100,19 @@ checkpoint reload.
 
 | Metric | Best | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **16.64** | #4 | pejudvyd | 2026-04-29 |
-| `test_primary/surface_pressure_rel_l2_pct` | **10.65** | #4 | pejudvyd | 2026-04-29 |
-| `test_primary/wall_shear_rel_l2_pct` | **17.66** | #4 | pejudvyd | 2026-04-29 |
-| `test_primary/volume_pressure_rel_l2_pct` | **14.37** | #4 | pejudvyd | 2026-04-29 |
-| `test_primary/wall_shear_x_rel_l2_pct` | **14.87** | #4 | pejudvyd | 2026-04-29 |
-| `test_primary/wall_shear_y_rel_l2_pct` | **19.89** | #4 | pejudvyd | 2026-04-29 |
-| `test_primary/wall_shear_z_rel_l2_pct` | **21.73** | #4 | pejudvyd | 2026-04-29 |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **13.15** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/surface_pressure_rel_l2_pct` | **7.64** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/wall_shear_rel_l2_pct` | **13.47** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/volume_pressure_rel_l2_pct` | **13.58** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/wall_shear_x_rel_l2_pct` | **11.53** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/wall_shear_y_rel_l2_pct` | **16.23** | #14 | et4ajeqj | 2026-04-29 |
+| `test_primary/wall_shear_z_rel_l2_pct` | **16.75** | #14 | et4ajeqj | 2026-04-29 |
 
-Note: PRs #8 (frieren FiLM, abupt=16.53) and #13 (norman cosine EMA, abupt=15.82)
-are verified wins currently pending rebase — once merged the headline metric
-will drop further, with #13 as projected new best.
+Note: Additional wins pending merge — PRs #22 (gilbert clip=1.0, 14.80),
+#24 (emma sq-rel-L2, 14.81), #3 (askeladd codex-lineage, 15.27),
+#13 (norman cosine EMA, 15.82), #8 (frieren FiLM, 16.53). All are now
+superseded on headline metric by PR #14 but may contain orthogonal code
+contributions worth extracting.
 
 (`p_s = 10.07` from PR #11 is a marginally better single-axis number, but the
 abupt_axis_mean win is decisive and `tau_*` improvements dominate the
@@ -118,18 +160,19 @@ experiments should layer on top of the gilbert config and add
 
 **Distance from AB-UPT targets (multiple of target):**
 
-| Metric | yi best (PR #4) | AB-UPT | Ratio |
+| Metric | yi best (PR #14) | AB-UPT | Ratio |
 |---|---:|---:|---:|
-| surface_pressure | 10.65 | 3.82 | 2.8× |
-| wall_shear | 17.66 | 7.29 | 2.4× |
-| volume_pressure | 14.37 | 6.08 | 2.4× |
-| wall_shear_x | 14.87 | 5.35 | 2.8× |
-| wall_shear_y | 19.89 | 3.65 | 5.5× |
-| wall_shear_z | 21.73 | 3.63 | 6.0× |
+| surface_pressure | 7.64 | 3.82 | 2.0× |
+| wall_shear | 13.47 | 7.29 | 1.8× |
+| volume_pressure | 13.58 | 6.08 | 2.2× |
+| wall_shear_x | 11.53 | 5.35 | 2.2× |
+| wall_shear_y | 16.23 | 3.65 | 4.4× |
+| wall_shear_z | 16.75 | 3.63 | 4.6× |
 
-The wall-shear axes (esp. `tau_y`, `tau_z`) remain the largest gap to AB-UPT
-but have collapsed by ~60–70% from where we started. Volume pressure and
-surface pressure are now the rate-limiting axes by absolute ratio.
+All axes have improved substantially. Wall_shear_y and wall_shear_z remain the
+largest gap at ~4-5× AB-UPT. Volume pressure shows a known val→test gap
+(val 6.93 ≈ AB-UPT level, test 13.58 = 2×) — test generalization is the
+remaining challenge, not model capacity per se.
 
 **Known training-stability bug (gilbert flagged in PR #9):** `train.py` has
 **no gradient clipping**. Run B (vol_w=3.0) and several other Round-1 PRs
