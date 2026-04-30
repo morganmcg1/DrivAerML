@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-04-30 00:50 UTC
+- **Date:** 2026-04-30 01:13 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -8,25 +8,24 @@
   "How's it going? We making progress?" — replied with full status. No new directives.
   Previous: Issue #18 from yi advisor: "be bolder; replace the backbone; mine noam/radford branches."
 
-## Current SOTA — PR #39 MERGED 2026-04-29 22:05 UTC
-
-**tay crosses below yi frontier: test_abupt 15.43 vs yi best 15.82**
+## Current SOTA — PR #46 MERGED 2026-04-30 01:12 UTC
 
 | PR | Student | test_abupt | Key lever |
 |---|---|---:|---|
 | #30 | alphonse | 19.81 | yi calibration config (4L/512d/8h) |
 | #33 | fern | 17.77 | RFF coord features sigma=1.0, no-compile |
-| #40 | alphonse | 17.25 | torch.compile fix → 12 epochs vs 9 |
-| **#39** | **tanjiro** | **15.43** | **Lion optimizer lr=1.7e-5, wd=5e-3 — sign-based updates** |
+| #40 | alphonse | 17.25 | torch.compile fix |
+| #39 | tanjiro | 15.43 | Lion optimizer lr=1.7e-5, wd=5e-3 — sign-based updates |
+| **#46** | **alphonse** | **14.550** | **AdamW + RFF + compile → epoch 16; tau_y −11.7%** |
 
-**W&B run:** `xonbs83i` (rank 0) — group `tay-lion-lr-sweep` — 287.1 min, best_epoch=9
-val curve still descending at cutoff → compile would give 12 epochs, further improvement expected.
+**W&B run:** `28l4yanr` (rank 0) — group `tay-round2-rff-compiled` — 284.9 min, best_epoch=16
+Note: volume_pressure **regressed** to 15.032 (vs PR #39 Lion 13.83) — Lion's sign-update normalizes volume gradients better. PR #52 (Lion+RFF+compile) and PR #55 (vol_w=3.0) both address this.
 
 ## Active assignments (8 students, all DDP8)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #46 | alphonse | RFF (sigma=1.0, 32 feats) + compile | Running, val 14.446, 234 min (~01:00 finish) |
+| **#55** | **alphonse** | **RFF + compile + volume-loss-weight 3.0 (recover vol regression from PR #46)** | **Just assigned** |
 | **#54** | **fern** | **Lion + per-axis tau_y/tau_z loss weighting (2×/2× vs 1×)** | **Just assigned — addresses binding 5×+ gap** |
 | #47 | thorfinn | Bilateral train-time augmentation | Running, val 21.87, 210 min |
 | #42 | frieren | Squared rel-L2 loss + compile (rebased) | Running, run `uwt74mip`, ~207 min |
@@ -39,6 +38,7 @@ val curve still descending at cutoff → compile would give 12 epochs, further i
 
 | PR | Outcome | Why |
 |---|---|---|
+| #46 alphonse | **MERGED — NEW SOTA 14.550** | AdamW + RFF + compile → epoch 16, −5.7% vs Lion |
 | #43 fern | CLOSED — +15.7% vs SOTA, noise vs own baseline | Multi-scale RFF redundant on [−1,4]m surface domain; σ=1.0 already at local optimum |
 | #41 askeladd | CLOSED — regression +22.5% | Eval-time tangential projection destroys normal-component of tau that helps rel-L2 |
 | #37 thorfinn | CLOSED — regression +14.2% | Bilateral TTA-eval only (no train aug); per-axis weights code never pushed |
@@ -49,23 +49,26 @@ val curve still descending at cutoff → compile would give 12 epochs, further i
 
 ## Critical learnings
 
-1. **Lion optimizer is the dominant new lever** — sign-based updates sidestep grad-clip-norm=1.0 compression. `lr=1.7e-5, wd=5e-3` (paper config) wins by −10.5%.
-2. **RFF is orthogonal to optimizer** — composition Lion+RFF is the next highest-priority test (PR #51).
-3. **Compile gives ~12 vs 9 epochs** — val curve still descending at epoch 9 (Lion). Lion+compile (PR #50) is the second highest-priority test.
-4. **Cosine EMA needs `--ema-total-epochs` calibrated to actual budget** (12, not 50). Without this it's a regression.
-5. **ANP decoder can't be compiled** — inductor dynamic-shapes bug specific to backbone-then-split flow. Dead end until that patch lands.
-6. **eval-time tangential projection destroys normal-component tau** — closed door with yi PR #11.
-7. **Budget miscalibration compounds** — any schedule-dependent hyperparameter (EMA, LR warmup, etc.) must be set to `T = actual_epochs_expected`, not `max_epochs`.
+1. **Compile gives epoch 16** (vs 9 uncompiled) — PR #46 reached best_epoch=16, ~18 min/epoch. Future calibration: T_max for schedules should be 16, not 12 as previously thought.
+2. **AdamW + RFF + compile beats Lion-only** — PR #46 (14.55) > PR #39 Lion (15.43). The deeper training from 16 epochs saturates RFF's spectral headroom on surface/wall-shear.
+3. **Volume_pressure regression from AdamW + compile** — Lion's sign-update normalizes per-channel gradient magnitude; AdamW without extra volume_loss_weight (currently 2.0) under-represents volume. Fix: vol_w=3.0 (PR #55) or Lion+RFF+compile (PR #52).
+4. **Lion optimizer sidesteps grad-clip compression** — `lr=1.7e-5, wd=5e-3` wins by −10.5% (PR #39 vs PR #40).
+5. **RFF is orthogonal to optimizer** — composition Lion+RFF (PR #51) is queued; expect ~12.5-13.5 abupt.
+6. **Multi-scale RFF redundant** on DrivAerML surface domain — σ=1.0 single-scale already at local optimum. Multi-scale only adds compute cost.
+7. **Cosine EMA calibration** — needs `--ema-total-epochs 16` (not 50 or 12). Edward's PR #44 used 50 → only 18% through schedule.
+8. **ANP decoder uncompilable** — inductor dynamic-shapes bug. Dead end until patched.
+9. **eval-time tangential projection destroys normal-component tau** — closed door with yi PR #11.
 
 ## Next priority compositions (after Lion win)
 
-High priority (single-delta from Lion SOTA):
-1. **Lion + compile** (PR #50 nezuko) — queued, pod restart needed
-2. **Lion + RFF** (PR #51 edward) — queued, pod restart needed
-3. **Lion + per-axis tau_y/tau_z weights** (PR #54 fern) — just assigned, addresses 5×+ binding gap
-4. **Lion + RFF + compile** (PR #52 tanjiro) — queued after arm B finishes
-5. **Lion + FiLM** (not yet assigned) — FiLM failed at uncompiled 9 epochs; Lion+compile gives FiLM another chance
-6. **Lion + cosine EMA (correct T_max=12)** — yi's biggest non-arch lever, correctly calibrated
+High priority (single-delta from PR #46 new SOTA):
+1. **Lion + RFF + compile** (PR #52 tanjiro) — queued; should fix the volume_pressure regression by combining Lion's per-channel gradient signal with RFF enrichment and 16 epochs
+2. **RFF + compile + vol_w=3.0** (PR #55 alphonse) — just assigned; targeted fix for volume regression
+3. **Lion + per-axis tau_y/tau_z weights** (PR #54 fern) — just assigned; addresses 5×+ gap on worst axes
+4. **Lion + compile** (PR #50 nezuko) — queued, pod restart needed
+5. **Lion + RFF** (PR #51 edward) — queued, pod restart needed
+6. **Lion + FiLM** (not yet assigned) — FiLM failed at uncompiled 9 epochs; Lion+compile gives FiLM another chance
+7. **Lion + cosine EMA (correct T_max=16)** — yi's biggest non-arch lever, now calibrated to actual 16-epoch budget
 
 Active but possibly suboptimal vs Lion:
 5. **RFF + compile (PR #46 alphonse)** — tests RFF without Lion; important for decomposing gains

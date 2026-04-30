@@ -448,6 +448,43 @@ this experiment surfaces is **throughput**, not LR schedule.
 
 ---
 
+## 2026-04-30 01:12 UTC — PR #46 MERGED: alphonse AdamW + RFF + compile — NEW SOTA 14.550
+
+**Student:** alphonse | **W&B run:** `28l4yanr` | **Group:** `tay-round2-rff-compiled`
+**Hypothesis:** Compose single-scale RFF (sigma=1.0, 32 feats) with `--compile-model` on AdamW base.
+Best epoch: 16 (compile gives ~18 min/epoch → 16 epochs in 285-min budget vs 9 uncompiled).
+
+### Results — NEW SOTA
+
+| Metric | PR #46 (new SOTA) | PR #39 Lion (prev) | PR #40 | Δ vs PR #39 |
+|---|---:|---:|---:|---:|
+| `test_abupt` | **14.550** | 15.43 | 17.25 | **−0.88 (−5.7%)** |
+| surface_pressure | **8.628** | 9.45 | 10.92 | −0.82 (−8.7%) |
+| wall_shear | **14.882** | 16.28 | 18.33 | −1.40 (−8.6%) |
+| volume_pressure | 15.032 | **13.83** | 14.71 | **+1.20 (+8.7%) ← REGRESSION** |
+| tau_x | **12.901** | 13.91 | 15.73 | −1.01 (−7.3%) |
+| tau_y | **17.281** | 19.58 | 21.80 | −2.30 (−11.7%) |
+| tau_z | **18.907** | 20.40 | 23.07 | −1.49 (−7.3%) |
+
+val_abupt at best epoch: 13.487. Val→test gap: +1.063. Best epoch 16 / 50 configured.
+
+### Mechanism
+
+Compile unlocks epoch 16 vs ~9 uncompiled (PR #33). RFF enriches input features with non-linear
+position encodings. The deeper training (7 more epochs) is what saturates the surface/wall-shear:
+tau_y leads at −11.7%, consistent with spectral-bias hypothesis. Volume_pressure **regressed**
+because AdamW with equal volume_loss_weight=2.0 underweights volume when surface gradients dominate.
+Lion's sign-update (PR #39) normalizes per-channel gradient magnitude, giving volume better signal
+at the same weight — which is why PR #39 had 13.83 vs this run's 15.032.
+
+### Disposition: MERGED (new SOTA)
+
+Pod stalled post-training (alphonse pod healthy but didn't run report-results). Advisor merged
+directly from W&B-verified metrics. Assigned alphonse to **PR #55: RFF + compile + volume-loss-weight 3.0**
+to recover the volume regression.
+
+---
+
 ## 2026-04-30 00:49 UTC — PR #43 CLOSED: fern multi-scale RFF — null result vs own baseline
 
 **Student:** fern | **W&B run:** `5bx6zsio` | **Group:** `fern-multiscale-rff`
