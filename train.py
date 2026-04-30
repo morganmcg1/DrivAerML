@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Iterable
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
@@ -64,6 +66,48 @@ from trainer_runtime import (
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
+
+
+TASK_NAMES: tuple[str, ...] = (
+    "surface_pressure",
+    "wall_shear_x",
+    "wall_shear_y",
+    "wall_shear_z",
+    "volume_pressure",
+)
+NUM_TASKS = len(TASK_NAMES)
+
+
+class GradNormController(nn.Module):
+    """GradNorm (Chen et al., 2018) per-task loss-weight controller.
+
+    Maintains a learnable ``log_w`` of shape ``(num_tasks,)``; the effective
+    per-task weights are ``w = softmax(log_w) * num_tasks`` so that the weights
+    are positive and sum to ``num_tasks`` (equivalent to the paper's ``sum w =
+    T`` invariant). Loss references are tracked with an exponential moving
+    average so the relative inverse training rate ``L_i / L_i_ref`` is robust
+    to single-step noise during early training.
+    """
+
+    def __init__(self, num_tasks: int = NUM_TASKS, alpha: float = 1.5, ref_decay: float = 0.99):
+        super().__init__()
+        self.num_tasks = num_tasks
+        self.alpha = alpha
+        self.ref_decay = ref_decay
+        self.log_w = nn.Parameter(torch.zeros(num_tasks))
+        self.register_buffer("loss_refs", torch.zeros(num_tasks))
+        self.register_buffer("loss_refs_initialized", torch.zeros(()))
+
+    def get_weights(self) -> torch.Tensor:
+        return F.softmax(self.log_w, dim=0) * self.num_tasks
+
+    @torch.no_grad()
+    def update_loss_refs(self, current_losses: torch.Tensor) -> None:
+        if bool(self.loss_refs_initialized.item() < 0.5):
+            self.loss_refs.copy_(current_losses)
+            self.loss_refs_initialized.fill_(1.0)
+        else:
+            self.loss_refs.mul_(self.ref_decay).add_(current_losses, alpha=1.0 - self.ref_decay)
 
 
 @dataclass
@@ -113,6 +157,12 @@ class Config:
     kill_thresholds: str = ""
     compile_model: bool = True
     debug: bool = False
+    gradnorm: bool = False
+    gradnorm_alpha: float = 1.5
+    gradnorm_update_every: int = 200
+    gradnorm_warmup_steps: int = 1000
+    gradnorm_lr: float = 1e-3
+    gradnorm_ref_decay: float = 0.99
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -151,16 +201,21 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
-def train_loss(
+def compute_task_losses(
     model: nn.Module,
     batch,
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-    *,
-    surface_loss_weight: float = 1.0,
-    volume_loss_weight: float = 1.0,
-) -> tuple[torch.Tensor, dict[str, float]]:
+) -> tuple[list[torch.Tensor], dict[str, float]]:
+    """Compute the five per-task normalized MSE losses and unweighted aggregates.
+
+    Returns (task_losses_list, metrics_dict). The task list is in the canonical
+    order from ``TASK_NAMES``. Aggregate metrics keep the historical
+    ``surface_loss + volume_loss`` definitions so existing kill thresholds and
+    W&B curves remain comparable.
+    """
+
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -171,19 +226,99 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        surface_pred = out["surface_preds"]
+        sp_loss = masked_mse(surface_pred[:, :, 0:1], surface_target[:, :, 0:1], batch.surface_mask)
+        wsx_loss = masked_mse(surface_pred[:, :, 1:2], surface_target[:, :, 1:2], batch.surface_mask)
+        wsy_loss = masked_mse(surface_pred[:, :, 2:3], surface_target[:, :, 2:3], batch.surface_mask)
+        wsz_loss = masked_mse(surface_pred[:, :, 3:4], surface_target[:, :, 3:4], batch.surface_mask)
+        vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # Match the historical "mean over 4 channels" surface_loss for the
+        # backward-compatible aggregate metrics; per-task losses are the
+        # primitives the GradNorm controller actually balances.
+        surface_loss = (sp_loss + wsx_loss + wsy_loss + wsz_loss) / 4.0
+        volume_loss = vp_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    task_losses = [sp_loss, wsx_loss, wsy_loss, wsz_loss, vp_loss]
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
-        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
-        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "surface_pressure_loss": float(sp_loss.detach().cpu().item()),
+        "wall_shear_x_loss": float(wsx_loss.detach().cpu().item()),
+        "wall_shear_y_loss": float(wsy_loss.detach().cpu().item()),
+        "wall_shear_z_loss": float(wsz_loss.detach().cpu().item()),
+        "volume_pressure_loss": float(vp_loss.detach().cpu().item()),
     }
+    return task_losses, metrics
+
+
+def gradnorm_controller_step(
+    *,
+    controller: GradNormController,
+    controller_optimizer: torch.optim.Optimizer,
+    task_losses: list[torch.Tensor],
+    shared_param: torch.nn.Parameter,
+    distributed_enabled: bool,
+    retain_main_graph: bool,
+) -> dict[str, float]:
+    """Run one GradNorm controller update and return diagnostics.
+
+    Computes the per-task gradient norm of each loss with respect to the
+    shared backbone parameter, all-reduces across DDP ranks, and updates the
+    learnable ``log_w`` to drive each task's weighted gradient norm toward
+    ``g_bar * (L_i / L_ref_i / mean(...)) ** alpha``. ``retain_main_graph``
+    keeps the forward graph alive for the subsequent ``total_loss.backward()``.
+    """
+
+    grad_norms_unweighted: list[torch.Tensor] = []
+    last_idx = len(task_losses) - 1
+    for idx, loss_i in enumerate(task_losses):
+        retain = retain_main_graph or idx < last_idx
+        (gi,) = torch.autograd.grad(
+            loss_i,
+            shared_param,
+            retain_graph=retain,
+            create_graph=False,
+            allow_unused=False,
+        )
+        grad_norms_unweighted.append(gi.float().norm().detach())
+    g_unweighted = torch.stack(grad_norms_unweighted)
+    if distributed_enabled:
+        dist.all_reduce(g_unweighted, op=dist.ReduceOp.AVG)
+
+    weights = controller.get_weights()  # graph through controller.log_w
+    g_weighted = weights * g_unweighted
+
+    task_loss_vec = torch.stack([l.detach().float() for l in task_losses])
+    if distributed_enabled:
+        dist.all_reduce(task_loss_vec, op=dist.ReduceOp.AVG)
+    controller.update_loss_refs(task_loss_vec)
+
+    with torch.no_grad():
+        loss_ratios = task_loss_vec / controller.loss_refs.clamp_min(1e-8)
+        r_tilde = loss_ratios / loss_ratios.mean().clamp_min(1e-8)
+        g_bar = g_weighted.detach().mean()
+        targets = (g_bar * r_tilde.pow(controller.alpha)).detach()
+
+    controller_loss = (g_weighted - targets).abs().sum()
+    controller_optimizer.zero_grad(set_to_none=True)
+    controller_loss.backward()
+    controller_optimizer.step()
+
+    diagnostics: dict[str, float] = {
+        "train/gradnorm/g_bar": float(g_bar.item()),
+        "train/gradnorm/controller_loss": float(controller_loss.detach().item()),
+        "train/gradnorm/log_w_max_abs": float(controller.log_w.detach().abs().max().item()),
+    }
+    final_weights = controller.get_weights().detach()
+    for i, name in enumerate(TASK_NAMES):
+        diagnostics[f"train/gradnorm/g_unweighted_{name}"] = float(g_unweighted[i].item())
+        diagnostics[f"train/gradnorm/g_{name}"] = float(g_weighted.detach()[i].item())
+        diagnostics[f"train/gradnorm/w_{name}"] = float(final_weights[i].item())
+        diagnostics[f"train/gradnorm/loss_ratio_{name}"] = float(loss_ratios[i].item())
+        diagnostics[f"train/gradnorm/loss_ref_{name}"] = float(controller.loss_refs[i].item())
+        diagnostics[f"train/gradnorm/log_w_{name}"] = float(controller.log_w.detach()[i].item())
+    return diagnostics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -229,6 +364,27 @@ def main(argv: Iterable[str] | None = None) -> None:
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+
+        controller: GradNormController | None = None
+        controller_optimizer: torch.optim.Optimizer | None = None
+        shared_param: torch.nn.Parameter | None = None
+        if config.gradnorm:
+            controller = GradNormController(
+                num_tasks=NUM_TASKS,
+                alpha=config.gradnorm_alpha,
+                ref_decay=config.gradnorm_ref_decay,
+            ).to(device)
+            controller_optimizer = torch.optim.Adam(controller.parameters(), lr=config.gradnorm_lr)
+            shared_param = base_model.norm.weight  # last LayerNorm scale shared across all 5 task heads
+            if state.is_main:
+                print(
+                    f"GradNorm enabled: alpha={config.gradnorm_alpha}, "
+                    f"warmup_steps={config.gradnorm_warmup_steps}, "
+                    f"update_every={config.gradnorm_update_every}, "
+                    f"controller_lr={config.gradnorm_lr}, "
+                    f"shared_param=base_model.norm.weight (shape={tuple(shared_param.shape)})"
+                )
+
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
         train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -288,15 +444,30 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
-                loss, batch_loss_metrics = train_loss(
+                task_losses, batch_loss_metrics = compute_task_losses(
                     model,
                     batch,
                     transform,
                     device,
                     config.amp_mode,
-                    surface_loss_weight=config.surface_loss_weight,
-                    volume_loss_weight=config.volume_loss_weight,
                 )
+                if controller is not None:
+                    weights_for_main = controller.get_weights().detach()
+                    surface_weight_total = float(weights_for_main[:4].sum().item()) / 4.0
+                    volume_weight = float(weights_for_main[4].item())
+                    surface_loss_weighted_tensor = sum(
+                        weights_for_main[i] * task_losses[i] for i in range(4)
+                    ) / 4.0
+                    volume_loss_weighted_tensor = weights_for_main[4] * task_losses[4]
+                    loss = sum(weights_for_main[i] * task_losses[i] for i in range(NUM_TASKS))
+                else:
+                    surface_weight_total = float(config.surface_loss_weight)
+                    volume_weight = float(config.volume_loss_weight)
+                    surface_unweighted = sum(task_losses[i] for i in range(4)) / 4.0
+                    surface_loss_weighted_tensor = config.surface_loss_weight * surface_unweighted
+                    volume_loss_weighted_tensor = config.volume_loss_weight * task_losses[4]
+                    loss = surface_loss_weighted_tensor + volume_loss_weighted_tensor
+
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -329,14 +500,52 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/base_mse_loss": batch_loss_metrics["base_mse_loss"],
                             "train/surface_loss": batch_loss_metrics["surface_loss"],
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
-                            "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
-                            "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/surface_loss_weighted": float(
+                                surface_loss_weighted_tensor.detach().cpu().item()
+                            ),
+                            "train/volume_loss_weighted": float(
+                                volume_loss_weighted_tensor.detach().cpu().item()
+                            ),
+                            "train/surface_pressure_loss": batch_loss_metrics["surface_pressure_loss"],
+                            "train/wall_shear_x_loss": batch_loss_metrics["wall_shear_x_loss"],
+                            "train/wall_shear_y_loss": batch_loss_metrics["wall_shear_y_loss"],
+                            "train/wall_shear_z_loss": batch_loss_metrics["wall_shear_z_loss"],
+                            "train/volume_pressure_loss": batch_loss_metrics["volume_pressure_loss"],
+                            "train/effective_surface_weight": surface_weight_total,
+                            "train/effective_volume_weight": volume_weight,
                         }
                     )
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
+                    if (
+                        controller is not None
+                        and controller_optimizer is not None
+                        and shared_param is not None
+                        and global_step >= config.gradnorm_warmup_steps
+                        and (global_step - config.gradnorm_warmup_steps) % config.gradnorm_update_every == 0
+                    ):
+                        # Re-forward through the unwrapped base_model so the
+                        # controller's autograd.grad calls don't interact with
+                        # the DDP reducer's hooks on the main forward graph.
+                        aux_task_losses, _ = compute_task_losses(
+                            base_model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                        )
+                        gradnorm_diag = gradnorm_controller_step(
+                            controller=controller,
+                            controller_optimizer=controller_optimizer,
+                            task_losses=aux_task_losses,
+                            shared_param=shared_param,
+                            distributed_enabled=state.enabled,
+                            retain_main_graph=False,
+                        )
+                        if state.is_main:
+                            train_log.update(gradnorm_diag)
                     loss.backward()
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
