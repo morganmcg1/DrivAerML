@@ -593,6 +593,8 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    lr_step_epochs: str = ""
+    lr_step_factor: float = 0.2
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1776,10 +1778,32 @@ def main(argv: Iterable[str] | None = None) -> None:
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
 
+    lr_step_epochs = (
+        [int(e) for e in config.lr_step_epochs.split(",") if e.strip()]
+        if config.lr_step_epochs
+        else []
+    )
+
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
             print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
             break
+
+        if epoch in lr_step_epochs:
+            for param_group in optimizer.param_groups:
+                param_group["lr"] *= config.lr_step_factor
+            current_lr = optimizer.param_groups[0]["lr"]
+            print(
+                f"Epoch {epoch}: LR step decay applied "
+                f"(factor={config.lr_step_factor}), new lr={current_lr:.2e}"
+            )
+            wandb.log(
+                {
+                    "train/lr_step_decay": current_lr,
+                    "train/epoch": epoch,
+                    "global_step": global_step,
+                }
+            )
 
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
