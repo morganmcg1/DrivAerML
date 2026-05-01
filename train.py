@@ -26,6 +26,7 @@ import torch.nn as nn
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
+from torch.optim.swa_utils import AveragedModel
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
@@ -115,6 +116,8 @@ class Config:
     compile_model: bool = True
     debug: bool = False
     raw_rel_l2_weight: float = 0.0
+    swa: bool = False
+    swa_start_epoch: int = 20
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -252,6 +255,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        swa_model: AveragedModel | None = None
+        if config.swa:
+            swa_model = AveragedModel(base_model, device=device)
+            swa_model.eval()
+            if state.is_main:
+                print(
+                    f"SWA enabled: start_epoch={config.swa_start_epoch}, "
+                    f"max_epochs={max_epochs} (window <= {max(0, max_epochs - config.swa_start_epoch + 1)} epochs)"
+                )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -457,6 +469,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     break
 
             scheduler.step()
+            if swa_model is not None and (epoch + 1) >= config.swa_start_epoch:
+                swa_model.update_parameters(base_model)
             epoch_train_loss = train_loss_sum / max(n_batches, 1)
             dt = time.time() - t0
             peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
@@ -474,6 +488,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if swa_model is not None:
+                log_metrics["swa/n_averaged"] = float(int(swa_model.n_averaged.item()))
+                log_metrics["swa/active"] = 1.0 if (epoch + 1) >= config.swa_start_epoch else 0.0
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
@@ -613,6 +630,77 @@ def main(argv: Iterable[str] | None = None) -> None:
             )
             wandb.finish()
             return
+
+        swa_n_averaged = int(swa_model.n_averaged.item()) if swa_model is not None else 0
+        if swa_model is not None and swa_n_averaged > 0 and best_metrics:
+            if state.is_main:
+                print(f"Evaluating SWA model (n_averaged={swa_n_averaged})...")
+            swa_val_metrics = {
+                name: evaluate_split(
+                    swa_model,
+                    loader,
+                    transform,
+                    device,
+                    amp_mode=config.amp_mode,
+                    distributed_state=state,
+                )
+                for name, loader in val_loaders.items()
+            }
+            if state.is_main:
+                swa_surface = swa_val_metrics["val_surface"]
+                primary_swa = swa_surface["abupt_axis_mean_rel_l2_pct"]
+                swa_log: dict[str, object] = {
+                    "global_step": global_step,
+                    "swa/n_averaged": float(swa_n_averaged),
+                    **primary_metric_log("swa_val_primary", swa_surface),
+                }
+                for split_name, metrics in swa_val_metrics.items():
+                    swa_log.update(metric_namespace("swa_val", split_name, metrics))
+                wandb.log(swa_log)
+                wandb.summary.update(
+                    {
+                        "swa/enabled": 1.0,
+                        "swa/n_averaged": float(swa_n_averaged),
+                        "swa/start_epoch": float(config.swa_start_epoch),
+                        "swa/val_primary_abupt_axis_mean_rel_l2_pct": primary_swa,
+                        "swa/best_per_epoch_val_abupt": best_val,
+                        "swa/swa_minus_per_epoch_pp": primary_swa - best_val,
+                    }
+                )
+                if should_update_best_checkpoint(primary_swa, best_val):
+                    print(
+                        f"SWA WIN: val_abupt={primary_swa:.4f} < per-epoch best={best_val:.4f} "
+                        f"(delta={primary_swa - best_val:+.4f}pp); promoting SWA to best checkpoint."
+                    )
+                    best_val = primary_swa
+                    best_metrics = {"epoch": float(max_epochs), **swa_surface}
+                    best_checkpoint_source = "swa"
+                    torch.save(
+                        {
+                            "model": swa_model.module.state_dict(),
+                            "config": asdict(config),
+                            "epoch": max_epochs,
+                            "val_metrics": swa_val_metrics,
+                            "checkpoint_source": "swa",
+                            "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                            "swa_n_averaged": swa_n_averaged,
+                            "swa_start_epoch": config.swa_start_epoch,
+                        },
+                        model_path,
+                    )
+                    wandb.summary.update({"swa/promoted_to_best": 1.0})
+                else:
+                    print(
+                        f"SWA NO-WIN: val_abupt={primary_swa:.4f} >= per-epoch best={best_val:.4f} "
+                        f"(delta={primary_swa - best_val:+.4f}pp); keeping per-epoch checkpoint."
+                    )
+                    wandb.summary.update({"swa/promoted_to_best": 0.0})
+        elif config.swa and state.is_main:
+            print(
+                f"SWA enabled but no averaged params (n_averaged={swa_n_averaged}); "
+                "skipping SWA eval."
+            )
+            wandb.summary.update({"swa/enabled": 1.0, "swa/n_averaged": float(swa_n_averaged)})
 
         distributed_barrier(state)
         if not state.is_main:
