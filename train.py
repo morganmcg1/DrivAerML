@@ -71,6 +71,8 @@ from trainer_runtime import (
 class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-4
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
     batch_size: int = 2
     epochs: int = 50
     train_surface_points: int = 40_000
@@ -249,7 +251,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        optimizer = torch.optim.AdamW(
+            base_model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.adam_beta1, config.adam_beta2),
+        )
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
