@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import random
 import re
 import subprocess
 import time
@@ -24,6 +25,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -661,6 +663,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         value = getattr(defaults, field.name)
         arg_name = f"--{field.name.replace('_', '-')}"
         help_value = help_text.get(field.name)
+        if field.name == "model_mlp_ratio":
+            parser.add_argument(
+                arg_name,
+                "--mlp-ratio",
+                type=int,
+                default=value,
+                dest="model_mlp_ratio",
+                help=help_value,
+            )
+            continue
         if isinstance(value, bool):
             parser.add_argument(arg_name, action="store_true", default=value, help=help_value)
             parser.add_argument(f"--no-{field.name.replace('_', '-')}", action="store_false", dest=field.name)
@@ -668,6 +680,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def _warmup_lr(global_step: int, base_lr: float, warmup_steps: int, warmup_start_lr: float) -> float:
+    if warmup_steps <= 0 or global_step >= warmup_steps:
+        return base_lr
+    progress = global_step / float(warmup_steps)
+    return warmup_start_lr + progress * (base_lr - warmup_start_lr)
 
 
 def autocast_context(device: torch.device, amp_mode: str):
@@ -1672,14 +1698,7 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
     if config.seed >= 0:
-        import random
-
-        import numpy as np
-
-        random.seed(config.seed)
-        np.random.seed(config.seed)
-        torch.manual_seed(config.seed)
-        torch.cuda.manual_seed_all(config.seed)
+        _seed_everything(config.seed)
     kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
     max_epochs = min(config.epochs, 3) if config.debug else config.epochs
     timeout_minutes = float(os.environ.get("SENPAI_TIMEOUT_MINUTES", "30"))
@@ -1754,8 +1773,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
-    wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
+    wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
 
@@ -1789,6 +1808,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if config.lr_warmup_steps > 0:
+                lr_now = _warmup_lr(
+                    global_step,
+                    config.lr,
+                    config.lr_warmup_steps,
+                    config.lr_warmup_start_lr,
+                )
+                for pg in optimizer.param_groups:
+                    pg["lr"] = lr_now
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1863,16 +1891,6 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 global_step += 1
                 continue
-            if config.lr_warmup_steps > 0:
-                if global_step < config.lr_warmup_steps:
-                    warmup_lr = config.lr_warmup_start_lr + (
-                        config.lr - config.lr_warmup_start_lr
-                    ) * (global_step / config.lr_warmup_steps)
-                    for pg in optimizer.param_groups:
-                        pg["lr"] = warmup_lr
-                elif global_step == config.lr_warmup_steps:
-                    for pg in optimizer.param_groups:
-                        pg["lr"] = config.lr
             optimizer.step()
             ema_decay_now: float | None = None
             if ema is not None:
@@ -1948,7 +1966,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if config.lr_warmup_steps == 0:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
@@ -1961,7 +1980,7 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": float(optimizer.param_groups[0]["lr"]),
             "epoch_time_s": dt,
             "global_step": global_step,
         }
