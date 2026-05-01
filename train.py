@@ -590,6 +590,13 @@ class Config:
     clip_grad_norm: float = 0.0
     compile_model: bool = True
     debug: bool = False
+    use_1cycle_lr: bool = False
+    onecycle_max_lr: float = 8e-4
+    onecycle_pct_start: float = 0.30
+    onecycle_div_factor: float = 25.0
+    onecycle_final_div_factor: float = 1e4
+    onecycle_warmup_steps: int = 500
+    onecycle_warmup_start_lr: float = 1e-5
 
 
 class TargetTransform:
@@ -1686,9 +1693,39 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    onecycle_start_lr: float = 0.0
+    if config.use_1cycle_lr:
+        onecycle_start_lr = config.onecycle_max_lr / config.onecycle_div_factor
+        onecycle_total_steps = max(1, total_estimated_steps - config.onecycle_warmup_steps)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=config.onecycle_max_lr,
+            total_steps=onecycle_total_steps,
+            pct_start=config.onecycle_pct_start,
+            div_factor=config.onecycle_div_factor,
+            final_div_factor=config.onecycle_final_div_factor,
+            anneal_strategy="cos",
+        )
+        for pg in optimizer.param_groups:
+            pg["lr"] = config.onecycle_warmup_start_lr
+        peak_step_after_warmup = int(onecycle_total_steps * config.onecycle_pct_start)
+        print(
+            f"OneCycleLR: max_lr={config.onecycle_max_lr:.2e} "
+            f"pct_start={config.onecycle_pct_start} "
+            f"div_factor={config.onecycle_div_factor} "
+            f"final_div_factor={config.onecycle_final_div_factor:.0e} "
+            f"start_lr={onecycle_start_lr:.3e} "
+            f"total_steps={onecycle_total_steps} (estimated peak @ global_step "
+            f"{peak_step_after_warmup + config.onecycle_warmup_steps})"
+        )
+        print(
+            f"Linear warmup guard: lr {config.onecycle_warmup_start_lr:.0e} -> "
+            f"{onecycle_start_lr:.3e} over {config.onecycle_warmup_steps} steps"
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1770,6 +1807,16 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if config.use_1cycle_lr:
+                if global_step < config.onecycle_warmup_steps:
+                    warmup_lr = config.onecycle_warmup_start_lr + (
+                        onecycle_start_lr - config.onecycle_warmup_start_lr
+                    ) * (global_step / float(max(1, config.onecycle_warmup_steps)))
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = warmup_lr
+                elif global_step == config.onecycle_warmup_steps:
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = onecycle_start_lr
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1830,6 +1877,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
+            if config.use_1cycle_lr and global_step > config.onecycle_warmup_steps:
+                try:
+                    scheduler.step()
+                except ValueError:
+                    pass
+            current_lr = float(optimizer.param_groups[0]["lr"])
             train_log: dict[str, object] = {
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
@@ -1838,6 +1891,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "lr": current_lr,
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
@@ -1881,7 +1935,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if not config.use_1cycle_lr:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
@@ -1894,7 +1949,7 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": float(optimizer.param_groups[0]["lr"]),
             "epoch_time_s": dt,
             "global_step": global_step,
         }
