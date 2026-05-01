@@ -505,3 +505,39 @@ All five students immediately reassigned with fresh Wave 3 hypotheses targeting 
 | #238 | kohaku | High-shear curriculum oversampling + linear anneal | Data axis — sampling reweight |
 
 All five new PRs include the corrected kill threshold `35000:val_primary/abupt_axis_mean_rel_l2_pct<20`, explicit ep5/ep10/ep15/ep20 gates, and a 30-minute acknowledgment requirement. Two missed acknowledgments = closure (consistent with the protocol that produced this round's reassignments).
+
+## 2026-04-30 21:00 — PR #218: [frieren] SO(3)-equivariant TangentFrameHead (CLOSED)
+
+- **Branch:** `frieren/tangent-frame-wallshear-head`
+- **Run IDs:** `lpnr8zhi` (primary), `dwl5oi97`, `d4cvbt1p`, `i3lx54ou` (siblings, all killed)
+- **Hypothesis:** Predict wall shear in the local tangent plane (Frisvad-Duff orthonormal basis built from surface normals) instead of Cartesian xyz, restoring SO(3)-equivariance and providing inductive bias toward physical wall-tangent flow direction.
+
+### Results table (kill at ep11)
+
+| Metric | TangentFrame (lpnr8zhi) | Cartesian baseline | Δ |
+|---|---:|---:|---:|
+| val_abupt | 13.195% | ~9.0% | +4.2pp WORSE |
+| val_surf_p | 6.288% | ~5.5% | +0.8pp |
+| val_vol_p | 5.868% | ~5.6% | +0.3pp |
+| val_wsx | 13.057% | ~8.5% | +4.6pp |
+| val_wsy | 19.379% | ~11.0% | +8.4pp |
+| val_wsz | 21.380% | ~13.0% | +8.4pp |
+
+Validation trajectory: ep1=18.7%, ep5=14.9%, ep11=13.2% — converging too slowly; slope analysis projected ep30 ≈ 11–12%, never reaching <9.0%.
+
+### Diagnosis (student writeup)
+
+The Frisvad-Duff basis introduces anisotropic gradient flow: small variations in the surface normal cause large discontinuous changes in the tangent frame, which the optimizer must compensate for. The wall-shear-y/z components (the binding constraint) ended up 2× WORSE than the dense MLP Cartesian baseline despite the equivariance prior — the geometric inductive bias is correct in theory but the optimization landscape is hostile in practice.
+
+### Conclusion
+
+**Rejected. Closed as dead end.** Clean negative result: SO(3)-equivariance via tangent frame reparametrization does not help on DrivAerML when the binding constraint is wsy/wsz absolute magnitude. Archived 5 follow-ups for Wave 5+:
+
+1. PCA-of-k-NN-normals tangent basis (smoother than Frisvad-Duff)
+2. Hybrid Cartesian + tangent prediction with learnable gate
+3. Tangent constraint as soft loss term, not hard reparametrization
+4. Warm-start tangent head from Cartesian baseline checkpoint
+5. Pair tangent head with Wave 4 wsy/wsz loss multipliers
+
+Frieren reassigned to PR #256 (Mirror-symmetry TTA for wsy reduction) in the Wave 4 launch.
+
