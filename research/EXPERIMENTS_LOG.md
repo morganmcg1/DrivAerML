@@ -1419,3 +1419,15 @@ Val trajectory: 78.56→43.75→23.68→16.92→13.80→12.01→11.03→10.41→
 - **Trajectory:** 41.81, 22.93, 17.12, 14.37, 12.67, 11.69, 11.10, 10.73, 10.59 — strong early lead (-48% ep1, -51% ep2 vs vanilla) but lead inverted by ep6.
 - **Conclusion:** EMA=0.998 is **too fast** for the 9-epoch budget. EMA sweep result: 0.9999 (too slow, closed) → 0.9995 (PR #50 baseline) → **0.999 SOTA** → 0.998 (this loser). Sweet spot confirmed at 0.999.
 - **Askeladd reassigned** to round10 compound stack lr=1e-4 + sw=2.0 + EMA=0.999 (combine round 9's two strongest winners).
+
+## 2026-05-01 04:55 UTC — PR #139 CLOSED: fern slices=256 (test 12.389, +17.1% vs SOTA)
+
+- **Branch:** `fern/round10-slices-256`
+- **W&B run:** `9lc1acwf` — 289.4 min, ~7 val epochs (et=8.9 min/ep in this config, faster per-epoch than 4L)
+- **Hypothesis:** Double slice count 128→256 to improve high-frequency spatial discrimination (tau_y/z attack)
+- **Result:** test_abupt **12.389** vs SOTA 10.580 = **+17.1% WORSE**. Best val 11.210 at ep7.
+- **Per-axis:** sp=7.12 (+25%), ws=12.62 (+21%), vp=13.11 (+2.9%), tau_x=10.77 (+21%), tau_y=15.24 (+22%), tau_z=15.71 (+20%).
+- **Notable:** Memory at 98.8% allocated (94.4/97 GB) — slice attention quadratic in slice count. Run used lr=5e-5 + vol_w=2.0 + EMA=0.999, not strict PR #115 base (lr=1e-4).
+- **Why:** Quadratic attention overhead (256 slices→each attends all others), smaller per-slice geometric patch = less spatial context, and no selective improvement on targeted tau axes — every component regressed uniformly.
+- **Conclusion:** model_slices=128 confirmed optimal. Lever closed.
+- **Fern reassigned** to PR #159: Lion β1=0.95 (first Lion beta sweep on tay, single delta from SOTA).
