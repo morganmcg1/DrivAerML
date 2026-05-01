@@ -563,6 +563,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    ohem_fraction: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1288,6 +1289,56 @@ def weighted_masked_mse_per_channel(
     return weighted_loss, per_axis_mean
 
 
+def ohem_wall_shear_loss(
+    ws_pred: torch.Tensor,      # [B, N, 3] wall-shear prediction (normalized)
+    ws_true: torch.Tensor,      # [B, N, 3] wall-shear target (normalized)
+    mask: torch.Tensor,         # [B, N] bool
+    ohem_fraction: float = 0.5,
+    channel_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
+) -> torch.Tensor:
+    """OHEM (Online Hard Example Mining) loss for wall-shear channels.
+
+    Selects the top `ohem_fraction` of surface points per batch element by
+    *unweighted* per-point mean squared error across the 3 ws channels (so
+    per-channel upweighting in the loss does not bias selection — see
+    S-OHEM, Li et al. 2017, arXiv:1705.02233). Hard-point contributions are
+    upweighted by 1/ohem_fraction. The loss scale matches
+    weighted_masked_mse_per_channel on the same 3 channels exactly when
+    ohem_fraction == 1.0; for ohem_fraction < 1.0 the loss equals the
+    standard ws MSE multiplied by the hard-set concentration factor
+    (typically 1.5-2x), giving a clean knob to focus gradient on hard
+    regions without inflating surface-vs-volume balance.
+
+    ws_pred, ws_true: [B, N, 3]. mask: [B, N] bool. Returns a scalar tensor.
+    """
+    sq_err = (ws_pred.float() - ws_true.float()).square()  # [B, N, 3]
+    w = torch.tensor(channel_weights, device=sq_err.device, dtype=sq_err.dtype)
+    sq_err_weighted = sq_err * w  # [B, N, 3]
+    N = ws_pred.shape[1]
+    if N == 0 or not bool(mask.any()):
+        return ws_pred.sum() * 0.0
+    n_channels = sq_err.shape[-1]
+    # Selection by unweighted priority (no channel bias)
+    priority = sq_err.mean(dim=-1)  # [B, N]
+    priority_masked = priority.masked_fill(~mask, float('-inf'))
+    N_valid = mask.float().sum(dim=-1).long()  # [B]
+    k = (N_valid.float() * ohem_fraction).long().clamp(min=1)  # [B]
+    # Per-element threshold via sort+gather avoids the variable-k topk issue
+    # across batch items (with a uniform topk over k.max(), batch elements
+    # with smaller N_valid would have -inf in their topk window and end up
+    # selecting all of their valid points).
+    sorted_priority, _ = priority_masked.sort(dim=-1, descending=True)  # [B, N]
+    k_idx = (k - 1).clamp(min=0, max=N - 1)  # [B]
+    topk_val = sorted_priority.gather(1, k_idx.unsqueeze(1))  # [B, 1]
+    hard_mask = mask & (priority_masked >= topk_val)  # [B, N]
+    # Hard-point upweight by 1/ohem_fraction; divide by total valid points * n_channels
+    # to keep the same scale as weighted_masked_mse_per_channel at f=1.
+    hard_weight = hard_mask.float() / ohem_fraction  # [B, N]
+    weighted_sum = (sq_err_weighted * hard_weight.unsqueeze(-1)).sum()  # scalar
+    n_valid_total = mask.float().sum().clamp_min(1)
+    return weighted_sum / (n_valid_total * n_channels)
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -1313,6 +1364,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    ohem_fraction: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1352,12 +1404,52 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
-            surface_pred_used,
-            surface_target_used,
-            batch.surface_mask,
-            channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
-        )
+        if ohem_fraction < 1.0:
+            # OHEM on the wall-shear channels (1:4) only; cp (channel 0) keeps its
+            # standard contribution. The cp and ws sub-losses are rescaled so that
+            # at ohem_fraction=1.0 the sum exactly equals the standard 4-channel
+            # weighted_masked_mse_per_channel (clean numerical control vs. Arm D),
+            # and at ohem_fraction<1.0 only the ws portion is amplified by the
+            # hard-set concentration factor (~1.5-2x for top-50%). This keeps the
+            # surface-vs-volume balance intact and isolates the OHEM effect.
+            #
+            # Standard 4ch weighted MSE = (cp_term + ws_term) / (N * 4) where each
+            # `*_term` is the unnormalized weighted SSE. So:
+            #   cp_term/(4N) = (1/4) * masked_mse(cp_pred, cp_true, mask)
+            #   ws_term/(4N) = (3/4) * weighted_masked_mse_per_channel(ws_pred,
+            #                          ws_true, mask, w_ws) on 3 channels
+            # which at f=1 sums to the standard 4ch loss. ohem_wall_shear_loss
+            # has the 3-channel weighted_masked_mse_per_channel scale at f=1
+            # (and `concentration` x that at f<1).
+            cp_unscaled = masked_mse(
+                surface_pred_used[..., :1],
+                surface_target_used[..., :1],
+                batch.surface_mask,
+            )
+            ws_unscaled = ohem_wall_shear_loss(
+                surface_pred_used[..., 1:4],
+                surface_target_used[..., 1:4],
+                batch.surface_mask,
+                ohem_fraction=ohem_fraction,
+                channel_weights=(1.0, wallshear_y_weight, wallshear_z_weight),
+            )
+            cp_loss = cp_unscaled * 0.25  # 1/n_total_channels (cp share in 4ch)
+            ws_ohem_loss = ws_unscaled * 0.75  # n_ws_channels/n_total_channels
+            surface_loss = cp_loss + ws_ohem_loss
+            # Compute unweighted per-axis diagnostics over all points (no OHEM applied)
+            _, per_axis_unweighted = weighted_masked_mse_per_channel(
+                surface_pred_used,
+                surface_target_used,
+                batch.surface_mask,
+                channel_weights=(1.0, 1.0, 1.0, 1.0),
+            )
+        else:
+            surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
+                surface_pred_used,
+                surface_target_used,
+                batch.surface_mask,
+                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+            )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
         aux_rel_l2_value: float | None = None
@@ -1380,6 +1472,8 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if ohem_fraction < 1.0:
+        metrics["ohem_fraction"] = ohem_fraction
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1810,6 +1904,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                ohem_fraction=config.ohem_fraction,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
