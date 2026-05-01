@@ -659,3 +659,54 @@ seed1337 ep3=11.92 is 1.23pp above baseline. Slope flattening (ep1→ep2: −5.2
 - **Key finding:** asinh-1.0 compresses the heavy tail → suppresses gradient explosions (0 skips vs 50%+) but also suppresses learning signal where the y/z gap lives. Train loss kept descending while val exploded ep2 (17.55→45.69) = classic underfitting of tail domain. asinh-1.0 is not a viable target transformation.
 - D (log1p) and B (asinh-0.5) are healthier but still above baseline trajectory. Final results pending ~12:10-13:51 UTC.
 
+
+---
+
+## 2026-05-01 14:00 — PR #168: [askeladd] Normal-consistency penalty (soft tangential constraint)
+- Branch: `askeladd/normal-penalty-wallshear-yz`
+- Hypothesis: Add λ·mean(dot(τ_pred, n̂)²) auxiliary loss in normalized space to softly enforce wall-shear tangentiality without coordinate-frame discontinuities (vs PR #121's hard Duff-ONB reparam).
+- Results: 3 arms swept λ ∈ {0.01, 0.05, 0.10}; all v1 NaN'd in physical-space due to per-axis std mismatch; v2 reverted to normalized-space.
+
+| Arm | λ | W&B run | ep1 val_abupt | ep2 val_abupt | Stability |
+|---|---:|---|---:|---:|---|
+| C | 0.01 | (NaN ep1) | — | — | Diverged ep1 even w/ clip 0.5 |
+| B | 0.05 | 1buc9rh1 | 15.875 | NaN | Best ep1 of any arm; ep2 spike |
+| A | 0.10 | gawdh7ah | — | **12.285** | Stable; ep3 ~14.4 |
+
+- **Counter-intuitive ranking:** larger λ more stable. Small λ insufficient to anchor τ_pred; out-of-plane drift produces a squared-dot loss spike that overwhelms clip=1.0 → corrupts Adam m,v.
+- **Verdict: NEGATIVE.** λ=0.10 ep2 12.285 was the first crossover vs fern PR #99 ep2 trajectory (12.417), but ep3 regressed to 14.4 vs final baseline 10.69.
+- **Combined with PR #121 (hard tangentiality, also negative):** explicit tangentiality enforcement provides no metric improvement on this dataset; the model already learns near-tangential predictions naturally (pen_phys 0.55 → 0.07 unprompted in baseline).
+- Closed as negative; askeladd reassigned.
+
+## 2026-05-01 14:00 — PR #164: [alphonse] 8L/256d depth + 1cycle LR (time-limited recovery)
+- Branch: `alphonse/depth-8L-1cycle-recovery`
+- Hypothesis: Restore 8L/256d depth (PR #144 negative @ const lr=5e-4, val 12.69) by pairing with OneCycleLR super-convergence schedule. Sweep peak ∈ {5e-4, 6e-4, 8e-4} over 3 epochs.
+- Results: All three arms diverged before completing training.
+
+| Arm | Peak LR | Diverged step | Diverged at lr | Cause |
+|---|---:|---:|---:|---|
+| A | 5e-4 | ~10700 | ~5e-4 | pre_clip 4 → 151 → 1369 → 1e9 |
+| B | 6e-4 | ~10599 | ~6e-4 | pre_clip 2 → 229 → cascade |
+| C | 8e-4 | ~8500 | ~7.5e-4 | pre_clip 3.8 → 22 → 5131 → 254611 |
+
+- **Verdict: NEGATIVE.** 8L/256d has a hard LR ceiling below 5e-4 for sustained training. Combined with PR #144 (8L const-lr=5e-4 val=12.69), depth scaling at width=256 is exhausted — neither schedule can clear the throughput needed to beat 10.69.
+- **Future depth work must change architecture (pre-LN/sandwich-LN, AGC clipping, or width=384+) before revisiting depth.**
+- Closed as negative; alphonse reassigned.
+
+## 2026-05-01 14:00 — PR #123: [frieren] asinh/log wall-shear target normalization (heavy-tail fix)
+- Branch: `frieren/asinh-log-target-normalization`
+- Hypothesis: Apply asinh(τ/scale) or log1p(|τ|) target normalization to compress the heavy-tailed wall-shear distribution, expecting better fitted gradients and faster convergence to lower rel_L2.
+- Results: 4 arms in v3/v3p1 with `--grad-skip-threshold` 1k–5k; major contribution was the always-on NaN/inf grad-skip + threshold infra in train.py.
+
+| Arm | Normalization | W&B run | ep1 val_abupt | ep2 val_abupt | Notes |
+|---|---|---|---:|---:|---|
+| A (v3p1) | Control | w8ecb8rp | — | 46.69 | 6543 grad-skips (39%); pathological |
+| C (v3) | asinh scale=1.0 | xtx426rb | **17.55** | 45.69 | ep1 best; ep2 train/val divergence |
+| D (v3p1) | log1p | 8oytk5ef | — | 22.35 | Healthier but well above baseline |
+| B (v3p1) | asinh-0.5 | zznrzvw5 | 18.94 | — | ep2 in flight |
+
+- **Verdict: NEGATIVE.** Best variant (asinh-1.0 ep1) val 17.55 vs baseline 10.69 (64% worse).
+- **Mechanism:** asinh suppresses gradient explosions by compressing the tail (0 grad-skips vs 50%+) but suppresses the very signal where the y/z gap lives. Train loss kept descending while val exploded → classic tail underfit.
+- **Open finding: universal ep1→ep2 train/val divergence** across all 4 norm variants is a separate failure mode worth pursuing — candidates: train/eval sampling distribution mismatch, overfitting-to-bulk regime, z-score saturation on tails. Suggests assigning a one-shot LR drop after ep1 experiment.
+- **Major contribution to retain:** `--grad-skip-threshold` + always-on NaN/inf grad-skip + W&B `train/grad/skipped_step|skipped_total` metrics. Will land independently on yi.
+- Closed as negative; frieren reassigned.
