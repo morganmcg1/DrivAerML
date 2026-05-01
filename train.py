@@ -593,6 +593,8 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    grad_skip_relative_threshold: float = 0.0
+    grad_skip_ema_beta: float = 0.95
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1770,6 +1772,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_metrics: dict[str, float] = {}
     global_step = 0
     nonfinite_skip_count = 0
+    running_grad_norm_ema: float | None = None
+    relative_skip_count = 0
     early_stop_reason: str | None = None
     timeout_hit = False
     train_start = time.time()
@@ -1838,11 +1842,23 @@ def main(argv: Iterable[str] | None = None) -> None:
                 else {}
             )
             grad_is_finite = True
-            if config.clip_grad_norm > 0:
+            pre_clip_norm_val: float | None = None
+            need_pre_clip_norm = (
+                config.clip_grad_norm > 0
+                or config.grad_skip_relative_threshold > 0
+            )
+            if need_pre_clip_norm:
+                max_n = (
+                    config.clip_grad_norm
+                    if config.clip_grad_norm > 0
+                    else float("inf")
+                )
                 pre_clip_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), max_norm=config.clip_grad_norm
+                    model.parameters(), max_norm=max_n
                 )
                 grad_is_finite = bool(torch.isfinite(pre_clip_norm).item())
+                if grad_is_finite:
+                    pre_clip_norm_val = float(pre_clip_norm)
                 if should_log_gradients:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
@@ -1861,6 +1877,43 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
                         f"loss/grad steps; training is structurally broken."
                     )
+                global_step += 1
+                continue
+            relative_skip = False
+            relative_skip_ratio_now: float | None = None
+            if (
+                config.grad_skip_relative_threshold > 0
+                and pre_clip_norm_val is not None
+            ):
+                if running_grad_norm_ema is None:
+                    running_grad_norm_ema = pre_clip_norm_val
+                else:
+                    running_grad_norm_ema = (
+                        config.grad_skip_ema_beta * running_grad_norm_ema
+                        + (1.0 - config.grad_skip_ema_beta) * pre_clip_norm_val
+                    )
+                if (
+                    running_grad_norm_ema > 0
+                    and pre_clip_norm_val
+                    > config.grad_skip_relative_threshold * running_grad_norm_ema
+                ):
+                    relative_skip = True
+                    relative_skip_count += 1
+                    relative_skip_ratio_now = (
+                        pre_clip_norm_val / running_grad_norm_ema
+                    )
+            if relative_skip:
+                optimizer.zero_grad(set_to_none=True)
+                wandb.log(
+                    {
+                        "train/grad/relative_skip": 1,
+                        "train/grad/relative_skip_ratio": relative_skip_ratio_now,
+                        "train/grad/relative_skip_total": relative_skip_count,
+                        "train/grad/relative_skip_pre_clip_norm": pre_clip_norm_val,
+                        "train/grad/running_ema_norm": running_grad_norm_ema,
+                        "global_step": global_step,
+                    }
+                )
                 global_step += 1
                 continue
             if config.lr_warmup_steps > 0:
@@ -1905,10 +1958,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "train/lr": float(optimizer.param_groups[0]["lr"]),
                 "train/nonfinite_skip_count": nonfinite_skip_count,
+                "train/grad/relative_skip": 0,
+                "train/grad/relative_skip_total": relative_skip_count,
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
             }
+            if pre_clip_norm_val is not None:
+                train_log.setdefault(
+                    "train/grad/pre_clip_norm", pre_clip_norm_val
+                )
+            if running_grad_norm_ema is not None:
+                train_log["train/grad/running_ema_norm"] = running_grad_norm_ema
+                if pre_clip_norm_val is not None and running_grad_norm_ema > 0:
+                    train_log["train/grad/relative_skip_ratio"] = (
+                        pre_clip_norm_val / running_grad_norm_ema
+                    )
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
