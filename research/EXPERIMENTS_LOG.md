@@ -28,6 +28,47 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Thorfinn reassigned** to PR #142: compound SOTA + vol_w=2.0 (recover volume gradient).
 - **New SOTA: 10.580**
 
+## 2026-05-01 02:50 UTC — PR #135 CLOSED: tanjiro T_max=100 + EMA=0.999 — 11.082 (+4.7% vs SOTA)
+
+- **Branch:** `tanjiro/round9-lion-tmax100-ema999`
+- **W&B run:** `wtfrhy2n` rank 0 — group `tay-round9-lion-tmax100-ema999`, 285 min, 9 val epochs, best val 9.886 (ep9)
+- **Hypothesis:** T_max=100 (4% LR decay vs T_max=50's 8%) + EMA=0.999 — testing extended cosine schedule.
+- **Result:** test_abupt **11.082** vs SOTA **10.580** = **+4.74% regression**.
+
+| Metric | PR #135 | PR #115 SOTA | Δ |
+|---|---:|---:|---:|
+| abupt_mean | 11.082 | **10.580** | +4.7% |
+| surface_pressure | 6.138 | **5.690** | +7.9% |
+| wall_shear | 11.039 | **10.419** | +5.9% |
+| volume_pressure | 12.665 | **12.740** | −0.6% |
+| tau_x | 9.348 | **8.908** | +4.9% |
+| tau_y | 13.469 | **12.491** | +7.8% |
+| tau_z | 13.791 | **13.071** | +5.5% |
+
+- **Conclusion:** T_max=100 vs T_max=50 (PR #133): essentially tied (+0.034 abupt). T_max sweep CLOSED-DOOR. The lr=1e-4 lever in PR #115 dominates the schedule contribution. **T_max=50 is the sweet spot**, but compounding with cosine on lr=1e-4 base is unlikely to add much.
+- **Tanjiro reassigned** to PR #149: per-axis tau_y/tau_z conservative weighting (W_y=W_z=1.5) — attack ×3.4-3.6 binding gap.
+
+## 2026-05-01 02:50 UTC — PR #136 CLOSED: alphonse Lion + sw=2.0 — 10.586 (+0.06% essentially tied)
+
+- **Branch:** `alphonse/round9-lion-surface-w2`
+- **W&B run:** `okl62six` rank 0 — group `tay-round9-lion-surface-w2`, 285 min, 9 val epochs, best val 9.473 (ep9)
+- **Hypothesis:** surface_loss_weight=2.0 (vs default 1.0) — attack tau_y/tau_z binding gap by upweighting surface losses.
+- **Result:** test_abupt **10.586** vs SOTA **10.580** = **+0.06% (essentially tied, NOT a winner)**. Best val 9.473 (slightly better than #115's 9.484). Mixed component improvements/regressions.
+
+| Metric | PR #136 (sw=2.0) | PR #115 SOTA | Δ |
+|---|---:|---:|---:|
+| abupt_mean | 10.586 | **10.580** | +0.06% |
+| surface_pressure | **5.642** | 5.690 | **−0.84%** |
+| wall_shear | **10.396** | 10.419 | **−0.22%** |
+| volume_pressure | 12.795 | **12.740** | +0.43% |
+| tau_x | **8.784** | 8.908 | **−1.39%** |
+| tau_y | 12.723 | **12.491** | +1.86% |
+| tau_z | **12.988** | 13.071 | **−0.64%** |
+
+- **Analysis:** sw=2.0 is a real lever — surface_pressure −0.84%, tau_x −1.39%, tau_z −0.64%. But the targeted tau_y REGRESSED (+1.86%, from 12.491 to 12.723) and volume_pressure also regressed slightly. Mixed-bag means orthogonal but small effect; abupt slightly worse.
+- **Conclusion:** sw=2.0 standalone is borderline. The compound test (lr=1e-4 + sw=2.0 + EMA=0.999, askeladd #141) will reveal whether sw=2.0 adds value when stacked with the lr lever.
+- **Alphonse reassigned** to PR #148: lr=1.5e-4 + EMA=0.999 (push LR ceiling, thorfinn's #115 follow-up #3).
+
 ## 2026-05-01 02:40 UTC — PR #134 CLOSED: frieren wd=2e-3 on lr=5e-5 base — 10.986 (+3.8% vs SOTA)
 
 - **Branch:** `frieren/round9-lion-wd-sweep-2e3`
