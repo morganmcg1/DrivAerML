@@ -2,39 +2,37 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: fern PR #222 lr_warmup_epochs=1 — 2026-05-01 19:30 UTC
+## Status: askeladd PR #232 model-heads=4 — 2026-05-01 21:06 UTC
 
-**NEW SOTA: fern PR #222 lr warmup 1ep beats PR #115 by −2.03% (9.2910 vs 9.484 val).**
+**NEW SOTA: askeladd PR #232 heads=4 beats PR #222 by −0.226pp (9.0650% vs 9.2910% val).**
 
-1-epoch linear LR warmup added to the SOTA stack (Lion lr=1e-4, EMA=0.999). Smooth convergence improvement with continuous descent across all 9 epochs — no instability. The warmup provides a gentler entry to steep descent, resulting in lower final val. ep1 inflated (warmup effect: LR still ramping) but ep2+ shows consistently better convergence than flat-LR baseline.
+Reducing attention heads from 8 (default) to 4 improves validation performance. Fewer, wider heads appear to provide better feature aggregation per head for this CFD point-cloud task. Best at epoch 11 (282.5min runtime).
 
-**W&B run:** `ut1qmc3i` (rank 0) — group `tay-round12-lr-warmup-1ep`, ~270 min runtime, 9 val epochs, best val 9.2910 (ep9)
-**PR:** #222
-**Test metrics:** **CONFIRMED — test_abupt 10.420% (beats prior PR #115 SOTA 10.580% by −0.16pp / −1.51%).** Updated 2026-05-01 from W&B run `ut1qmc3i` summary.
+**W&B run:** `r8s2dtnq` (rank 0) — group `tay-round12-heads-4`, 282.5 min runtime, best val 9.0650% (ep11)
+**PR:** #232
+**Test metrics:** test_abupt 10.190% (test_primary/abupt_axis_mean_rel_l2_pct)
 
-### tay current best — `val_primary/*` (val ep9)
+### tay current best — `val_primary/*` (best checkpoint, epoch 11)
 
 | Epoch | val_abupt | surf_pres | vol_pres | wall_shear |
 |-------|-----------|-----------|----------|------------|
-| ep7 | 9.8759% | 6.3077% | 6.0145% | 11.0603% |
-| ep8 | 9.4516% | 6.0019% | 5.7614% | 10.5847% |
-| **ep9 (best)** | **9.2910%** | **5.8707%** | **5.8789%** | **10.3423%** |
+| **ep11 (best)** | **9.0650%** | **5.703%** | **5.830%** | **10.089%** |
 
-### tay current best — `test_primary/*` (PR #222 fern, run `ut1qmc3i`)
+### tay current best — `test_primary/*` (PR #232 askeladd, run `r8s2dtnq`)
 
-| Metric | This-repo key | **PR #222 fern (NEW SOTA)** | PR #115 thorfinn (prev) | PR #111 tanjiro | AB-UPT |
+| Metric | This-repo key | **PR #232 askeladd (NEW SOTA)** | PR #222 fern (prev) | PR #115 thorfinn | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.420** | 10.580 | 11.142 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.550** | 5.690 | 6.209 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **10.185** | 10.419 | 11.138 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 12.737 | 12.740 | **12.548** | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.629** | 8.908 | 9.436 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **12.329** | 12.491 | 13.525 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **12.854** | 13.071 | 13.992 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.190** | 10.420 | 10.580 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.461** | 5.550 | 5.690 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **9.910** | 10.185 | 10.419 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 12.656 | 12.737 | 12.740 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.432** | 8.629 | 8.908 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **11.952** | 12.329 | 12.491 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **12.447** | 12.854 | 13.071 | 3.63 |
 
-**Wins over PR #115 on every axis except volume_pressure (essentially tied at 12.737 vs 12.740).** Largest single-axis test gains: tau_x −3.13%, surface_pressure −2.46%, wall_shear −2.24%, tau_z −1.66%, tau_y −1.30%, abupt −1.51%.
+**Wins over PR #222 on every axis.** Largest gains: wall_shear −2.70%, surface_pressure −1.60%, tau_y −3.07%, tau_z −3.17%, abupt −2.21%.
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, lr_warmup_epochs=1)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, lr_warmup_epochs=1, heads=4)
 
 ```bash
 cd target/
@@ -43,7 +41,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --no-compile-model --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
   --ema-decay 0.999 --lr-warmup-epochs 1
 ```
 
@@ -61,7 +59,33 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #110 | edward | **−0.04 (−0.34%) vs #50** | Lion + cosine T_max=50 (gentle 8% decay) |
 | #111 | tanjiro | **−0.03 (−0.25%) vs #110** | EMA decay 0.999 (5× faster than 0.9995) |
 | #115 | thorfinn | **−0.562 (−5.04%) vs #111** | Compound: lr=1e-4 + EMA=0.999 (both winners stacked) |
-| **#222** | **fern** | **−0.193 (−2.03%) vs #115** | **lr_warmup_epochs=1 (1-epoch linear warmup on top of SOTA stack)** |
+| #222 | fern | **−0.193 (−2.03%) vs #115** | lr_warmup_epochs=1 (1-epoch linear warmup on top of SOTA stack) |
+| **#232** | **askeladd** | **−0.226 (−2.44%) vs #222** | **model-heads=4 (halving attention heads from 8 to 4)** |
+
+---
+
+## Prior SOTA record: fern PR #222 lr_warmup_epochs=1 — 2026-05-01 19:30 UTC
+
+**NEW SOTA: fern PR #222 lr warmup 1ep beats PR #115 by −2.03% (9.2910 vs 9.484 val).**
+
+1-epoch linear LR warmup added to the SOTA stack (Lion lr=1e-4, EMA=0.999). Smooth convergence improvement with continuous descent across all 9 epochs — no instability. The warmup provides a gentler entry to steep descent, resulting in lower final val. ep1 inflated (warmup effect: LR still ramping) but ep2+ shows consistently better convergence than flat-LR baseline.
+
+**W&B run:** `ut1qmc3i` (rank 0) — group `tay-round12-lr-warmup-1ep`, ~270 min runtime, 9 val epochs, best val 9.2910 (ep9)
+**PR:** #222
+**Test metrics:** **CONFIRMED — test_abupt 10.420% (beats prior PR #115 SOTA 10.580% by −0.16pp / −1.51%).** Updated 2026-05-01 from W&B run `ut1qmc3i` summary.
+
+### Reproduce (Lion lr=1e-4, EMA=0.999, lr_warmup_epochs=1)
+
+```bash
+cd target/
+torchrun --standalone --nproc_per_node=8 train.py \
+  --agent <STUDENT> --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --no-compile-model --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --ema-decay 0.999 --lr-warmup-epochs 1
+```
 
 ---
 
