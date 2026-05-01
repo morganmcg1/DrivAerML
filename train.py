@@ -26,6 +26,7 @@ import torch.nn as nn
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
+from torch.optim.swa_utils import AveragedModel, update_bn
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
@@ -117,6 +118,7 @@ class Config:
     raw_rel_l2_weight: float = 0.0
     fourier_pe: bool = False
     fourier_pe_num_freqs: int = 8
+    swa_last_k_epochs: int = 5
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -290,6 +292,16 @@ def main(argv: Iterable[str] | None = None) -> None:
         timeout_hit = False
         train_start = time.time()
 
+        swa_enabled = config.swa_last_k_epochs > 0 and max_epochs > config.swa_last_k_epochs
+        swa_start_epoch = max_epochs - config.swa_last_k_epochs if swa_enabled else max_epochs
+        swa_model = AveragedModel(base_model) if swa_enabled else None
+        swa_snapshots = 0
+        if swa_enabled and state.is_main:
+            print(
+                f"SWA: averaging last {config.swa_last_k_epochs} epochs "
+                f"(epochs {swa_start_epoch + 1}..{max_epochs})"
+            )
+
         for epoch in range(max_epochs):
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
@@ -461,6 +473,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     break
 
             scheduler.step()
+            if swa_enabled and epoch >= swa_start_epoch:
+                swa_model.update_parameters(base_model)
+                swa_snapshots += 1
             epoch_train_loss = train_loss_sum / max(n_batches, 1)
             dt = time.time() - t0
             peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
@@ -623,6 +638,59 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary.update({"total_train_minutes": total_minutes})
             wandb.finish()
             return
+
+        if swa_enabled and swa_snapshots > 0:
+            swa_model = swa_model.to(device)
+            with torch.no_grad():
+                update_bn(train_loader, swa_model)
+            swa_model.eval()
+            swa_val_metrics = {
+                name: evaluate_split(swa_model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in val_loaders.items()
+            }
+            swa_primary_val = swa_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+            swa_log: dict[str, object] = {
+                "global_step": global_step,
+                "swa/snapshots": swa_snapshots,
+                "swa/start_epoch": swa_start_epoch + 1,
+            }
+            swa_log.update(primary_metric_log("swa", swa_val_metrics["val_surface"]))
+            for split_name, metrics in swa_val_metrics.items():
+                swa_log.update(metric_namespace("swa", split_name, metrics))
+            wandb.log(swa_log)
+            print(f"SWA model val_abupt={swa_primary_val:.4f} (snapshots={swa_snapshots})")
+            print_metrics("swa_val_surface", swa_val_metrics["val_surface"])
+            swa_improved = should_update_best_checkpoint(swa_primary_val, best_val)
+            wandb.summary.update(
+                {
+                    "swa/best_primary_abupt": swa_primary_val,
+                    "swa/snapshots": swa_snapshots,
+                    "swa/start_epoch": swa_start_epoch + 1,
+                    "swa/improved_over_per_epoch": 1.0 if swa_improved else 0.0,
+                    "swa/per_epoch_best_primary_abupt": best_val,
+                }
+            )
+            if swa_improved:
+                best_val = swa_primary_val
+                best_metrics = {
+                    "epoch": float(max_epochs),
+                    **swa_val_metrics["val_surface"],
+                }
+                best_checkpoint_source = "swa"
+                torch.save(
+                    {
+                        "model": swa_model.module.state_dict(),
+                        "config": asdict(config),
+                        "epoch": max_epochs,
+                        "val_metrics": swa_val_metrics,
+                        "checkpoint_source": "swa",
+                        "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                        "swa_snapshots": swa_snapshots,
+                        "swa_start_epoch": swa_start_epoch + 1,
+                    },
+                    model_path,
+                )
+                print(f"SWA checkpoint saved (improved over best per-epoch val={best_val:.4f})")
 
         if not best_metrics:
             wandb.summary.update(
