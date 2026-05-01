@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-01 (Round-6 launched — 9 new student assignments after Round-5 all-negative batch)
+- 2026-05-01 07:45 UTC — closed PR #143 (fern coord-norm) and PR #126 (kohaku FiLM); reassigned to PR #183 (fern omega-bank) and PR #184 (kohaku FiLM zero-init)
 
 ## Most Recent Research Direction from Human Researcher Team
 
@@ -81,8 +81,6 @@ Critical lessons learned from 7 failed experiments:
 | #151 | nezuko | `nezuko/symmetry-augmentation` | L/R symmetry augmentation for tau_y gap |
 | #150 | emma | `emma/multi-scale-hierarchy` | Multi-scale point hierarchy (2/3 scales) |
 | #144 | edward | `edward/adamw-beta2-sweep` | AdamW beta2 sweep (0.95 vs 0.999) |
-| #143 | fern | `fern/coord-normalization-sweep` | Coordinate normalization fix for sincos anisotropy |
-| #126 | kohaku | `kohaku/film-conditioning-6l-256d` | FiLM geometry conditioning on PR #99 base |
 | #125 | haku | `haku/onecycle-lr-peak-1e3` | 1cycle LR max=1e-3 |
 | #123 | frieren | `frieren/asinh-log-target-normalization` | asinh wall-shear target normalization |
 
@@ -98,6 +96,8 @@ Critical lessons learned from 7 failed experiments:
 | #170 | gilbert | `gilbert/width-384d-qknorm-fp32attn` | 384d + QK-norm + fp32-attention (stability fix) |
 | #171 | norman | `norman/snapshot-ensemble-cyclic-lr` | Snapshot ensemble via cyclic LR (3 ckpts avg) |
 | #172 | stark | `stark/adamw-eps-sweep` | AdamW eps sweep 1e-8/7/6/5 (gradient stability) |
+| #183 | fern | `fern/omega-bank-sweep` | Omega-bank frequency sweep (per-axis sincos for tau_y/z gap) — replaces #143 |
+| #184 | kohaku | `kohaku/film-zero-init` | FiLM with identity/zero-init (DiT-style stable conditioning) — replaces #126 |
 
 ## Current Research Themes
 
@@ -127,7 +127,8 @@ Pervasive Round-5 divergences motivate systematic optimizer investigation.
 - #155 armin (in flight) — top-3 checkpoint ensemble
 
 ### Theme 5: Data representation and augmentation
-- #143 fern (in flight) — coordinate normalization sweep (sincos anisotropy fix)
+- #183 fern (newly assigned) — **omega-bank frequency sweep** (max_wavelength sweep + per-axis omega banks); follow-up to falsified #143 coord-normalization
+- #184 kohaku (newly assigned) — **FiLM with identity/zero-init** (DiT-style); follow-up to falsified #126 vanilla-init FiLM, preserving the volume-pressure signal Arm 3 found
 - #151 nezuko (in flight) — L/R symmetry augmentation
 - #152 violet (in flight) — analytic geometry moment conditioning (14-dim)
 
@@ -142,6 +143,8 @@ Pervasive Round-5 divergences motivate systematic optimizer investigation.
 - **Δp≈0 is wrong RANS physics:** Laplacian pressure constraint only valid for Stokes (creeping) flow.
 - **Volume pressure nearly converged:** 1.3× AB-UPT at baseline — wall_shear_y/z is the main gap.
 - **LR warmup guards:** 500-1000 step linear warmup from 1e-5 is now standard practice for experiments with elevated initial gradients.
+- **Coord-norm is the wrong lever (PR #143):** The 4× tau_y/z gap is NOT primarily a sincos-anisotropy problem. `global-scale` normalization breaks the meter-calibrated `omega` bank (e1 abupt 24.85 vs control 16.20); `per-axis` causes volume-token explosions through the bias→attention path. Right next attack is the omega bank itself, in physical-meter coords (PR #183).
+- **FiLM at default-init × LR ≥ 3e-4 is unstable (PR #126):** Geom token is fine (norm steady ~0.75), but `to_gamma_beta` linear projections are the gradient amplification path (layer-0 grad/param ratio 0.567 at divergence). Volume-pressure signal real (Arm 3 vp=7.05 vs baseline 7.85) → identity-init follow-up justified (PR #184).
 
 ## Key Constraints
 - Training budget: ~270 min training + ~90 min val/test = 360 min total (~3-4 epochs at 6L/256d)

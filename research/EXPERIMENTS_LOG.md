@@ -424,3 +424,34 @@
 - Results: 8L/256d (W&B `xl92i3f5`, lr=3e-4) reached val abupt=11.33 at partial ep3, slope -0.59 abupt-pct/1k steps; extrapolated baseline crossing at ~step 26,500 but train_timeout=270min fired at step ~25,400. Test: abupt=12.44, volume_pressure=13.84 (only sub-metric beating baseline 14.42). Both 6L/384d arms diverged at all LRs (5e-4, 3e-4, 2e-4); d_head=96 destabilized earlier than d_head=64.
 - Commentary: NEGATIVE on merge bar but PROMISING. 8L/256d was time-limited not architecture-limited — depth is the viable scale-up direction. Width 384d needs QK-norm or fp32 attention to be stable in bf16. Round-6 priority: revisit 8L/256d combined with 1cycle LR for super-convergence.
 
+---
+
+## 2026-05-01 07:30 — PR #143: [fern] coordinate normalization sweep — CLOSED NEGATIVE
+- Branch: `fern/coord-normalization-sweep`
+- Hypothesis: Anisotropic bbox (x~8m, y/z~2-2.5m) makes `ContinuousSincosEmbed` give x-axis ~3-4× more frequency resolution than y/z, contributing to the 4× tau_y/z gap. Adding `--coord-normalize {none, global-scale, per-axis}` should restore isotropy.
+- Results: Hypothesis falsified across 9 attempts.
+
+| Mode | First-epoch abupt | vs control | Notes |
+|---|---:|---:|---|
+| none (control) | ~16.20 | — | matches PR #99 e1, then hits fleet-wide stochastic divergence in e2 |
+| global-scale | 24.85 | +8.65 (+53%) | normalizing to unit cube destroys sincos expressiveness — omega bank is calibrated for meter-scale geometry |
+| per-axis (4 variants) | diverged | — | volume tokens (~25× wider domain than vehicle bbox) get extreme out-of-range coords → MLP bias → slice attention gradient explosion |
+
+- Commentary: Coordinate normalization is the wrong lever — it breaks the fixed-frequency `omega` bank tuned for meter-scale wavelengths. The 4× tau_y/z gap is **NOT primarily** a sincos-anisotropy problem. Right next attack: tune the omega bank directly in physical-meter coords (denser/per-axis frequency basis on y/z), preserving meter-scale calibration. **Bug-fix side-discovery:** confirmed ~50% fleet-wide divergence at lr=5e-4. Non-finite/large-grad skip guard from haku (commit `6e8b674`) is already on `yi` so future runs are protected. **Decision: closed** — coord-normalize feature not merged. Fern reassigned to PR #183 (omega-bank anisotropic frequency sweep).
+
+---
+
+## 2026-05-01 07:30 — PR #126: [kohaku] FiLM geometry conditioning on PR #99 6L/256d base — CLOSED NEGATIVE (PROMISING SIGNAL)
+- Branch: `kohaku/film-conditioning-6l-256d`
+- Hypothesis: FiLM (PR #8 frieren code) + lr=5e-4 (PR #99 fern base) is additive — global geometry prior plus fast convergence.
+- Results: Hypothesis falsified across all 4 arms.
+
+| Arm | lr | clip | Diverge step | Best partial | W&B |
+|---|---:|---:|---:|---|---|
+| 1 | 5e-4 | 1.0 | ~15.3k (mid e2) | n/a | h6nlfcdr |
+| 2 | 5e-4 | 0.5 | ~12.4k (mid e2) | n/a | 3ddue2xd |
+| 3 | 4e-4 | 0.5 | ~30.1k (mid e3) | abupt=11.67, **vp=7.05** (e2) | sudqmuo9 |
+| 4 | 3e-4 | 0.5 | ~19.0k (mid e2) | n/a | jd1acg1t |
+
+- Commentary: Best partial (Arm 3 e2 abupt=11.67) is still 0.98pp worse than baseline 10.69. **lr=3e-4 (Arm 4) failed earlier than lr=4e-4 (Arm 3)** — pure LR reduction is not the lever. Root cause from forensics: `train/film/geom_token_norm_mean` was steady (~0.73-0.81) at all 4 divergence points (geom token is fine); layer-0 `to_gamma_beta/bias grad_to_param_norm=0.567` flagged the FiLM linear projections as the gradient amplification path. FiLM × LR ≥ 3e-4 has a fundamental stability ceiling at default-init. **Promising signal:** Arm 3 e2 vp=7.05 vs baseline 7.85 — FiLM helps volume more than surface, exactly the metric closest to AB-UPT (1.3× away). The direction is right; the failure mode is dynamics, not capability. **Decision: closed** — kohaku reassigned to PR #184 (FiLM with identity/zero-init, DiT-style stable conditioning).
+
