@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 05:25 UTC
+- **Date:** 2026-05-01 05:50 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,7 +37,7 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 
 | PR | Student | Hypothesis | Run state | Latest val (vs SOTA ep9 9.48) |
 |---|---|---|---|---|
-| **#141** | askeladd | sw=2.0 + vw=2.0 + (T_max=50 confound) | running rt=252m, near timeout | **9.67 (+2.0% above SOTA)** |
+| **#141** | askeladd | sw=2.0 + vw=2.0 + (T_max=50 confound) | hit 270.7m timeout, test eval pending | **full_val 9.445 (-0.41% BEATS SOTA 9.484)** |
 | #142 | thorfinn | compound + vol_w=2.0 | running rt=233m, near timeout | 11.15 (~ep5 SOTA equiv) |
 | #146 | edward | 6L/256d depth swap (yi −21% port) | running rt=186m | 11.92 (~ep4-5 SOTA equiv) |
 | #147 | frieren | compound + wd=2e-3 | **POD STUCK on PR #134 round9 still** | no round10 W&B run yet |
@@ -47,7 +47,7 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 | #159 | fern | Lion β1=0.95 (momentum sweep) | running rt~5m, retry after fail | no val yet |
 
 ### Key observations
-- **askeladd #141 4-way** is approaching timeout at val 9.67 — close but unlikely to beat SOTA 9.48. Expected test ~10.78, +1.9% behind SOTA test 10.580. **Will close if final val > 9.48.**
+- **askeladd #141 4-way BEATS SOTA on val (9.445 vs 9.484, -0.41%)**. Per-component val deltas vs SOTA `d03oghpp`: surface_pressure −0.92%, volume_pressure −0.86%, wall_shear −0.42%, wall_shear_x −1.04%, wall_shear_y +0.76%, wall_shear_z −0.67%. Broad-spectrum improvement. Expected test ~10.535 (val 9.445 × SOTA ratio 1.115). **Test eval pending; if test < 10.580, MERGE.**
 - **thorfinn #142** vol_w=2.0 trajectory looks slow — at 11.15 with ~3 epochs of timeout left.
 - **edward #146** 6L/256d at 11.92 — same slow-start pattern as nezuko's failed 5L. Depth swap with same point budget likely won't fit in 9-epoch timeout.
 - **frieren and tanjiro pods broken**. Frieren still running PR #134 (round9, GPU 100%); tanjiro idle (GPU 0%) despite branch checked out. Cannot intervene from advisor — pods own their loop.
