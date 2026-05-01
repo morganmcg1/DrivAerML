@@ -6,6 +6,54 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-02 00:45 — PR #287 ASSIGNED: alphonse QK-norm on SOTA stack (Round 16)
+
+- **Branch:** `alphonse/qk-norm-attention`
+- **Hypothesis:** Per-head L2 normalization of Q and K vectors in `TransolverAttention.forward()` decouples attention magnitude from pattern, stabilizing Lion's sign-based updates and preventing attention entropy collapse. First test of QK-norm on this architecture.
+- **Single delta vs SOTA:** `F.normalize(q, p=2, dim=-1)` + `F.normalize(k, p=2, dim=-1)` added in `model.py` after `qkv.chunk(3, dim=-1)`. No CLI change.
+- **W&B group:** `tay-round16-qk-norm`
+- **Status:** ASSIGNED — awaiting pod pickup.
+
+---
+
+## 2026-05-02 00:30 — Round 15 orphan PRs CLOSED: #263,264,265,267,268,269,271,272
+
+- **Reason:** PRs were assigned to chihiro/emma/gilbert/haku/kohaku/norman/senku/violet — students who have NO DrivAerML (ddp8) pods. Only alphonse/askeladd/edward/fern/frieren/nezuko/tanjiro/thorfinn have ddp8 pods.
+- **Action:** All 8 PRs closed; branches deleted. Hypotheses will be re-assigned to real ddp8 students in future rounds if still relevant.
+- **Hypotheses deferred (not yet tested):**
+  - lr-warmup-epochs=2 (chihiro #263)
+  - RFF retest on SOTA stack (emma #264)
+  - ema-decay=0.9995 with warmup=1ep (gilbert #265)
+  - grad-clip-norm=0.5 (haku #267)
+  - lr-cosine-t-max=12 (kohaku #268)
+  - warmup=1ep + cosine T_max=9 (norman #269)
+  - model-hidden-dim=768 + muP lr (senku #271)
+  - lr-min=1e-5 (violet #272)
+
+---
+
+## 2026-05-02 00:20 — PR #240 CLOSED: frieren mlp-ratio=8 — NEGATIVE
+
+- **Branch:** `frieren/mlp-ratio-8-wider-ffn` (closed)
+- **Hypothesis:** Increasing `mlp_ratio` from 4 to 8 doubles MLP block capacity, potentially improving feature richness per Transformer layer for the CFD point-cloud task.
+- **W&B run:** `kobvnazq` (rank 0), group `tay-round13-mlp-ratio-8`, runtime 270.9min
+
+| Epoch | Step  | val_abupt | Gap to SOTA (9.065%) |
+|-------|-------|-----------|----------------------|
+| 1.00  | 2720  | 54.6200%  | +45.555 pp |
+| 2.00  | 5441  | 23.7401%  | +14.675 pp |
+| 3.00  | 8162  | 15.9900%  | +6.925 pp |
+| 4.00  | 10883 | 12.9196%  | +3.855 pp |
+| 5.00  | 13604 | 11.3006%  | +2.236 pp |
+| 6.00  | 16325 | 10.4737%  | +1.409 pp |
+| 7.00  | 19046 | 9.7725%   | +0.708 pp |
+| **7.52** | **20444** | **9.5498%** | **+0.485 pp** |
+
+- **Result:** Best val=9.5498% at ep7.52 (timeout). Gap to SOTA = +0.485pp. NEGATIVE.
+- **Conclusion:** mlp_ratio=8 adds capacity but the model needs more training time/data to amortize it. At ep5-6 deceleration is severe (delta drops from -0.83pp to -0.22pp per interval). The expanded MLP blocks require a longer optimization budget than our 270min cap allows. Close as NEGATIVE; do not pursue further mlp_ratio scaling at this epoch budget. The mlp_ratio lever is now closed: 4=SOTA, 6=regression (PR#?), 8=NEGATIVE.
+
+---
+
 ## 2026-05-01 23:30 — PR #222 TEST METRICS CONFIRMED: fern lr_warmup_epochs=1 — NEW TEST SOTA 10.420%
 
 - **Branch:** `fern/round12-lr-warmup-1ep` (merged)
