@@ -117,6 +117,12 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    muon_lr: float = 1e-4
+    muon_momentum: float = 0.95
+    muon_ns_steps: int = 5
+    muon_weight_decay: float = 5e-4
+    muon_adamw_lr: float = 1e-4
+    muon_adamw_weight_decay: float = 5e-4
     debug: bool = False
 
 
@@ -145,6 +151,52 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+class _CombinedOptimizer(torch.optim.Optimizer):
+    """Thin wrapper that combines two optimizers behind a single interface.
+
+    Needed so the cosine LR scheduler (which uses ``isinstance(opt, Optimizer)``
+    and iterates ``optimizer.param_groups`` writing ``group["lr"]``) works
+    unchanged for both child optimizers.
+    """
+
+    def __init__(self, optimizers: list) -> None:
+        self._child_optimizers = optimizers
+        # Satisfy torch.optim.Optimizer.__init__ without duplicating params.
+        # We set up the internal fields ourselves and point param_groups at the
+        # combined list of actual groups from the child optimizers.
+        object.__setattr__(self, "defaults", {})
+        object.__setattr__(self, "state", {})
+        object.__setattr__(self, "_optimizer_step_pre_hooks", {})
+        object.__setattr__(self, "_optimizer_step_post_hooks", {})
+        object.__setattr__(self, "_optimizer_state_dict_pre_hooks", {})
+        object.__setattr__(self, "_optimizer_state_dict_post_hooks", {})
+        object.__setattr__(self, "_optimizer_load_state_dict_pre_hooks", {})
+        object.__setattr__(self, "_optimizer_load_state_dict_post_hooks", {})
+        object.__setattr__(self, "_warned_capturable_if_run_uncaptured", True)
+        # Build a flat list of all param_groups from child optimizers.
+        # Schedulers iterate this list and write group["lr"] — since these are
+        # the same dict objects as in the child optimizers, both are updated.
+        combined_groups: list = []
+        for opt in optimizers:
+            combined_groups.extend(opt.param_groups)
+        object.__setattr__(self, "param_groups", combined_groups)
+
+    def step(self, closure=None):
+        for o in self._child_optimizers:
+            o.step()
+
+    def zero_grad(self, set_to_none: bool = True):
+        for o in self._child_optimizers:
+            o.zero_grad(set_to_none=set_to_none)
+
+    def state_dict(self):
+        return {"optimizers": [o.state_dict() for o in self._child_optimizers]}
+
+    def load_state_dict(self, sd):
+        for o, s in zip(self._child_optimizers, sd["optimizers"]):
+            o.load_state_dict(s)
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
@@ -163,7 +215,36 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
         )
-    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+    if optimizer_name == "muon":
+        from torch.optim import Muon
+
+        # Muon only supports 2-D weight matrices (not biases / LayerNorm params).
+        muon_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
+        other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
+        muon_opt = Muon(
+            muon_params,
+            lr=config.muon_lr,
+            momentum=config.muon_momentum,
+            nesterov=True,
+            ns_steps=config.muon_ns_steps,
+            weight_decay=config.muon_weight_decay,
+            adjust_lr_fn="match_rms_adamw",
+        )
+        adam_opt = torch.optim.AdamW(
+            other_params,
+            lr=config.muon_adamw_lr,
+            weight_decay=config.muon_adamw_weight_decay,
+            betas=(0.9, 0.95),
+        )
+        n_muon = sum(p.numel() for p in muon_params)
+        n_adam = sum(p.numel() for p in other_params)
+        print(
+            f"[build_optimizer] Muon params: {n_muon:,}  "
+            f"AdamW params: {n_adam:,}  "
+            f"total: {n_muon + n_adam:,}"
+        )
+        return _CombinedOptimizer([muon_opt, adam_opt])
+    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion, muon.")
 
 
 def build_model(config: Config) -> SurfaceTransolver:
