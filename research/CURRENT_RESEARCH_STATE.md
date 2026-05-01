@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 11:45 UTC
+- **Updated:** 2026-05-01 12:15 UTC
 - **Branch:** `yi`
 - **Baseline:** PR #99 (fern), `abupt_axis_mean_rel_l2_pct = 10.69`, W&B run `3hljb0mg`
 
@@ -54,7 +54,7 @@
 | **#165** | chihiro | mlp_ratio=8 hardened (3-seed) | **seed1337 ep3=11.92 (NOT beating 10.69); clip=0.5 go/no-go at 12:20/13:30 UTC** |
 | **#164** | alphonse | 8L/256d + 1cycle LR recovery | WIP |
 | **#152** | violet | 14-dim analytic geometry moment conditioning | WIP |
-| **#151** | nezuko | L/R symmetry augmentation (tau_y gap) | WIP |
+| **#201** | nezuko | Physics-informed RANS divergence-free penalty on volume velocity | JUST ASSIGNED |
 | **#123** | frieren | asinh/log wall-shear target normalization | **Critical finding: asinh-1.0 trades metric for stability; arms A/D/B(v3p1) final results ~12:10-13:51 UTC** |
 
 ---
@@ -79,17 +79,22 @@
 - Also needed: finite-but-pathological loss guard (abort if train_loss > 5× running_median for sustained steps)
 - **This should be an infrastructure PR** — candidate to assign to the next available thorfinn/infra-capable student
 
-### Theme 4: FiLM Geometry Conditioning (Near Complete)
+### Theme 4: Physics-Informed Constraints
+- **#201 nezuko (NEW):** RANS divergence-free penalty — soft constraint λ·mean(∇·u²) on volume velocity predictions. 4-arm sweep: λ∈{0.001, 0.01, 0.1} + control (λ=0.0). Addresses Morgan's #4 directive. Hypothesis: enforcing ∇·u=0 improves near-wall velocity gradient accuracy → reduces tau_y/z errors.
+- **#168 askeladd:** Normal-consistency penalty — related physics-informed constraint from the surface tangentiality direction.
+- **KEY FINDING (PR #151, nezuko) — CLOSED NEGATIVE:** L/R symmetry augmentation — both arms crashed NaN in epoch 2 (val abupt 17.63 and 45.92 vs baseline 10.69). DrivAerML cars have real Y-asymmetries; symmetry label assumption is invalid.
+
+### Theme 5: FiLM Geometry Conditioning (Near Complete)
 - **#184 kohaku:** FiLM stability characterized. 5/5 at lr=5e-4 dead regardless of init_scale. Stability axis is lr alone. Arm B (lr=4e-4) sole survivor, completing ~14:25 UTC.
 - **Key finding:** FiLM requires lr ≤ 4e-4, which may conflict with the lr=5e-4 optimum. The volume_pressure signal from PR #126 Arm-3 (vp=7.05 vs 7.85 baseline) is real — FiLM may still help volume even if it can't close the tau_y/z gap.
 
-### Theme 5: Training Budget Efficiency
+### Theme 6: Training Budget Efficiency
 - **#171 norman:** Snapshot ensemble with cyclic LR. V1 diverged at epoch 3 (50× LR jump); V2 has 10× ratio + clip=0.5, running cleanly, ETA ~17:30 UTC.
 - **#196 edward:** Lion optimizer (round 12) — Lion typically needs ~3× lower LR than AdamW
 - **#198 senku:** SWA — free post-train gain from averaging model weights across last epochs
 - **#197 gilbert:** k-NN local attention — addresses spatial locality for tau_y/z
 
-### Theme 6: Architecture Exploration (Round 12)
+### Theme 7: Architecture Exploration (Round 12)
 - **#191 haku:** 1cycle LR (corrected — calibrated to actual epoch budget)
 - **#164 alphonse:** 8L/256d depth with 1cycle (time-limited recovery — must beat PR #144 ep4 val=12.69)
 
@@ -133,7 +138,7 @@
 4. **Review #183 (fern)** — cross-arm ep2 table at ~12:30 UTC
 5. **Infrastructure PR** — magnitude-based grad-skip (assign to thorfinn when free)
 6. **Perceiver-IO backbone** (Morgan's #2 directive) — not yet assigned; needs careful scoping
-7. **Physics-informed RANS** (Morgan's #4 directive) — not yet assigned
+7. **Physics-informed RANS** (Morgan's #4 directive) — ASSIGNED to nezuko (#201)
 
 ---
 
