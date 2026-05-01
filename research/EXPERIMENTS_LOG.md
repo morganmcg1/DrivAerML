@@ -6,6 +6,17 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 03:55 UTC — PR #138 CLOSED: nezuko 5L depth swap (test 11.213, +5.98% vs SOTA)
+
+- **Branch:** `nezuko/round10-depth-5l`
+- **W&B run:** `1l3ndrwe` rank 0 — group tay-round10-depth-5l, 270.9 min, 8 epochs (timeout mid-ep9), best val 9.986 (ep8)
+- **Hypothesis:** 5L depth swap (yi Wave 1 confirmed depth lever, −21% on yi)
+- **Result:** test_abupt **11.213** vs SOTA 10.580 = **+5.98% WORSE**. Best val 9.986 (ep8 EMA).
+- **Per-axis:** sp=6.20 (+9.0%), ws=11.23 (+7.8%), vp=12.62 (−0.94% only win), tau_x=9.51 (+6.8%), tau_y=13.69 (+9.6%), tau_z=14.04 (+7.4%).
+- **Why depth lost:** (1) Epoch budget squeeze: 8 ep (5L) vs 9 ep (4L) due to 13% slower per-epoch + 23% more params; (2) yi's gain was on a different stack (no SDF/Fourier/asinh) — on tay's compound base, depth's marginal lift is much smaller; (3) param efficiency mismatch at batch=4. Volume_pressure was the only axis where 5L slightly won — interesting signal but doesn't compensate for surface losses.
+- **Conclusion:** 5L is a closed lever on tay's 9-epoch budget. edward #146 (6L/256d) is yi's *exact* config — different param budget profile, separate test.
+- **Nezuko reassigned to PR #150: PR #115 + mlp_ratio=6** (yi Wave 1 confirmed lever, untested on tay).
+
 ## 2026-05-01 01:20 UTC — PR #115 MERGED: thorfinn compound lr=1e-4 + EMA=0.999 — NEW SOTA 10.580 (−5.0%)
 
 - **Branch:** `thorfinn/round9-compound-lr1e4-ema999`
