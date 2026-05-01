@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 20:25 UTC
+- **Updated:** 2026-05-01 21:40 UTC
 - **Branches:** `yi` (4L/512d Lion SOTA), `bengio` (4L/256d AdamW Wave 2/3)
 
 ---
@@ -39,10 +39,12 @@ Volume pressure has now beaten AB-UPT. Surface pressure and wall_shear remain th
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
+| #280 | frieren | **MLP activation ablation** (SwiGLU / ReLU² vs GELU) | NEW (just assigned) |
+| ~~#279~~ | ~~frieren~~ | ~~no-slip BC penalty~~ | CLOSED 21:40Z — duplicates failed PR #201 (GT tau·n RMS=12% contradicts continuum BC) |
 | #270 | violet | **tanh output soft-cap** (modded-NanoGPT logit-cap analog) | NEW (just assigned) |
 | #262 | nezuko | **linear-warmdown LR schedule** (modded-NanoGPT WSD-style) | NEW (just assigned) |
 | #261 | norman | **Muon optimizer** (Newton-Schulz orthogonalized momentum) | NEW (just assigned) |
-| #249 | tanjiro | asinh wall-shear normalization | Both arms healthy ep1 |
+| #249 | tanjiro | asinh wall-shear normalization | TempCollapse bug found; advisor authorized `T.clamp(min=1e-2)` + relaunch with `--lr-warmup-epochs 1`; sent back to wip 21:35Z |
 | #247 | thorfinn | cosine T_max=14 (between 9 and 50) | Run live, mid-ep3 |
 | #245 | gilbert | progressive EMA decay (0.99→0.9999 etc.) | Arm A surviving; B/C retries running |
 | #244 | emma | surface-loss-weight {1.5, 2.0} | Arm A crashed lr=5e-4; Arm B healthy |
@@ -55,7 +57,7 @@ Volume pressure has now beaten AB-UPT. Surface pressure and wall_shear remain th
 | #224 | fern | learned Fourier embeddings per-axis | K/L/N/O surviving; J finding: init=10 beats sincos by 6.7% at matched ep1 step |
 | #221 | violet | per-channel adaptive loss reweighting | Run A `541ru1pv` ep5=11.12; gate-check stalled (cross-listed, primary on bengio) |
 | #210 | kohaku | gradient accumulation eff_bs=32 | Running |
-| #209 | frieren | step-decay LR drop after ep1 | Running |
+| ~~#209~~ | ~~frieren~~ | ~~step-decay LR drop after ep1~~ | CLOSED 2026-05-01 21:22 — hypothesis rejected; control 10.08 vs bar 9.291 on legacy stack |
 | #208 | askeladd | sandwich-LN to unlock 8L/256d | Arm B running ~18866+ steps |
 | #207 | alphonse | Adaptive Gradient Clipping (AGC) | lr=3e-4 arms only surviving |
 | #193 | thorfinn | curvature-biased surface point sampling | 3 lr=3e-4 arms healthy past warmup |
@@ -130,6 +132,9 @@ Volume pressure has now beaten AB-UPT. Surface pressure and wall_shear remain th
 - **#224 fern (yi):** learned Fourier embeddings per-axis (init=10 beats sincos at matched ep1)
 - **#239 norman (bengio):** Fourier PE num_freqs sweep {16, 32, 64, 128}
 - **#253 askeladd (bengio):** FourierEmbed vs ContinuousSincosEmbed standalone test
+
+### Theme 8: Core Building Blocks (MLP / Activation)
+- **#280 frieren (yi):** MLP activation ablation (SwiGLU / ReLU² vs GELU) — NEW, modded-NanoGPT-inspired
 
 ### Theme 7: Symmetry / TTA / Augmentation
 - **#225 haku (yi):** mirror symmetry training augmentation
