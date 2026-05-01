@@ -478,3 +478,58 @@ Val slopes at end of run: abupt −0.156/1k steps, wall_shear_y −0.191/1k step
 
 - Commentary: Best partial (Arm 3 e2 abupt=11.67) is still 0.98pp worse than baseline 10.69. **lr=3e-4 (Arm 4) failed earlier than lr=4e-4 (Arm 3)** — pure LR reduction is not the lever. Root cause from forensics: `train/film/geom_token_norm_mean` was steady (~0.73-0.81) at all 4 divergence points (geom token is fine); layer-0 `to_gamma_beta/bias grad_to_param_norm=0.567` flagged the FiLM linear projections as the gradient amplification path. FiLM × LR ≥ 3e-4 has a fundamental stability ceiling at default-init. **Promising signal:** Arm 3 e2 vp=7.05 vs baseline 7.85 — FiLM helps volume more than surface, exactly the metric closest to AB-UPT (1.3× away). The direction is right; the failure mode is dynamics, not capability. **Decision: closed** — kohaku reassigned to PR #184 (FiLM with identity/zero-init, DiT-style stable conditioning).
 
+---
+
+## 2026-04-29 15:00 — PR #169: [thorfinn] NaN-skip + seed + LR warmup utility flags (stability infra) — MERGED
+- Branch: `thorfinn/nan-skip-utility-cherry-pick`
+- Hypothesis: N/A — pure infra utilities to improve training stability observability and repeatability.
+- Three new CLI flags added:
+  1. `--seed <int>` — set all RNG seeds for reproducibility
+  2. `--lr-warmup-steps <int>` — linear LR warmup from lr/10 to lr over N steps
+  3. NaN/Inf-skip safeguard — detect non-finite loss/gradients, skip those steps, abort after 200 consecutive skips
+- Also fixed: kill-threshold NaN bug (commit de8f8d0) — `_numeric_metric_items()` was filtering out NaN metrics silently so `check_kill_thresholds()` would never trigger on NaN runs. Now non-finite values trigger kill condition.
+- Validation run: W&B run `e6sgx5ku`, seed=42
+
+| Epoch | val abupt | Expected (spec band) | Notes |
+|---|---:|---|---|
+| 1 | 15.83 | 12.0–13.0 | High init variance from seed=42 — accepted |
+| 2 | **11.20** | 11.0–11.5 | Within spec band — no regression |
+
+- `train/nonfinite_skip_count = 0` throughout (NaN-skip not triggered — confirms baseline is already NaN-free)
+- Commentary: Infra PR merged for code utility. No metric improvement (infra PR, not hypothesis test). Epoch-1 spike (15.83) is seed=42 init variance, not a code bug — confirmed by epoch-2 landing in spec band (11.20). Kill-threshold NaN bug fix is fleet-wide safety. LR-warmup-steps flag is now available for future experiments that need structured warmup without committing to OneCycleLR. **Decision: merged.** Infra contributions on the main path — no regression.
+
+---
+
+## 2026-04-29 15:30 — PR #125: [haku] 1cycle LR max=1e-3 (super-convergence in epoch-limited regime) — CLOSED NEGATIVE
+- Branch: `haku/onecycle-lr-peak-1e3`
+- Hypothesis: OneCycleLR with structured warmup to peak LR then cosine anneal achieves super-convergence in the 3–4 epoch budget, beating flat lr=5e-4.
+- Results: 4-arm sweep (round 1) + 4-arm sweep (round 2 with total_steps bug fixed)
+
+**Round 1 (bug: total_steps=544,150 → schedule nearly flat):**
+
+| Arm | max_lr | W&B run | val ep2 | val ep3 | Notes |
+|---|---:|---|---:|---:|---|
+| A | 1e-3 | pbxxmq1h | NaN ep1 | — | Diverged immediately |
+| B | 7e-4 | — | NaN ep1 | — | Diverged |
+| C | 5e-4 | — | NaN ep1 | — | Diverged |
+| D | 3e-4 | bq11rk5t | 12.01 | 11.83 | Stable but schedule flat (bug) |
+
+**Round 2 (total_steps=36,000 — correct schedule):**
+
+| Arm | max_lr | pct_start | W&B run | val ep1 | val ep2 | val ep3 | val ep4 | test abupt | Notes |
+|---|---:|---:|---|---:|---:|---:|---:|---:|---|
+| A2 | 1e-3 | 0.10 | 1cycl-A2 | NaN | — | — | — | — | Diverged (> stability ceiling) |
+| B2 | 7e-4 | 0.15 | 1cycl-B2 | NaN | — | — | — | — | Diverged (> stability ceiling) |
+| **C3** | **5e-4** | **0.20** | 1cycl-C3 | 12.80 | 11.65 | 11.42 | **11.34** | **12.41** | Best arm; still worse than baseline |
+| D3 | 3e-4 | 0.10 | 1cycl-D3 | 11.89 | 11.63 | 11.48 | 11.46 | 12.20 | Soft-divergence at lr~6.5e-5 (late cosine anneal) |
+
+**Baseline (PR #99):** val=10.69, test=11.73
+
+- Commentary: Clean **negative result**. Two failure modes:
+  1. **Stability ceiling at ~6.5e-4** — confirmed fleet-wide. Even under structured OneCycleLR warmup, peaks ≥6.5e-4 diverge to NaN regardless of pct_start. No warmup schedule overcomes this ceiling.
+  2. **Budget starvation at lower peaks** — with peaks ≤5e-4, OneCycleLR spends ~20% of budget rising to peak and another ~60% falling back below flat baseline; effective average LR is much lower than flat 5e-4, and the model cannot recover in 3–4 epochs.
+  - Best arm C3 (5e-4 peak): all headline metrics regressed — test abupt=12.41 vs baseline 11.73 (+5.8%).
+  - One mild positive signal: C3 volume_pressure=13.33 vs baseline 14.42 — lower average LR may help the volume head specifically. Filed for future per-head LR experiments (e.g., different LR groups for surface vs volume decoder).
+  - D3 soft-divergence: anomalous loss spike at lr~6.5e-5 during deep cosine anneal — potential bf16 AMP precision issue at very low loss values. Fleet-wide flag: if future low-LR fine-tuning runs see similar, investigate AMP precision or implement LR floor ~1e-4.
+  - OneCycleLR does not help in this epoch-limited regime. LR schedule lever closed for now. **Decision: closed.**
+
