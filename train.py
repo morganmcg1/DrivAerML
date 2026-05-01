@@ -329,6 +329,41 @@ class Transformer(nn.Module):
         return x
 
 
+class OutputSoftCap(nn.Module):
+    """Per-channel tanh soft-cap on regression outputs.
+
+    Replaces y = head(x) with y = cap * tanh(head(x) / cap), bounding the
+    prediction range while preserving differentiability everywhere.
+    Inspired by modded-NanoGPT's logit soft-cap (Gemma/Grok).
+    """
+
+    def __init__(
+        self,
+        num_channels: int,
+        cap_init: float = 30.0,
+        learn_cap: bool = False,
+    ):
+        super().__init__()
+        self.num_channels = int(num_channels)
+        self.cap_init = float(cap_init)
+        self.learn_cap = bool(learn_cap)
+        cap = torch.full((self.num_channels,), self.cap_init, dtype=torch.float32)
+        if self.learn_cap:
+            self.cap = nn.Parameter(cap)
+        else:
+            self.register_buffer("cap", cap)
+
+    def effective_cap(self) -> torch.Tensor:
+        return self.cap.abs().clamp_min(1e-3)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        cap = self.effective_cap().to(dtype=x.dtype, device=x.device)
+        return cap * torch.tanh(x / cap)
+
+    def extra_repr(self) -> str:
+        return f"num_channels={self.num_channels}, cap_init={self.cap_init}, learn_cap={self.learn_cap}"
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -350,6 +385,9 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        output_soft_cap: bool = False,
+        soft_cap_value: float = 30.0,
+        soft_cap_learn: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +434,21 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.output_soft_cap = output_soft_cap
+        if output_soft_cap:
+            self.surface_soft_cap = OutputSoftCap(
+                self.surface_output_dim,
+                cap_init=soft_cap_value,
+                learn_cap=soft_cap_learn,
+            )
+            self.volume_soft_cap = OutputSoftCap(
+                self.volume_output_dim,
+                cap_init=soft_cap_value,
+                learn_cap=soft_cap_learn,
+            )
+        else:
+            self.surface_soft_cap = None
+            self.volume_soft_cap = None
 
     def _encode_group(
         self,
@@ -470,13 +523,19 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            if self.surface_soft_cap is not None:
+                surface_preds = self.surface_soft_cap(surface_preds)
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            volume_preds = self.volume_out(volume_hidden)
+            if self.volume_soft_cap is not None:
+                volume_preds = self.volume_soft_cap(volume_preds)
+            volume_preds = volume_preds * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
@@ -579,6 +638,14 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    output_soft_cap: bool = False
+    soft_cap_value: float = 30.0
+    soft_cap_learn: bool = False
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
+    lr_warmup_epochs: int = 0
+    max_steps_per_epoch: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,7 +812,31 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        output_soft_cap=config.output_soft_cap,
+        soft_cap_value=config.soft_cap_value,
+        soft_cap_learn=config.soft_cap_learn,
     )
+
+
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    optimizer_name = config.optimizer.lower()
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+    if optimizer_name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
 
 
 def _metric_path(name: str) -> str:
@@ -1709,10 +1800,19 @@ def main(argv: Iterable[str] | None = None) -> None:
     n_params = sum(param.numel() for param in model.parameters())
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    optimizer = build_optimizer(model, config)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
+        steps_per_epoch = max(len(train_loader), 1)
+        if config.max_steps_per_epoch > 0:
+            steps_per_epoch = min(steps_per_epoch, config.max_steps_per_epoch)
+        config.lr_warmup_steps = int(config.lr_warmup_epochs * steps_per_epoch)
+        print(
+            f"lr_warmup_epochs={config.lr_warmup_epochs} -> lr_warmup_steps="
+            f"{config.lr_warmup_steps} (steps_per_epoch={steps_per_epoch})"
+        )
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1797,7 +1897,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        epoch_step_limit = config.max_steps_per_epoch if config.max_steps_per_epoch > 0 else None
+        epoch_step_idx = 0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if epoch_step_limit is not None and epoch_step_idx >= epoch_step_limit:
+                break
+            epoch_step_idx += 1
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1931,6 +2036,22 @@ def main(argv: Iterable[str] | None = None) -> None:
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
                     train_log[f"train/{key}"] = value
+            base_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+            if base_model.surface_soft_cap is not None:
+                cap_vals = base_model.surface_soft_cap.effective_cap().detach().cpu().tolist()
+                surface_target_keys = [
+                    "surface_pressure",
+                    "wall_shear_x",
+                    "wall_shear_y",
+                    "wall_shear_z",
+                ]
+                for idx, key in enumerate(surface_target_keys[: len(cap_vals)]):
+                    train_log[f"train/soft_cap/surface/{key}"] = float(cap_vals[idx])
+                train_log["train/soft_cap/surface/mean"] = float(sum(cap_vals) / len(cap_vals))
+            if base_model.volume_soft_cap is not None:
+                v_cap_vals = base_model.volume_soft_cap.effective_cap().detach().cpu().tolist()
+                if v_cap_vals:
+                    train_log["train/soft_cap/volume/volume_pressure"] = float(v_cap_vals[0])
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,

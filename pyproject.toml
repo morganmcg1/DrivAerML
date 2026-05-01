@@ -13,6 +13,7 @@ dependencies = [
     "tqdm",
     "wandb",
     "pyyaml",
+    "lion-pytorch>=0.2.4",
 ]
 
 [project.optional-dependencies]
