@@ -601,6 +601,9 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    use_symmetry_augmentation: bool = False
+    symmetry_flip_prob: float = 0.5
+    symmetry_include_both: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1300,6 +1303,65 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def _flip_y_inplace(batch: SurfaceBatch) -> SurfaceBatch:
+    """Reflect a batch through the y=0 plane.
+
+    surface_x layout: [x, y, z, nx, ny, nz, area] — flip y (idx 1) and ny (idx 4).
+    volume_x layout:  [x, y, z, sdf]              — flip y (idx 1).
+    surface_y layout: [cp, tau_x, tau_y, tau_z]   — flip tau_y (idx 2).
+    volume_y layout:  [p_v]                       — unchanged (scalar).
+    """
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = -surface_x[..., 1]
+    surface_x[..., 4] = -surface_x[..., 4]
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = -volume_x[..., 1]
+    surface_y = batch.surface_y.clone()
+    surface_y[..., 2] = -surface_y[..., 2]
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
+
+
+def maybe_apply_symmetry_augmentation(
+    batch: SurfaceBatch,
+    *,
+    use_augmentation: bool,
+    flip_prob: float,
+    include_both: bool,
+) -> tuple[SurfaceBatch, str]:
+    """Optionally apply y-axis reflection augmentation to a training batch.
+
+    Returns the (possibly augmented) batch and a string label describing what
+    was applied this step ('off' / 'orig' / 'flip' / 'both').
+    """
+    if not use_augmentation:
+        return batch, "off"
+    if include_both:
+        flipped = _flip_y_inplace(batch)
+        combined = SurfaceBatch(
+            case_ids=list(batch.case_ids) + list(flipped.case_ids),
+            surface_x=torch.cat([batch.surface_x, flipped.surface_x], dim=0),
+            surface_y=torch.cat([batch.surface_y, flipped.surface_y], dim=0),
+            surface_mask=torch.cat([batch.surface_mask, flipped.surface_mask], dim=0),
+            volume_x=torch.cat([batch.volume_x, flipped.volume_x], dim=0),
+            volume_y=torch.cat([batch.volume_y, flipped.volume_y], dim=0),
+            volume_mask=torch.cat([batch.volume_mask, flipped.volume_mask], dim=0),
+            metadata=list(batch.metadata) + list(flipped.metadata),
+        )
+        return combined, "both"
+    if torch.rand(1).item() < flip_prob:
+        return _flip_y_inplace(batch), "flip"
+    return batch, "orig"
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1798,6 +1860,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            batch, symm_label = maybe_apply_symmetry_augmentation(
+                batch,
+                use_augmentation=config.use_symmetry_augmentation,
+                flip_prob=config.symmetry_flip_prob,
+                include_both=config.symmetry_include_both,
+            )
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1810,6 +1878,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+            )
+            batch_loss_metrics["symmetry_aug_applied"] = (
+                1.0 if symm_label == "flip" else (2.0 if symm_label == "both" else 0.0)
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
