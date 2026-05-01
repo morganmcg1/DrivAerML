@@ -588,6 +588,9 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
+    use_agc: bool = False
+    agc_lambda: float = 0.01
+    agc_eps: float = 1e-3
     compile_model: bool = True
     debug: bool = False
     seed: int = -1
@@ -898,6 +901,71 @@ def _parameter_display_type(
             continue
         return type(parent).__name__
     return type(module).__name__
+
+
+def _unitwise_norm(x: torch.Tensor, norm_type: float = 2.0) -> torch.Tensor:
+    """Per-output-unit Frobenius norm following Brock et al. 2021 (NFNets, App. B).
+
+    For ndim<=1 tensors returns a scalar tensor. For ndim>=2 tensors returns
+    a tensor of shape [out_dim, 1, 1, ...] containing the norm of each output
+    unit (row of a Linear weight, output channel of a Conv weight).
+    """
+    if x.ndim <= 1:
+        return x.norm(norm_type)
+    return x.norm(norm_type, dim=tuple(range(1, x.ndim)), keepdim=True)
+
+
+def adaptive_gradient_clipping(
+    parameters,
+    agc_lambda: float,
+    eps: float = 1e-3,
+) -> dict[str, float]:
+    """Unit-wise Adaptive Gradient Clipping (Brock et al. 2021, Appendix B).
+
+    Clips each output unit's gradient so that its norm is at most
+    ``agc_lambda * ||W_unit||``. Skips parameters with ndim<2 (biases,
+    LayerNorm gamma/beta) per the paper. Returns diagnostics computed before
+    the gradient is modified so the clipped fraction is meaningful.
+
+    Must be called after ``loss.backward()`` and before ``optimizer.step()``.
+    With bf16 AMP we operate directly on fp32 ``.grad`` (no scaler unscale).
+    """
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    parameters = [p for p in parameters if p.grad is not None]
+
+    eligible = 0
+    clipped_units = 0
+    total_units = 0
+    max_ratio = 0.0
+
+    for p in parameters:
+        if p.ndim < 2:
+            continue
+        eligible += 1
+        p_norm = _unitwise_norm(p.detach()).clamp_(min=eps)
+        g_norm = _unitwise_norm(p.grad.detach())
+        max_norm = p_norm * agc_lambda
+        ratio = (g_norm / p_norm).max().item()
+        if ratio > max_ratio:
+            max_ratio = ratio
+        trigger = g_norm > max_norm
+        n_units = trigger.numel()
+        total_units += n_units
+        n_clipped = int(trigger.sum().item())
+        clipped_units += n_clipped
+        if n_clipped > 0:
+            scale = max_norm / g_norm.clamp(min=1e-6)
+            clipped_grad = p.grad * scale
+            p.grad.detach().copy_(torch.where(trigger, clipped_grad, p.grad))
+
+    return {
+        "eligible_params": float(eligible),
+        "clipped_units": float(clipped_units),
+        "total_units": float(total_units),
+        "clipped_fraction": clipped_units / max(total_units, 1),
+        "max_ratio_to_lambda": max_ratio / max(agc_lambda, 1e-12),
+    }
 
 
 def collect_gradient_metrics(
@@ -1838,6 +1906,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                 else {}
             )
             grad_is_finite = True
+            if config.use_agc:
+                agc_diag = adaptive_gradient_clipping(
+                    model.parameters(),
+                    agc_lambda=config.agc_lambda,
+                    eps=config.agc_eps,
+                )
+                if should_log_gradients:
+                    gradient_metrics["train/agc/clipped_fraction"] = agc_diag["clipped_fraction"]
+                    gradient_metrics["train/agc/clipped_units"] = agc_diag["clipped_units"]
+                    gradient_metrics["train/agc/total_units"] = agc_diag["total_units"]
+                    gradient_metrics["train/agc/eligible_params"] = agc_diag["eligible_params"]
+                    gradient_metrics["train/agc/max_ratio_to_lambda"] = agc_diag["max_ratio_to_lambda"]
+                    gradient_metrics["train/agc/lambda"] = config.agc_lambda
             if config.clip_grad_norm > 0:
                 pre_clip_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=config.clip_grad_norm
