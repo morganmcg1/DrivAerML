@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -39,10 +40,12 @@ from data import (
     VOLUME_TARGET_NAMES,
     VOLUME_X_DIM,
     VOLUME_Y_DIM,
+    DrivAerMLCaseStore,
     SurfaceBatch,
     load_data,
     pad_collate,
 )
+from data.loader import _resolve_artifact_path  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +236,74 @@ class TransformerBlock(nn.Module):
         return x
 
 
+GEOM_DESC_DIM = 14  # bbox(6) + centroid(3) + bbox_vol(1) + log_n_pts(1) + eigvals(3)
+
+
+def compute_geom_moments(surf_pts: torch.Tensor) -> torch.Tensor:
+    """Analytic 14-dim shape descriptor from a (N, 3) surface point cloud.
+
+    Layout: [bbox_min(3), bbox_max(3), centroid(3), bbox_vol(1), log_n_pts(1),
+    eigvals(3 ascending)]. Eigenvalues are of the (3, 3) point covariance.
+    """
+    surf_pts = surf_pts.float()
+    bbox_min = surf_pts.min(dim=0).values
+    bbox_max = surf_pts.max(dim=0).values
+    centroid = surf_pts.mean(dim=0)
+    bbox_vol = (bbox_max - bbox_min).prod().reshape(1)
+    n_pts = max(int(surf_pts.shape[0]), 1)
+    log_n_pts = torch.tensor([float(n_pts)], dtype=torch.float32).log()
+    centered = surf_pts - centroid
+    cov = centered.T @ centered / float(max(n_pts - 1, 1))
+    eigvals = torch.linalg.eigvalsh(cov)
+    return torch.cat([bbox_min, bbox_max, centroid, bbox_vol, log_n_pts, eigvals])
+
+
+def build_geom_moment_table(
+    store: DrivAerMLCaseStore,
+    case_ids: Iterable[str],
+) -> dict[str, torch.Tensor]:
+    """Map each case_id to its raw 14-dim geom descriptor (full surface cloud)."""
+    table: dict[str, torch.Tensor] = {}
+    for case_id in case_ids:
+        case_dir = store.root / case_id
+        path = _resolve_artifact_path(case_dir / "surface_xyz.npy")
+        arr = np.asarray(np.load(path), dtype=np.float32)
+        surf_pts = torch.from_numpy(arr)
+        table[case_id] = compute_geom_moments(surf_pts)
+    return table
+
+
+def stack_geom_descriptors(
+    case_ids: Iterable[str],
+    lookup: dict[str, torch.Tensor],
+    device: torch.device,
+) -> torch.Tensor:
+    return torch.stack([lookup[cid] for cid in case_ids], dim=0).to(device)
+
+
+class GeomMomentConditioner(nn.Module):
+    """Project a per-case geometric descriptor to a (B, hidden_dim) additive bias.
+
+    Final linear is zero-initialized so the conditioner emits zero at start
+    (identity / no-op modulation) — analogous to AdaLN-zero in DiT. This keeps
+    the gradient landscape unchanged at init and lets the model gradually learn
+    to use the geometric signal.
+    """
+
+    def __init__(self, desc_dim: int, hidden_dim: int):
+        super().__init__()
+        self.fc1 = nn.Linear(desc_dim, hidden_dim)
+        self.act = nn.SiLU()
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.trunc_normal_(self.fc1.weight, std=0.02)
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.zeros_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+
+    def forward(self, desc: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.act(self.fc1(desc)))
+
+
 class GeomEncoder(nn.Module):
     """Mean-pooled MLP encoder over surface points to a per-case geometry token."""
 
@@ -320,9 +391,13 @@ class Transformer(nn.Module):
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
         geom_token: torch.Tensor | None = None,
+        geom_cond_token: torch.Tensor | None = None,
     ) -> torch.Tensor:
         for index, block in enumerate(self.blocks):
             x = block(x, attn_mask=attn_mask)
+            if geom_cond_token is not None:
+                x = x + geom_cond_token
+                x = _apply_token_mask(x, attn_mask)
             if self.film_layers is not None and geom_token is not None:
                 x = self.film_layers[index](x, geom_token)
                 x = _apply_token_mask(x, attn_mask)
@@ -350,6 +425,8 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_geom_moment_conditioning: bool = False,
+        geom_moment_inject_every_block: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,6 +439,8 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.use_geom_moment_conditioning = use_geom_moment_conditioning
+        self.geom_moment_inject_every_block = geom_moment_inject_every_block
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -381,6 +460,11 @@ class SurfaceTransolver(nn.Module):
         self.geom_encoder = (
             GeomEncoder(self.surface_input_dim, film_encoder_dim * 2, film_encoder_dim)
             if use_film
+            else None
+        )
+        self.geom_moment_conditioner = (
+            GeomMomentConditioner(desc_dim=GEOM_DESC_DIM, hidden_dim=n_hidden)
+            if use_geom_moment_conditioning
             else None
         )
         self.backbone = Transformer(
@@ -418,6 +502,7 @@ class SurfaceTransolver(nn.Module):
         surface_mask: torch.Tensor | None = None,
         volume_x: torch.Tensor | None = None,
         volume_mask: torch.Tensor | None = None,
+        geom_descriptor: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if surface_x is None and volume_x is None:
             raise ValueError("SurfaceTransolver requires surface_x or volume_x")
@@ -460,7 +545,23 @@ class SurfaceTransolver(nn.Module):
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
             geom_token = self.geom_encoder(surface_x, surface_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
+        geom_cond_vector: torch.Tensor | None = None
+        geom_cond_token: torch.Tensor | None = None
+        if (
+            self.use_geom_moment_conditioning
+            and self.geom_moment_conditioner is not None
+            and geom_descriptor is not None
+        ):
+            geom_cond_vector = self.geom_moment_conditioner(geom_descriptor.to(hidden.dtype))
+            geom_cond_token = geom_cond_vector.unsqueeze(1)
+            hidden = hidden + geom_cond_token
+            hidden = _apply_token_mask(hidden, attn_mask)
+        hidden = self.backbone(
+            hidden,
+            attn_mask=attn_mask,
+            geom_token=geom_token,
+            geom_cond_token=geom_cond_token if self.geom_moment_inject_every_block else None,
+        )
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -490,6 +591,8 @@ class SurfaceTransolver(nn.Module):
         }
         if geom_token is not None:
             result["geom_token"] = geom_token
+        if geom_cond_vector is not None:
+            result["geom_cond_vector"] = geom_cond_vector
         return result
 
 
@@ -579,6 +682,8 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_geom_moment_conditioning: bool = False
+    geom_moment_inject_every_block: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,6 +850,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_geom_moment_conditioning=config.use_geom_moment_conditioning,
+        geom_moment_inject_every_block=config.geom_moment_inject_every_block,
     )
 
 
@@ -1313,16 +1420,23 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    geom_descriptor_lookup: dict[str, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    geom_descriptor = (
+        stack_geom_descriptors(batch.case_ids, geom_descriptor_lookup, device)
+        if geom_descriptor_lookup is not None
+        else None
+    )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            geom_descriptor=geom_descriptor,
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
@@ -1390,6 +1504,18 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    if "geom_cond_vector" in out:
+        geom_cond = out["geom_cond_vector"].detach().float()
+        metrics["geom_moment/cond_norm_mean"] = float(
+            geom_cond.norm(dim=-1).mean().cpu().item()
+        )
+        metrics["geom_moment/cond_abs_mean"] = float(
+            geom_cond.abs().mean().cpu().item()
+        )
+    if geom_descriptor is not None:
+        metrics["geom_moment/desc_norm_mean"] = float(
+            geom_descriptor.detach().float().norm(dim=-1).mean().cpu().item()
+        )
     return loss, metrics
 
 
@@ -1441,6 +1567,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    geom_descriptor_lookup: dict[str, torch.Tensor] | None = None,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1471,12 +1598,18 @@ def evaluate_split(
         batch = batch.to(device)
         surface_target_norm = transform.apply_surface(batch.surface_y)
         volume_target_norm = transform.apply_volume(batch.volume_y)
+        geom_descriptor = (
+            stack_geom_descriptors(batch.case_ids, geom_descriptor_lookup, device)
+            if geom_descriptor_lookup is not None
+            else None
+        )
         with autocast_context(device, amp_mode):
             out = model(
                 surface_x=batch.surface_x,
                 surface_mask=batch.surface_mask,
                 volume_x=batch.volume_x,
                 volume_mask=batch.volume_mask,
+                geom_descriptor=geom_descriptor,
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
@@ -1703,6 +1836,36 @@ def main(argv: Iterable[str] | None = None) -> None:
         volume_y_std=stats["volume_y_std"].to(device),
     )
 
+    geom_descriptor_lookup: dict[str, torch.Tensor] | None = None
+    geom_norm_summary: dict[str, list[float]] | None = None
+    if config.use_geom_moment_conditioning:
+        moment_store = DrivAerMLCaseStore(
+            manifest_path=config.manifest,
+            root=config.data_root or None,
+        )
+        train_ids = moment_store.case_ids("train")
+        val_ids = moment_store.case_ids("val")
+        test_ids = moment_store.case_ids("test")
+        all_ids = list(train_ids) + list(val_ids) + list(test_ids)
+        raw_table = build_geom_moment_table(moment_store, all_ids)
+        train_descriptors = torch.stack([raw_table[cid] for cid in train_ids], dim=0)
+        geom_mean = train_descriptors.mean(dim=0)
+        geom_std = train_descriptors.std(dim=0).clamp(min=1e-6)
+        geom_descriptor_lookup = {
+            cid: ((raw_table[cid] - geom_mean) / geom_std).to(torch.float32)
+            for cid in raw_table
+        }
+        geom_norm_summary = {
+            "mean": geom_mean.tolist(),
+            "std": geom_std.tolist(),
+        }
+        print(
+            f"Geom moments: built {len(geom_descriptor_lookup)} descriptors "
+            f"(dim={GEOM_DESC_DIM}, normalised on train mean/std)."
+        )
+        print(f"  geom_mean: {geom_norm_summary['mean']}")
+        print(f"  geom_std:  {geom_norm_summary['std']}")
+
     model = build_model(config).to(device)
     if config.compile_model:
         model = torch.compile(model)
@@ -1720,22 +1883,27 @@ def main(argv: Iterable[str] | None = None) -> None:
     full_val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
     test_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
 
+    extra_run_config: dict[str, object] = {
+        **asdict(config),
+        "n_params": n_params,
+        "train_views": len(train_loader.dataset),
+        "val_views": {k: len(v.dataset) for k, v in val_loaders.items()},
+        "test_views": {k: len(v.dataset) for k, v in test_loaders.items()},
+        "surface_targets": SURFACE_TARGET_NAMES,
+        "volume_targets": VOLUME_TARGET_NAMES,
+        "total_estimated_steps": total_estimated_steps,
+    }
+    if geom_norm_summary is not None:
+        extra_run_config["geom_moment_train_mean"] = geom_norm_summary["mean"]
+        extra_run_config["geom_moment_train_std"] = geom_norm_summary["std"]
+        extra_run_config["geom_moment_desc_dim"] = GEOM_DESC_DIM
     run = wandb.init(
         entity=os.environ.get("WANDB_ENTITY"),
         project=os.environ.get("WANDB_PROJECT"),
         group=config.wandb_group or None,
         name=config.wandb_name or None,
         tags=[config.agent] if config.agent else [],
-        config={
-            **asdict(config),
-            "n_params": n_params,
-            "train_views": len(train_loader.dataset),
-            "val_views": {k: len(v.dataset) for k, v in val_loaders.items()},
-            "test_views": {k: len(v.dataset) for k, v in test_loaders.items()},
-            "surface_targets": SURFACE_TARGET_NAMES,
-            "volume_targets": VOLUME_TARGET_NAMES,
-            "total_estimated_steps": total_estimated_steps,
-        },
+        config=extra_run_config,
         mode=os.environ.get("WANDB_MODE", "online"),
     )
     wandb.define_metric("global_step")
@@ -1763,6 +1931,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/geom_moment/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -1810,6 +1979,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                geom_descriptor_lookup=geom_descriptor_lookup,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1922,6 +2092,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            for key in ("geom_moment/cond_norm_mean", "geom_moment/cond_abs_mean", "geom_moment/desc_norm_mean"):
+                if key in batch_loss_metrics:
+                    train_log[f"train/{key}"] = batch_loss_metrics[key]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
@@ -2001,7 +2174,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(
+                model,
+                loader,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                geom_descriptor_lookup=geom_descriptor_lookup,
+            )
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2150,7 +2330,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            geom_descriptor_lookup=geom_descriptor_lookup,
+        )
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
