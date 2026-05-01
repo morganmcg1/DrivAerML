@@ -1,6 +1,7 @@
 # SENPAI Research State
 
-- **2026-05-01 ~12:30Z (Wave 2 LAUNCHED)** — All 9 idle bengio students assigned Wave 2 PRs (#174-#182), all draft, awaiting student pickup. PR #74 (alphonse Wave 1) merged as wave leader; current baseline val_abupt=7.2091% (vol_p=4.166% beats AB-UPT target). Wave 2 cohort built on Fourier PE foundation (Wave 1's strongest signal). 0 review-ready PRs; 0 idle students. Test_primary eval for PR #74 (run `m9775k1v` ep30 ckpt) still pending — not blocking.
+- **2026-04-30 ~latest** — Closed PR #76 (gilbert 5L/256d, best ep31 abupt=7.4726%) and PR #77 (haku 4L/384d, best ep31 abupt=7.6344%) — both confirmed via full W&B scan, neither beat 7.2091% baseline. gilbert reassigned → PR #188 (slices=192 + Fourier PE, orthogonal to all Wave 2). Wave 2 pods are waiting on Wave 1 train.py completion; all 9 PRs #174-#182 have 0 comments (not yet picked up by students).
+- **2026-05-01 ~12:30Z (Wave 2 LAUNCHED)** — All 9 idle bengio students assigned Wave 2 PRs (#174-#182), all draft, awaiting student pickup. PR #74 (alphonse Wave 1) merged as wave leader; current baseline val_abupt=7.2091% (vol_p=4.166% beats AB-UPT target). Wave 2 cohort built on Fourier PE foundation (Wave 1's strongest signal). Test_primary eval for PR #74 (run `m9775k1v` ep30 ckpt) still pending — not blocking.
 - **2026-05-01 ~10:30Z** — Wave 1 wrap: 16 bengio runs healthy. alphonse leader (val_abupt=7.296 at ep39), peaked ep31 at 7.209. PR #74 merged. Wave 2 ready.
 - **2026-05-01 ~08:45Z** — PR #137 (edward GradNorm) closed: diverged val_abupt=33.43%. edward → PR #160 split-output-heads.
 - torch.compile bug: PyTorch 2.x Inductor `tiling_utils.get_pw_red_splits` crashes at first validation; all bengio students use `--no-compile-model`.
@@ -37,10 +38,12 @@ All 9 PRs are built on the Wave 1 winning recipe (4L/256d + Fourier PE + no-EMA 
 - thorfinn #181: EMA revival on longer schedule
 - norman #180: raw rel-L2 aux loss (eval-metric-aligned)
 
-**Other in-flight bengio PRs (Wave 1 leftovers / re-assignments)**:
-- PR #145 (senku): metric-aware loss `mse_plus_raw_rel_l2` w=0.05 — running, ep~4
-- PR #160 (edward): split surface output head (cp MLP + wall-shear MLP) — running
-- PR #75-77, #79-83, #85-87 (Wave 1, status:wip but should be reviewed once they hit ep50 / they're nearing completion)
+**Other in-flight bengio PRs**:
+- PR #145 (senku): metric-aware loss `mse_plus_raw_rel_l2` w=0.05 — running, ep~10, abupt=9.75% (Good zone, continue to ep20)
+- PR #160 (edward): split surface output head (cp MLP + wall-shear MLP) — running, ep~20, abupt~8.4% and improving
+- PR #188 (gilbert): 4L/256d + Fourier PE + slices=192 (new, Wave 2+ slice-count scaling; orthogonal to Wave 2 cohort)
+- PRs #76/#77 (gilbert/haku): CLOSED — neither beat baseline. Full scan confirmed best 7.47%/7.63% respectively.
+- PRs #75, #79-83, #85-87 (Wave 1): still running on old Wave 1 pods; watchdog waiting for train.py to complete before picking up Wave 2 assignments
 
 ## Most Recent Human Researcher Direction
 

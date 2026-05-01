@@ -57,6 +57,50 @@ Bold vol_p values are at or below AB-UPT target (6.08). Wave 1 is still mid-trai
 
 Volume_pressure test/val gap (5.83 → 12.51) is the dominant component of the test-set degradation, indicating UW under-weighted `volume_pressure` enough to hurt held-out generalization specifically.
 
+## 2026-04-30 ~latest — PR #76: [gilbert] 5L/256d Depth Scaling + Fourier PE (CLOSED)
+
+- **Branch:** `gilbert/5l-256d-depth-scaling-fourier-pe`
+- **Hypothesis:** Adding one extra transformer layer (4L→5L) at the Wave 1 256d baseline + Fourier PE would increase capacity and lower val_abupt below 7.2091%.
+- **W&B run:** `kn756yk6`, group `bengio-stream1-gilbert`
+
+| Epoch | abupt% | wsy% | wsz% | Notes |
+|-------|--------|------|------|-------|
+| 10 | 9.704 | 11.81 | 13.26 | |
+| 20 | 8.026 | 9.97 | 11.57 | |
+| 25 | 7.773 | 9.34 | 11.11 | |
+| 28 | 7.508 | 9.01 | 11.02 | |
+| 30 | 7.473 | 8.95 | 10.96 | |
+| **31** | **7.473** | 8.93 | 10.95 | **BEST** |
+| 32 | 7.492 | 8.97 | 10.99 | cosine bounce |
+| 38 | 7.542 | 9.07 | 11.08 | |
+
+**Best: ep31, abupt=7.4726%. Does NOT beat 7.2091% baseline. Gap: +0.26pp.**
+
+### Conclusion
+
+Closed. Pure depth scaling (5L at 256d) consistently finishes ~0.26pp above the 4L/256d + Fourier PE baseline. The extra layer adds capacity but not enough to close the shear field gap. vol_p=5.27% is strong but doesn't compensate. Depth lever exhausted at 256d width; revisit only if combined with width scaling (5L/384d covered by Wave 2 PR #179).
+
+## 2026-04-30 ~latest — PR #77: [haku] 4L/384d Width Scaling (no Fourier PE) (CLOSED)
+
+- **Branch:** `haku/4l-384d-width-scaling`
+- **Hypothesis:** Wider hidden dimension (256d→384d) at constant depth would improve val_abupt, testing orthogonal capacity dimension from PR #76.
+- **W&B run:** `nbbbw8qw`, group `bengio-stream1-haku`
+
+| Epoch | abupt% | wsy% | wsz% | Notes |
+|-------|--------|------|------|-------|
+| 10 | 9.964 | 13.04 | 14.67 | |
+| 20 | 8.417 | 10.95 | 12.29 | |
+| 25 | 7.708 | 10.25 | 11.45 | |
+| 28 | 7.658 | 10.17 | 11.36 | |
+| 30 | 7.639 | 10.12 | 11.32 | |
+| **31** | **7.634** | 10.11 | 11.31 | **BEST** |
+
+**Best: ep31, abupt=7.6344%. Does NOT beat 7.2091% baseline. Gap: +0.43pp.**
+
+### Conclusion
+
+Closed. Width scaling without Fourier PE is strictly worse than the baseline (4L/256d + PE). Comparing haku (7.634%) vs gilbert (7.473%) vs baseline (7.209%), the ranking is: PE > depth > width (no PE). Wall-shear y/z actually worsened vs baseline (wsy 10.11% vs 9.10%), indicating PE is the critical ingredient for shear field resolution. Width scaling in isolation without PE reallocates capacity but doesn't address the coordinate-encoding gap. The 4L/384d + PE hypothesis (askeladd #175) remains the clean follow-up.
+
 ### Follow-ups (from edward's diagnostic, archived for the queue)
 
 1. Wider clamp `[-10, 10]` or unclamped log_vars — let log_vars equilibrate at their analytic optimum.
