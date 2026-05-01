@@ -1056,20 +1056,26 @@ def collect_weight_metrics(
     return metrics
 
 
-def _numeric_metric_items(metrics: dict[str, object]) -> dict[str, float]:
-    numeric: dict[str, float] = {}
+def _coerce_metric_floats(metrics: dict[str, object]) -> dict[str, float]:
+    """Coerce metric values to floats, keeping NaN/Inf so callers can detect them."""
+
+    coerced: dict[str, float] = {}
     for key, value in metrics.items():
         if isinstance(value, bool):
             continue
         if isinstance(value, (int, float)):
-            number = float(value)
+            coerced[key] = float(value)
         elif isinstance(value, torch.Tensor) and value.numel() == 1:
-            number = float(value.detach().cpu().item())
-        else:
-            continue
-        if math.isfinite(number):
-            numeric[key] = number
-    return numeric
+            coerced[key] = float(value.detach().cpu().item())
+    return coerced
+
+
+def _numeric_metric_items(metrics: dict[str, object]) -> dict[str, float]:
+    return {
+        key: value
+        for key, value in _coerce_metric_floats(metrics).items()
+        if math.isfinite(value)
+    }
 
 
 def slope_source_metrics(metrics: dict[str, object]) -> dict[str, float]:
@@ -1225,11 +1231,11 @@ def check_kill_thresholds(
     metrics: dict[str, object],
     thresholds: list[KillThreshold],
 ) -> str | None:
-    numeric = _numeric_metric_items(metrics)
+    raw = _coerce_metric_floats(metrics)
     for threshold in thresholds:
-        if global_step < threshold.step or threshold.metric not in numeric:
+        if global_step < threshold.step or threshold.metric not in raw:
             continue
-        observed = numeric[threshold.metric]
+        observed = raw[threshold.metric]
         if not math.isfinite(observed) or not threshold.passes(observed):
             return (
                 f"kill threshold failed at step {global_step}: "
