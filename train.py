@@ -124,44 +124,6 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
-class AxisSincosEmbed(nn.Module):
-    """Per-axis continuous sincos embedding with independent max_wavelength per axis.
-
-    Splits hidden_dim into input_dim equal chunks (rounded down to even), runs an
-    independent ContinuousSincosEmbed (input_dim=1) on each coordinate axis with
-    its own max_wavelength, concatenates outputs, and zero-pads to hidden_dim.
-    """
-
-    def __init__(self, hidden_dim: int, input_dim: int, max_wavelengths: tuple[int, ...]):
-        super().__init__()
-        if len(max_wavelengths) != input_dim:
-            raise ValueError(
-                f"max_wavelengths must have length {input_dim}, got {len(max_wavelengths)}"
-            )
-        self.hidden_dim = hidden_dim
-        self.input_dim = input_dim
-        per_axis = (hidden_dim // input_dim) // 2 * 2
-        if per_axis <= 0:
-            raise ValueError("hidden_dim must be large enough for per-axis sincos")
-        self.per_axis = per_axis
-        self.padding = hidden_dim - per_axis * input_dim
-        self.max_wavelengths = tuple(int(mw) for mw in max_wavelengths)
-        self.embeds = nn.ModuleList(
-            [
-                ContinuousSincosEmbed(hidden_dim=per_axis, input_dim=1, max_wavelength=mw)
-                for mw in self.max_wavelengths
-            ]
-        )
-
-    def forward(self, coords: torch.Tensor) -> torch.Tensor:
-        outputs = [self.embeds[i](coords[..., i : i + 1]) for i in range(self.input_dim)]
-        emb = torch.cat(outputs, dim=-1)
-        if self.padding > 0:
-            pad = torch.zeros(*emb.shape[:-1], self.padding, device=emb.device, dtype=emb.dtype)
-            emb = torch.cat([emb, pad], dim=-1)
-        return emb
-
-
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -387,8 +349,7 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
-        pos_max_wavelength: int = 10_000,
-        pos_axis_wavelengths: tuple[int, ...] | None = None,
+        pos_max_wavelength: int = 1000,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -401,22 +362,12 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
-        self.pos_axis_wavelengths = (
-            tuple(int(mw) for mw in pos_axis_wavelengths) if pos_axis_wavelengths else None
-        )
 
-        if self.pos_axis_wavelengths is not None:
-            self.pos_embed = AxisSincosEmbed(
-                hidden_dim=n_hidden,
-                input_dim=space_dim,
-                max_wavelengths=self.pos_axis_wavelengths,
-            )
-        else:
-            self.pos_embed = ContinuousSincosEmbed(
-                hidden_dim=n_hidden,
-                input_dim=space_dim,
-                max_wavelength=pos_max_wavelength,
-            )
+        self.pos_embed = ContinuousSincosEmbed(
+            hidden_dim=n_hidden,
+            input_dim=space_dim,
+            max_wavelength=pos_max_wavelength,
+        )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -627,8 +578,7 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
-    pos_max_wavelength: int = 10_000
-    pos_axis_wavelengths: str = ""
+    pos_max_wavelength: int = 1000
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -783,24 +733,6 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
-def _parse_axis_wavelengths(spec: str) -> tuple[int, ...] | None:
-    spec = (spec or "").strip()
-    if not spec:
-        return None
-    parts = [p.strip() for p in spec.split(",") if p.strip()]
-    if len(parts) != 3:
-        raise ValueError(
-            f"--pos-axis-wavelengths must be a comma-separated triple of ints, got '{spec}'"
-        )
-    try:
-        values = tuple(int(p) for p in parts)
-    except ValueError as exc:
-        raise ValueError(f"--pos-axis-wavelengths must be ints, got '{spec}'") from exc
-    if any(v <= 0 for v in values):
-        raise ValueError(f"--pos-axis-wavelengths entries must be positive, got '{spec}'")
-    return values
-
-
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -813,7 +745,6 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
-        pos_axis_wavelengths=_parse_axis_wavelengths(config.pos_axis_wavelengths),
     )
 
 
