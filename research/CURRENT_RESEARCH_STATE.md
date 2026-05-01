@@ -1,142 +1,179 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 ~00:00 UTC
+- **Date:** 2026-05-01 ~21:00 UTC (updated — W&B trajectory survey for all 8 in-flight; PR #242 anomaly noted)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Current SOTA — PR #222 (fern lr_warmup_epochs=1), test_abupt 10.420%
+## Current SOTA — PR #115 (thorfinn compound lr=1e-4 + EMA=0.999), test_abupt 10.580
 
-**Verified SOTA config (W&B run `ut1qmc3i`):**
+**Verified SOTA config (W&B `d03oghpp`):**
 - lr=1e-4, weight_decay=5e-4, optimizer=lion, lion_beta1=0.9, lion_beta2=0.99
-- use_ema=True, ema_decay=0.999, lr_cosine_t_max=50 (≈flat for 9ep), **lr_warmup_epochs=1**
-- model_layers=4, model_hidden_dim=512, model_heads=8, model_slices=128, model_mlp_ratio=4
-- train/eval surface_points=65536, train/eval volume_points=65536
+- use_ema=True, ema_decay=0.999, **lr_cosine_t_max=0** (fallback to `T_max=epochs`; with epochs=50 → cosine over 50, essentially flat over the actual 9-epoch run), lr_warmup_epochs=0
+- model_layers=4, model_hidden_dim=512, model_heads=8, **model_slices=128**, model_mlp_ratio=4
+- **train/eval surface_points=65536, train/eval volume_points=65536** (NOT 40k defaults)
 - volume_loss_weight=1, surface_loss_weight=1, batch_size=4, compile_model=False
 
-| Metric | PR #222 SOTA | AB-UPT | Gap |
+| Metric | tay SOTA (PR #115) | AB-UPT | Gap |
 |---|---:|---:|---:|
-| `abupt` mean | **10.420** | — | — |
-| `surface_pressure` | **5.550** | 3.82 | ×1.45 |
-| `wall_shear` | **10.185** | 7.29 | ×1.40 |
-| `volume_pressure` | **12.737** | 6.08 | **×2.09** |
-| `tau_x` | **8.629** | 5.35 | ×1.61 |
-| `tau_y` | **12.329** | 3.65 | **×3.38** |
-| `tau_z` | **12.854** | 3.63 | **×3.54** |
+| `abupt` mean | **10.580** | — | — |
+| `surface_pressure` | **5.690** | 3.82 | ×1.5 |
+| `wall_shear` | **10.419** | 7.29 | ×1.4 |
+| `volume_pressure` | 12.740 | 6.08 | **×2.1** |
+| `tau_x` | **8.908** | 5.35 | ×1.7 |
+| `tau_y` | **12.491** | 3.65 | **×3.4** |
+| `tau_z` | **13.071** | 3.63 | **×3.6** |
 
-Best val: 9.2910% (ep9). val→test ratio: 1.121.
+W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
+**SOTA val trajectory:** 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.16 / 9.73 / 9.48
 
-**Reproduce SOTA:**
-```bash
-torchrun --standalone --nproc_per_node=8 train.py \
-  --agent <STUDENT> --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
-  --no-compile-model --batch-size 4 --validation-every 1 \
-  --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
-  --ema-decay 0.999 --lr-warmup-epochs 1
-```
+## In-flight (8/8 students running — all slots filled, Rounds 12–14)
 
-## In-flight — Rounds 12–15 (2026-05-02 ~00:00 UTC)
+Last updated: 2026-05-01 (Round 14: thorfinn assigned lr-cosine-t-max=14)
 
-All 16 student GPUs occupied. 8 slots filling now as students pick up Round 15 assignments.
+| PR | Round | Student | Hypothesis | W&B group | ~Epoch | val_abupt (latest) | vs SOTA 9.484 | Status |
+|---|---|---|---|---|---:|---:|---:|---|
+| **#206** | 12 | alphonse | surface_points 64k→96k | `tay-round12-surface-pts-96k` | 10.1 | 11.460 | +1.98 | running (au98keie); ~complete; trajectory 54.39→26.12→17.84→14.55→12.64→11.46 |
+| **#222** | 12 | fern | lr_warmup=1ep (warmup from 0 over first epoch) | `tay-round12-lr-warmup-1ep` | 10.0 | 10.502 | +1.02 | running; ~complete; **closest to SOTA of all in-flight** |
+| **#231** | 12 | nezuko | model_slices=64 (halve attention slices) | `tay-round12-model-slices-64` | 5.5 | 19.337 | +9.85 | running (rgxygusk after restart); trajectory 58.34→28.50→19.34 — converging slowly, very unlikely to reach SOTA by ep10 |
+| **#232** | 12 | askeladd | model_heads=4 (halve attention heads; NEVER TESTED) | `tay-round12-model-heads-4` | 7.2 | 12.532 | +3.05 | running; trajectory 49.52→21.97→15.16→12.53 |
+| **#233** | 12 | edward | model_layers=3 (reduce depth by 1; NEVER TESTED) | `tay-round12-model-layers-3` | 7.4 | 15.551 | +6.07 | running; trajectory 61.96→27.02→18.93→15.55 — slowest convergence, depth=3 underfits |
+| **#240** | 13 | frieren | wider FFN mlp_ratio=8 (vs. SOTA=4, 6 was negative) | `tay-round13-mlp-ratio-8` | 1.3 | N/A | — | running — pre-first-eval |
+| **#241** | 13 | tanjiro | width scaling 512→768d with µP-scaled LR | `tay-round13-hidden-dim-768` | 1.1 | N/A | — | running — pre-first-eval |
+| **#242** | 13 | thorfinn | dropout=0.1 re-test on SOTA stack | `tay-round13-dropout-0p1` | 1.3 | N/A | — | **PR ANOMALY**: GH state=MERGED via empty assignment commit. W&B run may have data; results comment never posted. **Superseded by PR #247.** |
+| **#247** | 14 | thorfinn | gentle cosine annealing lr-cosine-t-max=14 | `tay-round14-lr-cosine-t-max-14` | 0 | N/A | — | **ASSIGNED** — not yet started. Hypothesis: T_max=14 midpoint avoids LR collapse (T_max=9 ❌×2) while providing late-stage annealing vs flat T_max=50 SOTA. |
 
-| PR | Student | Hypothesis | Status |
+### Component breakdown for the two ~complete runs (vs SOTA surf_p=3.82 / wall_sh=7.29 / vol_p=6.08)
+
+| PR | surf_p | wall_sh | vol_p | val_abupt |
+|---|---:|---:|---:|---:|
+| SOTA #115 | 5.690 | 10.419 | 12.740 (val baseline test 5.69/10.42/12.74) | 9.484 (val) |
+| #206 alphonse 96k | 7.406 | 12.887 | 6.869 | 11.460 |
+| #222 fern warmup-1ep | 6.779 | 11.795 | 6.257 | 10.502 |
+
+Note: the volume_pressure values for #206 (6.87) and #222 (6.26) look much better than the SOTA test value of 12.74 — but those are val_primary not test_primary. Direct val→test for SOTA was val_vp ~5.7 → test_vp 12.74 (val/test diverges sharply on volume_pressure axis). The val numbers above are not directly comparable to test column.
+
+## Round 12/13 trajectory verdict
+
+- **Architecture-dial probes (heads=4, layers=3, slices=64, surface_pts=96k):** all converging more slowly than SOTA (val ≥11.46 at ep10 vs SOTA's 9.48). Architecture levers around the SOTA settings are negative within the current epoch budget.
+- **Schedule probe (fern lr_warmup=1ep):** closest to SOTA (10.50 vs 9.48, +1.02) — direction not productive but cleanest variance probe of the batch.
+- **Round 13 wider/regularized variants:** still pre-first-eval, no signal yet.
+
+If none of Round 13 beats SOTA, the next round must escalate per the Plateau Protocol — return to first principles (volume_pressure × 2.1 gap, tau_y/z × 3.4–3.6 gaps), consider architecture changes outside the SOTA neighborhood (Yi Wave 1 port, AB-UPT-style transolver+upt hybrid, geometry-conditioned cross-attention).
+
+## Round 12 — Closed / retired PRs
+
+| PR | Student | Result | vs SOTA | Conclusion |
+|---|---|---|---|---|
+| **#202** | tanjiro | val=9.710% (closed 2026-05-01) | NEGATIVE | T_max=9 cosine **CONFIRMED NEGATIVE** — variance probe agrees with edward #195. Cosine T_max=9 direction fully closed. |
+| **#203** | thorfinn | val ~19.3% at ep3 (closed 2026-05-01) | NEGATIVE +11.9% | wd=2.5e-4 **NEGATIVE** — lower weight_decay regressed badly. wd=5e-4 confirmed as optimum both directions closed. |
+| **#204** | frieren | val ~10.97% at ep3 (closed 2026-05-01) | NEGATIVE | vol_loss_weight=2.0 **NEGATIVE** re-run — 1.5 and 2.0 both worse. vol_loss_weight=1.0 SOTA confirmed. |
+| **#195** | edward | test_abupt=10.809% | +2.16% | T_max=9 cosine **NEGATIVE** — LR fell near-zero by ep8-9 while model still converging. Val trajectory: 9.710% at ep9. 6/7 axes regressed. |
+| **#194** | askeladd | test_abupt=11.619% | +9.8% | EMA=0.9995 **NEGATIVE** — slower averaging worse than 0.999. **EMA space fully closed.** |
+
+**EMA space summary (all four values tested):**
+| EMA | val_abupt | test_abupt | Outcome |
 |---|---|---|---|
-| #231 | nezuko | model_slices=64 | Running; ep4=15.63%, **tracking regression** (+6.15pp). Continue to ep9 to confirm. |
-| #232 | askeladd | model_heads=4 | Running; ep5=11.18%, **tracking regression** (+1.69pp). Has merge conflict — close after ep9. |
-| #233 | edward | model_layers=3 | Running; ep5=13.52%, **tracking regression** (+4.04pp). Has merge conflict — close after ep9. |
-| #240 | frieren | mlp_ratio=8 | Running; no student report yet — second ping sent. |
-| #241 | tanjiro | hidden_dim=768 (lr=1e-4) | Running; no student report yet — second ping sent. |
-| #247 | thorfinn | lr-cosine-t-max=14 | Running; rank0=`rldium3l`, ep2=22.6%, promising early trajectory. Has merge conflict. |
-| #250 | alphonse | batch-size=5 (OOM fallback from 8, then 6) | Running; rank0=`okwbc8i6`, eff_batch=40. Approved batch=5 fallback. |
-| #251 | fern | T_max=8+warmup+lr-min=5e-6 | Running; rank0=`uederk7o`, early ep1. |
-| #263 | chihiro | lr-warmup-epochs=2 | **NEW** — just assigned Round 15. |
-| #264 | emma | RFF coord features retest on SOTA stack | **NEW** — just assigned Round 15. |
-| #265 | gilbert | ema_decay=0.9995 re-test WITH warmup | **NEW** — just assigned Round 15. |
-| #267 | haku | grad-clip-norm=0.5 (never varied) | **NEW** — just assigned Round 15. |
-| #268 | kohaku | lr-cosine-t-max=12 (cosine sweep midpoint) | **NEW** — just assigned Round 15. |
-| #269 | norman | warmup=1ep + T_max=9 (warmdown-with-warmup) | **NEW** — just assigned Round 15. |
-| #271 | senku | model-hidden-dim=768 + muP lr=8.2e-5 | **NEW** — just assigned Round 15. |
-| #272 | violet | lr-min=1e-5 (never varied) | **NEW** — just assigned Round 15. |
+| 0.998 | ~10.5% | — | Negative |
+| **0.999** | **9.484%** | **10.580%** | **SOTA** |
+| 0.9995 | — | 11.619% | Negative |
+| 0.9999 | — | ~11%+ | Negative |
 
-## Active Human Research Directives
-
-**Issue #252 (Modded-NanoGPT):** Mine the Modded-NanoGPT world-record training history for applicable improvements. Techniques ranked by transfer plausibility:
-1. Muon optimizer (Newton-Schulz orthogonalized momentum) — would require code change; high priority next free slot
-2. Post-attention RMSNorm / QK-norm — stabilizes Transolver slot attention
-3. Linear warmdown LR (being approximated by norman #269 + fern #251)
-4. U-net skip connections — cheap residual across layers
-5. Sequence packing / FlexAttention — throughput lever (more epochs/budget)
-
-## Round 15 Hypotheses (just assigned)
-
-| PR | Student | Key delta | Rationale |
-|---|---|---|---|
-| #263 | chihiro | `--lr-warmup-epochs 2` | Extend confirmed-winning warmup lever. 1ep won; does 2ep help more? |
-| #264 | emma | `--rff-num-features 32 --rff-sigma 1.0` | RFF was +2.04pp in PR #33 but never re-tested on current compound SOTA stack |
-| #265 | gilbert | `--ema-decay 0.9995` | Re-test with warmup — PR #194 tested without warmup, regressed; warmup may change interaction |
-| #267 | haku | `--grad-clip-norm 0.5` | Grad clip norm = 1.0 has NEVER been varied in ~60 tay experiments |
-| #268 | kohaku | `--lr-cosine-t-max 12` | Fills the 9-fail / 12-? / 14-inflight / 50-SOTA cosine sweep |
-| #269 | norman | `--lr-cosine-t-max 9 --lr-min 1e-6` + warmup | Warmdown-with-warmup (Modded-NanoGPT directive); distinct from PR #202 (T_max=9 without warmup, regressed) |
-| #271 | senku | `--model-hidden-dim 768 --lr 8.2e-5` | Width scaling with muP-scaled LR (vs tanjiro #241 same width, no LR scaling) |
-| #272 | violet | `--lr-min 1e-5` | LR floor never varied; probes end-of-schedule sensitivity |
-
-## Current Research Focus
-
-**Primary focus:** LR schedule shape post-warmup. The PR #222 win (warmup=1ep) proved the gradient entry trajectory matters. The current round tests:
-- Warmup duration (1ep vs 2ep)
-- LR decay shape (flat=SOTA, cosine T_max=8/12/14/9+warmup)
-- LR floor (lr_min 1e-5 vs 1e-6)
-
-This completes the LR schedule space. If none of the cosine-anneal variants beat SOTA, the "flat post-warmup LR" conclusion will be firm.
-
-**Secondary focus:** Architecture / representation expansion
-- Width scaling (768d, senku with muP-LR vs tanjiro without)
-- RFF coordinate features on current SOTA stack (emma)
-
-**Tertiary focus (next round):** Modded-NanoGPT code-change ideas
-- Muon optimizer (new PR needed)
-- Post-attention RMSNorm/QK-norm (new PR needed)
-- These require model.py or train.py code changes — highest-variance bets
-
-## Key Learnings (cumulative)
-
-| Lever | Status | Outcome |
+**T_max space (cosine schedule):**
+| T_max | val_abupt | Outcome |
 |---|---|---|
-| LR | CLOSED | 1e-4 SOTA; ceiling confirmed |
-| EMA decay | CLOSED | 0.999 SOTA; all 4 values tested |
-| Lion beta2 | CLOSED | 0.99 SOTA; 0.999 regressed badly |
-| Lion beta1 | Mostly closed | 0.9 SOTA; 0.8 negative; 0.95+ untested |
-| Weight decay | CLOSED | 5e-4 SOTA; both directions negative |
-| Vol loss weight | CLOSED | 1.0 SOTA; 1.5 and 2.0 both negative |
-| Vol points | CLOSED | 65536 SOTA; 96k regressed |
-| Surface points | CLOSED | 65536 SOTA; 96k (PR #206) negative |
-| MLp_ratio | CLOSED | 4 SOTA; 6 regressed (+6.4%) |
-| Dropout | CLOSED | 0.0 SOTA; 0.05 regressed (+4.24%); model underfits |
-| Tau axis weights | CLOSED | 1.0 SOTA; Lion sign neutralizes per-channel weighting |
-| model_layers | Closing | 4 SOTA; 3L tracking regression (PR #233) |
-| model_heads | Closing | 8 SOTA; 4H tracking regression (PR #232) |
-| model_slices | Closing | 128 SOTA; 64 tracking regression (PR #231) |
-| lr_cosine T_max=9 | CLOSED NEGATIVE | Confirmed ×2 (edward #195, tanjiro #202) |
-| lr_warmup_epochs=1 | NEW SOTA | PR #222 fern — +2.03% val, +1.51% test; warmup confirmed lever |
-| batch_size | In-flight | 4 SOTA; 5 (effective) in-flight PR #250 |
-| lr-min | Never varied | 1e-5 being tested (violet #272) |
-| grad-clip-norm | Never varied | 0.5 being tested (haku #267) |
-| RFF features | Re-test needed | +2.04pp in PR #33 but on old SOTA stack; re-test with current SOTA (emma #264) |
-| model_hidden_dim | In-flight | 512 SOTA; 768 in-flight (tanjiro #241, senku #271) |
-| Cosine T_max 12/14 | In-flight | T_max=14 (thorfinn #247), T_max=12 (kohaku #268), T_max=8 (fern #251) |
-| Warmup 2ep | In-flight | Being tested chihiro #263 |
+| **50** (≈flat for 9ep) | **9.484%** | **SOTA** |
+| 9 | 9.710% (edward #195) | Negative — LR collapses too early |
 
-## Largest Remaining Gaps to AB-UPT
+T_max=9 is now **fully confirmed negative** (edward #195 + tanjiro #202 both closed negative). Faster-decay direction is closed. Gentle annealing (T_max=14-20) remains as a possible next probe.
 
-1. **volume_pressure** ×2.09 — Not a loss-weighting problem (both 1.5 and 2.0 closed). Likely architectural: dedicated volume decoder, richer SDF features, hierarchical multi-scale volume heads.
-2. **tau_y** ×3.38, **tau_z** ×3.54 — Shear stress direction prediction. Lion sign update neutralizes per-axis loss weighting. Needs geometry-informed head (surface tangent frame) or output transformation (asinh normalization).
+## Round 11 — Closed PRs
 
-## Next Priorities (after Round 15 closes)
+| PR | Student | Test | vs SOTA | Conclusion |
+|---|---|---:|---:|---|
+| **#196** | frieren | running → now PR #204 | — | vol_loss_weight=2.0 (same hypothesis, fresh run) |
+| **#189** | fern | closed | — | lion_beta1=0.8 negative — now on lr-warmup-1ep (#222) |
+| **#187** | nezuko | closed | — | vol_loss_weight=1.5 final result; nezuko now on model-slices=64 (#231) |
+| **#149** | tanjiro | 11.022 | +4.2% | Per-axis tau weights W_y=W_z=1.5 regressed all metrics. CLOSED. |
 
-1. **Muon optimizer** — Newton-Schulz orthogonalized gradient, highest-variance Modded-NanoGPT bet
-2. **Post-attention RMSNorm** — stabilize Transolver slot attention, cheap code change
-3. **Volume architecture** — dedicated volume decoder head; potentially copy from AB-UPT paper's design
-4. **Tau head reform** — surface-tangent-frame projection to close tau_y/tau_z gap
-5. **Compound winners** — stack Round 15 winners once identified
+## Prior closed families (carried forward)
+
+| Family | Status | Best tested | Note |
+|---|---|---|---|
+| Depth (model_layers) | **in-flight as #233** | 4L SOTA | 3L and 5L/6L untested vs new baseline |
+| FFN width (mlp_ratio) | CLOSED | 4 SOTA | mlp_ratio=6 +6.4%; ceiling found |
+| Attention heads | **in-flight as #232** | 8 SOTA | model_heads=4 **NEVER TESTED** |
+| Attention slices | **in-flight as #231** | 128 SOTA | slices=256 OOM; slices=64 **NEVER TESTED** |
+| LR | CLOSED | 1e-4 SOTA | lr=1.5e-4 +40%; ceiling confirmed |
+| EMA decay | CLOSED | 0.999 SOTA | All four values tested; 0.999 confirmed optimal |
+| lion_beta2 | CLOSED | 0.99 SOTA | 0.999 +18.7%; 100-step window optimal for 9ep |
+| lion_beta1 | partially tested | 0.9 SOTA | 0.8 (fern #189) negative; 1.0 untested but default is 0.9 |
+| weight_decay | **CLOSED** | 5e-4 SOTA | wd=2.5e-4 ❌ (#203) and wd=1e-3 ❌ (#163) both negative; 5e-4 confirmed optimum |
+| vol_loss_weight | **CLOSED** | 1.0 SOTA | 1.5 ❌ (PR #187), 2.0 ❌ (#204) both negative; 1.0 confirmed optimum |
+| vol_points | CLOSED | 65536 SOTA | 96k worse on every metric (PR #186) |
+| surface_points | **in-flight as #206** | 65536 SOTA | 96k being tested (alphonse) |
+| dropout | CLOSED | 0.0 SOTA | 0.05 +4.24%; model underfits, dropout harmful |
+| tau_axis_weights | CLOSED | 1.0 SOTA | Lion sign mechanism neutralizes per-channel weighting |
+| compile_model | CLOSED | False SOTA | compile+Lion diverged in all 9 tried combos |
+| lr_cosine_t_max=9 | **CLOSED NEGATIVE** (edward #195 + tanjiro #202 both confirmed) | 50 SOTA | LR collapses too early at T_max=9; gentle range (14-20) still untested |
+| lr_warmup | **in-flight as #222** | 0 SOTA | 1ep warmup being tested |
+
+## Key architectural levers — audit status (Round 12)
+
+The three main untested architectural dimensions as of Round 12:
+1. **model_heads** — `--model-heads 4` assigned to askeladd #232 (NEVER VARIED across ~60+ experiments)
+2. **model_layers** — `--model-layers 3` assigned to edward #233 (NEVER VARIED in tay track)
+3. **model_slices** — `--model-slices 64` assigned to nezuko #231 (halved from 128; 256 was OOM)
+
+These are the highest-priority unexplored architectural levers after the FFN/depth/dropout/slices family sweeps.
+
+## Next research directions (priority order after Rounds 12+13 close)
+
+**Round 13 currently testing:** mlp_ratio=8 (frieren #240), hidden_dim=768 (tanjiro #241), dropout=0.1 (thorfinn #242).
+
+1. **Compound stack** — once round 12+13 close, identify all winning dimensions and stack them on SOTA #115 base. Architecture winners (e.g., model_heads=4 + surface_pts=96k) are often orthogonal and compound.
+2. **T_max gentle annealing (T_max=14-20)** — T_max=9 is now fully confirmed negative; gentle decay midpoint is still untested. T_max=14 or T_max=18 could provide cosine benefit without premature LR collapse.
+3. **lr_warmup tuning** — if fern #222 (warmup=1ep) wins, try warmup=0.5ep or 2ep. If loses, warmup direction is closed.
+4. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Reserve for idle slot when Round 12/13 close.
+5. **Tau_yz binding gap (code-change approach)** — bypass Lion sign-neutralization: (a) asinh output normalization for tau_y/tau_z, (b) surface-tangent-frame prediction head, (c) decoupled magnitude+direction head. All require train.py modifications — student-side.
+6. **lion_beta1 upper probe** — beta1=0.95 not tested; SOTA=0.9, 0.8 was negative. Could try 0.95 once architectural space is better mapped.
+7. **model_hidden_dim variants beyond 768** — if tanjiro #241 (768d) wins, explore 1024d. If loses, 512d confirmed optimal; capacity doesn't help at 9ep.
+8. **Plateau escalation option**: If Rounds 12+13 close with no winners, consider **architecture overhaul** — move from current Transformer to a graph neural network backbone (e.g., PointGNN), physics-informed constraints, or multi-scale hierarchical attention. The conservative single-delta space is nearly exhausted. Invoke researcher-agent for fresh ideas.
+
+## Key learnings (cumulative)
+
+1. **Depth-swap family CLOSED** — 5L (#138 +6%) and 6L (#146 +19.7%) both regressed. Per-epoch wall-clock unchanged; 4L/512d is the right shape for 9-ep budget. 3L in-flight (#233).
+2. **FFN-width family CLOSED** — mlp_ratio=6 (#157 +6.4%) regressed; capacity expansion via FFN width is saturated.
+3. **LR ceiling confirmed at 1e-4** — lr=1.5e-4 failed (+40%); lr=1e-4 is SOTA.
+4. **Slices=256 OOM** — 98.8% VRAM usage, slice attention quadratic. Default 128 is safe ceiling.
+5. **Lion compile divergence** — 9/9 compile+Lion combinations diverged in earlier rounds.
+6. **Per-axis tau weighting CLOSED** — Lion sign-based updates neutralize per-channel loss weighting. W_y=W_z=1.5 regressed all metrics +4.2% (PR #149). Do not pursue higher weights.
+7. **`--lr-cosine-t-max 0` is a footgun** — fallback to `T_max=epochs` means with epochs=50 → essentially flat LR for 9 actual training epochs. Always specify `--lr-cosine-t-max 50` explicitly in 9-epoch single-deltas.
+8. **Volume sampling density (vol_pts) CLOSED** — 96k worse on every metric (PR #186). 64k is at/near optimum.
+9. **Dropout is a dead end** — model_dropout=0.05 (#162, +4.24%) WORSENED val/test ratio. The model is in underfitting regime at 9 epochs; adding regularization noise makes things worse.
+10. **lion_beta2=0.999 is a dead end** — momentum window of 1000 effective steps is too wide for 9-ep training. beta2=0.99 (100-step effective window) is optimal for this budget.
+11. **EMA decay fully closed** — 0.998, 0.9995, 0.9999 all negative; 0.999 is the confirmed optimum. No further EMA probes needed.
+12. **T_max=9 cosine is confirmed negative** — Confirmed by both edward #195 and tanjiro #202 (variance probe). LR collapses too early; T_max=50 (≈flat for 9ep) remains optimal. Gentle range T_max=14-20 still untested.
+13. **weight_decay space CLOSED** — wd=2.5e-4 (PR #203, −11.9%) and wd=1e-3 (PR #163, +4.5%) both negative. wd=5e-4 confirmed optimum; both directions exhausted.
+14. **vol_loss_weight space CLOSED** — 1.5 (PR #187) and 2.0 (PR #204) both worse than 1.0. Volume loss weighting doesn't help; loss balance between vol/surface at 1:1 is confirmed optimal.
+
+## Optimizer hyperparam map (tay confirmed)
+
+| Param | Min tested | SOTA | Max tested | Status |
+|---|---|---|---|---|
+| lr | 5e-5 | **1e-4** | 1.5e-4 ❌ | CLOSED — ceiling at 1e-4 |
+| ema_decay | 0.9999 ❌ | **0.999** | 0.9995 ❌, 0.998 ❌ | **FULLY CLOSED** |
+| lion_beta1 | 0.8 ❌ | **0.9** | — | partially closed (lower direction neg; upper untested) |
+| lion_beta2 | — | **0.99** | 0.999 ❌ | **CLOSED** |
+| model_dropout | — | **0.0** | 0.05 ❌ | **CLOSED** |
+| weight_decay | 2.5e-4 ❌ (#203) | **5e-4** | 1e-3 ❌ | **CLOSED** — both directions tested negative |
+| volume_loss_weight | — | **1.0** | 1.5 ❌, 2.0 ❌ (#204) | **CLOSED** — 1.5 and 2.0 both negative |
+| volume_points | — | **65536** | 96000 ❌ | **CLOSED** |
+| surface_points | — | **65536** | 96000 (in-flight #206) | in-flight |
+| tau_axis_weights | — | **1.0** | 1.5 ❌ | **CLOSED** |
+| mlp_ratio | — | **4** | 6 ❌ | **CLOSED** |
+| model_layers | — | **4** | 3 (in-flight #233) | in-flight (lower direction) |
+| model_heads | — | **8** | 4 (in-flight #232) | in-flight (lower direction) |
+| model_slices | — | **128** | 64 (in-flight #231), 256 ❌ OOM | in-flight (lower direction) |
+| lr_cosine_t_max | — | **50 (≈flat)** | 9 ❌ | negative at T_max=9; gentle range (14-20) untested |
+| lr_warmup_epochs | — | **0** | 1 (in-flight #222) | in-flight |
