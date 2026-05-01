@@ -533,3 +533,129 @@ Val slopes at end of run: abupt −0.156/1k steps, wall_shear_y −0.191/1k step
   - D3 soft-divergence: anomalous loss spike at lr~6.5e-5 during deep cosine anneal — potential bf16 AMP precision issue at very low loss values. Fleet-wide flag: if future low-LR fine-tuning runs see similar, investigate AMP precision or implement LR floor ~1e-4.
   - OneCycleLR does not help in this epoch-limited regime. LR schedule lever closed for now. **Decision: closed.**
 
+---
+
+## 2026-05-01 07:30 — PR #166: [senku] W_y=W_z=3.0 with 500-step LR warmup — CLOSED NEGATIVE
+- Branch: `senku/per-component-wallshear-yz-3`
+- Hypothesis: Increasing from W_y=W_z=2 (current best) to W_y=W_z=3 with gradual warmup would further focus gradient on tau_y/z axes.
+- Results: CLOSED 2026-05-01T11:09:05Z. No merge.
+- Commentary: W=3 was already tested in PR #66 (thorfinn) where it scored 13.18 vs 12.74 for W=2 — W=3 overfits tau_y/z, degrading abupt. Warmup doesn't change the fundamental overfitting issue. Static W=2 remains the sweet spot.
+
+---
+
+## 2026-05-01 07:30 — PR #167: [tanjiro] W_y=W_z=3.5 with 1k LR warmup — CLOSED NEGATIVE
+- Branch: `tanjiro/static-wyz-35-warmup`
+- Hypothesis: W_y=W_z=3.5 pushes the tau_y/z gradient signal even harder.
+- Results: CLOSED 2026-05-01T09:58:05Z. No merge.
+- Commentary: Extension of the same W=3 overfitting issue. W=3.5 is even more extreme. Warmup does not prevent the channel imbalance. Closed as confirmed negative along with W=3.
+
+---
+
+## 2026-05-01 08:00 — PR #172: [stark] AdamW epsilon sweep 1e-8/7/6/5 — CLOSED NEGATIVE
+- Branch: `stark/adamw-eps-sweep`
+- Results: CLOSED 2026-05-01T08:43:12Z. No merge.
+- Commentary: AdamW epsilon is a secondary numerical stability parameter. Changing it in the range 1e-8 to 1e-5 does not address the root cause of the fleet-wide gradient instability (large-but-finite spikes bypassing the NaN-skip guard). Closed as not the right lever.
+
+---
+
+## 2026-05-01 11:30 — PR #185: [emma] SAM optimizer (ρ=0.05/0.10) — CLOSED NEGATIVE
+- Branch: `emma/sam-sharpness-aware-min`
+- Results: CLOSED 2026-05-01T11:35:49Z. No merge.
+- Commentary: SAM requires 2 forward-backward passes per step, cutting effective steps/epoch in half. In this 3-4 epoch budget this is too expensive. Also does not address the tau_y/z coordinate-frame hypothesis. Closed.
+
+---
+
+## 2026-05-01 — PR #184: [kohaku] FiLM with identity/zero-init (DiT-style) — IN FLIGHT
+- Branch: `kohaku/film-zero-init`
+- Hypothesis: FiLM with zero-initialized gamma/beta (identity transform at init) plus lr=4e-4 is stable where lr=5e-4 is not.
+- Intermediate results (5/5 arms at lr=5e-4 dead; 1 arm at lr=4e-4 healthy):
+
+| Arm | Config | W&B run | Status @ 11:45 UTC |
+|---|---|---|---|
+| A | zero-init/clip=1.0/lr=5e-4 | (prev) | Dead @ step 2455 |
+| A' | zero-init/clip=0.5/lr=5e-4 | (prev) | Dead @ step 1900 |
+| D | zero-init/clip=1.0/WD=1e-3/lr=5e-4 | (prev) | Dead @ step 2400 |
+| C | scale=0.01/clip=1.0/lr=5e-4 | (prev) | Dead @ step 15800 |
+| E | scale=0.001/clip=1.0/lr=5e-4 | gtur4oew | Dead @ step 14706 (scale delays but doesn't prevent divergence) |
+| **B** | **zero-init/clip=0.5/lr=4e-4** | **jov1kcjl** | **Healthy ep2≈99%; ETA ~14:25 UTC** |
+
+- **Key finding:** FiLM stability axis is LR alone, not init_scale. scale=0.001 delayed divergence 6× (step 2455→14706) but failure mode is identical (gamma/beta accumulate bias beyond critical threshold). The "escape path" via aggressive init scaling is falsified. lr=4e-4 (arm B) is the sole viable FiLM configuration. Final results pending ~14:25 UTC.
+
+---
+
+## 2026-05-01 — PR #183: [fern] Omega-bank frequency sweep — IN FLIGHT (PARTIAL RESULTS)
+- Branch: `fern/omega-bank-sweep`
+- Hypothesis: Per-axis sincos positional encodings with different max_wavelength per axis (x=10000, y=2500-1000, z=2000-1000) directly encode the car's geometric anisotropy, helping the model learn the tau_y/z channels.
+- All 4 original non-guarded arms diverged (large-but-finite grad spikes bypassing NaN-skip):
+
+| Arm | Config | Div step | Max grad at div |
+|---|---|---:|---:|
+| A1 | mw=1000 | 7499 | 14.9M |
+| B | mw=100 | 15800 | 252 (sustained) |
+| C1 | 10000,2500,2000 | 14181 | 899 (cascading) |
+| D1/D2 | 5000/10000,1000,1000 | 3555/8799 | NaN/15019 |
+
+- mw=100 (arm B) is **structurally untenable** — 3 independent attempts (B, B2 guarded, B3 guarded+warmup) all diverged within 0.3-1.6 epochs. Falsified.
+- Surviving guarded arms as of 11:35 UTC:
+
+| Arm | Config | W&B run | ep1 val_abupt | ep2 ETA |
+|---|---|---|---:|---|
+| A2 | mw=1000 | bplngfyo | 17.72 | ~12:00 UTC |
+| C3 | 10000,2500,2000 | hm7p3lag | In flight (ep1 ~42%) | ~12:20 UTC |
+| D3 | 10000,1000,1000 | 4r0rd7dx | 17.23 | Ep2 ~12% |
+
+Ep1 for A2/D3 are worse than baseline ep1 (16.47) and worse on targeted tau_y/z axes. Ep3 comparison is the real test.
+- **Fleet-wide infrastructure finding:** PR #169's NaN-skip is necessary but not sufficient. Large-but-finite grad spikes (165, 252, 2.2M confirmed) bypass isfinite() check. Magnitude-based skip needed (pre_clip_norm > N × running_median).
+
+---
+
+## 2026-05-01 — PR #165: [chihiro] mlp_ratio=8 hardened (3-seed + warmup) — IN FLIGHT
+- Branch: `chihiro/mlp-ratio-8-hardened`
+- Intermediate results (clip=1.0 sweep completed, clip=0.5 relaunch in progress):
+
+| Seed | clip | W&B run | Best val abupt | Notes |
+|---|---:|---|---:|---|
+| 42 (orig) | 1.0 | wuyxg6ze | — | NaN @ step 7167 |
+| 42 (r2) | 1.0 | elra20qm | — | NaN @ step 6783 |
+| 7 | 1.0 | 0n1eizhz | 18.50 (ep1 only) | Diverged @ step 13641 |
+| **1337** | **1.0** | **vch5jyhv** | **11.92 (ep3)** | **Finished, clean, does NOT beat 10.69** |
+| 42 (r3) | 0.5 | lkl2xob5 | In flight | Checkpoint ~12:20 UTC (prev div @ 6783) |
+| 7 (r2) | 0.5 | rypx2e36 | In flight | Checkpoint ~13:30 UTC (prev div @ 13641) |
+
+seed1337 ep3=11.92 is 1.23pp above baseline. Slope flattening (ep1→ep2: −5.29, ep2→ep3: −1.15) — would need 5-6+ epochs to possibly reach 10.69. clip=0.5 go/no-go is the active test.
+
+---
+
+## 2026-05-01 — PR #168: [askeladd] Normal-consistency soft penalty — IN FLIGHT
+- Branch: `askeladd/normal-penalty-wallshear-yz`
+- Hypothesis: Soft λ·(τ·n̂)² penalty in normalized space penalizes out-of-plane wall-shear predictions.
+- Intermediate results: v1 (physical-space penalty) FAILED — physical-space amplification of τ_x via std_x²≈4.3 created asymmetric gradient. Correctly diagnosed and relaunched as v2 (normalized-space).
+
+| Arm | λ | clip | W&B run | ep1 val_abupt | Notes |
+|---|---:|---:|---|---:|---|
+| λ=0.01 (v1) | 0.01 | 1.0 | ufi2fg1e | — | NaN (physical-space penalty unstable) |
+| λ=0.05 (v1) | 0.05 | 1.0 | ol7r0oh6 | — | NaN (physical-space penalty spiky) |
+| λ=0.10 (v1) | 0.10 | 1.0 | uyorcld7 | — | NaN ep1 13.7% |
+| **λ=0.10 (v2)** | **0.10** | **1.0** | **gawdh7ah** | **17.103** | **Only stable arm; pen_phys dropping** |
+| λ=0.01 (v2 clip=0.5) | 0.01 | 0.5 | d14ee58k | In flight | Previous NaN @ step 7899 |
+| λ=0.05 (v2 clip=0.5) | 0.05 | 0.5 | (run id) | In flight | Previous NaN @ step 8499 |
+
+- **Key finding:** λ ranking inversion — larger λ MORE stable. Mechanism: at λ=0.01, constraint contribution (~1.6e-3) is too small to push model away from out-of-plane drift; single bad batch drives large squared-dot spike. At λ=0.10, constraint is strong enough to bound τ_pred magnitudes, preventing the spike. This is the opposite of standard regularization intuition.
+- pen_raw plateaus ~0.13 (fixed normalized-space cost); pen_phys drops 0.55→0.07 (physical tangentiality residual decreasing = model IS learning to satisfy geometric constraint).
+
+---
+
+## 2026-05-01 — PR #123: [frieren] asinh/log wall-shear target normalization — IN FLIGHT
+- Branch: `frieren/asinh-log-target-normalization`
+- Intermediate results (key finding: asinh-1.0 trades metric for stability):
+
+| Arm | Normalization | W&B run | ep1 val_abupt | ep2 val_abupt | grad_skips | Notes |
+|---|---|---|---:|---:|---:|---|
+| A (v3p1) | Control | w8ecb8rp | — | 46.69 | 6543 (39%) | Pathological |
+| C (v3) | asinh scale=1.0 | xtx426rb | **17.55** | **45.69** | 5 | ep1 OK, ep2 collapsed |
+| D (v3p1) | log1p | 8oytk5ef | — | 22.35 | 0 | Healthier than control |
+| B (v3p1) | asinh-0.5 | zznrzvw5 | 18.94 | — | 0 | In flight ep2 |
+
+- **Key finding:** asinh-1.0 compresses the heavy tail → suppresses gradient explosions (0 skips vs 50%+) but also suppresses learning signal where the y/z gap lives. Train loss kept descending while val exploded ep2 (17.55→45.69) = classic underfitting of tail domain. asinh-1.0 is not a viable target transformation.
+- D (log1p) and B (asinh-0.5) are healthier but still above baseline trajectory. Final results pending ~12:10-13:51 UTC.
+
