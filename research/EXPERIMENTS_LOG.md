@@ -6,6 +6,16 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 (late) — PR #202 SENT BACK: tanjiro lr_cosine_t_max=9 — CONFIG ERROR
+
+- **Branch:** `tanjiro/cosine-tmax9`
+- **Assigned hypothesis:** lr_cosine_t_max=9 (genuine full cosine arc within 9-ep budget vs SOTA T_max=50 ≈ flat).
+- **What student actually ran:** `lr_cosine_t_max: 50`, `wandb_group: tay-round11-cosine-tmax50-sota` — a SOTA replication, not the assigned T_max=9 experiment.
+- **Result:** val=9.9196 (rank0 run `s58uz78l`, ep9, crashed post-train); +0.44 vs SOTA val=9.484 — within run-to-run variance (~0.7%).
+- **Per-axis (run `s58uz78l`):** surface_pressure 6.30, volume_pressure 6.22, wall_shear 11.09, wall_shear_y 13.39, wall_shear_z 14.29.
+- **Action:** PR returned to draft via `send_pr_back_to_student_with_comment`. Tanjiro must re-run with `--lr-cosine-t-max 9 --wandb-group tay-round12-cosine-tmax9` keeping all other flags identical.
+- **Status:** Awaiting re-run. T_max=9 hypothesis remains untested by this PR (edward #195 is testing the same hypothesis in parallel).
+
 ## 2026-05-01 12:30 UTC — PR #204 ASSIGNED: frieren vol_loss_weight=2.0 (SOTA stack single-delta)
 
 - **Branch:** `frieren/vol-loss-weight-2p0`

@@ -39,7 +39,7 @@ Last updated: 2026-05-01 (updated — thorfinn reassigned; frieren pod #147 clos
 | **#189** | fern | lion_beta1=0.8 | ep5 | 14.378 | +4.89 | running |
 | **#194** | askeladd | ema_decay=0.9995 | ep1 | alarming (+23pp) | +23 | running — early epochs highly noisy; wait for ep4+ |
 | **#195** | edward | lr_cosine_t_max=9 | ep1 | 52.407 | — | running — promising early signal (similar ep1 to SOTA run) |
-| **#202** | tanjiro | lr_cosine_t_max=9 genuine | ep1 | TBD | — | **ASSIGNED** 2026-05-01 — parallel T_max=9 validation run |
+| **#202** | tanjiro | lr_cosine_t_max=9 genuine | DONE | 9.9196 | +0.44 | **CONFIG ERROR — SENT BACK** 2026-05-01 — student ran `lr_cosine_t_max=50` (SOTA replication, group `tay-round11-cosine-tmax50-sota`) instead of assigned T_max=9. val=9.9196 ≈ SOTA variance; does NOT test the hypothesis. Awaiting re-run with `--lr-cosine-t-max 9 --wandb-group tay-round12-cosine-tmax9` |
 | **#203** | **thorfinn** | weight_decay=2.5e-4 (sweep down) | — | — | — | **ASSIGNED** 2026-05-01 — sweep DOWN from SOTA wd=5e-4; PR #163 (wd=1e-3) regressed +4.5% confirming gradient points down |
 
 ## Closed this cycle (2026-05-01)
