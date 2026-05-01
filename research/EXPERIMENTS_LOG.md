@@ -6,6 +6,42 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 23:30 — PR #222 TEST METRICS CONFIRMED: fern lr_warmup_epochs=1 — NEW TEST SOTA 10.420%
+
+- **Branch:** `fern/round12-lr-warmup-1ep` (merged)
+- **W&B run:** `ut1qmc3i` (rank 0), group `tay-round12-lr-warmup-1ep`
+- **Test result (apples-to-apples vs prior PR #115 SOTA 10.580%):**
+
+| Metric | PR #222 (NEW) | PR #115 (prev) | Delta |
+|---|---:|---:|---:|
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **10.420** | 10.580 | **−0.160pp / −1.51%** |
+| `test_primary/surface_pressure_rel_l2_pct` | **5.550** | 5.690 | −0.140 / −2.46% |
+| `test_primary/wall_shear_rel_l2_pct` | **10.185** | 10.419 | −0.234 / −2.24% |
+| `test_primary/volume_pressure_rel_l2_pct` | 12.737 | 12.740 | −0.003 (tied) |
+| `test_primary/wall_shear_x_rel_l2_pct` | **8.629** | 8.908 | −0.279 / −3.13% |
+| `test_primary/wall_shear_y_rel_l2_pct` | **12.329** | 12.491 | −0.162 / −1.30% |
+| `test_primary/wall_shear_z_rel_l2_pct` | **12.854** | 13.071 | −0.217 / −1.66% |
+
+- **Conclusion:** 1-epoch linear LR warmup is a **confirmed orthogonal win on test** (not just val). Improves every axis except volume_pressure (tied). The val win (9.291 vs 9.484, −2.03%) translates cleanly to test (−1.51%) — strong sign the warmup effect is generalization, not val-set leakage. **All future SOTA reproduce commands must include `--lr-warmup-epochs 1`.**
+- **Implication:** The "warmup → settle → flat-LR" pattern outperforms cold-start steep entry. Suggests the early-training gradient norm is large enough that a hot-start LR=1e-4 imposes a directional bias the model has to unlearn. Worth exploring complementary "warmdown" shape (linear or cosine decay over ep7-9, per Modded-NanoGPT directive).
+
+## 2026-05-01 23:00 — PR #251 ASSIGNED: fern warmup+cosine-anneal-hard T_max=8 lr-min=5e-6 (Round 15)
+
+- **Branch:** `fern/lr-anneal-hard-tmax8-lrmin5e-6`
+- **Hypothesis:** Combining 1ep linear warmup with aggressive cosine decay to 5% of peak LR (lr-min=5e-6, T_max=8) forces genuine convergence at end-of-training. No prior run has combined warmup=1ep + cosine anneal + non-trivial lr-min together. Distinct from thorfinn #247 (T_max=14, no warmup, no lr-min).
+- **Single delta vs SOTA:** `--lr-cosine-t-max 8 --lr-min 5e-6` added (SOTA has neither; `--lr-warmup-epochs 1` from PR #222 baseline)
+- **W&B group:** `tay-round13-lr-anneal`
+- **Status:** ASSIGNED — awaiting student run start.
+
+## 2026-05-01 23:00 — PR #250 ASSIGNED: alphonse batch-size=8 yi-confirmed lever (Round 15)
+
+- **Branch:** `alphonse/batch-size-8-yi-lever`
+- **Hypothesis:** Doubling per-GPU batch size from 4→8 (effective batch 64 vs 32) reduces gradient noise. Yi PR #9 (gilbert) confirmed this as orthogonal. PR #120 was queued for this exact test but never ran; this finally runs it.
+- **Single delta vs SOTA:** `--batch-size 8` (SOTA: `--batch-size 4`)
+- **W&B group:** `tay-round13-batch8`
+- **Fallback:** `--batch-size 6` if OOM. LR held at 1e-4 (no proportional scaling — PR #148 showed diminishing returns above 1e-4).
+- **Status:** ASSIGNED — awaiting student run start.
+
 ## 2026-05-01 21:30 — PR #247 ASSIGNED: thorfinn lr-cosine-t-max=14 (Round 14 — gentle annealing midpoint)
 
 - **Branch:** `thorfinn/lr-cosine-t-max-14`

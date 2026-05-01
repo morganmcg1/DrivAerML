@@ -10,9 +10,9 @@
 
 **W&B run:** `ut1qmc3i` (rank 0) — group `tay-round12-lr-warmup-1ep`, ~270 min runtime, 9 val epochs, best val 9.2910 (ep9)
 **PR:** #222
-**Test metrics:** PENDING — run still completing test evaluation. Will update when `test_primary/*` keys appear in summary.
+**Test metrics:** **CONFIRMED — test_abupt 10.420% (beats prior PR #115 SOTA 10.580% by −0.16pp / −1.51%).** Updated 2026-05-01 from W&B run `ut1qmc3i` summary.
 
-### tay current best — `val_primary/*` (test pending)
+### tay current best — `val_primary/*` (val ep9)
 
 | Epoch | val_abupt | surf_pres | vol_pres | wall_shear |
 |-------|-----------|-----------|----------|------------|
@@ -20,17 +20,19 @@
 | ep8 | 9.4516% | 6.0019% | 5.7614% | 10.5847% |
 | **ep9 (best)** | **9.2910%** | **5.8707%** | **5.8789%** | **10.3423%** |
 
-### Previous best `test_primary/*` (PR #115 thorfinn — valid until PR #222 test completes)
+### tay current best — `test_primary/*` (PR #222 fern, run `ut1qmc3i`)
 
-| Metric | This-repo key | tay best (PR #115 thorfinn) | PR #111 tanjiro | PR #50 | AB-UPT |
+| Metric | This-repo key | **PR #222 fern (NEW SOTA)** | PR #115 thorfinn (prev) | PR #111 tanjiro | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.580** | 11.142 | 11.208 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.690** | 6.209 | 6.193 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **10.419** | 11.138 | 11.199 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 12.740 | **12.548** | 12.726 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.908** | 9.436 | 9.512 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **12.491** | 13.525 | 13.592 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **13.071** | 13.992 | 14.017 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.420** | 10.580 | 11.142 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.550** | 5.690 | 6.209 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **10.185** | 10.419 | 11.138 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 12.737 | 12.740 | **12.548** | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.629** | 8.908 | 9.436 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **12.329** | 12.491 | 13.525 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **12.854** | 13.071 | 13.992 | 3.63 |
+
+**Wins over PR #115 on every axis except volume_pressure (essentially tied at 12.737 vs 12.740).** Largest single-axis test gains: tau_x −3.13%, surface_pressure −2.46%, wall_shear −2.24%, tau_z −1.66%, tau_y −1.30%, abupt −1.51%.
 
 ### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, lr_warmup_epochs=1)
 
