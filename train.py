@@ -348,11 +348,15 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        use_decoupled_wallshear: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
-        self.surface_output_dim = surface_output_dim
+        self.use_decoupled_wallshear = use_decoupled_wallshear
+        # In decoupled mode: 1 cp + 1 log-magnitude + 3 direction = 5 channels.
+        # In standard mode: 1 cp + 3 cartesian wall-shear = 4 channels.
+        self.surface_output_dim = 5 if use_decoupled_wallshear else surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
@@ -556,6 +560,10 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    use_decoupled_wallshear: bool = False
+    wallshear_magnitude_loss_weight: float = 1.0
+    wallshear_direction_loss_weight: float = 1.0
+    wallshear_direction_magnitude_weighted: bool = False
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -730,6 +738,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        use_decoupled_wallshear=config.use_decoupled_wallshear,
     )
 
 
@@ -1285,6 +1294,93 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def decoupled_wallshear_pieces(
+    surface_pred_raw: torch.Tensor,
+    surface_target_norm: torch.Tensor,
+    surface_mask: torch.Tensor,
+    transform: TargetTransform,
+    *,
+    magnitude_loss_weight: float,
+    direction_loss_weight: float,
+    direction_magnitude_weighted: bool = False,
+    eps: float = 1e-8,
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor]:
+    """Decoupled magnitude + direction wall-shear loss.
+
+    surface_pred_raw : [B, N, 5] = (cp_norm, log_mag_phys, dir_x, dir_y, dir_z).
+    surface_target_norm : [B, N, 4] = normalized (cp, tau_x, tau_y, tau_z).
+
+    Returns total_surface_loss, metrics_dict, reconstructed cartesian
+    surface_pred_norm of shape [B, N, 4] in the original normalized space so
+    the existing per-axis logging / validation code is reused.
+    """
+    cp_pred_norm = surface_pred_raw[..., 0:1]
+    log_mag_pred = surface_pred_raw[..., 1]
+    dir_pred_raw = surface_pred_raw[..., 2:5]
+
+    cp_true_norm = surface_target_norm[..., 0:1]
+    ws_std = transform.surface_y_std[1:4].to(surface_pred_raw.device)
+    ws_mean = transform.surface_y_mean[1:4].to(surface_pred_raw.device)
+    tau_true_phys = surface_target_norm[..., 1:4] * ws_std + ws_mean
+    tau_true_mag = torch.linalg.vector_norm(tau_true_phys.float(), dim=-1)
+    log_mag_true = torch.log1p(tau_true_mag)
+    dir_true = tau_true_phys.float() / tau_true_mag.clamp(min=eps).unsqueeze(-1)
+
+    dir_pred_normalized = F.normalize(dir_pred_raw.float(), dim=-1, eps=eps)
+    mag_pred_phys = torch.expm1(log_mag_pred.float()).clamp(min=0.0)
+    tau_pred_phys = mag_pred_phys.unsqueeze(-1) * dir_pred_normalized
+    tau_pred_norm = (tau_pred_phys - ws_mean) / ws_std
+    surface_pred_cartesian = torch.cat(
+        [cp_pred_norm.float(), tau_pred_norm.to(cp_pred_norm.dtype)], dim=-1
+    )
+
+    if not bool(surface_mask.any()):
+        zero = surface_pred_raw.sum() * 0.0
+        return zero, {
+            "loss_cp": 0.0,
+            "loss_mag": 0.0,
+            "loss_dir": 0.0,
+            "cos_sim_mean": 0.0,
+            "log_mag_pred_mean": 0.0,
+            "log_mag_true_mean": 0.0,
+        }, surface_pred_cartesian
+
+    mask_f = surface_mask.to(cp_pred_norm.dtype)
+    valid = mask_f.sum().clamp_min(1)
+
+    cp_diff_sq = (cp_pred_norm[..., 0] - cp_true_norm[..., 0]).pow(2)
+    loss_cp = (cp_diff_sq * mask_f).sum() / valid
+
+    mag_diff_sq = (log_mag_pred.float() - log_mag_true).pow(2)
+    loss_mag = (mag_diff_sq * mask_f).sum() / valid
+
+    cos_sim = (dir_pred_normalized * dir_true).sum(dim=-1)
+    if direction_magnitude_weighted:
+        # Soft magnitude weighting: down-weight stagnation/near-zero |tau| points
+        # (where direction is physically undefined) and up-weight high-|tau|
+        # points (where direction matters most for the relative-L2 metric).
+        # Per-point weight = log1p(|tau|) / mean(log1p(|tau|)) computed on valid
+        # points, then multiplied into the unmasked loss before applying mask.
+        masked_log_mag_true = log_mag_true * mask_f
+        log_mag_true_mean = masked_log_mag_true.sum() / valid
+        per_point_weight = log_mag_true / log_mag_true_mean.clamp(min=eps)
+        loss_dir = ((1.0 - cos_sim) * per_point_weight * mask_f).sum() / valid
+    else:
+        loss_dir = ((1.0 - cos_sim) * mask_f).sum() / valid
+
+    total = loss_cp + magnitude_loss_weight * loss_mag.to(loss_cp.dtype) + direction_loss_weight * loss_dir.to(loss_cp.dtype)
+    valid_f = valid.detach().float()
+    metrics = {
+        "loss_cp": float(loss_cp.detach().cpu().item()),
+        "loss_mag": float(loss_mag.detach().cpu().item()),
+        "loss_dir": float(loss_dir.detach().cpu().item()),
+        "cos_sim_mean": float((cos_sim * mask_f).sum().detach().cpu().item() / float(valid_f.cpu().item())),
+        "log_mag_pred_mean": float(((log_mag_pred.float() * mask_f).sum() / valid).detach().cpu().item()),
+        "log_mag_true_mean": float(((log_mag_true * mask_f).sum() / valid).detach().cpu().item()),
+    }
+    return total, metrics, surface_pred_cartesian
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1298,6 +1394,10 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    use_decoupled_wallshear: bool = False,
+    wallshear_magnitude_loss_weight: float = 1.0,
+    wallshear_direction_loss_weight: float = 1.0,
+    wallshear_direction_magnitude_weighted: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1311,6 +1411,61 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
+        decoupled_metrics: dict[str, float] | None = None
+        if use_decoupled_wallshear:
+            surface_loss, decoupled_metrics, surface_pred_norm = decoupled_wallshear_pieces(
+                surface_pred_norm,
+                surface_target,
+                batch.surface_mask,
+                transform,
+                magnitude_loss_weight=wallshear_magnitude_loss_weight,
+                direction_loss_weight=wallshear_direction_loss_weight,
+                direction_magnitude_weighted=wallshear_direction_magnitude_weighted,
+            )
+            surface_pred_used = surface_pred_norm
+            surface_target_used = surface_target
+            per_axis_unweighted = [
+                decoupled_metrics["loss_cp"],
+                0.0,
+                0.0,
+                0.0,
+            ]
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+            aux_rel_l2_value: float | None = None
+            if aux_rel_l2_weight > 0.0:
+                surf_pred_f = surface_pred_norm.float()
+                surf_true_f = surface_target.float()
+                mask_f_aux = batch.surface_mask.float().unsqueeze(-1)
+                num = ((surf_pred_f - surf_true_f) ** 2 * mask_f_aux).sum()
+                den = (surf_true_f ** 2 * mask_f_aux).sum().clamp_min(1e-8)
+                aux_rel_l2 = num / den
+                loss = loss + aux_rel_l2_weight * aux_rel_l2
+                aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+            metrics: dict[str, float] = {
+                "surface_loss": float(surface_loss.detach().cpu().item()),
+                "volume_loss": float(volume_loss.detach().cpu().item()),
+                "loss_cp": decoupled_metrics["loss_cp"],
+                "loss_tau_x": 0.0,
+                "loss_tau_y": 0.0,
+                "loss_tau_z": 0.0,
+                "wallshear_magnitude_loss": decoupled_metrics["loss_mag"],
+                "wallshear_direction_loss": decoupled_metrics["loss_dir"],
+                "wallshear_cos_sim_mean": decoupled_metrics["cos_sim_mean"],
+                "wallshear_log_mag_pred_mean": decoupled_metrics["log_mag_pred_mean"],
+                "wallshear_log_mag_true_mean": decoupled_metrics["log_mag_true_mean"],
+            }
+            if aux_rel_l2_value is not None:
+                metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+            if "geom_token" in out:
+                geom_token = out["geom_token"].detach().float()
+                metrics["film/geom_token_norm_mean"] = float(
+                    geom_token.norm(dim=-1).mean().cpu().item()
+                )
+                metrics["film/geom_token_abs_mean"] = float(
+                    geom_token.abs().mean().cpu().item()
+                )
+            return loss, metrics
         if use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
@@ -1426,6 +1581,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    use_decoupled_wallshear: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1465,6 +1621,17 @@ def evaluate_split(
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
+        if use_decoupled_wallshear:
+            ws_std = transform.surface_y_std[1:4].to(surface_pred_norm.device).float()
+            ws_mean = transform.surface_y_mean[1:4].to(surface_pred_norm.device).float()
+            cp_pred = surface_pred_norm[..., 0:1]
+            log_mag_pred = surface_pred_norm[..., 1]
+            dir_pred_raw = surface_pred_norm[..., 2:5]
+            dir_pred_normalized = F.normalize(dir_pred_raw, dim=-1, eps=1e-8)
+            mag_pred_phys = torch.expm1(log_mag_pred).clamp(min=0.0)
+            tau_pred_phys = mag_pred_phys.unsqueeze(-1) * dir_pred_normalized
+            tau_pred_norm = (tau_pred_phys - ws_mean) / ws_std
+            surface_pred_norm = torch.cat([cp_pred, tau_pred_norm], dim=-1)
         surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
@@ -1782,6 +1949,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                use_decoupled_wallshear=config.use_decoupled_wallshear,
+                wallshear_magnitude_loss_weight=config.wallshear_magnitude_loss_weight,
+                wallshear_direction_loss_weight=config.wallshear_direction_loss_weight,
+                wallshear_direction_magnitude_weighted=config.wallshear_direction_magnitude_weighted,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1845,6 +2016,22 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "wallshear_magnitude_loss" in batch_loss_metrics:
+                train_log["train/wallshear_magnitude_loss"] = batch_loss_metrics[
+                    "wallshear_magnitude_loss"
+                ]
+                train_log["train/wallshear_direction_loss"] = batch_loss_metrics[
+                    "wallshear_direction_loss"
+                ]
+                train_log["train/wallshear_cos_sim_mean"] = batch_loss_metrics[
+                    "wallshear_cos_sim_mean"
+                ]
+                train_log["train/wallshear_log_mag_pred_mean"] = batch_loss_metrics[
+                    "wallshear_log_mag_pred_mean"
+                ]
+                train_log["train/wallshear_log_mag_true_mean"] = batch_loss_metrics[
+                    "wallshear_log_mag_true_mean"
                 ]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
@@ -1925,7 +2112,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(
+                model,
+                loader,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                use_decoupled_wallshear=config.use_decoupled_wallshear,
+            )
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2040,7 +2234,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_decoupled_wallshear=config.use_decoupled_wallshear,
+        )
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2074,7 +2275,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_decoupled_wallshear=config.use_decoupled_wallshear,
+        )
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
