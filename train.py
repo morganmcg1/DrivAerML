@@ -556,6 +556,8 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_normalization: str = "none"
+    wallshear_norm_scale: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -588,6 +590,7 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
+    grad_skip_threshold: float = 0.0
     compile_model: bool = True
     debug: bool = False
 
@@ -1285,6 +1288,45 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+WALLSHEAR_NORMALIZATION_MODES = ("none", "asinh", "log1p")
+
+
+def apply_wallshear_normalization(
+    target: torch.Tensor,
+    pred: torch.Tensor,
+    mode: str,
+    scale: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compress wall-shear-stress channels at loss time.
+
+    target, pred: [B, N, 4] z-scored surface tensors with channel order
+    [cp, tau_x, tau_y, tau_z]. Only tau channels are compressed; cp is left
+    untouched. The compression is symmetric (applied to both target and pred)
+    so the model still predicts z-scored values; the asinh/log1p is a
+    loss-space reparameterization that down-weights extreme-tail residuals.
+    """
+    if mode == "none":
+        return target, pred
+    if scale <= 0.0:
+        raise ValueError(f"wallshear_norm_scale must be positive, got {scale}")
+    ws_t = target[..., 1:4]
+    ws_p = pred[..., 1:4]
+    if mode == "asinh":
+        ws_t_c = torch.asinh(ws_t / scale)
+        ws_p_c = torch.asinh(ws_p / scale)
+    elif mode == "log1p":
+        ws_t_c = torch.sign(ws_t) * torch.log1p(ws_t.abs() / scale)
+        ws_p_c = torch.sign(ws_p) * torch.log1p(ws_p.abs() / scale)
+    else:
+        raise ValueError(
+            f"wallshear_normalization must be one of {WALLSHEAR_NORMALIZATION_MODES}, "
+            f"got {mode!r}"
+        )
+    target_out = torch.cat([target[..., :1], ws_t_c], dim=-1)
+    pred_out = torch.cat([pred[..., :1], ws_p_c], dim=-1)
+    return target_out, pred_out
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1298,6 +1340,8 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    wallshear_normalization: str = "none",
+    wallshear_norm_scale: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1337,6 +1381,22 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
+        per_axis_zscore: list[float] | None = None
+        if wallshear_normalization != "none":
+            surface_target_pre = surface_target_used
+            surface_pred_pre = surface_pred_used
+            _, per_axis_zscore = weighted_masked_mse_per_channel(
+                surface_pred_pre,
+                surface_target_pre,
+                batch.surface_mask,
+                channel_weights=(1.0, 1.0, 1.0, 1.0),
+            )
+            surface_target_used, surface_pred_used = apply_wallshear_normalization(
+                surface_target_used,
+                surface_pred_used,
+                mode=wallshear_normalization,
+                scale=wallshear_norm_scale,
+            )
         surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
             surface_pred_used,
             surface_target_used,
@@ -1363,6 +1423,11 @@ def train_loss(
         "loss_tau_y": per_axis_unweighted[2],
         "loss_tau_z": per_axis_unweighted[3],
     }
+    if per_axis_zscore is not None:
+        metrics["loss_zscore_cp"] = per_axis_zscore[0]
+        metrics["loss_zscore_tau_x"] = per_axis_zscore[1]
+        metrics["loss_zscore_tau_y"] = per_axis_zscore[2]
+        metrics["loss_zscore_tau_z"] = per_axis_zscore[3]
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
@@ -1665,6 +1730,16 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
 
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    if config.wallshear_normalization not in WALLSHEAR_NORMALIZATION_MODES:
+        raise ValueError(
+            f"--wallshear-normalization must be one of "
+            f"{WALLSHEAR_NORMALIZATION_MODES}, got {config.wallshear_normalization!r}"
+        )
+    if config.wallshear_normalization != "none" and config.wallshear_norm_scale <= 0.0:
+        raise ValueError(
+            f"--wallshear-norm-scale must be positive when normalization is enabled, "
+            f"got {config.wallshear_norm_scale}"
+        )
     kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
     max_epochs = min(config.epochs, 3) if config.debug else config.epochs
     timeout_minutes = float(os.environ.get("SENPAI_TIMEOUT_MINUTES", "30"))
@@ -1751,6 +1826,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
     global_step = 0
+    grad_skipped_count = 0
     early_stop_reason: str | None = None
     timeout_hit = False
     train_start = time.time()
@@ -1782,6 +1858,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                wallshear_normalization=config.wallshear_normalization,
+                wallshear_norm_scale=config.wallshear_norm_scale,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1801,14 +1879,43 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
+            pre_clip_norm_value: float | None = None
             if config.clip_grad_norm > 0:
                 pre_clip_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=config.clip_grad_norm
                 )
+                pre_clip_norm_value = float(pre_clip_norm)
                 if should_log_gradients:
-                    gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
+                    gradient_metrics["train/grad/pre_clip_norm"] = pre_clip_norm_value
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
-            optimizer.step()
+            grad_skipped = False
+            grad_skip_reason: str | None = None
+            if pre_clip_norm_value is not None and not math.isfinite(pre_clip_norm_value):
+                grad_skipped = True
+                grad_skip_reason = "nonfinite_grad"
+            elif (
+                config.grad_skip_threshold > 0
+                and pre_clip_norm_value is not None
+                and pre_clip_norm_value > config.grad_skip_threshold
+            ):
+                grad_skipped = True
+                grad_skip_reason = "grad_norm_above_threshold"
+            if grad_skipped:
+                optimizer.zero_grad(set_to_none=True)
+                grad_skipped_count += 1
+                norm_str = (
+                    f"{pre_clip_norm_value:.2f}"
+                    if pre_clip_norm_value is not None and math.isfinite(pre_clip_norm_value)
+                    else str(pre_clip_norm_value)
+                )
+                print(
+                    f"[grad-skip] step={global_step + 1} reason={grad_skip_reason} "
+                    f"pre_clip_norm={norm_str} total_skips={grad_skipped_count}"
+                )
+            else:
+                optimizer.step()
+            gradient_metrics["train/grad/skipped_step"] = 1.0 if grad_skipped else 0.0
+            gradient_metrics["train/grad/skipped_total"] = float(grad_skipped_count)
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
