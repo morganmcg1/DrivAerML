@@ -6,6 +6,26 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 (latest) — PR #203 ASSIGNED: thorfinn round12 weight_decay=2.5e-4 (sweep DOWN from SOTA)
+
+- **Branch:** `thorfinn/round12-wd-2p5e-4`
+- **Hypothesis:** PR #163 (wd=1e-3) regressed all metrics +4.5% from SOTA (wd=5e-4). Gradient in WD points DOWN — sweep to 2.5e-4 (half of SOTA value).
+- **W&B group:** `tay-round12-wd-2p5e-4`
+- **Single delta from SOTA:** only `--weight-decay 2.5e-4` changes.
+- **Status:** Running. Awaiting results.
+
+## 2026-05-01 (latest) — PR #163 CLOSED: thorfinn weight_decay=1e-3 (regressed +4.5% from SOTA)
+
+- **Branch:** `thorfinn/wd-1e-3` (exact branch name per assignment note)
+- **Hypothesis:** Sweep WD UP from SOTA 5e-4 → 1e-3 as a regularization dial.
+- **Result:** best val **9.911%** vs SOTA 9.484% (+4.5% regression). All 7 test metrics regressed.
+  | Metric | SOTA (PR #115) | PR #163 | Delta |
+  |---|---:|---:|---:|
+  | val_abupt | 9.484 | 9.911 | +4.5% |
+- **W&B group:** `tay-round12-wd-1e-3`
+- **Conclusion:** Increasing weight decay hurts. Gradient in WD is downward from SOTA — optimum likely at or below 5e-4. Next: PR #203 sweeps to 2.5e-4.
+- **Thorfinn reassigned** to PR #203: weight_decay=2.5e-4.
+
 ## 2026-05-01 20:15 UTC — PR #162 CLOSED: edward model_dropout=0.05 (test 11.029, +4.24% vs SOTA)
 
 - **Branch:** `edward/round11-model-dropout-0p05`
