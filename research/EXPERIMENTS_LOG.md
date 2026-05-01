@@ -63,15 +63,54 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Conclusion:** T_max=9 cosine does NOT improve over SOTA. Aggressive LR warmdown within the 9-epoch budget hurts performance uniformly across all axes (+4–7% regressions). The model is still in active learning at epoch 9 — cutting LR aggressively in eps 7-9 starves the final refinement phase. The near-flat schedule (T_max=50 ≈ 4% decay over 9 epochs) is confirmed optimal for this training horizon. **LR schedule space closed in the T_max direction.**
 - **PR Status:** CLOSED. Negative result.
 
-## 2026-05-01 12:30 UTC — PR #204 ASSIGNED: frieren vol_loss_weight=2.0 (SOTA stack single-delta)
+## 2026-05-01 — PR #204 CLOSED: frieren vol_loss_weight=2.0 (test 11.096, +4.88% vs SOTA)
 
 - **Branch:** `frieren/vol-loss-weight-2p0`
-- **Hypothesis:** BASELINE.md explicitly flags that the current SOTA (PR #115) was trained WITHOUT `--volume-loss-weight 2.0`. PR #142 tested vol_w=2.0 but on an earlier suboptimal stack (missing Lion wd=5e-4, EMA=0.999 compound). This run adds vol_w=2.0 as a clean single-delta against the verified SOTA config. The `volume_pressure` gap (12.740 vs AB-UPT ref 6.08, ×2.1) is the largest remaining per-axis gap — vol_w=2.0 directly targets this.
+- **Hypothesis:** BASELINE.md flags SOTA (PR #115) was trained WITHOUT `--volume-loss-weight 2.0`. PR #142 tested vol_w=2.0 on earlier stack (missing Lion wd=5e-4, EMA=0.999 compound). This run added vol_w=2.0 as a clean single-delta against verified SOTA. Targeted the largest per-axis gap (`volume_pressure` 12.740 vs AB-UPT 6.08, ×2.1).
 - **W&B group:** `tay-round12-vol-loss-weight-2p0`
-- **Single delta from SOTA:** only `--volume-loss-weight 2.0` changes; all other flags match SOTA exactly.
-- **Expected:** push `abupt_axis_mean` toward ~10.3, recover `volume_pressure` meaningfully.
-- **Watch:** `val_primary/volume_pressure_rel_l2_pct` directly; if surface metrics regress >2%, stop run.
-- **Status:** Running. Awaiting results.
+- **W&B run:** `qymdn7px`, rt=287min, 9/9 epochs.
+- **Single delta from SOTA:** only `--volume-loss-weight 2.0` changes.
+
+### Val trajectory
+
+| Epoch | abupt_val |
+|------:|----------:|
+| 1 | 55.509 |
+| 2 | 25.452 |
+| 3 | 16.941 |
+| 4 | 13.654 |
+| 5 | 11.907 |
+| 6 | 10.969 |
+| 7 | 10.400 |
+| 8 | 10.058 |
+| 9 (best) | **9.945** |
+
+### Test metrics vs SOTA (PR #115)
+
+| Metric | SOTA | PR #204 | Δ |
+|---|---:|---:|---:|
+| abupt_axis_mean | 10.580 | **11.096** | **+4.88%** |
+| surface_pressure | 5.690 | 6.251 | +9.86% |
+| wall_shear | 10.419 | 11.042 | +5.98% |
+| volume_pressure | 12.740 | 12.772 | +0.25% (≈neutral) |
+| tau_x | 8.908 | 9.497 | +6.61% |
+| tau_y | 12.491 | 13.132 | +5.13% |
+| tau_z | 13.071 | 13.825 | +5.77% |
+
+**val→test ratio:** 1.116 (SOTA: 1.115) — consistent generalization.
+
+### Analysis
+
+vol_loss_weight=2.0 produced a clear multi-task trade-off:
+- **Volume_pressure barely moved** (+0.25%) — 2× weighting did not meaningfully reduce its gap. The volume ceiling is not a loss-weighting problem; it likely needs architectural capacity (dedicated volume head, separate decoder, richer volume features).
+- **Surface_pressure regressed -9.86%** and wall_shear -5.98%. Capacity that previously served surface fidelity got redirected to volume with negligible benefit.
+- Best val 9.945 propagated through normal val→test ratio into test 11.096.
+
+### Conclusion
+
+**vol_loss_weight axis CLOSED for 9-epoch budget.** Loss-reweighting cannot close the volume_pressure gap without sacrificing surface metrics that dominate the abupt aggregate. Further volume_pressure work must be architectural (dedicated head, capacity allocation, or representation-level changes).
+
+- **PR Status:** CLOSED. Negative result.
 
 ## 2026-05-01 (latest) — PR #203 CLOSED: thorfinn round12 weight_decay=2.5e-4 (test 11.841, +11.9% vs SOTA)
 
