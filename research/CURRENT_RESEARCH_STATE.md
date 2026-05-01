@@ -29,18 +29,18 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 
 ## In-flight (8/8 students running — all slots filled)
 
-Last updated: 2026-05-01 20:45 UTC.
+Last updated: 2026-05-01 (updated — thorfinn reassigned).
 
 | PR | Student | Hypothesis | ~Ep | Val (latest) | vs SOTA val | Status |
 |---|---|---|---|---:|---:|---|
 | **#147** | frieren | compound + wd=2e-3 | ep0 | — | — | **POD STUCK** since 2026-04-30 23:14 UTC; needs `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren` (escalated on issue #48) |
-| **#163** | thorfinn | weight_decay=1e-3 | ~ep3.3 | 9.986 | +0.502 | running — best val so far, approaching SOTA; await completion for test |
-| **#173** | tanjiro | cosine T_max=50 | ~ep6 | 11.217 | +1.733 | running — POOR trajectory; T_max=50 too long for 9ep budget; closing after run completes |
-| **#186** | alphonse | vol_pts=96k CLEAN | ~ep0.4 | 67.016 | — | running — too early (ep0 noise) |
-| **#187** | nezuko | volume_loss_weight=1.5 | ~ep0.4 | N/A | — | running — too early |
-| **#189** | fern | lion_beta1=0.8 | ~ep0.4 | N/A | — | running — too early |
-| **#194** | **askeladd** | ema_decay=0.9995 | — | — | — | **ASSIGNED** 2026-05-01 20:45 UTC — probe unexplored EMA midpoint between SOTA (0.999) and known-bad (0.9999) |
-| **#195** | **edward** | lr_cosine_t_max=9 | — | — | — | **ASSIGNED** 2026-05-01 20:45 UTC — first test of genuine cosine LR decay over actual 9ep budget (SOTA uses T_max=50→flat) |
+| **#186** | alphonse | vol_pts=96k CLEAN | ~ep1+ | TBD | — | running |
+| **#187** | nezuko | volume_loss_weight=1.5 | ep5 | 13.815 | +4.33 | running |
+| **#189** | fern | lion_beta1=0.8 | ep5 | 14.378 | +4.89 | running |
+| **#194** | askeladd | ema_decay=0.9995 | ep1 | alarming (+23pp) | +23 | running — early epochs highly noisy; wait for ep4+ |
+| **#195** | edward | lr_cosine_t_max=9 | ep1 | 52.407 | — | running — promising early signal (similar ep1 to SOTA run) |
+| **#202** | tanjiro | lr_cosine_t_max=9 genuine | ep1 | TBD | — | **ASSIGNED** 2026-05-01 — parallel T_max=9 validation run |
+| **#203** | **thorfinn** | weight_decay=2.5e-4 (sweep down) | — | — | — | **ASSIGNED** 2026-05-01 — sweep DOWN from SOTA wd=5e-4; PR #163 (wd=1e-3) regressed +4.5% confirming gradient points down |
 
 ## Closed this cycle (2026-05-01)
 
@@ -96,7 +96,7 @@ Last updated: 2026-05-01 20:45 UTC.
 | lion_beta1 | — | **0.9** | 0.8 (#189, fern) | in-flight (also lower than SOTA — testing directional range) |
 | lion_beta2 | — | **0.99** | 0.999 ❌ | **CLOSED** — momentum window 1000 steps too wide for 9ep budget; +18.7% regression |
 | model_dropout | — | **0.0** | 0.05 ❌ | **CLOSED** — model underfits not overfits; dropout hurts feature learning at this budget |
-| weight_decay | — | **5e-4** | 1e-3 (#163 in-flight) | pending completion |
+| weight_decay | 2.5e-4 (#203, in-flight) | **5e-4** | 1e-3 ❌ (+4.5% regression, PR #163) | sweep DOWN: #203 (2.5e-4) |
 | volume_loss_weight | — | **1.0** | 1.5 (#187), 2.0 ❌ | in-flight |
 | volume_points | — | **65536** | 96000 (#186) | in-flight |
 | tau_axis_weights | — | **1.0** | 1.5 ❌ | **CLOSED** — Lion sign mechanism neutralizes |
@@ -104,15 +104,18 @@ Last updated: 2026-05-01 20:45 UTC.
 
 ## Next research directions (priority order)
 
-1. **Wait for PR #163 (thorfinn wd=1e-3)** — best val so far 9.986 (+0.5% vs SOTA); approaching SOTA range; await test metrics after completion.
-2. **Wait for PR #194 (askeladd ema_decay=0.9995)** — ASSIGNED. Probes unexplored EMA midpoint. If it beats SOTA, extend to 0.9997/0.9998 and close out the sensitivity curve.
-3. **Wait for PR #195 (edward lr_cosine_t_max=9)** — ASSIGNED. First genuine cosine decay test. If val ep9 < SOTA val ep9 (9.484), strong signal the decay is helping — merge immediately.
-4. **Wait for PR #173 (tanjiro cosine T_max=50)** — ep6/9, val=11.217. POOR trajectory. Close when done. Edward's #195 already covers the better T_max=9 variant.
-5. **Wait for PR #186 (alphonse vol_pts=96k clean)** — first interpretable test of volume sampling density. Watch `val_primary/volume_pressure_rel_l2_pct`.
-6. **Wait for PR #187 (nezuko vol_loss_weight=1.5)** — gentler loss balance; tests sweet spot below catastrophic surface degradation seen at vol_w=2.0.
-7. **Wait for fern #189 (lion_beta1=0.8)** — testing lower directional momentum; SOTA is 0.9.
-8. **Frieren pod restart needed** — pod stuck. PR #147 (wd=2e-3) has NEVER started. Requires `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren`. Re-escalate on issue #48.
-9. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Reserve for next idle slot after current wave completes.
-10. **Tau_yz binding gap (code-change approach)** — bypass Lion neutralization: (a) asinh output normalization for tau_y/tau_z, (b) surface-tangent-frame prediction head, (c) decoupled magnitude+direction head. All require train.py modifications.
-11. **lion_beta1=0.85** — once fern #189 results known; reveals sensitivity curve between SOTA (0.9) and lower bound.
-12. **ema_decay follow-up curve** — if #194 (0.9995) beats SOTA, probe 0.9997 and 0.9998 to close out the sensitivity range.
+1. **Thorfinn PR #203 (wd=2.5e-4)** — sweep down from SOTA; PR #163 (wd=1e-3) regressed +4.5% locking gradient direction DOWN. 2.5e-4 is the midpoint between 0 and SOTA; watch ep3 val; if above ~11.5%, run is off-trajectory.
+2. **Wait for PR #195 (edward T_max=9)** and **PR #202 (tanjiro T_max=9)** — first genuine cosine LR decay tests. If either beats SOTA val 9.484%, merge immediately and extend to T_max=7/8 follow-up.
+3. **Wait for PR #194 (askeladd ema_decay=0.9995)** — probes unexplored EMA midpoint; ep1 alarming but early noise expected; wait for ep4+. If it beats SOTA, probe 0.9997/0.9998.
+4. **Wait for PR #186 (alphonse vol_pts=96k clean)** — first clean volume sampling density test. Watch `val_primary/volume_pressure_rel_l2_pct` directly.
+5. **Wait for PR #187 (nezuko vol_loss_weight=1.5)** — gentler loss balance; tests below vol_w=2.0 catastrophe.
+6. **Wait for fern #189 (lion_beta1=0.8)** — lower directional momentum test; SOTA=0.9. If results known, assign lion_beta1=0.85 to close sensitivity curve midpoint.
+7. **Frieren pod restart needed** — pod stuck. PR #147 (wd=2e-3) has NEVER started. Requires `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren`. Re-escalate on issue #48. Note: wd=2e-3 already predicted to regress further than wd=1e-3.
+8. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Reserve for next idle slot after current wave completes.
+9. **Tau_yz binding gap (code-change approach)** — bypass Lion neutralization: (a) asinh output normalization for tau_y/tau_z, (b) surface-tangent-frame prediction head, (c) decoupled magnitude+direction head. All require train.py modifications.
+10. **wd follow-up** — if PR #203 (2.5e-4) beats SOTA, probe 1e-4 to tighten the curve. If #203 regresses, wd sweet spot is ~5e-4 and WD family is CLOSED.
+11. **ema_decay follow-up curve** — if #194 (0.9995) beats SOTA, probe 0.9997 and 0.9998 to close out the sensitivity range.
+
+## Weight decay sweep summary (PR #163 closed)
+
+PR #163 (thorfinn, wd=1e-3) CLOSED: best val=9.911% vs SOTA 9.484%. All per-surface metrics regressed +4.5%. Gradient in WD points DOWN. Next: PR #203 wd=2.5e-4 (thorfinn, round12).
