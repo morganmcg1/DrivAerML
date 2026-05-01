@@ -1844,6 +1844,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
     global_step = 0
+    nonfinite_grad_skip_count = 0
     early_stop_reason: str | None = None
     timeout_hit = False
     train_start = time.time()
@@ -1894,16 +1895,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
+            grad_finite = True
             if config.clip_grad_norm > 0:
                 pre_clip_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=config.clip_grad_norm
                 )
+                grad_finite = bool(torch.isfinite(pre_clip_norm).item())
                 if should_log_gradients:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
-            optimizer.step()
+            if grad_finite:
+                optimizer.step()
+            else:
+                nonfinite_grad_skip_count += 1
+                optimizer.zero_grad(set_to_none=True)
             ema_decay_now: float | None = None
-            if ema is not None:
+            if ema is not None and grad_finite:
                 if config.ema_decay_start > 0.0:
                     progress = min(global_step / max(total_estimated_steps, 1), 1.0)
                     cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
@@ -1931,6 +1938,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "train/grad/step_skipped": 0.0 if grad_finite else 1.0,
+                "train/grad/nonfinite_skip_total": float(nonfinite_grad_skip_count),
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
