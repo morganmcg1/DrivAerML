@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 (updated — Round 13 PRs added, closed PRs #202/#203/#204 retired)
+- **Date:** 2026-05-01 ~21:00 UTC (updated — W&B trajectory survey for all 8 in-flight; PR #242 anomaly noted)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -29,18 +29,36 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 
 ## In-flight (8/8 students running — all slots filled, Round 12 + Round 13)
 
-Last updated: 2026-05-01 ~20:00 (CURRENT_RESEARCH_STATE refresh after Round 13 assignment).
+Last updated: 2026-05-01 ~21:00 UTC — W&B trajectory survey across all 8 active groups.
 
-| PR | Round | Student | Hypothesis | W&B group | Status |
-|---|---|---|---|---|---|
-| **#206** | 12 | alphonse | surface_points 64k→96k | `tay-round12-surface-pts-96k` | running — ~68% complete (~step 16,662/24,480); val projected ~9.83% |
-| **#222** | 12 | fern | lr_warmup=1ep (warmup from 0 over first epoch) | `tay-round12-lr-warmup-1ep` | running — ~50% complete; strongest slope of active runs |
-| **#231** | 12 | nezuko | model_slices=64 (halve attention slices) | `tay-round12-model-slices-64` | running — wild-card; extreme recovery slope from high starting val |
-| **#232** | 12 | askeladd | model_heads=4 (halve attention heads; NEVER TESTED) | `tay-round12-model-heads-4` | running |
-| **#233** | 12 | edward | model_layers=3 (reduce depth by 1; NEVER TESTED) | `tay-round12-model-layers-3` | running |
-| **#240** | 13 | frieren | wider FFN mlp_ratio=8 (vs. SOTA=4, 6 was negative) | `tay-round13-mlp-ratio-8` | running — pre-first-eval |
-| **#241** | 13 | tanjiro | width scaling 512→768d with µP-scaled LR | `tay-round13-hidden-dim-768` | running — pre-first-eval |
-| **#242** | 13 | thorfinn | dropout=0.1 re-test on SOTA stack (0.05 was negative) | `tay-round13-dropout-0p1` | running — pre-first-eval |
+| PR | Round | Student | Hypothesis | W&B group | ~Epoch | val_abupt (latest) | vs SOTA 9.484 | Status |
+|---|---|---|---|---|---:|---:|---:|---|
+| **#206** | 12 | alphonse | surface_points 64k→96k | `tay-round12-surface-pts-96k` | 10.1 | 11.460 | +1.98 | running (au98keie); ~complete; trajectory 54.39→26.12→17.84→14.55→12.64→11.46 |
+| **#222** | 12 | fern | lr_warmup=1ep (warmup from 0 over first epoch) | `tay-round12-lr-warmup-1ep` | 10.0 | 10.502 | +1.02 | running; ~complete; **closest to SOTA of all in-flight** |
+| **#231** | 12 | nezuko | model_slices=64 (halve attention slices) | `tay-round12-model-slices-64` | 5.5 | 19.337 | +9.85 | running (rgxygusk after restart); trajectory 58.34→28.50→19.34 — converging slowly, very unlikely to reach SOTA by ep10 |
+| **#232** | 12 | askeladd | model_heads=4 (halve attention heads; NEVER TESTED) | `tay-round12-model-heads-4` | 7.2 | 12.532 | +3.05 | running; trajectory 49.52→21.97→15.16→12.53 |
+| **#233** | 12 | edward | model_layers=3 (reduce depth by 1; NEVER TESTED) | `tay-round12-model-layers-3` | 7.4 | 15.551 | +6.07 | running; trajectory 61.96→27.02→18.93→15.55 — slowest convergence, depth=3 underfits |
+| **#240** | 13 | frieren | wider FFN mlp_ratio=8 (vs. SOTA=4, 6 was negative) | `tay-round13-mlp-ratio-8` | 1.3 | N/A | — | running — pre-first-eval |
+| **#241** | 13 | tanjiro | width scaling 512→768d with µP-scaled LR | `tay-round13-hidden-dim-768` | 1.1 | N/A | — | running — pre-first-eval |
+| **#242** | 13 | thorfinn | dropout=0.1 re-test on SOTA stack (0.05 was negative) | `tay-round13-dropout-0p1` | 1.3 | N/A | — | **PR ANOMALY**: GH state=MERGED via empty assignment commit (no code merged into tay). Experiment running fine in W&B group. Will need new follow-up PR to land results comment when run completes. |
+
+### Component breakdown for the two ~complete runs (vs SOTA surf_p=3.82 / wall_sh=7.29 / vol_p=6.08)
+
+| PR | surf_p | wall_sh | vol_p | val_abupt |
+|---|---:|---:|---:|---:|
+| SOTA #115 | 5.690 | 10.419 | 12.740 (val baseline test 5.69/10.42/12.74) | 9.484 (val) |
+| #206 alphonse 96k | 7.406 | 12.887 | 6.869 | 11.460 |
+| #222 fern warmup-1ep | 6.779 | 11.795 | 6.257 | 10.502 |
+
+Note: the volume_pressure values for #206 (6.87) and #222 (6.26) look much better than the SOTA test value of 12.74 — but those are val_primary not test_primary. Direct val→test for SOTA was val_vp ~5.7 → test_vp 12.74 (val/test diverges sharply on volume_pressure axis). The val numbers above are not directly comparable to test column.
+
+## Round 12/13 trajectory verdict
+
+- **Architecture-dial probes (heads=4, layers=3, slices=64, surface_pts=96k):** all converging more slowly than SOTA (val ≥11.46 at ep10 vs SOTA's 9.48). Architecture levers around the SOTA settings are negative within the current epoch budget.
+- **Schedule probe (fern lr_warmup=1ep):** closest to SOTA (10.50 vs 9.48, +1.02) — direction not productive but cleanest variance probe of the batch.
+- **Round 13 wider/regularized variants:** still pre-first-eval, no signal yet.
+
+If none of Round 13 beats SOTA, the next round must escalate per the Plateau Protocol — return to first principles (volume_pressure × 2.1 gap, tau_y/z × 3.4–3.6 gaps), consider architecture changes outside the SOTA neighborhood (Yi Wave 1 port, AB-UPT-style transolver+upt hybrid, geometry-conditioned cross-attention).
 
 ## Round 12 — Closed / retired PRs
 
