@@ -39,10 +39,255 @@ from data import (
     VOLUME_TARGET_NAMES,
     VOLUME_X_DIM,
     VOLUME_Y_DIM,
+    DrivAerMLCase,
+    DrivAerMLCaseStore,
+    DrivAerMLSurfaceDataset,
     SurfaceBatch,
     load_data,
     pad_collate,
 )
+
+
+# ---------------------------------------------------------------------------
+# Curvature-biased surface point sampling (PR #193)
+# ---------------------------------------------------------------------------
+
+
+def _compute_curvature_score_gpu(
+    xyz: torch.Tensor,
+    normals: torch.Tensor,
+    *,
+    k: int,
+    subsample_size: int,
+    knn_chunk: int = 16_384,
+    propagate_chunk_q: int = 65_536,
+    seed: int = 0,
+) -> torch.Tensor:
+    """Compute per-point unnormalized curvature score via stddev of normals in k-NN ball.
+
+    To stay tractable on 8M-point meshes, k-NN is computed on a uniform random
+    subsample of ``subsample_size`` points; scores are then propagated to every
+    full-mesh point via 1-NN against the subsample. Returns an unnormalized
+    [N] non-negative tensor in roughly [0, 1] (raw stddev magnitude). Caller is
+    responsible for normalizing to a probability distribution.
+    """
+
+    n_total = xyz.shape[0]
+    device = xyz.device
+    if subsample_size <= 0 or n_total <= subsample_size:
+        sub_xyz = xyz.contiguous()
+        sub_normals = normals.contiguous()
+        sub_indices = None
+    else:
+        gen = torch.Generator(device=device).manual_seed(int(seed))
+        sub_indices = torch.randperm(n_total, generator=gen, device=device)[:subsample_size]
+        sub_xyz = xyz[sub_indices].contiguous()
+        sub_normals = normals[sub_indices].contiguous()
+    n_sub = sub_xyz.shape[0]
+    sub_sq = (sub_xyz ** 2).sum(dim=1)
+
+    sub_score = torch.zeros(n_sub, device=device, dtype=torch.float32)
+    k_eff = min(k, max(1, n_sub - 1))
+    for q_start in range(0, n_sub, knn_chunk):
+        q_end = min(q_start + knn_chunk, n_sub)
+        q = sub_xyz[q_start:q_end]
+        q_sq = (q ** 2).sum(dim=1)
+        d_sq = q_sq.unsqueeze(1) - 2 * (q @ sub_xyz.T) + sub_sq.unsqueeze(0)
+        _, knn_idx = d_sq.topk(k_eff + 1, dim=1, largest=False)
+        knn_idx = knn_idx[:, 1:]  # drop self
+        neigh_normals = sub_normals[knn_idx]  # [Q, k, 3]
+        sub_score[q_start:q_end] = neigh_normals.std(dim=1).norm(dim=1)
+    del sub_normals
+
+    if sub_indices is None:
+        full_score = sub_score
+    else:
+        full_score = torch.empty(n_total, device=device, dtype=torch.float32)
+        for q_start in range(0, n_total, propagate_chunk_q):
+            q_end = min(q_start + propagate_chunk_q, n_total)
+            q = xyz[q_start:q_end]
+            q_sq = (q ** 2).sum(dim=1)
+            d_sq = q_sq.unsqueeze(1) - 2 * (q @ sub_xyz.T) + sub_sq.unsqueeze(0)
+            _, nearest = d_sq.min(dim=1)
+            full_score[q_start:q_end] = sub_score[nearest]
+
+    full_score = torch.nan_to_num(full_score, nan=0.0, posinf=0.0, neginf=0.0)
+    full_score = torch.clamp(full_score, min=0.0)
+    return full_score
+
+
+def _build_curvature_cache(
+    case_ids: list[str],
+    store: DrivAerMLCaseStore,
+    cache_dir: Path,
+    *,
+    k: int,
+    subsample_size: int,
+    device: torch.device,
+) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    pending = [cid for cid in case_ids if not (cache_dir / f"{cid}.npy").exists()]
+    if not pending:
+        print(f"[curvature_sampling] cache hit: all {len(case_ids)} cases present in {cache_dir}")
+        return
+    print(
+        f"[curvature_sampling] precomputing {len(pending)}/{len(case_ids)} cases at "
+        f"k={k}, subsample={subsample_size}, dir={cache_dir}"
+    )
+    t0 = time.time()
+    for i, case_id in enumerate(pending):
+        case_t0 = time.time()
+        case = store.load_case(case_id)
+        xyz = case.surface_x[:, :3].to(device)
+        normals = case.surface_x[:, 3:6].to(device)
+        score = _compute_curvature_score_gpu(
+            xyz,
+            normals,
+            k=k,
+            subsample_size=subsample_size,
+            seed=hash(case_id) & 0xFFFF_FFFF,
+        )
+        score_np = score.detach().to("cpu", dtype=torch.float16).numpy()
+        tmp_path = cache_dir / f"{case_id}.tmp.npy"
+        final_path = cache_dir / f"{case_id}.npy"
+        import numpy as np
+
+        np.save(tmp_path, score_np, allow_pickle=False)
+        os.replace(tmp_path, final_path)
+        del case, xyz, normals, score
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        elapsed = time.time() - case_t0
+        if (i + 1) % 25 == 0 or i == 0 or i + 1 == len(pending):
+            print(
+                f"[curvature_sampling] {i + 1}/{len(pending)} {case_id} "
+                f"in {elapsed:.1f}s (total {(time.time() - t0) / 60:.1f} min)"
+            )
+
+
+def _load_curvature_cache(case_ids: list[str], cache_dir: Path) -> dict[str, torch.Tensor]:
+    """Load per-case unnormalized curvature scores and convert to probability dist."""
+    import numpy as np
+
+    out: dict[str, torch.Tensor] = {}
+    for case_id in case_ids:
+        path = cache_dir / f"{case_id}.npy"
+        if not path.exists():
+            raise FileNotFoundError(f"Missing curvature cache for {case_id}: {path}")
+        arr = np.load(path).astype(np.float32, copy=False)
+        tensor = torch.from_numpy(arr)
+        # Normalize to a probability distribution. Add a tiny floor so every
+        # point retains a small but non-zero curvature mass.
+        tensor = torch.clamp(tensor, min=0.0)
+        total = float(tensor.sum())
+        if total <= 0.0:
+            tensor = torch.full_like(tensor, 1.0 / max(tensor.numel(), 1))
+        else:
+            tensor = tensor / total
+        out[case_id] = tensor
+    return out
+
+
+class CurvatureBiasedSurfaceDataset(DrivAerMLSurfaceDataset):
+    """Wraps DrivAerMLSurfaceDataset with curvature-biased surface sampling.
+
+    For training views (sampling_mode == "train_random") and surface modality only,
+    samples row indices from the per-mesh curvature-blended distribution
+    ``p = (1 - alpha) * uniform + alpha * curvature``.
+
+    Volume sampling and eval sampling fall back to the parent's behavior.
+    """
+
+    def __init__(
+        self,
+        base: DrivAerMLSurfaceDataset,
+        curvature_dist: dict[str, torch.Tensor],
+        alpha: float,
+    ):
+        # Adopt the base dataset's state without re-initializing the parent
+        # (which would rebuild views and re-stat case metadata).
+        self.store = base.store
+        self.case_ids = list(base.case_ids)
+        self.max_surface_points = base.max_surface_points
+        self.max_volume_points = base.max_volume_points
+        self.sampling_mode = base.sampling_mode
+        self.views = list(base.views)
+        self.curvature_dist = dict(curvature_dist)
+        self.alpha = float(alpha)
+
+    def _surface_indices_curv(
+        self,
+        total: int,
+        count: int,
+        view,
+        group_view_count: int,
+    ) -> torch.Tensor | None:
+        if view.view_index >= group_view_count:
+            return torch.empty(0, dtype=torch.long)
+        if count <= 0 or total <= count:
+            return None if view.view_index == 0 else torch.empty(0, dtype=torch.long)
+        case_dist = self.curvature_dist.get(view.case_id)
+        if case_dist is None or case_dist.numel() != total or self.alpha <= 0.0:
+            return torch.randint(total, (count,), dtype=torch.long).sort().values
+        # Blend uniform + curvature; clamp min to a fraction of uniform to avoid
+        # complete starvation of flat regions.
+        uniform = 1.0 / float(total)
+        # min sampling prob = (1 - alpha) * uniform / 4 (paranoid floor)
+        min_floor = (1.0 - self.alpha) * uniform * 0.25
+        weights = (1.0 - self.alpha) * uniform + self.alpha * case_dist
+        weights = torch.clamp(weights, min=max(min_floor, 1e-12))
+        indices = torch.multinomial(weights, count, replacement=False)
+        return indices.sort().values
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        if view.sampling_mode == "train_random":
+            surface_idx = self._surface_indices_curv(
+                counts["n_surface"],
+                self.max_surface_points,
+                view,
+                view.surface_view_count,
+            )
+        else:
+            surface_idx = self._indices(
+                counts["n_surface"],
+                self.max_surface_points,
+                view,
+                group_view_count=view.surface_view_count,
+            )
+        volume_idx = self._indices(
+            counts["n_volume"],
+            self.max_volume_points,
+            view,
+            group_view_count=view.volume_view_count,
+        )
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode
+        metadata["joint_view_count"] = int(view.view_count)
+        metadata["surface_curvature_alpha"] = float(self.alpha)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +838,10 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    surface_curvature_sampling_alpha: float = 0.0
+    surface_curvature_k: int = 16
+    surface_curvature_subsample: int = 50_000
+    surface_curvature_cache_dir: str = "outputs/curvature_cache_v1"
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -699,6 +948,24 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    if config.surface_curvature_sampling_alpha > 0.0:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        cache_dir = Path(config.surface_curvature_cache_dir)
+        train_case_ids = list(train_ds.case_ids)
+        _build_curvature_cache(
+            train_case_ids,
+            train_ds.store,
+            cache_dir,
+            k=config.surface_curvature_k,
+            subsample_size=config.surface_curvature_subsample,
+            device=device,
+        )
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        curvature_dist = _load_curvature_cache(train_case_ids, cache_dir)
+        train_ds = CurvatureBiasedSurfaceDataset(
+            train_ds, curvature_dist, config.surface_curvature_sampling_alpha
+        )
     num_workers = resolve_num_workers(config)
     loader_kwargs = {
         "collate_fn": pad_collate,
