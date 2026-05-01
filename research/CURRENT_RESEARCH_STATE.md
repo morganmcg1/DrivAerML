@@ -1,44 +1,47 @@
 # SENPAI Research State
 
-- 2026-04-30 ~23:50 UTC — Wave 1 in flight (16 students + edward/senku supplementary), all 16 bengio pods 1/1 READY at ~15h uptime. 0 PRs review-ready, 0 idle students, no human issues. All pods healthy.
-- W&B survey at ~23:45 UTC — all runs active, ~60% complete (epoch 29-30/50). No test_primary completions yet.
-- First Wave 1 results expected ~05:00–10:00 UTC May 1 (50 epochs, ~23h per trial at ~10-11 it/s).
+- 2026-05-01 ~05:30 UTC — Wave 1 in flight (17 students: 16 core + edward/senku supplementary). 0 PRs review-ready, 0 idle students, no human issues. All 17 pods healthy.
+- W&B survey at 2026-05-01 ~05:30 UTC — all 15 named runs active and in-progress. No test_primary completions yet. Leaders at ~31-32 epochs/50.
+- First Wave 1 results expected ~08:00–12:00 UTC May 1 (50 epochs, ~23h per trial at ~10-11 it/s). Leaders (alphonse, fern, thorfinn) approaching epoch 31-32.
 - torch.compile bug resolved: all students running with `--no-compile-model`. All confirmed stable.
 - thorfinn Trial B (gc=0.5 + wd=1e-4) crashed earlier; Trial A (wd=5e-4) running cleanly.
-- Wave 2 hypothesis slate drafted: `/research/RESEARCH_IDEAS_2026-04-30_15:34.md` — 16 assignments staged, ready to fire when Wave 1 PRs flip to review.
-- askeladd regression noted: SDF log-Fourier run went from 9.20 → 9.442 (+0.242 at step 313k) — may be unstable or plateau-ing.
+- Wave 2 hypothesis slate: 16 assignments staged (see below), ready to fire when Wave 1 PRs flip to review.
+- askeladd (SDF): recovered to 8.497% at step 539k — stable but below leaders.
+- senku (metric-aware loss, PR #145): 9.983% at step 539k — last in cohort, auxiliary rel-L2 term not helping wall shear.
 
-## Wave 1 Latest Snapshot (~23:45 UTC Apr 30, ~60% complete — NOT FINAL)
+## Wave 1 Latest Snapshot (~05:30 UTC May 1, ~62-65% complete — NOT FINAL)
 
-`val/abupt_axis_mean_rel_l2_pct` mid-training leaderboard (all `running`, no test_primary results yet):
+`val_primary/abupt_axis_mean_rel_l2_pct` mid-training leaderboard (all `running`, no test_primary results yet):
 
-| Rank | Student | Run ID | Step | Epoch | val_abupt | wsy | wsz |
-|-----:|---------|--------|------:|------:|----------:|----:|----:|
-| 1 | alphonse | m9775k1v | 516,972 | 29.0 | **7.221** | 9.120 | 10.879 |
-| 2 | gilbert | kn756yk6 | 433,858 | 24.3 | 7.586 | — | — |
-| 3 | kohaku | h7ve1hmb | 472,285 | 26.5 | 7.911 | — | — |
-| 4 | haku | nbbbw8qw | 353,269 | 19.8 | 8.061 | — | — |
-| 5 | nezuko | p8swf78o | 498,184 | 28.0 | 8.215 | — | — |
-| 6 | emma | kuk0oy8g | 367,725 | 20.6 | 8.216 | — | — |
-| 7 | frieren | l23vz4md | 468,349 | 26.3 | 8.275 | — | — |
-| 8 | thorfinn | snrwvw14 | 532,850 | 29.9 | 8.334 | 11.133 | 12.258 |
-| 9 | askeladd | uxrhudp1 | 511,694 | 28.7 | 8.457 | — | — |
-| 10 | tanjiro | 846uciam | 521,966 | 29.3 | 8.462 | 11.169 | 12.371 |
-| 11 | fern | pxty4knv | 534,508 | 30.0 | 8.604 | 10.573 | 12.335 |
-| 12 | norman | 0iv7wifz | 518,124 | 29.1 | 8.643 | — | — |
-| 13 | chihiro | kit58p2e | 510,130 | 28.6 | 8.821 | — | — |
-| 14 | violet | em5ixfew | 524,883 | 29.5 | 8.949 | 12.212 | 13.052 |
-| 15 | senku | k8ytnvh8 | 511,627 | 28.7 | 10.020 | — | — |
+| Rank | PR# | Student | Run ID | Step | val_abupt | wsy | wsz |
+|-----:|-----|---------|--------|------:|----------:|----:|----:|
+| 1 | #74 | alphonse | m9775k1v | 545,120 | **7.212** | 9.103 | 10.869 |
+| 2 | #76 | gilbert | kn756yk6 | 456,876 | 7.571 | 9.114 | 11.052 |
+| 3 | #78 | kohaku | h7ve1hmb | 497,513 | 7.881 | 9.570 | 11.456 |
+| 4 | #77 | haku | nbbbw8qw | 371,872 | 8.031 | 10.878 | 11.806 |
+| 5 | #86 | nezuko | p8swf78o | 524,011 | 8.163 | 10.887 | 11.979 |
+| 6 | #79 | emma | kuk0oy8g | 386,689 | 8.214 | 9.904 | 11.828 |
+| 7 | #85 | frieren | l23vz4md | 493,269 | 8.249 | 11.057 | 12.053 |
+| 8 | #89 | thorfinn | snrwvw14 | 558,956 | 8.322 | 11.108 | 12.239 |
+| 9 | #80 | tanjiro | 846uciam | 550,086 | 8.446 | 11.147 | 12.347 |
+| 10 | #82 | askeladd | uxrhudp1 | 539,366 | 8.497 | 11.338 | 12.462 |
+| 11 | #75 | fern | pxty4knv | 560,775 | 8.583 | 10.537 | 12.297 |
+| 12 | #87 | norman | 0iv7wifz | 545,961 | 8.612 | 11.422 | 12.687 |
+| 13 | #83 | chihiro | kit58p2e | 537,654 | 8.769 | 12.112 | 13.038 |
+| 14 | #81 | violet | em5ixfew | 552,422 | 8.922 | 12.056 | 13.073 |
+| 15 | #145 | senku | k8ytnvh8 | 539,403 | 9.983 | 12.599 | 14.932 |
 
-Note: edward (#16 by inference, running separately as PR #137) not in primary cohort rank.
+Note: edward (PR #137, GradNorm) running separately as supplementary; W&B run not found by student filter at this survey pass.
 
-**Key observations (~23:45 UTC)**:
-- alphonse improved from 7.666 → **7.221** (step 317k → 517k). Fourier PE + 4L/256d recipe consolidating lead.
-- gilbert improved from 8.246 → 7.586 at step 434k. 5L depth signal strengthening.
-- Wall-shear y/z still universally above AB-UPT targets: best wsy=9.120, wsz=10.879 (alphonse) vs targets 3.65/3.63. ~5-7pp gap remains the binding structural constraint.
-- No test_primary results yet. First completions expected ~05:00–10:00 UTC May 1.
-- ~356k–422k steps remain across the cohort before training ends.
-- senku (RFF) still last at 10.020. PR #140 (curriculum sampling) is a separate run.
+**Key observations (~05:30 UTC May 1)**:
+- alphonse continues to lead at **7.212%** (step 545k, ~30.6 epochs). Fourier PE + 4L/256d recipe is the strongest so far.
+- gilbert closing gap: 7.571% at step 457k. 5L depth scaling shows real signal.
+- kohaku (128-slice): 7.881% at step 498k — surface tokenization resolution clearly matters.
+- emma (60k points): 8.214% — higher point density helping but less than depth/slice scaling.
+- Wall-shear y/z structurally stuck: best wsy=9.103%, wsz=10.869% (alphonse) vs targets 3.65/3.63. Gap is ~2.5x on y and ~3x on z.
+- chihiro (asinh normalization): 8.769% — not beating vanilla Fourier PE; wall_shear_y still 12.112%.
+- senku (metric-aware loss, PR #145): 9.983%, last in cohort — auxiliary rel-L2 loss is not helping.
+- No test_primary metrics logged for any run. First completions expected ~08:00–12:00 UTC May 1.
 
 ## Most Recent Human Researcher Direction
 
@@ -53,13 +56,13 @@ AB-UPT targets to beat:
 - wall_shear_z_rel_l2_pct < 3.63
 - abupt_axis_mean_rel_l2_pct ~ 4.51 (mean of 5 axis metrics)
 
-Current best on bengio branch: none merged yet. Mid-training leader (alphonse) is 7.666 abupt (val), still ~3.15pp from target. Wall-shear y/z axes are the binding constraint — the entire wave is 3-4x above target on these axes.
+Current best on bengio branch: none merged yet. Mid-training leader (alphonse) is 7.212% abupt (val), still ~2.7pp from target. Wall-shear y/z axes are the binding constraint — the entire wave is 2.5–3x above target on these axes.
 
 ## Current Research Focus and Themes
 
 **Wave 1 (in flight) — Two parallel streams**:
 - Stream 1 — Exploit radford prior (Fourier PE + 4L/256d + no-EMA + T_max=30): alphonse, fern, gilbert, haku, kohaku, emma, tanjiro, violet
-- Stream 2 — Fresh ideas: askeladd (SDF), chihiro (asinh), edward (uncertainty), frieren (cross-attn), nezuko (mlp-6), norman (dropout), senku (RFF), thorfinn (gc+wd)
+- Stream 2 — Fresh ideas: askeladd (SDF), chihiro (asinh), edward (gradnorm), frieren (cross-attn), nezuko (mlp-6), norman (dropout), senku (metric-aware loss), thorfinn (gc+wd)
 
 **Wave 2 (staged, not yet assigned) — Five themes**:
 - A. Stack the winners on DDP4 (5L + Fourier + 128 slices + 60k + sw=2.0)
