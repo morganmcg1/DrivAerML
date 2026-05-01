@@ -541,6 +541,66 @@ class EMA:
         self.backup = None
 
 
+class SWA:
+    """Stochastic Weight Averaging: uniform running mean of model parameters
+    starting after ``start_step`` (Izmailov et al. 2018, arXiv:1803.05407).
+
+    Unlike EMA's exponential decay, SWA weights every post-start checkpoint
+    equally, which targets the centre of the flat loss basin near the end of
+    training. The model uses LayerNorm (not BatchNorm) so no BN-update pass is
+    required after the SWA weights are loaded.
+    """
+
+    def __init__(self, model: nn.Module, start_step: int):
+        self.start_step = int(start_step)
+        self.step_counter = 0
+        self.n_averaged = 0
+        self.shadow: dict[str, torch.Tensor] = {
+            name: torch.zeros_like(param.detach())
+            for name, param in model.named_parameters()
+            if param.requires_grad
+        }
+        self.backup: dict[str, torch.Tensor] | None = None
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        self.step_counter += 1
+        if self.step_counter < self.start_step:
+            return
+        self.n_averaged += 1
+        n = float(self.n_averaged)
+        for name, param in model.named_parameters():
+            if param.requires_grad and name in self.shadow:
+                self.shadow[name].mul_((n - 1.0) / n).add_(param.detach(), alpha=1.0 / n)
+
+    @property
+    def is_active(self) -> bool:
+        return self.n_averaged > 0
+
+    @torch.no_grad()
+    def store(self, model: nn.Module) -> None:
+        self.backup = {
+            name: param.detach().clone()
+            for name, param in model.named_parameters()
+            if param.requires_grad and name in self.shadow
+        }
+
+    @torch.no_grad()
+    def copy_to(self, model: nn.Module) -> None:
+        for name, param in model.named_parameters():
+            if param.requires_grad and name in self.shadow:
+                param.data.copy_(self.shadow[name])
+
+    @torch.no_grad()
+    def restore(self, model: nn.Module) -> None:
+        if self.backup is None:
+            return
+        for name, param in model.named_parameters():
+            if param.requires_grad and name in self.backup:
+                param.data.copy_(self.backup[name])
+        self.backup = None
+
+
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
@@ -601,6 +661,7 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    swa_start_frac: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1713,6 +1774,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    swa: SWA | None = None
+    swa_start_step = 0
+    if config.swa_start_frac > 0.0:
+        swa_start_step = int(total_estimated_steps * config.swa_start_frac)
+        swa = SWA(model, start_step=swa_start_step)
+        print(
+            f"SWA enabled: start_step={swa_start_step} "
+            f"({config.swa_start_frac * 100:.0f}% of ~{total_estimated_steps} estimated steps)"
+        )
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1746,6 +1816,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("full_val_primary/*", step_metric="global_step")
     wandb.define_metric("test/*", step_metric="global_step")
     wandb.define_metric("test_primary/*", step_metric="global_step")
+    wandb.define_metric("swa_val/*", step_metric="global_step")
+    wandb.define_metric("swa_val_primary/*", step_metric="global_step")
+    wandb.define_metric("swa_full_val/*", step_metric="global_step")
+    wandb.define_metric("swa_full_val_primary/*", step_metric="global_step")
+    wandb.define_metric("swa_test/*", step_metric="global_step")
+    wandb.define_metric("swa_test_primary/*", step_metric="global_step")
     wandb.define_metric("train/slope/*", step_metric="global_step")
     wandb.define_metric("val/slope/*", step_metric="global_step")
     wandb.define_metric("full_val/slope/*", step_metric="global_step")
@@ -1777,6 +1853,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
+    best_swa_val = float("inf")
+    best_swa_metrics: dict[str, float] = {}
+    swa_model_path = output_dir / "swa_checkpoint.pt"
     global_step = 0
     nonfinite_skip_count = 0
     early_stop_reason: str | None = None
@@ -1893,6 +1972,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                     ema.set_decay(ema_decay_now)
                 ema.update(model)
+            if swa is not None:
+                swa.update(model)
             weight_metrics = (
                 collect_weight_metrics(
                     model,
@@ -1928,6 +2009,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
+            if swa is not None:
+                train_log["train/swa_n_averaged"] = swa.n_averaged
+                train_log["train/swa_active"] = 1.0 if swa.is_active else 0.0
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
                     train_log[f"train/{key}"] = value
@@ -2007,6 +2091,38 @@ def main(argv: Iterable[str] | None = None) -> None:
         if ema is not None:
             ema.restore(model)
 
+        swa_val_metrics: dict[str, dict[str, float]] | None = None
+        swa_primary_val = float("nan")
+        swa_improved = False
+        if swa is not None and swa.is_active:
+            swa.store(model)
+            swa.copy_to(model)
+            swa_val_metrics = {
+                name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in val_loaders.items()
+            }
+            swa_primary_val = swa_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+            swa_primary_is_valid = math.isfinite(swa_primary_val) and swa_primary_val > 0.0
+            swa_improved = swa_primary_is_valid and swa_primary_val < best_swa_val
+            if swa_improved:
+                best_swa_val = swa_primary_val
+                best_swa_metrics = {
+                    "epoch": float(epoch + 1),
+                    "n_averaged": float(swa.n_averaged),
+                    **swa_val_metrics["val_surface"],
+                }
+                torch.save(
+                    {
+                        "model": model.state_dict(),
+                        "config": asdict(config),
+                        "epoch": epoch + 1,
+                        "swa_n_averaged": swa.n_averaged,
+                        "val_metrics": swa_val_metrics,
+                    },
+                    swa_model_path,
+                )
+            swa.restore(model)
+
         primary_val = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
         log_metrics.update(
             {
@@ -2023,6 +2139,26 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "val_primary/volume_pressure_rel_l2_pct": val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
             }
         )
+        if swa_val_metrics is not None:
+            log_metrics.update(
+                {
+                    "swa_val_primary/abupt_axis_mean_rel_l2_pct": swa_primary_val,
+                    "swa_val_primary/abupt_axis_mean_rel_l2": swa_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+                    "swa_val_primary/surface_pressure_mae": swa_val_metrics["val_surface"]["surface_pressure_mae"],
+                    "swa_val_primary/wall_shear_mae": swa_val_metrics["val_surface"]["wall_shear_mae"],
+                    "swa_val_primary/volume_pressure_mae": swa_val_metrics["val_surface"]["volume_pressure_mae"],
+                    "swa_val_primary/surface_pressure_rel_l2_pct": swa_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+                    "swa_val_primary/wall_shear_rel_l2_pct": swa_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+                    "swa_val_primary/wall_shear_x_rel_l2_pct": swa_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+                    "swa_val_primary/wall_shear_y_rel_l2_pct": swa_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+                    "swa_val_primary/wall_shear_z_rel_l2_pct": swa_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+                    "swa_val_primary/volume_pressure_rel_l2_pct": swa_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+                    "swa_val_primary/n_averaged": float(swa.n_averaged),
+                }
+            )
+            for split_name, metrics in swa_val_metrics.items():
+                for key, value in metrics.items():
+                    log_metrics[f"swa_val/{split_name}/{key}"] = value
         for split_name, metrics in val_metrics.items():
             for key, value in metrics.items():
                 log_metrics[f"val/{split_name}/{key}"] = value
@@ -2066,12 +2202,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                 ema.restore(model)
 
         tag = " *" if improved else ""
+        swa_tag = " *swa" if swa_improved else ""
+        swa_summary = (
+            f" swa_val_abupt={swa_primary_val:.4f}{swa_tag} (n={swa.n_averaged})"
+            if swa is not None and swa.is_active
+            else ""
+        )
         print(
             f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
             f"train_loss={epoch_train_loss:.5f} "
-            f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
+            f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}{swa_summary}"
         )
         print_metrics("val_surface", val_metrics["val_surface"])
+        if swa_val_metrics is not None:
+            print_metrics("swa_val_surface", swa_val_metrics["val_surface"])
         if early_stop_reason is not None:
             print(early_stop_reason)
             break
@@ -2182,6 +2326,79 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.log(test_log)
     wandb.summary.update(_numeric_metric_items(test_log))
     print_metrics("test_surface", test_metrics["test_surface"])
+
+    if swa is not None and best_swa_metrics and swa_model_path.exists():
+        swa_checkpoint = torch.load(swa_model_path, map_location=device, weights_only=True)
+        model.load_state_dict(swa_checkpoint["model"])
+        print(
+            f"\nBest SWA val: epoch {int(best_swa_metrics['epoch'])}, "
+            f"abupt_axis_mean_rel_l2_pct={best_swa_metrics['abupt_axis_mean_rel_l2_pct']:.4f} "
+            f"(n_averaged={int(best_swa_metrics['n_averaged'])})"
+        )
+        swa_full_val_metrics = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            for name, loader in val_loaders.items()
+        }
+        swa_full_val_primary = swa_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+        swa_full_val_log: dict[str, object] = {
+            "swa_full_val_primary/abupt_axis_mean_rel_l2_pct": swa_full_val_primary,
+            "swa_full_val_primary/abupt_axis_mean_rel_l2": swa_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+            "swa_full_val_primary/surface_pressure_mae": swa_full_val_metrics["val_surface"]["surface_pressure_mae"],
+            "swa_full_val_primary/wall_shear_mae": swa_full_val_metrics["val_surface"]["wall_shear_mae"],
+            "swa_full_val_primary/volume_pressure_mae": swa_full_val_metrics["val_surface"]["volume_pressure_mae"],
+            "swa_full_val_primary/surface_pressure_rel_l2_pct": swa_full_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_x_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_y_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_z_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+            "swa_full_val_primary/volume_pressure_rel_l2_pct": swa_full_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+            "swa_full_val_primary/n_averaged": float(best_swa_metrics["n_averaged"]),
+            "global_step": global_step,
+        }
+        for split_name, metrics in swa_full_val_metrics.items():
+            for key, value in metrics.items():
+                swa_full_val_log[f"swa_full_val/{split_name}/{key}"] = value
+        wandb.log(swa_full_val_log)
+        wandb.summary.update(_numeric_metric_items(swa_full_val_log))
+        print_metrics("swa_full_val", swa_full_val_metrics["val_surface"])
+
+        swa_test_metrics = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            for name, loader in test_loaders.items()
+        }
+        swa_test_primary = swa_test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
+        swa_test_log: dict[str, object] = {
+            "swa_test_primary/abupt_axis_mean_rel_l2_pct": swa_test_primary,
+            "swa_test_primary/abupt_axis_mean_rel_l2": swa_test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
+            "swa_test_primary/surface_pressure_mae": swa_test_metrics["test_surface"]["surface_pressure_mae"],
+            "swa_test_primary/wall_shear_mae": swa_test_metrics["test_surface"]["wall_shear_mae"],
+            "swa_test_primary/volume_pressure_mae": swa_test_metrics["test_surface"]["volume_pressure_mae"],
+            "swa_test_primary/surface_pressure_rel_l2_pct": swa_test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+            "swa_test_primary/wall_shear_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+            "swa_test_primary/wall_shear_x_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+            "swa_test_primary/wall_shear_y_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+            "swa_test_primary/wall_shear_z_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
+            "swa_test_primary/volume_pressure_rel_l2_pct": swa_test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
+            "swa_test_primary/n_averaged": float(best_swa_metrics["n_averaged"]),
+            "global_step": global_step,
+        }
+        for split_name, metrics in swa_test_metrics.items():
+            for key, value in metrics.items():
+                swa_test_log[f"swa_test/{split_name}/{key}"] = value
+        wandb.log(swa_test_log)
+        wandb.summary.update(_numeric_metric_items(swa_test_log))
+        wandb.summary.update(
+            {
+                "best_swa_epoch": int(best_swa_metrics["epoch"]),
+                "best_swa_n_averaged": int(best_swa_metrics["n_averaged"]),
+                "best_swa_val_primary/abupt_axis_mean_rel_l2_pct": best_swa_metrics["abupt_axis_mean_rel_l2_pct"],
+            }
+        )
+        print_metrics("swa_test_surface", swa_test_metrics["test_surface"])
+
+        # Restore the EMA-best weights so that the final artifact reflects the canonical checkpoint.
+        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+        model.load_state_dict(checkpoint["model"])
 
     log_model_artifact(
         run=run,
