@@ -173,7 +173,7 @@ class TransolverAttention(nn.Module):
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
-        slice_logits = self.in_project_slice(x_mid) / self.temperature
+        slice_logits = self.in_project_slice(x_mid) / self.temperature.clamp(min=1e-2)
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
