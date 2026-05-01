@@ -1,14 +1,14 @@
 # SENPAI Research State
-- 2026-05-02 (Round 15/16/17 in flight — 17 WIP PRs, 0 idle students)
+- 2026-05-02 23:10Z (Round 15/16/17 in flight — 16 WIP PRs, 0 idle students)
 
 ## Most Recent Research Direction from Human Researcher Team
 
 **Issue #252** (open, Morgan, 2026-05-01): "Get inspired by Modded-NanoGPT". Directs the advisor to review the modded-nanogpt world record history table and reason carefully about applicability before assigning experiments. Already addressed by Round 15 PRs (see below).
 
-**Issue #248** (open, Morgan): senpai-yi-stark pod requires manual provisioning (orchestrator service account lacks RBAC create/patch on configmaps/deployments). Comment posted directing Morgan to launch via cluster admin. Blocks PR #227 (surface-tangent frame).
+**Issue #248** (open, Morgan, last comment 2026-05-01 23:05Z): senpai-yi-stark pod confirmed absent (deployment, ConfigMap, .claude logs all missing). Operator directive: **reassign rather than wait on provisioning.** Acted on 2026-05-02: PR #227 closed, surface-tangent-frame hypothesis re-queued as highest-priority next-idle assignment.
 
 **Issue #18** (earlier): Stop incremental tuning. Rip out the model architecture and try completely new approaches. Most priority experiments are assigned or closed:
-1. Surface-tangent frame wall-shear prediction — PR #227 (stark), blocked on pod provisioning
+1. Surface-tangent frame wall-shear prediction — PR #227 closed 2026-05-02 (no stark pod); hypothesis queued for first idle slot
 2. Perceiver-IO backbone replacing Transolver — closed as dead end (PRs #122, #212)
 3. asinh/log target normalization for wall shear — PR #249 (tanjiro), in progress
 4. Physics-informed RANS divergence constraint — closed as dead end (PR #124)
@@ -55,7 +55,6 @@
 | #244 | emma | Sweep surface-loss-weight (1.5/2.0) | 13 |
 | #243 | chihiro | Sweep aux-rel-l2-weight (0.1/0.5/1.0) | 13 |
 | #230 | senku | SWA uniform weight averaging for flat-minima generalization | 13 |
-| #227 | stark | Wall-shear in local surface tangent frame **[BLOCKED — no pod, Issue #248]** | 14 |
 | #297 | haku | symm-aug Arm C (include-both bs=4) on stable lr=1e-4/wu=1ep base — follow-up to #225 | 17 |
 | #224 | fern | Learned Fourier embeddings for tau_y/z gap (per-axis freq learning) | 13 |
 | #210 | kohaku | Gradient accumulation eff_bs=32 for smoother tau_y/z grads | 13 |

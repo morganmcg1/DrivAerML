@@ -1,5 +1,41 @@
 # SENPAI Research Results
 
+## 2026-05-02 23:10 — PR #227 [stark]: Surface tangent-frame wall shear — CLOSED (pod never provisioned, RBAC blocker)
+
+- Branch: `stark/surface-tangent-frame` (deleted)
+- Hypothesis: Predict wall-shear in local {t1, t2, n} tangent frame (Duff et al. 2017 frame builder) so the network's regression head respects the no-slip BC geometry directly and decouples tau_y / tau_z from the global coordinate system that the current network conflates.
+- Status: Never ran. The `senpai-yi-stark` deployment / ConfigMap / pod never existed in the live `pai-2/default` cluster (operator confirmed via Issue #248 on 2026-05-01 23:05Z). Advisor pod's service account lacks RBAC create/patch on configmaps and deployments.apps, so we could not self-provision.
+- Operator directive: reassign rather than wait. PR #227 closed by advisor 2026-05-02 23:09Z. Issue #248 acknowledged; hypothesis queued as **highest-priority next-idle assignment** off PR #222 baseline (val_abupt = 9.291%).
+- Note: stark slot is not in the active `STUDENT_NAMES` for the `yi` advisor branch (16 active: alphonse, askeladd, chihiro, edward, emma, fern, frieren, gilbert, haku, kohaku, nezuko, norman, senku, tanjiro, thorfinn, violet). Reassignment will go to the first of those to become idle.
+
+## 2026-04-29 14:00 — PR #224: [fern] Learned Fourier embeddings (init-scale sweep) — CLOSED (divergence, no convergence past ep1)
+
+- Branch: `fern/learned-frequency-embeddings` (deleted)
+- Hypothesis: Replace fixed sincos positional encoding with a learned linear projection `W: Linear(3→d//2)`, output `[sin(Wx), cos(Wx)]`. With high init_scale (10–50), W spans high-frequency space but can adapt; hypothesized to improve τ_y/τ_z frequency selectivity.
+
+| Arm | init_scale | lr | clip | ep1 abupt | ep1 tau_y | ep1 tau_z | Outcome |
+|---|---:|---:|---:|---:|---:|---:|---|
+| A (sincos control) | — | 5e-4 | 1.0 | 10.99% | 14.0% | 15.1% | finished (reference) |
+| B (init=1) | 1 | 5e-4 | 1.0 | 12.38% | 15.6% | 17.2% | failed — worse than control |
+| C (init=0.1) | 0.1 | 5e-4 | 1.0 | 12.10% | 15.3% | 16.9% | failed — worse than control |
+| D (init=100) | 100 | 5e-4 | 1.0 | 11.20% | 14.1% | 15.2% | marginally worse |
+| E (init=10) | 10 | 5e-4 | 1.0 | 11.02% | 13.9% | 15.0% | marginal improvement, NaN ~ep4 |
+| F (init=50) | 50 | 5e-4 | 1.0 | 10.98% | 13.8% | 15.0% | marginal, NaN ~ep4 |
+| N (init=10, clip=0.3) | 10 | 5e-4 | 0.3 | 10.94% | 13.9% | 15.0% | slight improvement, NaN ~ep4 |
+| O (init=10, clip=0.5, lr=3e-4) | 10 | 3e-4 | 0.5 | **10.17%** | **12.9%** | **13.9%** | best ep1, NaN step ~19000 |
+| K (best val overall) | 10 | 5e-4 | 1.0 | — | — | — | best val 10.48%, did not beat bar 9.291% |
+
+Baseline: 9.291% val_abupt (PR #222 merge bar)
+
+- **Result:** CLOSED — no arm beat the 9.291% merge bar. Best overall val was arm K at 10.48% (−12.7% vs baseline). The ep1 improvement from init=1 (worse) to init=10 (better) confirmed the frequency selectivity hypothesis is directionally correct, but high-LR instability (NaN ~step 4764–19000 in all runs, fleet-wide bf16 + lr=5e-4) prevented convergence.
+- **Key finding:** Arm O (init=10, clip=0.5, lr=3e-4) showed the strongest ep1 signal: abupt 10.17% vs 10.99% control (−7.5%). However, O also diverged before step ~19000. The ep1 lead is architecturally real.
+- **W row-norm analysis:** Per-axis column norms `||W[:, x]||_2`, `||W[:, y]||_2`, `||W[:, z]||_2` were inconclusive at ep1 — not enough training time to show frequency selectivity emergence.
+- **init=1 pathology:** Learned W with small init is poorly conditioned at ep0 and converges slower than sincos. init≥10 is required.
+- **Fleet instability root cause:** lr=5e-4 + bf16 + clip≥0.5 causes NaN divergence around steps 4764–19000; confirmed across PRs #197, #224, #245.
+- **Follow-up assigned:** PR #298 (fern) — 4-arm sweep at stable lr=3e-4 + clip=0.5 + adamw on 6L/256d base to verify arm O's ep1 advantage persists through convergence.
+
+---
+
 ## 2026-05-02 00:00 — PR #225: [haku] Left-right symmetry augmentation for tau_y/z gap — CLOSED (ep1 signal, no convergence)
 
 - Branch: `haku/symmetry-augmentation` (deleted)
