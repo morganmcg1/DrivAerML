@@ -414,4 +414,70 @@ Wave 2 launched following completion of all Wave 1 streams. Focus: stack Wave 1 
 - **Group:** `chihiro-mlpratio8-seeds`
 - **Hypothesis:** mlp_ratio=8 (double standard 4) to increase MLP capacity. Seed sweep to distinguish architecture effect from seed variance.
 - **Status:** seed42 at step ~3.5K. seed1337 showing 11.92% at ep3 (early instability — monitoring).
+
+---
+
+## 2026-04-30 14:30 — PR #182: [violet] Volume loss downweight {0.5, 0.25} on Fourier PE baseline (CLOSED)
+
+- **Branch:** `violet/volume-loss-downweight-fourier-pe`
+- **Hypothesis:** Downweight `--volume-loss-weight` (0.5 or 0.25) to redirect optimizer gradient bandwidth from the already-converged vol_p axis toward the binding wsy/wsz shear axes.
+- **W&B run IDs:** `tnpb1777` (rank0), `y4bfvygm`, `avc3ic2e`, `o40i85ua` (Trial A only; Trial B never launched)
+- **W&B group:** `bengio-wave2-vol-downweight`
+
+### Results table (Trial A at ep2, killed)
+
+| Metric | Trial A (vol_w=0.5) @ ep2 | Wave 1 baseline | AB-UPT target |
+|---|---:|---:|---:|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **24.879** | 7.209 | 4.51 |
+| `val_primary/surface_pressure_rel_l2_pct` | 17.666 | 4.802 | 3.82 |
+| `val_primary/wall_shear_rel_l2_pct` | 27.369 | 8.160 | 7.29 |
+| `val_primary/wall_shear_y_rel_l2_pct` | 32.797 | 9.100 | 3.65 |
+| `val_primary/wall_shear_z_rel_l2_pct` | 34.596 | 10.869 | 3.63 |
+| `val_primary/volume_pressure_rel_l2_pct` | 15.808 | 4.166 | 6.08 |
+
+### Commentary
+
+Dead end. Killed Trial A at ep2 (24.88% abupt — 3.45× worse than baseline). Fixed volume downweighting destabilizes the loss balance at the surface level; even at only 50% vol downweight, the surface terms dominate catastrophically. Trial B (vol_w=0.25) was never launched.
+
+**Key failure mode**: The 5-epoch warmup + the kill-threshold interaction caused an initial false kill, which violet correctly diagnosed and fixed. But the underlying hypothesis is unsound: senku/metric-aware-loss concurrently showed vol_p < 6.08% (beats target) **without any volume downweighting**, confirming the knob is wrong.
+
+**Successor hypothesis**: Per-channel adaptive loss reweighting (PR #205) — targets the same wsy/wsz gap via running-variance-based auto-tuning rather than fixed scalar downweight.
+
+---
+
+## 2026-04-30 14:30 — PR #79: [emma] DrivAerML 60k Points + Fourier PE (sent back to WIP)
+
+- **Branch:** `emma/60k-points-fourier-pe`
+- **Hypothesis:** 60k surface/volume points (vs. default 40k) + FourierEmbed PE + T_max=50 cosine (Trial B v2, fixes Trial A's T_max=30 warm-restart pathology)
+- **W&B run ID:** `3evzgru1` (rank 0), group `bengio-stream1-emma-trialB`, running
+
+### W&B-verified metrics at ep5 (step ~59,434)
+
+| Channel | ep5 value | Trial A terminal (ep32) | Wave 1 baseline | AB-UPT |
+|---|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | **10.799** | 8.214 | 7.209 | 4.51 |
+| `surface_pressure_rel_l2_pct` | 7.281 | — | 4.802 | 3.82 |
+| `wall_shear_rel_l2_pct` | 11.592 | — | 8.160 | 7.29 |
+| `volume_pressure_rel_l2_pct` | 8.038 | — | 4.166 | 6.08 |
+| `wall_shear_y_rel_l2_pct` | 13.392 | — | 9.100 | 3.65 |
+| `wall_shear_z_rel_l2_pct` | 15.325 | — | 10.869 | 3.63 |
+
+### Commentary
+
+Run is healthy: `grad/global_norm=0.169`, `nonfinite_count=0`, all val/slope metrics negative (consistent improvement across all channels). FourierEmbed PE is learning (`grad_to_param_norm=0.011`). Best checkpoint saved at ep5.
+
+Sent back to WIP — too early to merge/close at ep5 (only 10% through training). Trial A's pathology was the cosine warm-restart bouncing at T_max=30, which pushed the terminal from an ep32 optimum (8.214%) to ep50 worse. Trial B v2 with T_max=50 removes this pathology; terminal should beat 8.214%. Whether it can reach <7.21% (alphonse) remains to be seen at ep30+.
+
+**New gates**: ep15 abupt<9.0%, ep20 abupt<8.0%, ep30 abupt<7.5%, terminal ep50 full test_primary breakdown.
+
+---
+
+## 2026-04-30 14:30 — PR #205: [violet] Per-channel surface loss rebalance (adaptive weights) (ASSIGNED)
+
+- **Branch:** `violet/per-channel-loss-rebalance`
+- **Hypothesis:** Replace uniform surface MSE with per-channel adaptive weighting (inversely proportional to exponential running mean of per-channel loss). Channels with higher residual loss (wsy, wsz — binding axes) get upweighted automatically.
+- **Motivation:** Wave 1 best shows wsy gap = 5.45pp, wsz gap = 7.24pp vs. AB-UPT targets. Equal channel weighting wastes gradient on cp (nearly converged) at the expense of the binding shear axes. Adaptive reweighting continuously redirects gradient bandwidth to the hardest axes.
+- **Implementation:** `PerChannelLossRebalancer` class with momentum=0.99 EMA of per-channel losses, normalized weights fed into `train_loss()`.
+- **W&B group:** `bengio-wave3-per-ch-rebalance`
+- **Status:** Assigned, student picking up.
 - **Notes:** Early instability at ep3 is common (kohaku had 13.51% at ep3, recovered to 7.94% at ep10).

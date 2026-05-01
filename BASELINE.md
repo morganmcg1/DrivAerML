@@ -6,9 +6,9 @@ The current best result on the bengio branch is from PR #74 (alphonse), 4L/256d 
 with Fourier Positional Encoding, no-EMA, cosine LR with T_max=30. Val metrics at best checkpoint
 (ep30, step 552,326, W&B run `m9775k1v`).
 
-Note: These are **validation** metrics — test_primary eval from the ep30 checkpoint is pending
-(student was unresponsive; merged on val metrics as wave leader). Test metrics will be added when
-the eval is run.
+Note: These are **validation** metrics — test_primary eval from the ep30 checkpoint is pending.
+
+**IMPORTANT val/test gap**: A systematic ~2x degradation on vol_p has been observed across experiments (e.g., val=4.17% → test~8-12%). Do not claim AB-UPT wins based solely on val metrics — test_primary confirmation required for all axis metrics before submission.
 
 | Metric | Current Best (val) | AB-UPT Target |
 |--------|-------------------|--------------|
