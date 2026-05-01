@@ -1,25 +1,58 @@
 # DrivAerML Baseline Metrics
 
-## Current Best: AB-UPT Public Reference (no experiment merged yet)
+## Current Best: PR #74 — alphonse 4L/256d Fourier PE baseline (2026-05-01)
 
-No experiments have been merged on the bengio branch yet. The baseline to beat is the AB-UPT public reference.
+The current best result on the bengio branch is from PR #74 (alphonse), 4L/256d Transformer
+with Fourier Positional Encoding, no-EMA, cosine LR with T_max=30. Val metrics at best checkpoint
+(ep30, step 552,326, W&B run `m9775k1v`).
 
-| Metric | Value | AB-UPT Target |
-|--------|-------|--------------|
-| `test_primary/surface_pressure_rel_l2_pct` | — | 3.82 |
-| `test_primary/wall_shear_rel_l2_pct` | — | 7.29 |
-| `test_primary/volume_pressure_rel_l2_pct` | — | 6.08 |
-| `test_primary/wall_shear_x_rel_l2_pct` | — | 5.35 |
-| `test_primary/wall_shear_y_rel_l2_pct` | — | 3.65 |
-| `test_primary/wall_shear_z_rel_l2_pct` | — | 3.63 |
-| `test_primary/abupt_axis_mean_rel_l2_pct` | — | ~4.51 (mean of 5 axis metrics) |
+Note: These are **validation** metrics — test_primary eval from the ep30 checkpoint is pending
+(student was unresponsive; merged on val metrics as wave leader). Test metrics will be added when
+the eval is run.
 
-## Historical Best from radford branch (PR #2593)
+| Metric | Current Best (val) | AB-UPT Target |
+|--------|-------------------|--------------|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **7.2091** | 4.51 |
+| `val_primary/surface_pressure_rel_l2_pct` | 4.802 | 3.82 |
+| `val_primary/wall_shear_rel_l2_pct` | 8.160 | 7.29 |
+| `val_primary/volume_pressure_rel_l2_pct` | **4.166** ✓ | 6.08 |
+| `val_primary/wall_shear_x_rel_l2_pct` | 7.109 | 5.35 |
+| `val_primary/wall_shear_y_rel_l2_pct` | 9.100 | 3.65 |
+| `val_primary/wall_shear_z_rel_l2_pct` | 10.869 | 3.63 |
 
-The strongest known DrivAerML result from prior research is the 4L/256d + no-EMA + Fourier features + T_max=30 recipe from radford PR #2593, which achieved approximately 12.96% on `abupt_axis_mean_rel_l2_pct`.
+**vol_p beats AB-UPT target.** abupt is 7.21% vs 4.51% target — 2.7pp gap remains.
 
-Note: The radford PR result still needs to beat the AB-UPT targets above. These reference the bengio branch's quest to decisively beat those targets.
+### Reproduce command (best config)
+
+```bash
+cd target/ && python train.py \
+  --model-num-layers 4 \
+  --model-hidden-dim 256 \
+  --no-use-ema \
+  --lr-cosine-t-max 30 \
+  --fourier-pe \
+  --no-compile-model \
+  --nproc_per_node 4 \
+  --wandb_group bengio-wave2
+```
+
+## AB-UPT Public Reference Targets
+
+| Metric | AB-UPT Target |
+|--------|--------------|
+| `test_primary/surface_pressure_rel_l2_pct` | 3.82 |
+| `test_primary/wall_shear_rel_l2_pct` | 7.29 |
+| `test_primary/volume_pressure_rel_l2_pct` | 6.08 |
+| `test_primary/wall_shear_x_rel_l2_pct` | 5.35 |
+| `test_primary/wall_shear_y_rel_l2_pct` | 3.65 |
+| `test_primary/wall_shear_z_rel_l2_pct` | 3.63 |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | ~4.51 (mean of 5 axis metrics) |
+
+## Historical Reference: radford branch (PR #2593)
+
+Approximately 12.96% abupt — the bengio Wave 1 result (7.21%) is a significant improvement.
 
 ## Update Log
 
 - 2026-04-30: Branch initialized. No experiments merged yet. AB-UPT reference values are the targets.
+- 2026-05-01: PR #74 (alphonse) merged as Wave 1 leader. New best val_abupt = 7.2091% (ep30, run m9775k1v). vol_p beats AB-UPT target at 4.166%.
