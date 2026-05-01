@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 05:50 UTC
+- **Date:** 2026-05-01 06:00 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,9 +37,9 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 
 | PR | Student | Hypothesis | Run state | Latest val (vs SOTA ep9 9.48) |
 |---|---|---|---|---|
-| **#141** | askeladd | sw=2.0 + vw=2.0 + (T_max=50 confound) | hit 270.7m timeout, test eval pending | **full_val 9.445 (-0.41% BEATS SOTA 9.484)** |
-| #142 | thorfinn | compound + vol_w=2.0 | running rt=233m, near timeout | 11.15 (~ep5 SOTA equiv) |
-| #146 | edward | 6L/256d depth swap (yi −21% port) | running rt=186m | 11.92 (~ep4-5 SOTA equiv) |
+| **#141** | askeladd | sw=2.0 + vw=2.0 + (T_max=50 confound) | finished | val 9.445 (-0.41%) but **test 10.604 (+0.23% NOT a winner)** |
+| #142 | thorfinn | compound + vol_w=2.0 | finalizing test eval | best_val 10.607 (+11.8% NOT a winner) |
+| #146 | edward | 6L/256d depth swap (yi −21% port) | finished | test 12.662 (+19.7% NOT a winner, 9-ep budget too short) |
 | #147 | frieren | compound + wd=2e-3 | **POD STUCK on PR #134 round9 still** | no round10 W&B run yet |
 | #149 | tanjiro | per-axis tau_y/z weights W=1.5 | **POD IDLE 0% GPU** | no round10 W&B run yet |
 | #157 | nezuko | mlp_ratio=6 (yi Wave 1 lever) | running rt=31m, attempt 3 (×2 OOM) | val ep0=56.05 |
@@ -47,7 +47,10 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 | #159 | fern | Lion β1=0.95 (momentum sweep) | running rt~5m, retry after fail | no val yet |
 
 ### Key observations
-- **askeladd #141 4-way BEATS SOTA on val (9.445 vs 9.484, -0.41%)**. Per-component val deltas vs SOTA `d03oghpp`: surface_pressure −0.92%, volume_pressure −0.86%, wall_shear −0.42%, wall_shear_x −1.04%, wall_shear_y +0.76%, wall_shear_z −0.67%. Broad-spectrum improvement. Expected test ~10.535 (val 9.445 × SOTA ratio 1.115). **Test eval pending; if test < 10.580, MERGE.**
+- **askeladd #141 val→test divergence**: val −0.41% (9.445 vs 9.484) BUT test +0.23% (10.604 vs 10.580). Test breakdown: surface_p −0.08%, vol_p −0.60% (improved!), wall_shear_y +1.25% (regression), wall_shear_z +0.35%. Net: val/test ratio 1.123 vs SOTA 1.115 — slight overfit to val. **CLOSEOUT, not merge.**
+- **vol_p test improved -0.60%** with vw=2.0 + sw=2.0 — confirms volume gradient lever has signal but tau-axis regressions cancel it.
+- **thorfinn #142 (vw=2.0 alone)** at best_val 10.607 = +11.8% behind SOTA. vw=2.0 alone NOT effective on top of compound base.
+- **edward #146 (6L/256d)** test 12.662 = +19.7% behind. Depth swap requires more than 9-epoch budget.
 - **thorfinn #142** vol_w=2.0 trajectory looks slow — at 11.15 with ~3 epochs of timeout left.
 - **edward #146** 6L/256d at 11.92 — same slow-start pattern as nezuko's failed 5L. Depth swap with same point budget likely won't fit in 9-epoch timeout.
 - **frieren and tanjiro pods broken**. Frieren still running PR #134 (round9, GPU 100%); tanjiro idle (GPU 0%) despite branch checked out. Cannot intervene from advisor — pods own their loop.
