@@ -124,6 +124,33 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class LearnedFourierEmbed(nn.Module):
+    """Learned Fourier positional embedding: replaces fixed sincos grid with a
+    learned linear projection W: R^{coord_dim} -> R^{hidden_dim//2}, output
+    is [sin(W x), cos(W x)] concatenated along the feature dim.
+
+    W is initialized from N(0, std) where std = init_scale / sqrt(hidden_dim).
+    For hidden_dim=256 and meter-scale coords (vehicle bbox ~8m), init_scale
+    in [10, 32] gives phase angles of order 2-8 rad at edges (Tancik 2020).
+    """
+
+    def __init__(self, hidden_dim: int, coord_dim: int = 3, init_scale: float = 10.0):
+        super().__init__()
+        if hidden_dim % 2 != 0:
+            raise ValueError("LearnedFourierEmbed requires an even hidden_dim")
+        self.hidden_dim = hidden_dim
+        self.coord_dim = coord_dim
+        self.init_scale = float(init_scale)
+        self.W = nn.Linear(coord_dim, hidden_dim // 2, bias=False)
+        std = self.init_scale / (hidden_dim ** 0.5)
+        nn.init.normal_(self.W.weight, mean=0.0, std=std)
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords = coords.float()
+        proj = self.W(coords)
+        return torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -350,6 +377,8 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_learned_fourier_embed: bool = False,
+        learned_fourier_init_scale: float = 10.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,12 +391,21 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.use_learned_fourier_embed = use_learned_fourier_embed
+        self.learned_fourier_init_scale = float(learned_fourier_init_scale)
 
-        self.pos_embed = ContinuousSincosEmbed(
-            hidden_dim=n_hidden,
-            input_dim=space_dim,
-            max_wavelength=pos_max_wavelength,
-        )
+        if use_learned_fourier_embed:
+            self.pos_embed = LearnedFourierEmbed(
+                hidden_dim=n_hidden,
+                coord_dim=space_dim,
+                init_scale=learned_fourier_init_scale,
+            )
+        else:
+            self.pos_embed = ContinuousSincosEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                max_wavelength=pos_max_wavelength,
+            )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -579,6 +617,8 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_learned_fourier_embed: bool = False
+    learned_fourier_init_scale: float = 10.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,6 +785,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_learned_fourier_embed=config.use_learned_fourier_embed,
+        learned_fourier_init_scale=config.learned_fourier_init_scale,
     )
 
 
@@ -1068,6 +1110,49 @@ def collect_weight_metrics(
     if log_histograms and finite_weight_chunks:
         metrics["train/weight_hist/all"] = wandb.Histogram(torch.cat(finite_weight_chunks).numpy())
 
+    return metrics
+
+
+def collect_learned_fourier_metrics(model: nn.Module) -> dict[str, float | wandb.Histogram]:
+    """Per-axis frequency statistics of any LearnedFourierEmbed in the model.
+
+    Reports mean magnitude of W per axis (to see if the model emphasizes
+    one coordinate axis over another), the std of W (frequency spread),
+    and effective rank of W.
+    """
+
+    base_model = getattr(model, "_orig_mod", model)
+    metrics: dict[str, float | wandb.Histogram] = {}
+    for name, module in base_model.named_modules():
+        if not isinstance(module, LearnedFourierEmbed):
+            continue
+        with torch.no_grad():
+            W = module.W.weight.detach().float()  # [d_model//2, coord_dim]
+            prefix = f"train/learned_fourier/{name or 'pos_embed'}"
+            metrics[f"{prefix}/W_std"] = float(W.std().item())
+            metrics[f"{prefix}/W_abs_mean"] = float(W.abs().mean().item())
+            metrics[f"{prefix}/W_abs_max"] = float(W.abs().max().item())
+            for axis_idx in range(W.shape[1]):
+                axis_name = ["x", "y", "z"][axis_idx] if W.shape[1] <= 3 else f"a{axis_idx}"
+                col = W[:, axis_idx]
+                metrics[f"{prefix}/W_axis_{axis_name}_abs_mean"] = float(col.abs().mean().item())
+                metrics[f"{prefix}/W_axis_{axis_name}_std"] = float(col.std().item())
+                metrics[f"{prefix}/W_axis_{axis_name}_norm"] = float(col.norm().item())
+            try:
+                S = torch.linalg.svdvals(W)
+                S2 = (S ** 2)
+                p = S2 / (S2.sum() + 1e-12)
+                eff_rank = float(torch.exp(-(p * (p.clamp_min(1e-12)).log()).sum()).item())
+                metrics[f"{prefix}/W_effective_rank"] = eff_rank
+                metrics[f"{prefix}/W_singular_max"] = float(S[0].item())
+                metrics[f"{prefix}/W_singular_min"] = float(S[-1].item())
+            except Exception:
+                pass
+            metrics[f"{prefix}/W_hist"] = wandb.Histogram(W.cpu().numpy())
+            row_norms = W.norm(dim=1)
+            metrics[f"{prefix}/W_row_norm_mean"] = float(row_norms.mean().item())
+            metrics[f"{prefix}/W_row_norm_std"] = float(row_norms.std().item())
+            metrics[f"{prefix}/W_row_norm_hist"] = wandb.Histogram(row_norms.cpu().numpy())
     return metrics
 
 
@@ -1762,6 +1847,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_type/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
+    wandb.define_metric("train/learned_fourier/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
@@ -2026,6 +2112,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         for split_name, metrics in val_metrics.items():
             for key, value in metrics.items():
                 log_metrics[f"val/{split_name}/{key}"] = value
+        log_metrics.update(collect_learned_fourier_metrics(model))
         log_metrics.update(
             val_slope_tracker.update(
                 global_step=global_step,
