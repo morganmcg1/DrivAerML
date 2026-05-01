@@ -6,6 +6,26 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 12:30 UTC — PR #157 CLOSED: nezuko mlp_ratio=6 (test 11.261, +6.4% vs SOTA)
+
+- **Branch:** `nezuko/round10-mlp-ratio-6`
+- **Hypothesis:** mlp_ratio=4→6 (yi Wave 1 confirmed lever) ports to tay compound SOTA stack — wider FFN improves surface topology / fine-grained pressure gradients.
+- **Result:** test_abupt 11.261 (+6.4% regression), best val 10.131 ep7 (+6.8%). All metrics regressed: surface_p +7.5%, wall_shear +7.3%, vol_p +3.3%, tau_y +9.7%, tau_z +5.9%.
+- **W&B:** `xuppho03` (verified) — val flatlined ep7→ep8 (10.131→10.142) while SOTA still improving 9.73→9.484 — capacity ceiling hit early under 9-epoch budget.
+- **Why it failed:** +15% param cost via FFN width does not buy generalization at this budget. FFN width is not where the headroom is in our compound SOTA stack. Combined with the T_max=50 vs SOTA's effective T_max=50 fallback, this is a clean single-delta on mlp_ratio.
+- **Conclusion:** mlp_ratio=4 stays. FFN-width capacity expansion family closed. Architecture-level capacity tweaks (FFN width, depth) are saturated at 9-ep budget — next bold capacity moves should be data-side (sampling density) or loss-side (re-weighting), not parameter count.
+- **Nezuko reassigned** to PR #187: volume_loss_weight=1.5 (gentler than #142's 2.0; attack vol_p ×2.1 gap).
+
+## 2026-05-01 12:25 UTC — PR #158 CLOSED: alphonse vol_pts=96k confounded (test 13.179, +24.6% vs SOTA)
+
+- **Branch:** `alphonse/round10-vol-pts-60k` (re-scoped pre-launch to 96k after baseline correction)
+- **Hypothesis:** volume_points 65k→96k attacks volume_pressure ×2.1 binding gap.
+- **Result:** test_abupt 13.179 (+24.6%), surface_p 7.817 (+37.4%), wall_shear 13.461 (+29.2%), vol_p 13.720 (+7.7%), best val 12.067.
+- **W&B:** `yfi14f1w`
+- **Why CONFOUNDED, not negative:** student ran `--lr-cosine-t-max 0` which (per `trainer_runtime.py:1255`) falls back to `T_max=epochs=9` ⇒ LR collapsed to 1e-6 by ep9 vs SOTA's `t_max=0, epochs=50` ⇒ `T_max=50` (essentially flat ~1e-4 over 9 epochs). LR collapsed before model could leverage extra volume sampling. Excellent post-hoc analysis by alphonse identified this.
+- **Key finding (research-level):** `--lr-cosine-t-max 0` is a footgun. Specify `--lr-cosine-t-max 50` explicitly in any 9-epoch single-delta to match SOTA's effective LR schedule.
+- **Alphonse reassigned** to PR #186: vol_pts=96k CLEAN re-run with `--lr-cosine-t-max 50`. The original hypothesis (vol_pts as binding-gap lever) is still untested; this finishes the job properly.
+
 ## 2026-05-01 06:35 UTC — PR #142 CLOSED: thorfinn vol_w=2.0 (test 11.721, +10.78% vs SOTA)
 
 - **Branch:** `thorfinn/round10-compound-volw2`
