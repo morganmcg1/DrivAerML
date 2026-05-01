@@ -556,6 +556,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    asinh_wallshear_yz: bool = False
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1304,6 +1305,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    asinh_wallshear_yz: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1343,6 +1345,17 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
+        if asinh_wallshear_yz:
+            # Compress heavy-tailed wall-shear y (idx 2) and z (idx 3) targets
+            # via asinh. The model output is trained to live in asinh-normalized
+            # space for these channels and is inverted with sinh at metric time.
+            surface_target_used = torch.cat(
+                [
+                    surface_target_used[..., :2],
+                    torch.asinh(surface_target_used[..., 2:4]),
+                ],
+                dim=-1,
+            )
         surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
             surface_pred_used,
             surface_target_used,
@@ -1432,6 +1445,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    asinh_wallshear_yz: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1471,13 +1485,38 @@ def evaluate_split(
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
-        surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
+        if asinh_wallshear_yz:
+            # Mirror the training-time target transform for val SSE so it stays
+            # comparable to train loss (model output is in asinh-normalized space
+            # for y/z, targets are asinh-transformed before MSE).
+            surface_target_norm_for_loss = torch.cat(
+                [
+                    surface_target_norm[..., :2],
+                    torch.asinh(surface_target_norm[..., 2:4]),
+                ],
+                dim=-1,
+            )
+        else:
+            surface_target_norm_for_loss = surface_target_norm
+        surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm_for_loss, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
         surface_loss_count += surface_count
         volume_loss_sse += volume_sse
         volume_loss_count += volume_count
-        surface_pred = transform.invert_surface(surface_pred_norm)
+        if asinh_wallshear_yz:
+            # Invert asinh on y/z predictions (sinh) before standard denorm so
+            # all rel-L2/MAE metrics are computed in physical units.
+            surface_pred_norm_for_metrics = torch.cat(
+                [
+                    surface_pred_norm[..., :2],
+                    torch.sinh(surface_pred_norm[..., 2:4]),
+                ],
+                dim=-1,
+            )
+        else:
+            surface_pred_norm_for_metrics = surface_pred_norm
+        surface_pred = transform.invert_surface(surface_pred_norm_for_metrics)
         volume_pred = transform.invert_volume(volume_pred_norm)
 
         if bool(batch.surface_mask.any()):
@@ -1801,6 +1840,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                asinh_wallshear_yz=config.asinh_wallshear_yz,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1992,7 +2032,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, asinh_wallshear_yz=config.asinh_wallshear_yz)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2107,7 +2147,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, asinh_wallshear_yz=config.asinh_wallshear_yz)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2141,7 +2181,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, asinh_wallshear_yz=config.asinh_wallshear_yz)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
