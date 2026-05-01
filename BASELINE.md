@@ -1,10 +1,16 @@
 # DrivAerML Baseline Metrics
 
-## Current Best: PR #74 — alphonse 4L/256d Fourier PE baseline (2026-05-01)
+## Current Best: PR #74 — alphonse 4L/256d baseline (2026-05-01)
 
 The current best result on the bengio branch is from PR #74 (alphonse), 4L/256d Transformer
-with Fourier Positional Encoding, no-EMA, cosine LR with T_max=30. Val metrics at best checkpoint
-(ep30, step 552,326, W&B run `m9775k1v`).
+with **`ContinuousSincosEmbed` PE** (the existing default), no-EMA, cosine LR with T_max=30.
+Val metrics at best checkpoint (ep30, step 552,326, W&B run `m9775k1v`).
+
+**Baseline correction (2026-05-01 16:14Z, frieren PR #218 audit)**: The Wave 1 alphonse PR was
+a squash merge of an assignment commit only — no model code landed. FourierEmbed (chihiro PR
+#176) was added to bengio later. So the 7.21% baseline does NOT use Fourier PE; it uses the
+existing `ContinuousSincosEmbed` default. The `--fourier-pe` flag is now wired but has not
+been validated as a standalone improvement on the 4L/256d recipe.
 
 Note: These are **validation** metrics — test_primary eval from the ep30 checkpoint is pending.
 
@@ -25,16 +31,18 @@ Note: These are **validation** metrics — test_primary eval from the ep30 check
 ### Reproduce command (best config)
 
 ```bash
-cd target/ && python train.py \
-  --model-num-layers 4 \
+cd target/ && torchrun --standalone --nproc-per-node=4 train.py \
+  --model-layers 4 \
   --model-hidden-dim 256 \
+  --model-heads 4 \
   --no-use-ema \
+  --lr 3e-4 \
   --lr-cosine-t-max 30 \
-  --fourier-pe \
   --no-compile-model \
-  --nproc_per_node 4 \
-  --wandb_group bengio-wave2
+  --wandb-group bengio-wave2
 ```
+
+(no `--fourier-pe` — the m9775k1v baseline used `ContinuousSincosEmbed`, the existing default)
 
 ## AB-UPT Public Reference Targets
 
@@ -56,3 +64,4 @@ Approximately 12.96% abupt — the bengio Wave 1 result (7.21%) is a significant
 
 - 2026-04-30: Branch initialized. No experiments merged yet. AB-UPT reference values are the targets.
 - 2026-05-01: PR #74 (alphonse) merged as Wave 1 leader. New best val_abupt = 7.2091% (ep30, run m9775k1v). vol_p beats AB-UPT target at 4.166%.
+- 2026-05-01 16:14Z: Corrected baseline description — alphonse `m9775k1v` used `ContinuousSincosEmbed` not FourierEmbed (frieren PR #218 audit confirmed via W&B run config); PR #74 was a squash merge of the assignment only, no model code. FourierEmbed was added later via chihiro PR #176. Reproduce command updated to drop `--fourier-pe`.
