@@ -1,10 +1,7 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 12:30 UTC
+- **Updated:** 2026-05-01 14:30 UTC
 - **Branch:** `yi`
 - **Baseline:** PR #99 (fern), `abupt_axis_mean_rel_l2_pct = 10.69`, W&B run `3hljb0mg`
-
-## CURRENT HOTTEST FINDING (2026-05-01 12:30 UTC)
-**PR #168 askeladd ep2 crossover:** gawdh7ah (λ=0.10) ep2 val_abupt = **12.285** vs PR #99 fern ep2 = **12.417**. First experiment in this round to beat baseline trajectory at a matched epoch. vol_p ep2 = 7.055 vs 10.531 confirms backbone regularization. Awaiting ep3 (~13:30 UTC) for go/no-go on merge bar (10.69). Counter-intuitive ranking confirmed: λ=0.10 most stable; λ=0.01 fails (insufficient anchor → out-of-plane drift → squared-dot spike). λ=0.05 (1buc9rh1) ep1 abupt=15.875 = best ep1 of any arm.
 
 ---
 
@@ -15,10 +12,10 @@
 
 **Morgan's ordered priority list:**
 1. Surface-tangent frame wall-shear prediction — 4× wall shear y/z error is a coordinate frame mismatch
-2. Perceiver-IO backbone replacement — ~3× faster per epoch = more epochs within budget
-3. asinh/log target normalization — wall shear spans 4 decades (tested, **NEGATIVE — tail suppression problem**)
-4. Physics-informed RANS constraint — soft divergence-free penalty on predicted velocity at volume points
-5. 1-cycle LR schedule with higher peak (tested, **NEGATIVE — budget starvation + stability ceiling at ~6.5e-4**)
+2. **Perceiver-IO backbone replacement** — ~3× faster per epoch = more epochs within budget (**ASSIGNED #212 noam**)
+3. asinh/log target normalization — tested, **NEGATIVE — tail suppression problem (PR #123)**
+4. Physics-informed RANS constraint — soft divergence-free penalty (**ASSIGNED #201 nezuko**)
+5. 1-cycle LR schedule with higher peak — tested, **NEGATIVE — budget starvation + stability ceiling (PRs #164, #191)**
 
 ---
 
@@ -38,121 +35,119 @@
 
 ---
 
-## Active WIP PRs (as of 2026-05-01 11:45 UTC)
+## Active WIP PRs (as of 2026-05-01 14:30 UTC)
 
-| PR | Student | Hypothesis | Status |
-|---|---|---|---|
-| **#199** | stark | Smooth tangent-frame wall-shear prediction (continuous e_x-projection frame, 2D output) | JUST ASSIGNED |
-| **#200** | emma | Wall-shear magnitude/direction decomposition loss (log-mag + cosine direction) | JUST ASSIGNED |
-| **#198** | senku | Stochastic Weight Averaging (SWA) free gain (r12) | WIP, no data yet |
-| **#197** | gilbert | k-NN local surface attention for tau_y/z gap (r12) | WIP, no data yet |
-| **#196** | edward | Lion optimizer sweep vs AdamW (r12) | WIP, no data yet |
-| **#193** | thorfinn | Curvature-biased surface point sampling | WIP, 1 comment only |
-| **#192** | tanjiro | asinh target normalization for tau_y/z (separate from frieren's approach) | WIP, 4-seed relaunch w/ warmup-500 |
-| **#191** | haku | 1-cycle LR max=1e-3 (corrected epoch-limited schedule) | WIP, A_tuned running |
-| **#184** | kohaku | FiLM with identity/zero-init (DiT-style) | **arm B (lr=4e-4) sole survivor, ep2≈99%, ETA ~14:25 UTC** |
-| **#183** | fern | Omega-bank frequency sweep | **3 arms healthy (A2/C3/D3); mw=100 FALSIFIED; ep2 results ~12:00-12:20 UTC** |
-| **#171** | norman | Snapshot ensemble with cyclic LR | **V2 running (okm6uoea, eta_min=5e-5 + clip=0.5); ETA ~17:30 UTC** |
-| **#168** | askeladd | Normal-consistency penalty λ∈{0.01,0.05,0.10} | **λ=0.10 (gawdh7ah) ep2=12.285 < fern ep2 12.417 — FIRST CROSSOVER; ep3 ETA ~13:30 UTC** |
-| **#165** | chihiro | mlp_ratio=8 hardened (3-seed) | **seed1337 ep3=11.92 (NOT beating 10.69); clip=0.5 go/no-go at 12:20/13:30 UTC** |
-| **#164** | alphonse | 8L/256d + 1cycle LR recovery | WIP |
-| **#152** | violet | 14-dim analytic geometry moment conditioning | WIP |
-| **#201** | nezuko | Physics-informed RANS divergence-free penalty on volume velocity | JUST ASSIGNED |
-| **#123** | frieren | asinh/log wall-shear target normalization | **Critical finding: asinh-1.0 trades metric for stability; arms A/D/B(v3p1) final results ~12:10-13:51 UTC** |
+### Round-6 Assignments (Just Assigned)
+
+| PR | Student | Hypothesis |
+|---|---|---|
+| **#207** | alphonse | Adaptive Gradient Clipping (AGC, NFNets) per-parameter stability |
+| **#208** | askeladd | Sandwich-LN normalization to unlock 8L/256d depth |
+| **#209** | frieren | Step-decay LR drop after ep1 (5e-4→1e-4, attacks ep1→ep2 divergence) |
+| **#210** | kohaku | Gradient accumulation eff_bs=32 for smoother tau_y/z grads |
+| **#211** | tanjiro | Relative magnitude-based grad-skip (EMA-adaptive) fleet infra |
+| **#212** | noam | Perceiver-IO backbone replacement (2-4× speed → more epochs) |
+
+### Ongoing From Earlier Rounds
+
+| PR | Student | Hypothesis |
+|---|---|---|
+| **#201** | nezuko | Physics-informed RANS divergence-free penalty on volume velocity |
+| **#200** | emma | Wall-shear magnitude/direction decomposition loss (τ y/z gap) |
+| **#199** | stark | Smooth tangent-frame wall-shear prediction (continuous e_x-projection) |
+| **#198** | senku | Stochastic Weight Averaging (SWA) free gain |
+| **#197** | gilbert | k-NN local surface attention for tau_y/z gap |
+| **#196** | edward | Lion optimizer sweep vs AdamW |
+| **#193** | thorfinn | Curvature-biased surface point sampling |
+| **#191** | haku | 1-cycle LR max=1e-3 (corrected epoch-limited schedule) |
+| **#183** | fern | Omega-bank frequency sweep |
+| **#171** | norman | Snapshot ensemble with cyclic LR |
+| **#165** | chihiro | mlp_ratio=8 hardened (3-seed) |
+| **#152** | violet | 14-dim analytic geometric moment conditioning |
+
+---
+
+## Round-6 Closed PRs (Negatives)
+
+| PR | Student | Hypothesis | Best Val | Verdict |
+|---|---|---|---:|---|
+| **#168** | askeladd | Normal-consistency penalty λ∈{0.01,0.05,0.10} | 12.285 (ep2) | NEGATIVE — tangentiality enforcement provides no metric gain |
+| **#164** | alphonse | 8L/256d + 1cycle LR | DNF (all diverged) | NEGATIVE — 8L/256d has LR ceiling < 5e-4 |
+| **#123** | frieren | asinh/log wall-shear target normalization | 17.55 (ep1) | NEGATIVE — tail suppression kills the signal |
 
 ---
 
 ## Current Research Themes
 
 ### Theme 1: Coordinate-Frame Hypothesis for tau_y/z Gap (HIGHEST PRIORITY)
-**Root question:** Is the 4× tau_y/z error a coordinate-frame problem? AB-UPT achieves equal error on tau_x/y/z (~3.6) while we have 10/14/15. The asymmetry exists in our model but not in AB-UPT.
+**Root question:** Is the 4× tau_y/z error a coordinate-frame problem? AB-UPT achieves equal error on tau_x/y/z (~3.6) while we have 10/14/15.
 
-- **#199 stark (NEW):** Full tangent-frame prediction (smooth e_x-projection frame). Addresses Morgan's #1 directive. Different from PR #121 (Duff ONB discontinuity) — uses continuous frame with fallback at poles.
-- **#168 askeladd:** Normal-consistency penalty (soft tangentiality constraint from the other direction)
-- **#200 emma (NEW):** Magnitude/direction decomposition loss — separate log-mag and cosine-direction losses to decouple scale from alignment learning
-- **#192 tanjiro:** asinh normalization applied specifically to y/z channels
+- **#199 stark:** Full tangent-frame prediction (smooth e_x-projection frame). Morgan's #1 directive.
+- **#200 emma:** Magnitude/direction decomposition loss — decouple scale from alignment learning.
+- **CLOSED NEGATIVE #168 askeladd:** Normal-consistency penalty — model already near-tangential naturally.
+- **CLOSED NEGATIVE #121:** Hard Duff-ONB tangent-frame — discontinuous at t1.x sign-flip.
 
-### Theme 2: Target Representation for Heavy-Tail Distributions
-- **#123 frieren (near completion):** PARTIAL RESULT — asinh-1.0 is NEGATIVE (suppresses tail learning signal). log1p (arm D) and asinh-0.5 (arm B) still viable; final results ~12:10-13:51 UTC.
-- **Key finding:** Cannot suppress tail to gain stability — the gap lives in the tail. Need a way to handle heavy-tailed targets WITHOUT compression.
+### Theme 2: Architecture Replacement (BOLD SWINGS — Morgan's directive)
+- **#212 noam (NEW):** Perceiver-IO backbone — cross-attention bottleneck, 2-4× faster per epoch → 5+ epochs in budget. Morgan's #2 priority.
+- **#208 askeladd (NEW):** Sandwich-LN to unlock 8L/256d depth — prior 8L attempts all diverged; sandwich-LN dampens gradient growth across depth.
 
-### Theme 3: Optimizer Stability Infrastructure (CONFIRMED FLEET-WIDE GAP)
-**Four independent confirmations (frieren #123, fern #183, askeladd #168, chihiro #165):** PR #169's NaN-skip only catches non-finite gradients. Large-but-finite spikes (165, 252, 2.2M) bypass it, corrupt Adam m/v after clipping.
-- Needed: magnitude-based grad-skip (pre_clip_norm > N × running_median, or abs threshold)
-- Also needed: finite-but-pathological loss guard (abort if train_loss > 5× running_median for sustained steps)
-- **This should be an infrastructure PR** — candidate to assign to the next available thorfinn/infra-capable student
+### Theme 3: Optimizer Stability Infrastructure
+**Four independent confirmations (PRs #123, #168, #165, #164):** Large-but-finite grad spikes bypass PR #169's NaN-skip.
+- **#211 tanjiro (NEW):** Relative magnitude-based grad-skip (EMA-adaptive threshold).
+- **#207 alphonse (NEW):** AGC per-parameter clipping (NFNets). Addresses root cause by making clip threshold proportional to weight norm.
+- Together these form a complementary infra pair; combine if both show promise.
 
-### Theme 4: Physics-Informed Constraints
-- **#201 nezuko (NEW):** RANS divergence-free penalty — soft constraint λ·mean(∇·u²) on volume velocity predictions. 4-arm sweep: λ∈{0.001, 0.01, 0.1} + control (λ=0.0). Addresses Morgan's #4 directive. Hypothesis: enforcing ∇·u=0 improves near-wall velocity gradient accuracy → reduces tau_y/z errors.
-- **#168 askeladd:** Normal-consistency penalty — related physics-informed constraint from the surface tangentiality direction.
-- **KEY FINDING (PR #151, nezuko) — CLOSED NEGATIVE:** L/R symmetry augmentation — both arms crashed NaN in epoch 2 (val abupt 17.63 and 45.92 vs baseline 10.69). DrivAerML cars have real Y-asymmetries; symmetry label assumption is invalid.
+### Theme 4: LR Schedule Optimization
+- **#209 frieren (NEW):** Step-decay LR drop after ep1 (5e-4→1e-4). Attacks the universal ep1→ep2 train/val divergence observed across 4 normalization variants in PR #123.
+- **CLOSED NEGATIVE #164/#191:** OneCycleLR — 8L/256d and LR ceiling at ~6.5e-4 confirmed.
 
-### Theme 5: FiLM Geometry Conditioning (Near Complete)
-- **#184 kohaku:** FiLM stability characterized. 5/5 at lr=5e-4 dead regardless of init_scale. Stability axis is lr alone. Arm B (lr=4e-4) sole survivor, completing ~14:25 UTC.
-- **Key finding:** FiLM requires lr ≤ 4e-4, which may conflict with the lr=5e-4 optimum. The volume_pressure signal from PR #126 Arm-3 (vp=7.05 vs 7.85 baseline) is real — FiLM may still help volume even if it can't close the tau_y/z gap.
+### Theme 5: Batch Statistics and Gradient Quality
+- **#210 kohaku (NEW):** Gradient accumulation eff_bs=32. Zero VRAM cost; smoother gradient estimates for rare high-|τ| tail points.
+- **#183 fern:** Omega-bank frequency sweep. Three arms healthy.
 
-### Theme 6: Training Budget Efficiency
-- **#171 norman:** Snapshot ensemble with cyclic LR. V1 diverged at epoch 3 (50× LR jump); V2 has 10× ratio + clip=0.5, running cleanly, ETA ~17:30 UTC.
-- **#196 edward:** Lion optimizer (round 12) — Lion typically needs ~3× lower LR than AdamW
-- **#198 senku:** SWA — free post-train gain from averaging model weights across last epochs
-- **#197 gilbert:** k-NN local attention — addresses spatial locality for tau_y/z
+### Theme 6: Physics-Informed Constraints
+- **#201 nezuko:** RANS divergence-free penalty on volume velocity. Morgan's #4 directive.
+- **CLOSED NEGATIVE #168:** Normal-consistency (tangential) constraint.
 
-### Theme 7: Architecture Exploration (Round 12)
-- **#191 haku:** 1cycle LR (corrected — calibrated to actual epoch budget)
-- **#164 alphonse:** 8L/256d depth with 1cycle (time-limited recovery — must beat PR #144 ep4 val=12.69)
+### Theme 7: Ensemble and Budget Efficiency
+- **#171 norman:** Snapshot ensemble with cyclic LR (V2).
+- **#198 senku:** SWA — free post-train gain from weight averaging.
+- **#196 edward:** Lion optimizer sweep.
+
+### Theme 8: Data Representation and Sampling
+- **#197 gilbert:** k-NN local surface attention for tau_y/z spatial locality.
+- **#193 thorfinn:** Curvature-biased surface point sampling.
+- **#152 violet:** 14-dim analytic geometric moment conditioning.
 
 ---
 
 ## Key Structural Findings Accumulated
 
 ### Stability
-- **Fleet-wide instability mechanism (CONFIRMED):** Large-but-finite grad spikes bypass PR #169's NaN-skip. clip_grad_norm=1.0 normalizes direction but preserves poison vector → Adam m/v corruption. Fix needed: magnitude-based skip.
-- **FiLM stability axis is LR, not init_scale:** scale=0.001 delays divergence 6× vs scale=1.0 but cannot prevent it at lr=5e-4. lr=4e-4 is the stability boundary.
-- **mw=100 (omega-bank) structurally untenable:** 3 independent attempts all diverged. Low max_wavelength → highly compressed Fourier features → fragile at lr=5e-4.
-- **LR ceiling at ~6.5e-4:** OneCycleLR peaks ≥ 6.5e-4 diverge regardless of warmup schedule.
-- **W_y=W_z > 2.0 overfits tau_y/z:** W=3 (PR #66) scores 13.18 vs 12.74 for W=2. Static W=2 is the sweet spot.
+- **Fleet-wide instability mechanism (CONFIRMED):** Large-but-finite grad spikes bypass PR #169's NaN-skip. clip_grad_norm=1.0 normalizes direction but preserves poison vector → Adam m/v corruption.
+- **FiLM stability axis is LR** (PR #184 closed): lr=4e-4 is the stability boundary; lr=5e-4 kills FiLM regardless of init_scale.
+- **LR ceiling at ~6.5e-4** (PRs #164, #191): OneCycleLR peaks ≥ 6.5e-4 diverge regardless of warmup.
+- **W_y=W_z > 2.0 overfits tau_y/z** (PR #66): W=3 scores 13.18 vs 12.74 for W=2.
 
 ### Target Representation
-- **asinh-1.0 trades metric for stability (frieren #123):** Suppresses gradient explosions by compressing the tail, but the gap to AB-UPT lives in the tail. Stability ≠ metric improvement.
-- **Heavy-tail is real:** Wall shear spans 4 decades. The tail (high-|τ| separation regions) dominates the rel_L2 numerator AND denominator. Compression hurts.
+- **asinh normalization NEGATIVE** (PR #123): Compresses tail → suppresses gradient explosions but also suppresses learning signal where y/z gap lives.
+- **Heavy-tail is real:** Wall shear spans 4 decades. The tail dominates rel_L2 numerator AND denominator. Cannot compress it.
 
 ### Architecture
-- **Depth >> Width:** 6L/256d (4.73M) dominates 4L/512d (12.7M). 8L/256d time-limited but promising.
-- **Multi-scale hierarchy failed (PR #150):** Receptive field is not the lever for tau_y/z gap.
-- **384d in bf16 is unstable:** QK-norm + fp32 attention required (PR #170 gilbert testing).
+- **Depth >> Width:** 6L/256d (4.73M) dominates 4L/512d (12.7M).
+- **8L/256d is blocked by LR ceiling** (PRs #144, #164): Cannot train at lr ≥ 5e-4 with current norm structure. Sandwich-LN (PR #208) is the unlock attempt.
+- **Multi-scale hierarchy failed** (PR #150): Receptive field is not the lever for tau_y/z gap.
 
 ### Loss/Data Representation
-- **Per-axis wallshear upweighting:** W_y=W_z=2 is optimal (PR #66). W=3+ overfits, W=1.5- underdirects.
-- **Normal-consistency λ ranking inversion:** λ=0.10 most stable, λ=0.01 most unstable — larger constraint enforces stronger out-of-plane avoidance, bounding the squared-dot spike.
-- **Tangent-frame prediction (Duff ONB):** Discontinuous at t1.x sign-flip → incompatible with non-gauge-equivariant Transolver. Use smooth e_x-projection frame instead.
-- **Coord-normalization wrong lever (PR #143):** global-scale breaks meter-calibrated omega bank; per-axis causes volume-token explosions.
-
-### Optimizer
-- **EMA m/v desynchronization:** Mid-run schedule changes → second-moment coupling issues. Start Adam with training-time weights.
-- **Uniform surface_sw amplifies already-upweighted channels.** Per-component weight is the right knob.
-
----
-
-## Near-Term Priority Queue
-
-1. **Watch #168 (askeladd) gawdh7ah ep3 (~13:30 UTC)** — if abupt < 10.69 with healthy ws_y/z, this is the headline merge candidate of the round
-2. **Watch #168 (askeladd) 1buc9rh1 (λ=0.05, clip=0.5) ep2** — best ep1 (15.875) of any arm; tests whether sweet-spot is between 0.05 and 0.10
-3. **Await and merge #184 (kohaku FiLM, arm B) ~14:25 UTC** — if val_abupt < 10.69
-4. **Review #123 (frieren) final results ~12:10-13:51 UTC** — close based on best arm; v3 already negative
-5. **Monitor #196 (edward Lion)** — C2 (seed=42, lr=2e-4) approaching the step-3500 danger zone; F (seed=43) is the bad-batch test
-6. **Monitor #165 (chihiro)** — clip=0.5 seed42/seed7 go/no-go around 12:20-13:30 UTC
-7. **Monitor #193 (thorfinn curvature)** — Arm A (alpha=0.5) and B (alpha=1.0) running; ep1 vals due ~13:00 UTC
-8. **Monitor #200 (emma)** — pod stuck in watchdog state; advisor posted explicit pkill instruction
-9. **Track #199 (stark)** — no pod visible in cluster; flagged in advisor comment
-10. **Infrastructure PR** — magnitude-based grad-skip (assign to thorfinn when free)
-11. **Perceiver-IO backbone** (Morgan's #2 directive) — not yet assigned; needs careful scoping
-12. **Physics-informed RANS** (Morgan's #4 directive) — ASSIGNED to nezuko (#201)
+- **Per-axis wallshear upweighting:** W_y=W_z=2 is optimal (PR #66).
+- **Explicit tangentiality enforcement provides no gain** (PRs #121, #168): Model already learns near-tangential predictions naturally.
+- **Tangent-frame prediction (Duff ONB) discontinuous** at t1.x sign-flip → incompatible with Transolver. Use smooth e_x-projection frame (PR #199).
 
 ---
 
 ## Key Constraints
 - Training budget: ~270 min training + ~90 min val/test = 360 min total (~3-4 epochs at 6L/256d)
 - VRAM: 96 GB per GPU; 6L/256d at bs=8 uses ~75 GB
-- Gradient clipping: clip_grad_norm=1.0 standard; clip=0.5 used for stability-sensitive experiments
-- LR warmup: 500 steps (1e-5 start) now standard for experiments with elevated initial gradients
+- Gradient clipping: clip_grad_norm=1.0 standard; clip=0.5 for stability-sensitive experiments
+- LR warmup: 500 steps (1e-5 start) now standard
 - Students have 4 GPUs each
