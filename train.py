@@ -590,6 +590,12 @@ class Config:
     clip_grad_norm: float = 0.0
     compile_model: bool = True
     debug: bool = False
+    use_onecycle_lr: bool = False
+    onecycle_max_lr: float = 1e-3
+    onecycle_pct_start: float = 0.3
+    onecycle_div_factor: float = 25.0
+    onecycle_final_div_factor: float = 1e4
+    onecycle_total_steps: int = 0
 
 
 class TargetTransform:
@@ -1692,9 +1698,33 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
-    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    if config.use_onecycle_lr:
+        onecycle_total_steps = (
+            int(config.onecycle_total_steps)
+            if config.onecycle_total_steps > 0
+            else total_estimated_steps
+        )
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=config.onecycle_max_lr,
+            total_steps=onecycle_total_steps,
+            pct_start=config.onecycle_pct_start,
+            anneal_strategy="cos",
+            div_factor=config.onecycle_div_factor,
+            final_div_factor=config.onecycle_final_div_factor,
+            cycle_momentum=False,
+        )
+        print(
+            f"OneCycleLR: max_lr={config.onecycle_max_lr:.2e} "
+            f"pct_start={config.onecycle_pct_start} "
+            f"total_steps={onecycle_total_steps} "
+            f"initial_lr={config.onecycle_max_lr / config.onecycle_div_factor:.2e} "
+            f"final_lr={config.onecycle_max_lr / config.onecycle_div_factor / config.onecycle_final_div_factor:.2e}"
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1815,6 +1845,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
             optimizer.step()
+            if config.use_onecycle_lr and scheduler.last_epoch < scheduler.total_steps:
+                scheduler.step()
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
@@ -1844,6 +1876,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "train/lr": scheduler.get_last_lr()[0],
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
@@ -1887,7 +1920,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if not config.use_onecycle_lr:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
