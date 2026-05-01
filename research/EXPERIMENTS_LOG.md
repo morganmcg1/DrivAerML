@@ -25,15 +25,43 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Correction to prior log entries:** Earlier "vol_p=6.358% vs SOTA 12.740% = 50% improvement" claim was a val-vs-test apples-to-oranges error. Apples-to-apples val ep9 comparison shows alphonse vol_p IS worse than SOTA val by 0.46pp.
 - **Follow-up assignment:** alphonse round12-surface-pts-96k (PR #206) — same one-flag-delta protocol but on the surface side.
 
-## 2026-05-01 (late) — PR #202 SENT BACK: tanjiro lr_cosine_t_max=9 — CONFIG ERROR
+## 2026-05-01 (latest) — PR #202 CLOSED: tanjiro lr_cosine_t_max=9 — negative (test 11.081, +4.74% vs SOTA)
 
-- **Branch:** `tanjiro/cosine-tmax9`
-- **Assigned hypothesis:** lr_cosine_t_max=9 (genuine full cosine arc within 9-ep budget vs SOTA T_max=50 ≈ flat).
-- **What student actually ran:** `lr_cosine_t_max: 50`, `wandb_group: tay-round11-cosine-tmax50-sota` — a SOTA replication, not the assigned T_max=9 experiment.
-- **Result:** val=9.9196 (rank0 run `s58uz78l`, ep9, crashed post-train); +0.44 vs SOTA val=9.484 — within run-to-run variance (~0.7%).
-- **Per-axis (run `s58uz78l`):** surface_pressure 6.30, volume_pressure 6.22, wall_shear 11.09, wall_shear_y 13.39, wall_shear_z 14.29.
-- **Action:** PR returned to draft via `send_pr_back_to_student_with_comment`. Tanjiro must re-run with `--lr-cosine-t-max 9 --wandb-group tay-round12-cosine-tmax9` keeping all other flags identical.
-- **Status:** Awaiting re-run. T_max=9 hypothesis remains untested by this PR (edward #195 is testing the same hypothesis in parallel).
+- **Branch:** `tanjiro/cosine-tmax9-genuine`
+- **Hypothesis:** Genuine cosine LR decay within the 9-epoch budget (T_max=9) will improve over SOTA's near-flat T_max=50 schedule, which decays only ~4% over 9 epochs. The theory: aggressive late-epoch LR warmdown lets the model settle into a tighter local minimum.
+- **W&B:** run `1wx7mfw6`, group `tay-round12-cosine-tmax9`, rt=285min, 9/9 epochs.
+- **Note:** Student initially submitted a config-error run (T_max=50 SOTA replication, `s58uz78l`); PR was sent back; corrected re-run is `1wx7mfw6`.
+
+### Val trajectory
+
+| Epoch | abupt_val (%) |
+|------:|-------------:|
+| 1 | 57.877 |
+| 2 | 25.396 |
+| 3 | 16.747 |
+| 4 | 13.372 |
+| 5 | 11.808 |
+| 6 | 10.947 |
+| 7 | 10.426 |
+| 8 | 10.117 |
+| 9 | **10.017** |
+
+### Test metrics vs SOTA
+
+| Metric | SOTA (PR #115) | PR #202 (T_max=9) | Delta |
+|---|---:|---:|---:|
+| abupt_mean | 10.580 | **11.081** | +4.74% |
+| surface_pressure | 5.690 | 6.107 | +7.33% |
+| wall_shear | 10.419 | 10.930 | +4.91% |
+| volume_pressure | 12.740 | 13.200 | +3.61% |
+| tau_x | 8.908 | 9.387 | +5.38% |
+| tau_y | 12.491 | 13.041 | +4.41% |
+| tau_z | 13.071 | 13.672 | +4.60% |
+
+**val→test ratio:** 1.106 (SOTA: 1.115) — consistent generalization behavior.
+
+- **Conclusion:** T_max=9 cosine does NOT improve over SOTA. Aggressive LR warmdown within the 9-epoch budget hurts performance uniformly across all axes (+4–7% regressions). The model is still in active learning at epoch 9 — cutting LR aggressively in eps 7-9 starves the final refinement phase. The near-flat schedule (T_max=50 ≈ 4% decay over 9 epochs) is confirmed optimal for this training horizon. **LR schedule space closed in the T_max direction.**
+- **PR Status:** CLOSED. Negative result.
 
 ## 2026-05-01 12:30 UTC — PR #204 ASSIGNED: frieren vol_loss_weight=2.0 (SOTA stack single-delta)
 
