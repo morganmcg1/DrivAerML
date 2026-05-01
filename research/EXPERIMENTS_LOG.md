@@ -6,6 +6,16 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 06:35 UTC — PR #142 CLOSED: thorfinn vol_w=2.0 (test 11.721, +10.78% vs SOTA)
+
+- **Branch:** `thorfinn/round10-compound-volw2`
+- **Hypothesis:** vol_w=2.0 alone (surface_loss_weight=1.0 default) attacks volume_pressure binding gap ×2.1 vs AB-UPT
+- **Result:** test_abupt 11.721 (+10.78%), val 10.607 (+11.8% vs SOTA ep9 9.484). Test breakdown: surface_p +18.42%, vol_p +0.10% (FLAT!), wall_shear +13.83%, tau_x +14.70%, tau_y +13.36%, tau_z +12.72%.
+- **Key finding:** Raising vol_w=2.0 with sw=1.0 default does NOT help vol_p (+0.10% flat) and severely hurts surface/wall-shear. The relative balance matters, not the absolute weight. Compare: askeladd #141 with sw=2 + vw=2 paired did improve vol_p test -0.60% — because the ratio sw:vw stayed 1:1.
+- **W&B:** `33l6yvwy`
+- **Conclusion:** vol_w=2.0 alone closes the volume loss lever in isolation. Loss weight family (vol_w, surf_w) must be paired. Loss-weight sweep **closed** without better ratio balance.
+- **Thorfinn reassigned** to PR #163: weight_decay=1e-3 (untested, addresses val→test gen gap).
+
 ## 2026-05-01 06:08 UTC — PR #146 CLOSED: edward 6L/256d depth swap (test 12.662, +19.7% vs SOTA)
 
 - **Branch:** `edward/round10-depth-6l256d`
