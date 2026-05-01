@@ -29,11 +29,11 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 
 ## In-flight (8/8 students running — all slots filled)
 
-Last updated: 2026-05-01 (updated — thorfinn reassigned).
+Last updated: 2026-05-01 (updated — thorfinn reassigned; frieren pod #147 closed, reassigned PR #204 vol_loss_weight=2.0).
 
 | PR | Student | Hypothesis | ~Ep | Val (latest) | vs SOTA val | Status |
 |---|---|---|---|---:|---:|---|
-| **#147** | frieren | compound + wd=2e-3 | ep0 | — | — | **POD STUCK** since 2026-04-30 23:14 UTC; needs `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren` (escalated on issue #48) |
+| **#204** | **frieren** | vol_loss_weight=2.0 (SOTA stack single-delta) | — | — | — | **ASSIGNED** 2026-05-01 — BASELINE.md flagged as missing from SOTA; expected to push abupt→~10.3, recover volume_pressure gap (12.740 vs 6.08 ref) |
 | **#186** | alphonse | vol_pts=96k CLEAN | ~ep1+ | TBD | — | running |
 | **#187** | nezuko | volume_loss_weight=1.5 | ep5 | 13.815 | +4.33 | running |
 | **#189** | fern | lion_beta1=0.8 | ep5 | 14.378 | +4.89 | running |
@@ -97,7 +97,7 @@ Last updated: 2026-05-01 (updated — thorfinn reassigned).
 | lion_beta2 | — | **0.99** | 0.999 ❌ | **CLOSED** — momentum window 1000 steps too wide for 9ep budget; +18.7% regression |
 | model_dropout | — | **0.0** | 0.05 ❌ | **CLOSED** — model underfits not overfits; dropout hurts feature learning at this budget |
 | weight_decay | 2.5e-4 (#203, in-flight) | **5e-4** | 1e-3 ❌ (+4.5% regression, PR #163) | sweep DOWN: #203 (2.5e-4) |
-| volume_loss_weight | — | **1.0** | 1.5 (#187), 2.0 ❌ | in-flight |
+| volume_loss_weight | — | **1.0** | 1.5 (#187 in-flight), 2.0 (#204 frieren in-flight) | in-flight (both) |
 | volume_points | — | **65536** | 96000 (#186) | in-flight |
 | tau_axis_weights | — | **1.0** | 1.5 ❌ | **CLOSED** — Lion sign mechanism neutralizes |
 | mlp_ratio | — | **4** | 6 ❌ | **CLOSED** — capacity ceiling at 9-ep budget |
@@ -110,7 +110,7 @@ Last updated: 2026-05-01 (updated — thorfinn reassigned).
 4. **Wait for PR #186 (alphonse vol_pts=96k clean)** — first clean volume sampling density test. Watch `val_primary/volume_pressure_rel_l2_pct` directly.
 5. **Wait for PR #187 (nezuko vol_loss_weight=1.5)** — gentler loss balance; tests below vol_w=2.0 catastrophe.
 6. **Wait for fern #189 (lion_beta1=0.8)** — lower directional momentum test; SOTA=0.9. If results known, assign lion_beta1=0.85 to close sensitivity curve midpoint.
-7. **Frieren pod restart needed** — pod stuck. PR #147 (wd=2e-3) has NEVER started. Requires `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren`. Re-escalate on issue #48. Note: wd=2e-3 already predicted to regress further than wd=1e-3.
+7. **Wait for frieren PR #204 (vol_loss_weight=2.0)** — BASELINE.md explicitly flags this as missing from SOTA stack. SOTA was PR #115 without vol_w=2.0; PR #142 showed vol_w=2.0 alone hurt surface; this run adds it paired with the full SOTA optimizer stack (Lion lr=1e-4, wd=5e-4, EMA=0.999). Watch `volume_pressure_rel_l2_pct` and `abupt_axis_mean`. Expected to push abupt toward ~10.3.
 8. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Reserve for next idle slot after current wave completes.
 9. **Tau_yz binding gap (code-change approach)** — bypass Lion neutralization: (a) asinh output normalization for tau_y/tau_z, (b) surface-tangent-frame prediction head, (c) decoupled magnitude+direction head. All require train.py modifications.
 10. **wd follow-up** — if PR #203 (2.5e-4) beats SOTA, probe 1e-4 to tighten the curve. If #203 regresses, wd sweet spot is ~5e-4 and WD family is CLOSED.

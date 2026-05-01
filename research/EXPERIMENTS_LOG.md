@@ -6,6 +6,16 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 12:30 UTC — PR #204 ASSIGNED: frieren vol_loss_weight=2.0 (SOTA stack single-delta)
+
+- **Branch:** `frieren/vol-loss-weight-2p0`
+- **Hypothesis:** BASELINE.md explicitly flags that the current SOTA (PR #115) was trained WITHOUT `--volume-loss-weight 2.0`. PR #142 tested vol_w=2.0 but on an earlier suboptimal stack (missing Lion wd=5e-4, EMA=0.999 compound). This run adds vol_w=2.0 as a clean single-delta against the verified SOTA config. The `volume_pressure` gap (12.740 vs AB-UPT ref 6.08, ×2.1) is the largest remaining per-axis gap — vol_w=2.0 directly targets this.
+- **W&B group:** `tay-round12-vol-loss-weight-2p0`
+- **Single delta from SOTA:** only `--volume-loss-weight 2.0` changes; all other flags match SOTA exactly.
+- **Expected:** push `abupt_axis_mean` toward ~10.3, recover `volume_pressure` meaningfully.
+- **Watch:** `val_primary/volume_pressure_rel_l2_pct` directly; if surface metrics regress >2%, stop run.
+- **Status:** Running. Awaiting results.
+
 ## 2026-05-01 (latest) — PR #203 ASSIGNED: thorfinn round12 weight_decay=2.5e-4 (sweep DOWN from SOTA)
 
 - **Branch:** `thorfinn/round12-wd-2p5e-4`
