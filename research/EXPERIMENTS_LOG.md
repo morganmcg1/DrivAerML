@@ -1,5 +1,29 @@
 # SENPAI Research Results
 
+## 2026-05-01 12:00 — PR #151: [nezuko] Left/right symmetry augmentation (tau_y gap)
+- Branch: `nezuko/symmetry-augmentation`
+- Hypothesis: DrivAerML cars have bilateral (left/right) symmetry — reflecting geometry about the xz-plane (y→-y) gives a physically valid new training example, potentially doubling effective training data and regularizing tau_y predictions.
+- Results: W&B runs `agns4wt7` (Arm A p=0.5), `9xsrl7pp` (Arm B p=1.0)
+
+| Metric | Arm A (p=0.5) val | Arm A test | Arm B (p=1.0) val | Arm B test | Baseline val | AB-UPT |
+|---|---:|---:|---:|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | 17.63 | 18.46 | 45.92 | 45.62 | **10.69** | — |
+| `surface_pressure_rel_l2_pct` | 12.68 | 12.49 | 36.45 | 35.37 | 6.97 | 3.82 |
+| `wall_shear_rel_l2_pct` | 19.42 | 19.28 | 50.90 | 49.66 | 11.69 | 7.29 |
+| `volume_pressure_rel_l2_pct` | 11.18 | 16.59 | 23.80 | 28.30 | 7.85 | 6.08 |
+| `wall_shear_y_rel_l2_pct` | 22.85 | 22.60 | 65.14 | 63.59 | **13.73** | **3.65** |
+| `wall_shear_z_rel_l2_pct` | 24.56 | 23.75 | 61.55 | 59.43 | **14.73** | **3.63** |
+
+- Commentary: **NEGATIVE RESULT. CLOSED.** Both arms diverged. Arm A (p=0.5) crashed with NaN at epoch 2 step ~19400 (grad norm spiked from ~1 to 1537+ over ~900 steps). Arm B (p=1.0) collapsed in ep1 (val=45.9%) and went NaN at step ~11185.
+  
+  Root cause: DrivAerML cars have real Y-asymmetries (drivetrain, suspension, mirrors, fuel filler). At 65536 surface points, the mirrored geometry is a *new* car with labels that don't satisfy the symmetry assumption. The augmentation creates an inconsistent gradient signal — once the model has fit the asymmetric ground truth, augmented batches push conflicting constraints, eventually destabilizing the optimizer. Arm B (always-mirror) prevents the model from ever seeing the original geometry orientation and diverges even faster.
+  
+  Key finding: **The symmetry assumption needs empirical verification before any symmetry-based method can be applied.** For a few held-out cars, one should check that tau_y(flip(x)) ≈ -tau_y(x) actually holds in the data — if geometry asymmetries cause a ~5-15% residual, that is a noise floor for any symmetry-based method.
+  
+  Suggested follow-ups from student: (1) Anti-symmetric soft loss penalty L_sym = ||y_pred(x) + flip(y_pred(flip(x)))||² as a regularizer (not data augmentation). (2) Lower lr or warmup-then-augment approach. (3) Tighter grad clipping (clip=0.25-0.5) when augmentation is active.
+
+---
+
 ## 2026-04-29 03:00 — PR #11: [kohaku] Tangential wall-shear projection loss
 - Branch: `kohaku/round1-tangential-wallshear-loss`
 - Hypothesis: Project wall-shear predictions onto the tangential plane at each surface point to enforce the no-slip boundary condition physically.
