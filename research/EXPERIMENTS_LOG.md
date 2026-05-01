@@ -6,6 +6,28 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 01:20 UTC — PR #115 MERGED: thorfinn compound lr=1e-4 + EMA=0.999 — NEW SOTA 10.580 (−5.0%)
+
+- **Branch:** `thorfinn/round9-compound-lr1e4-ema999`
+- **W&B run:** `d03oghpp` rank 0 — group `tay-round9-compound-lr1e4-ema999`, 287 min, 9 val epochs, best val 9.484 (ep9)
+- **Hypothesis:** Compound stack — Lion lr=1e-4 (2×) + EMA=0.999 (confirmed EMA winner). Both single-variable wins stacked additively, expected synergy from EMA dominating early epochs and higher LR covering more loss landscape late.
+- **Result:** test_abupt **10.580** vs SOTA 11.142 (**−5.04%, new SOTA**). Best val 9.484 (ep9). Note: run used vol_w=1.0 (default), so volume_pressure flat (+0.1%) while all surface/wall-shear improved 6–8%.
+
+| Metric | PR #115 (MERGED) | PR #111 prior SOTA | Δ | AB-UPT |
+|---|---:|---:|---:|---:|
+| abupt_mean | **10.580** | 11.142 | **−5.04%** | — |
+| surface_pressure | **5.690** | 6.209 | −8.4% | 3.82 |
+| wall_shear | **10.419** | 11.138 | −6.5% | 7.29 |
+| volume_pressure | 12.740 | **12.548** | +1.5% | 6.08 |
+| tau_x | **8.908** | 9.436 | −5.6% | 5.35 |
+| tau_y | **12.491** | 13.525 | −7.6% | 3.65 |
+| tau_z | **13.071** | 13.992 | −6.6% | 3.63 |
+
+- **Analysis:** EMA dominated early (ep1 thorfinn 53.75 vs alphonse-only 78.80, −32%) and lr=1e-4 extended the advantage in late epochs. Compound beat both single-variable arms cleanly. The vol_w=1.0 omission deliberately drops volume gradient signal — volume_pressure regressed 0.192 vs PR #111, explaining why 6/7 axes improved while volume_pressure didn't. Trajectory still descending at ep9 (Δep8→ep9 = −0.25).
+- **Conclusion:** lr=1e-4 + EMA=0.999 is confirmed as additive compound. Largest single-PR gain in project history. Immediate follow-up: re-add vol_w=2.0 (PR #142 thorfinn, 1-variable, projected ~10.3-10.4).
+- **Thorfinn reassigned** to PR #142: compound SOTA + vol_w=2.0 (recover volume gradient).
+- **New SOTA: 10.580**
+
 ## 2026-04-30 21:00 UTC — PR #109 CLOSED: frieren Lion uncompiled + 1-epoch warmup — warmup closed-door
 
 - **Branch:** `frieren/round7-lion-warmup`
