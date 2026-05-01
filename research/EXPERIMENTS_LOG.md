@@ -6,6 +6,27 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 06:08 UTC — PR #146 CLOSED: edward 6L/256d depth swap (test 12.662, +19.7% vs SOTA)
+
+- **Branch:** `edward/round10-depth-6l256d`
+- **Hypothesis:** 6L/256d (4.65M params) was yi's confirmed −21% lever; port to tay's stack
+- **Result:** test_abupt 12.662 (+19.7%), full_val 11.549 at ep7 (+21.8%). All 6 components regressed: surface_p +27.1%, wall_shear +22.0%, vol_p +10.4%, tau_x +21.5%, tau_y +24.2%, tau_z +19.9%
+- **Why:** 6L vs 4L per-epoch wall-clock IDENTICAL (~30.7m vs 30m) despite 2.7× fewer parameters — attention over 65k surface + 65k volume points dominates forward pass, depth (sequential layers) cancels savings. The "smaller model = more epochs in 270m budget" assumption fails. Linear extrapolation to ep9 = ~10.8 abupt, still +14% behind SOTA. Not a budget issue, a fundamental fit issue.
+- **W&B:** `93n0zlc8`
+- **Conclusion:** Combined with nezuko #138 (5L/512d, +6.0%) and this run (6L/256d, +19.7%), the depth-swap family is **closed** at 9-epoch budget. 4L/512d is the right shape.
+- **Edward reassigned** to next PR (model_dropout=0.05 — fresh untouched regularization lever).
+
+## 2026-05-01 06:05 UTC — PR #141 CLOSED: askeladd 3-way compound sw=2 + vw=2 + T_max=50 (test 10.605, +0.23% vs SOTA)
+
+- **Branch:** `askeladd/round10-compound-lr1e4-sw2-ema999`
+- **Hypothesis:** compound lr=1e-4 + sw=2.0 + EMA=0.999. PR body cited stale PR #111 baseline (test 11.142).
+- **Re-scored vs PR #115 SOTA (test 10.580):** test_abupt 10.605 = **+0.23%** (NOT a winner). Val 9.445 = −0.41% (improve).
+- **Test breakdown vs SOTA:** surface_p 5.685 (−0.08%), vol_p 12.664 (**−0.60% improve!**), wall_shear 10.469 (+0.48%), tau_x 8.909 (≈0%), tau_y 12.648 (**+1.25% regress**), tau_z 13.117 (+0.35%)
+- **Val→test divergence:** ratio 1.123 vs SOTA 1.115. 3-way compound overfit val by ~0.7%. vol_p test improvement (binding gap) is real but cancelled by tau_y regression on TEST.
+- **W&B:** `rdpf0y7r` — best val 9.445 (ep9, EMA), val trajectory 50.49/23.03/15.99/13.02/11.56/10.69/10.05/9.67/9.45 — still descending at ep9 (epoch cap, not plateau).
+- **Conclusion:** sw=2.0 + vw=2.0 stack lifts vol_p on test (-0.60%) but introduces tau-axis regressions. Compound stack of weight schemes net-zero vs SOTA on test. Cosine T_max=50 was an unintended confound (SOTA uses T_max=0).
+- **Askeladd reassigned** to next PR (lion_beta2=0.999 single delta — fresh untouched optimizer hyperparam).
+
 ## 2026-05-01 04:45 UTC — PR #148 CLOSED EARLY: alphonse lr=1.5e-4 (stably +40% worse, 4 epochs)
 
 - **Branch:** `alphonse/round10-lr1p5e4`
