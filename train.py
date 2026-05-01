@@ -601,6 +601,13 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    lr_warmup_epochs: int = 0
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
+    use_symmetry_augmentation: bool = False
+    symmetry_flip_prob: float = 0.5
+    symmetry_include_both: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1300,6 +1307,93 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def _flip_batch_y(batch: SurfaceBatch) -> SurfaceBatch:
+    """Reflect a batch through the y=0 plane.
+
+    surface_x: [..., 7] = [x, y, z, nx, ny, nz, area]  -> flip y (idx 1) and ny (idx 4)
+    surface_y: [..., 4] = [Cp, tau_x, tau_y, tau_z]    -> flip tau_y (idx 2)
+    volume_x:  [..., 4] = [x, y, z, sdf]               -> flip y (idx 1); sdf invariant
+    volume_y:  [..., 1] = [pressure]                   -> invariant scalar field
+    """
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = -surface_x[..., 1]
+    surface_x[..., 4] = -surface_x[..., 4]
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = -volume_x[..., 1]
+    surface_y = batch.surface_y.clone()
+    surface_y[..., 2] = -surface_y[..., 2]
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
+
+
+def maybe_apply_symmetry_augmentation(
+    batch: SurfaceBatch,
+    *,
+    use_augmentation: bool,
+    flip_prob: float,
+    include_both: bool,
+    rng: torch.Generator | None = None,
+) -> tuple[SurfaceBatch, str]:
+    """Optionally apply y-axis reflection augmentation to a training batch.
+
+    Returns (possibly augmented batch, label) where label is one of
+    'off' / 'orig' / 'flip' / 'both'. With include_both=True we always
+    concatenate orig+flip along batch dim, doubling effective batch.
+    """
+    if not use_augmentation:
+        return batch, "off"
+    if include_both:
+        flipped = _flip_batch_y(batch)
+        combined = SurfaceBatch(
+            case_ids=list(batch.case_ids) + list(flipped.case_ids),
+            surface_x=torch.cat([batch.surface_x, flipped.surface_x], dim=0),
+            surface_y=torch.cat([batch.surface_y, flipped.surface_y], dim=0),
+            surface_mask=torch.cat([batch.surface_mask, flipped.surface_mask], dim=0),
+            volume_x=torch.cat([batch.volume_x, flipped.volume_x], dim=0),
+            volume_y=torch.cat([batch.volume_y, flipped.volume_y], dim=0),
+            volume_mask=torch.cat([batch.volume_mask, flipped.volume_mask], dim=0),
+            metadata=list(batch.metadata) + list(flipped.metadata),
+        )
+        return combined, "both"
+    if rng is not None:
+        draw = torch.rand(1, generator=rng).item()
+    else:
+        draw = torch.rand(1).item()
+    if draw < flip_prob:
+        return _flip_batch_y(batch), "flip"
+    return batch, "orig"
+
+
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    """Build optimizer based on config.optimizer ('adamw' or 'lion')."""
+    name = config.optimizer.lower()
+    if name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+    if name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1709,8 +1803,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     n_params = sum(param.numel() for param in model.parameters())
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    optimizer = build_optimizer(model, config)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    if config.lr_warmup_epochs > 0:
+        steps_per_epoch = max(len(train_loader), 1)
+        config.lr_warmup_steps = int(config.lr_warmup_epochs * steps_per_epoch)
+        print(
+            f"Using {config.lr_warmup_epochs}-epoch LR warmup -> "
+            f"{config.lr_warmup_steps} steps "
+            f"(steps_per_epoch={steps_per_epoch})"
+        )
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     if kill_thresholds:
@@ -1798,6 +1900,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            batch, symm_label = maybe_apply_symmetry_augmentation(
+                batch,
+                use_augmentation=config.use_symmetry_augmentation,
+                flip_prob=config.symmetry_flip_prob,
+                include_both=config.symmetry_include_both,
+            )
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1811,6 +1919,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
             )
+            symm_aug_code = {"off": 0.0, "orig": 0.0, "flip": 1.0, "both": 2.0}[symm_label]
+            batch_loss_metrics["symmetry_aug_applied"] = symm_aug_code
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
             if not loss_is_finite:
@@ -1925,6 +2035,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
+                ]
+            if "symmetry_aug_applied" in batch_loss_metrics:
+                train_log["train/symmetry_aug_applied"] = batch_loss_metrics[
+                    "symmetry_aug_applied"
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
