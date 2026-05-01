@@ -593,6 +593,8 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    use_sam: bool = False
+    sam_rho: float = 0.05
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1754,6 +1756,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/sam/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -1821,6 +1824,79 @@ def main(argv: Iterable[str] | None = None) -> None:
                 global_step += 1
                 continue
             loss.backward()
+            sam_first_grad_norm_value: float | None = None
+            sam_loss_perturbed_value: float | None = None
+            if config.use_sam:
+                first_grad_sq = torch.zeros((), device=device, dtype=torch.float32)
+                for p in model.parameters():
+                    if p.grad is not None:
+                        first_grad_sq = first_grad_sq + p.grad.detach().float().pow(2).sum()
+                first_grad_norm = first_grad_sq.sqrt()
+                first_grad_norm_f = float(first_grad_norm.detach().cpu().item())
+                sam_first_grad_norm_value = first_grad_norm_f
+                if not math.isfinite(first_grad_norm_f) or first_grad_norm_f <= 0.0:
+                    optimizer.zero_grad(set_to_none=True)
+                    nonfinite_skip_count += 1
+                    wandb.log(
+                        {
+                            "train/nonfinite_skip_count": nonfinite_skip_count,
+                            "train/nonfinite_skip_kind": 3,
+                            "global_step": global_step,
+                        }
+                    )
+                    if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                        raise RuntimeError(
+                            f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                            f"loss/grad steps; training is structurally broken."
+                        )
+                    global_step += 1
+                    continue
+                eps_w: dict[torch.nn.Parameter, torch.Tensor] = {}
+                scale = config.sam_rho / (first_grad_norm_f + 1e-12)
+                with torch.no_grad():
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            eps = (scale * p.grad).detach().clone().to(p.dtype)
+                            eps_w[p] = eps
+                            p.data.add_(eps)
+                optimizer.zero_grad(set_to_none=True)
+                loss_perturbed, _ = train_loss(
+                    model,
+                    batch,
+                    transform,
+                    device,
+                    config.amp_mode,
+                    surface_loss_weight=config.surface_loss_weight,
+                    volume_loss_weight=config.volume_loss_weight,
+                    aux_rel_l2_weight=config.aux_rel_l2_weight,
+                    use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                    wallshear_y_weight=config.wallshear_y_weight,
+                    wallshear_z_weight=config.wallshear_z_weight,
+                )
+                loss_perturbed_finite = bool(torch.isfinite(loss_perturbed).item())
+                if loss_perturbed_finite:
+                    loss_perturbed.backward()
+                    sam_loss_perturbed_value = float(loss_perturbed.detach().cpu().item())
+                with torch.no_grad():
+                    for p, eps in eps_w.items():
+                        p.data.sub_(eps)
+                if not loss_perturbed_finite:
+                    optimizer.zero_grad(set_to_none=True)
+                    nonfinite_skip_count += 1
+                    wandb.log(
+                        {
+                            "train/nonfinite_skip_count": nonfinite_skip_count,
+                            "train/nonfinite_skip_kind": 4,
+                            "global_step": global_step,
+                        }
+                    )
+                    if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                        raise RuntimeError(
+                            f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                            f"loss/grad steps; training is structurally broken."
+                        )
+                    global_step += 1
+                    continue
             should_log_gradients = (
                 config.gradient_log_every > 0
                 and (global_step + 1) % config.gradient_log_every == 0
@@ -1919,6 +1995,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
+            if config.use_sam:
+                if sam_first_grad_norm_value is not None:
+                    train_log["train/sam/grad_norm_first"] = sam_first_grad_norm_value
+                if sam_loss_perturbed_value is not None:
+                    train_log["train/sam/loss_perturbed"] = sam_loss_perturbed_value
+                    train_log["train/sam/loss_gap"] = (
+                        sam_loss_perturbed_value - float(loss.detach().cpu().item())
+                    )
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
                     train_log[f"train/{key}"] = value
