@@ -622,6 +622,7 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    lr_warmup_epochs: int = 0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1723,6 +1724,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Device: {device}" + (" [DEBUG]" if config.debug else ""))
 
     train_loader, val_loaders, test_loaders, stats = make_loaders(config)
+    if config.lr_warmup_epochs > 0:
+        steps_per_epoch = max(len(train_loader), 1)
+        config.lr_warmup_steps = config.lr_warmup_epochs * steps_per_epoch
+        print(
+            f"LR warmup: {config.lr_warmup_epochs} epoch(s) = "
+            f"{config.lr_warmup_steps} steps (steps_per_epoch={steps_per_epoch})"
+        )
     transform = TargetTransform(
         surface_y_mean=stats["surface_y_mean"].to(device),
         surface_y_std=stats["surface_y_std"].to(device),
