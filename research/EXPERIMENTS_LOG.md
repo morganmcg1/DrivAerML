@@ -6,6 +6,14 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 18:00 — ASSIGNED: nezuko round12-model-slices-64 (halve attention slices)
+
+- **Branch:** `nezuko/round12-model-slices-64`
+- **Hypothesis:** SOTA uses `--model-slices 128`. PR #139 tested `--model-slices 256` (double, regressed). The opposite direction — `--model-slices 64` (half) — has never been tested. Reducing slices may reduce overfitting by shrinking attention capacity or improve training signal concentration.
+- **W&B group:** `tay-round12-model-slices-64`
+- **Single delta from SOTA:** only `--model-slices 64` changes (SOTA=128)
+- **Status:** Assigned. Awaiting results.
+
 ## 2026-05-01 15:30 — PR #186 CLOSED: alphonse vol_pts=96k clean re-run — does not beat SOTA
 
 - **Branch:** `alphonse/round11-vol-pts-96k-clean`
