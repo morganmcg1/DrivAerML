@@ -542,6 +542,8 @@ class EMA:
 @dataclass
 class Config:
     lr: float = 3e-4
+    lr_warmup_steps: int = 0
+    lr_warmup_start_lr: float = 0.0
     weight_decay: float = 1e-4
     batch_size: int = 2
     epochs: int = 50
@@ -671,6 +673,15 @@ def autocast_context(device: torch.device, amp_mode: str):
     if not supports_bf16():
         return nullcontext()
     return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+
+
+def compute_warmup_lr(
+    step: int, base_lr: float, warmup_steps: int, warmup_start_lr: float
+) -> float:
+    if warmup_steps <= 0 or step >= warmup_steps:
+        return base_lr
+    progress = step / max(warmup_steps, 1)
+    return warmup_start_lr + progress * (base_lr - warmup_start_lr)
 
 
 def resolve_num_workers(config: Config) -> int:
@@ -1770,6 +1781,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if config.lr_warmup_steps > 0:
+                current_lr = compute_warmup_lr(
+                    global_step,
+                    config.lr,
+                    config.lr_warmup_steps,
+                    config.lr_warmup_start_lr,
+                )
+                for pg in optimizer.param_groups:
+                    pg["lr"] = current_lr
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1838,6 +1858,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "train/lr": float(optimizer.param_groups[0]["lr"]),
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
@@ -1881,7 +1902,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if config.lr_warmup_steps == 0:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
@@ -1894,7 +1916,7 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": float(optimizer.param_groups[0]["lr"]),
             "epoch_time_s": dt,
             "global_step": global_step,
         }
