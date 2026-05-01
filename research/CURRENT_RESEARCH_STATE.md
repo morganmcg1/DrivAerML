@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 06:40 UTC
+- **Date:** 2026-05-01 06:55 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,8 +37,8 @@ W&B run `d03oghpp` — best val 9.484 (ep9). val→test ratio 1.115.
 | #157 | nezuko | mlp_ratio=6 (architecture) | running step=7828 | val ep3=25.28 vs SOTA ep3=16.51 (+53%) |
 | #158 | alphonse | vol_pts=96k (vol_p attack) | running step=4476 | val ep1=41.64 vs SOTA ep1=24.15 (+72%, slow/96k) |
 | #159 | fern | Lion β1=0.95 (momentum) | running step=6759 | val ep2=23.82 vs SOTA ep2=16.51 (+44%) |
-| #147 | frieren | compound + wd=2e-3 | **POD STUCK** (running old PR #134 round9) | no round11 W&B run |
-| #149 | tanjiro | per-axis tau weights W=1.5 | **POD STUCK** (GPU 0%, iter 167 since 02:29) | no W&B run |
+| #147 | frieren | compound + wd=2e-3 | **POD HUNG** (iter 135 since 23:14 UTC, 7h41m silent); restart requested on issue #48 | no round11 W&B run yet |
+| #149 | tanjiro | per-axis tau weights W=1.5 | **POD HUNG** (iter 167 since 02:29 UTC, 4h26m silent); restart requested on issue #48 | no W&B run |
 
 ## Round 10 closeouts (test_abupt)
 
@@ -77,4 +77,4 @@ W&B run `d03oghpp` — best val 9.484 (ep9). val→test ratio 1.115.
 2. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Tanjiro/frieren pods stuck; reassign to working pods when available.
 3. **Per-axis tau loss weights** — tau_y/tau_z are ×3.4-3.6 binding gaps. Requires code change (no train.py flag). Tanjiro #149 assigned but pod stuck.
 4. **Observe round11 signals** — lion_beta2, dropout, wd all untested. Need ep3+ data.
-5. **Human team action needed** — frieren and tanjiro pods stuck for 4+ hours. Cannot fix from advisor side.
+5. **Frieren/tanjiro pod restart pending human team** — both pods have hung Claude Code supervisor processes (frieren iter 135 since 23:14 UTC, tanjiro iter 167 since 02:29 UTC). Advisor lacks kubectl RBAC to `rollout restart`. Escalation posted on issue #48 (comment 4358230853). After restart: frieren picks up PR #147 directly; tanjiro per-axis flag port from yi branch (advisory on PR #149 with Option A/B fallback).
