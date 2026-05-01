@@ -50,6 +50,55 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **W&B group:** `tay-round14-lr-cosine-t-max-14`
 - **Status:** ASSIGNED — awaiting student run start. Results to be filled when run completes.
 
+## 2026-05-01 19:30 — ASSIGNED: edward round12-model-layers-3 (reduce depth by 1)
+
+- **Branch:** `edward/round12-model-layers-3`
+- **Hypothesis:** SOTA uses `--model-layers 4`. Layer depth has **never been varied** in tay experiments. Reducing to 3 layers reduces model capacity and may reduce overfitting on the limited 9-epoch budget. Also reduces per-epoch compute, potentially allowing the model to explore more of the loss landscape within the training timeout.
+- **W&B group:** `tay-round12-model-layers-3`
+- **Single delta from SOTA:** only `--model-layers 3` changes (SOTA=4)
+- **Status:** Assigned to @edward. Awaiting results.
+
+## 2026-05-01 19:15 — PR #195 CLOSED: edward lr-cosine-tmax-9 — too aggressive, negative
+
+- **Branch:** `edward/lr-cosine-tmax-9`
+- **Hypothesis:** Full cosine decay arc within 9-ep budget (T_max=9) vs SOTA near-flat (T_max=50).
+- **W&B run:** `0gftvkrc`, group `tay-round12-lr-cosine-tmax-9`
+
+| Metric | This (T_max=9) | SOTA #115 | Δ |
+|---|---|---|---|
+| val_abupt | 9.710% | 9.484% | +0.226pp (+2.38%) |
+| test_abupt | 10.809% | 10.580% | **+0.229pp (+2.16%)** |
+| test_surface_pressure | 5.940% | 5.690% | +0.250pp |
+| test_volume_pressure | 12.683% | 12.740% | -0.057pp (only improvement) |
+| test_wall_shear | 10.729% | 10.419% | +0.310pp |
+
+- **Result:** Clear negative. 6/7 axes regressed. val/test gap unchanged (ratio 1.1132 vs SOTA 1.115).
+- **Mechanism:** LR reached near-zero by ep8-9 while model was still actively converging (val still declining -0.12pp/ep at ep9). Schedule cut off ~30-40% of effective gradient updates. SOTA's flat T_max=50 preserves training capacity throughout.
+- **T_max space:** T_max=50 (SOTA): 9.484%; T_max=9 (this): 9.710% val. More moderate T_max=14-18 range untested.
+- **Conclusion:** T_max=9 retired. Tanjiro #202 re-running same hypothesis for confirmation. Branch deleted.
+
+## 2026-05-01 19:00 — ASSIGNED: askeladd round12-model-heads-4 (halve attention heads)
+
+- **Branch:** `askeladd/round12-model-heads-4`
+- **Hypothesis:** SOTA uses `--model-heads 8`. Head count has **never been varied** in 60+ tay PRs — most prominent untested architectural lever. 4 heads forces larger per-head attention subspace; may reduce fragmentation noise.
+- **W&B group:** `tay-round12-model-heads-4`
+- **Single delta from SOTA:** only `--model-heads 4` changes (SOTA=8)
+- **Status:** Assigned to @askeladd. Awaiting results.
+
+## 2026-05-01 18:30 — PR #194 CLOSED: askeladd EMA=0.9995 — negative result, EMA space retired
+
+- **Branch:** `askeladd/ema-decay-0p9995`
+- **Hypothesis:** EMA decay of 0.9995 (between SOTA 0.999 and previously-tested 0.9999) may improve generalization.
+- **Result:** test_abupt=11.619% (+9.8% vs SOTA test=10.580%) — clear regression.
+- **EMA sweep summary (all four values tested):**
+  | EMA | val_abupt | test_abupt | Outcome |
+  |---|---|---|---|
+  | 0.998 | ~10.5% | — | Negative |
+  | **0.999** | **9.484%** | **10.580%** | **SOTA** |
+  | 0.9995 | — | 11.619% | Negative |
+  | 0.9999 | — | ~11%+ | Negative |
+- **Conclusion:** EMA decay space fully closed. 0.999 is the clear optimum. Branch deleted.
+
 ## 2026-05-01 15:30 — PR #186 CLOSED: alphonse vol_pts=96k clean re-run — does not beat SOTA
 
 - **Branch:** `alphonse/round11-vol-pts-96k-clean`
