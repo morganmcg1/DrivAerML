@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-02 ~late (Wave 5 mid-flight, sweep round)** — Wave 5 is now the dominant front: PR #174 (alphonse 5L/256d + Fourier PE + T_max=50, run `vu4jsiic`) and PR #179 (nezuko 5L/384d + Fourier PE + T_max=60, run `ud5iddlc`) are both pre-clearing their gate thresholds with abupt trajectories below the 7.21% baseline path. PR #239 (norman Fourier PE num_freqs sweep) is healthy at ep9, NF=32 arm pending launch. PR #276 (fern SWA last-5) and PR #278 (gilbert mirror-aug) are early-stage with kill gates active. FourierEmbed (PR #176) merged to bengio; lr=3e-4 confirmed optimal.
+- **2026-05-03 early (Wave 5 leaders converging, Wave 4/5 augmentation runs gating)** — Wave 5 leaders both still on a strong descending trajectory: PR #174 (alphonse `vu4jsiic` 5L/256d + Fourier PE + T_max=50) at ep16=7.667% (only 0.458pp above baseline, 34 epochs remaining); PR #179 (nezuko `ud5iddlc` 5L/384d + Fourier PE + T_max=60) at ep13=8.410%. PR #239 (norman NF=16) passed ep10 gate at 9.357%; advisor decided option (A) early-stop NF=16 at ep15 to free GPU for NF=32/64/128. PR #254 (chihiro raw-relL2) ep5 gate passed at 10.742%. PR #256 (frieren mirror-aug training) at ep3=12.918% on-track. PR #278 (gilbert mirror-aug Trial A) at ep2=15.05% kill gate cleared. PR #276 (fern SWA) restarted after crash with new run group bengio-wave5-fern (rank0=`xyec3py9`). PR #277 (tanjiro DomainLayerNorm) NCCL deadlock root-caused (empty-surface batches → unused params); fix in attempt 5.
 
 ## Most Recent Human Researcher Direction
 
@@ -23,25 +23,28 @@
 
 ## Active Experiments — Live Tracking
 
-### Wave 5 leaders (ahead of gates)
+### Wave 5 leaders (ahead of gates, descending healthily)
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.667%** | 16 | LEADER. ep20 gate <7.8% PRE-CLEARED. vol_p=4.39% (well under target). Plateau ep10-13 cleared at ep14. ep30 projected <7.2%. |
+| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.667%** | 16 | LEADER. wsy=9.95% wsz=11.50% surf=5.04% vol=4.39% (vol still well under target). Trajectory ep12→ep16 monotonic decline. ep30 projected <7.2%. |
 | #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **8.410%** | 13 | ep15 gate <8.5% PRE-CLEARED. **vol_p=6.008% MEETS AB-UPT target** (6.08%). T_max=60 means 47 epochs of remaining headroom. |
 
-### Wave 3 sweep round (in flight)
+### Wave 3 sweep round (NF=16 ep10 gate PASSED)
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #239 | norman | `pnhbrqtw` | Fourier PE num_freqs sweep, NF=16 arm | **descending** | 9 | All gates pass. ep6 minor bump (10.12% vs ep5 10.07%) noted. vol_p=6.855% approaching target. NF=32 arm to launch at ep15. |
+| #239 | norman | `pnhbrqtw` | Fourier PE NF sweep, NF=16 | **9.357%** | 10 | ep10 gate <12% PASSED. wsy=11.80% wsz=13.28%. Advisor decision: option (A) early-stop NF=16 at ep15 → launch NF=32 sooner. |
 
-### Wave 4/5 augmentation experiments (early-stage)
+### Wave 4/5 augmentation experiments (mid-stage)
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #276 | fern | `ep4dl3uw` | SWA over last 5 epochs (26-30) | 14.436% | 2.13 | ep5 kill gate <10.5% borderline. Verification checklist posted (BN update, eval path consistency). |
-| #278 | gilbert | `0kwzszub` | Mirror-aug (p=0.5 y-flip, negate wsy) | 17.910% | 1.25 | step-35k kill gate <20% will pass. Trial B (SW=2.0 + mirror-aug) to launch after Trial A ep5. |
+| #254 | chihiro | `klsmwdkr` | Raw rel-L2 aux loss w∈{0.05, 0.1} | **10.742%** | 5 | ep5 gate <11% PASSED. Healthy decline ep1=17.4% → ep5=10.7%. wsy=14.6% wsz=15.3% remain elevated. |
+| #256 | frieren | `ppd3aqq2` | Mirror-aug training (y-flip + negate wsy) | **12.918%** | 3 | Stable, no divergence (cf nezuko PR#151 NaN). Tracking very slightly ahead of gilbert PR#278. ep5 gate <12% upcoming. |
+| #278 | gilbert | `0kwzszub` | Mirror-aug Trial A (p=0.5) | **15.050%** | 2 | step-35k kill gate <20% PASSED. Stable. Trial B (SW=2.0 + mirror-aug) launches after Trial A ep5. |
+| #276 | fern | `xyec3py9` (rank0) | SWA over last 5 epochs (26-30) | — | 0.6 | RESTART (orig `ep4dl3uw` crashed at step=44416 / ep~2.5 SIGTERM). Code review confirmed clean. New group bengio-wave5-fern. |
+| #277 | tanjiro | (relaunching) | DomainLayerNorm | — | — | NCCL deadlock root-caused: 38% empty-surface batches → unused affine params. Fix applied (always-slice + ghost connection). Attempt 5 launching. |
 
 ### Wave 2/3 leftovers
 
@@ -123,14 +126,17 @@ fern Trial B at ep18 hit vol_p=6.07% — at AB-UPT target — while still 12 epo
 
 | Time (approx) | Event |
 |---|---|
-| Next ~hours | norman `pnhbrqtw` ep10/ep15 gate |
-| Next ~hours | fern `ep4dl3uw` ep5 kill gate <10.5% (borderline) |
-| Next ~hours | gilbert `0kwzszub` step-35k kill gate <20% (will pass) |
-| Next ~6h | nezuko `ud5iddlc` ep15 gate (already cleared at ep13) |
-| Next ~8h | alphonse `vu4jsiic` ep20 gate (already cleared at ep16) |
+| Next ~hours | norman `pnhbrqtw` ep15 (option A: early-stop here, launch NF=32) |
+| Next ~hours | chihiro `klsmwdkr` ep10 gate (currently ep5=10.74%) |
+| Next ~hours | frieren `ppd3aqq2` ep5 gate <12% (currently ep3=12.92%) |
+| Next ~hours | gilbert `0kwzszub` ep5 gate (Trial B launch trigger) |
+| Next ~hours | fern `xyec3py9` ep1 (post-restart sanity) |
+| Next ~hours | tanjiro attempt-5 ep1 (post-fix sanity) |
+| Next ~6h | nezuko `ud5iddlc` ep20 gate <7.5% (currently ep13=8.41%) |
+| Next ~8h | alphonse `vu4jsiic` ep20 gate (currently ep16=7.667%) |
 | Next ~24h | alphonse `vu4jsiic` ep30 (projected <7.2%; possible new baseline) |
 | Next ~24h | nezuko `ud5iddlc` ep30 |
-| Wave 4 PRs #253-260 | first ep5/ep10 reports rolling in |
+| Wave 4 PRs #253, 255, 257-260 | non-responsive students — escalation cycle |
 
 ## Plateau Protocol Status
 
