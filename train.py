@@ -123,6 +123,27 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class RFFEncoding(nn.Module):
+    """Gaussian random Fourier feature coordinate encoding (Tancik et al. 2020).
+    Projects 3D coordinates via N(0, sigma^2) random matrix before sincos encoding.
+    Captures high-frequency spatial patterns better than fixed sincos embedding.
+    """
+    def __init__(self, in_dim: int, num_features: int = 64, sigma: float = 1.0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features = num_features
+        self.sigma = sigma
+        self.register_buffer("B", torch.randn(in_dim, num_features) * sigma)
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.num_features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        proj = 2.0 * math.pi * (x.float() @ self.B.to(dtype=torch.float32))
+        return torch.cat([proj.sin(), proj.cos()], dim=-1)
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -348,6 +369,8 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        rff_num_features: int = 0,
+        rff_sigma: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -359,8 +382,16 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.rff_num_features = rff_num_features
+        self.rff_sigma = rff_sigma
 
-        self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
+        if rff_num_features > 0:
+            rff = RFFEncoding(in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma)
+            rff_proj = nn.Linear(rff.output_dim, n_hidden)
+            _init_linear(rff_proj)
+            self.pos_embed = nn.Sequential(rff, rff_proj)
+        else:
+            self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -571,6 +602,8 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
+    rff_num_features: int = 0
+    rff_sigma: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -730,6 +763,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        rff_num_features=config.rff_num_features,
+        rff_sigma=config.rff_sigma,
     )
 
 
