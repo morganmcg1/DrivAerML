@@ -6,6 +6,14 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 21:30 — PR #247 ASSIGNED: thorfinn lr-cosine-t-max=14 (Round 14 — gentle annealing midpoint)
+
+- **Branch:** `thorfinn/lr-cosine-t-max-14`
+- **Hypothesis:** T_max=14 sits between the confirmed failure (T_max=9, LR collapses too early — edward #195 + tanjiro #202 both NEGATIVE) and the SOTA flat schedule (T_max=50 ≈ no decay for 9 epochs). A gentle midpoint decay might sharpen late-stage convergence while avoiding premature LR collapse.
+- **Single delta:** `--lr-cosine-t-max 14` (SOTA: `--lr-cosine-t-max 50`)
+- **W&B group:** `tay-round14-lr-cosine-t-max-14`
+- **Status:** ASSIGNED — awaiting student run start. Results to be filled when run completes.
+
 ## 2026-05-01 15:30 — PR #186 CLOSED: alphonse vol_pts=96k clean re-run — does not beat SOTA
 
 - **Branch:** `alphonse/round11-vol-pts-96k-clean`
