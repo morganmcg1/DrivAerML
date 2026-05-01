@@ -274,6 +274,120 @@ class FiLMLayer(nn.Module):
         return h * (1 + gamma.unsqueeze(1)) + beta.unsqueeze(1)
 
 
+class CrossAttention(nn.Module):
+    """Cross-attention via SDPA. Zero-init out_proj so initial output is exactly zero."""
+
+    def __init__(self, hidden_dim: int, num_heads: int):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.q_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.k_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.v_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        kv: torch.Tensor,
+        kv_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, _ = q.shape
+        M = kv.shape[1]
+        Q = self.q_proj(q).view(B, N, self.num_heads, self.dim_head).transpose(1, 2)
+        K = self.k_proj(kv).view(B, M, self.num_heads, self.dim_head).transpose(1, 2)
+        V = self.v_proj(kv).view(B, M, self.num_heads, self.dim_head).transpose(1, 2)
+        if kv_mask is not None:
+            # Zero K and V at padded positions (post-projection cancels k/v_proj bias).
+            # softmax(Q*K_padded^T) * V_padded contributes 0 to output. We avoid passing
+            # an attn_mask so SDPA can dispatch to FlashAttention.
+            kv_mask_b = kv_mask[:, None, :, None].to(K.dtype)
+            K = K * kv_mask_b
+            V = V * kv_mask_b
+        out = F.scaled_dot_product_attention(Q, K, V)
+        out = out.transpose(1, 2).contiguous().view(B, N, self.hidden_dim)
+        return self.out_proj(out)
+
+
+class CrossAttentionBlock(nn.Module):
+    """Pre-norm cross-attention with residual; supports stop-gradient on the kv path."""
+
+    def __init__(self, hidden_dim: int, num_heads: int, stop_gradient: bool = False):
+        super().__init__()
+        self.norm_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.attn = CrossAttention(hidden_dim, num_heads)
+        self.stop_gradient = stop_gradient
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        kv: torch.Tensor,
+        kv_mask: torch.Tensor | None = None,
+        q_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if self.stop_gradient:
+            kv = kv.detach()
+        normed_q = self.norm_q(q)
+        normed_kv = self.norm_kv(kv)
+        attn_out = self.attn(normed_q, normed_kv, kv_mask=kv_mask)
+        if q_mask is not None:
+            attn_out = attn_out * q_mask.unsqueeze(-1).to(attn_out.dtype)
+        return q + attn_out
+
+
+class MultiScaleHierarchy(nn.Module):
+    """Cross-scale enrichment of surface features.
+
+    Builds num_scales-1 coarse levels by progressive strided downsampling
+    (factor 4x per level: 65536 -> 16384 -> 4096) and applies fine -> coarse
+    cross-attention at each level. Output of each cross-attention is
+    zero-initialized so the model starts identically to the no-hierarchy baseline.
+    """
+
+    def __init__(
+        self,
+        *,
+        hidden_dim: int,
+        num_heads: int = 4,
+        num_scales: int = 3,
+        stop_gradient: bool = False,
+        coarse_factor: int = 4,
+    ):
+        super().__init__()
+        if num_scales < 2:
+            raise ValueError("num_scales must be at least 2 for a hierarchy")
+        self.num_scales = num_scales
+        self.coarse_factor = coarse_factor
+        n_levels = num_scales - 1
+        self.cross_blocks = nn.ModuleList(
+            [
+                CrossAttentionBlock(hidden_dim, num_heads, stop_gradient=stop_gradient)
+                for _ in range(n_levels)
+            ]
+        )
+
+    def forward(
+        self,
+        fine_feats: torch.Tensor,
+        fine_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        out = fine_feats
+        coarse_feats = fine_feats
+        coarse_mask = fine_mask
+        s = self.coarse_factor
+        for block in self.cross_blocks:
+            coarse_feats = coarse_feats[:, ::s].contiguous()
+            coarse_mask = coarse_mask[:, ::s].contiguous()
+            out = block(out, coarse_feats, kv_mask=coarse_mask, q_mask=fine_mask)
+        return out
+
+
 class Transformer(nn.Module):
     def __init__(
         self,
@@ -348,6 +462,9 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        use_multiscale_hierarchy: bool = False,
+        num_scales: int = 3,
+        multiscale_stop_gradient: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -359,6 +476,7 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.use_multiscale_hierarchy = use_multiscale_hierarchy
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -387,6 +505,16 @@ class SurfaceTransolver(nn.Module):
             film_geom_dim=film_encoder_dim if use_film else 0,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        self.hierarchy = (
+            MultiScaleHierarchy(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                num_scales=num_scales,
+                stop_gradient=multiscale_stop_gradient,
+            )
+            if use_multiscale_hierarchy
+            else None
+        )
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -461,6 +589,10 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if self.hierarchy is not None and surface_x is not None:
+            surface_hidden = self.hierarchy(surface_hidden, surface_mask)
+            surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
@@ -571,6 +703,9 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
+    use_multiscale_hierarchy: bool = False
+    num_scales: int = 3
+    multiscale_stop_gradient: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -730,6 +865,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        use_multiscale_hierarchy=config.use_multiscale_hierarchy,
+        num_scales=config.num_scales,
+        multiscale_stop_gradient=config.multiscale_stop_gradient,
     )
 
 
@@ -1739,6 +1877,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/hierarchy/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
