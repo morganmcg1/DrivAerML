@@ -581,6 +581,7 @@ class Config:
     ema_start_step: int = 50
     ema_decay_start: float = 0.0
     ema_decay_end: float = 0.9999
+    ema_decay_schedule_epochs: int = 0
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -1689,6 +1690,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    ema_schedule_epochs = (
+        config.ema_decay_schedule_epochs if config.ema_decay_schedule_epochs > 0 else max_epochs
+    )
+    ema_schedule_total_steps = max(1, ema_schedule_epochs * max(len(train_loader), 1))
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1812,7 +1817,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
-                    progress = min(global_step / max(total_estimated_steps, 1), 1.0)
+                    progress = min(global_step / ema_schedule_total_steps, 1.0)
                     cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
                     ema_decay_now = config.ema_decay_start + cos_val * (
                         config.ema_decay_end - config.ema_decay_start
