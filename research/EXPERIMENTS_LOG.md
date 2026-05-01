@@ -28,6 +28,27 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Thorfinn reassigned** to PR #142: compound SOTA + vol_w=2.0 (recover volume gradient).
 - **New SOTA: 10.580**
 
+## 2026-05-01 02:17 UTC — PR #133 CLOSED: edward compound T_max=50 + EMA=0.999 — 11.116 (+5.1% vs SOTA)
+
+- **Branch:** `edward/round9-compound-tmax50-ema999`
+- **W&B run:** `a7k1k2y4` rank 0 — group `tay-round9-compound-tmax50-ema999`, 285 min, 9 val epochs, best val 9.9947 (ep9)
+- **Hypothesis:** Compound Lion T_max=50 + EMA=0.999 (both confirmed single-variable winners stacked).
+- **Result:** test_abupt **11.116** vs SOTA **10.580** (PR #115) = **+5.07% regression**. Student correctly noted +0.48% win over PR #110 (their benchmark at launch time), but PR #115 merged during run and set a higher bar.
+
+| Metric | PR #133 | PR #115 SOTA | Δ vs SOTA | AB-UPT |
+|---|---:|---:|---:|---:|
+| abupt_mean | 11.116 | **10.580** | +5.1% | — |
+| surface_pressure | 6.174 | **5.690** | +8.5% | 3.82 |
+| wall_shear | 11.128 | **10.419** | +6.8% | 7.29 |
+| volume_pressure | 12.625 | **12.740** | −0.9% | 6.08 |
+| tau_x | 9.513 | **8.908** | +6.8% | 5.35 |
+| tau_y | 13.435 | **12.491** | +7.6% | 3.65 |
+| tau_z | 13.835 | **13.071** | +5.8% | 3.63 |
+
+- **Analysis:** T_max=50 cosine + EMA=0.999 is a real compound (val 9.99 is the cleanest sub-10 outside of #115), but the LR=5e-5 base can't match LR=1e-4's coverage in 9 epochs. PR #115's lr=1e-4 change dominates entirely.
+- **Conclusion:** T_max=50 and EMA=0.999 are additive on the lr=5e-5 base, but lr=1e-4 wins on a different dimension. The schedule lever is likely still useful when compounded on the lr=1e-4+EMA=0.999 base. Edward reassigned to 6L/256d depth swap (yi's −21% single-shot, biggest untested lever).
+- **Edward reassigned** to PR #146: 6L/256d depth swap.
+
 ## 2026-04-30 21:00 UTC — PR #109 CLOSED: frieren Lion uncompiled + 1-epoch warmup — warmup closed-door
 
 - **Branch:** `frieren/round7-lion-warmup`
