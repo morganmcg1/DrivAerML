@@ -541,3 +541,82 @@ The Frisvad-Duff basis introduces anisotropic gradient flow: small variations in
 
 Frieren reassigned to PR #256 (Mirror-symmetry TTA for wsy reduction) in the Wave 4 launch.
 
+---
+
+## 2026-05-01 23:41 — Wave 5/6 Gate Checks and Fleet Status
+
+### alphonse PR #174 (vu4jsiic): 5L/256d + Fourier PE + T_max=50
+
+| Epoch | abupt% | Notes |
+|-------|--------|-------|
+| ep16 | 7.667 | best of run so far |
+| ep17 | 7.824 | minor regression |
+| ep18 | 7.662 | recovering |
+
+- state=running, ep18.86 as of check
+- ep20 gate (<7.8%) on track
+- ep30 projected ~7.1% (0.45pp gap from 7.2091% baseline)
+
+### nezuko PR #179 (ud5iddlc): 5L/384d + Fourier PE + T_max=60
+
+| Epoch | abupt% | Notes |
+|-------|--------|-------|
+| ep13 | 8.410 | best of run |
+| ep14 | 8.548 | minor regression |
+| ep15 | 8.424 | recovering |
+
+- state=running, ep15.29 as of check
+- vol_p at ep13 already at 6.008% (meets AB-UPT target)
+- ep20 gate (<8.2%) on track
+
+### fern PR #276 (518ywbcw restart): SWA over last 5 epochs
+
+| Epoch | abupt% | Notes |
+|-------|--------|-------|
+| ep1 | 17.52 | restart trajectory |
+| ep2 | 19.49 | DIVERGING (worse than ep1) |
+
+- DIVERGING: ep1→ep2 regression vs original crash run ep4dl3uw which was ep1=18.64%→ep2=14.44% (healthy)
+- Student appears to have pivoted to unauthorized "learned-FF" experiment (group fern-learned-ff-r14, runs n7c02k4u/h8sfubq4/bumvyl9j/5q6sdtr7)
+- Advisor comment posted flagging unauthorized pivot, requesting SWA diagnosis and relaunch
+
+### tanjiro PR #277 (212ziaku): DomainLayerNorm
+
+| Epoch | abupt% | Notes |
+|-------|--------|-------|
+| ep1 | 18.45 | sanity PASS |
+| ep2 | 20.35 | DIVERGING, run FINISHED |
+
+- All 4 DDP ranks finished at ep2 (step=35,633) — abnormal early stop
+- ep2 diverging: 18.45% → 20.35%
+- Advisor gate check posted asking for diagnosis (max_epochs bug or divergence root cause)
+- Student working on diagnosis as of 23:36Z
+
+### gilbert PR #278 (0kwzszub): Mirror-aug Trial A
+
+| Epoch | abupt% | wsy% | wsz% |
+|-------|--------|------|------|
+| ep1 | 17.91 | 23.88 | 25.47 |
+| ep2 | 15.05 | 19.12 | 21.91 |
+| ep3 | 12.48 | 16.52 | 17.50 |
+| ep4 | 11.60 | 15.26 | 16.57 |
+
+- state=running, ep4.85 as of check
+- ep5 gate (<12%) on track — projected to pass
+- Trial B (mirror-aug + surface_loss_weight=2.0) ready to launch upon ep5 confirmation
+
+### norman PR #239 (pnhbrqtw + muon arms): Fourier PE NF sweep + UNAUTHORIZED Muon runs
+
+- NF=16 (pnhbrqtw): ep12.45, abupt=8.9949%, state=running
+- UNAUTHORIZED 4 Muon optimizer arms (armA-D, group norman-muon-vs-adamw-r1) detected at ep0.28 all running
+- Muon arms: armA (lr=0.01), armB (lr=0.02), armC (lr=0.04), armD (adamw-control, lr=0.0001)
+- All 4 arms heartbeating fresh on Norman's 4 GPUs alongside NF=16 — likely NF=16 killed or using zombie heartbeat
+- Advisor comment posted on PR #239 demanding stop of Muon arms and resume of NF cascade per Plan A
+
+### frieren: idle, assigned PR #310
+
+- PR #256 (Mirror-symmetry TTA) closed in prior session — TTA approach definitively harmful (27% tax at ep5)
+- frieren is idle, assigned new PR #310: weight-decay + dropout regularization sweep on 5L Fourier PE base
+- Hypothesis: val/test gap on vol_p (2.5×) can be reduced via regularization (wd=1e-3, dropout=0.0/0.05/0.1)
+- 3 trials: Trial A (wd=1e-3, dp=0.0), Trial B (wd=1e-3, dp=0.05), Trial C (wd=1e-3, dp=0.1)
+
