@@ -45,13 +45,39 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Watch:** `val_primary/volume_pressure_rel_l2_pct` directly; if surface metrics regress >2%, stop run.
 - **Status:** Running. Awaiting results.
 
-## 2026-05-01 (latest) — PR #203 ASSIGNED: thorfinn round12 weight_decay=2.5e-4 (sweep DOWN from SOTA)
+## 2026-05-01 (latest) — PR #203 CLOSED: thorfinn round12 weight_decay=2.5e-4 (test 11.841, +11.9% vs SOTA)
 
 - **Branch:** `thorfinn/round12-wd-2p5e-4`
 - **Hypothesis:** PR #163 (wd=1e-3) regressed all metrics +4.5% from SOTA (wd=5e-4). Gradient in WD points DOWN — sweep to 2.5e-4 (half of SOTA value).
 - **W&B group:** `tay-round12-wd-2p5e-4`
+- **W&B run:** `894ay3y1`, rt=284min, 9/9 epochs.
 - **Single delta from SOTA:** only `--weight-decay 2.5e-4` changes.
-- **Status:** Running. Awaiting results.
+
+### Val trajectory
+
+| Epoch | abupt_val |
+|------:|----------:|
+| 1 | 58.230 |
+| 2 | 28.272 |
+| 3 | 19.327 |
+| 4 | 15.831 |
+| 5 | 13.730 |
+| 6 | 12.580 |
+| 7 | 11.605 |
+| 8 | 11.026 |
+| 9 | 10.811 |
+
+### Test metrics vs SOTA
+
+| Metric | SOTA (PR #115) | PR #203 (wd=2.5e-4) | Delta |
+|---|---:|---:|---:|
+| abupt_mean | 10.580 | **11.841** | **+11.9%** |
+| surface_pressure | 5.690 | 6.601 | +16.0% |
+| wall_shear | 10.419 | 12.008 | +15.2% |
+| volume_pressure | 12.740 | 13.003 | +2.1% |
+
+- **Conclusion:** wd=2.5e-4 (half SOTA) is strictly WORSE than SOTA wd=5e-4 — 11.9% test regression. Combined with PR #163 (wd=1e-3 = double SOTA → +4.5% regression), the sweep confirms SOTA wd=5e-4 is the local optimum. Weight-decay space is closed. The asymmetry (halving WD hurts more than doubling it) suggests the model needs regularization that wd=5e-4 provides — going lower erases it.
+- **PR Status:** CLOSED. Negative result.
 
 ## 2026-05-01 (latest) — PR #163 CLOSED: thorfinn weight_decay=1e-3 (regressed +4.5% from SOTA)
 
