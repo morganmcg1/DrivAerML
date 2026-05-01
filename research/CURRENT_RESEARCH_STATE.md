@@ -1,6 +1,6 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 21:40 UTC
-- **Branches:** `yi` (4L/512d Lion SOTA), `bengio` (4L/256d AdamW Wave 2/3)
+- **Updated:** 2026-05-01 22:35 UTC (yi advisor sweep)
+- **Branches:** `yi` (4L/512d Lion SOTA), `bengio` (4L/256d AdamW Wave 2/3), `tay` (Lion+DDP refactored codebase)
 
 ---
 
@@ -37,30 +37,31 @@ Volume pressure has now beaten AB-UPT. Surface pressure and wall_shear remain th
 
 ### yi branch — 17 WIP PRs (zero idle)
 
+Note: PRs assigned to other advisor branches (`tay`: #247, #280; `bengio`: #239) are excluded from this table — they belong to those advisors' fleets.
+
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #280 | frieren | **MLP activation ablation** (SwiGLU / ReLU² vs GELU) | NEW (just assigned) |
-| ~~#279~~ | ~~frieren~~ | ~~no-slip BC penalty~~ | CLOSED 21:40Z — duplicates failed PR #201 (GT tau·n RMS=12% contradicts continuum BC) |
-| #270 | violet | **tanh output soft-cap** (modded-NanoGPT logit-cap analog) | NEW (just assigned) |
-| #262 | nezuko | **linear-warmdown LR schedule** (modded-NanoGPT WSD-style) | NEW (just assigned) |
-| #261 | norman | **Muon optimizer** (Newton-Schulz orthogonalized momentum) | NEW (just assigned) |
-| #249 | tanjiro | asinh wall-shear normalization | TempCollapse bug found; advisor authorized `T.clamp(min=1e-2)` + relaunch with `--lr-warmup-epochs 1`; sent back to wip 21:35Z |
-| #247 | thorfinn | cosine T_max=14 (between 9 and 50) | Run live, mid-ep3 |
-| #245 | gilbert | progressive EMA decay (0.99→0.9999 etc.) | Arm A surviving; B/C retries running |
-| #244 | emma | surface-loss-weight {1.5, 2.0} | Arm A crashed lr=5e-4; Arm B healthy |
-| #243 | chihiro | aux-rel-l2-weight {0.1, 0.5, 1.0} | A/B retries at lr=3e-4; C healthy |
-| #239 | norman | Fourier PE num_freqs sweep (bengio-branch work) | NF=16 running, ep5 gate ~5h |
-| #230 | senku | SWA tail-end weight averaging | All 4 arms running, no signal until ep25+ |
-| #228 | edward | OHEM hard surface-point weighting | Arm B (f=1.0) running |
-| #227 | stark | wall-shear in surface tangent frame | NO POD — RBAC blocked, Issue #248 |
-| #225 | haku | mirror symmetry training augmentation | Running |
-| #224 | fern | learned Fourier embeddings per-axis | K/L/N/O surviving; J finding: init=10 beats sincos by 6.7% at matched ep1 step |
-| #221 | violet | per-channel adaptive loss reweighting | Run A `541ru1pv` ep5=11.12; gate-check stalled (cross-listed, primary on bengio) |
-| #210 | kohaku | gradient accumulation eff_bs=32 | Running |
-| ~~#209~~ | ~~frieren~~ | ~~step-decay LR drop after ep1~~ | CLOSED 2026-05-01 21:22 — hypothesis rejected; control 10.08 vs bar 9.291 on legacy stack |
-| #208 | askeladd | sandwich-LN to unlock 8L/256d | Arm B running ~18866+ steps |
+| #286 | frieren | **bilateral-symmetry test-time augmentation (TTA)** for tau_y/z gap | NEW (just assigned 22:35Z, replacing closed #209) |
+| #284 | alphonse | 6L/512d depth+width scaling on Lion+warmup SOTA | Awaiting student launch |
+| #273 | edward | focal-loss per-point surface weighting (γ sweep {0,0.5,1,2}) | All 4 arms launched, AdamW-control on yi |
+| #270 | violet | **tanh output soft-cap** (modded-NanoGPT logit-cap analog) | Arm-matrix swap applied; sweep restarted |
+| #262 | nezuko | **linear-warmdown LR schedule** (modded-NanoGPT WSD-style) | Arm C only (skipped A; fern `ut1qmc3i` is published control) |
+| #261 | norman | **Muon optimizer** (Newton-Schulz orthogonalized momentum) | Plan B-modified: AdamW control; Lion port deferred |
+| #249 | tanjiro | asinh wall-shear normalization | TempCollapse fix applied (commit 66cce26); arms relaunched |
+| #245 | gilbert | progressive EMA decay (0.99→0.9999 etc.) | Arm B retry ep1 val landed; Arm C retry crashed at 94% |
+| #244 | emma | surface-loss-weight {1.5, 2.0} | Both arms stable on lr=3e-4 |
+| #243 | chihiro | aux-rel-l2-weight {0.1, 0.5, 1.0} | A r3 + B r2 ep1 vals landed; C r2 still in ep1 |
+| #230 | senku | SWA tail-end weight averaging | v2 sweep (warmup=1000) launched 21:49Z, all 4 arms healthy |
+| #227 | stark | wall-shear in surface tangent frame | **NO POD — RBAC blocked, Issue #248 (still OPEN)** |
+| #225 | haku | mirror symmetry training augmentation | Running, lr=5e-4 instability margin documented |
+| #224 | fern | learned Fourier embeddings per-axis | K/L/N/O surviving; J finding: init=10 beats sincos by 6.7% at matched ep1 |
+| #210 | kohaku | gradient accumulation eff_bs=32 | Arm A switched to lr=3e-4+seed=43 after dual seed=42/43 crashes |
+| #208 | askeladd | sandwich-LN to unlock 8L/256d | Round-7 launched 20:23Z; lr_warmup ramp running |
 | #207 | alphonse | Adaptive Gradient Clipping (AGC) | lr=3e-4 arms only surviving |
-| #193 | thorfinn | curvature-biased surface point sampling | 3 lr=3e-4 arms healthy past warmup |
+| #193 | thorfinn | curvature-biased surface point sampling | 3 lr=3e-4 arms healthy past warmup; lr=5e-4 path closed |
+
+### Closed since last update (2026-05-01)
+- **PR #209** (frieren step-decay LR drop) — closed 21:22Z. All decay arms (B/C/D) underperformed no-decay control; hypothesis rejected on this lineage.
 
 ### bengio branch — 16 WIP PRs (zero idle)
 
@@ -138,19 +139,25 @@ Volume pressure has now beaten AB-UPT. Surface pressure and wall_shear remain th
 
 ### Theme 7: Symmetry / TTA / Augmentation
 - **#225 haku (yi):** mirror symmetry training augmentation
+- **#286 frieren (yi):** bilateral-symmetry TTA — orthogonal to #225, inference-only, no training cost
 - **#256 frieren (bengio):** mirror-symmetry TTA
 - **#257 haku (bengio):** high-shear curriculum oversampling
 - **#227 stark (yi):** wall-shear in tangent frame — POD MISSING (RBAC, Issue #248)
 - **#230 senku (yi):** SWA tail-end weight averaging
 
+### Theme 9: Architecture Capacity Scaling
+- **#284 alphonse (yi):** 6L/512d depth+width on Lion+warmup SOTA — tests whether 4L/512d is capacity-bound
+
 ---
 
 ## Fleet-Wide Stability Constraints (current)
 
-- **lr=5e-4 + 4L/512d + Lion is structurally unstable.** Confirmed across 10+ arms across PRs #193/#207/#224/#243/#244/#245. Standard response: relaunch at lr=3e-4 (Lion) or lr=1e-4 (Lion + lr_warmup_epochs=1, the SOTA recipe).
-- **PR #222 SOTA recipe (Lion, lr=1e-4, lr_warmup_epochs=1, 4L/512d) is the only confirmed-stable optimizer point** in this regime.
+- **lr=5e-4 + 4L/512d is structurally unstable on yi-monolithic AdamW.** Confirmed across 10+ arms across PRs #193/#207/#210/#224/#243/#244/#245. Standard response: relaunch at lr=3e-4 or seed=-1.
+- **yi vs tay infrastructure gap**: PR #222 winning config (Lion + DDP + `--lr-warmup-epochs`) lives on `tay`'s refactored codebase. yi's monolithic `train.py` is **AdamW-only, single-process, has only `--lr-warmup-steps` and `--wandb-group` (dash form)**. All Round-15 yi PRs run AdamW-control comparisons — relative deltas, not absolute 9.291% bar. Lion+DDP port to yi deferred to a single dedicated infra PR (no student assigned yet).
+- **PR #222 SOTA recipe (Lion, lr=1e-4, lr_warmup_epochs=1, 4L/512d) is the only confirmed-stable optimizer point** for the absolute bar — but only reproducible on tay.
 - **Volume pressure now beats AB-UPT (0.97×, 5.88 vs 6.08).** All future experiments should avoid sacrificing p_v for tau gains.
 - **Wall_shear_y/z gap remains 1.4× of AB-UPT** — primary research target.
+- **Issue #248 (stark pod RBAC)**: still OPEN. Two follow-up nudges posted to Morgan; awaiting human cluster admin action.
 
 ---
 
