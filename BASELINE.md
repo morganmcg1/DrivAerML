@@ -2,16 +2,25 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: thorfinn PR #115 compound lr=1e-4 + EMA=0.999 — 2026-05-01 01:20 UTC
+## Status: fern PR #222 lr_warmup_epochs=1 — 2026-05-01 19:30 UTC
 
-**NEW SOTA: thorfinn PR #115 compound stack beats PR #111 by −5.04% (10.580 vs 11.142).**
+**NEW SOTA: fern PR #222 lr warmup 1ep beats PR #115 by −2.03% (9.2910 vs 9.484 val).**
 
-lr=1e-4 (2× SOTA) + EMA=0.999 compound stack. Both levers stacked additively with no negative interaction. EMA dominates early epochs (ep1 lead −33%), lr dominates late epochs. Note: run used default `volume_loss_weight=1.0` — volume_pressure unchanged (+0.1%), while all surface/wall-shear metrics improved 6–8%. Best val 9.484 at ep9.
+1-epoch linear LR warmup added to the SOTA stack (Lion lr=1e-4, EMA=0.999). Smooth convergence improvement with continuous descent across all 9 epochs — no instability. The warmup provides a gentler entry to steep descent, resulting in lower final val. ep1 inflated (warmup effect: LR still ramping) but ep2+ shows consistently better convergence than flat-LR baseline.
 
-**W&B run:** `d03oghpp` (rank 0) — group `tay-round9-compound-lr1e4-ema999`, 287 min runtime, 9 val epochs, best val 9.484 (ep9)
-**PR:** #115
+**W&B run:** `ut1qmc3i` (rank 0) — group `tay-round12-lr-warmup-1ep`, ~270 min runtime, 9 val epochs, best val 9.2910 (ep9)
+**PR:** #222
+**Test metrics:** PENDING — run still completing test evaluation. Will update when `test_primary/*` keys appear in summary.
 
-### tay current best — `test_primary/*`
+### tay current best — `val_primary/*` (test pending)
+
+| Epoch | val_abupt | surf_pres | vol_pres | wall_shear |
+|-------|-----------|-----------|----------|------------|
+| ep7 | 9.8759% | 6.3077% | 6.0145% | 11.0603% |
+| ep8 | 9.4516% | 6.0019% | 5.7614% | 10.5847% |
+| **ep9 (best)** | **9.2910%** | **5.8707%** | **5.8789%** | **10.3423%** |
+
+### Previous best `test_primary/*` (PR #115 thorfinn — valid until PR #222 test completes)
 
 | Metric | This-repo key | tay best (PR #115 thorfinn) | PR #111 tanjiro | PR #50 | AB-UPT |
 |---|---|---:|---:|---:|---:|
@@ -23,7 +32,7 @@ lr=1e-4 (2× SOTA) + EMA=0.999 compound stack. Both levers stacked additively wi
 | `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **12.491** | 13.525 | 13.592 | 3.65 |
 | `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **13.071** | 13.992 | 14.017 | 3.63 |
 
-### Reproduce new SOTA (Lion lr=1e-4, no compile, EMA=0.999)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, lr_warmup_epochs=1)
 
 ```bash
 cd target/
@@ -33,10 +42,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
-  --ema-decay 0.999
+  --ema-decay 0.999 --lr-warmup-epochs 1
 ```
-
-**Note:** This run did NOT include `--volume-loss-weight 2.0`. The full SOTA stack should add it back — expected to recover volume_pressure and push abupt toward ~10.3.
 
 ### Compounding wins so far
 
@@ -51,7 +58,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #50 | nezuko | **−0.10 (−0.84%) vs arm B** | Lion uncompiled lr=5e-5 reproduce |
 | #110 | edward | **−0.04 (−0.34%) vs #50** | Lion + cosine T_max=50 (gentle 8% decay) |
 | #111 | tanjiro | **−0.03 (−0.25%) vs #110** | EMA decay 0.999 (5× faster than 0.9995) |
-| **#115** | **thorfinn** | **−0.562 (−5.04%) vs #111** | **Compound: lr=1e-4 + EMA=0.999 (both winners stacked)** |
+| #115 | thorfinn | **−0.562 (−5.04%) vs #111** | Compound: lr=1e-4 + EMA=0.999 (both winners stacked) |
+| **#222** | **fern** | **−0.193 (−2.03%) vs #115** | **lr_warmup_epochs=1 (1-epoch linear warmup on top of SOTA stack)** |
 
 ---
 
