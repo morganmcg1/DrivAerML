@@ -102,6 +102,7 @@ class ContinuousSincosEmbed(nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim
+        self.max_wavelength = max_wavelength
         padding = hidden_dim % input_dim
         dim_per_axis = (hidden_dim - padding) // input_dim
         sincos_padding = dim_per_axis % 2
@@ -348,6 +349,7 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        pos_max_wavelength: int = 1000,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -359,8 +361,13 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.pos_max_wavelength = pos_max_wavelength
 
-        self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
+        self.pos_embed = ContinuousSincosEmbed(
+            hidden_dim=n_hidden,
+            input_dim=space_dim,
+            max_wavelength=pos_max_wavelength,
+        )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -571,6 +578,7 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
+    pos_max_wavelength: int = 1000
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -736,6 +744,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        pos_max_wavelength=config.pos_max_wavelength,
     )
 
 
