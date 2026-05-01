@@ -556,6 +556,10 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    div_constraint_weight: float = 0.0
+    div_constraint_k: int = 8
+    div_constraint_sdf_threshold: float = 0.05
+    div_constraint_anchor_count: int = 4096
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1285,6 +1289,77 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def divergence_constraint_loss(
+    p_pred: torch.Tensor,
+    coords: torch.Tensor,
+    sdf: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    k: int,
+    sdf_threshold: float,
+    anchor_count: int,
+) -> torch.Tensor:
+    """Discrete-Laplacian smoothness penalty on predicted volume pressure.
+
+    DrivAerML exposes only volume pressure (no velocity), so the strongest
+    physics prior we can apply is the homogeneous pressure-Poisson form
+    `nabla^2 p approx 0` away from the body surface. We approximate it
+    with a kNN inverse-distance-weighted Laplacian computed on a random
+    subsample of valid far-field volume points (sdf magnitude above
+    `sdf_threshold`). All math is in fp32 for bf16 stability.
+
+    Inputs are in normalized space (the same space the data loss uses).
+
+    Args:
+        p_pred: [B, N, 1] predicted volume pressure (normalized).
+        coords: [B, N, 3] raw volume xyz from `batch.volume_x[..., :3]`.
+        sdf: [B, N, 1] raw SDF channel from `batch.volume_x[..., 3:4]`.
+        mask: [B, N] bool, True for non-padded volume tokens.
+        k: number of nearest neighbours per anchor.
+        sdf_threshold: anchors with `|sdf|` below this are filtered out.
+        anchor_count: random subsample size per batch element.
+
+    Returns:
+        Scalar loss with gradient flow back through `p_pred`. Returns a
+        graph-preserving zero when no batch element contains enough
+        far-field anchors (e.g. tiny debug batches).
+    """
+    if anchor_count <= 0 or k <= 0:
+        return p_pred.sum() * 0.0
+    batch_size = p_pred.shape[0]
+    if batch_size == 0 or p_pred.shape[1] == 0:
+        return p_pred.sum() * 0.0
+    p_flat = p_pred.squeeze(-1).float()
+    coords_f = coords.float()
+    sdf_abs = sdf.squeeze(-1).float().abs()
+    far = sdf_abs > sdf_threshold
+    valid = mask & far
+    losses: list[torch.Tensor] = []
+    for b in range(batch_size):
+        valid_idx = valid[b].nonzero(as_tuple=False).squeeze(-1)
+        if int(valid_idx.numel()) < k + 2:
+            continue
+        n_sub = min(int(anchor_count), int(valid_idx.numel()))
+        perm = torch.randperm(int(valid_idx.numel()), device=coords_f.device)[:n_sub]
+        sub = valid_idx[perm]
+        c_sub = coords_f[b, sub]
+        p_sub = p_flat[b, sub]
+        with torch.no_grad():
+            dists = torch.cdist(c_sub, c_sub)
+            topk = dists.topk(k + 1, dim=-1, largest=False).indices
+            nbr_idx = topk[:, 1:].contiguous()
+        nbr_xyz = c_sub[nbr_idx]
+        d = (nbr_xyz - c_sub.unsqueeze(1)).norm(dim=-1).clamp_min(1e-6)
+        w = 1.0 / d
+        w = w / w.sum(dim=-1, keepdim=True)
+        nbr_p = p_sub[nbr_idx]
+        lap = (w * (nbr_p - p_sub.unsqueeze(-1))).sum(dim=-1)
+        losses.append(lap.pow(2).mean())
+    if not losses:
+        return p_pred.sum() * 0.0
+    return torch.stack(losses).mean()
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1298,6 +1373,10 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    div_constraint_weight: float = 0.0,
+    div_constraint_k: int = 8,
+    div_constraint_sdf_threshold: float = 0.05,
+    div_constraint_anchor_count: int = 4096,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1355,6 +1434,19 @@ def train_loss(
             aux_rel_l2 = num / den
             loss = loss + aux_rel_l2_weight * aux_rel_l2
             aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+        div_constraint_value: float | None = None
+        if div_constraint_weight > 0.0:
+            div_loss = divergence_constraint_loss(
+                p_pred=out["volume_preds"],
+                coords=batch.volume_x[:, :, :3],
+                sdf=batch.volume_x[:, :, 3:4],
+                mask=batch.volume_mask,
+                k=div_constraint_k,
+                sdf_threshold=div_constraint_sdf_threshold,
+                anchor_count=div_constraint_anchor_count,
+            )
+            loss = loss + div_constraint_weight * div_loss
+            div_constraint_value = float(div_loss.detach().cpu().item())
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -1365,6 +1457,8 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if div_constraint_value is not None:
+        metrics["div_constraint_loss"] = div_constraint_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1782,6 +1876,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                div_constraint_weight=config.div_constraint_weight,
+                div_constraint_k=config.div_constraint_k,
+                div_constraint_sdf_threshold=config.div_constraint_sdf_threshold,
+                div_constraint_anchor_count=config.div_constraint_anchor_count,
             )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -1849,6 +1947,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
+                ]
+            if "div_constraint_loss" in batch_loss_metrics:
+                train_log["train/div_constraint_loss"] = batch_loss_metrics[
+                    "div_constraint_loss"
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
