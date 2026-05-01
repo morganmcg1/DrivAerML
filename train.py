@@ -16,11 +16,13 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import random
 import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.nn as nn
 import wandb
@@ -101,6 +103,8 @@ class Config:
     ema_start_step: int = 50
     eval_raw_vs_ema: bool = False
     lr_warmup_epochs: int = 0
+    lr_warmup_steps: int = 0
+    lr_warmup_start_lr: float = 1e-5
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
     grad_clip_norm: float = 1.0
@@ -111,6 +115,8 @@ class Config:
     ddp_log_model_telemetry_all_ranks: bool = False
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
+    seed: int = -1
+    nonfinite_skip_abort: int = 200
     compile_model: bool = True
     debug: bool = False
 
@@ -138,6 +144,30 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def step_warmup_lr(config: Config, scheduled_lr: float, global_step: int) -> float:
+    if config.lr_warmup_steps <= 0:
+        return scheduled_lr
+    step_index = max(global_step - 1, 0)
+    if step_index >= config.lr_warmup_steps:
+        return scheduled_lr
+    progress = step_index / max(config.lr_warmup_steps, 1)
+    return config.lr_warmup_start_lr + progress * (
+        scheduled_lr - config.lr_warmup_start_lr
+    )
+
+
+def set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
 
 
 def build_model(config: Config) -> SurfaceTransolver:
@@ -191,6 +221,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        if config.seed >= 0:
+            seed_everything(config.seed)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
@@ -258,6 +290,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         best_metrics: dict[str, float] = {}
         best_checkpoint_source = "ema" if ema is not None else "raw"
         global_step = 0
+        nonfinite_skip_count = 0
         early_stop_reason: str | None = None
         timeout_hit = False
         train_start = time.time()
@@ -299,9 +332,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
-                current_lr = scheduler.get_last_lr()[0]
+                scheduled_lr = scheduler.get_last_lr()[0]
+                current_lr = step_warmup_lr(config, scheduled_lr, global_step)
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
-                skip_step = distributed_any(state, loss_is_nonfinite, device)
+                loss_skip_step = distributed_any(state, loss_is_nonfinite, device)
+                skip_step = loss_skip_step
+                nonfinite_skip_kind = 1 if loss_skip_step else 0
                 should_log_model_telemetry = (
                     state.is_main or config.ddp_log_model_telemetry_all_ranks
                 )
@@ -320,9 +356,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/lr": current_lr,
                     "lr": current_lr,
                     "train/step_skipped": 1.0 if skip_step else 0.0,
-                    "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/nonfinite_loss": 1.0 if loss_skip_step else 0.0,
                 }
-                if not loss_is_nonfinite:
+                if not loss_skip_step:
                     train_log.update(
                         {
                             "train/loss": float(loss.detach().cpu().item()),
@@ -347,7 +383,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         grad_norm_tensor = global_grad_norm(base_model.parameters(), device)
                     grad_norm_pre_clip = float(grad_norm_tensor.detach().cpu().item())
                     grad_is_nonfinite = not math.isfinite(grad_norm_pre_clip)
-                    skip_step = distributed_any(state, grad_is_nonfinite, device)
+                    grad_skip_step = distributed_any(state, grad_is_nonfinite, device)
+                    skip_step = grad_skip_step
+                    if grad_skip_step:
+                        nonfinite_skip_kind = 2
                     clipped = (
                         config.grad_clip_norm > 0.0
                         and math.isfinite(grad_norm_pre_clip)
@@ -357,7 +396,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         {
                             "train/grad/global_norm_pre_clip": grad_norm_pre_clip,
                             "train/grad/clipped": 1.0 if clipped else 0.0,
-                            "train/nonfinite_grad": 1.0 if grad_is_nonfinite else 0.0,
+                            "train/nonfinite_grad": 1.0 if grad_skip_step else 0.0,
                             "train/step_skipped": 1.0 if skip_step else 0.0,
                         }
                     )
@@ -372,6 +411,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if skip_step:
                         optimizer.zero_grad(set_to_none=True)
                     else:
+                        set_optimizer_lr(optimizer, current_lr)
                         optimizer.step()
                         if ema is not None:
                             ema.update(base_model)
@@ -387,6 +427,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+
+                if skip_step:
+                    nonfinite_skip_count += 1
+                train_log["train/nonfinite_skip_count"] = nonfinite_skip_count
+                train_log["train/nonfinite_skip_kind"] = nonfinite_skip_kind
+                abort_for_nonfinite = (
+                    config.nonfinite_skip_abort >= 0
+                    and nonfinite_skip_count > config.nonfinite_skip_abort
+                )
+                if abort_for_nonfinite:
+                    train_log["train/nonfinite_abort"] = 1.0
 
                 train_log.update(
                     train_slope_tracker.update(
@@ -408,6 +459,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if early_stop_reason is not None:
                     train_log["early_stop/triggered"] = 1.0
                 wandb.log(train_log)
+                if abort_for_nonfinite:
+                    raise RuntimeError(
+                        f"Aborting after {nonfinite_skip_count} non-finite loss/grad skips; "
+                        "training is structurally broken."
+                    )
                 if early_stop_reason is not None:
                     if state.is_main:
                         print(early_stop_reason)
