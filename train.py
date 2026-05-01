@@ -556,6 +556,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    rans_divergence_weight: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1304,6 +1305,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    rans_divergence_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1317,16 +1319,26 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
-        if use_tangential_wallshear_loss:
-            # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
-            # in normalized space does not equal physical-space tangent projection.
-            # Denormalize -> project in physical space -> renormalize.
+        rans_penalty_value: float | None = None
+        # Compute normal-component dot product when needed by either tangential
+        # loss or the RANS soft no-slip-wall penalty (tau . n = 0).
+        need_normal_dot = use_tangential_wallshear_loss or rans_divergence_weight > 0.0
+        if need_normal_dot:
+            # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]); we work in
+            # physical space so the constraint matches the physical identity.
             normals = batch.surface_x[..., 3:6]
             ws_std = transform.surface_y_std[1:4]
             ws_mean = transform.surface_y_mean[1:4]
-            ws_pred_norm = surface_pred_norm[..., 1:4]
+            ws_pred_norm_chan = surface_pred_norm[..., 1:4]
+            ws_pred_phys = ws_pred_norm_chan * ws_std + ws_mean
+            n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+            normal_dot = (ws_pred_phys.float() * n_hat).sum(dim=-1)
+            if bool(batch.surface_mask.any()):
+                normal_rms = float(
+                    normal_dot[batch.surface_mask].square().mean().sqrt().detach().cpu().item()
+                )
+        if use_tangential_wallshear_loss:
             ws_true_norm = surface_target[..., 1:4]
-            ws_pred_phys = ws_pred_norm * ws_std + ws_mean
             ws_true_phys = ws_true_norm * ws_std + ws_mean
             ws_pred_tan = project_tangential(ws_pred_phys, normals)
             ws_true_tan = project_tangential(ws_true_phys, normals)
@@ -1334,12 +1346,6 @@ def train_loss(
             ws_true_tan_norm = (ws_true_tan - ws_mean) / ws_std
             surface_pred_used = torch.cat([surface_pred_norm[..., :1], ws_pred_tan_norm], dim=-1)
             surface_target_used = torch.cat([surface_target[..., :1], ws_true_tan_norm], dim=-1)
-            if bool(batch.surface_mask.any()):
-                n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
-                normal_dot = (ws_pred_phys.float() * n_hat).sum(dim=-1)
-                normal_rms = float(
-                    normal_dot[batch.surface_mask].square().mean().sqrt().detach().cpu().item()
-                )
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
@@ -1351,6 +1357,15 @@ def train_loss(
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        if rans_divergence_weight > 0.0:
+            if bool(batch.surface_mask.any()):
+                mask_f = batch.surface_mask.float()
+                normal_dot_clamped = normal_dot.float().clamp(-10.0, 10.0)
+                rans_penalty = ((normal_dot_clamped ** 2) * mask_f).sum() / mask_f.sum().clamp_min(1.0)
+            else:
+                rans_penalty = torch.zeros((), device=loss.device, dtype=torch.float32)
+            loss = loss + rans_divergence_weight * rans_penalty.to(loss.dtype)
+            rans_penalty_value = float(rans_penalty.detach().cpu().item())
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
             surf_pred_f = surface_pred_norm.float()
@@ -1371,8 +1386,10 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
-    if use_tangential_wallshear_loss:
+    if need_normal_dot:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if rans_penalty_value is not None:
+        metrics["rans_divergence_loss"] = rans_penalty_value
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -1801,6 +1818,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                rans_divergence_weight=config.rans_divergence_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1912,6 +1930,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "rans_divergence_loss" in batch_loss_metrics:
+                train_log["train/rans_divergence_loss"] = batch_loss_metrics[
+                    "rans_divergence_loss"
                 ]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
