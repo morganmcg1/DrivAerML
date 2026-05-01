@@ -351,9 +351,10 @@ class SurfaceTransolver(nn.Module):
         coord_normalize: str = "none",
     ):
         super().__init__()
-        if coord_normalize not in {"none", "global-scale", "per-axis"}:
+        if coord_normalize not in {"none", "global-scale", "per-axis", "per-axis-clamped"}:
             raise ValueError(
-                f"coord_normalize must be 'none', 'global-scale', or 'per-axis'; got {coord_normalize!r}"
+                "coord_normalize must be 'none', 'global-scale', 'per-axis', "
+                f"or 'per-axis-clamped'; got {coord_normalize!r}"
             )
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
@@ -409,6 +410,8 @@ class SurfaceTransolver(nn.Module):
         pos = x[:, :, : self.space_dim]
         if self.coord_normalize != "none":
             pos = (pos - self.coord_shift) / self.coord_scale.clamp(min=1e-6)
+            if self.coord_normalize == "per-axis-clamped":
+                pos = pos.clamp(0.0, 1.0)
         hidden = self.pos_embed(pos)
         if project_features is not None and x.shape[-1] > self.space_dim:
             hidden = hidden + project_features(x[:, :, self.space_dim :])
@@ -798,7 +801,7 @@ def resolve_coord_normalization(
     if mode == "none":
         return torch.zeros_like(xmin), torch.ones_like(xmin)
     extent = xmax - xmin
-    if mode == "per-axis":
+    if mode in ("per-axis", "per-axis-clamped"):
         return xmin.clone(), extent.clone()
     if mode == "global-scale":
         diag = torch.norm(extent)
