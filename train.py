@@ -210,8 +210,12 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         drop_path_prob: float = 0.0,
+        norm_style: str = "pre-ln",
     ):
         super().__init__()
+        if norm_style not in {"pre-ln", "sandwich-ln"}:
+            raise ValueError(f"norm_style must be 'pre-ln' or 'sandwich-ln', got {norm_style!r}")
+        self.norm_style = norm_style
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
         self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.attention = TransolverAttention(
@@ -222,13 +226,25 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        if norm_style == "sandwich-ln":
+            self.norm1_post = nn.LayerNorm(hidden_dim, eps=1e-6)
+            self.norm2_post = nn.LayerNorm(hidden_dim, eps=1e-6)
+        else:
+            self.norm1_post = None
+            self.norm2_post = None
         self.drop_path = DropPath(drop_path_prob)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
+        attn_out = self.attention(self.norm1(x), attn_mask=attn_mask)
+        if self.norm1_post is not None:
+            attn_out = self.norm1_post(attn_out)
+        x = x + self.drop_path(attn_out)
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        mlp_out = self.mlp(self.norm2(x))
+        if self.norm2_post is not None:
+            mlp_out = self.norm2_post(mlp_out)
+        x = x + self.drop_path(mlp_out)
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -286,6 +302,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        norm_style: str = "pre-ln",
     ):
         super().__init__()
         if depth <= 1:
@@ -303,6 +320,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     drop_path_prob=drop_path_rates[i],
+                    norm_style=norm_style,
                 )
                 for i in range(depth)
             ]
@@ -350,6 +368,7 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        norm_style: str = "pre-ln",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -392,6 +411,7 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            norm_style=norm_style,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -579,6 +599,7 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    norm_style: str = "pre-ln"
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -675,7 +696,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    config = Config(**vars(namespace))
+    if config.norm_style not in {"pre-ln", "sandwich-ln"}:
+        parser.error(
+            f"--norm-style must be 'pre-ln' or 'sandwich-ln', got {config.norm_style!r}"
+        )
+    return config
 
 
 def autocast_context(device: torch.device, amp_mode: str):
@@ -745,6 +771,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        norm_style=config.norm_style,
     )
 
 
