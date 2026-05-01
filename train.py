@@ -124,6 +124,35 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class LearnedFourierEmbed(nn.Module):
+    """Learned Fourier features: W: Linear(input_dim -> hidden_dim//2, bias=False);
+    output [sin(Wx), cos(Wx)] concatenated. W ~ N(0, init_scale^2). Following Tancik
+    et al. 2020 (NeRF), bias=False; init_scale controls frequency band coverage —
+    higher init_scale spans higher frequencies but is harder to optimise."""
+
+    def __init__(self, hidden_dim: int, input_dim: int, init_scale: float = 10.0):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
+        self.init_scale = init_scale
+        half = hidden_dim // 2
+        self.padding = hidden_dim - 2 * half
+        if half <= 0:
+            raise ValueError("hidden_dim must be at least 2 for LearnedFourierEmbed")
+        self.W = nn.Linear(input_dim, half, bias=False)
+        with torch.no_grad():
+            self.W.weight.normal_(mean=0.0, std=float(init_scale))
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords = coords.float()
+        proj = self.W(coords)
+        emb = torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)
+        if self.padding > 0:
+            padding = torch.zeros(*emb.shape[:-1], self.padding, device=emb.device, dtype=emb.dtype)
+            emb = torch.cat([emb, padding], dim=-1)
+        return emb
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -350,6 +379,8 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_learned_fourier_embed: bool = False,
+        learned_fourier_init_scale: float = 10.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,12 +393,21 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.use_learned_fourier_embed = use_learned_fourier_embed
+        self.learned_fourier_init_scale = learned_fourier_init_scale
 
-        self.pos_embed = ContinuousSincosEmbed(
-            hidden_dim=n_hidden,
-            input_dim=space_dim,
-            max_wavelength=pos_max_wavelength,
-        )
+        if use_learned_fourier_embed:
+            self.pos_embed = LearnedFourierEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                init_scale=learned_fourier_init_scale,
+            )
+        else:
+            self.pos_embed = ContinuousSincosEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                max_wavelength=pos_max_wavelength,
+            )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -579,6 +619,8 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_learned_fourier_embed: bool = False
+    learned_fourier_init_scale: float = 10.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -600,6 +642,7 @@ class Config:
     debug: bool = False
     seed: int = -1
     lr_warmup_steps: int = 0
+    lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
 
 
@@ -733,6 +776,25 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
+def _collect_pos_embed_stats(model: nn.Module) -> dict[str, float]:
+    """Per-axis column norms ||W[:, x]||_2, ||W[:, y]||_2, ||W[:, z]||_2 of the
+    learned Fourier projection (no-op when sincos)."""
+    stats: dict[str, float] = {}
+    target = getattr(model, "_orig_mod", model)
+    pos_embed = getattr(target, "pos_embed", None)
+    if isinstance(pos_embed, LearnedFourierEmbed):
+        with torch.no_grad():
+            W = pos_embed.W.weight.detach().float()
+        col_norms = W.norm(dim=0)
+        axis_names = ("x", "y", "z")
+        for i, axis in enumerate(axis_names[: W.shape[1]]):
+            stats[f"pos_embed/W_col_norm_{axis}"] = float(col_norms[i].item())
+        stats["pos_embed/W_global_norm"] = float(W.norm().item())
+        stats["pos_embed/W_max_abs"] = float(W.abs().max().item())
+        stats["pos_embed/W_mean_abs"] = float(W.abs().mean().item())
+    return stats
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -745,6 +807,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_learned_fourier_embed=config.use_learned_fourier_embed,
+        learned_fourier_init_scale=config.learned_fourier_init_scale,
     )
 
 
@@ -1712,7 +1776,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
-    total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    steps_per_epoch = max(len(train_loader), 1)
+    total_estimated_steps = max(1, max_epochs * steps_per_epoch)
+    effective_warmup_steps = config.lr_warmup_steps
+    if config.lr_warmup_epochs > 0:
+        effective_warmup_steps = max(effective_warmup_steps, config.lr_warmup_epochs * steps_per_epoch)
+    print(
+        f"steps_per_epoch={steps_per_epoch} "
+        f"effective_warmup_steps={effective_warmup_steps} "
+        f"total_estimated_steps={total_estimated_steps}"
+    )
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1767,6 +1840,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
+    wandb.define_metric("pos_embed/*", step_metric="global_step")
 
     output_dir = Path(config.output_dir) / f"run-{run.id}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1872,14 +1946,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 global_step += 1
                 continue
-            if config.lr_warmup_steps > 0:
-                if global_step < config.lr_warmup_steps:
+            if effective_warmup_steps > 0:
+                if global_step < effective_warmup_steps:
                     warmup_lr = config.lr_warmup_start_lr + (
                         config.lr - config.lr_warmup_start_lr
-                    ) * (global_step / config.lr_warmup_steps)
+                    ) * (global_step / effective_warmup_steps)
                     for pg in optimizer.param_groups:
                         pg["lr"] = warmup_lr
-                elif global_step == config.lr_warmup_steps:
+                elif global_step == effective_warmup_steps:
                     for pg in optimizer.param_groups:
                         pg["lr"] = config.lr
             optimizer.step()
@@ -2041,6 +2115,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
+        log_metrics.update(_collect_pos_embed_stats(model))
         wandb.log(log_metrics)
 
         primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0
