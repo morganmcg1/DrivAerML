@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 ~01:00 UTC
+- **Date:** 2026-05-02 ~02:00 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,62 +37,60 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --ema-decay 0.999 --lr-warmup-epochs 1
 ```
 
-## In-flight — Rounds 13–16 (2026-05-02 ~01:00 UTC)
+## In-flight — Rounds 13–17 (2026-05-02 ~02:00 UTC)
 
-**Active DrivAerML students (ddp8):** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn.
-
-**NOTE:** Round 15 PRs (#263-272) assigned to non-existent students were closed 2026-05-02. Deferred hypotheses listed under Key Learnings.
+**Active DrivAerML students (ddp8):** alphonse, askeladd, chihiro, edward, emma, fern, frieren, gilbert, haku, kohaku, nezuko, norman, senku, tanjiro, thorfinn, violet.
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
 | #232 | askeladd | model_heads=4 | **MERGED — CURRENT SOTA** |
 | #240 | frieren | mlp_ratio=8 | **CLOSED NEGATIVE** — best val=9.5498% at ep7.52 (+0.485pp). |
-| #241 | tanjiro | hidden_dim=768 (lr=1e-4) | Running; **tracking NEGATIVE** (~10.5% likely final). |
-| #247 | thorfinn | lr-cosine-t-max=14 | Running; ep7=9.9253%, **tracking NEGATIVE** (+0.860pp). |
-| #251 | fern | T_max=8+warmup+lr-min=5e-6 | Running; ep5=11.835%, **tracking NEGATIVE** (behind frieren at every epoch). |
-| #280 | frieren | MLP activation ablation (SwiGLU/ReLU²) | WIP — pod waiting for #240 cleanup. |
-| #281 | askeladd | --compile-model on SOTA stack | Running; ep2=45.04% (**anomalous — 2x worse than SOTA ep2=22%**). Monitor. |
-| #282 | edward | --lion-beta1 0.95 | Running; ep1=63.7% (normal). Monitor ep2. |
-| #283 | nezuko | --model-layers 5 depth sweep | Running; ep1=64.78% (normal). Monitor ep2. |
-| **#287** | **alphonse** | **QK-norm on SOTA stack** | **NEW Round 16 — pod pickup pending.** |
+| #251 | fern | T_max=8+warmup+lr-min=5e-6 | Running; ep5=11.835%, **NEGATIVE** (behind frieren at every epoch). Let finish; close when done. |
+| #280 | frieren | MLP activation ablation (SwiGLU/ReLU²/GELU) | 4-arm sequential DDP8 sweep; started ~22:59 UTC 2026-05-01; ~18h total; results due ~17:00 UTC 2026-05-02. Branch has merge conflict — rebase reminder posted. |
+| #282 | edward | lion-beta1=0.95 | Running; ep3=26.10% (gap narrowing, down from ep2=53.3%). Monitor for convergence. |
+| #283 | nezuko | model-layers=5 depth sweep | Running; ep1=64.78% (warmup normal). Monitor ep2+. |
+| #287 | alphonse | QK-norm on SOTA stack (per-head L2 norm) | Round 16 — pod starting; 0 comments. |
+| #289 | chihiro | lr-warmup-epochs=2 (1ep→2ep) | Round 17 — pod starting; 0 comments. |
+| #290 | emma | RFF retest on current SOTA stack (heads=4+warmup=1ep) | Round 17 — pod starting; 0 comments. |
+| #291 | gilbert | ema-decay=0.9995 with lr-warmup-epochs=1 | Round 17 — pod starting; 0 comments. |
+| #292 | haku | grad-clip-norm=0.5 (Lion stabilization) | Round 17 — pod starting; 0 comments. |
+| #293 | kohaku | lr-cosine-t-max=12 (fill T_max=9 neg / T_max=14 neg gap) | Round 17 — pod starting; 0 comments. |
+| #294 | norman | warmup=1ep + lr-cosine-t-max=9 (warmup+anneal compound) | Round 17 — pod starting; 0 comments. |
+| #295 | senku | model-hidden-dim=768 + muP lr=8.2e-5 (rescue tanjiro w/ correct LR scaling) | Round 17 — pod starting; 0 comments. |
+| #296 | violet | lr-min=1e-5 on SOTA stack (cosine LR floor) | Round 17 — pod starting; 0 comments. |
+| #299 | askeladd | Muon optimizer (Newton-Schulz orthogonalized momentum) | Round 17 — pod starting; 0 comments. |
+| #300 | tanjiro | Post-attention + post-MLP RMSNorm (sandwich-norm) | Round 17 — pod starting; 0 comments. |
+| #309 | thorfinn | grad-clip-norm=0.5 (Lion+EMA+warmup+heads=4) | Round 17 — pod starting; 0 comments. |
 
 ## Active Human Research Directives
 
 **Issue #252 (Modded-NanoGPT):** Mine the Modded-NanoGPT world-record training history for applicable improvements. Techniques ranked by transfer plausibility:
-1. Muon optimizer (Newton-Schulz orthogonalized momentum) — would require code change; high priority next free slot
-2. Post-attention RMSNorm / QK-norm — stabilizes Transolver slot attention
-3. Linear warmdown LR (being approximated by norman #269 + fern #251)
-4. U-net skip connections — cheap residual across layers
-5. Sequence packing / FlexAttention — throughput lever (more epochs/budget)
+1. Muon optimizer (Newton-Schulz orthogonalized momentum) — **in-flight** askeladd #299
+2. Post-attention RMSNorm / QK-norm — **in-flight** tanjiro #300 (RMSNorm) + alphonse #287 (QK-norm)
+3. Linear warmdown LR (approximated by norman #294 + fern #251)
+4. U-net skip connections — cheap residual across layers (deferred)
+5. Sequence packing / FlexAttention — throughput lever (deferred)
+
+**Issue #285 (GRAPE/Representational Position Encoding):** 3-arm sweep (RFF control / 3D STRING separable / full GRAPE-M learned non-axis-aligned planes) — **unassigned; deferred to next free slot.**
 
 ## Current Research Focus
 
-**Primary focus:** Architecture and attention normalization (Round 16).
-- QK-norm on SOTA stack (alphonse #287) — per-head L2 normalization, never tested
-- MLP activation ablation SwiGLU/ReLU² vs GELU (frieren #280) — activation function sweep
+**Primary focus — Round 17 (architecture + optimizer):**
+- Muon optimizer (askeladd #299) — highest-variance bet; Newton-Schulz orthogonalization replaces Adam/Lion
+- Sandwich-norm RMSNorm (tanjiro #300) — post-attn + post-MLP normalization; stabilizes Transolver attention
+- QK-norm (alphonse #287) — per-head L2 normalization; never tested
 
-**Secondary focus (closing out active runs):**
-- compile_model efficiency (askeladd #281) — anomalous ep2 val; monitor for recovery
-- model-layers=5 depth sweep (nezuko #283) — closing the depth axis
-- lion-beta1=0.95 (edward #282) — closing the lion_beta1 sweep axis
-- LR anneal T_max=8 (fern #251) — tracking NEGATIVE; close when done
-- LR cosine T_max=14 (thorfinn #247) — tracking NEGATIVE; close when done
-- Width 768d (tanjiro #241) — tracking NEGATIVE; close when done
+**Secondary focus — Round 17 (hyperparameter closure):**
+- MLP activation ablation (frieren #280) — SwiGLU/ReLU²/GELU 4-arm sweep; results due ~17:00 UTC 2026-05-02
+- lion-beta1=0.95 (edward #282) — closing lion_beta1 axis
+- model-layers=5 (nezuko #283) — closing depth axis
 
-**Deferred (hypotheses from closed Round 15 orphans — assign to ddp8 students):**
-- lr-warmup-epochs=2 (was chihiro #263)
-- RFF retest on current SOTA stack (was emma #264)
-- ema-decay=0.9995 WITH warmup=1ep (was gilbert #265)
-- grad-clip-norm=0.5 (was haku #267)
-- lr-cosine-t-max=12 (was kohaku #268)
-- warmup=1ep + cosine T_max=9 (was norman #269)
-- model-hidden-dim=768 + muP lr=8.2e-5 (was senku #271)
-- lr-min=1e-5 (was violet #272)
-
-**Next priority (after Round 16):** Modded-NanoGPT code-change ideas
-- Muon optimizer (Newton-Schulz orthogonalized gradient) — highest expected gain
-- Post-attention RMSNorm (stabilize Transolver attention, ~4-line change)
-- U-net skip connections (cross-layer residuals)
+**Deferred (assign when next student frees up):**
+- GRAPE/Group Representational Position Encoding (Issue #285) — 3-arm: RFF ctrl / 3D STRING / GRAPE-M
+- U-net skip connections (Modded-NanoGPT inspired)
+- Sequence packing / FlexAttention (throughput lever)
+- Dedicated volume decoder head (volume_pressure ×2.08 gap)
+- Surface-tangent-frame projection for tau_y/tau_z (×3.27/×3.43 gaps)
 
 ## Key Learnings (cumulative)
 
@@ -106,36 +104,41 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | Vol loss weight | CLOSED | 1.0 SOTA; 1.5 and 2.0 both negative |
 | Vol points | CLOSED | 65536 SOTA; 96k regressed |
 | Surface points | CLOSED | 65536 SOTA; 96k (PR #206) negative |
-| mlp_ratio | **CLOSED NEGATIVE** | 4 SOTA; 6 regressed (+6.4%); 8 NEGATIVE (PR#240, +0.485pp, timeout-bounded) |
-| Dropout | CLOSED | 0.0 SOTA; 0.05 regressed (+4.24%); model underfits |
+| mlp_ratio | CLOSED NEGATIVE | 4 SOTA; 6 regressed (+6.4%); 8 negative (PR#240, +0.485pp) |
+| Dropout | CLOSED | 0.0 SOTA; 0.05 regressed (+4.24%) |
 | Tau axis weights | CLOSED | 1.0 SOTA; Lion sign neutralizes per-channel weighting |
 | model_layers | Closing | 4 SOTA; 3L regression (PR #233); 5L in-flight (#283) |
-| model_heads | **CLOSED — NEW SOTA** | 4H beats 8H (PR #232 merged; −0.226pp val) |
-| model_slices | Closing | 128 SOTA; 64 tracking regression (PR #231) |
+| model_heads | CLOSED — NEW SOTA | 4H beats 8H (PR #232 merged; −0.226pp val) |
+| model_slices | CLOSED NEGATIVE | 128 SOTA; 64 regression (PR #231) |
+| model_hidden_dim | CLOSED NEGATIVE | 512 SOTA; 768 tanjiro #241 negative; 768+muP in-flight (#295) |
 | lr_cosine T_max=9 | CLOSED NEGATIVE | Confirmed ×2 (edward #195, tanjiro #202) |
-| lr_cosine T_max=14 | NEGATIVE (in-flight) | thorfinn #247: ep7=9.925%, tracking +0.86pp above SOTA |
+| lr_cosine T_max=14 | CLOSED NEGATIVE | thorfinn #247: ep7=9.925%, +0.86pp above SOTA |
 | lr_cosine T_max=8 + anneal | NEGATIVE (in-flight) | fern #251: ep5=11.83%, behind frieren at every epoch |
+| lr_cosine T_max=12 | In-flight | kohaku #293: fills T_max gap; pod starting |
 | lr_warmup_epochs=1 | WIN (compound) | PR #222 fern — +2.03% val, +1.51% test |
-| lr-min | DEFERRED | 1e-5 was violet #272 (no pod — orphan closed) |
-| grad-clip-norm | DEFERRED | 0.5 was haku #267 (no pod — orphan closed) |
-| RFF features | DEFERRED | Emma #264 retest on SOTA (no pod — orphan closed) |
-| model_hidden_dim | NEGATIVE (in-flight) | 512 SOTA; 768 tanjiro #241 tracking plateau |
-| Warmup 2ep | DEFERRED | chihiro #263 (no pod — orphan closed) |
+| lr_warmup_epochs=2 | In-flight | chihiro #289: pod starting |
+| lr-min=1e-5 | In-flight | violet #296: pod starting |
+| warmup+T_max=9 compound | In-flight | norman #294: pod starting |
+| grad-clip-norm=0.5 | In-flight | haku #292 + thorfinn #309: pods starting |
+| RFF features | In-flight | emma #290: SOTA-stack retest (heads=4+warmup); pod starting |
+| ema-decay=0.9995 | In-flight | gilbert #291: with warmup=1ep; pod starting |
 | batch_size | CLOSED NEGATIVE | batch=5 OOM'd; batch-size lever closed; 4=SOTA |
-| compile_model | Anomalous (in-flight) | askeladd #281: ep2=45% vs SOTA 22% — monitoring for recovery |
-| lion_beta1 | Closing | 0.9 SOTA; 0.8 negative; 0.95 in-flight (edward #282) |
-| MLP activation | In-flight | SwiGLU/ReLU²/GELU ablation (frieren #280) |
-| QK-norm | In-flight | Per-head L2 norm (alphonse #287) — new Round 16 |
+| compile_model | CLOSED ANOMALOUS | askeladd #281: ep2=45% anomalous; closed |
+| MLP activation | In-flight (long run) | SwiGLU/ReLU²/GELU ablation (frieren #280); ~18h sweep |
+| QK-norm | In-flight | Per-head L2 norm (alphonse #287); pod starting |
+| Sandwich-norm (RMSNorm) | In-flight | Post-attn+post-MLP (tanjiro #300); pod starting |
+| Muon optimizer | In-flight | Newton-Schulz orthogonalization (askeladd #299); pod starting |
 
 ## Largest Remaining Gaps to AB-UPT
 
 1. **volume_pressure** ×2.08 — Not a loss-weighting problem (closed). Likely architectural: dedicated volume decoder, richer SDF features, hierarchical multi-scale volume heads.
 2. **tau_y** ×3.27, **tau_z** ×3.43 — Shear stress direction prediction. Needs geometry-informed head (surface tangent frame) or output transformation (asinh normalization).
 
-## Next Priorities (after Rounds 15/16 close)
+## Next Priorities (after Rounds 16/17 close)
 
-1. **Muon optimizer** — Newton-Schulz orthogonalized gradient, highest-variance Modded-NanoGPT bet
-2. **Post-attention RMSNorm** — stabilize Transolver slot attention, cheap code change
-3. **Volume architecture** — dedicated volume decoder head; potentially copy from AB-UPT paper's design
+1. **GRAPE/Representational Position Encoding** (Issue #285) — 3-arm sweep once a student frees up
+2. **U-net skip connections** — cross-layer residuals (Modded-NanoGPT inspired)
+3. **Volume architecture** — dedicated volume decoder head; copy from AB-UPT paper's design
 4. **Tau head reform** — surface-tangent-frame projection to close tau_y/tau_z gap
-5. **Compound winners** — stack Round 15/16 winners once identified
+5. **Compound winners** — stack Round 16/17 winners once identified
+6. **Sequence packing / FlexAttention** — throughput lever (more epochs/budget)
