@@ -2,17 +2,17 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: fern PR #99 wins — new baseline 2026-04-29
+## Status: fern PR #183 wins — new baseline 2026-04-29
 
-PR #99 (fern, lr=5e-4 peak LR, 5× base lr=1e-4) reduced
-`val_primary/abupt_axis_mean_rel_l2_pct` from 12.74 (thorfinn PR #66) to
-**10.69** — a 16.1% improvement on the headline metric. W&B run: `3hljb0mg`.
+PR #183 (fern, omega-bank sweep: pos_max_wavelength=1000) reduced
+`val_primary/abupt_axis_mean_rel_l2_pct` from 10.69 (fern PR #99) to
+**10.21** — a 4.5% improvement on the headline metric. W&B run: `bplngfyo`.
 
-Key finding: raising the peak learning rate from 2e-4 (thorfinn base) to 5e-4
-significantly improves convergence without instability. The 5× LR boost applied
-on top of the thorfinn base config (6L/256d, W_y=2, W_z=2) yields best-ever
-metrics across surface_pressure (6.97 vs 7.64), wall_shear (11.69 vs 12.86),
-and volume_pressure (7.85 vs 13.14). 4.6h runtime, lr=5e-4, wd=5e-4.
+Key finding: compressing `pos_max_wavelength` from 10,000 → 1,000 in
+`ContinuousSincosEmbed` significantly improves all metrics. The vehicle bbox
+is ~8m × 2.5m × 2m, so 1,000 gives much denser frequency sampling across all
+axes. Best-ever volume_pressure (6.32 vs 7.85) and consistent improvements on
+surface_pressure (6.85 vs 6.97), wall_shear (11.43 vs 11.69). 4.6h runtime.
 
 **Compounding wins so far (all landed on `yi`):**
 1. PR #11 kohaku — tangential wall-shear projection loss code
@@ -21,10 +21,11 @@ and volume_pressure (7.85 vs 13.14). 4.6h runtime, lr=5e-4, wd=5e-4.
 4. PR #14 senku — depth scale-up to 6L/256d
 5. PR #58 alphonse — NaN-safe checkpoint guard (bugfix)
 6. PR #66 thorfinn — per-axis tau_y/z loss upweighting W_y=2, W_z=2
-7. PR #99 fern — LR peak 5e-4 (5× base) (this PR)
+7. PR #99 fern — LR peak 5e-4 (5× base)
 8. PR #169 thorfinn — NaN/Inf-skip safeguard, --seed, --lr-warmup-steps (infra utilities, no metric regression)
+9. PR #183 fern — pos_max_wavelength=1000 (omega-bank sincos positional encoding)
 
-**New recommended base config (PR #99 winning arm):**
+**New recommended base config (PR #183 winning arm):**
 
 ```bash
 cd target/
@@ -40,6 +41,7 @@ python train.py \
   --clip-grad-norm 1.0 \
   --wallshear-y-weight 2.0 \
   --wallshear-z-weight 2.0 \
+  --pos-max-wavelength 1000 \
   --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
 ```
 
@@ -120,34 +122,36 @@ checkpoint reload.
 
 | Metric | Best | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `val_primary/abupt_axis_mean_rel_l2_pct` | **10.69** | #99 | 3hljb0mg | 2026-04-29 |
-| `val_primary/surface_pressure_rel_l2_pct` | **6.97** | #99 | 3hljb0mg | 2026-04-29 |
-| `val_primary/wall_shear_rel_l2_pct` | **11.69** | #99 | 3hljb0mg | 2026-04-29 |
-| `val_primary/volume_pressure_rel_l2_pct` | **7.85** | #99 | 3hljb0mg | 2026-04-29 |
-| `val_primary/wall_shear_x_rel_l2_pct` | **10.17** | #99 | 3hljb0mg | 2026-04-29 |
-| `val_primary/wall_shear_y_rel_l2_pct` | **13.73** | #99 | 3hljb0mg | 2026-04-29 |
-| `val_primary/wall_shear_z_rel_l2_pct` | **14.73** | #99 | 3hljb0mg | 2026-04-29 |
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **10.21** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/surface_pressure_rel_l2_pct` | **6.85** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/wall_shear_rel_l2_pct` | **11.43** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/volume_pressure_rel_l2_pct` | **6.32** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/wall_shear_x_rel_l2_pct` | **9.89** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/wall_shear_y_rel_l2_pct` | **13.47** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/wall_shear_z_rel_l2_pct` | **14.52** | #183 | bplngfyo | 2026-04-29 |
 
 Note: Additional code wins pending merge (all superseded on headline metric by
-PR #99 but contain orthogonal code contributions) — PRs #98 (emma weight-decay),
+PR #183 but contain orthogonal code contributions) — PRs #98 (emma weight-decay),
 #106 (thorfinn yw2.5-zw2.5), #97 (edward slices192), #63 (askeladd sq-rel),
 #104 (senku ema9997), #102 (haku dropout). PRs #8 (frieren FiLM) merged 2026-04-29.
 PR #169 (thorfinn, infra utilities) merged 2026-04-29 — adds NaN/Inf-skip, --seed, --lr-warmup-steps to train.py.
+PR #183 (fern, omega-bank sweep) merged 2026-04-29 — pos_max_wavelength=1000 now default in train.py.
 
 **Distance from AB-UPT targets (multiple of target):**
 
-| Metric | yi best (PR #99) | AB-UPT | Ratio |
+| Metric | yi best (PR #183) | AB-UPT | Ratio |
 |---|---:|---:|---:|
-| surface_pressure | 6.97 | 3.82 | 1.8× |
-| wall_shear | 11.69 | 7.29 | 1.6× |
-| volume_pressure | 7.85 | 6.08 | 1.3× |
-| wall_shear_x | 10.17 | 5.35 | 1.9× |
-| wall_shear_y | 13.73 | 3.65 | 3.8× |
-| wall_shear_z | 14.73 | 3.63 | 4.1× |
+| surface_pressure | 6.85 | 3.82 | 1.8× |
+| wall_shear | 11.43 | 7.29 | 1.6× |
+| volume_pressure | 6.32 | 6.08 | 1.0× |
+| wall_shear_x | 9.89 | 5.35 | 1.8× |
+| wall_shear_y | 13.47 | 3.65 | 3.7× |
+| wall_shear_z | 14.52 | 3.63 | 4.0× |
 
 Wall_shear_y and wall_shear_z remain the largest gap at ~4× AB-UPT.
-Volume pressure is now very close to AB-UPT (1.3×), suggesting the model
-has good capacity but wall-shear axis precision remains the key challenge.
+Volume pressure has now matched AB-UPT (1.0×, 6.32 vs 6.08), suggesting
+strong capacity for scalar fields. Wall-shear axis precision remains the
+key challenge and the primary target for future experiments.
 
 ## Reference config (`train.py` defaults on `yi`)
 
