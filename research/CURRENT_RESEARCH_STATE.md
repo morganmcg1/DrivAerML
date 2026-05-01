@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 16:30 UTC
+- **Updated:** 2026-05-01 19:00 UTC
 - **Branch:** `yi`
 - **Baseline:** PR #183 (fern, `pos_max_wavelength=1000`), `abupt_axis_mean_rel_l2_pct = 10.21`
 
@@ -35,93 +35,93 @@
 
 ---
 
-## Active WIP PRs (as of 2026-05-01 14:30 UTC)
+## Active WIP PRs (as of 2026-05-01 19:00 UTC)
 
-### Round-6 Assignments (Just Assigned)
+### Round 14 Baseline Sweep (Just Assigned — ~Round 14)
 
-| PR | Student | Hypothesis |
-|---|---|---|
-| **#207** | alphonse | Adaptive Gradient Clipping (AGC, NFNets) per-parameter stability |
-| **#208** | askeladd | Sandwich-LN normalization to unlock 8L/256d depth |
-| **#209** | frieren | Step-decay LR drop after ep1 (5e-4→1e-4, attacks ep1→ep2 divergence) |
-| **#210** | kohaku | Gradient accumulation eff_bs=32 for smoother tau_y/z grads |
-| **#211** | tanjiro | Relative magnitude-based grad-skip (EMA-adaptive) fleet infra |
-| **#212** | noam | Perceiver-IO backbone replacement (2-4× speed → more epochs) |
-| **#213** | nezuko | SAM (Sharpness-Aware Minimization) for flat-minima generalization |
+| PR | Student | Hypothesis | Status |
+|---|---|---|---|
+| **#243** | chihiro | Sweep aux-rel-l2-weight {0.1, 0.5, 1.0} on 10.21 baseline | Training (90-100% GPU) |
+| **#244** | emma | Sweep surface-loss-weight {1.5, 2.0} on 10.21 baseline | Training (90-100% GPU) |
+| **#245** | gilbert | Progressive EMA decay schedule on 10.21 baseline | Training (90-100% GPU) |
+| **#246** | tanjiro | Calibrate LR warmup {500, 1000 steps} on 10.21 baseline | Training (90-100% GPU) |
 
-### Ongoing From Earlier Rounds
+### Earlier-Round PRs Currently Running
 
-| PR | Student | Hypothesis |
-|---|---|---|
-| **#200** | emma | Wall-shear magnitude/direction decomposition loss (τ y/z gap) |
-| **#199** | stark | Smooth tangent-frame wall-shear prediction (continuous e_x-projection) |
-| **#198** | senku | Stochastic Weight Averaging (SWA) free gain |
-| **#197** | gilbert | k-NN local surface attention for tau_y/z gap |
-| **#196** | edward | Lion optimizer sweep vs AdamW |
-| **#193** | thorfinn | Curvature-biased surface point sampling |
-| **#191** | haku | 1-cycle LR max=1e-3 (corrected epoch-limited schedule) |
-| **#183** | fern | Omega-bank frequency sweep |
-| **#171** | norman | Snapshot ensemble with cyclic LR |
-| **#165** | chihiro | mlp_ratio=8 hardened (3-seed) |
-| **#152** | violet | 14-dim analytic geometric moment conditioning |
+| PR | Student | Hypothesis | Notes |
+|---|---|---|---|
+| **#227** | stark | Wall-shear in local surface tangent frame (Morgan's #1 directive) | **NO POD — RBAC blocked provisioning. Issue #248 filed for human operator.** |
+| **#230** | senku | SWA uniform weight averaging for flat-minima generalization | SWA activates ep25–42 of 50 |
+| **#229** | norman | y-flip test-time symmetry augmentation (TTA) | Pod restarted ~18:36 UTC; Iter 1 |
+| **#228** | edward | OHEM hard surface-point weighting for tau_y/z gap | Running |
+| **#225** | haku | Left-right symmetry augmentation (tau_y/z gap) | Arm C surviving; awaiting ep2 |
+| **#224** | fern | Learned Fourier embeddings per-axis freq learning | Arms G/H/I/J relaunched |
+| **#222** | (Round12) | 1-epoch LR warmup before cosine decay | Running |
+| **#221** | violet | Per-channel adaptive loss reweighting toward AB-UPT targets | v6 (lr=3e-4, seed=1) running |
+| **#218** | frieren | SO(3)-equivariant tangent-frame wall shear head | Running |
+| **#214** | gilbert | k-NN local surface attention for wsy/wsz gap | Running |
+| **#213** | nezuko | SAM optimizer for flat-minima generalization | ep1 underperforming control; awaiting ep2 |
+| **#210** | kohaku | Gradient accumulation eff_bs=32 | Training (confirmed GPU activity) |
+| **#209** | frieren | Step-decay LR drop after ep1 (seed=-1, no-warmup relaunches) | Awaiting ep1 vals |
+| **#208** | askeladd | Sandwich-LN to unlock 8L/256d depth | Arm B (8L sandwich-LN, bs=4) running ~18866+ steps |
+| **#207** | alphonse | AGC (NFNets) per-parameter stability | Arms I/J/K running |
+| **#193** | thorfinn | Curvature-biased surface point sampling | alpha=0.25 arm running |
+| **#152** | violet | Per-channel adaptive loss reweighting | v6 running |
 
----
-
-## Round-6 Closed PRs (Negatives)
-
-| PR | Student | Hypothesis | Best Val | Verdict |
-|---|---|---|---:|---|
-| **#168** | askeladd | Normal-consistency penalty λ∈{0.01,0.05,0.10} | 12.285 (ep2) | NEGATIVE — tangentiality enforcement provides no metric gain |
-| **#164** | alphonse | 8L/256d + 1cycle LR | DNF (all diverged) | NEGATIVE — 8L/256d has LR ceiling < 5e-4 |
-| **#123** | frieren | asinh/log wall-shear target normalization | 17.55 (ep1) | NEGATIVE — tail suppression kills the signal |
+### Pod Status (as of 2026-05-01 19:00 UTC)
+- All 17 named student deployments: READY (1/1)
+- `senpai-yi-stark`: **MISSING** — human provisioning required (Issue #248)
 
 ---
 
 ## Current Research Themes
 
-### Theme 1: Coordinate-Frame Hypothesis for tau_y/z Gap (HIGHEST PRIORITY)
+### Theme 1: Coordinate-Frame Hypothesis for tau_y/z Gap (HIGHEST PRIORITY — Morgan's directive)
 **Root question:** Is the 4× tau_y/z error a coordinate-frame problem? AB-UPT achieves equal error on tau_x/y/z (~3.6) while we have 10/14/15.
 
-- **#199 stark:** Full tangent-frame prediction (smooth e_x-projection frame). Morgan's #1 directive.
-- **#200 emma:** Magnitude/direction decomposition loss — decouple scale from alignment learning.
-- **CLOSED NEGATIVE #168 askeladd:** Normal-consistency penalty — model already near-tangential naturally.
-- **CLOSED NEGATIVE #121:** Hard Duff-ONB tangent-frame — discontinuous at t1.x sign-flip.
+- **#227 stark:** Wall-shear prediction in local surface tangent frame {t1, t2, n}. Morgan's #1 directive. **POD MISSING — Issue #248 filed.**
+- **#218 frieren:** SO(3)-equivariant tangent-frame wall shear head.
+- **CLOSED NEGATIVE #121, #168:** Hard Duff-ONB (discontinuous at t1.x sign-flip) and normal-consistency penalty (model already near-tangential).
 
-### Theme 2: Architecture Replacement (BOLD SWINGS — Morgan's directive)
-- **#212 noam (NEW):** Perceiver-IO backbone — cross-attention bottleneck, 2-4× faster per epoch → 5+ epochs in budget. Morgan's #2 priority.
-- **#208 askeladd (NEW):** Sandwich-LN to unlock 8L/256d depth — prior 8L attempts all diverged; sandwich-LN dampens gradient growth across depth.
+### Theme 2: Hyperparameter Calibration (Round 14 Sweep)
+Systematic calibration on 10.21 baseline — four students sweeping complementary hyperparameters:
+- **#243 chihiro:** aux-rel-l2-weight {0.1, 0.5, 1.0}
+- **#244 emma:** surface-loss-weight {1.5, 2.0}
+- **#245 gilbert:** progressive EMA decay schedule
+- **#246 tanjiro:** LR warmup steps {500, 1000}
 
-### Theme 3: Optimizer Stability Infrastructure
-**Four independent confirmations (PRs #123, #168, #165, #164):** Large-but-finite grad spikes bypass PR #169's NaN-skip.
-- **#211 tanjiro (NEW):** Relative magnitude-based grad-skip (EMA-adaptive threshold).
-- **#207 alphonse (NEW):** AGC per-parameter clipping (NFNets). Addresses root cause by making clip threshold proportional to weight norm.
-- Together these form a complementary infra pair; combine if both show promise.
+### Theme 3: Architecture Scaling
+- **#208 askeladd:** Sandwich-LN to unlock 8L/256d depth — Arm B running stably at 18866+ steps.
+- **#235 askeladd:** 4L/512d/8H width frontier — radford champion port.
+- **#240 frieren:** Wider FFN (mlp-ratio=8) for richer per-block representation.
+- **#241 tanjiro:** Width scaling 512→768d with µP-scaled LR.
+- **PRIOR FINDING: Depth >> Width:** 6L/256d (4.73M) dominates 4L/512d (12.7M) — further depth exploration warranted if sandwich-LN stabilizes 8L.
 
-### Theme 4: LR Schedule Optimization
-- **#209 frieren (NEW):** Step-decay LR drop after ep1 (5e-4→1e-4). Attacks the universal ep1→ep2 train/val divergence observed across 4 normalization variants in PR #123.
-- **CLOSED NEGATIVE #164/#191:** OneCycleLR — 8L/256d and LR ceiling at ~6.5e-4 confirmed.
+### Theme 4: Optimizer and Training Infrastructure
+- **#207 alphonse:** AGC (NFNets) per-parameter clipping. Arms I/J/K running.
+- **#213 nezuko:** SAM optimizer — ep1 underperforming control; ep2 awaited.
+- **#234 senku:** Mirror-symmetry TTA for wsy free gain.
+- **#229 norman:** y-flip TTA (Pod restarted ~18:36 UTC).
+- **#230 senku:** SWA uniform weight averaging.
 
-### Theme 5: Batch Statistics and Gradient Quality
-- **#210 kohaku (NEW):** Gradient accumulation eff_bs=32. Zero VRAM cost; smoother gradient estimates for rare high-|τ| tail points.
-- **#183 fern:** Omega-bank frequency sweep. Three arms healthy.
+### Theme 5: Loss Formulation and Sampling
+- **#236 edward:** Fixed wsy/wsz loss multipliers — direct binding-constraint attack.
+- **#237 haku:** Squared rel-L2 aux loss for hard-sample focusing.
+- **#238 kohaku:** High-shear curriculum oversampling for wsy/wsz tail.
+- **#225 haku:** Left-right symmetry augmentation.
+- **#193 thorfinn:** Curvature-biased surface point sampling (alpha=0.25 arm).
 
-### Theme 6: Physics-Informed Constraints
-- **CLOSED NEGATIVE #201 nezuko:** RANS divergence-free penalty — label contradiction: GT mesh has RMS(τ·n)/|τ|=12%, so (τ·n)=0 no-slip constraint directly opposes labels. No feasible λ.
-- **CLOSED NEGATIVE #168:** Normal-consistency (tangential) constraint.
-- **Theme exhausted at current data contract.** True ∇·u requires velocity head (volume_y is pressure-only).
+### Theme 6: Positional Encoding
+- **#224 fern:** Learned Fourier embeddings per-axis freq. Arms G/H/I/J relaunched.
+- **#239 norman:** Fourier PE num_freqs sweep {16, 32, 64, 128}.
+- **BASELINE: PR #183 (fern):** pos_max_wavelength=1000 ContinuousSincosEmbed — the current 10.21 bar.
 
-### Theme 9: Optimization Landscape (NEW)
-- **#213 nezuko (NEW):** SAM (Sharpness-Aware Minimization) — seeks flat minima explicitly. 500-train vs 50-val geometries → sharp minima risk. SAM's 2× compute cost limits to 2 epochs but flat-minima training may beat 3 sharp-minima epochs.
+### Theme 7: Adaptive Loss Reweighting
+- **#221 violet:** Per-channel adaptive loss reweighting toward AB-UPT targets. v6 running (lr=3e-4, warmup=1000, seed=1).
+- **#228 edward:** OHEM hard surface-point weighting.
 
-### Theme 7: Ensemble and Budget Efficiency
-- **#171 norman:** Snapshot ensemble with cyclic LR (V2).
-- **#198 senku:** SWA — free post-train gain from weight averaging.
-- **#196 edward:** Lion optimizer sweep.
-
-### Theme 8: Data Representation and Sampling
-- **#197 gilbert:** k-NN local surface attention for tau_y/z spatial locality.
-- **#193 thorfinn:** Curvature-biased surface point sampling.
-- **#152 violet:** 14-dim analytic geometric moment conditioning.
+### Theme 8: Architecture Depth Ablation (Round 12 PRs still running)
+- **#231 (slices=64), #232 (heads=4), #233 (layers=3):** Ablate individual architectural dimensions from SOTA.
 
 ---
 
