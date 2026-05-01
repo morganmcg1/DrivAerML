@@ -1,127 +1,144 @@
 # SENPAI Research State
 
-- **2026-05-01 16:14Z** — Active monitoring. 16 bengio WIP, 0 review-ready, 0 idle. **PR #174 (alphonse) escalated TWICE** — 13:12Z kill instruction unanswered, 15:36Z first escalation unanswered, 16:05Z second escalation posted with default replacement (8L/256d + T_max=30 + EMA off + b1=0.95; 30min response deadline = 16:35Z). Wave 2 active runs healthy: chihiro `ld3ff1gs` (lr=5e-4, ep5=11.05%), nezuko `ud5iddlc` (5L/384d, ep4=11.21%), norman `1rieq278` (raw rel-L2 w=0.1, ep5=10.85%), thorfinn `scefipy4` (EMA off + b1=0.95 + T_max=50, launched 13:21Z), emma `3evzgru1` (60k pts + T_max=50, ep5=10.799%, gates ep15<9.0/ep20<8.0/ep30<7.5). Wave 3 launches confirmed: #218 frieren (TangentFrameHead w/ Frisvad-Duff), #221 violet (Run A tau=1.0, ep1=15.36%). Wave 3 #214/215/217/219/220 not yet confirmed launched (~85min since 14:47-14:53Z check-ins, borderline). **Critical baseline correction (frieren PR #218 W&B audit)**: alphonse Wave 1 winner `m9775k1v` actually used `ContinuousSincosEmbed` NOT FourierEmbed — PR #74 was a squash merge of the assignment commit only, no model code landed. So Wave 1 best (7.21%) was 4L/256d + SincosEmbed + no-EMA + T_max=30. FourierEmbed (chihiro PR #176) was added afterwards. BASELINE.md and reproduce command corrected.
-- **2026-05-01 15:43 UTC** — Active monitoring round, cross-contamination cleanup. All 16 bengio students WIP, 0 review-ready, 0 idle. This session: (1) **Escalated PR #174 alphonse** — kill instruction for `7n7fv6i9` (depth-8L+1cycle, abupt=34% at step 11k) sat unactioned for 2.5h; demanded confirmation + replacement default to depth-8L + cosine T_max=30 + Fourier + EMA off + b1=0.95 stack. (2) **Apologized on PR #80 (tanjiro)** — disregarded `zznrzvw5` kill instruction (asinh stream, wrong student); B1 `0qjbutkd` healthy at ep4 ~14.50%. (3) **Apologized on PR #180 (norman)** — `jfl82lmj` is on yi advisor's pod, cannot be killed from bengio; `1rieq278` ep5=10.85% on track. (4) **Acknowledged PR #75 (fern)** — Trial B `uz4em31o` at ep9=9.391%, healthy descent post-ep6 spike, wsy/wsz holding -1.3pp lead vs Trial A. **FourierEmbed clarification**: PR #176 (chihiro) added the code but is NOT MERGED — it sits on chihiro's branch. Other students who run `--fourier-pe` cherry-pick askeladd's `d97c19d` from PR #175. Fragile state; if any Wave 3 PR wins it should land FourierEmbed cleanly via that merge. **Open watch list**: emma `3evzgru1` ep15<9.0% gate, thorfinn `scefipy4` ep10-15 report, nezuko `ud5iddlc` ep5 gate <15%, norman `1rieq278` ep10 gate <9.0%, fern `uz4em31o` ep15 update at 19:35Z, alphonse replacement run id pending.
-- **2026-05-01 ~15:25 UTC** — All 8 Wave 3 PRs (#214-221) launched and check-in comments delivered. Legacy WIP PRs #75/#79/#80/#174/#176/#179/#180/#181 still running. Alphonse Wave 1 best (abupt=7.2091%) remains the headline result.
+- **2026-05-01 ~17:00Z** — Comprehensive PR audit complete. 16 WIP, 0 review-ready, 0 idle. Key update: tanjiro SW=2.0 T_max=30 full test results in (test abupt=9.697% — lost to alphonse 8.480%). First confirmed alphonse test baseline: **8.480%**. val/test gap confirmed at ~2.5× on vol_p (val=5.19% → test=12.90%). Wave 3 PRs #214 (gilbert) and #218 (frieren) launched with results incoming. Stale PRs: #215 (senku), #216 (askeladd), #217 (edward), #219 (haku), #220 (kohaku) — no student responses to advisor check-ins.
 
 ## Most Recent Human Researcher Direction
 
 - **Issue #48 (tay/morganmcg1)**: "Hows it going? we making progress?" — Responded.
 - **Issue #18 (yi)**: "Ensure you're really pushing hard on new ideas" — Wave 3 prioritizes bold architectural moves.
-- Mission: crush DrivAerML AB-UPT public reference metrics across all 6 axis metrics simultaneously.
+- Mission: crush DrivAerML AB-UPT public reference metrics across all 6 axis metrics simultaneously on **test** set.
 
-## AB-UPT Targets (all must be beaten simultaneously)
+## AB-UPT Targets (all must be beaten simultaneously on test)
 
-| Metric | AB-UPT Target | Current Best Live | Source | Status |
-|--------|:---:|:---:|----|----|
-| abupt_axis_mean_rel_l2_pct | 4.51% | **7.209%** | alphonse Wave 1 (`m9775k1v`) | gap −2.70pp |
-| surface_pressure_rel_l2_pct | 3.82% | 4.802% | alphonse Wave 1 | gap −0.98pp |
-| volume_pressure_rel_l2_pct | 6.08% | **4.166%** (alphonse val) | alphonse Wave 1 | **WON (val)** — note val/test gap ~2x |
-| wall_shear_x_rel_l2_pct | 5.35% | 7.109% | alphonse Wave 1 | gap −1.76pp |
-| wall_shear_y_rel_l2_pct | 3.65% | 9.100% | alphonse Wave 1 | gap −5.45pp ← **BINDING** |
-| wall_shear_z_rel_l2_pct | 3.63% | 10.869% | alphonse Wave 1 | gap −7.24pp ← **HARDEST** |
+| Metric | AB-UPT Target | Best Val | Best Test | Status |
+|--------|:---:|:---:|:---:|----|
+| abupt_axis_mean_rel_l2_pct | 4.51% | **7.209%** (`m9775k1v`) | **8.480%** (alphonse, confirmed by tanjiro) | gap −3.97pp (test) |
+| surface_pressure_rel_l2_pct | 3.82% | 4.802% | 5.078% (tanjiro SW2) | gap −1.26pp (test) |
+| volume_pressure_rel_l2_pct | 6.08% | **4.166%** (val only) | 12.897% (tanjiro SW2, 2.5× val/test gap) | **val WON but test fails badly** |
+| wall_shear_x_rel_l2_pct | 5.35% | 7.109% | 7.953% (tanjiro SW2) | gap −2.60pp (test) |
+| wall_shear_y_rel_l2_pct | 3.65% | 9.100% | 10.895% (tanjiro SW2) | gap −7.25pp ← **BINDING** |
+| wall_shear_z_rel_l2_pct | 3.63% | 10.869% | 11.664% (tanjiro SW2) | gap −8.03pp ← **HARDEST** |
 
-**IMPORTANT**: Systematic val/test degradation ~2x observed (vol_p val=4.17% → test~8-12%). All val wins need test confirmation before claiming true AB-UPT beat.
+**CRITICAL**: The val/test gap on vol_p is ~2.5×. Surface-loss reweighting (SW=2.0) did NOT help on test — it was worse than alphonse on all 5 axes. Do not chase val vol_p wins without test confirmation.
+
+**Alphonse test baseline confirmed**: abupt=8.480% (5 axis mean, tanjiro PR #80 reported on 2026-05-01). Previously only val=7.209% was known.
+
+## Baseline Correction (2026-05-01, frieren PR #218 audit)
+
+- alphonse Wave 1 winner `m9775k1v` used **`ContinuousSincosEmbed`** NOT FourierEmbed
+- PR #74 was a squash merge of assignment commit only — no model code landed
+- FourierEmbed added to bengio later by chihiro PR #176 (not yet merged)
+- All students using `--fourier-pe` are cherry-picking askeladd commit `d97c19d` from PR #175
 
 ## Universal ep31 Peak Pattern
 
-All experiments examined show val abupt minimum at ~step 552K (~ep31), regardless of T_max setting. This is a dataset/architecture property, not a schedule artifact. Experiments with T_max=50 or T_max=60 may benefit from continued cosine decay, but the primary valley is at ep31.
+All experiments show val abupt minimum at ~step 552K (~ep31) regardless of T_max. This is a dataset/architecture property. Experiments with T_max=50+ may benefit from continued cosine decay but the primary valley is always near ep31.
 
-## Infrastructure Update — `--fourier-pe` flag now landing on bengio (PR #176)
+## Active Experiments — Live Tracking
 
-Chihiro discovered `--fourier-pe` was missing from bengio (alphonse PR #74's squash had carried only metric/training-config diffs, no model code). Chihiro re-implemented `FourierEmbed` in `model.py` (geometric freq progression, `num_freqs=8`, projects `input_dim*num_freqs*2 → hidden_dim`) and wired in `--fourier-pe` / `--no-fourier-pe` / `--fourier-pe-num-freqs` argparse flags in `train.py`. Default `False` keeps full backward compatibility. **Approved**. Once PR #176 merges, every PR that assumes `--fourier-pe` exists (haku PR #219 most prominently) becomes runnable as-described.
+### Legacy Wave 2 (still running)
 
-## Wave 2 — Finished Experiments (no merges yet)
+| PR | Student | Run ID | Experiment | Best abupt | Epoch | Gate | ETA |
+|----|---------|--------|-----------|:----------:|-------|------|-----|
+| #75 | fern | `uz4em31o` | lr=5e-4 Trial B | ~9.40% | ep9 | ep15 <9% | ep31 ~10:30Z May 2 |
+| #79 | emma | `3evzgru1` | 60k pts + Fourier PE + T_max=50 Trial B v2 | 9.214% | ep12 | ep15 <9% (projected ~8.82% PASS) | ep31 ~TBD |
+| #80 | tanjiro | `0qjbutkd` | SW=2.0 + T_max=50 (Trial B1) | 9.562% | ep10 | ep15 <9%, ep25 <8%, ep50 <7% | ep50 ~May 2 10:30Z |
+| #174 | alphonse | `vu4jsiic` | 5L/256d + T_max=50 Trial B v2 | 9.917% | ep10 | ep15 <9% | TBD |
+| #176 | chihiro | `ld3ff1gs` | lr=5e-4 Trial B (FourierEmbed) | ~11% | ep5+ | ep15 <9% | TBD |
+| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | 10.51% | ep5 | ep5 gate PASSED | ep31 ~May 2 11:00Z |
+| #180 | norman | `1rieq278` | raw rel-L2 aux loss w=0.1 Trial A | 10.85% | ep5 | ep10 <9% (may fail) | TBD |
+| #181 | thorfinn | `scefipy4` | no-EMA + b1=0.95 + T_max=50 | ? | ep1+ | ep10-15 report pending | TBD |
 
-Ranked by best val_abupt across all completed Wave 2 runs (none beat alphonse's 7.21%):
+**Tanjiro Trial B matrix auto-launch**: B2 (SW=3.0/T_max=30) and B3 (SW=3.0/T_max=50) queued via PID 188667 script, fire after B1 ep31.
 
-| Rank | Run ID | Experiment | abupt% | Notes |
-|------|--------|-----------|:------:|-------|
-| 1 | `c4kc4465` | emma-ms-2scale | 11.085 | finished |
-| 2 | `e6sgx5ku` | thorfinn/nanskim-seed-warmup-validation | 11.200 | finished |
-| 3 | `xl92i3f5` | alphonse-8l256d-lr3e-4 | 11.334 | 8L depth confirms scaling helps |
-| 4 | `go7fae23` | tanjiro arm-C3-1cycle-5e-4-ts36k | 11.339 | finished |
-| 5 | `sudqmuo9` | kohaku/film-6l-256d-lr4e4-clip0.5 | 11.671 | FiLM with 6L+256d; finished |
-| 6 | `zei4lzb8` | edward-adamw-b95 | 11.803 | b1=0.95 finding |
-| 7 | `vch5jyhv` | chihiro/mlpratio8-seed1337 | 11.918 | confirms mlpratio=8 viable |
-| 8 | `0351xvpg` | edward-adamw-ctrl | 11.962 | control |
-| 9 | `jov1kcjl` | kohaku/film-zinit-B-lr4e4-clip0.5 | 12.234 | FiLM identity init |
-| 10 | `vacp1wdg` | violet-geom-add-v3 | 12.554 | geom conditioning v3 |
+**Fern Trial C**: `auto_kc_trialC.sh` queued to fire after Trial B ep31 (~May 2 01:30Z). Trial C = T_max=50 + lr=5e-4.
 
-**Pattern**: all completed Wave 2 experiments cluster 11–13%, well above alphonse 7.21%. The Wave 1 hyperparameter regime (4L/256d, EMA off, Fourier PE, T_max=30, lr=5e-4) is a sharp optimum; most perturbations cost ≥4pp.
+### Wave 3 (launched 2026-05-01)
 
-## Legacy WIP — Still Running
+| PR | Student | Run ID | Experiment | Last Known | Kill Threshold Fixed? | Notes |
+|----|---------|--------|-----------|:----------:|-----------------------|-------|
+| #214 | gilbert | `2rnm99yl` | k-NN local attention (PointTransformer-style rel PE, zero-init out_proj) | launched 16:42Z | YES → `35000:<20` | k=16, chunk=4096, ~8.4 it/s; ~21.5h ETA for ep1; no ep val yet |
+| #215 | senku | ? | SWA last-5-epoch averaging | no response | NO | Stale — only advisor check-in |
+| #216 | askeladd | ? | Per-axis EMA variance autoweighting | no response | NO | Stale — only advisor check-in |
+| #217 | edward | ? | Lion optimizer sweep (lr=1e-4, 3e-4) | no response | NO | Stale — only advisor check-in |
+| #218 | frieren | ? (no ID posted) | TangentFrameHead w/ Frisvad-Duff basis (τ = α·e_t1 + β·e_t2) | launched, no W&B ID in thread | YES → `35000:<20` | Physically motivated; `max|τ·n|<1e-6` by construction; stats buffered before torch.compile |
+| #219 | haku | ? | 5L depth + Fourier PE + GradNorm α=1.5 stack | no response | NO | Stale — depends on PR #176 landing |
+| #220 | kohaku | ? | Asinh surf pressure + 96k pts | no response | NO | Stale — only advisor check-in |
+| #221 | violet | ? | Adaptive loss reweighting (gap-ratio softmax, τ=1.0, weights every 5 ep) | ep1-2 launched | YES | Run A (ContinuousSincosEmbed) — no recent update |
 
-| PR | Run ID | Experiment | abupt% | Step / Epoch | Notes |
-|----|--------|-----------|:------:|------|-------|
-| #75 | `uz4em31o` | fern/lr-sweep Trial B (lr=5e-4) | 9.90 (ep5) | ~ep7 | Trial A done, ep30 best=8.578% (no beat). Trial B ep5=9.90% beats Trial A ep5 by −1.60pp; wsy/wsz both improve ~−2.2pp. ep6 val bounce (13.62%) confirmed expected noise — train/loss monotonically decreasing, 0 nonfinite events. Continue to ep30-31. |
-| #79 | TBD | emma/60k-pts-fourier-pe | ? | ? | Point density test |
-| #80 | TBD | tanjiro/surface-loss-weight-sweep | ? | ? | Surface loss weighting |
-| #174 | TBD | alphonse/5L-256d-fourier-pe-T50 | ? | ? | Depth ablation; `7n7fv6i9` killed; main run TBD |
-| #176 | `ld3ff1gs` | chihiro/lr-sweep Trial B (lr=5e-4) | not yet | just launched 13:21Z | Trial A `lle5ylae` killed at step 22K (abupt=40.5%, lr=1e-4 too low). Trial B is the only meaningful arm. **Also delivered FourierEmbed module to bengio.** |
-| #179 | `ud5iddlc` | nezuko/5L-384d-fourier-pe-T60 | 13.36 | step 56,802 (~ep3.2) | In 5-epoch LR warmup. ep5 gate <15% likely to pass. |
-| #180 | `1rieq278` | norman/raw-rel-l2-aux-loss Trial A (w=0.1) | 10.85 | step 93,742 (~ep5.3) | Healthy descent; ep10 gate at <9% needed for Trial B (w=0.3) launch. Trajectory suggests gate may not pass. |
-| #181 | `scefipy4` | thorfinn/EMA-off + b1=0.95 + T_max=50 | ? | ? | EMA revival pivoted to no-EMA + AdamW b1=0.95 + longer T |
-| #180 | `jfl82lmj` | norman snapshot-ensemble-v3 (UNAUTHORIZED) | 19.10 | step 12,041 | Run is on yi advisor's pod (`senpai-yi-norman-...`), NOT killable from bengio. Acknowledged. |
+**Dead RANS experiments** (nezuko): `pe2ryffk` (λ=0.1) crashed step 12K; `8u7jc8kt` (control) crashed step 13K. Direction closed.
 
-## Wave 3 — All PRs Launched (2026-05-01), No Student Responses Yet
+**Symmetry augmentation** (nezuko Wave 2): symm-p50=16.564%, symm-p100=54.686%. Direction closed — breaks coordinate encoding.
 
-All 8 Wave 3 PRs received advisor check-in comments at 14:47-14:51Z. All had the dead kill-threshold bug (`3000:val_primary/abupt_axis_mean_rel_l2_pct<=25`) — fix communicated: use `35000:val_primary/abupt_axis_mean_rel_l2_pct<20`.
+## Stale PR Watch List (need follow-up)
 
-| PR | Student | Experiment | Key Risk | Status |
-|----|---------|-----------|----------|--------|
-| #214 | gilbert | k-NN local surface attention (torch.cdist OOM for N=32768) | wsy/wsz binding — no response yet |
-| #215 | senku | SWA last-5-epoch averaging (LayerNorm → no update_bn needed) | Free gain — no response yet |
-| #216 | askeladd | Per-axis loss autoweighting via running variance EMA | wsy/wsz rebalancing — no response yet |
-| #217 | edward | Lion optimizer sweep (lr 1e-4, 3e-4 — 3-10x smaller than AdamW) | General improvement — no response yet |
-| #218 | frieren | SO(3)-equivariant tangent-frame wall shear head | wsy/wsz direct attack — no response yet |
-| #219 | haku | 5L depth + Fourier PE + GradNorm α=1.5 stack | Stack winners — depends on PR #176 landing for `--fourier-pe` |
-| #220 | kohaku | Asinh surf pressure + 96k pts × 5L × T_max=40 (sinh denorm required) | surf_p gap — no response yet |
-| #221 | violet | Per-channel adaptive reweighting τ=0.5,1.0 | wsy/wsz gap ratio — **unblocked**: Path A (ContinuousSincosEmbed) decided 2026-05-01 |
+PRs with only advisor check-in, no student response — may need escalation or reassignment:
+- **#215 (senku)**: SWA
+- **#216 (askeladd)**: Per-axis EMA variance autoweighting
+- **#217 (edward)**: Lion optimizer
+- **#219 (haku)**: GradNorm stack
+- **#220 (kohaku)**: Asinh surf pressure
 
-**RANS experiments (nezuko side)** — both abandoned:
-- `pe2ryffk` (rans-lambda=0.1): crashed step 12,498, val abupt=63.09%
-- `8u7jc8kt` (rans-lambda=0.0 control): crashed step 13,627, val abupt=15.55%
+All share the dead kill threshold bug (`3000:val_primary/abupt_axis_mean_rel_l2_pct<=25`). Fix communicated in advisor check-in comments: use `35000:val_primary/abupt_axis_mean_rel_l2_pct<20`.
 
-## Current Research Focus (2026-05-01)
+## Critical Research Finding: Surface-Loss Reweighting Does Not Help on Test
 
-**Immediate priorities (advisor)**:
-1. **PR #176 (chihiro) Trial B (`ld3ff1gs`)** — the only currently-active PR that has a chance of beating alphonse on a per-config basis. Watch ep5 (~step 89K) for <12%, ep15 for <9%, ep30 for beat. Also: PR #176 ships the FourierEmbed module — merge unlocks haku/others.
-2. **PR #75 (fern) Trial B (`uz4em31o`)** — ep30 ETA ~10:30 UTC May 2. Trial B ep5 already beats Trial A ep5 by −1.60pp on abupt and −2.2pp on wsy/wsz. Most promising lr-sweep arm so far.
-3. **ep5 gate on nezuko `ud5iddlc`** (~step 89K): target <15% — likely passes (currently 13.36% at ep3.2).
-4. **edward gradnorm `09kojb6q`** (step 582K, ep32.7, abupt=7.60%) — approaching completion. Collect test_primary metrics from ep31 best checkpoint.
-5. **Norman Trial A ep10 gate** (#180): if abupt <9% at step 178K, launch Trial B (w=0.3). Currently 10.85% at ep5.3 — gate may not pass.
-6. **Wave 3 first results** expected within 1-2 days. No student responses yet on any of the 8.
+tanjiro PR #80 provides the definitive result:
+- SW=2.0 T_max=30 (`846uciam`): test abupt=9.697% vs alphonse test=8.480% — **lost on all 5 axes**
+- The "vol_p beats AB-UPT" result (val=4.17%) is a **val artifact** — test vol_p=12.897% (2.5× degradation)
+- Surface loss reweighting moves error around between train channels but does not reduce test error
+- SW=2.0 T_max=50 (B1 `0qjbutkd`) currently testing whether longer schedule recovers SW benefits
 
-**Critical gap — wsy/wsz binding constraint** (unchanged):
-- Best wsy = 9.10% (alphonse) vs target 3.65%; wsz = 10.87% vs 3.63%. Gap is 2.5–3x.
-- Wave 3 PRs #214/#216/#218/#221 all target wsy/wsz from different angles.
-- Wave 3 PR #218 (frieren SO(3)-equivariant) is the boldest architectural bet — theoretically motivated for shear vectors.
-- Wave 3 PR #214 (gilbert k-NN attention) addresses local surface geometry which may explain shear underperformance.
-- Fern Trial B wsy/wsz delta (−2.2pp at ep5) is the strongest empirical signal we have on what helps wsy/wsz.
+## Critical Gap — wsy/wsz Binding Constraint
+
+Best wsy = 9.10% (alphonse val) / 10.895% (tanjiro test) vs target 3.65%. Gap is 2.5–3× on test.  
+Best wsz = 10.87% (alphonse val) / 11.664% (tanjiro test) vs target 3.63%. Gap is 3.2× on test.
+
+Wave 3 bets targeting this:
+- **#218 frieren** (TangentFrameHead): theoretically motivated — shear lives in tangent plane, predict α/β scalars → reconstruct τ. Strongest inductive bias bet.
+- **#214 gilbert** (k-NN local attention): local surface geometry may explain shear underperformance
+- **#216 askeladd** (EMA variance autoweighting): upweights harder axes dynamically
+- **#221 violet** (gap-ratio softmax): explicitly targets axes furthest from AB-UPT target
+
+Empirical signal: fern Trial B wsy delta = −2.2pp at ep5 vs Trial A — strongest wsy/wsz improvement yet from lr=5e-4.
 
 ## Potential Next Research Directions (Wave 4)
 
-**Bold architectural moves queued**:
-- SO(3)-equivariant representations (Wave 3 PR #218 testing)
+**Bold architectural moves**:
+- SO(3)-equivariant representations (Wave 3 PR #218 testing first flavor)
 - Spectral-graph convolution as parallel branch alongside Transolver attention
 - Latent diffusion prior for surface field reconstruction
 - Boundary-layer-aware attention with explicit `y+` distance feature
+- Graph neural network on surface mesh (explicit topology vs point cloud)
 
-**Empirical compounders ready once Wave 3 returns data**:
-- 5L/6L depth + Fourier PE + GradNorm-α=1.5 + SWA (stack all Wave 1 winners)
+**Empirical compounders** (ready once Wave 3 data returns):
+- Stack all winning ingredients: 5L depth + Fourier PE + GradNorm α=1.5 + T_max=50 + SWA
 - Asinh on volume fields too (not just surface pressure)
-- Per-axis loss weights frozen from senku metric-aware coefficients (transfer the weights, not the recipe)
-- Longer schedule T_max=50-60 compound with 5L depth (nezuko + alphonse #174 testing)
-- Trial C standby for fern (#75): lr=5e-4 + T_max=50 if Trial B lands 7.5–8.5%
+- Per-axis loss weights from senku metric-aware coefficients (transfer optimal weights)
+- Trial C for fern: lr=5e-4 + T_max=50 if Trial B lands 7.5–8.5%
 
-**Stacking plan once we have any new winner**:
-- Snapshot current best, then layer GradNorm + metric-aware loss + Fourier PE + best depth, one factor at a time.
+**Test-focused strategy**:
+- The val/test vol_p gap (2.5×) is the biggest blocker. Hypothesis: overfitting to training distribution on volume pressure. Try stronger regularization (higher dropout, weight decay) specifically for volume decoder.
+- Consider test_primary eval of all completed val-winners before claiming any axis beat.
+
+**Plateau protocol**: 5+ consecutive experiments with no test improvement → escalate to architecture-level changes. We are at ~2 rounds of improvements post-Wave-1 with no test beat. Wave 3 results are the next decision point.
+
+## Upcoming Gates and Checkpoints
+
+| Time (approx) | Event |
+|---|---|
+| ~May 1 18:00Z | Emma `3evzgru1` ep15 (projected 8.82%, PASS) |
+| ~May 1 19:00Z | Chihiro `ld3ff1gs` ep15 gate (<9%) |
+| ~May 1 20:00Z | Gilbert `2rnm99yl` ep1 val (first wsy/wsz vs baseline) |
+| ~May 2 01:30Z | Fern Trial B ep31 → auto-fire Trial C |
+| ~May 2 10:30Z | Tanjiro B1 `0qjbutkd` ep50 → auto-fire B2 (SW=3.0/T_max=30) |
+| ~May 2 11:00Z | Nezuko `ud5iddlc` ep31 (5L/384d valley) |
+| ~May 2 11:00Z | Alphonse `vu4jsiic` ep31 (5L/256d + T_max=50) |
+| ~May 2 TBD | Frieren first ep1-5 results (TangentFrameHead) |
 
 ## Research Log Pointers
 
-- All Wave 1 results: `/research/EXPERIMENTS_LOG.md`
-- Current branch baseline: `/BASELINE.md` — alphonse Wave 1 best = 7.209%
+- All experiments: `/research/EXPERIMENTS_LOG.md`
+- Current baseline: `/BASELINE.md` — alphonse Wave 1 val=7.209%, test=8.480%
 - Research ideas: `/research/RESEARCH_IDEAS_2026-04-30_15:34.md`
-- Wave 3 PR advisor check-ins: posted 2026-05-01 on PRs #214-221 and #179
-- 2026-05-01 follow-ups: PR #176 (FourierEmbed approval + cross-PR correction), PR #75 (Trial B ep6 bounce confirmed expected noise), PR #221 (Path A decision)
+- Wave 3 check-ins: posted 2026-05-01 on PRs #214-221
