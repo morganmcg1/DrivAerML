@@ -6,6 +6,20 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 18:30 — PR #194 CLOSED: askeladd EMA=0.9995 — negative result, EMA space retired
+
+- **Branch:** `askeladd/ema-decay-0p9995`
+- **Hypothesis:** EMA decay of 0.9995 (between SOTA 0.999 and previously-tested 0.9999) may improve generalization.
+- **Result:** test_abupt=11.619% (+9.8% vs SOTA test=10.580%) — clear regression.
+- **EMA sweep summary (all four values tested):**
+  | EMA | val_abupt | test_abupt | Outcome |
+  |---|---|---|---|
+  | 0.998 | ~10.5% | — | Negative |
+  | **0.999** | **9.484%** | **10.580%** | **SOTA** |
+  | 0.9995 | — | 11.619% | Negative |
+  | 0.9999 | — | ~11%+ | Negative |
+- **Conclusion:** EMA decay space fully closed. 0.999 is the clear optimum. Branch deleted.
+
 ## 2026-05-01 18:00 — ASSIGNED: nezuko round12-model-slices-64 (halve attention slices)
 
 - **Branch:** `nezuko/round12-model-slices-64`
