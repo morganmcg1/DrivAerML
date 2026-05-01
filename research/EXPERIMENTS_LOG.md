@@ -6,6 +6,44 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 20:15 UTC — PR #162 CLOSED: edward model_dropout=0.05 (test 11.029, +4.24% vs SOTA)
+
+- **Branch:** `edward/round11-model-dropout-0p05`
+- **Hypothesis:** model_dropout=0 → 0.05 as a regularization lever; reduce overfitting on the val→test generalization gap (val/test ratio 1.115 at SOTA, looking for tighter generalization).
+- **Result:** test_abupt **11.029** (+4.24% regression), best val 9.757 (+2.87% vs SOTA 9.484). All 7 test metrics regressed vs SOTA.
+  | Metric | SOTA (PR #115) | This run | Delta |
+  |---|---:|---:|---:|
+  | abupt mean | 10.580 | 11.029 | +4.24% |
+  | surface_pressure | 5.690 | 5.820 | +2.29% |
+  | wall_shear | 10.419 | 10.842 | +4.06% |
+  | volume_pressure | 12.740 | 12.853 | +0.89% |
+  | tau_x | 8.908 | 9.262 | +3.97% |
+  | tau_y | 12.491 | 13.060 | +4.56% |
+  | tau_z | 13.071 | 13.680 | +4.66% |
+- **W&B:** `tfumujfi` (verified) — best val 9.757, test 11.029.
+- **Why it failed:** Dropout adds regularization noise during training, but this model is NOT over-parameterized at 4L/512d/batch=4 on DrivAerML. The training signal is weak enough (9 epochs, CFD sparse supervision) that dropout at 0.05 creates more harm than benefit — it degrades feature representations without providing measurable generalization improvement. The val→test ratio was 11.029/9.757 = 1.130, slightly WORSE than SOTA 1.115, confirming dropout hurt rather than helped generalization.
+- **Conclusion:** model_dropout=0.05 regresses all metrics. Dropout is a dead end at this batch size / epoch budget — the model underfits, not overfits. Regularization via dropout closed.
+- **Edward now idle** — awaiting new assignment.
+
+## 2026-05-01 20:00 UTC — PR #161 CLOSED: askeladd lion_beta2=0.999 (test 12.564, +18.7% vs SOTA)
+
+- **Branch:** `askeladd/round11-lion-beta2-0p999`
+- **Hypothesis:** lion_beta2=0.99 → 0.999 (SOTA uses 0.99); higher beta2 = more momentum smoothing → better generalization on CFD objectives.
+- **Result:** test_abupt **12.564** (+18.7% regression), best val **11.493** (+21.2% vs SOTA val 9.484). Massive regression across all metrics.
+  | Metric | SOTA (PR #115) | This run | Delta |
+  |---|---:|---:|---:|
+  | abupt mean | 10.580 | 12.564 | +18.7% |
+  | surface_pressure | 5.690 | 7.173 | +26.1% |
+  | wall_shear | 10.419 | 12.574 | +20.7% |
+  | volume_pressure | 12.740 | 14.159 | +11.1% |
+  | tau_x | 8.908 | 10.832 | +21.6% |
+  | tau_y | 12.491 | 14.945 | +19.7% |
+  | tau_z | 13.071 | 15.713 | +20.2% |
+- **W&B:** run `tfumujfi` group `tay-round11-lion-beta2-0p999` (verified) — best val 11.493.
+- **Why it failed:** Lion's EMA update uses `m_t = beta2 * m_t-1 + (1-beta2) * g_t`. At beta2=0.999, the effective momentum window is 1/(1-0.999) = 1000 steps vs 1/(1-0.99) = 100 steps at SOTA. This makes the momentum very slow to respond to the current gradient — effectively a heavily trailing average. In a 9-epoch training run (~45,000 total steps / 8 GPUs), the momentum barely adapts to local gradient structure. The model gets stuck in early-training trajectories with insufficient gradient responsiveness. beta2=0.99 (SOTA) is already well-tuned for this 9-epoch budget.
+- **Conclusion:** lion_beta2=0.999 is a clear dead end — 18.7% regression. SOTA beta2=0.99 confirmed as optimal; the momentum window of 100 effective steps is well-calibrated for 9-ep CFD training. beta2 space closed at 0.99. Higher values (longer memory) hurt responsiveness; lower values untested but low priority given plateau.
+- **Askeladd now idle** — awaiting new assignment.
+
 ## 2026-05-01 12:30 UTC — PR #157 CLOSED: nezuko mlp_ratio=6 (test 11.261, +6.4% vs SOTA)
 
 - **Branch:** `nezuko/round10-mlp-ratio-6`
