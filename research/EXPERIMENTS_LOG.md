@@ -710,3 +710,26 @@ seed1337 ep3=11.92 is 1.23pp above baseline. Slope flattening (ep1→ep2: −5.2
 - **Open finding: universal ep1→ep2 train/val divergence** across all 4 norm variants is a separate failure mode worth pursuing — candidates: train/eval sampling distribution mismatch, overfitting-to-bulk regime, z-score saturation on tails. Suggests assigning a one-shot LR drop after ep1 experiment.
 - **Major contribution to retain:** `--grad-skip-threshold` + always-on NaN/inf grad-skip + W&B `train/grad/skipped_step|skipped_total` metrics. Will land independently on yi.
 - Closed as negative; frieren reassigned.
+
+---
+
+## 2026-05-01 14:30 — PR #201: [nezuko] Physics-informed RANS divergence-free penalty on volume velocity
+- Branch: `nezuko/physics-informed-rans-divergence`
+- Hypothesis: Add soft λ·mean(∇·u²) divergence-free penalty on volume velocity predictions to improve near-wall flow coherence and reduce tau_y/z error.
+- Results: 4-arm sweep λ∈{0.001, 0.01, 0.1, 0.0 control}
+
+| Arm | λ | W&B run | ep1 val_abupt | Fate |
+|---|---:|---|---:|---|
+| A orig | 0.001 | rtoy6zsi | DNF | NaN at step 2873 (>200 non-finite skips) |
+| A clamp | 0.001 | t0ak5zjy | DNF | Clamp(-10,10) didn't help; diverged same step |
+| B orig | 0.01 | xo1vzowt | DNF | NaN at step 5882 |
+| B clamp | 0.01 | qnk5doi7 | DNF | NaN at step 4546 |
+| **C** | **0.1** | **pe2ryffk** | **63.09** | **Stable but catastrophically worse (4×)** |
+| D | 0.0 | 8u7jc8kt | 15.55 | Control — healthy baseline trajectory |
+
+- **CRITICAL DATA FINDING:** GT labels have RMS(τ·n)/|τ| = 12% (τ·n mean=0.113, RMS=0.364, p99=1.722). DrivAerML mesh-discretized normals are not exactly orthogonal to the analytic surface, so the continuum no-slip constraint (τ·n = 0) directly contradicts the ground truth. There is no λ where this penalty can help:
+  - Small λ: batch-variance gradients from squared penalty too large → NaN cascade
+  - Large λ: forces τ_pred·n → 0, but labels have τ·n ≈ 0.36 → 2× train loss inflation, 4× val regression
+- **VOLUME ARCHITECTURE FINDING:** volume_y is scalar pressure only (no velocity in input or output contract). True ∇·u formulation is infeasible without adding a velocity head and separate supervision.
+- **Verdict: NEGATIVE.** Both the surface no-slip-wall penalty and the volume divergence-free penalty are infeasible with the current DrivAerML data contract and ground-truth labels.
+- Closed; nezuko reassigned.
