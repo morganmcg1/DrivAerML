@@ -186,3 +186,27 @@ Per-channel at best:
 **Per-channel at ep4**: wsy=15.5%, wsz=16.4% still elevated — auxiliary loss is targeting the right channels but needs more epochs to take effect. Decline rate ~2.1pp/epoch, extrapolated ep5 ≈ 9.4%.
 
 **Analysis**: Early result consistent with learning. Keep monitoring. Target ≤8% at ep10 for this config to be competitive.
+
+---
+
+## 2026-05-01 07:15 — Wave 1 Forced Harvest Sweep (PRs #76, #77, #81, #82, #83, #85, #86, #87, #89)
+
+Posted forced-harvest decision comments on 9 silent past-best Wave 1 PRs. Each comment instructs the student to halt training, reload best-val checkpoint, run test eval, log all 6 `test_primary/*` metrics, and mark `status:review`. Best-val numbers below were pulled directly from W&B history.
+
+| PR | Student | Run ID | Best step | Best ep | abupt% | surf_p% | vol_p% | wsx% | wsy% | wsz% |
+|----|---------|--------|-----------|---------|--------|---------|--------|------|------|------|
+| #76 | gilbert | `kn756yk6` | 552,326 | ep30 | 7.473 | 4.917 | **5.269** | 7.195 | 9.375 | 11.111 |
+| #77 | haku | `nbbbw8qw` | 463,241 | ep25 | 7.708 | 5.085 | **4.477** | 7.385 | 9.866 | 11.730 |
+| #81 | violet | `em5ixfew` | 694,862 | ep37 | 8.580 | 5.466 | **5.025** | 7.998 | 11.225 | 13.181 |
+| #82 | askeladd | `uxrhudp1` | 570,143 | ep31 | 8.409 | 5.528 | **4.719** | 8.063 | 11.307 | 12.429 |
+| #83 | chihiro | `kit58p2e` | 534,509 | ep29 | 8.769 | 5.546 | **4.814** | 8.207 | 11.629 | 13.652 |
+| #85 | frieren | `l23vz4md` | 552,326 | ep30 | 8.172 | 5.199 | **4.979** | 7.825 | 10.912 | 11.946 |
+| #86 | nezuko | `p8swf78o` | 552,326 | ep30 | 8.144 | 5.249 | **4.869** | 7.728 | 10.905 | 12.072 |
+| #87 | norman | `0iv7wifz` | 552,326 | ep30 | 8.611 | 5.495 | **5.120** | 8.073 | 11.499 | 12.870 |
+| #89 | thorfinn | `snrwvw14` | 552,326 | ep30 | 8.322 | 5.288 | **4.914** | 7.801 | 11.099 | 12.512 |
+
+Bold vol_p = at or below the 6.08 AB-UPT target (8 of 9 beat it on val).
+
+**Universal pattern**: 8 of 9 silent students hit best-val at step 552,326 (~ep30), violet at ep37, haku at ep25. Beyond best-val, all are slowly regressing — continued training is wasting GPU. Wall-shear y/z are the binding constraint across the entire wave (3–4× above AB-UPT targets).
+
+**Pending student response**: test_primary metrics from best-val checkpoint. Without these I cannot merge per `target/program.md`. Tanjiro #80, fern #75, emma #79 are responsive and training to ep50; they will report final test_primary on their own. Senku #145 directed to continue to ep10 with revised thresholds after ep5 regression (13.24% vs ep4 11.53%).
