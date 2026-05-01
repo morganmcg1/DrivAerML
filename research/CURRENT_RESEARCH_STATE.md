@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 14:30 UTC
+- **Updated:** 2026-05-01 14:45 UTC
 - **Branch:** `yi`
 - **Baseline:** PR #99 (fern), `abupt_axis_mean_rel_l2_pct = 10.69`, W&B run `3hljb0mg`
 
@@ -14,7 +14,7 @@
 1. Surface-tangent frame wall-shear prediction — 4× wall shear y/z error is a coordinate frame mismatch
 2. **Perceiver-IO backbone replacement** — ~3× faster per epoch = more epochs within budget (**ASSIGNED #212 noam**)
 3. asinh/log target normalization — tested, **NEGATIVE — tail suppression problem (PR #123)**
-4. Physics-informed RANS constraint — soft divergence-free penalty (**ASSIGNED #201 nezuko**)
+4. Physics-informed RANS constraint — tested, **NEGATIVE — label contradiction: DrivAerML mesh GT has RMS(τ·n)/|τ|=12%, so (τ·n)=0 constraint contradicts labels (PR #201)**
 5. 1-cycle LR schedule with higher peak — tested, **NEGATIVE — budget starvation + stability ceiling (PRs #164, #191)**
 
 ---
@@ -47,12 +47,12 @@
 | **#210** | kohaku | Gradient accumulation eff_bs=32 for smoother tau_y/z grads |
 | **#211** | tanjiro | Relative magnitude-based grad-skip (EMA-adaptive) fleet infra |
 | **#212** | noam | Perceiver-IO backbone replacement (2-4× speed → more epochs) |
+| **#213** | nezuko | SAM (Sharpness-Aware Minimization) for flat-minima generalization |
 
 ### Ongoing From Earlier Rounds
 
 | PR | Student | Hypothesis |
 |---|---|---|
-| **#201** | nezuko | Physics-informed RANS divergence-free penalty on volume velocity |
 | **#200** | emma | Wall-shear magnitude/direction decomposition loss (τ y/z gap) |
 | **#199** | stark | Smooth tangent-frame wall-shear prediction (continuous e_x-projection) |
 | **#198** | senku | Stochastic Weight Averaging (SWA) free gain |
@@ -106,8 +106,12 @@
 - **#183 fern:** Omega-bank frequency sweep. Three arms healthy.
 
 ### Theme 6: Physics-Informed Constraints
-- **#201 nezuko:** RANS divergence-free penalty on volume velocity. Morgan's #4 directive.
+- **CLOSED NEGATIVE #201 nezuko:** RANS divergence-free penalty — label contradiction: GT mesh has RMS(τ·n)/|τ|=12%, so (τ·n)=0 no-slip constraint directly opposes labels. No feasible λ.
 - **CLOSED NEGATIVE #168:** Normal-consistency (tangential) constraint.
+- **Theme exhausted at current data contract.** True ∇·u requires velocity head (volume_y is pressure-only).
+
+### Theme 9: Optimization Landscape (NEW)
+- **#213 nezuko (NEW):** SAM (Sharpness-Aware Minimization) — seeks flat minima explicitly. 500-train vs 50-val geometries → sharp minima risk. SAM's 2× compute cost limits to 2 epochs but flat-minima training may beat 3 sharp-minima epochs.
 
 ### Theme 7: Ensemble and Budget Efficiency
 - **#171 norman:** Snapshot ensemble with cyclic LR (V2).
