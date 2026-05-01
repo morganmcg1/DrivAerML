@@ -348,8 +348,13 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        coord_normalize: str = "none",
     ):
         super().__init__()
+        if coord_normalize not in {"none", "global-scale", "per-axis"}:
+            raise ValueError(
+                f"coord_normalize must be 'none', 'global-scale', or 'per-axis'; got {coord_normalize!r}"
+            )
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
@@ -359,6 +364,9 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.coord_normalize = coord_normalize
+        self.register_buffer("coord_shift", torch.zeros(space_dim))
+        self.register_buffer("coord_scale", torch.ones(space_dim))
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -399,6 +407,8 @@ class SurfaceTransolver(nn.Module):
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
+        if self.coord_normalize != "none":
+            pos = (pos - self.coord_shift) / self.coord_scale.clamp(min=1e-6)
         hidden = self.pos_embed(pos)
         if project_features is not None and x.shape[-1] > self.space_dim:
             hidden = hidden + project_features(x[:, :, self.space_dim :])
@@ -589,6 +599,7 @@ class Config:
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
     compile_model: bool = True
+    coord_normalize: str = "none"
     debug: bool = False
 
 
@@ -730,7 +741,69 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        coord_normalize=config.coord_normalize,
     )
+
+
+def compute_coord_stats(
+    manifest_path: str,
+    root: str | None,
+    *,
+    debug: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-axis (min, max) of vehicle-surface xyz coords across the training split.
+
+    Scans surface_xyz.npy via mmap; reuses the loader's PVC mirror/symlink path
+    resolver so the scan works on either mount layout.
+
+    Surface-only by design: volume_xyz extends across the wind-tunnel CFD
+    domain (~120 x 43 x 21 m), 25x wider than the vehicle (~5 x 2 x 1.5 m).
+    Including volume bounds would shrink surface features to ~4% of the unit
+    cube — the opposite of what the PR hypothesis aims to fix. Volume points
+    are encoded by the same shifted/scaled embedding; they fall outside the
+    unit cube but sin/cos pos_embed handles that gracefully.
+    """
+
+    import numpy as np
+
+    from data import DrivAerMLCaseStore
+    from data.loader import _resolve_artifact_path
+
+    store = DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
+    train_ids = store.case_ids("train")
+    if debug:
+        train_ids = train_ids[:4]
+    xmin = np.full(3, np.inf, dtype=np.float64)
+    xmax = np.full(3, -np.inf, dtype=np.float64)
+    for case_id in train_ids:
+        case_dir = store.root / case_id
+        arr = np.load(_resolve_artifact_path(case_dir / "surface_xyz.npy"), mmap_mode="r")
+        xmin = np.minimum(xmin, arr.min(axis=0).astype(np.float64))
+        xmax = np.maximum(xmax, arr.max(axis=0).astype(np.float64))
+    if not np.isfinite(xmin).all() or not np.isfinite(xmax).all():
+        raise RuntimeError("compute_coord_stats produced non-finite bounds")
+    return (
+        torch.from_numpy(xmin.astype(np.float32)),
+        torch.from_numpy(xmax.astype(np.float32)),
+    )
+
+
+def resolve_coord_normalization(
+    mode: str,
+    xmin: torch.Tensor,
+    xmax: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-axis (shift, scale) buffers for the requested mode."""
+
+    if mode == "none":
+        return torch.zeros_like(xmin), torch.ones_like(xmin)
+    extent = xmax - xmin
+    if mode == "per-axis":
+        return xmin.clone(), extent.clone()
+    if mode == "global-scale":
+        diag = torch.norm(extent)
+        return xmin.clone(), diag.expand_as(extent).clone()
+    raise ValueError(f"unknown coord_normalize mode: {mode!r}")
 
 
 def _metric_path(name: str) -> str:
@@ -1680,6 +1753,25 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     model = build_model(config).to(device)
+    coord_bbox: dict[str, list[float]] = {}
+    if config.coord_normalize != "none":
+        xmin, xmax = compute_coord_stats(
+            config.manifest, config.data_root or None, debug=config.debug
+        )
+        shift, scale = resolve_coord_normalization(config.coord_normalize, xmin, xmax)
+        model.coord_shift.copy_(shift.to(device=device, dtype=model.coord_shift.dtype))
+        model.coord_scale.copy_(scale.to(device=device, dtype=model.coord_scale.dtype))
+        coord_bbox = {
+            "xmin": xmin.tolist(),
+            "xmax": xmax.tolist(),
+            "shift": shift.tolist(),
+            "scale": scale.tolist(),
+        }
+        print(
+            f"Coord normalize='{config.coord_normalize}' "
+            f"xmin={coord_bbox['xmin']} xmax={coord_bbox['xmax']} "
+            f"shift={coord_bbox['shift']} scale={coord_bbox['scale']}"
+        )
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
@@ -1711,6 +1803,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             "surface_targets": SURFACE_TARGET_NAMES,
             "volume_targets": VOLUME_TARGET_NAMES,
             "total_estimated_steps": total_estimated_steps,
+            "coord_bbox": coord_bbox,
         },
         mode=os.environ.get("WANDB_MODE", "online"),
     )
