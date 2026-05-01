@@ -1,7 +1,10 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 12:15 UTC
+- **Updated:** 2026-05-01 12:30 UTC
 - **Branch:** `yi`
 - **Baseline:** PR #99 (fern), `abupt_axis_mean_rel_l2_pct = 10.69`, W&B run `3hljb0mg`
+
+## CURRENT HOTTEST FINDING (2026-05-01 12:30 UTC)
+**PR #168 askeladd ep2 crossover:** gawdh7ah (λ=0.10) ep2 val_abupt = **12.285** vs PR #99 fern ep2 = **12.417**. First experiment in this round to beat baseline trajectory at a matched epoch. vol_p ep2 = 7.055 vs 10.531 confirms backbone regularization. Awaiting ep3 (~13:30 UTC) for go/no-go on merge bar (10.69). Counter-intuitive ranking confirmed: λ=0.10 most stable; λ=0.01 fails (insufficient anchor → out-of-plane drift → squared-dot spike). λ=0.05 (1buc9rh1) ep1 abupt=15.875 = best ep1 of any arm.
 
 ---
 
@@ -50,7 +53,7 @@
 | **#184** | kohaku | FiLM with identity/zero-init (DiT-style) | **arm B (lr=4e-4) sole survivor, ep2≈99%, ETA ~14:25 UTC** |
 | **#183** | fern | Omega-bank frequency sweep | **3 arms healthy (A2/C3/D3); mw=100 FALSIFIED; ep2 results ~12:00-12:20 UTC** |
 | **#171** | norman | Snapshot ensemble with cyclic LR | **V2 running (okm6uoea, eta_min=5e-5 + clip=0.5); ETA ~17:30 UTC** |
-| **#168** | askeladd | Normal-consistency penalty λ∈{0.01,0.05,0.10} | **λ=0.10 (gawdh7ah) ep1=17.103; clip=0.5 relaunches for λ=0.01/0.05 in flight** |
+| **#168** | askeladd | Normal-consistency penalty λ∈{0.01,0.05,0.10} | **λ=0.10 (gawdh7ah) ep2=12.285 < fern ep2 12.417 — FIRST CROSSOVER; ep3 ETA ~13:30 UTC** |
 | **#165** | chihiro | mlp_ratio=8 hardened (3-seed) | **seed1337 ep3=11.92 (NOT beating 10.69); clip=0.5 go/no-go at 12:20/13:30 UTC** |
 | **#164** | alphonse | 8L/256d + 1cycle LR recovery | WIP |
 | **#152** | violet | 14-dim analytic geometry moment conditioning | WIP |
@@ -132,13 +135,18 @@
 
 ## Near-Term Priority Queue
 
-1. **Await and merge #184 (kohaku FiLM, arm B) ~14:25 UTC** — if val_abupt < 10.69
-2. **Review #123 (frieren) final results ~12:10-13:51 UTC** — close based on best arm
-3. **Monitor #165 (chihiro)** — seed42 go/no-go at step 6783 (~12:20 UTC)
-4. **Review #183 (fern)** — cross-arm ep2 table at ~12:30 UTC
-5. **Infrastructure PR** — magnitude-based grad-skip (assign to thorfinn when free)
-6. **Perceiver-IO backbone** (Morgan's #2 directive) — not yet assigned; needs careful scoping
-7. **Physics-informed RANS** (Morgan's #4 directive) — ASSIGNED to nezuko (#201)
+1. **Watch #168 (askeladd) gawdh7ah ep3 (~13:30 UTC)** — if abupt < 10.69 with healthy ws_y/z, this is the headline merge candidate of the round
+2. **Watch #168 (askeladd) 1buc9rh1 (λ=0.05, clip=0.5) ep2** — best ep1 (15.875) of any arm; tests whether sweet-spot is between 0.05 and 0.10
+3. **Await and merge #184 (kohaku FiLM, arm B) ~14:25 UTC** — if val_abupt < 10.69
+4. **Review #123 (frieren) final results ~12:10-13:51 UTC** — close based on best arm; v3 already negative
+5. **Monitor #196 (edward Lion)** — C2 (seed=42, lr=2e-4) approaching the step-3500 danger zone; F (seed=43) is the bad-batch test
+6. **Monitor #165 (chihiro)** — clip=0.5 seed42/seed7 go/no-go around 12:20-13:30 UTC
+7. **Monitor #193 (thorfinn curvature)** — Arm A (alpha=0.5) and B (alpha=1.0) running; ep1 vals due ~13:00 UTC
+8. **Monitor #200 (emma)** — pod stuck in watchdog state; advisor posted explicit pkill instruction
+9. **Track #199 (stark)** — no pod visible in cluster; flagged in advisor comment
+10. **Infrastructure PR** — magnitude-based grad-skip (assign to thorfinn when free)
+11. **Perceiver-IO backbone** (Morgan's #2 directive) — not yet assigned; needs careful scoping
+12. **Physics-informed RANS** (Morgan's #4 directive) — ASSIGNED to nezuko (#201)
 
 ---
 
