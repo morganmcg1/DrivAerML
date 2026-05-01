@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 06:55 UTC
+- **Date:** 2026-05-01 09:30 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -24,21 +24,30 @@
 | `tau_y` | **12.491** | 3.65 | **×3.4** |
 | `tau_z` | **13.071** | 3.63 | **×3.6** |
 
-W&B run `d03oghpp` — best val 9.484 (ep9). val→test ratio 1.115.
+W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 **SOTA val trajectory:** 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.16 / 9.73 / 9.48
 
-## Round 11 in-flight status
+## Round 11 in-flight status (updated 2026-05-01 ~09:00 UTC)
 
-| PR | Student | Hypothesis | Status | Signal |
-|---|---|---|---|---|
-| **#161** | askeladd | lion_beta2=0.999 (single delta) | running, launched | no val yet |
-| **#162** | edward | model_dropout=0.05 (single delta) | running, launched | no val yet |
-| **#163** | thorfinn | weight_decay=1e-3 (single delta) | just assigned | — |
-| #157 | nezuko | mlp_ratio=6 (architecture) | running step=7828 | val ep3=25.28 vs SOTA ep3=16.51 (+53%) |
-| #158 | alphonse | vol_pts=96k (vol_p attack) | running step=4476 | val ep1=41.64 vs SOTA ep1=24.15 (+72%, slow/96k) |
-| #159 | fern | Lion β1=0.95 (momentum) | running step=6759 | val ep2=23.82 vs SOTA ep2=16.51 (+44%) |
-| #147 | frieren | compound + wd=2e-3 | **POD HUNG** (iter 135 since 23:14 UTC, 7h41m silent); restart requested on issue #48 | no round11 W&B run yet |
-| #149 | tanjiro | per-axis tau weights W=1.5 | **POD HUNG** (iter 167 since 02:29 UTC, 4h26m silent); restart requested on issue #48 | no W&B run |
+| PR | Student | Hypothesis | W&B run | Val (latest) | Status |
+|---|---|---|---|---|---|
+| **#157** | nezuko | mlp_ratio=6 (architecture) | xuppho03 | **12.308** (ep6+, 178min) | running — most advanced |
+| **#158** | alphonse | vol_pts=96k (vol_p attack) | yfi14f1w | **15.841** (ep4, 145min) | running — early |
+| **#159** | fern | Lion β1=0.95 (momentum) | rnmwwg6q | **12.610** (ep5-6, 160min) | running — competitive |
+| **#161** | askeladd | lion_beta2=0.999 (single delta) | tfumujfi | 31.772 (ep1, 87min) | running — too early to judge |
+| **#162** | edward | model_dropout=0.05 (single delta) | e5l1r38b | 25.505 (ep1, 87min) | running — too early |
+| **#163** | thorfinn | weight_decay=1e-3 (single delta) | 7rp28zrm | 26.420 (ep1, 77min) | running — too early |
+| **#147** | frieren | compound + wd=2e-3 | NONE | — | **POD STUCK** — no W&B run ever started; restart requested on issue #48 |
+
+SOTA val trajectory reference: ep0=53.75 / ep1=24.15 / ep2=16.51 / ep3=13.47 / ep4=11.83 / ep5=10.88 / ep6=10.16 / ep7=9.73 / ep8=9.484
+
+## Round 11 closed (per-axis tau weights) — REGRESSION
+
+| PR | Student | Test | vs SOTA | W&B run | Conclusion |
+|---|---|---:|---:|---|---|
+| **#149** | tanjiro | **11.022** | **+4.2%** | rtajk53c | Per-axis tau weights W_y=W_z=1.5 regressed ALL metrics. **Direction CLOSED.** |
+
+**Why tau axis weighting fails with Lion:** Lion uses sign-based momentum updates, not raw gradients. Per-channel loss multipliers shift gradient magnitudes but NOT the sign (direction) of each parameter update. The axis ratio is preserved regardless of loss multiplier — weighting is effectively neutralized. Do NOT pursue W=2.0/2.5 follow-ups via this mechanism.
 
 ## Round 10 closeouts (test_abupt)
 
@@ -58,7 +67,8 @@ W&B run `d03oghpp` — best val 9.484 (ep9). val→test ratio 1.115.
 3. **LR ceiling confirmed at 1e-4** — lr=1.5e-4 failed (+40%); lr=1e-4 is SOTA.
 4. **Slices=256 OOM** — 98.8% VRAM usage, slice attention quadratic. Default 128 is safe ceiling.
 5. **Lion compile divergence** — 9/9 compile+Lion combinations diverged in earlier rounds.
-6. **Vol_p test improvement possible** — askeladd #141 achieved -0.60% on vol_p test with sw+vw stack; but tau_y regressed. Decoupling is needed.
+6. **Per-axis tau weighting CLOSED** — Lion sign-based updates neutralize per-channel loss weighting. W_y=W_z=1.5 regressed all metrics +4.2% (PR #149). Do not pursue higher weights.
+7. **Next approach for tau_yz gap**: Target normalization (asinh/log transform), surface-tangent-frame head, or decoupled magnitude+direction prediction head. Need code changes beyond current train.py flags.
 
 ## Optimizer hyperparam map (tay confirmed)
 
@@ -66,15 +76,18 @@ W&B run `d03oghpp` — best val 9.484 (ep9). val→test ratio 1.115.
 |---|---|---|---|---|
 | lr | 5e-5 | **1e-4** | 1.5e-4 ❌ | ceiling found |
 | ema_decay | 0.9999 | **0.999** | 0.998 ❌ | sweet spot |
-| lion_beta1 | — | **0.9** | 0.95 (#159) | partial |
-| lion_beta2 | — | **0.99** | 0.999 (#161) | untested |
-| model_dropout | — | **0.0** | 0.05 (#162) | untested |
-| weight_decay | — | **5e-4** | 1e-3 (#163) | untested |
+| lion_beta1 | — | **0.9** | 0.95 (#159) | in-flight |
+| lion_beta2 | — | **0.99** | 0.999 (#161) | in-flight |
+| model_dropout | — | **0.0** | 0.05 (#162) | in-flight |
+| weight_decay | — | **5e-4** | 1e-3 (#163) | in-flight |
+| tau_axis_weights | — | **1.0** | 1.5 ❌ | **CLOSED** — Lion sign mechanism neutralizes |
 
 ## Next research directions (priority order)
 
-1. **Wait for alphonse #158 vol_pts=96k** — dominant binding gap attack (vol_p ×2.1). Just launched, early.
-2. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Tanjiro/frieren pods stuck; reassign to working pods when available.
-3. **Per-axis tau loss weights** — tau_y/tau_z are ×3.4-3.6 binding gaps. Requires code change (no train.py flag). Tanjiro #149 assigned but pod stuck.
-4. **Observe round11 signals** — lion_beta2, dropout, wd all untested. Need ep3+ data.
-5. **Frieren/tanjiro pod restart pending human team** — both pods have hung Claude Code supervisor processes (frieren iter 135 since 23:14 UTC, tanjiro iter 167 since 02:29 UTC). Advisor lacks kubectl RBAC to `rollout restart`. Escalation posted on issue #48 (comment 4358230853). After restart: frieren picks up PR #147 directly; tanjiro per-axis flag port from yi branch (advisory on PR #149 with Option A/B fallback).
+1. **Wait for fern #159 and nezuko #157** — both in ep5-6 range showing 12.3-12.6 val. Need ep8-9 to compare with SOTA val=9.484. These are the most advanced round 11 experiments.
+2. **Alphonse #158 vol_pts=96k** — dominant vol_p binding gap attack (×2.1 vs AB-UPT). At ep4=15.84. Need ep8-9 final.
+3. **Frieren pod restart needed** — pod stuck at init since 23:14 UTC Apr 30. PR #147 (wd=2e-3) has NEVER started. Requires human `kubectl rollout restart`. Escalated on issue #48.
+4. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Not yet assigned to any running pod.
+5. **Volume loss weight isolation** — clean `--volume-loss-weight 1.5-2.0` experiment WITHOUT tau coupling side effects. Previous vol_w=2.0 hurt surface; hypothesis: lighter volume weight (1.5) with isolated testing might find a sweet spot.
+6. **Tau_yz binding gap (code-change approach)** — must bypass Lion neutralization. Options: (a) asinh output normalization for tau_y/tau_z (normalizes small-magnitude components), (b) surface-tangent-frame prediction head (predicts in a frame where components are better conditioned), (c) decoupled magnitude+direction head. All require train.py modifications by a student.
+7. **Observe round 11 askeladd/edward/thorfinn ep3+ signals** — lion_beta2, dropout, wd all at ep1 only. Need 2-3 more epochs to evaluate trajectories vs SOTA reference.
