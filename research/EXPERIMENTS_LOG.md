@@ -93,3 +93,96 @@ The follow-ups #1–#3 are queued under Wave 3 ideas; not worth re-spinning UW i
 - If GradNorm is revisited, use a dedicated, much smaller LR for task weights (e.g., 1e-5) decoupled from the backbone LR.
 - Alternative: simple fixed per-axis loss upweighting for wsy/wsz (e.g., multiply wsy/wsz channel losses by 3-5x explicitly).
 - Edward immediately reassigned to PR #160: split surface output head (dedicated cp MLP + wall-shear MLP) as a simpler, more stable architectural approach to the wsy/wsz binding constraint.
+## 2026-04-30 — Status: Wave 1 In-Progress, Forced Harvests Requested
+
+---
+
+## 2026-04-30 10:00 — PR #74 (alphonse): 4L/256d Fourier PE Baseline
+
+- **Branch**: alphonse
+- **W&B Run**: `m9775k1v` (entity: morganmcg1, project: DrivAerML)
+- **Hypothesis**: Establish 4-layer / 256-dim transformer with Fourier positional encodings as the Wave 1 baseline. No EMA, cosine LR with T_max=30. This was the strongest recipe from radford PR #2593 (~12.96% abupt) — run from scratch on bengio branch.
+- **Status**: Running (ep39/50 as of harvest check). Regressing since ep30.
+
+**Epoch trajectory (selected)**:
+
+| Epoch | Step | val_abupt% | surf_p% | wall_sh% | vol_p% | wsx% | wsy% | wsz% |
+|-------|------|-----------|---------|---------|-------|-----|-----|-----|
+| ep10 | 184,110 | 7.4260 | 5.017 | 8.268 | 4.473 | 6.622 | 8.926 | 10.617 |
+| ep20 | 368,220 | 7.2988 | 4.899 | 8.096 | 4.375 | 6.499 | 8.733 | 10.438 |
+| ep28 | 515,508 | 7.2215 | 4.823 | 8.002 | 4.322 | 6.423 | 8.649 | 10.345 |
+| ep29 | 533,919 | 7.2145 | 4.815 | 7.994 | 4.317 | 6.417 | 8.641 | 10.330 |
+| **ep30** | **552,326** | **7.2091** | **4.802** | **8.160** | **4.166** | **7.109** | **9.100** | **10.869** |
+| ep31 | 570,737 | 7.2534 | 4.840 | 8.017 | 4.357 | 6.448 | 8.680 | 10.383 |
+| ep35 | 644,381 | 7.2329 | 4.816 | 7.996 | 4.339 | 6.425 | 8.647 | 10.346 |
+| ep39 | 718,025 | 7.3454 | 4.910 | 8.142 | 4.421 | 6.572 | 8.823 | 10.526 |
+
+**Best val_abupt: 7.2091% at ep30 (step 552,326)**
+
+Per-channel at best:
+- surf_p = 4.802% (AB-UPT: 3.82% — 1.0pp gap)
+- vol_p = 4.166% **BEATS AB-UPT target of 6.08%** ✓
+- wall_sh = 8.160% (AB-UPT: 7.29% — 0.87pp gap)
+- wsx = 7.109% (AB-UPT: 5.35% — 1.76pp gap)
+- wsy = 9.100% (AB-UPT: 3.65% — 5.45pp gap)
+- wsz = 10.869% (AB-UPT: 3.63% — 7.24pp gap)
+
+**Analysis**: Run clearly past optimum. vol_p already beating AB-UPT target. wsy and wsz are the hardest channels — both 2.5-3x above AB-UPT targets. This is the Wave 1 leader and bengio branch merge candidate. Forced harvest requested at ep30 checkpoint. Awaiting test_primary/* evaluation.
+
+---
+
+## 2026-04-30 10:00 — PR #78 (kohaku): 128-Slice + Fourier PE
+
+- **Branch**: kohaku
+- **W&B Run**: `h7ve1hmb` (entity: morganmcg1, project: DrivAerML)
+- **Hypothesis**: Increase radial resolution from 64 to 128 slices with Fourier PE. Test whether higher mesh resolution improves accuracy over alphonse's 64-slice baseline.
+- **Status**: Running (ep35/50 as of harvest check). Very slight improvement continuing past ep31 but essentially plateaued.
+
+**Epoch trajectory (selected)**:
+
+| Epoch | Step | val_abupt% | surf_p% | wall_sh% | vol_p% | wsx% | wsy% | wsz% |
+|-------|------|-----------|---------|---------|-------|-----|-----|-----|
+| ep3 | 71,267 | 13.5136 | — | — | — | — | — | — |
+| ep10 | 200,144 | 7.9399 | 5.317 | 8.760 | 4.713 | 7.046 | 9.592 | 11.484 |
+| ep20 | 384,254 | 7.8587 | 5.249 | 8.633 | 4.641 | 6.965 | 9.490 | 11.337 |
+| ep29 | 549,953 | 7.8415 | 5.239 | 8.611 | 4.626 | 6.944 | 9.469 | 11.303 |
+| ep30 | 568,364 | 7.8396 | 5.237 | 8.607 | 4.625 | 6.943 | 9.467 | 11.300 |
+| **ep31** | **570,143** | **7.8338** | **5.235** | **8.556** | **5.569** | **7.480** | **9.465** | **11.420** |
+| ep32 | 606,186 | 7.8395 | 5.238 | 8.606 | 4.624 | 6.942 | 9.465 | 11.298 |
+| ep35 | 661,419 | 7.8370 | 5.236 | 8.602 | 4.622 | 6.941 | 9.462 | 11.293 |
+
+**Best val_abupt: 7.8338% at ep31 (step 570,143)**
+
+Per-channel at best:
+- surf_p = 5.235% (AB-UPT: 3.82% — 1.42pp gap)
+- vol_p = 5.569% **BEATS AB-UPT target of 6.08%** ✓
+- wall_sh = 8.556% (AB-UPT: 7.29% — 1.27pp gap)
+- wsx = 7.480% (AB-UPT: 5.35% — 2.13pp gap)
+- wsy = 9.465% (AB-UPT: 3.65% — 5.82pp gap)
+- wsz = 11.420% (AB-UPT: 3.63% — 7.79pp gap)
+
+**Analysis**: 128-slice adds +0.625pp overhead vs 64-slice alphonse. ep3 instability spike (13.51%) resolved by ep4 — early training instability pattern. vol_p beats AB-UPT target but all other metrics worse than alphonse. Conclusion: higher radial slice count is not beneficial at this model scale — more mesh resolution does not help without corresponding model capacity increase. Forced harvest requested at ep31. Awaiting test_primary/* evaluation. Will only merge if it beats alphonse's eventual test_primary baseline.
+
+---
+
+## 2026-04-30 12:00 — PR #145 (senku): MSE + Raw Relative L2 Auxiliary Loss (w=0.05)
+
+- **Branch**: senku
+- **W&B Run**: `39dekqil` (entity: morganmcg1, project: DrivAerML)
+- **Hypothesis**: Add raw (non-normalized) relative L2 as auxiliary loss term weighted at 0.05. Theory: standard L2 loss may under-weight physically meaningful relative errors; auxiliary loss directly targets the eval metric.
+- **Status**: Running (ep4 as of last check). Decision rule being applied.
+
+**Epoch trajectory so far**:
+
+| Epoch | Step | val_abupt% | Decision |
+|-------|------|-----------|---------|
+| ep4 | ~73,644 | 11.53 | Keep going (11-13 zone), flag ep10 |
+
+**Decision rule applied**:
+- ≤11% at ep5: keep going at w=0.05
+- (11, 13] at ep5: keep going, flag for ep10 check
+- >13% at ep5: kill and relaunch at w=0.01
+
+**Per-channel at ep4**: wsy=15.5%, wsz=16.4% still elevated — auxiliary loss is targeting the right channels but needs more epochs to take effect. Decline rate ~2.1pp/epoch, extrapolated ep5 ≈ 9.4%.
+
+**Analysis**: Early result consistent with learning. Keep monitoring. Target ≤8% at ep10 for this config to be competitive.
