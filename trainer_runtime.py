@@ -913,6 +913,67 @@ def _finite_mean(values: Iterable[float]) -> float:
     return sum(finite) / max(len(finite), 1)
 
 
+def _mirror_y_inputs(
+    surface_x: torch.Tensor | None,
+    volume_x: torch.Tensor | None,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Reflect inputs across y=0: flips surface y and ny, volume y."""
+    if surface_x is not None:
+        surface_x = surface_x.clone()
+        surface_x[..., 1] = -surface_x[..., 1]
+        surface_x[..., 4] = -surface_x[..., 4]
+    if volume_x is not None:
+        volume_x = volume_x.clone()
+        volume_x[..., 1] = -volume_x[..., 1]
+    return surface_x, volume_x
+
+
+def model_forward_norm(
+    model: nn.Module,
+    *,
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    volume_x: torch.Tensor,
+    volume_mask: torch.Tensor,
+    device: torch.device,
+    amp_mode: str,
+    mirror_tta: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Forward pass returning (surface_pred_norm, volume_pred_norm) in float32.
+
+    When ``mirror_tta`` is true, also runs a y-mirrored forward pass and averages
+    the predictions. The wsy channel of the mirrored surface output is sign-flipped
+    before averaging because under y-reflection the wall-shear vector transforms as
+    (wsx, wsy, wsz) -> (wsx, -wsy, wsz).
+    """
+    with autocast_context(device, amp_mode):
+        out = model(
+            surface_x=surface_x,
+            surface_mask=surface_mask,
+            volume_x=volume_x,
+            volume_mask=volume_mask,
+        )
+    surface_pred = out["surface_preds"].float()
+    volume_pred = out["volume_preds"].float()
+    if not mirror_tta:
+        return surface_pred, volume_pred
+
+    surface_x_mir, volume_x_mir = _mirror_y_inputs(surface_x, volume_x)
+    with autocast_context(device, amp_mode):
+        out_mir = model(
+            surface_x=surface_x_mir,
+            surface_mask=surface_mask,
+            volume_x=volume_x_mir,
+            volume_mask=volume_mask,
+        )
+    surface_pred_mir = out_mir["surface_preds"].float()
+    volume_pred_mir = out_mir["volume_preds"].float()
+    if surface_pred_mir.shape[-1] >= 3:
+        surface_pred_mir = surface_pred_mir.clone()
+        surface_pred_mir[..., 2] = -surface_pred_mir[..., 2]
+    return 0.5 * (surface_pred + surface_pred_mir), 0.5 * (volume_pred + volume_pred_mir)
+
+
 def accumulate_eval_batch(
     accumulator: EvalAccumulator,
     *,
@@ -921,19 +982,21 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    mirror_tta: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
     volume_target_norm = transform.apply_volume(batch.volume_y)
-    with autocast_context(device, amp_mode):
-        out = model(
-            surface_x=batch.surface_x,
-            surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
-            volume_mask=batch.volume_mask,
-        )
-    surface_pred_norm = out["surface_preds"].float()
-    volume_pred_norm = out["volume_preds"].float()
+    surface_pred_norm, volume_pred_norm = model_forward_norm(
+        model,
+        surface_x=batch.surface_x,
+        surface_mask=batch.surface_mask,
+        volume_x=batch.volume_x,
+        volume_mask=batch.volume_mask,
+        device=device,
+        amp_mode=amp_mode,
+        mirror_tta=mirror_tta,
+    )
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
@@ -1086,6 +1149,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    mirror_tta: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1097,6 +1161,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            mirror_tta=mirror_tta,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1313,6 +1378,14 @@ def define_wandb_metrics() -> None:
         "val_raw_primary/*",
         "full_val/*",
         "full_val_primary/*",
+        "no_tta_full_val/*",
+        "no_tta_full_val_primary/*",
+        "mirror_tta_full_val/*",
+        "mirror_tta_full_val_primary/*",
+        "no_tta_test/*",
+        "no_tta_test_primary/*",
+        "mirror_tta_test/*",
+        "mirror_tta_test_primary/*",
         "test/*",
         "test_primary/*",
         "train/slope/*",
@@ -1380,6 +1453,191 @@ def init_wandb_run(
     return run
 
 
+class _AlphonseFourierEmbed(nn.Module):
+    """Reconstructed FourierEmbed used for the alphonse Wave 1 m9775k1v run.
+
+    The exact code was a local edit and was never committed. Reconstructed from
+    the state_dict's parameter names (``pos_embed.center``, ``pos_embed.half_range``,
+    ``pos_embed.freqs``, ``pos_embed.proj.project.{weight,bias}``) and the buffer
+    values: center=[1, 0, 0], half_range=[13, 5, 3], freqs=2^k * pi for k=0..7.
+    Used only by run_eval_only to load that specific checkpoint.
+    """
+
+    def __init__(self, hidden_dim: int, input_dim: int = 3, num_freqs: int = 8):
+        super().__init__()
+        from model import LinearProjection  # local import to avoid cycles
+        self.register_buffer("center", torch.zeros(input_dim))
+        self.register_buffer("half_range", torch.ones(input_dim))
+        self.register_buffer(
+            "freqs", 2.0 ** torch.arange(num_freqs).float() * math.pi
+        )
+        raw_dim = input_dim * num_freqs * 2
+        self.proj = LinearProjection(raw_dim, hidden_dim)
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords = coords.float()
+        normalized = (coords - self.center) / self.half_range.clamp(min=1e-6)
+        angles = normalized.unsqueeze(-1) * self.freqs
+        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
+        emb = emb.flatten(start_dim=-2)
+        return self.proj(emb)
+
+
+def resolve_checkpoint_path(spec: str) -> Path:
+    """Resolve a checkpoint spec to a local file.
+
+    Accepts a local filesystem path or a W&B artifact reference of the form
+    ``wandb://entity/project/artifact:alias`` or just
+    ``entity/project/artifact:alias``.
+    """
+    spec = spec.strip()
+    if not spec:
+        raise ValueError("eval_checkpoint must be set when --eval-only is used")
+    local = Path(spec)
+    if local.exists():
+        return local
+    if spec.startswith("wandb://"):
+        spec = spec[len("wandb://"):]
+    if spec.count("/") >= 2 and ":" in spec.rsplit("/", 1)[-1]:
+        artifact = wandb.use_artifact(spec, type="model")
+        artifact_dir = Path(artifact.download())
+        for candidate in (artifact_dir / "checkpoint.pt", artifact_dir / "model.pt"):
+            if candidate.exists():
+                return candidate
+        raise FileNotFoundError(f"No checkpoint.pt or model.pt in artifact dir {artifact_dir}")
+    raise FileNotFoundError(f"Cannot resolve eval_checkpoint spec: {spec!r}")
+
+
+def run_eval_only(
+    *,
+    run,
+    model: nn.Module,
+    config,
+    transform: TargetTransform,
+    device: torch.device,
+    final_val_loaders: dict[str, DataLoader],
+    final_test_loaders: dict[str, DataLoader],
+    n_params: int,
+) -> None:
+    """Load a checkpoint and log no-TTA vs mirror-TTA metrics on val + test.
+
+    Intended for validating the TTA implementation against an existing baseline
+    checkpoint. Logs all four prefixes:
+      no_tta_full_val_primary/*, no_tta_test_primary/*,
+      mirror_tta_full_val_primary/*, mirror_tta_test_primary/*.
+    Also logs full_val_primary/* and test_primary/* mirroring config.mirror_tta
+    so the standard contract is met.
+    """
+    checkpoint_path = resolve_checkpoint_path(config.eval_checkpoint)
+    print(f"Loading checkpoint from {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    state_dict = checkpoint.get("model", checkpoint)
+    cleaned: dict[str, torch.Tensor] = {}
+    for key, value in state_dict.items():
+        cleaned_key = key.removeprefix("module.").removeprefix("_orig_mod.")
+        cleaned[cleaned_key] = value
+
+    if "pos_embed.center" in cleaned and "pos_embed.proj.project.weight" in cleaned:
+        hidden_dim = int(cleaned["pos_embed.proj.project.weight"].shape[0])
+        raw_dim = int(cleaned["pos_embed.proj.project.weight"].shape[1])
+        num_freqs = int(cleaned["pos_embed.freqs"].numel())
+        input_dim = raw_dim // (num_freqs * 2)
+        legacy_pe = _AlphonseFourierEmbed(
+            hidden_dim=hidden_dim, input_dim=input_dim, num_freqs=num_freqs
+        )
+        model.pos_embed = legacy_pe.to(device)
+        print(
+            "Detected legacy alphonse FourierEmbed in checkpoint; swapped pos_embed "
+            f"(hidden={hidden_dim}, input={input_dim}, num_freqs={num_freqs})."
+        )
+
+    missing, unexpected = model.load_state_dict(cleaned, strict=False)
+    if missing or unexpected:
+        print(f"load_state_dict: missing={len(missing)} unexpected={len(unexpected)}")
+        if missing:
+            print(f"  missing example: {missing[:3]}")
+        if unexpected:
+            print(f"  unexpected example: {unexpected[:3]}")
+    saved_epoch = checkpoint.get("epoch")
+    saved_source = checkpoint.get("checkpoint_source", "raw")
+    print(f"Checkpoint epoch={saved_epoch} source={saved_source}")
+    wandb.summary.update(
+        {
+            "eval_only/checkpoint_path": str(checkpoint_path),
+            "eval_only/checkpoint_epoch": int(saved_epoch) if saved_epoch is not None else -1,
+            "eval_only/checkpoint_source": saved_source,
+            "n_params": n_params,
+        }
+    )
+
+    no_tta_val = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=False)
+        for name, loader in final_val_loaders.items()
+    }
+    mirror_tta_val = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=True)
+        for name, loader in final_val_loaders.items()
+    }
+    no_tta_test = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=False)
+        for name, loader in final_test_loaders.items()
+    }
+    mirror_tta_test = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=True)
+        for name, loader in final_test_loaders.items()
+    }
+
+    log: dict[str, object] = {"global_step": 0}
+    log.update(primary_metric_log("no_tta_full_val_primary", no_tta_val["val_surface"]))
+    log.update(primary_metric_log("mirror_tta_full_val_primary", mirror_tta_val["val_surface"]))
+    log.update(primary_metric_log("no_tta_test_primary", no_tta_test["test_surface"]))
+    log.update(primary_metric_log("mirror_tta_test_primary", mirror_tta_test["test_surface"]))
+    for split_name, metrics in no_tta_val.items():
+        log.update(metric_namespace("no_tta_full_val", split_name, metrics))
+    for split_name, metrics in mirror_tta_val.items():
+        log.update(metric_namespace("mirror_tta_full_val", split_name, metrics))
+    for split_name, metrics in no_tta_test.items():
+        log.update(metric_namespace("no_tta_test", split_name, metrics))
+    for split_name, metrics in mirror_tta_test.items():
+        log.update(metric_namespace("mirror_tta_test", split_name, metrics))
+
+    chosen_val = mirror_tta_val if config.mirror_tta else no_tta_val
+    chosen_test = mirror_tta_test if config.mirror_tta else no_tta_test
+    log.update(primary_metric_log("full_val_primary", chosen_val["val_surface"]))
+    log.update(primary_metric_log("test_primary", chosen_test["test_surface"]))
+    for split_name, metrics in chosen_val.items():
+        log.update(metric_namespace("full_val", split_name, metrics))
+    for split_name, metrics in chosen_test.items():
+        log.update(metric_namespace("test", split_name, metrics))
+
+    print_metrics("no_tta_full_val", no_tta_val["val_surface"])
+    print_metrics("mirror_tta_full_val", mirror_tta_val["val_surface"])
+    print_metrics("no_tta_test", no_tta_test["test_surface"])
+    print_metrics("mirror_tta_test", mirror_tta_test["test_surface"])
+
+    delta_val = (
+        no_tta_val["val_surface"]["wall_shear_y_rel_l2_pct"]
+        - mirror_tta_val["val_surface"]["wall_shear_y_rel_l2_pct"]
+    )
+    delta_val_abupt = (
+        no_tta_val["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+        - mirror_tta_val["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+    )
+    print(f"\nMirror-TTA val deltas (no_tta - mirror_tta, lower is better):")
+    print(f"  wall_shear_y_rel_l2_pct: {delta_val:.4f}")
+    print(f"  abupt_axis_mean_rel_l2_pct: {delta_val_abupt:.4f}")
+
+    try:
+        assert_required_finite_metrics(log, "full_val_primary")
+        assert_required_finite_metrics(log, "test_primary")
+    except RuntimeError as exc:
+        wandb.summary.update({"run_invalid": 1.0, "run_invalid/reason": str(exc)})
+        wandb.finish()
+        raise
+    wandb.log(log)
+    wandb.summary.update(numeric_metric_items(log))
+
+
 def run_final_evaluation(
     *,
     run,
@@ -1416,8 +1674,9 @@ def run_final_evaluation(
         }
     )
 
+    mirror_tta = bool(getattr(config, "mirror_tta", False))
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=mirror_tta)
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1426,6 +1685,16 @@ def run_final_evaluation(
     }
     for split_name, metrics in full_val_metrics.items():
         full_val_log.update(metric_namespace("full_val", split_name, metrics))
+    if mirror_tta:
+        no_tta_full_val_metrics = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=False)
+            for name, loader in final_val_loaders.items()
+        }
+        full_val_log.update(
+            primary_metric_log("no_tta_full_val_primary", no_tta_full_val_metrics["val_surface"])
+        )
+        for split_name, metrics in no_tta_full_val_metrics.items():
+            full_val_log.update(metric_namespace("no_tta_full_val", split_name, metrics))
     try:
         assert_required_finite_metrics(full_val_log, "full_val_primary")
     except RuntimeError as exc:
@@ -1435,9 +1704,11 @@ def run_final_evaluation(
     wandb.log(full_val_log)
     wandb.summary.update(numeric_metric_items(full_val_log))
     print_metrics("full_val", full_val_metrics["val_surface"])
+    if mirror_tta:
+        print_metrics("no_tta_full_val", no_tta_full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=mirror_tta)
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {
@@ -1446,6 +1717,16 @@ def run_final_evaluation(
     }
     for split_name, metrics in test_metrics.items():
         test_log.update(metric_namespace("test", split_name, metrics))
+    if mirror_tta:
+        no_tta_test_metrics = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, mirror_tta=False)
+            for name, loader in final_test_loaders.items()
+        }
+        test_log.update(
+            primary_metric_log("no_tta_test_primary", no_tta_test_metrics["test_surface"])
+        )
+        for split_name, metrics in no_tta_test_metrics.items():
+            test_log.update(metric_namespace("no_tta_test", split_name, metrics))
     try:
         assert_required_finite_metrics(test_log, "test_primary")
     except RuntimeError as exc:
@@ -1455,6 +1736,8 @@ def run_final_evaluation(
     wandb.log(test_log)
     wandb.summary.update(numeric_metric_items(test_log))
     print_metrics("test_surface", test_metrics["test_surface"])
+    if mirror_tta:
+        print_metrics("no_tta_test", no_tta_test_metrics["test_surface"])
 
     log_model_artifact(
         run=run,

@@ -55,6 +55,7 @@ from trainer_runtime import (
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
+    run_eval_only,
     run_final_evaluation,
     should_update_best_checkpoint,
     timeout_budget_minutes,
@@ -117,6 +118,9 @@ class Config:
     raw_rel_l2_weight: float = 0.0
     fourier_pe: bool = False
     fourier_pe_num_freqs: int = 8
+    mirror_tta: bool = False
+    eval_only: bool = False
+    eval_checkpoint: str = ""
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -281,6 +285,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         config_path = output_dir / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
+
+        if config.eval_only:
+            distributed_barrier(state)
+            if state.is_main:
+                run_eval_only(
+                    run=run,
+                    model=base_model,
+                    config=config,
+                    transform=transform,
+                    device=device,
+                    final_val_loaders=final_val_loaders,
+                    final_test_loaders=final_test_loaders,
+                    n_params=n_params,
+                )
+            wandb.finish()
+            return
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -518,6 +538,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        mirror_tta=config.mirror_tta,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -532,6 +553,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    mirror_tta=config.mirror_tta,
                 )
                 for name, loader in val_loaders.items()
             }
