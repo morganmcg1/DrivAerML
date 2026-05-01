@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 12:30 UTC
+- **Date:** 2026-05-01 (updated from survey)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -29,18 +29,20 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 
 ## In-flight (8/8 students WIP — zero idle GPUs)
 
-| PR | Student | Hypothesis | W&B run | Val (latest) | Status |
-|---|---|---|---|---|---|
-| **#147** | frieren | compound + wd=2e-3 | NONE | — | **POD STUCK** since 2026-04-30 23:14 UTC; needs `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren` (escalated on issue #48 multiple times) |
-| **#159** | fern | Lion β1=0.95 (momentum) | rnmwwg6q | 12.61 (ep5-6) | running |
-| **#161** | askeladd | lion_beta2=0.999 | tfumujfi | 31.77 (ep1) | running, early |
-| **#162** | edward | model_dropout=0.05 | e5l1r38b | 25.51 (ep1) | running, early |
-| **#163** | thorfinn | weight_decay=1e-3 | 7rp28zrm | 26.42 (ep1) | running, early |
-| **#173** | tanjiro | cosine T_max=50 (≡ SOTA replication) | s58uz78l (rank0) | 17.24 mid-run | running — replication baseline + noise floor |
-| **#186** | alphonse | vol_pts=96k CLEAN (LR confound fixed) | not yet started | — | freshly assigned 2026-05-01 12:25 UTC |
-| **#187** | nezuko | volume_loss_weight=1.5 | not yet started | — | freshly assigned 2026-05-01 12:30 UTC |
+Last updated: 2026-05-01 survey. Steps measured at ~5000 steps/epoch (DDP8).
 
-## Closed this cycle (2026-05-01 12:25–12:30 UTC)
+| PR | Student | Hypothesis | Step | ~Ep | Val (latest) | vs SOTA val | Status |
+|---|---|---|---|---|---:|---:|---|
+| **#147** | frieren | compound + wd=2e-3 | 0 | ep0 | — | — | **POD STUCK** since 2026-04-30 23:14 UTC; needs `kubectl rollout restart deployment senpai-drivaerml-ddp8-frieren` (escalated 5× on issue #48) |
+| **#161** | askeladd | lion_beta2=0.999 | 21,700 | ~ep4.3 | 12.779 | +3.295 | running — POOR trajectory |
+| **#162** | edward | model_dropout=0.05 | 21,462 | ~ep4.3 | 10.674 | +1.190 | running — **LEADING** |
+| **#163** | thorfinn | weight_decay=1e-3 | 20,753 | ~ep4.2 | 10.767 | +1.283 | running — close 2nd |
+| **#173** | tanjiro | cosine T_max=50 | 12,675 | ~ep2.5 | 13.858 | +4.374 | running — POOR (T_max too long for budget) |
+| **#186** | alphonse | vol_pts=96k CLEAN | 1,903 | ~ep0.4 | 67.016 | — | running — too early (ep0 noise; SOTA ep0 val ~53-75 range) |
+| **#187** | nezuko | volume_loss_weight=1.5 | 2,227 | ~ep0.4 | N/A | — | running — too early |
+| **#189** | fern | lion_beta1=0.8 | 1,781 | ~ep0.4 | N/A | — | running — too early |
+
+## Closed this cycle (2026-05-01)
 
 | PR | Student | Test | vs SOTA | Why |
 |---|---|---:|---:|---|
@@ -87,7 +89,7 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 |---|---|---|---|---|
 | lr | 5e-5 | **1e-4** | 1.5e-4 ❌ | ceiling found |
 | ema_decay | 0.9999 | **0.999** | 0.998 ❌ | sweet spot |
-| lion_beta1 | — | **0.9** | 0.95 (#159) | in-flight |
+| lion_beta1 | — | **0.9** | 0.8 (#189, fern) | in-flight (also lower than SOTA — testing directional range) |
 | lion_beta2 | — | **0.99** | 0.999 (#161) | in-flight |
 | model_dropout | — | **0.0** | 0.05 (#162) | in-flight |
 | weight_decay | — | **5e-4** | 1e-3 (#163) | in-flight |
