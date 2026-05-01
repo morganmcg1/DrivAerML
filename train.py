@@ -254,18 +254,36 @@ class GeomEncoder(nn.Module):
 
 
 class FiLMLayer(nn.Module):
-    """FiLM with AdaLN-zero init: gamma=0, beta=0 at start so output equals input.
+    """FiLM with configurable init for stability.
 
-    Applies h' = h * (1 + gamma) + beta where (gamma, beta) come from a linear
-    projection of the per-case geometry token. Final linear is zero-initialized
-    so the layer is identity at training start (residual modulation).
+    Parameterization: h' = h * (1 + gamma) + beta where (gamma, beta) come from
+    a linear projection of the per-case geometry token.
+
+    - zero_init=True (default, AdaLN-Zero style): weight=0, bias=0 → gamma=0,
+      beta=0 → exact identity at init. The modulation ramps in via gradient.
+    - zero_init=False, init_scale<1: keep default Linear init for bias and scale
+      the projection weight by init_scale. Soft-init that starts near identity
+      but with non-trivial bias-driven perturbation (faster ramp-in than full
+      zero-init).
+    - zero_init=False, init_scale=1.0: full default Linear init (vanilla).
     """
 
-    def __init__(self, geom_dim: int, hidden_dim: int):
+    def __init__(
+        self,
+        geom_dim: int,
+        hidden_dim: int,
+        *,
+        zero_init: bool = True,
+        init_scale: float = 1.0,
+    ):
         super().__init__()
         self.to_gamma_beta = nn.Linear(geom_dim, 2 * hidden_dim)
-        nn.init.zeros_(self.to_gamma_beta.weight)
-        nn.init.zeros_(self.to_gamma_beta.bias)
+        if zero_init:
+            nn.init.zeros_(self.to_gamma_beta.weight)
+            nn.init.zeros_(self.to_gamma_beta.bias)
+        elif init_scale != 1.0:
+            with torch.no_grad():
+                self.to_gamma_beta.weight.mul_(init_scale)
 
     def forward(self, h: torch.Tensor, geom: torch.Tensor) -> torch.Tensor:
         # h: [B, N, hidden_dim], geom: [B, geom_dim]
@@ -285,6 +303,8 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        film_zero_init: bool = True,
+        film_init_scale: float = 1.0,
     ):
         super().__init__()
         if depth <= 1:
@@ -308,7 +328,15 @@ class Transformer(nn.Module):
         )
         self.film_layers = (
             nn.ModuleList(
-                [FiLMLayer(film_geom_dim, hidden_dim) for _ in range(depth)]
+                [
+                    FiLMLayer(
+                        film_geom_dim,
+                        hidden_dim,
+                        zero_init=film_zero_init,
+                        init_scale=film_init_scale,
+                    )
+                    for _ in range(depth)
+                ]
             )
             if film_geom_dim > 0
             else None
@@ -348,6 +376,8 @@ class SurfaceTransolver(nn.Module):
         stochastic_depth_prob: float = 0.0,
         use_film: bool = False,
         film_encoder_dim: int = 64,
+        film_zero_init: bool = True,
+        film_init_scale: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -359,6 +389,8 @@ class SurfaceTransolver(nn.Module):
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
+        self.film_zero_init = film_zero_init
+        self.film_init_scale = film_init_scale
 
         self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -385,6 +417,8 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            film_zero_init=film_zero_init,
+            film_init_scale=film_init_scale,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -571,6 +605,8 @@ class Config:
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
+    film_zero_init: bool = True
+    film_init_scale: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -730,6 +766,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         stochastic_depth_prob=config.stochastic_depth_prob,
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
+        film_zero_init=config.film_zero_init,
+        film_init_scale=config.film_init_scale,
     )
 
 
