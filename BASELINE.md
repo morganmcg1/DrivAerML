@@ -2,43 +2,41 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: tanjiro PR #111 EMA=0.999 — 2026-04-30 21:38 UTC
+## Status: thorfinn PR #115 compound lr=1e-4 + EMA=0.999 — 2026-05-01 01:20 UTC
 
-**NEW SOTA: tanjiro PR #111 EMA=0.999 beats PR #110 by −0.25% (11.142 vs 11.170).**
+**NEW SOTA: thorfinn PR #115 compound stack beats PR #111 by −5.04% (10.580 vs 11.142).**
 
-Faster EMA tracking (0.999 vs 0.9995) under a tight 9-epoch budget — 5× faster decay captures late-stage convergence more cleanly. 6/7 components improve; volume_pressure best improvement (−0.178).
+lr=1e-4 (2× SOTA) + EMA=0.999 compound stack. Both levers stacked additively with no negative interaction. EMA dominates early epochs (ep1 lead −33%), lr dominates late epochs. Note: run used default `volume_loss_weight=1.0` — volume_pressure unchanged (+0.1%), while all surface/wall-shear metrics improved 6–8%. Best val 9.484 at ep9.
 
-**W&B run:** `ab3y4ej7` (rank 0) — group `tay-round7-ema-fast`, 285 min runtime, 9 val epochs, best val 9.989 (ep9)
-**PR:** #111
+**W&B run:** `d03oghpp` (rank 0) — group `tay-round9-compound-lr1e4-ema999`, 287 min runtime, 9 val epochs, best val 9.484 (ep9)
+**PR:** #115
 
 ### tay current best — `test_primary/*`
 
-| Metric | This-repo key | tay best (PR #111 tanjiro) | PR #110 edward | PR #50 | AB-UPT |
+| Metric | This-repo key | tay best (PR #115 thorfinn) | PR #111 tanjiro | PR #50 | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **11.142** | 11.170 | 11.208 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | 6.209 | 6.264 | **6.193** | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **11.138** | 11.197 | 11.199 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.548** | 12.556 | 12.726 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **9.436** | 9.552 | 9.512 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **13.525** | 13.572 | 13.592 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | 13.992 | **13.904** | 14.017 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.580** | 11.142 | 11.208 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.690** | 6.209 | 6.193 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **10.419** | 11.138 | 11.199 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 12.740 | **12.548** | 12.726 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.908** | 9.436 | 9.512 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **12.491** | 13.525 | 13.592 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **13.071** | 13.992 | 14.017 | 3.63 |
 
-### Reproduce new SOTA (Lion lr=5e-5, no compile, EMA=0.999)
+### Reproduce new SOTA (Lion lr=1e-4, no compile, EMA=0.999)
 
 ```bash
 cd target/
 torchrun --standalone --nproc_per_node=8 train.py \
-  --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
-  --lr 5e-5 --weight-decay 5e-4 \
-  --no-compile-model \
-  --volume-loss-weight 2.0 --batch-size 4 --validation-every 1 \
+  --agent <STUDENT> --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --no-compile-model --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
-  --ema-decay 0.999 \
-  --gradient-log-every 100 --weight-log-every 100 \
-  --no-log-gradient-histograms
+  --ema-decay 0.999
 ```
+
+**Note:** This run did NOT include `--volume-loss-weight 2.0`. The full SOTA stack should add it back — expected to recover volume_pressure and push abupt toward ~10.3.
 
 ### Compounding wins so far
 
@@ -52,7 +50,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | (no PR) | tanjiro arm B | **−3.25 (−22.3%) vs #46** | Lion lr=5e-5/wd=5e-4 — paper config was wrong |
 | #50 | nezuko | **−0.10 (−0.84%) vs arm B** | Lion uncompiled lr=5e-5 reproduce |
 | #110 | edward | **−0.04 (−0.34%) vs #50** | Lion + cosine T_max=50 (gentle 8% decay) |
-| **#111** | **tanjiro** | **−0.03 (−0.25%) vs #110** | **EMA decay 0.999 (5× faster than 0.9995)** |
+| #111 | tanjiro | **−0.03 (−0.25%) vs #110** | EMA decay 0.999 (5× faster than 0.9995) |
+| **#115** | **thorfinn** | **−0.562 (−5.04%) vs #111** | **Compound: lr=1e-4 + EMA=0.999 (both winners stacked)** |
 
 ---
 
