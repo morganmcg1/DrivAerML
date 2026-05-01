@@ -72,6 +72,29 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class FourierEmbed(nn.Module):
+    """Fourier positional encoding with geometric frequency progression."""
+
+    def __init__(self, hidden_dim: int, input_dim: int = 3, num_freqs: int = 8):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
+        self.num_freqs = num_freqs
+        freqs = 2.0 ** torch.arange(num_freqs).float()
+        self.register_buffer("freqs", freqs)
+        raw_dim = input_dim * num_freqs * 2
+        self.proj = nn.Linear(raw_dim, hidden_dim) if raw_dim != hidden_dim else nn.Identity()
+        if isinstance(self.proj, nn.Linear):
+            _init_linear(self.proj)
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords = coords.float()
+        angles = coords.unsqueeze(-1) * self.freqs * math.pi
+        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
+        emb = emb.flatten(start_dim=-2)
+        return self.proj(emb)
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -226,6 +249,8 @@ class SurfaceTransolver(nn.Module):
         n_head: int = 3,
         mlp_ratio: int = 4,
         slice_num: int = 96,
+        fourier_pe: bool = False,
+        fourier_pe_num_freqs: int = 8,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -236,7 +261,12 @@ class SurfaceTransolver(nn.Module):
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
-        self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
+        if fourier_pe:
+            self.pos_embed = FourierEmbed(
+                hidden_dim=n_hidden, input_dim=space_dim, num_freqs=fourier_pe_num_freqs
+            )
+        else:
+            self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (

@@ -115,6 +115,8 @@ class Config:
     compile_model: bool = True
     debug: bool = False
     raw_rel_l2_weight: float = 0.0
+    fourier_pe: bool = False
+    fourier_pe_num_freqs: int = 8
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -150,6 +152,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
+        fourier_pe=config.fourier_pe,
+        fourier_pe_num_freqs=config.fourier_pe_num_freqs,
     )
 
 
