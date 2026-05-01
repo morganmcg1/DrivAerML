@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 09:30 UTC
+- **Date:** 2026-05-01 10:15 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,6 +37,7 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 | **#161** | askeladd | lion_beta2=0.999 (single delta) | tfumujfi | 31.772 (ep1, 87min) | running — too early to judge |
 | **#162** | edward | model_dropout=0.05 (single delta) | e5l1r38b | 25.505 (ep1, 87min) | running — too early |
 | **#163** | thorfinn | weight_decay=1e-3 (single delta) | 7rp28zrm | 26.420 (ep1, 77min) | running — too early |
+| **#173** | tanjiro | cosine T_max=50 on SOTA stack (single delta) | TBD | — | **JUST ASSIGNED** — single delta from PR #115: add --lr-cosine-t-max 50 |
 | **#147** | frieren | compound + wd=2e-3 | NONE | — | **POD STUCK** — no W&B run ever started; restart requested on issue #48 |
 
 SOTA val trajectory reference: ep0=53.75 / ep1=24.15 / ep2=16.51 / ep3=13.47 / ep4=11.83 / ep5=10.88 / ep6=10.16 / ep7=9.73 / ep8=9.484
@@ -86,8 +87,9 @@ SOTA val trajectory reference: ep0=53.75 / ep1=24.15 / ep2=16.51 / ep3=13.47 / e
 
 1. **Wait for fern #159 and nezuko #157** — both in ep5-6 range showing 12.3-12.6 val. Need ep8-9 to compare with SOTA val=9.484. These are the most advanced round 11 experiments.
 2. **Alphonse #158 vol_pts=96k** — dominant vol_p binding gap attack (×2.1 vs AB-UPT). At ep4=15.84. Need ep8-9 final.
-3. **Frieren pod restart needed** — pod stuck at init since 23:14 UTC Apr 30. PR #147 (wd=2e-3) has NEVER started. Requires human `kubectl rollout restart`. Escalated on issue #48.
-4. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Not yet assigned to any running pod.
-5. **Volume loss weight isolation** — clean `--volume-loss-weight 1.5-2.0` experiment WITHOUT tau coupling side effects. Previous vol_w=2.0 hurt surface; hypothesis: lighter volume weight (1.5) with isolated testing might find a sweet spot.
-6. **Tau_yz binding gap (code-change approach)** — must bypass Lion neutralization. Options: (a) asinh output normalization for tau_y/tau_z (normalizes small-magnitude components), (b) surface-tangent-frame prediction head (predicts in a frame where components are better conditioned), (c) decoupled magnitude+direction head. All require train.py modifications by a student.
-7. **Observe round 11 askeladd/edward/thorfinn ep3+ signals** — lion_beta2, dropout, wd all at ep1 only. Need 2-3 more epochs to evaluate trajectories vs SOTA reference.
+3. **Tanjiro #173 cosine T_max=50** — clean single-delta from PR #115 SOTA. Cosine was a winner on older stack (PR #110) but never tested on lr=1e-4+EMA=0.999. Good chance to stack another improvement.
+4. **Frieren pod restart needed** — pod stuck at init since 23:14 UTC Apr 30. PR #147 (wd=2e-3) has NEVER started. Requires human `kubectl rollout restart`. Escalated on issue #48.
+5. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Not yet assigned to any running pod.
+6. **Volume loss weight isolation** — clean `--volume-loss-weight 1.5-2.0` experiment WITHOUT tau coupling side effects. Previous vol_w=2.0 hurt surface; hypothesis: lighter volume weight (1.5) with isolated testing might find a sweet spot.
+7. **Tau_yz binding gap (code-change approach)** — must bypass Lion neutralization. Options: (a) asinh output normalization for tau_y/tau_z (normalizes small-magnitude components), (b) surface-tangent-frame prediction head (predicts in a frame where components are better conditioned), (c) decoupled magnitude+direction head. All require train.py modifications by a student.
+8. **Observe round 11 askeladd/edward/thorfinn ep3+ signals** — lion_beta2, dropout, wd all at ep1 only. Need 2-3 more epochs to evaluate trajectories vs SOTA reference.
