@@ -1,7 +1,7 @@
 # SENPAI Research State
-- **Updated:** 2026-05-01 14:45 UTC
+- **Updated:** 2026-05-01 16:30 UTC
 - **Branch:** `yi`
-- **Baseline:** PR #99 (fern), `abupt_axis_mean_rel_l2_pct = 10.69`, W&B run `3hljb0mg`
+- **Baseline:** PR #183 (fern, `pos_max_wavelength=1000`), `abupt_axis_mean_rel_l2_pct = 10.21`
 
 ---
 
@@ -23,7 +23,7 @@
 
 | Metric | yi best | AB-UPT | Gap |
 |---|---:|---:|---:|
-| `abupt_axis_mean_rel_l2_pct` | **10.69** | — | — |
+| `abupt_axis_mean_rel_l2_pct` | **10.21** | — | — |
 | `surface_pressure_rel_l2_pct` | **6.97** | 3.82 | 1.8× |
 | `wall_shear_rel_l2_pct` | **11.69** | 7.29 | 1.6× |
 | `volume_pressure_rel_l2_pct` | **7.85** | 6.08 | 1.3× |
