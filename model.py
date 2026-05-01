@@ -121,6 +121,38 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class DomainLayerNorm(nn.Module):
+    """LayerNorm with shared per-token statistics and separate affine params for surface vs volume tokens."""
+
+    def __init__(self, hidden_dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.eps = eps
+        self.norm = nn.LayerNorm(hidden_dim, elementwise_affine=False, eps=eps)
+        self.surface_weight = nn.Parameter(torch.ones(hidden_dim))
+        self.surface_bias = nn.Parameter(torch.zeros(hidden_dim))
+        self.volume_weight = nn.Parameter(torch.ones(hidden_dim))
+        self.volume_bias = nn.Parameter(torch.zeros(hidden_dim))
+
+    def forward(self, x: torch.Tensor, surface_tokens: int = 0) -> torch.Tensor:
+        normed = self.norm(x)
+        total = x.shape[1]
+        surface_tokens = max(0, min(surface_tokens, total))
+        # Always compute both branches so both sets of affine params are in the
+        # autograd graph (DDP find_unused_parameters=False otherwise hangs when
+        # ranks see different empty-slice patterns, e.g. surface_tokens=0 batches).
+        surf = normed[:, :surface_tokens] * self.surface_weight + self.surface_bias
+        vol = normed[:, surface_tokens:] * self.volume_weight + self.volume_bias
+        out = torch.cat([surf, vol], dim=1)
+        # Ghost connection: zero-valued contribution that guarantees all 4 affine
+        # params are touched even when one slice is empty across the entire batch.
+        ghost = (
+            self.surface_weight.sum() + self.surface_bias.sum()
+            + self.volume_weight.sum() + self.volume_bias.sum()
+        ) * 0.0
+        return out + ghost
+
+
 class TransolverAttention(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
         super().__init__()
@@ -180,24 +212,40 @@ class TransformerBlock(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_domain_ln: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
-        self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.use_domain_ln = use_domain_ln
+        if use_domain_ln:
+            self.norm1 = DomainLayerNorm(hidden_dim)
+            self.norm2 = DomainLayerNorm(hidden_dim)
+        else:
+            self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+            self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.attention = TransolverAttention(
             hidden_dim=hidden_dim,
             num_heads=num_heads,
             num_slices=num_slices,
             dropout=dropout,
         )
-        self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        surface_tokens: int = 0,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
-        x = _apply_token_mask(x, attn_mask)
-        x = x + self.mlp(self.norm2(x))
+        if self.use_domain_ln:
+            x = x + self.attention(self.norm1(x, surface_tokens), attn_mask=attn_mask)
+            x = _apply_token_mask(x, attn_mask)
+            x = x + self.mlp(self.norm2(x, surface_tokens))
+        else:
+            x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+            x = _apply_token_mask(x, attn_mask)
+            x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -211,6 +259,7 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_domain_ln: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -221,14 +270,20 @@ class Transformer(nn.Module):
                     mlp_expansion_factor=mlp_expansion_factor,
                     num_slices=num_slices,
                     dropout=dropout,
+                    use_domain_ln=use_domain_ln,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        surface_tokens: int = 0,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, surface_tokens=surface_tokens)
         return x
 
 
@@ -251,8 +306,10 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         fourier_pe: bool = False,
         fourier_pe_num_freqs: int = 8,
+        domain_ln: bool = False,
     ):
         super().__init__()
+        self.domain_ln = domain_ln
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
@@ -284,6 +341,7 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            use_domain_ln=domain_ln,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -349,7 +407,7 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        hidden = self.backbone(hidden, attn_mask=attn_mask, surface_tokens=surface_tokens)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
