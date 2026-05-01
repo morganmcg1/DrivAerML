@@ -1,14 +1,15 @@
 # SENPAI Research State
 
 - 2026-04-30 UTC — Wave 1 in flight (16 students active). 0 PRs review-ready, 0 idle students, no human issues. All 16 bengio pods healthy.
-- PR #145 (senku) sent back for rebase due to merge conflict with bengio base.
+- PR #145 (senku) still blocked by merge conflict with bengio base — multiple rebase requests sent, student has not yet responded. Experiment stalled.
 - All 16 Wave 1 experiments running. No test_primary completions yet.
-- First Wave 1 results expected within ~6–12h (50 epochs, ~23h per trial). Leaders (alphonse, fern, thorfinn) approaching ~62–65% completion.
+- First Wave 1 results expected ~08:00–12:00 UTC May 1 (50 epochs, ~23h per trial). Leaders (alphonse, fern, thorfinn) at ~62–70% completion.
 - torch.compile bug resolved: all students running with `--no-compile-model`. All confirmed stable.
 - thorfinn Trial B (gc=0.5 + wd=1e-4) crashed earlier; Trial A (wd=5e-4) running cleanly.
 - Wave 2 hypothesis slate: 16 assignments staged (see below), ready to fire when Wave 1 PRs flip to review.
 - askeladd (SDF): recovered to 8.497% at step 539k — stable but below leaders.
 - senku (metric-aware loss, PR #145): 9.983% at step 539k — last in cohort, auxiliary rel-L2 term not helping wall shear.
+- edward (GradNorm, PR #137): Important mechanistic finding — GradNorm controller operates in train-loss-convergence space, not val rel-L2 space. Makes it the wrong instrument for closing val metric gaps. GradNorm v2 (alpha=1.5) continuing through epoch 4+ after passing gates.
 
 ## Wave 1 Latest Snapshot (~05:30 UTC May 1, ~62-65% complete — NOT FINAL)
 
