@@ -27,9 +27,9 @@
 W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 **SOTA val trajectory:** 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.16 / 9.73 / 9.48
 
-## In-flight (8/8 students running — all slots filled, Round 12 + Round 13)
+## In-flight (8/8 students running — all slots filled, Rounds 12–14)
 
-Last updated: 2026-05-01 ~21:00 UTC — W&B trajectory survey across all 8 active groups.
+Last updated: 2026-05-01 ~21:30 UTC — PR #247 assigned to thorfinn (Round 14, T_max=14 gentle annealing).
 
 | PR | Round | Student | Hypothesis | W&B group | ~Epoch | val_abupt (latest) | vs SOTA 9.484 | Status |
 |---|---|---|---|---|---:|---:|---:|---|
@@ -40,7 +40,8 @@ Last updated: 2026-05-01 ~21:00 UTC — W&B trajectory survey across all 8 activ
 | **#233** | 12 | edward | model_layers=3 (reduce depth by 1; NEVER TESTED) | `tay-round12-model-layers-3` | 7.4 | 15.551 | +6.07 | running; trajectory 61.96→27.02→18.93→15.55 — slowest convergence, depth=3 underfits |
 | **#240** | 13 | frieren | wider FFN mlp_ratio=8 (vs. SOTA=4, 6 was negative) | `tay-round13-mlp-ratio-8` | 1.3 | N/A | — | running — pre-first-eval |
 | **#241** | 13 | tanjiro | width scaling 512→768d with µP-scaled LR | `tay-round13-hidden-dim-768` | 1.1 | N/A | — | running — pre-first-eval |
-| **#242** | 13 | thorfinn | dropout=0.1 re-test on SOTA stack (0.05 was negative) | `tay-round13-dropout-0p1` | 1.3 | N/A | — | **PR ANOMALY**: GH state=MERGED via empty assignment commit (no code merged into tay). Experiment running fine in W&B group. Will need new follow-up PR to land results comment when run completes. |
+| **#242** | 13 | thorfinn | dropout=0.1 re-test on SOTA stack (0.05 was negative) | `tay-round13-dropout-0p1` | 1.3 | N/A | — | **PR ANOMALY**: GH state=MERGED via empty assignment commit (no code merged into tay). Superseded by PR #247. |
+| **#247** | 14 | thorfinn | gentle cosine annealing lr-cosine-t-max=14 | `tay-round14-lr-cosine-t-max-14` | 0 | N/A | — | **ASSIGNED** — not yet started. Hypothesis: T_max=14 midpoint avoids LR collapse (T_max=9 ❌×2) while providing late-stage annealing vs flat T_max=50 SOTA. |
 
 ### Component breakdown for the two ~complete runs (vs SOTA surf_p=3.82 / wall_sh=7.29 / vol_p=6.08)
 
