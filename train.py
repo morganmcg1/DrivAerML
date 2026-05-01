@@ -556,6 +556,8 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    symmetry_augmentation: bool = False
+    symmetry_aug_prob: float = 0.5
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1285,6 +1287,49 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def apply_symmetry_augmentation(
+    batch: SurfaceBatch, aug_prob: float
+) -> tuple[SurfaceBatch, float]:
+    """Reflect a fraction of batch elements about the xz-plane (y -> -y).
+
+    DrivAerML cars are bilaterally symmetric. Under y-reflection:
+      - surface positions: y (idx 1) negated
+      - surface normals (vectors): ny (idx 4) negated
+      - volume positions: y (idx 1) negated; sdf (idx 3) invariant (scalar distance)
+      - surface targets: tau_y (idx 2) negated (antisymmetric); cp, tau_x, tau_z invariant
+      - volume targets: volume_pressure (scalar) invariant
+    """
+    if aug_prob <= 0.0:
+        return batch, 0.0
+    B = batch.surface_x.shape[0]
+    n_aug = min(B, int(round(B * aug_prob)))
+    if n_aug <= 0:
+        return batch, 0.0
+
+    aug_idx = torch.randperm(B, device=batch.surface_x.device)[:n_aug]
+
+    surface_x = batch.surface_x.clone()
+    surface_y = batch.surface_y.clone()
+    volume_x = batch.volume_x.clone()
+
+    surface_x[aug_idx, :, 1] = -surface_x[aug_idx, :, 1]
+    surface_x[aug_idx, :, 4] = -surface_x[aug_idx, :, 4]
+    volume_x[aug_idx, :, 1] = -volume_x[aug_idx, :, 1]
+    surface_y[aug_idx, :, 2] = -surface_y[aug_idx, :, 2]
+
+    aug_batch = SurfaceBatch(
+        case_ids=batch.case_ids,
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=batch.metadata,
+    )
+    return aug_batch, float(n_aug) / float(B)
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1770,6 +1815,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            aug_frac = 0.0
+            if config.symmetry_augmentation:
+                batch, aug_frac = apply_symmetry_augmentation(
+                    batch, config.symmetry_aug_prob
+                )
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1838,6 +1888,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "train/aug_frac": aug_frac,
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
