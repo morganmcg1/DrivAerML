@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Iterable
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import wandb
 import yaml
@@ -32,6 +33,7 @@ from tqdm import tqdm
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
+    DistributedState,
     MetricSlopeTracker,
     TargetTransform,
     autocast_context,
@@ -115,6 +117,10 @@ class Config:
     compile_model: bool = True
     debug: bool = False
     raw_rel_l2_weight: float = 0.0
+    autoweight: bool = False
+    autoweight_beta: float = 0.99
+    autoweight_warmup_steps: int = 500
+    autoweight_eps: float = 1e-4
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -142,6 +148,108 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+_AUTOWEIGHT_AXES: tuple[str, ...] = (
+    "surface_pressure",
+    "wall_shear_x",
+    "wall_shear_y",
+    "wall_shear_z",
+    "volume_pressure",
+)
+
+
+def masked_mse_per_axis(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    """Per-channel masked MSE; returns shape `[C]` where C = pred.shape[-1]."""
+    diff_sq = (pred - target).square()
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    numerator = (diff_sq * mask_f).sum(dim=(0, 1))
+    denominator = mask_f.sum().clamp_min(1.0)
+    if bool(mask_f.sum().detach().cpu().item() > 0):
+        return numerator / denominator
+    return numerator * 0.0
+
+
+class PerAxisAutoWeighter:
+    """Per-axis loss reweighting via EMA of squared loss.
+
+    State per axis: `ema[k] = beta * ema[k] + (1 - beta) * loss_k^2`.
+    Weight per axis: `w_k = 1 / (sqrt(ema[k]) + eps)`, normalized to sum to 1.
+    During the first `warmup_steps` updates, weights are uniform `1/n_axes`.
+    EMA state is averaged across DDP ranks so weights stay identical on all ranks.
+    """
+
+    def __init__(
+        self,
+        *,
+        beta: float,
+        warmup_steps: int,
+        eps: float,
+        device: torch.device,
+        axes: tuple[str, ...] = _AUTOWEIGHT_AXES,
+    ) -> None:
+        self.beta = beta
+        self.warmup_steps = warmup_steps
+        self.eps = eps
+        self.device = device
+        self.axes = axes
+        self.n_axes = len(axes)
+        self.ema = torch.zeros(self.n_axes, device=device, dtype=torch.float32)
+        self.initialized = False
+        self.steps_seen = 0
+
+    def in_warmup(self) -> bool:
+        return self.steps_seen < self.warmup_steps
+
+    def update(
+        self,
+        per_axis_loss: torch.Tensor,
+        *,
+        distributed_state: DistributedState,
+    ) -> None:
+        loss_sq = per_axis_loss.detach().to(self.device, dtype=torch.float32).square()
+        if distributed_state.enabled:
+            dist.all_reduce(loss_sq, op=dist.ReduceOp.AVG)
+        # Replace any non-finite axes with prior EMA so a poisoned batch never
+        # corrupts the running statistics (would otherwise NaN-propagate via
+        # weight normalization on every subsequent step).
+        finite_mask = torch.isfinite(loss_sq)
+        if not bool(finite_mask.all().item()):
+            fallback = self.ema if self.initialized else torch.ones_like(loss_sq)
+            loss_sq = torch.where(finite_mask, loss_sq, fallback)
+        if not self.initialized:
+            self.ema = loss_sq.clone()
+            self.initialized = True
+        else:
+            self.ema = self.beta * self.ema + (1.0 - self.beta) * loss_sq
+        self.steps_seen += 1
+
+    def weights(self) -> torch.Tensor:
+        if self.in_warmup() or not self.initialized:
+            return torch.full(
+                (self.n_axes,),
+                1.0 / float(self.n_axes),
+                device=self.device,
+                dtype=torch.float32,
+            )
+        raw = 1.0 / (torch.sqrt(self.ema) + self.eps)
+        total = raw.sum().clamp_min(1e-12)
+        return raw / total
+
+    def axis_metrics(self, *, prefix: str = "train/per_axis") -> dict[str, float]:
+        weights = self.weights().detach().cpu()
+        ema_cpu = self.ema.detach().cpu()
+        out: dict[str, float] = {}
+        for k, name in enumerate(self.axes):
+            out[f"{prefix}_ema_var/{name}"] = float(ema_cpu[k].item())
+            out[f"{prefix}_weight/{name}"] = float(weights[k].item())
+        out[f"{prefix}_warmup_active"] = 1.0 if self.in_warmup() else 0.0
+        out[f"{prefix}_steps_seen"] = float(self.steps_seen)
+        return out
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -163,6 +271,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     raw_rel_l2_weight: float = 0.0,
+    autoweighter: PerAxisAutoWeighter | None = None,
+    distributed_state: DistributedState | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -174,10 +284,26 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
+        surface_per_axis = masked_mse_per_axis(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )  # [4]
+        volume_per_axis = masked_mse_per_axis(
+            out["volume_preds"], volume_target, batch.volume_mask
+        )  # [1]
+        surface_loss = surface_per_axis.mean()
+        volume_loss = volume_per_axis.mean()
+        per_axis_loss = torch.cat([surface_per_axis, volume_per_axis], dim=0)  # [5]
+
+        if autoweighter is not None:
+            assert distributed_state is not None
+            autoweighter.update(per_axis_loss, distributed_state=distributed_state)
+            weights = autoweighter.weights().to(per_axis_loss.dtype)
+            weighted_per_axis = weights * per_axis_loss  # [5]
+            weighted_surface_loss = surface_loss_weight * weighted_per_axis[:4].sum()
+            weighted_volume_loss = volume_loss_weight * weighted_per_axis[4:].sum()
+        else:
+            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
 
@@ -200,12 +326,17 @@ def train_loss(
             aux_loss = aux_loss + vol_rel_l2
             loss = loss + raw_rel_l2_weight * aux_loss
 
+    per_axis_metrics: dict[str, float] = {}
+    per_axis_cpu = per_axis_loss.detach().cpu()
+    for k, axis_name in enumerate(_AUTOWEIGHT_AXES):
+        per_axis_metrics[f"per_axis_loss/{axis_name}"] = float(per_axis_cpu[k].item())
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **per_axis_metrics,
         **aux_metrics,
     }
 
@@ -252,6 +383,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        autoweighter: PerAxisAutoWeighter | None = None
+        if config.autoweight:
+            autoweighter = PerAxisAutoWeighter(
+                beta=config.autoweight_beta,
+                warmup_steps=config.autoweight_warmup_steps,
+                eps=config.autoweight_eps,
+                device=device,
+            )
+            if state.is_main:
+                print(
+                    f"Per-axis autoweight ON: axes={list(_AUTOWEIGHT_AXES)} "
+                    f"beta={config.autoweight_beta} warmup={config.autoweight_warmup_steps} "
+                    f"eps={config.autoweight_eps}"
+                )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -321,6 +466,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
                     raw_rel_l2_weight=config.raw_rel_l2_weight,
+                    autoweighter=autoweighter,
+                    distributed_state=state,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -364,6 +511,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                                      "raw_rel_l2/vol_pressure"):
                         if _aux_key in batch_loss_metrics:
                             train_log[f"train/{_aux_key}"] = batch_loss_metrics[_aux_key]
+                    # Per-axis (5-axis) MSE diagnostics — always logged for both
+                    # autoweight and baseline runs so we can compare trajectories.
+                    for _axis_name in _AUTOWEIGHT_AXES:
+                        _key = f"per_axis_loss/{_axis_name}"
+                        if _key in batch_loss_metrics:
+                            train_log[f"train/{_key}"] = batch_loss_metrics[_key]
+                    if autoweighter is not None:
+                        train_log.update(autoweighter.axis_metrics(prefix="train/per_axis"))
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
