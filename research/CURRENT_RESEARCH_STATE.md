@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 06:00 UTC
+- **Date:** 2026-05-01 06:20 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,14 +37,16 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 
 | PR | Student | Hypothesis | Run state | Latest val (vs SOTA ep9 9.48) |
 |---|---|---|---|---|
-| **#141** | askeladd | sw=2.0 + vw=2.0 + (T_max=50 confound) | finished | val 9.445 (-0.41%) but **test 10.604 (+0.23% NOT a winner)** |
+| **#161** | askeladd | lion_beta2=0.999 (optimizer sweep, single delta) | round11 — just assigned | — |
+| #162 | edward | model_dropout=0.05 (regularization single delta) | round11 — just assigned | — |
+| **#141** | askeladd | sw=2.0 + vw=2.0 + T_max=50 | **CLOSED** | test 10.605 (+0.23%), val won (-0.41%) but tau_y regressed on test |
 | #142 | thorfinn | compound + vol_w=2.0 | finalizing test eval | best_val 10.607 (+11.8% NOT a winner) |
-| #146 | edward | 6L/256d depth swap (yi −21% port) | finished | test 12.662 (+19.7% NOT a winner, 9-ep budget too short) |
-| #147 | frieren | compound + wd=2e-3 | **POD STUCK on PR #134 round9 still** | no round10 W&B run yet |
-| #149 | tanjiro | per-axis tau_y/z weights W=1.5 | **POD IDLE 0% GPU** | no round10 W&B run yet |
-| #157 | nezuko | mlp_ratio=6 (yi Wave 1 lever) | running rt=31m, attempt 3 (×2 OOM) | val ep0=56.05 |
-| #158 | alphonse | vol_pts=96k (attack vol_p ×2.1 gap) | running rt~10m, fresh launch | no val yet |
-| #159 | fern | Lion β1=0.95 (momentum sweep) | running rt~5m, retry after fail | no val yet |
+| **#146** | edward | 6L/256d depth swap | **CLOSED** | test 12.662 (+19.7%, depth-swap family closed) |
+| #147 | frieren | compound + wd=2e-3 | **POD STUCK** (running old PR #134 round9) | no round10 W&B run |
+| #149 | tanjiro | per-axis tau_y/z weights W=1.5 | **POD STUCK** (GPU 0%, iter 167 since 02:29) | no round10 W&B run |
+| #157 | nezuko | mlp_ratio=6 | running | val ep2 25.28 (SOTA ep2 16.51, +53% behind) |
+| #158 | alphonse | vol_pts=96k (vol_p attack) | running | val ep1 77.22 (early, high pts load) |
+| #159 | fern | Lion β1=0.95 | running | val ep1 59.07 (underperforming early) |
 
 ### Key observations
 - **askeladd #141 val→test divergence**: val −0.41% (9.445 vs 9.484) BUT test +0.23% (10.604 vs 10.580). Test breakdown: surface_p −0.08%, vol_p −0.60% (improved!), wall_shear_y +1.25% (regression), wall_shear_z +0.35%. Net: val/test ratio 1.123 vs SOTA 1.115 — slight overfit to val. **CLOSEOUT, not merge.**
@@ -56,13 +58,15 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 - **frieren and tanjiro pods broken**. Frieren still running PR #134 (round9, GPU 100%); tanjiro idle (GPU 0%) despite branch checked out. Cannot intervene from advisor — pods own their loop.
 - **alphonse student auto-corrected** the 4-flag baseline mismatch I introduced — relaunched with vol_pts=96k single-delta from verified SOTA config. Same applies to nezuko — student caught and corrected before launching.
 
-## Round 10 closeouts (test_abupt, primary metric)
+## Round 10/11 closeouts (test_abupt, primary metric)
 
 | PR | Student | Test result | vs SOTA |
 |---|---|---:|---:|
 | #138 | nezuko (5L depth) | 11.213 | +5.98% (CLOSED) |
 | #139 | fern (slices=256) | 12.389 | +17.1% (CLOSED, 98.8% VRAM) |
-| #148 | alphonse (lr=1.5e-4) | early-close ep4 | +40% (CLOSED, LR ceiling 1e-4 to 1.5e-4) |
+| #141 | askeladd (sw+vw+T_max 3-way) | 10.605 | +0.23% (CLOSED, val win/test loss) |
+| #146 | edward (6L/256d) | 12.662 | +19.7% (CLOSED, depth-swap family closed) |
+| #148 | alphonse (lr=1.5e-4) | early-close ep4 | +40% (CLOSED, LR ceiling confirmed) |
 
 ## Comparison with yi advisor (parallel branch)
 
@@ -74,10 +78,19 @@ PR #115 SOTA val trajectory: 53.75 / 24.15 / 16.51 / 13.47 / 11.83 / 10.88 / 10.
 
 ## Next research directions (priority order)
 
-1. **If askeladd #141 closes as non-winner**: vol_w=2.0 isolation (already in flight via thorfinn #142).
-2. **If thorfinn #142 wins**: confirm vol_w as new compound lever. Stack with sw=2.0 next.
-3. **If alphonse #158 vol_pts=96k wins**: vol_p ×2.1 gap closes via compute, not architecture.
-4. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Volume_pressure ×2.1 vs reference is the dominant gap and architecture-level fix.
-5. **Tangential wall-shear loss** (yi #11 kohaku) — confirm flag exists in tay's train.py.
-6. **Higher LR + cosine warmup** — lr=2e-4 with warmup ramp.
-7. **Mixup / curriculum** — fresh data-augmentation lever, untouched on tay.
+1. **alphonse #158 vol_pts=96k** — most promising active run, directly attacking dominant binding gap (vol_p ×2.1 vs AB-UPT).
+2. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Big architectural move, potential 20%+ gain. Tanjiro/frieren pods stuck and unavailable; assign to working pods.
+3. **Per-axis tau loss weights** — tanjiro #149 stuck; may need to reassign to a working pod (tau_y/tau_z are ×3.4-3.6 binding gaps). No train.py flag exists — requires student code addition.
+4. **thorfinn #142 closeout** — vol_w=2.0 at best_val +11.8%, not competitive. Clean up when submitted.
+5. **Optimizer hyperparam map** — lion_beta2=0.999 (#161) and model_dropout=0.05 (#162) are the two open single-delta experiments. lion_beta1=0.95 (#159) early signal weak.
+6. **Frieren/tanjiro pod recovery** — pods stuck; human team intervention needed. Cannot fix from advisor side.
+
+## Optimizer hyperparam map (confirmed on tay)
+
+| Param | Min tested | SOTA | Max tested | Status |
+|---|---|---|---|---|
+| lr | 5e-5 (PR #50) | **1e-4 (PR #115)** | 1.5e-4 (CLOSED) | Ceiling found |
+| ema_decay | 0.9999 (slow) | **0.999** | 0.998 (fast) | Sweet spot confirmed |
+| lion_beta1 | — | **0.9** | 0.95 (#159 running) | In flight |
+| lion_beta2 | — | **0.99** | 0.999 (#161 assigned) | Untested |
+| model_dropout | — | **0.0** | 0.05 (#162 assigned) | Untested |
