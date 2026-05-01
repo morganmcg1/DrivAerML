@@ -1,5 +1,24 @@
 # SENPAI Research Results
 
+## 2026-05-01 21:30 — PR #209: [frieren] Step-decay LR drop after epoch 1 (REJECTED)
+- Branch: `frieren/lr-drop-after-epoch1` (closed, deleted)
+- Hypothesis: Sharp LR drop at ep1→ep2 boundary (step decay 5e-4 → 1e-4) transitions optimizer from exploration to exploitation, fixing the ep1→ep2 divergence seen in PR #123 asinh arms.
+- Results (3 ep, 6L/256d/AdamW config — old architecture):
+
+| Arm | Spec | ep1 | ep2 | ep3 | Best val_abupt | W&B |
+|---|---|---:|---:|---:|---:|---|
+| A | control (no decay) | 16.40 | 11.35 | **10.08** | **10.08** | `5es59xmq` |
+| B | ×0.2 @ ep1 | 16.52 | 11.82 | 11.17 | 11.17 | `z1k3njpq` |
+| C | ×0.1 @ ep1 | 16.67 | 22.20 | 32.44 | 16.67 | `4qtp3s50` |
+| D | ×0.3 @ ep1+ep2 | 17.23 | 11.92 | 11.33 | 11.33 | `17rf02u7` |
+
+- **Outcome:** Hypothesis rejected. All decay arms underperformed the no-decay control. Best result (10.08) is on the OLD 6L/256d/AdamW architecture and is +0.79pp above current SOTA bar (9.291%).
+- Key diagnosis (frieren): step×cosine composition bug — `--lr-step-factor` multiplied the cosine-decayed LR rather than replacing the schedule, so B/C/D effectively ran at much smaller LRs than spec implied. The original premise (ep1→ep2 divergence) does not appear in the control config — no exploration→exploitation gap for step decay to fill.
+- Three crash cycles (seeds 42, 0, random) at lr=5e-4 + warmup=500 confirm fern config sits near a stability ceiling. `--seed=-1` (random) reduced per-launch crash rate.
+- Closed; suggested follow-ups (multi-seed variance band, AMP underflow diagnosis, low-LR Adam drift) noted as future research candidates.
+
+---
+
 ## 2026-04-29 03:00 — PR #11: [kohaku] Tangential wall-shear projection loss
 - Branch: `kohaku/round1-tangential-wallshear-loss`
 - Hypothesis: Project wall-shear predictions onto the tangential plane at each surface point to enforce the no-slip boundary condition physically.
