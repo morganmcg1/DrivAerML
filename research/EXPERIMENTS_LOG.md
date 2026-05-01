@@ -441,6 +441,29 @@
 
 ---
 
+## 2026-05-01 08:22 — PR #150: [emma] Multi-scale point hierarchy for tau_y/z gap — CLOSED NEGATIVE
+
+- Branch: `emma/multi-scale-hierarchy`
+- Hypothesis: PointNet++-style SetAbstraction coarsening (65536→16384→4096) wrapping Transolver with cross-scale attention will capture multi-scale spatial context and reduce tau_y/z error, which we hypothesize involves both large-scale flow structure and fine-scale boundary-layer gradients.
+- Results: 3 arms — 2-scale (stable), 3-scale (NaN divergence), 3-scale+stop-grad (plateau). W&B runs: `c4kc4465` (Arm A 2-scale), `k4glpuqg` (Arm B 3-scale), `kq3fvrvd` (Arm C 3-scale stop-grad).
+
+| Metric | Arm A 2-scale val | Baseline val | vs Baseline |
+|---|---:|---:|:---|
+| `abupt_axis_mean_rel_l2_pct` | 11.085 | **10.69** | WORSE +0.40pp |
+| `surface_pressure_rel_l2_pct` | 7.416 | **6.97** | WORSE +0.45pp |
+| `wall_shear_rel_l2_pct` | 12.437 | **11.69** | WORSE +0.75pp |
+| `wall_shear_y_rel_l2_pct` | 14.562 | **13.73** | WORSE +0.83pp |
+| `wall_shear_z_rel_l2_pct` | 15.701 | **14.73** | WORSE +0.97pp |
+| `volume_pressure_rel_l2_pct` | 6.912 | 7.85 | **BETTER −12%** |
+
+Test metrics (Arm A 2-scale, run `c4kc4465`): abupt 12.177 (vs 11.73 baseline, WORSE); volume_pressure 13.557 (vs 14.42 baseline, BETTER ~6%).
+
+Val slopes at end of run: abupt −0.156/1k steps, wall_shear_y −0.191/1k steps, wall_shear_z −0.234/1k steps (still converging, budget-limited, but gap of 0.4pp unlikely to close).
+
+- Commentary: Multi-scale SetAbstraction hierarchy did not improve tau_y/z as hypothesized. 3-scale arms both failed: NaN divergence (k4glpuqg, ~step 23.5k epoch 2.16) and loss plateau at 5.4 (kq3fvrvd). The 2-scale arm was stable but all primary metrics were worse than baseline. The only positive signal is volume_pressure (~12% improvement on val, ~6% on test) — possibly because coarse-scale aggregation acts as a spatial smoother on volumetric quantities. The tau_y/z failure reinforces that the 4× gap is not a spatial-receptive-field problem — it appears to be a loss/target-representation or coordinate-frame problem. **Decision: closed** — emma reassigned to PR #185 (SAM optimizer, ρ=0.05/0.10).
+
+---
+
 ## 2026-05-01 07:30 — PR #126: [kohaku] FiLM geometry conditioning on PR #99 6L/256d base — CLOSED NEGATIVE (PROMISING SIGNAL)
 - Branch: `kohaku/film-conditioning-6l-256d`
 - Hypothesis: FiLM (PR #8 frieren code) + lr=5e-4 (PR #99 fern base) is additive — global geometry prior plus fast convergence.

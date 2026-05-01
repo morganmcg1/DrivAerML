@@ -79,7 +79,7 @@ Critical lessons learned from 7 failed experiments:
 | #153 | mob | `mob/lookahead-optimizer` | Lookahead optimizer k=5/10 |
 | #152 | violet | `violet/geom-moment-conditioning` | 14-dim analytic geometry conditioning |
 | #151 | nezuko | `nezuko/symmetry-augmentation` | L/R symmetry augmentation for tau_y gap |
-| #150 | emma | `emma/multi-scale-hierarchy` | Multi-scale point hierarchy (2/3 scales) |
+| #185 | emma | `emma/sam-sharpness-aware-min` | SAM optimizer ρ=0.05/0.10 (val→test gap) |
 | #144 | edward | `edward/adamw-beta2-sweep` | AdamW beta2 sweep (0.95 vs 0.999) |
 | #125 | haku | `haku/onecycle-lr-peak-1e3` | 1cycle LR max=1e-3 |
 | #123 | frieren | `frieren/asinh-log-target-normalization` | asinh wall-shear target normalization |
@@ -122,9 +122,10 @@ Pervasive Round-5 divergences motivate systematic optimizer investigation.
 - #169 thorfinn — NaN-skip + seed + LR warmup utility PR (infra for all future experiments)
 - #144 edward (in flight) — AdamW beta2 sweep (0.95 vs 0.999)
 
-### Theme 4: Post-training / test-time gain
+### Theme 4: Post-training / test-time gain + generalization
 - #171 norman — snapshot ensemble with cyclic LR (free gain from averaging 3 cycle ckpts)
 - #155 armin (in flight) — top-3 checkpoint ensemble
+- #185 emma — **SAM optimizer ρ=0.05/0.10** (Sharpness-Aware Minimization; targets val→test gap of 1.04pp; wraps AdamW with perturbation step)
 
 ### Theme 5: Data representation and augmentation
 - #183 fern (newly assigned) — **omega-bank frequency sweep** (max_wavelength sweep + per-axis omega banks); follow-up to falsified #143 coord-normalization
@@ -143,6 +144,7 @@ Pervasive Round-5 divergences motivate systematic optimizer investigation.
 - **Δp≈0 is wrong RANS physics:** Laplacian pressure constraint only valid for Stokes (creeping) flow.
 - **Volume pressure nearly converged:** 1.3× AB-UPT at baseline — wall_shear_y/z is the main gap.
 - **LR warmup guards:** 500-1000 step linear warmup from 1e-5 is now standard practice for experiments with elevated initial gradients.
+- **Multi-scale hierarchy failed (PR #150, closed 2026-05-01):** 2-scale arm stable but all primary metrics worse than baseline; 3-scale both diverged. Volume_pressure ~12% better on val but not the primary metric. Multi-scale spatial receptive field is not the lever for tau_y/z gap.
 - **Coord-norm is the wrong lever (PR #143):** The 4× tau_y/z gap is NOT primarily a sincos-anisotropy problem. `global-scale` normalization breaks the meter-calibrated `omega` bank (e1 abupt 24.85 vs control 16.20); `per-axis` causes volume-token explosions through the bias→attention path. Right next attack is the omega bank itself, in physical-meter coords (PR #183).
 - **FiLM at default-init × LR ≥ 3e-4 is unstable (PR #126):** Geom token is fine (norm steady ~0.75), but `to_gamma_beta` linear projections are the gradient amplification path (layer-0 grad/param ratio 0.567 at divergence). Volume-pressure signal real (Arm 3 vp=7.05 vs baseline 7.85) → identity-init follow-up justified (PR #184).
 
