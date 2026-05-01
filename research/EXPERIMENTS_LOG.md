@@ -1273,3 +1273,24 @@ Val trajectory: 78.56→43.75→23.68→16.92→13.80→12.01→11.03→10.41→
 - **Trajectory:** 72.29, 41.51, 29.01, 24.13, 21.39, 19.63, 18.24, 17.25, 16.48, 15.80, 15.26, 14.80, 14.44, 14.83, 17.31, **35.19** (ep16 catastrophic divergence)
 - **Conclusion:** AdamW+RFF+per-axis weighting is fundamentally weaker than Lion uncompiled. The per-axis weighting did NOT close the binding gap — tau_y/tau_z REGRESSED +33%/+39%. Combined with PR #54 (Lion+per-axis diverged ep4), per-axis weighting at sw=2.0 ratio is closed-door on both stacks. Future attempts need conservative weights (sw_y/z ≤ 1.5) AND likely selective application (only after a warmup phase).
 - **Fern reassigned** to round10 model-slices=256 sweep (architecture lever — current SOTA uses 128 slices).
+
+## 2026-05-01 00:35 UTC — PR #114 CLOSED: askeladd EMA=0.998 — confirmed loser test 11.865 (+6.5%)
+
+- askeladd/round8-ema-faster
+- Hypothesis: EMA=0.998 (5× faster than current SOTA 0.999) might capture late-stage convergence even more aggressively. Test the lower-bound side of EMA sweep.
+- W&B run: 9qxs9qrp, group tay-round8-ema-faster
+
+| Metric | PR #114 (EMA=0.998) | Current SOTA PR #111 | Δ |
+|---|---:|---:|---:|
+| test_abupt | 11.865 | 11.142 | **+6.5%** |
+| surface_pressure | 6.808 | 6.209 | +9.7% |
+| wall_shear | 11.922 | 11.138 | +7.0% |
+| volume_pressure | 13.164 | 12.548 | +4.9% |
+| tau_x | 10.259 | 9.436 | +8.7% |
+| tau_y | 14.161 | 13.525 | +4.7% |
+| tau_z | 14.935 | 13.992 | +6.7% |
+| best val (ep9) | 10.59 | 9.99 | +6.0% |
+
+- **Trajectory:** 41.81, 22.93, 17.12, 14.37, 12.67, 11.69, 11.10, 10.73, 10.59 — strong early lead (-48% ep1, -51% ep2 vs vanilla) but lead inverted by ep6.
+- **Conclusion:** EMA=0.998 is **too fast** for the 9-epoch budget. EMA sweep result: 0.9999 (too slow, closed) → 0.9995 (PR #50 baseline) → **0.999 SOTA** → 0.998 (this loser). Sweet spot confirmed at 0.999.
+- **Askeladd reassigned** to round10 compound stack lr=1e-4 + sw=2.0 + EMA=0.999 (combine round 9's two strongest winners).
