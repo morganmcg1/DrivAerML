@@ -28,6 +28,27 @@ Targets to beat (lower is better, AB-UPT public reference):
 - **Thorfinn reassigned** to PR #142: compound SOTA + vol_w=2.0 (recover volume gradient).
 - **New SOTA: 10.580**
 
+## 2026-05-01 02:40 UTC — PR #134 CLOSED: frieren wd=2e-3 on lr=5e-5 base — 10.986 (+3.8% vs SOTA)
+
+- **Branch:** `frieren/round9-lion-wd-sweep-2e3`
+- **W&B run:** `3c514gml` rank 0 — group `tay-round9-lion-wd-sweep`, 270 min, 9 val epochs, best val 9.763 (ep9)
+- **Hypothesis:** wd=2e-3 (4× current) on Lion uncompiled SOTA stack. Lion paper recommends higher wd to regularize sign-based updates.
+- **Result:** test_abupt **10.986** vs SOTA **10.580** (PR #115) = **+3.84% regression**. Student compared to PR #111 (valid at launch time) where result was −1.40% win. PR #115 merged during run.
+
+| Metric | PR #134 | PR #115 SOTA | Δ | AB-UPT |
+|---|---:|---:|---:|---:|
+| abupt_mean | 10.986 | **10.580** | +3.8% | — |
+| surface_pressure | 6.065 | **5.690** | +6.6% | 3.82 |
+| wall_shear | 10.895 | **10.419** | +4.6% | 7.29 |
+| volume_pressure | 12.727 | **12.740** | −0.1% | 6.08 |
+| tau_x | 9.232 | **8.908** | +3.6% | 5.35 |
+| tau_y | 13.208 | **12.491** | +5.7% | 3.65 |
+| tau_z | 13.698 | **13.071** | +4.8% | 3.63 |
+
+- **Signal:** wd=2e-3 IS a real lever on lr=5e-5 base (−1.4% vs PR #111 confirmed). Classic regularization crossover at ep4 — slower early, better late. Slope still descending at ep9.
+- **Conclusion:** wd lever orthogonal to EMA and schedule — follow-up needed on PR #115 base. Single-delta compound assigned as PR #147 (wd=2e-3 + lr=1e-4 + EMA=0.999).
+- **Frieren reassigned** to PR #147: compound SOTA + wd=2e-3.
+
 ## 2026-05-01 02:17 UTC — PR #133 CLOSED: edward compound T_max=50 + EMA=0.999 — 11.116 (+5.1% vs SOTA)
 
 - **Branch:** `edward/round9-compound-tmax50-ema999`
