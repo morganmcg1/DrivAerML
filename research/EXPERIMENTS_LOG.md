@@ -6,6 +6,15 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 04:45 UTC — PR #148 CLOSED EARLY: alphonse lr=1.5e-4 (stably +40% worse, 4 epochs)
+
+- **Branch:** `alphonse/round10-lr1p5e4`
+- **Hypothesis:** lr=1.5e-4 + EMA=0.999 single-delta from PR #115 SOTA (push LR ceiling)
+- **Result:** Closed at ep3 — trajectory stably ~40% behind SOTA with no compression: ep0 +34.8% / ep1 +41.8% / ep2 +37.7% / ep3 +40.8%. Projected final test ~14-15 (vs SOTA 10.580).
+- **Why:** Lion uses sign of gradient, so lr directly scales update magnitude with no adaptive damping. At 1.5e-4 the updates are too large for EMA=0.999 to compensate; T_max=50 cosine barely decays (92% of lr_max at ep9), so instability persists. LR ceiling between 1e-4 and 1.5e-4 — 1e-4 (PR #115) is the optimal value.
+- **Conclusion:** LR lever closed. The 5e-5 → 1e-4 transition (PR #115 −5%) captures all available LR headroom.
+- **Alphonse reassigned** to PR #158: vol_pts=60k (yi Wave 1 lever, attack dominant vol_p ×2.1 gap).
+
 ## 2026-05-01 03:55 UTC — PR #138 CLOSED: nezuko 5L depth swap (test 11.213, +5.98% vs SOTA)
 
 - **Branch:** `nezuko/round10-depth-5l`
