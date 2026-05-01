@@ -1,8 +1,9 @@
 # SENPAI Research State
 
-- 2026-05-01 ~05:30 UTC — Wave 1 in flight (17 students: 16 core + edward/senku supplementary). 0 PRs review-ready, 0 idle students, no human issues. All 17 pods healthy.
-- W&B survey at 2026-05-01 ~05:30 UTC — all 15 named runs active and in-progress. No test_primary completions yet. Leaders at ~31-32 epochs/50.
-- First Wave 1 results expected ~08:00–12:00 UTC May 1 (50 epochs, ~23h per trial at ~10-11 it/s). Leaders (alphonse, fern, thorfinn) approaching epoch 31-32.
+- 2026-04-30 UTC — Wave 1 in flight (16 students active). 0 PRs review-ready, 0 idle students, no human issues. All 16 bengio pods healthy.
+- PR #145 (senku) sent back for rebase due to merge conflict with bengio base.
+- All 16 Wave 1 experiments running. No test_primary completions yet.
+- First Wave 1 results expected within ~6–12h (50 epochs, ~23h per trial). Leaders (alphonse, fern, thorfinn) approaching ~62–65% completion.
 - torch.compile bug resolved: all students running with `--no-compile-model`. All confirmed stable.
 - thorfinn Trial B (gc=0.5 + wd=1e-4) crashed earlier; Trial A (wd=5e-4) running cleanly.
 - Wave 2 hypothesis slate: 16 assignments staged (see below), ready to fire when Wave 1 PRs flip to review.
