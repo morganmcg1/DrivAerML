@@ -367,3 +367,60 @@
 - Hypothesis: Cosine annealing + FiLM conditioning compose orthogonally on 6L base.
 - Results: abupt=19.27 (W&B `duv7m45t`) — best val at epoch 1 (18.44), degraded monotonically thereafter.
 - Commentary: FiLM + cosine LR + cosine EMA on 6L creates a fragile stack. The interaction between the cosine LR schedule and the cosine EMA ramp produces unstable training. Cosine LR alone on 6L (without FiLM) is being tested in PR #67 kafka. Closed.
+
+---
+
+## 2026-05-01 06:30 — PR #131: [thorfinn] Log-magnitude wall-shear target normalization — CLOSED NEGATIVE
+- Branch: `thorfinn/log-magnitude-wallshear-targets`
+- Hypothesis: sign(x)*log1p(|x|/eps) normalization compresses heavy-tailed wall-shear distribution, improving y/z gap.
+- Results: best arm (eps=1.0, eps_low=0.10) → val abupt=11.03 vs baseline 10.69. wall_shear_y/z both regressed. Smaller eps (0.01, 0.10) caused pre_clip_norm spikes to 2M+ and NaNs (gradient of log1p near 0 is ~1/eps).
+- Commentary: NEGATIVE on primary metric and on the targeted sub-metric. The NaN/Inf-skip safeguard added in this PR (commit 2a8f7e4) is structurally valuable and orthogonal — should be cherry-picked into a utility PR. asinh transform (frieren #123, in-flight) is the smoother alternative.
+
+---
+
+## 2026-05-01 06:31 — PR #130: [tanjiro] Curriculum tau_y/z weighting schedule — CLOSED NEGATIVE
+- Branch: `tanjiro/curriculum-tau-yz-weighting`
+- Hypothesis: Linearly ramping W_y from 1→3 (and W_z parallel) across early training stabilizes Adam moments before reaching final upweight.
+- Results: 6/6 arm launches diverged. All hit Adam-second-moment desynchronization band around W_y≈2.7.
+- Commentary: NEGATIVE. Curriculum reweighting on top of existing W_y=W_z=2 base (effective surface gradient already ~3× volume) is structurally incompatible with Adam state. Per-component static reweighting at start (so m/v initialize correctly per channel) is the better path.
+
+---
+
+## 2026-05-01 06:32 — PR #124: [gilbert] RANS divergence constraint (Laplacian on pressure) — CLOSED NEGATIVE
+- Branch: `gilbert/rans-divergence-constraint`
+- Hypothesis: Soft penalty ∇²p ≈ 0 (kNN inverse-distance Laplacian, k=8, sdf_threshold=0.05) acts as physics-informed regularizer.
+- Results: λ≥0.01 destabilized training, λ=0.001 was a no-op. No signal at any λ.
+- Commentary: NEGATIVE — wrong physics. Δp=0 is incompressible-Stokes (creeping flow); real RANS has advective and turbulent stress terms. The right divergence constraint is ∇·u=0 on velocity targets, which requires loader changes to expose u. Reusable kNN Laplacian implementation is a keeper for future physics work.
+
+---
+
+## 2026-05-01 06:33 — PR #121: [askeladd] Surface-tangent-frame wall-shear head — CLOSED NEGATIVE
+- Branch: `askeladd/surface-tangent-frame-wallshear`
+- Hypothesis: Reparametrize wall-shear prediction as τ = a·t1 + b·t2 in tangent frame (Duff 2017 ONB) to factor out normal direction and improve y/z accuracy.
+- Results: Worse than global Cartesian baseline at every checkpoint. Lr=3e-4, clip=0.3 delayed but didn't prevent gradient explosion.
+- Commentary: NEGATIVE. Two structural problems: (1) Duff branchless ONB is discontinuous along t1.x sign-flip — adjacent surface patches with similar normals map to opposite (a,b) targets, and a non-gauge-equivariant Transolver can't learn discontinuous frames. (2) τ_y/τ_z share (a,b) weights → channel coupling in Adam → correlated gradient spikes. Continuous frame (heat-method, PCA-aligned) or soft normal-component penalty are the right alternatives.
+
+---
+
+## 2026-05-01 06:34 — PR #118: [chihiro] MLP ratio sweep 6/8 — CLOSED AMBIGUOUS
+- Branch: `chihiro/mlp-ratio-sweep-r4`
+- Hypothesis: Wider FFN intermediate dim (mlp_ratio=6 or 8) increases capacity per layer without depth penalty.
+- Results: 12/16 runs diverged. 4 valid epoch-1 vals; mlp_ratio=8 trended slightly better than mlp_ratio=4 baseline but no convergent comparison vs 10.69.
+- Commentary: AMBIGUOUS — seed-dependent gradient instability (same as alphonse #117). Recommend re-running mlp_ratio=8 under stability-hardened recipe: 1k-step linear LR warmup from 1e-5, --seed flag, lr=3e-4. If stabilized, +3M params with clear epoch-1 trend signal is worth pursuing.
+
+---
+
+## 2026-05-01 06:35 — PR #129: [senku] Surface loss weight sweep on PR #99 base — CLOSED NEGATIVE
+- Branch: `senku/surface-loss-upweight-sweep`
+- Hypothesis: Uniform surface_loss_weight ∈ {1.5, 2.0, 2.5, 3.0} on PR #99 base improves surface metrics.
+- Results: 8 arms total (A/B/C/D + R1/R2/R3/R4 rescue at lr=3e-4, lr=2e-4, varying clips). 7 diverged. R4 (lr=2e-4, clip=0.5, 1k warmup, W&B `jtx73lg0`) was only stable arm but killed by external pod restart at step 27752 mid-ep3. Best partial: R3 ep2 abupt=12.84 vs baseline ep2=12.42 (already behind, then destabilized).
+- Commentary: NEGATIVE. Monotone instability with sw confirmed: D@8k → A@18.6k → C@19.7k → B@20.7k. Base config already has W_y=W_z=2 (effective surface gradient ~3× volume); uniform sw≥1.5 amplifies the entire bundle including upweighted y/z, exceeding stability ceiling. Per-component reweighting (--wallshear-y/z-weight only) is the right knob, not uniform --surface-loss-weight.
+
+---
+
+## 2026-05-01 06:36 — PR #117: [alphonse] Width scale-up sweep 384d + 8L depth — CLOSED NEGATIVE (PROMISING SIGNAL)
+- Branch: `alphonse/width-384d-sweep`
+- Hypothesis: Scale up Transolver width to 384d (4h or 6h) or depth to 8L for capacity gain.
+- Results: 8L/256d (W&B `xl92i3f5`, lr=3e-4) reached val abupt=11.33 at partial ep3, slope -0.59 abupt-pct/1k steps; extrapolated baseline crossing at ~step 26,500 but train_timeout=270min fired at step ~25,400. Test: abupt=12.44, volume_pressure=13.84 (only sub-metric beating baseline 14.42). Both 6L/384d arms diverged at all LRs (5e-4, 3e-4, 2e-4); d_head=96 destabilized earlier than d_head=64.
+- Commentary: NEGATIVE on merge bar but PROMISING. 8L/256d was time-limited not architecture-limited — depth is the viable scale-up direction. Width 384d needs QK-norm or fp32 attention to be stable in bf16. Round-6 priority: revisit 8L/256d combined with 1cycle LR for super-convergence.
+
