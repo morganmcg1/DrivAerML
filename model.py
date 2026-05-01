@@ -232,6 +232,144 @@ class Transformer(nn.Module):
         return x
 
 
+class KNNLocalAttention(nn.Module):
+    """k-NN local self-attention over surface tokens conditioned on 3D xyz neighbourhood.
+
+    For each surface query point, gathers its k nearest neighbours in 3D xyz space,
+    runs multi-head attention with a learned relative-position bias (relative xyz +
+    query surface normal) added to keys and values, and returns the residual+LayerNorm
+    output. Padded tokens are excluded from the neighbour set via a large-distance mask.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int = 4,
+        k: int = 16,
+        knn_chunk_size: int = 4096,
+        pos_input_dim: int = 6,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.k = k
+        self.knn_chunk_size = knn_chunk_size
+        self.pos_input_dim = pos_input_dim
+        self.scale = 1.0 / math.sqrt(self.dim_head)
+
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.k_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.v_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.pos_mlp = nn.Sequential(
+            nn.Linear(pos_input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.norm_out = nn.LayerNorm(hidden_dim, eps=1e-6)
+
+        for module in (self.q_proj, self.k_proj, self.v_proj):
+            _init_linear(module)
+        for module in self.pos_mlp:
+            _init_linear(module)
+        nn.init.zeros_(self.out_proj.weight)
+        if self.out_proj.bias is not None:
+            nn.init.zeros_(self.out_proj.bias)
+
+    @torch.no_grad()
+    def _knn_indices(
+        self,
+        coords: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        batch_size, num_points, _ = coords.shape
+        device = coords.device
+        coords_f = coords.float()
+        invalid = None
+        if mask is not None:
+            invalid = mask <= 0
+        indices = torch.empty(batch_size, num_points, self.k, dtype=torch.long, device=device)
+        chunk = max(1, min(self.knn_chunk_size, num_points))
+        for start in range(0, num_points, chunk):
+            end = min(start + chunk, num_points)
+            q_chunk = coords_f[:, start:end, :]
+            dist = torch.cdist(q_chunk, coords_f, p=2)
+            if invalid is not None:
+                dist = dist.masked_fill(invalid.unsqueeze(1), float("inf"))
+            _, idx = torch.topk(dist, k=self.k, dim=-1, largest=False)
+            indices[:, start:end] = idx
+        return indices
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        coords: torch.Tensor,
+        normals: torch.Tensor | None,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        residual = features
+        batch_size, num_points, hidden_dim = features.shape
+
+        indices = self._knn_indices(coords, mask)
+
+        flat_idx_3 = indices.reshape(batch_size, num_points * self.k, 1).expand(-1, -1, 3)
+        coords_f = coords.float()
+        neighbour_coords = torch.gather(coords_f, 1, flat_idx_3).view(batch_size, num_points, self.k, 3)
+        rel_pos = coords_f.unsqueeze(2) - neighbour_coords
+
+        if normals is not None:
+            normals_f = normals.float().unsqueeze(2).expand(-1, -1, self.k, -1)
+            pos_input = torch.cat([rel_pos, normals_f], dim=-1)
+        else:
+            pos_input = rel_pos
+        pos_input = pos_input.to(features.dtype)
+        pos_emb = self.pos_mlp(pos_input)
+
+        q = self.q_proj(features)
+        k_proj = self.k_proj(features)
+        v_proj = self.v_proj(features)
+
+        flat_idx_d = indices.reshape(batch_size, num_points * self.k, 1).expand(-1, -1, hidden_dim)
+        k_gather = torch.gather(k_proj, 1, flat_idx_d).view(batch_size, num_points, self.k, hidden_dim)
+        v_gather = torch.gather(v_proj, 1, flat_idx_d).view(batch_size, num_points, self.k, hidden_dim)
+
+        k_combined = (k_gather + pos_emb).view(
+            batch_size, num_points, self.k, self.num_heads, self.dim_head
+        )
+        v_combined = (v_gather + pos_emb).view(
+            batch_size, num_points, self.k, self.num_heads, self.dim_head
+        )
+        q = q.view(batch_size, num_points, self.num_heads, self.dim_head)
+
+        attn_logits = (q.unsqueeze(2) * k_combined).sum(dim=-1) * self.scale
+        if mask is not None:
+            neighbour_valid = torch.gather(
+                mask.to(dtype=attn_logits.dtype),
+                1,
+                indices.reshape(batch_size, num_points * self.k),
+            ).view(batch_size, num_points, self.k)
+            attn_logits = attn_logits.masked_fill(
+                (neighbour_valid <= 0).unsqueeze(-1), float("-inf")
+            )
+        attn_weights = F.softmax(attn_logits, dim=2)
+        # Padded query rows whose neighbours are all invalid produce a row of -inf
+        # in attn_logits, yielding NaN after softmax. Replace with 0 — these rows are
+        # masked downstream by `_apply_token_mask`, so the value does not affect outputs.
+        attn_weights = torch.nan_to_num(attn_weights, nan=0.0)
+
+        out = (attn_weights.unsqueeze(-1) * v_combined).sum(dim=2)
+        out = out.reshape(batch_size, num_points, hidden_dim)
+        out = self.out_proj(out)
+        out = _apply_token_mask(out, mask)
+
+        h = self.norm_out(residual + out)
+        h = _apply_token_mask(h, mask)
+        return h
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -251,6 +389,12 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         fourier_pe: bool = False,
         fourier_pe_num_freqs: int = 8,
+        knn_k: int = 0,
+        knn_heads: int = 4,
+        knn_chunk_size: int = 4096,
+        knn_use_normals: bool = True,
+        surface_normal_start: int = 3,
+        surface_normal_dim: int = 3,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -286,6 +430,21 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        self.knn_k = knn_k
+        self.knn_use_normals = knn_use_normals and surface_extra_dim >= surface_normal_dim
+        self.surface_normal_start = surface_normal_start
+        self.surface_normal_dim = surface_normal_dim
+        if knn_k > 0:
+            pos_input_dim = space_dim + (surface_normal_dim if self.knn_use_normals else 0)
+            self.knn_attn = KNNLocalAttention(
+                hidden_dim=n_hidden,
+                num_heads=knn_heads,
+                k=knn_k,
+                knn_chunk_size=knn_chunk_size,
+                pos_input_dim=pos_input_dim,
+            )
+        else:
+            self.knn_attn = None
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -357,6 +516,28 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if self.knn_attn is not None and surface_x is not None:
+            # NOTE: must run unconditionally on every forward (including surface_tokens==0)
+            # so DDP sees consistent parameter usage across ranks; otherwise the all-reduce
+            # bucket schedule diverges and NCCL deadlocks at the next allreduce. The
+            # KNNLocalAttention forward handles num_points==0 by passing empty tensors
+            # through every learnable parameter.
+            surface_coords = surface_x[:, :, : self.space_dim]
+            if self.knn_use_normals and surface_x.shape[-1] >= self.surface_normal_start + self.surface_normal_dim:
+                surface_normals = surface_x[
+                    :,
+                    :,
+                    self.surface_normal_start : self.surface_normal_start + self.surface_normal_dim,
+                ]
+            else:
+                surface_normals = None
+            surface_hidden = self.knn_attn(
+                surface_hidden,
+                surface_coords,
+                surface_normals,
+                surface_mask,
+            )
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)

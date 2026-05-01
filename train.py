@@ -92,6 +92,10 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    knn_k: int = 0
+    knn_heads: int = 4
+    knn_chunk_size: int = 4096
+    knn_use_normals: bool = True
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -154,6 +158,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         fourier_pe=config.fourier_pe,
         fourier_pe_num_freqs=config.fourier_pe_num_freqs,
+        knn_k=config.knn_k,
+        knn_heads=config.knn_heads,
+        knn_chunk_size=config.knn_chunk_size,
+        knn_use_normals=config.knn_use_normals,
     )
 
 
