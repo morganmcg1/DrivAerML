@@ -2,17 +2,17 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: fern PR #183 wins — new baseline 2026-04-29
+## Status: fern PR #222 wins — new baseline 2026-05-01
 
-PR #183 (fern, omega-bank sweep: pos_max_wavelength=1000) reduced
-`val_primary/abupt_axis_mean_rel_l2_pct` from 10.69 (fern PR #99) to
-**10.21** — a 4.5% improvement on the headline metric. W&B run: `bplngfyo`.
+PR #222 (fern, 1-epoch LR warmup before cosine decay) reduced
+`val_primary/abupt_axis_mean_rel_l2_pct` from 9.484% (fern PR #208 / prior best) to
+**9.2910%** — a 2.0% improvement on the headline metric. W&B run: `ut1qmc3i`, group: `tay-round12-lr-warmup-1ep`.
 
-Key finding: compressing `pos_max_wavelength` from 10,000 → 1,000 in
-`ContinuousSincosEmbed` significantly improves all metrics. The vehicle bbox
-is ~8m × 2.5m × 2m, so 1,000 gives much denser frequency sampling across all
-axes. Best-ever volume_pressure (6.32 vs 7.85) and consistent improvements on
-surface_pressure (6.85 vs 6.97), wall_shear (11.43 vs 11.69). 4.6h runtime.
+Key finding: adding a single epoch of linear LR warm-up before cosine annealing stabilises
+Lion training on the 4L/512d architecture (lr=1e-4, batch=4, torchrun 8-GPU DDP).
+Smooth loss descent across all 9 epochs with no instability. Best-epoch=9.
+Operates on the **4L/512d** architecture (not 6L/256d), which had been the
+previous SoTA architecture.
 
 **Compounding wins so far (all landed on `yi`):**
 1. PR #11 kohaku — tangential wall-shear projection loss code
@@ -24,26 +24,45 @@ surface_pressure (6.85 vs 6.97), wall_shear (11.43 vs 11.69). 4.6h runtime.
 7. PR #99 fern — LR peak 5e-4 (5× base)
 8. PR #169 thorfinn — NaN/Inf-skip safeguard, --seed, --lr-warmup-steps (infra utilities, no metric regression)
 9. PR #183 fern — pos_max_wavelength=1000 (omega-bank sincos positional encoding)
+10. PR #222 fern — lr_warmup_epochs=1 (Lion stability, 4L/512d architecture)
 
-**New recommended base config (PR #183 winning arm):**
+**New recommended base config (PR #222 winning arm):**
 
 ```bash
 cd target/
-python train.py \
-  --volume-loss-weight 2.0 \
-  --batch-size 8 \
+torchrun --standalone --nproc_per_node=8 train.py \
+  --agent fern \
+  --optimizer lion \
+  --lr 1e-4 \
+  --weight-decay 5e-4 \
+  --no-compile-model \
+  --batch-size 4 \
   --validation-every 1 \
-  --lr 5e-4 --weight-decay 5e-4 \
-  --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
-  --model-layers 6 --model-hidden-dim 256 --model-heads 4 --model-slices 128 \
-  --ema-decay 0.9995 \
-  --clip-grad-norm 1.0 \
-  --wallshear-y-weight 2.0 \
-  --wallshear-z-weight 2.0 \
-  --pos-max-wavelength 1000 \
-  --gradient-log-every 100 --weight-log-every 100 --no-log-gradient-histograms
+  --train-surface-points 65536 \
+  --eval-surface-points 65536 \
+  --train-volume-points 65536 \
+  --eval-volume-points 65536 \
+  --model-layers 4 \
+  --model-hidden-dim 512 \
+  --model-heads 8 \
+  --model-slices 128 \
+  --ema-decay 0.999 \
+  --lr-warmup-epochs 1
 ```
+
+**PR #222 epoch-by-epoch metrics (W&B run `ut1qmc3i`):**
+
+| Epoch | Step  | val_abupt  | surf_pres | vol_pres  | wall_shear |
+|-------|-------|-----------|-----------|-----------|------------|
+| 1     | 2720  | 67.7263%  | 52.1452%  | 59.6851%  | 68.9568%   |
+| 2     | 5441  | 41.9288%  | 31.5194%  | 25.0452%  | 46.0780%   |
+| 3     | 8162  | 19.3033%  | 13.3635%  | 11.4773%  | 21.4948%   |
+| 4     | 10883 | 13.7327%  | 9.2451%   | 8.0774%   | 15.3581%   |
+| 5     | 13604 | 11.6016%  | 7.6196%   | 6.8622%   | 13.0241%   |
+| 6     | 16325 | 10.5020%  | 6.7791%   | 6.2569%   | 11.7950%   |
+| 7     | 19046 | 9.8759%   | 6.3077%   | 6.0145%   | 11.0603%   |
+| 8     | 21767 | 9.4516%   | 6.0019%   | 5.7614%   | 10.5847%   |
+| **9** | **23544** | **9.2910%** | **5.8707%** | **5.8789%** | **10.3423%** |
 
 ---
 
@@ -122,36 +141,34 @@ checkpoint reload.
 
 | Metric | Best | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `val_primary/abupt_axis_mean_rel_l2_pct` | **10.21** | #183 | bplngfyo | 2026-04-29 |
-| `val_primary/surface_pressure_rel_l2_pct` | **6.85** | #183 | bplngfyo | 2026-04-29 |
-| `val_primary/wall_shear_rel_l2_pct` | **11.43** | #183 | bplngfyo | 2026-04-29 |
-| `val_primary/volume_pressure_rel_l2_pct` | **6.32** | #183 | bplngfyo | 2026-04-29 |
-| `val_primary/wall_shear_x_rel_l2_pct` | **9.89** | #183 | bplngfyo | 2026-04-29 |
-| `val_primary/wall_shear_y_rel_l2_pct` | **13.47** | #183 | bplngfyo | 2026-04-29 |
-| `val_primary/wall_shear_z_rel_l2_pct` | **14.52** | #183 | bplngfyo | 2026-04-29 |
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **9.2910** | #222 | ut1qmc3i | 2026-05-01 |
+| `val_primary/surface_pressure_rel_l2_pct` | **5.8707** | #222 | ut1qmc3i | 2026-05-01 |
+| `val_primary/wall_shear_rel_l2_pct` | **10.3423** | #222 | ut1qmc3i | 2026-05-01 |
+| `val_primary/volume_pressure_rel_l2_pct` | **5.8789** | #222 | ut1qmc3i | 2026-05-01 |
+| `val_primary/wall_shear_x_rel_l2_pct` | — | — | — | — |
+| `val_primary/wall_shear_y_rel_l2_pct` | — | — | — | — |
+| `val_primary/wall_shear_z_rel_l2_pct` | — | — | — | — |
 
-Note: Additional code wins pending merge (all superseded on headline metric by
-PR #183 but contain orthogonal code contributions) — PRs #98 (emma weight-decay),
-#106 (thorfinn yw2.5-zw2.5), #97 (edward slices192), #63 (askeladd sq-rel),
-#104 (senku ema9997), #102 (haku dropout). PRs #8 (frieren FiLM) merged 2026-04-29.
+Note: PR #222 (fern, lr_warmup_epochs=1) merged 2026-05-01. Additional code wins in history:
+PRs #98 (emma weight-decay), #106 (thorfinn yw2.5-zw2.5), #97 (edward slices192),
+#63 (askeladd sq-rel), #104 (senku ema9997), #102 (haku dropout). PR #8 (frieren FiLM) merged 2026-04-29.
 PR #169 (thorfinn, infra utilities) merged 2026-04-29 — adds NaN/Inf-skip, --seed, --lr-warmup-steps to train.py.
-PR #183 (fern, omega-bank sweep) merged 2026-04-29 — pos_max_wavelength=1000 now default in train.py.
+PR #183 (fern, omega-bank sweep) merged 2026-04-29 — pos_max_wavelength=1000.
+**Merge bar: 9.291% — any PR must beat this to merge.**
 
 **Distance from AB-UPT targets (multiple of target):**
 
-| Metric | yi best (PR #183) | AB-UPT | Ratio |
+| Metric | yi best (PR #222) | AB-UPT | Ratio |
 |---|---:|---:|---:|
-| surface_pressure | 6.85 | 3.82 | 1.8× |
-| wall_shear | 11.43 | 7.29 | 1.6× |
-| volume_pressure | 6.32 | 6.08 | 1.0× |
-| wall_shear_x | 9.89 | 5.35 | 1.8× |
-| wall_shear_y | 13.47 | 3.65 | 3.7× |
-| wall_shear_z | 14.52 | 3.63 | 4.0× |
+| surface_pressure | 5.8707 | 3.82 | 1.54× |
+| wall_shear | 10.3423 | 7.29 | 1.42× |
+| volume_pressure | 5.8789 | 6.08 | 0.97× |
+| abupt_axis_mean | 9.2910 | — | — |
 
-Wall_shear_y and wall_shear_z remain the largest gap at ~4× AB-UPT.
-Volume pressure has now matched AB-UPT (1.0×, 6.32 vs 6.08), suggesting
-strong capacity for scalar fields. Wall-shear axis precision remains the
-key challenge and the primary target for future experiments.
+Volume pressure has now beaten AB-UPT (0.97×, 5.88 vs 6.08) — our architecture
+is competitive on scalar fields. Surface pressure and wall_shear remain the key
+gap. Per-axis wall_shear_y/z breakdown not available for PR #222 at time of
+writing — check W&B run `ut1qmc3i` for latest.
 
 ## Reference config (`train.py` defaults on `yi`)
 
