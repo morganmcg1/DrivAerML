@@ -1,21 +1,112 @@
 # SENPAI Research Results
 
-## 2026-05-01 21:30 — PR #209: [frieren] Step-decay LR drop after epoch 1 (REJECTED)
-- Branch: `frieren/lr-drop-after-epoch1` (closed, deleted)
-- Hypothesis: Sharp LR drop at ep1→ep2 boundary (step decay 5e-4 → 1e-4) transitions optimizer from exploration to exploitation, fixing the ep1→ep2 divergence seen in PR #123 asinh arms.
-- Results (3 ep, 6L/256d/AdamW config — old architecture):
+## 2026-05-02 00:00 — PR #225: [haku] Left-right symmetry augmentation for tau_y/z gap — CLOSED (ep1 signal, no convergence)
 
-| Arm | Spec | ep1 | ep2 | ep3 | Best val_abupt | W&B |
-|---|---|---:|---:|---:|---:|---|
-| A | control (no decay) | 16.40 | 11.35 | **10.08** | **10.08** | `5es59xmq` |
-| B | ×0.2 @ ep1 | 16.52 | 11.82 | 11.17 | 11.17 | `z1k3njpq` |
-| C | ×0.1 @ ep1 | 16.67 | 22.20 | 32.44 | 16.67 | `4qtp3s50` |
-| D | ×0.3 @ ep1+ep2 | 17.23 | 11.92 | 11.33 | 11.33 | `17rf02u7` |
+- Branch: `haku/symmetry-augmentation` (deleted)
+- Hypothesis: Left-right y-axis reflection of DrivAerML surface data addresses tau_y/tau_z gap by teaching the model the bilateral symmetry constraint. `--symmetry-include-both` (orig+flip concat per step, effective bs×2) was tested alongside stochastic flip p=0.5.
 
-- **Outcome:** Hypothesis rejected. All decay arms underperformed the no-decay control. Best result (10.08) is on the OLD 6L/256d/AdamW architecture and is +0.79pp above current SOTA bar (9.291%).
-- Key diagnosis (frieren): step×cosine composition bug — `--lr-step-factor` multiplied the cosine-decayed LR rather than replacing the schedule, so B/C/D effectively ran at much smaller LRs than spec implied. The original premise (ep1→ep2 divergence) does not appear in the control config — no exploration→exploitation gap for step decay to fill.
-- Three crash cycles (seeds 42, 0, random) at lr=5e-4 + warmup=500 confirm fern config sits near a stability ceiling. `--seed=-1` (random) reduced per-launch crash rate.
-- Closed; suggested follow-ups (multi-seed variance band, AMP underflow diagnosis, low-LR Adam drift) noted as future research candidates.
+| Arm | Run | Seeds | ep1 abupt | ep1 tau_y | ep1 tau_z | Outcome |
+|---|---|---|---:|---:|---:|---|
+| A control | zhwlaury/te7uug8u/k3boii9j | 42/7/13 | — | — | — | All crashed before ep1 val |
+| B symm p=0.5 | byxxuehz | 13 | 15.95 (−10.0%) | 20.46 (−11.3%) | 22.53 (−11.1%) | ep1 val OK, crashed ep2 |
+| C symm-both bs=4 | d03gq4om | 101 | **12.75 (−28.0%)** | **16.29 (−29.4%)** | **17.89 (−29.4%)** | ep1 val OK, crashed ep2 |
+| D symm-yzw3 | 2een5w1o | 42 | 15.71 (−11.4%) | 19.96 (−13.5%) | 21.80 (−14.0%) | ep1 val OK, crashed ep2 |
+
+Baseline ep1 comparison: bplngfyo (PR #183 epoch-1 val): abupt=17.72, tau_y=23.07, tau_z=25.35
+
+- **Result:** Win criterion not met — no run survived to final convergence. All 11 attempts in this PR hit NONFINITE_SKIP_ABORT (>200 nonfinite steps), including 3/3 control arm attempts. The instability is structural (fleet-wide lr=5e-4 + warmup=500 issue), not augmentation-induced.
+- **Ep1 signal:** Arm C (symm-include-both, bs=4) showed the strongest signal in the fleet at ep1: −28% abupt and −29.4% tau_y/z vs baseline ep1. The tau_y/z disproportionality ratio is mild (1.05× — most of the win is uniform improvement, partly from effective dataset doubling). Arm B/D (random p=0.5) showed a smaller but consistent −10-14% improvement.
+- **Key insight:** The "include-both" variant (doubling effective data per step) is much more powerful than stochastic flip. This suggests the win is partly a true symmetry prior and partly sample-budget doubling — worth disentangling in a follow-up.
+- **Follow-up assigned:** PR #297 (haku) — re-test Arm C (symm-include-both, bs=4) on the stable PR #222 base config (lr=1e-4, warmup=1 epoch, 8-GPU DDP torchrun). The −28% ep1 signal should survive to convergence on the stable base.
+
+---
+
+## 2026-04-29 12:00 — PR #144: [edward] AdamW beta2 sweep (0.95 vs 0.999, lr 3e-4 and 5e-4) — CLOSED NEGATIVE
+- Branch: `edward/adamw-beta2-sweep`
+- Hypothesis: β2=0.95 in AdamW (faster second-moment adaptation) will reduce the v-saturation collapse driving NaN at lr=5e-4, potentially unlocking lr=5e-4 stability or beyond.
+
+| Arm | Run | Best val_primary | Terminal |
+|---|---|---:|---|
+| A v1 (lr=5e-4, β2=0.999) | 0351xvpg | 11.962 (e2) | NaN ep3 step 32417 |
+| B v1 (lr=5e-4, β2=0.95) | zei4lzb8 | **11.803 (e2)** | NaN ep3 step 30557 |
+| C v1 (lr=3e-4, β2=0.95) | 23nmdpp0 | 19.391 (e1) | kill-threshold ep2 |
+| D v1 (lr=3e-4, β2=0.999) | nnex5o0v | 18.282 (e1) | kill-threshold ep2 |
+| A v2 (lr=5e-4, β2=0.999) | snjasvxx | — | NaN ep1 step 5099 |
+| B v2 (lr=5e-4, β2=0.95) | l6os2f8i | 11.945 (e2) | NaN ep3 step 25501 |
+| C v2 (lr=3e-4, β2=0.95) | oagys1rq | 12.690 (e4) | finished, 4 epochs |
+| D v2 (lr=3e-4, β2=0.999) | oxfn12do | 17.594 (e1) | NaN ep2 ~step 20400 |
+
+Baseline: **10.69** — none of 8 runs reached baseline. Best was B v1 at 11.803 (1.11 pp gap).
+
+- Commentary: **Hypothesis NOT supported. β2=0.95 does not fix the lr=5e-4 instability ceiling.** All 4 lr=5e-4 arm-runs NaN'd in epoch 3 regardless of β2. The dominant stability lever was `--lr-warmup-steps 500`, which pushed NaN onset from ~step 11k (fleet historical) to ~25–32k. β2 shows a weak stability advantage at lr=3e-4 (C v2 survived 4 epochs vs D v2 NaN at epoch 2), but best metric C v2=12.690 is well above baseline 10.69. Infrastructure contribution: `--beta1`, `--beta2`, `--lr-warmup-steps`, `--lr-warmup-start-factor` flags added to train.py — these will be cherry-picked for fleet adoption. Additional finding: kill-threshold operator direction trap (condition is what must hold to continue, NOT to kill — inverted `>=3.0` killed all healthy arms in phase 1).
+
+## 2026-04-29 12:00 — Round 12 assignments: edward #196, gilbert #197, senku #198
+
+Three idle students assigned fresh experiments for Round 12:
+- **PR #196 (edward)** — Lion optimizer (sign-based, immune to v-saturation NaN). Sweep: Lion at lr=1e-4/3e-4/5e-4 + AdamW control with warmup=500. Hypothesis: Lion's bounded-magnitude updates sidestep the heavy-tail gradient distribution collapse.
+- **PR #197 (gilbert)** — K-NN local attention: replace last 1/2/3 transformer layers with k=32 or k=64 nearest-neighbor surface attention. Hypothesis: wall shear is a local physical quantity; global attention is the wrong inductive bias for tau_y/z.
+- **PR #198 (senku)** — Stochastic Weight Averaging (SWA) free gain: collect uniform weight averages over the last 30–50% of training at swa_lr=5e-5–1e-4. Hypothesis: SWA finds wider minima that generalize better than EMA alone; composes orthogonally with EMA.
+
+---
+
+## 2026-05-01 10:15 — PR #167: [tanjiro] Static W_y=W_z=3.5 + 1k LR warmup — CLOSED NEGATIVE
+- Branch: `tanjiro/static-wyz-35-warmup`
+- Hypothesis: Setting static per-component weights W_y=W_z=3.5 from step 0 (vs curriculum ramping in PR #130 that caused Adam desync) with 1000-step LR warmup gives Adam's second moments time to calibrate before full-lr updates hit the higher-weighted channels.
+- W&B run: `ynqjygsa` (tanjiro/static-wyz35-warmup1k)
+
+| Metric | Epoch 1 (only valid epoch) | Baseline (PR #99 best) | AB-UPT target |
+|---|---:|---:|---:|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | 15.63 | **10.69** | — |
+| `val_primary/wall_shear_y_rel_l2_pct` | 19.59 | 13.73 | 3.65 |
+| `val_primary/wall_shear_z_rel_l2_pct` | 21.84 | 14.73 | 3.63 |
+| `val_primary/surface_pressure_rel_l2_pct` | 11.25 | 6.97 | 3.82 |
+| `val_primary/volume_pressure_rel_l2_pct` | 9.85 | 7.85 | 6.08 |
+
+Pre-clip grad norm trajectory by phase:
+| Phase | n | mean | max |
+|---|---:|---:|---:|
+| Warmup 0–1000 | 10 | 25.98 | 64.77 |
+| Epoch 1 post-warmup (1001–10883) | 98 | 3.17 | 11.36 |
+| Epoch 2 pre-div (1001–15099) | 47 | 554.97 | 13,646.89 |
+| Epoch 2 divergence (≥15100) | 2 | 2,035,679 | 4,046,702 |
+
+- Commentary: **Clear negative — NaN divergence at step 15,300 (mid epoch 2).** Epoch 1 beat baseline epoch 1 (15.63 vs 16.47, +5% better) confirming the signal is real. But grad norms drifted 4 OoM mid-epoch-2: elevated warmup → calm epoch 1 → silent drift → catastrophic explosion → NaN. Sister arm senku #166 (W=3.0) also NaN'd (step 9,699, even earlier). **Per-component stability ceiling is below 3.0** at lr=5e-4/clip=1.0. Static weights from step 0 did not prevent the failure — Adam's second-moment saturation on boosted channels is a post-warmup instability, not a warmup miscalibration. Longer warmup would not help. The direction of upweighting is correct (epoch-1 signals are encouraging) but the mechanism needs a lower LR or tighter per-channel gradient clipping. Decision: closed. LR warmup infrastructure already in train.py via PR #169.
+
+
+## 2026-05-01 10:30 — New assignments: haku #191, tanjiro #192, thorfinn #193
+
+Three idle students (haku, tanjiro, thorfinn) assigned new experiments targeting the tau_y/z gap and training efficiency:
+
+- **PR #191 (haku)** — 1-cycle LR max=1e-3 super-convergence: PyTorch OneCycleLR with peak 1e-3, pct_start=0.3, div_factor=25. Hypothesis: epoch-limited regime benefits from spending more training time at elevated LR. Fallback arm at lr=5e-4 if 1e-3 diverges.
+- **PR #192 (tanjiro)** — asinh target normalization for tau_y/z: apply `torch.asinh` to wall-shear y and z targets before computing loss, invert before metric computation. Targets the heavy-tail distribution causing the 4× gap vs AB-UPT. Isolated to y/z components only.
+- **PR #193 (thorfinn)** — Curvature-biased surface point sampling: sample training surface points with probability proportional to local surface normal variation (curvature proxy), biasing toward wheel arches/mirrors where tau_y/z errors are highest. Eval sampling remains uniform. Two arms: alpha=0.5 (blend) and alpha=1.0 (fully biased).
+
+---
+
+## 2026-04-29 10:45 — PR #191: [haku] 1-cycle LR max=1e-3 super-convergence — CLOSED NEGATIVE
+- Branch: `haku/1cycle-lr-max1e3-superconvergence`
+- Hypothesis: PyTorch OneCycleLR with peak_lr=1e-3, pct_start=0.3, div_factor=25 enables super-convergence in the epoch-limited training regime; spending more time at elevated LR accelerates learning on tau_y/z channels.
+
+Three arms:
+| Arm | Run | Status | Best val_abupt |
+|---|---|---|---:|
+| Main literal (lr=1e-3, epochs=50, total_steps=544150) | d86d7dg9 | Finished | 18.43 |
+| Tuned (lr=1e-3, epochs=4, calibrated total_steps) | 1khqvozw | NaN-abort at step 12,759 | 28.23 |
+| Fallback (lr=5e-4, epochs=4, calibrated total_steps) | 0e3jqcti | NaN-abort at step 14,279 | 27.31 |
+
+Best arm full W&B metrics (d86d7dg9):
+
+| Metric | 1-cycle best | Baseline (PR #183) | Δ |
+|---|---:|---:|---|
+| abupt_axis_mean_rel_l2_pct | 18.43 | **10.21** | +8.22 |
+| surface_pressure_rel_l2_pct | 13.01 | 6.97 | +6.04 |
+| wall_shear_rel_l2_pct | 20.86 | 11.69 | +9.17 |
+| volume_pressure_rel_l2_pct | 10.60 | 6.32 | +4.28 |
+| wall_shear_x_rel_l2_pct | 18.36 | 10.17 | +8.19 |
+| wall_shear_y_rel_l2_pct | 24.42 | 13.73 | +10.69 |
+| wall_shear_z_rel_l2_pct | 25.76 | 14.73 | +11.03 |
+
+- Commentary: **Clear negative. Root cause: fundamental incompatibility between OneCycleLR's peak schedule and the time-limited training regime.** With total_steps=544,150 (epoch=50), the warmup phase extends to step 163,245 — but the actual training run reaches only ~33,263 steps (3–4 epochs/wall-clock). Training terminated at ~20% through the warmup ramp, never reaching the intended super-convergence phase. Best arm scored 18.43 vs baseline 10.21 (+80% worse). The calibrated arms (total_steps matched to actual budget) failed with NaN-abort at peak LR because the steep 5e-4 → 1e-3 ramp triggered gradient instability before any benefit could materialize. Epoch progression shows steady improvement (35.16→23.84→18.64→18.43) but all below baseline. OneCycleLR is not viable in this regime without either: (a) drastically reducing total_steps to match actual training steps, AND (b) capping peak LR to avoid NaN — by which point it degrades to a standard warmup schedule.
 
 ---
 
@@ -223,279 +314,117 @@
 
 ---
 
-## 2026-04-30 14:00 — PR #58: [alphonse] NaN-safe checkpoint guard — MERGED (bugfix)
-- Branch: `alphonse/nan-checkpoint-guard-bugfix`
-- Hypothesis: Guard `best_checkpoint` overwrite against NaN primary_val to prevent EMA NaN from replacing valid checkpoint.
-- Results: Bugfix — no metric change.
-- Commentary: Root cause: `_finite_mean([nan, nan])` returns 0.0, and `0.0 < best_val` fires improved=True, overwriting valid checkpoint with NaN model. Fix: `primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0`. Validated by smoke run `tcyjp36i`. Merged to yi.
-
----
-
-## 2026-04-30 14:10 — PR #66: [thorfinn] Per-axis tau_y/z loss upweighting W_y=2, W_z=2 — MERGED (NEW BEST)
-- Branch: `thorfinn/surface-loss-weight-and-per-axis-wallshear`
-- Hypothesis: Selectively upweight tau_y and tau_z channels in surface MSE loss (W_y=2, W_z=2, W_x=1) to redirect training gradient toward the two hardest wall-shear axes.
-- Results: 3-arm sweep on 6L/256d base
-
-| Arm | W_y | W_z | W&B run | abupt | wall_shear_y | wall_shear_z |
-|---|---:|---:|---|---:|---:|---:|
-| yw1.5-zw1.5 | 1.5 | 1.5 | `vf3y3z7g` | 13.01 | 15.49 | 15.41 |
-| **yw2-zw2** | **2.0** | **2.0** | **`gvigs86q`** | **12.74** | **15.15** | **15.05** |
-| yw3-zw3 | 3.0 | 3.0 | `w8r0mvf1` | 13.18 | 15.12 | 14.52 |
-
-| Metric | thorfinn yw2-zw2 | PR #14 (6L/256d) | AB-UPT |
-|---|---:|---:|---:|
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **12.74** | 13.15 | — |
-| `test_primary/surface_pressure_rel_l2_pct` | 7.86 | 7.64 | 3.82 |
-| `test_primary/wall_shear_rel_l2_pct` | 12.86 | 13.47 | 7.29 |
-| `test_primary/volume_pressure_rel_l2_pct` | 13.14 | 13.58 | 6.08 |
-| `test_primary/wall_shear_x_rel_l2_pct` | 11.29 | 11.53 | 5.35 |
-| `test_primary/wall_shear_y_rel_l2_pct` | 15.15 | 16.23 | 3.65 |
-| `test_primary/wall_shear_z_rel_l2_pct` | 15.05 | 16.75 | 3.63 |
-
-- Commentary: New yi best (12.74, −3.1% vs 13.15). The W=2 sweet spot outperforms W=1.5 and W=3 — W=3 overfits the tau_y/z directions, slightly hurting abupt. The selective approach (upweight only tau_y/z, not tau_x) avoids the divergence seen in haku's uniform weighting PR #10. tau_y and tau_z are the most challenging axes (4× AB-UPT); explicit gradient emphasis works.
-
----
-
-## 2026-04-30 14:20 — PR #65: [violet] Volume-loss-weight sweep (1.5/2.0/3.0/4.0) — CLOSED
-- Branch: `violet/volume-pressure-loss-weight-sweep`
-- Hypothesis: vol_w=4.0 might further reduce volume_pressure by forcing more gradient toward volume prediction.
-- Results: 4-arm sweep
-
-| Arm | vol_w | W&B run | abupt | vol_pressure |
-|---|---:|---|---:|---:|
-| vw-15 | 1.5 | `n3k58pah` | 13.71 | 13.56 |
-| vw-20 | 2.0 | `ioq7jh9w` | 13.61 | 13.62 |
-| vw-30 | 3.0 | `kj2i4gx3` | 13.72 | 13.45 |
-| vw-40 | 4.0 | `v98qrfmd` | 13.71 | 13.30 |
-
-- Commentary: No arm beats baseline 12.74. vol_w=4.0 marginally improves volume_pressure (13.30 vs 13.58) but hurts wall-shear. The kill-threshold bug (>=N syntax) prematurely killed several arms. vol_w=2.0 confirmed as the correct operating point for composite metric. Closed.
-
----
-
-## 2026-04-30 14:20 — PR #64: [fern] Stochastic depth regularization (3-rate sweep) — CLOSED
-- Branch: `fern/stochastic-depth-regularization`
-- Hypothesis: Stochastic depth (drop-path) regularization at rates 0.05/0.10/0.20 provides regularization to prevent overfitting.
-- Results: 3-arm sweep
-
-| Arm | sdp_rate | W&B run | abupt |
-|---|---:|---|---:|
-| sdp-005 | 0.05 | — (killed by threshold bug) | — |
-| sdp-010 | 0.10 | `q8yv93km` | 13.73 |
-| sdp-020 | 0.20 | `w3bt19pk` | 13.92 |
-
-- Commentary: All arms negative vs baseline 12.74 (+7.8% best). Stochastic depth regularization is redundant at 4-epoch budgets. Gradient clip already provides effective implicit regularization. Closed.
-
----
-
-## 2026-04-30 14:20 — PR #63: [askeladd] Squared rel-L2 aux loss on 6L base — SENT BACK FOR REBASE
-- Branch: `askeladd/squared-rel-l2-aux-on-6l`
-- Hypothesis: Add squared relative-L2 aux loss on 6L base; weight sweep w=0.1/0.3/0.5/1.0.
-- Results: 4-arm sweep
-
-| Arm | weight | W&B run | abupt |
-|---|---:|---|---:|
-| w=0.1 | 0.1 | `qntz7gzr` | 13.42 |
-| w=0.3 | 0.3 | `h5w3vf5y` | 13.11 |
-| **w=0.5** | **0.5** | **`dln9trni`** | **12.94** |
-| w=1.0 | 1.0 | `n9ckb2qe` | 13.77 |
-
-- Commentary: w=0.5 achieved 12.94 — beats PR #14 baseline (13.15) but not new baseline 12.74 (PR #66). The composition of squared rel-L2 aux loss + thorfinn per-axis weights is untested. Sent back to rebase onto thorfinn base and re-run with both --aux-rel-l2-weight 0.5 and --wallshear-y-weight 2.0 --wallshear-z-weight 2.0.
-
----
-
-## 2026-04-30 14:20 — PR #61: [gilbert] Tangential wall-shear projection on 6L base — CLOSED
-- Branch: `gilbert/tangential-wallshear-on-6l-base`
-- Hypothesis: Tangential projection loss on 6L base (no normal penalty).
-- Results: abupt=34.07 (W&B `x0pyk2yw`) — catastrophic failure. 2.7× baseline.
-- Commentary: Projection without normal penalty allows unbounded normal component growth. Gradient signal is removed in the normal direction but no compensating loss drives it to zero. Tangential projection research line closed.
-
----
-
-## 2026-04-30 14:20 — PR #60: [chihiro] 6L/512d depth×width composition — CLOSED
-- Branch: `chihiro/depth-width-composition-6l-512d`
-- Hypothesis: Combining 6L depth with 512d width should outperform either alone.
-- Results: abupt=16.00, only 2 epochs completed (data-starved).
-- Commentary: 6L/512d (18.1M params) is too large for the 4.5h budget — only 2 epochs vs 4 for 6L/256d. Data-starvation dominates. 6L/256d is the right operating point. Closed.
-
----
-
-## 2026-04-30 14:20 — PR #59: [senku] Depth 7L/8L sweep — CLOSED
-- Branch: `senku/depth-7l-8l-sweep`
-- Hypothesis: Pushing depth beyond 6L further improves the composite metric.
-- Results: 7L abupt=13.28, 8L abupt=13.57 (both worse than 6L=13.15/12.74 baseline).
-- Commentary: 7L/8L hit kill-threshold bug (>=18 means kill when val drops below 18, so some runs killed prematurely). Even corrected, both are worse than 6L at same compute — more depth = fewer epochs = data starvation at this budget. Depth ceiling confirmed at 6L. Closed.
-
----
-
-## 2026-04-30 14:20 — PR #21: [kohaku] Normal-component suppression on 6L (sweep-v2) — CLOSED
-- Branch: `kohaku/round2-normal-component-suppression`
-- Hypothesis: Penalty λ*(ws_pred·n_hat)² drives predicted normal component to zero; sweep λ∈{0.01, 0.1, 1.0} on 6L base.
+## 2026-05-01 01:18 — PR #119: [edward] RFF coordinate encoding (Tancik 2020) — CLOSED
+- Branch: `edward/rff-coordinate-encoding`
+- Hypothesis: Replace ContinuousSincosEmbed with Random Fourier Features (Tancik 2020) to give the model access to learnable coordinate frequencies, potentially improving high-frequency surface detail.
 - Results:
 
-| λ | W&B run | abupt |
-|---:|---|---:|
-| 0.01 | `le10xx7e` | 16.06 |
-| 0.1 | `j0gdj2jy` | 17.47 |
-| 1.0 | `fsxvmo08` | 15.93 |
+| Arm | σ | features | W&B run | val abupt (best epoch) | test abupt | Final state |
+|---|---:|---:|---|---:|---:|---|
+| 1 (fnyhm654) | 1.0 | 64 | fnyhm654 | NaN | — | crashed (NaN @step ~2300, epoch 1) |
+| 1-r2 (n77zkyc8) | 1.0 | 64 | n77zkyc8 | NaN | — | crashed (NaN @step ~7500, epoch 1) |
+| 2 (3s9qatve) | 5.0 | 64 | 3s9qatve | 130.01 (epoch 3) | 88.55 | loss explosion @step ~7700; stuck at ~3.5 forever |
+| 3 (fig141q6) | 2.0 | 128 | fig141q6 | 17.45 (epoch 1) | 18.28 | NaN @step 17269 (mid epoch 2) |
 
-- Commentary: All arms 22–33% worse than baseline 12.74. The suppression mechanism works mechanistically but the projection+suppression combination degrades wall-shear badly (tau_y/z ≈20–26%, far worse than baseline 15-17%). Tangential projection research conclusively closed.
-
----
-
-## 2026-04-30 14:20 — PR #15: [tanjiro] SDF-gated volume attention (v2, sigma sweep) — CLOSED
-- Branch: `tanjiro/round1-sdf-gated-volume-attention`
-- Hypothesis: Gaussian SDF gate or quantile-rank gate focuses volume attention on near-wall critical points.
-- Results: 3-arm sweep on 6L base
-
-| Arm | W&B run | abupt |
-|---|---|---:|
-| quantile q=0.10 | `l6yfeh31` | 13.26 |
-| gaussian σ=0.005 | `gu2v23cs` | 13.87 |
-| gaussian σ=0.001 | `r7c8jss2` | 36.48 (diverged) |
-
-- Commentary: Best arm (quantile q=0.10) achieves 13.26 — worse than new baseline 12.74. The val→test gap in volume_pressure (12→13.58) is a distribution shift issue that SDF gating cannot address. σ=0.001 diverges. Closing — SDF gating adds instability and doesn't help test generalization. Closed.
+- Commentary: Clean negative result — all 3 sigma values unstable at lr=5e-4/clip=1.0/bf16/raw-meter-coords. Best arm (σ=2.0, 128 features) test abupt=18.28 (56% worse than baseline 11.73). Wall_shear_y/z worst per-axis (21.3%, 23.2%) — consistent with anisotropy hypothesis (σ isotropic on non-isotropic meters). RFF fixed-Gaussian-B amplifies certain coordinate-frequency components creating unstable training unlike ContinuousSincosEmbed (deterministic, balanced). Suggests coord normalization to [-1,1] before RFF would be needed. Assigned follow-up PR #143 (fern, coord normalization) to test this hypothesis. Closed.
 
 ---
 
-## 2026-04-30 14:20 — PR #10: [haku] Per-axis wall-shear loss weights (uniform w2/w3) — CLOSED
-- Branch: `haku/round1-per-axis-wallshear-loss-weight`
-- Hypothesis: Uniform upweighting of all 3 wall-shear channels (tau_x, tau_y, tau_z) by 2× or 3× should reduce wall-shear error.
-- Results (Round-2, 6L base):
+## 2026-05-01 (in progress) — PR #117: [alphonse] Width+depth scale-up (6L/384d, 8L/256d) — WIP
+- Branch: `alphonse/width-depth-scale-up`
+- Hypothesis: Increasing Transolver from 6L/256d (4.73M params) to 6L/384d (~9M) or 8L/256d (~6M) provides additional capacity to resolve the tau_y/z fine-scale surface features.
+- Results (intermediate — running at lr=3e-4 after fleet-wide stability discovery):
 
-| Arm | weights | W&B run | abupt |
-|---|---|---|---:|
-| Control | (1,1,1,1) | `648ssek0` | 13.15 |
-| w2 | (1,2,2,2) | `s3y7sclb` | 18.35 (diverged ep3) |
-| w3 | (1,3,3,3) | `inpik7c3` | 14.35 (diverged ep4) |
-| w2+tan | (1,2,2,2)+tan | `1cxf7026` | 36.41 |
+Round 1 at lr=5e-4: all 3 arms diverged (6L/384d/4h @step 3206, 8L/256d @step 8899, 6L/384d/6h @step 11099). Round 2 at lr=3e-4: stable as of ~01:00 UTC May 1.
 
-- Commentary: Uniform upweighting causes divergence — tau_x upweighting destabilizes. Thorfinn's selective approach (W_y=W_z=2, W_x=1) succeeds where uniform fails. Confirmed: tau_x should not be upweighted. Closed.
+| Arm | Config | W&B run | Step (~01:00) | train/loss | State |
+|---|---|---|---:|---:|---|
+| A | 8L/256d | xl92i3f5 | stable | healthy | running |
+| B | 6L/384d/4h | hbahy1ob | stable | healthy | running |
+| C | 6L/384d/6h | 3m4cqwg3 | stable | healthy | running |
 
----
-
-## 2026-04-30 14:20 — PR #24: [emma] Squared rel-L2 aux loss (4L base) — CLOSED
-- Branch: `emma/round2-squared-rel-l2-aux-loss`
-- Hypothesis: Squared rel-L2 aux loss (no sqrt) is stable where round-1 version diverged.
-- Results: w=0.5 → abupt=14.81 (W&B `zv791js1`, 4L base).
-- Commentary: Stable (no divergence) and beats 4L baseline, but 4L superseded. Code was incorporated into PR #63 (askeladd, 6L). Closed — hypothesis lives on in PR #63.
+- Commentary: Confirms lr=5e-4 is hard stability ceiling for scale-up experiments. 6L/384d/4h has d_head=96 (vs standard 64) — possible bf16 attention overflow. lr=3e-4 resolves all arms. Awaiting first val checkpoint.
 
 ---
 
-## 2026-04-30 14:20 — PR #5: [edward] Cosine LR + FiLM composition on 6L — CLOSED
-- Branch: `edward/round1-cosine-lr-warmup`
-- Hypothesis: Cosine annealing + FiLM conditioning compose orthogonally on 6L base.
-- Results: abupt=19.27 (W&B `duv7m45t`) — best val at epoch 1 (18.44), degraded monotonically thereafter.
-- Commentary: FiLM + cosine LR + cosine EMA on 6L creates a fragile stack. The interaction between the cosine LR schedule and the cosine EMA ramp produces unstable training. Cosine LR alone on 6L (without FiLM) is being tested in PR #67 kafka. Closed.
+## 2026-05-01 (in progress) — PR #119 companion: RFF → coord-normalization insight
+- Key insight from edward #119: raw DrivAerML coords are anisotropic (x~8m, y/z~2m). ContinuousSincosEmbed's omega is tuned for the x-range, leaving y/z under-sampled in frequency. This is likely a direct cause of the 4× tau_y/z gap. Assigned as PR #143 (fern, coord normalization sweep).
 
 ---
 
-## 2026-05-01 06:30 — PR #131: [thorfinn] Log-magnitude wall-shear target normalization — CLOSED NEGATIVE
-- Branch: `thorfinn/log-magnitude-wallshear-targets`
-- Hypothesis: sign(x)*log1p(|x|/eps) normalization compresses heavy-tailed wall-shear distribution, improving y/z gap.
-- Results: best arm (eps=1.0, eps_low=0.10) → val abupt=11.03 vs baseline 10.69. wall_shear_y/z both regressed. Smaller eps (0.01, 0.10) caused pre_clip_norm spikes to 2M+ and NaNs (gradient of log1p near 0 is ~1/eps).
-- Commentary: NEGATIVE on primary metric and on the targeted sub-metric. The NaN/Inf-skip safeguard added in this PR (commit 2a8f7e4) is structurally valuable and orthogonal — should be cherry-picked into a utility PR. asinh transform (frieren #123, in-flight) is the smoother alternative.
+## 2026-05-01 02:28 — PR #132: [violet] Decoupled wall-shear magnitude + direction prediction — CLOSED
+- Branch: `violet/wallshear-magnitude-direction-decoupled`
+- Hypothesis: Factorize tau into |tau| (log-MSE) + tau_dir (cosine loss) heads to reduce magnitude-dominated gradients and preferentially help the small-magnitude tau_y/tau_z axes (currently 3.8×/4.1× AB-UPT gap).
+- Results: 6-arm sweep — only B and D survived to terminal epoch.
+
+| Arm | mw | dw | mag-weighted dir | W&B status | test abupt | tau_y | tau_z | p_s | p_v |
+|---|---:|---:|---|---|---:|---:|---:|---:|---:|
+| A | 1 | 1 | no | stuck | — | — | — | — | — |
+| B | 0.5 | 2 | no | finished | **13.22** | 16.60 | 18.14 | **6.42** | **13.57** |
+| C | 1 | 1 | yes | NaN ep1 | — | — | — | — | — |
+| D | 1 | 1 | yes (mw=1) | finished | 13.74 | 17.28 | 18.84 | 7.17 | 13.89 |
+| E | 0.5 | 2 | yes | NaN ep1 | — | — | — | — | — |
+| F | 2 | 0.5 | no | diverged ep1 | — | — | — | — | — |
+| **PR #99 baseline** | — | — | — | — | **11.73** | 13.53 | 13.98 | 6.64 | 14.42 |
+
+- Commentary: Clean **negative result** on the headline. Best surviving arm (B) +12.7% worse than baseline; the very axes the PR was designed to fix (tau_y, tau_z) regressed 23–30%. Three diagnostic findings:
+  1. **Cosine direction loss has perverse axis priority.** Gradient scales by sin(θ); once tau_x dominant alignment is learned, the small y/z residual contributes near-zero gradient. Reformulation does the *opposite* of preferentially upweighting transverse components.
+  2. **Magnitude-weighted direction loss is destructively unstable.** 3 of 4 mag-weighted arms NaN'd. Arm D's cos_sim trajectory `0.531→0.899→0.930→0.951→collapse to 0.404 in ~11 steps` is textbook bf16 overflow as residual high-|tau| points dominate post-convergence.
+  3. **Pressure side-effect is interesting but not load-bearing.** Arm B's p_s 6.42 (−3.3%) and p_v 13.57 (−5.9%) beat baseline. Plausible: the magnitude head's log-MSE is acting as a soft regularizer on the shared trunk. Worth a narrow ablation (`--wallshear-magnitude-loss-weight 0.5 --wallshear-direction-loss-weight 0`) but not from this PR.
+- **Direction forward**: For the y/z gap, PR #121 (askeladd surface-tangent frame) attacks the *coordinate frame* of the loss rather than the output reformulation — better-targeted lever. Output-side decoupling is closed-door pending a fundamentally different magnitude weighting scheme. Violet reassigned.
 
 ---
 
-## 2026-05-01 06:31 — PR #130: [tanjiro] Curriculum tau_y/z weighting schedule — CLOSED NEGATIVE
-- Branch: `tanjiro/curriculum-tau-yz-weighting`
-- Hypothesis: Linearly ramping W_y from 1→3 (and W_z parallel) across early training stabilizes Adam moments before reaching final upweight.
-- Results: 6/6 arm launches diverged. All hit Adam-second-moment desynchronization band around W_y≈2.7.
-- Commentary: NEGATIVE. Curriculum reweighting on top of existing W_y=W_z=2 base (effective surface gradient already ~3× volume) is structurally incompatible with Adam state. Per-component static reweighting at start (so m/v initialize correctly per channel) is the better path.
+## 2026-05-01 02:19 — PR #122: [emma] Perceiver-IO backbone replacing Transolver — CLOSED
+- Branch: `emma/perceiver-io-backbone`
+- Hypothesis: Perceiver-IO with M latent tokens (cross-attention bottleneck) trains 2× faster per step than Transolver with comparable accuracy, buying more epochs in the 6h budget.
+- Results: Throughput won, accuracy lost decisively.
+
+| Arm | Config | W&B | Steps/sec | VRAM | test abupt | val abupt (best epoch 6) |
+|---|---|---|---:|---:|---:|---:|
+| A | Transolver 6L/256d/128sl (control) | 1iilxfvs | 2.15 | 76 GB | NaN ep1 | — |
+| B | Perceiver-IO M=512, 6L/256d | jyesq3i4 | 4.29 | 17 GB | 24.46 | 23.69 |
+| C | Perceiver-IO M=1024, 6L/256d | 8b8yd2c8 | 3.54 | 17 GB | **22.46** | **21.43** |
+| **PR #99 baseline (Transolver)** | 6L/256d/128sl | 3hljb0mg | 2.15 | 76 GB | **11.73** | **10.69** |
+
+- Per-axis: C tau_y=27.11, tau_z=28.40 vs baseline 13.53 / 13.98 (~2× worse on the very gap PR was meant to help).
+- Commentary: Perceiver-IO is **architecturally mismatched** for DrivAerML CFD. Latent cross-attention bottleneck loses fine-grained spatial structure; Transolver's slice-based attention preserves it. Despite 2× speedup and 5× VRAM savings, accuracy gap is prohibitive — even with the throughput-bought 6 vs 3 epochs, val abupt floor is ~21% vs ~11% for Transolver. Diminishing returns clear: Arm C's per-epoch deltas were −8.65, −2.18, −1.99, −0.85, −0.09 → asymptote near 21%. Arm A control NaN'd at step 6676 ep1 (independent flake; not Perceiver-related). **Decision: closed.** Backbone replacement is a dead-end direction for this geometry. Emma reassigned.
 
 ---
 
-## 2026-05-01 06:32 — PR #124: [gilbert] RANS divergence constraint (Laplacian on pressure) — CLOSED NEGATIVE
-- Branch: `gilbert/rans-divergence-constraint`
-- Hypothesis: Soft penalty ∇²p ≈ 0 (kNN inverse-distance Laplacian, k=8, sdf_threshold=0.05) acts as physics-informed regularizer.
-- Results: λ≥0.01 destabilized training, λ=0.001 was a no-op. No signal at any λ.
-- Commentary: NEGATIVE — wrong physics. Δp=0 is incompressible-Stokes (creeping flow); real RANS has advective and turbulent stress terms. The right divergence constraint is ∇·u=0 on velocity targets, which requires loader changes to expose u. Reusable kNN Laplacian implementation is a keeper for future physics work.
+## 2026-05-01 02:19 — PR #127: [nezuko] Stochastic depth regularization sweep — CLOSED
+- Branch: `nezuko/stochastic-depth-regularization`
+- Hypothesis: DropPath stochastic depth at rates {0.05, 0.10, 0.20} provides regularization that closes the wall-shear y/z gap by preventing layer-specialization.
+- Results: All arms regress on wall-shear; hypothesis refuted.
+
+| Arm | sd_prob | W&B | test abupt | p_s | tau_vec | tau_x | tau_y | tau_z | p_v |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| **PR #99 baseline** | 0.0 | 3hljb0mg | **11.727** | 6.637 | 11.484 | 10.064 | 13.529 | 13.980 | 14.424 |
+| A | 0.05 | u0s413c0 | 11.707 (−0.020) | 6.743 (+) | 11.762 (+) | 10.262 (+) | 13.962 (+0.43) | 14.318 (+0.34) | **13.251 (−1.17)** |
+| B | 0.10 | i5kk7ng0 | 14.02 (NaN ep3) | 8.68 | 14.40 | 12.63 | 16.80 | 17.76 | 14.24 |
+| C | 0.20 | lyjnyi3a | 13.07 (+11%) | 7.88 | 13.37 | 11.79 | 15.61 | 16.23 | 13.83 |
+
+- Commentary: Arm A's −0.020 abupt is within noise; all wall-shear axes regress (+0.20–0.43 pp on tau_x/y/z). The PR's target was the y/z gap — stochastic depth widens it, not closes it. Arm B diverged at step 23705 ep3 (single-seed flake). Arm C clearly worse. **Mechanistic read:** wall-shear prediction needs coherent multi-layer feature propagation through the fine boundary layer geometry; randomly dropping residual branches injects noise that the model can't recover from in 9 epochs. **Volume pressure note:** Arm A's −1.17 p_v is interesting but isolated — possibly the dropout is a soft regularizer on volume features specifically. Not enough to justify the shear regression. **Decision: closed.** Stochastic depth ruled out for this regime. Nezuko reassigned.
 
 ---
 
-## 2026-05-01 06:33 — PR #121: [askeladd] Surface-tangent-frame wall-shear head — CLOSED NEGATIVE
-- Branch: `askeladd/surface-tangent-frame-wallshear`
-- Hypothesis: Reparametrize wall-shear prediction as τ = a·t1 + b·t2 in tangent frame (Duff 2017 ONB) to factor out normal direction and improve y/z accuracy.
-- Results: Worse than global Cartesian baseline at every checkpoint. Lr=3e-4, clip=0.3 delayed but didn't prevent gradient explosion.
-- Commentary: NEGATIVE. Two structural problems: (1) Duff branchless ONB is discontinuous along t1.x sign-flip — adjacent surface patches with similar normals map to opposite (a,b) targets, and a non-gauge-equivariant Transolver can't learn discontinuous frames. (2) τ_y/τ_z share (a,b) weights → channel coupling in Adam → correlated gradient spikes. Continuous frame (heat-method, PCA-aligned) or soft normal-component penalty are the right alternatives.
+## 2026-05-01 02:24 — PR #135: [tanjiro] T_max=100 cosine LR sweep extension (tay branch) — CLOSED
+- Branch: `tanjiro/round9-lion-tmax100-ema999`
+- Hypothesis: Extend cosine schedule T_max from 50 → 100 to test if "less LR decay is better" trend continues at the wider end on the tay branch.
+- Results: Narrow win vs PR #111 SOTA-at-the-time, but superseded by PR #115 lr-change.
 
----
+| Metric | PR #135 (T_max=100) | PR #111 SOTA-at-launch (T_max=50) | PR #115 actual SOTA (lr=1e-4) | Δ vs PR #115 |
+|---|---:|---:|---:|---:|
+| `test_primary/abupt_axis_mean` | 11.082 | 11.142 | **10.580** | **+4.74% regression** |
+| `surface_pressure` | 6.138 | 6.209 | — | — |
+| `wall_shear` | 11.039 | 11.138 | — | — |
+| `volume_pressure` | 12.665 | 12.548 | — | — |
+| `tau_y` | 13.469 | 13.525 | — | — |
+| `tau_z` | 13.791 | 13.992 | — | — |
+| `best_val_primary/abupt` (ep9) | 9.886 | 9.989 | — | — |
 
-## 2026-05-01 06:34 — PR #118: [chihiro] MLP ratio sweep 6/8 — CLOSED AMBIGUOUS
-- Branch: `chihiro/mlp-ratio-sweep-r4`
-- Hypothesis: Wider FFN intermediate dim (mlp_ratio=6 or 8) increases capacity per layer without depth penalty.
-- Results: 12/16 runs diverged. 4 valid epoch-1 vals; mlp_ratio=8 trended slightly better than mlp_ratio=4 baseline but no convergent comparison vs 10.69.
-- Commentary: AMBIGUOUS — seed-dependent gradient instability (same as alphonse #117). Recommend re-running mlp_ratio=8 under stability-hardened recipe: 1k-step linear LR warmup from 1e-5, --seed flag, lr=3e-4. If stabilized, +3M params with clear epoch-1 trend signal is worth pursuing.
-
----
-
-## 2026-05-01 06:35 — PR #129: [senku] Surface loss weight sweep on PR #99 base — CLOSED NEGATIVE
-- Branch: `senku/surface-loss-upweight-sweep`
-- Hypothesis: Uniform surface_loss_weight ∈ {1.5, 2.0, 2.5, 3.0} on PR #99 base improves surface metrics.
-- Results: 8 arms total (A/B/C/D + R1/R2/R3/R4 rescue at lr=3e-4, lr=2e-4, varying clips). 7 diverged. R4 (lr=2e-4, clip=0.5, 1k warmup, W&B `jtx73lg0`) was only stable arm but killed by external pod restart at step 27752 mid-ep3. Best partial: R3 ep2 abupt=12.84 vs baseline ep2=12.42 (already behind, then destabilized).
-- Commentary: NEGATIVE. Monotone instability with sw confirmed: D@8k → A@18.6k → C@19.7k → B@20.7k. Base config already has W_y=W_z=2 (effective surface gradient ~3× volume); uniform sw≥1.5 amplifies the entire bundle including upweighted y/z, exceeding stability ceiling. Per-component reweighting (--wallshear-y/z-weight only) is the right knob, not uniform --surface-loss-weight.
-
----
-
-## 2026-05-01 06:36 — PR #117: [alphonse] Width scale-up sweep 384d + 8L depth — CLOSED NEGATIVE (PROMISING SIGNAL)
-- Branch: `alphonse/width-384d-sweep`
-- Hypothesis: Scale up Transolver width to 384d (4h or 6h) or depth to 8L for capacity gain.
-- Results: 8L/256d (W&B `xl92i3f5`, lr=3e-4) reached val abupt=11.33 at partial ep3, slope -0.59 abupt-pct/1k steps; extrapolated baseline crossing at ~step 26,500 but train_timeout=270min fired at step ~25,400. Test: abupt=12.44, volume_pressure=13.84 (only sub-metric beating baseline 14.42). Both 6L/384d arms diverged at all LRs (5e-4, 3e-4, 2e-4); d_head=96 destabilized earlier than d_head=64.
-- Commentary: NEGATIVE on merge bar but PROMISING. 8L/256d was time-limited not architecture-limited — depth is the viable scale-up direction. Width 384d needs QK-norm or fp32 attention to be stable in bf16. Round-6 priority: revisit 8L/256d combined with 1cycle LR for super-convergence.
-
----
-
-## 2026-05-01 07:30 — PR #143: [fern] coordinate normalization sweep — CLOSED NEGATIVE
-- Branch: `fern/coord-normalization-sweep`
-- Hypothesis: Anisotropic bbox (x~8m, y/z~2-2.5m) makes `ContinuousSincosEmbed` give x-axis ~3-4× more frequency resolution than y/z, contributing to the 4× tau_y/z gap. Adding `--coord-normalize {none, global-scale, per-axis}` should restore isotropy.
-- Results: Hypothesis falsified across 9 attempts.
-
-| Mode | First-epoch abupt | vs control | Notes |
-|---|---:|---:|---|
-| none (control) | ~16.20 | — | matches PR #99 e1, then hits fleet-wide stochastic divergence in e2 |
-| global-scale | 24.85 | +8.65 (+53%) | normalizing to unit cube destroys sincos expressiveness — omega bank is calibrated for meter-scale geometry |
-| per-axis (4 variants) | diverged | — | volume tokens (~25× wider domain than vehicle bbox) get extreme out-of-range coords → MLP bias → slice attention gradient explosion |
-
-- Commentary: Coordinate normalization is the wrong lever — it breaks the fixed-frequency `omega` bank tuned for meter-scale wavelengths. The 4× tau_y/z gap is **NOT primarily** a sincos-anisotropy problem. Right next attack: tune the omega bank directly in physical-meter coords (denser/per-axis frequency basis on y/z), preserving meter-scale calibration. **Bug-fix side-discovery:** confirmed ~50% fleet-wide divergence at lr=5e-4. Non-finite/large-grad skip guard from haku (commit `6e8b674`) is already on `yi` so future runs are protected. **Decision: closed** — coord-normalize feature not merged. Fern reassigned to PR #183 (omega-bank anisotropic frequency sweep).
-
----
-
-## 2026-05-01 08:22 — PR #150: [emma] Multi-scale point hierarchy for tau_y/z gap — CLOSED NEGATIVE
-
-- Branch: `emma/multi-scale-hierarchy`
-- Hypothesis: PointNet++-style SetAbstraction coarsening (65536→16384→4096) wrapping Transolver with cross-scale attention will capture multi-scale spatial context and reduce tau_y/z error, which we hypothesize involves both large-scale flow structure and fine-scale boundary-layer gradients.
-- Results: 3 arms — 2-scale (stable), 3-scale (NaN divergence), 3-scale+stop-grad (plateau). W&B runs: `c4kc4465` (Arm A 2-scale), `k4glpuqg` (Arm B 3-scale), `kq3fvrvd` (Arm C 3-scale stop-grad).
-
-| Metric | Arm A 2-scale val | Baseline val | vs Baseline |
-|---|---:|---:|:---|
-| `abupt_axis_mean_rel_l2_pct` | 11.085 | **10.69** | WORSE +0.40pp |
-| `surface_pressure_rel_l2_pct` | 7.416 | **6.97** | WORSE +0.45pp |
-| `wall_shear_rel_l2_pct` | 12.437 | **11.69** | WORSE +0.75pp |
-| `wall_shear_y_rel_l2_pct` | 14.562 | **13.73** | WORSE +0.83pp |
-| `wall_shear_z_rel_l2_pct` | 15.701 | **14.73** | WORSE +0.97pp |
-| `volume_pressure_rel_l2_pct` | 6.912 | 7.85 | **BETTER −12%** |
-
-Test metrics (Arm A 2-scale, run `c4kc4465`): abupt 12.177 (vs 11.73 baseline, WORSE); volume_pressure 13.557 (vs 14.42 baseline, BETTER ~6%).
-
-Val slopes at end of run: abupt −0.156/1k steps, wall_shear_y −0.191/1k steps, wall_shear_z −0.234/1k steps (still converging, budget-limited, but gap of 0.4pp unlikely to close).
-
-- Commentary: Multi-scale SetAbstraction hierarchy did not improve tau_y/z as hypothesized. 3-scale arms both failed: NaN divergence (k4glpuqg, ~step 23.5k epoch 2.16) and loss plateau at 5.4 (kq3fvrvd). The 2-scale arm was stable but all primary metrics were worse than baseline. The only positive signal is volume_pressure (~12% improvement on val, ~6% on test) — possibly because coarse-scale aggregation acts as a spatial smoother on volumetric quantities. The tau_y/z failure reinforces that the 4× gap is not a spatial-receptive-field problem — it appears to be a loss/target-representation or coordinate-frame problem. **Decision: closed** — emma reassigned to PR #185 (SAM optimizer, ρ=0.05/0.10).
-
----
-
-## 2026-05-01 07:30 — PR #126: [kohaku] FiLM geometry conditioning on PR #99 6L/256d base — CLOSED NEGATIVE (PROMISING SIGNAL)
-- Branch: `kohaku/film-conditioning-6l-256d`
-- Hypothesis: FiLM (PR #8 frieren code) + lr=5e-4 (PR #99 fern base) is additive — global geometry prior plus fast convergence.
-- Results: Hypothesis falsified across all 4 arms.
-
-| Arm | lr | clip | Diverge step | Best partial | W&B |
-|---|---:|---:|---:|---|---|
-| 1 | 5e-4 | 1.0 | ~15.3k (mid e2) | n/a | h6nlfcdr |
-| 2 | 5e-4 | 0.5 | ~12.4k (mid e2) | n/a | 3ddue2xd |
-| 3 | 4e-4 | 0.5 | ~30.1k (mid e3) | abupt=11.67, **vp=7.05** (e2) | sudqmuo9 |
-| 4 | 3e-4 | 0.5 | ~19.0k (mid e2) | n/a | jd1acg1t |
-
-- Commentary: Best partial (Arm 3 e2 abupt=11.67) is still 0.98pp worse than baseline 10.69. **lr=3e-4 (Arm 4) failed earlier than lr=4e-4 (Arm 3)** — pure LR reduction is not the lever. Root cause from forensics: `train/film/geom_token_norm_mean` was steady (~0.73-0.81) at all 4 divergence points (geom token is fine); layer-0 `to_gamma_beta/bias grad_to_param_norm=0.567` flagged the FiLM linear projections as the gradient amplification path. FiLM × LR ≥ 3e-4 has a fundamental stability ceiling at default-init. **Promising signal:** Arm 3 e2 vp=7.05 vs baseline 7.85 — FiLM helps volume more than surface, exactly the metric closest to AB-UPT (1.3× away). The direction is right; the failure mode is dynamics, not capability. **Decision: closed** — kohaku reassigned to PR #184 (FiLM with identity/zero-init, DiT-style stable conditioning).
+- W&B run: `wtfrhy2n`. T_max sweep series across three values: T_max=24→50 gave −3.1pp; T_max=50→100 gave −0.54%pp — clear diminishing returns.
+- Commentary: This run launched against PR #111 SOTA (11.142) and would have been a clean +0.5% win at that time. During the run, PR #115 (lr=1e-4 change) merged to tay and moved SOTA to 10.580 — making PR #135's 11.082 a +4.74% regression against the current frontier. Schedule lever (T_max) is **closed-door on tay**: sweet spot is T_max=50 (already merged in PR #110), and gains are sub-percentage and dominated by lr-based wins. **Decision: closed.** Tanjiro reassigned to PR #149 (per-axis tau_y/tau_z conservative weighting on tay's new SOTA stack).
 
 ---
 
@@ -552,203 +481,40 @@ Val slopes at end of run: abupt −0.156/1k steps, wall_shear_y −0.191/1k step
   - D3 soft-divergence: anomalous loss spike at lr~6.5e-5 during deep cosine anneal — potential bf16 AMP precision issue at very low loss values. Fleet-wide flag: if future low-LR fine-tuning runs see similar, investigate AMP precision or implement LR floor ~1e-4.
   - OneCycleLR does not help in this epoch-limited regime. LR schedule lever closed for now. **Decision: closed.**
 
----
+## 2026-05-01 — PR #245: [gilbert] Progressive EMA decay schedule (ramp 0.99→0.9999 vs fixed 0.9995) — CLOSED INCONCLUSIVE
+- Branch: `gilbert/ema-decay-schedule`
+- Hypothesis: Progressive EMA warmup — ramping decay from low (fast adaptation) to high (slow adaptation) over training — allows the model to track loss-landscape changes quickly early on and then stabilize to a smooth EMA trajectory for inference, outperforming fixed EMA decay.
 
-## 2026-05-01 07:30 — PR #166: [senku] W_y=W_z=3.0 with 500-step LR warmup — CLOSED NEGATIVE
-- Branch: `senku/per-component-wallshear-yz-3`
-- Hypothesis: Increasing from W_y=W_z=2 (current best) to W_y=W_z=3 with gradual warmup would further focus gradient on tau_y/z axes.
-- Results: CLOSED 2026-05-01T11:09:05Z. No merge.
-- Commentary: W=3 was already tested in PR #66 (thorfinn) where it scored 13.18 vs 12.74 for W=2 — W=3 overfits tau_y/z, degrading abupt. Warmup doesn't change the fundamental overfitting issue. Static W=2 remains the sweet spot.
+**W&B-verified ep1 metrics (merge bar = 9.291, PR #222):**
 
----
+| Run | Arm | State | abupt (primary) | surf press | vol press | wall shear |
+|-----|-----|-------|----------------|------------|-----------|------------|
+| xpoz88lg | A: ramp 0.99→0.9999, lr=5e-4 | failed (ep2 grad explosion) | 14.41% | 10.18% | 8.29% | 16.20% |
+| f6acdprl | B: ramp 0.999→0.9999, lr=5e-4 | crashed (ep2 grad explosion) | 14.63% | 10.41% | 8.50% | 16.41% |
+| buch3nry | C: fixed 0.9995, lr=3e-4 | ep1 only (stopped) | 18.93% | 13.63% | 10.96% | 21.19% |
 
-## 2026-05-01 07:30 — PR #167: [tanjiro] W_y=W_z=3.5 with 1k LR warmup — CLOSED NEGATIVE
-- Branch: `tanjiro/static-wyz-35-warmup`
-- Hypothesis: W_y=W_z=3.5 pushes the tau_y/z gradient signal even harder.
-- Results: CLOSED 2026-05-01T09:58:05Z. No merge.
-- Commentary: Extension of the same W=3 overfitting issue. W=3.5 is even more extreme. Warmup does not prevent the channel imbalance. Closed as confirmed negative along with W=3.
+- Commentary: Experiment dominated by the fleet-wide lr=5e-4 gradient explosion (pre-clip grad norms reaching 1e7–1e9). Arms A and B both crashed in epoch 2 before producing comparable multi-epoch metrics. The ep1 A/B gap (14.41 vs 14.63) is within run-to-run noise — no valid signal on EMA ramp schedule. Arm C (fixed 0.9995) used lr=3e-4 after two lr=5e-4 failures, and only produced ep1 metrics (18.93% — underfitting after 1 epoch at lower lr). Cannot serve as the matched fixed-decay control. Research decision: EMA ramp hypothesis remains untested in clean conditions. Keeping default --ema-decay 0.9995 unchanged. Deprioritized in favour of higher-leverage experiments (architecture, loss formulation). If revisited, all arms must use lr=3e-4 (or lr=5e-4 with 1k-step warmup) and include a matched fixed-decay control at the same lr.
 
 ---
 
-## 2026-05-01 08:00 — PR #172: [stark] AdamW epsilon sweep 1e-8/7/6/5 — CLOSED NEGATIVE
-- Branch: `stark/adamw-eps-sweep`
-- Results: CLOSED 2026-05-01T08:43:12Z. No merge.
-- Commentary: AdamW epsilon is a secondary numerical stability parameter. Changing it in the range 1e-8 to 1e-5 does not address the root cause of the fleet-wide gradient instability (large-but-finite spikes bypassing the NaN-skip guard). Closed as not the right lever.
+## 2026-05-01 — PR #197: [gilbert] K-NN local surface attention for tau_y/z gap — CLOSED NEGATIVE
+- Branch: `gilbert/knn-local-attention-r12`
+- Hypothesis: K-nearest-neighbor local surface attention introduces a locality bias that disproportionately improves tau_y/z prediction by giving the model better access to fine-grained boundary-layer geometry near each query point. The 4× tau_y/z gap was hypothesized to stem from insufficient local receptive field.
+- Results:
 
----
+| Arm | Config | W&B run | val_primary (abupt) | wall_shear_y | wall_shear_z | surface_pressure | volume_pressure | Final state |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| A (control) | 0L KNN | haibegok | 17.64 | 23.38 | 24.89 | 12.57 | 9.99 | crashed |
+| B | 1L KNN k=32 | 77yqqenp | — | — | — | — | — | crashed (no metrics) |
+| C | 2L KNN k=32 | hvey8no6 | 19.91 | 25.55 | 27.32 | 13.73 | 13.89 | completed |
+| D | 2L KNN k=64 | 7vmm33nz | 24.10 | 30.46 | 32.40 | 16.69 | 18.21 | completed |
+| **yi baseline** | PR #183 | — | **10.21** | **13.47** | **14.52** | **6.85** | **6.32** | — |
 
-## 2026-05-01 11:30 — PR #185: [emma] SAM optimizer (ρ=0.05/0.10) — CLOSED NEGATIVE
-- Branch: `emma/sam-sharpness-aware-min`
-- Results: CLOSED 2026-05-01T11:35:49Z. No merge.
-- Commentary: SAM requires 2 forward-backward passes per step, cutting effective steps/epoch in half. In this 3-4 epoch budget this is too expensive. Also does not address the tau_y/z coordinate-frame hypothesis. Closed.
-
----
-
-## 2026-05-01 — PR #184: [kohaku] FiLM with identity/zero-init (DiT-style) — IN FLIGHT
-- Branch: `kohaku/film-zero-init`
-- Hypothesis: FiLM with zero-initialized gamma/beta (identity transform at init) plus lr=4e-4 is stable where lr=5e-4 is not.
-- Intermediate results (5/5 arms at lr=5e-4 dead; 1 arm at lr=4e-4 healthy):
-
-| Arm | Config | W&B run | Status @ 11:45 UTC |
-|---|---|---|---|
-| A | zero-init/clip=1.0/lr=5e-4 | (prev) | Dead @ step 2455 |
-| A' | zero-init/clip=0.5/lr=5e-4 | (prev) | Dead @ step 1900 |
-| D | zero-init/clip=1.0/WD=1e-3/lr=5e-4 | (prev) | Dead @ step 2400 |
-| C | scale=0.01/clip=1.0/lr=5e-4 | (prev) | Dead @ step 15800 |
-| E | scale=0.001/clip=1.0/lr=5e-4 | gtur4oew | Dead @ step 14706 (scale delays but doesn't prevent divergence) |
-| **B** | **zero-init/clip=0.5/lr=4e-4** | **jov1kcjl** | **Healthy ep2≈99%; ETA ~14:25 UTC** |
-
-- **Key finding:** FiLM stability axis is LR alone, not init_scale. scale=0.001 delayed divergence 6× (step 2455→14706) but failure mode is identical (gamma/beta accumulate bias beyond critical threshold). The "escape path" via aggressive init scaling is falsified. lr=4e-4 (arm B) is the sole viable FiLM configuration. Final results pending ~14:25 UTC.
-
----
-
-## 2026-05-01 — PR #183: [fern] Omega-bank frequency sweep — IN FLIGHT (PARTIAL RESULTS)
-- Branch: `fern/omega-bank-sweep`
-- Hypothesis: Per-axis sincos positional encodings with different max_wavelength per axis (x=10000, y=2500-1000, z=2000-1000) directly encode the car's geometric anisotropy, helping the model learn the tau_y/z channels.
-- All 4 original non-guarded arms diverged (large-but-finite grad spikes bypassing NaN-skip):
-
-| Arm | Config | Div step | Max grad at div |
-|---|---|---:|---:|
-| A1 | mw=1000 | 7499 | 14.9M |
-| B | mw=100 | 15800 | 252 (sustained) |
-| C1 | 10000,2500,2000 | 14181 | 899 (cascading) |
-| D1/D2 | 5000/10000,1000,1000 | 3555/8799 | NaN/15019 |
-
-- mw=100 (arm B) is **structurally untenable** — 3 independent attempts (B, B2 guarded, B3 guarded+warmup) all diverged within 0.3-1.6 epochs. Falsified.
-- Surviving guarded arms as of 11:35 UTC:
-
-| Arm | Config | W&B run | ep1 val_abupt | ep2 ETA |
-|---|---|---|---:|---|
-| A2 | mw=1000 | bplngfyo | 17.72 | ~12:00 UTC |
-| C3 | 10000,2500,2000 | hm7p3lag | In flight (ep1 ~42%) | ~12:20 UTC |
-| D3 | 10000,1000,1000 | 4r0rd7dx | 17.23 | Ep2 ~12% |
-
-Ep1 for A2/D3 are worse than baseline ep1 (16.47) and worse on targeted tau_y/z axes. Ep3 comparison is the real test.
-- **Fleet-wide infrastructure finding:** PR #169's NaN-skip is necessary but not sufficient. Large-but-finite grad spikes (165, 252, 2.2M confirmed) bypass isfinite() check. Magnitude-based skip needed (pre_clip_norm > N × running_median).
-
----
-
-## 2026-05-01 — PR #165: [chihiro] mlp_ratio=8 hardened (3-seed + warmup) — IN FLIGHT
-- Branch: `chihiro/mlp-ratio-8-hardened`
-- Intermediate results (clip=1.0 sweep completed, clip=0.5 relaunch in progress):
-
-| Seed | clip | W&B run | Best val abupt | Notes |
-|---|---:|---|---:|---|
-| 42 (orig) | 1.0 | wuyxg6ze | — | NaN @ step 7167 |
-| 42 (r2) | 1.0 | elra20qm | — | NaN @ step 6783 |
-| 7 | 1.0 | 0n1eizhz | 18.50 (ep1 only) | Diverged @ step 13641 |
-| **1337** | **1.0** | **vch5jyhv** | **11.92 (ep3)** | **Finished, clean, does NOT beat 10.69** |
-| 42 (r3) | 0.5 | lkl2xob5 | In flight | Checkpoint ~12:20 UTC (prev div @ 6783) |
-| 7 (r2) | 0.5 | rypx2e36 | In flight | Checkpoint ~13:30 UTC (prev div @ 13641) |
-
-seed1337 ep3=11.92 is 1.23pp above baseline. Slope flattening (ep1→ep2: −5.29, ep2→ep3: −1.15) — would need 5-6+ epochs to possibly reach 10.69. clip=0.5 go/no-go is the active test.
-
----
-
-## 2026-05-01 — PR #168: [askeladd] Normal-consistency soft penalty — IN FLIGHT
-- Branch: `askeladd/normal-penalty-wallshear-yz`
-- Hypothesis: Soft λ·(τ·n̂)² penalty in normalized space penalizes out-of-plane wall-shear predictions.
-- Intermediate results: v1 (physical-space penalty) FAILED — physical-space amplification of τ_x via std_x²≈4.3 created asymmetric gradient. Correctly diagnosed and relaunched as v2 (normalized-space).
-
-| Arm | λ | clip | W&B run | ep1 val_abupt | Notes |
-|---|---:|---:|---|---:|---|
-| λ=0.01 (v1) | 0.01 | 1.0 | ufi2fg1e | — | NaN (physical-space penalty unstable) |
-| λ=0.05 (v1) | 0.05 | 1.0 | ol7r0oh6 | — | NaN (physical-space penalty spiky) |
-| λ=0.10 (v1) | 0.10 | 1.0 | uyorcld7 | — | NaN ep1 13.7% |
-| **λ=0.10 (v2)** | **0.10** | **1.0** | **gawdh7ah** | **17.103** | **Only stable arm; pen_phys dropping** |
-| λ=0.01 (v2 clip=0.5) | 0.01 | 0.5 | d14ee58k | In flight | Previous NaN @ step 7899 |
-| λ=0.05 (v2 clip=0.5) | 0.05 | 0.5 | (run id) | In flight | Previous NaN @ step 8499 |
-
-- **Key finding:** λ ranking inversion — larger λ MORE stable. Mechanism: at λ=0.01, constraint contribution (~1.6e-3) is too small to push model away from out-of-plane drift; single bad batch drives large squared-dot spike. At λ=0.10, constraint is strong enough to bound τ_pred magnitudes, preventing the spike. This is the opposite of standard regularization intuition.
-- pen_raw plateaus ~0.13 (fixed normalized-space cost); pen_phys drops 0.55→0.07 (physical tangentiality residual decreasing = model IS learning to satisfy geometric constraint).
-
----
-
-## 2026-05-01 — PR #123: [frieren] asinh/log wall-shear target normalization — IN FLIGHT
-- Branch: `frieren/asinh-log-target-normalization`
-- Intermediate results (key finding: asinh-1.0 trades metric for stability):
-
-| Arm | Normalization | W&B run | ep1 val_abupt | ep2 val_abupt | grad_skips | Notes |
-|---|---|---|---:|---:|---:|---|
-| A (v3p1) | Control | w8ecb8rp | — | 46.69 | 6543 (39%) | Pathological |
-| C (v3) | asinh scale=1.0 | xtx426rb | **17.55** | **45.69** | 5 | ep1 OK, ep2 collapsed |
-| D (v3p1) | log1p | 8oytk5ef | — | 22.35 | 0 | Healthier than control |
-| B (v3p1) | asinh-0.5 | zznrzvw5 | 18.94 | — | 0 | In flight ep2 |
-
-- **Key finding:** asinh-1.0 compresses the heavy tail → suppresses gradient explosions (0 skips vs 50%+) but also suppresses learning signal where the y/z gap lives. Train loss kept descending while val exploded ep2 (17.55→45.69) = classic underfitting of tail domain. asinh-1.0 is not a viable target transformation.
-- D (log1p) and B (asinh-0.5) are healthier but still above baseline trajectory. Final results pending ~12:10-13:51 UTC.
-
-
----
-
-## 2026-05-01 14:00 — PR #168: [askeladd] Normal-consistency penalty (soft tangential constraint)
-- Branch: `askeladd/normal-penalty-wallshear-yz`
-- Hypothesis: Add λ·mean(dot(τ_pred, n̂)²) auxiliary loss in normalized space to softly enforce wall-shear tangentiality without coordinate-frame discontinuities (vs PR #121's hard Duff-ONB reparam).
-- Results: 3 arms swept λ ∈ {0.01, 0.05, 0.10}; all v1 NaN'd in physical-space due to per-axis std mismatch; v2 reverted to normalized-space.
-
-| Arm | λ | W&B run | ep1 val_abupt | ep2 val_abupt | Stability |
-|---|---:|---|---:|---:|---|
-| C | 0.01 | (NaN ep1) | — | — | Diverged ep1 even w/ clip 0.5 |
-| B | 0.05 | 1buc9rh1 | 15.875 | NaN | Best ep1 of any arm; ep2 spike |
-| A | 0.10 | gawdh7ah | — | **12.285** | Stable; ep3 ~14.4 |
-
-- **Counter-intuitive ranking:** larger λ more stable. Small λ insufficient to anchor τ_pred; out-of-plane drift produces a squared-dot loss spike that overwhelms clip=1.0 → corrupts Adam m,v.
-- **Verdict: NEGATIVE.** λ=0.10 ep2 12.285 was the first crossover vs fern PR #99 ep2 trajectory (12.417), but ep3 regressed to 14.4 vs final baseline 10.69.
-- **Combined with PR #121 (hard tangentiality, also negative):** explicit tangentiality enforcement provides no metric improvement on this dataset; the model already learns near-tangential predictions naturally (pen_phys 0.55 → 0.07 unprompted in baseline).
-- Closed as negative; askeladd reassigned.
-
-## 2026-05-01 14:00 — PR #164: [alphonse] 8L/256d depth + 1cycle LR (time-limited recovery)
-- Branch: `alphonse/depth-8L-1cycle-recovery`
-- Hypothesis: Restore 8L/256d depth (PR #144 negative @ const lr=5e-4, val 12.69) by pairing with OneCycleLR super-convergence schedule. Sweep peak ∈ {5e-4, 6e-4, 8e-4} over 3 epochs.
-- Results: All three arms diverged before completing training.
-
-| Arm | Peak LR | Diverged step | Diverged at lr | Cause |
-|---|---:|---:|---:|---|
-| A | 5e-4 | ~10700 | ~5e-4 | pre_clip 4 → 151 → 1369 → 1e9 |
-| B | 6e-4 | ~10599 | ~6e-4 | pre_clip 2 → 229 → cascade |
-| C | 8e-4 | ~8500 | ~7.5e-4 | pre_clip 3.8 → 22 → 5131 → 254611 |
-
-- **Verdict: NEGATIVE.** 8L/256d has a hard LR ceiling below 5e-4 for sustained training. Combined with PR #144 (8L const-lr=5e-4 val=12.69), depth scaling at width=256 is exhausted — neither schedule can clear the throughput needed to beat 10.69.
-- **Future depth work must change architecture (pre-LN/sandwich-LN, AGC clipping, or width=384+) before revisiting depth.**
-- Closed as negative; alphonse reassigned.
-
-## 2026-05-01 14:00 — PR #123: [frieren] asinh/log wall-shear target normalization (heavy-tail fix)
-- Branch: `frieren/asinh-log-target-normalization`
-- Hypothesis: Apply asinh(τ/scale) or log1p(|τ|) target normalization to compress the heavy-tailed wall-shear distribution, expecting better fitted gradients and faster convergence to lower rel_L2.
-- Results: 4 arms in v3/v3p1 with `--grad-skip-threshold` 1k–5k; major contribution was the always-on NaN/inf grad-skip + threshold infra in train.py.
-
-| Arm | Normalization | W&B run | ep1 val_abupt | ep2 val_abupt | Notes |
-|---|---|---|---:|---:|---|
-| A (v3p1) | Control | w8ecb8rp | — | 46.69 | 6543 grad-skips (39%); pathological |
-| C (v3) | asinh scale=1.0 | xtx426rb | **17.55** | 45.69 | ep1 best; ep2 train/val divergence |
-| D (v3p1) | log1p | 8oytk5ef | — | 22.35 | Healthier but well above baseline |
-| B (v3p1) | asinh-0.5 | zznrzvw5 | 18.94 | — | ep2 in flight |
-
-- **Verdict: NEGATIVE.** Best variant (asinh-1.0 ep1) val 17.55 vs baseline 10.69 (64% worse).
-- **Mechanism:** asinh suppresses gradient explosions by compressing the tail (0 grad-skips vs 50%+) but suppresses the very signal where the y/z gap lives. Train loss kept descending while val exploded → classic tail underfit.
-- **Open finding: universal ep1→ep2 train/val divergence** across all 4 norm variants is a separate failure mode worth pursuing — candidates: train/eval sampling distribution mismatch, overfitting-to-bulk regime, z-score saturation on tails. Suggests assigning a one-shot LR drop after ep1 experiment.
-- **Major contribution to retain:** `--grad-skip-threshold` + always-on NaN/inf grad-skip + W&B `train/grad/skipped_step|skipped_total` metrics. Will land independently on yi.
-- Closed as negative; frieren reassigned.
-
----
-
-## 2026-05-01 14:30 — PR #201: [nezuko] Physics-informed RANS divergence-free penalty on volume velocity
-- Branch: `nezuko/physics-informed-rans-divergence`
-- Hypothesis: Add soft λ·mean(∇·u²) divergence-free penalty on volume velocity predictions to improve near-wall flow coherence and reduce tau_y/z error.
-- Results: 4-arm sweep λ∈{0.001, 0.01, 0.1, 0.0 control}
-
-| Arm | λ | W&B run | ep1 val_abupt | Fate |
-|---|---:|---|---:|---|
-| A orig | 0.001 | rtoy6zsi | DNF | NaN at step 2873 (>200 non-finite skips) |
-| A clamp | 0.001 | t0ak5zjy | DNF | Clamp(-10,10) didn't help; diverged same step |
-| B orig | 0.01 | xo1vzowt | DNF | NaN at step 5882 |
-| B clamp | 0.01 | qnk5doi7 | DNF | NaN at step 4546 |
-| **C** | **0.1** | **pe2ryffk** | **63.09** | **Stable but catastrophically worse (4×)** |
-| D | 0.0 | 8u7jc8kt | 15.55 | Control — healthy baseline trajectory |
-
-- **CRITICAL DATA FINDING:** GT labels have RMS(τ·n)/|τ| = 12% (τ·n mean=0.113, RMS=0.364, p99=1.722). DrivAerML mesh-discretized normals are not exactly orthogonal to the analytic surface, so the continuum no-slip constraint (τ·n = 0) directly contradicts the ground truth. There is no λ where this penalty can help:
-  - Small λ: batch-variance gradients from squared penalty too large → NaN cascade
-  - Large λ: forces τ_pred·n → 0, but labels have τ·n ≈ 0.36 → 2× train loss inflation, 4× val regression
-- **VOLUME ARCHITECTURE FINDING:** volume_y is scalar pressure only (no velocity in input or output contract). True ∇·u formulation is infeasible without adding a velocity head and separate supervision.
-- **Verdict: NEGATIVE.** Both the surface no-slip-wall penalty and the volume divergence-free penalty are infeasible with the current DrivAerML data contract and ground-truth labels.
-- Closed; nezuko reassigned.
+- Commentary: Clean negative. Locality bias hypothesis falsified. Key findings:
+  1. **No tau_y/z-specific improvement** — all metrics degrade uniformly with more KNN layers; the gap ratio is not selectively reduced.
+  2. **Monotonic degradation**: 0L=17.64 → 2L k=32=19.91 → 2L k=64=24.10. Every additional KNN layer hurts.
+  3. **KNN compute overhead ~4–9× per step** means Arms C/D ran less than 1 epoch in the 270-min budget, so comparisons are slightly biased against KNN arms — but the directional signal is unambiguous.
+  4. **Volume pressure catastrophic regression**: +39% (Arm C) to +82% (Arm D) vs control, suggesting the shared FFN between surface KNN tokens and volume global-attention tokens acts as a leak path degrading the well-solved volume-pressure head.
+  5. **The tau_y/z gap is NOT a locality/receptive-field problem.** The Transolver global-attention mechanism already has sufficient receptive field; adding KNN locality layers actively interferes with the learned global representation.
+  - Peak VRAM: A=74.8GB, B=72.1GB, C=71.4GB, D=72.2GB on H200 96GB.
+  - Direction closed. Do not re-assign local surface attention variants.
