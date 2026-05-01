@@ -22,6 +22,7 @@ and volume_pressure (7.85 vs 13.14). 4.6h runtime, lr=5e-4, wd=5e-4.
 5. PR #58 alphonse — NaN-safe checkpoint guard (bugfix)
 6. PR #66 thorfinn — per-axis tau_y/z loss upweighting W_y=2, W_z=2
 7. PR #99 fern — LR peak 5e-4 (5× base) (this PR)
+8. PR #169 thorfinn — NaN/Inf-skip safeguard, --seed, --lr-warmup-steps (infra utilities, no metric regression)
 
 **New recommended base config (PR #99 winning arm):**
 
@@ -131,6 +132,7 @@ Note: Additional code wins pending merge (all superseded on headline metric by
 PR #99 but contain orthogonal code contributions) — PRs #98 (emma weight-decay),
 #106 (thorfinn yw2.5-zw2.5), #97 (edward slices192), #63 (askeladd sq-rel),
 #104 (senku ema9997), #102 (haku dropout). PRs #8 (frieren FiLM) merged 2026-04-29.
+PR #169 (thorfinn, infra utilities) merged 2026-04-29 — adds NaN/Inf-skip, --seed, --lr-warmup-steps to train.py.
 
 **Distance from AB-UPT targets (multiple of target):**
 
