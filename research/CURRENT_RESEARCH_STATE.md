@@ -29,34 +29,36 @@ W&B run `d03oghpp` — best val 9.484 (ep8). val→test ratio 1.115.
 
 ## In-flight (8/8 students running — all slots filled)
 
-Last updated: 2026-05-01 15:00 (fresh W&B poll — all 8 confirmed logging run IDs verified).
+Last updated: 2026-05-01 15:30 (fresh W&B poll; alphonse #186 closed and re-assigned as #206).
 
 | PR | Student | Hypothesis | W&B run | ep config | Eps done | Latest Val | vs SOTA (ep-matched) | Status |
 |---|---|---|---|---|---|---:|---:|---|
-| **#186** | alphonse | vol_pts=96k CLEAN | `vv3j0qag` (group `tay-round11-vol-pts-96k-clean`) | 9 | 9/9 **DONE** | 10.068 | +0.584 vs SOTA 9.484 | **COMPLETE** — above SOTA abupt but **volume_pressure=6.358% vs SOTA 12.740% (50% improvement)**. Pending review. |
+| **#206** | alphonse | surface_pts 64k→96k | (assigned, no W&B run yet) | 9 | 0 | — | — | newly assigned this cycle (replaces #186 closeout) |
 | **#187** | nezuko | volume_loss_weight=1.5 | `osbmpkmq` (group `tay-round11-vol-loss-weight-1p5`) | 9 | 7/9 | 10.368 | +0.208 vs SOTA ep7=10.16 | running — 2 epochs remain; trajectory still approaching SOTA pace |
 | **#189** | fern | lion_beta1=0.8 | `iukbkkgm` (group `round11-lion-beta1-0p8`) | 9 | 7/9 | 10.884 | +0.724 vs SOTA ep7=10.16 | running — 2 epochs remain; lagging SOTA pace by 0.7pp |
 | **#194** | askeladd | ema_decay=0.9995 | `qvoj4lbs` (group `tay-round12-ema-decay-0p9995`) | 50 | 5 | 12.623 | +0.793 vs SOTA ep5=11.83 | running — lagging by 0.79pp; watching ep6+ |
-| **#195** | edward | lr_cosine_t_max=9 | `0gftvkrc` (group `tay-round12-lr-cosine-tmax-9`) | 50 | 4 | 12.618 | **-0.852 vs SOTA ep4=13.47** | **RUNNING AHEAD OF SOTA PACE** — strongest mid-run signal; ep4=12.618 vs SOTA ep4=13.47 |
+| **#195** | edward | lr_cosine_t_max=9 | `0gftvkrc` (group `tay-round12-lr-cosine-tmax-9`) | 50 | **5** | **11.390** | **-0.440 vs SOTA ep5=11.83** | **AHEAD OF SOTA PACE 2 EPOCHS RUNNING** — strongest live signal; uniformly ahead on every sub-metric (surf=7.41<7.77, vol=6.95<7.12, wall=12.78<13.27) |
 | **#196** | frieren | vol_loss_weight=2.0 | `qymdn7px` (group `tay-round12-vol-loss-weight-2p0`) | 9 | 2 | 25.452 | — (ep2 only) | running — too early to assess; wait for ep4+ |
-| **#202** | tanjiro | lr_cosine_t_max=9 (re-run) | `1wx7mfw6` (group `tay-round12-cosine-tmax9`) | 50 | 2 | 25.396 | — (ep2 only) | running — too early to assess; wait for ep4+ |
-| **#203** | thorfinn | weight_decay=2.5e-4 | `894ay3y1` (group `tay-round12-wd-2p5e-4`) | 50 | 2 | 28.272 | — (ep2 only) | running — too early to assess; wait for ep4+ |
+| **#202** | tanjiro | lr_cosine_t_max=9 (replication) | `1wx7mfw6` (group `tay-round12-cosine-tmax9`) | 50 | 2 | 25.396 | — (ep2 only) | running — variance probe for edward #195; identical config |
+| **#203** | thorfinn | weight_decay=2.5e-4 | `894ay3y1` (group `tay-round12-wd-2p5e-4`) | 50 | 3 | 19.327 | +2.813 vs SOTA ep3=16.51 | running — looking weak so far; wait for ep5+ |
 
-**Key signals (2026-05-01 15:00):**
-- **Edward #195** is AHEAD of SOTA pace at ep4 (12.618% vs SOTA 13.47%) — strongest active signal for a potential SOTA beat
-- **Alphonse #186** completed ep9=10.068% — above SOTA abupt but **volume_pressure=6.358% is 50% better than SOTA 12.740%** — remarkable sub-metric finding; the vol_pts=96k hypothesis genuinely helps volume pressure binding even if it doesn't overcome surface metric regressions in abupt mean
-- **Nezuko #187** at ep7=10.368% — 2 epochs remain; closest 9-epoch run to challenging SOTA
-- **Fern #189** at ep7=10.884% — 2 epochs remain; lagging; lion_beta1=0.8 appears suboptimal vs SOTA 0.9
-- Frieren (#196), tanjiro (#202), thorfinn (#203) all at ep2 — too early to assess
+**Key signals (2026-05-01 15:30):**
+- **Edward #195 is the live SOTA-beat candidate** — ep5 abupt=11.390 vs SOTA 11.830 (-0.44pp), uniformly ahead on every sub-metric. If trend holds to ep9 the cosine_tmax=9 lever is a clear win and tanjiro #202 will give us a free run-to-run variance estimate.
+- **Nezuko #187** at ep7=10.368% — 2 epochs remain; closest 9-epoch run to challenging SOTA but trajectory is +0.2pp behind ep-matched SOTA.
+- **Fern #189** at ep7=10.884% — lagging; lion_beta1=0.8 looking like a clear loss vs SOTA 0.9.
+- **Askeladd #194** at ep5 lags 0.79pp — ema_decay=0.9995 (slower averaging) appears worse than 0.999 at this point.
+- **Alphonse #186 CLOSED** — vol_pts=96k clean re-run trailed SOTA on EVERY sub-metric at every epoch (ep9 abupt 10.068>9.484, surf 6.411>6.007, vol 6.358>5.896, wall 11.238>10.632). Vol_pts lever retired.
+- (Earlier "vol_p=6.358% vs SOTA 12.740% = 50% improvement" claim was wrong — that compared val ep9 to *test* ep9 numbers, not val-to-val. Apples-to-apples val comparison shows alphonse vol_p IS worse than SOTA val by 0.46pp.)
 
 ## Closed this cycle (2026-05-01)
 
 | PR | Student | Test | vs SOTA | Why |
 |---|---|---:|---:|---|
+| **#186** | **alphonse** | val 10.068 (ep9) | **+0.584 val** | **vol_pts=96k CLEAN re-run.** Trailed SOTA on every sub-metric at every epoch (surf 6.411>6.007, vol 6.358>5.896, wall 11.238>10.632). Vol_pts lever retired — 64k confirmed at/near optimum. |
 | #161 | askeladd | 12.564 | +18.7% | lion_beta2=0.999 — momentum window too wide (1000 steps vs SOTA 100 steps); model stuck in early-training trajectories. beta2=0.99 confirmed optimal. |
 | #162 | edward | 11.029 | +4.24% | model_dropout=0.05 — model underfits (not overfits) at 9ep; dropout noise hurts feature learning. val/test ratio WORSE (1.130 vs SOTA 1.115). Regularization lever closed. |
 | #157 | nezuko | 11.261 | +6.4% | mlp_ratio=6 capacity expansion didn't help; val flatlined ep7-8. FFN-width family CLOSED. |
-| #158 | alphonse | 13.179 | +24.6% | CONFOUNDED — `--lr-cosine-t-max 0` collapsed LR to 1e-6 by ep9. Original vol_pts hypothesis re-launched cleanly as PR #186. |
+| #158 | alphonse | 13.179 | +24.6% | CONFOUNDED — `--lr-cosine-t-max 0` collapsed LR to 1e-6 by ep9. Original vol_pts hypothesis re-launched cleanly as PR #186 (now also closed, see above). |
 
 ## Round 11 closeouts (carried forward)
 
@@ -105,26 +107,26 @@ Last updated: 2026-05-01 15:00 (fresh W&B poll — all 8 confirmed logging run I
 | model_dropout | — | **0.0** | 0.05 ❌ | **CLOSED** — model underfits not overfits; dropout hurts feature learning at this budget |
 | weight_decay | 2.5e-4 (#203, in-flight) | **5e-4** | 1e-3 ❌ (+4.5% regression, PR #163) | sweep DOWN: #203 (2.5e-4) |
 | volume_loss_weight | — | **1.0** | 1.5 (#187 nezuko in-flight), 2.0 (#196 frieren in-flight) | in-flight (both) |
-| volume_points | — | **65536** | 96000 (#186) | in-flight |
+| volume_points | — | **65536** | 96000 ❌ (#186 closed: +0.46pp val on every metric) | **CLOSED** — 64k is at/near optimum |
+| surface_points | — | **65536** | 96000 (#206, alphonse round12) | newly in-flight |
 | tau_axis_weights | — | **1.0** | 1.5 ❌ | **CLOSED** — Lion sign mechanism neutralizes |
 | mlp_ratio | — | **4** | 6 ❌ | **CLOSED** — capacity ceiling at 9-ep budget |
 
 ## Next research directions (priority order)
 
-1. **Review alphonse PR #186 (vol_pts=96k DONE ep9=10.068%)** — does not beat SOTA abupt, but volume_pressure=6.358% is 50% better than SOTA 12.740%. Evaluate: vol_pts=96k is a genuine lever for volume_pressure binding. Decision: close vs probe vol_pts=128k as follow-up to push abupt lower.
-2. **Watch edward #195 (cosine T_max=9)** — running AHEAD of SOTA pace at ep4 (12.618% vs 13.47%). Highest-priority live signal for a SOTA beat. If ep5+ continue ahead, very likely to finish below 9.484%.
-3. **Watch nezuko #187 (vol_loss_weight=1.5)** — ep7=10.368%, 2 epochs remaining; 2nd-closest 9-ep run. If ep9 finishes below 9.484%, merge immediately.
-4. **Fern #189 (lion_beta1=0.8)** — ep7=10.884%, lagging SOTA pace by 0.7pp; lion_beta1=0.8 appears suboptimal. If ep9 doesn't beat SOTA, close and note that lion_beta1=0.9 is optimal (both sides tested).
-5. **Askeladd #194 (ema_decay=0.9995)** — ep5=12.623% vs SOTA ep5=11.83%; lagging 0.79pp. Watching ep6+. If it closes the gap by ep7, still possible.
-6. **Frieren #196 (vol_loss_weight=2.0)** — ep2 only (25.452%); too early; wait for ep4+.
-7. **Tanjiro #202 (cosine T_max=9 re-run)** — ep2 only (25.396%); running in parallel with edward to cross-validate T_max=9 signal.
-8. **Thorfinn #203 (wd=2.5e-4)** — ep2 only (28.272%); too early; wait for ep4+.
-9. **vol_pts follow-up (128k)** — alphonse result shows 96k helps volume_pressure dramatically; 128k may further tighten the binding. Probe as next idle slot once alphonse decision made.
-10. **cosine T_max follow-up (T_max=7/8)** — if edward/tanjiro beat SOTA, probe shorter decay schedules to find optimal annealing point.
-11. **ema_decay follow-up curve** — if askeladd (0.9995) beats SOTA, probe 0.9997 and 0.9998 to close sensitivity range.
-12. **wd follow-up** — if thorfinn (2.5e-4) beats SOTA, probe 1e-4. If regresses, wd sweet spot is ~5e-4 and WD family CLOSED.
-13. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Reserve for idle slot after current wave completes.
-14. **Tau_yz binding gap (code-change approach)** — bypass Lion neutralization: (a) asinh output normalization for tau_y/tau_z, (b) surface-tangent-frame prediction head, (c) decoupled magnitude+direction head. All require train.py modifications.
+1. **Watch edward #195 (cosine T_max=9)** — ep5=11.390% vs SOTA ep5=11.830 (-0.44pp), uniformly ahead on every sub-metric. Highest-priority live signal for a SOTA beat; if trend holds to ep9 the lever is a clear win.
+2. **Watch tanjiro #202 (cosine T_max=9 replication)** — variance probe in parallel with edward. If both beat SOTA, lever is robust; if one beats and one loses, run-to-run noise dominates and we need more replicates.
+3. **Watch nezuko #187 (vol_loss_weight=1.5)** — ep7=10.368%, 2 epochs remaining; closest 9-ep run to SOTA. If ep9 finishes below 9.484%, merge immediately. Currently +0.2pp behind ep-matched SOTA — borderline.
+4. **Watch fern #189 (lion_beta1=0.8)** — ep7=10.884%, lagging by 0.7pp. lion_beta1=0.8 appears suboptimal vs SOTA 0.9. If ep9 doesn't beat SOTA, close and confirm lion_beta1=0.9 as optimum (both sides tested: 0.8 here vs 0.9 SOTA, no upside seen).
+5. **Watch askeladd #194 (ema_decay=0.9995)** — ep5=12.623% vs SOTA ep5=11.83 (+0.79pp lag). Watching ep6+. If gap doesn't close by ep7, ema_decay=0.999 confirmed optimal direction (slower averaging hurts).
+6. **Watch alphonse #206 (surface_pts=96k, just assigned)** — clean parallel to retired vol_pts=96k probe. If wins, surface_pts is the lever; if loses, surface_pts at 64k is also confirmed optimal.
+7. **Watch frieren #196 (vol_loss_weight=2.0)**, **thorfinn #203 (wd=2.5e-4)** — both at ep2/ep3, too early to assess; wait for ep4+.
+8. **cosine T_max follow-up (T_max=7/8)** — if edward AND tanjiro both beat SOTA at T_max=9, probe shorter decay schedules to find the optimal annealing point.
+9. **ema_decay follow-up curve** — if askeladd (0.9995) beats SOTA, probe 0.9997 and 0.9998. If loses, EMA family fully calibrated at 0.999.
+10. **wd follow-up** — if thorfinn (2.5e-4) beats SOTA, probe 1e-4 next. If regresses, wd=5e-4 confirmed and WD family CLOSED both directions.
+11. **Compound stack for next round** — once round 12 closes, stack the winners (likely cosine_tmax=9 + any other new winners) on top of SOTA #115 base.
+12. **Yi Wave 1 architecture port** — Fourier PE + asinh transform + SDF features. Biggest untested architectural lever. Reserve for idle slot after round 12 wave completes.
+13. **Tau_yz binding gap (code-change approach)** — bypass Lion neutralization: (a) asinh output normalization for tau_y/tau_z, (b) surface-tangent-frame prediction head, (c) decoupled magnitude+direction head. All require train.py modifications.
 
 ## Weight decay sweep summary (PR #163 closed)
 

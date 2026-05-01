@@ -6,6 +6,25 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-01 15:30 — PR #186 CLOSED: alphonse vol_pts=96k clean re-run — does not beat SOTA
+
+- **Branch:** `alphonse/round11-vol-pts-96k-clean`
+- **Hypothesis:** Increasing volume sampling from 64k → 96k will reduce volume_pressure error and pull abupt below SOTA (clean re-run with explicit `--lr-cosine-t-max 50` after PR #158 LR-confound).
+- **W&B:** rank-0 run `vv3j0qag`, group `tay-round11-vol-pts-96k-clean`, ran 9/9 epochs.
+
+### Val trajectory vs SOTA #115
+
+| ep | abupt | surf_p | vol_p | wall_s | SOTA abupt | SOTA surf | SOTA vol | SOTA wall |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 67.016 | 51.826 | 53.372 | 70.311 | 53.750 | 38.817 | 37.798 | 57.644 |
+| 5 | 13.664 | 9.143 | 8.395 | 15.218 | 11.830 | 7.770 | 7.118 | 13.265 |
+| 9 | **10.068** | **6.411** | **6.358** | **11.238** | **9.484** | **6.007** | **5.896** | **10.632** |
+
+- **Result:** ep9 abupt 10.068 vs SOTA 9.484 → **+0.584pp WORSE val**. Trailed SOTA on every sub-metric at every epoch — surface, volume, AND wall_shear.
+- **Conclusion:** vol_pts=96k regresses on every axis vs SOTA vol_pts=64k. The volume sampling rate is at or near its local optimum at 64k. **Vol_pts lever retired.** This is the mirror retirement to volume_loss_weight (which earlier we hoped would close the AB-UPT vol_p gap from below; this hoped to close it from above via more samples).
+- **Correction to prior log entries:** Earlier "vol_p=6.358% vs SOTA 12.740% = 50% improvement" claim was a val-vs-test apples-to-oranges error. Apples-to-apples val ep9 comparison shows alphonse vol_p IS worse than SOTA val by 0.46pp.
+- **Follow-up assignment:** alphonse round12-surface-pts-96k (PR #206) — same one-flag-delta protocol but on the surface side.
+
 ## 2026-05-01 (late) — PR #202 SENT BACK: tanjiro lr_cosine_t_max=9 — CONFIG ERROR
 
 - **Branch:** `tanjiro/cosine-tmax9`
