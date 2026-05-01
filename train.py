@@ -201,6 +201,177 @@ class TransolverAttention(nn.Module):
         return _apply_token_mask(out_x, attn_mask)
 
 
+@torch.compiler.disable
+@torch.no_grad()
+def compute_chunked_knn(
+    xyz: torch.Tensor,
+    k: int,
+    *,
+    mask: torch.Tensor | None = None,
+    chunk_size: int = 4096,
+) -> torch.Tensor:
+    """Compute k-NN indices over surface points, chunked along the query axis.
+
+    Returns long-tensor neighbor indices of shape [B, N, k]. Padding points
+    (mask==0) are pushed to a far coordinate so they do not appear as
+    neighbors of valid points; padding queries still receive indices but
+    their downstream output is masked.
+    """
+    B, N, _ = xyz.shape
+    device = xyz.device
+    xyz_keys = xyz
+    if mask is not None:
+        invalid = ~mask.bool()
+        far_coord = xyz.new_full((1, 1, 3), 1.0e9)
+        xyz_keys = torch.where(invalid.unsqueeze(-1), far_coord, xyz)
+    xyz_keys_f = xyz_keys.float()
+
+    idx_full = torch.empty((B, N, k), dtype=torch.long, device=device)
+    chunk_size = max(1, int(chunk_size))
+    for start in range(0, N, chunk_size):
+        end = min(start + chunk_size, N)
+        q = xyz[:, start:end, :].float()  # [B, chunk, 3]
+        d = torch.cdist(q, xyz_keys_f)  # [B, chunk, N]
+        # k+1 to drop the self-match (smallest distance is self at 0).
+        topk = d.topk(k + 1, largest=False, dim=-1).indices[..., 1:]
+        idx_full[:, start:end] = topk.long()
+    return idx_full
+
+
+class KNNAttention(nn.Module):
+    """Local k-NN self-attention with per-head relative-position MLP bias.
+
+    For each query point i in surface tokens, attend over its k geometric
+    neighbors only. Memory peak is bounded by chunking the query axis: K and V
+    are gathered chunk-by-chunk so the full [B, N, k, C] neighbor tensor is
+    never materialized.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        k: int,
+        *,
+        pos_mlp_hidden: int = 32,
+        chunk_size: int = 8192,
+    ) -> None:
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.k = int(k)
+        self.scale = self.dim_head ** -0.5
+        self.chunk_size = int(chunk_size)
+        self.qkv = LinearProjection(hidden_dim, hidden_dim * 3, bias=False)
+        self.proj = LinearProjection(hidden_dim, hidden_dim)
+        self.pos_mlp = nn.Sequential(
+            nn.Linear(3, pos_mlp_hidden),
+            nn.GELU(),
+            nn.Linear(pos_mlp_hidden, num_heads),
+        )
+        # Default-init for the first MLP layer; zero-init the output bias so
+        # the position prior starts as a no-op and parameters can grow as
+        # needed without overpowering the dot-product attention at init.
+        _init_linear(self.pos_mlp[0])
+        nn.init.zeros_(self.pos_mlp[-1].weight)
+        nn.init.zeros_(self.pos_mlp[-1].bias)
+
+    def _chunk_attend(
+        self,
+        q_chunk: torch.Tensor,
+        flat_k: torch.Tensor,
+        flat_v: torch.Tensor,
+        flat_xyz: torch.Tensor,
+        flat_idx: torch.Tensor,
+        xyz_chunk: torch.Tensor,
+        B: int,
+        n_chunk: int,
+    ) -> torch.Tensor:
+        H = self.num_heads
+        d = self.dim_head
+        k = self.k
+        # k/v neighbors: [B, n_chunk, k, H, d]
+        k_neighbors = flat_k[flat_idx].reshape(B, n_chunk, k, H, d)
+        v_neighbors = flat_v[flat_idx].reshape(B, n_chunk, k, H, d)
+        xyz_neighbors = flat_xyz[flat_idx].reshape(B, n_chunk, k, 3)
+        delta_xyz = xyz_chunk - xyz_neighbors  # [B, n_chunk, k, 3]
+        pos_bias = self.pos_mlp(delta_xyz)  # [B, n_chunk, k, H]
+
+        # Manual masked dot-product attention. We avoid SDPA here because
+        # its efficient/flash kernels have an internal batch-dim cap of
+        # 65535 and B*n_chunk can exceed that for full-fidelity surface
+        # views (e.g. B=8, n_chunk=8192 -> 65536 hits the limit).
+        scores = torch.einsum("bnhd,bnkhd->bnhk", q_chunk, k_neighbors) * self.scale
+        scores = scores + pos_bias.permute(0, 1, 3, 2)  # add bias on heads/k
+        attn = F.softmax(scores.float(), dim=-1).to(scores.dtype)
+        chunk_out = torch.einsum("bnhk,bnkhd->bnhd", attn, v_neighbors)
+        return chunk_out.reshape(B, n_chunk, H * d)
+
+    @torch.compiler.disable
+    def forward(
+        self,
+        x: torch.Tensor,
+        xyz: torch.Tensor,
+        idx: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, C = x.shape
+        H = self.num_heads
+        d = self.dim_head
+
+        qkv = self.qkv(x)
+        q_full, k_full, v_full = qkv.chunk(3, dim=-1)
+
+        flat_k = k_full.reshape(B * N, C)
+        flat_v = v_full.reshape(B * N, C)
+        flat_xyz = xyz.reshape(B * N, 3).to(x.dtype)
+        batch_offsets = torch.arange(B, device=x.device).view(B, 1, 1) * N
+
+        use_checkpoint = self.training and torch.is_grad_enabled()
+        out_chunks: list[torch.Tensor] = []
+        for start in range(0, N, self.chunk_size):
+            end = min(start + self.chunk_size, N)
+            n_chunk = end - start
+
+            q_chunk = q_full[:, start:end, :].reshape(B, n_chunk, H, d)
+            idx_chunk = idx[:, start:end, :]
+            flat_idx = (idx_chunk + batch_offsets).reshape(-1)
+            xyz_chunk = xyz[:, start:end, :].to(x.dtype).unsqueeze(2)
+
+            if use_checkpoint:
+                chunk_out = torch.utils.checkpoint.checkpoint(
+                    self._chunk_attend,
+                    q_chunk,
+                    flat_k,
+                    flat_v,
+                    flat_xyz,
+                    flat_idx,
+                    xyz_chunk,
+                    B,
+                    n_chunk,
+                    use_reentrant=False,
+                )
+            else:
+                chunk_out = self._chunk_attend(
+                    q_chunk,
+                    flat_k,
+                    flat_v,
+                    flat_xyz,
+                    flat_idx,
+                    xyz_chunk,
+                    B,
+                    n_chunk,
+                )
+            out_chunks.append(chunk_out)
+
+        out = torch.cat(out_chunks, dim=1)
+        out = self.proj(out)
+        return _apply_token_mask(out, attn_mask)
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -227,6 +398,92 @@ class TransformerBlock(nn.Module):
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = _apply_token_mask(x, attn_mask)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = _apply_token_mask(x, attn_mask)
+        return x
+
+
+class KNNTransformerBlock(nn.Module):
+    """Hybrid block: k-NN local attention on surface tokens, Transolver
+    global attention on volume tokens, shared FFN.
+
+    Used to replace the last `surface_decoder_local_knn` standard
+    `TransformerBlock`s. Surface tokens get a local boundary-layer-aware
+    receptive field while volume tokens keep the global slice-attention path
+    that has been driving down `volume_pressure_rel_l2_pct` already.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        mlp_expansion_factor: int | float,
+        num_slices: int,
+        knn_k: int,
+        knn_chunk_size: int = 8192,
+        dropout: float = 0.0,
+        drop_path_prob: float = 0.0,
+    ):
+        super().__init__()
+        mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
+        self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.surface_attention = KNNAttention(
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            k=knn_k,
+            chunk_size=knn_chunk_size,
+        )
+        self.volume_attention = TransolverAttention(
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            num_slices=num_slices,
+            dropout=dropout,
+        )
+        self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.drop_path = DropPath(drop_path_prob)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None,
+        *,
+        surface_xyz: torch.Tensor | None,
+        knn_idx: torch.Tensor | None,
+        surface_token_count: int,
+    ) -> torch.Tensor:
+        x = _apply_token_mask(x, attn_mask)
+        x_norm = self.norm1(x)
+
+        knn_available = (
+            surface_token_count > 0
+            and surface_xyz is not None
+            and knn_idx is not None
+        )
+        if knn_available:
+            s_x = x_norm[:, :surface_token_count, :]
+            s_mask = (
+                attn_mask[:, :surface_token_count] if attn_mask is not None else None
+            )
+            s_out = self.surface_attention(s_x, surface_xyz, knn_idx, s_mask)
+        else:
+            s_out = x_norm[:, :0, :]
+
+        v_start = surface_token_count if knn_available else 0
+        if x_norm.shape[1] > v_start:
+            v_x = x_norm[:, v_start:, :]
+            v_mask = (
+                attn_mask[:, v_start:] if attn_mask is not None else None
+            )
+            v_out = self.volume_attention(v_x, attn_mask=v_mask)
+        else:
+            v_out = x_norm[:, :0, :]
+
+        attn_out = torch.cat([s_out, v_out], dim=1) if s_out.numel() or v_out.numel() else x_norm
+        attn_out = _apply_token_mask(attn_out, attn_mask)
+
+        x = x + self.drop_path(attn_out)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -286,6 +543,9 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        knn_layers: int = 0,
+        knn_k: int = 32,
+        knn_chunk_size: int = 8192,
     ):
         super().__init__()
         if depth <= 1:
@@ -294,19 +554,38 @@ class Transformer(nn.Module):
             drop_path_rates = [
                 stochastic_depth_prob * i / (depth - 1) for i in range(depth)
             ]
-        self.blocks = nn.ModuleList(
-            [
-                TransformerBlock(
-                    hidden_dim=hidden_dim,
-                    num_heads=num_heads,
-                    mlp_expansion_factor=mlp_expansion_factor,
-                    num_slices=num_slices,
-                    dropout=dropout,
-                    drop_path_prob=drop_path_rates[i],
+        self.knn_layers = max(0, min(int(knn_layers), depth))
+        self.knn_k = int(knn_k)
+        self.knn_chunk_size = int(knn_chunk_size)
+        knn_start_index = depth - self.knn_layers
+
+        blocks: list[nn.Module] = []
+        for i in range(depth):
+            if i >= knn_start_index:
+                blocks.append(
+                    KNNTransformerBlock(
+                        hidden_dim=hidden_dim,
+                        num_heads=num_heads,
+                        mlp_expansion_factor=mlp_expansion_factor,
+                        num_slices=num_slices,
+                        knn_k=self.knn_k,
+                        knn_chunk_size=self.knn_chunk_size,
+                        dropout=dropout,
+                        drop_path_prob=drop_path_rates[i],
+                    )
                 )
-                for i in range(depth)
-            ]
-        )
+            else:
+                blocks.append(
+                    TransformerBlock(
+                        hidden_dim=hidden_dim,
+                        num_heads=num_heads,
+                        mlp_expansion_factor=mlp_expansion_factor,
+                        num_slices=num_slices,
+                        dropout=dropout,
+                        drop_path_prob=drop_path_rates[i],
+                    )
+                )
+        self.blocks = nn.ModuleList(blocks)
         self.film_layers = (
             nn.ModuleList(
                 [FiLMLayer(film_geom_dim, hidden_dim) for _ in range(depth)]
@@ -320,9 +599,33 @@ class Transformer(nn.Module):
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
         geom_token: torch.Tensor | None = None,
+        *,
+        surface_xyz: torch.Tensor | None = None,
+        surface_token_count: int = 0,
     ) -> torch.Tensor:
+        knn_idx: torch.Tensor | None = None
+        if self.knn_layers > 0 and surface_xyz is not None and surface_token_count > 0:
+            surface_mask: torch.Tensor | None = None
+            if attn_mask is not None:
+                surface_mask = attn_mask[:, :surface_token_count]
+            knn_idx = compute_chunked_knn(
+                surface_xyz,
+                k=self.knn_k,
+                mask=surface_mask,
+                chunk_size=self.knn_chunk_size,
+            )
+
         for index, block in enumerate(self.blocks):
-            x = block(x, attn_mask=attn_mask)
+            if isinstance(block, KNNTransformerBlock):
+                x = block(
+                    x,
+                    attn_mask,
+                    surface_xyz=surface_xyz,
+                    knn_idx=knn_idx,
+                    surface_token_count=surface_token_count,
+                )
+            else:
+                x = block(x, attn_mask=attn_mask)
             if self.film_layers is not None and geom_token is not None:
                 x = self.film_layers[index](x, geom_token)
                 x = _apply_token_mask(x, attn_mask)
@@ -350,6 +653,9 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        surface_decoder_local_knn: int = 0,
+        surface_knn_k: int = 32,
+        surface_knn_chunk_size: int = 8192,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -392,6 +698,9 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            knn_layers=surface_decoder_local_knn,
+            knn_k=surface_knn_k,
+            knn_chunk_size=surface_knn_chunk_size,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -460,7 +769,16 @@ class SurfaceTransolver(nn.Module):
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
             geom_token = self.geom_encoder(surface_x, surface_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
+        surface_xyz_for_knn: torch.Tensor | None = None
+        if surface_x is not None and getattr(self.backbone, "knn_layers", 0) > 0:
+            surface_xyz_for_knn = surface_x[:, :, : self.space_dim]
+        hidden = self.backbone(
+            hidden,
+            attn_mask=attn_mask,
+            geom_token=geom_token,
+            surface_xyz=surface_xyz_for_knn,
+            surface_token_count=surface_tokens,
+        )
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -579,6 +897,9 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    surface_decoder_local_knn: int = 0
+    surface_knn_k: int = 32
+    surface_knn_chunk_size: int = 8192
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,6 +1066,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        surface_decoder_local_knn=config.surface_decoder_local_knn,
+        surface_knn_k=config.surface_knn_k,
+        surface_knn_chunk_size=config.surface_knn_chunk_size,
     )
 
 
