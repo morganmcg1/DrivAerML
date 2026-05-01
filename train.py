@@ -543,6 +543,10 @@ class EMA:
 class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-4
+    beta1: float = 0.9
+    beta2: float = 0.999
+    lr_warmup_steps: int = 0
+    lr_warmup_start_factor: float = 0.01
     batch_size: int = 2
     epochs: int = 50
     train_surface_points: int = 40_000
@@ -1685,8 +1689,26 @@ def main(argv: Iterable[str] | None = None) -> None:
     n_params = sum(param.numel() for param in model.parameters())
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.lr,
+        weight_decay=config.weight_decay,
+        betas=(config.beta1, config.beta2),
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    if config.lr_warmup_steps > 0:
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=config.lr_warmup_start_factor,
+            end_factor=1.0,
+            total_iters=config.lr_warmup_steps,
+        )
+        print(
+            f"LR warmup: linear ramp from {config.lr * config.lr_warmup_start_factor:.2e} to "
+            f"{config.lr:.2e} over {config.lr_warmup_steps} steps"
+        )
+    else:
+        warmup_scheduler = None
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     if kill_thresholds:
@@ -1809,6 +1831,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
                     gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
             optimizer.step()
+            if warmup_scheduler is not None and global_step < config.lr_warmup_steps:
+                warmup_scheduler.step()
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
@@ -1838,6 +1862,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                "train/lr": float(optimizer.param_groups[0]["lr"]),
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
@@ -1881,7 +1906,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if config.lr_warmup_steps == 0 or global_step >= config.lr_warmup_steps:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
