@@ -51,6 +51,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    squared_relative_l2_loss,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -113,6 +114,7 @@ class Config:
     kill_thresholds: str = ""
     compile_model: bool = True
     debug: bool = False
+    raw_rel_l2_weight: float = 0.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -160,6 +162,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    raw_rel_l2_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -177,12 +180,33 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+
+        aux_metrics: dict[str, float] = {}
+        if raw_rel_l2_weight > 0.0:
+            # Un-normalize predictions back to physical space for relative L2 loss.
+            # Surface channels: 0=surface_pressure, 1=wsx, 2=wsy, 3=wsz
+            surface_preds_phys = transform.invert_surface(out["surface_preds"])
+            volume_preds_phys = transform.invert_volume(out["volume_preds"])
+            _surface_channel_names = ["surface_pressure", "wsx", "wsy", "wsz"]
+            aux_loss = torch.zeros(1, device=device, dtype=loss.dtype).squeeze()
+            for ch_idx, ch_name in enumerate(_surface_channel_names):
+                ch_pred = surface_preds_phys[..., ch_idx : ch_idx + 1]
+                ch_tgt = batch.surface_y[..., ch_idx : ch_idx + 1]
+                ch_rel_l2 = squared_relative_l2_loss(ch_pred, ch_tgt, batch.surface_mask)
+                aux_metrics[f"raw_rel_l2/{ch_name}"] = float(ch_rel_l2.detach().cpu().item())
+                aux_loss = aux_loss + ch_rel_l2
+            vol_rel_l2 = squared_relative_l2_loss(volume_preds_phys, batch.volume_y, batch.volume_mask)
+            aux_metrics["raw_rel_l2/vol_pressure"] = float(vol_rel_l2.detach().cpu().item())
+            aux_loss = aux_loss + vol_rel_l2
+            loss = loss + raw_rel_l2_weight * aux_loss
+
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **aux_metrics,
     }
 
 
@@ -296,6 +320,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    raw_rel_l2_weight=config.raw_rel_l2_weight,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -333,6 +358,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    # Log per-channel raw relative L2 auxiliary metrics when enabled.
+                    for _aux_key in ("raw_rel_l2/surface_pressure", "raw_rel_l2/wsx",
+                                     "raw_rel_l2/wsy", "raw_rel_l2/wsz",
+                                     "raw_rel_l2/vol_pressure"):
+                        if _aux_key in batch_loss_metrics:
+                            train_log[f"train/{_aux_key}"] = batch_loss_metrics[_aux_key]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
