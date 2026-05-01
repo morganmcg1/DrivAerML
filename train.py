@@ -601,9 +601,20 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    asinh_wallshear: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
+
+
+def _asinh_scale(std: torch.Tensor) -> torch.Tensor:
+    """Return per-channel asinh scale so typical values (±1 std) map to ±1 before z-score.
+
+    Scale is chosen as the per-channel std so that raw values at ±1 std map to
+    ±asinh(1)/asinh(1) = ±1, i.e. asinh(x / scale) / asinh(1) ∈ [-1, 1] for
+    most of the distribution.  The clamp avoids division by zero.
+    """
+    return std.clamp(min=1e-6)
 
 
 class TargetTransform:
@@ -616,6 +627,7 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        asinh_wallshear: bool = False,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -633,6 +645,7 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.asinh_wallshear = asinh_wallshear
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -641,10 +654,23 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
+        if self.asinh_wallshear:
+            # Apply asinh compression to wall-shear channels (1-3: tau_x, tau_y, tau_z)
+            # before z-score normalization.  Scale = per-channel std so ±1 std maps to
+            # approximately ±1 in asinh space (asinh(1)/asinh(1) = 1).
+            ws_scale = _asinh_scale(self.surface_y_std[1:4]).to(y.device)
+            ws_asinh = torch.asinh(y[..., 1:4] / ws_scale) / math.asinh(1.0)
+            y = torch.cat([y[..., :1], ws_asinh, y[..., 4:]], dim=-1)
         return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        y_out = y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        if self.asinh_wallshear:
+            # Reverse asinh: undo de-z-score first (done above), then invert asinh.
+            ws_scale = _asinh_scale(self.surface_y_std[1:4]).to(y.device)
+            ws_raw = torch.sinh(y_out[..., 1:4] * math.asinh(1.0)) * ws_scale
+            y_out = torch.cat([y_out[..., :1], ws_raw, y_out[..., 4:]], dim=-1)
+        return y_out
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
         return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
@@ -1701,6 +1727,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         surface_y_std=stats["surface_y_std"].to(device),
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
+        asinh_wallshear=config.asinh_wallshear,
     )
 
     model = build_model(config).to(device)
