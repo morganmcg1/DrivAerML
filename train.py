@@ -601,6 +601,7 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    coord_noise_std: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1313,15 +1314,29 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    coord_noise_std: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    surface_x_in = batch.surface_x
+    volume_x_in = batch.volume_x
+    if coord_noise_std > 0.0 and model.training:
+        # Jitter the xyz coordinates only (channels 0:3); leave normals, area, sdf
+        # untouched so the model still receives accurate non-positional features.
+        surface_x_in = surface_x_in.clone()
+        surface_x_in[..., :3] = surface_x_in[..., :3] + (
+            torch.randn_like(surface_x_in[..., :3]) * coord_noise_std
+        )
+        volume_x_in = volume_x_in.clone()
+        volume_x_in[..., :3] = volume_x_in[..., :3] + (
+            torch.randn_like(volume_x_in[..., :3]) * coord_noise_std
+        )
     with autocast_context(device, amp_mode):
         out = model(
-            surface_x=batch.surface_x,
+            surface_x=surface_x_in,
             surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
+            volume_x=volume_x_in,
             volume_mask=batch.volume_mask,
         )
         surface_pred_norm = out["surface_preds"]
@@ -1810,6 +1825,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                coord_noise_std=config.coord_noise_std,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
