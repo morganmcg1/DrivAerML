@@ -2,6 +2,24 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
+## Status: edward PR #311 — active baseline (val_abupt 7.546%) — 2026-05-02
+
+## Mechanism flag landed: PR #317 violet (Huber wall-shear loss) — 2026-04-29
+
+PR #317 (violet, `--wallshear-huber-delta`) adds opt-in Huber loss on standardized
+residuals for surface τ channels (1..3 = τ_x/y/z). Default delta=0.0 → exact MSE,
+zero behavior change. The mechanism was validated in a 2-seed parity comparison:
+mean Δ val_abupt = −1.45pp (ctrl 37.15% → d10 35.70%), both seeds agree (−1.15pp and
+−1.75pp), per-channel gains match heavy-tail hypothesis (ws_z −3.39pp, ws_x −3.16pp,
+ws_y −0.57pp). Volume backbone uncontaminated (vol_loss ~0.014–0.016 flat).
+
+Note: Absolute merge bar (7.546% from PR #311) was not contested — paired comparison
+ran under 1-epoch tangential-loss conditions (SENPAI_TIMEOUT_MINUTES=360 limits to
+1 epoch on single-GPU). The flag is available for composition with asinh (#374) and
+full-budget DDP runs. W&B runs: ctrl `g1s45tbt`/`6649fm5e`, d10 `52urviip`/`zni9if9p`.
+
+**Active baseline remains: PR #311 val_abupt=7.546%, test_abupt=8.771%**
+
 ## Status: edward PR #311 wins — new baseline 2026-05-02
 
 PR #311 (edward, STRING-separable learnable position encoding) reduced
