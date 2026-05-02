@@ -235,41 +235,154 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class CrossAttentionBlock(nn.Module):
-    """Lightweight cross-attention bridge between surface and volume streams.
+class CrossAttentionBridge(nn.Module):
+    """One-directional cross-stream attention via a register-token bottleneck.
 
-    Each stream uses standard multi-head attention to read from the other
-    stream's hidden states. Output is gated by a learnable `tanh(g)` scalar
-    initialised at 0 so cross-stream contribution starts at zero and the
-    gradient signal can gradually open the bridge.
+    Two-pass design (Perceiver / Set Transformer / DINOv3 registers):
+      Pass 1: K learned register tokens attend to source tokens
+              (registers=Q, source=K/V) -> registers summarise the source.
+      Pass 2: target tokens attend to the summarised registers
+              (target=Q, registers=K/V) -> per-token cross-stream delta.
+
+    Complexity is O((N_source + N_target) * K), avoiding O(N^2) over raw
+    65k-token streams. Output is gated by `tanh(gate)` initialised at 0, so
+    the bridge contributes nothing at init and gradient on the gate gradually
+    opens it.
     """
 
-    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_registers: int = 128,
+        dropout: float = 0.0,
+    ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
-        self.norm_surf_q = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.norm_vol_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.surf_to_vol = nn.MultiheadAttention(
+        self.num_registers = int(num_registers)
+        # Learnable register tokens, shaped [1, K, D].
+        self.registers = nn.Parameter(
+            torch.randn(1, self.num_registers, hidden_dim) * 0.02
+        )
+        # Pass 1: registers (Q) attend to source (K/V).
+        self.norm_reg_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_src_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.attn_reg_from_src = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
             dropout=dropout,
             batch_first=True,
         )
-        self.norm_vol_q = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.norm_surf_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.vol_to_surf = nn.MultiheadAttention(
+        # Pass 2: target (Q) attends to registers (K/V).
+        self.norm_tgt_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_reg_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.attn_tgt_from_reg = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
             dropout=dropout,
             batch_first=True,
         )
-        # Zero-init residual gates -> tanh(0)=0 -> cross-attn contributes 0 at init.
-        self.surf_gate = nn.Parameter(torch.zeros(1))
-        self.vol_gate = nn.Parameter(torch.zeros(1))
+        # Zero-init residual gate -> bridge contributes 0 at init.
+        self.gate = nn.Parameter(torch.zeros(1))
 
-    def _has_tokens(self, mask: torch.Tensor) -> bool:
-        return mask.shape[1] > 0 and bool(mask.any())
+    def forward(
+        self,
+        source: torch.Tensor,        # [B, N_src, D]
+        target: torch.Tensor,        # [B, N_tgt, D]
+        source_mask: torch.Tensor,   # [B, N_src] 1=valid
+        target_mask: torch.Tensor,   # [B, N_tgt] 1=valid
+    ) -> torch.Tensor:
+        batch_size = source.shape[0]
+        registers = self.registers.expand(batch_size, -1, -1).contiguous()
+
+        # Pass 1: registers attend to source tokens.
+        # nn.MultiheadAttention key_padding_mask: True = ignore.
+        src_key_pad = ~source_mask.bool()
+        # Guard rows where every source token is padding -- MHA returns NaN if
+        # a query attends to a fully-masked KV. Disable padding for those rows;
+        # the gate is zero-init so any noise is multiplied to ~0 anyway.
+        all_pad_rows = src_key_pad.all(dim=-1)
+        if bool(all_pad_rows.any()):
+            src_key_pad = src_key_pad.clone()
+            src_key_pad[all_pad_rows] = False
+
+        reg_q = self.norm_reg_q(registers)
+        src_kv = self.norm_src_kv(source)
+        reg_summary, _ = self.attn_reg_from_src(
+            reg_q, src_kv, src_kv,
+            key_padding_mask=src_key_pad,
+            need_weights=False,
+        )
+        registers = registers + reg_summary  # residual on registers
+
+        # Pass 2: target attends to registers (always valid -- no padding mask).
+        tgt_q = self.norm_tgt_q(target)
+        reg_kv = self.norm_reg_kv(registers)
+        tgt_delta, _ = self.attn_tgt_from_reg(
+            tgt_q, reg_kv, reg_kv,
+            need_weights=False,
+        )
+        target = target + self.gate.tanh() * tgt_delta
+        target = _apply_token_mask(target, target_mask)
+        return target
+
+
+class CrossAttentionBlock(nn.Module):
+    """Bi-directional register-token cross-attention bridge.
+
+    Holds two `CrossAttentionBridge` modules: one for surface<-volume and one
+    for volume<-surface. Each direction owns its own learned register tokens,
+    so the two streams' summaries do not have to share a representation space.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_registers: int = 128,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.num_registers = int(num_registers)
+        # surface receives information from volume
+        self.vol_to_surf = CrossAttentionBridge(
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            num_registers=num_registers,
+            dropout=dropout,
+        )
+        # volume receives information from (post-update) surface
+        self.surf_to_vol = CrossAttentionBridge(
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            num_registers=num_registers,
+            dropout=dropout,
+        )
+
+    @property
+    def surf_gate(self) -> torch.Tensor:
+        return self.vol_to_surf.gate
+
+    @property
+    def vol_gate(self) -> torch.Tensor:
+        return self.surf_to_vol.gate
+
+    def _touch_all_params(self) -> torch.Tensor:
+        """DDP-safe no-op: 0-valued tensor with grad path through every parameter.
+
+        Needed because some DrivAerML batches have surface_views < volume_views
+        (or vice-versa), so a batch can arrive with N_surface=0 or N_volume=0.
+        In that case MHA cannot run; we skip the bridge but must still register
+        each parameter as "used" or DDP find_unused_parameters=False will error.
+        """
+        accum = None
+        for p in self.parameters():
+            term = p.sum()
+            accum = term if accum is None else accum + term
+        return accum * 0.0 if accum is not None else torch.zeros((), device=next(self.parameters()).device)
 
     def forward(
         self,
@@ -278,69 +391,26 @@ class CrossAttentionBlock(nn.Module):
         surf_mask: torch.Tensor,
         vol_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        surf_has = self._has_tokens(surf_mask)
-        vol_has = self._has_tokens(vol_mask)
-
-        # Without keys/values on one side, attention is undefined — skip the
-        # bridge. We still touch all parameters via a 0-multiplied dummy pass
-        # so DDP / autograd see every gate even when this batch happens to be
-        # surface-only or volume-only.
-        if not (surf_has and vol_has):
-            zero = (
-                self.surf_gate.sum() * 0.0
-                + self.vol_gate.sum() * 0.0
-            )
+        # Empty-stream guard: if either modality has 0 tokens (e.g. a view-count
+        # mismatch in the DrivAerML loader), MHA cannot run on a 0-length axis.
+        if surf.shape[1] == 0 or vol.shape[1] == 0:
+            zero = self._touch_all_params()
             return surf + zero, vol + zero
 
-        # nn.MultiheadAttention key_padding_mask convention: True = ignore.
-        surf_key_pad = ~surf_mask.bool()
-        vol_key_pad = ~vol_mask.bool()
-        # Guard fully-padded query rows: nn.MultiheadAttention returns NaN when
-        # a query attends to a fully-masked key set. Disable padding for any
-        # row that has no valid keys (the corresponding query rows are
-        # themselves padding and will be re-zeroed by the post-call mask
-        # multiplication).
-        if bool(vol_key_pad.all(dim=-1).any()):
-            all_pad_rows = vol_key_pad.all(dim=-1)
-            vol_key_pad = vol_key_pad.clone()
-            vol_key_pad[all_pad_rows] = False
-        if bool(surf_key_pad.all(dim=-1).any()):
-            all_pad_rows = surf_key_pad.all(dim=-1)
-            surf_key_pad = surf_key_pad.clone()
-            surf_key_pad[all_pad_rows] = False
-
-        surf_q = self.norm_surf_q(surf)
-        vol_kv = self.norm_vol_kv(vol)
-        # nn.MultiheadAttention does not support bf16 autocast on all paths;
-        # cast to fp32 internally to avoid silent NaNs and let DropPath/EMA see
-        # finite values in the residual.
-        surf_q_f = surf_q.float()
-        vol_kv_f = vol_kv.float()
-        surf_delta, _ = self.surf_to_vol(
-            surf_q_f, vol_kv_f, vol_kv_f,
-            key_padding_mask=vol_key_pad,
-            need_weights=False,
+        # Surface pulls a summary of the volume stream.
+        surf = self.vol_to_surf(
+            source=vol,
+            target=surf,
+            source_mask=vol_mask,
+            target_mask=surf_mask,
         )
-        surf_delta = surf_delta.to(surf.dtype)
-        surf = surf + self.surf_gate.tanh() * surf_delta
-        surf = _apply_token_mask(surf, surf_mask)
-
-        vol_q = self.norm_vol_q(vol)
-        # use the *updated* surf as the KV source for vol_to_surf — this matches
-        # the deterministic ordering described in the PR (surface receives,
-        # then volume reads from the post-update surface).
-        surf_kv = self.norm_surf_kv(surf)
-        vol_q_f = vol_q.float()
-        surf_kv_f = surf_kv.float()
-        vol_delta, _ = self.vol_to_surf(
-            vol_q_f, surf_kv_f, surf_kv_f,
-            key_padding_mask=surf_key_pad,
-            need_weights=False,
+        # Volume pulls a summary of the (just-updated) surface stream.
+        vol = self.surf_to_vol(
+            source=surf,
+            target=vol,
+            source_mask=surf_mask,
+            target_mask=vol_mask,
         )
-        vol_delta = vol_delta.to(vol.dtype)
-        vol = vol + self.vol_gate.tanh() * vol_delta
-        vol = _apply_token_mask(vol, vol_mask)
-
         return surf, vol
 
 
@@ -458,6 +528,7 @@ class DualStreamTransformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         cross_attn_every: int = 2,
+        cross_attn_registers: int = 128,
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
     ):
@@ -470,6 +541,7 @@ class DualStreamTransformer(nn.Module):
             ]
         self.depth = depth
         self.cross_attn_every = max(1, int(cross_attn_every))
+        self.cross_attn_registers = int(cross_attn_registers)
 
         self.surface_blocks = nn.ModuleList(
             [
@@ -503,6 +575,7 @@ class DualStreamTransformer(nn.Module):
                 CrossAttentionBlock(
                     hidden_dim=hidden_dim,
                     num_heads=num_heads,
+                    num_registers=self.cross_attn_registers,
                     dropout=dropout,
                 )
                 for _ in range(num_bridges)
@@ -551,6 +624,7 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         use_dual_stream: bool = False,
         cross_attn_every: int = 2,
+        cross_attn_registers: int = 128,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -565,6 +639,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_max_wavelength = pos_max_wavelength
         self.use_dual_stream = bool(use_dual_stream)
         self.cross_attn_every = int(cross_attn_every)
+        self.cross_attn_registers = int(cross_attn_registers)
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -599,6 +674,7 @@ class SurfaceTransolver(nn.Module):
                 mlp_expansion_factor=mlp_ratio,
                 num_slices=slice_num,
                 cross_attn_every=self.cross_attn_every,
+                cross_attn_registers=self.cross_attn_registers,
                 dropout=dropout,
                 stochastic_depth_prob=stochastic_depth_prob,
             )
@@ -859,6 +935,7 @@ class Config:
     pos_max_wavelength: int = 1000
     use_dual_stream: bool = False
     cross_attn_every: int = 2
+    cross_attn_registers: int = 128
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -1044,6 +1121,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_max_wavelength=config.pos_max_wavelength,
         use_dual_stream=config.use_dual_stream,
         cross_attn_every=config.cross_attn_every,
+        cross_attn_registers=config.cross_attn_registers,
     )
 
 
@@ -1400,6 +1478,35 @@ def slope_source_metrics(metrics: dict[str, object]) -> dict[str, float]:
     )
     numeric = _numeric_metric_items(metrics)
     return {key: value for key, value in numeric.items() if any(word in key for word in keywords)}
+
+
+def collect_cross_attn_gate_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-bridge tanh(gate) magnitudes — sanity check that bridges open over time."""
+
+    base_model = getattr(model, "_orig_mod", model)
+    backbone = getattr(base_model, "backbone", None)
+    bridges = getattr(backbone, "cross_attn_bridges", None)
+    if bridges is None:
+        return {}
+    metrics: dict[str, float] = {}
+    abs_values: list[float] = []
+    for idx, bridge in enumerate(bridges):
+        for name, mod in (
+            ("vol_to_surf", getattr(bridge, "vol_to_surf", None)),
+            ("surf_to_vol", getattr(bridge, "surf_to_vol", None)),
+        ):
+            if mod is None:
+                continue
+            gate = getattr(mod, "gate", None)
+            if gate is None:
+                continue
+            value = float(gate.detach().tanh().item())
+            metrics[f"train/cross_attn/bridge_{idx}/{name}/tanh_gate"] = value
+            abs_values.append(abs(value))
+    if abs_values:
+        metrics["train/cross_attn/tanh_gate_abs_mean"] = sum(abs_values) / len(abs_values)
+        metrics["train/cross_attn/tanh_gate_abs_max"] = max(abs_values)
+    return metrics
 
 
 class MetricSlopeTracker:
@@ -2324,6 +2431,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
+            cross_attn_gate_metrics = (
+                collect_cross_attn_gate_metrics(model)
+                if config.use_dual_stream and should_log_weights
+                else {}
+            )
             train_log: dict[str, object] = {
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
@@ -2337,6 +2449,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
+                **cross_attn_gate_metrics,
             }
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
