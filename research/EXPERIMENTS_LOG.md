@@ -1,5 +1,70 @@
 # SENPAI Research Results
 
+## 2026-04-29 18:00 — PR #298 [fern]: Learned-FF warmup disambiguation (4-arm) — SENT BACK (warmup confound; A2/B2 requested)
+
+- Branch: `fern/learned-ff-warmup-disambiguation`
+- Hypothesis: Isolate whether the marginal learned-FF signal in PR #224 is real or a warmup confound. Arms A/B use identical warmup (full-epoch ~10,883 steps); Arm C used 500-step warmup. Side-by-side A vs B on the same warmup schedule will falsify or confirm the learned-FF benefit.
+
+| Arm | Config | W&B run | val_abupt | val_tau_y | val_tau_z | Notes |
+|---|---|---|---:|---:|---:|---|
+| A (sincos control) | sincos + ~10,883-step wu | (from PR body) | 16.68% | — | — | 4L/256d screening, 500-step wu inadvertently (later revised) |
+| B (learned-FF) | learned-FF + ~10,883-step wu | (from PR body) | 16.78% | — | — | 4L/256d screening |
+| C (learned-FF, 500wu) | learned-FF + 500-step wu | (from PR body) | lower | — | — | Short warmup gave apparent advantage |
+
+Baseline: 9.291% val_abupt (PR #222, merge bar)
+
+- **Advisor decision: SENT BACK — warmup confound identified.**
+- Arms A and B (both on full-epoch warmup) show no learned-FF benefit: A=16.68% vs B=16.78% — FF is marginally *worse*. However Arm C used only 500-step warmup versus Arms A/B's ~10,883-step warmup, making the comparison meaningless for isolating the FF effect.
+- **Key insight:** `--lr-warmup-steps 500` vs `--lr-warmup-steps ~10,883` is a major confounder. The shorter warmup allows the LR to reach peak sooner, compounding any architectural effect. Must hold warmup constant across arms.
+- **Follow-up (A2/B2):** Re-run Arms A (sincos) and B (learned-FF) both with `--lr-warmup-steps 500` on 4L/256d screening config to cleanly isolate the FF effect at short warmup. If A2≈B2, learned-FF provides no benefit. If B2<A2, the frequency-learned embedding has genuine value.
+- **Feedback posted to PR:** "Arms A/B showed no FF gain (16.68% vs 16.78%). Re-run A2/B2 both at --lr-warmup-steps 500 to confirm warmup confound."
+
+---
+
+## 2026-04-29 18:30 — PR #297 [haku]: Symmetry-aug Arm C on SOTA base — SENT BACK (single-GPU warmup mismatch)
+
+- Branch: `haku/symm-aug-arm-c-sota-base`
+- Hypothesis: Re-test Arm C (symm-include-both, bs=4, effective bs=8 with doubling) from PR #225 on the stable PR #222 SOTA base (Lion lr=1e-4, 8-GPU DDP, `--lr-warmup-steps 2720`). The −28% ep1 signal from PR #225 should survive to convergence on the stable base.
+
+| Run detail | Config | Issue |
+|---|---|---|
+| Submitted attempt | Single-GPU bs=2, `--lr-warmup-epochs 1` | `--lr-warmup-epochs` flag does NOT exist |
+| Effective warmup steps | ~43,532 steps (single-GPU bs=2: 43,532 steps/epoch) | Never reached target LR |
+| Max LR reached | ~6.4×10⁻⁵ | Budget exhausted at ~18,600 steps; target was 1×10⁻⁴ |
+
+Baseline: 9.291% val_abupt (PR #222, merge bar)
+
+- **Advisor decision: SENT BACK — single-GPU warmup mismatch (LR never reached target).**
+- The student ran on a single GPU with bs=2, giving ~43,532 steps per epoch. The warmup was set to `--lr-warmup-epochs 1` (flag doesn't exist) which likely triggered a default, and training ended at ~18,600 steps before the LR could ramp fully to 1e-4. The warmup regime was completely different from the SOTA base (8-GPU DDP, bs=4, ~2720 steps/epoch). Any conclusions from this run are confounded.
+- **Key insight:** `include-both` augmentation showed variance reduction σ≈0.03pp on the runs that did complete — this is a real finding even amid the warmup mismatch. The bilateral symmetry prior (doubling effective data) likely has genuine value.
+- **Fix required:** Use `--lr-warmup-steps 2000` (not `--lr-warmup-epochs 1`). This gives a ~2000-step warmup from lr=0 to lr=1e-4, compatible with whatever hardware the student runs on, without depending on epoch length.
+- **Feedback posted to PR:** "Re-run with `--lr-warmup-steps 2000` (fixes single-GPU warmup mismatch; LR never reached 1e-4 in first attempt)."
+
+---
+
+## 2026-04-29 19:00 — PR #288 [gilbert]: FFT spectral loss on wall-shear channels — CLOSED (geometrically meaningless + sub-threshold)
+
+- Branch: `gilbert/spectral-fourier-loss`
+- Hypothesis: Adding a spectral Fourier loss term on tau_y/z surface predictions (applied over node index) will penalize high-frequency noise in the predictions, improving smoothness and reducing the tau_y/z gap. Sweep: λ=0.0 (control) / 0.05 / 0.10 / 0.20.
+
+| Arm | λ | val_abupt (best) | Δ vs control | Notes |
+|---|---:|---:|---:|---|
+| A (control) | 0.00 | baseline | 0.00 pp | 4L/256d, lr=1e-4, wu=2000 |
+| B | 0.05 | ~baseline | ~0.00 pp | marginal |
+| C | 0.10 | baseline − 0.32pp | −0.32 pp | weak positive signal |
+| D | 0.20 | baseline + ~0.1pp | +0.10 pp | slight regression |
+
+Baseline: 9.291% val_abupt (PR #222, merge bar)
+
+- **Advisor decision: CLOSED — sub-threshold signal + geometrically invalid approach.**
+- **Signal:** λ=0.10 showed 0.32pp improvement on the 4L/256d screening config. However the practical significance bar is 0.5pp (below this, noise and cross-run variance can explain the delta). The signal is real but sub-threshold.
+- **Geometric invalidity:** FFT applied over the node *index* of an unstructured mesh has no physical meaning. DrivAerML surface nodes are not ordered in any spatially coherent way — the Fourier transform of node-indexed predictions measures nothing about spatial frequency content of the physical field. Adjacent indices may be on opposite sides of the vehicle.
+- **Root cause of sub-threshold result:** Because the FFT is geometrically meaningless, the model can easily game the spectral loss by reordering latent representations without improving actual physical smoothness. The loss provides an incorrect inductive bias.
+- **Pivot:** The correct spectral analysis tool for unstructured meshes is the **Graph Fourier Transform (GFT)** via the mesh Laplacian eigenvectors. GFT eigenvectors form a geometrically principled basis where low eigenvalues correspond to global, smooth spatial modes and high eigenvalues correspond to fine-grained local variation. PR #334 (gilbert) assigned with GFT implementation.
+- **PR #334 assigned:** `gilbert/mesh-laplacian-gft-spectral-loss`, 4-arm sweep λ=0.0/0.05/0.10/0.20, `--lr-warmup-steps 2000`, 4L/256d screening config. GFT uses symmetric normalized Laplacian L = I − D^{−1/2} A D^{−1/2} eigenvectors.
+
+---
+
 ## 2026-05-02 23:10 — PR #227 [stark]: Surface tangent-frame wall shear — CLOSED (pod never provisioned, RBAC blocker)
 
 - Branch: `stark/surface-tangent-frame` (deleted)
