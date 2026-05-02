@@ -1,5 +1,49 @@
 # SENPAI Research Results
 
+## 2026-04-29 20:10 — PR #243 [chihiro]: aux-rel-l2-weight sweep (0.1/0.5/1.0) — CLOSED (hypothesis not supported)
+
+- Branch: `chihiro/aux-rel-l2-weight-sweep` (deleted)
+- Hypothesis: Adding an auxiliary relative-L2 loss term (weight w∈{0.1, 0.5, 1.0}) would provide an orthogonal gradient signal complementing the main MSE losses, improving the primary metric.
+
+| Arm | aux-weight | lr | seed | Run ID | best_ep | val_abupt | test_abupt |
+|---|---:|---:|---:|---|---:|---:|---:|
+| A r3 | 0.1 | 3e-4 | 0 | `v4mdrc2h` | 4 | 10.897 | 12.017 |
+| B r4 | 0.5 | 2e-4 | 2 | `cpxk5wjl` | 4 | 12.170 | 13.327 |
+| C r3 | 1.0 | 2e-4 | 2 | `n1ewjfuy` | 4 | 11.104 | 12.253 |
+
+Baseline: 9.291% val_abupt (PR #222, merge bar)
+
+- **Result: CLOSED — hypothesis not supported.** Best arm (A r3, w=0.1) at val=10.897/test=12.017 sits ~17% above the 9.291 merge bar. None of the 3 weights beat the bar within 4 epochs.
+- **Confound:** Arm A ran at lr=3e-4 while Arms B/C were forced to lr=2e-4 because higher aux weights amplified the fleet-wide gradient-explosion mechanism (4/6 original arms diverged at lr=5e-4 or lr=3e-4 with w≥0.5). The sweep is not a clean fixed-lr ablation.
+- **Within lr=2e-4 cohort:** w=1.0 (Arm C: 11.10%) weakly beats w=0.5 (Arm B: 12.17%), providing a small positive signal for larger aux weight — but neither approached the bar.
+- **Why this fails:** The train/aux_rel_l2_loss signal is small (~0.02 magnitude), suggesting the model already implicitly optimizes a similar quantity through the main MSE losses. The aux term doesn't provide an orthogonal gradient direction.
+- **Stability flag (fleet-wide):** aux-rel-l2 weight ≥0.5 reliably amplifies gradient-explosion risk at lr≥3e-4. This is now documented for future aux-loss experiment designs — use lr≤2e-4 or keep w<0.5 when adding aux terms to the Lion/4L/512d stack.
+
+---
+
+## 2026-04-29 20:10 — PR #284 [alphonse]: 6L/512d depth+width scaling — SENT BACK (8-GPU re-run requested)
+
+- Branch: `alphonse/depth-scaling-6l-512d`
+- Hypothesis: Scaling the model to 6 layers with 512d hidden dim (18.52M params vs 4L/512d's 12.7M) on the Lion+warmup SOTA recipe will beat the 9.291% bar by leveraging depth sample-efficiency gains seen in prior rounds.
+
+| Epoch | val_abupt | surf_p | wall_shear | vol_p | W&B run |
+|---:|---:|---:|---:|---:|---|
+| 1 (warmup end) | 22.371% | 15.681% | 24.212% | 15.155% | `wsvdv49o` |
+| 2 | 11.723% | 7.216% | 12.515% | 9.343% | `wsvdv49o` |
+| 3 (best, also final) | 11.618% | 6.716% | 11.833% | 11.777% | `wsvdv49o` |
+| test (from ep-3 ckpt) | 12.571% | 6.440% | 11.669% | 17.771% | — |
+
+Baseline: 9.291% val_abupt (PR #222, merge bar)
+
+- **Result: SENT BACK — hypothesis alive but underpowered.** 12.571% test_abupt does not beat the 9.291 bar, but the per-epoch trajectory dominance over 4L/512d is dramatic: ep1 −45pp, ep2 −30pp, ep3 −7.7pp advantage. This is consistent with depth improving sample efficiency.
+- **Budget mismatch:** 4 GPUs at 89 min/epoch only fits 3 epochs in the 6h budget. PR #222 ran 9 epochs on 8 GPUs. At 4 GPUs the hypothesis is simply untested at adequate compute.
+- **Cosine T_max confound:** T_max=999 meant LR was held essentially flat for the entire 3-epoch run — no cosine cooldown. The ep2→ep3 plateau (−0.10pp) and vol_p regression (9.34%→11.78%) are likely artifacts of this rather than true convergence behavior.
+- **DDP infrastructure landed:** alphonse's DDP port (commit `bfbe975`) adds torchrun support, Lion optimizer, `--lr-warmup-epochs` flag, `DistributedSampler`, `all_reduce` for val metrics, and a DDP `run_id` broadcast fix (`broadcast_object_list` pattern). This is a significant infrastructure contribution that will be cherry-picked onto yi.
+- **Key bug fixed:** DDP `run_id` divergence — each rank previously generated its own `run.id` under `wandb.init(mode="disabled")`, causing non-rank-0 processes to crash at `torch.load` with `FileNotFoundError`. Fix: broadcast rank-0's `run.id` via `dist.broadcast_object_list` before computing `output_dir`.
+- **Re-run instructions:** 8 GPUs (ddp8 fleet), `torchrun --nproc_per_node=8`, effective bs=32 (matches PR #222), `--cosine-t-max-epochs 6`, 6 epochs to beat bar.
+
+---
+
 ## 2026-04-29 18:00 — PR #298 [fern]: Learned-FF warmup disambiguation (4-arm) — SENT BACK (warmup confound; A2/B2 requested)
 
 - Branch: `fern/learned-ff-warmup-disambiguation`

@@ -1,12 +1,15 @@
 # SENPAI Research State
-- 2026-04-29 (Round 19 — 17 WIP PRs on yi, 0 idle students; Round-17 reviews complete: #288 closed, #334 assigned, #297/#298 sent back)
+- 2026-04-29 (Round 20 — 16 WIP PRs on yi, 0 idle; Round-20 reviews complete: #243 closed, #284/#298 sent back, chihiro PR #335 assigned)
 
-## Latest Survey Pass (2026-04-29)
-- **Round 19 assignment**: PR #324 (stark) — per-channel target z-score standardization for tau_y/z gap. Two arms: z-score ON (--normalize-targets) vs control. AdamW + --lr-warmup-steps 2700.
-- **Advisor replies posted**: PR #322 (emma) — approved AdamW + lr-warmup-steps path; PR #316 (thorfinn) — approved bs=4 OOM deviation, set reporting expectations for dynamic-weight trajectory.
-- Round 18 PRs in progress: edward (#312 surface-tangent frame), kohaku (#313 multi-seed ensemble), norman (#314 coord jitter), senku (#315 mlp_ratio), thorfinn (#316 GradNorm dynamic weighting), violet (#317 Huber loss), emma (#322 surface-loss-weight=2.0).
-- Older PRs still in flight: fern (#298 learned-FF warmup disambiguation A2/B2), haku (#297 symm-aug Arm C re-run with --lr-warmup-steps 2000), gilbert (#334 GFT spectral loss, replaces closed #288), frieren (#286 TTA), alphonse (#284 6L/512d), nezuko (#262 WSD LR), tanjiro (#249 asinh), chihiro (#243 aux-rel-l2), askeladd (#208 sandwich-LN).
-- All 17 yi student pods active. Zero idle GPUs.
+## Latest Survey Pass (2026-04-29 Round 20)
+
+**Reviewed this round:**
+- **PR #243 (chihiro)**: CLOSED — aux-rel-l2 hypothesis not supported. All 3 weights (0.1/0.5/1.0) failed to beat 9.291 bar. Best val=10.897 (test=12.017). Aux signal magnitude too small (train/aux~0.02), amplified instability at higher weights. Confounded by forced lr=2e-4 at w≥0.5.
+- **PR #284 (alphonse)**: SENT BACK for 8-GPU re-run. 6L/512d showed dramatic per-epoch convergence gains (ep1 −45pp, ep2 −30pp vs 4L/512d) but budget cut at 3 epochs. Cosine T_max mismatch (T_max=999) caused LR to hold flat. DDP port + Lion + lr-warmup-epochs infrastructure now on branch. Re-run: ddp8 fleet, `--nproc_per_node=8`, `--cosine-t-max-epochs 6`.
+- **PR #298 (fern)**: SENT BACK with Arm A2 instructions. Arm A (sincos) = 16.68% vs Arm B (learned-FF) = 16.78% — no FF signal. Arm C's 14.47% win is entirely warmup confound (500 steps vs 10,883 steps). A2: sincos + 500-step warmup to confirm warmup as the driver.
+
+**New assignment:**
+- **PR #335 (chihiro)**: tau_y/z loss-weight curriculum (ramp W 1.0→2.0 or 1.0→3.0 over first 3 epochs). Tests whether static W=2 from step-0 hurts early-epoch learning vs easing into the upweighting. Also tests W_max=3 cleanly for the first time. 3-arm: curriculum-1to2, curriculum-1to3, static-W=2 control.
 
 ## Most Recent Research Direction from Human Researcher Team
 
@@ -49,26 +52,26 @@
 
 **Merge bar: 9.291% — any PR must beat this val_abupt to merge.**
 
-## Active WIP PRs (as of 2026-04-29 — 17 WIP PRs on yi)
+## Active WIP PRs (as of 2026-04-29 — 16 WIP PRs on yi)
 
 | PR | Student | Hypothesis | Round | Notes |
 |---|---|---|---|---|
-| #334 | gilbert | Mesh-Laplacian GFT spectral loss on surface predictions (4-arm: λ=0.0/0.05/0.10/0.20) | 17 | NEW — replaces closed #288; GFT uses geometrically principled eigenvectors of graph Laplacian vs arbitrary-index FFT |
+| #335 | chihiro | tau_y/z loss-weight curriculum (ramp 1.0→2.0/3.0 over 3 epochs, 3-arm) | 20 | NEW — tests whether easing into W_y/z upweighting beats static W=2 from step-0; also tests W_max=3 cleanly |
+| #334 | gilbert | Mesh-Laplacian GFT spectral loss on surface predictions (4-arm: λ=0.0/0.05/0.10/0.20) | 17 | GFT uses geometrically principled eigenvectors of graph Laplacian vs arbitrary-index FFT |
 | #324 | stark | Per-channel target z-score standardization (2-arm: zscore vs control) | 19 | |
 | #322 | emma | surface-loss-weight=2.0 on SOTA base (AdamW + lr-warmup-steps 2700) | 18 | |
 | #317 | violet | Huber loss for wall-shear (δ=0.5/1.0/2.0 sweep) | 18 | |
-| #316 | thorfinn | GradNorm dynamic per-task loss weighting for tau_y/z (bs=4, 2-arm) | 18 | |
-| #315 | senku | MLP expansion ratio sweep (mlp_ratio=2/4/8) | 18 | |
+| #316 | thorfinn | GradNorm dynamic per-task loss weighting for tau_y/z (bs=4, 2-arm) | 18 | stale WIP |
+| #315 | senku | MLP expansion ratio sweep (mlp_ratio=2/4/8) | 18 | stale WIP |
 | #314 | norman | Coordinate jitter augmentation sweep (σ=0.002/0.005/0.01) | 18 | |
-| #313 | kohaku | Multi-seed ensemble averaging (3-seed variance reduction) | 18 | |
-| #312 | edward | Surface-tangent frame wall-shear prediction | 18 | |
-| #298 | fern | Learned-FF warmup disambiguation (Arms A2/B2: sincos+500wu vs learned-FF+500wu) | 17 | Sent back: Arms A/B showed no FF gain (16.68% vs 16.78%). A2/B2 at 500-step warmup to confirm warmup confound |
-| #297 | haku | symm-aug Arm C (include-both bs=4) on stable lr=1e-4/wu=1ep base | 17 | Sent back: re-run with --lr-warmup-steps 2000 (fixes single-GPU warmup mismatch; LR never reached 1e-4 in first attempt) |
+| #313 | kohaku | Multi-seed ensemble averaging (3-seed variance reduction) | 18 | stale WIP |
+| #312 | edward | Surface-tangent frame wall-shear prediction | 18 | stale WIP |
+| #298 | fern | Learned-FF Arm A2: sincos + 500-step warmup (warmup-confound disambiguation) | 17 | Sent back with A2 instructions — if A2≈C (14.47%), warmup confound confirmed; if A2>C, FF has signal |
+| #297 | haku | symm-aug Arm C (include-both bs=4) on stable lr=1e-4/wu=2000-step base | 17 | Sent back with --lr-warmup-steps 2000 fix |
 | #286 | frieren | Bilateral-symmetry TTA (y→-y reflection at inference) | 15 | |
-| #284 | alphonse | 6L/512d depth+width scaling on Lion+warmup SOTA | 15 | |
+| #284 | alphonse | 6L/512d depth+width scaling — 8-GPU re-run on ddp8 fleet | 15 | Sent back: needs 8 GPUs + cosine-t-max-epochs 6; DDP/Lion port now on branch |
 | #262 | nezuko | Linear-warmdown LR (WSD-style) on 4L/512d SOTA | 15 | |
 | #249 | tanjiro | asinh normalization for wall-shear targets | 14 | |
-| #243 | chihiro | Sweep aux-rel-l2-weight (0.1/0.5/1.0) | 13 | |
 | #208 | askeladd | Sandwich-LN to unlock 8L/256d depth (stability fix) | 13 | |
 
 ## Key Architecture Configuration (PR #222 winning base config)
@@ -85,10 +88,15 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --model-heads 8 \
   --model-slices 128 \
   --ema-decay 0.999 \
-  --lr-warmup-steps 2720
+  --lr-warmup-steps 2720 \
+  --wallshear-y-weight 2.0 \
+  --wallshear-z-weight 2.0 \
+  --volume-loss-weight 2.0
 ```
 
-Note: Lion optimizer (lr=1e-4 with 1-epoch warmup) is now confirmed stable via PR #222. This resolves the earlier Lion instability observed at higher LRs. `--lr-warmup-steps 2720` ≈ 1 epoch at 8-GPU DDP / bs=4 (10,883 steps/epoch / 4 gradient-accumulation-equivalent). Use `--lr-warmup-steps` only — `--lr-warmup-epochs` does NOT exist in train.py.
+Note: Lion optimizer (lr=1e-4 with 1-epoch warmup) is now confirmed stable via PR #222. This resolves the earlier Lion instability observed at higher LRs. `--lr-warmup-steps 2720` ≈ 1 epoch at 8-GPU DDP / bs=4 (10,883 steps/epoch / 4 gradient-accumulation-equivalent). Use `--lr-warmup-steps` only — `--lr-warmup-epochs` does NOT exist in base yi train.py (alphonse's DDP branch has it; pending infra PR).
+
+**DDP infrastructure (alphonse PR #284 branch):** torchrun support, Lion optimizer, `--lr-warmup-epochs` flag, `DistributedSampler`, `all_reduce` for val metrics, DDP `run_id` broadcast fix — all on `alphonse/depth-scaling-6l-512d`. Pending cherry-pick to yi after PR #284 re-run.
 
 ## Fleet-Wide Stability Constraints
 
@@ -126,6 +134,7 @@ Note: Lion optimizer (lr=1e-4 with 1-epoch warmup) is now confirmed stable via P
 | #199 stark | Surface-tangent frame: pod never launched | Zero compute attached; reassigned as PR #227 |
 | #144 edward | β2=0.95 sweep: best 11.803 vs baseline 10.69 | β2 not a primary stability lever |
 | #288 gilbert | FFT spectral loss (λ=0.10 → 0.32pp gain) | Signal below 0.5pp practical bar; arbitrary node-index FFT is geometrically meaningless on unstructured mesh. Pivot to GFT (PR #334). |
+| #243 chihiro | aux-rel-l2-weight sweep (w=0.1/0.5/1.0) | Best val=10.897 (test=12.017) — 17% above bar. Aux signal magnitude tiny (~0.02); model already optimizes an equivalent quantity. Higher weights amplify instability. Confounded lr sweep. |
 | #45 | Mamba-2 SSM: diverged | — |
 | #15/#36 | SDF-gated volume attention: no improvement | — |
 | #7/#17 | Area-weighted loss: non-viable | — |
