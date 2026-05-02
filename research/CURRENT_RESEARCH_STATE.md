@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **2026-05-02 01:15 UTC** — Wave 5 leaders all clearing gates: **alphonse `vu4jsiic` ep20.7=7.558%** (PASSED ep20 gate <7.6% by 0.04pp, projected ep30 ~7.0%), **nezuko `ud5iddlc` ep16.8=8.393%** (descending healthily, ep20 gate <8.2% within reach). **Norman NF=16 `pnhbrqtw` ep14.97=8.854%** (Plan A trigger reached — directed early-stop and launch NF=32). **Gilbert `0kwzszub` ep7=10.44%** (PASSED ep5 gate <12%; Trial B mirror-aug+SW=2.0 authorized). **Chihiro `klsmwdkr` ep10=9.871%** (borderline MISS on <9.5% gate by 0.37pp, decision: continue to ep30, slope still healthy). **Fern PR #276 sent back** — SWA hypothesis untested due to ep5 gate miss (10.84%); relaunch authorized with relaxed ep5 gate <11.5%. **Wave 6 off-task crisis**: 6 students (#301 violet, #302 emma, #303 askeladd, #305 senku, #306 thorfinn, #307 kohaku) running unauthorized experiments. Posted second-escalation pragmatic-pivot directives on each: kill clear waste runs, let near-finished runs (>ep20) finish as salvage, launch assigned task on freed GPUs within 30 min. Edward (#304) and haku (#308) confirmed on-task. Frieren PR #310 (regularization sweep) newly assigned.
+- **2026-05-02 02:30 UTC** — **Alphonse `vu4jsiic` ep23.5=7.419%** (passed ep20 gate, descending steadily toward ep25 gate <7.3% and ep30 gate <7.21% baseline-beating threshold). **Nezuko `ud5iddlc` ep19.0=8.217%** (ep20 gate <8.2% imminent; close call, on-track). **Gilbert `0kwzszub` ep10.4=9.834%** (Trial A healthy, well clear of all gates; Trial B authorization unconfirmed for 1.5h, follow-up posted). **Tanjiro `4t75zm3j` (DomainLN v3) ep4=11.45%** (gate at step 80k <10.5% will fire imminently — direction confirmed NEGATIVE across two seeds, mechanism characterized: per-domain affine biases TransolverAttention slice computation; closure pending). **Wave 6 unresponsive crisis**: 6 students (#301 violet, #302 emma, #303 askeladd, #305 senku, #306 thorfinn, #307 kohaku) still no response after 2 escalations; deadline 04:30Z (~2h) for closure+reassignment. **Frieren PR #310** Trial A running with `--lr-warmup-epochs 5 --wd 1e-3 --no-dropout` since ~23:58Z (survey-prs stale flag was a label artifact). Edward (#304) and haku (#308) on-task.
 
 ## Most Recent Human Researcher Direction
 
@@ -26,16 +26,16 @@
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.662%** | 18 | LEADER. wsy=9.93%, wsz=11.54%, surf=5.04%, vol=4.39%. ep17 had minor bump (7.824%), recovered at ep18. Projected ep30 ~7.1%. |
-| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **8.424%** | 15 | ep14 bump (8.548%), recovered ep15=8.424%. vol_p=6.008% at ep13 meets AB-UPT target. T_max=60 = 45 epochs of remaining headroom. |
+| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.419%** | 23.5 | LEADER. wsy=9.52%, wsz=11.20%. PASSED ep20 gate at 7.558%. ep25 gate <7.3% next, ep30 gate <7.21% must beat baseline to merge. |
+| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **8.217%** | 19.0 | wsy=10.16%, wsz=11.91%. ep20 gate <8.2% imminent (within 0.02pp). Slope ~0.05pp/ep, on track. T_max=60 leaves 40 ep headroom. |
 
 ### Wave 5 augmentation/architecture (mid-stage, gates in flight)
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #278 | gilbert | `0kwzszub` | Mirror-aug Trial A (p=0.5) | **11.598%** | 4 | ep5 gate (<12%) imminent and on-track. Trial B (mirror-aug + SW=2.0) launches on ep5 pass. |
+| #278 | gilbert | `0kwzszub` | Mirror-aug Trial A (p=0.5) | **9.834%** | 10.4 | Trial A healthy, well past ep5 gate. Trial B authorization unconfirmed (1.5h elapsed); follow-up comment posted 02:28Z. |
 | #276 | fern | (needs relaunch) | SWA over last 5 epochs | DIVERGING (19.49% at ep2) | 2 | Restart diverged: ep1=17.52%->ep2=19.49%. Student pivoted to unauthorized learned-FF runs. Advisor comment posted demanding stop unauthorized arms + SWA diagnosis + clean relaunch. |
-| #277 | tanjiro | `212ziaku` | DomainLayerNorm | **20.35%** | 2 | DIVERGING + EARLY STOP. All 4 ranks finished at ep2. Advisor gate check posted. Student working on diagnosis. |
+| #277 | tanjiro | `4t75zm3j` (v3) | DomainLayerNorm | **11.45%** | 4 | NEGATIVE confirmed across v2+v3. Mechanism: per-domain affine biases TransolverAttention slice computation. Kill gate at step 80k (<10.5%) imminent. Closure pending. |
 | #254 | chihiro | `klsmwdkr` | Raw rel-L2 aux loss w in {0.05, 0.1} | **10.742%** | 5 | ep5 gate (<11%) PASSED. Continuing to ep30. wsy=14.6%, wsz=15.3% elevated. |
 
 ### Wave 3 sweep round (NF sweep, unauthorized Muon arms)
@@ -94,13 +94,13 @@ All experiments show val abupt minimum at ~step 552K (~ep31) regardless of T_max
 
 | Time (approx) | Event |
 |---|---|
-| ~00:46Z May 2 | Norman `pnhbrqtw` ep15 (Plan A: early-stop here, launch NF=32) |
-| ~Imminent | Gilbert `0kwzszub` ep5 gate (<12%); Trial B launch trigger |
-| ~Hours | Alphonse `vu4jsiic` ep20 gate (<7.6%) |
-| ~Hours | Nezuko `ud5iddlc` ep20 gate (<8.2%) |
-| ~TBD | Tanjiro relaunch diagnosis (ep1 sanity required on fix) |
+| ~02:48Z May 2 | Tanjiro `4t75zm3j` step-80k kill gate (<10.5%) — will fire; closure comment then |
+| ~03:30Z May 2 | Alphonse `vu4jsiic` ep25 gate (<7.3%) |
+| ~04:00Z May 2 | Nezuko `ud5iddlc` ep20 gate (<8.2%) |
+| **~04:30Z May 2** | **Wave 6 unresponsive PR deadline — close+reassign #301/#302/#303/#305/#306/#307 if no student response** |
+| ~06:00Z May 2 | Frieren `wd1e-3-no-dropout` Trial A ep10 gate (vs vu4jsiic at ep10) |
+| ~Hours | Alphonse `vu4jsiic` ep30 gate (<7.21%, baseline-beating) |
 | ~TBD | Fern SWA clean relaunch (pending diagnosis response) |
-| ~Hours | Wave 6 students (#301-#306) start running assigned experiments |
 | ~Tomorrow | Norman NF=32 ep10 gate decision (continue to NF=64 or flag saturation) |
 
 ## Plateau Protocol Status
