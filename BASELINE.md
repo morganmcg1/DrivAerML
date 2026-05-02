@@ -2,6 +2,46 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
+## Status: yi-baseline reset — PR #311 STRING-sep PE was a tay-branch result, NOT on yi (2026-05-02 19:00 UTC)
+
+**CRITICAL CORRECTION:** PR #311 (edward, STRING-separable learnable PE, val_abupt 7.546%
+on W&B run `gcwx9yaa`) was implemented and merged into the **`tay`** branch, not `yi`.
+The `yi` branch `train.py` only has the original fixed-omega `ContinuousSincosEmbed`.
+The 7.546% number was an aspirational target lifted from a different codebase; it is
+NOT a result reproduced on the current yi stack.
+
+**True yi-architecture baseline (until STRING-sep PE lands here):** PR #309 thorfinn
+grad-clip=0.5 — `val_abupt 9.039%`. The merge bar for "beats yi as it actually exists
+today" is therefore **9.039%**, not 7.546%.
+
+**Path forward:** PR #420 (fern, `fern/string-sep-pe-yi`) ports STRING-sep PE to yi
+with DDP cherry-picks + `--learnable-pe` flag (commit `6f2e991`). When that PR lands
+and reproduces ≤7.546%, the 7.546% bar resumes. Until then, the live merge bar on
+yi is **9.039%** for any yi-codebase architectural change. PRs whose sole comparison
+is "didn't beat 7.546%" should not be closed for that reason alone — they need to be
+re-evaluated against 9.039%.
+
+Compounding-wins entries 1–11 below remain valid (all merged on yi). Entry 12 (PR #311)
+is **historical** and is retained only as the target-to-port via PR #420; it is not
+present in yi `train.py` and should not be cited as a yi merge until #420 reproduces it.
+
+## Mechanism flag landed: PR #317 violet (Huber wall-shear loss) — 2026-04-29
+
+PR #317 (violet, `--wallshear-huber-delta`) adds opt-in Huber loss on standardized
+residuals for surface τ channels (1..3 = τ_x/y/z). Default delta=0.0 → exact MSE,
+zero behavior change. The mechanism was validated in a 2-seed parity comparison:
+mean Δ val_abupt = −1.45pp (ctrl 37.15% → d10 35.70%), both seeds agree (−1.15pp and
+−1.75pp), per-channel gains match heavy-tail hypothesis (ws_z −3.39pp, ws_x −3.16pp,
+ws_y −0.57pp). Volume backbone uncontaminated (vol_loss ~0.014–0.016 flat).
+
+Note: Absolute merge bar (7.546% from PR #311) was not contested — paired comparison
+ran under 1-epoch tangential-loss conditions (SENPAI_TIMEOUT_MINUTES=360 limits to
+1 epoch on single-GPU). The flag is available for composition with asinh (#374) and
+full-budget DDP runs. W&B runs: ctrl `g1s45tbt`/`6649fm5e`, d10 `52urviip`/`zni9if9p`.
+
+**Active merge bar on yi as it actually exists today: val_abupt 9.039% (PR #309 thorfinn).**
+**Aspirational target once PR #420 lands STRING-sep PE on yi: val_abupt 7.546% (PR #311 tay run `gcwx9yaa`).**
+
 ## Status: edward PR #311 wins — new baseline 2026-05-02
 
 PR #311 (edward, STRING-separable learnable position encoding) reduced
@@ -43,7 +83,8 @@ previous SoTA architecture.
 9. PR #183 fern — pos_max_wavelength=1000 (omega-bank sincos positional encoding)
 10. PR #222 fern — lr_warmup_epochs=1 (Lion stability, 4L/512d architecture)
 11. PR #309 thorfinn — gradient clipping max_norm=0.5 (val 9.039%)
-12. PR #311 edward — STRING-separable learnable position encoding (val 7.546%, test 8.771%)
+12. ~~PR #311 edward — STRING-separable learnable position encoding (val 7.546%, test 8.771%)~~ **NOT ON YI: PR #311 merged to `tay`, not `yi`. Yi `train.py` still has fixed-omega `ContinuousSincosEmbed`. Port via PR #420 (fern) is in flight.**
+13. PR #355 emma — DDP infrastructure restored (cherry-pick bfbe975+1a8f7b7: init_process_group, DistributedSampler, DDP wrap, Lion optimizer wiring; unblocks full fleet 4/8-GPU torchrun; metrics bar unchanged)
 
 **New recommended base config (PR #222 winning arm):**
 
@@ -174,7 +215,8 @@ PR #309 (thorfinn, grad-clip=0.5, val 9.039%), PR #222 (fern, lr_warmup_epochs=1
 Additional code wins in history: PRs #98 (emma weight-decay), #106 (thorfinn yw2.5-zw2.5),
 #97 (edward slices192), #63 (askeladd sq-rel), #104 (senku ema9997), #102 (haku dropout),
 #8 (frieren FiLM), #169 (thorfinn infra), #183 (fern omega-bank).
-**Merge bar: val_abupt 7.546% — any PR must beat this to merge.**
+**Merge bar: val_abupt 9.039% on the yi codebase as it exists today (PR #309 thorfinn).**
+**Aspirational target once PR #420 lands STRING-sep PE: val_abupt 7.546% (PR #311 tay run `gcwx9yaa`, not currently in yi).**
 
 **Distance from AB-UPT targets (test, multiple of target):**
 

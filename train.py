@@ -25,11 +25,13 @@ from pathlib import Path
 from typing import Iterable
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 import yaml
-from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
 
 from data import (
@@ -838,6 +840,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_huber_delta: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -877,7 +880,9 @@ class Config:
     debug: bool = False
     seed: int = -1
     lr_warmup_steps: int = 0
+    lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    optimizer: str = "adamw"
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -974,6 +979,10 @@ def resolve_num_workers(config: Config) -> int:
 
 def make_loaders(
     config: Config,
+    *,
+    is_distributed: bool = False,
+    world_size: int = 1,
+    rank: int = 0,
 ) -> tuple[DataLoader, dict[str, DataLoader], dict[str, DataLoader], dict[str, torch.Tensor]]:
     train_ds, val_splits, test_splits, stats = load_data(
         manifest_path=config.manifest,
@@ -993,12 +1002,23 @@ def make_loaders(
     if num_workers > 0:
         loader_kwargs["persistent_workers"] = config.persistent_workers
         loader_kwargs["prefetch_factor"] = config.prefetch_factor
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=config.batch_size,
-        shuffle=True,
-        **loader_kwargs,
-    )
+    if is_distributed:
+        train_sampler = DistributedSampler(
+            train_ds, num_replicas=world_size, rank=rank, shuffle=True, drop_last=False
+        )
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=config.batch_size,
+            sampler=train_sampler,
+            **loader_kwargs,
+        )
+    else:
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=config.batch_size,
+            shuffle=True,
+            **loader_kwargs,
+        )
     val_loaders = {
         name: DataLoader(ds, batch_size=config.batch_size, shuffle=False, **loader_kwargs)
         for name, ds in val_splits.items()
@@ -1544,23 +1564,59 @@ def weighted_masked_mse_per_channel(
     mask: torch.Tensor,
     *,
     channel_weights: Iterable[float],
+    wallshear_huber_delta: float = 0.0,
 ) -> tuple[torch.Tensor, list[float]]:
-    """Per-channel weighted masked MSE for surface predictions.
+    """Per-channel weighted masked loss for surface predictions.
 
     pred, target: [B, N, C]. mask: [B, N] bool.
-    Returns the weighted scalar loss plus an unweighted per-channel mean for
-    diagnostic logging. With all weights == 1 this is numerically equivalent
-    to F.mse_loss(pred[mask], target[mask]).
+    With ``wallshear_huber_delta == 0.0`` (default), this is per-channel weighted
+    masked MSE — numerically equivalent to F.mse_loss(pred[mask], target[mask])
+    when all weights == 1.
+
+    With ``wallshear_huber_delta > 0.0``, channels 1..3 (tau_x, tau_y, tau_z)
+    use a Huber on the standardized residual ``r = pred - target`` (targets are
+    already standardized by ``TargetTransform`` upstream, so r is in σ-units),
+    rescaled so that ``delta -> infty`` recovers MSE:
+        loss_elem = r^2                          if |r| <  delta
+                  = 2 * delta * (|r| - delta/2)  if |r| >= delta
+    Channel 0 (cp / surface_pressure) keeps the standard MSE loss.
+
+    Note: PR #317's spec used a *relative* Huber ``(pred-target)/(|target|+eps)``,
+    but standardized targets cross zero frequently, so dividing by ``|target|``
+    blows up the gradient (pre-clip grad-norms 50–300× the MSE control) and
+    poisons the rest of the network through the shared backbone. Plain Huber on
+    standardized residuals preserves the spirit (bounded gradient for
+    outlier-magnitude residuals) without the divide-by-zero issue, and the 2x
+    rescaling keeps the L2 regime matched to the MSE control for clean
+    interpretation of delta. Per-axis diagnostic loss keys remain MSE-based for
+    cross-run comparability.
     """
     weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
     if not bool(mask.any()):
         per_axis = [0.0] * int(weights.numel())
         return pred.sum() * 0.0, per_axis
-    diff_sq = (pred - target).pow(2)  # [B, N, C]
+    diff = pred - target  # [B, N, C]
+    diff_sq = diff.pow(2)
     mask_f = mask.unsqueeze(-1).to(pred.dtype)
     valid = mask_f.sum().clamp_min(1)
     n_channels = diff_sq.shape[-1]
-    weighted_diff = diff_sq * weights.view(1, 1, -1)
+
+    if wallshear_huber_delta > 0.0 and n_channels >= 4:
+        abs_err = diff.abs()
+        delta_t = pred.new_full((), float(wallshear_huber_delta))
+        huber_elem = torch.where(
+            abs_err < delta_t,
+            diff_sq,
+            2.0 * delta_t * (abs_err - 0.5 * delta_t),
+        )
+        # cp keeps MSE; tau channels use plain Huber on standardized residual.
+        loss_elem = torch.cat([diff_sq[..., :1], huber_elem[..., 1:4]], dim=-1)
+        if n_channels > 4:
+            loss_elem = torch.cat([loss_elem, diff_sq[..., 4:]], dim=-1)
+    else:
+        loss_elem = diff_sq
+
+    weighted_diff = loss_elem * weights.view(1, 1, -1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
@@ -1592,6 +1648,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    wallshear_huber_delta: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1636,6 +1693,7 @@ def train_loss(
             surface_target_used,
             batch.surface_mask,
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+            wallshear_huber_delta=wallshear_huber_delta,
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -1959,22 +2017,43 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
 
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    is_distributed = world_size > 1
+    is_main = rank == 0
+    if is_distributed:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
     if config.seed >= 0:
         import random
 
         import numpy as np
 
-        random.seed(config.seed)
-        np.random.seed(config.seed)
-        torch.manual_seed(config.seed)
-        torch.cuda.manual_seed_all(config.seed)
+        random.seed(config.seed + rank)
+        np.random.seed(config.seed + rank)
+        torch.manual_seed(config.seed + rank)
+        torch.cuda.manual_seed_all(config.seed + rank)
     kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
     max_epochs = min(config.epochs, 3) if config.debug else config.epochs
     timeout_minutes = float(os.environ.get("SENPAI_TIMEOUT_MINUTES", "30"))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}" + (" [DEBUG]" if config.debug else ""))
+    if is_distributed:
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if is_main:
+        print(
+            f"Device: {device}"
+            + (" [DEBUG]" if config.debug else "")
+            + (f" [DDP world_size={world_size}]" if is_distributed else "")
+        )
 
-    train_loader, val_loaders, test_loaders, stats = make_loaders(config)
+    train_loader, val_loaders, test_loaders, stats = make_loaders(
+        config,
+        is_distributed=is_distributed,
+        world_size=world_size,
+        rank=rank,
+    )
     transform = TargetTransform(
         surface_y_mean=stats["surface_y_mean"].to(device),
         surface_y_std=stats["surface_y_std"].to(device),
@@ -1986,13 +2065,51 @@ def main(argv: Iterable[str] | None = None) -> None:
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
-    print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+    if is_main:
+        print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    if is_distributed:
+        train_model = DistributedDataParallel(
+            model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
+    else:
+        train_model = model
+
+    optimizer_name = config.optimizer.lower()
+    if optimizer_name == "adamw":
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        )
+    elif optimizer_name == "lion":
+        from lion_pytorch import Lion
+
+        optimizer = Lion(
+            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        )
+    else:
+        raise ValueError(
+            f"Unknown optimizer '{config.optimizer}'. Supported: 'adamw', 'lion'."
+        )
+    if is_main:
+        print(
+            f"Optimizer: {optimizer.__class__.__name__} "
+            f"lr={config.lr} wd={config.weight_decay}"
+        )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
-    if kill_thresholds:
+    effective_warmup_steps = config.lr_warmup_steps
+    if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
+        effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
+    if is_main and effective_warmup_steps > 0:
+        print(
+            f"LR warmup: {effective_warmup_steps} steps "
+            f"(start_lr={config.lr_warmup_start_lr} -> peak_lr={config.lr})"
+        )
+    if is_main and kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
     val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -2014,8 +2131,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             "surface_targets": SURFACE_TARGET_NAMES,
             "volume_targets": VOLUME_TARGET_NAMES,
             "total_estimated_steps": total_estimated_steps,
+            "ddp_world_size": world_size,
+            "ddp_effective_batch_size": config.batch_size * world_size,
+            "lr_warmup_steps_effective": effective_warmup_steps,
         },
-        mode=os.environ.get("WANDB_MODE", "online"),
+        mode=(
+            os.environ.get("WANDB_MODE", "online") if is_main else "disabled"
+        ),
     )
     wandb.define_metric("global_step")
     wandb.define_metric("train/*", step_metric="global_step")
@@ -2047,12 +2169,22 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
 
-    output_dir = Path(config.output_dir) / f"run-{run.id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if is_distributed:
+        run_id_holder = [run.id if is_main else None]
+        dist.broadcast_object_list(run_id_holder, src=0)
+        shared_run_id = run_id_holder[0]
+    else:
+        shared_run_id = run.id
+    output_dir = Path(config.output_dir) / f"run-{shared_run_id}"
+    if is_main:
+        output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / "checkpoint.pt"
     config_path = output_dir / "config.yaml"
-    with config_path.open("w") as f:
-        yaml.safe_dump(asdict(config), f)
+    if is_main:
+        with config_path.open("w") as f:
+            yaml.safe_dump(asdict(config), f)
+    if is_distributed:
+        dist.barrier()
 
     best_val = float("inf")
     best_metrics: dict[str, float] = {}
@@ -2066,19 +2198,27 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
-            print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
+            if is_main:
+                print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
             break
 
+        if is_distributed and isinstance(train_loader.sampler, DistributedSampler):
+            train_loader.sampler.set_epoch(epoch)
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
         t0 = time.time()
-        model.train()
+        train_model.train()
         train_loss_sum = 0.0
         n_batches = 0
 
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+        train_iter = train_loader
+        if is_main:
+            train_iter = tqdm(
+                train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
+            )
+        for batch in train_iter:
             loss, batch_loss_metrics = train_loss(
-                model,
+                train_model,
                 batch,
                 transform,
                 device,
@@ -2089,6 +2229,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                wallshear_huber_delta=config.wallshear_huber_delta,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2151,14 +2292,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 global_step += 1
                 continue
-            if config.lr_warmup_steps > 0:
-                if global_step < config.lr_warmup_steps:
+            if effective_warmup_steps > 0:
+                if global_step < effective_warmup_steps:
                     warmup_lr = config.lr_warmup_start_lr + (
                         config.lr - config.lr_warmup_start_lr
-                    ) * (global_step / config.lr_warmup_steps)
+                    ) * (global_step / effective_warmup_steps)
                     for pg in optimizer.param_groups:
                         pg["lr"] = warmup_lr
-                elif global_step == config.lr_warmup_steps:
+                elif global_step == effective_warmup_steps:
                     for pg in optimizer.param_groups:
                         pg["lr"] = config.lr
             optimizer.step()
@@ -2267,12 +2408,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
             wandb.log(log_metrics)
-            print(
-                f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
-                f"train_loss={epoch_train_loss:.5f}"
-            )
+            if is_main:
+                print(
+                    f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                    f"train_loss={epoch_train_loss:.5f}"
+                )
+                if early_stop_reason is not None:
+                    print(early_stop_reason)
             if early_stop_reason is not None:
-                print(early_stop_reason)
                 break
             continue
 
@@ -2327,38 +2470,42 @@ def main(argv: Iterable[str] | None = None) -> None:
         if improved:
             best_val = primary_val
             best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
-            save_model = model
-            if ema is not None:
-                ema.store(model)
-                ema.copy_to(model)
-                save_model = model
-            torch.save(
-                {
-                    "model": save_model.state_dict(),
-                    "config": asdict(config),
-                    "epoch": epoch + 1,
-                    "val_metrics": val_metrics,
-                },
-                model_path,
-            )
-            if ema is not None:
-                ema.restore(model)
+            if is_main:
+                if ema is not None:
+                    ema.store(model)
+                    ema.copy_to(model)
+                torch.save(
+                    {
+                        "model": model.state_dict(),
+                        "config": asdict(config),
+                        "epoch": epoch + 1,
+                        "val_metrics": val_metrics,
+                    },
+                    model_path,
+                )
+                if ema is not None:
+                    ema.restore(model)
+        if is_distributed:
+            dist.barrier()
 
         tag = " *" if improved else ""
-        print(
-            f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
-            f"train_loss={epoch_train_loss:.5f} "
-            f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
-        )
-        print_metrics("val_surface", val_metrics["val_surface"])
+        if is_main:
+            print(
+                f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                f"train_loss={epoch_train_loss:.5f} "
+                f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
+            )
+            print_metrics("val_surface", val_metrics["val_surface"])
+            if early_stop_reason is not None:
+                print(early_stop_reason)
         if early_stop_reason is not None:
-            print(early_stop_reason)
             break
         if timeout_hit:
             break
 
     total_minutes = (time.time() - train_start) / 60.0
-    print(f"\nTraining done in {total_minutes:.1f} min")
+    if is_main:
+        print(f"\nTraining done in {total_minutes:.1f} min")
 
     if early_stop_reason is not None:
         wandb.summary.update(
@@ -2370,19 +2517,27 @@ def main(argv: Iterable[str] | None = None) -> None:
             }
         )
         wandb.finish()
+        if is_distributed:
+            dist.destroy_process_group()
         return
 
     if not best_metrics:
-        print("No validation checkpoint was saved.")
+        if is_main:
+            print("No validation checkpoint was saved.")
         wandb.finish()
+        if is_distributed:
+            dist.destroy_process_group()
         return
 
+    if is_distributed:
+        dist.barrier()
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model"])
-    print(
-        f"Best val: epoch {int(best_metrics['epoch'])}, "
-        f"abupt_axis_mean_rel_l2_pct={best_metrics['abupt_axis_mean_rel_l2_pct']:.4f}"
-    )
+    if is_main:
+        print(
+            f"Best val: epoch {int(best_metrics['epoch'])}, "
+            f"abupt_axis_mean_rel_l2_pct={best_metrics['abupt_axis_mean_rel_l2_pct']:.4f}"
+        )
     wandb.summary.update(
         {
             "best_epoch": int(best_metrics["epoch"]),
@@ -2426,7 +2581,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
     wandb.log(full_val_log)
     wandb.summary.update(_numeric_metric_items(full_val_log))
-    print_metrics("full_val", full_val_metrics["val_surface"])
+    if is_main:
+        print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
         name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
@@ -2460,18 +2616,22 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
     wandb.log(test_log)
     wandb.summary.update(_numeric_metric_items(test_log))
-    print_metrics("test_surface", test_metrics["test_surface"])
+    if is_main:
+        print_metrics("test_surface", test_metrics["test_surface"])
 
-    log_model_artifact(
-        run=run,
-        model_path=model_path,
-        config_path=config_path,
-        config=config,
-        best_metrics=best_metrics,
-        test_metrics=test_metrics,
-        n_params=n_params,
-    )
+    if is_main:
+        log_model_artifact(
+            run=run,
+            model_path=model_path,
+            config_path=config_path,
+            config=config,
+            best_metrics=best_metrics,
+            test_metrics=test_metrics,
+            n_params=n_params,
+        )
     wandb.finish()
+    if is_distributed:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
