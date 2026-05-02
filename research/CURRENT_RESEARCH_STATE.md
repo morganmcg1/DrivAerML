@@ -41,6 +41,7 @@
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
+| #450 | thorfinn | Lion weight-decay sweep (1e-4/5e-4/2e-3/5e-3) | NEW — just assigned |
 | #449 | norman | Log-x coordinate compression for isotropic sincos PE | NEW — just assigned |
 | #440 | violet | Huber δ sweep without tangential loss (pure MSE baseline) | Nudged — awaiting launch |
 | #436 | noam | Slices sweep 64/128/192 on STRING-sep stack | Nudged — awaiting launch |
