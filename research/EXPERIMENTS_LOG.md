@@ -1,5 +1,40 @@
 # SENPAI Research Results
 
+## 2026-04-29 22:00 — PR #429: frieren 1-cycle LR (OneCycleLR) vs cosine baseline — CLOSED (STRUCTURALLY COMPROMISED SCREEN)
+
+- Branch: `frieren/onecycle-lr-schedule` (deleted)
+- Hypothesis: OneCycleLR (`pct_start=0.3`, `div_factor=25`, `final_div_factor=1e4`) will improve convergence speed and final metric vs plain CosineAnnealingLR. Implements `--lr-schedule onecycle` flag.
+
+| Arm | Schedule | val_abupt @ step ~12.7K | test_abupt | W&B run |
+|-----|----------|------------------------:|-----------:|---------|
+| A | Cosine ctrl (T_max=1) | 22.309% | 22.992% | `7zttsybm` |
+| B | OneCycleLR | 25.261% (killed by threshold) | N/A (killed) | `5xwh5ib3` |
+
+- W&B group: `frieren-r26-onecycle-lr-v1`. Single-GPU AdamW lr=1e-4, 4L/512d, 65k pts, `--epochs 1`. Both arms hit budget cap at ~57% of epoch 1.
+- **Root cause of compromised screen:** Cosine with `T_max=1` at epoch granularity never decays within a run cut at 57% of epoch 1 — it sat at `max_lr` post-warmup throughout. OneCycleLR invested steps 0–6530 (30%) ramping from `4e-6` to `1e-4` while cosine was already at `max_lr`. At step ~12.7K OneCycleLR was at 41% of the anneal phase (LR≈`6.4e-5`) while cosine was still at `1e-4`. A higher constant LR unsurprisingly wins at a 57%-of-epoch-1 snapshot.
+- **Infra note:** `train/lr` per-step logging is NOT implemented in yi `train.py` — frieren flagged this (added to follow-up via PR #474).
+- **Decision:** Closed. OneCycleLR not definitively tested. A fair test requires DDP (multiple epoch boundaries so cosine can decay) and per-step cosine scheduling. `pct_start` should be reduced to 0.05–0.10 for a future retry. Kill threshold also needs schedule-aware gating for OneCycleLR.
+
+---
+
+## 2026-04-29 22:00 — PR #430: emma cosine EMA decay ramp (0.99→0.9999 vs fixed 0.999) — SENT BACK FOR DDP RERUN
+
+- Branch: `emma/ema-decay-ramp` (still open)
+- Hypothesis: Cosine-ramped EMA decay (start=0.99 → end=0.9999) will outperform fixed EMA=0.999 by adapting faster in early training and smoothing more in late training.
+
+| Arm | EMA config | val_abupt @ step ~12.5K | test_abupt | W&B run |
+|-----|------------|------------------------:|-----------:|---------|
+| A | Fixed 0.999 | 31.68% | N/A (killed) | `xsqiwxmw` |
+| B | Ramp 0.99→0.9999 | **29.83%** | N/A (killed) | `hwgrehby` |
+| C | Ramp 0.995→0.9999 | 30.19% | N/A (killed) | `xbda1p6j` |
+
+- W&B group: `emma-r27-ema-decay-ramp-v1`. Single-GPU AdamW, 4L/512d, 65k pts. Kill threshold `<25` fired after the single forced-validation at ~57% of epoch 1.
+- **Root cause of null result:** Ramp horizon = `max_epochs * steps_per_epoch` ≈ 1.09M steps. Arms B/C only reached 12.5K steps (~1.15% of schedule). The cosine ramp advanced by <0.003 — arms B and C effectively ran as fixed lower-decay arms (0.99 and 0.995 respectively). The cosine ramp was never actually exercised.
+- **What we did learn:** At step 12.5K (early training, ~57% epoch 1), lower fixed EMA (0.99) tracks the rapidly-improving model better than 0.999 by 1.85pp. Uniform across all channels. Signal is real but reflects "lower is better early" not "ramp is better end-to-end."
+- **Decision:** Sent back to emma for 8-GPU DDP rerun with: 4 arms (A=fixed 0.999, B=fixed 0.99, C=ramp 0.99→0.9999, D=ramp 0.995→0.9999), kill threshold removed, ramp horizon anchored to actual training duration, and DDP to produce multiple epoch boundaries so the ramp is exercised.
+
+---
+
 ## 2026-05-02 19:00 — PR #374: thorfinn asinh(tau/scale) target normalization — CLOSED NEGATIVE
 
 - Branch: `thorfinn/asinh-tau-target-normalization` (deleted)
