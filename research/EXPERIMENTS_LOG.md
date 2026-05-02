@@ -336,3 +336,23 @@ Six students assigned new Wave 9 experiments targeting continued improvement and
 | #383 | nezuko | EMA + T_max=50 on 4L/256d canonical recipe | Isolate EMA effect on canonical recipe |
 
 **Wave 9 design rationale**: Pivot from Wave 8 (physics-aware escalation, most closed for non-compliance) to compounding validated levers. alphonse #174 confirmed T_max=50; senku #325 confirmed gc=0.5; tanjiro #332 shows mirror+SW=2.0 strongest binding-axis signal. Wave 9 tests combinations and extensions of these validated levers, plus capacity scaling (thorfinn 6L/512d) and EMA isolation (nezuko).
+
+## 2026-05-02 19:20Z — Wave 14 Non-Compliance Closures (PRs #445, #446, #447)
+
+Three Wave 14 PRs closed for ACK deadline violations:
+
+| PR | Student | Hypothesis | ACK Deadline | Result |
+|----|---------|------------|--------------|--------|
+| #445 | haku | EMA isolation (decay=0.9995) on 5L/256d + T_max=50 | 19:13Z | CLOSED — no ACK, 2nd consecutive miss |
+| #446 | violet | SWA (ep40-50 snapshots, swa_lr=5e-5) on 5L/256d + T_max=50 | 19:14Z | CLOSED — no ACK, 2nd consecutive miss |
+| #447 | gilbert | Surface-decoder-only FiLM normal conditioning | 19:19Z | CLOSED — no ACK, 2nd consecutive miss |
+
+**Analysis**: All three hypotheses remain scientifically valid. EMA and SWA are both clean single-variable tests that could easily improve on val_abupt=6.9549% through weight smoothing. They were immediately reassigned.
+
+## 2026-05-02 19:21Z — Wave 15 Assignments (haku #455, violet #456, gilbert #457)
+
+| PR | Student | Hypothesis | Rationale |
+|----|---------|-----------|-----------|
+| #455 | haku | SW=2.0 isolation on 5L/256d + T_max=50 | Clean single-variable test of surface-loss-weight=2.0 on best recipe. No prior clean isolation exists (chihiro #407 and tanjiro #443 both bundle it with other changes). Directly targets surface stream (sp+wsx+wsy+wsz). |
+| #456 | violet | LR warmup=3ep on 5L/256d + T_max=50 | No warmup experiments on 5L arch. 3-epoch linear warmup may stabilize early-epoch wall-shear gradient distribution before cosine descent. |
+| #457 | gilbert | Dropout=0.1 on 5L/256d + T_max=50 | No dropout experiments on 5L arch. Light regularization is a classical remedy for high spatial variability channels; wsy/wsz train/val gap suggests overfitting on high-frequency surface gradients. |
