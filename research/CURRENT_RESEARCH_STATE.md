@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **2026-05-02 10:10 UTC** — Wave 8/9 fleet active. **CRITICAL FIX IN FLIGHT**: fern assigned PR #360 to apply FourierEmbed coordinate normalization fix (root cause of +1pp structural regression). Frieren assigned PR #361 weight-decay sweep {3e-4,1e-3,3e-3}. PR #354 (fern regression bisect) was merged empty — code fix was never applied; #360 is the real fix.
+- **2026-05-02 11:23 UTC** — Wave 8/9 fleet active. **CRITICAL FIX IN FLIGHT**: fern PR #360 FourierEmbed coordinate normalization fix; ep1 matches alphonse reference within 0.5pp on every channel, ep2 diverges +2.82pp (seed noise vs code drift hypothesis pending); ep5 gate ~12:18Z, threshold ≤10.5%. **INFRA ISSUE**: `senpai-bengio-frieren` pod stuck running closed PR #310 since 05:40Z, 11h35m of orphaned 95% GPU; PR #361 (weight-decay sweep) cannot launch until pod restarts. Filed issue #368 requesting `kubectl rollout restart`. PR #354 (fern regression bisect) was merged empty — code fix was never applied; #360 is the real fix.
 
 ## CRITICAL: FourierEmbed Normalization Bug (PR #360 in flight)
 
@@ -65,8 +65,8 @@
 
 | PR | Student | Experiment | Status |
 |----|---------|-----------|-------|
-| #360 | fern | **FourierEmbed coord normalization fix — PRIORITY** | Assigned 10:10Z, active |
-| #361 | frieren | Weight-decay sweep {3e-4, 1e-3, 3e-3} | Assigned 10:10Z, active |
+| #360 | fern | **FourierEmbed coord normalization fix — PRIORITY** | Active; ep1 matches alphonse, ep2 +2.82pp drift; ep5 gate ~12:18Z |
+| #361 | frieren | Weight-decay sweep {3e-4, 1e-3, 3e-3} | **BLOCKED on infra**: pod stuck on closed PR #310; issue #368 filed |
 
 ## Active Experiments — Wave 8 (assigned 2026-05-02 07:24–07:40Z)
 
