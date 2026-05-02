@@ -233,6 +233,115 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class CrossAttentionBlock(nn.Module):
+    """Lightweight cross-attention bridge between surface and volume streams.
+
+    Each stream uses standard multi-head attention to read from the other
+    stream's hidden states. Output is gated by a learnable `tanh(g)` scalar
+    initialised at 0 so cross-stream contribution starts at zero and the
+    gradient signal can gradually open the bridge.
+    """
+
+    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.0):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.norm_surf_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_vol_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.surf_to_vol = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.norm_vol_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_surf_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.vol_to_surf = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        # Zero-init residual gates -> tanh(0)=0 -> cross-attn contributes 0 at init.
+        self.surf_gate = nn.Parameter(torch.zeros(1))
+        self.vol_gate = nn.Parameter(torch.zeros(1))
+
+    def _has_tokens(self, mask: torch.Tensor) -> bool:
+        return mask.shape[1] > 0 and bool(mask.any())
+
+    def forward(
+        self,
+        surf: torch.Tensor,
+        vol: torch.Tensor,
+        surf_mask: torch.Tensor,
+        vol_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        surf_has = self._has_tokens(surf_mask)
+        vol_has = self._has_tokens(vol_mask)
+
+        # Without keys/values on one side, attention is undefined — skip the
+        # bridge. We still touch all parameters via a 0-multiplied dummy pass
+        # so DDP / autograd see every gate even when this batch happens to be
+        # surface-only or volume-only.
+        if not (surf_has and vol_has):
+            zero = (
+                self.surf_gate.sum() * 0.0
+                + self.vol_gate.sum() * 0.0
+            )
+            return surf + zero, vol + zero
+
+        # nn.MultiheadAttention key_padding_mask convention: True = ignore.
+        surf_key_pad = ~surf_mask.bool()
+        vol_key_pad = ~vol_mask.bool()
+        # Guard fully-padded query rows: nn.MultiheadAttention returns NaN when
+        # a query attends to a fully-masked key set. Disable padding for any
+        # row that has no valid keys (the corresponding query rows are
+        # themselves padding and will be re-zeroed by the post-call mask
+        # multiplication).
+        if bool(vol_key_pad.all(dim=-1).any()):
+            all_pad_rows = vol_key_pad.all(dim=-1)
+            vol_key_pad = vol_key_pad.clone()
+            vol_key_pad[all_pad_rows] = False
+        if bool(surf_key_pad.all(dim=-1).any()):
+            all_pad_rows = surf_key_pad.all(dim=-1)
+            surf_key_pad = surf_key_pad.clone()
+            surf_key_pad[all_pad_rows] = False
+
+        surf_q = self.norm_surf_q(surf)
+        vol_kv = self.norm_vol_kv(vol)
+        # nn.MultiheadAttention does not support bf16 autocast on all paths;
+        # cast to fp32 internally to avoid silent NaNs and let DropPath/EMA see
+        # finite values in the residual.
+        surf_q_f = surf_q.float()
+        vol_kv_f = vol_kv.float()
+        surf_delta, _ = self.surf_to_vol(
+            surf_q_f, vol_kv_f, vol_kv_f,
+            key_padding_mask=vol_key_pad,
+            need_weights=False,
+        )
+        surf_delta = surf_delta.to(surf.dtype)
+        surf = surf + self.surf_gate.tanh() * surf_delta
+        surf = _apply_token_mask(surf, surf_mask)
+
+        vol_q = self.norm_vol_q(vol)
+        # use the *updated* surf as the KV source for vol_to_surf — this matches
+        # the deterministic ordering described in the PR (surface receives,
+        # then volume reads from the post-update surface).
+        surf_kv = self.norm_surf_kv(surf)
+        vol_q_f = vol_q.float()
+        surf_kv_f = surf_kv.float()
+        vol_delta, _ = self.vol_to_surf(
+            vol_q_f, surf_kv_f, surf_kv_f,
+            key_padding_mask=surf_key_pad,
+            need_weights=False,
+        )
+        vol_delta = vol_delta.to(vol.dtype)
+        vol = vol + self.vol_gate.tanh() * vol_delta
+        vol = _apply_token_mask(vol, vol_mask)
+
+        return surf, vol
+
+
 class GeomEncoder(nn.Module):
     """Mean-pooled MLP encoder over surface points to a per-case geometry token."""
 
@@ -329,6 +438,94 @@ class Transformer(nn.Module):
         return x
 
 
+class DualStreamTransformer(nn.Module):
+    """Two parallel Transformer stacks (surface + volume) with cross-attention bridges.
+
+    Each stream owns its own per-layer TransformerBlock list (independent
+    Transolver slice budgets, independent MLPs, independent LayerNorms).
+    A `CrossAttentionBlock` is inserted after every `cross_attn_every`
+    Transformer blocks so the two streams can exchange information without
+    contaminating their own slice representations.
+    """
+
+    def __init__(
+        self,
+        depth: int,
+        hidden_dim: int,
+        num_heads: int,
+        mlp_expansion_factor: int | float,
+        num_slices: int,
+        cross_attn_every: int = 2,
+        dropout: float = 0.0,
+        stochastic_depth_prob: float = 0.0,
+    ):
+        super().__init__()
+        if depth <= 1:
+            drop_path_rates = [stochastic_depth_prob] * depth
+        else:
+            drop_path_rates = [
+                stochastic_depth_prob * i / (depth - 1) for i in range(depth)
+            ]
+        self.depth = depth
+        self.cross_attn_every = max(1, int(cross_attn_every))
+
+        self.surface_blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    hidden_dim=hidden_dim,
+                    num_heads=num_heads,
+                    mlp_expansion_factor=mlp_expansion_factor,
+                    num_slices=num_slices,
+                    dropout=dropout,
+                    drop_path_prob=drop_path_rates[i],
+                )
+                for i in range(depth)
+            ]
+        )
+        self.volume_blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    hidden_dim=hidden_dim,
+                    num_heads=num_heads,
+                    mlp_expansion_factor=mlp_expansion_factor,
+                    num_slices=num_slices,
+                    dropout=dropout,
+                    drop_path_prob=drop_path_rates[i],
+                )
+                for i in range(depth)
+            ]
+        )
+        num_bridges = depth // self.cross_attn_every
+        self.cross_attn_bridges = nn.ModuleList(
+            [
+                CrossAttentionBlock(
+                    hidden_dim=hidden_dim,
+                    num_heads=num_heads,
+                    dropout=dropout,
+                )
+                for _ in range(num_bridges)
+            ]
+        )
+
+    def forward(
+        self,
+        surf: torch.Tensor,
+        vol: torch.Tensor,
+        surf_mask: torch.Tensor,
+        vol_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        bridge_idx = 0
+        for i in range(self.depth):
+            surf = self.surface_blocks[i](surf, attn_mask=surf_mask)
+            vol = self.volume_blocks[i](vol, attn_mask=vol_mask)
+            if (i + 1) % self.cross_attn_every == 0 and bridge_idx < len(self.cross_attn_bridges):
+                surf, vol = self.cross_attn_bridges[bridge_idx](
+                    surf, vol, surf_mask, vol_mask
+                )
+                bridge_idx += 1
+        return surf, vol
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -350,6 +547,8 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_dual_stream: bool = False,
+        cross_attn_every: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,6 +561,8 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.use_dual_stream = bool(use_dual_stream)
+        self.cross_attn_every = int(cross_attn_every)
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -383,17 +584,39 @@ class SurfaceTransolver(nn.Module):
             if use_film
             else None
         )
-        self.backbone = Transformer(
-            depth=n_layers,
-            hidden_dim=n_hidden,
-            num_heads=n_head,
-            mlp_expansion_factor=mlp_ratio,
-            num_slices=slice_num,
-            dropout=dropout,
-            stochastic_depth_prob=stochastic_depth_prob,
-            film_geom_dim=film_encoder_dim if use_film else 0,
-        )
-        self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        if self.use_dual_stream:
+            if use_film:
+                raise ValueError(
+                    "use_dual_stream and use_film are not currently compatible "
+                    "(dual stream backbone does not consume FiLM tokens)."
+                )
+            self.backbone = DualStreamTransformer(
+                depth=n_layers,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_expansion_factor=mlp_ratio,
+                num_slices=slice_num,
+                cross_attn_every=self.cross_attn_every,
+                dropout=dropout,
+                stochastic_depth_prob=stochastic_depth_prob,
+            )
+            self.surface_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.volume_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.norm = None
+        else:
+            self.backbone = Transformer(
+                depth=n_layers,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_expansion_factor=mlp_ratio,
+                num_slices=slice_num,
+                dropout=dropout,
+                stochastic_depth_prob=stochastic_depth_prob,
+                film_geom_dim=film_encoder_dim if use_film else 0,
+            )
+            self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.surface_norm = None
+            self.volume_norm = None
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -426,67 +649,119 @@ class SurfaceTransolver(nn.Module):
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
 
-        tokens: list[torch.Tensor] = []
-        masks: list[torch.Tensor] = []
-        surface_tokens = 0
-        volume_tokens = 0
-
+        surf_h: torch.Tensor | None = None
+        vol_h: torch.Tensor | None = None
         if surface_x is not None:
-            surface_tokens = surface_x.shape[1]
-            tokens.append(
+            surf_h = _apply_token_mask(
                 self._encode_group(
                     surface_x,
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
-                )
+                ),
+                surface_mask,
             )
-            masks.append(surface_mask)
-
         if volume_x is not None:
-            volume_tokens = volume_x.shape[1]
-            tokens.append(
+            vol_h = _apply_token_mask(
                 self._encode_group(
                     volume_x,
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
-                )
+                ),
+                volume_mask,
             )
-            masks.append(volume_mask)
 
-        attn_mask = torch.cat(masks, dim=1)
-        hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
             geom_token = self.geom_encoder(surface_x, surface_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
-        hidden = _apply_token_mask(hidden, attn_mask)
-        hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
-        cursor = 0
-        surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
-        cursor += surface_tokens
-        volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+        if self.use_dual_stream:
+            if surface_x is not None and volume_x is not None:
+                surf_out, vol_out = self.backbone(
+                    surf_h, vol_h, surface_mask, volume_mask
+                )
+            elif surface_x is not None:
+                surf_out = surf_h
+                for blk in self.backbone.surface_blocks:
+                    surf_out = blk(surf_out, attn_mask=surface_mask)
+                vol_out = None
+            else:
+                vol_out = vol_h
+                for blk in self.backbone.volume_blocks:
+                    vol_out = blk(vol_out, attn_mask=volume_mask)
+                surf_out = None
 
-        if surface_x is not None:
+            surface_hidden = (
+                _apply_token_mask(self.surface_norm(surf_out), surface_mask)
+                if surf_out is not None
+                else None
+            )
+            volume_hidden = (
+                _apply_token_mask(self.volume_norm(vol_out), volume_mask)
+                if vol_out is not None
+                else None
+            )
+            # Reconstruct a concatenated hidden for downstream consumers
+            # (loss/metrics only read surface_preds / volume_preds, but we
+            # preserve the dict-shape contract from the single-stream path).
+            hidden_chunks: list[torch.Tensor] = []
+            if surface_hidden is not None:
+                hidden_chunks.append(surface_hidden)
+            if volume_hidden is not None:
+                hidden_chunks.append(volume_hidden)
+            hidden_norm = torch.cat(hidden_chunks, dim=1) if hidden_chunks else surf_h
+        else:
+            tokens: list[torch.Tensor] = []
+            masks: list[torch.Tensor] = []
+            if surf_h is not None:
+                tokens.append(surf_h)
+                masks.append(surface_mask)
+            if vol_h is not None:
+                tokens.append(vol_h)
+                masks.append(volume_mask)
+            attn_mask = torch.cat(masks, dim=1)
+            hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
+            hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
+            hidden = _apply_token_mask(hidden, attn_mask)
+            hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
+            surface_tokens = surf_h.shape[1] if surf_h is not None else 0
+            volume_tokens = vol_h.shape[1] if vol_h is not None else 0
+            surface_hidden = (
+                hidden_norm[:, :surface_tokens] if surface_tokens > 0 else None
+            )
+            volume_hidden = (
+                hidden_norm[:, surface_tokens : surface_tokens + volume_tokens]
+                if volume_tokens > 0
+                else None
+            )
+
+        if surface_hidden is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
-            surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+            surface_preds = (
+                volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+                if volume_hidden is not None
+                else hidden_norm.new_zeros(batch_size, 0, self.surface_output_dim)
+            )
 
-        if volume_x is not None:
+        if volume_hidden is not None:
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
-            volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+            volume_preds = (
+                surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+                if surface_hidden is not None
+                else hidden_norm.new_zeros(batch_size, 0, self.volume_output_dim)
+            )
 
         result = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
-            "hidden": hidden,
-            "surface_hidden": surface_hidden,
-            "volume_hidden": volume_hidden,
+            "hidden": hidden_norm,
+            "surface_hidden": surface_hidden if surface_hidden is not None else hidden_norm.new_zeros(0),
+            "volume_hidden": volume_hidden if volume_hidden is not None else hidden_norm.new_zeros(0),
         }
         if geom_token is not None:
             result["geom_token"] = geom_token
@@ -579,6 +854,8 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_dual_stream: bool = False
+    cross_attn_every: int = 2
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,6 +1022,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_dual_stream=config.use_dual_stream,
+        cross_attn_every=config.cross_attn_every,
     )
 
 
