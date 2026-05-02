@@ -27,33 +27,42 @@
 
 Merge bar = val_abupt < 9.0389%.
 
-## BREAKING — TWO SOTA-CROSSING RUNS IN-FLIGHT (08:30 UTC)
+## BREAKING — THREE SOTA-CROSSING SIGNALS (~09:05 UTC)
 
-### edward #311 STRING-separable — **val=7.7424% ep9 (-1.30pp vs SOTA)** — DECISIVE WIN
+### edward #311 STRING-separable — **val=7.5458% (-1.49pp vs SOTA)** — DECISIVE WIN, still improving
 
-W&B run `gcwx9yaa`. Monotone-decreasing, still running. Crossed merge bar at ep6.
+W&B run `gcwx9yaa`. Monotone-decreasing, still running (runtime ~4.5h).
 
 | Epoch | val_abupt | vs SOTA |
 |---:|---:|---:|
 | 5 | 9.235% | +0.20pp |
-| 6 | 8.478% | **-0.56pp (crossed)** |
+| 6 | 8.478% | -0.56pp (crossed) |
 | 7 | 8.159% | -0.88pp |
 | 8 | 7.909% | -1.13pp |
-| 9 | **7.742%** | **-1.30pp** |
+| 9 | 7.742% | -1.30pp |
+| latest summary | **7.546%** | **-1.49pp** |
 
-**This is the first new-architecture (vs HP-tuning) win in many rounds.** Fast-track instructions posted: let it finish, then run test-set evaluation from best-val checkpoint, post per-axis test table, mark ready for review for immediate merge.
+**First new-architecture (vs HP-tuning) win in many rounds.** Fast-track: let it finish, run test-set eval from best-val checkpoint, mark ready for review for immediate merge.
 
-### alphonse #287 QK-norm — **val=8.9532% ep10 (-0.086pp vs SOTA)** — also crossed
+### nezuko #283 model-layers=5 — **val=8.9938% ep12 (-0.045pp vs SOTA)** — CROSSED
 
-W&B run `nesrmoi9`. Monotone-decreasing, still running.
+W&B run `z6xc97gg`. Lion ep10 spike → ep11/12 recovery played out cleanly.
 
 | Epoch | val_abupt | vs SOTA |
 |---:|---:|---:|
-| 8 | 9.456% | +0.42pp |
-| 9 | 9.195% | +0.16pp |
-| 10 | **8.953%** | **-0.086pp (crossed)** |
+| 9 | 9.254% | +0.21pp |
+| 10 | 10.896% | (Lion spike) |
+| 11 | 9.523% | +0.48pp |
+| 12 | **8.9938%** | **-0.045pp (crossed)** |
 
-Modest improvement but a clean orthogonal architectural delta (per-head L2 norm on Q, K). Strong compound candidate with STRING-separable.
+Still training (~6 epochs left of budget). Plan: let run to completion, test-set eval from best-val checkpoint, then merge.
+
+### alphonse #287 QK-norm — LABELING CORRECTION (do not merge yet)
+
+Earlier celebration of `nesrmoi9` was incorrect — that is **Arm A control (no `--qk-norm`)**, not the treatment. Control itself reached ep10=8.9532% (-0.086pp), informative for seed/init variance characterization but NOT a QK-norm signal.
+
+- Arm B treatment `pz7zp49v` launched 08:43Z, currently <ep1.
+- Merge criterion: Arm B must beat Arm A's best-val by ≥0.4pp to credibly attribute to QK-norm. Within ±0.2pp = null result.
 
 ## In-flight — Round 16-18 fleet (8 active WIP PRs; 2 SOTA-crossing, 1 wrap-up, 1 idle, 08:35 UTC)
 
@@ -61,12 +70,12 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 
 | PR | Student | Hypothesis | W&B | Latest val | vs SOTA | Status |
 |---|---|---|---|---:|---:|---|
-| #311 | edward | STRING-separable / GRAPE-M / RFF (3-arm) | `gcwx9yaa` ArmB | **7.742% ep9** | **-1.30pp** | **WINNER — fast-track merge after test eval** |
-| #287 | alphonse | QK-norm (per-head L2) | `nesrmoi9` | **8.953% ep10** | **-0.086pp** | **WINNER — let finish, test eval, merge** |
-| #345 | thorfinn | RFF retest on SOTA stack (sigma=1.0, 32 feats) | — | starting | — | Round 18 |
-| #283 | nezuko | model-layers=5 | `z6xc97gg` | 9.523% (~ep11) | +0.48pp | Trending down, unlikely to cross |
+| #311 | edward | STRING-separable / GRAPE-M / RFF (3-arm) | `gcwx9yaa` ArmB | **7.546% latest** | **-1.49pp** | **WINNER — fast-track merge after test eval** |
+| #287 | alphonse | QK-norm (per-head L2) | Arm A `nesrmoi9` (CONTROL, ep10=8.953%); Arm B `pz7zp49v` <ep1 | TBD | TBD | Awaiting Arm B treatment results |
+| #345 | thorfinn | grad-clip-norm=2.0 retest | `7see7ryk` | 13.42% (epoch unconfirmed) | — | Pinged for status — possible divergence |
+| #283 | nezuko | model-layers=5 | `z6xc97gg` | **8.9938% ep12** | **-0.045pp** | **CROSSED — let finish, test eval, merge** |
 | ~~#280~~ | ~~frieren~~ | ~~MLP activation (SwiGLU/ReLU²/GELU)~~ | `k76fngw1` ArmC | 9.153% | +0.114pp | **CLOSED — informative-negative** |
-| **#352** | **frieren** | **Per-channel output-head scaling (tau_y/z magnitude calibration)** | — | — | — | **NEW — assigned Round 19** |
+| **#352** | **frieren** | **Per-channel output-head scaling** — but active W&B run `9yme70s3` is `arm-D-swiglu-uniform` (PR #280 family). PRpr/branch mismatch flagged to student. | `9yme70s3` (mismatched?) | 58.24% (ep1) | — | **NEEDS CLARIFICATION** |
 | ~~#299~~ | ~~askeladd~~ | ~~Muon optimizer (canonical lr=0.02)~~ | `t3o9jib0` | 13.13% ep11 | +4.09pp | **CLOSED — confirmed negative** |
 | **#353** | **askeladd** | **Channel-selective Huber loss on tau (delta=0.5)** | — | — | — | **NEW — assigned (H04 Tier-1)** |
 | #323 | tanjiro | 2-layer MLP volume decoder head | restarted | (in restart) | — | Restarting after divergence |
@@ -85,9 +94,10 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 
 ## Current Research Focus
 
-**Top priority — close out the two SOTA winners:**
-1. edward #311 STRING-separable (val=7.742%): wait for run to finish, run test-set eval from best-val checkpoint, merge.
-2. alphonse #287 QK-norm (val=8.953%): wait for run to finish, run test-set eval, merge.
+**Top priority — close out SOTA winners (best-first merge order):**
+1. edward #311 STRING-separable (val≈7.55%, -1.49pp): wait for run to finish, run test-set eval from best-val checkpoint, merge first.
+2. nezuko #283 model-layers=5 (val=8.9938%, -0.045pp): wait for run to finish, test eval, merge after #311 (deltas orthogonal: PE vs depth).
+3. alphonse #287 QK-norm: await Arm B treatment `pz7zp49v` results before any merge decision (Arm A was control).
 
 **Compound experiment planning:**
 - If both #311 and #287 merge, compound experiment = STRING-separable + QK-norm + grad-clip=0.5 SOTA stack. Assign to next free student. The deltas are architecturally orthogonal (position encoding vs attention normalization vs gradient stabilization).
