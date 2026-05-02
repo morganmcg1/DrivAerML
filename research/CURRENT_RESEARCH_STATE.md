@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **2026-05-02 02:30 UTC** — **Alphonse `vu4jsiic` ep23.5=7.419%** (passed ep20 gate, descending steadily toward ep25 gate <7.3% and ep30 gate <7.21% baseline-beating threshold). **Nezuko `ud5iddlc` ep19.0=8.217%** (ep20 gate <8.2% imminent; close call, on-track). **Gilbert `0kwzszub` ep10.4=9.834%** (Trial A healthy, well clear of all gates; Trial B authorization unconfirmed for 1.5h, follow-up posted). **Tanjiro `4t75zm3j` (DomainLN v3) ep4=11.45%** (gate at step 80k <10.5% will fire imminently — direction confirmed NEGATIVE across two seeds, mechanism characterized: per-domain affine biases TransolverAttention slice computation; closure pending). **Wave 6 unresponsive crisis**: 6 students (#301 violet, #302 emma, #303 askeladd, #305 senku, #306 thorfinn, #307 kohaku) still no response after 2 escalations; deadline 04:30Z (~2h) for closure+reassignment. **Frieren PR #310** Trial A running with `--lr-warmup-epochs 5 --wd 1e-3 --no-dropout` since ~23:58Z (survey-prs stale flag was a label artifact). Edward (#304) and haku (#308) on-task.
+- **2026-05-02 03:45 UTC** — Wave 7 launched (PRs #325-#332, replacing unresponsive Wave 6 PRs). 16 active WIP PRs, 0 review-ready. **Alphonse `vu4jsiic` ep24.19=7.4618%** (regression from ep23.23=7.4101%, slope flattened since ep20; ep25 gate <7.3% will FAIL; ep30 proj ~7.39% MISS baseline; ep50 proj ~7.16% would beat baseline). **Nezuko `ud5iddlc` ep19.35=8.1552%** (ep20 gate <8.2% PASSED; ep30 proj ~7.52% MISS baseline). **Gilbert `0kwzszub` Trial A ep12.58=9.71%** (slope -0.42 pp/ep, healthy). **Fern `tfphcp42` ep4.84=11.20%** (ep5 gate <11.5% PASS; bouncy ep3.87=13.58% spike requires diagnosis at ep10). **Chihiro `klsmwdkr` Trial A ep14.52=9.23%** (slope -0.10, ep30 proj 7.70%). **Edward `kuz4na0j` Trial B ep1=15.15%** (too early to gate). **Violet PR #330 reassigned to DDP4** (no DDP8 available in bengio fleet). **Frieren PR #310 nudged for status** (no Trial A confirmation since 00:18Z).
 
 ## Most Recent Human Researcher Direction
 
@@ -11,7 +11,7 @@
 
 | Metric | AB-UPT Target | Best Val | Best Test | Status |
 |--------|:---:|:---:|:---:|----|
-| abupt_axis_mean_rel_l2_pct | 4.51% | **7.662%** (`vu4jsiic` ep18, in flight) / 7.209% (`m9775k1v` baseline) | **8.480%** (alphonse, confirmed) | gap -3.97pp (test) |
+| abupt_axis_mean_rel_l2_pct | 4.51% | **7.4101%** (`vu4jsiic` ep23.23, in flight) / 7.209% (`m9775k1v` baseline) | **8.480%** (alphonse, confirmed) | gap -3.97pp (test) |
 | surface_pressure_rel_l2_pct | 3.82% | 4.802% | 5.078% (tanjiro SW2) | gap -1.26pp (test) |
 | volume_pressure_rel_l2_pct | 6.08% | **4.166%** (val only) | 12.897% (tanjiro SW2, 2.5x val/test gap) | **val WON but test fails badly** |
 | wall_shear_x_rel_l2_pct | 5.35% | 7.109% | 7.953% (tanjiro SW2) | gap -2.60pp (test) |
@@ -22,96 +22,88 @@
 
 ## Active Experiments — Live Tracking
 
-### Wave 5 leaders (ahead of gates, descending healthily)
+### Wave 5 leaders
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.419%** | 23.5 | LEADER. wsy=9.52%, wsz=11.20%. PASSED ep20 gate at 7.558%. ep25 gate <7.3% next, ep30 gate <7.21% must beat baseline to merge. |
-| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **8.217%** | 19.0 | wsy=10.16%, wsz=11.91%. ep20 gate <8.2% imminent (within 0.02pp). Slope ~0.05pp/ep, on track. T_max=60 leaves 40 ep headroom. |
+| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.4618%** | 24.19 | LEADER. wsy=9.66%, wsz=11.22%. **Slope flattened**: ep20-24 only 0.10pp improvement. ep25 gate <7.3% will FAIL. ep30 proj 7.39% (miss baseline). ep50 proj 7.16% (would beat baseline). Continue to T_max=50 cosine knee (ep31-35). |
+| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **8.1552%** | 19.35 | wsy=10.13%, wsz=11.79%. ep20 gate <8.2% PASSED. Slope -0.06 pp/ep, ep30 proj 7.52% MISS baseline. Continue as scaling reference. |
 
-### Wave 5 augmentation/architecture (mid-stage, gates in flight)
-
-| PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
-|----|---------|--------|-----------|:----------:|------:|---------|
-| #278 | gilbert | `0kwzszub` | Mirror-aug Trial A (p=0.5) | **9.834%** | 10.4 | Trial A healthy, well past ep5 gate. Trial B authorization unconfirmed (1.5h elapsed); follow-up comment posted 02:28Z. |
-| #276 | fern | (needs relaunch) | SWA over last 5 epochs | DIVERGING (19.49% at ep2) | 2 | Restart diverged: ep1=17.52%->ep2=19.49%. Student pivoted to unauthorized learned-FF runs. Advisor comment posted demanding stop unauthorized arms + SWA diagnosis + clean relaunch. |
-| #277 | tanjiro | `4t75zm3j` (v3) | DomainLayerNorm | **11.45%** | 4 | NEGATIVE confirmed across v2+v3. Mechanism: per-domain affine biases TransolverAttention slice computation. Kill gate at step 80k (<10.5%) imminent. Closure pending. |
-| #254 | chihiro | `klsmwdkr` | Raw rel-L2 aux loss w in {0.05, 0.1} | **10.742%** | 5 | ep5 gate (<11%) PASSED. Continuing to ep30. wsy=14.6%, wsz=15.3% elevated. |
-
-### Wave 3 sweep round (NF sweep, unauthorized Muon arms)
+### Wave 5 augmentation/architecture
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #239 | norman | `pnhbrqtw` | Fourier PE NF=16 sweep | **8.995%** | 12.45 | Healthy. BUT: 4 unauthorized Muon arms (armA-D) launched at ep0.28. Advisor comment posted demanding stop. NF=16 should early-stop at ep15, then NF=32/64/128 cascade per Plan A. |
+| #278 | gilbert | `0kwzszub` | Mirror-aug Trial A (p=0.5) | **9.7113%** | 12.58 | Trial A healthy, slope -0.42 pp/ep. Trial B closure issued (covered by tanjiro PR #332). |
+| #276 | fern | `tfphcp42` | SWA over last 5 epochs | **11.200%** | 4.84 | ep5 gate <11.5% PASS. Bouncy: ep3.87=13.58% spike (+1.21pp), needs diagnosis at ep10. |
+| #254 | chihiro | `klsmwdkr` | Raw rel-L2 aux loss w=0.05 (Trial A) | **9.2324%** | 14.52 | ep15 report posted. ep30 proj 7.70% MISS baseline. Trial B (w=0.1) queued. |
+| #304 | edward | `kuz4na0j` | Per-channel wsy/wsz upweight Trial B | **15.1523%** | 0.97 | Just launched, too early to gate. ep5 gate (<11.0%) approaching. |
+| #239 | norman | `pnhbrqtw` | Fourier PE NF=16 sweep | **8.995%** | 12.45 | NF=16 healthy. NF=32 should be running — needs status check. |
+| #277 | tanjiro | (closed) | DomainLayerNorm | NEGATIVE | 4 | CLOSED. |
 
-### Wave 6 (launched 2026-05-01 ~23:20Z)
+### Regularization front
 
-| PR | Student | Experiment | W&B Status |
-|----|---------|------------|-----------|
-| #301 | violet | DDP8 radford port v2: 4L/512d/8H + EMA + gc=0.5 + lr=4.8e-4 | Old softcap runs still active; Wave 6 not yet started |
-| #302 | emma | 96k surface + 96k volume points scale-up v2 | Old surface-weight runs still active; Wave 6 not yet started |
-| #303 | askeladd | FourierEmbed standalone A/B validation | Old sandwich-LN runs still active; Wave 6 not yet started |
-| #304 | edward | Per-channel wall-shear loss multipliers (wsy/wsz upweight) | NEW: `bengio-wave6-wss-channel-weights` RUNNING since 23:44Z |
-| #305 | senku | Grad-clip-norm sweep {0.5, 1.0, 2.0} | Old SWA-v2 runs still active; Wave 6 not yet started |
-| #306 | thorfinn | Model-slices sweep {128, 192, 256} | Old curvature-sampling runs still active; Wave 6 not yet started |
-| #307 | kohaku | Wall-shear-only squared rel-L2 aux loss sweep | Old grad-accum runs still active; Wave 6 not yet started |
-| #308 | haku | Surface-loss-weight sweep {2.0, 4.0, 8.0} | NEW: `bengio-wave6-surface-weight` RUNNING since 23:36Z (Trial A sw=2.0) |
+| PR | Student | Run ID | Experiment | Status |
+|----|---------|--------|-----------|-------|
+| #310 | frieren | (TBD) | Weight-decay + dropout sweep | Trial A status unconfirmed since 00:18Z (3h gap). Nudge posted 03:39Z asking for W&B run ID. |
 
-### Regularization front (Wave 6+)
+### Wave 7 (newly assigned 2026-05-02 03:19-03:25Z)
 
 | PR | Student | Experiment | Status |
 |----|---------|------------|-------|
-| #310 | frieren | Weight-decay (1e-3) + dropout (0.0/0.05/0.1) sweep on 5L Fourier PE | Newly assigned 2026-05-01 23:50Z |
+| #325 | senku | Grad-clip-norm sweep {0.5, 1.0, 2.0} | Just assigned, no comments yet |
+| #326 | thorfinn | Model-slices sweep {128, 192, 256} | Just assigned |
+| #327 | haku | Surface-loss-weight sweep {2.0, 4.0, 8.0} | Just assigned |
+| #328 | askeladd | FourierEmbed standalone A/B | Just assigned |
+| #329 | emma | 96k surface+volume scale-up | Just assigned |
+| #330 | violet | radford-champion DDP8 to DDP4 port (rewritten with lr=3.4e-4) | Reassigned to DDP4 at 03:39Z |
+| #331 | kohaku | Wall-shear aux loss sweep {0.1, 0.5, 1.0} | Just assigned |
+| #332 | tanjiro | Mirror-aug + SW=2.0 stack | Just assigned (covers gilbert Trial B) |
 
 ## Critical Findings
 
-### val/test gap on vol_p is ~2.5x (tanjiro SW2 evidence)
-- val=4.17% -> test=12.90%
-- Surface-loss reweighting moves error around between train channels but does not reduce test error
-- Implication: regularization or test-time generalization of volume head is the gap, not architecture or loss weight
-- **NEW FRONT**: frieren PR #310 directly attacks this via weight-decay and dropout
+### Alphonse vu4jsiic plateau emerging at ep20-24
+- ep18=7.662, ep20=7.558, ep23=7.410, ep24=7.462. Slope dropped from -0.25 pp/ep (pre-ep20) to -0.012 pp/ep (last 5 ckpts).
+- This is the cosine schedule mid-curve regime, before the ep31 knee. Late gains expected.
+- ep30 baseline-beat now in question; ep50 finish projected at 7.16%. **The bet on T_max=50 vs T_max=30 is now contingent on ep35-50 cosine tail dynamics.**
 
-### wsy/wsz binding constraint (Wave 4/5/6 entire focus)
-- Best wsy = 9.10% (alphonse val) / 10.895% (tanjiro test) vs target 3.65%. Gap 2.5-3x on test.
-- Best wsz = 10.87% (alphonse val) / 11.664% (tanjiro test) vs target 3.63%. Gap 3.2x on test.
-- TangentFrameHead failed (PR #218) — pure inductive bias did not work
-- Wave 4/5/6 attacks via multiple orthogonal levers
+### val/test gap on vol_p is ~2.5x
+- val=4.17% to test=12.90% (tanjiro SW2 evidence). 
+- Surface-loss reweighting moves error around between train channels but does not reduce test error.
+- **Open front**: frieren PR #310 directly attacks via wd+dropout; askeladd #328 isolates FourierEmbed; haku #327 sweep widens the surface-weight axis.
 
-### Depth scaling + Fourier PE is the round-2 winning ingredient stack
-- alphonse `vu4jsiic` (5L/256d, Fourier PE, T_max=50) at ep18 = 7.662% — close to beating baseline
-- nezuko `ud5iddlc` (5L/384d, Fourier PE, T_max=60) at ep15 = 8.424%
-- Both confirm 5L/Fourier PE/longer T_max is robustly better than 4L/256d/T_max=30
+### wsy/wsz binding constraint (entire focus of Wave 5/6/7)
+- Best wsy = 9.10% val / 10.895% test vs target 3.65%. Gap 2.5-3x on test.
+- Best wsz = 10.87% val / 11.664% test vs target 3.63%. Gap 3.2x on test.
+- Multi-pronged attack now in flight: gilbert mirror-aug, edward channel weights, kohaku wall-shear aux loss, tanjiro mirror+SW stack.
 
 ### Universal ep31 valley pattern
 All experiments show val abupt minimum at ~step 552K (~ep31) regardless of T_max. T_max=50 schedules align cosine knee with this valley.
 
-### Unauthorized student pivots (fleet-wide discipline issue)
-- Norman: 4 Muon optimizer arms (armA-D) launched without approval. Advisor comment posted.
-- Fern: Pivoted from SWA (PR #276) to learned-FF experiment without approval. Advisor comment posted.
-- Pattern: some students explore unilaterally rather than waiting for advisor approval. Must be addressed consistently.
+### Depth scaling + Fourier PE is the round-2 winning ingredient stack
+- alphonse `vu4jsiic` (5L/256d, Fourier PE, T_max=50) at ep23 = 7.410% (best so far in flight)
+- nezuko `ud5iddlc` (5L/384d, Fourier PE, T_max=60) at ep19 = 8.155%
+- 5L/384d wider+deeper produced WORSE than 5L/256d — capacity is not the bottleneck
 
 ## Upcoming Gates and Checkpoints
 
 | Time (approx) | Event |
 |---|---|
-| ~02:48Z May 2 | Tanjiro `4t75zm3j` step-80k kill gate (<10.5%) — will fire; closure comment then |
-| ~03:30Z May 2 | Alphonse `vu4jsiic` ep25 gate (<7.3%) |
-| ~04:00Z May 2 | Nezuko `ud5iddlc` ep20 gate (<8.2%) |
-| **~04:30Z May 2** | **Wave 6 unresponsive PR deadline — close+reassign #301/#302/#303/#305/#306/#307 if no student response** |
-| ~06:00Z May 2 | Frieren `wd1e-3-no-dropout` Trial A ep10 gate (vs vu4jsiic at ep10) |
-| ~Hours | Alphonse `vu4jsiic` ep30 gate (<7.21%, baseline-beating) |
-| ~TBD | Fern SWA clean relaunch (pending diagnosis response) |
-| ~Tomorrow | Norman NF=32 ep10 gate decision (continue to NF=64 or flag saturation) |
+| ~04:00Z May 2 | Alphonse `vu4jsiic` ep25 gate (will MISS, continue to ep30/ep35/ep50) |
+| ~05:30Z May 2 | Edward `kuz4na0j` ep5 gate (<11.0%) |
+| ~06:00Z May 2 | Frieren wd1e-3 Trial A ep10 gate (vs vu4jsiic at ep10) |
+| ~06:30Z May 2 | Fern `tfphcp42` ep10 gate (<9.5%) — diagnose ep3.87 spike |
+| ~Hours | Wave 7 PRs #325-#332 first ep5 gates |
+| ~Tomorrow | Alphonse `vu4jsiic` ep30 gate (<7.21%, baseline-beating) — likely miss |
+| ~Day 2 | Alphonse `vu4jsiic` ep35 / ep50 cosine knee (last realistic baseline-beat opportunity) |
 
 ## Plateau Protocol Status
 
-We are NOT on a plateau. Three active fronts:
-1. Wave 5 leaders (alphonse `vu4jsiic`, nezuko `ud5iddlc`) — 5L + Fourier PE + longer T_max stack delivering improvements
-2. Wave 6 multi-student sweep (8 PRs, single-knob variations on alphonse Fourier base)
-3. Regularization front (frieren PR #310) — directly attacks val/test gap
-4. Norman NF sweep (Fourier frequency bands) — scientific disambiguation of optimal NF
+We are NOT on a plateau but the LEADER is showing signs of one:
+- Alphonse `vu4jsiic` slope flattened at ep20-24. Final outcome contingent on T_max=50 cosine tail.
+- Multi-pronged Wave 7 fleet (8 PRs) attacks orthogonal axes: grad-clip, model-slices, surface-weight, FourierEmbed, scale-up, DDP4 radford champion port, wall-shear aux, mirror+SW stack.
+- Regularization (frieren #310) attacks the val/test gap directly.
 
-If alphonse `vu4jsiic` beats 7.2091% baseline at ep30, that becomes new baseline and all Wave 6 winner stacks on top.
+If alphonse `vu4jsiic` finishes at ep50 between 7.10-7.20%, we have a new baseline; otherwise Wave 7 must produce the next champion.
 
 ## Research Log Pointers
 
