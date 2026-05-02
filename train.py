@@ -117,6 +117,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    qk_norm: bool = False
     debug: bool = False
 
 
@@ -176,6 +177,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        qk_norm=config.qk_norm,
     )
 
 
