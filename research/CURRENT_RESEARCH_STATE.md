@@ -1,5 +1,16 @@
 # SENPAI Research State
-- 2026-04-29 (Round 21 — 16 WIP PRs on yi, 0 idle; tanjiro PR #249 closed (asinh dead end), tanjiro PR #336 sent back (per-channel heads — option 1 confirmed), frieren PR #286 closed (bilateral-symmetry TTA — negative), frieren PR #338 assigned (DropPath sweep))
+- 2026-04-29 (Round 22 — 17 WIP PRs on yi, 0 idle; emma PR #333 closed (RoPE — sincos+RoPE complementary, defer pending DDP fix), emma PR #355 assigned (DDP infrastructure fix))
+
+## Latest Survey Pass (2026-04-29 Round 22)
+
+**Reviewed this round:**
+- **PR #333 (emma)**: CLOSED — RoPE positional encoding deferred pending DDP infrastructure fix. Key finding: sincos and RoPE are complementary (A beats C by 12.5–17.8% across all metrics). However, both arms ran single-GPU (DDP missing in yi/train.py), hitting timeout at ~55% of warmup epoch 1. Cannot fairly compare to 9.291% merge bar. Volume pressure regressed most without sincos (22%), consistent with absolute position importance for full-domain fields. RoPENd module preserved for future follow-up. See EXPERIMENTS_LOG for full result table.
+
+**New assignments this round:**
+- **PR #355 (emma)**: DDP infrastructure fix — cherry-pick `bfbe975` + `1a8f7b7` from alphonse PR #284 to restore `init_process_group` + `DistributedSampler` + `set_device(LOCAL_RANK)` in yi/train.py. This is the single highest-leverage change: unblocks entire fleet from using canonical 8-GPU `torchrun --nproc_per_node=8` command. All students silently trained single-GPU in recent rounds.
+
+**Critical infrastructure finding:**
+`target/train.py` on `yi` has NO DDP. The canonical `torchrun --nproc_per_node=8` command in BASELINE.md is broken. Students running the base config command have been training single-GPU. PR #355 (emma) is fixing this. Until merged, all other students should cherry-pick `bfbe975` + `1a8f7b7` from `origin/alphonse/depth-scaling-6l-512d` onto their own branches.
 
 ## Latest Survey Pass (2026-04-29 Round 21)
 
