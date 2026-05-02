@@ -30,6 +30,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 import yaml
+from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
@@ -45,6 +46,134 @@ from data import (
     load_data,
     pad_collate,
 )
+
+
+# ---------------------------------------------------------------------------
+# Muon optimizer (Newton-Schulz orthogonalized momentum)
+# Reference: https://github.com/KellerJordan/Muon  (Keller Jordan, 2024)
+# ---------------------------------------------------------------------------
+
+
+@torch.no_grad()
+def zeropower_via_newtonschulz5(G: Tensor, steps: int = 5) -> Tensor:
+    """Quintic Newton-Schulz iteration that drives singular values toward 1.
+
+    Casts to fp32 for the iteration to avoid bf16 Gram-matrix instabilities
+    flagged in the Newton-Muon literature; casts back at the end.
+    """
+    assert G.ndim == 2
+    a, b, c = (3.4445, -4.7750, 2.0315)
+    X = G.float()
+    transposed = G.size(-2) > G.size(-1)
+    if transposed:
+        X = X.T
+    X = X / (X.norm() + 1e-7)
+    for _ in range(steps):
+        A = X @ X.T
+        X = a * X + b * (A @ X) + c * (A @ A @ X)
+    if transposed:
+        X = X.T
+    return X.to(G.dtype)
+
+
+class Muon(torch.optim.Optimizer):
+    """Muon: Newton-Schulz orthogonalized SGD-momentum on 2-D weights, AdamW fallback elsewhere.
+
+    Per parameter group:
+      - ``mode == "muon"``: 2-D matmul weights are updated via Nesterov momentum +
+        Newton-Schulz orthogonalization, scaled by ``sqrt(max(rows, cols))``.
+      - ``mode == "adamw"``: all other tensors (1-D biases, layernorm scales, 0-D scalars,
+        3-D/4-D tensors) use a self-contained AdamW update inside this optimizer.
+
+    Both modes read ``group["lr"]`` directly so external warmup / cosine schedulers
+    affect both groups proportionally.
+    """
+
+    def __init__(
+        self,
+        params,
+        lr: float = 2e-2,
+        momentum: float = 0.95,
+        ns_steps: int = 5,
+        betas: tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+        mode: str = "muon",
+    ):
+        if lr <= 0.0:
+            raise ValueError(f"Muon lr must be > 0, got {lr}")
+        if mode not in ("muon", "adamw"):
+            raise ValueError(f"Muon group mode must be 'muon' or 'adamw', got {mode!r}")
+        defaults = dict(
+            lr=lr,
+            momentum=momentum,
+            ns_steps=ns_steps,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            mode=mode,
+        )
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            lr = group["lr"]
+            mode = group["mode"]
+
+            if mode == "muon":
+                momentum = group["momentum"]
+                ns_steps = group["ns_steps"]
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+                    g = p.grad
+                    if g.ndim != 2:
+                        raise RuntimeError(
+                            f"Muon mode='muon' got param of ndim {g.ndim}; route non-2-D "
+                            f"params to a mode='adamw' group."
+                        )
+                    state = self.state[p]
+                    if "momentum_buffer" not in state:
+                        state["momentum_buffer"] = torch.zeros_like(g)
+                    buf = state["momentum_buffer"]
+                    buf.mul_(momentum).add_(g)
+                    g_nesterov = g.add(buf, alpha=momentum)
+                    g_ortho = zeropower_via_newtonschulz5(g_nesterov, steps=ns_steps)
+                    scale = max(g.size(-2), g.size(-1)) ** 0.5
+                    p.data.add_(g_ortho, alpha=-lr * scale)
+            else:
+                beta1, beta2 = group["betas"]
+                eps = group["eps"]
+                wd = group["weight_decay"]
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+                    g = p.grad
+                    state = self.state[p]
+                    if "exp_avg" not in state:
+                        state["exp_avg"] = torch.zeros_like(p)
+                        state["exp_avg_sq"] = torch.zeros_like(p)
+                        state["step"] = 0
+                    state["step"] += 1
+                    exp_avg = state["exp_avg"]
+                    exp_avg_sq = state["exp_avg_sq"]
+                    exp_avg.mul_(beta1).add_(g, alpha=1.0 - beta1)
+                    exp_avg_sq.mul_(beta2).addcmul_(g, g, value=1.0 - beta2)
+                    step = state["step"]
+                    bias_corr1 = 1.0 - beta1 ** step
+                    bias_corr2 = 1.0 - beta2 ** step
+                    step_size = lr / bias_corr1
+                    denom = (exp_avg_sq.sqrt() / (bias_corr2 ** 0.5)).add_(eps)
+                    p.data.addcdiv_(exp_avg, denom, value=-step_size)
+                    if wd > 0:
+                        p.data.mul_(1.0 - lr * wd)
+        return loss
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +681,10 @@ class EMA:
 class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-4
+    optimizer: str = "adamw"  # "adamw" or "muon"
+    muon_momentum: float = 0.95
+    muon_ns_steps: int = 5
+    muon_adamw_lr_scale: float = 0.1  # adamw fallback LR = lr * this
     batch_size: int = 2
     epochs: int = 50
     train_surface_points: int = 40_000
@@ -605,7 +738,6 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
-    optimizer: str = "adamw"
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1810,15 +1942,56 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = Lion(
             model.parameters(), lr=config.lr, weight_decay=config.weight_decay
         )
+    elif optimizer_name == "muon":
+        muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
+        muon_other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
+        n_muon_2d = sum(p.numel() for p in muon_2d_params)
+        n_muon_other = sum(p.numel() for p in muon_other_params)
+        adamw_fallback_lr = config.lr * config.muon_adamw_lr_scale
+        if is_main:
+            print(
+                f"Optimizer: Muon (lr={config.lr}, momentum={config.muon_momentum}, "
+                f"ns_steps={config.muon_ns_steps}); 2-D params {n_muon_2d / 1e6:.2f}M -> Muon, "
+                f"other params {n_muon_other / 1e6:.2f}M -> AdamW fallback "
+                f"(lr={adamw_fallback_lr}, wd={config.weight_decay})"
+            )
+        optimizer = Muon(
+            [
+                {
+                    "params": muon_2d_params,
+                    "mode": "muon",
+                    "lr": config.lr,
+                    "momentum": config.muon_momentum,
+                    "ns_steps": config.muon_ns_steps,
+                    "weight_decay": 0.0,
+                },
+                {
+                    "params": muon_other_params,
+                    "mode": "adamw",
+                    "lr": adamw_fallback_lr,
+                    "betas": (0.9, 0.999),
+                    "eps": 1e-8,
+                    "weight_decay": config.weight_decay,
+                },
+            ],
+            lr=config.lr,
+            momentum=config.muon_momentum,
+            ns_steps=config.muon_ns_steps,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+            weight_decay=config.weight_decay,
+            mode="muon",
+        )
     else:
         raise ValueError(
-            f"Unknown optimizer '{config.optimizer}'. Supported: 'adamw', 'lion'."
+            f"Unknown optimizer '{config.optimizer}'. Supported: 'adamw', 'lion', 'muon'."
         )
-    if is_main:
+    if is_main and optimizer_name != "muon":
         print(
             f"Optimizer: {optimizer.__class__.__name__} "
             f"lr={config.lr} wd={config.weight_decay}"
         )
+    initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -2015,14 +2188,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 continue
             if effective_warmup_steps > 0:
                 if global_step < effective_warmup_steps:
-                    warmup_lr = config.lr_warmup_start_lr + (
-                        config.lr - config.lr_warmup_start_lr
-                    ) * (global_step / effective_warmup_steps)
-                    for pg in optimizer.param_groups:
-                        pg["lr"] = warmup_lr
+                    progress = global_step / effective_warmup_steps
+                    start_ratio = (
+                        config.lr_warmup_start_lr / max(config.lr, 1e-12)
+                    )
+                    warmup_ratio = start_ratio + (1.0 - start_ratio) * progress
+                    for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
+                        pg["lr"] = base_lr * warmup_ratio
                 elif global_step == effective_warmup_steps:
-                    for pg in optimizer.param_groups:
-                        pg["lr"] = config.lr
+                    for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
+                        pg["lr"] = base_lr
             optimizer.step()
             ema_decay_now: float | None = None
             if ema is not None:
