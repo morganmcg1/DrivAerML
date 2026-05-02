@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import re
@@ -601,6 +602,9 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    eval_only: bool = False
+    eval_only_checkpoint: str = ""
+    eval_only_output: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1458,6 +1462,8 @@ def evaluate_split(
     abs_counts = {key: 0 for key in abs_sums}
     wall_shear_vector_abs_sum = 0.0
     wall_shear_vector_count = 0
+    tau_normal_ratio_sums = {"pred": 0.0, "target": 0.0}
+    tau_normal_ratio_counts = {"pred": 0, "target": 0}
     case_sums = {
         "surface_pressure": {},
         "wall_shear": {},
@@ -1507,6 +1513,20 @@ def evaluate_split(
             )
             wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
             wall_shear_vector_count += int(wall_vector_error.numel())
+            normals_valid = batch.surface_x[..., 3:6][batch.surface_mask].float()
+            n_hat_valid = F.normalize(normals_valid, dim=-1, eps=1e-8)
+            tau_pred_valid = surface_pred[batch.surface_mask][:, 1:4].float()
+            tau_target_valid = batch.surface_y[batch.surface_mask][:, 1:4].float()
+            tau_pred_norm = torch.linalg.vector_norm(tau_pred_valid, dim=-1).clamp_min(1e-8)
+            tau_target_norm = torch.linalg.vector_norm(tau_target_valid, dim=-1).clamp_min(1e-8)
+            tau_pred_normal = (tau_pred_valid * n_hat_valid).sum(dim=-1).abs()
+            tau_target_normal = (tau_target_valid * n_hat_valid).sum(dim=-1).abs()
+            tau_pred_ratio = tau_pred_normal / tau_pred_norm
+            tau_target_ratio = tau_target_normal / tau_target_norm
+            tau_normal_ratio_sums["pred"] += float(tau_pred_ratio.sum().detach().cpu().item())
+            tau_normal_ratio_counts["pred"] += int(tau_pred_ratio.numel())
+            tau_normal_ratio_sums["target"] += float(tau_target_ratio.sum().detach().cpu().item())
+            tau_normal_ratio_counts["target"] += int(tau_target_ratio.numel())
 
         if bool(batch.volume_mask.any()):
             volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
@@ -1567,10 +1587,18 @@ def evaluate_split(
     }
     wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
     loss = (surface_loss_sse + volume_loss_sse) / max(surface_loss_count + volume_loss_count, 1)
+    tau_pred_normal_ratio_mean = (
+        tau_normal_ratio_sums["pred"] / max(tau_normal_ratio_counts["pred"], 1)
+    )
+    tau_target_normal_ratio_mean = (
+        tau_normal_ratio_sums["target"] / max(tau_normal_ratio_counts["target"], 1)
+    )
     return {
         "loss": loss,
         "surface_loss": surface_loss_sse / max(surface_loss_count, 1),
         "volume_loss": volume_loss_sse / max(volume_loss_count, 1),
+        "tau_pred_normal_ratio_mean": tau_pred_normal_ratio_mean,
+        "tau_target_normal_ratio_mean": tau_target_normal_ratio_mean,
         "surface_pressure_mae": mae_values["surface_pressure"],
         "wall_shear_mae": mae_values["wall_shear"],
         "wall_shear_vector_mae": wall_shear_vector_mae,
@@ -1678,8 +1706,77 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     )
 
 
+def run_eval_only(cli_config: Config) -> dict:
+    """Post-hoc evaluation: load checkpoint, rebuild loaders from saved config,
+    and run the current evaluate_split (so newly added diagnostics are computed)."""
+    if not cli_config.eval_only_checkpoint:
+        raise ValueError("--eval-only requires --eval-only-checkpoint <path>")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[eval_only] device={device} checkpoint={cli_config.eval_only_checkpoint}")
+    checkpoint = torch.load(cli_config.eval_only_checkpoint, map_location=device, weights_only=True)
+    saved = dict(checkpoint["config"])
+    valid = {f.name for f in fields(Config)}
+    cli_overrides = {
+        "manifest": cli_config.manifest,
+        "data_root": cli_config.data_root,
+        "eval_surface_points": cli_config.eval_surface_points,
+        "eval_volume_points": cli_config.eval_volume_points,
+        "batch_size": cli_config.batch_size,
+        "amp_mode": cli_config.amp_mode,
+        "num_workers": cli_config.num_workers,
+        "pin_memory": cli_config.pin_memory,
+        "persistent_workers": cli_config.persistent_workers,
+        "prefetch_factor": cli_config.prefetch_factor,
+        "compile_model": cli_config.compile_model,
+        "debug": cli_config.debug,
+    }
+    saved.update({k: v for k, v in cli_overrides.items() if k in valid})
+    config = Config(**{k: v for k, v in saved.items() if k in valid})
+    print(f"[eval_only] manifest={config.manifest} data_root={config.data_root or '(default)'}")
+    print(
+        f"[eval_only] model_layers={config.model_layers} hidden={config.model_hidden_dim} "
+        f"heads={config.model_heads} slices={config.model_slices}"
+    )
+    _, val_loaders, test_loaders, stats = make_loaders(config)
+    transform = TargetTransform(
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
+    )
+    model = build_model(config).to(device)
+    model.load_state_dict(checkpoint["model"])
+    model.eval()
+    val_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in val_loaders.items()
+    }
+    test_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in test_loaders.items()
+    }
+    out = {
+        "checkpoint": cli_config.eval_only_checkpoint,
+        "saved_epoch": int(checkpoint.get("epoch", -1)),
+        "val": val_metrics,
+        "test": test_metrics,
+    }
+    if cli_config.eval_only_output:
+        Path(cli_config.eval_only_output).parent.mkdir(parents=True, exist_ok=True)
+        with open(cli_config.eval_only_output, "w") as f:
+            json.dump(out, f, indent=2, default=float)
+        print(f"[eval_only] wrote results to {cli_config.eval_only_output}")
+    print("[eval_only] === RESULTS BEGIN ===")
+    print(json.dumps(out, indent=2, default=float))
+    print("[eval_only] === RESULTS END ===")
+    return out
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    if config.eval_only:
+        run_eval_only(config)
+        return
     if config.seed >= 0:
         import random
 
