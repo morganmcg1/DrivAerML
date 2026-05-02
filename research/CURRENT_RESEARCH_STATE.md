@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 12:40 UTC (Round 19 in flight; STRING-sep code unblocked at 12:01Z, edward/frieren redirect orders sent)
+- **Date:** 2026-05-02 13:10 UTC (Round 19 in flight; alphonse reassigned to STRING-sep feature-count sweep after QK-norm null result)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -33,9 +33,9 @@ Merge bar = val_abupt < 7.546%.
 
 ### Tay branch (8 active WIP PRs)
 
-| PR | Student | Hypothesis | Status (12:40Z) | Latest val_abupt |
+| PR | Student | Hypothesis | Status (13:10Z) | Latest val_abupt |
 |---|---|---|---|---:|
-| #287 | alphonse | QK-norm on OLD SOTA stack (Arm A control + Arm B treatment) | Arm B `pz7zp49v` ep9.2 — underperforming Arm A ctrl 8.953% | 9.487% |
+| #387 | alphonse | STRING-sep num_features sweep (16/32/64) — optimal spectral resolution | Just assigned — warmup | — |
 | #323 | tanjiro | 2-layer MLP vol decoder + STRING-sep (combined re-launch) | `8x7c537j` ep1.1 — warmup | 37.95% |
 | #351 | fern | Soft tangent-frame loss on tau (asymmetric, λ=0.1) | `la5hrm16` ep4.4 — tracking SOTA closely | 13.75% |
 | #353 | askeladd | Channel-selective Huber loss on tau (δ=0.5) | `nhr4uj3q` ep8.2 — descending but behind SOTA | 10.91% |
@@ -44,9 +44,9 @@ Merge bar = val_abupt < 7.546%.
 | #359 | frieren | STRING-sep + separate volume decoder head | **OFF-TASK** — running unauthorized SwiGLU arm-D; redirect order sent 12:38Z | — |
 | #365 | nezuko | model-layers=5 + STRING-sep PE | `70lnb3dt` group `tay-nezuko-layers5-string-sep` ep~2.5 | descending |
 
-### Notes on each (Round 19, 12:40Z snapshot)
+### Notes on each (Round 19, 13:10Z snapshot)
 
-**PR #287 alphonse QK-norm Arm B (treatment):** ep9.2 best 9.487% — currently 0.534pp BEHIND Arm A control's 8.953%. Headed toward null result on QK-norm-vs-baseline. Watch ep10-12 for late recovery; if Arm B does not reach ≤8.6% by ep12 the experiment is a null and we close.
+**PR #387 alphonse STRING-sep feature count sweep:** 3-arm W&B sweep under group `alphonse-string-sep-features`. Arm A=16 features (96-dim encoding), Arm B=32 (192-dim, SOTA control), Arm C=64 (384-dim, double expressivity). Win condition: any arm beats val_abupt < 7.546%. Watch ep5-8 for Arm C vs Arm B divergence — if 64 wins by ≥0.3pp it points toward even larger feature counts (128) as next step.
 
 **PR #323 tanjiro vol-decoder + STRING-sep (combined):** Just relaunched 12:07Z after rebase onto STRING-sep. Single-delta on top of SOTA = `--model-vol-decoder-depth 2`. Watch ep5-6 vol_pressure — if it drops below 4.0% val (vs SOTA 4.525%) it's the merge signal.
 
@@ -102,8 +102,9 @@ Edward's GRAPE-M Arm C (group `tay-round18-grape-ablation`, run `hrgo2pk1`) was 
 | lr_cosine T_max / warmup | CLOSED | T_max=50, warmup=0 SOTA |
 | grad-clip-norm | MERGED | 0.5 SOTA (#309) |
 | **STRING-separable PE** | **MERGED NEW SOTA** | **val 7.546% / test 8.771% (#311)** |
+| STRING-sep num_features | In-flight | alphonse #387 (16/32/64 sweep) |
 | RFF (isotropic Gaussian) | CLOSED NEGATIVE | WORSE than no-encoding |
-| QK-norm | In-flight | alphonse #287 (old base), thorfinn #358 (new base) |
+| QK-norm | CLOSED NEGATIVE (old base) / In-flight (new base) | alphonse #287 null (+0.10pp worse); thorfinn #358 on STRING-sep base in-flight |
 | U-net skips | CLOSED NEGATIVE | +0.555pp vs SOTA |
 | MLP activation (SwiGLU/ReLU²) | CLOSED NEGATIVE | Near-zero improvement; ReLU² OOM |
 | Per-channel output-head scaling | CLOSED MISMATCH | frieren #352 closed (PR/run mismatch) |
@@ -126,9 +127,9 @@ Edward's GRAPE-M Arm C (group `tay-round18-grape-ablation`, run `hrgo2pk1`) was 
 
 ## Next Priorities (as students complete)
 
-1. **Monitor alphonse #287 QK-norm Arm B** — if it beats STRING-sep SOTA, merge and compound
+1. **Monitor alphonse #387 STRING-sep feature count sweep** — if 64-feature arm beats 32-feature control, merge and consider 128 as follow-up
 2. **Monitor PR #357 edward extended epochs** — may push STRING-sep val below 7.0%
 3. **Monitor nezuko #365** — model-layers=5 + STRING-sep compound; depth=5 may compound with richer STRING-sep geometry
 4. **Await tanjiro #323 completion** — if vol-decoder works on old base, supersede with frieren #359
 5. **Compound round** (next free students): depth=5 + STRING-sep; or STRING-sep + QK-norm + depth (three-way stack if all work independently)
-6. **STRING-sep hyperparameter sweep**: feature count (16/32/64), init scale, per-axis vs isotropic hybrid
+6. **STRING-sep hyperparameter sweep**: init scale, per-axis vs isotropic hybrid (feature count now covered by alphonse #387)
