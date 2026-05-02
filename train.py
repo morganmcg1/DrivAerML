@@ -91,6 +91,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    model_unet_skip: bool = False
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     amp_mode: str = "bf16"
@@ -176,6 +177,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        unet_skip=config.model_unet_skip,
     )
 
 
@@ -471,6 +473,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if config.model_unet_skip and getattr(base_model.backbone, "unet_skip", False):
+                backbone = base_model.backbone
+                for gate_name in ("skip_gate_2", "skip_gate_3"):
+                    gate = getattr(backbone, gate_name, None)
+                    if gate is not None:
+                        log_metrics[f"train/unet_skip/{gate_name}"] = float(gate.detach().cpu().item())
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)

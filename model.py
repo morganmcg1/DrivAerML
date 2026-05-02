@@ -213,8 +213,10 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        unet_skip: bool = False,
     ):
         super().__init__()
+        self.unet_skip = unet_skip
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -227,11 +229,29 @@ class Transformer(nn.Module):
                 for _ in range(depth)
             ]
         )
+        if unet_skip:
+            # Learnable scalar gates for U-Net skip connections (initialized to 0
+            # so they start as identity and gradually open).
+            # With depth=4: skip_gate_2 gates block[0]->block[2], skip_gate_3 gates block[1]->block[3]
+            self.skip_gate_2 = nn.Parameter(torch.zeros(1))
+            self.skip_gate_3 = nn.Parameter(torch.zeros(1))
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
-        return x
+        if not self.unet_skip:
+            for block in self.blocks:
+                x = block(x, attn_mask=attn_mask)
+            return x
+
+        # 4-layer U-Net skip connections:
+        # x0 = blocks[0](x_in)
+        # x1 = blocks[1](x0)
+        # x2 = blocks[2](x1 + skip_gate_2 * x0)   <- skip from block-0 output
+        # x3 = blocks[3](x2 + skip_gate_3 * x1)   <- skip from block-1 output
+        x0 = self.blocks[0](x, attn_mask=attn_mask)
+        x1 = self.blocks[1](x0, attn_mask=attn_mask)
+        x2 = self.blocks[2](x1 + self.skip_gate_2 * x0, attn_mask=attn_mask)
+        x3 = self.blocks[3](x2 + self.skip_gate_3 * x1, attn_mask=attn_mask)
+        return x3
 
 
 class SurfaceTransolver(nn.Module):
@@ -253,6 +273,7 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
+        unet_skip: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -299,6 +320,7 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            unet_skip=unet_skip,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
