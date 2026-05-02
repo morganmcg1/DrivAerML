@@ -6,6 +6,37 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-03 00:30 UTC — PR #471 OPENED: askeladd signed-log transform on volume_pressure target
+
+- **Branch:** `askeladd/vol-p-signed-log` (status:wip)
+- **Hypothesis:** Signed-log target transform `y' = sign(y)·log1p(|y|/c)` applied only to volume_pressure channel (c=1.0 default). Volume pressure has a heavy-tailed amplitude distribution spanning multiple decades (stagnation/body/wake). Compressing dynamic range in loss space should help the network distribute capacity uniformly across magnitudes, closing the ×2.0 vol_p gap vs AB-UPT (12.1885% → target 6.08%).
+- **2-arm DDP8 sweep:** Arm A = SOTA control, Arm B = SOTA + --vol-signed-log --vol-signed-log-c 1.0. W&B group: `askeladd-vol-signedlog-r23`
+- **Status:** Launched, awaiting EP1.
+- **Gates:** EP5 ≤8.9%, EP7 ≤8.5%. Merge bar: val_abupt <7.3816% AND vol_p materially improves over 12.1885%.
+
+---
+
+## 2026-05-03 00:25 UTC — PR #451 CLOSED NEGATIVE: askeladd volume-loss-weight 3.0
+
+- **Branch:** `askeladd/volume-loss-weight-3` (closed, branch deleted)
+- **Hypothesis:** Boost volume_pressure loss contribution via `--volume-loss-weight 3.0` on SOTA stack to close the ×2.0 vol_p gap.
+- **W&B run rank0:** `4nlu8sjy`, group `askeladd-vol-w3-r22`
+
+| EP | val_abupt | Gate |
+|---:|---:|---|
+| 1 | 54.74% | — |
+| 2 | 33.77% | — |
+| 3 | 16.28% | — |
+| 4 | 12.16% | — |
+| 5 | 10.17% | ≤8.9% — FAIL (+1.27pp) |
+| 6 | 9.27% | — |
+
+- **Conclusion:** NEGATIVE — EP6=9.272%, 1.89pp above SOTA bar. Per-epoch delta decaying slowly. Loss-weight rebalancing is too blunt a knob: it shifts capacity globally from surface fields to volume, degrading the abupt average. No inflection in trajectory suggesting it would converge to SOTA levels.
+- **Key takeaway:** Scalar loss reweighting is a dead end for closing vol_p gap on this stack. Capacity-allocation via separate decoder head (PR #452) appears more promising.
+- **Reassignment:** askeladd → PR #471 (signed-log transform on vol_p target channel).
+
+---
+
 ## 2026-05-02 19:30 UTC — PR #423 CLOSED NEGATIVE: thorfinn local tangent-frame input features
 
 - **Branch:** `thorfinn/local-tangent-frame-features` (closed, branch deleted)
