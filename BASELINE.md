@@ -2,7 +2,24 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: fern PR #222 wins — new baseline 2026-05-01
+## Status: edward PR #311 wins — new baseline 2026-05-02
+
+PR #311 (edward, STRING-separable learnable position encoding) reduced
+`val_primary/abupt_axis_mean_rel_l2_pct` from 9.039% (PR #309 thorfinn grad-clip=0.5) to
+**7.546%** — a 16.5% improvement on the headline metric, and a 13.9% improvement
+on `test_primary/abupt_axis_mean_rel_l2_pct` (10.190% → **8.771%**). W&B run: `gcwx9yaa`,
+group: `tay-round18-grape-ablation`, Arm B.
+
+Key finding: replacing isotropic RFF-32 (or no spectral encoding) with a
+**STRING-separable** position encoding — axis-aligned frequencies with per-axis
+**learnable** `log_freq` and `phase` parameters — yields the cleanest
+architectural win in many rounds. Test deltas vs prior SOTA: surface_pressure
+−0.98pp, wall_shear −1.68pp, volume_pressure −0.22pp. All val slopes still
+negative at terminal epoch (model still converging) → more epochs would likely
+extend the gain. This is the **first new-architecture (vs HP) win** in several
+rounds and should compound with the existing 4L/512d Lion+warmup stack.
+
+## Previous: fern PR #222 wins — baseline 2026-05-01
 
 PR #222 (fern, 1-epoch LR warmup before cosine decay) reduced
 `val_primary/abupt_axis_mean_rel_l2_pct` from 9.484% (fern PR #208 / prior best) to
@@ -25,6 +42,8 @@ previous SoTA architecture.
 8. PR #169 thorfinn — NaN/Inf-skip safeguard, --seed, --lr-warmup-steps (infra utilities, no metric regression)
 9. PR #183 fern — pos_max_wavelength=1000 (omega-bank sincos positional encoding)
 10. PR #222 fern — lr_warmup_epochs=1 (Lion stability, 4L/512d architecture)
+11. PR #309 thorfinn — gradient clipping max_norm=0.5 (val 9.039%)
+12. PR #311 edward — STRING-separable learnable position encoding (val 7.546%, test 8.771%)
 
 **New recommended base config (PR #222 winning arm):**
 
@@ -139,36 +158,41 @@ checkpoint reload.
 
 ## Current best on `yi`
 
-| Metric | Best | PR | W&B run | Date |
-|---|---:|---|---|---|
-| `val_primary/abupt_axis_mean_rel_l2_pct` | **9.2910** | #222 | ut1qmc3i | 2026-05-01 |
-| `val_primary/surface_pressure_rel_l2_pct` | **5.8707** | #222 | ut1qmc3i | 2026-05-01 |
-| `val_primary/wall_shear_rel_l2_pct` | **10.3423** | #222 | ut1qmc3i | 2026-05-01 |
-| `val_primary/volume_pressure_rel_l2_pct` | **5.8789** | #222 | ut1qmc3i | 2026-05-01 |
-| `val_primary/wall_shear_x_rel_l2_pct` | — | — | — | — |
-| `val_primary/wall_shear_y_rel_l2_pct` | — | — | — | — |
-| `val_primary/wall_shear_z_rel_l2_pct` | — | — | — | — |
+| Metric | Best (val) | Best (test) | PR | W&B run | Date |
+|---|---:|---:|---|---|---|
+| `abupt_axis_mean_rel_l2_pct` | **7.546** | **8.771** | #311 | gcwx9yaa | 2026-05-02 |
+| `surface_pressure_rel_l2_pct` | — | **4.485** | #311 | gcwx9yaa | 2026-05-02 |
+| `wall_shear_rel_l2_pct` | — | **8.227** | #311 | gcwx9yaa | 2026-05-02 |
+| `volume_pressure_rel_l2_pct` | — | **12.438** | #311 | gcwx9yaa | 2026-05-02 |
+| `wall_shear_x_rel_l2_pct` | — | **7.253** | #311 | gcwx9yaa | 2026-05-02 |
+| `wall_shear_y_rel_l2_pct` | — | **9.233** | #311 | gcwx9yaa | 2026-05-02 |
+| `wall_shear_z_rel_l2_pct` | — | **10.449** | #311 | gcwx9yaa | 2026-05-02 |
 
-Note: PR #222 (fern, lr_warmup_epochs=1) merged 2026-05-01. Additional code wins in history:
-PRs #98 (emma weight-decay), #106 (thorfinn yw2.5-zw2.5), #97 (edward slices192),
-#63 (askeladd sq-rel), #104 (senku ema9997), #102 (haku dropout). PR #8 (frieren FiLM) merged 2026-04-29.
-PR #169 (thorfinn, infra utilities) merged 2026-04-29 — adds NaN/Inf-skip, --seed, --lr-warmup-steps to train.py.
-PR #183 (fern, omega-bank sweep) merged 2026-04-29 — pos_max_wavelength=1000.
-**Merge bar: 9.291% — any PR must beat this to merge.**
+Note: PR #311 (edward, STRING-separable position encoding) merged 2026-05-02 —
+the first new-architecture win in many rounds. Prior compounding wins:
+PR #309 (thorfinn, grad-clip=0.5, val 9.039%), PR #222 (fern, lr_warmup_epochs=1, val 9.291%).
+Additional code wins in history: PRs #98 (emma weight-decay), #106 (thorfinn yw2.5-zw2.5),
+#97 (edward slices192), #63 (askeladd sq-rel), #104 (senku ema9997), #102 (haku dropout),
+#8 (frieren FiLM), #169 (thorfinn infra), #183 (fern omega-bank).
+**Merge bar: val_abupt 7.546% — any PR must beat this to merge.**
 
-**Distance from AB-UPT targets (multiple of target):**
+**Distance from AB-UPT targets (test, multiple of target):**
 
-| Metric | yi best (PR #222) | AB-UPT | Ratio |
+| Metric | yi best test (PR #311) | AB-UPT | Ratio |
 |---|---:|---:|---:|
-| surface_pressure | 5.8707 | 3.82 | 1.54× |
-| wall_shear | 10.3423 | 7.29 | 1.42× |
-| volume_pressure | 5.8789 | 6.08 | 0.97× |
-| abupt_axis_mean | 9.2910 | — | — |
+| surface_pressure | 4.485 | 3.82 | 1.17× |
+| wall_shear | 8.227 | 7.29 | 1.13× |
+| volume_pressure | 12.438 | 6.08 | 2.05× |
+| wall_shear_x | 7.253 | 5.35 | 1.36× |
+| wall_shear_y | 9.233 | 3.65 | 2.53× |
+| wall_shear_z | 10.449 | 3.63 | 2.88× |
+| abupt_axis_mean | 8.771 | — | — |
 
-Volume pressure has now beaten AB-UPT (0.97×, 5.88 vs 6.08) — our architecture
-is competitive on scalar fields. Surface pressure and wall_shear remain the key
-gap. Per-axis wall_shear_y/z breakdown not available for PR #222 at time of
-writing — check W&B run `ut1qmc3i` for latest.
+Surface pressure and wall_shear (vector) have closed substantially with PR #311.
+The dominant remaining gaps are **wall_shear_y/z (2.5×, 2.9×)** and
+**volume_pressure (2.0×)** — these are the key research targets for upcoming
+rounds. PR #311 STRING-sep also showed all val slopes still negative at terminal
+epoch, so longer training on this architecture is itself a candidate.
 
 ## Reference config (`train.py` defaults on `yi`)
 
