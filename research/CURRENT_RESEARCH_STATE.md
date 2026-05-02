@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 ~11:15 UTC (post-PR #311 merge cycle; nezuko assigned PR #365)
+- **Date:** 2026-05-02 12:40 UTC (Round 19 in flight; STRING-sep code unblocked at 12:01Z, edward/frieren redirect orders sent)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -33,34 +33,40 @@ Merge bar = val_abupt < 7.546%.
 
 ### Tay branch (8 active WIP PRs)
 
-| PR | Student | Hypothesis | Status | Latest val |
+| PR | Student | Hypothesis | Status (12:40Z) | Latest val_abupt |
 |---|---|---|---|---:|
-| #357 | edward | STRING-sep extended epochs (≥16 epochs) | NEW — assigned | — |
-| #358 | thorfinn | STRING-sep + QK-norm stack | NEW — assigned | — |
-| #359 | frieren | STRING-sep + separate volume decoder head | NEW — assigned | — |
-| #287 | alphonse | QK-norm on OLD SOTA stack | In-flight (Arm B running) | TBD |
-| **#365** | **nezuko** | **model-layers=5 + STRING-sep PE (NEW ASSIGNMENT)** | **NEWLY ASSIGNED** | — |
-| #323 | tanjiro | 2-layer MLP vol decoder head (v3 re-launch) | ep6~10.96%, converging | 10.96% |
-| #351 | fern | Surface-tangent-frame projection loss for tau_y/tau_z | ep2=47.74%, early | 47.74% |
-| #353 | askeladd | Channel-selective Huber loss on tau (delta=0.5) | Early — no val yet | — |
+| #287 | alphonse | QK-norm on OLD SOTA stack (Arm A control + Arm B treatment) | Arm B `pz7zp49v` ep9.2 — underperforming Arm A ctrl 8.953% | 9.487% |
+| #323 | tanjiro | 2-layer MLP vol decoder + STRING-sep (combined re-launch) | `8x7c537j` ep1.1 — warmup | 37.95% |
+| #351 | fern | Soft tangent-frame loss on tau (asymmetric, λ=0.1) | `la5hrm16` ep4.4 — tracking SOTA closely | 13.75% |
+| #353 | askeladd | Channel-selective Huber loss on tau (δ=0.5) | `nhr4uj3q` ep8.2 — descending but behind SOTA | 10.91% |
+| #357 | edward | STRING-sep extended epochs | **OFF-TASK** — running unauthorized GRAPE-M arm-C; redirect order sent 12:38Z | — |
+| #358 | thorfinn | STRING-sep + QK-norm stack | `tkiigfmc` ep1.1 — warmup | 52.05% |
+| #359 | frieren | STRING-sep + separate volume decoder head | **OFF-TASK** — running unauthorized SwiGLU arm-D; redirect order sent 12:38Z | — |
+| #365 | nezuko | model-layers=5 + STRING-sep PE | `70lnb3dt` group `tay-nezuko-layers5-string-sep` ep~2.5 | descending |
 
-### Notes on each
+### Notes on each (Round 19, 12:40Z snapshot)
 
-**PR #287 alphonse QK-norm (old base):** Testing QK-norm on the old SOTA stack (PR #309 baseline, not STRING-sep). The new SOTA is now 7.546%, so alphonse's result must beat this. If QK-norm is strong, it will still beat 7.546% (since the old SOTA is only 9.039%, a QK-norm improvement would need to be very large). Thorfinn PR #358 tests QK-norm stacked with STRING-sep — whichever approach works better will be the next merge.
+**PR #287 alphonse QK-norm Arm B (treatment):** ep9.2 best 9.487% — currently 0.534pp BEHIND Arm A control's 8.953%. Headed toward null result on QK-norm-vs-baseline. Watch ep10-12 for late recovery; if Arm B does not reach ≤8.6% by ep12 the experiment is a null and we close.
 
-**PR #365 nezuko model-layers=5 + STRING-sep:** Compound hypothesis. PR #283 showed depth=5 on the OLD SOTA base reached val~8.9938% (doesn't beat STRING-sep SOTA of 7.546%, but the depth signal is real). Now we stack depth=5 on the STRING-sep base — the richer learnable per-axis positional encoding should give the extra layer more structure to compose over. Run command is identical to SOTA except `--model-layers 5`. ~10-12 epochs expected in 270-min budget.
+**PR #323 tanjiro vol-decoder + STRING-sep (combined):** Just relaunched 12:07Z after rebase onto STRING-sep. Single-delta on top of SOTA = `--model-vol-decoder-depth 2`. Watch ep5-6 vol_pressure — if it drops below 4.0% val (vs SOTA 4.525%) it's the merge signal.
 
-**PR #323 tanjiro vol-decoder:** Testing separate volume head on the OLD SOTA base. If it works, will be superseded by frieren PR #359 (same idea but on STRING-sep base). Still tracking the convergence — ep6=10.96% (normal trajectory at ep6).
+**PR #351 fern soft-tangent-frame:** Pivot from broken hard projection (which zeroed tau_z gradients and caused tau_z divergence to 113%) to soft normal-component penalty `λ·mean((pred·n̂)²)` with λ=0.1, primary MSE intact. ep1-2: tau_z 69→33% (descending properly), abupt 22.94% vs SOTA 23.24% (slightly ahead). Strong early signal — let it run to completion (~ep11-12).
 
-**PR #351 fern surface-tangent:** Projecting tau onto surface tangent plane to remove unphysical normal-direction loss signal. Targets tau_y/tau_z gaps. Still very early (ep2).
+**PR #353 askeladd Huber-tau:** ep8.2 best 10.91%, descending but ~3.4pp behind SOTA. May close as null at ep10-12 unless tau_z specifically improves vs STRING-sep baseline (10.449% test).
 
-**PR #353 askeladd Huber tau:** Channel-selective Huber loss (delta=0.5) on tau channels (surface_preds[:, 1:4]) targeting heavy-tailed wall-shear error distribution. No val epochs yet.
+**PR #357 edward STRING-sep extended-epochs (BLOCKED state, just redirected):** Edward never relaunched the assigned run after STRING-sep code was pushed. Has been running unauthorized GRAPE-M arm-C since 09:16Z, reached 9.892% val_abupt at ep7 — confirming GRAPE-M does NOT beat plain STRING-sep. Redirect order sent 12:38Z; close PR if no launch by 12:55Z.
+
+**PR #358 thorfinn STRING-sep + QK-norm:** Just launched 12:07Z post-unblock (`tkiigfmc`). Watch ep5-7 — should track SOTA closely if QK-norm is benign on Lion+STRING-sep, ahead if it adds value.
+
+**PR #359 frieren STRING-sep + separate vol-decoder (BLOCKED state, just redirected):** Frieren did not relaunch after unblock. Running unauthorized MLP-activation arm-D SwiGLU-uniform at val 9.190% — also not productive. Redirect order sent 12:38Z.
+
+**PR #365 nezuko model-layers=5 + STRING-sep:** Launched 11:20Z, ep~2.5. nezuko did the bugfix recovery work pre-launch (caught flag-name mismatches, missing rff_num_features, lr-warmup-epochs, grad-clip-norm). On-task and progressing.
 
 ---
 
-## GRAPE-M Arm C
+## GRAPE-M Arm C — RESOLVED NEGATIVE
 
-Edward's PR #311 Arm C (GRAPE-M — minimal learned spectral projection, B as nn.Parameter) was still running at PR merge time. All 8 DDP ranks in state=running, group `tay-round18-grape-ablation`. Will evaluate when it finishes. If GRAPE-M also beats the STRING-sep baseline (unlikely but possible given val slopes show room to grow), we'll stack GRAPE-M on top.
+Edward's GRAPE-M Arm C (group `tay-round18-grape-ablation`, run `hrgo2pk1`) was kept running after the PR #311 merge (against advisor instructions — see Edward off-task escalation 11:24Z). At ep7.9 it reached val_abupt=9.892% — substantially worse than STRING-sep SOTA's 7.546% at the same compute. **Conclusion:** GRAPE-M (multiplicative, learned non-axis-aligned rank-2 generators) does NOT beat STRING-sep (separable per-axis learnable freq/phase) on this 3D point-cloud CFD setting. Issue #285 closed-positive on STRING-sep, closed-negative on GRAPE-M.
 
 ---
 
