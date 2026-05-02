@@ -32,7 +32,9 @@ Reducing attention heads from 8 (default) to 4 improves validation performance. 
 
 **Wins over PR #222 on every axis.** Largest gains: wall_shear −2.70%, surface_pressure −1.60%, tau_y −3.07%, tau_z −3.17%, abupt −2.21%.
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, lr_warmup_epochs=1, heads=4)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, heads=4)
+
+**Note:** W&B run `r8s2dtnq` was confirmed (by edward, 2026-05-02) to have `rff_num_features=0` and `lr_warmup_epochs=0`. The SOTA does NOT use RFF and does NOT use lr-warmup. The reproduce command below matches the actual run config.
 
 ```bash
 cd target/
@@ -42,7 +44,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
-  --ema-decay 0.999 --lr-warmup-epochs 1
+  --ema-decay 0.999
 ```
 
 ### Compounding wins so far

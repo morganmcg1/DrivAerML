@@ -6,6 +6,87 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+---
+
+## 2026-05-02 14:00 UTC — PR #300 CLOSED: tanjiro sandwich-norm RMSNorm — NEGATIVE (catastrophic)
+
+- **Branch:** `tanjiro/post-attn-rmsnorm` (closed, branch deleted)
+- **Hypothesis:** Post-attention + post-MLP RMSNorm (sandwich-norm pattern from Modded-NanoGPT) stabilizes Transolver slot attention by normalizing each sublayer output before the residual add.
+- **W&B run:** `528uuqx5` (rank 0), group `post-attn-rmsnorm`
+
+| Metric | Run `528uuqx5` | SOTA (9.065%) |
+|---|---|---|
+| `val_abupt` | **79.982%** | 9.065% |
+| `surface_pressure` | 67.49% | 5.703% |
+| `volume_pressure` | 62.29% | 5.830% |
+| `wall_shear` | 83.97% | 10.089% |
+| `tau_y` | 99.27% | — |
+| `tau_z` | 95.06% | — |
+
+- **Conclusion:** CATASTROPHIC divergence. The model is failing to learn — all metrics near 100% error. Earlier runs in same group also crashed (40t1yerr at 66.18%). Post-attn RMSNorm destroys the Transolver slot routing mechanism. Hypothesis falsified: the sandwich-norm pattern from NLP/image transformers does not transfer to Transolver's slice-attention, which already produces near-unit-norm features from the routing mechanism. The additional post-norms collapse signal.
+- **Action:** Closed PR, deleted branch. Tanjiro reassigned to PR #323 (volume decoder head).
+
+---
+
+## 2026-05-02 14:00 UTC — PRs #289–#296 and #321 CLOSED: orphan student PRs
+
+- **Students:** chihiro (#289), emma (#290), gilbert (#291), kohaku (#293), norman (#294), senku (#295), violet (#296), haku (#321)
+- **Reason:** These students do not have `senpai-drivaerml-ddp8` pods — they cannot run tay experiments. PRs were created by prior advisor sessions without verifying pod existence.
+- **Hypotheses deferred:**
+  - lr-warmup-epochs=2 (chihiro)
+  - RFF retest on SOTA heads=4 (emma) — NOTE: SOTA confirmed to use rff=0, RFF is not in SOTA
+  - ema-decay=0.9995 + warmup=1ep (gilbert)
+  - lr-cosine-t-max=12 (kohaku)
+  - warmup=1ep + T_max=9 compound (norman)
+  - model-hidden-dim=768 + muP lr (senku)
+  - lr-min=1e-5 (violet)
+  - Dedicated 2-layer MLP volume decoder (haku — reassigned to tanjiro #323)
+
+---
+
+## 2026-05-02 14:00 UTC — PR #283 IN PROGRESS: nezuko model-layers=5 — VERY PROMISING
+
+- **Branch:** `nezuko/model-layers-5`
+- **Hypothesis:** Adding a 5th Transformer layer (4→5) improves expressiveness for this CFD surrogate task, especially volume pressure which requires 3D field integration.
+- **W&B run:** `io3rt633` (rank 0), group `tay-model-layers-sweep`
+
+| Epoch | val_abupt | surface_p | wall_shear | volume_p | tau_x | tau_y | tau_z |
+|------:|----------:|----------:|-----------:|---------:|------:|------:|------:|
+| 1 (warmup) | 64.78% | 49.60% | 66.57% | 54.34% | 56.31% | 85.67% | 78.02% |
+| 4 | 13.08% | 8.54% | 14.64% | 8.06% | 12.46% | 17.75% | 18.60% |
+| 5 | 11.41% | 7.23% | 12.74% | 7.29% | 10.76% | 15.70% | 16.07% |
+| 6 | 10.46% | 6.53% | 11.72% | 6.65% | 9.87% | 14.51% | 14.76% |
+| **7** | **9.808%** | **6.10%** | **11.02%** | **6.09%** | **9.26%** | **13.64%** | **13.95%** |
+| SOTA (ep11) | **9.065%** | 5.461% | 9.910% | 12.656% | 8.432% | 11.952% | 12.447% |
+| AB-UPT ref | — | 3.82% | 7.29% | **6.08%** | 5.35% | 3.65% | 3.63% |
+
+- **KEY FINDING:** volume_pressure at epoch 7 = **6.09%** — essentially matching AB-UPT (6.08%). The 5th layer resolves volume fields dramatically better than 4L. Val_abupt=9.808%, gap to SOTA = 0.74pp with ~3 epochs remaining. Slope at ep7/1k = -0.241.
+- **Prognosis:** Strong chance of beating SOTA val=9.065% by ep10. Wall time ~37 min/epoch, ~136 min remaining in budget. Watch for PR to be marked ready for review.
+- **Wall shear caveat:** tau_y (13.64%) and tau_z (13.95%) still above SOTA (11.952%, 12.447%). 5L helps volume but not yet wall shear.
+
+---
+
+## 2026-05-02 02:00 UTC — PR #311 ASSIGNED: edward GRAPE/STRING/RFF 3-arm positional encoding
+
+- **Branch:** `edward/grape-positional-encoding`
+- **Hypothesis:** Learned group-based representational position encodings (GRAPE-M) or separable STRING (3D factored planes) will outperform the current RFF baseline on shear stress axes where geometric detail is critical.
+- **W&B run (early):** `zf2dp7tv` (Arm A, RFF ctrl), group `tay-round18-grape-ablation`; val=35.16% slope=-7.0/1k (very early stage).
+- **Edward's note:** SOTA run r8s2dtnq confirmed to use rff_num_features=0 — no RFF in actual SOTA. Arm A is the cross-encoding ablation control (RFF=32), not a SOTA recheck. All three arms use consistent baseline, so spread is purely about encoding.
+- **Status:** Running. Arms B (STRING) and C (GRAPE-M) pending after Arm A completes.
+
+---
+
+## 2026-05-02 14:00 UTC — PR #323 ASSIGNED: tanjiro 2-layer MLP volume decoder head
+
+- **Branch:** `tanjiro/vol-decoder-head`
+- **Hypothesis:** Replace the single linear volume output head (`nn.Linear`) with a 2-layer MLP (hidden→hidden→output with GELU + LayerNorm) to provide dedicated non-linear capacity for the volume pressure field, which shows the largest gap vs AB-UPT (12.656% vs 6.08%).
+- **Baseline:** SOTA val 9.065%, volume_pressure 12.656%
+- **Single delta:** Add `vol_decoder_depth` flag; depth=2 uses `nn.Sequential(Linear, GELU, LayerNorm, Linear)` vs depth=1 baseline.
+- **2-arm sweep:** Arm A (depth=2 MLP), Arm B (depth=1 linear ctrl). `--wandb-group tanjiro-vol-decoder`
+- **Status:** ASSIGNED — waiting for pod pickup.
+
+---
+
 ## 2026-05-02 05:30 UTC — PR #251 CLOSED: fern T_max=8+warmup+lr-min=5e-6 — NEGATIVE (+0.344pp vs SOTA)
 
 - **Branch:** `fern/cosine-tmax8-lrmin5e-6-warmup` (closed, branch deleted)
