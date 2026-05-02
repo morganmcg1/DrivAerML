@@ -91,6 +91,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    model_vol_decoder_depth: int = 1   # 1=linear (baseline), 2=MLP decoder
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     pos_encoding_mode: str = "sincos"
@@ -178,6 +179,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
         pos_encoding_mode=config.pos_encoding_mode,
+        vol_decoder_depth=config.model_vol_decoder_depth,
     )
 
 
