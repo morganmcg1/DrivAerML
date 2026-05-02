@@ -17,6 +17,7 @@ import argparse
 import math
 import os
 import time
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
@@ -160,24 +161,24 @@ class _CombinedOptimizer(torch.optim.Optimizer):
     """
 
     def __init__(self, optimizers: list) -> None:
-        self._child_optimizers = optimizers
-        # Satisfy torch.optim.Optimizer.__init__ without duplicating params.
-        # We set up the internal fields ourselves and point param_groups at the
-        # combined list of actual groups from the child optimizers.
+        self._child_optimizers = list(optimizers)
+        # Satisfy torch.optim.Optimizer's expected attributes without duplicating
+        # the children's parameter lists. We set up the internal fields directly
+        # and expose param_groups as the concatenation of the children's groups.
         object.__setattr__(self, "defaults", {})
         object.__setattr__(self, "state", {})
-        object.__setattr__(self, "_optimizer_step_pre_hooks", {})
-        object.__setattr__(self, "_optimizer_step_post_hooks", {})
-        object.__setattr__(self, "_optimizer_state_dict_pre_hooks", {})
-        object.__setattr__(self, "_optimizer_state_dict_post_hooks", {})
-        object.__setattr__(self, "_optimizer_load_state_dict_pre_hooks", {})
-        object.__setattr__(self, "_optimizer_load_state_dict_post_hooks", {})
+        object.__setattr__(self, "_optimizer_step_pre_hooks", OrderedDict())
+        object.__setattr__(self, "_optimizer_step_post_hooks", OrderedDict())
+        object.__setattr__(self, "_optimizer_state_dict_pre_hooks", OrderedDict())
+        object.__setattr__(self, "_optimizer_state_dict_post_hooks", OrderedDict())
+        object.__setattr__(self, "_optimizer_load_state_dict_pre_hooks", OrderedDict())
+        object.__setattr__(self, "_optimizer_load_state_dict_post_hooks", OrderedDict())
         object.__setattr__(self, "_warned_capturable_if_run_uncaptured", True)
         # Build a flat list of all param_groups from child optimizers.
         # Schedulers iterate this list and write group["lr"] — since these are
         # the same dict objects as in the child optimizers, both are updated.
         combined_groups: list = []
-        for opt in optimizers:
+        for opt in self._child_optimizers:
             combined_groups.extend(opt.param_groups)
         object.__setattr__(self, "param_groups", combined_groups)
 
