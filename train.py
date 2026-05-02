@@ -29,7 +29,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 import yaml
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from data import (
@@ -601,6 +601,8 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    eval_symmetry_tta: bool = False
+    max_train_cases: int = 0  # 0 = use all; >0 = subsample first N training cases
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -707,6 +709,10 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    # Optionally restrict to the first N training cases (for fast diagnostic runs).
+    if config.max_train_cases > 0 and config.max_train_cases < len(train_ds):
+        train_ds = Subset(train_ds, list(range(config.max_train_cases)))
+        print(f"max_train_cases={config.max_train_cases}: training set limited to {len(train_ds)} views")
     num_workers = resolve_num_workers(config)
     loader_kwargs = {
         "collate_fn": pad_collate,
@@ -1441,6 +1447,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    use_symmetry_tta: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1472,14 +1479,35 @@ def evaluate_split(
         surface_target_norm = transform.apply_surface(batch.surface_y)
         volume_target_norm = transform.apply_volume(batch.volume_y)
         with autocast_context(device, amp_mode):
-            out = model(
+            out_orig = model(
                 surface_x=batch.surface_x,
                 surface_mask=batch.surface_mask,
                 volume_x=batch.volume_x,
                 volume_mask=batch.volume_mask,
             )
-        surface_pred_norm = out["surface_preds"].float()
-        volume_pred_norm = out["volume_preds"].float()
+            if use_symmetry_tta:
+                # Build y-reflected inputs: negate y-coord (index 1) and y-normal (index 4)
+                # for surface points; negate y-coord (index 1) for volume points.
+                surface_x_refl = batch.surface_x.clone()
+                surface_x_refl[..., 1] = -surface_x_refl[..., 1]   # y coord
+                surface_x_refl[..., 4] = -surface_x_refl[..., 4]   # ny normal
+                volume_x_refl = batch.volume_x.clone()
+                volume_x_refl[..., 1] = -volume_x_refl[..., 1]     # y coord
+                out_refl = model(
+                    surface_x=surface_x_refl,
+                    surface_mask=batch.surface_mask,
+                    volume_x=volume_x_refl,
+                    volume_mask=batch.volume_mask,
+                )
+                # Undo reflection on predictions: tau_y (channel 2) is anti-symmetric
+                surface_preds_refl = out_refl["surface_preds"].clone()
+                surface_preds_refl[..., 2] = -surface_preds_refl[..., 2]
+                # Average original and reflection-corrected predictions
+                surface_pred_norm = 0.5 * (out_orig["surface_preds"].float() + surface_preds_refl.float())
+                volume_pred_norm = 0.5 * (out_orig["volume_preds"].float() + out_refl["volume_preds"].float())
+            else:
+                surface_pred_norm = out_orig["surface_preds"].float()
+                volume_pred_norm = out_orig["volume_preds"].float()
         surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
@@ -2001,9 +2029,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_symmetry_tta=config.eval_symmetry_tta)
             for name, loader in val_loaders.items()
         }
+        # Dual-eval: when symmetry TTA is enabled, also evaluate without TTA so both
+        # arms are logged at every epoch under distinct W&B prefixes.
+        if config.eval_symmetry_tta:
+            val_metrics_no_tta = {
+                name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_symmetry_tta=False)
+                for name, loader in val_loaders.items()
+            }
+        else:
+            val_metrics_no_tta = None
         if ema is not None:
             ema.restore(model)
 
@@ -2026,6 +2063,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         for split_name, metrics in val_metrics.items():
             for key, value in metrics.items():
                 log_metrics[f"val/{split_name}/{key}"] = value
+        # Log both TTA arms under distinct prefixes when dual-eval is active.
+        if config.eval_symmetry_tta:
+            for split_name, metrics in val_metrics.items():
+                for key, value in metrics.items():
+                    log_metrics[f"val_tta/{split_name}/{key}"] = value
+            assert val_metrics_no_tta is not None
+            for split_name, metrics in val_metrics_no_tta.items():
+                for key, value in metrics.items():
+                    log_metrics[f"val_no_tta/{split_name}/{key}"] = value
         log_metrics.update(
             val_slope_tracker.update(
                 global_step=global_step,
@@ -2116,9 +2162,18 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_symmetry_tta=config.eval_symmetry_tta)
         for name, loader in val_loaders.items()
     }
+    # When TTA is on, also evaluate the same checkpoint without TTA so both arms
+    # are logged at the final-val/test stage on the same model state.
+    if config.eval_symmetry_tta:
+        full_val_metrics_no_tta = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_symmetry_tta=False)
+            for name, loader in val_loaders.items()
+        }
+    else:
+        full_val_metrics_no_tta = None
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
     full_val_log: dict[str, object] = {
         "full_val_primary/abupt_axis_mean_rel_l2_pct": full_val_primary,
@@ -2137,6 +2192,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, metrics in full_val_metrics.items():
         for key, value in metrics.items():
             full_val_log[f"full_val/{split_name}/{key}"] = value
+    if config.eval_symmetry_tta:
+        for split_name, metrics in full_val_metrics.items():
+            for key, value in metrics.items():
+                full_val_log[f"full_val_tta/{split_name}/{key}"] = value
+        assert full_val_metrics_no_tta is not None
+        for split_name, metrics in full_val_metrics_no_tta.items():
+            for key, value in metrics.items():
+                full_val_log[f"full_val_no_tta/{split_name}/{key}"] = value
     full_val_log.update(
         full_val_slope_tracker.update(
             global_step=global_step,
@@ -2148,11 +2211,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.log(full_val_log)
     wandb.summary.update(_numeric_metric_items(full_val_log))
     print_metrics("full_val", full_val_metrics["val_surface"])
+    if full_val_metrics_no_tta is not None:
+        print_metrics("full_val_no_tta", full_val_metrics_no_tta["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_symmetry_tta=config.eval_symmetry_tta)
         for name, loader in test_loaders.items()
     }
+    if config.eval_symmetry_tta:
+        test_metrics_no_tta = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_symmetry_tta=False)
+            for name, loader in test_loaders.items()
+        }
+    else:
+        test_metrics_no_tta = None
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
     test_log: dict[str, object] = {
         "test_primary/abupt_axis_mean_rel_l2_pct": test_primary,
@@ -2171,6 +2243,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     for split_name, metrics in test_metrics.items():
         for key, value in metrics.items():
             test_log[f"test/{split_name}/{key}"] = value
+    if config.eval_symmetry_tta:
+        for split_name, metrics in test_metrics.items():
+            for key, value in metrics.items():
+                test_log[f"test_tta/{split_name}/{key}"] = value
+        assert test_metrics_no_tta is not None
+        for split_name, metrics in test_metrics_no_tta.items():
+            for key, value in metrics.items():
+                test_log[f"test_no_tta/{split_name}/{key}"] = value
     test_log.update(
         test_slope_tracker.update(
             global_step=global_step,
@@ -2182,6 +2262,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.log(test_log)
     wandb.summary.update(_numeric_metric_items(test_log))
     print_metrics("test_surface", test_metrics["test_surface"])
+    if test_metrics_no_tta is not None:
+        print_metrics("test_no_tta", test_metrics_no_tta["test_surface"])
 
     log_model_artifact(
         run=run,
