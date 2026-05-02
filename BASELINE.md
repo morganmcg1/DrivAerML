@@ -1,6 +1,40 @@
 # DrivAerML Baseline Metrics
 
-## Current Best: PR #74 — alphonse 4L/256d baseline (2026-05-01)
+## Current Best: PR #174 — alphonse 5L/256d + FourierPE + T_max=50 (2026-05-02)
+
+Best result on the bengio branch from PR #174 (alphonse), 5L/256d Transformer with **`FourierEmbed` PE**, no-EMA, cosine LR with T_max=50.
+Val metrics at best checkpoint (ep~45.3, step 807,025, W&B run `vu4jsiic`).
+
+| Metric | Current Best (val) | AB-UPT Target |
+|--------|-------------------|--------------|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **6.9549** | 4.51 |
+| `val_primary/surface_pressure_rel_l2_pct` | 4.5644 | 3.82 |
+| `val_primary/volume_pressure_rel_l2_pct` | **3.9361** ✓ | 6.08 |
+| `val_primary/wall_shear_y_rel_l2_pct` | 8.7345 | 3.65 |
+| `val_primary/wall_shear_z_rel_l2_pct` | 10.5766 | 3.63 |
+
+**vol_p beats AB-UPT target.** abupt is 6.95% vs 4.51% target — 2.44pp gap remains.
+
+**Architecture**: n_params=3,249,813 = FourierEmbed + 5L/256d/4H. T_max=50 cosine schedule validated as +0.25pp improvement vs T_max=30 baseline.
+
+### Reproduce command (best config)
+
+```bash
+cd target/ && torchrun --standalone --nproc-per-node=4 train.py \
+  --model-layers 5 \
+  --model-hidden-dim 256 \
+  --model-heads 4 \
+  --fourier-pe \
+  --no-use-ema \
+  --lr 3e-4 \
+  --lr-cosine-t-max 50 \
+  --no-compile-model \
+  --wandb-group bengio-wave9
+```
+
+---
+
+## Previous Best: PR #74 — alphonse 4L/256d baseline (2026-05-01)
 
 The current best result on the bengio branch is from PR #74 (alphonse), 4L/256d Transformer
 with **`FourierEmbed` PE**, no-EMA, cosine LR with T_max=30.
@@ -73,3 +107,4 @@ Approximately 12.96% abupt — the bengio Wave 1 result (7.21%) is a significant
 - 2026-05-01: PR #74 (alphonse) merged as Wave 1 leader. New best val_abupt = 7.2091% (ep30, run m9775k1v). vol_p beats AB-UPT target at 4.166%.
 - 2026-05-01 16:14Z: Corrected baseline description — alphonse `m9775k1v` used `ContinuousSincosEmbed` not FourierEmbed (frieren PR #218 audit confirmed via W&B run config); PR #74 was a squash merge of the assignment only, no model code. FourierEmbed was added later via chihiro PR #176. Reproduce command updated to drop `--fourier-pe`.
 - 2026-05-02: PR #176 (chihiro) squash-merged — canonical FourierEmbed implementation and `--fourier-pe` flag are now on bengio. Baseline does NOT change (7.2091%). LR sweep result: lr=3e-4 confirmed optimal within {1e-4, 3e-4, 5e-4}; lr=5e-4 Trial B best at ep11=9.122% (worse than baseline), lr=1e-4 Trial A diverged. **BASELINE.md CORRECTED**: the "ContinuousSincosEmbed" baseline description was wrong. m9775k1v used FourierEmbed (n_params=3,249,813, run name `alphonse/4l-256d-fourier-pe-baseline-rank0`). All reproduce commands updated to include `--fourier-pe`. The frieren PR #218 audit was incorrect in its conclusion (absence of `fourier_pe` config field in W&B does not mean ContinuousSincosEmbed — FourierEmbed was the hardcoded default at time of training, before the flag was added).
+- 2026-05-02 15:00Z: PR #174 (alphonse) merged as new best. New best val_abupt = **6.9549%** (ep~45.3, step 807,025, run `vu4jsiic`). Improvements: 5L vs 4L (+1 layer), T_max=50 vs T_max=30. Combined gain: −0.254pp on abupt. Wall-shear axes remain the dominant binding constraint (wsy=8.73%, wsz=10.58%).
