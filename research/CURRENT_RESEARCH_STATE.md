@@ -1,12 +1,12 @@
 # SENPAI Research State
-- 2026-05-02 (Round 18 assigned — 16 WIP PRs on yi, 0 idle students)
+- 2026-04-29 (Round 19 — 17 WIP PRs on yi, 0 idle students)
 
-## Latest Survey Pass (2026-05-02)
-- Round 18 assignments complete: 6 new yi PRs created for edward, kohaku, norman, senku, thorfinn, violet
-- PR #298 (fern learned Fourier embed): 4-arm sweep running (single-GPU per arm; yi has no DDP). ep1 results pending.
-- PR #297 (haku symm-aug Arm C): running on stable lr=1e-4/wu=1ep base; ep1 results pending.
-- PR #288 (gilbert spectral Fourier loss), #286 (frieren TTA), #284 (alphonse 6L/512d), #262 (nezuko WSD): all in progress.
-- All 16 yi student pods active. Zero idle GPUs.
+## Latest Survey Pass (2026-04-29)
+- **Round 19 assignment**: PR #324 (stark) — per-channel target z-score standardization for tau_y/z gap. Two arms: z-score ON (--normalize-targets) vs control. AdamW + --lr-warmup-steps 2700.
+- **Advisor replies posted**: PR #322 (emma) — approved AdamW + lr-warmup-steps path; PR #316 (thorfinn) — approved bs=4 OOM deviation, set reporting expectations for dynamic-weight trajectory.
+- Round 18 PRs in progress: edward (#312 surface-tangent frame), kohaku (#313 multi-seed ensemble), norman (#314 coord jitter), senku (#315 mlp_ratio), thorfinn (#316 GradNorm dynamic weighting), violet (#317 Huber loss), emma (#322 surface-loss-weight=2.0).
+- Older PRs still in flight: fern (#298 learned Fourier embed 4-arm), haku (#297 symm-aug Arm C), gilbert (#288 spectral Fourier loss), frieren (#286 TTA), alphonse (#284 6L/512d), nezuko (#262 WSD LR), tanjiro (#249 asinh), chihiro (#243 aux-rel-l2), askeladd (#208 sandwich-LN).
+- All 17 yi student pods active. Zero idle GPUs.
 
 ## Most Recent Research Direction from Human Researcher Team
 
@@ -49,12 +49,14 @@
 
 **Merge bar: 9.291% — any PR must beat this val_abupt to merge.**
 
-## Active WIP PRs (as of 2026-05-02 — 16 WIP PRs on yi)
+## Active WIP PRs (as of 2026-04-29 — 17 WIP PRs on yi)
 
 | PR | Student | Hypothesis | Round |
 |---|---|---|---|
+| #324 | stark | Per-channel target z-score standardization (2-arm: zscore vs control) | 19 |
+| #322 | emma | surface-loss-weight=2.0 on SOTA base (AdamW + lr-warmup-steps 2700) | 18 |
 | #317 | violet | Huber loss for wall-shear (δ=0.5/1.0/2.0 sweep) | 18 |
-| #316 | thorfinn | GradNorm dynamic per-task loss weighting for tau_y/z | 18 |
+| #316 | thorfinn | GradNorm dynamic per-task loss weighting for tau_y/z (bs=4, 2-arm) | 18 |
 | #315 | senku | MLP expansion ratio sweep (mlp_ratio=2/4/8) | 18 |
 | #314 | norman | Coordinate jitter augmentation sweep (σ=0.002/0.005/0.01) | 18 |
 | #313 | kohaku | Multi-seed ensemble averaging (3-seed variance reduction) | 18 |
@@ -66,7 +68,6 @@
 | #284 | alphonse | 6L/512d depth+width scaling on Lion+warmup SOTA | 15 |
 | #262 | nezuko | Linear-warmdown LR (WSD-style) on 4L/512d SOTA | 15 |
 | #249 | tanjiro | asinh normalization for wall-shear targets | 14 |
-| #244 | emma | Sweep surface-loss-weight (1.5/2.0) | 13 |
 | #243 | chihiro | Sweep aux-rel-l2-weight (0.1/0.5/1.0) | 13 |
 | #208 | askeladd | Sandwich-LN to unlock 8L/256d depth (stability fix) | 13 |
 
