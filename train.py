@@ -604,6 +604,7 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    cosine_t_max_epochs: int = 0
     optimizer: str = "adamw"
 
 
@@ -1780,7 +1781,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"Optimizer: {optimizer.__class__.__name__} "
             f"lr={config.lr} wd={config.weight_decay}"
         )
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    cosine_t_max = config.cosine_t_max_epochs if config.cosine_t_max_epochs > 0 else max_epochs
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cosine_t_max)
+    if is_main:
+        print(f"Cosine schedule: T_max={cosine_t_max} epochs (max_epochs={max_epochs})")
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
