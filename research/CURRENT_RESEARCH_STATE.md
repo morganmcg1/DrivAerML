@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **2026-05-02 03:45 UTC** — Wave 7 launched (PRs #325-#332, replacing unresponsive Wave 6 PRs). 16 active WIP PRs, 0 review-ready. **Alphonse `vu4jsiic` ep24.19=7.4618%** (regression from ep23.23=7.4101%, slope flattened since ep20; ep25 gate <7.3% will FAIL; ep30 proj ~7.39% MISS baseline; ep50 proj ~7.16% would beat baseline). **Nezuko `ud5iddlc` ep19.35=8.1552%** (ep20 gate <8.2% PASSED; ep30 proj ~7.52% MISS baseline). **Gilbert `0kwzszub` Trial A ep12.58=9.71%** (slope -0.42 pp/ep, healthy). **Fern `tfphcp42` ep4.84=11.20%** (ep5 gate <11.5% PASS; bouncy ep3.87=13.58% spike requires diagnosis at ep10). **Chihiro `klsmwdkr` Trial A ep14.52=9.23%** (slope -0.10, ep30 proj 7.70%). **Edward `kuz4na0j` Trial B ep1=15.15%** (too early to gate). **Violet PR #330 reassigned to DDP4** (no DDP8 available in bengio fleet). **Frieren PR #310 nudged for status** (no Trial A confirmation since 00:18Z).
+- **2026-05-02 04:45 UTC** — Wave 7 actively running, **multiple students misconfigured**. 16 WIP PRs, 0 review-ready. **Alphonse `vu4jsiic` ep26=7.498% (regressed from ep25=7.378% best)** — plateau confirmed at 7.40% mean, ep30 will miss baseline 7.21%. **Nezuko `ud5iddlc` ep21=7.997% (broke 8% barrier)** — slope steepening, ep30 proj ~7.34% (still misses baseline). **Wave 7 corrective actions issued**: thorfinn #326 wrong config (running 4L/512d/65k pts not 4L/256d/40k pts model-slices sweep), kohaku #331 wrong config (same — also missing required code edit for `--ws-only-rel-l2-weight`), emma #329 running RoPE not 96k-points-scaleup (5 failed launches), haku #327 crashed at step 1,590 (config OK, infrastructure issue). All 4 sent back to student with detailed corrective feedback. **Senku #325 ep1=14.71% PASS** (gc=0.5, healthy). **Askeladd #328 sincos arm running** (Fourier vs Sincos A/B in progress). **Tanjiro #332 mirror+SW stack running**. **Violet #330 DDP4 fallback ep1=28.45%** (high but within kill threshold for radford-style 4L/512d/8H — watching ep5). **Fern SWA relaunch with `--fourier-pe`** is now running — 4 ranks active.
 
 ## Most Recent Human Researcher Direction
 
@@ -26,8 +26,8 @@
 
 | PR | Student | Run ID | Experiment | Latest abupt | Epoch | Verdict |
 |----|---------|--------|-----------|:----------:|------:|---------|
-| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.4618%** | 24.19 | LEADER. wsy=9.66%, wsz=11.22%. **Slope flattened**: ep20-24 only 0.10pp improvement. ep25 gate <7.3% will FAIL. ep30 proj 7.39% (miss baseline). ep50 proj 7.16% (would beat baseline). Continue to T_max=50 cosine knee (ep31-35). |
-| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **8.1552%** | 19.35 | wsy=10.13%, wsz=11.79%. ep20 gate <8.2% PASSED. Slope -0.06 pp/ep, ep30 proj 7.52% MISS baseline. Continue as scaling reference. |
+| #174 | alphonse | `vu4jsiic` | 5L/256d + Fourier PE + T_max=50 + EMA off | **7.378% (ep25 best, ep26=7.498% regressed)** | 26.00 | Plateau at 7.40% mean (ep21-26 std=0.05%). ep30 proj 7.40-7.50% — will miss baseline. wsy=9.45%, wsz=11.17% at ep25 best. Run will not beat baseline. Plan: continue to ep30 stop, post final, close PR as negative result. |
+| #179 | nezuko | `ud5iddlc` | 5L/384d + Fourier PE + T_max=60 | **7.997% ep21 (best)** | 21.00 | Broke 8% barrier — slope steepening (last 3 ep: -0.073 pp/ep). ep30 proj ~7.34% — still misses baseline 7.21%. Continue to ep60. |
 
 ### Wave 5 augmentation/architecture
 
@@ -46,18 +46,24 @@
 |----|---------|--------|-----------|-------|
 | #310 | frieren | (TBD) | Weight-decay + dropout sweep | Trial A status unconfirmed since 00:18Z (3h gap). Nudge posted 03:39Z asking for W&B run ID. |
 
-### Wave 7 (newly assigned 2026-05-02 03:19-03:25Z)
+### Wave 7 status (assigned 2026-05-02 03:19-03:25Z)
 
-| PR | Student | Experiment | Status |
-|----|---------|------------|-------|
-| #325 | senku | Grad-clip-norm sweep {0.5, 1.0, 2.0} | Just assigned, no comments yet |
-| #326 | thorfinn | Model-slices sweep {128, 192, 256} | Just assigned |
-| #327 | haku | Surface-loss-weight sweep {2.0, 4.0, 8.0} | Just assigned |
-| #328 | askeladd | FourierEmbed standalone A/B | Just assigned |
-| #329 | emma | 96k surface+volume scale-up | Just assigned |
-| #330 | violet | radford-champion DDP8 to DDP4 port (rewritten with lr=3.4e-4) | Reassigned to DDP4 at 03:39Z |
-| #331 | kohaku | Wall-shear aux loss sweep {0.1, 0.5, 1.0} | Just assigned |
-| #332 | tanjiro | Mirror-aug + SW=2.0 stack | Just assigned (covers gilbert Trial B) |
+| PR | Student | Run ID | Experiment | Status |
+|----|---------|--------|------------|-------|
+| #325 | senku | `31s1j3a0` | Grad-clip-norm sweep {0.5, 1.0, 2.0} | gc=0.5 Trial A: ep1 abupt=14.71% (PASS). Healthy. |
+| #326 | thorfinn | `15msq8rj` | Model-slices sweep | **WRONG CONFIG** (4L/512d/65k pts, not 4L/256d/40k pts). Sent back 04:38Z. |
+| #327 | haku | `3ugzvr0y` | Surface-loss-weight sweep | **CRASHED at step 1,590**. Config OK, infrastructure issue. Sent back 04:38Z to relaunch. |
+| #328 | askeladd | `pwzntjt9` | FourierEmbed vs Sincos A/B | Sincos arm running (fpe=False). Fourier arm queued. |
+| #329 | emma | (5 failed runs) | 96k surface+volume scale-up | **WRONG EXPERIMENT** — running `rope-arm-A-xz-sincos` not 96k-pts. All 5 launches fail at step=0. Sent back 04:38Z. |
+| #330 | violet | `f7tj959m` | radford-champion DDP4 port (lr=3.4e-4, T_max=36, EMA=0.9995, gc=0.5, 4L/512d/8H, fourier_pe) | ep1=28.45% (high but within kill thresh 80k:>22). Watching ep5. |
+| #331 | kohaku | `k7wq5uxx` | Wall-shear aux loss sweep | **WRONG CONFIG + missing code edit** (running 4L/512d/65k, not 4L/256d/40k; no `ws_only_rel_l2_weight` flag). Sent back 04:38Z. |
+| #332 | tanjiro | `lt2m7z8t` | Mirror-aug p=0.5 + SW=2.0 stack | Running (sw=2, fpe=True, 4L/256d). |
+
+### Fern SWA — relaunched with `--fourier-pe`
+
+| PR | Student | Run IDs | Status |
+|----|---------|---------|-------|
+| #276 | fern | `0fhryk4r,h2zvizyz,hc177wum,7yddn7jb` (DDP4 ranks) | Running, step ~482. New SWA-last-5 with fourier_pe enabled. Will reach ep5 gate in ~hours. |
 
 ## Critical Findings
 
