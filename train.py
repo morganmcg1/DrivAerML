@@ -124,6 +124,47 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class StringSepEmbed(nn.Module):
+    """STRING-separable axis-aligned learnable position encoding.
+
+    Drop-in replacement for ContinuousSincosEmbed: outputs the same hidden_dim
+    shape, padding, and sin/cos layout, but per-axis log-frequencies and
+    phase shifts are learnable parameters initialized from the sincos
+    omega-bank. Replicates PR #311's STRING-sep arm on the yi sincos+omega base.
+    """
+
+    def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
+        self.max_wavelength = max_wavelength
+        padding = hidden_dim % input_dim
+        dim_per_axis = (hidden_dim - padding) // input_dim
+        sincos_padding = dim_per_axis % 2
+        self.padding = padding + sincos_padding * input_dim
+        effective_dim_per_axis = (hidden_dim - self.padding) // input_dim
+        if effective_dim_per_axis <= 0:
+            raise ValueError("hidden_dim must be large enough for the requested input dimension")
+        n_features_per_axis = effective_dim_per_axis // 2
+        self.n_features_per_axis = n_features_per_axis
+        arange = torch.arange(0, effective_dim_per_axis, 2, dtype=torch.float32)
+        omega_init = 1.0 / max_wavelength ** (arange / effective_dim_per_axis)  # [F]
+        log_freq_init = torch.log(omega_init).unsqueeze(0).repeat(input_dim, 1)  # [in_dim, F]
+        self.log_freq = nn.Parameter(log_freq_init)
+        self.phase = nn.Parameter(torch.zeros(input_dim, n_features_per_axis))
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords = coords.float()
+        freq = self.log_freq.exp()  # [in_dim, F]
+        proj = coords.unsqueeze(-1) * freq + self.phase  # [..., in_dim, F]
+        emb = torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)  # [..., in_dim, 2*F]
+        emb = emb.flatten(start_dim=-2)  # [..., in_dim*2*F]
+        if self.padding > 0:
+            padding = torch.zeros(*emb.shape[:-1], self.padding, device=emb.device, dtype=emb.dtype)
+            emb = torch.cat([emb, padding], dim=-1)
+        return emb
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -350,6 +391,7 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        pos_encoding_mode: str = "sincos",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,12 +404,22 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.pos_encoding_mode = pos_encoding_mode
 
-        self.pos_embed = ContinuousSincosEmbed(
-            hidden_dim=n_hidden,
-            input_dim=space_dim,
-            max_wavelength=pos_max_wavelength,
-        )
+        if pos_encoding_mode == "sincos":
+            self.pos_embed = ContinuousSincosEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                max_wavelength=pos_max_wavelength,
+            )
+        elif pos_encoding_mode == "string":
+            self.pos_embed = StringSepEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                max_wavelength=pos_max_wavelength,
+            )
+        else:
+            raise ValueError(f"Unknown pos_encoding_mode: {pos_encoding_mode!r}; expected 'sincos' or 'string'")
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -579,6 +631,8 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    pos_encoding_mode: str = "sincos"
+    max_steps_per_epoch: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,6 +799,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        pos_encoding_mode=config.pos_encoding_mode,
     )
 
 
@@ -1797,7 +1852,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        epoch_step_limit = config.max_steps_per_epoch if config.max_steps_per_epoch > 0 else None
+        epoch_step_idx = 0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if epoch_step_limit is not None and epoch_step_idx >= epoch_step_limit:
+                break
+            epoch_step_idx += 1
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
