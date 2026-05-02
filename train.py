@@ -563,6 +563,10 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_y_weight_final: float = 1.0
+    wallshear_z_weight_final: float = 1.0
+    wallshear_weight_ramp_epochs: int = 0
+    optimizer: str = "adamw"
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1709,7 +1713,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     n_params = sum(param.numel() for param in model.parameters())
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    opt_name = config.optimizer.lower()
+    if opt_name == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    elif opt_name == "lion":
+        from lion_pytorch import Lion
+        optimizer = Lion(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    else:
+        raise ValueError(f"Unknown optimizer: {config.optimizer!r} (expected 'adamw' or 'lion')")
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -1797,6 +1808,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        _ramp = config.wallshear_weight_ramp_epochs
+        if _ramp > 0:
+            _progress = min(epoch, _ramp) / _ramp
+            _wy = config.wallshear_y_weight + (config.wallshear_y_weight_final - config.wallshear_y_weight) * _progress
+            _wz = config.wallshear_z_weight + (config.wallshear_z_weight_final - config.wallshear_z_weight) * _progress
+        else:
+            _wy = config.wallshear_y_weight
+            _wz = config.wallshear_z_weight
+
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
             loss, batch_loss_metrics = train_loss(
                 model,
@@ -1808,8 +1828,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
-                wallshear_y_weight=config.wallshear_y_weight,
-                wallshear_z_weight=config.wallshear_z_weight,
+                wallshear_y_weight=_wy,
+                wallshear_z_weight=_wz,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1913,6 +1933,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "train/lr": float(optimizer.param_groups[0]["lr"]),
+                "train/wallshear_y_weight_current": float(_wy),
+                "train/wallshear_z_weight_current": float(_wz),
                 "train/nonfinite_skip_count": nonfinite_skip_count,
                 "global_step": global_step,
                 **gradient_metrics,
