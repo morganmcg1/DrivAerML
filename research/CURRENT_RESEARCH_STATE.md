@@ -67,7 +67,8 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 | #283 | nezuko | model-layers=5 | `z6xc97gg` | 9.523% (~ep11) | +0.48pp | Trending down, unlikely to cross |
 | ~~#280~~ | ~~frieren~~ | ~~MLP activation (SwiGLU/ReLU²/GELU)~~ | `k76fngw1` ArmC | 9.153% | +0.114pp | **CLOSED — informative-negative** |
 | **#352** | **frieren** | **Per-channel output-head scaling (tau_y/z magnitude calibration)** | — | — | — | **NEW — assigned Round 19** |
-| #299 | askeladd | Muon optimizer (canonical lr=0.02) | `t3o9jib0` | 13.241% (~ep10) | +4.20pp | Slow convergence, decision at ep10–12 |
+| ~~#299~~ | ~~askeladd~~ | ~~Muon optimizer (canonical lr=0.02)~~ | `t3o9jib0` | 13.13% ep11 | +4.09pp | **CLOSED — confirmed negative** |
+| **#353** | **askeladd** | **Channel-selective Huber loss on tau (delta=0.5)** | — | — | — | **NEW — assigned (H04 Tier-1)** |
 | #323 | tanjiro | 2-layer MLP volume decoder head | restarted | (in restart) | — | Restarting after divergence |
 | #351 | fern | surface-tangent-frame projection loss for tau_y/tau_z | — | — | — | WIP |
 
@@ -97,7 +98,10 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 - thorfinn #345: RFF retest on Lion+EMA+heads=4 stack starting fresh.
 
 **Optimizer:**
-- askeladd #299 Muon canonical lr=0.02: still 13.24% at ~ep10. Likely close at decision point. Backup: Muon-with-warmup retry.
+- askeladd #299 Muon canonical lr=0.02: **CLOSED** — 13.13% at ep11 (+4.09pp), confirmed negative. Backup option for later: Muon-with-warmup retry.
+
+**Loss reformulation:**
+- askeladd #353 Huber-on-tau (delta=0.5): channel-selective Huber loss for tau_x/tau_y/tau_z (surface_preds[:, 1:4]); MSE retained on surface_pressure (channel 0) and all volume channels. Targets the heavy-tailed wall-shear distribution driving tau_y x3.27 and tau_z x3.42 gaps. Near-orthogonal to architecture deltas in-flight.
 
 **Decoder head:**
 - tanjiro #323 MLP volume decoder restart targeting volume_pressure ×2.05 gap.
@@ -126,7 +130,8 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 | MLP activation (SwiGLU/ReLU²) | CLOSED NEGATIVE | frieren #280: SwiGLU 9.153 > GELU 9.196 (0.043pp, below noise), ReLU² OOM at 4L/512d/65k+65k DDP8 |
 | Per-channel output-head scaling | In-flight | frieren #352: s∈R^4 init=1 on surface_out + s∈R^1 on volume_out; targets tau_y/z magnitude calibration |
 | Sandwich-norm (RMSNorm) | CLOSED NEGATIVE | tanjiro #300 diverged |
-| Muon (canonical) | In-flight | askeladd #299 13.24% slow |
+| Muon (canonical) | CLOSED NEGATIVE | askeladd #299 13.13% ep11 (+4.09pp) — confirmed negative |
+| Channel-selective Huber on tau | In-flight | askeladd #353 (delta=0.5 on surface_preds[:, 1:4]) |
 | MLP volume decoder | Restarting | tanjiro #323 |
 | RFF on Lion stack | New | thorfinn #345 retest |
 | batch_size / compile_model | CLOSED | 4 / False SOTA |
@@ -134,7 +139,7 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 ## Largest Remaining Gaps to AB-UPT
 
 1. **volume_pressure** ×2.05 (12.484% vs 6.08%) — tanjiro MLP decoder restart; nezuko layers=5 also hits this axis.
-2. **tau_y** ×3.27, **tau_z** ×3.42 — two parallel approaches in-flight: fern #351 (tangent-frame projection loss) and frieren #352 (per-channel output-head scaling).
+2. **tau_y** ×3.27, **tau_z** ×3.42 — three parallel approaches in-flight: fern #351 (tangent-frame projection loss), frieren #352 (per-channel output-head scaling), and askeladd #353 (channel-selective Huber loss on tau).
 
 ## Next Priorities (when students free up)
 
