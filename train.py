@@ -95,6 +95,7 @@ class Config:
     rff_sigma: float = 1.0
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    log1p_tau_norm: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -242,6 +243,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             surface_y_std=stats["surface_y_std"].to(device),
             volume_y_mean=stats["volume_y_mean"].to(device),
             volume_y_std=stats["volume_y_std"].to(device),
+            log1p_tau_norm=config.log1p_tau_norm,
         )
 
         model: nn.Module = build_model(config).to(device)

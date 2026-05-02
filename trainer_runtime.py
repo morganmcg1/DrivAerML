@@ -170,6 +170,7 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        log1p_tau_norm: bool = False,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -187,6 +188,7 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.log1p_tau_norm = log1p_tau_norm
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -195,10 +197,19 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
+        if self.log1p_tau_norm:
+            y = y.clone()
+            tau = y[..., 1:4]
+            y[..., 1:4] = tau.sign() * tau.abs().log1p()
         return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        y_out = y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        if self.log1p_tau_norm:
+            y_out = y_out.clone()
+            tau = y_out[..., 1:4]
+            y_out[..., 1:4] = tau.sign() * tau.abs().expm1()
+        return y_out
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
         return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
