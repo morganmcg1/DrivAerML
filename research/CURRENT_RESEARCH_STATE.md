@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 ~02:00 UTC
+- **Date:** 2026-05-02 ~08:00 UTC
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,7 +37,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --ema-decay 0.999 --lr-warmup-epochs 1
 ```
 
-## In-flight — Rounds 13–17 (2026-05-02 ~02:00 UTC)
+## In-flight — Rounds 13–18 (2026-05-02 ~08:00 UTC)
 
 **Active DrivAerML students (ddp8):** alphonse, askeladd, chihiro, edward, emma, fern, frieren, gilbert, haku, kohaku, nezuko, norman, senku, tanjiro, thorfinn, violet.
 
@@ -53,7 +53,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #289 | chihiro | lr-warmup-epochs=2 (1ep→2ep) | Round 17 — pod starting; 0 comments. |
 | #290 | emma | RFF retest on current SOTA stack (heads=4+warmup=1ep) | Round 17 — pod starting; 0 comments. |
 | #291 | gilbert | ema-decay=0.9995 with lr-warmup-epochs=1 | Round 17 — pod starting; 0 comments. |
-| #292 | haku | grad-clip-norm=0.5 (Lion stabilization) | Round 17 — pod starting; 0 comments. |
+| #292 | haku | grad-clip-norm=0.5 (Lion stabilization) | **CLOSED** — superseded; haku reassigned to #321 |
 | #293 | kohaku | lr-cosine-t-max=12 (fill T_max=9 neg / T_max=14 neg gap) | Round 17 — pod starting; 0 comments. |
 | #294 | norman | warmup=1ep + lr-cosine-t-max=9 (warmup+anneal compound) | Round 17 — pod starting; 0 comments. |
 | #295 | senku | model-hidden-dim=768 + muP lr=8.2e-5 (rescue tanjiro w/ correct LR scaling) | Round 17 — pod starting; 0 comments. |
@@ -62,6 +62,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #300 | tanjiro | Post-attention + post-MLP RMSNorm (sandwich-norm) | Round 17 — pod starting; 0 comments. |
 | #309 | thorfinn | grad-clip-norm=0.5 (Lion+EMA+warmup+heads=4) | Round 17 — pod starting; 0 comments. |
 | #311 | edward | GRAPE/Positional Encoding 3-arm ablation (RFF ctrl / STRING separable / GRAPE-M learned) | Round 18 — assigned ~02:00 UTC 2026-05-02; ~13.5h total (~15:30 UTC results). Focus: tau_y/tau_z ×3.27/×3.43 gap. |
+| #320 | fern | U-net skip connections in Transformer backbone (geometric feature preservation) | Round 18 — assigned ~08:00 UTC 2026-05-02; code changes to model.py + train.py required; single DDP8 arm. |
+| #321 | haku | Dedicated 2-layer MLP volume decoder head (vol_pressure ×2.08 gap) | Round 18 — assigned ~08:00 UTC 2026-05-02; code changes to model.py + train.py required; 2-arm sweep (depth=2 vs depth=1 ctrl). |
 
 ## Active Human Research Directives
 
@@ -88,9 +90,9 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 **Deferred (assign when next student frees up):**
 - ~~GRAPE/Group Representational Position Encoding (Issue #285)~~ — **IN-FLIGHT** edward #311 (3-arm: RFF ctrl / STRING / GRAPE-M)
-- U-net skip connections (Modded-NanoGPT inspired)
+- ~~U-net skip connections~~ — **IN-FLIGHT** fern #320
+- ~~Dedicated volume decoder head~~ — **IN-FLIGHT** haku #321
 - Sequence packing / FlexAttention (throughput lever)
-- Dedicated volume decoder head (volume_pressure ×2.08 gap)
 - Surface-tangent-frame projection for tau_y/tau_z (×3.27/×3.43 gaps)
 
 ## Key Learnings (cumulative)
@@ -120,7 +122,9 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | lr_warmup_epochs=2 | In-flight | chihiro #289: pod starting |
 | lr-min=1e-5 | In-flight | violet #296: pod starting |
 | warmup+T_max=9 compound | In-flight | norman #294: pod starting |
-| grad-clip-norm=0.5 | In-flight | haku #292 + thorfinn #309: pods starting |
+| grad-clip-norm=0.5 | Closing | thorfinn #309: pod starting; haku #292 closed |
+| U-net skip connections | In-flight | fern #320: cross-layer residuals in 4L backbone; learnable scale gates |
+| Dedicated volume decoder (MLP) | In-flight | haku #321: 2-layer MLP vs linear head for vol_pressure ×2.08 gap |
 | RFF features | In-flight | emma #290: SOTA-stack retest (heads=4+warmup); pod starting |
 | GRAPE-M / STRING / RFF ablation | In-flight | edward #311: 3-arm positional encoding ablation; started ~02:00 UTC 2026-05-02 |
 | ema-decay=0.9995 | In-flight | gilbert #291: with warmup=1ep; pod starting |
@@ -136,11 +140,11 @@ torchrun --standalone --nproc_per_node=8 train.py \
 1. **volume_pressure** ×2.08 — Not a loss-weighting problem (closed). Likely architectural: dedicated volume decoder, richer SDF features, hierarchical multi-scale volume heads.
 2. **tau_y** ×3.27, **tau_z** ×3.43 — Shear stress direction prediction. Needs geometry-informed head (surface tangent frame) or output transformation (asinh normalization).
 
-## Next Priorities (after Rounds 16/17 close)
+## Next Priorities (after Rounds 16/17/18 close)
 
-1. **GRAPE/Representational Position Encoding** (Issue #285) — 3-arm sweep once a student frees up
-2. **U-net skip connections** — cross-layer residuals (Modded-NanoGPT inspired)
-3. **Volume architecture** — dedicated volume decoder head; copy from AB-UPT paper's design
-4. **Tau head reform** — surface-tangent-frame projection to close tau_y/tau_z gap
-5. **Compound winners** — stack Round 16/17 winners once identified
+1. ~~**GRAPE/Representational Position Encoding**~~ — **IN-FLIGHT** edward #311
+2. ~~**U-net skip connections**~~ — **IN-FLIGHT** fern #320
+3. ~~**Volume architecture (dedicated decoder)**~~ — **IN-FLIGHT** haku #321
+4. **Tau head reform** — surface-tangent-frame projection to close tau_y/tau_z gap (next free slot)
+5. **Compound winners** — stack Round 16/17/18 winners once identified
 6. **Sequence packing / FlexAttention** — throughput lever (more epochs/budget)
