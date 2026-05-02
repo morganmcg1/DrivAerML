@@ -738,6 +738,8 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    lr_schedule: str = "cosine"
+    lr_warmdown_start_epoch: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1992,16 +1994,36 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"lr={config.lr} wd={config.weight_decay}"
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    if config.lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    elif config.lr_schedule == "linear-warmdown":
+        scheduler = None
+    else:
+        raise ValueError(
+            f"Unknown lr_schedule '{config.lr_schedule}'. Supported: 'cosine', 'linear-warmdown'."
+        )
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
-    total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    steps_per_epoch = max(len(train_loader), 1)
+    total_estimated_steps = max(1, max_epochs * steps_per_epoch)
     effective_warmup_steps = config.lr_warmup_steps
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
-        effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
+        effective_warmup_steps = config.lr_warmup_epochs * steps_per_epoch
+    if config.lr_warmdown_start_epoch > 0.0:
+        lr_warmdown_start_step = int(round(config.lr_warmdown_start_epoch * steps_per_epoch))
+    else:
+        lr_warmdown_start_step = int(round(0.7 * total_estimated_steps))
+    lr_warmdown_start_step = max(int(effective_warmup_steps), lr_warmdown_start_step)
+    lr_warmdown_total_steps = max(1, total_estimated_steps - lr_warmdown_start_step)
     if is_main and effective_warmup_steps > 0:
         print(
             f"LR warmup: {effective_warmup_steps} steps "
             f"(start_lr={config.lr_warmup_start_lr} -> peak_lr={config.lr})"
+        )
+    if is_main:
+        print(
+            f"LR schedule: {config.lr_schedule} | warmup_steps={int(effective_warmup_steps)} | "
+            f"warmdown_start_step={lr_warmdown_start_step} (epoch={config.lr_warmdown_start_epoch}) | "
+            f"total_steps={total_estimated_steps} | steps_per_epoch={steps_per_epoch}"
         )
     if is_main and kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -2186,7 +2208,24 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 global_step += 1
                 continue
-            if effective_warmup_steps > 0:
+            if config.lr_schedule == "linear-warmdown":
+                if effective_warmup_steps > 0 and global_step < effective_warmup_steps:
+                    progress = global_step / effective_warmup_steps
+                    start_ratio = (
+                        config.lr_warmup_start_lr / max(config.lr, 1e-12)
+                    )
+                    lr_ratio = start_ratio + (1.0 - start_ratio) * progress
+                elif global_step < lr_warmdown_start_step:
+                    lr_ratio = 1.0
+                else:
+                    progress = min(
+                        1.0,
+                        (global_step - lr_warmdown_start_step) / lr_warmdown_total_steps,
+                    )
+                    lr_ratio = max(0.0, 1.0 - progress)
+                for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
+                    pg["lr"] = base_lr * lr_ratio
+            elif effective_warmup_steps > 0:
                 if global_step < effective_warmup_steps:
                     progress = global_step / effective_warmup_steps
                     start_ratio = (
@@ -2273,7 +2312,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
