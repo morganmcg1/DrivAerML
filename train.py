@@ -126,22 +126,25 @@ class ContinuousSincosEmbed(nn.Module):
 
 class LearnedFourierEmbed(nn.Module):
     """Learned Fourier features: W: Linear(input_dim -> hidden_dim//2, bias=False);
-    output [sin(Wx), cos(Wx)] concatenated. W ~ N(0, init_scale^2). Following Tancik
-    et al. 2020 (NeRF), bias=False; init_scale controls frequency band coverage —
-    higher init_scale spans higher frequencies but is harder to optimise."""
+    output [sin(Wx), cos(Wx)] concatenated. W ~ N(0, std) where
+    std = init_scale / sqrt(hidden_dim) (Tancik 2020); for hidden_dim=256 and
+    meter-scale coords (~8m bbox), init_scale in [10, 32] gives phase angles of
+    order 2-8 rad at edges. Higher init_scale spans higher frequencies but is
+    harder to optimise."""
 
     def __init__(self, hidden_dim: int, input_dim: int, init_scale: float = 10.0):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim
-        self.init_scale = init_scale
+        self.init_scale = float(init_scale)
         half = hidden_dim // 2
         self.padding = hidden_dim - 2 * half
         if half <= 0:
             raise ValueError("hidden_dim must be at least 2 for LearnedFourierEmbed")
         self.W = nn.Linear(input_dim, half, bias=False)
+        std = self.init_scale / (hidden_dim ** 0.5)
         with torch.no_grad():
-            self.W.weight.normal_(mean=0.0, std=float(init_scale))
+            self.W.weight.normal_(mean=0.0, std=std)
 
     def forward(self, coords: torch.Tensor) -> torch.Tensor:
         coords = coords.float()
