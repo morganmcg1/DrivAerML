@@ -117,6 +117,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    use_tangential_wallshear_loss: bool = False
     debug: bool = False
 
 
@@ -179,6 +180,18 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
+    """Project a 3-vector field onto the surface tangent plane defined by per-point normals.
+
+    vec:     [..., 3]  predicted or target vector field (in any consistent space)
+    normals: [..., 3]  surface normals (will be unit-normalized)
+    returns: [..., 3]  tangential component  (vec - (vec·n)n)
+    """
+    n = torch.nn.functional.normalize(normals.to(vec.dtype), dim=-1)
+    dot = (vec * n).sum(dim=-1, keepdim=True)
+    return vec - dot * n
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -188,6 +201,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    use_tangential_wallshear_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -199,7 +213,17 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_preds = out["surface_preds"]
+        if use_tangential_wallshear_loss:
+            normals = batch.surface_x[..., 3:6]
+            pred_ws = project_tangential(surface_preds[..., 1:4], normals)
+            true_ws = project_tangential(surface_target[..., 1:4], normals)
+            surface_preds_loss = torch.cat([surface_preds[..., :1], pred_ws], dim=-1)
+            surface_target_loss = torch.cat([surface_target[..., :1], true_ws], dim=-1)
+        else:
+            surface_preds_loss = surface_preds
+            surface_target_loss = surface_target
+        surface_loss = masked_mse(surface_preds_loss, surface_target_loss, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -324,6 +348,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
