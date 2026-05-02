@@ -71,6 +71,53 @@ class RFFEncoding(nn.Module):
         return torch.cat([proj.sin(), proj.cos()], dim=-1)
 
 
+class StringSeparableEncoding(nn.Module):
+    """STRING-separable positional encoding.
+
+    Replaces the fixed isotropic Gaussian RFF (Tancik et al. 2020) with a
+    learnable per-axis spectral basis.  Each spatial axis ``d`` gets its own
+    ``num_features`` independent frequency/phase parameters:
+
+        phi_d(x_d) = sin(exp(log_freq_d) * 2pi * x_d + phase_d)   [num_features]
+        psi_d(x_d) = cos(exp(log_freq_d) * 2pi * x_d + phase_d)   [num_features]
+
+    All axes are concatenated to produce a ``2 * in_dim * num_features``-dim
+    output, matching the axis-separable factorisation of automotive aerodynamics
+    where x (stream), y (span), and z (vertical) have distinct spectral content.
+
+    Parameters are initialised so that ``exp(log_freq)`` starts near the fixed
+    RFF sigma (i.e. ``log_freq = log(sigma)``), providing a warm-start from
+    the isotropic baseline.
+    """
+
+    def __init__(self, in_dim: int, num_features: int = 32, sigma: float = 1.0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features = num_features
+        # log_freq[d, f]: learnable log-frequency per axis per feature
+        self.log_freq = nn.Parameter(
+            torch.full((in_dim, num_features), math.log(sigma))
+        )
+        # phase[d, f]: learnable phase per axis per feature
+        self.phase = nn.Parameter(torch.zeros(in_dim, num_features))
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.in_dim * self.num_features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [..., in_dim]
+        # freq: [in_dim, num_features]
+        freq = torch.exp(self.log_freq.to(dtype=x.dtype))
+        phase = self.phase.to(dtype=x.dtype)
+        # proj: [..., in_dim, num_features]
+        proj = 2.0 * math.pi * x.unsqueeze(-1) * freq + phase
+        # sin and cos each: [..., in_dim, num_features]
+        enc = torch.cat([proj.sin(), proj.cos()], dim=-1)
+        # flatten last two dims: [..., 2 * in_dim * num_features]
+        return enc.flatten(start_dim=-2)
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -253,6 +300,7 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
+        pos_encoding_mode: str = "sincos",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -262,25 +310,45 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         self.rff_num_features = rff_num_features
         self.rff_sigma = rff_sigma
+        self.pos_encoding_mode = pos_encoding_mode
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
-        self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
-        self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
-        self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
-
-        if rff_num_features > 0:
-            self.surface_rff = RFFEncoding(
-                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+        if pos_encoding_mode == "string_separable":
+            # STRING-separable: learnable per-axis log_freq + phase,
+            # replaces fixed isotropic Gaussian RFF.
+            # num_features defaults to rff_num_features if provided, else 32.
+            string_sep_features = rff_num_features if rff_num_features > 0 else 32
+            self.surface_string_sep = StringSeparableEncoding(
+                in_dim=space_dim, num_features=string_sep_features, sigma=rff_sigma
             )
-            self.volume_rff = RFFEncoding(
-                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+            self.volume_string_sep = StringSeparableEncoding(
+                in_dim=space_dim, num_features=string_sep_features, sigma=rff_sigma
             )
-            rff_out_dim = 2 * rff_num_features
-        else:
+            string_sep_out_dim = self.surface_string_sep.output_dim  # 2 * space_dim * num_features
+            self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
             self.surface_rff = None
             self.volume_rff = None
-            rff_out_dim = 0
+            rff_out_dim = string_sep_out_dim
+        else:
+            self.surface_string_sep = None
+            self.volume_string_sep = None
+            self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
+            if rff_num_features > 0:
+                self.surface_rff = RFFEncoding(
+                    in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+                )
+                self.volume_rff = RFFEncoding(
+                    in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+                )
+                rff_out_dim = 2 * rff_num_features
+            else:
+                self.surface_rff = None
+                self.volume_rff = None
+                rff_out_dim = 0
+
+        self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
+        self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
 
         surface_proj_in = surface_extra_dim + rff_out_dim
         volume_proj_in = volume_extra_dim + rff_out_dim
@@ -309,6 +377,7 @@ class SurfaceTransolver(nn.Module):
         x: torch.Tensor,
         *,
         rff: nn.Module | None,
+        string_sep: nn.Module | None,
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
@@ -318,7 +387,9 @@ class SurfaceTransolver(nn.Module):
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
-        if rff is not None:
+        if string_sep is not None:
+            feature_parts.append(string_sep(pos))
+        elif rff is not None:
             feature_parts.append(rff(pos))
         if project_features is not None and feature_parts:
             features = (
@@ -353,6 +424,7 @@ class SurfaceTransolver(nn.Module):
                 self._encode_group(
                     surface_x,
                     rff=self.surface_rff,
+                    string_sep=self.surface_string_sep,
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
@@ -366,6 +438,7 @@ class SurfaceTransolver(nn.Module):
                 self._encode_group(
                     volume_x,
                     rff=self.volume_rff,
+                    string_sep=self.volume_string_sep,
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,

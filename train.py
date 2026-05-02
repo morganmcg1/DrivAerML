@@ -93,6 +93,7 @@ class Config:
     model_dropout: float = 0.0
     rff_num_features: int = 0
     rff_sigma: float = 1.0
+    pos_encoding_mode: str = "sincos"
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -176,6 +177,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        pos_encoding_mode=config.pos_encoding_mode,
     )
 
 
