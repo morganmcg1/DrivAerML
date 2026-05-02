@@ -636,6 +636,7 @@ class Config:
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
     pos_encoding_mode: str = "sincos"
+    max_steps_per_epoch: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -1954,7 +1955,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_iter = tqdm(
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
+        epoch_step_limit = config.max_steps_per_epoch if config.max_steps_per_epoch > 0 else None
+        epoch_step_idx = 0
         for batch in train_iter:
+            if epoch_step_limit is not None and epoch_step_idx >= epoch_step_limit:
+                break
+            epoch_step_idx += 1
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
