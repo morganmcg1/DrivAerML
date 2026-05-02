@@ -44,6 +44,7 @@ previous SoTA architecture.
 10. PR #222 fern — lr_warmup_epochs=1 (Lion stability, 4L/512d architecture)
 11. PR #309 thorfinn — gradient clipping max_norm=0.5 (val 9.039%)
 12. PR #311 edward — STRING-separable learnable position encoding (val 7.546%, test 8.771%)
+13. PR #355 emma — DDP infrastructure restored (cherry-pick bfbe975+1a8f7b7: init_process_group, DistributedSampler, DDP wrap, Lion optimizer wiring; unblocks full fleet 4/8-GPU torchrun; metrics bar unchanged)
 
 **New recommended base config (PR #222 winning arm):**
 
