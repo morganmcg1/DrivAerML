@@ -180,6 +180,7 @@ class TransformerBlock(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        film_dim: int | None = None,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -192,12 +193,39 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        if film_dim is not None and film_dim > 0:
+            # Per-block (gamma, beta) projection. Zero-init so the block starts as identity FiLM
+            # and the model is numerically equivalent to the no-FiLM baseline at step 0.
+            self.film_proj = nn.Linear(film_dim, 2 * hidden_dim)
+            nn.init.zeros_(self.film_proj.weight)
+            nn.init.zeros_(self.film_proj.bias)
+        else:
+            self.film_proj = None
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        film_cond_surface: torch.Tensor | None = None,
+        num_surface_tokens: int = 0,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
         x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
+        if (
+            self.film_proj is not None
+            and film_cond_surface is not None
+            and num_surface_tokens > 0
+        ):
+            gb = self.film_proj(film_cond_surface)
+            gamma, beta = gb.chunk(2, dim=-1)
+            x_surface = x[:, :num_surface_tokens]
+            x_surface = (1.0 + gamma) * x_surface + beta
+            if x.shape[1] > num_surface_tokens:
+                x = torch.cat([x_surface, x[:, num_surface_tokens:]], dim=1)
+            else:
+                x = x_surface
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -211,6 +239,7 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        film_dim: int | None = None,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -221,14 +250,26 @@ class Transformer(nn.Module):
                     mlp_expansion_factor=mlp_expansion_factor,
                     num_slices=num_slices,
                     dropout=dropout,
+                    film_dim=film_dim,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        film_cond_surface: torch.Tensor | None = None,
+        num_surface_tokens: int = 0,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(
+                x,
+                attn_mask=attn_mask,
+                film_cond_surface=film_cond_surface,
+                num_surface_tokens=num_surface_tokens,
+            )
         return x
 
 
@@ -251,6 +292,8 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         fourier_pe: bool = False,
         fourier_pe_num_freqs: int = 8,
+        film_normal: bool = False,
+        film_hidden_dim: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -258,6 +301,8 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.film_normal = film_normal
+        self.film_hidden_dim = film_hidden_dim if film_normal else 0
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -277,6 +322,15 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        if film_normal:
+            self.film_normal_encoder = nn.Sequential(
+                nn.Linear(space_dim, film_hidden_dim),
+                nn.GELU(),
+                nn.Linear(film_hidden_dim, film_hidden_dim),
+            )
+            self.film_normal_encoder.apply(_init_linear)
+        else:
+            self.film_normal_encoder = None
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -284,6 +338,7 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            film_dim=film_hidden_dim if film_normal else None,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -349,7 +404,18 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        film_cond_surface = None
+        if self.film_normal_encoder is not None and surface_x is not None and surface_tokens > 0:
+            normals = surface_x[:, :, self.space_dim : self.space_dim + 3]
+            film_cond_surface = self.film_normal_encoder(normals)
+
+        hidden = self.backbone(
+            hidden,
+            attn_mask=attn_mask,
+            film_cond_surface=film_cond_surface,
+            num_surface_tokens=surface_tokens,
+        )
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
