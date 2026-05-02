@@ -1,5 +1,56 @@
 # SENPAI Research Results
 
+## 2026-04-29 14:00 — PR #286: [frieren] Bilateral-symmetry TTA (y→-y reflection at inference) — CLOSED NEGATIVE
+
+- Branch: `frieren/symmetry-tta` (deleted)
+- Hypothesis: At inference, reflect each CFD sample around the y=0 plane, average the forward pass predictions with sign-corrected flip (tau_y negated), to enforce the bilateral symmetry the model must learn statistically from only 500 training cases. Expected to disproportionately close the tau_y/z gap at zero training cost.
+- W&B group: `frieren-symmetry-tta-r15`, project: `wandb-applied-ai-team/senpai-v1-drivaerml`
+
+| Run ID | Name | Train Views | no_tta abupt (best) | tta abupt (best) | TTA Δ rel |
+|---|---|---|---:|---:|---:|
+| gq1dp80i | tta-mini50-bs2-r4 | 50 | 98.236% | 92.518% | −5.82% (untrained — meaningless) |
+| 4usjyxjg | tta-mini8k-bs4 | 8k | 22.139% | 22.193% | **+0.24% HARMFUL** |
+| d5scti3o | tta-mini20k-bs4-seed1 | 20k | 18.784% | 18.663% | **−0.644%** (below threshold) |
+| dqhpc9v0 | tta-mini20k-bs4-seed2 | 20k | 27.983% | 26.921% | −3.80% (diverged base model) |
+
+**Per-component at d5scti3o (best trained arm, mini20k seed1):**
+
+| Channel | no_tta | tta | Δ |
+|---|---:|---:|---:|
+| surface_p | 12.988% | 13.114% | **+0.126% HARMFUL** |
+| wall_shear_y | 24.223% | 23.547% | **−0.676% HELPFUL** |
+| wall_shear_z | 25.950% | 25.840% | −0.110% (marginal) |
+| vol_p | 12.797% | 13.063% | **+0.266% HARMFUL** |
+| **abupt** | **18.784%** | **18.663%** | **−0.644%** |
+
+- **Merge bar status:** No run is anywhere near 9.291%. Best base model is 18.784% (2.02× above bar). Hypothesis not confirmed.
+- **Root cause analysis:** Only tau_y uniquely benefits from y-flip averaging — it is the only channel with no static bias in the symmetric direction (tau_y must be exactly anti-symmetric under y→-y by physics). Surface_p, tau_z, and vol_p all have learned per-channel offsets from asymmetric training data distribution; averaging with the flipped prediction introduces a bias mismatch that is net-harmful.
+- **Conclusion:** CLOSED. Net TTA effect at best-trained arm: −0.644% relative on abupt, below ~1% meaningful threshold. TTA does work for tau_y (+2.79%) but this is more than cancelled by the surface_p and vol_p degradation.
+- **Informed follow-ups (parked):** (a) selective channel-wise TTA — flip-average only wall_shear_y, keep original for surface_p/tau_z/vol_p; (b) train with bilateral symmetry augmentation first (PR #297 haku), then apply TTA on a symmetry-aware model — should eliminate the per-channel bias mismatch.
+
+---
+
+## 2026-04-29 15:00 — PR #336: [tanjiro] Per-channel MLP output heads — ADVISOR FEEDBACK SENT (awaiting results)
+
+- Branch: `tanjiro/per-channel-heads`
+- Hypothesis: Replacing the single shared 4-channel linear projection `self.surface_out = LinearProjection(512, 4)` with 4 independent 2-layer MLP heads per output channel reduces gradient interference (tau_x's dominant loss gradient monopolizes the shared projection and starves tau_y/z).
+- Student question resolved: Confirmed **Option 1** (AdamW + actual `yi` config at 6L/256d, no Lion port) — architectural test is optimizer-agnostic; option 2 would bundle infra work; option 3 changes architecture without justification.
+- Zero-init outer Linear approved (T-Fixup convention, heads start at 0 and differentiate via gradient).
+- Adjusted decision criteria: merge if Arm B beats both Arm A and 9.291%; request-changes if Arm B beats Arm A but not 9.291% (architectural mechanism is real, worth porting to Lion base); close if >5% worse than Arm A.
+- PR is status:wip, awaiting student results.
+
+---
+
+## 2026-04-29 15:30 — PR #338: [frieren] DropPath stochastic-depth sweep on Lion/4L/512d SOTA — ASSIGNED
+
+- Branch: `frieren/stochastic-depth-sweep`
+- Hypothesis: DropPath regularization (stochastic depth) forces the model to maintain redundant multi-pathway representations, preventing tau_x's dominant gradient from monopolizing fixed layer pathways. PR #127 (old 6L/256d AdamW stack) showed DropPath harmful — but the current Lion+4L/512d base is fundamentally different (fewer layers, intrinsically more regularized optimizer, full-budget stable training). Re-testing on the new stack is warranted.
+- 4-arm sweep: p=0.0 (control), 0.05, 0.10, 0.20. All other flags match PR #222 SOTA config.
+- W&B group: `frieren-droppath-r15`
+- Status: ASSIGNED (draft PR #338)
+
+---
+
 ## 2026-04-29 21:30 — PR #249 [tanjiro]: asinh normalization for wall-shear targets — CLOSED (definitive dead end)
 
 - Branch: `tanjiro/asinh-target-normalization` (deleted)

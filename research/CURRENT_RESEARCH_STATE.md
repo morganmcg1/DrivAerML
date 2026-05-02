@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-04-29 (Round 21 — 16 WIP PRs on yi, 0 idle; tanjiro PR #249 closed (asinh dead end), tanjiro PR #336 assigned (per-channel output heads))
+- 2026-04-29 (Round 21 — 16 WIP PRs on yi, 0 idle; tanjiro PR #249 closed (asinh dead end), tanjiro PR #336 sent back (per-channel heads — option 1 confirmed), frieren PR #286 closed (bilateral-symmetry TTA — negative), frieren PR #338 assigned (DropPath sweep))
 
 ## Latest Survey Pass (2026-04-29 Round 21)
 
@@ -70,7 +70,7 @@
 | #312 | edward | Surface-tangent frame wall-shear prediction | 18 | stale WIP |
 | #298 | fern | Learned-FF Arm A2: sincos + 500-step warmup (warmup-confound disambiguation) | 17 | Sent back with A2 instructions — if A2≈C (14.47%), warmup confound confirmed; if A2>C, FF has signal |
 | #297 | haku | symm-aug Arm C (include-both bs=4) on stable lr=1e-4/wu=2000-step base | 17 | Sent back with --lr-warmup-steps 2000 fix |
-| #286 | frieren | Bilateral-symmetry TTA (y→-y reflection at inference) | 15 | |
+| #338 | frieren | DropPath stochastic-depth sweep (p=0.0/0.05/0.10/0.20) on Lion/4L/512d SOTA | 21 | Re-tests PR #127 idea on fundamentally different stable base |
 | #284 | alphonse | 6L/512d depth+width scaling — 8-GPU re-run on ddp8 fleet | 15 | Sent back: needs 8 GPUs + cosine-t-max-epochs 6; DDP/Lion port now on branch |
 | #262 | nezuko | Linear-warmdown LR (WSD-style) on 4L/512d SOTA | 15 | |
 | #336 | tanjiro | Per-channel MLP output heads for surface (4 heads: surface_p/tau_x/y/z, hidden=256 each) | 21 | NEW — attacks gradient interference in shared linear head, orthogonal to all in-flight tau_y/z fixes |
