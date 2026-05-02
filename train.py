@@ -97,6 +97,61 @@ class LinearProjection(nn.Module):
         return self.project(x)
 
 
+class PerChannelMLPHeads(nn.Module):
+    """One 2-layer MLP per output channel, sharing the same input representation.
+
+    All Linear layers use the model's standard trunc_normal(std=0.02) init.
+    Failure-mode notes from prior revisions on the yi base (6L/256d AdamW):
+      - Zero-init outer Linear (LoRA / T-Fixup convention) created a dead-grad
+        at step 0 for the inner Linear (zero outer weight ⇒ zero gradient flow
+        back) which caused asymmetric ramp-up and NaN grads at ~step 3K under
+        bf16.
+      - Standard init alone trained cleanly to step ~7100 then suddenly diverged
+        (loss 0.21→3.5, backbone-LN grads exploded to ~10^4-10^6) while the
+        linear-baseline control on the same backbone stayed at loss ~0.12. The
+        head's intermediate (hidden_dim, post-GELU) is unbounded, and once the
+        upstream representation grew, the heads amplified it into a runaway
+        backward signal through the backbone LayerNorms.
+    The use_norm flag inserts a LayerNorm between GELU and the outer Linear in
+    each head, bounding the post-GELU intermediate (standard transformer-FFN
+    style) and breaking the runaway loop.
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        num_channels: int,
+        hidden_dim: int,
+        use_norm: bool = False,
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.num_channels = num_channels
+        self.hidden_dim = hidden_dim
+        self.use_norm = use_norm
+
+        def _build_head() -> nn.Sequential:
+            layers: list[nn.Module] = [
+                nn.Linear(input_dim, hidden_dim),
+                nn.GELU(),
+            ]
+            if use_norm:
+                layers.append(nn.LayerNorm(hidden_dim, eps=1e-6))
+            layers.append(nn.Linear(hidden_dim, 1))
+            return nn.Sequential(*layers)
+
+        self.heads = nn.ModuleList([_build_head() for _ in range(num_channels)])
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        for head in self.heads:
+            head.apply(_init_linear)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        outs = [head(x) for head in self.heads]
+        return torch.cat(outs, dim=-1)
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -350,6 +405,9 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_per_channel_heads: bool = False,
+        per_channel_head_hidden: int = 256,
+        per_channel_head_norm: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,6 +420,9 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.use_per_channel_heads = use_per_channel_heads
+        self.per_channel_head_hidden = per_channel_head_hidden
+        self.per_channel_head_norm = per_channel_head_norm
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -394,7 +455,15 @@ class SurfaceTransolver(nn.Module):
             film_geom_dim=film_encoder_dim if use_film else 0,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+        if use_per_channel_heads:
+            self.surface_out = PerChannelMLPHeads(
+                input_dim=n_hidden,
+                num_channels=self.surface_output_dim,
+                hidden_dim=per_channel_head_hidden,
+                use_norm=per_channel_head_norm,
+            )
+        else:
+            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
@@ -579,6 +648,9 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_per_channel_heads: bool = False
+    per_channel_head_hidden: int = 256
+    per_channel_head_norm: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -745,6 +817,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_per_channel_heads=config.use_per_channel_heads,
+        per_channel_head_hidden=config.per_channel_head_hidden,
+        per_channel_head_norm=config.per_channel_head_norm,
     )
 
 
