@@ -1,5 +1,17 @@
 # SENPAI Research State
-- 2026-04-29 (Round 22 — 17 WIP PRs on yi, 0 idle; emma PR #333 closed (RoPE — sincos+RoPE complementary, defer pending DDP fix), emma PR #355 assigned (DDP infrastructure fix))
+- 2026-04-29 10:35 (Round 23 — 16 WIP PRs on yi, 0 idle; PR #298 fern closed (warmup confound CONFIRMED), PR #297 haku closed (variance-reduction filed), PR #362 fern assigned (loss-side tangent projection), PR #363 haku assigned (diagnostic: tau_y/z error-mode analysis))
+
+## Latest Survey Pass (2026-04-29 Round 23)
+
+**Reviewed and closed this round:**
+- **PR #298 (fern) CLOSED**: warmup confound between learned-FF and warmup-length conclusively confirmed. At matched 500-step warmup, sincos (A2: 16.84%) ties learned-FF (C: 16.97%) at ep1, Δ = -0.137 pp. Trajectory extrapolation puts A2 ep2 at ~14.3%, within ±0.5pp of C's known 14.47%. Bonus: clip 0.5 + ep1-warmup is +1.98pp worse than clip 1.0 + ep1-warmup (clip-warmup interaction). Learned-FF dropped from active hypothesis set.
+- **PR #297 (haku) CLOSED**: best arm (CONTROL no-aug s42 = 12.61%) is 1.36x the 9.291% bar — single-GPU 1-epoch budget can't reach merge bar. Symmetry-aug doesn't beat no-aug at the best seed. **Variance-reduction signal kept on file**: include-both 5.3x lower seed half-range vs no-aug; CONTROL2 no-aug s7 collapsed to 34.30% while inc-both s7 stayed at 16.75%. Deterministic 2x-augmentation is a known fix for bad-basin seeds. PR #332 (tanjiro mirror-aug) is the active vehicle for the symmetry direction.
+
+**New assignments this round:**
+- **PR #362 (fern): loss-side tangent projection.** Project both tau_pred and tau_target onto surface tangent plane before MSE — physically motivated by the no-penetration BC. Distinct from PR #312 (output rotation, hurt) and PR #349 (input features). Single-GPU 2-arm screen on yi. Decision rule: Δ(B-A) ≤ -0.3 pp at ep1 → request full DDP run on emma's #355 base.
+- **PR #363 (haku): diagnostic study, not optimization.** Load PR #222 ep9 checkpoint (`ut1qmc3i`), produce 5-section error-mode report — per-region error magnitude, spatial autocorrelation (Moran's I), error vs curvature, error vs flow alignment, per-case ranking. Goal: tell the fleet **where on the vehicle** tau_y/z errors physically concentrate so future optimization-side PRs can target geometry rather than guess globally. This is a high-leverage knowledge investment.
+
+## Latest Survey Pass (2026-04-29 Round 22)
 
 ## Latest Survey Pass (2026-04-29 Round 22)
 
