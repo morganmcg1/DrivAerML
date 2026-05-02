@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 19:30 UTC (Round 22 in flight)
+- **Date:** 2026-05-02 20:10 UTC (Round 22 in flight)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -33,13 +33,18 @@ No new directives in the last cycle. Last actionable directive: Issue #252 (Modd
 |---|---|---|---|
 | #387 | alphonse | STRING-sep num_features sweep (16/32/64) on QK-norm base | `alphonse-string-sep-feat-qknorm` |
 | #422 | tanjiro | Multi-scale STRING-sep (8/32/128 features) on QK-norm | `tay-tanjiro-multiscale-rff` |
-| #435 | senku | 5L + STRING-sep full-budget DDP escalation | `senku-5l-string-sep-ddp` |
 | #451 | askeladd | volume-loss-weight=3.0 on STRING+QK SOTA | `askeladd-vol-w3-r22` |
 | #452 | edward | Separate 2-layer MLP volume decoder head | `edward-vol-decoder-r22` |
 | #453 | fern | Cosine EMA ramp 0.99→0.9999 on STRING+QK+Lion SOTA | `fern-ema-ramp-r22` |
 | #454 | frieren | Per-axis tau_y/tau_z loss weights ×2 on SOTA | `frieren-tau-axis-r22` |
 | #458 | nezuko | model-mlp-ratio 6 vs 8 sweep on SOTA stack | `nezuko-mlp-ratio-r22` |
 | #459 | thorfinn | Lion β2 reactive sweep (0.95/0.97) on SOTA | `thorfinn-lion-beta2-r22` |
+
+### Latest in-flight metrics (2026-05-02 20:10 UTC)
+
+- **#422 tanjiro** — EP3 val_abupt **12.152%** vs baseline 13.130% (−0.98 pp). Watch-points cleared (surface_pressure recovered, per-head grads 1:6:47 stable). EP5 convergence criterion: ≤9.3% supports clearing 7.3921% bar by EP12-13. Currently mid-EP4.
+- **#387 alphonse Arm A (feat16)** — EP6 val_abupt 8.73%, slope flattening at −0.13pp/epoch. Projection EP11 ≈ 8.08%, unlikely to clear 7.3921% bar. Arm B (feat32 control) launches ~22:50Z, Arm C (feat64) at ~04:50Z 2026-05-03.
+- **#451-#454, #458-#459 (Round 22)** — All assigned 19:15-19:29Z, pods spinning up. EP1 metrics expected ~26 min after each launch.
 
 ---
 
@@ -59,7 +64,7 @@ No new directives in the last cycle. Last actionable directive: Issue #252 (Modd
 
 1. **Closing the volume_pressure gap (×2.05 vs AB-UPT)** — primary laggard. Multiple angles in flight: PR #451 (loss reweight), PR #452 (separate decoder head). Both pure single-variable deltas on the SOTA stack — first time vol-targeted experiments tested on STRING-sep+QK-norm base.
 2. **Closing the tau_y/tau_z gap (×2.53 / ×2.88)** — second laggard. PR #454 (frieren per-axis weights), PR #422 (multi-scale STRING-sep). Tangent-frame input features ruled out (#423).
-3. **Capacity scaling on SOTA stack** — never done in single-variable form on STRING-sep+QK-norm. PR #435 (5L), PR #458 (mlp_ratio 6/8), PR #387 (PE feature count).
+3. **Capacity scaling on SOTA stack** — never done in single-variable form on STRING-sep+QK-norm. PR #458 (mlp_ratio 6/8), PR #387 (PE feature count). 5L escalation is being tested on the `yi` branch (PR #435) rather than `tay`.
 4. **Optimizer dynamics** — PR #459 (Lion β2=0.95/0.97 reactive sweep). β2<0.99 has never been tested on this dataset.
 5. **EMA scheduling** — PR #453 (cosine 0.99→0.9999 ramp) replaces fixed 0.999.
 
