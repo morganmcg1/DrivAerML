@@ -124,6 +124,43 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class StringMultiScaleEncoding(nn.Module):
+    """STRING-separable multi-scale position encoding.
+
+    Per-axis learnable log-frequencies and phases. With ``num_freqs=1`` this
+    matches the STRING-separable design from PR #311; ``num_freqs > 1`` stacks
+    multiple per-axis frequencies before a linear projection so the model can
+    attend to global and near-wall scales simultaneously.
+    """
+
+    def __init__(self, hidden_dim: int, space_dim: int, num_freqs: int = 4):
+        super().__init__()
+        if num_freqs < 1:
+            raise ValueError("num_freqs must be >= 1")
+        self.hidden_dim = hidden_dim
+        self.space_dim = space_dim
+        self.num_freqs = num_freqs
+        self.log_freq = nn.Parameter(torch.zeros(space_dim, num_freqs))
+        self.phase = nn.Parameter(torch.zeros(space_dim, num_freqs))
+        self.proj = nn.Linear(2 * space_dim * num_freqs, hidden_dim, bias=True)
+        _init_linear(self.proj)
+        with torch.no_grad():
+            if num_freqs > 1:
+                init_range = torch.linspace(-6.9, 0.0, num_freqs)
+            else:
+                init_range = torch.zeros(1)
+            for ax in range(space_dim):
+                self.log_freq[ax] = init_range
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords = coords.float()
+        freq = torch.exp(self.log_freq)
+        angles = coords.unsqueeze(-1) * freq + self.phase
+        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
+        emb = emb.flatten(start_dim=-2)
+        return self.proj(emb)
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -350,6 +387,7 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        string_num_freqs: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,12 +400,20 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.string_num_freqs = string_num_freqs
 
-        self.pos_embed = ContinuousSincosEmbed(
-            hidden_dim=n_hidden,
-            input_dim=space_dim,
-            max_wavelength=pos_max_wavelength,
-        )
+        if string_num_freqs > 0:
+            self.pos_embed = StringMultiScaleEncoding(
+                hidden_dim=n_hidden,
+                space_dim=space_dim,
+                num_freqs=string_num_freqs,
+            )
+        else:
+            self.pos_embed = ContinuousSincosEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                max_wavelength=pos_max_wavelength,
+            )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
@@ -579,6 +625,7 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    string_num_freqs: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -664,6 +711,11 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
         ),
+        "string_num_freqs": (
+            "If >0, replace ContinuousSincosEmbed with StringMultiScaleEncoding "
+            "(per-axis learnable log-frequencies). num_freqs=1 reproduces "
+            "STRING-separable PE; num_freqs>1 stacks multiple frequencies."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -745,6 +797,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        string_num_freqs=config.string_num_freqs,
     )
 
 
@@ -1763,6 +1816,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("model/string/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -2041,6 +2095,24 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
+        base_model_for_log = getattr(model, "_orig_mod", model)
+        pos_embed_log = getattr(base_model_for_log, "pos_embed", None)
+        if isinstance(pos_embed_log, StringMultiScaleEncoding):
+            with torch.no_grad():
+                lf = pos_embed_log.log_freq.detach().float().cpu()
+                ph = pos_embed_log.phase.detach().float().cpu()
+                fr = lf.exp()
+                axis_names = ("x", "y", "z")
+                for ax in range(lf.shape[0]):
+                    ax_name = axis_names[ax] if ax < len(axis_names) else f"a{ax}"
+                    log_metrics[f"model/string/{ax_name}/freq_min"] = float(fr[ax].min())
+                    log_metrics[f"model/string/{ax_name}/freq_max"] = float(fr[ax].max())
+                    log_metrics[f"model/string/{ax_name}/log_freq_mean"] = float(lf[ax].mean())
+                    if lf.shape[1] > 1:
+                        log_metrics[f"model/string/{ax_name}/log_freq_std"] = float(lf[ax].std())
+                    log_metrics[f"model/string/{ax_name}/phase_mean"] = float(ph[ax].mean())
+                    for fi in range(lf.shape[1]):
+                        log_metrics[f"model/string/{ax_name}/freq_{fi}"] = float(fr[ax, fi])
         wandb.log(log_metrics)
 
         primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0
