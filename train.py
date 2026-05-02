@@ -694,6 +694,8 @@ class Config:
     validation_every: int = 10
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    volume_loss_type: str = "mse"
+    volume_huber_delta: float = 1.0
     aux_rel_l2_weight: float = 0.0
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
@@ -1411,6 +1413,45 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return pred.sum() * 0.0
 
 
+def masked_huber(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    beta: float,
+) -> torch.Tensor:
+    if bool(mask.any()):
+        return F.smooth_l1_loss(pred[mask], target[mask], beta=beta, reduction="mean")
+    return pred.sum() * 0.0
+
+
+_VOL_RESIDUAL_QUANTILES: tuple[float, ...] = (0.5, 0.75, 0.9, 0.95, 0.99)
+
+
+def volume_residual_percentiles(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> dict[str, float]:
+    if not bool(mask.any()):
+        return {}
+    diff = (pred[mask].detach().float() - target[mask].detach().float()).abs()
+    if diff.numel() == 0:
+        return {}
+    qs = torch.tensor(_VOL_RESIDUAL_QUANTILES, dtype=diff.dtype, device=diff.device)
+    # `torch.quantile` allocates O(N log N) for sort; subsample to keep cost bounded.
+    if diff.numel() > 200_000:
+        idx = torch.randperm(diff.numel(), device=diff.device)[:200_000]
+        diff_sample = diff[idx]
+    else:
+        diff_sample = diff
+    vals = torch.quantile(diff_sample, qs)
+    return {
+        f"vol_residual_p{int(q * 100):02d}": float(v.cpu().item())
+        for q, v in zip(_VOL_RESIDUAL_QUANTILES, vals)
+    }
+
+
 def weighted_masked_mse_per_channel(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -1497,6 +1538,8 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    volume_loss_type: str = "mse",
+    volume_huber_delta: float = 1.0,
     aux_rel_l2_weight: float = 0.0,
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
@@ -1548,8 +1591,24 @@ def train_loss(
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
             wallshear_huber_delta=wallshear_huber_delta,
         )
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        volume_pred = out["volume_preds"]
+        if volume_loss_type == "huber":
+            volume_loss = masked_huber(
+                volume_pred,
+                volume_target,
+                batch.volume_mask,
+                beta=volume_huber_delta,
+            )
+        elif volume_loss_type == "mse":
+            volume_loss = masked_mse(volume_pred, volume_target, batch.volume_mask)
+        else:
+            raise ValueError(
+                f"Unknown volume_loss_type {volume_loss_type!r}; expected 'mse' or 'huber'."
+            )
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        vol_residual_metrics = volume_residual_percentiles(
+            volume_pred, volume_target, batch.volume_mask
+        )
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
             surf_pred_f = surface_pred_norm.float()
@@ -1568,6 +1627,7 @@ def train_loss(
         "loss_tau_y": per_axis_unweighted[2],
         "loss_tau_z": per_axis_unweighted[3],
     }
+    metrics.update(vol_residual_metrics)
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
@@ -1870,6 +1930,14 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
 
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    if config.volume_loss_type not in {"mse", "huber"}:
+        raise ValueError(
+            f"--volume-loss-type must be 'mse' or 'huber'; got {config.volume_loss_type!r}"
+        )
+    if config.volume_huber_delta <= 0:
+        raise ValueError(
+            f"--volume-huber-delta must be > 0; got {config.volume_huber_delta}"
+        )
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -2119,6 +2187,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 config.amp_mode,
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
+                volume_loss_type=config.volume_loss_type,
+                volume_huber_delta=config.volume_huber_delta,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
@@ -2242,6 +2312,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            for key, value in batch_loss_metrics.items():
+                if key.startswith("vol_residual_"):
+                    train_log[f"train/{key}"] = value
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
