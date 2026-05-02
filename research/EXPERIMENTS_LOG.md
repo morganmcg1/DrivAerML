@@ -1,5 +1,24 @@
 # SENPAI Research Results
 
+## 2026-05-03 00:30 — PR #440: violet Huber δ sweep WITHOUT --use-tangential-wallshear-loss — SENT BACK (mechanism confirmed, needs full-budget DDP)
+
+- Branch: `violet/huber-without-tangential-loss-baseline-test` (still open)
+- Hypothesis: Huber loss on τ channels (PR #317 mechanism) survives WITHOUT the tangential-loss confound. Test δ ∈ {0.0, 0.5, 1.0} on the canonical yi MSE config (no `--use-tangential-wallshear-loss`).
+- Setup: 3-arm sweep, single-GPU AdamW, lr=5e-4, bs=4, 65k+65k pts, 4L/512d/8h/128sl. Hit `SENPAI_TIMEOUT_MINUTES=360` train-phase timeout at ~22:33 UTC mid-epoch 1 (~56% of epoch 1, 12,260–12,279 train steps). All arms `state=finished`, ran best-EMA reload + `full_val` + test eval. W&B group: [`violet-huber-r21-no-tangential`](https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml/groups/violet-huber-r21-no-tangential).
+
+| Arm | δ | run | **val_abupt** | val_surf_p | val_ws | val_ws_x | val_ws_y | val_ws_z | val_vol_p | test_abupt | test_vol_p |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| A (MSE ctrl) | 0.0 | `k9qjk71l` | 13.5341 | 9.3570 | 14.8900 | 12.9757 | 16.8492 | 19.5976 | 8.8912 | 14.4398 | 14.5060 |
+| B (Huber)    | 0.5 | `pgm54ox5` | 13.2766 | **8.5796** | 14.8504 | 12.7028 | 17.7157 | 19.0572 | **8.3276** | **14.1062** | 13.8773 |
+| C (Huber)    | 1.0 | `mdhb4igs` | **13.1980** | 8.8418 | **14.5606** | **12.5127** | 16.9722 | **19.0519** | 8.6115 | 14.2221 | 15.2060 |
+
+- **Result:** Δ(C vs A) val_abupt = **−0.336pp**, Δ(B vs A) = −0.258pp. Both clear the 0.05pp confirmation threshold. val_abupt monotonic in δ. Per-axis val: ws_x monotonic ↓, ws_z monotonic ↓ (both align with heavy-tail hypothesis); ws_y non-monotonic (worsens at δ=0.5, partially recovers at δ=1.0). Test agrees on direction but ranking flips: B beats C on test_abupt by 0.116pp and on test_vol_p by 1.33pp. Volume-pressure regression at C is val/test split-specific; possibly single-checkpoint mid-epoch noise.
+- **Headline gap to yi merge bar:** best val_abupt 13.198% vs **9.039%** (PR #309 thorfinn). Single-GPU AdamW + 56%-of-epoch-1 budget is structurally far from the multi-epoch DDP regime — this is a within-config mechanism validation, not a baseline contender. Student correctly framed it as such.
+- **Decision:** Sent back. δ=1.0 picked for promotion (monotonic val_abupt). Next iteration: 8-GPU Lion DDP, full PR #222 winning recipe + `--clip-grad-norm 0.5` (PR #309) + `--wallshear-huber-delta 1.0`, full 9 epochs. W&B group `violet-huber-r22-fullbudget-ddp`. Win bar: val_abupt < 9.039%.
+- **Compounding note:** This is the second mechanism (after #317) that points at heavy-tail-tolerance on τ_x/τ_z as a real lever. With the tangential-loss confound removed, Huber stacks cleanly on top of the upstream PR #66 per-axis weighting (W_y=W_z=2.0). Open question once full-budget run lands: do W_y/W_z weighting and Huber δ interact, or are they orthogonal? (deferred.)
+
+---
+
 ## 2026-04-29 22:00 — PR #429: frieren 1-cycle LR (OneCycleLR) vs cosine baseline — CLOSED (STRUCTURALLY COMPROMISED SCREEN)
 
 - Branch: `frieren/onecycle-lr-schedule` (deleted)
