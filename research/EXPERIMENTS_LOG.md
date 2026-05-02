@@ -6,6 +6,37 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-02 19:30 UTC — PR #423 CLOSED NEGATIVE: thorfinn local tangent-frame input features
+
+- **Branch:** `thorfinn/local-tangent-frame-features` (closed, branch deleted)
+- **Hypothesis:** Explicit `(t1, t2)` surface tangent-frame vectors as 6 extra input features (7→13 dim) would disproportionately help `tau_y`/`tau_z` (the components misaligned with global axes), addressing the ×2.53/×2.88 AB-UPT gap.
+- **W&B run:** `69riz56v`, group `tay-thorfinn-tangent-frame`, killed at EP6 step 38
+
+| EP | Tangent-frame | Baseline `tkiigfmc` | Δ (pp) |
+|---:|---:|---:|---:|
+| 1 | 49.263% | 52.054% | **−2.79** ✓ |
+| 2 | 31.569% | 30.041% | +1.53 |
+| 3 | 13.774% | 13.130% | +0.64 |
+| 4 | 10.209% | 9.924% | +0.29 |
+| 5 | 9.342% | 8.866% | **+0.48** ✗ |
+
+- **EP5 per-target Δ vs baseline (relative):** abupt +5.4%, ws_x +5.3%, ws_y +4.9%, ws_z +5.0%, surface_pressure +4.2%, volume_pressure +8.7%
+- **Conclusion:** NEGATIVE — uniform ~5% relative degradation across ALL targets (including SP and vol_p which cannot benefit from tangent-frame features) is the smoking gun for "wider input is harder to optimize" rather than "missing useful signal". Hypothesis-specific signature (disproportionate tau_y/z gain) was absent — tau_y/z degrade in lockstep with everything else.
+- **Implications:** "Missing local-frame geometric context" is RULED OUT as the tau_y/tau_z bottleneck. FIGConvNet's local-frame win does not transfer to slice-attention architectures (their mechanism rotates conv kernels; Transolver has no directional kernel to align). Bottleneck must lie elsewhere — loss form, capacity, target normalization, or slice resolution.
+- **Useful follow-ups recorded:** (1) Output-side tangent-frame decomposition — supervise (tau_n, tau_t1, tau_t2), rotate to global. Several prior tries (PRs #11 merged, #41/#121/#199/#218/#227/#312/#337/#344/#349/#362/#369 closed) — direction is exhausted on multiple stacks. (2) Per-axis tau loss balancing — already in flight as PR #454 (frieren). (3) Target-specific decoder capacity — already in flight as PR #347 (nezuko on bengio).
+- **Reassignment:** thorfinn → PR #459 (Lion β2 reactive sweep, 0.95/0.97).
+
+---
+
+## 2026-05-02 19:25 UTC — PR #365 CLOSED ABANDONED: nezuko model-layers=5 + STRING-sep
+
+- **Branch:** `nezuko/model-layers5-string-sep` (closed, branch deleted)
+- **Hypothesis:** Stack `--model-layers 5` on STRING-sep PE (PR #311 base).
+- **Reason for closing:** Result reported (val 7.5250% EP9) no longer clears the merge bar (now 7.3921% post-PR #358). Branch had unresolved merge conflicts with current tay HEAD, and student was unresponsive to 4 rebase requests over multiple hours. Layers=5 hypothesis is being re-tested on the full SOTA stack by senku PR #435.
+- **Reassignment:** nezuko → PR #458 (model-mlp-ratio 6 vs 8 sweep).
+
+---
+
 ## 2026-05-02 17:00 UTC — PR #353 CLOSED NEGATIVE: askeladd channel-selective Huber loss
 
 - **Branch:** `askeladd/huber-tau-loss` (closed, branch deleted)
