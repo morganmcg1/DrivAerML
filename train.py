@@ -352,9 +352,15 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_tangent_frame: bool = False,
+        predict_tau_local_frame: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
+        self.use_tangent_frame = use_tangent_frame
+        self.predict_tau_local_frame = predict_tau_local_frame
+        if use_tangent_frame:
+            surface_input_dim = surface_input_dim + 6  # +t1(3) +t2(3)
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
@@ -433,6 +439,14 @@ class SurfaceTransolver(nn.Module):
         surface_tokens = 0
         volume_tokens = 0
 
+        n_hat: torch.Tensor | None = None
+        t1: torch.Tensor | None = None
+        t2: torch.Tensor | None = None
+        if surface_x is not None and self.use_tangent_frame:
+            normals = surface_x[..., 3:6]
+            n_hat, t1, t2 = compute_tangent_frame(normals)
+            surface_x = torch.cat([surface_x, t1, t2], dim=-1)
+
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
             tokens.append(
@@ -472,7 +486,29 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            if (
+                self.predict_tau_local_frame
+                and n_hat is not None
+                and t1 is not None
+                and t2 is not None
+            ):
+                # Output channels 1-3 are interpreted as (tau_t1, tau_t2, tau_n) in
+                # the local frame; rotate back to global Cartesian (tau_x, tau_y, tau_z).
+                # Channel 0 (surface_pressure) is left untouched.
+                cp_pred = surface_preds[..., 0:1]
+                tau_local = surface_preds[..., 1:4]
+                tau_t1 = tau_local[..., 0:1]
+                tau_t2 = tau_local[..., 1:2]
+                tau_n = tau_local[..., 2:3]
+                tau_global = (
+                    tau_t1 * t1.to(tau_local.dtype)
+                    + tau_t2 * t2.to(tau_local.dtype)
+                    + tau_n * n_hat.to(tau_local.dtype)
+                )
+                extra = surface_preds[..., 4:]  # in case output_dim > 4
+                surface_preds = torch.cat([cp_pred, tau_global, extra], dim=-1)
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -582,6 +618,8 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_tangent_frame: bool = False
+    predict_tau_local_frame: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -765,6 +803,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_tangent_frame=config.use_tangent_frame,
+        predict_tau_local_frame=config.predict_tau_local_frame,
     )
 
 
@@ -1354,6 +1394,31 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
     dot = (vec_f * n_hat).sum(dim=-1, keepdim=True)
     return (vec_f - dot * n_hat).to(vec.dtype)
+
+
+def compute_tangent_frame(
+    normals: torch.Tensor, near_parallel_dot: float = 0.9
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build a deterministic orthonormal tangent frame (n, t1, t2) from per-point normals.
+
+    Uses the standard Gram-Schmidt construction `t1 = normalize(n x ref)` with
+    `ref = [0, 1, 0]`, falling back to `[1, 0, 0]` where n is near-parallel to
+    the reference (|n.ref| > 0.9) to avoid degenerate crosses. fp32 internally
+    for bf16 stability. Returns (n_hat, t1, t2) all matching the input dtype.
+    """
+    normals_f = normals.float()
+    n_hat = F.normalize(normals_f, dim=-1, eps=1e-8)
+    primary = torch.zeros_like(n_hat)
+    primary[..., 1] = 1.0  # [0, 1, 0]
+    fallback = torch.zeros_like(n_hat)
+    fallback[..., 0] = 1.0  # [1, 0, 0]
+    dot = (n_hat * primary).sum(dim=-1, keepdim=True).abs()
+    ref = torch.where(dot > near_parallel_dot, fallback, primary)
+    t1 = torch.linalg.cross(n_hat, ref)
+    t1 = t1 / (t1.norm(dim=-1, keepdim=True) + 1e-8)
+    t2 = torch.linalg.cross(n_hat, t1)
+    t2 = t2 / (t2.norm(dim=-1, keepdim=True) + 1e-8)
+    return n_hat.to(normals.dtype), t1.to(normals.dtype), t2.to(normals.dtype)
 
 
 def train_loss(
