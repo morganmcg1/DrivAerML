@@ -2,21 +2,21 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: thorfinn PR #358 STRING-sep + QK-norm stack — 2026-05-01 (updated)
+## Status: thorfinn PR #358 STRING-sep + QK-norm stack — 2026-05-02 (updated)
 
-**NEW SOTA: thorfinn PR #358 (STRING-sep + QK-norm stack) beats PR #311 by −0.081pp val (7.4648% vs 7.546% val). W&B run `tkiigfmc`, EP10.**
+**NEW SOTA: thorfinn PR #358 (STRING-sep + QK-norm stack) beats PR #311 by −0.154pp val (7.3921% vs 7.546% val). W&B run `tkiigfmc`, EP11 (run continued past EP10 to new best).**
 
-QK-norm adds `nn.RMSNorm(dim_head, elementwise_affine=True)` applied to Q and K projections immediately after the qkv chunk, before `F.scaled_dot_product_attention`. Stacks directly on top of PR #311 STRING-sep config. Convergence trajectory was smooth and still descending at EP10, indicating further gains are possible.
+QK-norm adds `nn.RMSNorm(dim_head, elementwise_affine=True)` applied to Q and K projections immediately after the qkv chunk, before `F.scaled_dot_product_attention`. Stacks directly on top of PR #311 STRING-sep config. Convergence continued improving to EP11.
 
-**W&B run:** `tkiigfmc` (thorfinn DDP8) — group `thorfinn-string-qknorm-r19`, best val 7.4648% (EP10)
+**W&B run:** `tkiigfmc` (thorfinn DDP8) — group `thorfinn-string-qknorm-r19`, best val **7.3921%** (EP11)
 **PR:** #358
-**Val sub-metrics (EP10):** surface_pressure=4.9919%, volume_pressure=4.5871%, wall_shear=8.4538%
+**Test metrics (best-val checkpoint):** test_abupt=8.625%, surface_pressure=4.462%, wall_shear=7.965%, volume_pressure=12.434%
 
 ### tay current best — `val_primary/*`
 
 | Epoch | val_abupt |
 |-------|-----------|
-| **EP10 (best)** | **7.4648%** |
+| **EP11 (best)** | **7.3921%** |
 
 ### Val trajectory (run `tkiigfmc`)
 
@@ -31,7 +31,19 @@ QK-norm adds `nn.RMSNorm(dim_head, elementwise_affine=True)` applied to Q and K 
 | 7 | 8.041% |
 | 8 | 7.723% |
 | 9 | 7.577% |
-| **10** | **7.465%** |
+| 10 | 7.465% |
+| **11** | **7.392%** |
+
+### tay current best — `test_primary/*` (PR #358 thorfinn, run `tkiigfmc`)
+
+| Metric | This-repo key | **PR #358 thorfinn (SOTA)** | PR #311 edward (prev) | AB-UPT |
+|---|---|---:|---:|---:|
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **8.625** | 8.771 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **4.462** | 4.485 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **7.965** | 8.227 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.434** | 12.438 | 6.08 |
+
+**Note:** volume_pressure at 12.434% remains the primary laggard — 2× the AB-UPT reference (6.08%). Surface and wall shear are within ~0.6-0.7pp of targets. Every round must target closing the volume_pressure gap.
 
 ### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm)
 
@@ -66,7 +78,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #232 | askeladd | **−0.226 (−2.44%) vs #222** | model-heads=4 (halving attention heads from 8 to 4) |
 | #309 | thorfinn | **−0.064pp (−0.63%) vs #232** | grad-clip-norm=0.5 (Lion EMA momentum stabilization, avoids ep8 regression) |
 | #311 | edward | **−1.355pp (−13.39%) vs #309** | STRING-separable pos encoding: learnable per-axis log_freq + phase — largest single gain since tanjiro arm B |
-| **#358** | **thorfinn** | **−0.081pp (−1.07%) vs #311** | **QK-norm (RMSNorm on Q and K) stacked on STRING-sep** |
+| **#358** | **thorfinn** | **−0.154pp (−2.04%) vs #311** | **QK-norm (RMSNorm on Q and K) stacked on STRING-sep — best val at EP11 (7.3921%)** |
 
 ---
 
