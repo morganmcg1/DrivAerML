@@ -620,3 +620,57 @@ Frieren reassigned to PR #256 (Mirror-symmetry TTA for wsy reduction) in the Wav
 - Hypothesis: val/test gap on vol_p (2.5×) can be reduced via regularization (wd=1e-3, dropout=0.0/0.05/0.1)
 - 3 trials: Trial A (wd=1e-3, dp=0.0), Trial B (wd=1e-3, dp=0.05), Trial C (wd=1e-3, dp=0.1)
 
+---
+
+## 2026-05-02 09:30 — PR #276: [fern] SWA over last 5 epochs (CLOSED — blocked on regression)
+
+- **Branch:** `fern/swa-last-k-epochs` (closed, head preserved at commit `d6cb811`)
+- **Hypothesis:** Stochastic Weight Averaging (SWA) over the final 5 epochs of the 30-epoch alphonse recipe should find flatter minima and improve generalization, targeting the wsy/wsz binding constraint. SWA implemented via `torch.optim.swa_utils.AveragedModel` + `SWALR` + `update_bn` (no-op since no BatchNorm).
+
+### Run history
+
+| Run ID | Attempt | Outcome |
+|--------|---------|---------|
+| `ep4dl3uw` | Run 1 | SIGTERM at ep~2.5, never reached SWA window |
+| `518ywbcw` | Run 2 | ep5=10.837% > 10.5% gate (0.34pp miss); missing `--fourier-pe` (n_params=3,237,269) |
+| `tfphcp42` | Run 3 | Missing `--fourier-pe`, ep6=13.564% killed |
+| `0fhryk4r` | Run 4 | Correct arch (3,249,813 params), ep10=9.270% > 8.5% gate (0.77pp miss) |
+
+### Critical finding: structural codebase regression
+
+**fern's ep-by-ep trajectory comparison revealed a persistent +1.0–1.5pp gap vs alphonse `m9775k1v` across all 10 epochs** — despite identical architecture (4L/256d, FourierEmbed, lr=3e-4, no-EMA, T_max=30). This gap appeared in every other recent fourier-pe nf=8 run:
+
+| Run ID | Config | Best abupt |
+|--------|--------|-----------|
+| `m9775k1v` | alphonse baseline PR #74 (ep30) | **7.2091%** |
+| `67u9bilg` | haku SW=2.0 (identical arch, 50ep) | 8.168% |
+| `kuz4na0j` | trial-B wsy/wsz 0.5 | 8.895% |
+| `w3thlivw` | mirror0.5 + sw2.0 | 8.919% |
+| `31s1j3a0` | gc=0.5 (grad clip) | 9.215% |
+| `0fhryk4r` | fern SWA (ep10) | 9.270% |
+
+No run since alphonse PR #74 (Wave 1 winner) has reproduced the 7.21% baseline, despite identical architecture and HPs. This affects ALL in-flight Wave 5–8 PRs.
+
+### Decision
+
+Closed PR #276 without running to ep30. Rationale: a ~1pp code regression makes the SWA delta uninterpretable — we cannot know whether SWA's effect is being compounded or masked by whatever changed. SWA code is preserved on the branch for later cherry-pick.
+
+**Pivoting fern to PR #354: regression bisect** — identify the commit between PR #74 and current HEAD that introduced the regression. This is the highest-leverage action on the bengio track.
+
+### Diagnosis categories (to investigate in PR #354)
+
+1. Data/dataloader normalization changes
+2. Loss function changes (weights, formulation)
+3. Model initialization changes (FourierEmbed, transformer)
+4. LR scheduler changes
+5. DDP sync / metric aggregation changes
+
+---
+
+## 2026-05-02 09:35 — PR #337: [frieren] Surface-normal tangent frame (CLOSED — non-compliance)
+
+- **Branch:** `frieren/surface-normal-shear-coords`
+- **Hypothesis:** Predict wall-shear components in a surface-tangent frame (tau_t1, tau_t2, tau_n) rather than global (wsx, wsy, wsz) to reduce the coordinate-system complexity for the binding wsy/wsz constraint
+- **Outcome:** Zero activity since assignment. No commits, no W&B runs, no acknowledgment. 4-hour deadline at 07:08Z with no response. frieren appears to be working exclusively on yi-branch experiments. **Third consecutive wave of bengio non-compliance.** Closed.
+- **Reassignment note:** The tangent-frame hypothesis is still scientifically interesting and will be assigned to a responsive student in a future wave.
+
