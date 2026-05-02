@@ -563,6 +563,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    asinh_tau_scale: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -616,6 +617,7 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        asinh_tau_scale: float = 0.0,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -633,6 +635,9 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        if asinh_tau_scale < 0.0:
+            raise ValueError("asinh_tau_scale must be >= 0")
+        self.asinh_tau_scale = float(asinh_tau_scale)
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -641,10 +646,22 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+        mean = self.surface_y_mean.to(y.device)
+        std = self.surface_y_std.to(y.device)
+        if self.asinh_tau_scale > 0:
+            cp_norm = (y[..., 0:1] - mean[0:1]) / std[0:1]
+            tau_norm = torch.asinh(y[..., 1:4] / self.asinh_tau_scale)
+            return torch.cat([cp_norm, tau_norm], dim=-1)
+        return (y - mean) / std
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        mean = self.surface_y_mean.to(y.device)
+        std = self.surface_y_std.to(y.device)
+        if self.asinh_tau_scale > 0:
+            cp_phys = y[..., 0:1] * std[0:1] + mean[0:1]
+            tau_phys = self.asinh_tau_scale * torch.sinh(y[..., 1:4])
+            return torch.cat([cp_phys, tau_phys], dim=-1)
+        return y * std + mean
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
         return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
@@ -1696,11 +1713,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Device: {device}" + (" [DEBUG]" if config.debug else ""))
 
     train_loader, val_loaders, test_loaders, stats = make_loaders(config)
+    if config.asinh_tau_scale > 0 and config.use_tangential_wallshear_loss:
+        raise ValueError(
+            "--asinh-tau-scale and --use-tangential-wallshear-loss are mutually "
+            "exclusive: tangential projection assumes physical-space wall-shear."
+        )
     transform = TargetTransform(
         surface_y_mean=stats["surface_y_mean"].to(device),
         surface_y_std=stats["surface_y_std"].to(device),
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
+        asinh_tau_scale=config.asinh_tau_scale,
     )
 
     model = build_model(config).to(device)
