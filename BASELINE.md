@@ -2,7 +2,75 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: edward PR #311 STRING-separable positional encoding — 2026-05-01 (updated)
+## Status: thorfinn PR #358 STRING-sep + QK-norm stack — 2026-05-01 (updated)
+
+**NEW SOTA: thorfinn PR #358 (STRING-sep + QK-norm stack) beats PR #311 by −0.081pp val (7.4648% vs 7.546% val). W&B run `tkiigfmc`, EP10.**
+
+QK-norm adds `nn.RMSNorm(dim_head, elementwise_affine=True)` applied to Q and K projections immediately after the qkv chunk, before `F.scaled_dot_product_attention`. Stacks directly on top of PR #311 STRING-sep config. Convergence trajectory was smooth and still descending at EP10, indicating further gains are possible.
+
+**W&B run:** `tkiigfmc` (thorfinn DDP8) — group `thorfinn-string-qknorm-r19`, best val 7.4648% (EP10)
+**PR:** #358
+**Val sub-metrics (EP10):** surface_pressure=4.9919%, volume_pressure=4.5871%, wall_shear=8.4538%
+
+### tay current best — `val_primary/*`
+
+| Epoch | val_abupt |
+|-------|-----------|
+| **EP10 (best)** | **7.4648%** |
+
+### Val trajectory (run `tkiigfmc`)
+
+| Epoch | val_abupt |
+|-------|-----------|
+| 1 | 52.054% |
+| 2 | 30.041% |
+| 3 | 13.131% |
+| 4 | 9.924% |
+| 5 | 8.866% |
+| 6 | 8.215% |
+| 7 | 8.041% |
+| 8 | 7.723% |
+| 9 | 7.577% |
+| **10** | **7.465%** |
+
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm)
+
+```bash
+torchrun --standalone --nproc_per_node=8 train.py \
+  --agent thorfinn --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --no-compile-model --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
+  --pos-encoding-mode string_separable --use-qk-norm \
+  --wandb-group thorfinn-string-qknorm-r19 \
+  --wandb-name thorfinn/string-sep-qknorm-stack-pr358
+```
+
+### Compounding wins so far (updated through PR #358)
+
+| PR | Who | Delta | Lever |
+|---|---|---:|---|
+| #30 | alphonse | baseline (19.81) | yi calibration config (4L/512d/8h, vol_w=2.0) |
+| #33 | fern | **−2.04 (−10.3%)** | RFF coord features (sigma=1.0, 32 feats) — uncompiled |
+| #40 | alphonse | **−0.52 (−2.9%) vs #33** | torch.compile fix → 12 epochs vs 9 |
+| #39 | tanjiro | **−1.82 (−10.5%) vs #40** | Lion optimizer lr=1.7e-5 |
+| #46 | alphonse | **−0.88 (−5.7%) vs #39** | AdamW + RFF (sigma=1.0) + compile → epoch 16 |
+| (no PR) | tanjiro arm B | **−3.25 (−22.3%) vs #46** | Lion lr=5e-5/wd=5e-4 — paper config was wrong |
+| #50 | nezuko | **−0.10 (−0.84%) vs arm B** | Lion uncompiled lr=5e-5 reproduce |
+| #110 | edward | **−0.04 (−0.34%) vs #50** | Lion + cosine T_max=50 (gentle 8% decay) |
+| #111 | tanjiro | **−0.03 (−0.25%) vs #110** | EMA decay 0.999 (5× faster than 0.9995) |
+| #115 | thorfinn | **−0.562 (−5.04%) vs #111** | Compound: lr=1e-4 + EMA=0.999 (both winners stacked) |
+| #222 | fern | **−0.193 (−2.03%) vs #115** | lr_warmup_epochs=1 (1-epoch linear warmup on top of SOTA stack) |
+| #232 | askeladd | **−0.226 (−2.44%) vs #222** | model-heads=4 (halving attention heads from 8 to 4) |
+| #309 | thorfinn | **−0.064pp (−0.63%) vs #232** | grad-clip-norm=0.5 (Lion EMA momentum stabilization, avoids ep8 regression) |
+| #311 | edward | **−1.355pp (−13.39%) vs #309** | STRING-separable pos encoding: learnable per-axis log_freq + phase — largest single gain since tanjiro arm B |
+| **#358** | **thorfinn** | **−0.081pp (−1.07%) vs #311** | **QK-norm (RMSNorm on Q and K) stacked on STRING-sep** |
+
+---
+
+## Prior SOTA record: edward PR #311 STRING-separable positional encoding — 2026-05-01 (updated)
 
 **NEW SOTA: edward PR #311 (STRING-separable pos encoding) beats PR #309 by −1.493pp val / −1.355pp test (7.546% vs 9.039% val, 8.771% vs 10.126% test). This is a −13.93% relative improvement on test_abupt.**
 
