@@ -601,6 +601,7 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    max_steps_per_epoch: int = 0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1797,7 +1798,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        epoch_step_limit = config.max_steps_per_epoch if config.max_steps_per_epoch > 0 else None
+        epoch_step_idx = 0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if epoch_step_limit is not None and epoch_step_idx >= epoch_step_limit:
+                break
+            epoch_step_idx += 1
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
