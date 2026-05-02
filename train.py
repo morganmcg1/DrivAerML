@@ -124,6 +124,92 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+def _parse_rope_axes(axes_str: str) -> tuple[int, ...]:
+    mapping = {"x": 0, "y": 1, "z": 2}
+    axes_str = axes_str.lower().strip()
+    if not axes_str:
+        raise ValueError("rope_axes must be a non-empty subset of 'xyz'")
+    seen: list[int] = []
+    for ch in axes_str:
+        if ch not in mapping:
+            raise ValueError(f"rope_axes contains invalid axis '{ch}'; must be subset of 'xyz'")
+        idx = mapping[ch]
+        if idx in seen:
+            raise ValueError(f"rope_axes contains duplicate axis '{ch}'")
+        seen.append(idx)
+    return tuple(seen)
+
+
+class RoPENd(nn.Module):
+    """Rotary positional embedding for arbitrary spatial axes.
+
+    Splits head_dim/2 rotation pairs across the requested axes (diagonal layout),
+    favouring earlier axes when the count does not divide evenly. Operates on
+    [..., head_dim] tensors that share the trailing layout produced by
+    ``q``/``k`` of TransolverAttention.
+    """
+
+    def __init__(self, head_dim: int, axes: tuple[int, ...], max_wavelength: float = 1000.0):
+        super().__init__()
+        if head_dim % 2 != 0:
+            raise ValueError(f"head_dim {head_dim} must be even for RoPE")
+        n_axes = len(axes)
+        if n_axes == 0:
+            raise ValueError("RoPENd requires at least one axis")
+        total_pairs = head_dim // 2
+        if total_pairs < n_axes:
+            raise ValueError(
+                f"head_dim {head_dim} too small for {n_axes} RoPE axes; "
+                f"need at least 2*{n_axes} = {2 * n_axes} dims"
+            )
+        base = total_pairs // n_axes
+        extra = total_pairs % n_axes
+        # Distribute extra pairs to leading axes so the dominant axis gets more capacity.
+        pairs_per_axis = [base + (1 if i < extra else 0) for i in range(n_axes)]
+        self.axes = tuple(axes)
+        self.head_dim = head_dim
+        self.max_wavelength = float(max_wavelength)
+        self.pairs_per_axis = tuple(pairs_per_axis)
+        # One inv_freq buffer per axis; lengths sum to head_dim/2.
+        for i, pairs in enumerate(pairs_per_axis):
+            arange = torch.arange(0, pairs, dtype=torch.float32)
+            inv_freq = 1.0 / (max_wavelength ** (arange / max(pairs, 1)))
+            self.register_buffer(f"inv_freq_{i}", inv_freq, persistent=False)
+
+    def _inv_freqs(self) -> list[torch.Tensor]:
+        return [getattr(self, f"inv_freq_{i}") for i in range(len(self.axes))]
+
+    @staticmethod
+    def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        coords: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Rotate q and k according to coords.
+
+        coords broadcasts with q/k: leading dims must match q.shape[:-1]; trailing
+        dim contains the spatial coordinate (>= max(self.axes) + 1 channels).
+        """
+        cos_parts: list[torch.Tensor] = []
+        sin_parts: list[torch.Tensor] = []
+        for axis, inv_freq in zip(self.axes, self._inv_freqs()):
+            angles = coords[..., axis : axis + 1] * inv_freq.to(dtype=coords.dtype, device=coords.device)
+            cos_parts.append(angles.cos())
+            sin_parts.append(angles.sin())
+        cos_half = torch.cat(cos_parts, dim=-1)
+        sin_half = torch.cat(sin_parts, dim=-1)
+        cos = torch.cat((cos_half, cos_half), dim=-1).to(dtype=q.dtype)
+        sin = torch.cat((sin_half, sin_half), dim=-1).to(dtype=q.dtype)
+        q_rot = q * cos + self._rotate_half(q) * sin
+        k_rot = k * cos + self._rotate_half(k) * sin
+        return q_rot, k_rot
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -151,7 +237,14 @@ class UpActDownMlp(nn.Module):
 
 
 class TransolverAttention(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        dropout: float = 0.0,
+        rope: RoPENd | None = None,
+    ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError("hidden_dim must be divisible by num_heads")
@@ -168,6 +261,7 @@ class TransolverAttention(nn.Module):
         self.qkv = LinearProjection(self.dim_head, self.dim_head * 3, bias=False)
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
+        self.rope = rope
 
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
@@ -184,10 +278,18 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
+        if self.rope is not None and coords is not None:
+            slice_coords = self._slice_centroids(slice_weights, coords)
+            q, k = self.rope(q, k, slice_coords)
         out_slice = F.scaled_dot_product_attention(
             q,
             k,
@@ -200,6 +302,19 @@ class TransolverAttention(nn.Module):
         out_x = self.proj_dropout(self.proj(out_x))
         return _apply_token_mask(out_x, attn_mask)
 
+    @staticmethod
+    def _slice_centroids(slice_weights: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
+        """Compute per-head spatial centroid of each slice from masked slice weights.
+
+        slice_weights: [B, H, N, S] (already masked to zero on padding tokens)
+        coords:        [B, N, 3]
+        returns:       [B, H, S, 3]
+        """
+        coords_f = coords.to(dtype=slice_weights.dtype)
+        numer = torch.einsum("bhns,bnd->bhsd", slice_weights, coords_f)
+        denom = slice_weights.sum(dim=-2).unsqueeze(-1).clamp(min=1e-5)
+        return numer / denom
+
 
 class TransformerBlock(nn.Module):
     def __init__(
@@ -210,6 +325,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         drop_path_prob: float = 0.0,
+        rope: RoPENd | None = None,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -219,14 +335,20 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             num_slices=num_slices,
             dropout=dropout,
+            rope=rope,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path = DropPath(drop_path_prob)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask, coords=coords))
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -286,6 +408,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        rope: RoPENd | None = None,
     ):
         super().__init__()
         if depth <= 1:
@@ -294,6 +417,7 @@ class Transformer(nn.Module):
             drop_path_rates = [
                 stochastic_depth_prob * i / (depth - 1) for i in range(depth)
             ]
+        # Share a single RoPE instance across all blocks; rotation is parameter-free.
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -303,6 +427,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     drop_path_prob=drop_path_rates[i],
+                    rope=rope,
                 )
                 for i in range(depth)
             ]
@@ -320,9 +445,10 @@ class Transformer(nn.Module):
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
         geom_token: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
     ) -> torch.Tensor:
         for index, block in enumerate(self.blocks):
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, coords=coords)
             if self.film_layers is not None and geom_token is not None:
                 x = self.film_layers[index](x, geom_token)
                 x = _apply_token_mask(x, attn_mask)
@@ -350,6 +476,10 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        use_rope: bool = False,
+        rope_max_wavelength: float = 1000.0,
+        rope_axes: tuple[int, ...] = (0, 2),
+        disable_sincos: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,6 +492,10 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.use_rope = use_rope
+        self.rope_max_wavelength = rope_max_wavelength
+        self.rope_axes = rope_axes
+        self.disable_sincos = disable_sincos
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -376,11 +510,25 @@ class SurfaceTransolver(nn.Module):
         self.project_volume_features = (
             LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
         )
+        # When sincos is disabled we still need a position-aware feature path so the
+        # slice formation can attend to space; project raw coords into hidden space.
+        self.project_surface_coords = (
+            LinearProjection(space_dim, n_hidden) if disable_sincos else None
+        )
+        self.project_volume_coords = (
+            LinearProjection(space_dim, n_hidden) if disable_sincos else None
+        )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.geom_encoder = (
             GeomEncoder(self.surface_input_dim, film_encoder_dim * 2, film_encoder_dim)
             if use_film
+            else None
+        )
+        head_dim = n_hidden // n_head
+        rope = (
+            RoPENd(head_dim=head_dim, axes=rope_axes, max_wavelength=rope_max_wavelength)
+            if use_rope
             else None
         )
         self.backbone = Transformer(
@@ -392,6 +540,7 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            rope=rope,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -402,11 +551,18 @@ class SurfaceTransolver(nn.Module):
         x: torch.Tensor,
         *,
         project_features: LinearProjection | None,
+        project_coords: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
-        hidden = self.pos_embed(pos)
+        if self.disable_sincos:
+            if project_coords is None:
+                hidden = pos.new_zeros(pos.shape[0], pos.shape[1], placeholder.shape[-1])
+            else:
+                hidden = project_coords(pos)
+        else:
+            hidden = self.pos_embed(pos)
         if project_features is not None and x.shape[-1] > self.space_dim:
             hidden = hidden + project_features(x[:, :, self.space_dim :])
         return bias(hidden) + placeholder
@@ -428,6 +584,7 @@ class SurfaceTransolver(nn.Module):
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
+        coords_list: list[torch.Tensor] = []
         surface_tokens = 0
         volume_tokens = 0
 
@@ -437,11 +594,13 @@ class SurfaceTransolver(nn.Module):
                 self._encode_group(
                     surface_x,
                     project_features=self.project_surface_features,
+                    project_coords=self.project_surface_coords,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
                 )
             )
             masks.append(surface_mask)
+            coords_list.append(surface_x[:, :, : self.space_dim])
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
@@ -449,18 +608,21 @@ class SurfaceTransolver(nn.Module):
                 self._encode_group(
                     volume_x,
                     project_features=self.project_volume_features,
+                    project_coords=self.project_volume_coords,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
                 )
             )
             masks.append(volume_mask)
+            coords_list.append(volume_x[:, :, : self.space_dim])
 
         attn_mask = torch.cat(masks, dim=1)
+        coords = torch.cat(coords_list, dim=1) if self.use_rope else None
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
             geom_token = self.geom_encoder(surface_x, surface_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
+        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token, coords=coords)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -579,6 +741,10 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_rope: bool = False
+    rope_max_wavelength: float = 1000.0
+    rope_axes: str = "xz"
+    sincos: bool = True
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -749,6 +915,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        use_rope=config.use_rope,
+        rope_max_wavelength=config.rope_max_wavelength,
+        rope_axes=_parse_rope_axes(config.rope_axes),
+        disable_sincos=not config.sincos,
     )
 
 
