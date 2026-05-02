@@ -161,7 +161,9 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
 
-        self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
+        self._temperature_min = 1e-2
+        raw_init = math.log(math.expm1(0.5 - self._temperature_min))
+        self.temperature_raw = nn.Parameter(torch.full((1, num_heads, 1, 1), raw_init))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_fx = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_slice = LinearProjection(self.dim_head, num_slices)
@@ -173,7 +175,8 @@ class TransolverAttention(nn.Module):
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
-        slice_logits = self.in_project_slice(x_mid) / self.temperature.clamp(min=1e-2)
+        temperature = F.softplus(self.temperature_raw) + self._temperature_min
+        slice_logits = self.in_project_slice(x_mid) / temperature
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
