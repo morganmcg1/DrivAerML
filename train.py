@@ -481,6 +481,8 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        coord_normalize: str = "none",
+        coord_axis_scale: tuple[float, float, float] = (1.4, 0.7, 0.4),
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -493,6 +495,17 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        if coord_normalize not in ("none", "axis", "l2"):
+            raise ValueError(
+                f"coord_normalize must be one of 'none'|'axis'|'l2', got '{coord_normalize}'"
+            )
+        self.coord_normalize = coord_normalize
+        self.register_buffer(
+            "coord_axis_scale",
+            torch.tensor(list(coord_axis_scale), dtype=torch.float32),
+            persistent=False,
+        )
+        self._coord_stats_logged = False
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -528,6 +541,16 @@ class SurfaceTransolver(nn.Module):
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
+    def _normalize_pos(self, pos: torch.Tensor) -> torch.Tensor:
+        if self.coord_normalize == "none":
+            return pos
+        if self.coord_normalize == "axis":
+            return pos / self.coord_axis_scale.to(device=pos.device, dtype=pos.dtype)
+        if self.coord_normalize == "l2":
+            norm = pos.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+            return pos / norm
+        return pos
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -537,6 +560,7 @@ class SurfaceTransolver(nn.Module):
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
+        pos = self._normalize_pos(pos)
         hidden = self.pos_embed(pos)
         if project_features is not None and x.shape[-1] > self.space_dim:
             hidden = hidden + project_features(x[:, :, self.space_dim :])
@@ -715,6 +739,10 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    coord_normalize: str = "none"  # "none" | "axis" | "l2"
+    coord_axis_scale_x: float = 1.4
+    coord_axis_scale_y: float = 0.7
+    coord_axis_scale_z: float = 0.4
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -897,6 +925,12 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        coord_normalize=config.coord_normalize,
+        coord_axis_scale=(
+            config.coord_axis_scale_x,
+            config.coord_axis_scale_y,
+            config.coord_axis_scale_z,
+        ),
     )
 
 
@@ -2111,6 +2145,72 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            if epoch == 0 and n_batches == 0 and is_main:
+                surf_xyz_b = batch.surface_x[..., :3]
+                vol_xyz_b = batch.volume_x[..., :3]
+                surf_mask_b = batch.surface_mask.bool()
+                vol_mask_b = batch.volume_mask.bool()
+                surf_valid = surf_xyz_b[surf_mask_b]
+                vol_valid = vol_xyz_b[vol_mask_b]
+                base_model = getattr(model, "_orig_mod", model)
+                norm_surf = base_model._normalize_pos(surf_valid.to(device))
+                norm_vol = base_model._normalize_pos(vol_valid.to(device))
+                coord_log = {
+                    "coord/raw_surf_min_x": float(surf_valid[:, 0].min()),
+                    "coord/raw_surf_min_y": float(surf_valid[:, 1].min()),
+                    "coord/raw_surf_min_z": float(surf_valid[:, 2].min()),
+                    "coord/raw_surf_max_x": float(surf_valid[:, 0].max()),
+                    "coord/raw_surf_max_y": float(surf_valid[:, 1].max()),
+                    "coord/raw_surf_max_z": float(surf_valid[:, 2].max()),
+                    "coord/raw_surf_std_x": float(surf_valid[:, 0].std()),
+                    "coord/raw_surf_std_y": float(surf_valid[:, 1].std()),
+                    "coord/raw_surf_std_z": float(surf_valid[:, 2].std()),
+                    "coord/raw_vol_min_x": float(vol_valid[:, 0].min()),
+                    "coord/raw_vol_min_y": float(vol_valid[:, 1].min()),
+                    "coord/raw_vol_min_z": float(vol_valid[:, 2].min()),
+                    "coord/raw_vol_max_x": float(vol_valid[:, 0].max()),
+                    "coord/raw_vol_max_y": float(vol_valid[:, 1].max()),
+                    "coord/raw_vol_max_z": float(vol_valid[:, 2].max()),
+                    "coord/raw_vol_std_x": float(vol_valid[:, 0].std()),
+                    "coord/raw_vol_std_y": float(vol_valid[:, 1].std()),
+                    "coord/raw_vol_std_z": float(vol_valid[:, 2].std()),
+                    "coord/normed_surf_min_x": float(norm_surf[:, 0].min()),
+                    "coord/normed_surf_min_y": float(norm_surf[:, 1].min()),
+                    "coord/normed_surf_min_z": float(norm_surf[:, 2].min()),
+                    "coord/normed_surf_max_x": float(norm_surf[:, 0].max()),
+                    "coord/normed_surf_max_y": float(norm_surf[:, 1].max()),
+                    "coord/normed_surf_max_z": float(norm_surf[:, 2].max()),
+                    "coord/normed_surf_std_x": float(norm_surf[:, 0].std()),
+                    "coord/normed_surf_std_y": float(norm_surf[:, 1].std()),
+                    "coord/normed_surf_std_z": float(norm_surf[:, 2].std()),
+                    "coord/normed_vol_std_x": float(norm_vol[:, 0].std()),
+                    "coord/normed_vol_std_y": float(norm_vol[:, 1].std()),
+                    "coord/normed_vol_std_z": float(norm_vol[:, 2].std()),
+                    "global_step": global_step,
+                }
+                wandb.log(coord_log)
+                print(
+                    f"[coord-norm={config.coord_normalize}] surface raw "
+                    f"min={surf_valid.min(0).values.tolist()} "
+                    f"max={surf_valid.max(0).values.tolist()} "
+                    f"std={surf_valid.std(0).tolist()}"
+                )
+                print(
+                    f"[coord-norm={config.coord_normalize}] surface normed "
+                    f"min={norm_surf.min(0).values.tolist()} "
+                    f"max={norm_surf.max(0).values.tolist()} "
+                    f"std={norm_surf.std(0).tolist()}"
+                )
+                print(
+                    f"[coord-norm={config.coord_normalize}] volume raw "
+                    f"min={vol_valid.min(0).values.tolist()} "
+                    f"max={vol_valid.max(0).values.tolist()} "
+                    f"std={vol_valid.std(0).tolist()}"
+                )
+                print(
+                    f"[coord-norm={config.coord_normalize}] volume normed "
+                    f"std={norm_vol.std(0).tolist()}"
+                )
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
