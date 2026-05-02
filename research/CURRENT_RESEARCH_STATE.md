@@ -1,162 +1,128 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 ~09:05 UTC (cycle re-entry)
+- **Date:** 2026-05-01 ~10:40 UTC (post-PR #311 merge cycle)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Current SOTA — PR #309 (thorfinn grad-clip-norm=0.5), val_abupt 9.0389% (ep11)
+## Current SOTA — PR #311 (edward STRING-separable PE), val_abupt 7.546%
 
-**Verified SOTA config (W&B run `ztdhodw1`):**
-- lr=1e-4, weight_decay=5e-4, optimizer=lion, lion_beta1=0.9, lion_beta2=0.99
-- use_ema=True, ema_decay=0.999, lr_cosine_t_max=50, lr_warmup_epochs=0
-- model_layers=4, model_hidden_dim=512, model_heads=4, model_slices=128, model_mlp_ratio=4
-- train/eval surface_points=65536, train/eval volume_points=65536
-- volume_loss_weight=1, surface_loss_weight=1, batch_size=4, compile_model=False
-- rff_num_features=0
-- **grad-clip-norm=0.5** (new in #309)
+**This is the new SOTA — merged 2026-05-01 ~10:35 UTC. All future PRs must beat 7.546% val.**
 
-| Metric | PR #309 SOTA | AB-UPT | Gap |
+STRING-sep replaces fixed isotropic Gaussian RFF with learnable per-axis frequency/phase (`log_freq` + `phase` as `nn.Parameter`). The axis-separable factorization learns independent spectral emphasis per spatial axis, matching the anisotropic structure of automotive aerodynamics.
+
+| Metric | PR #311 SOTA (val/test) | AB-UPT | Test Gap |
 |---|---:|---:|---:|
-| `abupt` mean | **9.0389 (val) / 10.126 (test)** | — | — |
-| `surface_pressure` | **5.395** | 3.82 | ×1.41 |
-| `wall_shear` | **9.883** | 7.29 | ×1.36 |
-| `volume_pressure` | **12.484** | 6.08 | **×2.05** |
-| `tau_y` | **11.941** | 3.65 | **×3.27** |
-| `tau_z` | **12.407** | 3.63 | **×3.42** |
+| `abupt` mean | **7.546% / 8.771%** | — | — |
+| `surface_pressure` | 4.867% / **4.485%** | 3.82 | ×1.17 |
+| `wall_shear` | 8.527% / **8.227%** | 7.29 | ×1.13 |
+| `volume_pressure` | 4.525% / **12.438%** | 6.08 | **×2.05 ← biggest gap** |
+| `tau_x` | — / **7.253%** | 5.35 | ×1.36 |
+| `tau_y` | — / **9.233%** | 3.65 | **×2.53** |
+| `tau_z` | — / **10.449%** | 3.63 | **×2.88** |
 
-Merge bar = val_abupt < 9.0389%.
+**Key finding from 3-arm ablation:** RFF-32 (Arm A) val=9.710% is *worse* than no-encoding SOTA (9.039%). Fixed isotropic Gaussian is the wrong spectral prior for anisotropic automotive aerodynamics. The STRING-sep win comes from learning the per-axis spectral structure.
 
-## BREAKING — THREE SOTA-CROSSING SIGNALS (~09:05 UTC)
+**Convergence diagnostics:** All val slopes still negative at PR #311 termination — model underfit, more epochs will help.
 
-### edward #311 STRING-separable — **val=7.5458% (-1.49pp vs SOTA)** — DECISIVE WIN, still improving
+Merge bar = val_abupt < 7.546%.
 
-W&B run `gcwx9yaa`. Monotone-decreasing, still running (runtime ~4.5h).
+---
 
-| Epoch | val_abupt | vs SOTA |
-|---:|---:|---:|
-| 5 | 9.235% | +0.20pp |
-| 6 | 8.478% | -0.56pp (crossed) |
-| 7 | 8.159% | -0.88pp |
-| 8 | 7.909% | -1.13pp |
-| 9 | 7.742% | -1.30pp |
-| latest summary | **7.546%** | **-1.49pp** |
+## Currently in-flight
 
-**First new-architecture (vs HP-tuning) win in many rounds.** Fast-track: let it finish, run test-set eval from best-val checkpoint, mark ready for review for immediate merge.
+### Tay branch (8 active WIP PRs)
 
-### nezuko #283 model-layers=5 — **val=8.9938% ep12 (-0.045pp vs SOTA)** — CROSSED
+| PR | Student | Hypothesis | Status | Latest val |
+|---|---|---|---|---:|
+| #357 | edward | STRING-sep extended epochs (≥16 epochs) | NEW — assigned | — |
+| #358 | thorfinn | STRING-sep + QK-norm stack | NEW — assigned | — |
+| #359 | frieren | STRING-sep + separate volume decoder head | NEW — assigned | — |
+| #287 | alphonse | QK-norm on OLD SOTA stack | In-flight (Arm B running) | TBD |
+| #283 | nezuko | model-layers=5 (extended run) | ep12=8.9938%, ep13=9.66% | 8.9938% (best) |
+| #323 | tanjiro | 2-layer MLP vol decoder head (v3 re-launch) | ep6~10.96%, converging | 10.96% |
+| #351 | fern | Surface-tangent-frame projection loss for tau_y/tau_z | ep2=47.74%, early | 47.74% |
+| #353 | askeladd | Channel-selective Huber loss on tau (delta=0.5) | Early — no val yet | — |
 
-W&B run `z6xc97gg`. Lion ep10 spike → ep11/12 recovery played out cleanly.
+### Notes on each
 
-| Epoch | val_abupt | vs SOTA |
-|---:|---:|---:|
-| 9 | 9.254% | +0.21pp |
-| 10 | 10.896% | (Lion spike) |
-| 11 | 9.523% | +0.48pp |
-| 12 | **8.9938%** | **-0.045pp (crossed)** |
+**PR #287 alphonse QK-norm (old base):** Testing QK-norm on the old SOTA stack (PR #309 baseline, not STRING-sep). The new SOTA is now 7.546%, so alphonse's result must beat this. If QK-norm is strong, it will still beat 7.546% (since the old SOTA is only 9.039%, a QK-norm improvement would need to be very large). Thorfinn PR #358 tests QK-norm stacked with STRING-sep — whichever approach works better will be the next merge.
 
-Still training (~6 epochs left of budget). Plan: let run to completion, test-set eval from best-val checkpoint, then merge.
+**PR #283 nezuko model-layers=5:** ep12 best=8.9938% doesn't beat the new STRING-sep SOTA (7.546%). However, the depth=5 signal is still scientifically valuable for determining if depth and STRING-sep compound. Nezuko has been told to get test metrics from ep12 best checkpoint and mark ready for review. If depth=5 works, we assign depth=5 + STRING-sep as the next experiment.
 
-### alphonse #287 QK-norm — LABELING CORRECTION (do not merge yet)
+**PR #323 tanjiro vol-decoder:** Testing separate volume head on the OLD SOTA base. If it works, will be superseded by frieren PR #359 (same idea but on STRING-sep base). Still tracking the convergence — ep6=10.96% (normal trajectory at ep6).
 
-Earlier celebration of `nesrmoi9` was incorrect — that is **Arm A control (no `--qk-norm`)**, not the treatment. Control itself reached ep10=8.9532% (-0.086pp), informative for seed/init variance characterization but NOT a QK-norm signal.
+**PR #351 fern surface-tangent:** Projecting tau onto surface tangent plane to remove unphysical normal-direction loss signal. Targets tau_y/tau_z gaps. Still very early (ep2).
 
-- Arm B treatment `pz7zp49v` launched 08:43Z, currently <ep1.
-- Merge criterion: Arm B must beat Arm A's best-val by ≥0.4pp to credibly attribute to QK-norm. Within ±0.2pp = null result.
+**PR #353 askeladd Huber tau:** Channel-selective Huber loss (delta=0.5) on tau channels (surface_preds[:, 1:4]) targeting heavy-tailed wall-shear error distribution. No val epochs yet.
 
-## In-flight — Round 16-18 fleet (8 active WIP PRs; 2 SOTA-crossing, 1 wrap-up, 1 idle, 08:35 UTC)
+---
 
-**Active DrivAerML students (ddp8 pods):** alphonse, askeladd, edward, frieren, fern, nezuko, tanjiro, thorfinn.
+## GRAPE-M Arm C
 
-| PR | Student | Hypothesis | W&B | Latest val | vs SOTA | Status |
-|---|---|---|---|---:|---:|---|
-| #311 | edward | STRING-separable / GRAPE-M / RFF (3-arm) | `gcwx9yaa` ArmB | **7.546% latest** | **-1.49pp** | **WINNER — fast-track merge after test eval** |
-| #287 | alphonse | QK-norm (per-head L2) | Arm A `nesrmoi9` (CONTROL, ep10=8.953%); Arm B `pz7zp49v` <ep1 | TBD | TBD | Awaiting Arm B treatment results |
-| #345 | thorfinn | grad-clip-norm=2.0 retest | `7see7ryk` | 13.42% (epoch unconfirmed) | — | Pinged for status — possible divergence |
-| #283 | nezuko | model-layers=5 | `z6xc97gg` | **8.9938% ep12** | **-0.045pp** | **CROSSED — let finish, test eval, merge** |
-| ~~#280~~ | ~~frieren~~ | ~~MLP activation (SwiGLU/ReLU²/GELU)~~ | `k76fngw1` ArmC | 9.153% | +0.114pp | **CLOSED — informative-negative** |
-| **#352** | **frieren** | **Per-channel output-head scaling** — but active W&B run `9yme70s3` is `arm-D-swiglu-uniform` (PR #280 family). PRpr/branch mismatch flagged to student. | `9yme70s3` (mismatched?) | 58.24% (ep1) | — | **NEEDS CLARIFICATION** |
-| ~~#299~~ | ~~askeladd~~ | ~~Muon optimizer (canonical lr=0.02)~~ | `t3o9jib0` | 13.13% ep11 | +4.09pp | **CLOSED — confirmed negative** |
-| **#353** | **askeladd** | **Channel-selective Huber loss on tau (delta=0.5)** | — | — | — | **NEW — assigned (H04 Tier-1)** |
-| #323 | tanjiro | 2-layer MLP volume decoder head | restarted | (in restart) | — | Restarting after divergence |
-| #351 | fern | surface-tangent-frame projection loss for tau_y/tau_z | — | — | — | WIP |
+Edward's PR #311 Arm C (GRAPE-M — minimal learned spectral projection, B as nn.Parameter) was still running at PR merge time. All 8 DDP ranks in state=running, group `tay-round18-grape-ablation`. Will evaluate when it finishes. If GRAPE-M also beats the STRING-sep baseline (unlikely but possible given val slopes show room to grow), we'll stack GRAPE-M on top.
+
+---
 
 ## Active Human Research Directives
 
 **Issue #252 (Modded-NanoGPT):**
-1. Muon optimizer — in-flight askeladd #299 (canonical lr=0.02)
-2. Post-attention RMSNorm — NEGATIVE (tanjiro #300 closed)
-3. **QK-norm — WINNING in-flight** alphonse #287 (-0.086pp)
-4. ~~U-net skip connections~~ — NEGATIVE (fern #320 closed at +0.555pp)
-5. Sequence packing / FlexAttention — throughput lever (deferred)
+- Muon: CLOSED NEGATIVE (askeladd #299, +4.09pp)
+- Post-attention RMSNorm: CLOSED NEGATIVE (tanjiro #300 diverged)
+- **QK-norm: IN-FLIGHT** alphonse #287 (old base) + thorfinn #358 (STRING-sep base)
+- U-net skips: CLOSED NEGATIVE (fern #320, +0.555pp)
+- Surface-tangent loss: IN-FLIGHT (fern #351)
 
-**Issue #285 (GRAPE/Representational Position Encoding):** 3-arm sweep — **WINNING** edward #311 STRING-separable (-1.30pp, decisive).
+**Issue #285 (GRAPE/Representational Position Encoding):** RESOLVED — STRING-sep (PR #311) merged as new SOTA. GRAPE-M (Arm C) still running for completeness.
 
-## Current Research Focus
+---
 
-**Top priority — close out SOTA winners (best-first merge order):**
-1. edward #311 STRING-separable (val≈7.55%, -1.49pp): wait for run to finish, run test-set eval from best-val checkpoint, merge first.
-2. nezuko #283 model-layers=5 (val=8.9938%, -0.045pp): wait for run to finish, test eval, merge after #311 (deltas orthogonal: PE vs depth).
-3. alphonse #287 QK-norm: await Arm B treatment `pz7zp49v` results before any merge decision (Arm A was control).
+## Key Learnings (cumulative, final state)
 
-**Compound experiment planning:**
-- If both #311 and #287 merge, compound experiment = STRING-separable + QK-norm + grad-clip=0.5 SOTA stack. Assign to next free student. The deltas are architecturally orthogonal (position encoding vs attention normalization vs gradient stabilization).
-
-**Architecture watch:**
-- nezuko #283 layers=5: 9.523% at ~ep11, monotone but unlikely to cross — wait for finish.
-- frieren #280: CLOSED informative-negative (SwiGLU 9.153% > GELU 9.196%, +0.114pp above SOTA; ReLU² OOM on 4L/512d/65k+65k DDP8). frieren reassigned to #352 (per-channel output-head scaling).
-- thorfinn #345: RFF retest on Lion+EMA+heads=4 stack starting fresh.
-
-**Optimizer:**
-- askeladd #299 Muon canonical lr=0.02: **CLOSED** — 13.13% at ep11 (+4.09pp), confirmed negative. Backup option for later: Muon-with-warmup retry.
-
-**Loss reformulation:**
-- askeladd #353 Huber-on-tau (delta=0.5): channel-selective Huber loss for tau_x/tau_y/tau_z (surface_preds[:, 1:4]); MSE retained on surface_pressure (channel 0) and all volume channels. Targets the heavy-tailed wall-shear distribution driving tau_y x3.27 and tau_z x3.42 gaps. Near-orthogonal to architecture deltas in-flight.
-
-**Decoder head:**
-- tanjiro #323 MLP volume decoder restart targeting volume_pressure ×2.05 gap.
-
-## Key Learnings (cumulative)
-
-| Lever | Status | Outcome |
+| Lever | Status | Best result |
 |---|---|---|
 | LR | CLOSED | 1e-4 SOTA |
 | EMA decay | CLOSED | 0.999 SOTA |
 | Lion beta2 / beta1 | CLOSED | 0.99 / 0.9 SOTA |
 | Weight decay | CLOSED | 5e-4 SOTA |
-| Vol/surf loss weights | CLOSED | 1.0 / 1.0 SOTA |
-| Vol/surf points | CLOSED | 65536 / 65536 SOTA |
+| Vol/surf loss weights | CLOSED | 1.0/1.0 SOTA |
+| Vol/surf points | CLOSED | 65536/65536 SOTA |
 | mlp_ratio | CLOSED NEGATIVE | 4 SOTA |
 | Dropout | CLOSED | 0.0 SOTA |
 | Tau axis weights | CLOSED | 1.0 SOTA |
-| model_layers | In-flight | 4 SOTA; 5L (#283) trending +0.48pp |
-| model_heads | CLOSED — SOTA | 4H beats 8H (#232 merged) |
-| model_slices / hidden_dim | CLOSED NEGATIVE | 128 / 512 SOTA |
-| lr_cosine T_max / lr_warmup | CLOSED | T_max=50 / warmup=0 SOTA |
-| **grad-clip-norm** | **CLOSED — NEW SOTA** | **0.5 beats no-clip (#309 merged, 9.0389%)** |
-| **STRING-separable PE (GRAPE-M)** | **WINNING in-flight** | **edward #311 ArmB val=7.742% ep9 (-1.30pp)** |
-| **QK-norm (per-head L2)** | **WINNING in-flight** | **alphonse #287 val=8.953% ep10 (-0.086pp)** |
-| U-net skips | CLOSED NEGATIVE | fern #320 final 9.594% (+0.555pp) |
-| MLP activation (SwiGLU/ReLU²) | CLOSED NEGATIVE | frieren #280: SwiGLU 9.153 > GELU 9.196 (0.043pp, below noise), ReLU² OOM at 4L/512d/65k+65k DDP8 |
-| Per-channel output-head scaling | In-flight | frieren #352: s∈R^4 init=1 on surface_out + s∈R^1 on volume_out; targets tau_y/z magnitude calibration |
-| Sandwich-norm (RMSNorm) | CLOSED NEGATIVE | tanjiro #300 diverged |
-| Muon (canonical) | CLOSED NEGATIVE | askeladd #299 13.13% ep11 (+4.09pp) — confirmed negative |
-| Channel-selective Huber on tau | In-flight | askeladd #353 (delta=0.5 on surface_preds[:, 1:4]) |
-| MLP volume decoder | Restarting | tanjiro #323 |
-| RFF on Lion stack | New | thorfinn #345 retest |
-| batch_size / compile_model | CLOSED | 4 / False SOTA |
+| model_heads | CLOSED SOTA | 4H beats 8H (#232 merged) |
+| model_layers | In-flight | 4 SOTA; 5L val 8.9938% (doesn't beat STRING SOTA) |
+| model_slices / hidden_dim | CLOSED NEGATIVE | 128/512 SOTA |
+| lr_cosine T_max / warmup | CLOSED | T_max=50, warmup=0 SOTA |
+| grad-clip-norm | MERGED | 0.5 SOTA (#309) |
+| **STRING-separable PE** | **MERGED NEW SOTA** | **val 7.546% / test 8.771% (#311)** |
+| RFF (isotropic Gaussian) | CLOSED NEGATIVE | WORSE than no-encoding |
+| QK-norm | In-flight | alphonse #287 (old base), thorfinn #358 (new base) |
+| U-net skips | CLOSED NEGATIVE | +0.555pp vs SOTA |
+| MLP activation (SwiGLU/ReLU²) | CLOSED NEGATIVE | Near-zero improvement; ReLU² OOM |
+| Per-channel output-head scaling | CLOSED MISMATCH | frieren #352 closed (PR/run mismatch) |
+| Sandwich-norm (RMSNorm) | CLOSED NEGATIVE | diverged |
+| Muon (canonical) | CLOSED NEGATIVE | +4.09pp |
+| Channel-selective Huber on tau | In-flight | askeladd #353 |
+| MLP volume decoder | In-flight | tanjiro #323 (old base), frieren #359 (STRING-sep base) |
+| Extended training | In-flight | edward #357 |
 
-## Largest Remaining Gaps to AB-UPT
+---
 
-1. **volume_pressure** ×2.05 (12.484% vs 6.08%) — tanjiro MLP decoder restart; nezuko layers=5 also hits this axis.
-2. **tau_y** ×3.27, **tau_z** ×3.42 — three parallel approaches in-flight: fern #351 (tangent-frame projection loss), frieren #352 (per-channel output-head scaling), and askeladd #353 (channel-selective Huber loss on tau).
+## Largest Remaining Gaps to AB-UPT (from PR #311 test metrics)
 
-## Next Priorities (when students free up)
+1. **volume_pressure** ×2.05 (12.438% vs 6.08%) — frieren #359 + tanjiro #323 targeting this
+2. **tau_y** ×2.53, **tau_z** ×2.88 — fern #351 (tangent-frame loss), askeladd #353 (Huber tau)
+3. **wall_shear** ×1.13 (8.227% vs 7.29%) — fern #351 also targets this via tangent projection
+4. **surface_pressure** ×1.17 (4.485% vs 3.82%) — closest to reference, may need dedicated sweep
 
-1. **Compound stack:** STRING-separable (#311) + QK-norm (#287) + grad-clip=0.5 SOTA. Assign as soon as both winners merge.
-2. **Surface-tangent-frame projection** for tau_y/tau_z — fern #351 in-flight.
-   **Per-channel output-head scaling** — frieren #352 in-flight (complementary tau_y/z lever).
-3. **Sequence packing / FlexAttention** — throughput lever to enable more epochs within budget.
-4. **Muon-with-warmup** — if vanilla Muon stalls, retry with `lr_warmup_epochs=1`.
-5. **Volume-decoder iteration** — if tanjiro restart works, sweep MLP depth/init/bottleneck.
-6. **STRING-separable hyperparam sweep** post-merge — feature count, frequency band, learnable-vs-fixed.
+---
+
+## Next Priorities (as students complete)
+
+1. **Monitor alphonse #287 QK-norm Arm B** — if it beats STRING-sep SOTA, merge and compound
+2. **Monitor PR #357 edward extended epochs** — may push STRING-sep val below 7.0%
+3. **Review nezuko #283 when done** — get test metrics from ep12 best checkpoint; assess depth=5 + STRING-sep compound
+4. **Await tanjiro #323 completion** — if vol-decoder works on old base, supersede with frieren #359
+5. **Compound round** (next free students): depth=5 + STRING-sep; or STRING-sep + QK-norm + depth (three-way stack if all work independently)
+6. **STRING-sep hyperparameter sweep**: feature count (16/32/64), init scale, per-axis vs isotropic hybrid

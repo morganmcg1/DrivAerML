@@ -3,6 +3,91 @@
 W&B project: `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`.
 
 Targets to beat (lower is better, AB-UPT public reference):
+
+---
+
+## 2026-05-01 10:40 UTC — PR #359 ASSIGNED: frieren STRING-sep + separate volume decoder head
+
+- **Branch:** `frieren/string-sep-volume-decoder`
+- **Hypothesis:** Volume pressure (test 12.438%) is the largest remaining gap to AB-UPT (6.08%). A shared decoder forces the model to learn conflicting surface/volume representations. A separate 1-layer MLP volume head (hidden_dim//2=256 → num_volume_channels) on top of the STRING-sep SOTA should specialize the volume pathway and reduce this 2.05× gap.
+- **Baseline:** SOTA PR #311 val=7.546%, test=8.771%; test_volume_pressure=12.438%
+- **Status:** ASSIGNED
+
+---
+
+## 2026-05-01 10:40 UTC — PR #358 ASSIGNED: thorfinn STRING-sep + QK-norm stack
+
+- **Branch:** `thorfinn/string-sep-qknorm-stack`
+- **Hypothesis:** STRING-sep (PR #311, −1.493pp val) and QK-norm (alphonse PR #287, ~−0.086pp on old SOTA) target different mechanisms — positional encoding quality vs. attention logit stability. Stacking both changes on the new SOTA baseline should compound their individual improvements.
+- **Expected outcome:** val_abupt < 7.546%, possibly approaching 7.0%
+- **Implementation:** STRING-sep (learnable per-axis log_freq+phase) + RMSNorm on Q and K projections in each attention block
+- **Baseline:** SOTA PR #311 val=7.546%, test=8.771%
+- **Status:** ASSIGNED
+
+---
+
+## 2026-05-01 10:40 UTC — PR #357 ASSIGNED: edward STRING-sep extended epochs
+
+- **Branch:** `edward/string-sep-extended-epochs`
+- **Hypothesis:** PR #311 val slopes were all negative at termination (val_primary_abupt/per_1k_steps = −0.0425). The STRING-sep model was still converging when the budget expired. Extended training (target ≥16 epochs, SENPAI_MAX_EPOCHS=20) should push val_abupt toward or below 7.0% with zero code changes.
+- **Baseline:** SOTA PR #311 val=7.546%, test=8.771%
+- **Status:** ASSIGNED
+
+---
+
+## 2026-05-01 10:35 UTC — PR #352 CLOSED: frieren per-channel output-head scaling — PR/RUN MISMATCH
+
+- **Branch:** `frieren/output-head-scaling` (closed, branch deleted)
+- **Reason:** The PR body described per-channel output-head scaling (H09) but the live W&B run was `arm-D-swiglu-uniform` with `mlp_activation_uniform=True` AND `model_heads=8` (not the SOTA config of heads=4). Two violations simultaneously — wrong hypothesis and wrong config.
+
+---
+
+## 2026-05-01 10:30 UTC — PR #345 CLOSED: thorfinn RFF retest — DIVERGING
+
+- **Branch:** `thorfinn/rff-retest-sota` (closed, branch deleted)
+- **W&B run:** `7see7ryk` (grad_clip_norm=2.0)
+- **Val slope:** +0.635/1k steps (positive = diverging)
+- **Reason:** (1) Run was diverging, (2) also didn't match the PR hypothesis (was testing gradclip=2.0 not RFF retest), (3) the RFF question was already answered decisively by PR #311 3-arm ablation: RFF-32 val=9.710% is worse than no-encoding SOTA (9.039%). RFF is a dead end.
+
+---
+
+## 2026-05-01 10:15 UTC — PR #311 MERGED: edward STRING-separable positional encoding — NEW SOTA
+
+- **Branch:** `edward/grape-positional-encoding`
+- **Hypothesis:** Learnable per-axis frequency/phase parameters (STRING-separable encoding) replace fixed isotropic Gaussian RFF. The key insight: automotive aerodynamics is anisotropic — different spatial axes have different physical length scales. A fixed isotropic spectral prior (RFF) is the wrong inductive bias. Axis-separable learnable encoding lets the model discover the right spectral decomposition per axis.
+- **W&B runs:** Arm A=`zf2dp7tv` (RFF-32), Arm B=`gcwx9yaa` (STRING-sep), Arm C=GRAPE-M (still running at review time)
+- **Group:** `tay-round18-grape-ablation`
+
+**3-arm ablation results:**
+
+| Arm | Encoding | val_abupt | test_abupt | vs SOTA |
+|-----|----------|-----------|------------|---------|
+| A (RFF-32) | Fixed isotropic Gaussian | 9.710% | 10.721% | +0.595pp worse |
+| **B (STRING-sep)** | **Learnable per-axis freq/phase** | **7.546%** | **8.771%** | **−1.355pp better** |
+| C (GRAPE-M) | Minimal learned spectral proj | running | — | — |
+| SOTA #309 | No encoding (RFF-0) | 9.039% | 10.126% | baseline |
+
+**Per-axis test breakdown (Arm B STRING-sep):**
+
+| Metric | test |
+|--------|------|
+| abupt (primary) | 8.771% |
+| surface_pressure | 4.485% |
+| volume_pressure | 12.438% |
+| wall_shear | 8.227% |
+| tau_x | 7.253% |
+| tau_y | 9.233% |
+| tau_z | 10.449% |
+
+**Convergence diagnostics:**
+- All val slopes negative at termination (abupt −0.0425/1k, wall_shear_y −0.0702/1k) — model was still converging
+- All `nonfinite_count: 0` throughout — no gradient instability
+
+**Key finding:** RFF-32 is *worse* than no-encoding SOTA (9.710% vs 9.039%). This confirms that fixed isotropic Gaussian spectral prior is the wrong inductive bias for automotive CFD. The gains from STRING-sep come from learning the anisotropic spectral structure directly, not just from having more parameters in the encoding.
+
+**Impact:** val 7.546% vs previous SOTA 9.039% = **−1.493pp (−16.5% relative)** — largest single gain since tanjiro arm B round (~early round 3 in this programme). STRING-sep is now the base for all future tay experiments.
+
+---
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
