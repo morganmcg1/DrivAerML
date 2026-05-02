@@ -563,6 +563,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_huber_delta: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1265,23 +1266,59 @@ def weighted_masked_mse_per_channel(
     mask: torch.Tensor,
     *,
     channel_weights: Iterable[float],
+    wallshear_huber_delta: float = 0.0,
 ) -> tuple[torch.Tensor, list[float]]:
-    """Per-channel weighted masked MSE for surface predictions.
+    """Per-channel weighted masked loss for surface predictions.
 
     pred, target: [B, N, C]. mask: [B, N] bool.
-    Returns the weighted scalar loss plus an unweighted per-channel mean for
-    diagnostic logging. With all weights == 1 this is numerically equivalent
-    to F.mse_loss(pred[mask], target[mask]).
+    With ``wallshear_huber_delta == 0.0`` (default), this is per-channel weighted
+    masked MSE — numerically equivalent to F.mse_loss(pred[mask], target[mask])
+    when all weights == 1.
+
+    With ``wallshear_huber_delta > 0.0``, channels 1..3 (tau_x, tau_y, tau_z)
+    use a Huber on the standardized residual ``r = pred - target`` (targets are
+    already standardized by ``TargetTransform`` upstream, so r is in σ-units),
+    rescaled so that ``delta -> infty`` recovers MSE:
+        loss_elem = r^2                          if |r| <  delta
+                  = 2 * delta * (|r| - delta/2)  if |r| >= delta
+    Channel 0 (cp / surface_pressure) keeps the standard MSE loss.
+
+    Note: PR #317's spec used a *relative* Huber ``(pred-target)/(|target|+eps)``,
+    but standardized targets cross zero frequently, so dividing by ``|target|``
+    blows up the gradient (pre-clip grad-norms 50–300× the MSE control) and
+    poisons the rest of the network through the shared backbone. Plain Huber on
+    standardized residuals preserves the spirit (bounded gradient for
+    outlier-magnitude residuals) without the divide-by-zero issue, and the 2x
+    rescaling keeps the L2 regime matched to the MSE control for clean
+    interpretation of delta. Per-axis diagnostic loss keys remain MSE-based for
+    cross-run comparability.
     """
     weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
     if not bool(mask.any()):
         per_axis = [0.0] * int(weights.numel())
         return pred.sum() * 0.0, per_axis
-    diff_sq = (pred - target).pow(2)  # [B, N, C]
+    diff = pred - target  # [B, N, C]
+    diff_sq = diff.pow(2)
     mask_f = mask.unsqueeze(-1).to(pred.dtype)
     valid = mask_f.sum().clamp_min(1)
     n_channels = diff_sq.shape[-1]
-    weighted_diff = diff_sq * weights.view(1, 1, -1)
+
+    if wallshear_huber_delta > 0.0 and n_channels >= 4:
+        abs_err = diff.abs()
+        delta_t = pred.new_full((), float(wallshear_huber_delta))
+        huber_elem = torch.where(
+            abs_err < delta_t,
+            diff_sq,
+            2.0 * delta_t * (abs_err - 0.5 * delta_t),
+        )
+        # cp keeps MSE; tau channels use plain Huber on standardized residual.
+        loss_elem = torch.cat([diff_sq[..., :1], huber_elem[..., 1:4]], dim=-1)
+        if n_channels > 4:
+            loss_elem = torch.cat([loss_elem, diff_sq[..., 4:]], dim=-1)
+    else:
+        loss_elem = diff_sq
+
+    weighted_diff = loss_elem * weights.view(1, 1, -1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
@@ -1313,6 +1350,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    wallshear_huber_delta: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1357,6 +1395,7 @@ def train_loss(
             surface_target_used,
             batch.surface_mask,
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+            wallshear_huber_delta=wallshear_huber_delta,
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -1810,6 +1849,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                wallshear_huber_delta=config.wallshear_huber_delta,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
