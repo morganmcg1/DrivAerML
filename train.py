@@ -119,6 +119,8 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    vol_signed_log: bool = False
+    vol_signed_log_c: float = 1.0
     debug: bool = False
 
 
@@ -145,6 +147,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+class VolumeSignedLogTransform(TargetTransform):
+    """TargetTransform variant that replaces volume mean/std with signed-log compression.
+
+    Forward: y' = sign(y) * log1p(|y| / c)
+    Inverse: y = sign(y') * c * (exp(|y'|) - 1)
+    Surface targets are unchanged from the base TargetTransform.
+    """
+
+    def __init__(self, *args, signed_log_c: float = 1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.vol_signed_log_c = float(signed_log_c)
+
+    def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
+        c = self.vol_signed_log_c
+        return torch.sign(y) * torch.log1p(torch.abs(y) / c)
+
+    def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
+        c = self.vol_signed_log_c
+        return torch.sign(y) * c * torch.expm1(torch.abs(y))
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -237,12 +260,26 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
-        transform = TargetTransform(
-            surface_y_mean=stats["surface_y_mean"].to(device),
-            surface_y_std=stats["surface_y_std"].to(device),
-            volume_y_mean=stats["volume_y_mean"].to(device),
-            volume_y_std=stats["volume_y_std"].to(device),
-        )
+        if config.vol_signed_log:
+            transform = VolumeSignedLogTransform(
+                surface_y_mean=stats["surface_y_mean"].to(device),
+                surface_y_std=stats["surface_y_std"].to(device),
+                volume_y_mean=stats["volume_y_mean"].to(device),
+                volume_y_std=stats["volume_y_std"].to(device),
+                signed_log_c=config.vol_signed_log_c,
+            )
+            if state.is_main:
+                print(
+                    f"Volume target: signed-log transform with c={config.vol_signed_log_c} "
+                    f"(replaces volume mean/std normalization)."
+                )
+        else:
+            transform = TargetTransform(
+                surface_y_mean=stats["surface_y_mean"].to(device),
+                surface_y_std=stats["surface_y_std"].to(device),
+                volume_y_mean=stats["volume_y_mean"].to(device),
+                volume_y_std=stats["volume_y_std"].to(device),
+            )
 
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())
