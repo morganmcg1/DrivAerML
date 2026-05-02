@@ -8,6 +8,92 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-02 08:35 UTC — PR #351 ASSIGNED: fern surface-tangent-frame projection loss (tau_y/tau_z gap)
+
+- **Branch:** `fern/surface-tangent-frame-tau`
+- **Hypothesis:** Wall-shear stress must lie in the surface tangent plane; projecting both predicted and target tau onto the tangent plane (using normals from `batch.surface_x[..., 3:6]`) removes unphysical normal-direction loss signal and focuses gradient updates on tau_y/tau_z, our largest gaps (×3.27, ×3.42 to AB-UPT). Port of yi PR #11 (kohaku) onto tay SOTA stack.
+- **Implementation:** Add `--use-tangential-wallshear-loss` flag; `project_tangential(vec, normals) = vec - (vec·n)n`; apply to `surface_preds[..., 1:4]` and `surface_target[..., 1:4]` in normalized space before MSE.
+- **Baseline:** SOTA PR #309 val=9.0389%, test=10.126%
+- **Status:** ASSIGNED — awaiting fern pod pickup.
+
+---
+
+## 2026-05-02 08:30 UTC — PR #320 CLOSED: fern U-net skip connections — NEGATIVE (+0.555pp vs SOTA)
+
+- **Branch:** `fern/unet-skip-connections` (closed, branch deleted)
+- **Hypothesis:** Symmetric skip connections between Transformer blocks (U-net-style) improve multi-scale feature preservation for CFD point clouds.
+- **W&B run:** `1d2c2a6q` (Arm B), finished
+
+| Epoch | step | val_abupt | vs SOTA (9.0389%) |
+|---:|---:|---:|---:|
+| 2 | 5441 | 43.733% | — |
+| 4 | 10883 | 19.760% | — |
+| 6 | 16325 | 12.377% | +3.34pp |
+| 8 | 21767 | 10.604% | +1.57pp |
+| 10 | 27209 | 9.729% | +0.69pp |
+| final | 28412 | **9.594%** | **+0.555pp** |
+
+- **Conclusion:** NEGATIVE. U-net skips failed to improve on the 4L/512d/heads=4 SOTA stack. Likely reasons: (1) 4 layers is too shallow for meaningful multi-scale hierarchy; (2) Lion+EMA already provides strong gradient flow, leaving little headroom; (3) point-cloud token sequences lack the strict multi-resolution hierarchy that benefits image UNets. PR closed.
+
+---
+
+## 2026-05-02 08:30 UTC — PR #280 WRAP-UP DIRECTED: frieren MLP activation ablation (SwiGLU/ReLU²/GELU)
+
+- **Branch:** `frieren/mlp-activation-ablation`
+- **Hypothesis:** SwiGLU or ReLU² activations outperform GELU in the Transolver MLP blocks (FFN up-act-down pattern).
+
+| Arm | Activation | W&B run | best_val_abupt | vs GELU | vs SOTA |
+|---|---|---|---:|---:|---:|
+| A | GELU (control) | ds8n7253 | 9.196% | — | +0.157pp |
+| B | ReLU² | — (OOM) | — | — | — |
+| C | SwiGLU FFN-only | k76fngw1 | **9.153%** | **-0.043pp** | +0.114pp |
+
+- **Key findings:**
+  1. SwiGLU marginally beats GELU by 0.043pp — real but below single-seed noise floor; not enough to beat SOTA.
+  2. ReLU² is memory-infeasible at 4L/512d/65536+65536 DDP8 config — OOM at step 1 all 8 ranks (93GB in use, 4GB allocation failed). Rules out ReLU² on this config size permanently.
+  3. Arm A control ran at 9.196% vs SOTA 9.039% — 0.157pp gap due to config drift (old tay base with `lr_warmup_epochs=1` and `model_heads=8` before PR #232 merged heads=4).
+  4. Arm D (uniform SwiGLU across all MLP biases) skipped — marginal benefit of Arm C does not justify continuation.
+- **Wrap-up directed:** frieren instructed to skip Arm D, post final results table, mark ready for review. Will be closed as informative-negative.
+- **Status:** Awaiting frieren post + mark-ready.
+
+---
+
+## 2026-05-02 08:30 UTC — BREAKING: edward #311 STRING-separable val=7.742% ep9 — DECISIVE NEW SOTA CANDIDATE
+
+- **Branch:** `edward/grape-positional-encoding`
+- **Hypothesis:** STRING-separable factored positional encoding (3D tri-plane features) outperforms direct RFF on CFD shear-dominated metrics.
+- **W&B run:** `gcwx9yaa` (Arm B STRING-separable), running
+
+| Epoch | step | val_abupt | vs SOTA (9.0389%) |
+|---:|---:|---:|---:|
+| 5 | 13604 | 9.235% | +0.20pp |
+| 6 | 16325 | **8.478%** | **-0.56pp (crossed)** |
+| 7 | 19046 | 8.159% | -0.88pp |
+| 8 | 21767 | 7.909% | -1.13pp |
+| 9 | 24488 | **7.742%** | **-1.30pp** |
+
+- **Analysis:** Monotone-decreasing, still running. First new-architecture win (vs HP-tuning) in many rounds. STRING-separable factorizes the 3D coordinate space into three factored-plane feature sets, giving a compact but expressive position encoding that may better capture the geometric structure of CFD surface/volume point clouds. 1.30pp below SOTA. Fast-track merge instructions posted.
+- **Status:** RUNNING — await finish, test-set eval from best-val ckpt, then merge.
+
+---
+
+## 2026-05-02 08:30 UTC — alphonse #287 QK-norm val=8.953% ep10 — SOTA CROSSED
+
+- **Branch:** `alphonse/qk-norm-attention`
+- **Hypothesis:** Per-head L2 normalization of Q and K vectors stabilizes Transolver slot attention and reduces attention entropy collapse under Lion optimizer.
+- **W&B run:** `nesrmoi9` (Arm A QK-norm), running
+
+| Epoch | step | val_abupt | vs SOTA (9.0389%) |
+|---:|---:|---:|---:|
+| 8 | 21767 | 9.456% | +0.42pp |
+| 9 | 24488 | 9.195% | +0.16pp |
+| 10 | 27209 | **8.953%** | **-0.086pp (crossed)** |
+
+- **Analysis:** Modest but clean improvement, single architectural delta. Monotone-decreasing, likely still running. QK-norm is architecturally orthogonal to STRING-separable PE — if both merge, compound experiment is the obvious next step.
+- **Status:** RUNNING — await finish, test-set eval from best-val ckpt, then merge.
+
+---
+
 ## 2026-05-02 14:00 UTC — PR #300 CLOSED: tanjiro sandwich-norm RMSNorm — NEGATIVE (catastrophic)
 
 - **Branch:** `tanjiro/post-attn-rmsnorm` (closed, branch deleted)
