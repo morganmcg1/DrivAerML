@@ -63,6 +63,21 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+def apply_point_mask(mask: torch.Tensor, mask_ratio: float) -> torch.Tensor:
+    """Bernoulli-drop currently-valid positions for MAE-style point masking.
+
+    Each True position in `mask` is independently kept with probability
+    (1 - mask_ratio). Already-invalid (False) positions remain False.
+    Returns the input mask unchanged when mask_ratio <= 0.0.
+    """
+    if mask_ratio <= 0.0:
+        return mask
+    if mask_ratio >= 1.0:
+        raise ValueError(f"point_mask_ratio must be < 1.0, got {mask_ratio}")
+    keep = torch.rand(mask.shape, device=mask.device, dtype=torch.float32) >= mask_ratio
+    return mask & keep
+
+
 class DropPath(nn.Module):
     """Stochastic depth: drop entire residual branch with probability `drop_prob`."""
 
@@ -601,6 +616,7 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    point_mask_ratio: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1784,6 +1800,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     train_start = time.time()
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
+    point_mask_logged = False
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
@@ -1798,6 +1815,31 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if config.point_mask_ratio > 0.0:
+                surface_valid_before = int(batch.surface_mask.sum().item())
+                volume_valid_before = int(batch.volume_mask.sum().item())
+                batch.surface_mask = apply_point_mask(batch.surface_mask, config.point_mask_ratio)
+                batch.volume_mask = apply_point_mask(batch.volume_mask, config.point_mask_ratio)
+                if not point_mask_logged:
+                    surface_valid_after = int(batch.surface_mask.sum().item())
+                    volume_valid_after = int(batch.volume_mask.sum().item())
+                    surface_dropped = surface_valid_before - surface_valid_after
+                    volume_dropped = volume_valid_before - volume_valid_after
+                    surface_realized = (
+                        surface_dropped / max(surface_valid_before, 1)
+                    )
+                    volume_realized = (
+                        volume_dropped / max(volume_valid_before, 1)
+                    )
+                    print(
+                        f"[point_mask] ratio={config.point_mask_ratio:.3f} "
+                        f"surface dropped={surface_dropped}/{surface_valid_before} "
+                        f"({surface_realized:.4f}) "
+                        f"volume dropped={volume_dropped}/{volume_valid_before} "
+                        f"({volume_realized:.4f})",
+                        flush=True,
+                    )
+                    point_mask_logged = True
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
