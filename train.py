@@ -601,6 +601,10 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    lr_warmup_epochs: float = 0.0
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -746,6 +750,27 @@ def build_model(config: Config) -> SurfaceTransolver:
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
     )
+
+
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    optimizer_name = config.optimizer.lower()
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+    if optimizer_name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
 
 
 def _metric_path(name: str) -> str:
@@ -1709,10 +1734,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     n_params = sum(param.numel() for param in model.parameters())
     print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    optimizer = build_optimizer(model, config)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
+        steps_per_epoch = max(len(train_loader), 1)
+        config.lr_warmup_steps = int(config.lr_warmup_epochs * steps_per_epoch)
+        print(
+            f"lr_warmup_epochs={config.lr_warmup_epochs} -> lr_warmup_steps="
+            f"{config.lr_warmup_steps} (steps_per_epoch={steps_per_epoch})"
+        )
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
