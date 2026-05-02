@@ -1851,7 +1851,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
 
-    output_dir = Path(config.output_dir) / f"run-{run.id}"
+    if is_distributed:
+        run_id_holder = [run.id if is_main else None]
+        dist.broadcast_object_list(run_id_holder, src=0)
+        shared_run_id = run_id_holder[0]
+    else:
+        shared_run_id = run.id
+    output_dir = Path(config.output_dir) / f"run-{shared_run_id}"
     if is_main:
         output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / "checkpoint.pt"
