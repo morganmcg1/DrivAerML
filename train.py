@@ -563,6 +563,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    spectral_loss_weight: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1288,6 +1289,42 @@ def weighted_masked_mse_per_channel(
     return weighted_loss, per_axis_mean
 
 
+def spectral_relative_l2_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    min_valid_points: int = 16,
+) -> torch.Tensor:
+    """Relative-L2 in the 1-D rFFT magnitude domain along the point axis.
+
+    pred, target: [B, N, C] surface predictions in normalized space.
+    mask: [B, N] bool — True for non-padding points.
+
+    Per-sample loop avoids padding contaminating the spectrum (each sample has
+    a different N_valid). FFT runs in fp32 for numeric stability. norm="ortho"
+    keeps the spectral energy comparable to the spatial energy (Parseval).
+    """
+    pred_f = pred.float()
+    target_f = target.float()
+    losses: list[torch.Tensor] = []
+    for b in range(pred_f.shape[0]):
+        m = mask[b]
+        valid_count = int(m.sum().item())
+        if valid_count < min_valid_points:
+            continue
+        p = pred_f[b][m]
+        t = target_f[b][m]
+        p_freq = torch.fft.rfft(p, dim=0, norm="ortho")
+        t_freq = torch.fft.rfft(t, dim=0, norm="ortho")
+        diff_mag_sq = (p_freq.abs() - t_freq.abs()).pow(2).sum()
+        denom = t_freq.abs().pow(2).sum().clamp(min=1e-8)
+        losses.append(diff_mag_sq / denom)
+    if not losses:
+        return pred_f.new_zeros(())
+    return torch.stack(losses).mean()
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -1313,6 +1350,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    spectral_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1370,6 +1408,15 @@ def train_loss(
             aux_rel_l2 = num / den
             loss = loss + aux_rel_l2_weight * aux_rel_l2
             aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+        spectral_loss_value: float | None = None
+        if spectral_loss_weight > 0.0:
+            spec_loss = spectral_relative_l2_loss(
+                surface_pred_norm[..., 1:4],
+                surface_target[..., 1:4],
+                batch.surface_mask,
+            )
+            loss = loss + spectral_loss_weight * spec_loss
+            spectral_loss_value = float(spec_loss.detach().cpu().item())
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -1380,6 +1427,8 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if spectral_loss_value is not None:
+        metrics["spectral_loss"] = spectral_loss_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1810,6 +1859,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                spectral_loss_weight=config.spectral_loss_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1925,6 +1975,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
+                ]
+            if "spectral_loss" in batch_loss_metrics:
+                train_log["train/spectral_loss"] = batch_loss_metrics[
+                    "spectral_loss"
                 ]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
