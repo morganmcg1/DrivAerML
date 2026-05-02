@@ -73,23 +73,46 @@ class ContinuousSincosEmbed(nn.Module):
 
 
 class FourierEmbed(nn.Module):
-    """Fourier positional encoding with geometric frequency progression."""
+    """NeRF-style multi-scale sinusoidal positional encoding for 3D coordinates.
+
+    Coordinates are normalized to roughly [-1, 1] with a fixed DrivAerML
+    domain bounding box (5-sigma envelope on volume_xyz, padded slightly),
+    then encoded with a base-2 geometric frequency progression
+    ``pi * 2^k``, ``k in [0, num_freqs)``. Sin/cos features are concatenated
+    and projected to hidden_dim with a learned linear layer.
+    """
+
+    DOMAIN_BOUNDS = (
+        (-12.0, 14.0),
+        (-5.0, 5.0),
+        (-3.0, 3.0),
+    )
 
     def __init__(self, hidden_dim: int, input_dim: int = 3, num_freqs: int = 8):
         super().__init__()
+        if not 1 <= input_dim <= len(self.DOMAIN_BOUNDS):
+            raise ValueError(
+                f"input_dim must be in [1, {len(self.DOMAIN_BOUNDS)}]; got {input_dim}"
+            )
+        if num_freqs <= 0:
+            raise ValueError("num_freqs must be positive")
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim
         self.num_freqs = num_freqs
-        freqs = 2.0 ** torch.arange(num_freqs).float()
+        bounds = self.DOMAIN_BOUNDS[:input_dim]
+        center = torch.tensor([(lo + hi) / 2.0 for lo, hi in bounds], dtype=torch.float32)
+        half_range = torch.tensor([(hi - lo) / 2.0 for lo, hi in bounds], dtype=torch.float32)
+        self.register_buffer("center", center)
+        self.register_buffer("half_range", half_range)
+        freqs = math.pi * (2.0 ** torch.arange(num_freqs, dtype=torch.float32))
         self.register_buffer("freqs", freqs)
         raw_dim = input_dim * num_freqs * 2
-        self.proj = nn.Linear(raw_dim, hidden_dim) if raw_dim != hidden_dim else nn.Identity()
-        if isinstance(self.proj, nn.Linear):
-            _init_linear(self.proj)
+        self.proj = LinearProjection(raw_dim, hidden_dim)
 
     def forward(self, coords: torch.Tensor) -> torch.Tensor:
         coords = coords.float()
-        angles = coords.unsqueeze(-1) * self.freqs * math.pi
+        coords = (coords - self.center) / self.half_range
+        angles = coords.unsqueeze(-1) * self.freqs
         emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
         emb = emb.flatten(start_dim=-2)
         return self.proj(emb)
