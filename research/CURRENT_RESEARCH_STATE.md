@@ -1,5 +1,13 @@
 # SENPAI Research State
-- **2026-05-02 09:45 UTC** — Wave 8 fleet active; fern pivoted to critical regression bisect (PR #354). Frieren #337 closed for third consecutive non-compliance. **CRITICAL BLOCKER: structural +1pp codebase regression discovered by fern in PR #276** — every in-flight wave 5–8 experiment is running against a regressed baseline.
+- **2026-05-02 10:10 UTC** — Wave 8/9 fleet active. **CRITICAL FIX IN FLIGHT**: fern assigned PR #360 to apply FourierEmbed coordinate normalization fix (root cause of +1pp structural regression). Frieren assigned PR #361 weight-decay sweep {3e-4,1e-3,3e-3}. PR #354 (fern regression bisect) was merged empty — code fix was never applied; #360 is the real fix.
+
+## CRITICAL: FourierEmbed Normalization Bug (PR #360 in flight)
+
+**Root cause confirmed (2026-05-02, fern PR #354 analysis):** The alphonse baseline `m9775k1v` was trained with coordinate normalization in `FourierEmbed` (uncommitted local edits). chihiro PR #176 reimplemented FourierEmbed without normalization, introducing the +1pp regression. DrivAerML coordinates are NOT in [-1,1] (x≈[-10,14], y≈[-4.3,4.2], z≈[-2.5,2.7]); without normalization the highest-frequency sinusoid produces ~5,628 rad at x=14 — severe aliasing.
+
+**Required fix** (fern PR #360): Add `DOMAIN_BOUNDS = ((-12.0, 14.0), (-5.0, 5.0), (-3.0, 3.0))` to `FourierEmbed`, register `center`/`half_range` buffers, apply `(coords - self.center) / self.half_range` in `forward` before encoding.
+
+**Validation**: ep5 abupt should drop below 10.5% (currently ~13.3% on broken impl at ep5).
 
 ## Most Recent Human Researcher Direction
 
@@ -22,10 +30,10 @@
 
 **Implication**: Any "win" in Wave 5–8 may be the regression partially un-doing itself, not genuine improvement. fern has been assigned PR #354 to bisect the regression.
 
-### PR #354 — fern: regression bisect (ACTIVE)
-- Investigate commits between PR #74 merge and current HEAD
-- Categories: data normalization, loss formulation, model init, LR scheduler, DDP sync
-- Validation: ep5 abupt < 9.5% on baseline recipe (expected ~8.9% per alphonse trajectory)
+### PR #360 — fern: FourierEmbed coordinate normalization fix (ACTIVE)
+- Apply `DOMAIN_BOUNDS`-based center/half_range normalization to `FourierEmbed.forward()`
+- Root cause of +1pp regression identified by fern in PR #354 (merged empty — code never applied)
+- Validation: ep5 abupt < 10.5% (current broken codebase hits ~13.3% at ep5)
 - **Highest-leverage action on the entire bengio track right now**
 
 ## AB-UPT Targets (all must be beaten simultaneously on test)
@@ -53,18 +61,24 @@
 - Until PR #354 resolves, all experiment results carry ~1pp systematic uncertainty
 - Priority: fern must identify and patch the regression before Wave 9
 
+## Active Experiments — Wave 9 (assigned 2026-05-02 10:10Z)
+
+| PR | Student | Experiment | Status |
+|----|---------|-----------|-------|
+| #360 | fern | **FourierEmbed coord normalization fix — PRIORITY** | Assigned 10:10Z, active |
+| #361 | frieren | Weight-decay sweep {3e-4, 1e-3, 3e-3} | Assigned 10:10Z, active |
+
 ## Active Experiments — Wave 8 (assigned 2026-05-02 07:24–07:40Z)
 
 | PR | Student | Experiment | Status |
 |----|---------|-----------|-------|
-| #340 | thorfinn | model_slices sweep {128,192,256} | Just assigned, no activity yet |
-| #341 | haku | surface-loss-weight sweep {2.0,4.0,8.0} | Just assigned, no activity yet |
-| #342 | emma | 96k surface+volume points scale-up | Just assigned, no activity yet |
-| #343 | kohaku | Wall-shear-only rel-L2 aux loss sweep {0.1,0.5,1.0} | Just assigned, no activity yet |
-| #346 | gilbert | FiLM normal-conditioning at every transformer block | Just assigned, no activity yet |
-| #347 | nezuko | Dedicated 2-block wall-shear sub-decoder | Just assigned, no activity yet |
-| #348 | dazai | Weight-decay sweep {3e-4, 1e-3, 3e-3} | Just assigned, no activity yet |
-| #354 | fern | **Regression bisect — PRIORITY** | Assigned 09:32Z, active |
+| #340 | thorfinn | model_slices sweep {128,192,256} | In flight |
+| #341 | haku | surface-loss-weight sweep {2.0,4.0,8.0} | In flight |
+| #342 | emma | 96k surface+volume points scale-up | In flight |
+| #343 | kohaku | Wall-shear-only rel-L2 aux loss sweep {0.1,0.5,1.0} | In flight |
+| #346 | gilbert | FiLM normal-conditioning at every transformer block | In flight |
+| #347 | nezuko | Dedicated 2-block wall-shear sub-decoder | In flight |
+| #348 | dazai | Weight-decay sweep {3e-4, 1e-3, 3e-3} | CLOSED — no dazai pod; reassigned to frieren #361 |
 
 ## Active Experiments — Wave 7 (ongoing)
 
@@ -90,10 +104,12 @@
 |----|---------|--------|
 | #276 | fern | SWA blocked on regression; regression bisect opened as #354 |
 | #337 | frieren | Third consecutive non-compliance; tangent-frame hypothesis to be reassigned |
+| #348 | dazai | No `senpai-bengio-dazai` pod exists; hypothesis reassigned to frieren (#361) |
+| #354 | fern | Merged empty — fern diagnosed the bug in comments but code fix was never committed; proper fix reassigned as #360 |
 
 ## Key Research Findings (Cumulative)
 
-1. **Codebase regression (NEW, 2026-05-02)**: +1pp systematic gap vs alphonse baseline. Root cause unknown. All Wave 5–8 results carry uncertainty. **PR #354 in flight.**
+1. **Codebase regression root cause CONFIRMED (2026-05-02)**: FourierEmbed coordinate normalization missing in current codebase (chihiro PR #176 introduced this). alphonse `m9775k1v` used normalised FourierEmbed (uncommitted local edits with `DOMAIN_BOUNDS`). **PR #360 in flight to fix.** All Wave 5–8 results carry ~1pp systematic uncertainty until fixed.
 2. **Fourier PE is the dominant positive factor**: 12,544-param Linear(48→256) projection. Always include `--fourier-pe` flag.
 3. **vol_p effectively solved**: val=4.17% beats AB-UPT target of 6.08%. Test gap is 2.5–3x — overfitting concern.
 4. **wsy/wsz are the decisive binding constraint**: Both 2.5–3x above AB-UPT targets. Require architectural or loss-level solution.
@@ -110,11 +126,11 @@
 | alphonse | WIP | #174 |
 | askeladd | WIP | #328 |
 | chihiro | WIP | #254 |
-| dazai | WIP | #348 |
+| dazai | No pod — closed | — |
 | edward | WIP | #304 |
 | emma | WIP | #342 |
-| fern | WIP (bisect) | #354 |
-| frieren | Closed (non-compliant) | — |
+| fern | WIP (code fix) | #360 |
+| frieren | WIP | #361 |
 | gilbert | WIP | #346 |
 | haku | WIP | #341 |
 | kohaku | WIP | #343 |
@@ -125,15 +141,16 @@
 | thorfinn | WIP | #340 |
 | violet | WIP | #330 |
 
-**0 idle students** (17 students, 17 WIP PRs).
+**0 idle students** (16 active students, 16 WIP PRs).
 
 ## Next Wave Priority Hypotheses
 
-1. **Tangent-frame wall shear prediction** (frieren's #337 concept) — reassign to a responsive student
-2. **SWA reprise** — once regression is fixed (fern #354), re-run SWA last-5 from PR #276 code
+1. **SWA reprise** — once regression is fixed (fern #360), re-run SWA last-5 from PR #276 code
+2. **Tangent-frame wall shear prediction** (frieren's #337 concept) — reassign to a responsive student once frieren #361 clears
 3. **Larger model + longer schedule** — 6L/256d or 5L/320d after regression resolved
 4. **Architecture: cross-attention surface decoder** — separate encoder/decoder for surface vs volume with cross-attn bridge
 5. **Data augmentation: random rotation/jitter** — geometric augmentation beyond mirror
+6. **Re-run all Wave 8 experiments on fixed codebase** — once #360 merges, all current wave 8 results carry ~1pp uncertainty; high-value experiments (#332 tanjiro, #343 kohaku, #347 nezuko) should be re-run
 
 ## Research Log Pointers
 
