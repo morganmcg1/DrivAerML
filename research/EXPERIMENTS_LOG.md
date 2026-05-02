@@ -1,5 +1,29 @@
 # SENPAI Research Results
 
+## 2026-04-29 10:00 — PR #333: [emma] RoPE positional encoding vs additive sincos — CLOSED (defer pending DDP fix)
+
+- Branch: `emma/rope-positional-encoding`
+- Hypothesis: RoPE (Su et al. 2021) on slice-centroid coords encodes *relative* position into Q/K dot-products and should better fit the local-velocity-gradient physics of wall shear than additive sincos. Tested two arms: A=RoPE(xz)+sincos kept, C=RoPE(xz) only (`--no-sincos`).
+- W&B runs: `5akh0vs9` (Arm A, finished, _step=11929), `urovv3em` (Arm C, finished, _step=11924)
+
+**Critical infrastructure finding:** `target/train.py` on `yi` has NO DDP — no `init_process_group`, no `DistributedSampler`, no `cuda.set_device(LOCAL_RANK)`. The canonical `torchrun --nproc_per_node=8` command in BASELINE.md is broken for all students. Both runs forced single-GPU at bs=4, hitting timeout (SENPAI_TIMEOUT_MINUTES=360) at ~55% through warmup epoch 1 (`lr_warmup_steps=21766`).
+
+**Arm A vs Arm C (single fair comparison, identical config except `--no-sincos`):**
+
+| Metric | Arm A (RoPE+sincos) | Arm C (RoPE only) | A/C ratio |
+|---|---:|---:|---:|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | 16.1445 | 18.7926 | 0.859 |
+| `surface_pressure_rel_l2_pct` | 10.7316 | 12.5049 | 0.858 |
+| `wall_shear_rel_l2_pct` | 17.8310 | 20.5843 | 0.866 |
+| `volume_pressure_rel_l2_pct` | 10.2867 | 12.5155 | 0.822 |
+| `wall_shear_y_rel_l2_pct` | 21.5082 | 25.1930 | 0.854 |
+| `wall_shear_z_rel_l2_pct` | 23.1191 | 26.4233 | 0.875 |
+
+- Conclusion: **Sincos and RoPE are complementary, not interfering.** Across all six metrics, A beats C by 12.5–17.8% relative. Volume pressure regressed worst on `--no-sincos` (22% rel) — consistent with volume points spanning full domain where absolute position matters most.
+- Merge-bar comparison invalid: both arms mid-warmup, can't speak to asymptotic quality vs PR #222's 9.291% over 9 epochs.
+- Action: Closed PR. RoPE module (`RoPENd`) is clean and configurable — preserve for follow-up. Future RoPE PRs should keep sincos rather than replace it.
+- Side finding logged: DDP gap on `yi/train.py` is the highest-leverage open infrastructure fix. Path: cherry-pick `bfbe975` + `1a8f7b7` from PR #284 + `--max-steps-per-epoch` patch from PR #315.
+
 ## 2026-04-29 14:00 — PR #286: [frieren] Bilateral-symmetry TTA (y→-y reflection at inference) — CLOSED NEGATIVE
 
 - Branch: `frieren/symmetry-tta` (deleted)
