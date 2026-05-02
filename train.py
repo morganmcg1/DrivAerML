@@ -563,6 +563,8 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    use_surface_tangent_frame: bool = False
+    max_steps_per_epoch: int = 0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1300,6 +1302,38 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def compute_surface_tangent_frames(surface_x: torch.Tensor) -> torch.Tensor:
+    """Build a per-point orthonormal tangent frame T = [t1, t2, n] from given normals.
+
+    surface_x: [B, N, >=6] where [..., 3:6] are surface normals. Returns
+    T: [B, N, 3, 3] (fp32) with rows = [t1, t2, n] s.t. v_tang = T @ v_cart.
+
+    The basis is built deterministically: t1 = normalize(cross(n, ref)) where
+    ref is the global X axis (or Y axis when |n . X| > 0.9 to avoid the
+    degenerate cross product). Then t2 = cross(n, t1). This is O(N) and
+    avoids the cost of per-point KNN/PCA at our point counts (~520k/step),
+    while using the data's clean mesh normals directly.
+    """
+    n = F.normalize(surface_x[..., 3:6].float(), dim=-1, eps=1e-8)  # [B, N, 3]
+    abs_nx = n[..., 0:1].abs()  # [B, N, 1]
+    ref_x = torch.zeros_like(n)
+    ref_x[..., 0] = 1.0
+    ref_y = torch.zeros_like(n)
+    ref_y[..., 1] = 1.0
+    ref = torch.where(abs_nx > 0.9, ref_y, ref_x)
+    t1 = F.normalize(torch.cross(n, ref, dim=-1), dim=-1, eps=1e-8)  # [B, N, 3]
+    t2 = torch.cross(n, t1, dim=-1)  # already unit-norm given orthonormal n, t1
+    T = torch.stack([t1, t2, n], dim=-2)  # [B, N, 3, 3]
+    return T
+
+
+def rotate_to_tangent(vec: torch.Tensor, T: torch.Tensor) -> torch.Tensor:
+    """Rotate per-point Cartesian 3-vectors to the tangent frame: v_tang = T @ v_cart."""
+    vec_f = vec.float()
+    out = torch.einsum("bnij,bnj->bni", T, vec_f)
+    return out.to(vec.dtype)
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1313,6 +1347,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    use_surface_tangent_frame: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1326,7 +1361,47 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
-        if use_tangential_wallshear_loss:
+        tangent_diag: dict[str, float] = {}
+        if use_surface_tangent_frame:
+            with torch.no_grad():
+                T = compute_surface_tangent_frames(batch.surface_x)  # [B, N, 3, 3]
+            ws_pred_norm = surface_pred_norm[..., 1:4]
+            ws_true_norm = surface_target[..., 1:4]
+            ws_pred_tang_norm = rotate_to_tangent(ws_pred_norm, T)
+            ws_true_tang_norm = rotate_to_tangent(ws_true_norm, T)
+            surface_pred_used = torch.cat([surface_pred_norm[..., :1], ws_pred_tang_norm], dim=-1)
+            surface_target_used = torch.cat([surface_target[..., :1], ws_true_tang_norm], dim=-1)
+            if bool(batch.surface_mask.any()):
+                with torch.no_grad():
+                    mask_f = batch.surface_mask.float()
+                    valid_count = mask_f.sum().clamp_min(1.0)
+                    # Sanity: rotated target normal component RMS (in normalized space).
+                    # This is not zero in normalized space because per-axis stds differ,
+                    # but it diagnoses extreme values / NaNs.
+                    n_comp_norm = ws_true_tang_norm[..., 2].float()
+                    n_comp_rms = float(
+                        ((n_comp_norm.square() * mask_f).sum() / valid_count).sqrt().cpu().item()
+                    )
+                    # Physical-space normal-component RMS of true target (should be ~0).
+                    ws_std = transform.surface_y_std[1:4].to(ws_true_norm.device)
+                    ws_mean = transform.surface_y_mean[1:4].to(ws_true_norm.device)
+                    ws_true_phys = ws_true_norm.float() * ws_std + ws_mean
+                    n_hat = T[..., 2, :]  # [B, N, 3]
+                    n_dot_phys = (ws_true_phys * n_hat).sum(dim=-1)
+                    n_phys_rms = float(
+                        ((n_dot_phys.square() * mask_f).sum() / valid_count).sqrt().cpu().item()
+                    )
+                    # Tangent-frame orthogonality check: should be ~1 for valid frames.
+                    det = torch.linalg.det(T.float())
+                    det_mean = float(((det * mask_f).sum() / valid_count).cpu().item())
+                    nan_count = int(torch.isnan(T).any(dim=(-2, -1)).sum().cpu().item())
+                tangent_diag = {
+                    "tangent/n_target_norm_rms": n_comp_rms,
+                    "tangent/n_target_phys_rms": n_phys_rms,
+                    "tangent/frame_det_mean": det_mean,
+                    "tangent/frame_nan_count": float(nan_count),
+                }
+        elif use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
             # Denormalize -> project in physical space -> renormalize.
@@ -1382,6 +1457,8 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if tangent_diag:
+        metrics.update(tangent_diag)
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -1712,7 +1789,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
-    total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    effective_loader_len = max(len(train_loader), 1)
+    if config.max_steps_per_epoch > 0:
+        effective_loader_len = min(effective_loader_len, config.max_steps_per_epoch)
+    total_estimated_steps = max(1, max_epochs * effective_loader_len)
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1763,6 +1843,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/tangent/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -1797,7 +1878,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        epoch_step_cap = config.max_steps_per_epoch if config.max_steps_per_epoch > 0 else None
+        epoch_steps_done = 0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if epoch_step_cap is not None and epoch_steps_done >= epoch_step_cap:
+                break
+            epoch_steps_done += 1
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1810,6 +1896,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                use_surface_tangent_frame=config.use_surface_tangent_frame,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1922,6 +2009,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            for key, value in batch_loss_metrics.items():
+                if key.startswith("tangent/"):
+                    train_log[f"train/{key}"] = value
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
