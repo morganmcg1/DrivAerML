@@ -29,6 +29,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+from data import SurfaceBatch
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -117,6 +118,7 @@ class Config:
     raw_rel_l2_weight: float = 0.0
     fourier_pe: bool = False
     fourier_pe_num_freqs: int = 8
+    mirror_aug_prob: float = 0.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -157,6 +159,49 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_mirror_y_batch(batch: SurfaceBatch, prob: float) -> tuple[SurfaceBatch, float]:
+    """Per-sample independent y-mirror augmentation.
+
+    With probability `prob` per sample, reflect across the xz-plane:
+      surface_x[..., 1]  (y position)        -> negate
+      surface_x[..., 4]  (ny normal y)       -> negate
+      surface_y[..., 2]  (wsy = wall_shear_y) -> negate
+      volume_x[..., 1]   (y position)        -> negate
+    All other channels (x, z, nx, nz, area, cp, wsx, wsz, sdf, vol_p) are
+    sign-invariant under this reflection. Padded entries are 0 so the sign
+    multiply is a no-op there. Mask/metadata/case_ids untouched.
+
+    Returns the (possibly new) batch and the empirical fraction flipped.
+    """
+    if prob <= 0.0:
+        return batch, 0.0
+    bsz = batch.surface_x.shape[0]
+    flip = torch.rand(bsz, device=batch.surface_x.device) < prob
+    flip_frac = float(flip.float().mean().item())
+    if not bool(flip.any().item()):
+        return batch, flip_frac
+    sign_surf = (1.0 - 2.0 * flip.to(batch.surface_x.dtype)).view(bsz, 1)
+    sign_vol = (1.0 - 2.0 * flip.to(batch.volume_x.dtype)).view(bsz, 1)
+    sign_y = (1.0 - 2.0 * flip.to(batch.surface_y.dtype)).view(bsz, 1)
+    new_surface_x = batch.surface_x.clone()
+    new_surface_x[..., 1] = batch.surface_x[..., 1] * sign_surf
+    new_surface_x[..., 4] = batch.surface_x[..., 4] * sign_surf
+    new_surface_y = batch.surface_y.clone()
+    new_surface_y[..., 2] = batch.surface_y[..., 2] * sign_y
+    new_volume_x = batch.volume_x.clone()
+    new_volume_x[..., 1] = batch.volume_x[..., 1] * sign_vol
+    return SurfaceBatch(
+        case_ids=batch.case_ids,
+        surface_x=new_surface_x,
+        surface_y=new_surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=new_volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=batch.metadata,
+    ), flip_frac
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -167,8 +212,10 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     raw_rel_l2_weight: float = 0.0,
+    mirror_aug_prob: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    batch, mirror_aug_frac = apply_mirror_y_batch(batch, mirror_aug_prob)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -210,6 +257,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "mirror_aug_frac": mirror_aug_frac,
         **aux_metrics,
     }
 
@@ -325,6 +373,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
                     raw_rel_l2_weight=config.raw_rel_l2_weight,
+                    mirror_aug_prob=config.mirror_aug_prob,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -360,6 +409,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/mirror_aug_frac": batch_loss_metrics["mirror_aug_frac"],
                         }
                     )
                     # Log per-channel raw relative L2 auxiliary metrics when enabled.
