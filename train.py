@@ -118,6 +118,7 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     use_tangential_wallshear_loss: bool = False
+    tangential_penalty_weight: float = 0.1
     debug: bool = False
 
 
@@ -180,16 +181,31 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
-def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
-    """Project a 3-vector field onto the surface tangent plane defined by per-point normals.
+def wallshear_normal_penalty(
+    pred_wallshear: torch.Tensor,
+    normals: torch.Tensor,
+    mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Soft penalty on the normal component of predicted wall-shear.
 
-    vec:     [..., 3]  predicted or target vector field (in any consistent space)
-    normals: [..., 3]  surface normals (will be unit-normalized)
-    returns: [..., 3]  tangential component  (vec - (vec·n)n)
+    pred_wallshear: [B, N, 3]  predicted wall-shear (in normalized space)
+    normals:        [B, N, 3]  per-point surface normals (will be unit-normalized)
+    mask:           [B, N]     boolean validity mask
+
+    Returns (penalty, normal_fraction) where:
+      penalty         = mean over valid points of (pred · n_hat)^2
+      normal_fraction = sqrt(sum (pred·n_hat)^2 / sum ||pred||^2)  (scalar diagnostic)
     """
-    n = torch.nn.functional.normalize(normals.to(vec.dtype), dim=-1)
-    dot = (vec * n).sum(dim=-1, keepdim=True)
-    return vec - dot * n
+    n = torch.nn.functional.normalize(normals.to(pred_wallshear.dtype), dim=-1)
+    dot = (pred_wallshear * n).sum(dim=-1)
+    valid = mask.to(pred_wallshear.dtype)
+    valid_sum = valid.sum().clamp_min(1.0)
+    normal_sq = (dot.square() * valid).sum() / valid_sum
+    pred_sq_per_point = pred_wallshear.float().square().sum(dim=-1)
+    pred_sq_total = (pred_sq_per_point * valid).sum().clamp_min(1e-12)
+    normal_sq_total = (dot.float().square() * valid).sum()
+    normal_fraction = (normal_sq_total / pred_sq_total).sqrt()
+    return normal_sq, normal_fraction
 
 
 def train_loss(
@@ -202,6 +218,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     use_tangential_wallshear_loss: bool = False,
+    tangential_penalty_weight: float = 0.1,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -214,20 +231,21 @@ def train_loss(
             volume_mask=batch.volume_mask,
         )
         surface_preds = out["surface_preds"]
-        if use_tangential_wallshear_loss:
-            normals = batch.surface_x[..., 3:6]
-            pred_ws = project_tangential(surface_preds[..., 1:4], normals)
-            true_ws = project_tangential(surface_target[..., 1:4], normals)
-            surface_preds_loss = torch.cat([surface_preds[..., :1], pred_ws], dim=-1)
-            surface_target_loss = torch.cat([surface_target[..., :1], true_ws], dim=-1)
-        else:
-            surface_preds_loss = surface_preds
-            surface_target_loss = surface_target
-        surface_loss = masked_mse(surface_preds_loss, surface_target_loss, batch.surface_mask)
+        surface_loss = masked_mse(surface_preds, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        if use_tangential_wallshear_loss:
+            normals = batch.surface_x[..., 3:6]
+            normal_penalty, normal_fraction = wallshear_normal_penalty(
+                surface_preds[..., 1:4], normals, batch.surface_mask
+            )
+            weighted_normal_penalty = tangential_penalty_weight * normal_penalty
+        else:
+            normal_penalty = surface_preds.new_zeros(())
+            normal_fraction = surface_preds.new_zeros(())
+            weighted_normal_penalty = surface_preds.new_zeros(())
+        loss = weighted_surface_loss + weighted_volume_loss + weighted_normal_penalty
         base_mse_loss = surface_loss + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
@@ -235,6 +253,9 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "normal_penalty": float(normal_penalty.detach().cpu().item()),
+        "normal_penalty_weighted": float(weighted_normal_penalty.detach().cpu().item()),
+        "tau_normal_fraction": float(normal_fraction.detach().cpu().item()),
     }
 
 
@@ -349,6 +370,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
                     use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                    tangential_penalty_weight=config.tangential_penalty_weight,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -384,6 +406,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/normal_penalty": batch_loss_metrics["normal_penalty"],
+                            "train/normal_penalty_weighted": batch_loss_metrics["normal_penalty_weighted"],
+                            "train/tau_normal_fraction": batch_loss_metrics["tau_normal_fraction"],
                         }
                     )
 

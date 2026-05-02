@@ -869,6 +869,8 @@ class EvalAccumulator:
     abs_counts: dict[str, int] = field(default_factory=lambda: {key: 0 for key in EVAL_KEYS})
     wall_shear_vector_abs_sum: float = 0.0
     wall_shear_vector_count: int = 0
+    tau_normal_sq_sum: float = 0.0
+    tau_total_sq_sum: float = 0.0
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
@@ -963,6 +965,12 @@ def accumulate_eval_batch(
         )
         accumulator.wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
         accumulator.wall_shear_vector_count += int(wall_vector_error.numel())
+        pred_wallshear_valid = surface_pred[batch.surface_mask][:, 1:4].float()
+        normals_valid = batch.surface_x[batch.surface_mask][:, 3:6].float()
+        normals_unit = torch.nn.functional.normalize(normals_valid, dim=-1)
+        tau_normal_dot = (pred_wallshear_valid * normals_unit).sum(dim=-1)
+        accumulator.tau_normal_sq_sum += float(tau_normal_dot.square().sum().detach().cpu().item())
+        accumulator.tau_total_sq_sum += float(pred_wallshear_valid.square().sum().detach().cpu().item())
 
     if bool(batch.volume_mask.any()):
         volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
@@ -1012,6 +1020,8 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
         merged.volume_loss_count += accumulator.volume_loss_count
         merged.wall_shear_vector_abs_sum += accumulator.wall_shear_vector_abs_sum
         merged.wall_shear_vector_count += accumulator.wall_shear_vector_count
+        merged.tau_normal_sq_sum += accumulator.tau_normal_sq_sum
+        merged.tau_total_sq_sum += accumulator.tau_total_sq_sum
         for key in EVAL_KEYS:
             merged.abs_sums[key] += accumulator.abs_sums[key]
             merged.abs_counts[key] += accumulator.abs_counts[key]
@@ -1048,6 +1058,12 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
         accumulator.surface_loss_count + accumulator.volume_loss_count, 1
     )
+    if accumulator.tau_total_sq_sum > 0.0:
+        tau_normal_fraction = math.sqrt(
+            accumulator.tau_normal_sq_sum / accumulator.tau_total_sq_sum
+        )
+    else:
+        tau_normal_fraction = 0.0
     return {
         "loss": loss,
         "surface_loss": accumulator.surface_loss_sse / max(accumulator.surface_loss_count, 1),
@@ -1073,6 +1089,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
         "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
         "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
+        "tau_normal_fraction": tau_normal_fraction,
         "cases": max(surface_cases, wall_shear_cases, volume_cases),
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
