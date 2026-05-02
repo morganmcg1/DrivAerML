@@ -118,11 +118,11 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
-    muon_lr: float = 1e-4
+    muon_lr: float = 0.02
     muon_momentum: float = 0.95
     muon_ns_steps: int = 5
     muon_weight_decay: float = 5e-4
-    muon_adamw_lr: float = 1e-4
+    muon_adamw_lr: float = 3e-4
     muon_adamw_weight_decay: float = 5e-4
     debug: bool = False
 
@@ -229,7 +229,6 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
             nesterov=True,
             ns_steps=config.muon_ns_steps,
             weight_decay=config.muon_weight_decay,
-            adjust_lr_fn="match_rms_adamw",
         )
         adam_opt = torch.optim.AdamW(
             other_params,
