@@ -6,6 +6,55 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-02 17:00 UTC — PR #353 CLOSED NEGATIVE: askeladd channel-selective Huber loss
+
+- **Branch:** `askeladd/huber-tau-loss` (closed, branch deleted)
+- **Hypothesis:** Channel-selective Huber loss (δ=0.5) on tau channels (1:4) while keeping MSE on surface_pressure (ch 0), to reduce sensitivity to tau_y/tau_z outliers.
+- **W&B run:** `nhr4uj3q` (rank-0), δ=0.5 run completed
+
+| Metric | PR #309 SOTA | This run (val) | Δ |
+|---|---:|---:|---:|
+| val_abupt | 9.039% | 10.11% | +1.07pp |
+| tau_y | — | 14.74% | +2.57pp |
+| tau_z | — | 14.58% | +1.41pp |
+
+- **Conclusion:** NEGATIVE result. Two bugs: (1) separate masked_mean per channel gave sp 4× higher relative weight; (2) Huber clips gradient on large residuals — exactly the high-error tau channels we need to push hardest. Wrong loss direction. Re-assigned as per-axis L2 weighting (PR #424).
+
+---
+
+## 2026-05-02 17:00 UTC — PR #358 MERGED: thorfinn STRING-sep + QK-norm — NEW SOTA
+
+- **Branch:** `thorfinn/string-sep-qknorm-stack` (MERGED)
+- **Hypothesis:** QK-norm (RMSNorm on Q/K projections) stacked on STRING-sep SOTA compounds attention stability improvement with spectral PE quality.
+- **W&B run:** `tkiigfmc`, EP10, group `thorfinn-string-qknorm-r19`
+
+| Metric | PR #311 SOTA | PR #358 (val EP10) | Δ |
+|---|---:|---:|---:|
+| val_abupt | 7.546% | **7.4648%** | **−0.081pp** |
+| surface_pressure | 4.867% | 4.992% | +0.125pp |
+| volume_pressure | 4.525% | 4.587% | +0.062pp |
+| wall_shear | 8.527% | 8.454% | −0.073pp |
+
+- **Conclusion:** POSITIVE — new SOTA. QK-norm adds attention logit normalization on top of STRING-sep. Convergence still descending at EP10 → more headroom available. Merge bar updated to val_abupt < 7.4648%.
+
+---
+
+## 2026-05-02 17:00 UTC — Round 20 CLOSED (8 misassigned PRs)
+
+PRs #394 chihiro, #395 emma, #396 gilbert, #400 haku, #401 kohaku, #403 norman, #404 senku, #405 violet — all CLOSED as misassignments. These students have no `senpai-drivaerml-ddp8` pods. Underlying hypotheses are valid and candidates for re-assignment to DrivAerML fleet students.
+
+---
+
+## 2026-05-02 17:00 UTC — Round 21 ASSIGNED
+
+| PR | Student | Hypothesis |
+|---|---|---|
+| #422 | tanjiro | Multi-scale STRING-sep (8/32/128 features = 1008-dim) + QK-norm — targets tau_y/tau_z via multi-scale spectral content |
+| #423 | thorfinn | Local tangent-frame input features (t1, t2 from normal) — 7→13 input dim, targets tau_y/tau_z geometric context |
+| #424 | askeladd | Per-axis L2 loss weights: tau_y=2.0, tau_z=2.5 (Run A) then tau_y=3.0, tau_z=4.0 (Run B) — correct reweighting without Huber |
+
+---
+
 ## 2026-05-01 10:40 UTC — PR #359 ASSIGNED: frieren STRING-sep + separate volume decoder head
 
 - **Branch:** `frieren/string-sep-volume-decoder`
