@@ -2,39 +2,48 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: thorfinn PR #309 grad-clip-norm=0.5 — 2026-05-02 07:17 UTC
+## Status: edward PR #311 STRING-separable positional encoding — 2026-05-01 (updated)
 
-**NEW SOTA: thorfinn PR #309 grad-clip-norm=0.5 beats PR #232 by −0.026pp val / −0.064pp test (9.0389% vs 9.0650% val, 10.126% vs 10.190% test).**
+**NEW SOTA: edward PR #311 (STRING-separable pos encoding) beats PR #309 by −1.493pp val / −1.355pp test (7.546% vs 9.039% val, 8.771% vs 10.126% test). This is a −13.93% relative improvement on test_abupt.**
 
-Single-line change adding `--grad-clip-norm 0.5` to the Lion optimizer stack. Gradient clipping stabilizes Lion's sign-based EMA momentum updates, reducing gradient spike influence. Critically avoids the ep8 regression seen in unconstrained runs (ep8=9.728% vs prior SOTA 12.12%), demonstrating cleaner convergence. Best at epoch 11 (~270 min runtime).
+STRING-separable replaces fixed isotropic Gaussian RFF with learnable per-axis frequency/phase (`log_freq` + `phase` as `nn.Parameter`, one per axis). The axis-separable factorization learns independent spectral emphasis per spatial axis, matching the anisotropic structure of automotive aerodynamics. All gradient diagnostics healthy (nonfinite_count: 0 throughout). Val slopes still negative at terminal epoch — model still converging, further gains possible.
 
-**W&B run:** `ztdhodw1` (rank 0) — group `thorfinn-gradclip-r15`, ~270 min runtime, best val 9.0389% (ep11)
-**PR:** #309
-**Test metrics:** test_abupt 10.126% (test_primary/abupt_axis_mean_rel_l2_pct)
+**W&B run:** `gcwx9yaa` (rank 0) — group `tay-round18-grape-ablation`, STRING arm, best val 7.546%
+**PR:** #311
+**Test metrics:** test_abupt 8.771% (test_primary/abupt_axis_mean_rel_l2_pct)
 
-### tay current best — `val_primary/*` (best checkpoint, epoch 11)
+### tay current best — `val_primary/*`
 
 | Epoch | val_abupt |
 |-------|-----------|
-| **ep11 (best)** | **9.0389%** |
+| **best** | **7.546%** |
 
-### tay current best — `test_primary/*` (PR #309 thorfinn, run `ztdhodw1`)
+### tay current best — `test_primary/*` (PR #311 edward, run `gcwx9yaa`)
 
-| Metric | This-repo key | **PR #309 thorfinn (NEW SOTA)** | PR #232 askeladd (prev) | PR #222 fern | AB-UPT |
+| Metric | This-repo key | **PR #311 edward (NEW SOTA)** | PR #309 thorfinn (prev) | PR #232 askeladd | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.126** | 10.190 | 10.420 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.395** | 5.461 | 5.550 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **9.883** | 9.910 | 10.185 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.484** | 12.656 | 12.737 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.402** | 8.432 | 8.629 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **11.941** | 11.952 | 12.329 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **12.407** | 12.447 | 12.854 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **8.771** | 10.126 | 10.190 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **4.485** | 5.395 | 5.461 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **8.227** | 9.883 | 9.910 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.438** | 12.484 | 12.656 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **7.253** | 8.402 | 8.432 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **9.233** | 11.941 | 11.952 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **10.449** | 12.407 | 12.447 | 3.63 |
 
-**Wins over PR #232 on every axis.** Largest gains: volume_pressure −0.172pp (−1.36%), surface_pressure −0.066pp (−1.21%), abupt −0.064pp (−0.63%).
+**Wins over PR #309 on every axis.** Largest gains: tau_y −2.708pp (−22.68%), tau_z −1.958pp (−15.78%), surface_pressure −0.91pp (−16.87%), wall_shear −1.656pp (−16.76%).
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, heads=4, grad-clip-norm=0.5)
+**3-arm ablation comparison (tay-round18-grape-ablation):**
 
-**Note:** W&B run `ztdhodw1` uses `rff_num_features=0`, `lr_warmup_epochs=0`, `grad_clip_norm=0.5`. The SOTA does NOT use RFF and does NOT use lr-warmup.
+| Arm | Encoding | val_abupt | test_abupt | vs SOTA |
+|-----|----------|-----------|------------|---------|
+| A (RFF-32) | Fixed isotropic Gaussian | 9.710% | 10.721% | +0.595pp worse |
+| **B (STRING-sep)** | **Learnable per-axis freq/phase** | **7.546%** | **8.771%** | **−1.355pp better** |
+| C (GRAPE-M) | Minimal learned spectral proj | still running | — | — |
+| SOTA (#309) | No spectral encoding (RFF-0) | 9.039% | 10.126% | baseline |
+
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, heads=4, grad-clip-norm=0.5, STRING-sep)
+
+**Note:** STRING-separable encoding uses `--pos-encoding-mode string_separable` (or equivalent flag). Stacks on the full PR #309 SOTA config.
 
 ```bash
 cd target/
@@ -44,7 +53,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
-  --ema-decay 0.999 --grad-clip-norm 0.5
+  --ema-decay 0.999 --grad-clip-norm 0.5 \
+  --pos-encoding-mode string_separable
 ```
 
 ### Compounding wins so far
@@ -63,7 +73,18 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #115 | thorfinn | **−0.562 (−5.04%) vs #111** | Compound: lr=1e-4 + EMA=0.999 (both winners stacked) |
 | #222 | fern | **−0.193 (−2.03%) vs #115** | lr_warmup_epochs=1 (1-epoch linear warmup on top of SOTA stack) |
 | #232 | askeladd | **−0.226 (−2.44%) vs #222** | model-heads=4 (halving attention heads from 8 to 4) |
-| **#309** | **thorfinn** | **−0.064pp (−0.63%) vs #232** | **grad-clip-norm=0.5 (Lion EMA momentum stabilization, avoids ep8 regression)** |
+| #309 | thorfinn | **−0.064pp (−0.63%) vs #232** | grad-clip-norm=0.5 (Lion EMA momentum stabilization, avoids ep8 regression) |
+| **#311** | **edward** | **−1.355pp (−13.39%) vs #309** | **STRING-separable pos encoding: learnable per-axis log_freq + phase — largest single gain since tanjiro arm B** |
+
+---
+
+## Prior SOTA record: thorfinn PR #309 grad-clip-norm=0.5 — 2026-05-02 07:17 UTC
+
+**PRIOR SOTA: thorfinn PR #309 grad-clip-norm=0.5 beats PR #232 by −0.026pp val / −0.064pp test (9.0389% vs 9.0650% val, 10.126% vs 10.190% test).**
+
+**W&B run:** `ztdhodw1` (rank 0) — group `thorfinn-gradclip-r15`, ~270 min runtime, best val 9.0389% (ep11)
+**PR:** #309
+**Test metrics:** test_abupt 10.126% (test_primary/abupt_axis_mean_rel_l2_pct)
 
 ---
 
