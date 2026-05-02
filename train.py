@@ -563,6 +563,10 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    gft_spectral_loss_weight: float = 0.0
+    gft_n_subsample: int = 4096
+    gft_k_nn: int = 16
+    gft_k_modes: int = 64
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1300,6 +1304,126 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+@torch.no_grad()
+def _build_knn_gft_basis(
+    xyz: torch.Tensor,
+    *,
+    k_nn: int,
+    k_modes: int,
+) -> torch.Tensor:
+    """Compute symmetric-normalized graph Laplacian eigenvectors from a kNN graph.
+
+    xyz: [B, N, 3] point coordinates (no padding inside the active rows).
+    Returns U [B, N, k_modes], the eigenvectors corresponding to the k_modes
+    smallest eigenvalues of L_sym = I - D^-1/2 A D^-1/2 with binary kNN A
+    (symmetrized OR). Use within ``torch.no_grad`` — eigenvectors should not
+    contribute gradient to model parameters.
+    """
+    B, N, _ = xyz.shape
+    device = xyz.device
+    xyz_f = xyz.float()
+    # kNN
+    dist = torch.cdist(xyz_f, xyz_f)  # [B, N, N]
+    _, knn_idx = torch.topk(dist, k_nn + 1, largest=False, dim=2)
+    knn_idx = knn_idx[:, :, 1:]  # drop self [B, N, k_nn]
+    # Dense symmetric adjacency (binary OR)
+    adj = torch.zeros(B, N, N, device=device)
+    batch_index = torch.arange(B, device=device).view(B, 1, 1).expand(-1, N, k_nn)
+    row_index = torch.arange(N, device=device).view(1, N, 1).expand(B, -1, k_nn)
+    adj[batch_index, row_index, knn_idx] = 1.0
+    adj = ((adj + adj.transpose(1, 2)) > 0).float()
+    deg = adj.sum(dim=2)
+    deg_inv_sqrt = torch.where(deg > 0, deg.pow(-0.5), torch.zeros_like(deg))
+    eye = torch.eye(N, device=device).unsqueeze(0)
+    laplacian = eye - deg_inv_sqrt.unsqueeze(2) * adj * deg_inv_sqrt.unsqueeze(1)
+    eigvals, eigvecs = torch.linalg.eigh(laplacian)
+    # eigvals ascending; take first k_modes for the lowest-frequency modes
+    return eigvecs[:, :, :k_modes].contiguous()
+
+
+def gft_spectral_relative_l2_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    xyz: torch.Tensor,
+    *,
+    n_subsample: int,
+    k_nn: int,
+    k_modes: int,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Mesh-Laplacian GFT relative-L2 spectral loss for surface fields.
+
+    Builds a per-sample kNN graph on a random valid-point subsample, takes the
+    eigenvectors of its symmetric-normalized Laplacian as the GFT basis, then
+    penalises mismatch in spectral coefficients via relative-L2.
+
+    pred, target: [B, N, C] surface predictions/targets in normalized space.
+    mask: [B, N] valid-point mask (True for non-padding).
+    xyz: [B, N, 3] surface point coordinates.
+    Returns (loss_scalar, diag_metrics).
+    """
+    B, N, _ = pred.shape
+    device = pred.device
+    diag: dict[str, float] = {}
+    if B == 0 or N == 0:
+        return pred.new_zeros(()), diag
+    n_required = max(k_nn + 1, k_modes + 1, 8)
+    valid_counts = mask.sum(dim=1)  # [B]
+    eligible = valid_counts >= n_required
+    if not bool(eligible.any()):
+        return pred.new_zeros(()), diag
+    eligible_indices = torch.where(eligible)[0].tolist()
+    n_sub_per_sample = []
+    sub_idx_list = []
+    for b in eligible_indices:
+        n_valid = int(valid_counts[b].item())
+        n_sub = min(n_subsample, n_valid)
+        valid_idx = torch.where(mask[b])[0]
+        perm = torch.randperm(n_valid, device=device)[:n_sub]
+        sub_idx_list.append(valid_idx[perm])
+        n_sub_per_sample.append(n_sub)
+    # If all eligible samples agree on n_sub we can batch the eigh together.
+    n_sub_uniform = n_sub_per_sample[0]
+    same_n = all(n == n_sub_uniform for n in n_sub_per_sample)
+    pred_f = pred.float()
+    target_f = target.float()
+    sample_losses: list[torch.Tensor] = []
+    if same_n:
+        sub_idx = torch.stack(sub_idx_list, dim=0)  # [Beff, n_sub]
+        beff = sub_idx.shape[0]
+        # Gather using advanced indexing
+        bidx = torch.tensor(eligible_indices, device=device)
+        bsel = bidx.view(-1, 1).expand(-1, n_sub_uniform)
+        p_sub = pred_f[bsel, sub_idx]      # [Beff, n_sub, C]
+        t_sub = target_f[bsel, sub_idx]    # [Beff, n_sub, C]
+        x_sub = xyz[bsel, sub_idx].float()  # [Beff, n_sub, 3]
+        U = _build_knn_gft_basis(x_sub, k_nn=k_nn, k_modes=k_modes)  # [Beff, n_sub, k_modes]
+        c_pred = torch.einsum("bnk,bnc->bkc", U, p_sub)
+        c_true = torch.einsum("bnk,bnc->bkc", U, t_sub)
+        diff_sq = (c_pred - c_true).pow(2).sum(dim=(1, 2))  # [Beff]
+        denom = c_true.pow(2).sum(dim=(1, 2)).clamp_min(1e-8)
+        per_sample = diff_sq / denom
+        sample_losses = [per_sample.mean()]
+        diag["gft_n_subsample"] = float(n_sub_uniform)
+        diag["gft_eligible_batch"] = float(beff)
+    else:
+        for b, sub_idx, n_sub in zip(eligible_indices, sub_idx_list, n_sub_per_sample):
+            p_sub = pred_f[b, sub_idx].unsqueeze(0)
+            t_sub = target_f[b, sub_idx].unsqueeze(0)
+            x_sub = xyz[b, sub_idx].float().unsqueeze(0)
+            U = _build_knn_gft_basis(x_sub, k_nn=k_nn, k_modes=k_modes)
+            c_pred = torch.einsum("bnk,bnc->bkc", U, p_sub)
+            c_true = torch.einsum("bnk,bnc->bkc", U, t_sub)
+            diff_sq = (c_pred - c_true).pow(2).sum()
+            denom = c_true.pow(2).sum().clamp_min(1e-8)
+            sample_losses.append(diff_sq / denom)
+        diag["gft_n_subsample"] = float(sum(n_sub_per_sample) / max(len(n_sub_per_sample), 1))
+        diag["gft_eligible_batch"] = float(len(eligible_indices))
+    if not sample_losses:
+        return pred.new_zeros(()), diag
+    return torch.stack(sample_losses).mean(), diag
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1313,6 +1437,10 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    gft_spectral_loss_weight: float = 0.0,
+    gft_n_subsample: int = 4096,
+    gft_k_nn: int = 16,
+    gft_k_modes: int = 64,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1370,6 +1498,23 @@ def train_loss(
             aux_rel_l2 = num / den
             loss = loss + aux_rel_l2_weight * aux_rel_l2
             aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+        gft_spectral_value: float | None = None
+        gft_diag: dict[str, float] = {}
+        if gft_spectral_loss_weight > 0.0:
+            ws_pred = surface_pred_norm[..., 1:4]
+            ws_true = surface_target[..., 1:4]
+            xyz = batch.surface_x[..., :3]
+            gft_loss, gft_diag = gft_spectral_relative_l2_loss(
+                ws_pred,
+                ws_true,
+                batch.surface_mask,
+                xyz,
+                n_subsample=gft_n_subsample,
+                k_nn=gft_k_nn,
+                k_modes=gft_k_modes,
+            )
+            loss = loss + gft_spectral_loss_weight * gft_loss
+            gft_spectral_value = float(gft_loss.detach().cpu().item())
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -1380,6 +1525,10 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if gft_spectral_value is not None:
+        metrics["gft_spectral_loss"] = gft_spectral_value
+        for key, value in gft_diag.items():
+            metrics[key] = value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1810,6 +1959,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                gft_spectral_loss_weight=config.gft_spectral_loss_weight,
+                gft_n_subsample=config.gft_n_subsample,
+                gft_k_nn=config.gft_k_nn,
+                gft_k_modes=config.gft_k_modes,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -1926,6 +2079,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            if "gft_spectral_loss" in batch_loss_metrics:
+                train_log["train/gft_spectral_loss"] = batch_loss_metrics[
+                    "gft_spectral_loss"
+                ]
+                for key in ("gft_n_subsample", "gft_eligible_batch"):
+                    if key in batch_loss_metrics:
+                        train_log[f"train/{key}"] = batch_loss_metrics[key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
