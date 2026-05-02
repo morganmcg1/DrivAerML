@@ -1,5 +1,64 @@
 # SENPAI Research State
-- 2026-04-29 16:45 (Round 25 — 16 WIP + 2 review PRs on yi, 0 idle; assigned PR #419 chihiro (surface tangent), PR #420 fern (STRING-sep PE on yi), PR #421 kohaku (dual-stream cross-attn bridge — Issue #18 architectural rip-out))
+- 2026-05-02 17:30 UTC (Round 26 — 18 WIP PRs on yi, 0 idle; assigned PR #435 senku (5L+STRING-sep DDP escalation), PR #436 noam (slices sweep on STRING-sep))
+
+## Key infrastructure event: PR #355 (DDP fix) merged 2026-05-02 17:05 UTC
+- yi now has working 8-GPU DDP (`init_process_group`, `DistributedSampler`, DDP wrap, Lion optimizer wiring).
+- All students can now use `torchrun --standalone --nproc_per_node=8`. Full-fleet DDP escalations unblocked.
+
+## Current SOTA on yi (PR #311 edward — STRING-sep PE)
+- val_abupt **7.546%** (W&B `gcwx9yaa`) | test_abupt **8.771%**
+- test metrics: surface_pressure 4.485, wall_shear 8.227, volume_pressure 12.438, wall_shear_x 7.253, wall_shear_y 9.233, wall_shear_z 10.449
+
+## Dominant gaps vs AB-UPT targets
+- wall_shear_z: 10.449% vs 3.63% = **2.88×**
+- wall_shear_y: 9.233% vs 3.65% = **2.53×**
+- volume_pressure: 12.438% vs 6.08% = **2.05×**
+
+## Latest Survey Pass (2026-05-02 Round 26)
+
+**Reviewed this round:**
+- **PR #375 (senku) CLOSED**: 5L+STRING-sep stack hypothesis confirmed. 4-arm causal chain (W&B verified): STRING-sep adds −0.66pp (D→C), depth=5 adds −0.59pp (C→A), cumulative −1.25pp. Both clear ≥0.3pp escalation bar. Absolute val_abupt (17.78%) not comparable to bar — 4× undertrained (700 steps/epoch single-GPU). Curves still descending at final step. Conservative arm (B, lr=3e-4/clip=0.5) dropped — underperforms standard recipe. Escalation queued as PR #435.
+
+**New assignments (2 idle students):**
+- **PR #435 (senku)**: Full-budget 8-GPU DDP escalation of PR #375 Arm A. Exact config: 5L/512d + STRING-sep + lr=5e-4 + ema=0.9995 + weight_decay=5e-4 + clip=1.0. Single arm, no sweep. This is the first test of 5L+STRING-sep at full training budget — could be the next compounding win.
+- **PR #436 (noam)**: `--model-slices` sweep (64/128/192) on current 4L/512d + STRING-sep SOTA. Slices=128 was set in PR #97 before STRING-sep existed. STRING-sep's directional encoding may benefit from a different slice count. 3-arm screen with 4-GPU DDP per arm.
+
+## Active WIP fleet (18 PRs)
+
+| PR | Student | Hypothesis | Area |
+|---|---|---|---|
+| #435 | senku | 5L+STRING-sep full-budget DDP | Architecture depth |
+| #436 | noam | Slices sweep 64/128/192 on STRING-sep | Architecture width |
+| #431 | askeladd | Grad clip sweep (0/0.1/0.3/0.5) | Optimization |
+| #430 | emma | Cosine EMA decay ramp 0.99→0.9999 | Optimization |
+| #429 | ? | 1-cycle LR (OneCycleLR) | LR schedule |
+| #425 | stark | tau_z channel upweight sweep z=2→5 | Loss |
+| #421 | kohaku | Dual-stream Transformer cross-attn bridge | Architecture |
+| #420 | fern | STRING-sep PE on yi branch | Encoding |
+| #419 | chihiro | Surface-tangent frame input features | Features |
+| #391 | norman | Surface-only point masking sweep | Regularization |
+| #385 | alphonse | Multi-scale STRING-sep PE k=1/4/8 | Encoding |
+| #377 | edward | Muon optimizer vs AdamW | Optimization |
+| #374 | thorfinn | asinh(tau/scale) target norm for tau_y/z | Target repr |
+| #370 | tanjiro | Cross-flow exposure index as input feature | Features |
+| #367 | haku | Theta-conditioned wall-shear loss weight | Loss |
+| #366 | gilbert | Volume-pressure Huber + vol_loss_weight sweep | Loss |
+| #317 | violet | Huber loss for wall-shear heavy tails (δ sweep) | Loss |
+| #262 | nezuko | Linear-warmdown LR (WSD-style) | LR schedule |
+
+## Current research themes
+
+1. **STRING-sep follow-through** (PRs #420 fern, #385 alphonse, #436 noam, #435 senku): Apply and extend STRING-sep PE — the cleanest architectural win in many rounds. Multi-scale, slices tuning, depth escalation all in parallel.
+2. **tau_y/z direct attacks** (PRs #419 chihiro, #370 tanjiro, #367 haku, #374 thorfinn, #425 stark, #317 violet): Six complementary angles on the 2.5-2.9× wall-shear gap — tangent features, cross-flow index, loss conditioning, asinh normalization, Huber robustness, z-upweight.
+3. **Volume pressure gap** (PR #366 gilbert, #429): 12.44% vs 6.08% AB-UPT target (2.05×) — Huber + volume loss weight sweep.
+4. **Architectural rip-outs** (PR #421 kohaku): Dual-stream Transformer diagnosing single-backbone slice-budget competition. Inspired by Issue #18 "be bold" directive.
+5. **Optimizer and LR** (PRs #377 edward Muon, #430 emma EMA ramp, #429 1-cycle, #262 nezuko WSD warmdown, #431 askeladd clip): Full optimization sweep after DDP restored.
+
+## Most recent human researcher directives (Issue #18)
+
+1. Be bold with architecture — complete backbone replacements encouraged
+2. Cross-branch inspiration (check noam/radford branches)
+3. Round-5 priority: surface-tangent frame, Perceiver-IO, asinh/log norm, RANS div-free, 1-cycle LR
 
 ## Latest Survey Pass (2026-04-29 Round 25)
 
