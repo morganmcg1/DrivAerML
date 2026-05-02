@@ -121,6 +121,30 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class ShearSubDecoder(nn.Module):
+    """Dedicated 2-block residual MLP head for the wall-shear vector.
+
+    Each block is pre-LayerNorm + UpActDownMlp(D -> mlp_hidden -> D) with a
+    residual connection. The final projection to 3 channels is zero-initialized
+    so wall-shear predictions match the baseline-init behaviour at step 0.
+    """
+
+    def __init__(self, hidden_dim: int, mlp_hidden_dim: int, output_dim: int = 3):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.mlp1 = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.mlp2 = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.out = nn.Linear(hidden_dim, output_dim)
+        nn.init.zeros_(self.out.weight)
+        nn.init.zeros_(self.out.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.mlp1(self.norm1(x))
+        x = x + self.mlp2(self.norm2(x))
+        return self.out(x)
+
+
 class TransolverAttention(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
         super().__init__()
@@ -251,6 +275,7 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         fourier_pe: bool = False,
         fourier_pe_num_freqs: int = 8,
+        shear_head_mlp_ratio: int | float = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -286,7 +311,18 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+        if self.surface_output_dim != 4:
+            raise ValueError(
+                "Split surface head expects surface_output_dim == 4 "
+                "([surface_pressure, wall_shear_x, wall_shear_y, wall_shear_z])"
+            )
+        self.pressure_out = LinearProjection(n_hidden, 1)
+        shear_mlp_hidden = int(math.ceil(n_hidden * shear_head_mlp_ratio))
+        self.shear_out = ShearSubDecoder(
+            hidden_dim=n_hidden,
+            mlp_hidden_dim=shear_mlp_hidden,
+            output_dim=3,
+        )
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
@@ -359,7 +395,9 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            sp_pred = self.pressure_out(surface_hidden)
+            ws_pred = self.shear_out(surface_hidden)
+            surface_preds = torch.cat([sp_pred, ws_pred], dim=-1) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
