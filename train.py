@@ -566,6 +566,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    wallshear_theta_alpha: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1286,6 +1287,7 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
+    wallshear_point_weight: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked loss for surface predictions.
 
@@ -1338,6 +1340,12 @@ def weighted_masked_mse_per_channel(
         loss_elem = diff_sq
 
     weighted_diff = loss_elem * weights.view(1, 1, -1)
+    if wallshear_point_weight is not None and n_channels >= 4:
+        # Apply per-point weight to the tau channels (1:4). Keep cp (channel 0)
+        # and any extra channels (4:) at unity.
+        pw_full = weighted_diff.new_ones(weighted_diff.shape)
+        pw_full[..., 1:4] = wallshear_point_weight.unsqueeze(-1).expand_as(weighted_diff[..., 1:4]).to(weighted_diff.dtype)
+        weighted_diff = weighted_diff * pw_full
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
@@ -1370,6 +1378,7 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    wallshear_theta_alpha: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1409,12 +1418,33 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
+        theta_weight: torch.Tensor | None = None
+        theta_weight_mean: float | None = None
+        if wallshear_theta_alpha > 0.0:
+            # Per-point theta-conditioned wall-shear weight.
+            # theta_i = angle between GT wall-shear vector and global-x (streamwise) axis.
+            # w_i = 1 + alpha * sin(theta_i)  — up-weights cross-flow-dominant points.
+            ws_std_t  = transform.surface_y_std[1:4].to(device)
+            ws_mean_t = transform.surface_y_mean[1:4].to(device)
+            ws_true_norm_t = surface_target[..., 1:4]                 # [B, N, 3] normalised
+            ws_true_phys_t = ws_true_norm_t * ws_std_t + ws_mean_t    # physical space
+            tau_mag = ws_true_phys_t.norm(dim=-1, keepdim=False).clamp_min(1e-8)  # [B, N]
+            tau_x_abs = ws_true_phys_t[..., 0].abs()                              # [B, N]
+            cos_theta = (tau_x_abs / tau_mag).clamp(0.0, 1.0)
+            sin_theta = (1.0 - cos_theta.pow(2)).clamp_min(0.0).sqrt()
+            theta_weight = 1.0 + wallshear_theta_alpha * sin_theta                # [B, N]
+            mask_bool = batch.surface_mask
+            if bool(mask_bool.any()):
+                theta_weight_mean = float(
+                    theta_weight[mask_bool].detach().float().mean().cpu().item()
+                )
         surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
             surface_pred_used,
             surface_target_used,
             batch.surface_mask,
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
             wallshear_huber_delta=wallshear_huber_delta,
+            wallshear_point_weight=theta_weight,
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -1438,6 +1468,8 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if theta_weight_mean is not None:
+        metrics["wallshear_theta_weight_mean"] = theta_weight_mean
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -1951,6 +1983,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                wallshear_theta_alpha=config.wallshear_theta_alpha,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2062,6 +2095,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "wallshear_theta_weight_mean" in batch_loss_metrics:
+                train_log["train/wallshear_theta_weight_mean"] = batch_loss_metrics[
+                    "wallshear_theta_weight_mean"
                 ]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
