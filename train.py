@@ -601,6 +601,8 @@ class Config:
     seed: int = -1
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
+    surface_tangent_frame_input: bool = False
+    max_steps_per_epoch: int = 0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -734,7 +736,8 @@ def make_loaders(
 
 
 def build_model(config: Config) -> SurfaceTransolver:
-    return SurfaceTransolver(
+    surface_input_dim = SURFACE_X_DIM + (9 if config.surface_tangent_frame_input else 0)
+    model = SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
@@ -745,7 +748,15 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        surface_input_dim=surface_input_dim,
     )
+    # Zero-init the surface projection columns for the new tangent-frame channels so
+    # the model is mathematically identical to the no-frame baseline at init; the
+    # optimizer learns to use the new channels from gradient signal.
+    if config.surface_tangent_frame_input and model.project_surface_features is not None:
+        with torch.no_grad():
+            model.project_surface_features.project.weight[:, -9:].zero_()
+    return model
 
 
 def _metric_path(name: str) -> str:
@@ -1288,6 +1299,32 @@ def weighted_masked_mse_per_channel(
     return weighted_loss, per_axis_mean
 
 
+def compute_surface_tangent_frame(surface_x: torch.Tensor) -> torch.Tensor:
+    """Compute [t1, t2, n] tangent frame from normals in surface_x[..., 3:6].
+
+    Returns tensor of shape (..., 9) = [t1(3), t2(3), n(3)].
+    Uses fp32 internally for numerical stability regardless of input dtype.
+    The construction is deterministic: for each surface normal n,
+      ref = (0,1,0) when |n.x| > 0.9, else (1,0,0)
+      t1 = normalize(cross(ref, n))
+      t2 = cross(n, t1)
+    This gives a right-handed orthonormal frame.
+    """
+    orig_dtype = surface_x.dtype
+    n = F.normalize(surface_x[..., 3:6].float(), dim=-1, eps=1e-8)
+    # Reference vectors: (1,0,0) by default, fallback (0,1,0) near x-axis
+    ref_x = torch.zeros_like(n)
+    ref_x[..., 0] = 1.0
+    ref_y = torch.zeros_like(n)
+    ref_y[..., 1] = 1.0
+    use_fallback = (n[..., 0].abs() > 0.9).unsqueeze(-1)
+    ref = torch.where(use_fallback, ref_y, ref_x)
+    t1 = F.normalize(torch.linalg.cross(ref, n), dim=-1, eps=1e-8)
+    t2 = torch.linalg.cross(n, t1)
+    frame = torch.cat([t1, t2, n], dim=-1)
+    return frame.to(orig_dtype)
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -1313,13 +1350,18 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
+    surface_tangent_frame_input: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    surface_x = batch.surface_x
+    if surface_tangent_frame_input:
+        frame = compute_surface_tangent_frame(surface_x)
+        surface_x = torch.cat([surface_x, frame], dim=-1)
     with autocast_context(device, amp_mode):
         out = model(
-            surface_x=batch.surface_x,
+            surface_x=surface_x,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
@@ -1441,6 +1483,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    surface_tangent_frame_input: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1471,9 +1514,13 @@ def evaluate_split(
         batch = batch.to(device)
         surface_target_norm = transform.apply_surface(batch.surface_y)
         volume_target_norm = transform.apply_volume(batch.volume_y)
+        surface_x = batch.surface_x
+        if surface_tangent_frame_input:
+            frame = compute_surface_tangent_frame(surface_x)
+            surface_x = torch.cat([surface_x, frame], dim=-1)
         with autocast_context(device, amp_mode):
             out = model(
-                surface_x=batch.surface_x,
+                surface_x=surface_x,
                 surface_mask=batch.surface_mask,
                 volume_x=batch.volume_x,
                 volume_mask=batch.volume_mask,
@@ -1712,7 +1759,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
-    total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    effective_loader_len = max(len(train_loader), 1)
+    if config.max_steps_per_epoch > 0:
+        effective_loader_len = min(effective_loader_len, config.max_steps_per_epoch)
+    total_estimated_steps = max(1, max_epochs * effective_loader_len)
     if kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -1796,8 +1846,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         model.train()
         train_loss_sum = 0.0
         n_batches = 0
+        epoch_steps_done = 0
+        epoch_step_cap = config.max_steps_per_epoch if config.max_steps_per_epoch > 0 else None
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
+            if epoch_step_cap is not None and epoch_steps_done >= epoch_step_cap:
+                break
+            epoch_steps_done += 1
             loss, batch_loss_metrics = train_loss(
                 model,
                 batch,
@@ -1810,6 +1865,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
+                surface_tangent_frame_input=config.surface_tangent_frame_input,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2001,7 +2057,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_input=config.surface_tangent_frame_input)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2116,7 +2172,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_input=config.surface_tangent_frame_input)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2150,7 +2206,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_input=config.surface_tangent_frame_input)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
