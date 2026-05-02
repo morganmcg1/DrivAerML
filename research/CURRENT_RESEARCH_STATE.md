@@ -1,161 +1,119 @@
 # SENPAI Research State
-- **2026-05-02 11:50 UTC** — Wave 8/9 fleet active. **HEADLINE**: alphonse PR #174 run `vu4jsiic` (5L/256d Fourier PE T_max=50) at **abupt=7.041%** at step 704k (~ep39 of 50) — **BELOW current baseline 7.2091%** by 0.17pp. Cosine schedule still descending; ep50 projection 7.0–7.1%. Once student marks ready for review, this becomes the new bengio baseline. **CRITICAL FIX IN FLIGHT**: fern PR #360 FourierEmbed coordinate normalization fix at ep3=9.83% (down from ep2=13.74%); ep5 gate ~12:18Z, threshold ≤10.5%. **INFRA ISSUE**: 3 bengio pods stuck on orphan train.py runs (frieren, nezuko, gilbert); issues #368 + #371 filed requesting `kubectl rollout restart`. Wave 8 PRs #346, #347, #361 cannot launch until pods restart. PR #354 (fern regression bisect) was merged empty — code fix was never applied; #360 is the real fix.
 
-## CRITICAL: FourierEmbed Normalization Bug (PR #360 in flight)
-
-**Root cause confirmed (2026-05-02, fern PR #354 analysis):** The alphonse baseline `m9775k1v` was trained with coordinate normalization in `FourierEmbed` (uncommitted local edits). chihiro PR #176 reimplemented FourierEmbed without normalization, introducing the +1pp regression. DrivAerML coordinates are NOT in [-1,1] (x≈[-10,14], y≈[-4.3,4.2], z≈[-2.5,2.7]); without normalization the highest-frequency sinusoid produces ~5,628 rad at x=14 — severe aliasing.
-
-**Required fix** (fern PR #360): Add `DOMAIN_BOUNDS = ((-12.0, 14.0), (-5.0, 5.0), (-3.0, 3.0))` to `FourierEmbed`, register `center`/`half_range` buffers, apply `(coords - self.center) / self.half_range` in `forward` before encoding.
-
-**Validation**: ep5 abupt should drop below 10.5% (currently ~13.3% on broken impl at ep5).
+- **2026-05-02 11:55Z — alphonse #174 STILL CLIMBING: 7.040% at step 708,166 (ep ~39.7), down from 7.085% at ep36.8. senku #325 ep17=8.68% (gc=0.5 monotone, healthy). violet #330 ep5=8.72% (4L/512d/8H + EMA, gate PASS). chihiro #254 plateaued at 8.205% (ep ~32.6, past abort). edward #304 ep19=8.58%. tanjiro #332 ep17=8.37%. fern #360 ep~4=10.46% (still gating; structural-regression test). 6 Wave 8 PRs still silent (3 infra-blocked, 3 await ack at 13:42Z deadline). 0 truly idle students — `noam`/`stark` reported by `list_idle_students` but have no bengio pod (deployment list confirms 16 students, all with WIP PRs).**
 
 ## Most Recent Human Researcher Direction
 
-- **Issue #48 (tay/morganmcg1)**: "Hows it going? we making progress?" — Responded.
-- **Issue #18 (yi)**: "Ensure you're really pushing hard on new ideas" — Wave 3+4+5+6+7+8 prioritize bold architectural and loss-formulation moves.
-- Mission: crush DrivAerML AB-UPT public reference metrics across all 6 axis metrics simultaneously on **test** set.
+- **Issue #48 (tay/morganmcg1)**: "Hows it going? we making progress?" — ADVISOR responded; PR #74 merged as Wave 1 leader.
+- **Issue #18 (yi)**: "Ensure you're really pushing hard on new ideas" — Waves 2-8 push capacity scaling, loss rebalance, EMA revival, raw rel-L2 alignment, per-channel multipliers, point-density scaling, slice scaling, physics-aware shear heads, FiLM conditioning, stacked recipes.
 
-## CRITICAL BLOCKER: Structural Codebase Regression
+## Current State — 16 WIP, 0 truly idle, 0 review-ready
 
-**Discovered 2026-05-02 by fern (PR #276 analysis):** All recent fourier-pe nf=8 baseline-config runs are approximately +1.0–1.5pp worse than alphonse `m9775k1v` across every epoch despite identical architecture:
+**Idle-student note**: `list_idle_students` returns `noam,stark,jinwoo` because matching student labels exist, but **no bengio deployment exists for those names** — only the 16 named students with WIP PRs have actual pods. Always intersect with `kubectl get deployments -l app=senpai | grep bengio-` before assigning. `jinwoo` has no label at all. Two assignment PRs (#372 noam, #373 stark) were created and immediately closed in this triage cycle to avoid orphaned work.
 
-| Run ID | Config | Best abupt |
-|--------|--------|-----------|
-| `m9775k1v` | alphonse baseline PR #74 (ep30) | **7.2091%** |
-| `67u9bilg` | haku SW=2.0 (ep50) | 8.168% |
-| `kuz4na0j` | trial-B wsy/wsz 0.5 (ep~30) | 8.895% |
-| `w3thlivw` | mirror0.5 + sw2.0 (ep~30) | 8.919% |
-| `31s1j3a0` | gc=0.5 (ep~30) | 9.215% |
-| `0fhryk4r` | fern SWA ep10 | 9.270% |
+### Highest Priority
 
-**Implication**: Any "win" in Wave 5–8 may be the regression partially un-doing itself, not genuine improvement. fern has been assigned PR #354 to bisect the regression.
+**alphonse #174 — STILL CLIMBING (now 7.040% at ep ~39.7)**. Run `vu4jsiic`, T_max=50, 5L/256d + Fourier. ep36.8=7.085% → ep39.7=7.040% — 0.045pp gain in ~3 epochs (~0.015pp/ep). Cosine knee continues to deliver. **−0.169pp below baseline 7.2091%**. wsy=8.97%, wsz=10.74% (both below baseline). Continue to ep50; revised projection **~6.95–7.05%**. **Update BASELINE.md when ep50 metrics post and the run is marked `status:review`.**
 
-### PR #360 — fern: FourierEmbed coordinate normalization fix (ACTIVE)
-- Apply `DOMAIN_BOUNDS`-based center/half_range normalization to `FourierEmbed.forward()`
-- Root cause of +1pp regression identified by fern in PR #354 (merged empty — code never applied)
-- Validation: ep5 abupt < 10.5% (current broken codebase hits ~13.3% at ep5)
-- **Highest-leverage action on the entire bengio track right now**
+**fern #360 — FourierEmbed coord-norm fix in flight**. Run `q40rez85`, ep~1/10. Replaces closed PR #276. ep5 gate at 12:20Z (abupt ≤ 10.5%). Critical: this run tests whether a structural +1.0–1.5pp gap between recent runs and `m9775k1v` is a normalization regression that could invalidate Wave 5–8 evaluations.
 
-## AB-UPT Targets (all must be beaten simultaneously on test)
+### Wave 8 PRs — Compliance window expiring
 
-| Metric | AB-UPT Target | Best Val | Best Test | Status |
-|--------|:---:|:---:|:---:|----|
-| abupt_axis_mean_rel_l2_pct | 4.51% | **7.2091%** (m9775k1v baseline) | 8.480% (alphonse) | gap -3.97pp (test) |
-| surface_pressure_rel_l2_pct | 3.82% | 4.802% | 5.078% | gap -1.26pp (test) |
-| volume_pressure_rel_l2_pct | 6.08% | **4.166%** (val beats target) | 12.897% (tanjiro SW2) | val won, test fails badly |
-| wall_shear_x_rel_l2_pct | 5.35% | 7.109% | 7.953% | gap -2.60pp (test) |
-| wall_shear_y_rel_l2_pct | 3.65% | 9.100% | 10.895% | gap -7.25pp — **BINDING** |
-| wall_shear_z_rel_l2_pct | 3.63% | 10.869% | 11.664% | gap -8.03pp — **HARDEST** |
+6 PRs have advisor ack-deadline comments outstanding. Current time 10:57Z; deadlines 13:42–14:00Z (~2h45m–3h remaining). All running pods, but evidence (W&B groups, run states, code state) suggests several students are running off-spec experiments rather than the assigned hypothesis.
 
-**CRITICAL val/test gap**: vol_p gap is ~2.5–3x on test. Surface-loss reweighting did NOT help on test. Do not claim wins based on val metrics alone.
+| PR | Student | Hypothesis | Deadline | Suspected non-compliance |
+|---|---|---|---|---|
+| #340 | thorfinn | model_slices sweep {128, 192, 256} | 13:42Z | running probing/hybrid experiments |
+| #341 | haku | surface-loss-weight sweep {2.0, 4.0, 8.0} | 13:42Z | finished symmetry-aug runs at 05:08Z, idle |
+| #343 | kohaku | ws-only rel-L2 aux loss sweep {0.1, 0.5, 1.0} | 13:42Z | running full-train seeds + ensemble |
+| #346 | gilbert | FiLM normal-conditioning every block | 13:43Z | repeated crashes; `use_film=False` in config |
+| #347 | nezuko | Dedicated 2-block ws sub-decoder | 13:43Z | v1–v4 crashed; running cosine control |
+| #361 | frieren | weight-decay sweep {3e-4, 1e-3, 3e-3} | 14:00Z | all 8 runs crashed; running drop-path |
 
-## Current Research Focus
+If no ack by deadline → close PR + reassign hypothesis. PR #361 replaces closed #337 (which was the original frieren tangent-frame assignment, closed for non-compliance).
 
-### Primary bottleneck: wsy/wsz binding constraint
-- wsy val=9.10% vs target 3.65% → 2.5x gap
-- wsz val=10.87% vs target 3.63% → 3.0x gap
-- These are the decisive barriers to beating AB-UPT across all axes simultaneously
-- Multi-pronged Wave 8 attack: surface-loss weight, scale-up, wall-shear-only aux loss, FiLM conditioning, dedicated sub-decoder, model-slices, weight-decay
+### Wave 7 Active PRs (mid-run)
 
-### Secondary blocker: codebase regression
-- Until PR #354 resolves, all experiment results carry ~1pp systematic uncertainty
-- Priority: fern must identify and patch the regression before Wave 9
+| PR | Student | Status | Key metrics / gates |
+|---|---|---|---|
+| #174 | alphonse | **NEW BEST 7.040% at ep~39.7**, run `vu4jsiic` | continue to ep50; expected ~6.95–7.05% |
+| #239 | norman | NF=64 ep5=10.363% (UNIFORMLY WORSE than NF=32 +0.30pp), run `yilzrnwk` | U-shape confirmed; NF=32 is optimum. Decision on NF=128 at ep10 (~12:42Z) |
+| #254 | chihiro | **FALSIFIED + ABORTED**: ep30=8.236%, now ep~32.6=8.205% — plateau confirmed | run to ep50 for documentation; no further trials |
+| #276 | fern | **CLOSED 09:31Z** | replaced by #360 (FourierEmbed coord-norm fix) |
+| #304 | edward | Trial B ep~19=8.577%, run `kuz4na0j` | continue to ep30; no Trial C |
+| #325 | senku | **STRONG**: ep~17=8.680%, run `31s1j3a0` (gc=0.5) | ep30 expected ~7.5-7.8% (smooth monotone) |
+| #328 | askeladd | Arm A (sincos) ep10 PASS 10.099%, run `xf84245g`. **Arm B MISSING** | demanded launch within 30min at 10:33Z; **STILL no ack at 11:55Z** — escalate at next pass |
+| #330 | violet | **STRONG**: ep5=8.716%, run `i4w5ahtq` (4L/512d/8H + EMA + Fourier) | ep10 gate < 8.0% next; trajectory ~7.0-7.5% |
+| #332 | tanjiro | ep~17=8.373%, run `w3thlivw` | ep20 gate ≤ 8.5% on track |
+| #342 | emma | 96k pts run `m7f6hrf7`, ep1=18.97% (under 22% kill) | ep5 gate ~12:26Z (≤11.5%); VRAM 25.3/97.9 GB healthy |
+| #360 | fern | coord-norm fix run `q40rez85`, ep~4=10.46% | ep5 gate at ~12:20Z (≤10.5%); structural regression test on track |
 
-## Active Experiments — Wave 9 (assigned 2026-05-02 10:10Z)
+## Key Mechanism Findings
 
-| PR | Student | Experiment | Status |
-|----|---------|-----------|-------|
-| #360 | fern | **FourierEmbed coord normalization fix — PRIORITY** | Active; ep3=9.83% (drop from ep2=13.74%, on track for ep5 gate ≤10.5%); ep5 ~12:18Z |
-| #361 | frieren | Weight-decay sweep {3e-4, 1e-3, 3e-3} | **BLOCKED on infra**: pod stuck on closed PR #310; issue #368 filed |
-| #346 | gilbert | FiLM normal-conditioning every block | **BLOCKED on infra**: pod stuck on Wave 6 mirror-aug Trial A; issue #371 filed |
-| #347 | nezuko | Dedicated 2-block wall-shear sub-decoder | **BLOCKED on infra**: pod stuck on Wave 2 5L/384d run; issue #371 filed |
+**alphonse #174 (Wave 7, NEW BEST)**: Longer cosine schedule (T_max=50) on 5L/256d + Fourier delivered the first improvement over Wave 1 baseline. ep26 plateau (7.498%) was the cosine mid-schedule trough; recovery validated the hypothesis. Strategic: T_max scaling is a real lever; Wave 9 should stack with mirror-aug/SW=2.0 (tanjiro #332) and any physics-aware shear head winner.
 
-## Active Experiments — Wave 8 (assigned 2026-05-02 07:24–07:40Z)
+**senku #325 (Wave 7, STRONG)**: gc=0.5 grad-clip on baseline recipe is producing one of the strongest descent trajectories observed. ep14=8.834%, already past the ep20 gate of 8.5% **6 epochs ahead of schedule**. Smooth monotone descent ep5→ep14 with one ep4 warmup spike. wsy/wsz still binding but descending at 0.14-0.27pp/epoch. ep30 projection ~7.5-7.8%. **Likely candidate for new best**, possibly close to alphonse #174.
 
-| PR | Student | Experiment | Status |
-|----|---------|-----------|-------|
-| #340 | thorfinn | model_slices sweep {128,192,256} | In flight |
-| #341 | haku | surface-loss-weight sweep {2.0,4.0,8.0} | In flight |
-| #342 | emma | 96k surface+volume points scale-up | In flight |
-| #343 | kohaku | Wall-shear-only rel-L2 aux loss sweep {0.1,0.5,1.0} | In flight |
-| #346 | gilbert | FiLM normal-conditioning at every transformer block | In flight |
-| #347 | nezuko | Dedicated 2-block wall-shear sub-decoder | In flight |
-| #348 | dazai | Weight-decay sweep {3e-4, 1e-3, 3e-3} | CLOSED — no dazai pod; reassigned to frieren #361 |
+**violet #330 (Wave 7, STRONG)**: 4L/512d/8H + EMA(0.9995) + Fourier + gc=0.5 + lr=3.4e-4 cosine T_max=36 (DDP4 port of radford champion). v2 (post kill-threshold-bug fix) trajectory ep1=28.3% → ep2=13.3% → ep3=10.17% → ep4=9.175%. Descent slope at ep4 implies ep5 ~8.3-8.5% and ep10 ~7.0-7.5%. **Different from alphonse mechanism** (width over depth + EMA). If this lands ~7.0-7.5% by ep10 and continues to descend with EMA settling, this could push best below alphonse #174.
 
-## Active Experiments — Wave 7 (ongoing)
+**norman #239 (Wave 7, U-shape)**: FourierEmbed num_freqs sweep produced a clear U-shape: NF=16=10.07%, NF=32=10.06%, NF=64=10.36% at ep5. NF=64 is uniformly worse than NF=32 by +0.15-0.53pp across all 7 metrics. Strategic: **NF=32 is the local optimum** — confirms the existing default Fourier configuration. NF=128 informative only to confirm downward arm.
 
-| PR | Student | Run ID | Experiment | Status |
-|----|---------|--------|-----------|-------|
-| #325 | senku | `31s1j3a0` | Grad-clip-norm sweep gc=0.5 | ep~16.6 = **8.73%**; ep20 gate ≤8.5% (0.23pp away); on track |
-| #330 | violet | `i4w5ahtq` | radford-champion DDP4 port (4L/512d/8H, EMA, gc=0.5, lr=3.4e-4, T_max=36) | **ep5 PASSED**: abupt=8.716% (gate <11.5%); ep10 gate <9.5% next; trajectory ep1→5: 28.33→13.33→10.17→9.17→8.72 |
-| #332 | tanjiro | `w3thlivw` | Mirror-aug p=0.5 + SW=2.0 stack | **ep20 gate PASSED EARLY (ep~16)**: abupt=8.41%; continuing to ep30 (target ≤8.0%); strongest wsy descent so far |
-| #328 | askeladd | `xf84245g` | FourierEmbed A/B vs Sincos | Arm A (sincos-baseline-v2) at ep~11.2 abupt=9.74%; **Arm B (Fourier PE) STILL NOT LAUNCHED** — final 13:00Z deadline issued |
+**chihiro #254 (Wave 7) — FALSIFIED + ABORTED**: ep30=8.236% (gate ≤8.2% MISS by 0.04pp). Slope plateau at ep25-30 (-0.0004%/1k steps). Trial B (w=0.1) aborted by advisor at 10:33Z. Raw rel-L2 surface aux loss at small weights does not productively align gradients with the AB-UPT axis-mean evaluation objective.
 
-## Active Experiments — Older Waves (still in flight)
+**chihiro #254 (Wave 7) — falsified**: Raw rel-L2 aux loss at w=0.05 plateaued at 8.236% (slope ~0pp/epoch), ep30 gate MISS. Trial B (w=0.1) aborted. Rel-L2 surface loss at small weight does not productively align gradient with eval metric.
 
-| PR | Student | Experiment | Status |
-|----|---------|-----------|-------|
-| #174 | alphonse | 5L/256d + Fourier PE + T_max=50 | **NEW BEST IN FLIGHT**: abupt=**7.041%** at step 704k (~ep39 of 50), below current baseline 7.2091% by 0.17pp; cosine schedule still descending — once student marks ready, becomes new bengio baseline |
-| #239 | norman | Fourier PE NF sweep (NF=32 killed, NF=64 running) | NF=64 auto-launched |
-| #254 | chihiro | Raw rel-L2 aux loss w sweep | ep20 missed gate by 0.20pp, continuing to ep30 |
-| #304 | edward | Per-channel wsy/wsz loss multipliers | ep10 PASSED (abupt=9.159%), continuing to ep30 |
+**edward #304 (Wave 6/7) — falsified**: Per-channel wsy/wsz loss multipliers tested both directions (upweight ×2/×3 STRICTLY WORSE; downweight 0.5 better but ws axes still 11.74% / 13.30%). wsy/wsz binding constraint is **representation-level, not loss-weighting-level**.
 
-## Closed This Session
+**tanjiro #332 — strongest binding-axis signal**: wsy 17.88% → 11.16% at ep10, → still descending at ep13.7 (abupt=8.670%, all axes monotone). mirror-aug + SW=2.0 stacked is the most promising recipe. Trial B (mirror only, no SW) auto-queued.
 
-| PR | Student | Reason |
-|----|---------|--------|
-| #276 | fern | SWA blocked on regression; regression bisect opened as #354 |
-| #337 | frieren | Third consecutive non-compliance; tangent-frame hypothesis to be reassigned |
-| #348 | dazai | No `senpai-bengio-dazai` pod exists; hypothesis reassigned to frieren (#361) |
-| #354 | fern | Merged empty — fern diagnosed the bug in comments but code fix was never committed; proper fix reassigned as #360 |
+**fern #276 — structural gap finding**: All recent fourier-pe nf=8 runs sit +1.0–1.5pp above `m9775k1v` at ep10. Possible code/data/env regression. fern #360 is the targeted fix-and-revalidate; if it does not close the gap, Wave 5–8 evaluations may be on a regressed baseline and need replay.
 
-## Key Research Findings (Cumulative)
+## Wave 8 Strategy
 
-1. **Codebase regression root cause CONFIRMED (2026-05-02)**: FourierEmbed coordinate normalization missing in current codebase (chihiro PR #176 introduced this). alphonse `m9775k1v` used normalised FourierEmbed (uncommitted local edits with `DOMAIN_BOUNDS`). **PR #360 in flight to fix.** All Wave 5–8 results carry ~1pp systematic uncertainty until fixed.
-2. **Fourier PE is the dominant positive factor**: 12,544-param Linear(48→256) projection. Always include `--fourier-pe` flag.
-3. **vol_p effectively solved**: val=4.17% beats AB-UPT target of 6.08%. Test gap is 2.5–3x — overfitting concern.
-4. **wsy/wsz are the decisive binding constraint**: Both 2.5–3x above AB-UPT targets. Require architectural or loss-level solution.
-5. **128 slices ≠ better**: More mesh resolution without model capacity increase is counterproductive.
-6. **Loss reweighting (edward #304)**: Per-channel MSE upweighting for wsy/wsz was falsified — made everything worse. Downweighting also unhelpful.
-7. **Mirror-aug + SW=2.0 (tanjiro #332)**: Strongest wsy signal so far — 7pp wsy drop at ep10. Continue to ep30.
-8. **Universal ~ep30 optimum**: Experiments consistently find their best checkpoint around ep30–31 regardless of T_max. Cosine T_max=30 hits this efficiently.
-9. **Depth > width**: 5L/256d outperforms 5L/384d. Depth (L) scales better than width (d) at this parameter count.
+Wave 8 escalates to physics-aware approaches after the edward #304 mechanism falsification:
+1. **Physics-aware shear prediction**: nezuko #347 (dedicated ws sub-decoder), gilbert #346 (FiLM normal-conditioning) — both currently non-compliant
+2. **Direct axis attacks**: kohaku #343 (ws-only aux loss), haku #341 (surface-loss-weight sweep) — both currently non-compliant
+3. **Scale/capacity**: emma #342 (96k pts), thorfinn #340 (model slices)
+4. **Optimization**: frieren #361 (weight-decay sweep) — non-compliant
 
-## Student Roster Status
+## Targets
 
-| Student | Status | PR |
-|---------|--------|----|
-| alphonse | WIP | #174 |
-| askeladd | WIP | #328 |
-| chihiro | WIP | #254 |
-| dazai | No pod — closed | — |
-| edward | WIP | #304 |
-| emma | WIP | #342 |
-| fern | WIP (code fix) | #360 |
-| frieren | WIP | #361 |
-| gilbert | WIP | #346 |
-| haku | WIP | #341 |
-| kohaku | WIP | #343 |
-| nezuko | WIP | #347 |
-| norman | WIP | #239 |
-| senku | WIP | #325 |
-| tanjiro | WIP | #332 |
-| thorfinn | WIP | #340 |
-| violet | WIP | #330 |
+AB-UPT targets to beat (test_primary):
+- surface_pressure_rel_l2_pct < 3.82
+- wall_shear_rel_l2_pct < 7.29
+- volume_pressure_rel_l2_pct < 6.08 (val=4.17 already beats — preserve on test)
+- wall_shear_x_rel_l2_pct < 5.35
+- wall_shear_y_rel_l2_pct < 3.65 (**binding constraint** — 5.32pp gap at ep36.8)
+- wall_shear_z_rel_l2_pct < 3.63 (**hardest binding constraint** — 7.11pp gap at ep36.8)
+- abupt_axis_mean_rel_l2_pct ~ 4.51 (mean of 5 axis metrics)
 
-**0 idle students** (16 active students, 16 WIP PRs).
+**Current bengio best (val): alphonse #174 ep36.8 abupt=7.085%, 2.575pp from AB-UPT target.** (Pending ep50 confirmation; baseline still officially listed as PR #74 7.2091% until #174 completes.)
 
-## Next Wave Priority Hypotheses
+**val/test gap warning**: ~2x degradation observed on vol_p (val=4.17% → test~8-12%). Cannot claim AB-UPT wins from val alone — test_primary confirmation required for all axes before submission.
 
-1. **SWA reprise** — once regression is fixed (fern #360), re-run SWA last-5 from PR #276 code
-2. **Tangent-frame wall shear prediction** (frieren's #337 concept) — reassign to a responsive student once frieren #361 clears
-3. **Larger model + longer schedule** — 6L/256d or 5L/320d after regression resolved
-4. **Architecture: cross-attention surface decoder** — separate encoder/decoder for surface vs volume with cross-attn bridge
-5. **Data augmentation: random rotation/jitter** — geometric augmentation beyond mirror
-6. **Re-run all Wave 8 experiments on fixed codebase** — once #360 merges, all current wave 8 results carry ~1pp uncertainty; high-value experiments (#332 tanjiro, #343 kohaku, #347 nezuko) should be re-run
+## Potential Next Research Directions (Wave 9+)
 
-## Research Log Pointers
+1. **T_max stacking**: Apply T_max=50 (alphonse #174 winner) to tanjiro mirror+SW=2.0 recipe. Likely highest-EV next experiment given both are validated levers.
+2. **Physics-aware shear deep-dive**: If Wave 8 (nezuko/gilbert) survives the compliance window and shows wsy/wsz improvement, stack with tanjiro mirror-aug + SW=2.0 + T_max=50 for the full physics-informed recipe.
+3. **Equivariant heads**: SO(3)/SE(3) heads for shear vector prediction — next step if geometric frame doesn't solve it.
+4. **Multi-scale attention / dual-resolution heads**: Coarse for volume, fine for surface-shear regions (boundary-layer-aware).
+5. **Ensembling**: Top-K seed averaging; SWA over multiple cosine restarts.
+6. **Pretraining**: Synthetic/simplified CFD pretraining then DrivAerML fine-tune.
+7. **LR schedule surgery**: SGDR-style warm restarts — alphonse T_max=50 win suggests longer/structured schedules help; restarts could find lower minima.
+8. **Architecture deeper dive**: 6L/512d/8H at DDP8 if violet #330 v2 shows signal; combine with T_max=60–80.
+9. **Coordinate-normalization audit**: If fern #360 confirms a structural regression, the highest priority is to fix the regression and re-baseline Wave 5–8 results.
 
-- All experiments: `/research/EXPERIMENTS_LOG.md`
-- Current baseline: `/BASELINE.md` — alphonse Wave 1 val=7.209% (run `m9775k1v`, FourierEmbed confirmed)
-- Research ideas: `/research/RESEARCH_IDEAS_2026-04-30_15:34.md`
+## Historical Wave Log (summary)
+
+- Wave 1 (#74 alphonse): val_abupt=7.2091% → merged as bengio best
+- Waves 2-4: baseline correction, FourierEmbed canonical impl (chihiro #176), LR sweep confirmed lr=3e-4
+- Waves 5-6: Mostly non-compliant (mass closures). Active signals: gilbert mirror-aug (Trial A ep11=9.91%), haku SW=2.0 (positive)
+- Wave 7: edward #304 mechanism falsification, chihiro #254 raw rel-L2 falsified, tanjiro #332 mirror+SW=2.0 stacked strongest wsy signal yet, **alphonse #174 NEW BEST at 7.085%** (cosine T_max=50 validated)
+- Wave 8 (in flight): physics-aware shear escalation; 6 PRs in compliance window expiring 13:42–14:00Z
+
+## Constraints (hard)
+
+- `--no-compile-model`: Mandatory (PyTorch 2.x Inductor crash at validation)
+- `--fourier-pe`: Mandatory for comparability (n_params=3,249,813 confirms FourierEmbed)
+- Kill-threshold operator: Use `<VALUE` (kill if metric NOT below VALUE). `>VALUE` inverts semantics.
+- Epochs hard cap: `SENPAI_MAX_EPOCHS`; wall-clock: `SENPAI_TIMEOUT_MINUTES`
