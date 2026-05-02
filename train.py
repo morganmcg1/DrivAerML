@@ -65,6 +65,23 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+def apply_surface_mask(surface_mask: torch.Tensor, mask_ratio: float) -> torch.Tensor:
+    """Bernoulli-drop currently-valid surface positions for MAE-style point masking.
+
+    Each True position in `surface_mask` is independently kept with probability
+    (1 - mask_ratio). Already-invalid (False) positions remain False.
+    Returns the input mask unchanged when mask_ratio <= 0.0. Volume mask is
+    intentionally left untouched by callers — this helper operates only on the
+    surface mask.
+    """
+    if mask_ratio <= 0.0:
+        return surface_mask
+    if mask_ratio >= 1.0:
+        raise ValueError(f"surface_mask_ratio must be < 1.0, got {mask_ratio}")
+    keep = torch.rand(surface_mask.shape, device=surface_mask.device, dtype=torch.float32) >= mask_ratio
+    return surface_mask & keep
+
+
 class DropPath(nn.Module):
     """Stochastic depth: drop entire residual branch with probability `drop_prob`."""
 
@@ -606,6 +623,7 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     optimizer: str = "adamw"
+    surface_mask_ratio: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1788,6 +1806,11 @@ def main(argv: Iterable[str] | None = None) -> None:
     n_params = sum(param.numel() for param in model.parameters())
     if is_main:
         print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+        print(
+            f"[surface_mask] config.surface_mask_ratio={config.surface_mask_ratio:.3f} "
+            f"(applied to surface_mask only in train loop; volume_mask is never modified)",
+            flush=True,
+        )
 
     if is_distributed:
         train_model = DistributedDataParallel(
@@ -1916,6 +1939,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     train_start = time.time()
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
+    surface_mask_logged = False
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
@@ -1938,6 +1962,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            if config.surface_mask_ratio > 0.0:
+                surface_valid_before = int(batch.surface_mask.sum().item())
+                batch.surface_mask = apply_surface_mask(batch.surface_mask, config.surface_mask_ratio)
+                if is_main and not surface_mask_logged:
+                    surface_valid_after = int(batch.surface_mask.sum().item())
+                    surface_dropped = surface_valid_before - surface_valid_after
+                    surface_realized = surface_dropped / max(surface_valid_before, 1)
+                    print(
+                        f"[surface_mask] ratio={config.surface_mask_ratio:.3f} "
+                        f"surface dropped={surface_dropped}/{surface_valid_before} "
+                        f"({surface_realized:.4f}) "
+                        f"volume_mask UNTOUCHED",
+                        flush=True,
+                    )
+                    surface_mask_logged = True
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
