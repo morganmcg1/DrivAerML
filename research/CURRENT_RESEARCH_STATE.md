@@ -45,10 +45,10 @@ torchrun --standalone --nproc_per_node=8 train.py \
 |---|---|---|---|
 | #232 | askeladd | model_heads=4 | **MERGED — CURRENT SOTA** |
 | #240 | frieren | mlp_ratio=8 | **CLOSED NEGATIVE** — best val=9.5498% at ep7.52 (+0.485pp). |
-| #251 | fern | T_max=8+warmup+lr-min=5e-6 | Running; ep5=11.835%, **NEGATIVE** (behind frieren at every epoch). Let finish; close when done. |
+| #251 | fern | T_max=8+warmup+lr-min=5e-6 | **CLOSED NEGATIVE** — best val=9.4088% at ep9, +0.344pp vs SOTA. T_max=8 cosine hypothesis falsified. Branch deleted. |
 | #280 | frieren | MLP activation ablation (SwiGLU/ReLU²/GELU) | 4-arm sequential DDP8 sweep; started ~22:59 UTC 2026-05-01; ~18h total; results due ~17:00 UTC 2026-05-02. Branch has merge conflict — rebase reminder posted. |
 | #282 | edward | lion-beta1=0.95 | Running; ep3=26.10% (gap narrowing, down from ep2=53.3%). Monitor for convergence. |
-| #283 | nezuko | model-layers=5 depth sweep | Running; ep1=64.78% (warmup normal). Monitor ep2+. |
+| #283 | nezuko | model-layers=5 depth sweep | Running; ~2.7h elapsed, current val=11.41%, steep descent slope (-0.615%/1k steps), best_epoch=None. Monitor for completion. |
 | #287 | alphonse | QK-norm on SOTA stack (per-head L2 norm) | Round 16 — pod starting; 0 comments. |
 | #289 | chihiro | lr-warmup-epochs=2 (1ep→2ep) | Round 17 — pod starting; 0 comments. |
 | #290 | emma | RFF retest on current SOTA stack (heads=4+warmup=1ep) | Round 17 — pod starting; 0 comments. |
@@ -61,6 +61,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #299 | askeladd | Muon optimizer (Newton-Schulz orthogonalized momentum) | Round 17 — pod starting; 0 comments. |
 | #300 | tanjiro | Post-attention + post-MLP RMSNorm (sandwich-norm) | Round 17 — pod starting; 0 comments. |
 | #309 | thorfinn | grad-clip-norm=0.5 (Lion+EMA+warmup+heads=4) | Round 17 — pod starting; 0 comments. |
+| #311 | edward | GRAPE/Positional Encoding 3-arm ablation (RFF ctrl / STRING separable / GRAPE-M learned) | Round 18 — assigned ~02:00 UTC 2026-05-02; ~13.5h total (~15:30 UTC results). Focus: tau_y/tau_z ×3.27/×3.43 gap. |
 
 ## Active Human Research Directives
 
@@ -86,7 +87,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 - model-layers=5 (nezuko #283) — closing depth axis
 
 **Deferred (assign when next student frees up):**
-- GRAPE/Group Representational Position Encoding (Issue #285) — 3-arm: RFF ctrl / 3D STRING / GRAPE-M
+- ~~GRAPE/Group Representational Position Encoding (Issue #285)~~ — **IN-FLIGHT** edward #311 (3-arm: RFF ctrl / STRING / GRAPE-M)
 - U-net skip connections (Modded-NanoGPT inspired)
 - Sequence packing / FlexAttention (throughput lever)
 - Dedicated volume decoder head (volume_pressure ×2.08 gap)
@@ -113,7 +114,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | model_hidden_dim | CLOSED NEGATIVE | 512 SOTA; 768 tanjiro #241 negative; 768+muP in-flight (#295) |
 | lr_cosine T_max=9 | CLOSED NEGATIVE | Confirmed ×2 (edward #195, tanjiro #202) |
 | lr_cosine T_max=14 | CLOSED NEGATIVE | thorfinn #247: ep7=9.925%, +0.86pp above SOTA |
-| lr_cosine T_max=8 + anneal | NEGATIVE (in-flight) | fern #251: ep5=11.83%, behind frieren at every epoch |
+| lr_cosine T_max=8 + anneal | **CLOSED NEGATIVE** | fern #251: best val=9.4088% at ep9, +0.344pp vs SOTA |
 | lr_cosine T_max=12 | In-flight | kohaku #293: fills T_max gap; pod starting |
 | lr_warmup_epochs=1 | WIN (compound) | PR #222 fern — +2.03% val, +1.51% test |
 | lr_warmup_epochs=2 | In-flight | chihiro #289: pod starting |
@@ -121,6 +122,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | warmup+T_max=9 compound | In-flight | norman #294: pod starting |
 | grad-clip-norm=0.5 | In-flight | haku #292 + thorfinn #309: pods starting |
 | RFF features | In-flight | emma #290: SOTA-stack retest (heads=4+warmup); pod starting |
+| GRAPE-M / STRING / RFF ablation | In-flight | edward #311: 3-arm positional encoding ablation; started ~02:00 UTC 2026-05-02 |
 | ema-decay=0.9995 | In-flight | gilbert #291: with warmup=1ep; pod starting |
 | batch_size | CLOSED NEGATIVE | batch=5 OOM'd; batch-size lever closed; 4=SOTA |
 | compile_model | CLOSED ANOMALOUS | askeladd #281: ep2=45% anomalous; closed |

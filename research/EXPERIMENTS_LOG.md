@@ -6,6 +6,25 @@ Targets to beat (lower is better, AB-UPT public reference):
 `surface_pressure 3.82`, `wall_shear 7.29`, `volume_pressure 6.08`,
 `tau_x 5.35`, `tau_y 3.65`, `tau_z 3.63`.
 
+## 2026-05-02 05:30 UTC — PR #251 CLOSED: fern T_max=8+warmup+lr-min=5e-6 — NEGATIVE (+0.344pp vs SOTA)
+
+- **Branch:** `fern/cosine-tmax8-lrmin5e-6-warmup` (closed, branch deleted)
+- **Hypothesis:** Shorter cosine cycle (T_max=8 vs SOTA T_max≈50-flat) forces the LR to anneal within the training budget, potentially improving generalization. Combined with lr_min=5e-6 floor and lr_warmup_epochs=1.
+- **W&B run:** `uederk7o`
+
+| Epoch | val_abupt | surface_pressure | wall_shear | volume_pressure | Gap to SOTA (9.065%) |
+|-------|-----------|-----------------|------------|-----------------|----------------------|
+| 1     | ~54%      | —               | —          | —               | warmup |
+| 5     | 11.835%   | —               | —          | —               | +2.770 pp |
+| 9     | **9.4088%** | **6.090%** | **10.634%** | **5.390%** | **+0.344 pp** |
+| (best_epoch=9) | | | | | |
+
+- **test_abupt:** 10.591% (vs SOTA 10.190%)
+- **Conclusion:** T_max=8 aggressive cosine creates per-axis trade-offs — volume_pressure improved slightly (5.390% vs SOTA 12.656%) but wall_shear regressed (10.634% vs SOTA 9.910%). No uniform benefit. Shorter cosine cycle hypotheses are exhausted (T_max=8 negative, T_max=9 negative ×2, T_max=14 negative). The T_max≈flat schedule of SOTA is confirmed best.
+- **Key learning:** `lr_cosine T_max=8 + anneal` added to closed-negative learnings. The cosine T_max axis is now fully explored: 8 (neg), 9 (neg ×2), 14 (neg). SOTA flat-50 confirmed.
+
+---
+
 ## 2026-05-02 00:45 — PR #287 ASSIGNED: alphonse QK-norm on SOTA stack (Round 16)
 
 - **Branch:** `alphonse/qk-norm-attention`
