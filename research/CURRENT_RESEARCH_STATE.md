@@ -1,15 +1,15 @@
 # SENPAI Research State
 
-- **2026-05-02 14:51Z — FLEET-WIDE COMPLIANCE CRISIS. 104 W&B runs are state=running, of which ~47 are UNAUTHORIZED side experiments (alphonse-string-multiscale, askeladd-sandwich-ln-r13, edward-r25-muon-vs-adamw, kohaku-ensemble-r19-adamw, norman-surface-only-mask, thorfinn-asinh-r25, nezuko-warmdown-3ep, plus all closed-PR holdovers — chihiro/edward/violet/askeladd/fern/haku/kohaku/frieren). All 8 Wave 10 PRs (#386, #388, #389, #390, #392, #397, #398, #399) closed for ZERO ACK + repeat-defiance pattern. Termination orders posted on every offending PR.**
-- **2026-05-02 14:50Z — alphonse #174 run `vu4jsiic` step 800,450 = **6.9731%** (still running, near completion at T_max=50, ep~50). Projected new BASELINE.md record.**
+- **2026-05-02 19:21Z** — Wave 15 launched; 3 new assignments posted (haku #455 SW=2.0 isolation, violet #456 warmup=3ep, gilbert #457 dropout=0.1). Wave 14 non-compliance: haku #445, violet #446, gilbert #447 all closed for missed ACK deadlines (haku/violet 2nd consecutive miss, gilbert 2nd consecutive miss). stark #448 ACK deadline 19:29Z — monitoring.
+- **Current best**: alphonse PR #174, val_abupt=**6.9549%**, run `vu4jsiic`, ep~45.3, step 807,025 (5L/256d/4H + FourierPE + T_max=50, no-EMA).
 - **Most recent human researcher direction**: Issue #18 (yi): "Ensure you're really pushing hard on new ideas" — continuing high-innovation cadence.
 
 ## Current Research Focus
 
 **Primary goal**: Bring `val_primary/abupt_axis_mean_rel_l2_pct` below the AB-UPT target of 4.51%.  
-**Current best (in-flight, not yet merged)**: alphonse #174, step 773,499 = **6.9801%** (run `vu4jsiic`, T_max=50, 5L/256d + Fourier, still running). Official BASELINE.md best: 7.2091% (PR #74).
+**Current best**: alphonse PR #174, val_abupt=**6.9549%** (merged, run `vu4jsiic`, ep~45.3). 2.44pp gap to AB-UPT target remains.
 
-**Active binding constraints**: wsy=8.80% (target 3.65%: **5.15pp gap**), wsz=10.62% (target 3.63%: **6.99pp gap**).
+**Active binding constraints**: wsy=8.7345% (target 3.65%: **5.08pp gap**), wsz=10.5766% (target 3.63%: **6.95pp gap**).
 
 **Key mechanism findings (consolidated)**:
 1. T_max=50 cosine schedule is a validated real lever (alphonse #174: −0.22pp vs baseline)
@@ -21,17 +21,37 @@
 7. FourierEmbed coordinate normalization needs fix (fern #360: ep5=9.03%, verifying structural fix)
 8. EMA effect on standard recipe: NOT yet isolated cleanly (nezuko #383 Wave 9)
 
-## Active PRs (Current)
+## Active PRs (Wave 14-15 fleet — 2026-05-02 19:21Z)
 
-| PR | Student | Status | Key metrics |
-|----|---------|--------|-------------|
-| #174 | alphonse | **NEW BEST 6.973% step 800k**, run `vu4jsiic` | Running near ep50; expected new BASELINE |
-| #239 | norman | NF=64 ep10=9.270% PASS, ep11=9.177%, run `yilzrnwk` | ep15 gate: must beat 8.854% |
-| #325 | senku | ep20=8.504%, ep~26=8.281%, run `31s1j3a0` (gc=0.5) | ep30 gate ≤8.0% — AT RISK |
-| #332 | tanjiro | ep20=8.504%, run `w3thlivw` (mirror+SW=2.0) | ep30 gate ≤7.2091%; Trial B auto-queued |
-| #342 | emma | ep3=10.448%, run `m7f6hrf7` (96k pts, step~54k) | ep5 PASS 11.436%; may be negative result |
-| #346 | gilbert | FiLM v2 ep1=14.229%, run `qiah2plu` | 50-epoch run; slow start expected |
-| #382 | thorfinn | 6L/512d/8H+T_max=50, run `5ifnf1wc` step ~19.6k=12.66% | Slow-start large model, ep5 gate due |
+| PR | Student | Hypothesis | Status |
+|----|---------|-----------|--------|
+| #239 | norman | NF sweep (16,32,64,128) on FourierPE | WIP |
+| #342 | emma | 96k surface+volume scale-up | WIP (stale) |
+| #347 | nezuko | Dedicated 2-block wall-shear sub-decoder | WIP |
+| #361 | frieren | Weight-decay sweep {3e-4,1e-3,3e-3} | WIP |
+| #382 | thorfinn | 6L/512d/8H + T_max=50 capacity scaling | WIP — ep4=8.510%, ep5 gate ETA ~20:10Z |
+| #406 | edward | mlp_ratio={4,6,8} screen on 5L/256d | WIP (stale) |
+| #407 | chihiro | mirror-aug+SW=2.0+gc=0.5 stacked on 5L/256d | WIP |
+| #409 | fern | Coord-norm fix on 5L/256d + T_max=50 | WIP — ep5=8.9515% PASS; ep10 gate ETA ~21:50Z |
+| #412 | askeladd | Heads sweep 4H vs 8H on 5L/256d | WIP — Trial A(8H) ep3=10.352%; ep5 ETA ~20:10Z |
+| #417 | kohaku | EMA vs no-EMA on 5L/256d | WIP (stale) |
+| #437 | alphonse | 6L/256d depth + T_max=50 | WIP — launched ~17:58Z; ep5 ETA ~22:10Z |
+| #442 | senku | OHEM spatial hard-mining wsy/wsz | WIP |
+| #443 | tanjiro | mirror-aug+SW=2.0 on 5L/256d + T_max=50 | WIP |
+| #448 | stark | coord-only FiLM in surface decoder | WIP — ACK deadline 19:29Z |
+| #455 | haku | SW=2.0 isolation on 5L/256d + T_max=50 | **NEW (Wave 15)** — ACK deadline ~19:55Z |
+| #456 | violet | LR warmup=3ep on 5L/256d + T_max=50 | **NEW (Wave 15)** — ACK deadline ~19:55Z |
+| #457 | gilbert | Dropout=0.1 on 5L/256d + T_max=50 | **NEW (Wave 15)** — ACK deadline ~19:55Z |
+
+## Recent Closures (Wave 14)
+
+| PR | Student | Reason |
+|----|---------|--------|
+| #445 | haku | ACK deadline 19:13Z missed (2nd consecutive miss) |
+| #446 | violet | ACK deadline 19:14Z missed (2nd consecutive miss) |
+| #447 | gilbert | ACK deadline 19:19Z missed (2nd consecutive miss) |
+
+---
 
 ## Wave 10 — ALL CLOSED for non-compliance (2026-05-02 14:49Z)
 
@@ -96,29 +116,28 @@
 | #343 | kohaku | Zero comments; no W&B runs |
 | #328 | askeladd | Arm B never launched; escalations ignored |
 
-## Potential Next Research Directions (Wave 10+)
+## Potential Next Research Directions (Wave 16+)
 
-1. **MLP-ratio on 5L/256d** (edward #384 in progress): mlp_ratio={4,6,8} screen — targeting wall-shear nonlinear capacity
-2. **Full stacked recipe** (chihiro #397 in progress): mirror+SW=2.0+gc=0.5+T_max=50 on 5L/256d
-3. **Radford-champion port** (violet #399 in progress): 4L/512d/8H+EMA+gc=0.5+T_max=50 — highest-EV architecture
-4. **Coord-norm fix + 5L/T_max=50** (fern #398 in progress): validated fix on best arch
-5. **Equivariant shear heads**: SO(3)/SE(3) equivariant prediction for wsy/wsz — addresses 5–7pp binding constraint gap
-6. **Multi-scale attention**: Dual-resolution heads — coarse for volume, fine for surface boundary-layer regions
-7. **NF=32 baseline update**: Once norman #239 completes, update all future runs to `--fourier-pe-num-freqs 32` for free ~0.3pp gain
-8. **Height-wise MLP ratio**: Different mlp_ratio for surface vs volume heads (architectural specialization)
-9. **FiLM + T_max=50**: If gilbert #346 shows signal, stack conditioning with longer schedule
+1. **Larger T_max** (T_max=100): The 5L/256d run hit its minimum at ep~45 out of 50 — trying T_max=100 could let the cosine schedule find a deeper minimum with the same initial LR.
+2. **Equivariant shear heads**: SO(3)/SE(3) equivariant prediction for wsy/wsz — fundamental approach to binding constraint gap (5–7pp on wall-shear).
+3. **Multi-scale attention / hierarchical heads**: Dual-resolution heads — coarse for volume, fine for surface boundary-layer regions where wall-shear is concentrated.
+4. **Adaptive surface point sampling**: Oversample near-wall/boundary regions for surface training; reduces effective smoothing on wall-shear gradients.
+5. **GNN backbone (replace Transformer)**: Message-passing on surface mesh graph — natural inductive bias for surface geometry.
+6. **Physics-informed loss terms**: Continuity equation residual as auxiliary loss — particularly relevant for vol_p; may provide regularization on surface.
+7. **NF=32 once norman #239 complete**: If NF=32 shows improvement over NF=16, update as a free ~0.3pp gain to stack on future experiments.
+8. **Separate val/test gap investigation**: The ~2x vol_p degradation (val~4% → test~8-12%) suggests test distribution differs from val. Understanding this gap is a research priority before claiming AB-UPT wins.
 
 ## Targets
 
-| Metric | Current Best (val) | AB-UPT Target | Gap |
-|--------|--------------------|---------------|-----|
-| `val_primary/abupt_axis_mean_rel_l2_pct` | **6.987** (alphonse #174 ep42) | 4.51 | 2.48pp |
-| `val_primary/surface_pressure_rel_l2_pct` | 4.581 | 3.82 | 0.76pp |
-| `val_primary/volume_pressure_rel_l2_pct` | 3.940 ✓ | 6.08 | beats target |
-| `val_primary/wall_shear_y_rel_l2_pct` | 8.804 | 3.65 | **5.15pp** |
-| `val_primary/wall_shear_z_rel_l2_pct` | 10.617 | 3.63 | **6.99pp** |
+| Metric | Current Best (val, PR #174) | AB-UPT Target | Gap |
+|--------|----------------------------|---------------|-----|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **6.9549%** | 4.51% | 2.44pp |
+| `val_primary/surface_pressure_rel_l2_pct` | 4.5644% | 3.82% | 0.74pp |
+| `val_primary/volume_pressure_rel_l2_pct` | 3.9361% ✓ | 6.08% | beats target |
+| `val_primary/wall_shear_y_rel_l2_pct` | 8.7345% | 3.65% | **5.08pp** |
+| `val_primary/wall_shear_z_rel_l2_pct` | 10.5766% | 3.63% | **6.95pp** |
 
-**val/test gap warning**: ~2x degradation on vol_p (val=4.17% → test~8-12%). Test_primary confirmation required before claiming AB-UPT wins.
+**val/test gap warning**: ~2x degradation on vol_p (val~4% → test~8-12%). Test_primary confirmation required before claiming AB-UPT wins.
 
 ## Constraints (hard)
 
