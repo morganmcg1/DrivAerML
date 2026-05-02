@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-02 ~08:35 UTC (cycle re-entry)
+- **Date:** 2026-05-02 ~09:05 UTC (cycle re-entry)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -57,18 +57,19 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 
 ## In-flight — Round 16-18 fleet (8 active WIP PRs; 2 SOTA-crossing, 1 wrap-up, 1 idle, 08:35 UTC)
 
-**Active DrivAerML students (ddp8 pods):** alphonse, askeladd, edward, frieren, nezuko, tanjiro, thorfinn. **Idle:** fern.
+**Active DrivAerML students (ddp8 pods):** alphonse, askeladd, edward, frieren, fern, nezuko, tanjiro, thorfinn.
 
 | PR | Student | Hypothesis | W&B | Latest val | vs SOTA | Status |
 |---|---|---|---|---:|---:|---|
 | #311 | edward | STRING-separable / GRAPE-M / RFF (3-arm) | `gcwx9yaa` ArmB | **7.742% ep9** | **-1.30pp** | **WINNER — fast-track merge after test eval** |
 | #287 | alphonse | QK-norm (per-head L2) | `nesrmoi9` | **8.953% ep10** | **-0.086pp** | **WINNER — let finish, test eval, merge** |
-| #345 | thorfinn | RFF retest on SOTA stack (sigma=1.0, 32 feats) | — | starting | — | New assignment Round 18 |
-| #283 | nezuko | model-layers=5 | `z6xc97gg` | 9.523% (~ep11) | +0.48pp | Trending down, near SOTA but unlikely to cross |
-| #280 | frieren | MLP activation (SwiGLU/ReLU²/GELU) | `k76fngw1` ArmC | 9.153% best | +0.114pp | **Wrap-up directed** — skip Arm D, post final table, mark ready |
+| #345 | thorfinn | RFF retest on SOTA stack (sigma=1.0, 32 feats) | — | starting | — | Round 18 |
+| #283 | nezuko | model-layers=5 | `z6xc97gg` | 9.523% (~ep11) | +0.48pp | Trending down, unlikely to cross |
+| ~~#280~~ | ~~frieren~~ | ~~MLP activation (SwiGLU/ReLU²/GELU)~~ | `k76fngw1` ArmC | 9.153% | +0.114pp | **CLOSED — informative-negative** |
+| **#352** | **frieren** | **Per-channel output-head scaling (tau_y/z magnitude calibration)** | — | — | — | **NEW — assigned Round 19** |
 | #299 | askeladd | Muon optimizer (canonical lr=0.02) | `t3o9jib0` | 13.241% (~ep10) | +4.20pp | Slow convergence, decision at ep10–12 |
 | #323 | tanjiro | 2-layer MLP volume decoder head | restarted | (in restart) | — | Restarting after divergence |
-| ~~#320~~ | ~~fern~~ | ~~U-net skip connections~~ | `1d2c2a6q` | 9.594% final | +0.555pp | **CLOSED — negative result** |
+| #351 | fern | surface-tangent-frame projection loss for tau_y/tau_z | — | — | — | WIP |
 
 ## Active Human Research Directives
 
@@ -92,7 +93,7 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 
 **Architecture watch:**
 - nezuko #283 layers=5: 9.523% at ~ep11, monotone but unlikely to cross — wait for finish.
-- frieren #280: wrap-up directed (SwiGLU 9.153% > GELU 9.196% by 0.043pp, both above SOTA).
+- frieren #280: CLOSED informative-negative (SwiGLU 9.153% > GELU 9.196%, +0.114pp above SOTA; ReLU² OOM on 4L/512d/65k+65k DDP8). frieren reassigned to #352 (per-channel output-head scaling).
 - thorfinn #345: RFF retest on Lion+EMA+heads=4 stack starting fresh.
 
 **Optimizer:**
@@ -122,7 +123,8 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 | **STRING-separable PE (GRAPE-M)** | **WINNING in-flight** | **edward #311 ArmB val=7.742% ep9 (-1.30pp)** |
 | **QK-norm (per-head L2)** | **WINNING in-flight** | **alphonse #287 val=8.953% ep10 (-0.086pp)** |
 | U-net skips | CLOSED NEGATIVE | fern #320 final 9.594% (+0.555pp) |
-| MLP activation (SwiGLU/ReLU²) | Wrap-up | frieren #280: SwiGLU 9.153 > GELU 9.196, ReLU² OOM at 4L/512d/65k+65k |
+| MLP activation (SwiGLU/ReLU²) | CLOSED NEGATIVE | frieren #280: SwiGLU 9.153 > GELU 9.196 (0.043pp, below noise), ReLU² OOM at 4L/512d/65k+65k DDP8 |
+| Per-channel output-head scaling | In-flight | frieren #352: s∈R^4 init=1 on surface_out + s∈R^1 on volume_out; targets tau_y/z magnitude calibration |
 | Sandwich-norm (RMSNorm) | CLOSED NEGATIVE | tanjiro #300 diverged |
 | Muon (canonical) | In-flight | askeladd #299 13.24% slow |
 | MLP volume decoder | Restarting | tanjiro #323 |
@@ -132,12 +134,13 @@ Modest improvement but a clean orthogonal architectural delta (per-head L2 norm 
 ## Largest Remaining Gaps to AB-UPT
 
 1. **volume_pressure** ×2.05 (12.484% vs 6.08%) — tanjiro MLP decoder restart; nezuko layers=5 also hits this axis.
-2. **tau_y** ×3.27, **tau_z** ×3.42 — surface-tangent-frame projection is the next priority lever (assign to fern after she's freed).
+2. **tau_y** ×3.27, **tau_z** ×3.42 — two parallel approaches in-flight: fern #351 (tangent-frame projection loss) and frieren #352 (per-channel output-head scaling).
 
 ## Next Priorities (when students free up)
 
 1. **Compound stack:** STRING-separable (#311) + QK-norm (#287) + grad-clip=0.5 SOTA. Assign as soon as both winners merge.
-2. **Surface-tangent-frame projection** for tau_y/tau_z (×3.27/×3.42 gaps) — assign to fern (now idle).
+2. **Surface-tangent-frame projection** for tau_y/tau_z — fern #351 in-flight.
+   **Per-channel output-head scaling** — frieren #352 in-flight (complementary tau_y/z lever).
 3. **Sequence packing / FlexAttention** — throughput lever to enable more epochs within budget.
 4. **Muon-with-warmup** — if vanilla Muon stalls, retry with `lr_warmup_epochs=1`.
 5. **Volume-decoder iteration** — if tanjiro restart works, sweep MLP depth/init/bottleneck.

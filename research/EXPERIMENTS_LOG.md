@@ -8,6 +8,19 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-02 09:05 UTC — PR #352 ASSIGNED: frieren per-channel output-head scaling (tau_y/tau_z magnitude calibration)
+
+- **Branch:** `frieren/output-head-scaling`
+- **Hypothesis (H09):** The shared linear output head of `surface_out` (R^4) and `volume_out` (R^1) systematically under-predicts the magnitude of `tau_y` and `tau_z` relative to `cp` and `tau_x`. Adding a learnable per-channel scalar multiplier (s ∈ R^4 / R^1, init=1.0) gives the optimizer a direct 5-parameter path to recalibrate per-axis magnitudes — a strict superset of the current model (init = baseline).
+- **Diagnostic value:** Logging converged `s_tau_y` and `s_tau_z` during training. If they diverge from 1.0 significantly while `s_cp` stays near 1.0, that confirms systematic magnitude-bias in the shared head.
+- **Implementation:** `nn.Parameter(torch.ones(SURFACE_Y_DIM))` after `surface_out`; applied before mask multiply; CLI flags `--use-output-head-scaling` (Arm B) and `--output-head-affine` (Arm C, adds per-channel bias).
+- **Sweep:** 3-arm DDP8 sequential — Arm A control, Arm B scale-only, Arm C scale+bias. `--wandb_group frieren-output-head-scaling`.
+- **Baseline:** SOTA PR #309 val=9.0389%, test=10.126%; tau_y=11.941, tau_z=12.407 (×3.27/×3.42 gap to AB-UPT).
+- **Status:** ASSIGNED — awaiting frieren pod pickup.
+- **Composes with:** fern #351 (tangent-frame projection loss — loss-side vs output-side lever; complementary, can compound).
+
+---
+
 ## 2026-05-02 08:35 UTC — PR #351 ASSIGNED: fern surface-tangent-frame projection loss (tau_y/tau_z gap)
 
 - **Branch:** `fern/surface-tangent-frame-tau`
@@ -37,7 +50,7 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
-## 2026-05-02 08:30 UTC — PR #280 WRAP-UP DIRECTED: frieren MLP activation ablation (SwiGLU/ReLU²/GELU)
+## 2026-05-02 09:00 UTC — PR #280 CLOSED: frieren MLP activation ablation (SwiGLU/ReLU²/GELU) — informative-negative
 
 - **Branch:** `frieren/mlp-activation-ablation`
 - **Hypothesis:** SwiGLU or ReLU² activations outperform GELU in the Transolver MLP blocks (FFN up-act-down pattern).
@@ -53,8 +66,8 @@ Targets to beat (lower is better, AB-UPT public reference):
   2. ReLU² is memory-infeasible at 4L/512d/65536+65536 DDP8 config — OOM at step 1 all 8 ranks (93GB in use, 4GB allocation failed). Rules out ReLU² on this config size permanently.
   3. Arm A control ran at 9.196% vs SOTA 9.039% — 0.157pp gap due to config drift (old tay base with `lr_warmup_epochs=1` and `model_heads=8` before PR #232 merged heads=4).
   4. Arm D (uniform SwiGLU across all MLP biases) skipped — marginal benefit of Arm C does not justify continuation.
-- **Wrap-up directed:** frieren instructed to skip Arm D, post final results table, mark ready for review. Will be closed as informative-negative.
-- **Status:** Awaiting frieren post + mark-ready.
+- **Conclusion:** PR closed as informative-negative without rebase+rerun. The 0.043pp Arm A→Arm C delta is below single-seed noise floor on a drifted base (Arm A control already 0.157pp above SOTA). A clean re-run on rebased SOTA stack is unlikely to flip the verdict, and several SOTA-relevant PRs (heads=4, lr_warmup_epochs=0, RFF-off) have moved on. SwiGLU finding logged; ReLU² OOM finding rules it out for this config.
+- **Status:** CLOSED. Branch `frieren/mlp-activation-ablation` deleted. frieren idle — fresh assignment incoming.
 
 ---
 
