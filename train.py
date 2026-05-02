@@ -563,6 +563,11 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    dynamic_loss_weighting: bool = False
+    dynamic_grad_ema_decay: float = 0.9
+    dynamic_warmup_steps: int = 500
+    dynamic_weight_clip_min: float = 0.1
+    dynamic_weight_clip_max: float = 10.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1259,6 +1264,21 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return pred.sum() * 0.0
 
 
+def masked_mse_channel(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, channel: int
+) -> torch.Tensor:
+    """Mean-of-squared-error over masked points for a single channel.
+
+    pred, target: [B, N, C]. mask: [B, N] bool. Used to expose per-task
+    losses (surface_pressure, wall_shear_x/y/z) for GradNorm-lite.
+    """
+    if not bool(mask.any()):
+        return pred.sum() * 0.0
+    diff_sq = (pred[..., channel] - target[..., channel]).pow(2)
+    mask_f = mask.to(pred.dtype)
+    return (diff_sq * mask_f).sum() / mask_f.sum().clamp_min(1)
+
+
 def weighted_masked_mse_per_channel(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -1300,6 +1320,91 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+PER_TASK_LOSS_NAMES = (
+    "surface_pressure",
+    "wall_shear_x",
+    "wall_shear_y",
+    "wall_shear_z",
+    "volume_pressure",
+)
+
+
+def _apply_dynamic_loss_weighting(
+    *,
+    per_task_losses: dict[str, torch.Tensor],
+    shared_params: list[torch.nn.Parameter],
+    grad_ema: dict[str, float],
+    global_step: int,
+    warmup_steps: int,
+    ema_decay: float,
+    weight_clip_min: float,
+    weight_clip_max: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """GradNorm-lite: w_i = clamp(median_j(EMA(g_j)) / EMA(g_i), [w_min, w_max]).
+
+    Per-task gradient norms are measured at the last shared LayerNorm (cheap:
+    one head matmul + LN). EMA-smoothed across steps, weights renormalized so
+    sum(w_i) = N_tasks, then clamped. During the first `warmup_steps` we hold
+    all weights at 1.0 so the model has time to leave random init before we
+    react to its gradients.
+    """
+    n_tasks = len(per_task_losses)
+    log: dict[str, float] = {}
+    if global_step < warmup_steps:
+        weights = {name: 1.0 for name in per_task_losses}
+        log["train/dynamic_weight/active"] = 0.0
+    else:
+        log["train/dynamic_weight/active"] = 1.0
+        last_idx = n_tasks - 1
+        for idx, (name, loss_i) in enumerate(per_task_losses.items()):
+            grads = torch.autograd.grad(
+                loss_i,
+                shared_params,
+                retain_graph=True,
+                create_graph=False,
+                allow_unused=True,
+            )
+            valid = [g for g in grads if g is not None]
+            if valid:
+                g_vec = torch.cat([g.detach().float().reshape(-1) for g in valid])
+                g_norm = float(g_vec.norm(2).item())
+                if not math.isfinite(g_norm):
+                    g_norm = grad_ema[name]
+            else:
+                g_norm = grad_ema[name]
+            grad_ema[name] = ema_decay * grad_ema[name] + (1.0 - ema_decay) * g_norm
+            log[f"train/dynamic_grad_norm/{name}"] = g_norm
+            log[f"train/dynamic_grad_ema/{name}"] = grad_ema[name]
+            del valid, grads
+            _ = idx == last_idx  # keep retain_graph=True everywhere; final backward consumes the graph
+
+        ema_values = sorted(grad_ema.values())
+        median_g = ema_values[len(ema_values) // 2]
+        raw_weights = {
+            name: median_g / max(grad_ema[name], 1e-6) for name in per_task_losses
+        }
+        w_sum = sum(raw_weights.values())
+        if w_sum <= 0.0:
+            weights = {name: 1.0 for name in per_task_losses}
+        else:
+            scale = n_tasks / w_sum
+            weights = {
+                name: max(weight_clip_min, min(weight_clip_max, raw_weights[name] * scale))
+                for name in per_task_losses
+            }
+        log["train/dynamic_weight/median_grad_ema"] = median_g
+        log["train/dynamic_weight/sum_after_clip"] = float(sum(weights.values()))
+
+    total = None
+    for name, loss_i in per_task_losses.items():
+        weight = float(weights[name])
+        log[f"train/dynamic_weight/{name}"] = weight
+        term = weight * loss_i
+        total = term if total is None else total + term
+    assert total is not None
+    return total, log
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1313,7 +1418,7 @@ def train_loss(
     use_tangential_wallshear_loss: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
-) -> tuple[torch.Tensor, dict[str, float]]:
+) -> tuple[torch.Tensor, dict[str, float], dict[str, torch.Tensor]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -1359,6 +1464,26 @@ def train_loss(
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # Per-task losses (gradient-carrying tensors) for GradNorm-lite dynamic
+        # weighting. Channels 0..3 are cp, tau_x, tau_y, tau_z on the surface
+        # decoder; volume_pressure is the volume MSE. Use the same surface
+        # tensors that fed the static loss so tangential projection (when
+        # enabled) propagates to the per-task signal too.
+        per_task_losses: dict[str, torch.Tensor] = {
+            "surface_pressure": masked_mse_channel(
+                surface_pred_used, surface_target_used, batch.surface_mask, 0
+            ),
+            "wall_shear_x": masked_mse_channel(
+                surface_pred_used, surface_target_used, batch.surface_mask, 1
+            ),
+            "wall_shear_y": masked_mse_channel(
+                surface_pred_used, surface_target_used, batch.surface_mask, 2
+            ),
+            "wall_shear_z": masked_mse_channel(
+                surface_pred_used, surface_target_used, batch.surface_mask, 3
+            ),
+            "volume_pressure": volume_loss,
+        }
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
@@ -1390,7 +1515,7 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
-    return loss, metrics
+    return loss, metrics, per_task_losses
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -1763,6 +1888,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/dynamic_weight/*", step_metric="global_step")
+    wandb.define_metric("train/dynamic_grad_norm/*", step_metric="global_step")
+    wandb.define_metric("train/dynamic_grad_ema/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -1785,6 +1913,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
 
+    # GradNorm-lite state. EMA-smoothed per-task gradient norms; shared params
+    # are the last LayerNorm before the surface/volume head split. Cheap to
+    # autograd to (one head matmul) and a stable signal across all 5 tasks.
+    dynamic_grad_ema: dict[str, float] = {name: 1.0 for name in PER_TASK_LOSS_NAMES}
+    dynamic_shared_params: list[torch.nn.Parameter] = []
+    if config.dynamic_loss_weighting:
+        unwrapped = getattr(model, "_orig_mod", model)
+        dynamic_shared_params = [p for p in unwrapped.norm.parameters() if p.requires_grad]
+        if not dynamic_shared_params:
+            raise RuntimeError(
+                "dynamic_loss_weighting requires trainable parameters in model.norm; "
+                "found none."
+            )
+
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
             print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
@@ -1798,7 +1940,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False):
-            loss, batch_loss_metrics = train_loss(
+            loss, batch_loss_metrics, per_task_losses = train_loss(
                 model,
                 batch,
                 transform,
@@ -1811,6 +1953,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
             )
+            dynamic_weight_log: dict[str, float] = {}
+            if config.dynamic_loss_weighting:
+                loss, dynamic_weight_log = _apply_dynamic_loss_weighting(
+                    per_task_losses=per_task_losses,
+                    shared_params=dynamic_shared_params,
+                    grad_ema=dynamic_grad_ema,
+                    global_step=global_step,
+                    warmup_steps=config.dynamic_warmup_steps,
+                    ema_decay=config.dynamic_grad_ema_decay,
+                    weight_clip_min=config.dynamic_weight_clip_min,
+                    weight_clip_max=config.dynamic_weight_clip_max,
+                )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
             if not loss_is_finite:
@@ -1931,6 +2085,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
                     train_log[f"train/{key}"] = value
+            if dynamic_weight_log:
+                train_log.update(dynamic_weight_log)
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
