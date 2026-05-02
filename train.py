@@ -65,6 +65,16 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+def maybe_append_cross_flow_index(surface_x: torch.Tensor, use_cfi: bool) -> torch.Tensor:
+    if not use_cfi:
+        return surface_x
+    # surface_x columns: [x, y, z, n_x, n_y, n_z, area]; cfi = sqrt(n_y^2+n_z^2).
+    ny = surface_x[..., 4:5]
+    nz = surface_x[..., 5:6]
+    cfi = torch.sqrt(ny * ny + nz * nz)
+    return torch.cat([surface_x, cfi], dim=-1)
+
+
 class DropPath(nn.Module):
     """Stochastic depth: drop entire residual branch with probability `drop_prob`."""
 
@@ -582,6 +592,7 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    use_cross_flow_index: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -754,7 +765,9 @@ def make_loaders(
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    surface_input_dim = SURFACE_X_DIM + (1 if config.use_cross_flow_index else 0)
     return SurfaceTransolver(
+        surface_input_dim=surface_input_dim,
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
@@ -1370,13 +1383,15 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    use_cross_flow_index: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    surface_x_in = maybe_append_cross_flow_index(batch.surface_x, use_cross_flow_index)
     with autocast_context(device, amp_mode):
         out = model(
-            surface_x=batch.surface_x,
+            surface_x=surface_x_in,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
@@ -1499,6 +1514,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    use_cross_flow_index: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1529,9 +1545,10 @@ def evaluate_split(
         batch = batch.to(device)
         surface_target_norm = transform.apply_surface(batch.surface_y)
         volume_target_norm = transform.apply_volume(batch.volume_y)
+        surface_x_in = maybe_append_cross_flow_index(batch.surface_x, use_cross_flow_index)
         with autocast_context(device, amp_mode):
             out = model(
-                surface_x=batch.surface_x,
+                surface_x=surface_x_in,
                 surface_mask=batch.surface_mask,
                 volume_x=batch.volume_x,
                 volume_mask=batch.volume_mask,
@@ -1951,6 +1968,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                use_cross_flow_index=config.use_cross_flow_index,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2144,7 +2162,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_cross_flow_index=config.use_cross_flow_index)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2271,7 +2289,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_cross_flow_index=config.use_cross_flow_index)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2306,7 +2324,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_cross_flow_index=config.use_cross_flow_index)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
