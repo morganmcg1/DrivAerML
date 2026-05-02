@@ -70,6 +70,113 @@ class RFFEncoding(nn.Module):
         proj = 2.0 * math.pi * (x @ self.B.to(dtype=x.dtype))
         return torch.cat([proj.sin(), proj.cos()], dim=-1)
 
+    @torch.no_grad()
+    def diagnostics(self) -> dict[str, float]:
+        B = self.B.float()
+        return {"B_norm": float(B.norm().item()), "B_abs_mean": float(B.abs().mean().item())}
+
+
+class StringEncoding(nn.Module):
+    """Separable axis-aligned learnable frequency encoding (STRING-inspired).
+
+    Each of the ``in_dim`` axes gets ``num_features_per_axis`` independent learnable
+    frequencies parameterised as (log-amplitude, phase). The output dimension is
+    ``in_dim * num_features_per_axis * 2``.
+    """
+
+    def __init__(self, in_dim: int, num_features_per_axis: int = 11, sigma: float = 1.0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features_per_axis = num_features_per_axis
+        # Initialise log-frequencies near log(sigma); small noise avoids symmetry
+        self.log_freq = nn.Parameter(
+            torch.randn(in_dim, num_features_per_axis) * 0.1 + math.log(sigma)
+        )
+        self.phase = nn.Parameter(torch.zeros(in_dim, num_features_per_axis))
+
+    @property
+    def output_dim(self) -> int:
+        return self.in_dim * self.num_features_per_axis * 2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        freq = self.log_freq.exp()  # [in_dim, F]
+        # x: [..., in_dim]  ->  [..., in_dim, F]
+        proj = x.unsqueeze(-1) * freq + self.phase
+        proj = 2.0 * math.pi * proj
+        # sin/cos then flatten last two dims: [..., in_dim*F*2]
+        return torch.cat([proj.sin(), proj.cos()], dim=-1).flatten(start_dim=-2)
+
+    @torch.no_grad()
+    def diagnostics(self) -> dict[str, float]:
+        log_freq = self.log_freq.detach().float()
+        freq = log_freq.exp()
+        phase = self.phase.detach().float()
+        out = {
+            "log_freq_mean": float(log_freq.mean().item()),
+            "log_freq_std": float(log_freq.std().item()),
+            "freq_min": float(freq.min().item()),
+            "freq_max": float(freq.max().item()),
+            "phase_std": float(phase.std().item()),
+            "phase_abs_max": float(phase.abs().max().item()),
+        }
+        # Per-axis frequency spread reveals whether axes have specialized
+        for axis in range(self.in_dim):
+            out[f"freq_axis{axis}_mean"] = float(freq[axis].mean().item())
+            out[f"freq_axis{axis}_std"] = float(freq[axis].std().item())
+        return out
+
+
+class GrapeEncoding(nn.Module):
+    """Minimal GRAPE-M: learnable spectral projection planes (Knigge et al. 2024).
+
+    Identical in structure to :class:`RFFEncoding` but the projection matrix ``B``
+    is an ``nn.Parameter`` trained end-to-end rather than a fixed buffer.
+    Output dim = ``2 * num_features``.
+    """
+
+    def __init__(self, in_dim: int, num_features: int = 32, sigma: float = 1.0):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features = num_features
+        init = torch.randn(in_dim, num_features) * sigma
+        self.B = nn.Parameter(init.clone())
+        # B_init kept as buffer (non-trainable, DDP-broadcast) so we can measure
+        # how far the learned planes drift from initialization.
+        self.register_buffer("B_init", init.clone())
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.num_features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        proj = 2.0 * math.pi * (x @ self.B.to(dtype=x.dtype))
+        return torch.cat([proj.sin(), proj.cos()], dim=-1)
+
+    @torch.no_grad()
+    def diagnostics(self) -> dict[str, float]:
+        B = self.B.detach().float()
+        B_init = self.B_init.detach().float()
+        delta = B - B_init
+        init_norm = float(B_init.norm().item())
+        cur_norm = float(B.norm().item())
+        delta_norm = float(delta.norm().item())
+        # Per-row (per learned-plane) drift, useful for spotting dead rows
+        delta_row = delta.norm(dim=1)  # [in_dim]
+        out = {
+            "B_norm": cur_norm,
+            "B_abs_mean": float(B.abs().mean().item()),
+            "B_init_norm": init_norm,
+            "B_delta_norm": delta_norm,
+            "B_relative_drift": delta_norm / max(init_norm, 1e-12),
+            "B_max_row_drift": float(delta_row.max().item()),
+            "B_min_row_drift": float(delta_row.min().item()),
+        }
+        # Per-axis row drift reveals anisotropic learning
+        for axis in range(self.in_dim):
+            out[f"B_axis{axis}_row_drift"] = float(delta_row[axis].item())
+            out[f"B_axis{axis}_norm"] = float(B[axis].norm().item())
+        return out
+
 
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
@@ -237,6 +344,8 @@ class Transformer(nn.Module):
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
+    _ENCODING_MODES = ("rff", "string", "grape")
+
     def __init__(
         self,
         *,
@@ -253,8 +362,13 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
+        pos_encoding_mode: str = "rff",
     ):
         super().__init__()
+        if pos_encoding_mode not in self._ENCODING_MODES:
+            raise ValueError(
+                f"pos_encoding_mode must be one of {self._ENCODING_MODES}, got {pos_encoding_mode!r}"
+            )
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
@@ -262,6 +376,7 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         self.rff_num_features = rff_num_features
         self.rff_sigma = rff_sigma
+        self.pos_encoding_mode = pos_encoding_mode
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -269,21 +384,29 @@ class SurfaceTransolver(nn.Module):
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
 
-        if rff_num_features > 0:
-            self.surface_rff = RFFEncoding(
+        def _make_encoding() -> nn.Module | None:
+            if rff_num_features <= 0:
+                return None
+            if pos_encoding_mode == "string":
+                # STRING: per-axis features; use rff_num_features as features-per-axis
+                return StringEncoding(
+                    in_dim=space_dim, num_features_per_axis=rff_num_features, sigma=rff_sigma
+                )
+            if pos_encoding_mode == "grape":
+                return GrapeEncoding(
+                    in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
+                )
+            # default: rff
+            return RFFEncoding(
                 in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
             )
-            self.volume_rff = RFFEncoding(
-                in_dim=space_dim, num_features=rff_num_features, sigma=rff_sigma
-            )
-            rff_out_dim = 2 * rff_num_features
-        else:
-            self.surface_rff = None
-            self.volume_rff = None
-            rff_out_dim = 0
 
-        surface_proj_in = surface_extra_dim + rff_out_dim
-        volume_proj_in = volume_extra_dim + rff_out_dim
+        self.surface_rff = _make_encoding()
+        self.volume_rff = _make_encoding()
+        enc_out_dim = self.surface_rff.output_dim if self.surface_rff is not None else 0
+
+        surface_proj_in = surface_extra_dim + enc_out_dim
+        volume_proj_in = volume_extra_dim + enc_out_dim
         self.project_surface_features = (
             LinearProjection(surface_proj_in, n_hidden) if surface_proj_in > 0 else None
         )

@@ -93,6 +93,7 @@ class Config:
     model_dropout: float = 0.0
     rff_num_features: int = 0
     rff_sigma: float = 1.0
+    pos_encoding_mode: str = "rff"
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -176,6 +177,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        pos_encoding_mode=config.pos_encoding_mode,
     )
 
 
@@ -573,6 +575,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+                # Encoding diagnostics: tell us whether learnable encodings (STRING/GRAPE)
+                # are actually moving from init or stuck — answers "is the learnable
+                # advantage real" question that motivates the ablation.
+                for tag, enc in (("surface", base_model.surface_rff), ("volume", base_model.volume_rff)):
+                    if enc is not None and hasattr(enc, "diagnostics"):
+                        for k, v in enc.diagnostics().items():
+                            log_metrics[f"train/encoding/{tag}/{k}"] = v
                 wandb.log(log_metrics)
                 tag = " *" if improved else ""
                 print(
