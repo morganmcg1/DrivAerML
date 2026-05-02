@@ -1,15 +1,17 @@
 # SENPAI Research State
-- 2026-04-29 (Round 20 — 16 WIP PRs on yi, 0 idle; Round-20 reviews complete: #243 closed, #284/#298 sent back, chihiro PR #335 assigned)
+- 2026-04-29 (Round 21 — 16 WIP PRs on yi, 0 idle; tanjiro PR #249 closed (asinh dead end), tanjiro PR #336 assigned (per-channel output heads))
 
-## Latest Survey Pass (2026-04-29 Round 20)
+## Latest Survey Pass (2026-04-29 Round 21)
 
 **Reviewed this round:**
-- **PR #243 (chihiro)**: CLOSED — aux-rel-l2 hypothesis not supported. All 3 weights (0.1/0.5/1.0) failed to beat 9.291 bar. Best val=10.897 (test=12.017). Aux signal magnitude too small (train/aux~0.02), amplified instability at higher weights. Confounded by forced lr=2e-4 at w≥0.5.
-- **PR #284 (alphonse)**: SENT BACK for 8-GPU re-run. 6L/512d showed dramatic per-epoch convergence gains (ep1 −45pp, ep2 −30pp vs 4L/512d) but budget cut at 3 epochs. Cosine T_max mismatch (T_max=999) caused LR to hold flat. DDP port + Lion + lr-warmup-epochs infrastructure now on branch. Re-run: ddp8 fleet, `--nproc_per_node=8`, `--cosine-t-max-epochs 6`.
-- **PR #298 (fern)**: SENT BACK with Arm A2 instructions. Arm A (sincos) = 16.68% vs Arm B (learned-FF) = 16.78% — no FF signal. Arm C's 14.47% win is entirely warmup confound (500 steps vs 10,883 steps). A2: sincos + 500-step warmup to confirm warmup as the driver.
+- **PR #243 (chihiro)**: CLOSED — aux-rel-l2 hypothesis not supported. All 3 weights (0.1/0.5/1.0) failed to beat 9.291 bar. Best val=10.897 (test=12.017). Aux signal magnitude too small (train/aux~0.02), amplified instability at higher weights.
+- **PR #284 (alphonse)**: SENT BACK for 8-GPU re-run. 6L/512d showed dramatic per-epoch convergence gains (ep1 −45pp, ep2 −30pp vs 4L/512d) but budget cut at 3 epochs. Cosine T_max mismatch (T_max=999). Re-run: ddp8 fleet, `--nproc_per_node=8`, `--cosine-t-max-epochs 6`.
+- **PR #298 (fern)**: SENT BACK with Arm A2 instructions. Arm A (sincos) = 16.68% vs Arm B (learned-FF) = 16.78% — no FF signal. Arm C's 14.47% win is entirely warmup confound. A2: sincos + 500-step warmup to confirm.
+- **PR #249 (tanjiro)**: CLOSED (Round 21) — asinh normalization decisively refuted. Arm A asinh-on-v5 (u83ut9x2) at 31.62% vs Arm B baseline-ctrl-v5 (vya47gmk) at 15.43% — 2.05× regression on every channel including target tau_y/z. 5 rounds to achieve stable training; softplus-barrier scaffolding salvaged. See EXPERIMENTS_LOG.
 
-**New assignment:**
-- **PR #335 (chihiro)**: tau_y/z loss-weight curriculum (ramp W 1.0→2.0 or 1.0→3.0 over first 3 epochs). Tests whether static W=2 from step-0 hurts early-epoch learning vs easing into the upweighting. Also tests W_max=3 cleanly for the first time. 3-arm: curriculum-1to2, curriculum-1to3, static-W=2 control.
+**New assignments:**
+- **PR #335 (chihiro)**: tau_y/z loss-weight curriculum (ramp W 1.0→2.0 or 1.0→3.0 over first 3 epochs). 3-arm: curriculum-1to2, curriculum-1to3, static-W=2 control.
+- **PR #336 (tanjiro)**: Per-channel MLP output heads — 4 independent 2-layer MLP heads (hidden=256) replacing single shared LinearProjection(512, 4). Targets gradient interference across channels (tau_x dominates shared head, tau_y/z get residual capacity). 2-arm: control vs per-channel-h256.
 
 ## Most Recent Research Direction from Human Researcher Team
 
@@ -71,7 +73,7 @@
 | #286 | frieren | Bilateral-symmetry TTA (y→-y reflection at inference) | 15 | |
 | #284 | alphonse | 6L/512d depth+width scaling — 8-GPU re-run on ddp8 fleet | 15 | Sent back: needs 8 GPUs + cosine-t-max-epochs 6; DDP/Lion port now on branch |
 | #262 | nezuko | Linear-warmdown LR (WSD-style) on 4L/512d SOTA | 15 | |
-| #249 | tanjiro | asinh normalization for wall-shear targets | 14 | |
+| #336 | tanjiro | Per-channel MLP output heads for surface (4 heads: surface_p/tau_x/y/z, hidden=256 each) | 21 | NEW — attacks gradient interference in shared linear head, orthogonal to all in-flight tau_y/z fixes |
 | #208 | askeladd | Sandwich-LN to unlock 8L/256d depth (stability fix) | 13 | |
 
 ## Key Architecture Configuration (PR #222 winning base config)

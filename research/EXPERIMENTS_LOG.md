@@ -1,5 +1,30 @@
 # SENPAI Research Results
 
+## 2026-04-29 21:30 — PR #249 [tanjiro]: asinh normalization for wall-shear targets — CLOSED (definitive dead end)
+
+- Branch: `tanjiro/asinh-target-normalization` (deleted)
+- Hypothesis: Applying asinh transform to wall-shear targets (tau_x/y/z) before computing MSE would compress heavy tails, reduce gradient noise on tau_y/z outliers, and close the ~3.7-4.0× tau_y/z gap to AB-UPT.
+
+Five debugging rounds (v1-v5) were required to achieve stable training. Final controlled comparison at ep1 under v5 stability scaffolding (softplus barrier on attention temperature, kill threshold removal):
+
+| Metric | Arm A asinh-on-v5 (`u83ut9x2`) | Arm B baseline-ctrl-v5 (`vya47gmk`) | A:B ratio | PR #183 baseline ref `bplngfyo` ep1 |
+|---|---:|---:|---:|---:|
+| `val abupt_axis_mean_rel_l2_pct` | 31.62% | 15.43% | **2.05×** | 15.4% |
+| `val tau_x_rel_l2` | 2× worse | — | — | — |
+| `val tau_y_rel_l2` | 2× worse | — | — | — |
+| `val tau_z_rel_l2` | 2× worse | — | — | — |
+| `val surface_p_rel_l2` | 2× worse | — | — | — |
+| `val volume_p_rel_l2` | 2× worse | — | — | — |
+
+Baseline: 9.291% val_abupt (PR #222, merge bar)
+
+- **Result: CLOSED — hypothesis decisively refuted.** asinh produces a uniform 2× regression across every output channel, including the target tau_y/z axes that motivated the experiment. Apples-to-apples vs Arm B baseline-ctrl under identical v5 scaffolding leaves no ambiguity.
+- **Why this fails**: Whatever internal mechanism the model uses to handle heavy-tailed wall-shear targets, it works better in raw target space than under compressive non-linearity. The asinh transform shifts the model's effective loss landscape away from the regime it learns well in.
+- **Diagnostic salvage**: Five rounds of stability work yielded reusable scaffolding — softplus barrier on attention temperature parameter (prevents collapse <1e-2), grad-norm kill threshold removal at lr<5e-4, and post-val LR-floor instability mapping. Available for future high-instability hypotheses.
+- **Closing tanjiro for fresh assignment**: per-channel separate output heads (PR #336 forthcoming).
+
+---
+
 ## 2026-04-29 20:10 — PR #243 [chihiro]: aux-rel-l2-weight sweep (0.1/0.5/1.0) — CLOSED (hypothesis not supported)
 
 - Branch: `chihiro/aux-rel-l2-weight-sweep` (deleted)
