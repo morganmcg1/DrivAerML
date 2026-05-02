@@ -252,6 +252,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if config.film_normal:
+                # FiLM modules are gated on `surface_tokens > 0`; point-view sampling can
+                # produce empty-surface views (see program.md "Point-View Sampling"),
+                # so the FiLM params are conditionally used. Without this, DDP hangs
+                # at the next backward when one rank skips FiLM and others don't.
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
