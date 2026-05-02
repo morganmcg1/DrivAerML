@@ -832,6 +832,20 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_huber(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    delta: float = 0.5,
+) -> torch.Tensor:
+    e = pred - target
+    abs_e = e.abs()
+    quadratic = torch.minimum(abs_e, torch.full_like(abs_e, delta))
+    linear = abs_e - quadratic
+    loss = 0.5 * quadratic.square() + delta * linear
+    return masked_mean(loss, mask)
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,

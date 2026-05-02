@@ -49,6 +49,7 @@ from trainer_runtime import (
     init_wandb_run,
     is_valid_primary_metric,
     make_loaders,
+    masked_huber,
     masked_mse,
     metric_namespace,
     parse_kill_thresholds,
@@ -79,6 +80,8 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    tau_loss_type: str = "rel_l2"
+    tau_huber_delta: float = 0.5
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -188,6 +191,8 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    tau_loss_type: str = "rel_l2",
+    tau_huber_delta: float = 0.5,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -199,19 +204,43 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        if tau_loss_type == "huber":
+            sp_loss = masked_mse(
+                out["surface_preds"][..., 0:1],
+                surface_target[..., 0:1],
+                batch.surface_mask,
+            )
+            tau_loss = masked_huber(
+                out["surface_preds"][..., 1:4],
+                surface_target[..., 1:4],
+                batch.surface_mask,
+                delta=tau_huber_delta,
+            )
+            surface_loss = sp_loss + tau_loss
+        elif tau_loss_type == "rel_l2":
+            sp_loss = None
+            tau_loss = None
+            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        else:
+            raise ValueError(
+                f"Unknown tau_loss_type '{tau_loss_type}'. Supported: rel_l2, huber."
+            )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if sp_loss is not None:
+        metrics["surface_pressure_loss"] = float(sp_loss.detach().cpu().item())
+        metrics["tau_loss"] = float(tau_loss.detach().cpu().item())
+    return loss, metrics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -324,6 +353,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    tau_loss_type=config.tau_loss_type,
+                    tau_huber_delta=config.tau_huber_delta,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -361,6 +392,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if "surface_pressure_loss" in batch_loss_metrics:
+                        train_log["train/surface_pressure_loss"] = batch_loss_metrics["surface_pressure_loss"]
+                        train_log["train/tau_loss"] = batch_loss_metrics["tau_loss"]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
