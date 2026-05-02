@@ -117,6 +117,8 @@ class Config:
     raw_rel_l2_weight: float = 0.0
     fourier_pe: bool = False
     fourier_pe_num_freqs: int = 8
+    wsy_loss_weight: float = 1.0
+    wsz_loss_weight: float = 1.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -157,6 +159,17 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def _surface_per_channel_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+) -> torch.Tensor:
+    expanded_mask = mask.unsqueeze(-1).to(device=pred.device, dtype=pred.dtype)
+    diff_sq = (pred - target).square() * expanded_mask
+    n_valid = expanded_mask.sum().clamp_min(1.0)
+    return diff_sq.sum(dim=tuple(range(diff_sq.ndim - 1))) / n_valid
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -167,6 +180,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     raw_rel_l2_weight: float = 0.0,
+    surface_channel_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -178,7 +192,17 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_per_channel_mse = _surface_per_channel_mse(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )
+        if surface_channel_weights is None:
+            surface_loss = surface_per_channel_mse.mean()
+        else:
+            weights = surface_channel_weights.to(
+                device=surface_per_channel_mse.device,
+                dtype=surface_per_channel_mse.dtype,
+            )
+            surface_loss = (surface_per_channel_mse * weights).sum() / weights.sum().clamp_min(1e-12)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -204,12 +228,21 @@ def train_loss(
             aux_loss = aux_loss + vol_rel_l2
             loss = loss + raw_rel_l2_weight * aux_loss
 
+    surface_channel_names = ("surface_pressure", "wsx", "wsy", "wsz")
+    per_channel_log: dict[str, float] = {}
+    detached_per_channel = surface_per_channel_mse.detach().cpu()
+    for ch_idx, ch_name in enumerate(surface_channel_names):
+        if ch_idx < detached_per_channel.numel():
+            per_channel_log[f"surface_per_channel_mse/{ch_name}"] = float(
+                detached_per_channel[ch_idx].item()
+            )
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **per_channel_log,
         **aux_metrics,
     }
 
@@ -239,6 +272,24 @@ def main(argv: Iterable[str] | None = None) -> None:
             volume_y_mean=stats["volume_y_mean"].to(device),
             volume_y_std=stats["volume_y_std"].to(device),
         )
+        surface_channel_weights_cfg = (
+            1.0,
+            1.0,
+            float(config.wsy_loss_weight),
+            float(config.wsz_loss_weight),
+        )
+        surface_channel_weights = torch.tensor(
+            surface_channel_weights_cfg, device=device, dtype=torch.float32
+        )
+        surface_channel_weights_active = any(
+            abs(w - 1.0) > 1e-12 for w in surface_channel_weights_cfg
+        )
+        if state.is_main:
+            print(
+                "Surface channel loss weights "
+                "[surface_pressure, wsx, wsy, wsz] = "
+                f"{surface_channel_weights_cfg}"
+            )
 
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())
@@ -325,6 +376,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
                     raw_rel_l2_weight=config.raw_rel_l2_weight,
+                    surface_channel_weights=(
+                        surface_channel_weights
+                        if surface_channel_weights_active
+                        else None
+                    ),
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -368,6 +424,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                                      "raw_rel_l2/vol_pressure"):
                         if _aux_key in batch_loss_metrics:
                             train_log[f"train/{_aux_key}"] = batch_loss_metrics[_aux_key]
+                    for _per_channel_key in (
+                        "surface_per_channel_mse/surface_pressure",
+                        "surface_per_channel_mse/wsx",
+                        "surface_per_channel_mse/wsy",
+                        "surface_per_channel_mse/wsz",
+                    ):
+                        if _per_channel_key in batch_loss_metrics:
+                            train_log[f"train/{_per_channel_key}"] = batch_loss_metrics[_per_channel_key]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
