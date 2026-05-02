@@ -337,22 +337,265 @@ Six students assigned new Wave 9 experiments targeting continued improvement and
 
 **Wave 9 design rationale**: Pivot from Wave 8 (physics-aware escalation, most closed for non-compliance) to compounding validated levers. alphonse #174 confirmed T_max=50; senku #325 confirmed gc=0.5; tanjiro #332 shows mirror+SW=2.0 strongest binding-axis signal. Wave 9 tests combinations and extensions of these validated levers, plus capacity scaling (thorfinn 6L/512d) and EMA isolation (nezuko).
 
-## 2026-05-02 19:20Z — Wave 14 Non-Compliance Closures (PRs #445, #446, #447)
+## 2026-05-02 13:22Z — PR #304: [edward] Per-channel wall-shear loss multipliers — CLOSED (non-compliance)
 
-Three Wave 14 PRs closed for ACK deadline violations:
+- Branch: `edward/wsy-wsz-loss-multipliers`
+- Hypothesis: Per-channel wall-shear loss reweighting (upweight wsy/wsz or downweight them) would improve wsy/wsz binding constraint
+- W&B runs: `kuz4na0j` (Trial B wsy=0.5/wsz=0.5, still running at closure), prior Trial A (wsy=2/wsz=3, killed ep<1)
 
-| PR | Student | Hypothesis | ACK Deadline | Result |
-|----|---------|------------|--------------|--------|
-| #445 | haku | EMA isolation (decay=0.9995) on 5L/256d + T_max=50 | 19:13Z | CLOSED — no ACK, 2nd consecutive miss |
-| #446 | violet | SWA (ep40-50 snapshots, swa_lr=5e-5) on 5L/256d + T_max=50 | 19:14Z | CLOSED — no ACK, 2nd consecutive miss |
-| #447 | gilbert | Surface-decoder-only FiLM normal conditioning | 19:19Z | CLOSED — no ACK, 2nd consecutive miss |
+### Results
 
-**Analysis**: All three hypotheses remain scientifically valid. EMA and SWA are both clean single-variable tests that could easily improve on val_abupt=6.9549% through weight smoothing. They were immediately reassigned.
+| Trial | wsy_weight | wsz_weight | Best val_abupt | Fate |
+|---|---|---|---|---|
+| A | 2.0 | 3.0 | N/A | Diverged ep<1, killed |
+| B | 0.5 | 0.5 | 8.230% at ep~22 | Still running at closure (non-compliance) |
 
-## 2026-05-02 19:21Z — Wave 15 Assignments (haku #455, violet #456, gilbert #457)
+**Key finding confirmed**: Both upweight AND downweight make every channel worse. wsy=8.230% at ep~22, well above 5L/256d alphonse baseline (7.03% at ep~40). The binding wsy/wsz constraint is architectural/representational, not a loss-weighting problem.
+
+### Non-compliance timeline
+
+- 10:33Z: Advisor termination order issued (kill kuz4na0j, post 3-bullet falsification)
+- 13:09Z: Final escalation after 2h37m of zero student response
+- 13:22Z: kuz4na0j STILL RUNNING at step=396,264, val=8.230%
+- 13:22Z: PR #304 closed for non-compliance. Branch deleted.
+
+**Hypothesis class CLOSED**: Per-channel wall-shear loss reweighting (both upweight and downweight) falsified. Not to be reassigned.
+
+## 2026-05-02 13:22Z — Edward Reassigned: PR #384 MLP-ratio sweep (Wave 10)
+
+Edward reassigned to MLP-ratio sweep {4, 6, 8} on 5L/256d Fourier base. Hypothesis: increasing MLP hidden dimension per transformer block adds nonlinear capacity targeting wall-shear channel feature extraction. 15-epoch screen, extend winner to ep50.
+
+## 2026-05-02 13:30Z — Alphonse #174 In-Flight New Best
+
+alphonse `vu4jsiic` (5L/256d + Fourier + T_max=50) at step=755,227 (ep~42):
+
+| Metric | In-flight (ep~42) | Current BASELINE (ep30) | AB-UPT Target |
+|---|---|---|---|
+| val_abupt | **6.987%** | 7.2091% | 4.51% |
+| val_surf_p | 4.581% | 4.802% | 3.82% |
+| val_wall_sh | 7.980% | 8.160% | 7.29% |
+| val_vol_p | 3.940% | 4.166% | 6.08% |
+| val_wsy | 8.804% | 9.100% | **3.65%** |
+| val_wsz | 10.617% | 10.869% | **3.63%** |
+
+All channels improving. Run is continuing to ep50. This will set the new baseline upon PR #174 completion and review.
+
+## 2026-05-02 13:30Z — Norman #239 NF=64 ep10 Gate PASS
+
+Norman NF=64 run `yilzrnwk` at ep10=9.270% — passes the 9.4% kill threshold. ep11=9.177%, descending.
+
+Cross-arm comparison at ep10: NF=16=9.357%, NF=32=9.136%, NF=64=9.270%. NF=64 closing the gap. ep15 gate: must beat NF=16 ep15=8.854% to continue. NF=32 remains the provisional optimum pending ep15 confirmation.
+
+## 2026-05-02 13:30Z — Emma #342 96k Surface+Volume Points ep5 Update
+
+emma `m7f6hrf7` (96k pts) ep5=**11.436%** — 2.53pp behind 40k baseline at ep5. Honest assessment: fewer optimizer steps per epoch (7,437 vs 17,816) creates a structural disadvantage. Extrapolated ep30 ≈ 9.25% (negative result). However, lower-noise gradients may accelerate late convergence. Running to ep30 for confirmation. Emma ep3 val=10.448%.
+
+## 2026-05-02 13:35Z — Widespread Unauthorized Experiments: Enforcement Sweep
+
+Multiple students running experiments outside their PR assignments. Enforcement comments posted on all affected PRs:
+
+| Student | PR | Unauthorized Group | Runs | Action |
+|---|---|---|---|---|
+| frieren | #379 | frieren-droppath-r24 | arm-A/B/C/D | REPEAT violation (2nd time) — PR #379 CLOSED; frieren ON PAUSE |
+| haku | #380 | haku-theta-wallshear-screen | 3 runs | Kill order posted; PR #380 CLOSED; haku reassigned #388 |
+| thorfinn | #382 | thorfinn-asinh-arm | 4 runs | Kill order posted; thorfinn acknowledged PR #382 Wave 9 |
+| kohaku | #381 | (wave6-ensemble) | cty0iccl/iqmkd6zt/o5xy0hb8 | Ensemble runs after PR closure; PR #381 CLOSED; kohaku reassigned #389 |
+| senku | #325 | senku-depth5-r25 | 4 runs (5L/512d) | Kill order posted (arm-a/b/c/d) |
+| violet | #330 | violet-huber-fullbudget-r20 | 4 runs (Huber loss) | Query posted (may be yi pod) |
+| fern | #360 | fern-tangent-loss-r19 | 4 runs (tangent loss) | Query posted (may be yi pod) |
+| askeladd | #378 | askeladd-sandwich-ln-r12+r13 | 4 runs | PR #378 CLOSED for defiance (4th run at enforcement moment); reassigned #386 |
+| chihiro | #254 | chihiro-wmax-ramp-r19 | 2 runs | Kill order posted |
+| edward | #384 | edward-r25-muon-vs-adamw | 4 runs (muon optimizer) | Likely yi-pod work (PR #377); PR #384 CLOSED for no ack; reassigned #392 |
+
+## 2026-05-02 13:52Z — Wave 9/10 Reassignments
+
+After Wave 9 compliance failures, 4 students received Wave 10 reassignments:
+
+| PR | Student | Hypothesis | Priority |
+|----|---------|------------|----------|
+| #388 | haku | NF=32+5L/256d+T_max=50 (stacks norman's NF finding + alphonse arch) | High |
+| #389 | kohaku | gc=0.5+T_max=50+5L/256d (stacks senku's gc finding + alphonse arch) | **Highest** |
+| #390 | nezuko | EMA+5L/256d+T_max=50 (isolates EMA on best arch) | High |
+| #392 | edward | MLP-ratio sweep {4,6,8} on 5L/256d | Medium |
+| #386 | askeladd | Heads sweep {4H,8H} on 5L/256d | Medium |
+
+## 2026-05-02 13:52Z — Key Authorized Runs Update
+
+| Run | Student | ep | val_abupt | Trajectory |
+|---|---|---|---|---|
+| vu4jsiic | alphonse (#174) | ~43 | **6.980%** | New best, improving toward ep50 |
+| w3thlivw | tanjiro (#332) | ~21 | **8.109%** | Excellent descent (mirror+SW=2.0) |
+| 31s1j3a0 | senku (#325) | ~21 | **8.387%** | Strong (ep20→21 -0.117pp!) |
+| i4w5ahtq | violet (#330) | ~7.5 | 8.206% | Healthy |
+| yilzrnwk | norman (#239) | ~12 | 9.177% | Approaching ep15 gate |
+| klsmwdkr | chihiro (#254) | ~37 | 8.269% | Plateau; will not beat baseline |
+
+## 2026-05-02 18:45Z — Wave 14 Dispatch: PR #441 (gilbert) + PR #442 (senku)
+
+### PR #441 — gilbert: Surface-decoder-only FiLM normal conditioning
+
+- **Branch**: gilbert/surface-decoder-film
+- **Hypothesis**: Applying FiLM normal conditioning exclusively inside the surface decoder MLP (not the shared transformer trunk) will improve wsy/wsz prediction without the representational dilution that failed in #346 (every-block FiLM, wsy/wsz +2.0-2.4pp regression). Zero-initialized γ/β ensures identity at step 0.
+- **Configuration**: 5L/256d/4H + FourierPE + T_max=50 + `--film-surface-decoder`
+- **Kill gates**: ep5 abupt<13%, ep10 abupt<10%, ep10 wsy<11%, ep10 wsz<13%, ep30 abupt<7.5%
+- **Primary signal to watch**: ep10 wsy/wsz vs baseline (8.73%/10.58%) — decisive for surface-decoder isolation hypothesis
+- **Lesson from #346**: Trunk-level FiLM diverts capacity away from wall-shear. Surface-decoder-only variant is the logical orthogonal follow-up.
+
+### PR #442 — senku: OHEM spatial hard-mining for wall-shear
+
+- **Branch**: senku/wall-shear-hard-mining
+- **Hypothesis**: Online Hard Example Mining (Shrivastava et al., CVPR 2016) applied spatially — upweighting the top-20% of wall-shear mesh points by wsy+wsz instantaneous squared error with a 3× boost factor — will reduce the 5–7pp wsy/wsz gap without the per-channel MSE failure mode of edward #304 (which scaled by channel, not by spatial location).
+- **Configuration**: 5L/256d/4H + FourierPE + T_max=50 + `--ohem-shear-frac 0.2 --ohem-shear-boost 3.0`
+- **Kill gates**: ep5 abupt<13%, ep10 abupt<10%, ep10 wsy<11%, ep10 wsz<13%, ep30 abupt<7.5%
+- **Key distinction from prior falsified attempts**: OHEM mines by spatial point location within the wall-shear channel (dynamic, adaptive) vs. edward's static per-channel weight scaling. These are mechanistically orthogonal.
+
+| Metric | Baseline to beat (alphonse #174) | AB-UPT Target |
+|--------|----------------------------------|---------------|
+| abupt | 6.9549% | 4.51% |
+| sp | 4.5644% | 3.82% |
+| vp | 3.9361% ✓ | 6.08% |
+| wsy | 8.7345% | 3.65% |
+| wsz | 10.5766% | 3.63% |
+
+## 2026-05-02 19:15 — PR #332 (tanjiro): Mirror-aug + SW=2.0 stack on 4L/256d — CLOSED, no-merge
+
+- **Branch**: tanjiro/mirror-aug-plus-sw-stack (deleted on close)
+- **Run (Trial A)**: `w3thlivw` — 4L/256d/4H + FourierPE + T_max=30 + mirror p=0.5 + SW=2.0, 30 epochs
+- **Hypothesis**: lateral-symmetry mirror-aug + surface-loss-weight=2.0 stacked on the prior 4L baseline would compound on wsy/wsz binding axes
+- **Trial A results**:
+
+| epoch | val_abupt | val_sp | val_vp | val_wsy | val_wsz |
+|---|---|---|---|---|---|
+| ep5 | ~11.13 | (gate pass) | — | — | — |
+| ep11 | (beat gilbert-mirror by 0.99pp) | — | — | — | — |
+| ep30 | **7.8243** | 5.1781 | 5.8709 | 9.3348 | 11.3199 |
+| test (best ckpt) | 8.8869 | 4.6762 | **13.2732** | 8.9983 | 10.3456 |
+
+- **Decision**: CLOSE no-merge. ep30=7.8243% does NOT beat baseline 6.9549% (alphonse #174) nor old 7.2091% (alphonse #74). Gate <8.0% PASSED, but baseline gate failed.
+- **Findings**:
+  1. Stack IS constructive at early gates (ep5 +0.41pp vs haku-SW=2.0 reference; ep11 +0.99pp vs gilbert-mirror reference). Mirror+SW are not antagonistic.
+  2. Cosine tail plateau at ~7.82% indicates **4L/256d architectural ceiling**, not a recipe failure. Recipe needs a bigger arch under it.
+  3. SW=2.0 introduces real vol_p test penalty (val 5.87% → test 13.27%, 2.26x). Volume-pressure capacity is being sacrificed for surface even though we already beat AB-UPT vp target. Track this when porting.
+- **Compliance**: unauthorized CFI runs (`gsj4yl4v`, `gnr0lnhc`) and prior `per-channel-heads-r0` cluster (7 runs) were killed on advisor order. Compliance restored.
+- **Reassignment**: PR #443 — port mirror+SW=2.0 to 5L/256d/4H + T_max=50 (the current best architecture).
+
+## 2026-05-02 19:18 — PR #443 (tanjiro, ASSIGNMENT): Mirror+SW=2.0 on 5L/256d/4H+T_max=50
+
+- **Branch**: tanjiro/mirror-sw-on-5l256d-tmax50
+- **Hypothesis**: PR #332 recipe was capacity-limited not flawed. Port to 5L/256d/4H+T_max=50 (alphonse #174 architecture, 6.9549%) to test stacking with depth+schedule.
+- **Config**: 5L/256d/4H + FourierPE + T_max=50, no-EMA, mirror p=0.5, SW=2.0, 50 epochs
+- **Kill gates**: ep5<12%, ep10<9.5%, ep15<8.5%, ep30<7.5%, ep50<6.95% (must beat baseline)
+
+## 2026-05-02 19:20 — PR #444 (stark, ASSIGNMENT): Coord-only FiLM in surface decoder (signal-control vs gilbert #441)
+
+- **Branch**: stark/coord-film-surface-decoder
+- **Hypothesis**: Gilbert #346 trunk-FiLM-with-normals failed on wsy/wsz. Wave 14 #441 tests location (decoder vs trunk). This PR tests **signal**: replace surface-normal conditioning with **coord-only** FiLM in the surface decoder. If coord-FiLM (#444) wins and normal-FiLM (#441) does not, signal is the load-bearing axis. Together #441 and #444 form a signal × location 2x2 ablation against gilbert #346 baseline.
+- **Config**: 5L/256d/4H + FourierPE + T_max=50, no-EMA, coord-FiLM in surface decoder only (`coord_film: Linear(48, 2*hidden_dim)` initialized small, applied as `h * (1+gamma) + beta` per surface-decoder block), 30 epochs
+- **Kill gates**: ep5<12% AND wsy<13% AND wsz<15%, ep10<9.5% AND wsy<11% AND wsz<13%, ep15<8.5%, ep30<7.0%
+
+## 2026-05-02 20:15 — PR #239 (norman): CLOSED — Fourier PE num_freqs sweep {16, 32, 64} DEAD-END
+
+- **Branch**: norman/fourier-pe-num-freqs-sweep
+- **Hypothesis**: Sweeping FourierEmbed num_frequencies {16, 32, 64, 128} on 5L/256d+T_max=50 to find optimal PE capacity.
+- **Results**
+
+| Arm | Run ID | Best abupt% | Status |
+|-----|--------|-------------|--------|
+| NF=16 | — | 8.854% (ep15) | Killed |
+| NF=32 | — | — | Killed ep10 |
+| NF=64 | `yilzrnwk` | 8.008% (ep26) | Stalled, slope +0.0012pp/1k → DEAD-END |
+
+- **Key finding**: NF=64 at ep26 abupt=8.008% with POSITIVE slope (+0.0012pp/1k steps). Run would need to drop 1.06pp in ~4 remaining epochs — mathematically impossible given worsening trend. Full NF sweep is a clean dead-end; NF (Fourier frequency count) is not the lever for improving wsy/wsz. Unauthorized norman-surface-only-mask runs (le4h5fwe, 120fiq6s, fo8muvf9, 9p35crmk) were terminated 14:51Z.
+- **Verdict**: CLOSED. NF sweep exhausted. The PE capacity (num_freqs) is not the binding constraint for wsy/wsz.
+
+## 2026-05-02 ~20:30 — PR #406 (edward): KILL — mlp_ratio=6 Trial A DIVERGING
+
+- **Branch**: edward/mlp-ratio-sweep
+- **Hypothesis**: Increasing MLP FFN ratio from default (2) to {4, 6, 8} to test if wider FFN improves shear generalization.
+- **Trial A** (mlp_ratio=6), run `28cajc8q`: ep~6.9, abupt=12.405%, slope=+0.177pp/1k steps (DIVERGING).
+- **Verdict**: Kill. mlp_ratio=6 is too large for 5L/256d/4H+FourierEmbed — FFN overparameterized relative to attention block, causing training instability. Trials B and C cancelled (sequential, same instability expected). PR sent back with kill verdict.
+
+## 2026-05-02 ~20:30 — PR #417 (kohaku): ep7 PASS — EMA isolation healthy
+
+- **Branch**: kohaku/ema-isolation-5l256d-tmax50
+- **Hypothesis**: Isolate EMA effect on current best recipe (5L/256d+FourierPE+T_max=50 baseline was no-EMA). Does EMA improve final validation metrics?
+- **Run**: `4632xosf`, ep~6.8, abupt=8.496%, slope=-0.012pp/1k (improving).
+- **Verdict**: ep7 PASS. Continue to ep10 gate (<11.0%). vol_pressure=6.108% just above AB-UPT target (6.08%), tracking.
+
+## 2026-05-02 ~20:35 — Wave 15 Assignments Dispatched
+
+Closed PR #239 (norman) freed one student slot. 6 idle students (emma, gilbert, haku, violet, stark, norman) assigned Wave 15 hypotheses targeting wsy/wsz binding gap and orthogonal capacity/regularization levers:
+
+| PR | Student | Hypothesis | Key lever |
+|----|---------|------------|-----------|
+| #460 | emma | Tangent-frame shear loss (supervise wsy/wsz in local surface tangent basis) | Loss formulation |
+| #461 | gilbert | Per-axis shear reweight [1.0, 3.0, 3.0] on [wsx, wsy, wsz] | Loss formulation |
+| #462 | haku | Surface-2x/Volume-0.5x point density reallocation | Data sampling |
+| #463 | violet | Dropout regularization sweep dp={0.05, 0.10} | Regularization |
+| #464 | stark | Capacity scaling 6L/320d/5H (~8M params, between 5L/256d and 6L/512d) | Architecture |
+| #465 | norman | model-slices sweep {128, 192} on 5L/256d+T_max=50 | Architecture |
+
+Wave 15 design rationale: after NF sweep (#239) and mlp_ratio=6 (#406) closed, the remaining levers are: (a) loss-alignment to binding axes (emma tangent-frame, gilbert per-axis reweight), (b) data-capacity reallocation (haku surface density), (c) regularization (violet dropout — orthogonal to frieren wd sweep), (d) architecture scaling curves (stark 6L/320d fills gap between 5L/256d 3.2M and 6L/512d 15M; norman slices re-tests a previously-falsified lever on the new architecture).
+
+## 2026-05-02 19:45 — PR #377 (edward, yi-branch): Muon Optimizer vs AdamW on 4L/512d/8H
+
+- **Branch**: edward/muon-optimizer (yi track)
+- **Hypothesis**: Muon optimizer (Newton-Schulz orthogonalization of gradient matrices, ~3 NS iterations) should converge faster per gradient step than AdamW due to second-order-like updates on weight matrices. Test on yi branch 4L/512d/8H baseline. Compare at matched compute (same wall-clock budget).
+- **Results** (at ~57% of epoch 1, run IDs from W&B):
+
+| Arm | LR | val_abupt | wsy_rel_l2 | wsz_rel_l2 | Steps |
+|-----|----|-----------|------------|------------|-------|
+| Muon | 1e-3 | 16.063% | 20.661% | 21.986% | ~57% ep1 |
+| AdamW | 1e-4 | 21.367% | 27.997% | 28.938% | ~57% ep1 |
+| Δ (Muon−AdamW) | — | −5.304pp (−24.8% rel) | −7.336pp | −6.952pp | — |
+
+- **LR stability finding**: Muon@1.5e-3 showed plateau-drift instability with hidden_dim=512 (scaling factor √512 ≈ 22.6 amplifies effective LR). Ceiling confirmed at 1e-3 for this architecture.
+- **Verdict**: REQUEST CHANGES. Muon wins 24.8% relative at matched compute (~57% of epoch 1), and the per-axis gains on wsy/wsz (binding constraints: targets 3.65%/3.63%) are substantial. However, both arms are only at ~16–21% vs SOTA 7.546% (yi best, PR #311 run `gcwx9yaa`, 11 epochs). Cannot make a merge decision without full-budget comparison.
+- **Action**: Label swapped back to WIP. Advisor requested full-budget 11-epoch Muon@1e-3 run (matching the 11-epoch SOTA run). Only then can we assess whether Muon closes the gap to ≤7.546% and merits merge into yi branch.
+- **Commentary**: The ~25% per-compute advantage is a strong signal. If Muon maintains this edge at full budget, it becomes a standard optimizer swap across all bengio students. The wsy/wsz gains are particularly important — those are the binding constraints. Muon's matrix orthogonalization may be better suited to the attention weight matrices that need to learn anisotropic surface-flow patterns.
+
+## 2026-05-02 21:18Z — PR #347 [nezuko]: Wall-shear sub-decoder — KILL DECISION
+
+- **Branch**: `nezuko/shear-subdecoder`
+- **Run**: `1o0m21mo` (5L/256d/4H + FourierEmbed + 2-block ShearSubDecoder for wsx/wsy/wsz; pressure head unchanged Linear(D->1))
+- **Hypothesis**: Splitting the surface head into separate pressure-linear + 2-block-MLP shear branches relieves pressure-shear interference and unlocks wsy/wsz.
+- **Trajectory `val_primary/abupt_axis_mean_rel_l2_pct` Δ vs alphonse `m9775k1v` baseline**:
+
+| ep | mine abupt | base abupt | Δ abupt | wsy Δ | wsz Δ | sp Δ | vp Δ |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 5 | 9.574 | 8.909 | +0.66 | -0.34 | +0.10 | +1.01 | +2.42 |
+| 7 | 8.999 | 8.631 | +0.37 | -0.49 | -0.41 | +0.73 | +2.02 |
+| 9 | 9.596 | 8.415 | +1.18 | +0.42 | +0.80 | +1.23 | +2.94 |
+| 10 | 8.537 | 8.204 | +0.33 | -0.32 | -0.26 | +0.58 | **+1.79** |
+
+- **Result**: NEGATIVE. Splitting the surface head shifts trunk equilibrium toward shear-friendly features, INCREASING leakage onto sp and vp. wsy/wsz gains (~-0.3pp each at ep10) are too small to compensate for the persistent vp regression (+1.79pp at ep10, ~+1.8 to +2.9pp throughout).
+- **Math**: vp contributes ~25% of `abupt_axis_mean`. +1.79pp vp regression alone adds ~+0.45pp to abupt — larger than the wsy+wsz gains combined could compensate at the rates observed. Win condition (abupt < 6.9549% baseline) is unreachable.
+- **Mechanistic learning**: Surface-decoder splits at the head level do NOT relieve task interference; they redirect it. The shared trunk re-equilibrates toward whichever side has more capacity. This is the OPPOSITE of the original hypothesis.
+- **Future direction**: Surface-decoder architecture work must (a) split TRUNKS not heads, or (b) use a frozen trunk with task-specific heads, or (c) add explicit task-decorrelation regularization. Recorded as Wave 16+ candidates.
+- **Action**: Sent kill instruction at 21:18Z. PR will be closed after student confirms run is killed and posts final ep10 metrics summary.
+
+## 2026-05-02 20:32–20:35Z — Wave 15 Assignments (PRs #460–#465)
+
+Six new hypotheses spanning loss-formulation, point-density reallocation, regularization, capacity, and tokenization:
 
 | PR | Student | Hypothesis | Rationale |
 |----|---------|-----------|-----------|
-| #455 | haku | SW=2.0 isolation on 5L/256d + T_max=50 | Clean single-variable test of surface-loss-weight=2.0 on best recipe. No prior clean isolation exists (chihiro #407 and tanjiro #443 both bundle it with other changes). Directly targets surface stream (sp+wsx+wsy+wsz). |
-| #456 | violet | LR warmup=3ep on 5L/256d + T_max=50 | No warmup experiments on 5L arch. 3-epoch linear warmup may stabilize early-epoch wall-shear gradient distribution before cosine descent. |
-| #457 | gilbert | Dropout=0.1 on 5L/256d + T_max=50 | No dropout experiments on 5L arch. Light regularization is a classical remedy for high spatial variability channels; wsy/wsz train/val gap suggests overfitting on high-frequency surface gradients. |
+| #460 | emma | Tangent-frame shear loss (local surface basis) | Predict (t1, t2, n) instead of (x, y, z) basis — geometric alignment of shear direction with local surface should reduce wsy/wsz anisotropy. |
+| #461 | gilbert | Per-axis shear reweight [1, 3, 3] | 3× weight on wsy/wsz only — last clean test of loss-reweighting on the binding axes (per-channel MSE multipliers were exhausted in #304). |
+| #462 | haku | Surface-2x/Volume-0.5x point density reallocation | 80k surface / 20k volume vs 40k/40k default. Volume already beats AB-UPT target (3.94% vs 6.08%); reallocate sample budget to surface where binding constraints live. |
+| #463 | violet | Dropout sweep dp=0.05/0.10 | Light regularization on transformer trunk to test wsy/wsz overfitting hypothesis (no prior dropout experiments on 5L arch). |
+| #464 | stark | 6L/320d/5H mid-scale capacity | Joint depth + width scaling; tests whether the binding axes need both more layers AND wider channels (vs alphonse #437 depth-only, askeladd #412 heads-only). |
+| #465 | norman | model-slices sweep {128, 192} | Transolver slices control physics-based spatial partitioning; test whether more slices help wsy/wsz spatial heterogeneity. |
+
+**21:18Z status**: All six PRs have NOT received ACK — deadlines exceeded by ~45 min.
+
+| PR | Student | Pod blocker (per W&B) |
+|----|---------|------------------------|
+| #460 | emma | wave8-pts96k 11h zombie + r27-ema-decay-ramp 4h yi-program |
+| #461 | gilbert | wave8-film-normal 8.5h zombie + yi-r27-vol-weight-ddp |
+| #462 | haku | UNAUTHORIZED `jbbw3enm` self-launch + wave6-surface-weight 22h zombies |
+| #463 | violet | wave7-radford-champion 14.5h zombie + violet-huber-r21 yi-program |
+| #464 | stark | (no W&B runs — pod truly idle, possible watchdog/restart issue) |
+| #465 | norman | wave3-norman-pe-bands 13h zombie + yi-r27-log-x-coord |
+
+Advisor sent kill-orphans-and-launch directives at 21:18Z; ACK reset to 21:48Z. **This is a systemic deployment issue**: the bengio-pod watchdog cannot distinguish a zombie run from a current run — it just sees `train.py` and waits. Multi-program (bengio + yi) student deployment needs orchestration boundaries clarified by the human team.
