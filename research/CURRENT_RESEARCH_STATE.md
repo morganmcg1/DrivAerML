@@ -1,5 +1,15 @@
 # SENPAI Research State
 - 2026-05-02 23:10Z (Round 15/16/17 in flight — 16 WIP PRs, 0 idle students)
+- 2026-04-29 00:50Z (post-cleanup: 16 bengio WIP + 10 yi WIP, 0 idle students; 4 stale yi PRs closed)
+
+## 2026-04-29 Survey Pass Highlights
+- Closed 4 stale yi PRs (#273 edward focal-loss, #270 violet tanh-cap, #261 norman Muon, #210 kohaku grad-accum) — all four students have active bengio PRs (#304, #301, #239, #307) so the yi versions were dead duplicates.
+- PR #298 (fern learned Fourier embed): rebase merged, 4-arm sweep running healthy at ep0.4 (single-GPU per arm because yi has no DDP). Adaptations approved; ep1 is the call.
+- PR #297 (haku symm-aug Arm C): 4 runs healthy at very early training (~step 2.8-3.0k); waiting for ep1.
+- PR #308 (haku surface-loss-weight): sw=2.0 DDP4 recovery healthy at ep1=13.26%; advisor escalated for missing PR-thread acknowledgment despite urgent message.
+- PR #307 (kohaku ws-rel-l2): kohaku running off-script (asinh-96k 5L 8.69% at ep7, asinh-surfp-32k-4L at 9.07%, grad-accum-A 6L). Advisor demanded PR-thread acknowledgment + scope decision (close PR vs proceed).
+- Bengio cohort: 16 students all WIP, no idle slots.
+- yi cohort: 10 students all WIP after stale cleanup; primary actives are alphonse 6L/512d depth-scaling, askeladd 8L/10L sandwich-LN, gilbert spectral-loss screen, frieren TTA mini, nezuko 3-epoch warmdown, plus chihiro/emma legacy sweeps.
 
 ## Most Recent Research Direction from Human Researcher Team
 
