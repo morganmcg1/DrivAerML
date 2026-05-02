@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **2026-05-02 11:23 UTC** — Wave 8/9 fleet active. **CRITICAL FIX IN FLIGHT**: fern PR #360 FourierEmbed coordinate normalization fix; ep1 matches alphonse reference within 0.5pp on every channel, ep2 diverges +2.82pp (seed noise vs code drift hypothesis pending); ep5 gate ~12:18Z, threshold ≤10.5%. **INFRA ISSUE**: `senpai-bengio-frieren` pod stuck running closed PR #310 since 05:40Z, 11h35m of orphaned 95% GPU; PR #361 (weight-decay sweep) cannot launch until pod restarts. Filed issue #368 requesting `kubectl rollout restart`. PR #354 (fern regression bisect) was merged empty — code fix was never applied; #360 is the real fix.
+- **2026-05-02 11:50 UTC** — Wave 8/9 fleet active. **HEADLINE**: alphonse PR #174 run `vu4jsiic` (5L/256d Fourier PE T_max=50) at **abupt=7.041%** at step 704k (~ep39 of 50) — **BELOW current baseline 7.2091%** by 0.17pp. Cosine schedule still descending; ep50 projection 7.0–7.1%. Once student marks ready for review, this becomes the new bengio baseline. **CRITICAL FIX IN FLIGHT**: fern PR #360 FourierEmbed coordinate normalization fix at ep3=9.83% (down from ep2=13.74%); ep5 gate ~12:18Z, threshold ≤10.5%. **INFRA ISSUE**: 3 bengio pods stuck on orphan train.py runs (frieren, nezuko, gilbert); issues #368 + #371 filed requesting `kubectl rollout restart`. Wave 8 PRs #346, #347, #361 cannot launch until pods restart. PR #354 (fern regression bisect) was merged empty — code fix was never applied; #360 is the real fix.
 
 ## CRITICAL: FourierEmbed Normalization Bug (PR #360 in flight)
 
@@ -65,8 +65,10 @@
 
 | PR | Student | Experiment | Status |
 |----|---------|-----------|-------|
-| #360 | fern | **FourierEmbed coord normalization fix — PRIORITY** | Active; ep1 matches alphonse, ep2 +2.82pp drift; ep5 gate ~12:18Z |
+| #360 | fern | **FourierEmbed coord normalization fix — PRIORITY** | Active; ep3=9.83% (drop from ep2=13.74%, on track for ep5 gate ≤10.5%); ep5 ~12:18Z |
 | #361 | frieren | Weight-decay sweep {3e-4, 1e-3, 3e-3} | **BLOCKED on infra**: pod stuck on closed PR #310; issue #368 filed |
+| #346 | gilbert | FiLM normal-conditioning every block | **BLOCKED on infra**: pod stuck on Wave 6 mirror-aug Trial A; issue #371 filed |
+| #347 | nezuko | Dedicated 2-block wall-shear sub-decoder | **BLOCKED on infra**: pod stuck on Wave 2 5L/384d run; issue #371 filed |
 
 ## Active Experiments — Wave 8 (assigned 2026-05-02 07:24–07:40Z)
 
@@ -84,16 +86,16 @@
 
 | PR | Student | Run ID | Experiment | Status |
 |----|---------|--------|-----------|-------|
-| #325 | senku | `31s1j3a0` | Grad-clip-norm sweep gc=0.5 | ep10+ running; ep4 bump to 13.33% (transient), ep5=unclear, watching |
-| #330 | violet | `i4w5ahtq` | radford-champion DDP4 port (4L/512d/8H, EMA, gc=0.5, lr=3.4e-4, T_max=36) | Restarted after kill-threshold bug fix; ep5 overdue (~07:30Z), awaiting report |
-| #332 | tanjiro | (running) | Mirror-aug p=0.5 + SW=2.0 stack | ep10 PASSED (abupt=9.09%), continuing to ep30, **most promising signal**: wsy dropped ~7pp at ep10 |
-| #328 | askeladd | (running) | FourierEmbed A/B vs Sincos | Relaunch in progress; advisor waiting for updated run ID |
+| #325 | senku | `31s1j3a0` | Grad-clip-norm sweep gc=0.5 | ep~16.6 = **8.73%**; ep20 gate ≤8.5% (0.23pp away); on track |
+| #330 | violet | `i4w5ahtq` | radford-champion DDP4 port (4L/512d/8H, EMA, gc=0.5, lr=3.4e-4, T_max=36) | **ep5 PASSED**: abupt=8.716% (gate <11.5%); ep10 gate <9.5% next; trajectory ep1→5: 28.33→13.33→10.17→9.17→8.72 |
+| #332 | tanjiro | `w3thlivw` | Mirror-aug p=0.5 + SW=2.0 stack | **ep20 gate PASSED EARLY (ep~16)**: abupt=8.41%; continuing to ep30 (target ≤8.0%); strongest wsy descent so far |
+| #328 | askeladd | `xf84245g` | FourierEmbed A/B vs Sincos | Arm A (sincos-baseline-v2) at ep~11.2 abupt=9.74%; **Arm B (Fourier PE) STILL NOT LAUNCHED** — final 13:00Z deadline issued |
 
 ## Active Experiments — Older Waves (still in flight)
 
 | PR | Student | Experiment | Status |
 |----|---------|-----------|-------|
-| #174 | alphonse | 5L/256d + Fourier PE + T_max=50 | ep31.5, recovering from ep26 plateau, approaching ep30 final read |
+| #174 | alphonse | 5L/256d + Fourier PE + T_max=50 | **NEW BEST IN FLIGHT**: abupt=**7.041%** at step 704k (~ep39 of 50), below current baseline 7.2091% by 0.17pp; cosine schedule still descending — once student marks ready, becomes new bengio baseline |
 | #239 | norman | Fourier PE NF sweep (NF=32 killed, NF=64 running) | NF=64 auto-launched |
 | #254 | chihiro | Raw rel-L2 aux loss w sweep | ep20 missed gate by 0.20pp, continuing to ep30 |
 | #304 | edward | Per-channel wsy/wsz loss multipliers | ep10 PASSED (abupt=9.159%), continuing to ep30 |
