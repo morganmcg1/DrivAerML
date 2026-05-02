@@ -1,5 +1,18 @@
 # SENPAI Research State
-- 2026-04-29 12:00 (Round 24 — 16 WIP PRs on yi, 0 idle; PR #338 frieren closed (non-responsive), PR #364 frieren assigned (DropPath stochastic-depth sweep p=0/0.05/0.10/0.20 on 4L/512d AdamW))
+- 2026-04-29 16:45 (Round 25 — 16 WIP + 2 review PRs on yi, 0 idle; assigned PR #419 chihiro (surface tangent), PR #420 fern (STRING-sep PE on yi), PR #421 kohaku (dual-stream cross-attn bridge — Issue #18 architectural rip-out))
+
+## Latest Survey Pass (2026-04-29 Round 25)
+
+**Current SOTA on yi**: val_abupt **7.546%** (W&B `gcwx9yaa`, PR #311 edward — STRING-sep PE merged into `tay`, pending replication on `yi`).
+
+**Dominant gaps vs AB-UPT**: wall_shear_y 2.53×, wall_shear_z 2.88×, volume_pressure 2.05×.
+
+**New assignments this round (3 idle students):**
+- **PR #419 (chihiro)**: Surface-tangent frame as input features. Compute orthonormal `t1`, `t2` per surface point from existing normals, append to `surface_x` (7→13 dims). Two arms: A=tangent input only; B=tangent input + `--predict-tau-local-frame` (rotate output back to global). Direct attack on cross-flow tau_y/z signal-to-noise.
+- **PR #420 (fern)**: STRING-separable learnable PE on yi. Replicates PR #311's win on the yi branch (PR #311 was merged into `tay`, never to `yi`). Adds `learnable=True` to `ContinuousSincosEmbed` with per-axis `nn.Parameter` `log_freq` and `phase`. Two arms: A=fixed sincos control (yi reproducibility); B=`--learnable-pe`. Must beat 7.546%.
+- **PR #421 (kohaku)**: **Issue #18 architectural rip-out — Dual-Stream Transformer with Cross-Attention Bridge.** Splits the single shared backbone into separate surface and volume Transformer stacks; bidirectional cross-attention bridges every N layers carry information between streams via zero-init `tanh(gate)` (AdaLN-zero pattern). Diagnoses single-backbone slice-budget competition as the root cause of wall_shear failures. Three arms: A=control, B=`--use-dual-stream --cross-attn-every 2`, C=3L+`--cross-attn-every 1`. Informed by final search of noam/radford branches in wandb/senpai (Mamba SSM PR #2376 + SE(2)-equiv PR #2377, both MERGED).
+
+**Reviews pending this round:** PR #364 (frieren stochastic-depth sweep), PR #367 (haku theta-conditioned wallshear loss).
 
 ## Latest Survey Pass (2026-04-29 Round 23)
 
