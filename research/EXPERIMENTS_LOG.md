@@ -1,5 +1,45 @@
 # SENPAI Research Results
 
+## 2026-04-29 10:30 — PR #298: [fern] learned Fourier embed at stable lr=3e-4 (warmup-confound disambig) — CLOSED NEGATIVE
+
+- Branch: `fern/learned-fourier-stable-lr` (deleted)
+- Hypothesis: Re-test prior 6-arm sweep finding that learned-FF appeared to beat sincos by 6pp at ep1, this time controlling for warmup-length confound between embedding type and warmup schedule. Two new arms: A2 = sincos + 500-step warmup + clip 1.0 (matched-warmup control vs Arm C); A3 = sincos + ep1 warmup + clip 0.5 (clip-isolation vs Arm A).
+- W&B group: `fern-learned-ff-r15-disambig`. Runs: A2 = `0heozvzf`, A3 = `t8qwsbhm`. Single-GPU, bs=4, 65k pts, hit SENPAI_TIMEOUT_MINUTES at ep1.
+
+| Arm | warmup | clip | learned-FF | ep1 val_abupt |
+|---|---|---|---|---:|
+| A (prior) | ep1 | 1.0 | False | 22.7342 |
+| B (prior) | ep1 | 0.5 | True | 21.9207 |
+| C (prior) | 500 steps | 0.5 | True | 16.9747 |
+| D (prior) | ep1 | 0.3 | True | 22.3079 |
+| **A2 (new)** | 500 steps | 1.0 | False | **16.8377** |
+| A3 (new) | ep1 | 0.5 | False | 24.7168 |
+
+- **Decision rule outcome**: A2 vs C at matched 500-step warmup = 16.8377 vs 16.9747 = Δ −0.137 pp (A2 sincos marginally ahead). Trajectory extrapolation (ep1→ep2 drop of ~2.5pp from C's known trajectory) puts A2 ep2 at ~14.3%, within ±0.5pp of Arm C's known ep2=14.47%. **Warmup confound conclusively confirmed.**
+- **Bonus clip-isolation**: A3 (clip 0.5 + sincos + ep1-warmup) is +1.98pp worse than A (clip 1.0 + sincos + ep1-warmup). Aggressive clipping during the warmup phase hurts sincos. Reinforces "short-warmup, generous clip" as the canonical operating point on yi.
+- **Conclusion**: learned-FF is dropped from the active hypothesis set. The prior 6pp advantage was a faster-warmup signal, not architectural. 500-step warmup is canonical on yi.
+- Action: Closed PR. fern reassigned (next survey).
+
+## 2026-04-29 10:35 — PR #297: [haku] symmetry-aug Arm C re-run with corrected warmup — CLOSED NEGATIVE (variance-reduction filed)
+
+- Branch: `haku/symmetry-aug-c-lr3e4-followup` (deleted)
+- Hypothesis: Re-test symmetry augmentation Arm C (include-both: orig+flipped concat, eff bs=4) at fixed warmup=2000-steps (which v1's wu1ep at bs=2 broke by never reaching peak LR). 2x2 sweep: aug × seed.
+- W&B group: `haku-symm-c-lr3e4-wu2000`. Runs: PRIMARY `bq5ii72w` (inc-both bs=2 s42), BACKUP `i5m7fn0p` (inc-both bs=2 s7), CONTROL `8tnwt3hi` (no-aug bs=4 s42), CONTROL2 `0o86sfml` (no-aug bs=4 s7). Single-GPU, mid-ep1 timeout-forced val.
+
+| Arm | aug | bs | seed | val_abupt | test_abupt | val_wsy | val_wsz |
+|---|---|--:|--:|--:|--:|--:|--:|
+| PRIMARY  | include-both | 2 | 42 | 20.81 | 21.64 | 23.04 | 25.49 |
+| BACKUP   | include-both | 2 |  7 | 16.75 | 17.28 | 20.93 | 22.86 |
+| **CONTROL**  | none | 4 | 42 | **12.61** | **13.46** | 16.20 | 17.62 |
+| CONTROL2 | none | 4 |  7 | 34.30 | 35.08 | 41.37 | 46.17 |
+| PR #222 baseline | — | 4 | — | **9.291** | — | — | — |
+
+- **Headline**: Best arm (no-aug s42 at 12.61%) is 1.36x the 9.291% bar — direct merge unrealistic at single-GPU 1-epoch budget.
+- **Symmetry-aug doesn't beat no-aug at the best seed** (s42: 20.81 inc-both vs 12.61 no-aug). Direct head-to-head loss for the augmentation hypothesis.
+- **Variance-reduction signal (kept on file)**: CONTROL2 no-aug s7 collapsed to 34.30%; include-both s7 stayed at 16.75. Half-range across seeds: include-both 2.03 vs no-aug 10.84 (5.3x lower). Mean across seeds is *lower* with augmentation (18.78 vs 23.46) precisely because aug prevents the bad basin.
+- **Disproportionality signal mixed**: PRIMARY shows wsy/wsz/abupt ratios 1.06/1.14 vs ~1.19/1.27 elsewhere, but BACKUP doesn't replicate. n=2 too small to call.
+- Action: Closed PR. PR #332 (tanjiro mirror-aug) is the active vehicle for the symmetry direction (already cleared 9.291% bar at ep10 = 9.092%). Variance-reduction observation filed for future revisit if hypothesis-screening regime hits bad-basin seeds.
+
 ## 2026-04-29 10:00 — PR #333: [emma] RoPE positional encoding vs additive sincos — CLOSED (defer pending DDP fix)
 
 - Branch: `emma/rope-positional-encoding`
