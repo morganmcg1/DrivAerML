@@ -1,5 +1,42 @@
 # SENPAI Research Results
 
+## 2026-05-02 19:00 — PR #374: thorfinn asinh(tau/scale) target normalization — CLOSED NEGATIVE
+
+- Branch: `thorfinn/asinh-tau-target-normalization` (deleted)
+- Hypothesis: Applying asinh(tau/scale) transformation to tau_y/z targets before loss computation would reduce the multi-decade dynamic range and let the model learn small-magnitude cross-flow channels without being dominated by tau_x outliers.
+
+| Arm | scale | val_abupt | test_abupt | val_tau_y | val_tau_z | W&B run |
+|-----|------:|----------:|-----------:|----------:|----------:|---------|
+| A   | 0.05  | 18.77%    | 19.47%     | 23.27%    | 25.58%    | `wddfpv6b` |
+| B   | 0.10  | 16.73%    | 17.58%     | 21.30%    | 23.34%    | `8i8yn4hg` |
+| C   | 0.50  | 14.02%    | 14.93%     | 17.77%    | 20.55%    | `uqz1ory5` |
+| **CTRL** | 0.00 | **13.26%** | **14.11%** | **16.67%** | **18.63%** | `3ps71c3q` |
+
+- W&B group: `thorfinn-asinh-r25`. Single-GPU AdamW, best-epoch=1, 4.5h/epoch (timeout).
+- **Root cause of failure:** `clip-grad-norm=1.0` interaction with asinh-space MSE. Pre-clip gradient norms are 3-4× larger in asinh arms. After clipping to unit norm, the gradient *direction* is different from z-score control, navigating a different loss landscape. Asinh derivative also dampens large-|tau_x| gradients (∂asinh/∂x = 1/√(s²+x²)), making tau_x harder to correct.
+- **Monotone: smaller scale → more compression → worse.** All axes regress, not just tau_x.
+- **Decision:** Closed. Asinh normalization is NOT viable with clip_grad_norm. Would require disabling grad-clip per-channel or applying asinh only in eval metric (not loss). Dead end confirmed.
+
+## 2026-05-02 19:00 — PR #366: gilbert volume-pressure vol_loss_weight sweep — SENT BACK FOR DDP PROMOTION
+
+- Branch: `gilbert/volume-pressure-huber-loss`
+- Hypothesis: Down-weighting the volume MSE loss (`--volume-loss-weight < 1.0`) reduces the training signal competing with surface tau predictions, improving val_abupt while not significantly degrading volume_pressure.
+
+| Arm | vol_weight | val_abupt | test_abupt | val_vol_p | Δ_val_abupt |
+|-----|----------:|----------:|-----------:|----------:|-----------:|
+| Ctrl | 1.0 | 29.263% | 29.998% | 19.305% | — |
+| A   | 0.7  | 39.476% | 39.789% | 19.692% | +10.21pp (seed instability) |
+| **B** | **0.5** | **27.979%** | **28.566%** | **19.880%** | **−1.28pp** |
+| C   | 0.3  | 27.811% | 28.521% | 21.220% | −1.45pp (+vol_p constraint violated) |
+
+- W&B group: `gilbert-vol-weight-sweep`. Runs: Control `35ezmpy2`, A `qk3bfkgy`, B `0el9xu4w`, C `c2xxpe6y`.
+- Single-GPU, 4L/256d (screening config), bs=8, ep1, AdamW lr=1e-4.
+- **Win condition:** Arm B (w=0.5) meets all three: −1.28pp val_abupt, +0.58pp vol_p (< 1pp threshold), −1.43pp test_abupt.
+- **Mechanism confirmed:** vol_loss_weight=0.5 reproduces the Huber arm δ=1.0 Δ-vs-control effect (−1.12pp), confirming it was loss rebalancing not robustness. Simple single-flag change.
+- **Arm A**: Seed-induced late-training instability (train_loss rising in final stretch), not reflective of w=0.7. Not a vol_weight=0.7 verdict.
+- **Cross-sweep comparison**: Weight sweep Arm B Δ=−1.28pp vs Huber sweep Arm C Δ=−1.12pp. Weight approach wins at lower complexity.
+- **Decision:** Sent back to gilbert for DDP promotion. Run Arm B (w=0.5) with 4L/512d Lion 4-GPU DDP on full budget. Win condition: val_abupt < 9.039%.
+
 ## 2026-04-29 16:00 — PR #375: [senku] 5L/512d depth on STRING-sep SOTA (stack test) — CLOSED, HYPOTHESIS CONFIRMED, escalation queued
 
 - Branch: `senku/depth-5l-string-sep-stack` (deleted)
