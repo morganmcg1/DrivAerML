@@ -1,5 +1,26 @@
 # SENPAI Research Results
 
+## 2026-04-29 16:00 — PR #375: [senku] 5L/512d depth on STRING-sep SOTA (stack test) — CLOSED, HYPOTHESIS CONFIRMED, escalation queued
+
+- Branch: `senku/depth-5l-string-sep-stack` (deleted)
+- Hypothesis: 5L depth (PR #283 win on tay) and STRING-sep encoding (PR #311 win on tay) are orthogonal and stack additively when ported to yi. 4-arm causal chain at uniform yi defaults to attribute each effect cleanly.
+- W&B group: `senku-5L-string-sweep`. Single-GPU per arm (4-way parallel contention forced 700 steps/epoch vs advisor-recommended 2900). Final step 6300 (9 epochs).
+
+| Arm | layers | encoding | lr/clip | val_abupt | test_abupt | run_id |
+|---|---|---|---|--:|--:|---|
+| D (control) | 4 | sincos | 5e-4 / 1.0 | 19.032 | 20.046 | `75ax2spv` |
+| C | 4 | STRING-sep | 5e-4 / 1.0 | 18.368 | 19.267 | `0rtank8m` |
+| **A (best)** | **5** | **STRING-sep** | **5e-4 / 1.0** | **17.783** | **18.795** | `3sz9t11z` |
+| B | 5 | STRING-sep | 3e-4 / 0.5 | 19.735 | 20.521 | `yua3sxpc` |
+
+- Per-axis test (Arm A): surface_pressure 12.13, wall_shear 19.27, volume_pressure 18.90. tau_x/y/z not logged (axis split absent in yi val/test eval). All 2-3x above AB-UPT reference targets.
+- **Causal chain verified on W&B**: D→C = −0.66pp (STRING-sep effect), C→A = −0.59pp (depth=5 effect). Both clear the 0.3pp escalation bar. Effects are independent and additive.
+- Conservative recipe (Arm B clip=0.5/lr=3e-4) underperforms — **dropped from follow-up**. The 5L model wants a generous clip and full lr.
+- All curves still descending at step 6300 (last 3 vals for Arm A: 21.37 → 19.19 → 17.78, ~1.4pp/epoch). Not plateaued.
+- Stability: max gnorm 107 (5L) / 67 (4L) under the 200 kill threshold; memory 89.7 GB (5L) / 74.6 GB (4L) within 97 GB budget. No NaN.
+- **Decision**: Not merged — val_abupt 17.78 >> 7.546% bar because of single-GPU + 4x undertrained budget. Closed with directive to escalate Arm A's exact config (5L / STRING-sep / lr=5e-4 / clip=1.0) to 8-GPU DDP at full step budget once PR #355 (DDP fix) is verified on yi. STRING-sep impl uses 85 features/axis as a 512-dim drop-in (not PR #311's 11 features/axis) — kept as-is, can A/B later if needed.
+- Action: Closed PR #375. Escalation hypothesis tracked for senku's next assignment (post DDP-verify).
+
 ## 2026-04-29 10:30 — PR #298: [fern] learned Fourier embed at stable lr=3e-4 (warmup-confound disambig) — CLOSED NEGATIVE
 
 - Branch: `fern/learned-fourier-stable-lr` (deleted)
