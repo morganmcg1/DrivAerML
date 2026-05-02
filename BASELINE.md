@@ -2,39 +2,39 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: askeladd PR #232 model-heads=4 — 2026-05-01 21:06 UTC
+## Status: thorfinn PR #309 grad-clip-norm=0.5 — 2026-05-02 07:17 UTC
 
-**NEW SOTA: askeladd PR #232 heads=4 beats PR #222 by −0.226pp (9.0650% vs 9.2910% val).**
+**NEW SOTA: thorfinn PR #309 grad-clip-norm=0.5 beats PR #232 by −0.026pp val / −0.064pp test (9.0389% vs 9.0650% val, 10.126% vs 10.190% test).**
 
-Reducing attention heads from 8 (default) to 4 improves validation performance. Fewer, wider heads appear to provide better feature aggregation per head for this CFD point-cloud task. Best at epoch 11 (282.5min runtime).
+Single-line change adding `--grad-clip-norm 0.5` to the Lion optimizer stack. Gradient clipping stabilizes Lion's sign-based EMA momentum updates, reducing gradient spike influence. Critically avoids the ep8 regression seen in unconstrained runs (ep8=9.728% vs prior SOTA 12.12%), demonstrating cleaner convergence. Best at epoch 11 (~270 min runtime).
 
-**W&B run:** `r8s2dtnq` (rank 0) — group `tay-round12-heads-4`, 282.5 min runtime, best val 9.0650% (ep11)
-**PR:** #232
-**Test metrics:** test_abupt 10.190% (test_primary/abupt_axis_mean_rel_l2_pct)
+**W&B run:** `ztdhodw1` (rank 0) — group `thorfinn-gradclip-r15`, ~270 min runtime, best val 9.0389% (ep11)
+**PR:** #309
+**Test metrics:** test_abupt 10.126% (test_primary/abupt_axis_mean_rel_l2_pct)
 
 ### tay current best — `val_primary/*` (best checkpoint, epoch 11)
 
-| Epoch | val_abupt | surf_pres | vol_pres | wall_shear |
-|-------|-----------|-----------|----------|------------|
-| **ep11 (best)** | **9.0650%** | **5.703%** | **5.830%** | **10.089%** |
+| Epoch | val_abupt |
+|-------|-----------|
+| **ep11 (best)** | **9.0389%** |
 
-### tay current best — `test_primary/*` (PR #232 askeladd, run `r8s2dtnq`)
+### tay current best — `test_primary/*` (PR #309 thorfinn, run `ztdhodw1`)
 
-| Metric | This-repo key | **PR #232 askeladd (NEW SOTA)** | PR #222 fern (prev) | PR #115 thorfinn | AB-UPT |
+| Metric | This-repo key | **PR #309 thorfinn (NEW SOTA)** | PR #232 askeladd (prev) | PR #222 fern | AB-UPT |
 |---|---|---:|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.190** | 10.420 | 10.580 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.461** | 5.550 | 5.690 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **9.910** | 10.185 | 10.419 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | 12.656 | 12.737 | 12.740 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.432** | 8.629 | 8.908 | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **11.952** | 12.329 | 12.491 | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **12.447** | 12.854 | 13.071 | 3.63 |
+| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **10.126** | 10.190 | 10.420 | — |
+| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **5.395** | 5.461 | 5.550 | 3.82 |
+| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **9.883** | 9.910 | 10.185 | 7.29 |
+| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.484** | 12.656 | 12.737 | 6.08 |
+| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **8.402** | 8.432 | 8.629 | 5.35 |
+| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **11.941** | 11.952 | 12.329 | 3.65 |
+| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **12.407** | 12.447 | 12.854 | 3.63 |
 
-**Wins over PR #222 on every axis.** Largest gains: wall_shear −2.70%, surface_pressure −1.60%, tau_y −3.07%, tau_z −3.17%, abupt −2.21%.
+**Wins over PR #232 on every axis.** Largest gains: volume_pressure −0.172pp (−1.36%), surface_pressure −0.066pp (−1.21%), abupt −0.064pp (−0.63%).
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, heads=4)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, heads=4, grad-clip-norm=0.5)
 
-**Note:** W&B run `r8s2dtnq` was confirmed (by edward, 2026-05-02) to have `rff_num_features=0` and `lr_warmup_epochs=0`. The SOTA does NOT use RFF and does NOT use lr-warmup. The reproduce command below matches the actual run config.
+**Note:** W&B run `ztdhodw1` uses `rff_num_features=0`, `lr_warmup_epochs=0`, `grad_clip_norm=0.5`. The SOTA does NOT use RFF and does NOT use lr-warmup.
 
 ```bash
 cd target/
@@ -44,7 +44,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
-  --ema-decay 0.999
+  --ema-decay 0.999 --grad-clip-norm 0.5
 ```
 
 ### Compounding wins so far
@@ -62,7 +62,29 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #111 | tanjiro | **−0.03 (−0.25%) vs #110** | EMA decay 0.999 (5× faster than 0.9995) |
 | #115 | thorfinn | **−0.562 (−5.04%) vs #111** | Compound: lr=1e-4 + EMA=0.999 (both winners stacked) |
 | #222 | fern | **−0.193 (−2.03%) vs #115** | lr_warmup_epochs=1 (1-epoch linear warmup on top of SOTA stack) |
-| **#232** | **askeladd** | **−0.226 (−2.44%) vs #222** | **model-heads=4 (halving attention heads from 8 to 4)** |
+| #232 | askeladd | **−0.226 (−2.44%) vs #222** | model-heads=4 (halving attention heads from 8 to 4) |
+| **#309** | **thorfinn** | **−0.064pp (−0.63%) vs #232** | **grad-clip-norm=0.5 (Lion EMA momentum stabilization, avoids ep8 regression)** |
+
+---
+
+## Prior SOTA record: askeladd PR #232 model-heads=4 — 2026-05-01 21:06 UTC
+
+**PRIOR SOTA: askeladd PR #232 heads=4 beat PR #222 by −0.226pp (9.0650% vs 9.2910% val).**
+
+**W&B run:** `r8s2dtnq` (rank 0) — group `tay-round12-heads-4`, 282.5 min runtime, best val 9.0650% (ep11)
+**PR:** #232
+**Test metrics:** test_abupt 10.190%
+
+```bash
+cd target/
+torchrun --standalone --nproc_per_node=8 train.py \
+  --agent <STUDENT> --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --no-compile-model --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --ema-decay 0.999
+```
 
 ---
 
