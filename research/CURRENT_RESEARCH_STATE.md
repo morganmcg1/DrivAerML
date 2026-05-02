@@ -1,24 +1,21 @@
 # SENPAI Research State
-- 2026-05-02 23:10Z (Round 15/16/17 in flight — 16 WIP PRs, 0 idle students)
-- 2026-04-29 00:50Z (post-cleanup: 16 bengio WIP + 10 yi WIP, 0 idle students; 4 stale yi PRs closed)
+- 2026-05-02 (Round 18 assigned — 16 WIP PRs on yi, 0 idle students)
 
-## 2026-04-29 Survey Pass Highlights
-- Closed 4 stale yi PRs (#273 edward focal-loss, #270 violet tanh-cap, #261 norman Muon, #210 kohaku grad-accum) — all four students have active bengio PRs (#304, #301, #239, #307) so the yi versions were dead duplicates.
-- PR #298 (fern learned Fourier embed): rebase merged, 4-arm sweep running healthy at ep0.4 (single-GPU per arm because yi has no DDP). Adaptations approved; ep1 is the call.
-- PR #297 (haku symm-aug Arm C): 4 runs healthy at very early training (~step 2.8-3.0k); waiting for ep1.
-- PR #308 (haku surface-loss-weight): sw=2.0 DDP4 recovery healthy at ep1=13.26%; advisor escalated for missing PR-thread acknowledgment despite urgent message.
-- PR #307 (kohaku ws-rel-l2): kohaku running off-script (asinh-96k 5L 8.69% at ep7, asinh-surfp-32k-4L at 9.07%, grad-accum-A 6L). Advisor demanded PR-thread acknowledgment + scope decision (close PR vs proceed).
-- Bengio cohort: 16 students all WIP, no idle slots.
-- yi cohort: 10 students all WIP after stale cleanup; primary actives are alphonse 6L/512d depth-scaling, askeladd 8L/10L sandwich-LN, gilbert spectral-loss screen, frieren TTA mini, nezuko 3-epoch warmdown, plus chihiro/emma legacy sweeps.
+## Latest Survey Pass (2026-05-02)
+- Round 18 assignments complete: 6 new yi PRs created for edward, kohaku, norman, senku, thorfinn, violet
+- PR #298 (fern learned Fourier embed): 4-arm sweep running (single-GPU per arm; yi has no DDP). ep1 results pending.
+- PR #297 (haku symm-aug Arm C): running on stable lr=1e-4/wu=1ep base; ep1 results pending.
+- PR #288 (gilbert spectral Fourier loss), #286 (frieren TTA), #284 (alphonse 6L/512d), #262 (nezuko WSD): all in progress.
+- All 16 yi student pods active. Zero idle GPUs.
 
 ## Most Recent Research Direction from Human Researcher Team
 
 **Issue #252** (open, Morgan, 2026-05-01): "Get inspired by Modded-NanoGPT". Directs the advisor to review the modded-nanogpt world record history table and reason carefully about applicability before assigning experiments. Already addressed by Round 15 PRs (see below).
 
-**Issue #248** (open, Morgan, last comment 2026-05-01 23:05Z): senpai-yi-stark pod confirmed absent (deployment, ConfigMap, .claude logs all missing). Operator directive: **reassign rather than wait on provisioning.** Acted on 2026-05-02: PR #227 closed, surface-tangent-frame hypothesis re-queued as highest-priority next-idle assignment.
+**Issue #248** (open, Morgan): senpai-yi-stark pod never provisioned. PR #227 closed 2026-05-02. Surface-tangent-frame hypothesis reassigned as PR #312 (edward) 2026-05-02.
 
 **Issue #18** (earlier): Stop incremental tuning. Rip out the model architecture and try completely new approaches. Most priority experiments are assigned or closed:
-1. Surface-tangent frame wall-shear prediction — PR #227 closed 2026-05-02 (no stark pod); hypothesis queued for first idle slot
+1. Surface-tangent frame wall-shear prediction — **PR #312 (edward) assigned 2026-05-02** (first real test)
 2. Perceiver-IO backbone replacing Transolver — closed as dead end (PRs #122, #212)
 3. asinh/log target normalization for wall shear — PR #249 (tanjiro), in progress
 4. Physics-informed RANS divergence constraint — closed as dead end (PR #124)
@@ -52,26 +49,26 @@
 
 **Merge bar: 9.291% — any PR must beat this val_abupt to merge.**
 
-## Active WIP PRs (as of 2026-04-29 — 17 WIP PRs)
+## Active WIP PRs (as of 2026-05-02 — 16 WIP PRs on yi)
 
 | PR | Student | Hypothesis | Round |
 |---|---|---|---|
-| #273 | edward | Focal-loss per-point surface weighting for tau_y/z (γ sweep) | 15 |
-| #270 | violet | tanh output soft-cap for wsy/wsz tail bounding | 15 |
-| #262 | nezuko | Linear-warmdown LR (modded-nanogpt WSD-style) | 15 |
-| #261 | norman | Muon optimizer (Newton-Schulz orthogonalized momentum) | 15 |
-| #249 | tanjiro | asinh normalization for wall-shear targets | 14 |
+| #317 | violet | Huber loss for wall-shear (δ=0.5/1.0/2.0 sweep) | 18 |
+| #316 | thorfinn | GradNorm dynamic per-task loss weighting for tau_y/z | 18 |
+| #315 | senku | MLP expansion ratio sweep (mlp_ratio=2/4/8) | 18 |
+| #314 | norman | Coordinate jitter augmentation sweep (σ=0.002/0.005/0.01) | 18 |
+| #313 | kohaku | Multi-seed ensemble averaging (3-seed variance reduction) | 18 |
+| #312 | edward | Surface-tangent frame wall-shear prediction | 18 |
+| #298 | fern | Learned Fourier embed at stable lr=3e-4 (4-arm sweep) | 17 |
+| #297 | haku | symm-aug Arm C (include-both bs=4) on stable lr=1e-4/wu=1ep base | 17 |
 | #288 | gilbert | Spectral Fourier loss on wall-shear tau_y/z channels | 16 |
+| #286 | frieren | Bilateral-symmetry TTA (y→-y reflection at inference) | 15 |
+| #284 | alphonse | 6L/512d depth+width scaling on Lion+warmup SOTA | 15 |
+| #262 | nezuko | Linear-warmdown LR (WSD-style) on 4L/512d SOTA | 15 |
+| #249 | tanjiro | asinh normalization for wall-shear targets | 14 |
 | #244 | emma | Sweep surface-loss-weight (1.5/2.0) | 13 |
 | #243 | chihiro | Sweep aux-rel-l2-weight (0.1/0.5/1.0) | 13 |
-| #230 | senku | SWA uniform weight averaging for flat-minima generalization | 13 |
-| #297 | haku | symm-aug Arm C (include-both bs=4) on stable lr=1e-4/wu=1ep base — follow-up to #225 | 17 |
-| #224 | fern | Learned Fourier embeddings for tau_y/z gap (per-axis freq learning) | 13 |
-| #210 | kohaku | Gradient accumulation eff_bs=32 for smoother tau_y/z grads | 13 |
-| #286 | frieren | Bilateral-symmetry TTA (y→-y reflection at inference) | 15 |
-| #284 | alphonse | 6L/512d depth+width scaling — DDP port in progress (awaiting relaunch) | 15 |
 | #208 | askeladd | Sandwich-LN to unlock 8L/256d depth (stability fix) | 13 |
-| #193 | thorfinn | Curvature-biased surface point sampling (tau_y/z gap fix) | 13 |
 
 ## Key Architecture Configuration (PR #222 winning base config)
 
