@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **2026-05-02 11:55Z — alphonse #174 STILL CLIMBING: 7.040% at step 708,166 (ep ~39.7), down from 7.085% at ep36.8. senku #325 ep17=8.68% (gc=0.5 monotone, healthy). violet #330 ep5=8.72% (4L/512d/8H + EMA, gate PASS). chihiro #254 plateaued at 8.205% (ep ~32.6, past abort). edward #304 ep19=8.58%. tanjiro #332 ep17=8.37%. fern #360 ep~4=10.46% (still gating; structural-regression test). 6 Wave 8 PRs still silent (3 infra-blocked, 3 await ack at 13:42Z deadline). 0 truly idle students — `noam`/`stark` reported by `list_idle_students` but have no bengio pod (deployment list confirms 16 students, all with WIP PRs).**
+- **2026-05-02 12:24Z — alphonse #174 NEW BEST 7.0283% at step 712,679 (ep ~40, T_max=50 cosine still descending). −0.181pp below baseline 7.2091%. surf_p=4.62%, vol_p=3.97% (still beats AB-UPT 6.08), wsy=8.87%, wsz=10.65%. PR still WIP, baseline update pending merge. gilbert #346 LAUNCHED (run `ixyq15zt`, group `bengio-wave8-film-normal`, FiLM normal-cond, n_params=3,387,349, fourier_pe=True). frieren #361 + nezuko #347 sent BACK to draft — both running wrong experiments (frieren: droppath sweep, nezuko: 3ep-cosine-control debug; neither uses FourierEmbed). askeladd #328 Arm B still missing — final deadline 13:00Z (~36 min). thorfinn #340/haku #341/kohaku #343 still silent — deadline 13:42Z.**
 
 ## Most Recent Human Researcher Direction
 
@@ -13,7 +13,7 @@
 
 ### Highest Priority
 
-**alphonse #174 — STILL CLIMBING (now 7.040% at ep ~39.7)**. Run `vu4jsiic`, T_max=50, 5L/256d + Fourier. ep36.8=7.085% → ep39.7=7.040% — 0.045pp gain in ~3 epochs (~0.015pp/ep). Cosine knee continues to deliver. **−0.169pp below baseline 7.2091%**. wsy=8.97%, wsz=10.74% (both below baseline). Continue to ep50; revised projection **~6.95–7.05%**. **Update BASELINE.md when ep50 metrics post and the run is marked `status:review`.**
+**alphonse #174 — STILL CLIMBING (now 7.0283% at ep ~40, NEW BEST)**. Run `vu4jsiic`, T_max=50, 5L/256d + Fourier. ep36.8=7.085% → ep40=7.028% — 0.057pp gain in ~3 epochs (~0.019pp/ep). Cosine knee still delivering. **−0.181pp below baseline 7.2091%**. surf_p=4.62%, vol_p=3.97% (beats AB-UPT 6.08), wsy=8.87%, wsz=10.65% (both below baseline). Continue to ep50; revised projection **~6.90–7.00%**. **Update BASELINE.md when ep50 metrics post and the run is marked `status:review`.**
 
 **fern #360 — FourierEmbed coord-norm fix in flight**. Run `q40rez85`, ep~1/10. Replaces closed PR #276. ep5 gate at 12:20Z (abupt ≤ 10.5%). Critical: this run tests whether a structural +1.0–1.5pp gap between recent runs and `m9775k1v` is a normalization regression that could invalidate Wave 5–8 evaluations.
 
@@ -26,9 +26,9 @@
 | #340 | thorfinn | model_slices sweep {128, 192, 256} | 13:42Z | running probing/hybrid experiments |
 | #341 | haku | surface-loss-weight sweep {2.0, 4.0, 8.0} | 13:42Z | finished symmetry-aug runs at 05:08Z, idle |
 | #343 | kohaku | ws-only rel-L2 aux loss sweep {0.1, 0.5, 1.0} | 13:42Z | running full-train seeds + ensemble |
-| #346 | gilbert | FiLM normal-conditioning every block | 13:43Z | repeated crashes; `use_film=False` in config |
-| #347 | nezuko | Dedicated 2-block ws sub-decoder | 13:43Z | v1–v4 crashed; running cosine control |
-| #361 | frieren | weight-decay sweep {3e-4, 1e-3, 3e-3} | 14:00Z | all 8 runs crashed; running drop-path |
+| #346 | gilbert | FiLM normal-conditioning every block | LIFTED | LAUNCHED 12:19Z, run `ixyq15zt`, all 4 ranks running with `fourier_pe=True`, `film_normal=True`, n_params=3,387,349 |
+| #347 | nezuko | Dedicated 2-block ws sub-decoder | SENT BACK 12:24Z | running 3ep-cosine-control debug (4L/512d, no fourier_pe) instead of assigned hypothesis |
+| #361 | frieren | weight-decay sweep {3e-4, 1e-3, 3e-3} | SENT BACK 12:23Z | running droppath sweep (4 arms p0/0.05/0.10/0.20) instead of assigned WD sweep; no fourier_pe |
 
 If no ack by deadline → close PR + reassign hypothesis. PR #361 replaces closed #337 (which was the original frieren tangent-frame assignment, closed for non-compliance).
 
