@@ -806,11 +806,11 @@ class SurfaceTransolver(nn.Module):
             surface_tokens = surf_h.shape[1] if surf_h is not None else 0
             volume_tokens = vol_h.shape[1] if vol_h is not None else 0
             surface_hidden = (
-                hidden_norm[:, :surface_tokens] if surface_tokens > 0 else None
+                hidden_norm[:, :surface_tokens] if surf_h is not None else None
             )
             volume_hidden = (
                 hidden_norm[:, surface_tokens : surface_tokens + volume_tokens]
-                if volume_tokens > 0
+                if vol_h is not None
                 else None
             )
 
