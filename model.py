@@ -323,10 +323,10 @@ class SurfaceTransolver(nn.Module):
         rff_sigma: float = 1.0,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_tangent_frame_features: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
-        self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
@@ -334,6 +334,13 @@ class SurfaceTransolver(nn.Module):
         self.rff_sigma = rff_sigma
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_tangent_frame_features = use_tangent_frame_features
+        # When tangent-frame features are enabled, the model augments surface
+        # inputs internally with [t1x, t1y, t1z, t2x, t2y, t2z] (6 extra dims).
+        # Volume inputs stay at their original dim — separate projections.
+        if use_tangent_frame_features:
+            surface_input_dim = surface_input_dim + 6
+        self.surface_input_dim = surface_input_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -396,6 +403,32 @@ class SurfaceTransolver(nn.Module):
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
+    @staticmethod
+    def _compute_tangent_frame(normals: torch.Tensor) -> torch.Tensor:
+        """Build a deterministic local tangent frame (t1, t2) from unit normals.
+
+        Returns a [..., 6] tensor [t1x, t1y, t1z, t2x, t2y, t2z]. Points whose
+        normal magnitude is below 1e-6 (e.g. padded slots) are returned as
+        zeros so they do not poison the projection.
+        """
+        eps_norm = 1e-6
+        eps_axis = 1e-3
+        ref_z = normals.new_tensor([0.0, 0.0, 1.0]).expand_as(normals)
+        ref_x = normals.new_tensor([1.0, 0.0, 0.0]).expand_as(normals)
+        cross_z = torch.cross(normals, ref_z, dim=-1)
+        cross_x = torch.cross(normals, ref_x, dim=-1)
+        norm_z = cross_z.norm(dim=-1, keepdim=True)
+        # Fall back to cross with x when n is nearly parallel to z
+        t1_raw = torch.where(norm_z > eps_axis, cross_z, cross_x)
+        t1 = F.normalize(t1_raw, dim=-1, eps=eps_norm)
+        t2 = torch.cross(normals, t1, dim=-1)
+        normal_mag = normals.norm(dim=-1, keepdim=True)
+        valid = normal_mag > eps_norm
+        zeros = torch.zeros_like(t1)
+        t1 = torch.where(valid, t1, zeros)
+        t2 = torch.where(valid, t2, zeros)
+        return torch.cat([t1, t2], dim=-1)
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -443,6 +476,12 @@ class SurfaceTransolver(nn.Module):
         volume_tokens = 0
 
         if surface_x is not None:
+            if self.use_tangent_frame_features:
+                # surface_x layout: [x, y, z, nx, ny, nz, area]; append the
+                # local tangent frame [t1, t2] computed from the normals.
+                normals = surface_x[..., 3:6]
+                tangent_features = self._compute_tangent_frame(normals)
+                surface_x = torch.cat([surface_x, tangent_features], dim=-1)
             surface_tokens = surface_x.shape[1]
             tokens.append(
                 self._encode_group(
