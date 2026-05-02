@@ -568,6 +568,8 @@ class Config:
     dynamic_warmup_steps: int = 500
     dynamic_weight_clip_min: float = 0.1
     dynamic_weight_clip_max: float = 10.0
+    dynamic_shared_probe: str = "norm"
+    dynamic_static_floor: bool = False
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1339,6 +1341,7 @@ def _apply_dynamic_loss_weighting(
     ema_decay: float,
     weight_clip_min: float,
     weight_clip_max: float,
+    static_floor: dict[str, float] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """GradNorm-lite: w_i = clamp(median_j(EMA(g_j)) / EMA(g_i), [w_min, w_max]).
 
@@ -1347,6 +1350,12 @@ def _apply_dynamic_loss_weighting(
     sum(w_i) = N_tasks, then clamped. During the first `warmup_steps` we hold
     all weights at 1.0 so the model has time to leave random init before we
     react to its gradients.
+
+    If ``static_floor`` is provided, the final weight for each task is
+    ``max(dynamic_weight, static_floor[name])``. Tasks not in the dict default
+    to a floor of 1.0. This implements the hybrid weighting variant where a
+    PR #66 prior (e.g. tau_y/z = 2) is enforced as a lower bound while still
+    allowing the optimizer to upweight any task whose gradient becomes weak.
     """
     n_tasks = len(per_task_losses)
     log: dict[str, float] = {}
@@ -1394,6 +1403,18 @@ def _apply_dynamic_loss_weighting(
             }
         log["train/dynamic_weight/median_grad_ema"] = median_g
         log["train/dynamic_weight/sum_after_clip"] = float(sum(weights.values()))
+
+    if static_floor is not None:
+        floored: dict[str, float] = {}
+        for name in per_task_losses:
+            floor = float(static_floor.get(name, 1.0))
+            dyn_w = float(weights[name])
+            final_w = max(dyn_w, floor)
+            floored[name] = final_w
+            log[f"train/dynamic_weight/dynamic_only/{name}"] = dyn_w
+            log[f"train/dynamic_weight/static_floor/{name}"] = floor
+        weights = floored
+        log["train/dynamic_weight/sum_after_floor"] = float(sum(weights.values()))
 
     total = None
     for name, loss_i in per_task_losses.items():
@@ -1913,19 +1934,57 @@ def main(argv: Iterable[str] | None = None) -> None:
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
 
-    # GradNorm-lite state. EMA-smoothed per-task gradient norms; shared params
-    # are the last LayerNorm before the surface/volume head split. Cheap to
-    # autograd to (one head matmul) and a stable signal across all 5 tasks.
+    # GradNorm-lite state. EMA-smoothed per-task gradient norms measured on
+    # parameters at one of three depths in the shared trunk:
+    #   * "norm"                  -- last shared LayerNorm before the head split (default)
+    #   * "first_block" / "embed" -- first transformer block (earliest fully-shared layer)
+    #   * "last_block"            -- last transformer block (deepest shared point upstream
+    #                                of the LayerNorm)
+    # The probe choice changes which task gets surfaced as "under-attended"
+    # because gradient magnitudes at different depths reflect different
+    # things: shallow probes see input-side feature competition; deep probes
+    # see decoder-side capacity allocation.
     dynamic_grad_ema: dict[str, float] = {name: 1.0 for name in PER_TASK_LOSS_NAMES}
     dynamic_shared_params: list[torch.nn.Parameter] = []
+    dynamic_static_floor_map: dict[str, float] | None = None
     if config.dynamic_loss_weighting:
         unwrapped = getattr(model, "_orig_mod", model)
-        dynamic_shared_params = [p for p in unwrapped.norm.parameters() if p.requires_grad]
+        probe = config.dynamic_shared_probe
+        if probe == "norm":
+            probe_module = unwrapped.norm
+        elif probe in ("first_block", "embed"):
+            # First transformer block is the first layer where surface and
+            # volume tokens are concatenated and share a single set of
+            # parameters; the upstream input projections (surface_bias,
+            # volume_bias, project_*_features) are per-task and therefore
+            # not useful for measuring relative gradient pressure across all
+            # five tasks.
+            probe_module = unwrapped.backbone.blocks[0]
+        elif probe == "last_block":
+            probe_module = unwrapped.backbone.blocks[-1]
+        else:
+            raise ValueError(
+                f"dynamic_shared_probe must be one of 'norm', 'first_block' "
+                f"(alias 'embed'), 'last_block'; got {probe!r}"
+            )
+        dynamic_shared_params = [p for p in probe_module.parameters() if p.requires_grad]
         if not dynamic_shared_params:
             raise RuntimeError(
-                "dynamic_loss_weighting requires trainable parameters in model.norm; "
-                "found none."
+                f"dynamic_loss_weighting probe={probe!r} requires trainable "
+                "parameters at the chosen depth; found none."
             )
+        if config.dynamic_static_floor:
+            # Hybrid: enforce static W_y/W_z (from --wallshear-y-weight,
+            # --wallshear-z-weight) as a floor on the dynamic weights so PR
+            # #66's tau_y/z=2 prior is preserved. Other tasks default to a
+            # floor of 1.0 (no-op vs the dynamic weight when sum(w)=N).
+            dynamic_static_floor_map = {
+                "surface_pressure": 1.0,
+                "wall_shear_x": 1.0,
+                "wall_shear_y": float(config.wallshear_y_weight),
+                "wall_shear_z": float(config.wallshear_z_weight),
+                "volume_pressure": 1.0,
+            }
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
@@ -1964,6 +2023,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     ema_decay=config.dynamic_grad_ema_decay,
                     weight_clip_min=config.dynamic_weight_clip_min,
                     weight_clip_max=config.dynamic_weight_clip_max,
+                    static_floor=dynamic_static_floor_map,
                 )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
