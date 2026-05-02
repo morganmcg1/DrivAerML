@@ -1,0 +1,9 @@
+split: val
+n_cases: 34
+checkpoint: research/diagnostic_data/haku-tau-error-modes-r19/checkpoint_k7wq5uxx/checkpoint.pt
+checkpoint_origin: kohaku/seed2024 W&B run k7wq5uxx (PR #313 ensemble); used as PR #222-class stand-in because canonical PR #222 W&B run ut1qmc3i is no longer accessible from W&B; same yi 4L/512d/8H/128sl architecture, AdamW lr=5e-4, EMA(0.999), pos_max_wavelength=1000, wallshear_y/z_weight=2.
+checkpoint_epoch: 2
+tau_x_rel_l2_pct_global: 9.9377
+tau_y_rel_l2_pct_global: 13.6247
+tau_z_rel_l2_pct_global: 14.6511
+inference_seconds: 329.6

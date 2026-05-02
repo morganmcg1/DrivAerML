@@ -1,0 +1,4 @@
+# Per-case raw inference dumps (~13 GB) — regenerable by run_inference.py.
+predictions/*.npz
+# Binary checkpoint (~50 MB, downloaded from W&B artifact `model-seed2024-k7wq5uxx:best`).
+checkpoint_k7wq5uxx/*.pt
