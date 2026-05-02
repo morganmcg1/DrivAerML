@@ -91,6 +91,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    model_vol_decoder_depth: int = 1   # 1=linear (baseline), 2=MLP decoder
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     amp_mode: str = "bf16"
@@ -176,6 +177,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        vol_decoder_depth=config.model_vol_decoder_depth,
     )
 
 

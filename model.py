@@ -253,6 +253,7 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
+        vol_decoder_depth: int = 1,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -302,7 +303,24 @@ class SurfaceTransolver(nn.Module):
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        if vol_decoder_depth >= 2:
+            # Pre-norm head (advisor Option A after epoch-9 divergence in
+            # ux5s5id6): LayerNorm → Linear → GELU → Linear. Tail Linear is
+            # zero-bias, std=1e-2 trunc_normal so the head starts close to a
+            # tiny near-zero readout, letting the trunk shape the signal
+            # before the new MLP capacity adds variance.
+            self.volume_out = nn.Sequential(
+                nn.LayerNorm(n_hidden, eps=1e-6),
+                nn.Linear(n_hidden, n_hidden),
+                nn.GELU(),
+                nn.Linear(n_hidden, self.volume_output_dim),
+            )
+            # First Linear: standard trunc_normal std=0.02 (matches rest of
+            # backbone). Final Linear: std=1e-2, near-identity start.
+            _init_linear(self.volume_out[1], std=0.02)
+            _init_linear(self.volume_out[3], std=1e-2)
+        else:
+            self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
         self,
