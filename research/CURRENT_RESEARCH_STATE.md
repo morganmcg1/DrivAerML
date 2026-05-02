@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 ~10:40 UTC (post-PR #311 merge cycle)
+- **Date:** 2026-05-01 ~11:15 UTC (post-PR #311 merge cycle; nezuko assigned PR #365)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -39,7 +39,7 @@ Merge bar = val_abupt < 7.546%.
 | #358 | thorfinn | STRING-sep + QK-norm stack | NEW — assigned | — |
 | #359 | frieren | STRING-sep + separate volume decoder head | NEW — assigned | — |
 | #287 | alphonse | QK-norm on OLD SOTA stack | In-flight (Arm B running) | TBD |
-| #283 | nezuko | model-layers=5 (extended run) | ep12=8.9938%, ep13=9.66% | 8.9938% (best) |
+| **#365** | **nezuko** | **model-layers=5 + STRING-sep PE (NEW ASSIGNMENT)** | **NEWLY ASSIGNED** | — |
 | #323 | tanjiro | 2-layer MLP vol decoder head (v3 re-launch) | ep6~10.96%, converging | 10.96% |
 | #351 | fern | Surface-tangent-frame projection loss for tau_y/tau_z | ep2=47.74%, early | 47.74% |
 | #353 | askeladd | Channel-selective Huber loss on tau (delta=0.5) | Early — no val yet | — |
@@ -48,7 +48,7 @@ Merge bar = val_abupt < 7.546%.
 
 **PR #287 alphonse QK-norm (old base):** Testing QK-norm on the old SOTA stack (PR #309 baseline, not STRING-sep). The new SOTA is now 7.546%, so alphonse's result must beat this. If QK-norm is strong, it will still beat 7.546% (since the old SOTA is only 9.039%, a QK-norm improvement would need to be very large). Thorfinn PR #358 tests QK-norm stacked with STRING-sep — whichever approach works better will be the next merge.
 
-**PR #283 nezuko model-layers=5:** ep12 best=8.9938% doesn't beat the new STRING-sep SOTA (7.546%). However, the depth=5 signal is still scientifically valuable for determining if depth and STRING-sep compound. Nezuko has been told to get test metrics from ep12 best checkpoint and mark ready for review. If depth=5 works, we assign depth=5 + STRING-sep as the next experiment.
+**PR #365 nezuko model-layers=5 + STRING-sep:** Compound hypothesis. PR #283 showed depth=5 on the OLD SOTA base reached val~8.9938% (doesn't beat STRING-sep SOTA of 7.546%, but the depth signal is real). Now we stack depth=5 on the STRING-sep base — the richer learnable per-axis positional encoding should give the extra layer more structure to compose over. Run command is identical to SOTA except `--model-layers 5`. ~10-12 epochs expected in 270-min budget.
 
 **PR #323 tanjiro vol-decoder:** Testing separate volume head on the OLD SOTA base. If it works, will be superseded by frieren PR #359 (same idea but on STRING-sep base). Still tracking the convergence — ep6=10.96% (normal trajectory at ep6).
 
@@ -91,7 +91,7 @@ Edward's PR #311 Arm C (GRAPE-M — minimal learned spectral projection, B as nn
 | Dropout | CLOSED | 0.0 SOTA |
 | Tau axis weights | CLOSED | 1.0 SOTA |
 | model_heads | CLOSED SOTA | 4H beats 8H (#232 merged) |
-| model_layers | In-flight | 4 SOTA; 5L val 8.9938% (doesn't beat STRING SOTA) |
+| model_layers | In-flight | 4 SOTA; 5L on OLD base=8.9938%; 5L on STRING-sep base IN-FLIGHT (#365) |
 | model_slices / hidden_dim | CLOSED NEGATIVE | 128/512 SOTA |
 | lr_cosine T_max / warmup | CLOSED | T_max=50, warmup=0 SOTA |
 | grad-clip-norm | MERGED | 0.5 SOTA (#309) |
@@ -122,7 +122,7 @@ Edward's PR #311 Arm C (GRAPE-M — minimal learned spectral projection, B as nn
 
 1. **Monitor alphonse #287 QK-norm Arm B** — if it beats STRING-sep SOTA, merge and compound
 2. **Monitor PR #357 edward extended epochs** — may push STRING-sep val below 7.0%
-3. **Review nezuko #283 when done** — get test metrics from ep12 best checkpoint; assess depth=5 + STRING-sep compound
+3. **Monitor nezuko #365** — model-layers=5 + STRING-sep compound; depth=5 may compound with richer STRING-sep geometry
 4. **Await tanjiro #323 completion** — if vol-decoder works on old base, supersede with frieren #359
 5. **Compound round** (next free students): depth=5 + STRING-sep; or STRING-sep + QK-norm + depth (three-way stack if all work independently)
 6. **STRING-sep hyperparameter sweep**: feature count (16/32/64), init scale, per-axis vs isotropic hybrid
