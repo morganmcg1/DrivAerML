@@ -40,6 +40,7 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    cosine_ema_decay,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -103,6 +104,9 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    ema_decay_start: float = 0.0
+    ema_decay_end: float = 0.9999
+    ema_cosine_total_epochs: int = 0
     eval_raw_vs_ema: bool = False
     lr_warmup_epochs: int = 0
     lr_cosine_t_max: int = 0
@@ -294,9 +298,21 @@ def main(argv: Iterable[str] | None = None) -> None:
         timeout_hit = False
         train_start = time.time()
 
+        cosine_ema_active = config.ema_decay_start > 0.0 and ema is not None
+        cosine_ema_total_epochs = (
+            config.ema_cosine_total_epochs if config.ema_cosine_total_epochs > 0 else max_epochs
+        )
         for epoch in range(max_epochs):
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
+            if cosine_ema_active:
+                current_ema_decay = cosine_ema_decay(
+                    epoch=epoch,
+                    total_epochs=cosine_ema_total_epochs,
+                    decay_start=config.ema_decay_start,
+                    decay_end=config.ema_decay_end,
+                )
+                ema.set_decay(current_ema_decay)
             timeout_hit = distributed_any(
                 state,
                 (time.time() - train_start) / 60.0 >= timeout_minutes,
@@ -475,6 +491,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if ema is not None:
+                log_metrics["train/ema_decay"] = float(ema.decay)
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
