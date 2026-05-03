@@ -1,5 +1,29 @@
 # SENPAI Research Results
 
+## 2026-05-03 01:00 — PR #450: thorfinn Lion weight-decay sweep (1e-4/5e-4/2e-3/5e-3) — CLOSED INFORMATIVE NEGATIVE
+
+- Branch: `thorfinn/lion-weight-decay-sweep` (deleted)
+- W&B group: `yi-r27-lion-wd-sweep`
+- Hypothesis: Lion's sign-based updates make weight decay the primary regularization mechanism, so the optimal wd may differ from AdamW's optimum. Sweeping {1e-4, 5e-4, 2e-3, 5e-3} would identify the best wd and potentially improve both val_abupt and val→test gap.
+- Setup: 4-arm parallel sweep, single-GPU bs=4, partial epoch 1 (~57% at 270-min timeout), 4L/512d/8h/128sl, Lion lr=1e-4, seed=42.
+
+| Arm | wd | val_abupt | test_abupt | val→test | surf_p | vol_p | ws_y | ws_z | W&B run |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| A | 1e-4 (true prod baseline) | 12.460% | 13.289% | +0.83pp | 8.021% | 8.728% | 16.401% | 17.597% | `ypf1nu0z` |
+| **B** | **5e-4** | **12.146%** | **12.957%** | **+0.81pp** | **7.814%** | **7.895%** | **16.298%** | **17.321%** | `lyo3gox8` |
+| C | 2e-3 | 20.413% | 21.071% | +0.66pp | 11.252% | 30.984% | 21.352% | 23.118% | `fspgw59u` |
+| D | 5e-3 | 31.340% | 32.033% | +0.69pp | 21.255% | 18.925% | 43.809% | 43.582% | `jijrythy` |
+
+- **Results commentary:**
+  - Arm B (wd=5e-4) wins screening by 0.31pp val_abupt over Arm A (wd=1e-4, true production baseline). The margin is within single-seed noise at partial-epoch budget — not sufficient to flip production wd.
+  - DDP-promotion threshold (any arm ≠ B beats B by ≥ 0.5pp) was NOT met. Arm A is only 0.31pp worse; Arm C and D are catastrophically degraded.
+  - Lion is intolerant of wd ≥ 2e-3: Arm C vol_p 30.98% (vs 7.9% for B, 3.9× regression); Arm D wall_shear_y/z both ~43-44%. This confirms Lion's sign-based update produces small effective parameter magnitude — once wd crosses ~1e-3 the weight-decay direction dominates the gradient direction and signal collapses.
+  - Higher wd does NOT reduce the val→test gap (all arms ~0.66–0.83pp regardless of wd). Gap is dataset-shift-driven, not wd-driven.
+  - **Production decision:** keep wd=1e-4 unchanged. Future Lion experiments: prune wd search space to [1e-4, 5e-4], skip wd ≥ 1e-3 entirely.
+- **Follow-up assigned:** PR #479 (thorfinn, stochastic depth + dropout sweep) — directly attacks the val→test gap via regularization levers already wired in train.py.
+
+---
+
 ## 2026-05-03 00:05 — PR #419: chihiro surface-tangent frame input features — CLOSED NEGATIVE
 
 - Branch: `chihiro/surface-tangent-frame-inputs` (deleted)

@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-03 00:05 UTC (Round 29 — chihiro reassigned: per-step cosine LR)
+- 2026-05-03 01:00 UTC (Round 30 — PR #450 thorfinn Lion WD sweep closed, PR #479 thorfinn stochastic-depth+dropout assigned)
 
 ## Most Recent Human Researcher Directives (Issue #18)
 
@@ -46,7 +46,7 @@
 | #474 | frieren | EMA model soup (last-K checkpoint avg) + per-step LR logging | WIP |
 | #473 | alphonse | Per-axis coord normalization (x/2, y/0.5, z/0.5) to fix PE anisotropy | WIP |
 | #472 | edward | Muon@1e-3 vs AdamW full-budget 4-GPU DDP (PR #377 promotion) | WIP |
-| #450 | thorfinn | Lion weight-decay sweep (1e-4/5e-4/2e-3/5e-3) | WIP |
+| #479 | thorfinn | Stochastic depth + dropout sweep (val→test gap attack, 2×2 grid) | NEW |
 | #449 | norman | Log-x coordinate compression for isotropic sincos PE | WIP — advisor responded |
 | #440 | violet | Huber δ sweep without tangential loss — SENT BACK for full-budget DDP | WIP |
 | #436 | noam | Slices sweep 64/128/192 on STRING-sep stack | WIP |
@@ -79,6 +79,8 @@
 
 8. **Loss rebalancing** (PRs #440 violet, #366 gilbert, #367 haku): Huber loss for wall-shear tail, vol_weight=0.5 for pressure balance, theta-conditioned loss weighting.
 
+9. **Generalization regularization** (PR #479 thorfinn): PR #450 confirmed val→test gap (~0.81pp) is dataset-shift-driven, not wd-driven. PR #479 tests stochastic depth (`--stochastic-depth-prob 0.05`) + dropout (`--model-dropout 0.05`) in a 2×2 grid — both are already-wired flags with zero code risk, targeting smoother representations that generalize better under covariate shift.
+
 ## Recently Reviewed (this session — 2026-05-02/03)
 
 | PR | Student | Result | Decision |
@@ -86,6 +88,7 @@
 | #429 | frieren | OneCycleLR vs cosine — screen structurally broken (sub-epoch, cosine never decays) | CLOSED |
 | #430 | emma | EMA ramp — ramp never exercised (1.15% of schedule), only fixed-low-EMA snapshot | SENT BACK for DDP |
 | #419 | chihiro | Tangent frame input features — +2pp regression; Arm A (input only) worse on all channels; Arm B (local-frame pred) killed ep1 | CLOSED |
+| #450 | thorfinn | Lion WD sweep (1e-4/5e-4/2e-3/5e-3) — B(wd=5e-4) wins by 0.31pp, below 0.5pp DDP threshold; Arms C/D catastrophic; wd ≥ 1e-3 ruled out forever for Lion | CLOSED INFORMATIVE NEGATIVE |
 
 ## Dead Ends (do not re-assign on yi)
 
@@ -101,6 +104,7 @@
 | FFT spectral loss | #288 | Below practical bar; geometrically meaningless on unstructured mesh |
 | OneCycleLR (pct_start=0.3) | #429 | Screen compromised; retry with pct_start=0.05-0.10 and DDP needed first |
 | Surface-tangent frame input features | #419 | Input redundancy (t1/t2 deterministic from n — already an input); normalization bug in local-frame prediction |
+| Lion wd ≥ 1e-3 | #450 | Catastrophic: wd=2e-3 → vol_p 30.98% (3.9×), wd=5e-3 → ws_y/z 43-44%. Sign-update collapses under high wd. Keep Lion wd in [1e-4, 5e-4]. |
 
 ## Key Research Insights
 
