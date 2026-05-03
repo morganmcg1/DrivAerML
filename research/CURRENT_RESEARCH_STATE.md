@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-03 (post W&B snapshot, late EP9 region — 8 students active, 0 idle)
+- **Date:** 2026-05-03 (post-#454 closeout, frieren + edward reassigned — 8 students active, 0 idle)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -28,16 +28,18 @@ No new directives in last cycle. All 3 open human issues already responded to. S
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle students)
 
-| PR | Student | Hypothesis | Run | Step / EP | val_abupt | Status |
-|---|---|---|---|---|---:|---|
-| **#480** | **fern** | **Cosine EMA ramp (12-ep span)** | `2u6twuu4` | 23171 / EP9.5 | **7.745%** | **PRIMARY SOTA CANDIDATE** — projected EP12 ~7.28% |
-| #481 | tanjiro | log1p tau-norm v2 | `hnrpuptg` | 22436 / EP9.2 | 8.064% | Descending, vol_p strong |
-| #454 | frieren | tau_yz loss weight 1.5× | `l8nu1ajz` | 20493 / EP8.4 | 8.248% | tau_yz weighting confirmed inert |
-| #483 | edward | surface↔vol cross-attn bridge | `ok98szul` | 14537 / EP6.0 | 8.969% (EP5.6) | EP5 gate borderline pass (waiver) |
-| #458 | nezuko | model-mlp-ratio=8 | `he54fm6v` | 12815 / EP5.3 | 9.805% (EP4.5) | EP5 slope-waiver granted (slope −1.377 pp/1k → proj 8.05%) |
-| #488 | alphonse | Multi-sigma log_freq init (STRING-sep) | `ki2q9ko9` | 9863 / EP4.1 | 13.99% | Pre-gate, slow-warmup expected |
-| #489 | thorfinn | Volume-points curriculum 16k→65k | (run pending) | 8617 / EP3.5 | (no val yet) | Pre-gate, first val at EP4 |
-| #471 | askeladd | Signed-log vol target (arm-b) | `wlb9zv1v` | 6207 / EP2.6 | 38.36% | Arm-a EP12 done (vol_p 4.62% record); arm-b early |
+| PR | Student | Hypothesis | Status |
+|---|---|---|---|
+| #499 | fern | TTA mirror-y (post-hoc on frozen #387) | newly assigned, pre-first-val |
+| #496 | tanjiro | Uncertainty-weighted multitask loss | newly assigned, pre-first-val |
+| **#501** | **frieren** | **Anisotropic per-axis STRING freq (sigma_x/y/z, 3 arms)** | **NEW** — targets tau_y/z gap directly |
+| **#500** | **edward** | **Surface curvature (mean H + Gaussian K) input features** | **NEW** — targets tau_y/z gap via geometric prior |
+| #458 | nezuko | model-mlp-ratio=8 (Run 2) | EP5 slope-waiver granted; converging slow |
+| #488 | alphonse | Multi-sigma log_freq STRING-sep init | tau_y/z spectral attack, pre-EP5 |
+| #489 | thorfinn | Volume-points curriculum 16k→65k | pre-gate |
+| #471 | askeladd | Signed-log vol target (arm-b) | arm-a vol_p 4.62% recorded; arm-b in early warmup |
+
+(Detailed step/val trajectories last captured at the W&B snapshot earlier 2026-05-03 — see git history of this file.)
 
 ---
 
@@ -94,10 +96,12 @@ No new directives in last cycle. All 3 open human issues already responded to. S
 
 ## Recent closeouts
 
-- **PR #482 thorfinn (TTA mirror-y) — CLOSED (EP5 gate fail).** EP6 val_abupt=10.989%; TTA must be inference-only.
+- **PR #454 frieren (tau_yz w=1.5) — CLOSED-NEG.** Third NEG result in tau_yz loss-weight family. Spawned anisotropic STRING attack #501.
+- **PR #483 edward (surf↔vol cross-attn bridge) — CLOSED.** Did not beat SOTA. Edward reassigned to surface curvature features #500.
+- **PR #482 thorfinn (TTA mirror-y) — CLOSED (EP5 gate fail).** EP6 val_abupt=10.989%; TTA must be inference-only (now revisited as fern #499).
 - **PR #467 alphonse (per-axis output scaling) — CLOSED-NEG.** Confirms tau_y/tau_z gap is upstream in spectral representation. Spawned PR #488.
-- **PR #142 frieren (tau_yz weight=2.0) — CLOSED-NEG.** w=1.5 follow-up in PR #454.
-- **PR #458 nezuko mlp6 (Run 1) — CLOSED-NEG.** mlp8 (Run 2) launched as `he54fm6v`.
+- **PR #142 frieren (tau_yz weight=2.0) — CLOSED-NEG.** w=1.5 follow-up was #454, also NEG.
+- **PR #458 nezuko mlp6 (Run 1) — CLOSED-NEG.** mlp8 (Run 2) currently in flight.
 
 ---
 
@@ -110,10 +114,13 @@ No new directives in last cycle. All 3 open human issues already responded to. S
    - **Data curriculum:** PR #489 thorfinn (16k→65k vol-points ramp)
    - **log1p target:** PR #481 tanjiro — vol_p=4.83%
 
-2. **Closing the tau_y/tau_z gap (×2.5 / ×2.8 vs AB-UPT) — needs upstream attacks:**
-   - **Spectral representation:** PR #488 alphonse (multi-sigma STRING-sep init) — most promising line
-   - **Distribution shape (likely insufficient):** PR #481 tanjiro (log1p tau-norm v2)
-   - **Loss weighting (confirmed inert):** PR #454 frieren — third NEG result for this lever family
+2. **Closing the tau_y/tau_z gap (×2.5 / ×2.8 vs AB-UPT) — full-fleet upstream attack:**
+   - **Spectral representation, isotropic:** PR #488 alphonse (multi-sigma STRING-sep init)
+   - **Spectral representation, anisotropic per-axis:** **PR #501 frieren (sigma_x/y/z 3-arm sweep — NEW)**
+   - **Geometric prior (input features):** **PR #500 edward (mean H + Gaussian K curvature — NEW)**
+   - **Multitask balance:** PR #496 tanjiro (uncertainty weighting)
+   - **Inference-only TTA:** PR #499 fern (mirror-y on frozen SOTA)
+   - **Loss weighting (confirmed inert):** PR #142, #454, #467 — three NEG results, family exhausted
 
 3. **Capacity scaling:** PR #458 nezuko (mlp_ratio=8, slow-warmup, slope-waiver granted)
 
