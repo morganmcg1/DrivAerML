@@ -82,6 +82,7 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    mirror_aug_prob: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -223,6 +224,45 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_mirror_y_aug(batch, prob: float) -> tuple[object, float]:
+    """Per-sample y-mirror (xz-plane) augmentation.
+
+    Sign conventions (from data/loader.py):
+      surface_x layout: [x(0), y(1), z(2), nx(3), ny(4), nz(5), area(6)]
+      surface_y layout: [cp(0), tau_x(1), tau_y(2), tau_z(3)]
+      volume_x  layout: [x(0), y(1), z(2), sdf(3)]
+
+    Under y-reflection only the y position, y normal, and tau_y target flip sign;
+    cp / tau_x / tau_z / area / nx / nz / sdf and volume_y (scalar pressure) are
+    invariant. Returns the (possibly augmented) batch and the realized fraction
+    of flipped samples for logging.
+    """
+    if prob <= 0.0:
+        return batch, 0.0
+
+    B = batch.surface_x.shape[0]
+    flip_mask = torch.rand(B, device=batch.surface_x.device) < prob  # [B]
+    flip_frac = float(flip_mask.float().mean().item())
+    if not bool(flip_mask.any().item()):
+        return batch, flip_frac
+
+    sign = torch.where(flip_mask, -1.0, 1.0).to(batch.surface_x.dtype)  # [B]
+    surface_sign = sign[:, None]  # [B, 1]
+    volume_sign = sign[:, None]   # [B, 1]
+
+    surface_x = batch.surface_x.clone()
+    surface_y = batch.surface_y.clone()
+    volume_x = batch.volume_x.clone()
+
+    surface_x[:, :, 1] = surface_x[:, :, 1] * surface_sign
+    surface_x[:, :, 4] = surface_x[:, :, 4] * surface_sign
+    surface_y[:, :, 2] = surface_y[:, :, 2] * surface_sign
+    volume_x[:, :, 1] = volume_x[:, :, 1] * volume_sign
+
+    import dataclasses
+    return dataclasses.replace(batch, surface_x=surface_x, surface_y=surface_y, volume_x=volume_x), flip_frac
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -232,8 +272,12 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    mirror_aug_prob: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    mirror_aug_frac = 0.0
+    if mirror_aug_prob > 0.0:
+        batch, mirror_aug_frac = apply_mirror_y_aug(batch, mirror_aug_prob)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -255,6 +299,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "mirror_aug_frac": mirror_aug_frac,
     }
 
 
@@ -501,6 +546,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    mirror_aug_prob=config.mirror_aug_prob,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -537,6 +583,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/mirror_aug_frac": batch_loss_metrics["mirror_aug_frac"],
                         }
                     )
 
