@@ -6,6 +6,47 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-04 — Round 12 opened: 3 new assignments, 2 closed dead-ends
+
+### Closures
+
+#### PR #537 alphonse slw=2.0 full 13-epoch run — CLOSED NEGATIVE
+- Branch: `alphonse/slw2-full-13ep`, W&B run `49aimdiz`, group `alphonse-slw2-full13ep`
+- Hypothesis: Complete the timed-out PR #510 run with proper `--epochs 13 --lr-cosine-t-max 13`, expected to push slw=2.0 below SOTA
+- Result: Hit same 270min cap at EP5; val_abupt=6.8994% (beats #510 by 0.107pp on val, test flat at 8.2972% vs 8.2921%)
+- Verdict: Does NOT beat current SOTA #523 (6.9246%) on val (loses by 0.025pp); within seed-variance noise
+- Conclusion: Closed. Not a merge candidate. The student's suggested follow-up (`--epochs 6 --lr-cosine-t-max 6` to fit cosine to actual 270min train budget) noted for future revisit but lower priority than fresh hypotheses.
+
+#### PR #536 nezuko y-mirror training augmentation — CLOSED NEGATIVE (hypothesis falsified)
+- Branch: `nezuko/mirror-y-train-aug`, W&B run `w28i6zeh`, group `nezuko-mirror-y-aug`
+- Hypothesis: Y-mirror training aug (p=0.5) exploits xz-plane symmetry to selectively close tau_y gap (8.77% vs AB-UPT 3.65%)
+- Result: 270min cap hit mid-EP11; best val_abupt=7.2315% at EP11 (well above SOTA 6.9246%)
+- mirror_aug_frac mean=0.498 (correctly Binomial(4,0.5)/4) — the augmentation fired correctly
+- Crucial finding: tau_y did NOT improve selectively — gap closed uniformly across all channels. Warmup penalty +0.82pp at EP4, compressed to +0.08pp by EP10
+- **Verdict: hypothesis falsified.** The tau_y/tau_z gap is **structural / capacity-limited**, not data-symmetry addressable. Joins TTA mirror-y inference (#499) as both negative — both axes of mirror-symmetry exploitation are now closed.
+- Implication for next round: pivot away from data-augmentation attacks on tau_y; toward regularization, weight averaging, dynamic rebalancing, and architectural changes.
+
+### New assignments
+
+#### PR #552 thorfinn — GradNorm-EMA min_weight floor sweep
+- Hypothesis: Tighten the `--gradnorm-min-weight` floor on the proven SOTA mechanism. Current PR #523 SOTA used floor=0.7 (paper soft-floor). Sweep {0.5, 0.6} to widen redistribution and force harder push on tau_y/tau_z (still climbing +0.5pp/epoch through EP6 in #523).
+- Two arms sequential on DDP8, group `thorfinn-gradnorm-floor-sweep`. Bar: val < 6.9246% AND test ≤ 8.30%.
+
+#### PR #553 alphonse — input coordinate jitter regularization
+- Hypothesis: Gaussian noise on input coordinates (sigma sweep {0.002, 0.005, 0.010} in normalized units) acts as a Tikhonov regularizer, attacking memorization of coordinate-quantization artifacts. Targets tau_y/tau_z overfitting specifically. Orthogonal to RFF representation, loss reweighting, and gradient-budget mechanisms.
+- Three sigma arms sequential on slw=2.0 base, group `alphonse-coord-jitter`. Bar: val < 6.9246% AND test ≤ 8.30%.
+
+#### PR #554 nezuko — top-K best-val checkpoint averaging (model soup)
+- Hypothesis: Uniform average of top-K best-val EMA checkpoints (K=5) provides variance reduction (~√K) targeted at the slow-converging tau channels. Wortsman 2022 / Izmailov SWA — never tried on this stack. Reproduces SOTA #523 recipe (so best-of-1 IS the SOTA), then evaluates soup-1..soup-5 at end of training.
+- Single run, group `nezuko-checkpoint-soup`. Bar: any soup-K beats val < 6.9246% AND test ≤ 8.30%. Pure inference-time, zero training risk, composes with any future winner.
+
+### Round 12 fleet snapshot
+- 0 idle students, 8 WIP PRs (#516, #534, #538, #549, #550, #552, #553, #554), 0 review-ready
+- #549 and #550 currently CONFLICTING — need rebase before review
+- Next review window: when first new run hits status:review or when conflicts get rebased
+
+---
+
 ## 2026-05-03 19:05 UTC — PR #534 SENT BACK (rerun as Option A): tanjiro multi-scale STRING-sep bands
 
 - **Branch:** `tanjiro/multi-scale-string-bands`, status:wip (not merged, not closed — fused-equivalent rerun approved)
