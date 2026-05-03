@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 (post-#489 MERGE — thorfinn vol-curriculum is new SOTA; 8 students active, 0 idle)
+- **Date:** 2026-05-03 11:30Z — frieren EP8 PASS (7.60%), askeladd EP3 ahead of SOTA, nezuko EP5 PASS (9.13%); 8 students active, 0 idle; alphonse #510 critical surface_loss=0 incident in progress
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -33,14 +33,14 @@ No new directives since last cycle. All open human issues already responded to. 
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #523 | thorfinn | GradNorm dynamic loss balancing (Chen et al. NeurIPS 2018) | newly assigned post-#489 MERGE |
-| #499 | fern | TTA mirror-y (post-hoc on frozen #387) | run `dy3viqmk` live, EP1=11.18%, EP5 gate ≤9.2% |
+| #523 | thorfinn | GradNorm dynamic loss balancing (Chen et al. NeurIPS 2018) | full GradNorm crashed (5× overhead); pivoted to EMA-loss-proxy; advisor confirmed `r_i^alpha` formula at 11:26Z; new run launching |
+| #499 | fern | TTA mirror-y (post-hoc on frozen #387) | EP5 gate miss (10.02% vs 9.2%) but trajectory healthy; EP6=9.54%; post-hoc eval planned at timeout |
 | #496 | tanjiro | Uncertainty-weighted multitask loss (dual-optimizer fix) | relaunched with AdamW for log_sigma, monitor sigma spread at EP2 |
-| #501 | frieren | Anisotropic per-axis STRING freq (sigma_x/y/z, 3 arms) | run `kvywdebn` EP2=30.74%, in early warmup |
-| #506 | nezuko | Surface point density 2× (65k→131k surface pts) | run `e4gz48nf` EP1=52.47%, very early |
-| #510 | alphonse | Surface-loss-weight sweep (multi-arm) | runs `9aw9kqm9`/`fbu24ylm` ~1186 steps, no val yet |
-| #511 | edward | Extended training to EP15 (best-val extension) | runs `7h6vivvh`/`xilwwdkz` ~828 steps, no val yet |
-| #516 | askeladd | Per-channel tau_y/tau_z loss reweighting | newly assigned, pre-launch |
+| #501 | frieren | Anisotropic per-axis STRING freq (sigma_x/y/z, 3 arms) | **EP8 GATE PASS**: Arm A val_abupt=7.60% (run `kvywdebn`), pulling ahead of SOTA on tau_y/tau_z |
+| #506 | nezuko | Surface point density 2× (65k→131k surface pts) | **EP5 GATE PASS**: val_abupt=9.13% (run `e4gz48nf`); ~22% per-epoch overhead |
+| #510 | alphonse | Surface-loss-weight sweep (multi-arm) | **CRITICAL**: run `ojept9ov` had `surface_loss=0` and no val metrics; advisor flagged at 11:15Z; awaiting kill+diagnose+relaunch |
+| #511 | edward | Extended training to EP13 (best-val extension) | run `5o7jc7wi` healthy at ~EP6/13, monotonic descent |
+| #516 | askeladd | Per-channel tau_y/tau_z loss reweighting | Run A (tau_y×2.0, tau_z×2.5) tracking ahead of SOTA EP3-for-EP3; run `jeagf5zr` |
 
 ---
 
@@ -58,39 +58,44 @@ No new directives since last cycle. All open human issues already responded to. 
 
 ## Latest signals
 
-### Alphonse #510 — surface loss-weight sweep
-- Runs `9aw9kqm9`/`fbu24ylm` at ~1186 steps — no val checkpoint yet
-- Watch at EP5 for gate pass
+### Alphonse #510 — surface loss-weight sweep (CRITICAL incident in progress)
+- Run `ojept9ov` showed `train/surface_loss=0` and `train/surface_loss_weighted=0` throughout; no val metrics; vol_points stuck at 16384
+- Multiple branch-state issues: pre-rebase train.py loaded in memory at launch; entrypoint hard-reset undid local rebase; fix commit `41df492` checkout-from-tay applied but lost again on subsequent reset
+- Advisor flagged at 11:15Z; awaiting alphonse kill+diagnose+relaunch (pod healthy, on iteration 496)
 
-### Edward #511 — extended training EP15
-- Runs `7h6vivvh`/`xilwwdkz` at ~828 steps — no val checkpoint yet
+### Edward #511 — extended training EP13
+- Fell back from EP15 to EP13 (budget math: 25.2 min/epoch × 15 = 378 min > 360 min hard timeout)
+- Run `5o7jc7wi` healthy at ~EP6/13; val curve monotonically descending
 
 ### Fern #499 — TTA mirror-y (inference-only on frozen SOTA #387)
-- Run `dy3viqmk` + 7 DDP rank siblings live, EP1=11.18%
-- EP5 gate: ≤9.2%; TTA overhead adds ~20 min/eval pass
-- Beat target: val_abupt < **7.1792%** (updated from stale PR body which references 7.3816%)
+- EP5 gate miss (10.02% > 9.2%); trajectory normal (EP6=9.54%); not concerning
+- Post-hoc eval plan confirmed: after timeout, run `post_hoc_eval.py` with TTA on/off, compare tau_y delta
 
 ### Tanjiro #496 — uncertainty-weighted multitask loss (dual-optimizer fix)
-- Original Lion lockstep failure diagnosed: all log_sigma_sq parameters moved identically (±1e-4/step), eliminating per-task adaptation
-- Fix: separate AdamW(lr=1e-3, wd=0.0) for 5 log_sigma scalars; Lion for backbone
-- Monitor sigma spread at EP2 (want >0.01 spread)
+- Lion lockstep diagnosed: sign-update is scale-invariant when losses share order of magnitude → all 5 log_sigma move identically (spread 5e-4 at EP2)
+- Fix: separate AdamW(lr=1e-3, wd=0) for log_sigma; Lion for backbone
+- Awaiting EP1 sigma divergence + EP5 gate result
 
 ### Frieren #501 — anisotropic STRING frequencies (3-arm sweep: sigma_x/y/z)
-- Run `kvywdebn` step=7477, EP2=30.74% — still in early warmup
-- Warm-up expected slow; check at EP5 gate (~step 54320)
+- **EP8 GATE PASS** — Arm A (sigma_x=1.0, sigma_y=2.0, sigma_z=2.0) val_abupt=7.60% < 8.0% gate
+- Run `kvywdebn`, group `frieren-aniso-string`
+- Already pulling ahead of SOTA on asymmetric tau_y/tau_z channels — strongest live signal in fleet
 
 ### Nezuko #506 — surface pts 131k (2× density)
-- Run `e4gz48nf` step=5173, EP1=52.47% — very early
-- Check at EP5
+- **EP5 GATE PASS** — val_abupt=9.1316% ≤ 9.5% gate
+- Run `e4gz48nf`; tau_y/z still elevated (11.94%/13.25%) but converging
+- ~22% per-epoch time penalty
 
 ### Askeladd #516 — per-channel tau_y/tau_z loss reweighting
-- Newly assigned post-#471 closeout — pre-launch, awaiting first run confirmation
-- Beat target: val_abupt < **7.1792%** (note: PR body may reference stale 7.3672% — correct beat target is 7.1792%)
+- Run A (tau_y×2.0, tau_z×2.5) EP3 val_abupt=13.543% vs alphonse SOTA EP3 13.990% (−0.447pp ahead)
+- Run `jeagf5zr`, group `askeladd-tau-channel-reweight`
+- Note: PR #142, #454, #467 family marked EXHAUSTED — Run A's early lead vs PR #488 is interesting and bears watching
 
-### Thorfinn #523 — GradNorm dynamic loss balancing
-- Newly assigned post-#489 MERGE — pre-launch
-- Chen et al. NeurIPS 2018: adaptive per-task loss weighting via gradient norm monitoring
-- Primary target: close tau_y/tau_z gap without hand-tuning
+### Thorfinn #523 — GradNorm dynamic loss balancing → EMA-loss-proxy pivot
+- Full GradNorm (Chen 2018) crashed at step 10823 (5× autograd overhead untenable in 6h budget)
+- Pivoted to EMA-loss-proxy: `--gradnorm-mode ema_proxy --gradnorm-alpha 1.5 --gradnorm-ema-beta 0.9 --gradnorm-init-warmup-steps 50`
+- Formula deviation: implemented `w_i ∝ r_i^alpha` (relative training rate, original GradNorm) rather than literal `1/ema_loss_i` (which would invert sign)
+- Advisor confirmed at 11:26Z: thorfinn's interpretation matches the stated intent; gates set EP3≤14.0%, EP5≤9.5%, EP8≤8.0%
 
 ---
 
