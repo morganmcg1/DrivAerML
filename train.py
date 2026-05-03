@@ -95,6 +95,8 @@ class Config:
     rff_sigma: float = 1.0
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_cross_attn_bridge: bool = False
+    cross_attn_position: str = "pre_heads"
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -180,6 +182,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_sigma=config.rff_sigma,
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_cross_attn_bridge=config.use_cross_attn_bridge,
+        cross_attn_position=config.cross_attn_position,
     )
 
 
@@ -252,6 +256,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if config.use_cross_attn_bridge:
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
@@ -577,6 +583,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+                if (
+                    getattr(base_model, "use_cross_attn_bridge", False)
+                    and getattr(base_model, "cross_attn_bridge", None) is not None
+                ):
+                    bridge = base_model.cross_attn_bridge
+                    gate_s_tanh = bridge.gate_s.detach().tanh()
+                    gate_v_tanh = bridge.gate_v.detach().tanh()
+                    log_metrics["bridge/gate_s_tanh_mean"] = float(gate_s_tanh.mean().item())
+                    log_metrics["bridge/gate_v_tanh_mean"] = float(gate_v_tanh.mean().item())
+                    log_metrics["bridge/gate_s_tanh_max_abs"] = float(gate_s_tanh.abs().max().item())
+                    log_metrics["bridge/gate_v_tanh_max_abs"] = float(gate_v_tanh.abs().max().item())
+                    for head_idx in range(bridge.num_heads):
+                        log_metrics[f"bridge/gate_s_tanh_h{head_idx}"] = float(gate_s_tanh[head_idx].item())
+                        log_metrics[f"bridge/gate_v_tanh_h{head_idx}"] = float(gate_v_tanh[head_idx].item())
                 wandb.log(log_metrics)
                 tag = " *" if improved else ""
                 print(
