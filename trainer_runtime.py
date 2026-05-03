@@ -832,6 +832,37 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_cosine_direction_loss(
+    pred_norm: torch.Tensor,
+    target_norm: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    vec_mean: torch.Tensor,
+    vec_std: torch.Tensor,
+    eps_magnitude: float = 1e-2,
+) -> torch.Tensor:
+    # Per-channel z-score with non-uniform std/mean does not preserve vector
+    # direction, so we denormalize to physical units before computing cosine
+    # similarity. Same convention used by the tangential wall-shear loss
+    # established in PR #11.
+    if pred_norm.numel() == 0:
+        return pred_norm.sum() * 0.0
+    vec_mean_t = vec_mean.to(device=pred_norm.device, dtype=torch.float32)
+    vec_std_t = vec_std.to(device=pred_norm.device, dtype=torch.float32)
+    pred_phys = pred_norm.float() * vec_std_t + vec_mean_t
+    tgt_phys = target_norm.float() * vec_std_t + vec_mean_t
+    tgt_mag = tgt_phys.norm(dim=-1)
+    valid = mask.to(device=tgt_mag.device, dtype=torch.bool) & (tgt_mag > eps_magnitude)
+    if not bool(valid.any()):
+        return pred_norm.sum() * 0.0
+    pred_unit = pred_phys / pred_phys.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    tgt_unit = tgt_phys / tgt_phys.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+    cos_sim = (pred_unit * tgt_unit).sum(dim=-1)
+    direction_loss = 1.0 - cos_sim
+    valid_f = valid.to(direction_loss.dtype)
+    return (direction_loss * valid_f).sum() / valid_f.sum().clamp_min(1.0)
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,

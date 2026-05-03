@@ -52,6 +52,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_cosine_direction_loss,
     masked_mse,
     metric_namespace,
     parse_kill_thresholds,
@@ -82,6 +83,8 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    tau_unit_loss_weight: float = 0.0
+    tau_unit_loss_eps: float = 1e-2
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -130,6 +133,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     parser = argparse.ArgumentParser(description="DrivAerML surface/volume trainer")
     defaults = Config()
     help_text = {
+        "tau_unit_loss_weight": (
+            "Weight for auxiliary cosine-similarity direction loss on the wall-shear "
+            "unit vector (channels 1:4 of surface_preds). 0.0 disables it (default). "
+            "The loss is computed in DENORMALIZED physical units, since per-channel "
+            "z-score normalization with non-uniform std/mean would distort vector "
+            "direction. Loss = (1 - cos(pred_tau, tgt_tau)) averaged over masked "
+            "valid points where ||tgt_tau|| > tau-unit-loss-eps."
+        ),
+        "tau_unit_loss_eps": (
+            "Magnitude floor (in physical units) for masking near-zero target tau "
+            "vectors when computing the unit-vector direction loss. Default 1e-2 "
+            "is small relative to typical |tau| ~ O(1)."
+        ),
         "kill_thresholds": (
             "Optional early-stop checks. Format: "
             "'STEP:METRIC<NUMBER[,STEP:METRIC>=NUMBER...]'; commas or semicolons "
@@ -205,6 +221,8 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    tau_unit_loss_weight: float = 0.0,
+    tau_unit_loss_eps: float = 1e-2,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -222,12 +240,25 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+        tau_dir_loss = torch.zeros((), device=loss.device, dtype=loss.dtype)
+        if tau_unit_loss_weight > 0.0:
+            tau_dir_loss = masked_cosine_direction_loss(
+                out["surface_preds"][..., 1:4],
+                surface_target[..., 1:4],
+                batch.surface_mask,
+                vec_mean=transform.surface_y_mean[1:4],
+                vec_std=transform.surface_y_std[1:4],
+                eps_magnitude=tau_unit_loss_eps,
+            ).to(loss.dtype)
+            loss = loss + tau_unit_loss_weight * tau_dir_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "tau_dir_loss": float(tau_dir_loss.detach().cpu().item()),
+        "tau_dir_loss_weighted": float((tau_unit_loss_weight * tau_dir_loss).detach().cpu().item()),
     }
 
 
@@ -474,6 +505,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    tau_unit_loss_weight=config.tau_unit_loss_weight,
+                    tau_unit_loss_eps=config.tau_unit_loss_eps,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -510,6 +543,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/tau_dir_loss": batch_loss_metrics["tau_dir_loss"],
+                            "train/tau_dir_loss_weighted": batch_loss_metrics["tau_dir_loss_weighted"],
                         }
                     )
 
