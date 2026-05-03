@@ -229,11 +229,18 @@ class LinearProjection(nn.Module):
 
 
 class ContinuousSincosEmbed(nn.Module):
-    def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
+    def __init__(
+        self,
+        hidden_dim: int,
+        input_dim: int,
+        max_wavelength: int = 10_000,
+        learnable: bool = False,
+    ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim
         self.max_wavelength = max_wavelength
+        self.learnable = learnable
         padding = hidden_dim % input_dim
         dim_per_axis = (hidden_dim - padding) // input_dim
         sincos_padding = dim_per_axis % 2
@@ -242,11 +249,24 @@ class ContinuousSincosEmbed(nn.Module):
         if effective_dim_per_axis <= 0:
             raise ValueError("hidden_dim must be large enough for the requested input dimension")
         arange = torch.arange(0, effective_dim_per_axis, 2, dtype=torch.float32)
-        self.register_buffer("omega", 1.0 / max_wavelength ** (arange / effective_dim_per_axis))
+        init_omega = 1.0 / max_wavelength ** (arange / effective_dim_per_axis)
+        if self.learnable:
+            init_log_omega = torch.log(init_omega)
+            self.log_freq = nn.Parameter(
+                init_log_omega.unsqueeze(0).expand(input_dim, -1).clone()
+            )
+            self.phase = nn.Parameter(torch.zeros(input_dim, len(arange)))
+        else:
+            self.register_buffer("omega", init_omega)
 
     def forward(self, coords: torch.Tensor) -> torch.Tensor:
         coords = coords.float()
-        out = coords.unsqueeze(-1) * self.omega
+        if self.learnable:
+            omega = torch.exp(self.log_freq)
+            out = coords.unsqueeze(-1) * omega
+            out = out + self.phase
+        else:
+            out = coords.unsqueeze(-1) * self.omega
         emb = torch.cat([torch.sin(out), torch.cos(out)], dim=-1)
         emb = emb.flatten(start_dim=-2)
         if self.padding > 0:
@@ -481,6 +501,7 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        learnable_pe: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -493,11 +514,13 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        self.learnable_pe = learnable_pe
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
             input_dim=space_dim,
             max_wavelength=pos_max_wavelength,
+            learnable=learnable_pe,
         )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -715,6 +738,7 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    learnable_pe: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -738,6 +762,7 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    resume_from: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -897,6 +922,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        learnable_pe=config.learnable_pe,
     )
 
 
@@ -1915,6 +1941,27 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     model = build_model(config).to(device)
+    resume_info: dict[str, float | str | int] = {}
+    if config.resume_from:
+        ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
+        model.load_state_dict(ckpt["model"], strict=True)
+        prev_epoch = ckpt.get("epoch", -1)
+        prev_val_metrics = ckpt.get("val_metrics", {}) or {}
+        prev_primary_val = float(
+            (prev_val_metrics.get("val_surface", {}) or {}).get(
+                "abupt_axis_mean_rel_l2_pct", float("nan")
+            )
+        )
+        resume_info = {
+            "resume_from_path": str(config.resume_from),
+            "resume_prev_epoch": int(prev_epoch) if isinstance(prev_epoch, (int, float)) else -1,
+            "resume_prev_val_abupt_pct": prev_primary_val,
+        }
+        if is_main:
+            print(
+                f"Resumed model weights from {config.resume_from} "
+                f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%)"
+            )
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
@@ -2028,6 +2075,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             "ddp_world_size": world_size,
             "ddp_effective_batch_size": config.batch_size * world_size,
             "lr_warmup_steps_effective": effective_warmup_steps,
+            **resume_info,
         },
         mode=(
             os.environ.get("WANDB_MODE", "online") if is_main else "disabled"
