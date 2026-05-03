@@ -2,14 +2,12 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03 (CONFIRMED SOTA)
+## Status: thorfinn PR #523 EMA-proxy GradNorm alpha=0.5 EP6 — 2026-05-01 (CONFIRMED SOTA)
 
-**NOTE: PR #534 (tanjiro) was closed by tcapelle 2026-03-17 before training completed — "Preparing escalated round 14 with fundamentally different approaches." The mid-training candidate val_abupt=6.9349% at EP3.98 was never confirmed. All 8 Wave 10 PRs were closed simultaneously. Current confirmed SOTA remains PR #510 alphonse.**
-
-**W&B run:** `qqtdnlwq` (alphonse DDP8, rank-0) — group `alphonse-slw-sweep`, best val **7.0063%** (EP5 EMA), runtime 4.71h
-**PR:** #510
-**Val metrics (best-val checkpoint, EP5 EMA):** val_abupt=7.0063%, surface_pressure=4.5994%, wall_shear=7.8939%, volume_pressure=4.1643%, tau_x=6.8150%, tau_y=8.9516%, tau_z=10.5010%
-**Test metrics:** test_abupt=8.2921%, surface_pressure=4.2381%, wall_shear=7.6341%, volume_pressure=12.1047%, tau_x=6.6657%, tau_y=8.6452%, tau_z=9.8066%
+**W&B run:** `wyz68o8r` (thorfinn DDP8, rank-0) — group `thorfinn-gradnorm-r2`, best val **6.9246%** (EP6), runtime 4.71h
+**PR:** #523
+**Val metrics (best-val checkpoint, EP6):** val_abupt=6.9246%, surface_pressure=4.5840%, wall_shear=7.7457%, volume_pressure=4.3040%, tau_x=6.7193%, tau_y=8.7197%, tau_z=10.2960%
+**Test metrics:** test_abupt=8.2355%, surface_pressure=4.2712%, wall_shear=7.5043%, volume_pressure=12.2131%, tau_x=6.5557%, tau_y=8.4656%, tau_z=9.6720%
 
 ### Previous SOTA: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03
 
@@ -67,7 +65,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 (Note: multi-sigma STRING-sep init from PR #488 model.py is required — `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"`)
 
-### Compounding wins so far (updated through PR #510)
+### Compounding wins so far (updated through PR #523)
 
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
@@ -91,6 +89,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #489 | thorfinn | **−0.1880pp (−2.55%) vs #488** | vol-points curriculum 16k→32k→49k→65k: progressive coarse-to-fine volume sampling across training epochs — vp further improves to 4.207% |
 | #511 | edward | **−0.1658pp (−2.31%) vs #489** | extended cosine T_max 11→13: 2 extra convergence epochs on descending tail — EP13 val_abupt=7.0134%, test_abupt=8.3130% |
 | **#510** | **alphonse** | **−0.0071pp (−0.10%) vs #511** | **surface-loss-weight=2.0: heavier surface gradient emphasis closes tau_x/tau_z/wall_shear at EP5 — val_abupt=7.0063%, test_abupt=8.2921%** |
+| **#523** | **thorfinn** | **−0.0817pp (−1.16%) vs #510** | **EMA-proxy GradNorm alpha=0.5, floor=0.7: dynamic tau_y/tau_z upweighting (1.16×/1.24×), closed-form EMA weight updates ~0% overhead — val_abupt=6.9246%, test_abupt=8.2355%** |
 
 ---
 
