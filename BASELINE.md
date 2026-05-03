@@ -15,7 +15,7 @@ Val metrics at best checkpoint (ep~45.3, step 807,025, W&B run `vu4jsiic`).
 
 **vol_p beats AB-UPT target.** abupt is 6.95% vs 4.51% target — 2.44pp gap remains.
 
-**Architecture**: n_params=3,249,813 = FourierEmbed + 5L/256d/4H. T_max=50 cosine schedule validated as +0.25pp improvement vs T_max=30 baseline.
+**Architecture**: n_params=3,992,313 = FourierEmbed + 5L/256d/4H. T_max=50 cosine schedule validated as +0.25pp improvement vs T_max=30 baseline. (Earlier copies of this file listed 3,249,813 here — that was the 4L/256d Wave 1 value; the 5L version is +1 Transformer block, ~+743k params.)
 
 ### Reproduce command (best config)
 
