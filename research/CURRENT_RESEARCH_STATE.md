@@ -1,5 +1,6 @@
 # SENPAI Research State
 
+- **2026-05-03 06:30Z** — Session status update. Gate comments posted on fern #409 (EP25 continue, best ep24=7.16%), tanjiro #443 (EP20 plateau watch, best=8.00%), haku #462 (EP15 kill warning, projection ~9.5%), norman #465 (EP15 borderline kill warning, ep12=8.84%, plateau on wsy/wsz). chihiro #407 force-closed (ep24=7.69%, ceiling at ~7.59%, will not beat baseline). 4 idle students need assignment: chihiro (freshly vacated), emma, gilbert, violet (zombie cleanup pending). Stark still has no pod (infra blocker).
 - **2026-05-03 05:52Z** — Session status update. 2 new Wave 19 PRs assigned (senku #497, nezuko #498). BASELINE.md n_params corrected. Key leads: fern #409 (7.45% ep18), thorfinn #382 (7.59% ep11), edward #483 cross-attn (8.007% ep7, accelerating).
 - **Most recent human researcher direction**: Issue #466 still tracking zombie pod SIGKILL needs (emma/gilbert/violet blocked). No new research directives from human team since Issue #18 (yi): "Ensure you're really pushing hard on new ideas".
 
@@ -14,26 +15,28 @@
 
 | PR | Student | Wave | W&B run | abupt now | Notes |
 |----|---------|------|--------|----------:|-------|
-| #409 | fern | W11 | `hph6eaky` | **7.452** | LEADING. coord-norm fix on 5L/256d+FourierPE+T_max=50. ep18 (step 320k). EP25 ETA ~08:00Z, projected 6.88% — baseline beat likely. |
-| #382 | thorfinn | W9 | `5ifnf1wc` | **7.590** | 6L/512d/8H. ep11. EP15 ETA ~10:35Z, projected ~6.92% at ep15 — may beat baseline. Strongest wsy signal (-0.40pp/ep). |
-| #417 | kohaku | W11 | `4632xosf` | ~7.60 | EMA on 5L/256d. ep~20. Unlikely to beat baseline at ep25 (projected 7.3%). Cosine late-kick could help. |
-| #407 | chihiro | W14 | `jmbe8hys` | ~7.9 est | Stacked recipe. ep~19-20 (no update since ep10=8.42%). Nudge sent. |
+| #409 | fern | W11 | `hph6eaky` | **7.16 ep24** | LEADING. coord-norm fix on 5L/256d+FourierPE+T_max=50. ep25=7.29 (uptick). Best=ep24=7.1624%, gap to baseline=0.21pp. Continue to ep50 — still on convergence trajectory. |
+| #382 | thorfinn | W9 | `5ifnf1wc` | **7.54 ep12** | 6L/512d/8H. ep12=7.5445%, monotonic descent (ep5=8.25→ep12=7.54). EP15 imminent. |
+| #417 | kohaku | W11 | `4632xosf` | ~7.60 | EMA on 5L/256d. ep~20. Unlikely to beat baseline at ep25 (projected 7.3%). |
+| ~~#407~~ | chihiro | W14 | `jmbe8hys` | **CLOSED** | Stacked recipe. ep24=7.69%, best ep23=7.59%. Force-closed at 06:30Z — will not beat baseline. |
 | #437 | alphonse | W13 | `0xi2n4oo` | ~8.15 est | 6L/256d. ep~19 (no update since ep15=8.35%). EP25 ETA ~11:00Z. |
-| #443 | tanjiro | W14 | `vyhpqruv` | ~7.8 est | mirror-aug+SW=2.0. ep~20 (EP18=8.0075% last confirmed). EP20 gate overdue — nudge sent. |
-| #465 | norman | W15 | `o6zxx2uq` | 8.78 | model-slices=128. ep10 PASS. Running to ep30. Trial B (slices=192) launches after Trial A. |
+| #443 | tanjiro | W14 | `vyhpqruv` | **8.00 ep20** | mirror-aug+SW=2.0. Best ep20=7.998%, plateau. EP25 hard gate: <7.5% to continue. |
+| #465 | norman | W15 | `o6zxx2uq` | **8.84 ep12** | model-slices=128. EP10 best=8.78. Plateau ep10-12. EP15 borderline kill (threshold 8.5%). Trial B (slices=192) queued. |
 | #454 | frieren | W17 | `l8nu1ajz` | 7.921 ep9 | Per-axis tau_yz weight=1.5. Running to EP12. Unlikely to beat SOTA. |
-| #462 | haku | W15 | `f9nkv7p9` | ~9.5 est | Surface-2x/Volume-0.5x. ep~9. EP5 gate overdue — nudge sent. |
-| #468 | edward | W16 | retry `LR=5e-4` | early | Muon optimizer. LR=1e-3 failed at EP5 gate (11.37%). Retry at LR=5e-4 launched. |
+| #462 | haku | W15 | `f9nkv7p9` | **9.86 ep12** | Surface-2x/Volume-0.5x. EP15 KILL likely (projection ~9.5–9.7% vs threshold 8.5%). |
+| #468 | edward | W16 | `6b08y222` LR=5e-4 | ep~0.9 (no val) | Muon optimizer retry. Too early for gate. EP5 gate ETA ~3-4h. |
 | #483 | edward | W17 | `ok98szul` | 8.007 ep7 | Cross-attn bridge v4. EP7 slope ACCELERATED (−0.646/ep). Projected EP12 at SOTA boundary (~7.40-7.55%). |
 | #488 | alphonse | W17 | `ki2q9ko9` | 7.978 ep7 | Multi-sigma STRING-sep freq init. Tau_y/z improving fastest. Projected EP12 ~7.40-7.55% (SOTA boundary). |
 | #489 | thorfinn | W17 | `r5rw40rn` | 30.2 ep1 | Volume curriculum 16k→65k. Very early — coarse stage, high val expected. |
-| #495 | askeladd | W18 | `ky4rf6g5` | early | CoordConv dist-to-surface feature. Launched 05:30Z. EP5 ETA ~08:00Z. |
-| #361 | frieren | W9 | `totote1p`→Trial B `e1kxrd6b` | 7.833 Trial A ep30 | Weight-decay sweep. Trial A done (wd=3e-4, not better than baseline). Trial B (wd=1e-3) launched at 05:52Z. ETA ~19:50Z. Trial C (wd=3e-3) queued. |
-| #497 | senku | W19 | — | — | Stacked coord-norm+mirror-aug+SW=2.0. Assigned 05:52Z. ACK pending. |
-| #498 | nezuko | W19 | — | — | T_max sweep 70 vs 100. Assigned 05:52Z. ACK pending. |
+| #495 | askeladd | W18 | `ky4rf6g5` | 15.30 ep1 | CoordConv dist-to-surface feature. ep1 elevated vs fern/tanjiro (~14%). EP5 watch. |
+| #361 | frieren | W9 | Trial B `e1kxrd6b` | 14.998 ep1 | wd=1e-3 sweep. ep~1.3, only one val checkpoint. EP5 gate first. |
+| #497 | senku | W19 | — | — | Stacked coord-norm+mirror-aug+SW=2.0. Assigned 05:52Z. ACK pending (34 min into 60 min window). |
+| #498 | nezuko | W19 | — | — | T_max sweep 70 vs 100. Assigned 05:52Z. ACK pending (34 min into 60 min window). |
 
-**Zombie-blocked (awaiting human SIGKILL on Issue #466):**
-- emma, gilbert, violet: pods occupied by zombie runs from Wave 7/8. Cannot be assigned until human team kills the processes.
+**Idle students (need fresh assignments next loop):**
+- chihiro: freshly vacated after #407 force-close (06:30Z).
+- emma, gilbert, violet: previously zombie-blocked. Pods 1/1 ready per kubectl. Pre-staged hypotheses: deep supervision (emma), best-ckpt EMA-soup (gilbert), trunk-split decoder (violet). Reassign in next cycle.
+- stark: NO POD exists in kubectl deployments. Infrastructure blocker; human team must provision.
 
 ## Key Insights (consolidated)
 
@@ -56,13 +59,16 @@
 
 | PR | Student | Gate | ETA | Action needed |
 |----|---------|------|-----|---------------|
-| #462 | haku | EP5 (abupt>13%→kill) | OVERDUE (3h) | Check student update; kill if >13% |
-| #443 | tanjiro | EP20 (abupt≤8.0%) | OVERDUE (30min) | Check ep19/20 metrics |
-| #495 | askeladd | EP5 (abupt>13%→kill) | ~08:00Z | Monitor |
-| #409 | fern | EP25 (<6.9549%→review) | ~08:00Z | Monitor; MERGE if beats baseline |
-| #382 | thorfinn | EP15 (<8.5%) | ~10:35Z | Already at 7.59% ep11 — likely pass |
-| #437 | alphonse | EP25 (<8.0%→continue,<6.9549%→review) | ~11:00Z | Monitor |
+| #462 | haku | EP15 kill (<8.5%) | ~09:00Z | EP12=9.86%; KILL likely. Pre-staged. |
+| #465 | norman | EP15 borderline kill (<8.5%) | ~07:30Z | EP12=8.84%; plateau. Trial B (slices=192) queued. |
+| #443 | tanjiro | EP25 hard gate (<7.5%→continue) | ~10:30Z | EP20=8.00%, plateau. |
+| #495 | askeladd | EP5 (<13%) | ~08:30Z | EP1=15.30% (slightly elevated). |
+| #409 | fern | EP30+ (continue trajectory) | ~10:00Z | Best=7.16% ep24, continue to ep50. |
+| #382 | thorfinn | EP15 (<8.5%) | ~10:35Z | EP12=7.54% — easy pass. |
+| #468 | edward | EP5 Muon retry (<9.5%→kill) | ~12:00Z | ep~0.9, no val data yet. |
+| #361 | frieren | EP5 wd=1e-3 (<13%) | ~08:30Z | ep1=14.998%. |
 | #417 | kohaku | EP25 (<7.0%→kill,<6.9549%→review) | ~12:00Z | Monitor |
+| #437 | alphonse | EP25 (<8.0%→continue,<6.9549%→review) | ~11:00Z | Monitor |
 
 ## Potential Next Research Directions (Wave 19/20+)
 
