@@ -1254,7 +1254,9 @@ def build_lr_scheduler(
 ) -> torch.optim.lr_scheduler.LRScheduler:
     t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
     t_mult = max(1, getattr(config, "lr_cosine_t_mult", 1))
-    if t_mult > 1:
+    cosine_epochs = max_epochs - max(0, config.lr_warmup_epochs)
+    use_warm_restarts = t_mult > 1 or t_max < cosine_epochs
+    if use_warm_restarts:
         cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer,
             T_0=max(1, t_max),
