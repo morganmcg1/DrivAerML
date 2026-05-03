@@ -6,6 +6,37 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-03 16:40 UTC — PR #510 MERGED NEW SOTA: alphonse surface-loss-weight sweep (slw=2.0)
+
+- **Branch:** `alphonse/surface-loss-weight-sweep` (merged, squash)
+- **Hypothesis:** Surface MSE loss is under-weighted at `--surface-loss-weight 1.0` (default). Sweeping `slw ∈ {0.5, 1.0, 2.0, 4.0}` on the full SOTA stack should push surface channels (especially tau_y/tau_z) toward AB-UPT reference. Prior experiment (PR #322) tested slw=2.0 on a much weaker stack and was closed; the hypothesis deserves re-testing on the current STRING-sep + QK-norm + feat16 stack.
+- **W&B runs:** Arm B (slw=2.0) `qqtdnlwq`, group `alphonse-slw-sweep`, 4.71h, EP5 EMA (run timed out at 50-epoch budget at step 44224)
+- **Arm A (slw=0.5):** Crashed repeatedly — never produced a val checkpoint (VRAM/timeout issues, multiple crash waves at step 3694, 10262, 14587)
+- **Arm C (slw=4.0):** Just launched (step ~739) when PR was reviewed
+
+| Metric | **Arm B EP5 EMA (slw=2.0)** | PR #511 prev SOTA | Δ | Verdict |
+|---|---:|---:|---:|---|
+| **val_abupt** | **7.0063%** | 7.0134% | **−0.007pp** | ✓ NEW SOTA |
+| val_surface_pressure | 4.5994% | 4.5104% | +0.089pp | slight regression |
+| val_wall_shear | 7.8939% | 7.9650% | −0.071pp | ✓ |
+| val_volume_pressure | 4.1643% | 4.2168% | −0.053pp | ✓ |
+| val_tau_x | 6.8150% | 7.0053% | −0.190pp | ✓ |
+| **val_tau_y** | 8.9516% | 8.7717% | +0.180pp | slight regression |
+| val_tau_z | 10.5010% | 10.5629% | −0.062pp | ✓ |
+| **test_abupt** | **8.2921%** | 8.3130% | **−0.021pp** | ✓ |
+| test_surface_pressure | 4.2381% | 4.2709% | −0.033pp | ✓ |
+| test_wall_shear | 7.6341% | 7.7863% | −0.152pp | ✓ |
+| test_tau_x | 6.6657% | 6.9184% | −0.253pp | ✓ |
+| test_tau_y | 8.6452% | 8.5819% | +0.063pp | slight regression |
+| test_tau_z | 9.8066% | 9.9267% | −0.120pp | ✓ |
+| test_volume_pressure | 12.1047% | 11.8673% | +0.238pp | regression |
+
+- **Analysis:** slw=2.0 is a Pareto improvement on slw=1.0 on 5/7 test channels. The regression on tau_y (+0.063pp test) and vol_p (+0.238pp test) are the cost of over-weighting surface gradients. tau_y is the antisymmetric channel under y-flip that is hardest to learn — heavier surface emphasis helped wall_shear/tau_x/tau_z but didn't solve the tau_y gap specifically. Run timed out at EP5; full 13-epoch run with slw=2.0 expected to improve further.
+- **Key insight:** Loss weighting remains a live lever. The optimal slw may be between 1.0 and 2.0 (try slw=1.5?), or per-channel asymmetric weighting could specifically target tau_y without regressing surface_pressure.
+- **Suggested follow-ups:** (1) slw=2.0 full 13-epoch run (not 50-epoch config); (2) per-channel asymmetric: weight tau_y/tau_z more aggressively than tau_x/sp; (3) slw=2.0 combined with y-mirror augmentation (nezuko PR #536) for tau_y/tau_z.
+
+---
+
 ## 2026-05-01 — PR #532 CLOSED NEGATIVE: nezuko AdamW vs Lion optimizer comparison
 
 - **Branch:** `nezuko/adamw-vs-lion-optimizer` (closed, branch deleted)

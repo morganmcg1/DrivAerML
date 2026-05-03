@@ -1,23 +1,25 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 — 7 active WIP PRs, 0 ready for review, 0 idle students
+- **Date:** 2026-05-03 16:45 UTC — 7 active WIP PRs, 0 ready for review, 0 idle students
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Current SOTA — PR #511 (edward extended-cosine EP13), val_abupt **7.0134%** (W&B `5o7jc7wi`)
+## Current SOTA — PR #510 (alphonse slw=2.0, EP5 EMA), val_abupt **7.0063%** (W&B `qqtdnlwq`)
 
-All future PRs must beat val_abupt < **7.0134%**. Test: test_abupt=8.3130%.
+All future PRs must beat val_abupt < **7.0063%**. Test: test_abupt=8.2921%.
 
-| Metric | PR #511 SOTA (val EP13) | AB-UPT |
+| Metric | PR #510 SOTA (val EP5 EMA) | AB-UPT |
 |---|---:|---:|
-| `abupt` | **7.0134%** | — |
-| `surface_pressure` | 4.5104% | 3.82% |
-| `wall_shear` | 7.9650% | 7.29% |
-| `volume_pressure` | **4.2168%** | 6.08% (BEATEN) |
-| `tau_x` | 7.0053% | 5.35% |
-| `tau_y` | **8.7717%** | 3.65% |
-| `tau_z` | **10.5629%** | 3.63% |
+| `abupt` | **7.0063%** | — |
+| `surface_pressure` | 4.5994% | 3.82% |
+| `wall_shear` | 7.8939% | 7.29% |
+| `volume_pressure` | **4.1643%** | 6.08% (BEATEN) |
+| `tau_x` | 6.8150% | 5.35% |
+| `tau_y` | 8.9516% | 3.65% |
+| `tau_z` | 10.5010% | 3.63% |
+
+Note: tau_y/surface_pressure (val) are slightly worse than PR #511 (8.7717%/4.5104% vs 8.9516%/4.5994%), but test_abupt and 5/7 test channels improve.
 
 ### Canonical SOTA stack reproduce command
 ```bash
@@ -26,13 +28,17 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --no-compile-model --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
   --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
-  --lr-cosine-t-max 13 --epochs 13
+  --lr-cosine-t-max 13 --epochs 13 \
+  --surface-loss-weight 2.0
 ```
-Note: `--train-volume-points 65536` constant (NOT vol-curriculum); `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"` is the multi-sigma STRING-sep octave init.
+Note: `--vol-points-schedule "0:16384:3:32768:6:49152:9:65536"` is the vol-curriculum; `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"` is the multi-sigma STRING-sep octave init; `--surface-loss-weight 2.0` is the new slw=2.0 lever.
+
+Warning: run `qqtdnlwq` timed out at EP5 with a 50-epoch config (not --epochs 13). A proper 13-epoch run with slw=2.0 should be the canonical reproduce. The BASELINE.md reproduce command uses `--epochs 13 --lr-cosine-t-max 13` for comparison.
 
 ---
 
@@ -46,33 +52,30 @@ No new directives as of 2026-05-01. Continuing organic tau_y/tau_z attack progra
 
 | PR | Student | Hypothesis | Latest val_abupt | Status |
 |---|---|---|---:|---|
-| #535 | edward | Extended cosine to **EP15** on PR #511 stack | EP1=50.91% | run `nh2ke150` healthy; extended schedule to EP15 |
-| #534 | tanjiro | Multi-scale STRING-sep bands σ∈{0.25,1.0,4.0}, 8 feats/band | EP1=28.20% | run `loxzj4xq` EP1 best-ever; awaiting EP3+ |
-| #531 | fern | Unit-vector cosine direction loss on tau (Arm B w=0.1) | EP3=8.02% | run `3lurbotq` healthy, on-par trajectory |
-| #523 | thorfinn | GradNorm-EMA proxy Run 2 (α=0.5, min_weight=0.7) | (pending) | **Sent back** with Run 2 config; awaiting relaunch |
-| #536 | nezuko | Y-mirror training augmentation (p=0.5) for tau_y/tau_z | (pending) | **NEWLY ASSIGNED** — PR #536 |
-| #516 | askeladd | Per-channel tau_y/tau_z reweight (Run A: w_y=2.0, w_z=2.5) | (just launched) | run `4uw2c4z2` relaunched clean vs PR #511 |
-| #510 | alphonse | Surface-loss-weight=2.0 sweep vs PR #511 | EP3=7.65% | run `qqtdnlwq` — STRONG, leading every channel |
-| #501 | frieren | Per-axis multi-sigma STRING priors (frieren-aniso-string-vs511) | EP1 running | run `qawfhlu6` healthy, newly relaunched after rebase |
+| #535 | edward | Extended cosine to **EP15** on SOTA stack | EP2=9.03% | run `nh2ke150` running ~3.2h; EP2 healthy |
+| #534 | tanjiro | Multi-scale STRING-sep bands σ∈{0.25,1.0,4.0}, 8 feats/band | EP2=8.79% | run `loxzj4xq` mid-EP3; leading SOTA at EP2 |
+| #531 | fern | Unit-vector cosine direction loss on tau (Arm B w=0.1) | best=7.21% | run `3lurbotq` ~4.5h, nearing completion; 7.21% < 7.006% |
+| #523 | thorfinn | GradNorm-EMA proxy Run 2 (α=0.5, min_weight=0.7) | Run 1=7.267% | **Sent back** with Run 2 config; awaiting relaunch |
+| #536 | nezuko | Y-mirror training augmentation (p=0.5) for tau_y/tau_z | crashed | **BUG: mirror_aug_frac=0** — augmentation never fired; needs debug fix |
+| #516 | askeladd | Per-channel tau_y/tau_z reweight (Run A: w_y=2.0, w_z=2.5) | EP-partial=15.0% | run `4uw2c4z2` step 8898, 1.37h; EP1 not yet complete |
+| #501 | frieren | Per-axis multi-sigma STRING priors (frieren-aniso-string-vs511) | partial=29.6% | run `qawfhlu6` step 6682, 1.03h; EP1 in progress |
 
 ---
 
 ## Recent review results (this cycle)
 
-### PR #532 nezuko AdamW vs Lion — CLOSED NEGATIVE
-- Run `3hm5ae1j`, EP4 val_abupt=7.94% vs Lion 7.42% (+0.51pp gap)
-- **Lion wins convincingly** at every epoch and every axis including tau_y/tau_z
-- AdamW closed the gap from +1.87pp (EP2) to +0.51pp (EP4) — faster per-epoch improvement but starting disadvantage too large
-- **Insight:** Adaptive LR helps tau_y/tau_z per-epoch but not net. Scheduled optimizer switch (Lion→AdamW at ~EP3) is the correct experiment if we want adaptive-LR benefits.
-- **AdamW vs Lion at this batch size is now closed.** Do not retry.
+### PR #510 alphonse slw=2.0 — MERGED NEW SOTA
+- Run `qqtdnlwq`, EP5 EMA, val_abupt=7.0063%, test_abupt=8.2921%
+- Beats PR #511 by −0.007pp val, −0.021pp test. 5/7 test channels improve.
+- tau_y regresses slightly on val (+0.18pp) but improves on test (−0.063pp). vol_p regresses on test (+0.238pp).
+- Run timed out at EP5 (50-epoch config hit 360-min budget). Full 13-epoch run expected to improve further.
 
-### PR #523 thorfinn GradNorm-EMA proxy Run 1 — SENT BACK (promising, primary metric miss)
-- Run `9477cjoh`, 6 epochs, val_abupt=7.2667% (miss vs SOTA 7.0134%, +0.25pp)
-- **First ever tau_z win on val AND test:** val_tau_z=10.481% (−0.08pp below SOTA 10.5629%), test_tau_z=9.704% (−0.22pp below SOTA 9.927%)
-- tau_y=8.943% (still +0.17pp above SOTA 8.7717%) — close but didn't close
-- Mechanism worked perfectly: balancer r-ordering r_z>r_y>r_x>r_vp≈r_sp; w_tau_z climbed 1.04→1.58; w_sp dropped 0.96→0.50
-- **Problem:** α=1.5 too aggressive — sp/vp down-weighted to 0.50, causing +0.79pp vp regression that outweighed the tau gains
-- **Run 2 config:** α=0.5 (softer), min_weight=0.7 (floor on sp/vp), epochs=13 with cosine T_max=13 to match SOTA schedule
+### PR #532 nezuko AdamW vs Lion — CLOSED NEGATIVE
+- Lion wins convincingly at every epoch and every axis including tau_y/tau_z.
+
+### PR #523 thorfinn GradNorm-EMA proxy Run 1 — SENT BACK (promising)
+- Run `9477cjoh`, 6 epochs, val_abupt=7.2667% (miss vs SOTA 7.0134%, +0.25pp — now also behind new SOTA 7.0063%)
+- **First ever tau_z win on val AND test.** Run 2 with α=0.5 + min_weight=0.7 + EP13 config pending.
 
 ---
 
@@ -102,13 +105,15 @@ No new directives as of 2026-05-01. Continuing organic tau_y/tau_z attack progra
 
 ## Potential next research directions
 
-1. **Compose alpha-optimized GradNorm-EMA with slw=2.0** (when alphonse #510 lands and thorfinn Run 2 confirms)
-2. **Compose y-mirror aug with EP15 cosine** (if #535 and #536 both win)
-3. **Scheduled optimizer switch** (Lion→AdamW at EP3) to capture AdamW's per-epoch tau convergence advantage without the starting disadvantage
-4. **Physics-informed no-slip boundary loss** — zero-velocity wall condition as auxiliary loss on tau magnitude at wall proximity
-5. **EMA model-soup** — average parameters of top-K best-val checkpoints (variance reduction, zero GPU cost)
-6. **Frequency-aware tau loss** — weight loss contributions by spatial frequency (penalize high-freq tau residuals more heavily); targets tau_y/tau_z where the high-freq variation is the AB-UPT gap
-7. **Learnable Fourier basis (NTK-style)** — replace fixed Gaussian RFF with learned small matrix B, jointly trained with the main objective
+1. **slw=2.0 full 13-epoch run** — current SOTA was from an EP5 timeout. A proper 13-epoch run with slw=2.0 + cosine T_max=13 should improve on 7.0063% meaningfully.
+2. **Compose GradNorm-EMA α=0.5 with slw=2.0** (once thorfinn Run 2 confirms) — orthogonal mechanisms, expected to stack.
+3. **Per-channel asymmetric loss weight** — don't just scale surface globally (slw=2.0), but specifically upweight tau_y (the slowest axis): `w_tau_y=3.0, w_tau_z=2.0, w_sp=1.5, w_vol=1.0`
+4. **Y-mirror aug + slw=2.0** — once nezuko's augmentation bug is fixed, combine p=0.5 mirror aug with slw=2.0 baseline. Both improvements attack the surface representation problem from complementary angles.
+5. **Compose y-mirror aug with EP15 cosine** (if #535 and #536 both win)
+6. **Scheduled optimizer switch** (Lion→AdamW at EP3) — AdamW shows better per-epoch tau convergence, just slower start.
+7. **Physics-informed no-slip boundary loss** — zero-velocity wall condition as auxiliary loss on tau magnitude at wall proximity.
+8. **EMA model-soup** — average parameters of top-K best-val checkpoints (variance reduction, zero GPU cost).
+9. **Frequency-aware tau loss** — weight loss contributions by spatial frequency (penalize high-freq tau residuals more heavily).
 
 ---
 
