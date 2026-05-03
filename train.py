@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Iterable
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import wandb
 import yaml
@@ -125,6 +126,14 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    use_gradnorm: bool = False
+    gradnorm_mode: str = "ema_proxy"
+    gradnorm_alpha: float = 1.5
+    gradnorm_lr: float = 1e-3
+    gradnorm_init_warmup_steps: int = 10
+    gradnorm_log_clip: float = 4.0
+    gradnorm_ema_beta: float = 0.9
+    gradnorm_min_weight: float = 0.0
     debug: bool = False
 
 
@@ -147,6 +156,65 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "use_gradnorm": (
+            "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
+            "NeurIPS 2018, https://arxiv.org/abs/1711.02132). Splits the "
+            "surface MSE into 4 per-channel losses (sp, tau_x, tau_y, tau_z) "
+            "and treats volume_pressure as the 5th task; per-task weights "
+            "are updated each step (algorithm controlled by --gradnorm-mode). "
+            "When disabled, the legacy --surface-loss-weight / "
+            "--volume-loss-weight scalars apply."
+        ),
+        "gradnorm_mode": (
+            "GradNorm balancing algorithm. 'full' is the paper-faithful "
+            "variant: per-task gradient norms at the last shared encoder "
+            "block via autograd.grad with retain_graph (5x backward overhead "
+            "for 5 tasks). 'ema_proxy' is the lightweight loss-magnitude "
+            "approximation: maintains an EMA of per-task losses, computes "
+            "relative training rate r_i = ema_i / initial_i, and assigns "
+            "weights w_i proportional to r_i**alpha (renormalised so that "
+            "mean weight = 1). Trades the formal gradient-alignment "
+            "guarantee for ~1x overhead. Default: ema_proxy."
+        ),
+        "gradnorm_alpha": (
+            "Restoring-force exponent alpha. Higher values pull "
+            "slow-converging tasks back harder. Paper-recommended range "
+            "[0.5, 2.0]; default 1.5 for tasks with different rates. "
+            "Applied to relative training rate r_i in both modes."
+        ),
+        "gradnorm_lr": (
+            "Learning rate for the Adam optimizer that updates the per-task "
+            "log-weights in mode='full'. Unused in mode='ema_proxy' (weights "
+            "are computed in closed form). The brianlan reference uses "
+            "~2.5e-2; we default to 1e-3 for slower / stabler movement."
+        ),
+        "gradnorm_init_warmup_steps": (
+            "Number of training steps over which to average the per-task "
+            "losses to define L_i(0). Skips step 0 to avoid random-init "
+            "spikes; default 10 steps. Applied in both modes."
+        ),
+        "gradnorm_log_clip": (
+            "Symmetric clamp applied to the GradNorm log-weights each step "
+            "(weight = exp(log_w) so |log_w|<=clip => weight in "
+            "[exp(-clip), exp(clip)]). Prevents runaway divergence and "
+            "task collapse. Default 4.0 => weights in [0.018, 54.6]. "
+            "Applied in both modes."
+        ),
+        "gradnorm_ema_beta": (
+            "EMA decay for the per-task loss tracker used in "
+            "mode='ema_proxy' (ema = beta * ema + (1-beta) * L_i.detach()). "
+            "Default 0.9 matches the advisor spec. Unused in mode='full'."
+        ),
+        "gradnorm_min_weight": (
+            "Asymmetric per-task weight floor applied in mode='ema_proxy'. "
+            "Each pre-normalisation w_raw_i is clamped to >= min_weight "
+            "before the closed-form sum-T renormalisation; the up-weighting "
+            "ceiling is left free. Prevents over-aggressive down-weighting "
+            "of fast-converging tasks (sp/vp) while still allowing slow "
+            "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
+            "(matches Run 1 behavior). Recommended 0.7 for soft "
+            "redistribution. Unused in mode='full'."
         ),
     }
     for field in fields(Config):
@@ -257,6 +325,256 @@ def train_loss(
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+
+
+GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
+
+
+def per_task_train_losses(
+    model: nn.Module,
+    batch,
+    transform: TargetTransform,
+    device: torch.device,
+    amp_mode: str,
+) -> list[torch.Tensor]:
+    """Compute the 5 per-axis task losses used by GradNorm.
+
+    Returns scalar tensors in order: [sp, tau_x, tau_y, tau_z, vp].
+    All five share the same forward graph so the GradNorm balancer can
+    extract per-task gradient norms via ``torch.autograd.grad`` with
+    ``retain_graph=True``.
+    """
+
+    batch = batch.to(device)
+    surface_target = transform.apply_surface(batch.surface_y)
+    volume_target = transform.apply_volume(batch.volume_y)
+    with autocast_context(device, amp_mode):
+        out = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+        surface_pred = out["surface_preds"]
+        sp_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
+        taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
+        tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
+        tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+        vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
+
+
+GRADNORM_MODES = ("full", "ema_proxy")
+
+
+class GradNormBalancer:
+    """GradNorm dynamic multi-task loss balancing (Chen et al., NeurIPS 2018).
+
+    Two operating modes share the same per-task log-weight state and the
+    same warmup mechanism for L_i(0); they differ in how the weights are
+    updated each step.
+
+    mode='full' (paper-faithful):
+        Maintains a learnable log-weight per task and updates it via Adam
+        on the GradNorm L1 loss using gradient norms measured at the last
+        shared encoder block. Cost: 5x backward (one autograd.grad per
+        task with retain_graph=True) on top of the main backward.
+
+        Notes vs the paper:
+          * ``log_weights`` parameterisation; ``task_weights = exp(log_w) *
+            T / sum(exp(log_w))`` keeps the mean-1 invariant by construction.
+          * Avoids ``create_graph=True``: since ``||w * g||_2 = w * ||g||_2``
+            for ``w >= 0``, the GradNorm loss is computed as
+            ``W * grad_norm_detached`` and is differentiable in
+            ``log_weights`` directly. Equivalent and ~2x cheaper than the
+            second-order graph variant.
+
+    mode='ema_proxy' (lightweight loss-magnitude approximation):
+        Maintains an exponential moving average of per-task losses and
+        sets weights in closed form each step:
+
+            ema_i      = beta * ema_i + (1 - beta) * L_i.detach()
+            r_i        = ema_i / initial_loss_i              # relative rate
+            r_norm_i   = r_i / mean(r)                       # mean-1 rate
+            w_raw_i    = max(r_norm_i ** alpha, min_weight)  # asym floor
+            w_i        = w_raw_i * T / sum(w_raw_j)          # sum=T => mean=1
+
+        No autograd over the balancer => ~1x overhead. Tasks whose losses
+        decrease slower than average (high r_norm_i) get up-weighted; the
+        alpha exponent controls how aggressively. ``log_weights.data`` is
+        set from log(w_i) each step for unified logging and DDP broadcast.
+
+        ``min_weight`` (default 0.0) is an asymmetric pre-normalisation
+        floor applied to ``w_raw_i``: it caps how aggressively a fast
+        task can be down-weighted while leaving the up-weighting ceiling
+        free. Recommended 0.7 for soft redistribution.
+
+        Note on the advisor spec:
+            The original spec wrote ``w_i = (1/ema_i) / sum(1/ema_j) * T``
+            but described the intent as "tasks with larger current loss
+            get more weight" (which matches the GradNorm goal of
+            up-weighting slow-converging tasks like tau_y/tau_z). The
+            literal inverse-loss formula has the opposite sign (it
+            DOWN-weights high-loss tasks). We implement the intent: weights
+            proportional to r_i**alpha, which is the GradNorm relative
+            training rate dressed up as a closed-form computation.
+
+    DDP synchronisation (both modes): per-task losses (and per-task
+    gradient norms in 'full' mode) are all-reduced (AVG) so every rank
+    runs the same balancer step; ``log_weights`` are broadcast from rank 0
+    each step as a belt-and-suspenders guard against numerical drift.
+
+    L_i(0) is captured as the running average of the synced losses
+    (mode='full') or the EMA snapshot at warmup completion
+    (mode='ema_proxy') over the first ``init_warmup_steps`` steps.
+    """
+
+    def __init__(
+        self,
+        num_tasks: int,
+        *,
+        mode: str,
+        alpha: float,
+        lr: float,
+        device: torch.device,
+        init_warmup_steps: int,
+        log_clip: float,
+        ema_beta: float,
+        min_weight: float = 0.0,
+    ):
+        if mode not in GRADNORM_MODES:
+            raise ValueError(
+                f"Unknown gradnorm_mode '{mode}'. Supported: {GRADNORM_MODES}."
+            )
+        self.mode = mode
+        self.num_tasks = num_tasks
+        self.alpha = alpha
+        self.device = device
+        self.init_warmup_steps = max(1, init_warmup_steps)
+        self.log_clip = float(log_clip)
+        self.ema_beta = float(ema_beta)
+        self.min_weight = float(min_weight)
+        self.log_weights = nn.Parameter(torch.zeros(num_tasks, device=device))
+        if mode == "full":
+            self.optimizer: torch.optim.Optimizer | None = torch.optim.Adam(
+                [self.log_weights], lr=lr
+            )
+        else:
+            self.optimizer = None
+        self._init_loss_sum = torch.zeros(num_tasks, device=device)
+        self._init_loss_count = 0
+        self.initial_loss: torch.Tensor | None = None
+        self.ema_loss: torch.Tensor | None = None
+        self.last_floor_active: int = 0
+
+    @property
+    def ready(self) -> bool:
+        return self.initial_loss is not None
+
+    def task_weights(self) -> torch.Tensor:
+        w = self.log_weights.exp()
+        return w * (self.num_tasks / w.sum().clamp(min=1e-12))
+
+    def task_weights_detached(self) -> torch.Tensor:
+        return self.task_weights().detach()
+
+    def update_initial_loss(self, per_task_losses_synced: torch.Tensor) -> None:
+        if self.initial_loss is not None:
+            return
+        L = per_task_losses_synced.detach().to(self.device)
+        if self.mode == "ema_proxy":
+            if self.ema_loss is None:
+                self.ema_loss = L.clone()
+            else:
+                self.ema_loss = self.ema_beta * self.ema_loss + (1.0 - self.ema_beta) * L
+        self._init_loss_sum = self._init_loss_sum + L
+        self._init_loss_count += 1
+        if self._init_loss_count >= self.init_warmup_steps:
+            if self.mode == "ema_proxy" and self.ema_loss is not None:
+                self.initial_loss = self.ema_loss.detach().clamp(min=1e-12).clone()
+            else:
+                self.initial_loss = (
+                    self._init_loss_sum / self._init_loss_count
+                ).clamp(min=1e-12)
+
+    def step(
+        self,
+        per_task_losses_synced: torch.Tensor,
+        per_task_grad_norms_synced: torch.Tensor | None = None,
+    ) -> torch.Tensor | None:
+        """Run one GradNorm update on ``log_weights``.
+
+        Inputs are expected to already be cross-rank synced (mean over
+        ranks). In mode='ema_proxy' ``per_task_grad_norms_synced`` is
+        ignored. Returns a scalar diagnostic tensor (the L1 GradNorm loss
+        in 'full' mode, the per-task r_i sum-deviation in 'ema_proxy'
+        mode), or ``None`` if the initial-loss warmup has not finished
+        yet.
+        """
+
+        if self.initial_loss is None:
+            return None
+        L = per_task_losses_synced.detach().to(self.device)
+        if self.mode == "ema_proxy":
+            assert self.ema_loss is not None
+            self.ema_loss = (
+                self.ema_beta * self.ema_loss + (1.0 - self.ema_beta) * L
+            )
+            r = (self.ema_loss / self.initial_loss).clamp(min=1e-12)
+            r = r / r.mean().clamp(min=1e-12)
+            w_raw_pre = r.pow(self.alpha).clamp(min=1e-12)
+            if self.min_weight > 0.0:
+                self.last_floor_active = int(
+                    (w_raw_pre < self.min_weight).sum().item()
+                )
+                w_raw = w_raw_pre.clamp(min=self.min_weight)
+            else:
+                self.last_floor_active = 0
+                w_raw = w_raw_pre
+            w = w_raw * (self.num_tasks / w_raw.sum().clamp(min=1e-12))
+            with torch.no_grad():
+                self.log_weights.data = w.log().clamp(
+                    -self.log_clip, self.log_clip
+                )
+            return (r - 1.0).abs().sum().detach()
+
+        if per_task_grad_norms_synced is None:
+            raise ValueError(
+                "GradNormBalancer.step: gradient norms are required in mode='full'."
+            )
+        G_detached = per_task_grad_norms_synced.detach().to(self.device)
+        r = (L / self.initial_loss).clamp(min=1e-12)
+        r = r / r.mean().clamp(min=1e-12)
+        target = (G_detached.mean() * (r ** self.alpha)).detach()
+
+        W = self.task_weights()
+        G = W * G_detached
+        gradnorm_loss = (G - target).abs().sum()
+
+        self.optimizer.zero_grad()
+        gradnorm_loss.backward()
+        self.optimizer.step()
+
+        with torch.no_grad():
+            self.log_weights.clamp_(-self.log_clip, self.log_clip)
+        return gradnorm_loss.detach()
+
+
+def synced_per_task_tensor(
+    values: list[torch.Tensor] | torch.Tensor,
+    *,
+    state,
+    device: torch.device,
+) -> torch.Tensor:
+    """Stack per-task scalar tensors and all-reduce(AVG) across DDP ranks."""
+
+    if isinstance(values, torch.Tensor):
+        stacked = values.to(device=device, dtype=torch.float32)
+    else:
+        stacked = torch.stack([v.to(device=device, dtype=torch.float32) for v in values])
+    if state.enabled:
+        dist.all_reduce(stacked, op=dist.ReduceOp.AVG)
+    return stacked
 
 
 def parse_vol_points_schedule(text: str) -> list[tuple[int, int]]:
@@ -416,6 +734,55 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+        balancer: GradNormBalancer | None = None
+        gradnorm_shared_params: list[nn.Parameter] = []
+        if config.use_gradnorm:
+            if config.gradnorm_mode == "full" and config.compile_model:
+                raise ValueError(
+                    "--use-gradnorm --gradnorm-mode full requires --no-compile-model "
+                    "(autograd.grad with retain_graph is not supported through "
+                    "torch.compile)."
+                )
+            balancer = GradNormBalancer(
+                num_tasks=len(GRADNORM_TASK_NAMES),
+                mode=config.gradnorm_mode,
+                alpha=config.gradnorm_alpha,
+                lr=config.gradnorm_lr,
+                device=device,
+                init_warmup_steps=config.gradnorm_init_warmup_steps,
+                log_clip=config.gradnorm_log_clip,
+                ema_beta=config.gradnorm_ema_beta,
+                min_weight=config.gradnorm_min_weight,
+            )
+            if config.gradnorm_mode == "full":
+                gradnorm_shared_params = [
+                    p for p in base_model.backbone.blocks[-1].parameters() if p.requires_grad
+                ]
+                if not gradnorm_shared_params:
+                    raise RuntimeError(
+                        "GradNorm: no trainable parameters in the last shared encoder block."
+                    )
+            if state.is_main:
+                if config.gradnorm_mode == "full":
+                    shared_param_count = sum(p.numel() for p in gradnorm_shared_params)
+                    print(
+                        f"GradNorm enabled (mode=full): {len(GRADNORM_TASK_NAMES)} tasks "
+                        f"({', '.join(GRADNORM_TASK_NAMES)}); alpha={config.gradnorm_alpha}; "
+                        f"lr={config.gradnorm_lr}; warmup={config.gradnorm_init_warmup_steps} "
+                        f"steps; log_clip={config.gradnorm_log_clip}; "
+                        f"shared_params={shared_param_count:,d} (last backbone block)"
+                    )
+                else:
+                    print(
+                        f"GradNorm enabled (mode=ema_proxy): {len(GRADNORM_TASK_NAMES)} tasks "
+                        f"({', '.join(GRADNORM_TASK_NAMES)}); alpha={config.gradnorm_alpha}; "
+                        f"ema_beta={config.gradnorm_ema_beta}; "
+                        f"warmup={config.gradnorm_init_warmup_steps} steps; "
+                        f"log_clip={config.gradnorm_log_clip}; "
+                        f"min_weight={config.gradnorm_min_weight}; "
+                        f"closed-form weights from r_i = ema_loss_i / initial_loss_i"
+                    )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -494,15 +861,100 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
-                loss, batch_loss_metrics = train_loss(
-                    model,
-                    batch,
-                    transform,
-                    device,
-                    config.amp_mode,
-                    surface_loss_weight=config.surface_loss_weight,
-                    volume_loss_weight=config.volume_loss_weight,
-                )
+                gradnorm_metrics: dict[str, float] = {}
+                if balancer is not None:
+                    per_task_losses = per_task_train_losses(
+                        model, batch, transform, device, config.amp_mode
+                    )
+                    synced_losses = synced_per_task_tensor(
+                        [t.detach() for t in per_task_losses], state=state, device=device
+                    )
+                    balancer.update_initial_loss(synced_losses)
+
+                    synced_norms: torch.Tensor | None = None
+                    if balancer.mode == "full":
+                        per_task_grad_norms: list[torch.Tensor] = []
+                        for L_i in per_task_losses:
+                            grads = torch.autograd.grad(
+                                L_i,
+                                gradnorm_shared_params,
+                                retain_graph=True,
+                                allow_unused=True,
+                            )
+                            norm_sq = torch.zeros((), device=device, dtype=torch.float32)
+                            for g in grads:
+                                if g is not None:
+                                    norm_sq = norm_sq + g.float().square().sum()
+                            per_task_grad_norms.append(norm_sq.sqrt())
+                        grad_norms_tensor = torch.stack(per_task_grad_norms)
+                        synced_norms = synced_per_task_tensor(
+                            grad_norms_tensor, state=state, device=device
+                        )
+                    gradnorm_loss_tensor = balancer.step(synced_losses, synced_norms)
+                    if state.enabled:
+                        dist.broadcast(balancer.log_weights.data, src=0)
+
+                    W_detached = balancer.task_weights_detached()
+                    weighted_terms = [W_detached[i] * per_task_losses[i] for i in range(len(per_task_losses))]
+                    loss = weighted_terms[0]
+                    for term in weighted_terms[1:]:
+                        loss = loss + term
+                    surface_unweighted = per_task_losses[0]
+                    for term in per_task_losses[1:4]:
+                        surface_unweighted = surface_unweighted + term
+                    base_mse_total = surface_unweighted + per_task_losses[4]
+                    weighted_surface = (
+                        W_detached[:4] * torch.stack([t.detach() for t in per_task_losses[:4]])
+                    ).sum()
+                    weighted_volume = W_detached[4] * per_task_losses[4].detach()
+                    batch_loss_metrics = {
+                        "base_mse_loss": float(base_mse_total.detach().cpu().item()),
+                        "surface_loss": float(surface_unweighted.detach().cpu().item()),
+                        "volume_loss": float(per_task_losses[4].detach().cpu().item()),
+                        "surface_loss_weighted": float(weighted_surface.cpu().item()),
+                        "volume_loss_weighted": float(weighted_volume.cpu().item()),
+                    }
+                    weights_cpu = W_detached.cpu().tolist()
+                    losses_cpu = synced_losses.detach().cpu().tolist()
+                    for i, name in enumerate(GRADNORM_TASK_NAMES):
+                        gradnorm_metrics[f"gradnorm/weight_{name}"] = weights_cpu[i]
+                        gradnorm_metrics[f"train/loss_{name}"] = losses_cpu[i]
+                    if synced_norms is not None:
+                        norms_cpu = synced_norms.detach().cpu().tolist()
+                        for i, name in enumerate(GRADNORM_TASK_NAMES):
+                            gradnorm_metrics[f"gradnorm/gnorm_{name}"] = norms_cpu[i]
+                    if balancer.mode == "ema_proxy" and balancer.ema_loss is not None:
+                        ema_cpu = balancer.ema_loss.detach().cpu().tolist()
+                        for i, name in enumerate(GRADNORM_TASK_NAMES):
+                            gradnorm_metrics[f"gradnorm/ema_loss_{name}"] = ema_cpu[i]
+                        if balancer.initial_loss is not None:
+                            r_vec = (
+                                balancer.ema_loss / balancer.initial_loss.clamp(min=1e-12)
+                            ).detach().cpu().tolist()
+                            for i, name in enumerate(GRADNORM_TASK_NAMES):
+                                gradnorm_metrics[f"gradnorm/r_{name}"] = r_vec[i]
+                    gradnorm_metrics["gradnorm/ready"] = 1.0 if balancer.ready else 0.0
+                    if balancer.initial_loss is not None:
+                        for i, name in enumerate(GRADNORM_TASK_NAMES):
+                            gradnorm_metrics[f"gradnorm/initial_loss_{name}"] = float(
+                                balancer.initial_loss[i].cpu().item()
+                            )
+                    if balancer.mode == "ema_proxy" and balancer.min_weight > 0.0:
+                        gradnorm_metrics["gradnorm/min_weight_floor_count"] = float(
+                            balancer.last_floor_active
+                        )
+                    if gradnorm_loss_tensor is not None:
+                        gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
+                else:
+                    loss, batch_loss_metrics = train_loss(
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        surface_loss_weight=config.surface_loss_weight,
+                        volume_loss_weight=config.volume_loss_weight,
+                    )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -540,6 +992,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                if gradnorm_metrics:
+                    train_log.update(gradnorm_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
