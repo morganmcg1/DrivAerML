@@ -96,6 +96,7 @@ class Config:
     model_dropout: float = 0.0
     rff_num_features: int = 0
     rff_sigma: float = 1.0
+    rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     amp_mode: str = "bf16"
@@ -181,6 +182,31 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
 
 
+def parse_rff_init_sigmas(raw: str) -> list[float] | None:
+    if not raw:
+        return None
+    parsed = [float(x.strip()) for x in raw.split(",") if x.strip()]
+    return parsed or None
+
+
+def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    for attr in ("surface_string_sep", "volume_string_sep"):
+        module = getattr(model, attr, None)
+        if module is None:
+            continue
+        log_freq = module.log_freq.detach().float()
+        prefix = f"string_sep/{attr}"
+        metrics[f"{prefix}/log_freq_mean"] = float(log_freq.mean().item())
+        metrics[f"{prefix}/log_freq_std"] = float(log_freq.std().item())
+        metrics[f"{prefix}/log_freq_min"] = float(log_freq.min().item())
+        metrics[f"{prefix}/log_freq_max"] = float(log_freq.max().item())
+        for axis in range(log_freq.shape[0]):
+            metrics[f"{prefix}/freq_axis_{axis}_mean"] = float(log_freq[axis].mean().item())
+            metrics[f"{prefix}/freq_axis_{axis}_std"] = float(log_freq[axis].std().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -191,6 +217,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
+        rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
     )
@@ -690,6 +717,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
+                log_metrics.update(collect_string_sep_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

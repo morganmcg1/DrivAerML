@@ -90,14 +90,32 @@ class StringSeparableEncoding(nn.Module):
     the isotropic baseline.
     """
 
-    def __init__(self, in_dim: int, num_features: int = 32, sigma: float = 1.0):
+    def __init__(
+        self,
+        in_dim: int,
+        num_features: int = 32,
+        sigma: float = 1.0,
+        init_sigmas: list[float] | None = None,
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.num_features = num_features
         # log_freq[d, f]: learnable log-frequency per axis per feature
-        self.log_freq = nn.Parameter(
-            torch.full((in_dim, num_features), math.log(sigma))
-        )
+        if init_sigmas is not None and len(init_sigmas) > 1:
+            # Multi-sigma init (PR #488): round-robin per-feature sigma so the
+            # encoding starts with broad spectral coverage across frequency
+            # octaves. Each axis shares the same per-feature sigma pattern;
+            # per-axis specialisation is acquired through gradient descent.
+            log_sigmas = torch.tensor(
+                [math.log(init_sigmas[f % len(init_sigmas)]) for f in range(num_features)],
+                dtype=torch.float32,
+            )
+            log_freq_init = log_sigmas.unsqueeze(0).expand(in_dim, num_features).clone()
+            self.log_freq = nn.Parameter(log_freq_init)
+        else:
+            self.log_freq = nn.Parameter(
+                torch.full((in_dim, num_features), math.log(sigma))
+            )
         # phase[d, f]: learnable phase per axis per feature
         self.phase = nn.Parameter(torch.zeros(in_dim, num_features))
 
@@ -321,6 +339,7 @@ class SurfaceTransolver(nn.Module):
         slice_num: int = 96,
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
+        rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
     ):
@@ -332,6 +351,7 @@ class SurfaceTransolver(nn.Module):
         self.volume_output_dim = volume_output_dim
         self.rff_num_features = rff_num_features
         self.rff_sigma = rff_sigma
+        self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
@@ -343,10 +363,16 @@ class SurfaceTransolver(nn.Module):
             # num_features defaults to rff_num_features if provided, else 32.
             string_sep_features = rff_num_features if rff_num_features > 0 else 32
             self.surface_string_sep = StringSeparableEncoding(
-                in_dim=space_dim, num_features=string_sep_features, sigma=rff_sigma
+                in_dim=space_dim,
+                num_features=string_sep_features,
+                sigma=rff_sigma,
+                init_sigmas=self.rff_init_sigmas,
             )
             self.volume_string_sep = StringSeparableEncoding(
-                in_dim=space_dim, num_features=string_sep_features, sigma=rff_sigma
+                in_dim=space_dim,
+                num_features=string_sep_features,
+                sigma=rff_sigma,
+                init_sigmas=self.rff_init_sigmas,
             )
             string_sep_out_dim = self.surface_string_sep.output_dim  # 2 * space_dim * num_features
             self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
