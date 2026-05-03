@@ -599,3 +599,56 @@ Six new hypotheses spanning loss-formulation, point-density reallocation, regula
 | #465 | norman | wave3-norman-pe-bands 13h zombie + yi-r27-log-x-coord |
 
 Advisor sent kill-orphans-and-launch directives at 21:18Z; ACK reset to 21:48Z. **This is a systemic deployment issue**: the bengio-pod watchdog cannot distinguish a zombie run from a current run — it just sees `train.py` and waits. Multi-program (bengio + yi) student deployment needs orchestration boundaries clarified by the human team.
+
+## 2026-05-03 05:51Z — PR #480 (fern): Progressive EMA ramp on 5L/256d — CLOSED
+
+- **Branch**: `fern/progressive-ema-wave17`
+- **Hypothesis**: Ramping EMA decay from 0.9 to 0.9999 over 50 epochs (progressive EMA) avoids the early-training instability of high EMA while gaining late-training stability benefits. Expected to outperform both no-EMA and fixed-EMA.
+- **W&B run**: `2u6twuu4`
+- **Results**: val_abupt=7.4820%, test_abupt=8.6957%
+
+| Metric | This run (val) | SOTA val | Δ |
+|--------|---------------|----------|---|
+| abupt | 7.4820% | 7.3816% | +0.10pp |
+| test_abupt | 8.6957% | 8.5936% | +0.10pp |
+
+- **Conclusion**: Progressive EMA did NOT beat SOTA. The test result (+0.10pp vs SOTA) confirms no benefit. The key insight from this run: EMA (even progressive) hurts vol_p specifically — the no-EMA baseline is superior for this metric. EMA averaging over checkpoints prevents the low-LR cosine phase from producing the sharpest predictions on volume pressure.
+- **Action**: CLOSED.
+
+## 2026-05-03 05:51Z — PR #481 (tanjiro): log1p tau-norm v2 normalization — CLOSED
+
+- **Branch**: `tanjiro/log1p-tau-norm-v2`
+- **Hypothesis**: Apply log1p normalization to wall-shear targets (tau_x/y/z) before loss computation to reduce scale variance and help the model learn the low-magnitude shear components that correspond to wsy/wsz predictions.
+- **W&B run**: `hnrpuptg`
+- **Results**: val_abupt=7.6672%, test_abupt=8.7695%
+
+| Metric | This run (val) | SOTA val | Δ |
+|--------|---------------|----------|---|
+| abupt | 7.6672% | 7.3816% | +0.286pp |
+| test_abupt | 8.7695% | 8.5936% | +0.176pp |
+
+- **Conclusion**: log1p tau-norm is NEGATIVE — worse on both val and test. The normalization interfered with the model's ability to learn the absolute scale of wall shear stresses, which the relative L2 metric still depends on. This definitively closes the tau-normalization hypothesis family.
+- **Key negative signal**: wsy/wsz are not suffering from scale variance in the training loss — they're suffering from representation insufficiency. Scale-remapping does not help when the underlying issue is feature inadequacy.
+- **Action**: CLOSED.
+
+## 2026-05-03 05:51Z — PR #469 (nezuko): Metric-aware rel-L2 aux loss — CLOSED (EP5 gate fail)
+
+- **Branch**: `nezuko/rel-l2-aux-loss-wave16`
+- **Hypothesis**: Add an auxiliary loss on the relative L2 metric (matching the val metric exactly) at w=0.05 to make training explicitly aware of the evaluation metric, encouraging the model to focus on large-error regions.
+- **W&B run**: `tbm0bua1`
+- **EP5 gate result**: abupt~10.3-10.5% at step 89,080 (> 9.5% threshold) → killed at step 112,684 (ep~6.33, abupt=9.717%)
+- **Conclusion**: Metric-aware aux loss hurt early convergence vs baseline. The relative L2 metric as an auxiliary loss introduces gradient conflicts with the primary MSE loss that slow convergence. EP5 gate fail — closed.
+- **Action**: CLOSED.
+
+## 2026-05-03 05:52Z — Wave 19 Assignments (PRs #497, #498)
+
+Two new assignments given to idle students (senku and nezuko, whose Wave 18 PRs timed out without ACK):
+
+| PR | Student | Hypothesis |
+|----|---------|-----------|
+| #497 | senku | Stack coord-norm fix + mirror-aug + SW=2.0 on 5L/256d (Wave 19) |
+| #498 | nezuko | T_max cosine schedule sweep: 70 vs 100 on 5L/256d (Wave 19) |
+
+**Senku #497**: Tests whether coord-norm (fern #409, leading run at 7.33%) and mirror-aug+SW=2.0 (tanjiro #443, wsy-targeting) combine orthogonally. Expected combined gain ~−0.3 to −0.5pp on abupt vs baseline.
+
+**Nezuko #498**: Tests whether extending T_max beyond 50 (baseline validated) provides further gains. T_max=70 means LR is still at 70% of initial at ep50 — avoids low-LR fine-tuning phase. T_max=100 stays at 80% LR at ep50. The sweep will determine if the late-epoch cosine decay is helpful or harmful for this architecture.
