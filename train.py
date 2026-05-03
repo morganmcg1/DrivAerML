@@ -2324,9 +2324,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             or (timeout_hit and n_batches > 0)
         )
 
+        if scheduler is not None:
+            current_lr = scheduler.get_last_lr()[0]
+        else:
+            current_lr = optimizer.param_groups[0]["lr"]
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": current_lr,
             "epoch_time_s": dt,
             "global_step": global_step,
         }
