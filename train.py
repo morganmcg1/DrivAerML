@@ -40,6 +40,7 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    compute_or_load_log1p_tau_stats,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -119,6 +120,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    log1p_tau_norm: bool = False
     debug: bool = False
 
 
@@ -237,12 +239,84 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+
+        if config.log1p_tau_norm:
+            train_store = train_loader.dataset.store
+            log1p_tau_mean, log1p_tau_std = compute_or_load_log1p_tau_stats(
+                case_root=train_store.root,
+                train_case_ids=train_store.case_ids("train"),
+                distributed_state=state,
+            )
+            raw_tau_mean = stats["surface_y_mean"][1:4].clone()
+            raw_tau_std = stats["surface_y_std"][1:4].clone()
+            new_surface_mean = stats["surface_y_mean"].clone()
+            new_surface_std = stats["surface_y_std"].clone()
+            new_surface_mean[1:4] = log1p_tau_mean
+            new_surface_std[1:4] = log1p_tau_std
+            stats["surface_y_mean"] = new_surface_mean
+            stats["surface_y_std"] = new_surface_std
+            if state.is_main:
+                print(
+                    "[log1p_tau_norm] surface_y_mean (post-recompute): "
+                    f"{stats['surface_y_mean'].tolist()}"
+                )
+                print(
+                    "[log1p_tau_norm] surface_y_std  (post-recompute): "
+                    f"{stats['surface_y_std'].tolist()}"
+                )
+                print(
+                    "[log1p_tau_norm] raw tau mean was "
+                    f"{raw_tau_mean.tolist()}, raw tau std was {raw_tau_std.tolist()}"
+                )
+                print(
+                    "[log1p_tau_norm] log1p tau mean is "
+                    f"{log1p_tau_mean.tolist()}, log1p tau std is {log1p_tau_std.tolist()}"
+                )
+                if torch.allclose(log1p_tau_mean, raw_tau_mean) or torch.allclose(
+                    log1p_tau_std, raw_tau_std
+                ):
+                    raise RuntimeError(
+                        "log1p tau stats are equal to raw tau stats; recompute did not run correctly."
+                    )
+
         transform = TargetTransform(
             surface_y_mean=stats["surface_y_mean"].to(device),
             surface_y_std=stats["surface_y_std"].to(device),
             volume_y_mean=stats["volume_y_mean"].to(device),
             volume_y_std=stats["volume_y_std"].to(device),
+            log1p_tau_norm=config.log1p_tau_norm,
         )
+
+        if config.log1p_tau_norm and state.is_main:
+            try:
+                from data.loader import load_case as _load_case  # type: ignore
+
+                probe_case = _load_case(train_store.root, train_store.case_ids("train")[0])
+                probe_y = probe_case.surface_y.to(device)
+                with torch.no_grad():
+                    probe_norm = transform.apply_surface(probe_y)
+                per_chan_mean = probe_norm.mean(dim=0).tolist()
+                per_chan_std = probe_norm.std(dim=0).tolist()
+                print(
+                    "[log1p_tau_norm] post-transform per-channel mean (one train case): "
+                    f"{per_chan_mean}"
+                )
+                print(
+                    "[log1p_tau_norm] post-transform per-channel std  (one train case): "
+                    f"{per_chan_std}"
+                )
+                tau_mean_max = max(abs(m) for m in per_chan_mean[1:4])
+                tau_std_min = min(per_chan_std[1:4])
+                tau_std_max = max(per_chan_std[1:4])
+                if tau_mean_max > 0.2 or tau_std_min < 0.7 or tau_std_max > 1.4:
+                    raise RuntimeError(
+                        f"log1p_tau_norm post-transform tau stats out of expected band "
+                        f"(|mean|<=0.2, 0.7<=std<=1.4): mean={per_chan_mean[1:4]}, std={per_chan_std[1:4]}"
+                    )
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                print(f"[log1p_tau_norm] post-transform probe skipped: {exc}")
 
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())

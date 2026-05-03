@@ -6,15 +6,18 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
 import subprocess
+import time
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -170,6 +173,7 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        log1p_tau_norm: bool = False,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -187,6 +191,7 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.log1p_tau_norm = log1p_tau_norm
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -195,16 +200,148 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
+        if self.log1p_tau_norm:
+            y = y.clone()
+            tau = y[..., 1:4]
+            y[..., 1:4] = tau.sign() * tau.abs().log1p()
         return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        y_out = y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        if self.log1p_tau_norm:
+            y_out = y_out.clone()
+            tau = y_out[..., 1:4]
+            y_out[..., 1:4] = tau.sign() * tau.abs().expm1()
+        return y_out
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
         return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
 
     def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
         return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+
+
+_LOG1P_TAU_STATS_VERSION = "v1"
+
+
+def _compute_log1p_tau_stats_streaming(
+    case_root: Path,
+    train_case_ids: list[str],
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Stream training cases, apply sign-preserving log1p to tau, return per-channel mean/std.
+
+    Uses float64 accumulation of sum and sum of squares for numerical stability.
+    """
+    sum_per_chan = np.zeros(3, dtype=np.float64)
+    sum_sq_per_chan = np.zeros(3, dtype=np.float64)
+    total_count = 0
+    for idx, case_id in enumerate(train_case_ids):
+        path = Path(case_root) / case_id / "surface_wallshearstress.npy"
+        arr = np.load(path)
+        if arr.ndim != 2 or arr.shape[1] != 3:
+            raise ValueError(
+                f"Expected (N, 3) wall_shear array for case {case_id}, got shape {arr.shape}"
+            )
+        log1p_arr = (np.sign(arr) * np.log1p(np.abs(arr))).astype(np.float64)
+        sum_per_chan += log1p_arr.sum(axis=0)
+        sum_sq_per_chan += np.square(log1p_arr).sum(axis=0)
+        total_count += arr.shape[0]
+        if (idx + 1) % 50 == 0:
+            print(
+                f"[log1p_tau_stats] processed {idx + 1}/{len(train_case_ids)} cases, "
+                f"running n={total_count}"
+            )
+    if total_count == 0:
+        raise ValueError("No training samples to compute log1p tau stats from")
+    mean = sum_per_chan / total_count
+    var = sum_sq_per_chan / total_count - np.square(mean)
+    std = np.sqrt(np.clip(var, a_min=0.0, a_max=None))
+    return mean, std, total_count
+
+
+def compute_or_load_log1p_tau_stats(
+    case_root: Path | str,
+    train_case_ids: list[str],
+    distributed_state: DistributedState,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute (rank 0) or load (cached) per-channel mean/std of log1p-transformed tau channels.
+
+    Caches under <case_root>/log1p_tau_stats.json keyed by version + train-set fingerprint.
+    """
+    case_root = Path(case_root)
+    cache_path = case_root / "log1p_tau_stats.json"
+    fingerprint = {
+        "version": _LOG1P_TAU_STATS_VERSION,
+        "n_train_cases": len(train_case_ids),
+        "train_first": train_case_ids[0] if train_case_ids else None,
+        "train_last": train_case_ids[-1] if train_case_ids else None,
+    }
+
+    def _try_read_cache() -> dict | None:
+        if not cache_path.exists():
+            return None
+        try:
+            with cache_path.open() as f:
+                cached = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if cached.get("fingerprint") != fingerprint:
+            return None
+        return cached
+
+    mean_np: np.ndarray | None = None
+    std_np: np.ndarray | None = None
+
+    if distributed_state.is_main:
+        cached = _try_read_cache()
+        if cached is None:
+            print(
+                f"[log1p_tau_stats] computing from {len(train_case_ids)} train cases "
+                f"under {case_root}"
+            )
+            t0 = time.time()
+            mean_np, std_np, total_count = _compute_log1p_tau_stats_streaming(
+                case_root, train_case_ids
+            )
+            print(
+                f"[log1p_tau_stats] computed in {time.time() - t0:.1f}s "
+                f"(n={total_count}); mean={mean_np.tolist()}, std={std_np.tolist()}"
+            )
+            payload = {
+                "fingerprint": fingerprint,
+                "mean": mean_np.tolist(),
+                "std": std_np.tolist(),
+                "n_points": int(total_count),
+            }
+            try:
+                cache_path.write_text(json.dumps(payload, indent=2))
+                print(f"[log1p_tau_stats] cached to {cache_path}")
+            except OSError as exc:
+                print(f"[log1p_tau_stats] WARNING: failed to write cache {cache_path}: {exc}")
+        else:
+            mean_np = np.array(cached["mean"], dtype=np.float64)
+            std_np = np.array(cached["std"], dtype=np.float64)
+            print(
+                f"[log1p_tau_stats] loaded cached stats from {cache_path}: "
+                f"mean={mean_np.tolist()}, std={std_np.tolist()}"
+            )
+
+    distributed_barrier(distributed_state)
+
+    if not distributed_state.is_main:
+        cached = _try_read_cache()
+        if cached is None:
+            mean_np, std_np, _ = _compute_log1p_tau_stats_streaming(
+                case_root, train_case_ids
+            )
+        else:
+            mean_np = np.array(cached["mean"], dtype=np.float64)
+            std_np = np.array(cached["std"], dtype=np.float64)
+
+    assert mean_np is not None and std_np is not None
+    mean = torch.tensor(mean_np, dtype=torch.float32)
+    std = torch.tensor(std_np, dtype=torch.float32)
+    return mean, std
 
 
 def autocast_context(device: torch.device, amp_mode: str):
