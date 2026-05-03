@@ -1,5 +1,61 @@
 # SENPAI Research Results
 
+## 2026-05-03 09:10 — PR #431: askeladd gradient clip-norm sweep — CLOSED INFORMATIVE (structural finding)
+
+- Branch: `askeladd/grad-clip-sweep` (deleted)
+- Hypothesis: Is clip=0.5 optimal for the 4L/512d Lion model? Sweep {0, 0.1, 0.3, 0.5}.
+
+**Phase 1 (single-GPU, ~55% of epoch 1, kill threshold fired pre-test):**
+
+| Arm | clip | val_abupt (partial) |
+|---|---:|---:|
+| C | 0.3 | 31.74% |
+| B | 0.5 | 32.07% |
+| D | 0.1 | 33.23% |
+| A | none | 33.59% |
+
+Interior optimum at clip=0.3, but 100% clip-rate at all thresholds (pre-clip p50 = 20-46 >> any threshold). Test eval blocked by kill-threshold mis-calibration (`<25%` at step 3000; partial-epoch runs can't hit it).
+
+**Phase 2 (DDP-4 confirmatory, 2 sequential arms, 6h, 3 epochs, no kill threshold):**
+
+| Arm | optimizer | clip | wd | val_abupt | test_abupt | W&B run |
+|---|---|---:|---:|---:|---:|---|
+| 1 | AdamW | 0.3 | 5e-4 | 20.44% | 21.11% | `uck1mho2` |
+| 2 | Lion  | 0.5 | 1e-4 | 10.92% | 11.99% | `y2ye13q8` |
+
+- yi merge bar 9.039%; current SOTA 7.546% (PR #311). Neither arm beats either — Arm 2 bounded by 3-epoch DDP-4 budget (effective-batch 16 vs SOTA 8-GPU effective-batch 32).
+- **Multi-axis confound:** Arm 1 vs Arm 2 differed on optimizer + wd + clip (advisor copy-paste error in assignment — Arm 1 should have been Lion). A clean Arm 3 (Lion @ clip=0.3, wd=1e-4, DDP-4) would resolve the within-Lion question, but it cannot beat SOTA at this budget — closed in favor of structural learning + GPU reallocation.
+
+**Structural findings (kept):**
+1. **Lion pre-clip p50 = 1.1; AdamW pre-clip p50 = 6-46.** Lion's sign-based update produces a tight, well-conditioned grad-norm distribution.
+2. **At clip=0.5 with Lion, 97.5% of steps are clipped.** Clip in this regime is an effective-LR scaler — not a 'rare spike defender'. Future Lion experiments must treat (lr, clip) as one knob (joint sweep, lr-equivalent product as design variable), not two.
+3. **Optimizer dominates clip:** AdamW + clip=0.3 is ~2× worse than Lion + clip=0.5 at matched budget.
+
+**Production decision:** keep clip=0.5 on yi (no change). Logged for future Lion-derivative experiments.
+
+---
+
+## 2026-05-03 09:05 — PR #485: kohaku asinh wall-shear target normalization — CLOSED NEGATIVE (definitive)
+
+- Branch: `kohaku/asinh-wallshear-norm-yi` (deleted)
+- Hypothesis: `asinh(tau/scale)` target compression for 3 wall-shear channels rebalances gradient toward tau_y/tau_z (cross-flow).
+- Setup (corrected): single-GPU bs=4, partial epoch 1, 4L/512d/8h/128sl, Lion lr=1e-4 wd=1e-4 clip=0.5, no tangential loss, group `yi-r30-kohaku-asinh-wallshear-v2`.
+
+| Arm | scale | best val_abupt% | test_abupt% | W&B run |
+|---|---:|---:|---:|---|
+| A | 0.05 | 32.884 | 33.602 | `4uhtto3t` |
+| B | 0.10 | 23.849 | 24.881 | `0l7iuxwe` |
+| C | 0.50 | 18.086 | 19.017 | `v6hbp1pi` |
+| (yi merge bar) | — | 9.039 | — | — |
+
+- **Verdict:** hypothesis rejected. Monotonic trend in the **wrong** direction — more aggressive asinh compression made tau_y/tau_z worse, not better.
+- **Mechanism:** the inverse-pipeline Jacobian (`scale·sinh(z·σ+μ)`) exponentially amplifies prediction errors for heavy-tail samples when the model predicts in z-space. We compressed the loss but inflated the metric. No scale value rescues this within-architecture.
+- **Lessons (kept):**
+  1. Don't normalize targets when the metric is computed in original space and tails dominate.
+  2. tau_y/tau_z gradient imbalance is real, but the right lever is on the **loss side** (per-channel weighting, Huber, or asinh inside the loss only — no inverse pipeline) or via **input features** (cross-flow exposure index PR #370, surface-tangent frame).
+
+---
+
 ## 2026-05-03 03:15 — PR #474: frieren EMA-soup CLOSED (no-engagement) + reassignments (PR #490 frieren STRING-sep, PR #491 fern EMA-soup)
 
 - Closed PR #474 (frieren) after 3h+ silence: advisor correction at 23:51 UTC (wd=5e-4 → 1e-4), 1st escalation 02:54 UTC, no student response by 03:14 UTC. GPUs idle entire window. Following the fern #420 closure pattern. Hypothesis preserved.
