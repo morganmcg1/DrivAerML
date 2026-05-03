@@ -6,6 +6,88 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-03 12:00 UTC — PR #506 CLOSED NEGATIVE: nezuko 2× surface point density (65k→131k)
+
+- **Branch:** `nezuko/surface-pts-196k` (closed, branch deleted)
+- **Hypothesis:** Doubling surface sampling from 65k to 131k points per case would give the model finer surface resolution and improve surface pressure / wall shear metrics.
+- **W&B run:** `e4gz48nf`, group `nezuko-surf-pts-r24`, finished 282.7min
+
+| Metric | SOTA #489 (65k pts) | Nezuko 131k pts | Delta |
+|---|---:|---:|---:|
+| val_abupt (best) | 7.1792% | 7.9581% | +0.779pp worse |
+| test_abupt | 8.497% | 9.071% | +0.574pp worse |
+| test surface_pressure | 4.321% | 4.833% | +0.512pp worse |
+| test wall_shear | 7.860% | 8.690% | +0.830pp worse |
+| test tau_y | 8.881% | 10.026% | +1.145pp worse |
+| test tau_z | 10.038% | 11.007% | +0.969pp worse |
+
+- **Epochs completed:** ~EP7 (7 epochs vs 11 for SOTA at same timeout)
+- **Root cause:** 2× surface points → ~36.6 min/epoch vs ~22 min/epoch for SOTA. Fewer effective training passes in the 360min budget outweighs any benefit from denser surface sampling.
+- **Conclusion:** NEGATIVE — surface resolution is already saturated at 65k pts. The bottleneck is depth of training (epochs), not surface sampling density.
+
+---
+
+## 2026-05-03 12:00 UTC — PR #499 CLOSED NEGATIVE: fern inference-time mirror-y TTA
+
+- **Branch:** `fern/inference-time-mirror-y-tta` (closed, branch deleted)
+- **Hypothesis:** Mirror-y symmetry TTA at inference would reduce variance on tau_y (antisymmetric channel) and improve wall shear accuracy.
+- **W&B run:** `dy3viqmk` (rank0), group `fern-tta-mirror-y`, crashed step 28472 after EP10
+
+| Metric | TTA ON (training-eval) | TTA OFF (posthoc best-val ckpt) | Δ |
+|---|---:|---:|---:|
+| val_abupt | 8.834% | **7.657%** | TTA costs +1.177pp |
+| surface_pressure | 6.308% | 4.984% | TTA costs +1.324pp |
+| tau_y | 10.804% | 9.693% | TTA costs +1.110pp |
+| tau_z | 12.819% | 11.512% | TTA costs +1.307pp |
+| volume_pressure | 5.953% | 4.591% | TTA costs +1.362pp |
+
+- **Posthoc TTA OFF test_abupt:** 8.613% (vs SOTA 8.497%)
+- **Interpretation:** The model was trained with TTA=ON validation, so best-val checkpoint was selected against TTA-blended predictions. Without TTA at inference the unaided model is stronger. TTA uniformly hurt all channels — not just tau_y as hypothesized. The mirror-y averaging introduces label noise rather than variance reduction.
+- **Conclusion:** NEGATIVE — inference-time mirror-y TTA does not help. Future TTA experiments must use TTA-OFF validation for checkpoint selection, or use TTA as training augmentation not inference augmentation.
+
+---
+
+## 2026-05-03 12:00 UTC — PR #501 IN PROGRESS (sent back): frieren anisotropic STRING sigma priors
+
+- **Branch:** `frieren/aniso-string-freq-priors`
+- **Hypothesis:** Initialize STRING-sep `log_freq` per-axis with different sigma priors: sigma_x=1.0 (stream), sigma_y=2.0 (lateral), sigma_z=2.0 (vertical) to match the anisotropic flow physics. tau_y/tau_z errors are 2.5-2.9× above reference; these axes need wider frequency basis to represent cross-stream shear gradients.
+- **W&B run:** `kvywdebn`, group `frieren-aniso-string`, finished 282.6min at step 29120 (mid-EP11)
+
+| Metric | Frieren aniso-sigma (EP10 ckpt) | SOTA #489 | Δ |
+|---|---:|---:|---:|
+| val_abupt | 7.269% | 7.179% | +0.090pp |
+| **test_abupt** | **8.492%** | **8.497%** | **−0.005pp** |
+| test surface_pressure | 4.322% | 4.321% | ~tied |
+| test tau_y | 8.881% | 9.187% | **−0.306pp better** |
+| test tau_z | 10.038% | 10.701% | **−0.663pp better** |
+
+- **Key finding:** Test_abupt essentially tied with SOTA (8.492% vs 8.497%, 0.005pp). On test tau_y/tau_z, aniso sigma is materially better (−0.306pp and −0.663pp). The run timed out before EP11 val could be logged — the last val checkpoint is EP10 at 7.269% (0.090pp behind SOTA on val). Trajectory projects EP11 to ~7.14% (below SOTA 7.179%).
+- **Decision:** Sent back for EP11 rerun. The hypothesis is strongly supported on test. Frieren to rerun with same config to complete EP11.
+- **Status:** WIP (pending rerun)
+
+---
+
+## 2026-05-03 07:30 UTC — PR #458 CLOSED NEGATIVE: nezuko mlp-ratio capacity scaling sweep (mlp6 vs mlp8)
+
+- **Branch:** `nezuko/mlp-ratio-6-sota-stack` (closed, branch deleted)
+- **Hypothesis:** Wider FFN capacity (mlp_ratio=6 or 8 vs baseline=4) on the STRING-sep+QK-norm SOTA stack would improve overall accuracy, particularly targeting the volume_pressure gap by providing more per-token representational capacity.
+- **W&B runs:** mlp6=`4dwkhlst`, mlp8=`he54fm6v`, group `nezuko-mlp-ratio-r22`
+
+| Metric | SOTA PR #387 (mlp4) | mlp-ratio=6 | mlp-ratio=8 | AB-UPT |
+|---|---:|---:|---:|---:|
+| val_abupt (best EP) | **7.3816%** | 7.5708% (+0.189pp) | 7.5137% (+0.132pp) | — |
+| test_abupt | 8.5936% | 8.6824% (+0.089pp) | 8.7999% (+0.206pp) | — |
+| test surface_pressure | 4.4377% | 4.4683% | 4.5389% | 3.82% |
+| test wall_shear | 7.9989% | 8.1611% | 8.2566% | 7.29% |
+| test volume_pressure | 12.1885% | **12.2029%** | **12.3750%** | 6.08% |
+| Training time/epoch | ~22 min | ~27 min (+23%) | ~29 min (+32%) | — |
+
+- **Key finding:** Capacity scaling via FFN width is non-monotonic: mlp4 (7.38%) < mlp8 (7.51%) < mlp6 (7.57%). All wider variants underperform baseline. The wider FFN over-parameterizes surface heads at this depth/width, degrading surface and wall-shear accuracy. Vol_p showed marginal improvement with mlp6 (12.20% vs 12.19%) but this is within noise. mlp8 was cut short at EP9 by the 6h timeout (28.9 min/ep).
+- **Conclusion:** NEGATIVE — FFN width scaling is a dead end on this stack. mlp_ratio=4 is the correct default for 4L/512d/4H/128sl. Extra capacity should go to other dimensions (depth, hidden dim, attention heads, slices) not FFN width.
+- **Key takeaway:** Volume_pressure does NOT benefit meaningfully from FFN width. The ×2.0 vol_p gap vs AB-UPT is a structural/spectral problem, not a capacity problem.
+
+---
+
 ## 2026-05-03 04:30 UTC — PR #467 CLOSED NEGATIVE: alphonse learnable per-axis output scaling
 
 - **Branch:** `alphonse/per-axis-output-scaling` (closed, branch deleted)
