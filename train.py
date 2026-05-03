@@ -56,6 +56,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -101,6 +102,8 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    tau_y_loss_weight: float = 1.0
+    tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -251,11 +254,16 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
 
 
-def parse_rff_init_sigmas(raw: str) -> list[float] | None:
-    if not raw:
+def parse_rff_init_sigmas(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
         return None
-    parsed = [float(x.strip()) for x in raw.split(",") if x.strip()]
-    return parsed or None
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        return None
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--rff-init-sigmas must be positive: {spec!r}")
+    return sigmas
 
 
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
@@ -301,6 +309,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    surface_channel_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -312,7 +321,15 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        if surface_channel_weights is not None:
+            surface_loss = weighted_channel_mse(
+                out["surface_preds"],
+                surface_target,
+                batch.surface_mask,
+                surface_channel_weights,
+            )
+        else:
+            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -720,6 +737,16 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())
+        # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
+        # the largest gap to AB-UPT, so we expose per-channel weights here.
+        surface_channel_weights = torch.tensor(
+            [1.0, 1.0, config.tau_y_loss_weight, config.tau_z_loss_weight],
+            device=device,
+            dtype=torch.float32,
+        )
+        use_channel_weights = bool(
+            (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
+        )
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -789,6 +816,21 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
         val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
 
+        # Log multi-sigma RFF init layout for verification.
+        if state.is_main:
+            ss = getattr(base_model, "surface_string_sep", None)
+            if ss is not None and getattr(ss, "init_sigmas", None) is not None:
+                print(
+                    f"StringSep multi-sigma init: sigmas={ss.init_sigmas} "
+                    f"num_features={ss.num_features} layout=round-robin per axis "
+                    f"(log_freq[d, f] = log(sigmas[f % len(sigmas)]))"
+                )
+            if use_channel_weights:
+                print(
+                    f"Surface channel weights: cp=1.0 tau_x=1.0 "
+                    f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                )
+
         run = init_wandb_run(
             config=config,
             state=state,
@@ -808,6 +850,17 @@ def main(argv: Iterable[str] | None = None) -> None:
         config_path = output_dir / "config.yaml"
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
+
+        if state.is_main:
+            ss = getattr(base_model, "surface_string_sep", None)
+            init_sigmas_for_log = (
+                list(ss.init_sigmas)
+                if ss is not None and getattr(ss, "init_sigmas", None) is not None
+                else []
+            )
+            wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
+            wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
+            wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -954,6 +1007,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         config.amp_mode,
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
+                        surface_channel_weights=surface_channel_weights if use_channel_weights else None,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -990,6 +1044,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/tau_y_loss_weight": config.tau_y_loss_weight,
+                            "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
                 if gradnorm_metrics:
