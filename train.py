@@ -764,6 +764,7 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     lr_schedule_steps: bool = False
+    lr_schedule_cosine_t_max_override: int = 0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2045,7 +2046,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
         effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
     if config.lr_schedule_steps:
-        cosine_steps = max(1, total_estimated_steps - effective_warmup_steps)
+        if config.lr_schedule_cosine_t_max_override > 0:
+            cosine_steps = config.lr_schedule_cosine_t_max_override
+        else:
+            cosine_steps = max(1, total_estimated_steps - effective_warmup_steps)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=cosine_steps, eta_min=0.0
         )
@@ -2053,7 +2057,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(
                 f"LR schedule: per-step cosine, T_max={cosine_steps} "
                 f"(total_estimated_steps={total_estimated_steps}, "
-                f"effective_warmup_steps={effective_warmup_steps})"
+                f"effective_warmup_steps={effective_warmup_steps}, "
+                f"override={config.lr_schedule_cosine_t_max_override})"
             )
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
@@ -2090,8 +2095,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             "lr_warmup_steps_effective": effective_warmup_steps,
             **resume_info,
             "lr_schedule_mode": "step" if config.lr_schedule_steps else "epoch",
-            "lr_schedule_cosine_t_max": (
-                max(1, total_estimated_steps - effective_warmup_steps)
+            "lr_schedule_cosine_t_max_effective": (
+                (
+                    config.lr_schedule_cosine_t_max_override
+                    if config.lr_schedule_cosine_t_max_override > 0
+                    else max(1, total_estimated_steps - effective_warmup_steps)
+                )
                 if config.lr_schedule_steps
                 else max_epochs
             ),
