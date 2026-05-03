@@ -6,6 +6,28 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-03 19:05 UTC — PR #534 SENT BACK (rerun as Option A): tanjiro multi-scale STRING-sep bands
+
+- **Branch:** `tanjiro/multi-scale-string-bands`, status:wip (not merged, not closed — fused-equivalent rerun approved)
+- **Hypothesis:** Three independent `StringSeparableEncoding` modules (σ ∈ {0.25, 1.0, 4.0}, 8 features each), concatenated to 144-dim, give isolated per-band gradients so the fine band (σ=4.0) can specialize for tau_y/tau_z without coarse-geometry gradient interference.
+- **W&B run:** `loxzj4xq` (terminal at EP5 due to 270-min train budget; expected schedule was 11+ epochs at SOTA speed)
+
+| Metric | tanjiro EP5 (`loxzj4xq`) | alphonse SOTA (`qqtdnlwq`) | Δ |
+|---|---:|---:|---:|
+| **full_val_abupt** | **6.9349%** | 7.0062% | **−0.0713 (BETTER)** |
+| test_abupt | 8.3778% | 8.2921% | +0.0857 (worse) |
+| test surface_pressure | 4.3319% | 4.2381% | +0.0938 |
+| test wall_shear | 7.6938% | 7.6341% | +0.0597 |
+| test volume_pressure | 12.3013% | 12.1047% | +0.1966 |
+| test tau_x | 6.7505% | 6.6657% | +0.0848 |
+| test tau_y | 8.6784% | 8.6452% | +0.0332 |
+| test tau_z | 9.8267% | 9.8066% | +0.0201 |
+
+- **Analysis:** Val win is real (per-epoch trajectory was still steep: 28.2 → 8.8 → 7.6 → 7.1 → 6.9 at EP5). Test miss is uniform across every axis — that's the signature of an under-trained model, not a wrong inductive bias. 3-band sequential RFF ops + 144-dim projection caused 2.2× epoch slowdown (54 vs 25 min/epoch), so only 5 of the planned 13 epochs completed.
+- **Decision:** Sent PR back with Option A: refactor to a single `StringSeparableEncoding(num_features=24)` with band-grouped `init_sigmas = [0.25]*8 + [1.0]*8 + [4.0]*8`. Mathematically equivalent up to a learnable feature-index permutation (per-feature `log_freq`/`phase` are independent params either way), but collapses to 1 forward pass + 96-dim output projection — same compute as SOTA. Fresh run from scratch (warm start would mismatch projection-dim and feature ordering). Decision rule: full_val ≤ 6.95% AND test ≤ 8.29% to merge.
+
+---
+
 ## 2026-05-03 18:30 UTC — PR #531 CLOSED NEGATIVE: fern unit-vector cosine direction loss on tau (Arm B w=0.1)
 
 - **Branch:** `fern/unit-tau-vector-loss` (closed, branch deleted)
