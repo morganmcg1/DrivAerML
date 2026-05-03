@@ -6,6 +6,39 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-03 04:30 UTC — PR #467 CLOSED NEGATIVE: alphonse learnable per-axis output scaling
+
+- **Branch:** `alphonse/per-axis-output-scaling` (closed, branch deleted)
+- **Hypothesis:** Add a learnable 4-element scalar vector `surface_output_scale` (nn.Parameter, init=ones) after the `LinearProjection` output head to recalibrate per-channel [cp, tau_x, tau_y, tau_z] magnitudes, targeting the tau_y/tau_z gap vs AB-UPT.
+- **W&B run:** `wgvvevb9`, group `alphonse-per-axis-scale`, EP11 (budget-capped, step 29118)
+
+| Metric | SOTA PR #387 | PR #467 | Delta |
+|---|---:|---:|---:|
+| val_abupt (best EP11) | 7.3816% | **7.3794%** | −0.0022pp (within ~0.1pp noise) |
+| test_abupt | 8.5936% | **8.6176%** | **+0.024pp WORSE** |
+| test surface_pressure | 4.4377% | 4.4083% | −0.029pp (tie) |
+| test wall_shear | 7.9989% | 8.0571% | +0.058pp worse |
+| test volume_pressure | 12.1885% | 12.2538% | +0.065pp worse |
+| test tau_x | 6.9622% | 7.0780% | +0.116pp worse |
+| test tau_y | 9.1058% | 9.0914% | −0.014pp (tie) |
+| test tau_z | 10.2736% | 10.2568% | −0.017pp (tie) |
+
+- **Learned scale values:** [0.8423, 0.8878, 0.9198, 0.8466] — global ~13% attenuation, only 0.077 spread across channels. No meaningful per-channel recalibration occurred.
+- **Conclusion:** NEGATIVE — test_abupt 8.6176% does NOT beat SOTA 8.5936%. Mechanistic finding: the `LinearProjection` upstream already absorbs per-channel calibration through its weight magnitudes; adding a redundant scalar gate cannot break the symmetry. val is a statistical tie (−0.0022pp << seed noise floor ~0.1pp).
+- **Key takeaway:** The tau_y/tau_z gap to AB-UPT is NOT an output-head calibration problem. The gap must originate upstream in inductive biases — geometric/positional spectral encoding for shear orientation, or loss formulation for tangential vector components. PR #488 (multi-sigma STRING-sep init) attacks the spectral representation directly.
+
+---
+
+## 2026-05-03 04:30 UTC — PR #488 OPENED: alphonse multi-sigma log_freq init for STRING-sep encoding
+
+- **Branch:** `alphonse/multi-sigma-string-init` (status:wip)
+- **Hypothesis:** Initialize `StringSeparableEncoding.log_freq` with frequency spread across [0.25, 0.5, 1.0, 2.0, 4.0] sigma octaves (round-robin per feature) instead of uniform `log(1.0)`. Automotive aerodynamics spans a wide spatial frequency range — tau_y/tau_z concentrate near sharp geometric features (high-freq) while volume pressure is smooth (low-freq). Multi-scale warm-start should reduce gradient cost of learning the high-frequency basis, directly targeting the tau_y/tau_z gap at the representation level.
+- **Implementation:** New `--rff-init-sigmas` CLI flag; modifies only `log_freq` init in `StringSeparableEncoding`. Rest of SOTA stack unchanged.
+- **Config:** SOTA stack + `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"` + `--rff-num-features 16`
+- **Status:** Launched, awaiting EP1.
+
+---
+
 ## 2026-05-03 00:30 UTC — PR #471 OPENED: askeladd signed-log transform on volume_pressure target
 
 - **Branch:** `askeladd/vol-p-signed-log` (status:wip)
