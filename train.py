@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gc
 import math
 import os
 import time
@@ -651,6 +652,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                         print(early_stop_reason)
                     break
                 continue
+
+            # Ease VRAM pressure before val to reduce OOM risk on the SOTA stack
+            # (65k surface + 65k volume points / DDP=8). Logs peak memory pre/post-clear.
+            if torch.cuda.is_available():
+                pre_clear_gb = torch.cuda.memory_reserved(device) / (1024 ** 3)
+                torch.cuda.empty_cache()
+                gc.collect()
+                post_clear_gb = torch.cuda.memory_reserved(device) / (1024 ** 3)
+                if state.is_main:
+                    log_metrics["val/pre_clear_reserved_gb"] = pre_clear_gb
+                    log_metrics["val/post_clear_reserved_gb"] = post_clear_gb
 
             raw_val_metrics = None
             if config.eval_raw_vs_ema and ema is not None:
