@@ -1,9 +1,18 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-03 18:30 UTC — 8 active WIP PRs, 0 ready for review, 0 idle students
+- **Date:** 2026-05-04 (post-summary continuation) — 8 active WIP PRs, 0 ready for review, 0 idle students
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
+
+## Steps-per-epoch matrix (REQUIRED for all epoch math)
+
+Two distinct dataset configs are in flight. Always check `train_views` in W&B config:
+
+- **Config A — 87,064 train_views**: spe = 87,064 / (4×8) = **2,720.75** steps/epoch
+  Active: `nezuko (w28i6zeh)`, `edward (nh2ke150)`, `frieren (qawfhlu6)`
+- **Config B — 347,657 train_views (4× expanded)**: spe = 347,657 / (4×8) = **10,864.28** steps/epoch
+  Active: `thorfinn (wyz68o8r)`, `alphonse (49aimdiz)`, `tanjiro (19qf6di1)`, `askeladd (9mm3sz7x)`, `fern (2uerujyp)`. SOTA #510 `qqtdnlwq` was Config B too.
 
 ## Current SOTA — PR #510 (alphonse slw=2.0, EP5 EMA), val_abupt **7.0063%** (W&B `qqtdnlwq`)
 
@@ -50,18 +59,26 @@ No new directives as of 2026-05-01. Continuing organic tau_y/tau_z attack progra
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle students)
 
-| PR | Student | Hypothesis | Latest val_abupt | Status |
-|---|---|---|---:|---|
-| #538 | fern | Cosine annealing with warm restarts (SGDR T0=6, Tmult=2) | — | **NEW** — assigned 2026-05-03; awaiting launch |
-| #537 | alphonse | slw=2.0 full 13-epoch run (complete EP5 timeout SOTA) | — | **NEW** — assigned 2026-05-03; awaiting launch |
-| #535 | edward | Extended cosine to **EP15** on SOTA stack | EP2=9.03% | run `nh2ke150` running; EP2 healthy |
-| #534 | tanjiro | Multi-scale STRING-sep bands σ∈{0.25,1.0,4.0}, 8 feats/band | EP3=7.606% | run `loxzj4xq` running; strongest trajectory in flight |
-| #523 | thorfinn | GradNorm-EMA proxy Run 2 (α=0.5, min_weight=0.7) | Run 1=7.267% | **Sent back** with Run 2 config; awaiting relaunch |
-| #536 | nezuko | Y-mirror training augmentation (p=0.5) for tau_y/tau_z | crashed | **BUG: mirror_aug_frac=0** — augmentation never fired; needs debug fix |
-| #516 | askeladd | Per-channel tau_y/tau_z reweight (Run A: w_y=2.0, w_z=2.5) | EP3=15.017% | run `4uw2c4z2`; EP3 FAILS gate (≤14.15%), trajectory concerning |
-| #501 | frieren | Per-axis multi-sigma STRING priors (frieren-aniso-string-vs511) | EP1 partial | run `qawfhlu6` running; EP1 in progress |
+Live snapshot (latest val from W&B summary):
+
+| PR | Student | Run | Cfg | EP | val_abupt | τ_y | τ_z | Notes |
+|---|---|---|---|---:|---:|---:|---:|---|
+| #501 | frieren | `qawfhlu6` | A | 8.81 | **7.535%** | 9.61 | 11.22 | Aniso STRING priors; descending well, EP13 projection ~6.9% |
+| #535 | edward | `nh2ke150` | A | 11.37 | **7.262%** | 9.11 | 10.89 | EP15 extended cosine; trajectory −0.105/ep, EP13 projection ~7.05% |
+| #536 | nezuko | `w28i6zeh` | A | 5.40 | 9.224% | 11.83 | 13.23 | Y-mirror aug; on par with vanilla edward at EP5; relaunched (bug fixed) |
+| #534 | tanjiro | `19qf6di1` | B | 0.57 | — | — | — | Fused 24-feat StringSep (σ={0.25,1.0,4.0}×8). Prior `loxzj4xq` hit val=6.9349% at EP5 (timed out, test +0.09pp gap) |
+| #523 | thorfinn | `wyz68o8r` | B | 2.41 | 8.984% | 11.66 | 13.04 | GradNorm-EMA; EP2 mid-descent |
+| #537 | alphonse | `49aimdiz` | B | 2.28 | 8.607% | 11.25 | 12.68 | slw=2.0 full 13-ep; EP2 mid-descent |
+| #516 | askeladd | `9mm3sz7x` | B | 2.03 | 8.812% | 11.44 | 12.96 | tau_y×1.2, tau_z×1.3 micro-reweight, lr=9e-5; recovered from EP1=30.8% |
+| #538 | fern | `2uerujyp` | B | 2.02 | 8.937% | 11.85 | 13.23 | SGDR T0=6/Tmult=2; EP6 trough is key gate |
 
 ---
+
+## Front-runners to watch closely
+
+- **edward `nh2ke150` EP11 → EP13**: 7.262% with −0.105/ep slope. EP13 projection ~7.05% (within 0.04pp of SOTA). The EP14-15 tail (extended cosine) may break SOTA. Highest-priority gate is EP13 (step=35,370) and EP15 (step=40,811).
+- **frieren `qawfhlu6` EP9-13**: 7.535% at EP8.8 with −0.13/ep slope across recent epochs. EP13 projection ~6.89% — could break SOTA. Aniso per-axis STRING priors may be the strongest active hypothesis.
+- **tanjiro `loxzj4xq` legacy result**: val=6.9349% at EP5 (would be NEW SOTA) but test_abupt +0.0857pp regressed (under-trained signal). Fused `19qf6di1` is the production restart at full 13 epochs.
 
 ## Recent review results (this cycle)
 
