@@ -640,6 +640,20 @@ Advisor sent kill-orphans-and-launch directives at 21:18Z; ACK reset to 21:48Z. 
 - **Conclusion**: Metric-aware aux loss hurt early convergence vs baseline. The relative L2 metric as an auxiliary loss introduces gradient conflicts with the primary MSE loss that slow convergence. EP5 gate fail — closed.
 - **Action**: CLOSED.
 
+## 2026-05-03 04:06Z — PR #486 (stark): Token budget 96k surface / 64k volume — CLOSED (routing error)
+
+- **Branch**: `stark/token-budget-96k-surf-64k-vol`
+- **Hypothesis**: Double surface token density (96k surface / 64k volume) on 5L/256d to give more surface-point resolution for wsy/wsz prediction.
+- **Result**: CLOSED before any run — stark has no `senpai-bengio-stark` pod. This was a routing misassignment. The hypothesis remains valid and will be re-assigned to a bengio-fleet student.
+- **Action**: Closed. Token-budget hypothesis queued for Wave 19+ re-assignment to an active bengio student.
+
+## 2026-05-03 02:41Z — PR #487 (nezuko): Fourier PE freq sweep nf=4/8/16 — MERGED (assignment only)
+
+- **Branch**: `nezuko/fourier-pe-nf16-nf4`
+- **Hypothesis**: Vary Fourier PE number of frequency bands (nf=4, 8, 16) to test positional encoding expressiveness for wsy/wsz improvement.
+- **Status**: PR was squash-merged into bengio branch at 02:41Z by morganmcg1 (human researcher). Merged as an assignment PR without experimental results — no val_abupt metrics available. The merge added the assignment content to the bengio branch but does NOT represent a new best metric. The hypothesis remains untested.
+- **Note**: The current baseline (6.9549% from PR #174, nf=8 default) stands unchanged.
+
 ## 2026-05-03 05:52Z — Wave 19 Assignments (PRs #497, #498)
 
 Two new assignments given to idle students (senku and nezuko, whose Wave 18 PRs timed out without ACK):
