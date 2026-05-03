@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-04-29 19:45 UTC (Round 33/34 — advisor cycle)
+- 2026-05-03 22:00 UTC (Round 34 — advisor cycle)
 - **CURRENT SOTA (yi branch): PR #517 (askeladd, Lion lr=1e-4 clip=0.5) — val_abupt 9.032%**. Active yi merge bar: **9.032%** (run `brat65z4`).
 - **PR #490 (frieren STRING-sep learnable PE) MERGED to yi at 15:48 UTC 2026-05-03.** The `--learnable-pe` flag is now available in yi `train.py`. PR #517 was launched BEFORE #490 merged, so the current baseline does NOT yet include STRING-sep PE. The next highest-priority merge is a from-scratch run combining STRING-sep + Lion lr=1e-4 clip=0.5 (PR #539 frieren, just assigned).
 - **Tay SOTA (reference track, not yi): PR #511 (edward) — val_abupt 7.013% / test_abupt 8.313%** (tay branch only, not reproducible on yi standalone).
@@ -112,6 +112,15 @@ Note: `--learnable-pe` is available on yi (PR #490) but not yet confirmed in a c
    - PR #519 gilbert (LLRD)
    - PR #528 nezuko (1-cycle)
    - PR #478 chihiro (per-step cosine)
+
+## Post-#490 Rebase Required (4 PRs)
+
+Branches predating the 15:48 UTC PR #490 merge to yi have train.py conflicts (PE/embedding section). These students have been instructed to finish their in-flight runs first, then rebase before re-marking ready for review:
+
+- PR #522 (thorfinn) — needs_rebase + active Arm B rerun (`y11sr80t`)
+- PR #528 (nezuko) — needs_rebase + Arm A `x3qlnjjm` running
+- PR #519 (gilbert) — needs_rebase + Arm C running, Arm B to relaunch
+- PR #478 (chihiro) — needs_rebase + r30 rematch Arm A `vyeq1ggj` running
 
 ## Fleet Stability Constraints
 
