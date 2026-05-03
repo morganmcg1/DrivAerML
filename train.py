@@ -699,6 +699,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    asinh_wallshear_scale: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -753,6 +754,7 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        asinh_wallshear_scale: float = 0.0,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -770,6 +772,27 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.asinh_wallshear_scale = float(asinh_wallshear_scale)
+
+        # Pre-compute asinh-space mean/std for wall-shear channels (indices 1–3).
+        # We approximate by sampling from the raw N(μ, σ²) distribution using a
+        # fixed grid of 10001 quantile points for fast, deterministic moment estimation.
+        if self.asinh_wallshear_scale > 0.0:
+            ws_raw_mean = surface_y_mean[1:4].float().cpu()
+            ws_raw_std = surface_y_std.clamp(min=1e-6)[1:4].float().cpu()
+            n_samples = 10_001
+            quantiles = torch.linspace(1e-4, 1 - 1e-4, n_samples)
+            # icdf of standard normal: approximate via erfinv
+            z = torch.erfinv(2.0 * quantiles - 1.0) * (2.0 ** 0.5)  # shape (n_samples,)
+            # shape: (n_samples, 3) — compute on CPU, then move to same device as stats
+            samples = ws_raw_mean.unsqueeze(0) + ws_raw_std.unsqueeze(0) * z.unsqueeze(1)
+            asinh_samples = torch.asinh(samples / self.asinh_wallshear_scale)
+            target_device = surface_y_mean.device
+            self.asinh_ws_mean = asinh_samples.mean(dim=0).to(target_device)  # shape (3,)
+            self.asinh_ws_std = asinh_samples.std(dim=0).clamp(min=1e-6).to(target_device)  # shape (3,)
+        else:
+            self.asinh_ws_mean = None
+            self.asinh_ws_std = None
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -778,10 +801,51 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
+        if self.asinh_wallshear_scale > 0.0:
+            # Channel 0 (cp): standard z-score with raw mean/std
+            cp = (y[..., :1] - self.surface_y_mean[:1].to(y.device)) / self.surface_y_std[:1].to(y.device)
+            # Channels 1–3 (wall-shear): asinh pre-transform then z-score with asinh-space stats
+            ws = y[..., 1:4]
+            ws_asinh = torch.asinh(ws / self.asinh_wallshear_scale)
+            ws_norm = (ws_asinh - self.asinh_ws_mean.to(y.device)) / self.asinh_ws_std.to(y.device)
+            return torch.cat([cp, ws_norm], dim=-1)
         return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
+        if self.asinh_wallshear_scale > 0.0:
+            # Channel 0 (cp): standard un-z-score
+            cp = y[..., :1] * self.surface_y_std[:1].to(y.device) + self.surface_y_mean[:1].to(y.device)
+            # Channels 1–3 (wall-shear): un-z-score then inverse asinh (sinh * scale)
+            ws_norm = y[..., 1:4]
+            ws_asinh = ws_norm * self.asinh_ws_std.to(y.device) + self.asinh_ws_mean.to(y.device)
+            ws = torch.sinh(ws_asinh) * self.asinh_wallshear_scale
+            return torch.cat([cp, ws], dim=-1)
         return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+
+    def invert_wallshear(self, ws_norm: torch.Tensor) -> torch.Tensor:
+        """Invert normalization for wall-shear channels only (shape: [..., 3]).
+
+        When asinh is enabled, applies un-z-score then sinh * scale.
+        Otherwise, applies the standard linear un-z-score using raw mean/std.
+        Used by the tangential wall-shear loss to convert between normalized and
+        physical space without touching the cp channel.
+        """
+        if self.asinh_wallshear_scale > 0.0:
+            ws_asinh = ws_norm * self.asinh_ws_std.to(ws_norm.device) + self.asinh_ws_mean.to(ws_norm.device)
+            return torch.sinh(ws_asinh) * self.asinh_wallshear_scale
+        return ws_norm * self.surface_y_std[1:4].to(ws_norm.device) + self.surface_y_mean[1:4].to(ws_norm.device)
+
+    def apply_wallshear(self, ws_phys: torch.Tensor) -> torch.Tensor:
+        """Apply normalization to wall-shear channels only (shape: [..., 3]).
+
+        When asinh is enabled, applies asinh / scale then z-score with asinh-space stats.
+        Otherwise, applies the standard linear z-score using raw mean/std.
+        Used by the tangential wall-shear loss to re-normalize after physical projection.
+        """
+        if self.asinh_wallshear_scale > 0.0:
+            ws_asinh = torch.asinh(ws_phys / self.asinh_wallshear_scale)
+            return (ws_asinh - self.asinh_ws_mean.to(ws_phys.device)) / self.asinh_ws_std.to(ws_phys.device)
+        return (ws_phys - self.surface_y_mean[1:4].to(ws_phys.device)) / self.surface_y_std[1:4].to(ws_phys.device)
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
         return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
@@ -1520,16 +1584,14 @@ def train_loss(
             # in normalized space does not equal physical-space tangent projection.
             # Denormalize -> project in physical space -> renormalize.
             normals = batch.surface_x[..., 3:6]
-            ws_std = transform.surface_y_std[1:4]
-            ws_mean = transform.surface_y_mean[1:4]
             ws_pred_norm = surface_pred_norm[..., 1:4]
             ws_true_norm = surface_target[..., 1:4]
-            ws_pred_phys = ws_pred_norm * ws_std + ws_mean
-            ws_true_phys = ws_true_norm * ws_std + ws_mean
+            ws_pred_phys = transform.invert_wallshear(ws_pred_norm)
+            ws_true_phys = transform.invert_wallshear(ws_true_norm)
             ws_pred_tan = project_tangential(ws_pred_phys, normals)
             ws_true_tan = project_tangential(ws_true_phys, normals)
-            ws_pred_tan_norm = (ws_pred_tan - ws_mean) / ws_std
-            ws_true_tan_norm = (ws_true_tan - ws_mean) / ws_std
+            ws_pred_tan_norm = transform.apply_wallshear(ws_pred_tan)
+            ws_true_tan_norm = transform.apply_wallshear(ws_true_tan)
             surface_pred_used = torch.cat([surface_pred_norm[..., :1], ws_pred_tan_norm], dim=-1)
             surface_target_used = torch.cat([surface_target[..., :1], ws_true_tan_norm], dim=-1)
             if bool(batch.surface_mask.any()):
@@ -1912,6 +1974,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         surface_y_std=stats["surface_y_std"].to(device),
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
+        asinh_wallshear_scale=config.asinh_wallshear_scale,
     )
 
     model = build_model(config).to(device)
