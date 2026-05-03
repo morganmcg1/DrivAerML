@@ -763,6 +763,7 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    fp32_final_epochs: int = 0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2144,6 +2145,51 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
             break
 
+        # Decide precision policy for this epoch. With fp32_final_epochs > 0,
+        # disable autocast (full FP32) for the last N epochs of training.
+        # Use both an epoch-count check and a time-based estimate so the trigger
+        # fires correctly in either epoch-bounded or timeout-bounded runs.
+        if config.fp32_final_epochs > 0:
+            remaining_epochs_by_count = max_epochs - epoch
+            if epoch > 0:
+                elapsed_minutes = (time.time() - train_start) / 60.0
+                avg_epoch_minutes = elapsed_minutes / max(epoch, 1)
+                time_left_minutes = max(
+                    train_timeout_minutes - elapsed_minutes, 0.0
+                )
+                remaining_epochs_by_time = (
+                    time_left_minutes / max(avg_epoch_minutes, 1e-3) + 1.0
+                )
+            else:
+                remaining_epochs_by_time = float("inf")
+            remaining_epochs_estimate = min(
+                remaining_epochs_by_count, remaining_epochs_by_time
+            )
+            use_fp32_this_epoch = (
+                remaining_epochs_estimate <= config.fp32_final_epochs
+            )
+        else:
+            remaining_epochs_estimate = float(max_epochs - epoch)
+            use_fp32_this_epoch = False
+        epoch_amp_mode = "none" if use_fp32_this_epoch else config.amp_mode
+        if is_main:
+            wandb.log(
+                {
+                    "train/amp_dtype_active": 0 if use_fp32_this_epoch else 1,
+                    "train/fp32_final_epochs_remaining_estimate": float(
+                        remaining_epochs_estimate
+                    ),
+                    "epoch": epoch + 1,
+                    "global_step": global_step,
+                }
+            )
+            if use_fp32_this_epoch:
+                print(
+                    f"Epoch {epoch + 1}/{max_epochs}: switching to FP32 "
+                    f"(remaining_epochs_estimate={remaining_epochs_estimate:.2f}, "
+                    f"fp32_final_epochs={config.fp32_final_epochs})"
+                )
+
         if is_distributed and isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
         if torch.cuda.is_available():
@@ -2164,7 +2210,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 batch,
                 transform,
                 device,
-                config.amp_mode,
+                epoch_amp_mode,
                 surface_loss_weight=config.surface_loss_weight,
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
@@ -2336,6 +2382,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             "train/epoch_loss": epoch_train_loss,
             "lr": scheduler.get_last_lr()[0],
             "epoch_time_s": dt,
+            "epoch_time_s_fp32": dt if use_fp32_this_epoch else 0.0,
+            "epoch_time_s_bf16": 0.0 if use_fp32_this_epoch else dt,
+            "epoch_amp_dtype_active": 0 if use_fp32_this_epoch else 1,
             "global_step": global_step,
         }
         if early_stop_reason is not None:
