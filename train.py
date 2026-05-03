@@ -301,8 +301,85 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class SliceRoPE(nn.Module):
+    """3D Rotary Position Embedding for Transolver slice tokens.
+
+    Keyed on per-head slice centroids (xyz). Splits ``head_dim`` into 3 axis groups,
+    each contributing ``2 * (head_dim // 6)`` channels. If ``head_dim`` is not divisible
+    by 6 the residual ``head_dim - 6 * (head_dim // 6)`` channels pass through unrotated
+    (e.g. head_dim=64 → rotate first 60 channels, pass 4 untouched).
+
+    Convention: interleaved frequency packing matched with interleaved rotate_half so
+    consecutive (even, odd) channels form a complex pair sharing one rotation angle.
+    """
+
+    def __init__(self, head_dim: int, max_freq: float = 10.0):
+        super().__init__()
+        d = head_dim // 6
+        if d == 0:
+            raise ValueError(
+                f"head_dim {head_dim} too small for 3D RoPE (need at least 6, got {head_dim}/6={d})"
+            )
+        self.head_dim = head_dim
+        self.max_freq = float(max_freq)
+        self.d_per_axis = d
+        self.rot_dim = 6 * d
+        inv_freq = 1.0 / (self.max_freq ** (torch.arange(0, d, dtype=torch.float32) / d))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+    @staticmethod
+    def _rotate_half_interleaved(x: torch.Tensor) -> torch.Tensor:
+        x1 = x[..., 0::2]
+        x2 = x[..., 1::2]
+        return torch.stack([-x2, x1], dim=-1).flatten(-2)
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        centroids: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # q, k: (B, H, S, head_dim); centroids: (B, H, S, 3)
+        rot_dim = self.rot_dim
+        inv_freq = self.inv_freq
+        # Build per-axis frequency embeddings, then concat across axes.
+        # Pack each axis as [f0, f0, f1, f1, ..., f_{d-1}, f_{d-1}] to match the
+        # interleaved rotate_half convention.
+        axis_blocks = []
+        for axis in range(3):
+            c = centroids[..., axis]  # (B, H, S)
+            f = torch.einsum("bhs,d->bhsd", c.float(), inv_freq)  # (B, H, S, d)
+            f_pair = torch.repeat_interleave(f, 2, dim=-1)  # (B, H, S, 2d)
+            axis_blocks.append(f_pair)
+        theta = torch.cat(axis_blocks, dim=-1)  # (B, H, S, 6d)
+        cos_t = theta.cos().to(q.dtype)
+        sin_t = theta.sin().to(q.dtype)
+
+        q_rot = q[..., :rot_dim]
+        k_rot = k[..., :rot_dim]
+        q_rotated = q_rot * cos_t + self._rotate_half_interleaved(q_rot) * sin_t
+        k_rotated = k_rot * cos_t + self._rotate_half_interleaved(k_rot) * sin_t
+
+        if rot_dim < q.shape[-1]:
+            q_pass = q[..., rot_dim:]
+            k_pass = k[..., rot_dim:]
+            q_out = torch.cat([q_rotated, q_pass], dim=-1)
+            k_out = torch.cat([k_rotated, k_pass], dim=-1)
+        else:
+            q_out = q_rotated
+            k_out = k_rotated
+        return q_out, k_out
+
+
 class TransolverAttention(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        dropout: float = 0.0,
+        slice_rope: SliceRoPE | None = None,
+    ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError("hidden_dim must be divisible by num_heads")
@@ -319,6 +396,10 @@ class TransolverAttention(nn.Module):
         self.qkv = LinearProjection(self.dim_head, self.dim_head * 3, bias=False)
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
+        self.slice_rope = slice_rope
+        # Telemetry — populated per forward when slice_rope is enabled.
+        self.last_centroid_spread: float = 0.0
+        self.last_rope_q_cos_sim: float = 1.0
 
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
@@ -335,10 +416,49 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def _compute_slice_centroids(
+        self,
+        slice_weights: torch.Tensor,
+        point_coords: torch.Tensor,
+    ) -> torch.Tensor:
+        # slice_weights: (B, H, N, S); point_coords: (B, N, 3)
+        sw = slice_weights.float()
+        pc = point_coords.float()
+        num = torch.einsum("bhns,bnd->bhsd", sw, pc)  # (B, H, S, 3)
+        den = sw.sum(dim=2).unsqueeze(-1).clamp_min(1e-8)  # (B, H, S, 1)
+        return num / den
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
+
+        if self.slice_rope is not None and point_coords is not None:
+            slice_centroids = self._compute_slice_centroids(slice_weights, point_coords).detach()
+            q_pre = q
+            q, k = self.slice_rope(q, k, slice_centroids)
+            with torch.no_grad():
+                # Telemetry: detach to avoid graph extension.
+                B, H, S, _ = slice_centroids.shape
+                # Mean pairwise L2 distance between slice centroids (per head, then averaged).
+                c = slice_centroids.float()  # (B, H, S, 3)
+                diffs = c.unsqueeze(3) - c.unsqueeze(2)  # (B, H, S, S, 3)
+                dists = diffs.norm(dim=-1)  # (B, H, S, S)
+                eye = torch.eye(S, device=c.device, dtype=torch.bool).view(1, 1, S, S)
+                pairwise_count = max(S * (S - 1), 1)
+                spread = dists.masked_fill(eye, 0.0).sum(dim=(-2, -1)) / pairwise_count  # (B, H)
+                self.last_centroid_spread = float(spread.mean().item())
+                rd = self.slice_rope.rot_dim
+                a = q_pre[..., :rd].float()
+                b = q[..., :rd].float()
+                cos = F.cosine_similarity(a, b, dim=-1).mean()
+                self.last_rope_q_cos_sim = float(cos.item())
+
         out_slice = F.scaled_dot_product_attention(
             q,
             k,
@@ -361,6 +481,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         drop_path_prob: float = 0.0,
+        slice_rope: SliceRoPE | None = None,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -370,14 +491,22 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             num_slices=num_slices,
             dropout=dropout,
+            slice_rope=slice_rope,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path = DropPath(drop_path_prob)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path(
+            self.attention(self.norm1(x), attn_mask=attn_mask, point_coords=point_coords)
+        )
         x = _apply_token_mask(x, attn_mask)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
@@ -437,6 +566,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        slice_rope: SliceRoPE | None = None,
     ):
         super().__init__()
         if depth <= 1:
@@ -454,6 +584,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     drop_path_prob=drop_path_rates[i],
+                    slice_rope=slice_rope,
                 )
                 for i in range(depth)
             ]
@@ -471,9 +602,10 @@ class Transformer(nn.Module):
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
         geom_token: torch.Tensor | None = None,
+        point_coords: torch.Tensor | None = None,
     ) -> torch.Tensor:
         for index, block in enumerate(self.blocks):
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, point_coords=point_coords)
             if self.film_layers is not None and geom_token is not None:
                 x = self.film_layers[index](x, geom_token)
                 x = _apply_token_mask(x, attn_mask)
@@ -502,6 +634,8 @@ class SurfaceTransolver(nn.Module):
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
+        slice_rope: bool = False,
+        slice_rope_max_freq: float = 10.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -515,6 +649,8 @@ class SurfaceTransolver(nn.Module):
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
         self.learnable_pe = learnable_pe
+        self.use_slice_rope = bool(slice_rope)
+        self.slice_rope_max_freq = float(slice_rope_max_freq)
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -537,6 +673,15 @@ class SurfaceTransolver(nn.Module):
             if use_film
             else None
         )
+        if self.use_slice_rope:
+            if n_hidden % n_head != 0:
+                raise ValueError("hidden_dim must be divisible by num_heads when --slice-rope is set")
+            head_dim = n_hidden // n_head
+            self.slice_rope_module: SliceRoPE | None = SliceRoPE(
+                head_dim=head_dim, max_freq=slice_rope_max_freq
+            )
+        else:
+            self.slice_rope_module = None
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -546,6 +691,7 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            slice_rope=self.slice_rope_module,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -582,6 +728,7 @@ class SurfaceTransolver(nn.Module):
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
+        coords_list: list[torch.Tensor] = []
         surface_tokens = 0
         volume_tokens = 0
 
@@ -596,6 +743,7 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(surface_mask)
+            coords_list.append(surface_x[:, :, : self.space_dim])
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
@@ -608,13 +756,17 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(volume_mask)
+            coords_list.append(volume_x[:, :, : self.space_dim])
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
+        point_coords = torch.cat(coords_list, dim=1) if self.use_slice_rope else None
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
             geom_token = self.geom_encoder(surface_x, surface_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
+        hidden = self.backbone(
+            hidden, attn_mask=attn_mask, geom_token=geom_token, point_coords=point_coords
+        )
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -739,6 +891,8 @@ class Config:
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
     learnable_pe: bool = False
+    slice_rope: bool = False
+    slice_rope_max_freq: float = 10.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -923,6 +1077,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
         learnable_pe=config.learnable_pe,
+        slice_rope=config.slice_rope,
+        slice_rope_max_freq=config.slice_rope_max_freq,
     )
 
 
@@ -1168,6 +1324,24 @@ def collect_gradient_metrics(
     if log_histograms and finite_grad_chunks:
         metrics["train/grad_hist/all"] = wandb.Histogram(torch.cat(finite_grad_chunks).numpy())
 
+    return metrics
+
+
+def collect_slice_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Average slice-RoPE telemetry across all TransolverAttention blocks."""
+
+    base_model = getattr(model, "_orig_mod", model)
+    spreads: list[float] = []
+    cos_sims: list[float] = []
+    for module in base_model.modules():
+        if isinstance(module, TransolverAttention) and module.slice_rope is not None:
+            spreads.append(float(module.last_centroid_spread))
+            cos_sims.append(float(module.last_rope_q_cos_sim))
+    metrics: dict[str, float] = {}
+    if spreads:
+        metrics["train/slice_centroid_spread_mean"] = sum(spreads) / len(spreads)
+    if cos_sims:
+        metrics["train/slice_rope_q_cos_sim"] = sum(cos_sims) / len(cos_sims)
     return metrics
 
 
@@ -2295,6 +2469,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
                     train_log[f"train/{key}"] = value
+            if config.slice_rope:
+                rope_metrics = collect_slice_rope_metrics(model)
+                train_log.update(rope_metrics)
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
