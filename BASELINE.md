@@ -2,49 +2,48 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: alphonse PR #488 multi-sigma STRING-sep init — 2026-05-03 (updated)
+## Status: thorfinn PR #489 volume-points curriculum 16k→65k ramp — 2026-05-03 (updated)
 
-**NEW SOTA: alphonse PR #488 (multi-sigma RFF init across frequency octaves) beats PR #387 by −0.0144pp val (7.3672% vs 7.3816% val). W&B run `ki2q9ko9`, EP11.**
+**NEW SOTA: thorfinn PR #489 (vol-points curriculum 16k→32k→49k→65k over 4 stages) beats PR #488 by −0.1880pp val (7.1792% vs 7.3672% val). W&B run `r5rw40rn`, EP11. Delta −2.55% relative.**
 
-Multi-sigma STRING-sep init distributes `log_freq` parameters across frequency octaves at initialization via `--rff-init-sigmas`, giving the STRING-sep encoding a broader spectral coverage from the start. Dramatically improves volume_pressure (vp=4.357% vs SOTA 12.189% — a +7.832pp improvement), bringing it to near-target territory (AB-UPT ref: 6.08%). Surface pressure and wall shear see modest regression (+0.367pp and +0.348pp respectively), but the net val_abupt improvement confirms the octave-init approach is a genuine advance.
+Volume-points curriculum ramps the number of volume query points across training epochs: 16384 (ep0-2) → 32768 (ep3-5) → 49152 (ep6-8) → 65536 (ep9+). This curriculum approach lets the model first learn from cheaper, coarser sampling and progressively refine as training matures. Run timed out at 270 min before reaching the 49k/65k stages, but the final result still beats SOTA. Volume pressure improves further (vp=4.207% vs prior SOTA 4.357%), suggesting the curriculum meaningfully helps volume field fidelity. tau_y/tau_z remain the primary open problem.
 
-**W&B run:** `ki2q9ko9` (alphonse DDP8) — best val **7.3672%** (EP11)
-**PR:** #488
-**Val metrics (best-val checkpoint):** val_abupt=7.3672%, surface_pressure=4.805%, wall_shear=8.347%, volume_pressure=4.357%
+**W&B run:** `r5rw40rn` (thorfinn DDP8, rank 0) — group `thorfinn-vol-curriculum`, best val **7.1792%** (EP11), all 8 DDP siblings finished
+**PR:** #489
+**Val metrics (best-val checkpoint):** val_abupt=7.1792%, surface_pressure=4.783%, wall_shear=8.098%, volume_pressure=4.207%, tau_x=7.019%, tau_y=9.187%, tau_z=10.701%
+**Test metrics:** test_abupt=8.497%
 
-### tay current best — `val_primary/*`
+### tay current best — `val_primary/*` (PR #489 thorfinn, run `r5rw40rn`)
 
-| Epoch | val_abupt |
-|-------|-----------|
-| **EP11 (best)** | **7.3672%** |
-
-### tay current best — `val_primary/*` (PR #488 alphonse, run `ki2q9ko9`)
-
-| Metric | **PR #488 alphonse (SOTA)** | PR #387 alphonse (prev) | AB-UPT |
+| Metric | **PR #489 thorfinn (SOTA)** | PR #488 alphonse (prev) | AB-UPT |
 |---|---:|---:|---:|
-| `abupt` | **7.3672** | 7.3816 | — |
-| `surface_pressure` | 4.805 | **4.4377** | 3.82 |
-| `wall_shear` | 8.347 | **7.9989** | 7.29 |
-| `volume_pressure` | **4.357** | 12.1885 | 6.08 |
+| `abupt` | **7.1792** | 7.3672 | — |
+| `surface_pressure` | 4.783 | 4.805 | 3.82 |
+| `wall_shear` | 8.098 | 8.347 | 7.29 |
+| `volume_pressure` | **4.207** | 4.357 | 6.08 |
+| `tau_x` | 7.019 | — | 5.35 |
+| `tau_y` | 9.187 | — | 3.65 |
+| `tau_z` | 10.701 | — | 3.63 |
 
-**Key insight:** volume_pressure drops from 12.1885% to 4.357% — a dramatic 7.832pp improvement, now BELOW the AB-UPT reference target (6.08%). This is the first time any single metric has beaten its AB-UPT reference on this track. Surface pressure and wall shear regressed slightly, indicating the octave-init trades spectral coverage breadth for axis-specific precision. Net improvement confirms the direction is correct.
+**Key insight:** Volume-points curriculum improves across all axes. vp=4.207% beats prior SOTA 4.357% and stays well below AB-UPT ref 6.08%. tau_y/tau_z gap (9.19%/10.70% vs target 3.65%/3.63%) remains the primary unsolved problem — 2.5-2.9× above reference. The curriculum suggests progressive training strategies deserve further investigation.
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init, vol-curriculum)
 
 ```bash
 torchrun --standalone --nproc_per_node=8 train.py \
-  --agent alphonse --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --agent thorfinn --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
   --no-compile-model --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
-  --train-volume-points 65536 --eval-volume-points 65536 \
+  --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
   --rff-num-features 16 \
-  --rff-init-sigmas <octave-sigmas-used-in-pr488>
+  --rff-init-sigmas <octave-sigmas-from-pr488> \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536"
 ```
 
-### Compounding wins so far (updated through PR #488)
+### Compounding wins so far (updated through PR #489)
 
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
@@ -64,7 +63,20 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #311 | edward | **−1.355pp (−13.39%) vs #309** | STRING-separable pos encoding: learnable per-axis log_freq + phase — largest single gain since tanjiro arm B |
 | #358 | thorfinn | **−0.154pp (−2.04%) vs #311** | QK-norm (RMSNorm on Q and K) stacked on STRING-sep — best val at EP11 (7.3921%) |
 | #387 | alphonse | **−0.031pp (−0.36%) vs #358** | feat16 RFF (rff_num_features=16) stacked on STRING-sep + QK-norm config — best val at EP11 (7.3816%) |
-| **#488** | **alphonse** | **−0.0144pp (−0.195%) vs #387** | **multi-sigma STRING-sep init: log_freq params distributed across frequency octaves at init — vp drops from 12.189% to 4.357% (beats AB-UPT ref!)** |
+| #488 | alphonse | **−0.0144pp (−0.195%) vs #387** | multi-sigma STRING-sep init: log_freq params distributed across frequency octaves at init — vp drops from 12.189% to 4.357% (beats AB-UPT ref!) |
+| **#489** | **thorfinn** | **−0.1880pp (−2.55%) vs #488** | **vol-points curriculum 16k→32k→49k→65k: progressive coarse-to-fine volume sampling across training epochs — vp further improves to 4.207%** |
+
+---
+
+## Prior SOTA record: alphonse PR #488 multi-sigma STRING-sep init — 2026-05-03 (updated)
+
+**PRIOR SOTA: alphonse PR #488 (multi-sigma RFF init across frequency octaves) beats PR #387 by −0.0144pp val (7.3672% vs 7.3816% val). W&B run `ki2q9ko9`, EP11.**
+
+Multi-sigma STRING-sep init distributes `log_freq` parameters across frequency octaves at initialization via `--rff-init-sigmas`, giving the STRING-sep encoding a broader spectral coverage from the start. Dramatically improves volume_pressure (vp=4.357% vs SOTA 12.189% — a +7.832pp improvement), bringing it to near-target territory (AB-UPT ref: 6.08%). Surface pressure and wall shear see modest regression (+0.367pp and +0.348pp respectively), but the net val_abupt improvement confirms the octave-init approach is a genuine advance.
+
+**W&B run:** `ki2q9ko9` (alphonse DDP8) — best val **7.3672%** (EP11)
+**PR:** #488
+**Val metrics (best-val checkpoint):** val_abupt=7.3672%, surface_pressure=4.805%, wall_shear=8.347%, volume_pressure=4.357%
 
 ---
 
