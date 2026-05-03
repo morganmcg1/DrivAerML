@@ -97,6 +97,9 @@ class Config:
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     rff_init_sigmas: str = ""
+    rff_init_sigmas_x: str = ""
+    rff_init_sigmas_y: str = ""
+    rff_init_sigmas_z: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     amp_mode: str = "bf16"
@@ -189,6 +192,31 @@ def parse_rff_init_sigmas(raw: str) -> list[float] | None:
     return parsed or None
 
 
+def parse_rff_axis_init_sigmas(
+    sx: str, sy: str, sz: str
+) -> list[list[float]] | None:
+    """Parse per-axis multi-sigma flags into a list[list[float]] of length 3.
+
+    All three axis flags must be set together; if any is empty, returns None
+    (falls through to the axis-shared multi-sigma or single-sigma init).
+    """
+    raw = (sx, sy, sz)
+    set_count = sum(1 for r in raw if r)
+    if set_count == 0:
+        return None
+    if set_count != 3:
+        raise ValueError(
+            "rff_init_sigmas_{x,y,z} must all be set together; got "
+            f"x={sx!r}, y={sy!r}, z={sz!r}"
+        )
+    parsed = [parse_rff_init_sigmas(r) for r in raw]
+    if any(p is None or len(p) == 0 for p in parsed):
+        raise ValueError(
+            "rff_init_sigmas_{x,y,z} must each contain at least one positive float"
+        )
+    return parsed  # type: ignore[return-value]
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -218,6 +246,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
+        rff_axis_init_sigmas=parse_rff_axis_init_sigmas(
+            config.rff_init_sigmas_x,
+            config.rff_init_sigmas_y,
+            config.rff_init_sigmas_z,
+        ),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
     )
