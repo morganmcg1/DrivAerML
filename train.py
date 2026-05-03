@@ -722,6 +722,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    wallshear_ohem_k: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1444,7 +1445,8 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
-) -> tuple[torch.Tensor, list[float]]:
+    wallshear_ohem_k: float = 0.0,
+) -> tuple[torch.Tensor, list[float], float]:
     """Per-channel weighted masked loss for surface predictions.
 
     pred, target: [B, N, C]. mask: [B, N] bool.
@@ -1460,6 +1462,13 @@ def weighted_masked_mse_per_channel(
                   = 2 * delta * (|r| - delta/2)  if |r| >= delta
     Channel 0 (cp / surface_pressure) keeps the standard MSE loss.
 
+    With ``wallshear_ohem_k`` in (0, 1] and 4+ channels, apply Online Hard
+    Example Mining (OHEM) to the wall-shear channels: per sample, score every
+    surface point by ``τ_y² + τ_z²`` residual and keep only the top-k_fraction
+    hardest points for the τ-channel (1..3) loss. Channel 0 (cp) keeps the
+    standard masked MSE. The /n_channels normalization matches the non-OHEM
+    path so k=1.0 numerically recovers the standard MSE (when masks are full).
+
     Note: PR #317's spec used a *relative* Huber ``(pred-target)/(|target|+eps)``,
     but standardized targets cross zero frequently, so dividing by ``|target|``
     blows up the gradient (pre-clip grad-norms 50–300× the MSE control) and
@@ -1469,16 +1478,69 @@ def weighted_masked_mse_per_channel(
     rescaling keeps the L2 regime matched to the MSE control for clean
     interpretation of delta. Per-axis diagnostic loss keys remain MSE-based for
     cross-run comparability.
+
+    Returns
+    -------
+    weighted_loss : torch.Tensor
+        Scalar loss (matches the same /n_channels scale as standard MSE).
+    per_axis_mean : list[float]
+        Per-channel masked MSE diagnostics over *all* valid points (independent
+        of OHEM/Huber selection) for cross-run comparability.
+    ohem_mean_yz_residual : float
+        Mean ``τ_y² + τ_z²`` residual on the OHEM-selected hard points. NaN when
+        OHEM is disabled.
     """
     weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
     if not bool(mask.any()):
         per_axis = [0.0] * int(weights.numel())
-        return pred.sum() * 0.0, per_axis
+        return pred.sum() * 0.0, per_axis, float("nan")
     diff = pred - target  # [B, N, C]
     diff_sq = diff.pow(2)
     mask_f = mask.unsqueeze(-1).to(pred.dtype)
     valid = mask_f.sum().clamp_min(1)
     n_channels = diff_sq.shape[-1]
+
+    use_ohem = wallshear_ohem_k > 0.0 and n_channels >= 4
+    ohem_mean_yz_residual = float("nan")
+
+    if use_ohem:
+        # Score per surface point = τ_y² + τ_z² residual (channels 2 and 3).
+        yz_residual = diff_sq[..., 2] + diff_sq[..., 3]  # [B, N]
+        # Mask padded points so they are never picked by topk.
+        score = yz_residual.masked_fill(~mask, float("-inf"))
+        n_points = pred.shape[1]
+        k = max(1, int(round(n_points * float(wallshear_ohem_k))))
+        k = min(k, n_points)
+        _, hard_idx = score.topk(k, dim=1)  # [B, k]
+        hard_mask = mask.gather(1, hard_idx)  # [B, k] bool
+        hard_mask_f = hard_mask.unsqueeze(-1).to(pred.dtype)  # [B, k, 1]
+        # Gather τ-channel squared residuals on hard points.
+        idx_tau = hard_idx.unsqueeze(-1).expand(-1, -1, 3)
+        tau_diff_sq_hard = diff_sq[..., 1:4].gather(1, idx_tau)  # [B, k, 3]
+        tau_weights = weights[1:4].view(1, 1, -1)
+        # Per-channel mean over OHEM-selected valid points.
+        valid_hard = hard_mask_f.sum().clamp_min(1)
+        tau_loss_hard = (tau_diff_sq_hard * tau_weights * hard_mask_f).sum() / (
+            valid_hard * n_channels
+        )
+        # cp (channel 0) keeps standard masked MSE, normalized by /n_channels.
+        cp_loss = (diff_sq[..., 0:1] * weights[0:1].view(1, 1, -1) * mask_f).sum() / (
+            valid * n_channels
+        )
+        weighted_loss = cp_loss + tau_loss_hard
+        # Per-axis diagnostic: full-coverage masked MSE on every channel.
+        per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
+        per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
+        # Mean τ_y² + τ_z² on selected hard points (averaged over valid hard points).
+        yz_residual_hard = yz_residual.gather(1, hard_idx)  # [B, k]
+        yz_valid_count = hard_mask.to(pred.dtype).sum().clamp_min(1).detach()
+        ohem_mean_yz_residual = float(
+            (
+                (yz_residual_hard * hard_mask.to(pred.dtype)).sum().detach().float()
+                / yz_valid_count.float()
+            ).cpu().item()
+        )
+        return weighted_loss, per_axis_mean, ohem_mean_yz_residual
 
     if wallshear_huber_delta > 0.0 and n_channels >= 4:
         abs_err = diff.abs()
@@ -1499,7 +1561,7 @@ def weighted_masked_mse_per_channel(
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
-    return weighted_loss, per_axis_mean
+    return weighted_loss, per_axis_mean, ohem_mean_yz_residual
 
 
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
@@ -1528,6 +1590,7 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    wallshear_ohem_k: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1567,12 +1630,15 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
-            surface_pred_used,
-            surface_target_used,
-            batch.surface_mask,
-            channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
-            wallshear_huber_delta=wallshear_huber_delta,
+        surface_loss, per_axis_unweighted, ohem_mean_yz_residual = (
+            weighted_masked_mse_per_channel(
+                surface_pred_used,
+                surface_target_used,
+                batch.surface_mask,
+                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                wallshear_huber_delta=wallshear_huber_delta,
+                wallshear_ohem_k=wallshear_ohem_k,
+            )
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -1598,6 +1664,9 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if wallshear_ohem_k > 0.0:
+        metrics["ohem_hard_frac"] = float(wallshear_ohem_k)
+        metrics["ohem_mean_yz_residual"] = float(ohem_mean_yz_residual)
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -2172,6 +2241,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                wallshear_ohem_k=config.wallshear_ohem_k,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2285,6 +2355,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "ohem_hard_frac" in batch_loss_metrics:
+                train_log["train/ohem_hard_frac"] = batch_loss_metrics[
+                    "ohem_hard_frac"
+                ]
+                train_log["train/ohem_mean_yz_residual"] = batch_loss_metrics[
+                    "ohem_mean_yz_residual"
                 ]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
