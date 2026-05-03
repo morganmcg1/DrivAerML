@@ -6,6 +6,30 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-03 18:30 UTC — PR #531 CLOSED NEGATIVE: fern unit-vector cosine direction loss on tau (Arm B w=0.1)
+
+- **Branch:** `fern/unit-tau-vector-loss` (closed, branch deleted)
+- **Hypothesis:** Wall shear stress tau_y and tau_z are 3D vectors constrained to lie in the surface tangent plane. Adding an auxiliary unit-vector cosine similarity loss (w=0.1) penalizes direction misalignment independent of magnitude, which L2 loss treats implicitly. Hypothesis: explicit direction constraint forces the model to learn the geometric structure of tau at low extra cost.
+- **W&B run:** `3lurbotq`, best EP6, runtime 4.71h (timeout)
+
+| Metric | **fern #531 (best EP6)** | SOTA #510 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| **val_abupt** | 7.2105% | 7.0063% | **+0.204pp** | MISS |
+| val_surface_pressure | 4.7833% | 4.5994% | +0.184pp | worse |
+| val_wall_shear | 8.1592% | 7.8939% | +0.265pp | worse |
+| val_volume_pressure | 4.1090% | 4.1643% | **−0.055pp** | ✓ only win |
+| val_tau_x | 7.0421% | 6.8150% | +0.227pp | worse |
+| **val_tau_y** | **9.2710%** | 8.9516% | **+0.319pp** | worse (target channel!) |
+| **val_tau_z** | **10.8471%** | 10.5010% | **+0.346pp** | worse (target channel!) |
+| test_abupt | 8.5876% | 8.2921% | +0.296pp | worse |
+| test_tau_y | 9.0969% | 8.6452% | +0.452pp | worse |
+| test_tau_z | 10.2322% | 9.8066% | +0.426pp | worse |
+
+- **Analysis:** The unit-vector direction loss (w=0.1) failed comprehensively. Every channel except volume_pressure regressed vs SOTA. Critically, tau_y (+0.319pp val, +0.452pp test) and tau_z (+0.346pp val, +0.426pp test) — the channels the loss was designed to help — became WORSE. This suggests that (a) direction alignment is not the bottleneck in tau_y/tau_z; the bottleneck is spectral/geometric representation capacity, not supervision signal type; or (b) the auxiliary direction loss at w=0.1 is providing conflicting gradient that distorts the main L2 signal.
+- **Conclusion:** Geometric direction loss added on top of L2 is a negative lever. The tau_y/tau_z gap is not a direction-prediction problem — it's a feature representation / spectral coverage / model capacity problem. Do NOT retry direction losses at different weights (the approach is fundamentally wrong for this task). Adding to negative results catalog.
+
+---
+
 ## 2026-05-03 16:40 UTC — PR #510 MERGED NEW SOTA: alphonse surface-loss-weight sweep (slw=2.0)
 
 - **Branch:** `alphonse/surface-loss-weight-sweep` (merged, squash)

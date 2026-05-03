@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-03 16:45 UTC — 7 active WIP PRs, 0 ready for review, 0 idle students
+- **Date:** 2026-05-03 18:30 UTC — 8 active WIP PRs, 0 ready for review, 0 idle students
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -48,21 +48,29 @@ No new directives as of 2026-05-01. Continuing organic tau_y/tau_z attack progra
 
 ---
 
-## Currently in-flight (7 active WIP PRs on tay, ZERO idle students)
+## Currently in-flight (8 active WIP PRs on tay, ZERO idle students)
 
 | PR | Student | Hypothesis | Latest val_abupt | Status |
 |---|---|---|---:|---|
-| #535 | edward | Extended cosine to **EP15** on SOTA stack | EP2=9.03% | run `nh2ke150` running ~3.2h; EP2 healthy |
-| #534 | tanjiro | Multi-scale STRING-sep bands σ∈{0.25,1.0,4.0}, 8 feats/band | EP2=8.79% | run `loxzj4xq` mid-EP3; leading SOTA at EP2 |
-| #531 | fern | Unit-vector cosine direction loss on tau (Arm B w=0.1) | best=7.21% | run `3lurbotq` ~4.5h, nearing completion; 7.21% < 7.006% |
+| #538 | fern | Cosine annealing with warm restarts (SGDR T0=6, Tmult=2) | — | **NEW** — assigned 2026-05-03; awaiting launch |
+| #537 | alphonse | slw=2.0 full 13-epoch run (complete EP5 timeout SOTA) | — | **NEW** — assigned 2026-05-03; awaiting launch |
+| #535 | edward | Extended cosine to **EP15** on SOTA stack | EP2=9.03% | run `nh2ke150` running; EP2 healthy |
+| #534 | tanjiro | Multi-scale STRING-sep bands σ∈{0.25,1.0,4.0}, 8 feats/band | EP3=7.606% | run `loxzj4xq` running; strongest trajectory in flight |
 | #523 | thorfinn | GradNorm-EMA proxy Run 2 (α=0.5, min_weight=0.7) | Run 1=7.267% | **Sent back** with Run 2 config; awaiting relaunch |
 | #536 | nezuko | Y-mirror training augmentation (p=0.5) for tau_y/tau_z | crashed | **BUG: mirror_aug_frac=0** — augmentation never fired; needs debug fix |
-| #516 | askeladd | Per-channel tau_y/tau_z reweight (Run A: w_y=2.0, w_z=2.5) | EP-partial=15.0% | run `4uw2c4z2` step 8898, 1.37h; EP1 not yet complete |
-| #501 | frieren | Per-axis multi-sigma STRING priors (frieren-aniso-string-vs511) | partial=29.6% | run `qawfhlu6` step 6682, 1.03h; EP1 in progress |
+| #516 | askeladd | Per-channel tau_y/tau_z reweight (Run A: w_y=2.0, w_z=2.5) | EP3=15.017% | run `4uw2c4z2`; EP3 FAILS gate (≤14.15%), trajectory concerning |
+| #501 | frieren | Per-axis multi-sigma STRING priors (frieren-aniso-string-vs511) | EP1 partial | run `qawfhlu6` running; EP1 in progress |
 
 ---
 
 ## Recent review results (this cycle)
+
+### PR #531 fern unit-vector direction loss (tau Arm B w=0.1) — CLOSED NEGATIVE
+- Run `3lurbotq`, best EP6, 4.71h
+- val_abupt=7.2105% (MISS vs SOTA 7.0063%, +0.204pp)
+- tau_y=9.2710% (+0.319pp WORSE than SOTA), tau_z=10.8471% (+0.346pp WORSE)
+- test_abupt=8.5876% (+0.296pp WORSE). Every channel except volume_pressure regresses.
+- Conclusion: Geometric direction loss does not help — the tau_y/tau_z problem is not a direction-alignment problem.
 
 ### PR #510 alphonse slw=2.0 — MERGED NEW SOTA
 - Run `qqtdnlwq`, EP5 EMA, val_abupt=7.0063%, test_abupt=8.2921%
@@ -88,13 +96,13 @@ No new directives as of 2026-05-01. Continuing organic tau_y/tau_z attack progra
   - Y-mirror training augmentation (nezuko #536) — fresh orthogonal approach, doubles tau_y sign diversity
   - Per-channel reweighting (askeladd #516) — static weighting variation vs PR #511 stack
   - Surface-loss-weight=2.0 (alphonse #510) — indirect attack via surface up-weighting
-  - Unit-vec direction loss (fern #531) — geometric loss formulation
   - Per-axis multi-sigma STRING priors (frieren #501) — spectral frequency priors per-axis
   - Multi-scale STRING bands (tanjiro #534) — spectral diversity across octaves
 
 ### 2. Extended schedule / convergence
 - edward #535 (EP15 cosine) — descending tail at EP13 suggests EP14-15 headroom
-- All students now on EP13 cosine T_max=13 to match SOTA #511
+- fern #538 (SGDR warm restarts T0=6, Tmult=2) — two complete cosine cycles, restart at EP7
+- All students now on EP13 cosine T_max=13 or SGDR variant to match SOTA #511
 
 ### 3. Composition opportunities (next round, when winners emerge)
 - GradNorm-EMA α=0.5 + surface-loss-weight=2.0 — orthogonal mechanisms
@@ -139,3 +147,4 @@ No new directives as of 2026-05-01. Continuing organic tau_y/tau_z attack progra
 | log1p target transform (#481) | NEGATIVE |
 | AdamW vs Lion (#532) | NEGATIVE — Lion optimal, confirmed |
 | Full GradNorm (5× autograd overhead) | NEGATIVE operationally — crashes in budget |
+| Unit-vector cosine direction loss on tau (Arm B w=0.1) (#531) | NEGATIVE — tau_y/tau_z both regressed vs SOTA; direction loss is not the problem |
