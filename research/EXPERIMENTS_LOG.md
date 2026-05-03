@@ -1,5 +1,47 @@
 # SENPAI Research Results
 
+## 2026-04-29 — PR #490: frieren STRING-sep learnable PE port — SENT BACK (compute-starved, not refuted)
+
+- Branch: `frieren/string-sep-pe-port` (kept open as draft)
+- Hypothesis: Per-axis learnable log_freq + phase in `ContinuousSincosEmbed` (cherry-picked commit 6f2e991 → 51ade8f) lets the model adapt PE to anisotropic flow structure, beating fixed sincos.
+
+**W&B run 0p3rjqzz (state: finished, ~3 epochs in 360-min budget):**
+
+| metric | value |
+|---|---:|
+| best_val_primary/abupt_axis_mean_rel_l2_pct | 10.318 |
+| test_primary/abupt_axis_mean_rel_l2_pct | 11.543 |
+| val_primary/surface_pressure_rel_l2_pct | 6.472 |
+| val_primary/wall_shear_rel_l2_pct | 11.591 |
+| full_val_primary/volume_pressure_rel_l2_pct | 6.080 (matches AB-UPT 6.08% ref) |
+| val/slope/val_primary_abupt/per_1k_steps | -0.619 (still steeply descending) |
+
+**PE training healthy:** log_freq drift 25.5% from init; phase max_abs 0.031 from zero init; per-axis drift x=1.143 / y=1.062 / z=1.282 (z largest — consistent with vertical-wake-dominated learning signal).
+
+- **Diagnosis:** Same compute shortfall as edward PR #472. 3 epochs at 1.25 s/it × 113 min/epoch exhausts the 360-min budget before the curve crosses 9.039% bar. Architecture is healthy (vol_p already at AB-UPT reference); slope still steep.
+- **Decision:** Send back. New wandb-group `frieren-r30-string-sep-pe-port-v2`, target ≥5 more epochs (resume from checkpoint or re-run). Report per-epoch trajectory and PE drift snapshots at epoch 5+ and final.
+
+---
+
+## 2026-04-29 — PR #478: chihiro per-step cosine LR — SENT BACK (step-count confound)
+
+- Branch: `chihiro/per-step-cosine` (kept open as draft)
+- Hypothesis: Stepping `CosineAnnealingLR` per optimizer step with `T_max=total_steps - warmup_steps` (vs current per-epoch with `T_max=max_epochs=50`) lets the schedule actually decay over the realized 3-epoch budget, producing faster convergence per step.
+
+**W&B verification (LR-shape mechanics confirmed correct):**
+
+| Arm | run | epochs | steps | final LR | val_abupt | test_abupt | slope (pp/1k) |
+|---|---|---:|---:|---:|---:|---:|---:|
+| A epoch-cosine | ieq2qtn7 | 50 (timeout) | 12,318 | 9.97e-5 (99.7% peak) | 11.357 | 12.519 | -0.567 |
+| B step-cosine | 8ctb1o82 | 2 (clean exit) | 10,884 | 8.33e-12 (~0) | 11.784 | 12.898 | **-2.437 (4.3× steeper)** |
+
+**Matched-step comparison (both at step ~10,884):** Arm B 11.784% vs Arm A ~12.170% → step-cosine wins by **0.39 pp** at equal compute. End-of-run delta (Arm A wins by 0.427 pp) is purely Arm A's 1,434 extra steps from `--epochs 50` not triggering early exit while `--epochs 2` did.
+
+- **Diagnosis:** Mechanism is sound — at equal steps, per-step cosine converges ~4× faster. Confound: the two arms ran different step counts, so the end-of-run comparison favors the longer run, not the better schedule.
+- **Decision:** Send back. New wandb-group `chihiro-r30-per-step-cosine-rematch`, both arms at `--epochs 3` so step counts match (~16,326). If matched-step advantage holds (Arm B beats Arm A by ≥0.2 pp), this is mergeable as an orthogonal training-loop improvement that compounds with future architectural wins.
+
+---
+
 ## 2026-05-03 09:45 — PR #262: nezuko linear-warmdown LR (WSD-style) — CLOSED NULL RESULT
 
 - Branch: `nezuko/linear-warmdown-lr` (deleted)
