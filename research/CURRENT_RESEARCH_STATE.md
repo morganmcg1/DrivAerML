@@ -1,8 +1,14 @@
 # SENPAI Research State
 
-- **2026-05-03 06:30Z** — Session status update. Gate comments posted on fern #409 (EP25 continue, best ep24=7.16%), tanjiro #443 (EP20 plateau watch, best=8.00%), haku #462 (EP15 kill warning, projection ~9.5%), norman #465 (EP15 borderline kill warning, ep12=8.84%, plateau on wsy/wsz). chihiro #407 force-closed (ep24=7.69%, ceiling at ~7.59%, will not beat baseline). 4 idle students need assignment: chihiro (freshly vacated), emma, gilbert, violet (zombie cleanup pending). Stark still has no pod (infra blocker).
-- **2026-05-03 05:52Z** — Session status update. 2 new Wave 19 PRs assigned (senku #497, nezuko #498). BASELINE.md n_params corrected. Key leads: fern #409 (7.45% ep18), thorfinn #382 (7.59% ep11), edward #483 cross-attn (8.007% ep7, accelerating).
-- **Most recent human researcher direction**: Issue #466 still tracking zombie pod SIGKILL needs (emma/gilbert/violet blocked). No new research directives from human team since Issue #18 (yi): "Ensure you're really pushing hard on new ideas".
+- **2026-05-03 09:00Z** — Gate update. 16 active WIP PRs across Waves 9–20. 0 review-ready. 0 idle students. All 16 pods 1/1 Ready. Stark pod still absent. Wave 19/20 watchdog blocked on prior train.py — students will resume after prior runs finish.
+  - **askeladd #495** EP5 PASS: abupt=9.6641% @ ep5.06 (run `ky4rf6g5`).
+  - **edward #468** pre-EP5: abupt=8.7703% @ ep3.87 (run `6b08y222`), clean monotonic descent.
+  - **frieren #361** EP5 PASS: abupt=10.1743% @ ep5.40 (run `e1kxrd6b`), EP10 watch on track.
+  - **alphonse #513** running: run `hdzyr4fl` (rank0), step 3,966 (~ep0.22), 6L/512d/8H + T_max=70.
+  - **emma #502** running: run `3y93q5h7` just started (step 10, 08:27Z) — IGNORE this run id, it's actually a yi-pod contamination (host=`senpai-yi-emma-...`). Real bengio run still pending.
+  - **haku #507** running: run `zvros0ej` (1708 steps, ~ep0.1).
+- **2026-05-03 08:30Z** — Full session update. 16 active WIP PRs across Waves 9–20. 0 review-ready. 0 idle students. All 16 pods 1/1 Ready. Stark pod still absent (infra blocker). Wave 19 (5 PRs) and Wave 20 (3 PRs) students pinged to confirm run starts and post W&B IDs.
+- **Most recent human researcher direction**: Issue #466 tracking zombie pod SIGKILL, stark pod provisioning, and cross-track W&B tagging — no new directives since Issue #18 (yi): "Ensure you're really pushing hard on new ideas".
 
 ## Current Research Focus
 
@@ -11,77 +17,65 @@
 
 **Binding unsolved constraints**: wsy=8.7345% (target 3.65%: **5.08pp gap**), wsz=10.5766% (target 3.63%: **6.95pp gap**).
 
-## Active PRs (in flight, 13 active)
+## Active PRs — All 16 In-Flight
 
-| PR | Student | Wave | W&B run | abupt now | Notes |
-|----|---------|------|--------|----------:|-------|
-| #409 | fern | W11 | `hph6eaky` | **7.16 ep24** | LEADING. coord-norm fix on 5L/256d+FourierPE+T_max=50. ep25=7.29 (uptick). Best=ep24=7.1624%, gap to baseline=0.21pp. Continue to ep50 — still on convergence trajectory. |
-| #382 | thorfinn | W9 | `5ifnf1wc` | **7.54 ep12** | 6L/512d/8H. ep12=7.5445%, monotonic descent (ep5=8.25→ep12=7.54). EP15 imminent. |
-| #417 | kohaku | W11 | `4632xosf` | ~7.60 | EMA on 5L/256d. ep~20. Unlikely to beat baseline at ep25 (projected 7.3%). |
-| ~~#407~~ | chihiro | W14 | `jmbe8hys` | **CLOSED** | Stacked recipe. ep24=7.69%, best ep23=7.59%. Force-closed at 06:30Z — will not beat baseline. |
-| #437 | alphonse | W13 | `0xi2n4oo` | ~8.15 est | 6L/256d. ep~19 (no update since ep15=8.35%). EP25 ETA ~11:00Z. |
-| #443 | tanjiro | W14 | `vyhpqruv` | **8.00 ep20** | mirror-aug+SW=2.0. Best ep20=7.998%, plateau. EP25 hard gate: <7.5% to continue. |
-| #465 | norman | W15 | `o6zxx2uq` | **8.84 ep12** | model-slices=128. EP10 best=8.78. Plateau ep10-12. EP15 borderline kill (threshold 8.5%). Trial B (slices=192) queued. |
-| #454 | frieren | W17 | `l8nu1ajz` | 7.921 ep9 | Per-axis tau_yz weight=1.5. Running to EP12. Unlikely to beat SOTA. |
-| #462 | haku | W15 | `f9nkv7p9` | **9.86 ep12** | Surface-2x/Volume-0.5x. EP15 KILL likely (projection ~9.5–9.7% vs threshold 8.5%). |
-| #468 | edward | W16 | `6b08y222` LR=5e-4 | ep~0.9 (no val) | Muon optimizer retry. Too early for gate. EP5 gate ETA ~3-4h. |
-| #483 | edward | W17 | `ok98szul` | 8.007 ep7 | Cross-attn bridge v4. EP7 slope ACCELERATED (−0.646/ep). Projected EP12 at SOTA boundary (~7.40-7.55%). |
-| #488 | alphonse | W17 | `ki2q9ko9` | 7.978 ep7 | Multi-sigma STRING-sep freq init. Tau_y/z improving fastest. Projected EP12 ~7.40-7.55% (SOTA boundary). |
-| #489 | thorfinn | W17 | `r5rw40rn` | 30.2 ep1 | Volume curriculum 16k→65k. Very early — coarse stage, high val expected. |
-| #495 | askeladd | W18 | `ky4rf6g5` | 15.30 ep1 | CoordConv dist-to-surface feature. ep1 elevated vs fern/tanjiro (~14%). EP5 watch. |
-| #361 | frieren | W9 | Trial B `e1kxrd6b` | 14.998 ep1 | wd=1e-3 sweep. ep~1.3, only one val checkpoint. EP5 gate first. |
-| #497 | senku | W19 | — | — | Stacked coord-norm+mirror-aug+SW=2.0. Assigned 05:52Z. ACK pending (34 min into 60 min window). |
-| #498 | nezuko | W19 | — | — | T_max sweep 70 vs 100. Assigned 05:52Z. ACK pending (34 min into 60 min window). |
-
-**Idle students (need fresh assignments next loop):**
-- chihiro: freshly vacated after #407 force-close (06:30Z).
-- emma, gilbert, violet: previously zombie-blocked. Pods 1/1 ready per kubectl. Pre-staged hypotheses: deep supervision (emma), best-ckpt EMA-soup (gilbert), trunk-split decoder (violet). Reassign in next cycle.
-- stark: NO POD exists in kubectl deployments. Infrastructure blocker; human team must provision.
+| PR | Student | Wave | W&B run | Last known abupt | Notes |
+|----|---------|------|---------|----------------:|-------|
+| #443 | tanjiro | W14 | `vyhpqruv` | **7.843% ep22.7** | Mirror-aug+SW=2.0. Slope −0.01030%/k. Continue to ep50. |
+| #382 | thorfinn | W9 | `5ifnf1wc` | **7.506% ep13.3** | 6L/512d/8H. Slope −0.002189%/k. Continue to ep50. |
+| #361 | frieren | W9 | `e1kxrd6b` | **10.174% ep5.40** | wd=1e-3 sweep Trial B. EP5 PASS. Slope -0.0190%/k. EP10 watch (<10.5%, ETA step ~178k). |
+| #495 | askeladd | W18 | `ky4rf6g5` | **9.664% ep5.06** | CoordConv dist-to-surface. EP5 PASS (gate <13%). Slope -0.0239%/k. EP10 watch (<10.5%). |
+| #468 | edward | W16 | `6b08y222` | **8.770% ep3.87** | Muon LR=5e-4 retry. Clean monotonic descent. Slope -0.0235%/k. Approaching EP5 gate (<9.5%). |
+| #508 | kohaku | W12 | `5v1mjka1` | — ep0 | SWA over cosine tail ep46-50 on 5L/256d baseline. Just launched. |
+| #509 | norman | W12 | `wb2ww9a2` | — ep0 | OHEM top-50% hard-mining for wall-shear. Just launched. |
+| #513 | alphonse | W20 | `hdzyr4fl` | — ep0.22 | 6L/512d/8H + T_max=70. Launched 08:10Z. Step 3,966 / 17,816 (ep1). |
+| #498 | nezuko | W19 | — | — | T_max sweep 70 vs 100. Pinged 08:30Z — awaiting run ID. |
+| #502 | emma | W19 | — | — | Deep supervision aux wsy/wsz losses at layers 2,3,4. Pinged 08:30Z. |
+| #504 | violet | W19 | — | — | Trunk-split decoder: specialized surface/volume transformer. Pinged 08:30Z. |
+| #505 | chihiro | W19 | — | — | SO(3)-equivariant shear head tangent-frame prediction. Pinged 08:30Z. |
+| #507 | haku | W19 | `zvros0ej` | — ep0.1 | Per-axis shear loss reweight [wsy=3, wsz=3]. Started 07:52Z. |
+| #512 | gilbert | W20 | — | — | Tangent-frame wall-shear loss. Pinged 08:30Z — awaiting ACK. |
+| #514 | fern | W20 | — | — | TTA y-mirror averaging for wsy symmetry. Pinged 08:30Z — awaiting ACK. |
+| #515 | senku | W20 | — | — | Coord-norm + TTA y-mirror stacked. Pinged 08:30Z — awaiting ACK. |
 
 ## Key Insights (consolidated)
 
-1. **Coord-norm fix** (fern #409) is the strongest single architectural lever yet — currently leading all active runs at 7.45% ep18.
-2. **6L/512d/8H capacity** (thorfinn #382) is the strongest architecture change — 7.59% ep11 with wsy dropping 0.40pp/ep (binding axis).
-3. **T_max=50** validated as +0.25pp vs T_max=30 (baseline PR #174). T_max=70/100 sweep now testing.
-4. **Mirror-aug + SW=2.0** directly moves wsy — it's the best targeted binding-axis lever.
-5. **Stacking coord-norm + mirror-aug + SW=2.0** (senku #497) is the next logical compound step.
-6. **EMA is inferior to no-EMA** on this architecture — kohaku #417 confirms EMA hurts vol_p by 1.0pp vs coord-norm baseline at ep17.
-7. **Progressive EMA** (fern #480) CLOSED — does not beat no-EMA.
-8. **log1p tau-norm** (tanjiro #481) CLOSED NEGATIVE — scale-remapping does not help wsy/wsz; the issue is representation, not scale variance.
-9. **vol_p has been solved** (fern ep18: 4.29%, well below AB-UPT target 6.08%). wsy/wsz is the universal binding bottleneck.
-10. **Cross-attention bridge** (edward #483) showing unexpected acceleration at EP7 (8.007%, slope −0.65pp/ep) — high-potential trajectory, monitoring closely.
-11. **Muon optimizer** at LR=1e-3 is too aggressive for 5L/256d. Retry at LR=5e-4 ongoing.
-12. **6L/256d depth extension** (alphonse #437) is slower to converge than 5L. At ep15=8.35%, it trails both coord-norm-5L and 6L-512d-8H.
-13. **Weight decay** sweep (frieren #361): Trial A (wd=3e-4, ep30=7.833%) well above baseline. Trial B (wd=1e-3) running.
-14. **Cross-pod contamination** from yi-track is a recurring false-positive source. Always verify `metadata.host` before flagging.
+1. **Coord-norm fix** (fern #409, merged) is the strongest single architectural lever — drove fern to 7.16% ep24 before merging. All coord-norm family runs now benefit.
+2. **6L/512d/8H capacity** (thorfinn #382) is the strongest architecture at 7.506% ep13.3 (descending).
+3. **T_max=50** validated as +0.25pp vs T_max=30. T_max=70/100 sweep (alphonse #513, nezuko #498) now testing.
+4. **Mirror-aug + SW=2.0** directly moves wsy — best targeted binding-axis lever (tanjiro #443 at 7.843% ep22).
+5. **EMA is inferior to no-EMA** on this architecture — kohaku #417 confirmed EMA hurts vol_p by 1.0pp.
+6. **vol_p has been solved** (well below AB-UPT target 6.08%). wsy/wsz is the universal binding bottleneck.
+7. **Muon LR=1e-3** too aggressive for 5L/256d (oscillating, failed EP5). Retry at LR=5e-4 (edward #468) showing clean descent.
+8. **Cross-attention bridge** (edward #483) closed without beating baseline, but showed promising early acceleration pattern.
+9. **6L/256d** (alphonse #437) slower than 5L to converge and did not beat baseline. 6L+512d+8H (thorfinn) is the better architecture upgrade.
+10. **Weight decay** wd=3e-4 Trial A confirmed worse than baseline (7.833% ep30). Trial B wd=1e-3 running.
+11. **Cross-pod yi contamination** is a recurring false-positive: always verify `metadata.host` before flagging.
 
-## Immediate Gate Decisions Pending
+## Upcoming EP Gates
 
-| PR | Student | Gate | ETA | Action needed |
-|----|---------|------|-----|---------------|
-| #462 | haku | EP15 kill (<8.5%) | ~09:00Z | EP12=9.86%; KILL likely. Pre-staged. |
-| #465 | norman | EP15 borderline kill (<8.5%) | ~07:30Z | EP12=8.84%; plateau. Trial B (slices=192) queued. |
-| #443 | tanjiro | EP25 hard gate (<7.5%→continue) | ~10:30Z | EP20=8.00%, plateau. |
-| #495 | askeladd | EP5 (<13%) | ~08:30Z | EP1=15.30% (slightly elevated). |
-| #409 | fern | EP30+ (continue trajectory) | ~10:00Z | Best=7.16% ep24, continue to ep50. |
-| #382 | thorfinn | EP15 (<8.5%) | ~10:35Z | EP12=7.54% — easy pass. |
-| #468 | edward | EP5 Muon retry (<9.5%→kill) | ~12:00Z | ep~0.9, no val data yet. |
-| #361 | frieren | EP5 wd=1e-3 (<13%) | ~08:30Z | ep1=14.998%. |
-| #417 | kohaku | EP25 (<7.0%→kill,<6.9549%→review) | ~12:00Z | Monitor |
-| #437 | alphonse | EP25 (<8.0%→continue,<6.9549%→review) | ~11:00Z | Monitor |
+| PR | Student | Gate | Action needed |
+|----|---------|------|---------------|
+| #443 | tanjiro | Continue to ep50 | EP22.7=7.843%. On trajectory, watch for convergence near baseline. |
+| #382 | thorfinn | Continue to ep50 | EP13.3=7.506%. On track but slow convergence. |
+| #361 | frieren | EP10 (<10.5%) | EP5.40=10.174% PASS. Slope projects ep10 ≈ 8.6%. Monitor. |
+| #495 | askeladd | EP10 (<10.5%) | EP5.06=9.664% PASS. Strong neg slope. Monitor. |
+| #468 | edward | EP5 (<9.5%) | EP3.87=8.770%, projects ep5 ≈ 8.30%. On track. |
+| #508 | kohaku | EP5 (<13%) | Just launched SWA tail run. |
+| #509 | norman | EP5 (<13%) | Just launched OHEM run. |
+| #513 | alphonse | EP5 (<13%) | Just launched 6L/512d/8H T_max=70. |
+| W19/W20 | 8 students | EP5 (<13%) | Awaiting run starts and ep1 metrics. |
 
-## Potential Next Research Directions (Wave 19/20+)
+## Potential Next Research Directions (Wave 21+)
 
-1. **Stacked best-of-wave recipe**: coord-norm + mirror-aug + SW=2.0 (senku #497, assigned) — if wins, then add top Wave 17 finding.
-2. **Full-budget 6L/512d/8H replay**: thorfinn #382 is the leading architecture. If EP15 projection holds (~6.92%), schedule a 50-epoch full-budget DDP8 run to confirm.
-3. **Equivariant shear heads**: SE(3)/SO(3) equivariant outputs for wsy/wsz — the most physics-motivated path to closing the 5-7pp gap.
-4. **Trunk-split surface decoder**: split TRUNK not head for surface vs volume prediction — nezuko #347 showed head-split backfires; trunk-split is the mechanistically-motivated fix.
-5. **Test-time augmentation**: mirror + rotation averaging at inference. Zero training cost; wsy flip is sign-invariant under y-mirror, wsz is invariant. Free ensemble signal.
-6. **Best-checkpoint ensemble**: average late-epoch checkpoints from fern/thorfinn/kohaku — negligible effort, potential +0.2pp.
-7. **OOD geometry test sweep**: confirm val→test gap on all top-5 val runs before claiming AB-UPT wins.
-8. **Researcher-agent sweep**: invoke to generate Wave 20 candidates targeting the wsy/wsz 5-7pp binding gap with architectural + loss + data solutions.
-9. **Deep supervision**: auxiliary wsy/wsz prediction losses at intermediate transformer layers — Schmidhuber-style gradient injection at layers 2, 3, 4.
-10. **Larger batch size / gradient accumulation**: test if current 4-GPU DDP underfits on complex geometries.
+1. **Compound best-of-wave**: coord-norm + mirror-aug + SW=2.0 + 6L/512d/8H — if thorfinn and tanjiro both beat baseline, combine them.
+2. **Test-time augmentation on best checkpoint**: mirror averaging at inference, free ensemble signal for wsy (fern #514 testing).
+3. **Equivariant geometry heads**: SE(3)/SO(3) equivariant outputs for wsy/wsz — physics-motivated path for 5-7pp gap (chihiro #505 testing tangent-frame).
+4. **OOD geometry test sweep**: confirm val→test gap on all top-5 val runs before claiming AB-UPT wins.
+5. **Best-checkpoint ensemble**: average late-epoch checkpoints from thorfinn/tanjiro/alphonse.
+6. **Researcher-agent sweep**: generate Wave 21+ candidates targeting wsy/wsz 5-7pp gap via loss + data + architecture.
+7. **Fourier feature ablation**: systematically test Fourier embedding frequencies on wall-shear axes.
+8. **Multi-resolution point sampling**: coarse+fine hierarchical sampling targeting high-gradient boundary regions.
 
 ## Targets
 
@@ -93,21 +87,22 @@
 | `val_primary/wall_shear_y_rel_l2_pct` | 8.7345 | 3.65 | **5.08pp** |
 | `val_primary/wall_shear_z_rel_l2_pct` | 10.5766 | 3.63 | **6.95pp** |
 
-**val/test gap warning**: ~2x degradation on vol_p confirmed. Test confirmation required before claiming AB-UPT wins.
+**val/test gap warning**: ~2x degradation on vol_p confirmed on test set. Test confirmation required before claiming AB-UPT wins.
 
 ## Constraints (hard)
 
 - `--no-compile-model`: Mandatory (PyTorch 2.x Inductor crash at validation)
 - `--fourier-pe`: Mandatory for comparability (n_params=3,992,313 for 5L/256d)
-- `--coord-norm`: Required for all coord-norm experiments (fern baseline family)
+- `--coord-norm`: Required for all coord-norm experiments
 - Kill-threshold operator: `< VALUE` means kill if metric NOT below VALUE (≥ VALUE)
-- Standard gate schedule: ep5, ep10, ep15, ep25, ep50 (epoch budget per assignment varies)
+- Standard gate schedule: ep5, ep10, ep15, ep20/25, ep50 (varies by assignment)
 - Correct grad-clip flag: `--grad-clip-norm` (NOT `--grad-clip`)
 
 ## Compliance Watch
 
 | Student | Status |
 |---------|--------|
-| haku | 3rd off-script offense (jbbw3enm, cross-pod contamination confirmed). Current PR #462 on-script. |
-| frieren #361 | Trial A killed at ep30 (CosineAnnealingLR oscillation found); Trial B running. Technically compliant — early stop was the right call. |
 | All prior "off-script" flags | **WITHDRAWN** — confirmed cross-pod yi contamination via metadata.host checks. |
+| haku #507 | Per-axis reweight [wsy=3, wsz=3] — on script, clean assignment. Monitor. |
+| edward #468 | Muon LR=1e-3 self-killed and retried at LR=5e-4 per fallback plan. Compliant. |
+| frieren #361 | Trial A ep30 self-stopped at CosineAnnealingLR boundary — correct call. |
