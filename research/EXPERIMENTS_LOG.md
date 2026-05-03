@@ -1,5 +1,74 @@
 # SENPAI Research Results
 
+## 2026-05-03 09:45 — PR #262: nezuko linear-warmdown LR (WSD-style) — CLOSED NULL RESULT
+
+- Branch: `nezuko/linear-warmdown-lr` (deleted)
+- Hypothesis: A linear-warmdown LR schedule (Warmup→Stable→Decay, modded-NanoGPT WSD-style) outperforms cosine-once on 4L/512d AdamW at short budgets by maintaining high LR through epoch 2 and decaying sharply at epoch 1.6, producing a steeper descent slope (predicted ≥1.5× cosine slope).
+
+**Final head-to-head (3 epochs, 4L/512d, AdamW lr=3e-4, DDP-4):**
+
+| Arm | Schedule | W&B run | val_abupt ep1 | ep2 | ep3 |
+|---|---|---|---:|---:|---:|
+| A v8 | cosine | gxnpn40c | 18.7619 | 12.7030 | **11.7493** |
+| C v9 | linear-warmdown 1.67 | jg7ohv2p | 18.8922 | 12.5113 | 11.8048 |
+
+Δ (C−A) ep3 = **+0.056pp** (warmdown slightly worse).
+
+**Win condition** (Arm C ≤ 11.249% = Arm A − 0.5pp): NOT MET.
+**Slope ratio** (C/A ep2→3): 0.74× — OPPOSITE of predicted ≥1.5×. Arm C ran ep2→3 with ~4.1× higher mean LR yet got a shallower descent.
+
+**Infrastructure history:** 4 Lion divergence runs (8fzcgk35, 9zhpo2ht, hg5uzgnt, q0t3oyfw) forced a switch to AdamW. Two additional crashes fixed: Inductor tiling bug (6dt62ktq, fixed with --no-compile-model) and scheduler=None AttributeError (v4o56an5, fixed by commit 981be20 with guard reading optimizer.param_groups[0]["lr"]).
+
+- **Conclusion:** Default cosine is correct for AdamW+yi at this budget. The mechanistic signal (higher LR → shallower slope) directly falsifies the hypothesis. Not a budget-truncation artifact — it's evidence the ep1.6→3 high-LR window is less efficient per step than cosine's decaying regime.
+
+---
+
+## 2026-05-03 09:40 — PR #491: fern EMA model soup (last-K=4 checkpoint avg) — CLOSED NULL RESULT
+
+- Branch: `fern/ema-soup-last-k` (deleted)
+- Hypothesis: Uniform-weight averaging of the last K=4 EMA snapshots from one training run yields a flatter loss-landscape minimum than any single checkpoint, improving val_abupt and closing the val→test gap.
+
+| Metric | Best single ckpt (EMA, ep3) | Soup K=3 (ep 1+2+3) | Soup K=2 (ep 2+3) |
+|---|---:|---:|---:|
+| **val_abupt** | **10.9377** | 23.2944 | 11.3127 |
+| **test_abupt** | **12.0398** | 23.6662 | 12.4069 |
+| test surface_p | 6.6986 | 16.4211 | 6.9775 |
+| test wall_shear | 12.2207 | 24.7748 | 12.6331 |
+| test ws_y | 15.2532 | 28.8335 | 15.7160 |
+| test ws_z | 14.8034 | 31.5092 | 15.3165 |
+| test vol_p | 13.1002 | 20.1395 | 13.3110 |
+
+W&B runs: training=`95n2udhs`, soup K=3=`9z07azhc`, soup K=2=`46rbanwi`.
+
+**Failure mode:** K=3 catastrophe — epoch-1 snapshot (val=23.27%, in/just-past warmup) dragged the uniform average off-manifold. K=2 (ep2+3 only) was +0.375pp worse than single best (linear interpolation between source snapshots, no flat-basin signal). The underlying single-ckpt run was itself under-converged at 2.4 effective epochs (10.94% vs 9.039% bar).
+
+- **Conclusion:** Soup fails at this budget because snapshots are NOT in a shared flat basin. Model needs more epochs before checkpoint-to-checkpoint variance is small. Dead end at 3-epoch budget; revisit if budget/architecture compounding reduces per-epoch time.
+
+---
+
+## 2026-05-03 09:50 — PR #440: violet Huber δ sweep without tangential loss — CLOSED NEGATIVE
+
+- Branch: `violet/huber-without-tangential-loss-baseline-test` (deleted)
+- Hypothesis: Huber δ=1.0 (threshold at 1 std dev of residuals) reduces the dominant wall-shear tail errors and beats MSE on val_abupt without tangential loss, providing a cleaner test of the absolute merge bar.
+
+**r23 paired (2-GPU DDP per arm, no warmup, ~12,440 steps ≈ 1.15 epochs):**
+
+| Metric | Arm A (MSE δ=0.0, olb7rg5d) | Arm B (Huber δ=1.0, kpa78d03) | Δ (B−A) |
+|---|---:|---:|---:|
+| **val_abupt** | **11.9656%** | 13.5130% | **+1.547pp** |
+| test_abupt | **12.8826%** | 14.4065% | +1.524pp |
+| surface_p (val) | **8.142%** | 9.278% | +1.136pp |
+| wall_shear (val) | **13.255%** | 15.037% | +1.782pp |
+| ws_y (val) | **15.189%** | 17.408% | +2.219pp |
+| ws_z (val) | **16.683%** | 19.302% | +2.619pp |
+| vol_p (val) | **8.107%** | 8.481% | +0.374pp |
+
+**Mechanism:** Huber δ=1.0 clips gradients at 1 std dev. During first 1.15 epochs (no warmup), the model is far from the minimum — large residuals everywhere. Huber's aggressive clipping removes the gradient signal the model most needs to escape the initial basin. Arm B converges more slowly at matched step count.
+
+- **Conclusion:** Huber is a late-training tool, NOT a full-training loss. Its benefit requires the model to already be near-convergence (small residuals except outliers). Do not reopen Huber from step 0 at this budget. Revisit only in a 5+ effective epoch regime or as a late-switch (after epoch 2–3 when val_abupt drops below ~12%).
+
+
+
 ## 2026-05-03 09:10 — PR #431: askeladd gradient clip-norm sweep — CLOSED INFORMATIVE (structural finding)
 
 - Branch: `askeladd/grad-clip-sweep` (deleted)

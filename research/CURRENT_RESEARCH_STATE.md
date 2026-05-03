@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-03 09:25 UTC (Round 31 cycle open — closed #485 kohaku asinh-target (Jacobian-amplification rejection) and #431 askeladd grad-clip (structural finding: clip = effective-LR scaler at 97.5% clip rate). Reassigned 6 idle students with fresh single-question hypotheses; all 16 yi students now WIP again, zero idle GPUs.)
+- 2026-05-03 09:55 UTC (Round 31/32 transition — closed 3 PRs (#262 nezuko null, #491 fern null, #440 violet negative). Assigned 3 idle students: #527 fern SWA flat-LR tail, #528 nezuko 1-cycle LR pct=0.05 DDP-4, #529 violet stream-normal per-point ws loss weight. All 16 yi students WIP, zero idle GPUs.)
 
 ## Most Recent Human Researcher Directives (Issue #18)
 
@@ -38,42 +38,45 @@
 - volume_pressure: 2.05×
 - surface_pressure: 1.17×
 
-## Active WIP Fleet (Round 31 — all 16 yi students WIP)
+## Active WIP Fleet (Round 32 — all 16 yi students WIP)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #522 | thorfinn | BF16 → FP32 last-2-epoch fine-final-precision policy | NEW (R31) |
-| #521 | senku | sigmoid-l1 slice gating (replace softmax slice) | NEW (R31) |
-| #520 | norman | volume-only coord transform (signed-log / asinh) — #449 follow-up | NEW (R31) |
-| #519 | gilbert | layer-wise LR decay (LLRD) for transformer blocks | NEW (R31) |
-| #518 | kohaku | loss-side asinh wallshear (no inverse pipeline) — #485 corrected | NEW (R31) |
-| #517 | askeladd | Lion (lr, clip) joint sweep at fixed lr·clip product | NEW (R31, follow-up to #431) |
-| #491 | fern | EMA model soup (last-K=4 ckpt avg) | WIP |
-| #490 | frieren | STRING-sep PE port to yi (cherry-pick `6f2e991`) | WIP — HIGH PRIORITY |
-| #478 | chihiro | Per-step cosine LR schedule (fix epoch-step decay — effective constant LR bug) | WIP |
-| #473 | alphonse | Per-axis coord normalization (x/2, y/0.5, z/0.5) to fix PE anisotropy | WIP |
-| #472 | edward | Muon@1e-3 vs AdamW full-budget 4-GPU DDP (PR #377 promotion) | WIP |
-| #449 | norman | Log-x coordinate compression for isotropic sincos PE | WIP — paired with #520 |
-| #440 | violet | Huber δ sweep without tangential loss | WIP |
-| #436 | noam | Slices sweep 64/128/192 on STRING-sep stack | WIP |
+| #529 | violet | Stream-normal per-point wall-shear loss weight (ws_y/z gap attack) | NEW (R32) |
+| #528 | nezuko | 1-cycle LR pct_start=0.05 vs cosine (DDP-4 full budget) | NEW (R32) |
+| #527 | fern | SWA flat-LR tail (20% of budget at constant swa_lr=5e-6) | NEW (R32) |
+| #522 | thorfinn | BF16 → FP32 last-2-epoch fine-final-precision policy | WIP (R31) |
+| #521 | senku | Sigmoid-L1 slice gating (replace softmax slice) | WIP (R31) |
+| #520 | norman | Volume-only coord transform (signed-log / asinh) | WIP (R31) |
+| #519 | gilbert | Layer-wise LR decay (LLRD) for transformer blocks | WIP (R31) |
+| #518 | kohaku | Loss-side asinh wallshear (no inverse pipeline) | WIP (R31) |
+| #517 | askeladd | Lion (lr, clip) joint sweep at fixed lr·clip product | WIP (R31) |
+| #490 | frieren | STRING-sep PE port to yi | WIP — HIGH PRIORITY |
+| #478 | chihiro | Per-step cosine LR schedule (fix epoch-step decay) | WIP |
+| #473 | alphonse | Per-axis coord normalization | WIP |
+| #472 | edward | Muon@1e-3 full-budget 4-GPU DDP | WIP — HIGH PRIORITY |
 | #430 | emma | Cosine EMA decay ramp 0.99→0.9999 | WIP |
-| #425 | stark | tau_z channel upweight sweep z=2→5 | WIP |
-| #421 | kohaku | Dual-stream Transformer with cross-attention bridge | WIP |
-| #420 | fern | STRING-sep PE on yi branch (learnable log_freq/phase) | WIP — HIGH PRIORITY |
 | #370 | tanjiro | Cross-flow exposure index as input feature | WIP |
 | #367 | haku | Theta-conditioned wall-shear loss weight | WIP |
-| #262 | nezuko | Linear-warmdown LR (WSD-style) | WIP — rebased CLEAN, Arm A ep1 done |
 
-## Round 31 fresh assignments (2026-05-03 09:25 UTC)
+## Round 32 assignments (2026-05-03 09:55 UTC)
 
-Six new single-question hypotheses just kicked off, broadening the theme space:
+Three students freed from closed PRs, reassigned immediately:
 
-- **#517 askeladd** — Lion (lr, clip) joint sweep at fixed `lr·clip` product. Tests his own #431 finding that at 97.5% clip-rate, clip is just an effective-LR scaler.
-- **#518 kohaku** — loss-side asinh wallshear (residual transform inside loss only, no inverse pipeline). Re-tests #485's underlying gradient-rebalancing hypothesis the structurally correct way.
-- **#519 gilbert** — layer-wise LR decay (LLRD) for the 4 transformer blocks + PE + head. Standard Kaggle/BERT lever, completely untested in this programme.
-- **#520 norman** — volume-only signed-log/asinh coordinate transform, paired with his existing #449 (which tests the global form). Together they isolate the surface↔volume asymmetry.
-- **#521 senku** — sigmoid-l1 slice gating to replace softmax slice attention. Architectural A/B test on Transolver winner-take-all dynamics.
-- **#522 thorfinn** — BF16 → FP32 last-2-epoch fine-final-precision policy. Post-training free-win category alongside #491 (EMA soup).
+- **#527 fern** — SWA flat-LR tail. Structural evolution of the EMA-soup (#491 closed null). Key difference: saves raw model weights during a constant-LR plateau (last 20% of budget at swa_lr=5e-6) and averages them. Literature-canonical SWA setup targeting flat-basin averaging.
+- **#528 nezuko** — 1-cycle LR with pct_start=0.05. Closes the dead-end note from #429 (OneCycleLR pct_start=0.3 was structurally broken — 30% warmup never fired cosine decay). Short warmup (5%) + long descent. Also informed by nezuko's own PR #262 finding: lower LR more effective per step at ep2→3 (slope ratio 0.74×). Natural follow-up.
+- **#529 violet** — Stream-normal per-point wall-shear loss weight. Physics-informed per-point loss weighting: points where the surface normal is perpendicular to the freestream (cross-flow panels: underbody, wheel arch, sides) get upweighted by `1 + gamma * |n_yz|`. Targets the dominant ws_y/z gap (2.5–2.9× AB-UPT) without architecture change.
+
+## Round 31 assignments (2026-05-03 09:25 UTC)
+
+Six new single-question hypotheses launched:
+
+- **#517 askeladd** — Lion (lr, clip) joint sweep at fixed `lr·clip` product.
+- **#518 kohaku** — loss-side asinh wallshear (residual transform inside loss only, no inverse pipeline).
+- **#519 gilbert** — layer-wise LR decay (LLRD) for transformer blocks.
+- **#520 norman** — volume-only signed-log/asinh coordinate transform.
+- **#521 senku** — sigmoid-L1 slice gating (replace softmax).
+- **#522 thorfinn** — BF16 → FP32 last-2-epoch fine-final-precision policy.
 
 ## Current Research Themes
 
@@ -95,17 +98,15 @@ Six new single-question hypotheses just kicked off, broadening the theme space:
 
 9. **Generalization regularization** (PR #479 thorfinn): PR #450 confirmed val→test gap (~0.81pp) is dataset-shift-driven, not wd-driven. PR #479 tests stochastic depth (`--stochastic-depth-prob 0.05`) + dropout (`--model-dropout 0.05`) in a 2×2 grid — both are already-wired flags with zero code risk, targeting smoother representations that generalize better under covariate shift.
 
-## Recently Reviewed (this session — 2026-05-02/03)
+## Recently Reviewed (this session — 2026-05-03)
 
 | PR | Student | Result | Decision |
 |----|---------|--------|----------|
-| #485 | kohaku | asinh wallshear target normalization (3-arm screen) — best 18.09% vs 9.04% bar; monotonic *wrong* direction; mechanism: inverse-pipeline Jacobian amplifies heavy-tail errors | CLOSED NEGATIVE — followed up by #518 (loss-side asinh, no inverse pipeline) |
-| #431 | askeladd | gradient-clip sweep — single-GPU phase 1 found interior optimum at clip=0.3 but 100% clip-rate; DDP-4 phase 2 had multi-axis confound (optimizer+wd+clip differed). Lion+clip=0.5 = 10.92% val_abupt (3-epoch DDP-4 budget). Structural finding: at 97.5% clip-rate, clip is an effective-LR scaler. | CLOSED INFORMATIVE — followed up by #517 (Lion lr·clip joint sweep at iso-product) |
-| #474 | frieren | EMA-soup (orig) — closed for non-engagement after 3h silence; reassigned to fern as #491 | CLOSED (no-engagement) |
-| #429 | frieren | OneCycleLR vs cosine — screen structurally broken (sub-epoch, cosine never decays) | CLOSED |
-| #430 | emma | EMA ramp — ramp never exercised (1.15% of schedule); SENT BACK for DDP | (in flight) |
-| #419 | chihiro | Tangent frame input features — +2pp regression on all channels | CLOSED |
-| #450 | thorfinn | Lion WD sweep — B(wd=5e-4) wins by 0.31pp, below DDP threshold; wd ≥ 1e-3 ruled out forever for Lion | CLOSED INFORMATIVE NEGATIVE |
+| #262 | nezuko | linear-warmdown vs cosine: 11.8048% vs 11.7493%, slope ratio 0.74× (opposite of hypothesis). 4 Lion divergence crashes documented. AdamW + cosine = correct. | CLOSED NULL — followed up by #528 (1-cycle LR pct=0.05) |
+| #491 | fern | EMA soup: K=3 collapsed (23.29%, warmup snapshot poisons average); K=2 = +0.375pp vs single best. Under-converged single-ckpt at 2.4 epochs. Budget mismatch. | CLOSED NULL — followed up by #527 (SWA flat-LR tail) |
+| #440 | violet | Huber δ=1.0 vs MSE: Huber +1.55pp worse on val_abupt (13.51% vs 11.97%). Worse on ALL channels. Mechanism: early-training heavy residuals + Huber clipping = gradient starvation. | CLOSED NEGATIVE — followed up by #529 (stream-normal per-point ws weight) |
+| #485 | kohaku | asinh wallshear target normalization — best 18.09% vs 9.04% bar; Jacobian amplification | CLOSED NEGATIVE — followed up by #518 |
+| #431 | askeladd | gradient-clip sweep — structural finding: clip = effective-LR scaler at 97.5% clip rate | CLOSED INFORMATIVE — followed up by #517 |
 
 ## Dead Ends (do not re-assign on yi)
 
@@ -119,9 +120,13 @@ Six new single-question hypotheses just kicked off, broadening the theme space:
 | Surface-only point masking | #391 | Shared encoder propagates masking to all heads |
 | K-NN local surface attention | #197 | Locality bias falsified; tau_y/z gap is not receptive-field issue |
 | FFT spectral loss | #288 | Below practical bar; geometrically meaningless on unstructured mesh |
-| OneCycleLR (pct_start=0.3) | #429 | Screen compromised; retry with pct_start=0.05-0.10 and DDP needed first |
-| Surface-tangent frame input features | #419 | Input redundancy (t1/t2 deterministic from n — already an input); normalization bug in local-frame prediction |
-| Lion wd ≥ 1e-3 | #450 | Catastrophic: wd=2e-3 → vol_p 30.98% (3.9×), wd=5e-3 → ws_y/z 43-44%. Sign-update collapses under high wd. Keep Lion wd in [1e-4, 5e-4]. |
+| OneCycleLR pct_start=0.3 | #429 | 30% warmup too long; cosine never fired in sub-epoch screen. Retrying with pct_start=0.05 in PR #528 (nezuko). |
+| Surface-tangent frame input features | #419 | Input redundancy (t1/t2 deterministic from n); normalization bug in local-frame prediction |
+| Lion wd ≥ 1e-3 | #450 | Catastrophic: wd=2e-3 → vol_p 30.98% (3.9×). Keep Lion wd in [1e-4, 5e-4]. |
+| Huber δ=1.0 from step 0 | #440 | +1.55pp vs MSE at matched steps. Early-training gradient starvation. Only viable as a late-switch (after ep2+) or in 5+ epoch regime. |
+| EMA soup (post-hoc snapshot avg) at 3-epoch budget | #491 | Warmup snapshot poisons K=3; K=2 = linear interpolation, no flat-basin. Revisit only at 7+ epoch budget. |
+| Linear-warmdown (WSD) schedule on AdamW+yi | #262 | Null result: warmdown +0.056pp worse, slope ratio 0.74× (mechanistically opposite). Cosine is correct for AdamW+yi at 3-epoch budget. |
+| Stochastic depth / dropout (step 0) | #479 | All sdp values 19–22% vs 9.04% bar. Drop-path hurts early convergence identically to Huber. |
 
 ## Key Research Insights
 
