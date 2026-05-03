@@ -699,6 +699,8 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    use_tangent_frame_output: bool = False
+    tangent_normal_reg: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1488,6 +1490,179 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def build_tangent_frame(
+    normals: torch.Tensor,
+    *,
+    degenerate_threshold: float = 0.9,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build a per-point right-handed tangent basis (t1, t2, n_hat) from surface normals.
+
+    normals: [..., 3] (need not be unit). Returns (t1, t2, n_hat) each [..., 3] (fp32).
+
+    Uses Gram-Schmidt against world-z by default; switches to world-x where
+    ``|n_z| > degenerate_threshold`` (roof/floor surfaces) so the projected
+    reference does not collapse. ``t1 = ref - (ref . n_hat) n_hat`` is in the
+    tangent plane and aligned with the world reference; ``t2 = n_hat x t1`` is
+    the orthogonal in-plane companion. The basis is right-handed:
+    ``cross(t1, t2) = n_hat``.
+
+    Cross-product against a fixed axis (the prior-attempt convention) is
+    avoided here because it has a branch-cut at ``n parallel ref`` where the
+    cross-product magnitude collapses and the direction flips with sign. The
+    Gram-Schmidt projection is the more stable construction recommended by
+    the advisor in PR #530.
+
+    The frame depends only on the input geometry; the returned tensors are
+    detached so gradients do not flow through the frame construction.
+    """
+    n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    ref_z = torch.tensor([0.0, 0.0, 1.0], device=n_hat.device, dtype=n_hat.dtype)
+    ref_x = torch.tensor([1.0, 0.0, 0.0], device=n_hat.device, dtype=n_hat.dtype)
+    use_x = n_hat[..., 2].abs() > degenerate_threshold
+    ref = torch.where(
+        use_x.unsqueeze(-1),
+        ref_x.expand_as(n_hat),
+        ref_z.expand_as(n_hat),
+    )
+    proj = (ref * n_hat).sum(dim=-1, keepdim=True)
+    t1 = ref - proj * n_hat
+    t1 = F.normalize(t1, dim=-1, eps=1e-8)
+    t2 = torch.cross(n_hat, t1, dim=-1)
+    t2 = F.normalize(t2, dim=-1, eps=1e-8)
+    return t1.detach(), t2.detach(), n_hat.detach()
+
+
+@torch.no_grad()
+def tangent_basis_continuity_stats(
+    surface_xyz: torch.Tensor,
+    normals: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    knn_k: int = 8,
+    max_points: int = 4096,
+) -> dict[str, float]:
+    """Diagnose tangent-basis continuity by KNN angular jump.
+
+    For each sampled valid point, computes the angle between its ``t1`` and
+    each of its ``knn_k`` nearest neighbours' ``t1`` vectors (``arccos`` of
+    the absolute dot product, so antipodal vectors are treated as continuous
+    since the basis is sign-equivalent under flip ``t1 -> -t1``).
+
+    Returns angular-jump statistics in degrees plus the fraction of points
+    falling in the world-x fallback regime. Used at training start to
+    sanity-check that the basis is continuous over the actual surface
+    geometry, per the advisor's guard 1 in PR #530.
+    """
+    if not bool(mask.any()):
+        return {"mean_deg": float("nan"), "p99_deg": float("nan"), "max_deg": float("nan"), "fraction_x_fallback": float("nan")}
+    valid_xyz = surface_xyz[mask].float()
+    valid_normals = normals[mask].float()
+    n_valid = valid_xyz.shape[0]
+    if n_valid > max_points:
+        idx = torch.randperm(n_valid, device=valid_xyz.device)[:max_points]
+        valid_xyz = valid_xyz[idx]
+        valid_normals = valid_normals[idx]
+        n_valid = valid_xyz.shape[0]
+    t1, _, n_hat = build_tangent_frame(valid_normals)
+    fraction_x = float((n_hat[..., 2].abs() > 0.9).float().mean().item())
+    k = min(knn_k + 1, n_valid)
+    if k < 2:
+        return {
+            "mean_deg": float("nan"),
+            "p99_deg": float("nan"),
+            "max_deg": float("nan"),
+            "fraction_x_fallback": fraction_x,
+        }
+    diff = valid_xyz.unsqueeze(0) - valid_xyz.unsqueeze(1)
+    dist_sq = diff.pow(2).sum(dim=-1)
+    _, idx = torch.topk(dist_sq, k=k, dim=-1, largest=False)
+    nbr_idx = idx[:, 1:k]
+    dot = (t1.unsqueeze(1) * t1[nbr_idx]).sum(dim=-1).abs().clamp(0.0, 1.0)
+    angles_deg = torch.acos(dot) * (180.0 / math.pi)
+    flat = angles_deg.flatten()
+    return {
+        "mean_deg": float(flat.mean().item()),
+        "p99_deg": float(flat.quantile(0.99).item()),
+        "max_deg": float(flat.max().item()),
+        "fraction_x_fallback": fraction_x,
+    }
+
+
+def rotate_local_to_global(
+    local_phys_ws: torch.Tensor,
+    t1: torch.Tensor,
+    t2: torch.Tensor,
+    n_hat: torch.Tensor,
+) -> torch.Tensor:
+    """Rotate a per-point wallshear vector from local frame {t1,t2,n} to global xyz.
+
+    local_phys_ws: [..., 3] with components (tau_t1, tau_t2, tau_n) in physical units.
+    Returns [..., 3] with global xyz components in physical units.
+    """
+    return (
+        local_phys_ws[..., 0:1] * t1
+        + local_phys_ws[..., 1:2] * t2
+        + local_phys_ws[..., 2:3] * n_hat
+    )
+
+
+def rotate_global_to_local(
+    global_phys_ws: torch.Tensor,
+    t1: torch.Tensor,
+    t2: torch.Tensor,
+    n_hat: torch.Tensor,
+) -> torch.Tensor:
+    """Rotate a per-point wallshear vector from global xyz to local frame {t1,t2,n}.
+
+    global_phys_ws: [..., 3] with components (tau_x, tau_y, tau_z) in physical units.
+    Returns [..., 3] with local components (tau_t1, tau_t2, tau_n) in physical units.
+    """
+    g = global_phys_ws.float()
+    tau_t1 = (g * t1).sum(dim=-1, keepdim=True)
+    tau_t2 = (g * t2).sum(dim=-1, keepdim=True)
+    tau_n = (g * n_hat).sum(dim=-1, keepdim=True)
+    return torch.cat([tau_t1, tau_t2, tau_n], dim=-1)
+
+
+def _wallshear_scalar_std(transform: "TargetTransform") -> torch.Tensor:
+    """Scalar wall-shear std: sqrt(mean(std_x^2, std_y^2, std_z^2)).
+
+    Used to normalize the local-frame wallshear components when
+    ``use_tangent_frame_output`` is enabled. A single scalar means rotation between
+    global and local frames is an exact isometry in normalized space.
+    """
+    ws_std = transform.surface_y_std[1:4].float()
+    return ws_std.pow(2).mean().sqrt().clamp(min=1e-6)
+
+
+def tangent_frame_local_to_global_norm(
+    surface_pred_norm: torch.Tensor,
+    surface_x: torch.Tensor,
+    transform: "TargetTransform",
+) -> torch.Tensor:
+    """Convert tangent-frame surface predictions to global-frame normalized predictions.
+
+    surface_pred_norm: [B, N, C>=4]. Channels:
+      - 0: cp normalized (already in global cp normalization).
+      - 1..3: wallshear in local frame {t1, t2, n}, normalized by scalar wallshear std.
+    Returns same shape with channels 1..3 in global xyz normalized using the
+    standard per-channel mean/std (compatible with ``transform.invert_surface``).
+    """
+    normals = surface_x[..., 3:6]
+    t1, t2, n_hat = build_tangent_frame(normals)
+    ws_std_scalar = _wallshear_scalar_std(transform).to(surface_pred_norm.device)
+    ws_mean = transform.surface_y_mean[1:4].to(surface_pred_norm.device)
+    ws_std = transform.surface_y_std[1:4].to(surface_pred_norm.device)
+    pred_local_norm = surface_pred_norm[..., 1:4]
+    pred_local_phys = pred_local_norm.float() * ws_std_scalar
+    pred_global_phys = rotate_local_to_global(pred_local_phys, t1, t2, n_hat)
+    pred_global_norm = (pred_global_phys - ws_mean) / ws_std
+    return torch.cat(
+        [surface_pred_norm[..., :1], pred_global_norm.to(surface_pred_norm.dtype)],
+        dim=-1,
+    )
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1502,6 +1677,8 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    use_tangent_frame_output: bool = False,
+    tangent_normal_reg: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1515,7 +1692,49 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
-        if use_tangential_wallshear_loss:
+        tangent_pred_n_rms = float("nan")
+        tangent_target_n_rms = float("nan")
+        normal_reg_value: float | None = None
+        if use_tangent_frame_output:
+            # Reparameterize wall-shear output into local frame {t1, t2, n}:
+            # model channels [1,2,3] are (tau_t1, tau_t2, tau_n) normalized by a
+            # scalar wallshear std. Rotate the target to local frame for the loss.
+            normals = batch.surface_x[..., 3:6]
+            t1, t2, n_hat = build_tangent_frame(normals)
+            ws_std_scalar = _wallshear_scalar_std(transform).to(surface_pred_norm.device)
+            ws_target_phys = batch.surface_y[..., 1:4].float()
+            target_local_phys = rotate_global_to_local(ws_target_phys, t1, t2, n_hat)
+            target_local_norm = target_local_phys / ws_std_scalar
+            surface_target_used = torch.cat(
+                [
+                    surface_target[..., :1],
+                    target_local_norm.to(surface_target.dtype),
+                ],
+                dim=-1,
+            )
+            surface_pred_used = surface_pred_norm
+            if bool(batch.surface_mask.any()):
+                pred_n_norm = surface_pred_norm[..., 3]
+                target_n_norm = target_local_norm[..., 2]
+                tangent_pred_n_rms = float(
+                    (pred_n_norm[batch.surface_mask] * ws_std_scalar)
+                    .square()
+                    .mean()
+                    .sqrt()
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+                tangent_target_n_rms = float(
+                    (target_n_norm[batch.surface_mask] * ws_std_scalar)
+                    .square()
+                    .mean()
+                    .sqrt()
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+        elif use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
             # Denormalize -> project in physical space -> renormalize.
@@ -1550,10 +1769,15 @@ def train_loss(
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        if use_tangent_frame_output and tangent_normal_reg > 0.0 and bool(batch.surface_mask.any()):
+            pred_n_norm = surface_pred_norm[..., 3]
+            normal_reg = pred_n_norm[batch.surface_mask].pow(2).mean()
+            loss = loss + tangent_normal_reg * normal_reg
+            normal_reg_value = float(normal_reg.detach().cpu().item())
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
-            surf_pred_f = surface_pred_norm.float()
-            surf_true_f = surface_target.float()
+            surf_pred_f = surface_pred_used.float()
+            surf_true_f = surface_target_used.float()
             mask_f = batch.surface_mask.float().unsqueeze(-1)
             num = ((surf_pred_f - surf_true_f) ** 2 * mask_f).sum()
             den = (surf_true_f ** 2 * mask_f).sum().clamp_min(1e-8)
@@ -1572,6 +1796,14 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if use_tangent_frame_output:
+        metrics["tangent_pred_n_rms"] = tangent_pred_n_rms
+        metrics["tangent_target_n_rms"] = tangent_target_n_rms
+        metrics["loss_tangent_t1"] = per_axis_unweighted[1]
+        metrics["loss_tangent_t2"] = per_axis_unweighted[2]
+        metrics["loss_tangent_n"] = per_axis_unweighted[3]
+        if normal_reg_value is not None:
+            metrics["tangent_normal_reg_loss"] = normal_reg_value
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -1631,6 +1863,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    use_tangent_frame_output: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1657,6 +1890,10 @@ def evaluate_split(
         "volume_pressure": {},
     }
 
+    tangent_pred_n_sq_sum = 0.0
+    tangent_target_n_sq_sum = 0.0
+    tangent_n_count = 0
+
     for batch in loader:
         batch = batch.to(device)
         surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -1670,6 +1907,27 @@ def evaluate_split(
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
+        if use_tangent_frame_output and surface_pred_norm.numel() > 0:
+            if bool(batch.surface_mask.any()):
+                ws_std_scalar = _wallshear_scalar_std(transform).to(surface_pred_norm.device)
+                normals_eval = batch.surface_x[..., 3:6].float()
+                t1_eval, t2_eval, n_hat_eval = build_tangent_frame(normals_eval)
+                pred_n_phys = surface_pred_norm[..., 3] * ws_std_scalar
+                target_local_phys = rotate_global_to_local(
+                    batch.surface_y[..., 1:4].float(), t1_eval, t2_eval, n_hat_eval
+                )
+                target_n_phys = target_local_phys[..., 2]
+                mask_b = batch.surface_mask
+                tangent_pred_n_sq_sum += float(
+                    pred_n_phys[mask_b].square().sum().detach().cpu().item()
+                )
+                tangent_target_n_sq_sum += float(
+                    target_n_phys[mask_b].square().sum().detach().cpu().item()
+                )
+                tangent_n_count += int(mask_b.sum().item())
+            surface_pred_norm = tangent_frame_local_to_global_norm(
+                surface_pred_norm, batch.surface_x.float(), transform
+            )
         surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
@@ -1757,7 +2015,17 @@ def evaluate_split(
     }
     wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
     loss = (surface_loss_sse + volume_loss_sse) / max(surface_loss_count + volume_loss_count, 1)
-    return {
+    tangent_metrics: dict[str, float] = {}
+    if use_tangent_frame_output and tangent_n_count > 0:
+        pred_n_rms = math.sqrt(tangent_pred_n_sq_sum / tangent_n_count)
+        target_n_rms = math.sqrt(tangent_target_n_sq_sum / tangent_n_count)
+        tangent_metrics["tangent_pred_n_rms"] = pred_n_rms
+        tangent_metrics["tangent_target_n_rms"] = target_n_rms
+        scalar_std = float(_wallshear_scalar_std(transform).item())
+        if scalar_std > 0.0:
+            tangent_metrics["tangent_pred_n_rms_over_tau"] = pred_n_rms / scalar_std
+            tangent_metrics["tangent_target_n_rms_over_tau"] = target_n_rms / scalar_std
+    metrics_out = {
         "loss": loss,
         "surface_loss": surface_loss_sse / max(surface_loss_count, 1),
         "volume_loss": volume_loss_sse / max(volume_loss_count, 1),
@@ -1786,6 +2054,8 @@ def evaluate_split(
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
     }
+    metrics_out.update(tangent_metrics)
+    return metrics_out
 
 
 def _sanitize_artifact_token(value: str) -> str:
@@ -2090,6 +2360,33 @@ def main(argv: Iterable[str] | None = None) -> None:
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
 
+    if config.use_tangent_frame_output and is_main:
+        try:
+            sample_batch = next(iter(train_loader))
+            sample_batch = sample_batch.to(device)
+            cont_stats = tangent_basis_continuity_stats(
+                sample_batch.surface_x[..., :3].float(),
+                sample_batch.surface_x[..., 3:6].float(),
+                sample_batch.surface_mask,
+            )
+            scalar_std_val = float(_wallshear_scalar_std(transform).item())
+            print(
+                "[tangent-frame] basis continuity (k=8 nbrs, ~4096 pts): "
+                f"mean={cont_stats['mean_deg']:.2f}deg, "
+                f"p99={cont_stats['p99_deg']:.2f}deg, "
+                f"max={cont_stats['max_deg']:.2f}deg, "
+                f"x_fallback_frac={cont_stats['fraction_x_fallback']:.4f}, "
+                f"scalar_std={scalar_std_val:.4f}"
+            )
+            if run is not None:
+                run.summary["tangent/basis_jump_mean_deg"] = cont_stats["mean_deg"]
+                run.summary["tangent/basis_jump_p99_deg"] = cont_stats["p99_deg"]
+                run.summary["tangent/basis_jump_max_deg"] = cont_stats["max_deg"]
+                run.summary["tangent/x_fallback_fraction"] = cont_stats["fraction_x_fallback"]
+                run.summary["tangent/wallshear_scalar_std"] = scalar_std_val
+        except Exception as exc:
+            print(f"[tangent-frame] basis continuity check skipped: {exc}")
+
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
             if is_main:
@@ -2124,6 +2421,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                use_tangent_frame_output=config.use_tangent_frame_output,
+                tangent_normal_reg=config.tangent_normal_reg,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2242,6 +2541,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            for tangent_key in (
+                "tangent_pred_n_rms",
+                "tangent_target_n_rms",
+                "loss_tangent_t1",
+                "loss_tangent_t2",
+                "loss_tangent_n",
+                "tangent_normal_reg_loss",
+            ):
+                if tangent_key in batch_loss_metrics:
+                    train_log[f"train/{tangent_key}"] = batch_loss_metrics[tangent_key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
@@ -2319,7 +2628,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_tangent_frame_output=config.use_tangent_frame_output)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2446,7 +2755,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_tangent_frame_output=config.use_tangent_frame_output)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2481,7 +2790,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_tangent_frame_output=config.use_tangent_frame_output)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
