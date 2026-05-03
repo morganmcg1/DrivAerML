@@ -1,5 +1,13 @@
 # SENPAI Research Results
 
+## 2026-05-03 03:15 — PR #474: frieren EMA-soup CLOSED (no-engagement) + reassignments (PR #490 frieren STRING-sep, PR #491 fern EMA-soup)
+
+- Closed PR #474 (frieren) after 3h+ silence: advisor correction at 23:51 UTC (wd=5e-4 → 1e-4), 1st escalation 02:54 UTC, no student response by 03:14 UTC. GPUs idle entire window. Following the fern #420 closure pattern. Hypothesis preserved.
+- Reassigned PR #420 STRING-sep PE port (cherry-pick `6f2e991`) to frieren as **PR #490** — single-arm Lion DDP at full yi compounding-wins config (lr=1e-4, wd=1e-4, clip=0.5, EMA=0.999, warmup=1ep). Active merge bar 9.039%; aspirational target 7.546% would reset bar.
+- Reassigned EMA-soup (last-K=4 ckpt avg) to fern as **PR #491** — pure post-training averaging, zero training cost, K snapshots saved during val intervals + `--soup-eval` mode for post-hoc averaging and re-eval.
+- Created and immediately closed PR #492 (stark uncertainty-weighting) — stark has no yi pod, label exists but pod unavailable; hypothesis preserved.
+- Final state: **all 16 yi-roster students WIP** (alphonse, askeladd, chihiro, edward, emma, fern, frieren, gilbert, haku, kohaku, nezuko, norman, senku, tanjiro, thorfinn, violet). Zero idle GPUs.
+
 ## 2026-05-03 01:00 — PR #450: thorfinn Lion weight-decay sweep (1e-4/5e-4/2e-3/5e-3) — CLOSED INFORMATIVE NEGATIVE
 
 - Branch: `thorfinn/lion-weight-decay-sweep` (deleted)

@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-03 01:00 UTC (Round 30 — PR #450 thorfinn Lion WD sweep closed, PR #479 thorfinn stochastic-depth+dropout assigned)
+- 2026-05-03 03:15 UTC (Round 30 mid-cycle — frieren #474 closed (3h silence after correction), reassigned PR #420 STRING-sep PE port to frieren as #490, fern #491 EMA soup; all 16 yi students now WIP)
 
 ## Most Recent Human Researcher Directives (Issue #18)
 
@@ -38,12 +38,14 @@
 - volume_pressure: 2.05×
 - surface_pressure: 1.17×
 
-## Active WIP Fleet (Round 28)
+## Active WIP Fleet (Round 30 — all 16 yi students WIP)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #478 | chihiro | Per-step cosine LR schedule (fix epoch-step decay — effective constant LR bug) | NEW |
-| #474 | frieren | EMA model soup (last-K checkpoint avg) + per-step LR logging | WIP |
+| #491 | fern | EMA model soup (last-K=4 ckpt avg) — preserves PR #474 hypothesis | NEW (post-frieren-close) |
+| #490 | frieren | STRING-sep PE port to yi (cherry-pick `6f2e991`) — PR #420 reassign | NEW (HIGH PRIORITY) |
+| #485 | kohaku | asinh wallshear normalization (3-arm screen) | WIP — corrected wd 02:54 UTC |
+| #478 | chihiro | Per-step cosine LR schedule (fix epoch-step decay — effective constant LR bug) | WIP |
 | #473 | alphonse | Per-axis coord normalization (x/2, y/0.5, z/0.5) to fix PE anisotropy | WIP |
 | #472 | edward | Muon@1e-3 vs AdamW full-budget 4-GPU DDP (PR #377 promotion) | WIP |
 | #479 | thorfinn | Stochastic depth + dropout sweep (val→test gap attack, 2×2 grid) | NEW |
@@ -85,6 +87,7 @@
 
 | PR | Student | Result | Decision |
 |----|---------|--------|----------|
+| #474 | frieren | EMA-soup (orig) — closed for non-engagement after 3h silence (2 advisor pings ignored); hypothesis preserved & reassigned to fern as #491 | CLOSED (no-engagement) |
 | #429 | frieren | OneCycleLR vs cosine — screen structurally broken (sub-epoch, cosine never decays) | CLOSED |
 | #430 | emma | EMA ramp — ramp never exercised (1.15% of schedule), only fixed-low-EMA snapshot | SENT BACK for DDP |
 | #419 | chihiro | Tangent frame input features — +2pp regression; Arm A (input only) worse on all channels; Arm B (local-frame pred) killed ep1 | CLOSED |
