@@ -394,7 +394,18 @@ class SurfaceTransolver(nn.Module):
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        # Dedicated 2-layer MLP volume decoder head.
+        # Why: volume pressure (3D, Laplace-like, global flow topology) and
+        # surface fields (boundary-layer physics, local geometry) have different
+        # inductive biases; a deeper decoder lets the volume branch specialize
+        # without competing with surface for a single linear projection.
+        volume_decoder_hidden = n_hidden // 2
+        self.volume_out = nn.Sequential(
+            nn.Linear(n_hidden, volume_decoder_hidden),
+            nn.GELU(),
+            nn.Linear(volume_decoder_hidden, self.volume_output_dim),
+        )
+        self.volume_out.apply(_init_linear)
 
     def _encode_group(
         self,
