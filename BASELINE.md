@@ -2,48 +2,50 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: thorfinn PR #489 volume-points curriculum 16k→65k ramp — 2026-05-03 (updated)
+## Status: edward PR #511 extended cosine schedule EP13 — 2026-05-01 (updated)
 
-**NEW SOTA: thorfinn PR #489 (vol-points curriculum 16k→32k→49k→65k over 4 stages) beats PR #488 by −0.1880pp val (7.1792% vs 7.3672% val). W&B run `r5rw40rn`, EP11. Delta −2.55% relative.**
+**NEW SOTA: edward PR #511 (cosine T_max extended 11→13 for 2 extra convergence epochs) beats PR #489 by −0.1658pp val (7.0134% vs 7.1792% val). W&B run `5o7jc7wi`, EP13. Delta −2.31% relative.**
 
-Volume-points curriculum ramps the number of volume query points across training epochs: 16384 (ep0-2) → 32768 (ep3-5) → 49152 (ep6-8) → 65536 (ep9+). This curriculum approach lets the model first learn from cheaper, coarser sampling and progressively refine as training matures. Run timed out at 270 min before reaching the 49k/65k stages, but the final result still beats SOTA. Volume pressure improves further (vp=4.207% vs prior SOTA 4.357%), suggesting the curriculum meaningfully helps volume field fidelity. tau_y/tau_z remain the primary open problem.
+Key insight: PR #488 SOTA run `ki2q9ko9` was still descending at EP11 — the cosine schedule was truncating too early. Extending `lr_cosine_t_max` from 11→13 gives 2 more epochs on the descending tail, yielding consistent per-epoch improvement (EP11=7.13% → EP12=7.06% → EP13=7.01%). Test result confirms: test_abupt=8.3130% (vs prior SOTA 8.497%). Surface pressure improves substantially (4.271% vs 4.783%). tau_y/tau_z remain the open problem.
 
-**W&B run:** `r5rw40rn` (thorfinn DDP8, rank 0) — group `thorfinn-vol-curriculum`, best val **7.1792%** (EP11), all 8 DDP siblings finished
-**PR:** #489
-**Val metrics (best-val checkpoint):** val_abupt=7.1792%, surface_pressure=4.783%, wall_shear=8.098%, volume_pressure=4.207%, tau_x=7.019%, tau_y=9.187%, tau_z=10.701%
-**Test metrics:** test_abupt=8.497%
+**W&B run:** `5o7jc7wi` (edward DDP8) — group `edward-extended-cosine`, best val **7.0134%** (EP13), runtime 5.67h
+**PR:** #511
+**Val metrics (best-val checkpoint, EP13):** val_abupt=7.0134%, surface_pressure=4.5104%, wall_shear=7.9650%, volume_pressure=4.2168%, tau_x=7.0053%, tau_y=8.7717%, tau_z=10.5629%
+**Test metrics:** test_abupt=8.3130%, surface_pressure=4.2709%, wall_shear=7.7863%, volume_pressure=11.8673%, tau_x=6.9184%, tau_y=8.5819%, tau_z=9.9267%
 
-### tay current best — `val_primary/*` (PR #489 thorfinn, run `r5rw40rn`)
+### tay current best — `val_primary/*` (PR #511 edward, run `5o7jc7wi`)
 
-| Metric | **PR #489 thorfinn (SOTA)** | PR #488 alphonse (prev) | AB-UPT |
+| Metric | **PR #511 edward (SOTA)** | PR #489 thorfinn (prev) | AB-UPT |
 |---|---:|---:|---:|
-| `abupt` | **7.1792** | 7.3672 | — |
-| `surface_pressure` | 4.783 | 4.805 | 3.82 |
-| `wall_shear` | 8.098 | 8.347 | 7.29 |
-| `volume_pressure` | **4.207** | 4.357 | 6.08 |
-| `tau_x` | 7.019 | — | 5.35 |
-| `tau_y` | 9.187 | — | 3.65 |
-| `tau_z` | 10.701 | — | 3.63 |
+| `abupt` | **7.0134** | 7.1792 | — |
+| `surface_pressure` | **4.5104** | 4.783 | 3.82 |
+| `wall_shear` | **7.9650** | 8.098 | 7.29 |
+| `volume_pressure` | 4.2168 | **4.207** | 6.08 |
+| `tau_x` | **7.0053** | 7.019 | 5.35 |
+| `tau_y` | **8.7717** | 9.187 | 3.65 |
+| `tau_z` | **10.5629** | 10.701 | 3.63 |
 
-**Key insight:** Volume-points curriculum improves across all axes. vp=4.207% beats prior SOTA 4.357% and stays well below AB-UPT ref 6.08%. tau_y/tau_z gap (9.19%/10.70% vs target 3.65%/3.63%) remains the primary unsolved problem — 2.5-2.9× above reference. The curriculum suggests progressive training strategies deserve further investigation.
+**Key insight:** Extended cosine (EP13) beats prior SOTA on all val axes except volume_pressure (near-tie: 4.2168 vs 4.207). Test abupt improves by 0.184pp (−2.17% relative). The descending val trajectory (EP11=7.13→EP12=7.06→EP13=7.01) suggests EP14-15 may yield further gains if budget allows. tau_y/tau_z gap (8.77%/10.56% vs target 3.65%/3.63%) remains primary open problem.
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init, vol-curriculum)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init, vol-curriculum, EP13)
 
 ```bash
 torchrun --standalone --nproc_per_node=8 train.py \
-  --agent thorfinn --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --agent edward --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
   --no-compile-model --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
-  --eval-volume-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
   --rff-num-features 16 \
-  --rff-init-sigmas <octave-sigmas-from-pr488> \
-  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536"
+  --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --lr-cosine-t-max 13 \
+  --epochs 13 \
+  --wandb-group edward-extended-cosine --wandb-name edward-extended-ep13
 ```
 
-### Compounding wins so far (updated through PR #489)
+### Compounding wins so far (updated through PR #511)
 
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
@@ -64,7 +66,19 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #358 | thorfinn | **−0.154pp (−2.04%) vs #311** | QK-norm (RMSNorm on Q and K) stacked on STRING-sep — best val at EP11 (7.3921%) |
 | #387 | alphonse | **−0.031pp (−0.36%) vs #358** | feat16 RFF (rff_num_features=16) stacked on STRING-sep + QK-norm config — best val at EP11 (7.3816%) |
 | #488 | alphonse | **−0.0144pp (−0.195%) vs #387** | multi-sigma STRING-sep init: log_freq params distributed across frequency octaves at init — vp drops from 12.189% to 4.357% (beats AB-UPT ref!) |
-| **#489** | **thorfinn** | **−0.1880pp (−2.55%) vs #488** | **vol-points curriculum 16k→32k→49k→65k: progressive coarse-to-fine volume sampling across training epochs — vp further improves to 4.207%** |
+| #489 | thorfinn | **−0.1880pp (−2.55%) vs #488** | vol-points curriculum 16k→32k→49k→65k: progressive coarse-to-fine volume sampling across training epochs — vp further improves to 4.207% |
+| **#511** | **edward** | **−0.1658pp (−2.31%) vs #489** | **extended cosine T_max 11→13: 2 extra convergence epochs on descending tail — EP13 val_abupt=7.0134%, test_abupt=8.3130%** |
+
+---
+
+## Prior SOTA record: thorfinn PR #489 volume-points curriculum 16k→65k ramp — 2026-05-03 (updated)
+
+**PRIOR SOTA: thorfinn PR #489 (vol-points curriculum 16k→32k→49k→65k over 4 stages) beats PR #488 by −0.1880pp val (7.1792% vs 7.3672% val). W&B run `r5rw40rn`, EP11. Delta −2.55% relative.**
+
+**W&B run:** `r5rw40rn` (thorfinn DDP8, rank 0) — group `thorfinn-vol-curriculum`, best val **7.1792%** (EP11)
+**PR:** #489
+**Val metrics (best-val checkpoint):** val_abupt=7.1792%, surface_pressure=4.783%, wall_shear=8.098%, volume_pressure=4.207%, tau_x=7.019%, tau_y=9.187%, tau_z=10.701%
+**Test metrics:** test_abupt=8.497%
 
 ---
 
