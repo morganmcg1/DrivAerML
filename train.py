@@ -481,6 +481,7 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        volume_coord_transform: str = "none",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -493,6 +494,11 @@ class SurfaceTransolver(nn.Module):
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
+        if volume_coord_transform not in ("none", "signed-log", "asinh"):
+            raise ValueError(
+                f"volume_coord_transform must be 'none', 'signed-log', or 'asinh'; got {volume_coord_transform!r}"
+            )
+        self.volume_coord_transform = volume_coord_transform
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -576,9 +582,22 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
+            vol_x_for_encoder = volume_x
+            if self.volume_coord_transform != "none":
+                vol_pos = volume_x[..., : self.space_dim]
+                if self.volume_coord_transform == "signed-log":
+                    vol_pos = torch.sign(vol_pos) * torch.log1p(torch.abs(vol_pos))
+                else:  # "asinh"
+                    vol_pos = torch.asinh(vol_pos)
+                if volume_x.shape[-1] > self.space_dim:
+                    vol_x_for_encoder = torch.cat(
+                        [vol_pos, volume_x[..., self.space_dim :]], dim=-1
+                    )
+                else:
+                    vol_x_for_encoder = vol_pos
             tokens.append(
                 self._encode_group(
-                    volume_x,
+                    vol_x_for_encoder,
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
@@ -715,6 +734,7 @@ class Config:
     use_film: bool = False
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
+    volume_coord_transform: str = "none"  # "none" | "signed-log" | "asinh" — applied to volume xyz before PE encoder input only
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -897,6 +917,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        volume_coord_transform=config.volume_coord_transform,
     )
 
 
