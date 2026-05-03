@@ -282,15 +282,25 @@ class UpActDownMlp(nn.Module):
 
 
 class TransolverAttention(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        dropout: float = 0.0,
+        slice_attention: str = "softmax",
+    ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError("hidden_dim must be divisible by num_heads")
+        if slice_attention not in {"softmax", "sigmoid-l1"}:
+            raise ValueError(f"unknown slice_attention: {slice_attention}")
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.dim_head = hidden_dim // num_heads
         self.num_slices = num_slices
         self.dropout = dropout
+        self.slice_attention = slice_attention
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -300,12 +310,56 @@ class TransolverAttention(nn.Module):
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
 
+        # Per-step diagnostics (set in create_slices, read by training loop). Detached.
+        self.last_gate_l1_mean: torch.Tensor | None = None
+        self.last_slice_entropy_mean: torch.Tensor | None = None
+        self.last_gate_top1_mean: torch.Tensor | None = None
+        self.last_active_count_at_0p5: torch.Tensor | None = None
+
+    @staticmethod
+    def _masked_mean(values: torch.Tensor, attn_mask: torch.Tensor | None) -> torch.Tensor:
+        # values: [B, H, N]; attn_mask: [B, N] or None.
+        v = values.float()
+        if attn_mask is None:
+            return v.mean()
+        mask = attn_mask[:, None, :].to(dtype=v.dtype, device=v.device)
+        denom = mask.sum() * v.shape[1]
+        return (v * mask).sum() / denom.clamp(min=1.0)
+
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
-        slice_weights = F.softmax(slice_logits, dim=-1)
+
+        if self.slice_attention == "softmax":
+            slice_weights = F.softmax(slice_logits, dim=-1)
+            self.last_gate_l1_mean = None
+            self.last_gate_top1_mean = None
+            self.last_active_count_at_0p5 = None
+        else:  # sigmoid-l1
+            # Compute sigmoid + L1-renorm in fp32 for bf16 stability (low cost: only the
+            # K-axis sum and divide; sigmoid itself is stable in bf16).
+            slice_logits_fp32 = slice_logits.float()
+            gates = torch.sigmoid(slice_logits_fp32)
+            gate_l1 = gates.sum(dim=-1)  # [B, H, N]
+            with torch.no_grad():
+                self.last_gate_l1_mean = self._masked_mean(gate_l1, attn_mask).detach()
+                gate_top1 = gates.max(dim=-1).values  # [B, H, N]
+                self.last_gate_top1_mean = self._masked_mean(gate_top1, attn_mask).detach()
+                active = (gates > 0.5).to(gates.dtype).sum(dim=-1)  # [B, H, N]
+                self.last_active_count_at_0p5 = self._masked_mean(active, attn_mask).detach()
+            slice_weights = gates / (gate_l1.unsqueeze(-1) + 1e-6)
+            slice_weights = slice_weights.to(dtype=slice_logits.dtype)
+
+        # Slice usage entropy diagnostic over the (normalized) per-point distribution.
+        # Compute before the attn_mask multiplication so padded tokens (which become all-zero
+        # after masking) do not contaminate the average.
+        with torch.no_grad():
+            sw = slice_weights.detach().float()
+            entropy = -(sw.clamp(min=1e-12) * sw.clamp(min=1e-12).log()).sum(dim=-1)  # [B, H, N]
+            self.last_slice_entropy_mean = self._masked_mean(entropy, attn_mask)
+
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
                 device=slice_weights.device,
@@ -341,6 +395,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         drop_path_prob: float = 0.0,
+        slice_attention: str = "softmax",
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -350,6 +405,7 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             num_slices=num_slices,
             dropout=dropout,
+            slice_attention=slice_attention,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
@@ -417,6 +473,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        slice_attention: str = "softmax",
     ):
         super().__init__()
         if depth <= 1:
@@ -434,6 +491,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     drop_path_prob=drop_path_rates[i],
+                    slice_attention=slice_attention,
                 )
                 for i in range(depth)
             ]
@@ -481,6 +539,7 @@ class SurfaceTransolver(nn.Module):
         use_film: bool = False,
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
+        slice_attention: str = "softmax",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -523,6 +582,7 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            slice_attention=slice_attention,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -711,6 +771,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    slice_attention: str = "softmax"
     stochastic_depth_prob: float = 0.0
     use_film: bool = False
     film_encoder_dim: int = 64
@@ -897,7 +958,55 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_film=config.use_film,
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
+        slice_attention=config.slice_attention,
     )
+
+
+def collect_slice_attention_diagnostics(model: nn.Module) -> dict[str, float]:
+    """Average TransolverAttention per-step diagnostics across all blocks.
+
+    sigmoid-l1-only (omitted under softmax, where these are tautological):
+      - train/sigmoid_gate_l1_mean: mean unnormalized sigmoid-gate L1 across heads/points.
+        K/2 = uniform multi-membership; near 1 = winner-take-all (softmax-like collapse).
+      - train/sigmoid_gate_top1_mean: mean of pre-norm max-gate magnitude per point.
+        Near 0.5 = no saturation; approaching 1.0 = saturating high; 0 = saturating low.
+      - train/sigmoid_active_count_at_0p5: mean count of slices with pre-norm gate > 0.5
+        per point. K/2 if random; small int (1-5) if winner-take-all; large if uniform.
+
+    Reported for both arms:
+      - train/slice_entropy_mean: mean per-point Shannon entropy of the (normalized)
+        slice-membership distribution, in nats. log(K) = uniform; 0 = winner-take-all.
+      - train/slice_entropy_norm: slice_entropy_mean / log(K), in [0, 1].
+    """
+    gate_l1_vals: list[float] = []
+    entropy_vals: list[float] = []
+    gate_top1_vals: list[float] = []
+    active_vals: list[float] = []
+    num_slices = 0
+    for module in model.modules():
+        if isinstance(module, TransolverAttention):
+            num_slices = module.num_slices
+            if module.last_gate_l1_mean is not None:
+                gate_l1_vals.append(float(module.last_gate_l1_mean.item()))
+            if module.last_slice_entropy_mean is not None:
+                entropy_vals.append(float(module.last_slice_entropy_mean.item()))
+            if module.last_gate_top1_mean is not None:
+                gate_top1_vals.append(float(module.last_gate_top1_mean.item()))
+            if module.last_active_count_at_0p5 is not None:
+                active_vals.append(float(module.last_active_count_at_0p5.item()))
+    out: dict[str, float] = {}
+    if gate_l1_vals:
+        out["train/sigmoid_gate_l1_mean"] = sum(gate_l1_vals) / len(gate_l1_vals)
+    if gate_top1_vals:
+        out["train/sigmoid_gate_top1_mean"] = sum(gate_top1_vals) / len(gate_top1_vals)
+    if active_vals:
+        out["train/sigmoid_active_count_at_0p5"] = sum(active_vals) / len(active_vals)
+    if entropy_vals:
+        mean_entropy = sum(entropy_vals) / len(entropy_vals)
+        out["train/slice_entropy_mean"] = mean_entropy
+        if num_slices > 1:
+            out["train/slice_entropy_norm"] = mean_entropy / math.log(num_slices)
+    return out
 
 
 def _metric_path(name: str) -> str:
@@ -2220,6 +2329,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
+            slice_attn_diagnostics = collect_slice_attention_diagnostics(model)
             train_log: dict[str, object] = {
                 "train/loss": float(loss.detach().cpu().item()),
                 "train/surface_loss": batch_loss_metrics["surface_loss"],
@@ -2233,6 +2343,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
+                **slice_attn_diagnostics,
             }
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
