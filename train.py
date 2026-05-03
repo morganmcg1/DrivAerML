@@ -738,6 +738,10 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    swa_lr: float = 0.0
+    swa_fraction: float = 0.20
+    swa_save_interval_steps: int = 500
+    swa_eval: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1868,8 +1872,184 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     )
 
 
+def _average_swa_state_dicts(
+    snap_files: list[Path],
+) -> tuple[dict[str, torch.Tensor], list[int], dict[str, float]]:
+    avg: dict[str, torch.Tensor] = {}
+    steps: list[int] = []
+    n = len(snap_files)
+    if n == 0:
+        raise RuntimeError("No SWA snapshots found")
+    prev_concat: torch.Tensor | None = None
+    consecutive_l2: list[float] = []
+    avg_concat: torch.Tensor | None = None
+    snap_concats: list[torch.Tensor] = []
+    for f in snap_files:
+        payload = torch.load(f, map_location="cpu")
+        sd = payload["state_dict"]
+        steps.append(int(payload.get("global_step", -1)))
+        flat_parts: list[torch.Tensor] = []
+        for k in sorted(sd.keys()):
+            v = sd[k]
+            v_f32 = v.detach().to(torch.float32)
+            if k not in avg:
+                avg[k] = v_f32.clone()
+            else:
+                avg[k].add_(v_f32)
+            flat_parts.append(v_f32.flatten())
+        cur_concat = torch.cat(flat_parts)
+        snap_concats.append(cur_concat)
+        if prev_concat is not None:
+            consecutive_l2.append(float(torch.linalg.vector_norm(cur_concat - prev_concat).item()))
+        prev_concat = cur_concat
+    for k in avg:
+        avg[k].div_(n)
+    avg_flat_parts = [avg[k].flatten() for k in sorted(avg.keys())]
+    avg_concat = torch.cat(avg_flat_parts)
+    snap_to_avg_l2 = [float(torch.linalg.vector_norm(c - avg_concat).item()) for c in snap_concats]
+    snap_norm = [float(torch.linalg.vector_norm(c).item()) for c in snap_concats]
+    diagnostics = {
+        "n_snapshots": float(n),
+        "consecutive_l2_mean": float(sum(consecutive_l2) / max(len(consecutive_l2), 1)),
+        "consecutive_l2_max": float(max(consecutive_l2)) if consecutive_l2 else 0.0,
+        "snap_to_avg_l2_mean": float(sum(snap_to_avg_l2) / max(n, 1)),
+        "snap_to_avg_l2_max": float(max(snap_to_avg_l2)) if snap_to_avg_l2 else 0.0,
+        "snap_norm_mean": float(sum(snap_norm) / max(n, 1)),
+        "avg_norm": float(torch.linalg.vector_norm(avg_concat).item()),
+    }
+    return avg, steps, diagnostics
+
+
+def run_swa_eval(config: Config) -> None:
+    swa_snap_dir = Path(config.output_dir) / "swa_snapshots"
+    snap_files = sorted(swa_snap_dir.glob("swa_step_*.pt"))
+    if not snap_files:
+        raise RuntimeError(
+            f"No SWA snapshots in {swa_snap_dir}. "
+            "Run training with --swa-lr > 0 first."
+        )
+    print(f"Loading {len(snap_files)} SWA snapshots from {swa_snap_dir}")
+    for f in snap_files:
+        print(f"  {f.name}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_loader, val_loaders, test_loaders, stats = make_loaders(
+        config, is_distributed=False, world_size=1, rank=0
+    )
+    transform = TargetTransform(
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
+    )
+    model = build_model(config).to(device)
+    avg_state, snap_steps, swa_diagnostics = _average_swa_state_dicts(snap_files)
+    print("SWA diagnostics:")
+    for k, v in swa_diagnostics.items():
+        print(f"  {k}: {v:.6f}")
+    model_state = model.state_dict()
+    missing: list[str] = []
+    extra: list[str] = []
+    for k in avg_state:
+        if k not in model_state:
+            extra.append(k)
+    for k in model_state:
+        if k not in avg_state:
+            missing.append(k)
+    if missing:
+        print(f"WARN: {len(missing)} keys in model not in averaged state (first 5): {missing[:5]}")
+    if extra:
+        print(f"WARN: {len(extra)} extra keys in averaged state ignored (first 5): {extra[:5]}")
+    casted = {
+        k: avg_state[k].to(model_state[k].dtype) for k in avg_state if k in model_state
+    }
+    model.load_state_dict(casted, strict=False)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model: SurfaceTransolver ({n_params / 1e6:.2f}M params), SWA-avg over {len(snap_files)} snapshots")
+    run = wandb.init(
+        entity=os.environ.get("WANDB_ENTITY"),
+        project=os.environ.get("WANDB_PROJECT"),
+        group=config.wandb_group or None,
+        name=config.wandb_name or None,
+        tags=[config.agent, "swa-eval"] if config.agent else ["swa-eval"],
+        config={
+            **asdict(config),
+            "n_params": n_params,
+            "swa_n_snapshots": len(snap_files),
+            "swa_snapshot_steps": snap_steps,
+            "swa_eval_mode": True,
+        },
+        mode=os.environ.get("WANDB_MODE", "online"),
+    )
+    wandb.define_metric("global_step")
+    wandb.define_metric("swa_val/*", step_metric="global_step")
+    wandb.define_metric("swa_val_primary/*", step_metric="global_step")
+    wandb.define_metric("swa_test/*", step_metric="global_step")
+    wandb.define_metric("swa_test_primary/*", step_metric="global_step")
+    last_step = max(snap_steps) if snap_steps else 0
+    val_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in val_loaders.items()
+    }
+    test_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in test_loaders.items()
+    }
+    val_log: dict[str, object] = {
+        "swa_val_primary/abupt_axis_mean_rel_l2_pct": val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"],
+        "swa_val_primary/abupt_axis_mean_rel_l2": val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+        "swa_val_primary/surface_pressure_mae": val_metrics["val_surface"]["surface_pressure_mae"],
+        "swa_val_primary/wall_shear_mae": val_metrics["val_surface"]["wall_shear_mae"],
+        "swa_val_primary/volume_pressure_mae": val_metrics["val_surface"]["volume_pressure_mae"],
+        "swa_val_primary/surface_pressure_rel_l2_pct": val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+        "swa_val_primary/wall_shear_rel_l2_pct": val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+        "swa_val_primary/wall_shear_x_rel_l2_pct": val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+        "swa_val_primary/wall_shear_y_rel_l2_pct": val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+        "swa_val_primary/wall_shear_z_rel_l2_pct": val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+        "swa_val_primary/volume_pressure_rel_l2_pct": val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+        "global_step": last_step,
+    }
+    for split_name, metrics in val_metrics.items():
+        for k, v in metrics.items():
+            val_log[f"swa_val/{split_name}/{k}"] = v
+    test_log: dict[str, object] = {
+        "swa_test_primary/abupt_axis_mean_rel_l2_pct": test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"],
+        "swa_test_primary/abupt_axis_mean_rel_l2": test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
+        "swa_test_primary/surface_pressure_mae": test_metrics["test_surface"]["surface_pressure_mae"],
+        "swa_test_primary/wall_shear_mae": test_metrics["test_surface"]["wall_shear_mae"],
+        "swa_test_primary/volume_pressure_mae": test_metrics["test_surface"]["volume_pressure_mae"],
+        "swa_test_primary/surface_pressure_rel_l2_pct": test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+        "swa_test_primary/wall_shear_rel_l2_pct": test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+        "swa_test_primary/wall_shear_x_rel_l2_pct": test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+        "swa_test_primary/wall_shear_y_rel_l2_pct": test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+        "swa_test_primary/wall_shear_z_rel_l2_pct": test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
+        "swa_test_primary/volume_pressure_rel_l2_pct": test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
+        "global_step": last_step,
+    }
+    for split_name, metrics in test_metrics.items():
+        for k, v in metrics.items():
+            test_log[f"swa_test/{split_name}/{k}"] = v
+    wandb.log(val_log)
+    wandb.log(test_log)
+    wandb.summary.update(_numeric_metric_items(val_log))
+    wandb.summary.update(_numeric_metric_items(test_log))
+    wandb.summary.update(
+        {
+            "swa_n_snapshots": len(snap_files),
+            "swa_first_step": min(snap_steps) if snap_steps else 0,
+            "swa_last_step": last_step,
+            **{f"swa_diag/{k}": v for k, v in swa_diagnostics.items()},
+        }
+    )
+    print_metrics("swa_val", val_metrics["val_surface"])
+    print_metrics("swa_test", test_metrics["test_surface"])
+    wandb.finish()
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    if config.swa_eval:
+        run_swa_eval(config)
+        return
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -2077,6 +2257,26 @@ def main(argv: Iterable[str] | None = None) -> None:
     if is_main:
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
+
+    swa_snap_dir = Path(config.output_dir) / "swa_snapshots"
+    flat_start_step = -1
+    swa_estimate_finalized = False
+    swa_estimate_target_step = max(effective_warmup_steps, 0) + 100
+    if config.swa_lr > 0:
+        flat_start_step = int(total_estimated_steps * (1 - config.swa_fraction))
+        if is_main:
+            print(
+                f"SWA flat-LR: swa_lr={config.swa_lr}, swa_fraction={config.swa_fraction}, "
+                f"initial flat_start_step={flat_start_step}/{total_estimated_steps} "
+                f"(will refine post-warmup at step {swa_estimate_target_step}), "
+                f"save_interval={config.swa_save_interval_steps}, snap_dir={swa_snap_dir}"
+            )
+            if swa_snap_dir.exists():
+                for f in swa_snap_dir.glob("swa_step_*.pt"):
+                    f.unlink()
+                for f in swa_snap_dir.glob("swa_step_*.tmp"):
+                    f.unlink()
+            swa_snap_dir.mkdir(parents=True, exist_ok=True)
     if is_distributed:
         dist.barrier()
 
@@ -2198,7 +2398,59 @@ def main(argv: Iterable[str] | None = None) -> None:
                 elif global_step == effective_warmup_steps:
                     for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
                         pg["lr"] = base_lr
+            if (
+                config.swa_lr > 0
+                and not swa_estimate_finalized
+                and global_step >= swa_estimate_target_step
+            ):
+                if is_main:
+                    elapsed_s = time.time() - train_start
+                    avg_step_time = elapsed_s / max(global_step, 1)
+                    train_budget_s = train_timeout_minutes * 60.0
+                    remaining_s = max(train_budget_s - elapsed_s, 0.0)
+                    remaining_steps = int(remaining_s / max(avg_step_time, 1e-3))
+                    swa_total_estimate = min(global_step + remaining_steps, total_estimated_steps)
+                    new_flat_start_step = int(swa_total_estimate * (1 - config.swa_fraction))
+                else:
+                    elapsed_s = 0.0
+                    avg_step_time = 0.0
+                    remaining_steps = 0
+                    swa_total_estimate = 0
+                    new_flat_start_step = 0
+                if is_distributed:
+                    sync_tensor = torch.tensor([new_flat_start_step], dtype=torch.long, device=device)
+                    dist.broadcast(sync_tensor, src=0)
+                    new_flat_start_step = int(sync_tensor.item())
+                flat_start_step = new_flat_start_step
+                swa_estimate_finalized = True
+                if is_main:
+                    print(
+                        f"SWA refined flat_start_step={flat_start_step} "
+                        f"(swa_total_estimate={swa_total_estimate}, "
+                        f"avg_step_time={avg_step_time:.3f}s, "
+                        f"remaining_steps={remaining_steps})"
+                    )
+            swa_in_flat_phase = (
+                config.swa_lr > 0 and flat_start_step >= 0 and global_step >= flat_start_step
+            )
+            if swa_in_flat_phase:
+                for pg in optimizer.param_groups:
+                    pg["lr"] = config.swa_lr
             optimizer.step()
+            swa_save_due = False
+            if swa_in_flat_phase:
+                steps_into_flat = global_step - flat_start_step
+                swa_save_due = steps_into_flat % config.swa_save_interval_steps == 0
+            if swa_save_due and is_main:
+                snap_path = swa_snap_dir / f"swa_step_{global_step:08d}.pt"
+                tmp_path = snap_path.with_suffix(".tmp")
+                torch.save(
+                    {"state_dict": model.state_dict(), "global_step": global_step},
+                    tmp_path,
+                )
+                tmp_path.rename(snap_path)
+            if swa_save_due and is_distributed:
+                dist.barrier()
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
@@ -2273,7 +2525,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        epoch_in_flat_phase = (
+            config.swa_lr > 0 and flat_start_step >= 0 and global_step >= flat_start_step
+        )
+        if not epoch_in_flat_phase:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
@@ -2286,7 +2542,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": (
+                config.swa_lr if epoch_in_flat_phase else scheduler.get_last_lr()[0]
+            ),
             "epoch_time_s": dt,
             "global_step": global_step,
         }
