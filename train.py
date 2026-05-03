@@ -61,6 +61,33 @@ from trainer_runtime import (
 )
 
 
+# Per-axis surface loss weights, ordered to match data/loader.py
+# SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z").
+# tau_y/tau_z are the worst test metrics (×2.5–2.9 gap to AB-UPT) so we double their gradient signal.
+SURFACE_COMPONENT_WEIGHTS = (1.0, 1.0, 2.0, 2.0)
+SURFACE_COMPONENT_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")
+
+
+def _masked_per_component_mse(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """Per-component masked MSE over a [B, N, C] tensor; returns shape [C].
+
+    With uniform weights, ``_masked_per_component_mse(...).mean()`` equals
+    ``masked_mse(...)`` exactly: both reduce to (sum mask*diff^2) / (C * sum mask).
+    """
+    diff_sq = (pred - target).square()
+    if diff_sq.numel() == 0:
+        return diff_sq.sum(dim=tuple(range(diff_sq.ndim - 1))) * 0.0
+    expanded_mask = mask.to(device=diff_sq.device, dtype=diff_sq.dtype)
+    while expanded_mask.ndim < diff_sq.ndim:
+        expanded_mask = expanded_mask.unsqueeze(-1)
+    point_count = expanded_mask.expand(*diff_sq.shape[:-1], 1).sum()
+    weighted_diff = diff_sq * expanded_mask
+    reduce_dims = tuple(range(diff_sq.ndim - 1))
+    return weighted_diff.sum(dim=reduce_dims) / point_count.clamp_min(1.0)
+
+
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
@@ -203,18 +230,34 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_component_mse = _masked_per_component_mse(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )
+        component_weights = torch.as_tensor(
+            SURFACE_COMPONENT_WEIGHTS,
+            device=surface_component_mse.device,
+            dtype=surface_component_mse.dtype,
+        )
+        surface_loss = (surface_component_mse * component_weights).mean()
+        surface_loss_unweighted = surface_component_mse.mean()
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
+        base_mse_loss = surface_loss_unweighted + volume_loss
+    component_mse_cpu = surface_component_mse.detach().float().cpu().tolist()
+    component_metrics = {
+        f"surface_component_mse/{name}": value
+        for name, value in zip(SURFACE_COMPONENT_NAMES, component_mse_cpu)
+    }
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
+        "surface_loss_unweighted": float(surface_loss_unweighted.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **component_metrics,
     }
 
 
@@ -277,6 +320,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             max_epochs=max_epochs,
             train_timeout_minutes=train_timeout_minutes,
             val_budget_minutes=val_budget_minutes,
+        )
+        wandb.config.update(
+            {
+                "surface_component_weights": dict(
+                    zip(SURFACE_COMPONENT_NAMES, SURFACE_COMPONENT_WEIGHTS)
+                ),
+            },
+            allow_val_change=True,
         )
 
         output_dir = Path(config.output_dir) / f"run-{run.id}"
@@ -360,11 +411,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/loss": float(loss.detach().cpu().item()),
                             "train/base_mse_loss": batch_loss_metrics["base_mse_loss"],
                             "train/surface_loss": batch_loss_metrics["surface_loss"],
+                            "train/surface_loss_unweighted": batch_loss_metrics["surface_loss_unweighted"],
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    for component_name in SURFACE_COMPONENT_NAMES:
+                        key = f"surface_component_mse/{component_name}"
+                        if key in batch_loss_metrics:
+                            train_log[f"train/{key}"] = batch_loss_metrics[key]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
