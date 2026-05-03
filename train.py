@@ -63,8 +63,10 @@ from trainer_runtime import (
 
 # Per-axis surface loss weights, ordered to match data/loader.py
 # SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z").
-# tau_y/tau_z are the worst test metrics (×2.5–2.9 gap to AB-UPT) so we double their gradient signal.
-SURFACE_COMPONENT_WEIGHTS = (1.0, 1.0, 2.0, 2.0)
+# tau_y/tau_z are the worst test metrics (×2.5–2.9 gap to AB-UPT). 1.5× boost is a softer
+# variant of the 2.0× run (PR #454, val 7.3848%), aiming to keep the tau_y/z gain without
+# regressing surface_pressure / volume_pressure as much.
+SURFACE_COMPONENT_WEIGHTS = (1.0, 1.0, 1.5, 1.5)
 SURFACE_COMPONENT_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")
 
 
