@@ -2,11 +2,18 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03 (updated)
+## Status: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03 (CONFIRMED SOTA)
 
-**NEW SOTA: alphonse PR #510 (surface-loss-weight=2.0, heavier surface gradient emphasis) beats PR #511 by −0.007pp val, −0.021pp test (7.0063% val, 8.2921% test). W&B run `qqtdnlwq`, EP5 EMA. Delta −0.10% relative on val.**
+**NOTE: PR #534 (tanjiro) was closed by tcapelle 2026-03-17 before training completed — "Preparing escalated round 14 with fundamentally different approaches." The mid-training candidate val_abupt=6.9349% at EP3.98 was never confirmed. All 8 Wave 10 PRs were closed simultaneously. Current confirmed SOTA remains PR #510 alphonse.**
 
-Key insight: Doubling the surface MSE contribution via `--surface-loss-weight 2.0` drives more gradient capacity into surface channels. Run timed out at EP5 (4.71h of 50-epoch budget) but all win conditions and test eval completed. 5/7 test channels improve vs PR #511; tau_y (+0.063pp) and volume_pressure (+0.238pp) show small regressions. The hypothesis is confirmed: slw=2.0 is a Pareto improvement over slw=1.0 on the current SOTA stack. A full 13-epoch run with slw=2.0 should yield further gains.
+**W&B run:** `qqtdnlwq` (alphonse DDP8, rank-0) — group `alphonse-slw-sweep`, best val **7.0063%** (EP5 EMA), runtime 4.71h
+**PR:** #510
+**Val metrics (best-val checkpoint, EP5 EMA):** val_abupt=7.0063%, surface_pressure=4.5994%, wall_shear=7.8939%, volume_pressure=4.1643%, tau_x=6.8150%, tau_y=8.9516%, tau_z=10.5010%
+**Test metrics:** test_abupt=8.2921%, surface_pressure=4.2381%, wall_shear=7.6341%, volume_pressure=12.1047%, tau_x=6.6657%, tau_y=8.6452%, tau_z=9.8066%
+
+### Previous SOTA: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03
+
+**alphonse PR #510 (surface-loss-weight=2.0, heavier surface gradient emphasis) beats PR #511 by −0.007pp val, −0.021pp test (7.0063% val, 8.2921% test). W&B run `qqtdnlwq`, EP5 EMA. Delta −0.10% relative on val.**
 
 **W&B run:** `qqtdnlwq` (alphonse DDP8, rank-0) — group `alphonse-slw-sweep`, best val **7.0063%** (EP5 EMA), runtime 4.71h
 **PR:** #510
