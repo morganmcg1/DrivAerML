@@ -482,7 +482,7 @@ class SurfaceTransolver(nn.Module):
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
         coord_normalize: str = "none",
-        coord_axis_scale: tuple[float, float, float] = (1.4, 0.7, 0.4),
+        coord_axis_scale: tuple[float, float, float] = (2.5, 1.1, 0.75),
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -740,9 +740,9 @@ class Config:
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
     coord_normalize: str = "none"  # "none" | "axis" | "l2"
-    coord_axis_scale_x: float = 1.4
-    coord_axis_scale_y: float = 0.7
-    coord_axis_scale_z: float = 0.4
+    coord_axis_scale_x: float = 2.5
+    coord_axis_scale_y: float = 1.1
+    coord_axis_scale_z: float = 0.75
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
