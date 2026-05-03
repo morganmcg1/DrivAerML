@@ -26,9 +26,11 @@ import torch.nn as nn
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+from data import DrivAerMLSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -48,6 +50,7 @@ from trainer_runtime import (
     init_distributed,
     init_wandb_run,
     is_valid_primary_metric,
+    loader_kwargs,
     make_loaders,
     masked_mse,
     metric_namespace,
@@ -119,6 +122,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    vol_points_schedule: str = ""
     debug: bool = False
 
 
@@ -132,6 +136,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "separate checks. STEP is a global optimizer step and METRIC must match "
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
+        ),
+        "vol_points_schedule": (
+            "Optional epoch-based curriculum for the train-volume-points view "
+            "size. Format: 'EPOCH:POINTS:EPOCH:POINTS:...' (colon-separated). "
+            "The train DataLoader is rebuilt at any epoch where the value "
+            "changes. Must start at epoch 0; the value applies from that "
+            "epoch onwards (inclusive) until the next breakpoint. Empty "
+            "string disables the curriculum and `--train-volume-points` is "
+            "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
         ),
     }
     for field in fields(Config):
@@ -218,12 +231,113 @@ def train_loss(
     }
 
 
+def parse_vol_points_schedule(text: str) -> list[tuple[int, int]]:
+    if not text:
+        return []
+    parts = [p.strip() for p in text.split(":") if p.strip()]
+    if len(parts) % 2 != 0 or len(parts) == 0:
+        raise ValueError(
+            f"--vol-points-schedule must be 'EPOCH:POINTS' pairs joined by ':'; got '{text}'"
+        )
+    schedule: list[tuple[int, int]] = []
+    for i in range(0, len(parts), 2):
+        try:
+            epoch = int(parts[i])
+            points = int(parts[i + 1])
+        except ValueError as exc:
+            raise ValueError(
+                f"--vol-points-schedule values must be integers; got '{text}'"
+            ) from exc
+        if epoch < 0 or points <= 0:
+            raise ValueError(
+                f"--vol-points-schedule entries must satisfy epoch>=0 and points>0; "
+                f"got {epoch}:{points}"
+            )
+        schedule.append((epoch, points))
+    schedule.sort(key=lambda x: x[0])
+    seen: set[int] = set()
+    for start_epoch, _ in schedule:
+        if start_epoch in seen:
+            raise ValueError(
+                f"--vol-points-schedule has duplicate epoch breakpoint {start_epoch}"
+            )
+        seen.add(start_epoch)
+    if schedule[0][0] != 0:
+        raise ValueError(
+            f"--vol-points-schedule must start at epoch 0; got first entry {schedule[0]}"
+        )
+    return schedule
+
+
+def vol_points_for_epoch(
+    schedule: list[tuple[int, int]],
+    epoch: int,
+    fallback: int,
+) -> int:
+    if not schedule:
+        return fallback
+    current = schedule[0][1]
+    for start_epoch, points in schedule:
+        if epoch >= start_epoch:
+            current = points
+        else:
+            break
+    return current
+
+
+def rebuild_train_loader_with_vol_points(
+    config: Config,
+    old_train_loader: DataLoader,
+    n_points: int,
+    distributed_state,
+) -> DataLoader:
+    """Rebuild the training DataLoader with a new max_volume_points value.
+
+    Reuses the existing ``DrivAerMLCaseStore`` so cached point counts and
+    artifact-path resolutions survive the swap. The view list is recomputed
+    because ``max_volume_points`` changes the per-case view count, which in
+    turn changes the dataset length that the distributed sampler must see.
+    """
+
+    old_ds = old_train_loader.dataset
+    sampling_mode = (
+        "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
+    )
+    train_ds = DrivAerMLSurfaceDataset(
+        old_ds.case_ids,
+        store=old_ds.store,
+        max_surface_points=config.train_surface_points,
+        max_volume_points=n_points,
+        sampling_mode=sampling_mode,
+    )
+    train_sampler = None
+    train_shuffle = True
+    if distributed_state is not None and distributed_state.enabled:
+        train_sampler = DistributedSampler(
+            train_ds,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+            shuffle=True,
+            drop_last=True,
+        )
+        train_shuffle = False
+    return DataLoader(
+        train_ds,
+        batch_size=config.batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        drop_last=True,
+        **loader_kwargs(config),
+    )
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     state = init_distributed()
     run = None
     try:
         config = parse_args(argv)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
+        vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -233,6 +347,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
+
+        if vol_points_schedule:
+            initial_vol_points = vol_points_for_epoch(
+                vol_points_schedule, 0, config.train_volume_points
+            )
+            if config.debug:
+                initial_vol_points = min(initial_vol_points, 8_192)
+            config.train_volume_points = initial_vol_points
+            if state.is_main:
+                print(
+                    "Volume-points curriculum: "
+                    + ", ".join(f"ep{e}->{p}" for e, p in vol_points_schedule)
+                )
+        current_train_vol_points = config.train_volume_points
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
@@ -295,6 +423,24 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_start = time.time()
 
         for epoch in range(max_epochs):
+            if vol_points_schedule:
+                desired_vol_points = vol_points_for_epoch(
+                    vol_points_schedule, epoch, config.train_volume_points
+                )
+                if config.debug:
+                    desired_vol_points = min(desired_vol_points, 8_192)
+                if desired_vol_points != current_train_vol_points:
+                    if state.is_main:
+                        print(
+                            f"Volume-points curriculum: epoch {epoch} -> "
+                            f"train_volume_points={desired_vol_points} "
+                            f"(was {current_train_vol_points})"
+                        )
+                    config.train_volume_points = desired_vol_points
+                    train_loader = rebuild_train_loader_with_vol_points(
+                        config, train_loader, desired_vol_points, state
+                    )
+                    current_train_vol_points = desired_vol_points
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
@@ -351,6 +497,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "global_step": global_step,
                     "train/lr": current_lr,
                     "lr": current_lr,
+                    "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
