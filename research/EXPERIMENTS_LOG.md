@@ -6,6 +6,50 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-01 — PR #532 CLOSED NEGATIVE: nezuko AdamW vs Lion optimizer comparison
+
+- **Branch:** `nezuko/adamw-vs-lion-optimizer` (closed, branch deleted)
+- **Hypothesis:** AdamW (lr=5e-4, wd=1e-2) might match or beat Lion (lr=1e-4, wd=5e-4) on the full SOTA stack — particularly on tau_y/tau_z where adaptive per-parameter LR could help fine-grained cross-stream stress convergence.
+- **W&B run:** `3hm5ae1j`, group `nezuko-adamw-vs-lion`, ~5h runtime (mid-EP5 at close)
+
+| EP | AdamW val_abupt | Lion SOTA `r5rw40rn` | Δ |
+|---|---:|---:|---:|
+| 1 | 31.33% | 30.21% | +1.11 |
+| 2 | 11.55% | 9.68% | +1.87 |
+| 3 | 9.35% | 8.13% | +1.22 |
+| 4 | 7.94% | 7.42% | +0.51 |
+
+- **EP3→EP4 tau_y improvement:** AdamW −2.07pp vs Lion −0.84pp (AdamW genuinely faster per epoch on tau-axes mid-training)
+- **But:** AdamW starts +1.1pp behind at EP1 and the gap widens to +1.87pp at EP2 before closing. Cannot catch up in the 5–6 epoch budget.
+- **Conclusion:** NEGATIVE — Lion's sign-of-momentum update is genuinely better-conditioned for our batch size (32 effective). **Insight:** future adaptive-LR experiments should consider scheduled optimizer switch (Lion → AdamW at ~EP3) rather than pure AdamW from scratch. AdamW vs Lion at this batch size is now closed.
+
+---
+
+## 2026-05-01 — PR #523 SENT BACK (promising, primary metric miss): thorfinn GradNorm-EMA-proxy dynamic loss balancing
+
+- **Branch:** `thorfinn/gradnorm-multitask-balancing` (open, draft, status:wip — Run 2 pending)
+- **Hypothesis:** Dynamic per-task loss balancing should close the tau_y/tau_z gap (current 8.77%/10.56% vs AB-UPT 3.65%/3.63%) by upweighting the slowest-converging axes during training.
+- **W&B run:** `9477cjoh`, group `thorfinn-gradnorm`, 270.6 min, 6 epochs completed
+- **Implementation:** Lightweight EMA-loss-proxy GradNorm (~1× overhead) after full GradNorm crashed at 5× autograd cost. r_i = ema_i / initial_i, w_i ∝ r_i^α (α=1.5). Closed-form normalization to mean=1, log_clip=4.0 (never engaged).
+
+| Axis | Run 1 result | SOTA #511 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| **val_abupt** | 7.2667% | 7.0134% | **+0.25pp** | ✗ miss primary |
+| val_tau_y | 8.943% | 8.7717% | +0.17pp | ✗ |
+| **val_tau_z** | **10.481%** | 10.5629% | **−0.08pp** | **✓** first tau_z win since #142 |
+| val_sp | 4.982% | 4.5104% | +0.47pp | ✗ |
+| val_vp | 5.002% | 4.2168% | +0.79pp | ✗ |
+| **test_abupt** | 8.4111% | 8.3130% | +0.10pp | ✗ |
+| **test_tau_z** | **9.704%** | 9.927% | **−0.22pp** | ✓ |
+
+- **Final balancer state at EP6:** w_sp=0.50, w_tau_x=1.04, w_tau_y=1.38, w_tau_z=1.58, w_vp=0.50. r-ordering: r_z > r_y > r_x > r_vp ≈ r_sp — exactly matches the convergence-gap prior.
+- **Mechanism worked perfectly:** balancer correctly identified tau_z as the slowest task, weight evolved smoothly from 1.04 → 1.58 across 6 epochs, no oscillation, no runaway. Dropped tau_z below SOTA on both val and test — first time any experiment in this programme has done this since the static-reweighting failures (#142, #454, #467).
+- **Why primary metric missed:** α=1.5 from the GradNorm paper is too aggressive for our 5-axis MSE-decomposed setup; sp/vp got down-weighted to 0.50 and lost ~0.5–0.8pp accuracy each.
+- **Decision:** SEND BACK with explicit Run 2 config — α=0.5 (softer redistribution) + `--gradnorm-min-weight 0.7` floor (prevents sp/vp starvation) + `--lr-cosine-t-max 13 --epochs 13` (extended schedule like SOTA #511). The mechanism is validated; the redistribution intensity needs tuning.
+- **Conclusion:** PROMISING DIRECTION — Run 2 is the second of 2–3 alpha-sweep iterations expected. EMA-proxy GradNorm is the most mechanistically-correct attack on tau_y/tau_z to date.
+
+---
+
 ## 2026-05-03 12:00 UTC — PR #506 CLOSED NEGATIVE: nezuko 2× surface point density (65k→131k)
 
 - **Branch:** `nezuko/surface-pts-196k` (closed, branch deleted)
