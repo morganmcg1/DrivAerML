@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Iterable
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import wandb
 import yaml
@@ -119,6 +120,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    use_uncertainty_weighting: bool = False
     debug: bool = False
 
 
@@ -145,6 +147,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+UNCERTAINTY_TASK_NAMES: tuple[str, ...] = ("sp", "tau_x", "tau_y", "tau_z", "vol_p")
+UNCERTAINTY_LOG_SIGMA_CLAMP: tuple[float, float] = (-3.0, 3.0)
+# Lion's sign update would push log_sigma by ±lr each step regardless of grad
+# magnitude, capping drift at ±0.15 over a 12-epoch run. We instead optimize
+# log_sigma with a dedicated AdamW (adaptive step size, suitable for 5 scalars).
+UNCERTAINTY_LOG_SIGMA_LR: float = 1e-3
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -192,6 +202,7 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    log_sigma: nn.Parameter | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -203,19 +214,59 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
-    return loss, {
-        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
-        "surface_loss": float(surface_loss.detach().cpu().item()),
-        "volume_loss": float(volume_loss.detach().cpu().item()),
-        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
-        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        if log_sigma is None:
+            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_volume_loss = volume_loss_weight * volume_loss
+            loss = weighted_surface_loss + weighted_volume_loss
+            base_mse_loss = surface_loss + volume_loss
+            return loss, {
+                "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
+                "surface_loss": float(surface_loss.detach().cpu().item()),
+                "volume_loss": float(volume_loss.detach().cpu().item()),
+                "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
+                "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+            }
+        # Homoscedastic uncertainty weighting (Kendall et al. 2018, arXiv:1705.07115)
+        # L = sum_i [ L_i / (2 * sigma_i^2) + log(sigma_i) ]
+        # = sum_i [ L_i * exp(-2 * log_sigma_i) / 2 + log_sigma_i ]
+        ch_losses = [
+            masked_mse(
+                out["surface_preds"][..., c : c + 1],
+                surface_target[..., c : c + 1],
+                batch.surface_mask,
+            )
+            for c in range(4)
+        ]
+        volume_loss_t = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # Cast to fp32 for numerical stability of exp(-2*log_sigma).
+        per_task_losses = torch.stack(ch_losses + [volume_loss_t]).float()
+        log_sigma_clamped = log_sigma.float().clamp(*UNCERTAINTY_LOG_SIGMA_CLAMP)
+        inv_var_weights = 0.5 * torch.exp(-2.0 * log_sigma_clamped)
+        weighted_per_task = per_task_losses * inv_var_weights
+        uncertainty_regularizer = log_sigma_clamped.sum()
+        loss = weighted_per_task.sum() + uncertainty_regularizer
+    surface_loss_mean = per_task_losses[:4].mean()
+    weighted_surface_loss_value = weighted_per_task[:4].sum()
+    weighted_volume_loss_value = weighted_per_task[4]
+    base_mse_loss_value = surface_loss_mean + per_task_losses[4]
+    metrics: dict[str, float] = {
+        "base_mse_loss": float(base_mse_loss_value.detach().cpu().item()),
+        "surface_loss": float(surface_loss_mean.detach().cpu().item()),
+        "volume_loss": float(per_task_losses[4].detach().cpu().item()),
+        "surface_loss_weighted": float(weighted_surface_loss_value.detach().cpu().item()),
+        "volume_loss_weighted": float(weighted_volume_loss_value.detach().cpu().item()),
+        "uncertainty_regularizer": float(uncertainty_regularizer.detach().cpu().item()),
     }
+    sigma_values = torch.exp(log_sigma_clamped)
+    for i, name in enumerate(UNCERTAINTY_TASK_NAMES):
+        metrics[f"uncertainty/raw_loss_{name}"] = float(per_task_losses[i].detach().cpu().item())
+        metrics[f"uncertainty/sigma_{name}"] = float(sigma_values[i].detach().cpu().item())
+        metrics[f"uncertainty/log_sigma_{name}"] = float(log_sigma_clamped[i].detach().cpu().item())
+        metrics[f"uncertainty/effective_weight_{name}"] = float(inv_var_weights[i].detach().cpu().item())
+        metrics[f"uncertainty/weighted_loss_{name}"] = float(weighted_per_task[i].detach().cpu().item())
+    return loss, metrics
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -245,6 +296,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
 
         model: nn.Module = build_model(config).to(device)
+        log_sigma: nn.Parameter | None = None
+        if config.use_uncertainty_weighting:
+            log_sigma = nn.Parameter(torch.zeros(len(UNCERTAINTY_TASK_NAMES), device=device))
+            if state.is_main:
+                print(
+                    "Uncertainty-weighted multitask loss enabled (Kendall et al. 2018): "
+                    f"5 learnable log_sigma scalars init=0 for tasks "
+                    f"{', '.join(UNCERTAINTY_TASK_NAMES)} (clamp={UNCERTAINTY_LOG_SIGMA_CLAMP})"
+                )
         n_params = sum(param.numel() for param in model.parameters())
         if config.compile_model:
             model = torch.compile(model)
@@ -258,6 +318,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
         optimizer = build_optimizer(base_model, config)
+        log_sigma_optimizer: torch.optim.Optimizer | None = None
+        if log_sigma is not None:
+            # Dedicated AdamW for log_sigma scalars: Lion's sign update is the wrong
+            # inductive bias for 5 adaptive task-uncertainty scalars (constant ±lr step).
+            log_sigma_optimizer = torch.optim.AdamW(
+                [log_sigma], lr=UNCERTAINTY_LOG_SIGMA_LR, weight_decay=0.0
+            )
+            if state.is_main:
+                print(
+                    f"log_sigma optimizer: AdamW(lr={UNCERTAINTY_LOG_SIGMA_LR}, wd=0.0) "
+                    f"[separate from {config.optimizer.lower()} backbone]"
+                )
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -328,8 +400,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    log_sigma=log_sigma,
                 )
                 optimizer.zero_grad(set_to_none=True)
+                if log_sigma_optimizer is not None:
+                    log_sigma_optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
@@ -365,11 +440,29 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if log_sigma is not None:
+                        for key, value in batch_loss_metrics.items():
+                            if key.startswith("uncertainty/"):
+                                train_log[key] = value
+                        train_log["train/uncertainty_regularizer"] = batch_loss_metrics[
+                            "uncertainty_regularizer"
+                        ]
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
+                    if log_sigma_optimizer is not None:
+                        log_sigma_optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
+                    # log_sigma sits outside the DDP-wrapped model; manually all-reduce
+                    # its grad so every rank applies the same update.
+                    if (
+                        state.enabled
+                        and log_sigma is not None
+                        and log_sigma.grad is not None
+                    ):
+                        dist.all_reduce(log_sigma.grad, op=dist.ReduceOp.SUM)
+                        log_sigma.grad.div_(state.world_size)
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
@@ -403,8 +496,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                     if skip_step:
                         optimizer.zero_grad(set_to_none=True)
+                        if log_sigma_optimizer is not None:
+                            log_sigma_optimizer.zero_grad(set_to_none=True)
                     else:
                         optimizer.step()
+                        if log_sigma_optimizer is not None:
+                            log_sigma_optimizer.step()
                         if ema is not None:
                             ema.update(base_model)
                         weight_metrics = (
@@ -572,11 +669,27 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "val_metrics": val_metrics,
                             "checkpoint_source": best_checkpoint_source,
                             "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                            "log_sigma": (
+                                log_sigma.detach().cpu()
+                                if log_sigma is not None
+                                else None
+                            ),
+                            "uncertainty_task_names": (
+                                list(UNCERTAINTY_TASK_NAMES)
+                                if log_sigma is not None
+                                else None
+                            ),
                         },
                         model_path,
                     )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+                if log_sigma is not None:
+                    sigma_snapshot = torch.exp(
+                        log_sigma.detach().float().clamp(*UNCERTAINTY_LOG_SIGMA_CLAMP)
+                    ).cpu().tolist()
+                    for name, value in zip(UNCERTAINTY_TASK_NAMES, sigma_snapshot):
+                        log_metrics[f"uncertainty/sigma_{name}_epoch"] = float(value)
                 wandb.log(log_metrics)
                 tag = " *" if improved else ""
                 print(
@@ -584,6 +697,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"train_loss={epoch_train_loss:.5f} "
                     f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
                 )
+                if log_sigma is not None:
+                    sigma_str = " ".join(
+                        f"{name}={value:.4f}"
+                        for name, value in zip(UNCERTAINTY_TASK_NAMES, sigma_snapshot)
+                    )
+                    print(f"           sigma: {sigma_str}")
                 print_metrics("val_surface", val_metrics["val_surface"])
             else:
                 wandb.log(log_metrics)
