@@ -699,6 +699,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    surface_pressure_loss_weight_decay: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1502,6 +1503,7 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    sp_loss_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1545,7 +1547,7 @@ def train_loss(
             surface_pred_used,
             surface_target_used,
             batch.surface_mask,
-            channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+            channel_weights=(sp_loss_weight, 1.0, wallshear_y_weight, wallshear_z_weight),
             wallshear_huber_delta=wallshear_huber_delta,
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
@@ -2111,6 +2113,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            if config.surface_pressure_loss_weight_decay > 0.0:
+                sp_progress = min(1.0, global_step / max(1, total_estimated_steps))
+                sp_w_init = 1.0
+                sp_w_final = config.surface_pressure_loss_weight_decay
+                sp_loss_weight_now = sp_w_init + sp_progress * (sp_w_final - sp_w_init)
+            else:
+                sp_loss_weight_now = 1.0
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -2124,6 +2133,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                sp_loss_weight=sp_loss_weight_now,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2230,6 +2240,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "train/lr": float(optimizer.param_groups[0]["lr"]),
                 "train/nonfinite_skip_count": nonfinite_skip_count,
+                "train/sp_loss_weight_now": float(sp_loss_weight_now),
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
