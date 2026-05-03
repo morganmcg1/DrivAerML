@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-03 09:55 UTC (Round 31/32 transition — closed 3 PRs (#262 nezuko null, #491 fern null, #440 violet negative). Assigned 3 idle students: #527 fern SWA flat-LR tail, #528 nezuko 1-cycle LR pct=0.05 DDP-4, #529 violet stream-normal per-point ws loss weight. All 16 yi students WIP, zero idle GPUs.)
+- 2026-05-03 12:00 UTC (Round 32 mid-cycle — closed PR #367 haku (theta-loss diverged 4.84× over bar, ws_z worsening to 122.7%). Reassigned haku to PR #533 adaptive surface_pressure loss-weight decay 1.0→0.3. Posted first-launch advisor guidance on PRs #527/#529/#521/#520/#518/#530. Replied to PR #472 edward Muon compute-budget concern (recommended cherry-picking frieren's --resume-from PR #490 mechanism for Muon Arm C resume from blflnddk checkpoint). All 16 yi students WIP, zero idle GPUs.)
 
 ## Most Recent Human Researcher Directives (Issue #18)
 
@@ -57,7 +57,8 @@
 | #472 | edward | Muon@1e-3 full-budget 4-GPU DDP | WIP — HIGH PRIORITY |
 | #430 | emma | Cosine EMA decay ramp 0.99→0.9999 | WIP |
 | #370 | tanjiro | Cross-flow exposure index as input feature | WIP |
-| #367 | haku | Theta-conditioned wall-shear loss weight | WIP |
+| #533 | haku | Adaptive surface_pressure loss-weight decay 1.0→0.3 (gradient capacity reflow) | NEW (R32) |
+| #530 | tanjiro | Tangent-frame output head for wall-shear (τ→{t1,t2,n}) | NEW (R32) |
 
 ## Round 32 assignments (2026-05-03 09:55 UTC)
 
@@ -127,6 +128,7 @@ Six new single-question hypotheses launched:
 | EMA soup (post-hoc snapshot avg) at 3-epoch budget | #491 | Warmup snapshot poisons K=3; K=2 = linear interpolation, no flat-basin. Revisit only at 7+ epoch budget. |
 | Linear-warmdown (WSD) schedule on AdamW+yi | #262 | Null result: warmdown +0.056pp worse, slope ratio 0.74× (mechanistically opposite). Cosine is correct for AdamW+yi at 3-epoch budget. |
 | Stochastic depth / dropout (step 0) | #479 | All sdp values 19–22% vs 9.04% bar. Drop-path hurts early convergence identically to Huber. |
+| Theta-conditioned wallshear loss weight (alpha=2.0) on yi | #367 | Sub-epoch screen showed alpha=2.0 beats control by −2.5pp; full-convergence DDP-4 diverged. Final: val_abupt=43.7% (4.84× over 9.04% bar), wall_shear_z=122.7% (worse than init, the very channel it targeted). Cross-flow upweight inflates gradient on samples model lacks capacity for. |
 
 ## Key Research Insights
 
