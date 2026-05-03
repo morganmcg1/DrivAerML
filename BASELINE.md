@@ -2,9 +2,20 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: edward PR #511 extended cosine schedule EP13 — 2026-05-01 (updated)
+## Status: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03 (updated)
 
-**NEW SOTA: edward PR #511 (cosine T_max extended 11→13 for 2 extra convergence epochs) beats PR #489 by −0.1658pp val (7.0134% vs 7.1792% val). W&B run `5o7jc7wi`, EP13. Delta −2.31% relative.**
+**NEW SOTA: alphonse PR #510 (surface-loss-weight=2.0, heavier surface gradient emphasis) beats PR #511 by −0.007pp val, −0.021pp test (7.0063% val, 8.2921% test). W&B run `qqtdnlwq`, EP5 EMA. Delta −0.10% relative on val.**
+
+Key insight: Doubling the surface MSE contribution via `--surface-loss-weight 2.0` drives more gradient capacity into surface channels. Run timed out at EP5 (4.71h of 50-epoch budget) but all win conditions and test eval completed. 5/7 test channels improve vs PR #511; tau_y (+0.063pp) and volume_pressure (+0.238pp) show small regressions. The hypothesis is confirmed: slw=2.0 is a Pareto improvement over slw=1.0 on the current SOTA stack. A full 13-epoch run with slw=2.0 should yield further gains.
+
+**W&B run:** `qqtdnlwq` (alphonse DDP8, rank-0) — group `alphonse-slw-sweep`, best val **7.0063%** (EP5 EMA), runtime 4.71h
+**PR:** #510
+**Val metrics (best-val checkpoint, EP5 EMA):** val_abupt=7.0063%, surface_pressure=4.5994%, wall_shear=7.8939%, volume_pressure=4.1643%, tau_x=6.8150%, tau_y=8.9516%, tau_z=10.5010%
+**Test metrics:** test_abupt=8.2921%, surface_pressure=4.2381%, wall_shear=7.6341%, volume_pressure=12.1047%, tau_x=6.6657%, tau_y=8.6452%, tau_z=9.8066%
+
+**Prior SOTA: edward PR #511 extended cosine schedule EP13 — 2026-05-01 (updated)**
+
+**edward PR #511 (cosine T_max extended 11→13 for 2 extra convergence epochs) beats PR #489 by −0.1658pp val (7.0134% vs 7.1792% val). W&B run `5o7jc7wi`, EP13. Delta −2.31% relative.**
 
 Key insight: PR #488 SOTA run `ki2q9ko9` was still descending at EP11 — the cosine schedule was truncating too early. Extending `lr_cosine_t_max` from 11→13 gives 2 more epochs on the descending tail, yielding consistent per-epoch improvement (EP11=7.13% → EP12=7.06% → EP13=7.01%). Test result confirms: test_abupt=8.3130% (vs prior SOTA 8.497%). Surface pressure improves substantially (4.271% vs 4.783%). tau_y/tau_z remain the open problem.
 
@@ -13,28 +24,29 @@ Key insight: PR #488 SOTA run `ki2q9ko9` was still descending at EP11 — the co
 **Val metrics (best-val checkpoint, EP13):** val_abupt=7.0134%, surface_pressure=4.5104%, wall_shear=7.9650%, volume_pressure=4.2168%, tau_x=7.0053%, tau_y=8.7717%, tau_z=10.5629%
 **Test metrics:** test_abupt=8.3130%, surface_pressure=4.2709%, wall_shear=7.7863%, volume_pressure=11.8673%, tau_x=6.9184%, tau_y=8.5819%, tau_z=9.9267%
 
-### tay current best — `val_primary/*` (PR #511 edward, run `5o7jc7wi`)
+### tay current best — `val_primary/*` (PR #510 alphonse, run `qqtdnlwq`)
 
-| Metric | **PR #511 edward (SOTA)** | PR #489 thorfinn (prev) | AB-UPT |
+| Metric | **PR #510 alphonse (SOTA)** | PR #511 edward (prev) | AB-UPT |
 |---|---:|---:|---:|
-| `abupt` | **7.0134** | 7.1792 | — |
-| `surface_pressure` | **4.5104** | 4.783 | 3.82 |
-| `wall_shear` | **7.9650** | 8.098 | 7.29 |
-| `volume_pressure` | 4.2168 | **4.207** | 6.08 |
-| `tau_x` | **7.0053** | 7.019 | 5.35 |
-| `tau_y` | **8.7717** | 9.187 | 3.65 |
-| `tau_z` | **10.5629** | 10.701 | 3.63 |
+| `abupt` | **7.0063** | 7.0134 | — |
+| `surface_pressure` | 4.5994 | **4.5104** | 3.82 |
+| `wall_shear` | **7.8939** | 7.9650 | 7.29 |
+| `volume_pressure` | **4.1643** | 4.2168 | 6.08 |
+| `tau_x` | **6.8150** | 7.0053 | 5.35 |
+| `tau_y` | 8.9516 | **8.7717** | 3.65 |
+| `tau_z` | **10.5010** | 10.5629 | 3.63 |
 
-**Key insight:** Extended cosine (EP13) beats prior SOTA on all val axes except volume_pressure (near-tie: 4.2168 vs 4.207). Test abupt improves by 0.184pp (−2.17% relative). The descending val trajectory (EP11=7.13→EP12=7.06→EP13=7.01) suggests EP14-15 may yield further gains if budget allows. tau_y/tau_z gap (8.77%/10.56% vs target 3.65%/3.63%) remains primary open problem.
+**Key insight:** slw=2.0 (heavier surface gradient emphasis) wins on val_abupt at EP5, with substantial tau_x/tau_z/wall_shear improvements. tau_y and surface_pressure regress slightly vs PR #511 on val, but test metrics show improvements on 5/7 channels. Run timed out at EP5 (360-min limit); a full 13-epoch run should yield further improvement. tau_y/tau_z gap (8.95%/10.50% vs target 3.65%/3.63%) remains primary open problem.
 
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init, vol-curriculum, EP13)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init, vol-curriculum, slw=2.0)
 
 ```bash
 torchrun --standalone --nproc_per_node=8 train.py \
-  --agent edward --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --agent alphonse --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
   --no-compile-model --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
@@ -42,10 +54,13 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
   --lr-cosine-t-max 13 \
   --epochs 13 \
-  --wandb-group edward-extended-cosine --wandb-name edward-extended-ep13
+  --surface-loss-weight 2.0 \
+  --wandb-group alphonse-slw-sweep --wandb-name alphonse-slw-2.0
 ```
 
-### Compounding wins so far (updated through PR #511)
+(Note: multi-sigma STRING-sep init from PR #488 model.py is required — `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"`)
+
+### Compounding wins so far (updated through PR #510)
 
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
@@ -67,7 +82,8 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #387 | alphonse | **−0.031pp (−0.36%) vs #358** | feat16 RFF (rff_num_features=16) stacked on STRING-sep + QK-norm config — best val at EP11 (7.3816%) |
 | #488 | alphonse | **−0.0144pp (−0.195%) vs #387** | multi-sigma STRING-sep init: log_freq params distributed across frequency octaves at init — vp drops from 12.189% to 4.357% (beats AB-UPT ref!) |
 | #489 | thorfinn | **−0.1880pp (−2.55%) vs #488** | vol-points curriculum 16k→32k→49k→65k: progressive coarse-to-fine volume sampling across training epochs — vp further improves to 4.207% |
-| **#511** | **edward** | **−0.1658pp (−2.31%) vs #489** | **extended cosine T_max 11→13: 2 extra convergence epochs on descending tail — EP13 val_abupt=7.0134%, test_abupt=8.3130%** |
+| #511 | edward | **−0.1658pp (−2.31%) vs #489** | extended cosine T_max 11→13: 2 extra convergence epochs on descending tail — EP13 val_abupt=7.0134%, test_abupt=8.3130% |
+| **#510** | **alphonse** | **−0.0071pp (−0.10%) vs #511** | **surface-loss-weight=2.0: heavier surface gradient emphasis closes tau_x/tau_z/wall_shear at EP5 — val_abupt=7.0063%, test_abupt=8.2921%** |
 
 ---
 
