@@ -763,6 +763,10 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    lr_schedule: str = "cosine"  # "cosine" | "one-cycle"
+    lr_onecycle_pct_start: float = 0.05
+    lr_onecycle_div_factor: float = 25.0
+    lr_onecycle_final_div_factor: float = 1e4
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2039,12 +2043,50 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"lr={config.lr} wd={config.weight_decay}"
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
-    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
+    if config.lr_schedule == "one-cycle":
+        per_step_scheduler = True
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=config.lr,
+            total_steps=total_estimated_steps,
+            pct_start=config.lr_onecycle_pct_start,
+            div_factor=config.lr_onecycle_div_factor,
+            final_div_factor=config.lr_onecycle_final_div_factor,
+            anneal_strategy="cos",
+            cycle_momentum=False,
+        )
+        if is_main:
+            print(
+                f"LR schedule: OneCycleLR max_lr={config.lr} "
+                f"total_steps={total_estimated_steps} "
+                f"pct_start={config.lr_onecycle_pct_start} "
+                f"div_factor={config.lr_onecycle_div_factor} "
+                f"final_div_factor={config.lr_onecycle_final_div_factor} "
+                f"(initial_lr={config.lr / config.lr_onecycle_div_factor:.3e}, "
+                f"final_lr={config.lr / config.lr_onecycle_div_factor / config.lr_onecycle_final_div_factor:.3e})"
+            )
+    elif config.lr_schedule == "cosine":
+        per_step_scheduler = False
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+        if is_main:
+            print(f"LR schedule: CosineAnnealingLR T_max={max_epochs}")
+    else:
+        raise ValueError(
+            f"Unknown --lr-schedule '{config.lr_schedule}'. Supported: 'cosine', 'one-cycle'."
+        )
+    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     effective_warmup_steps = config.lr_warmup_steps
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
         effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
+    if config.lr_schedule == "one-cycle" and effective_warmup_steps > 0:
+        if is_main:
+            print(
+                f"WARNING: --lr-warmup-epochs/--lr-warmup-steps "
+                f"({effective_warmup_steps} steps) ignored when --lr-schedule=one-cycle "
+                f"(OneCycleLR has internal warmup via pct_start={config.lr_onecycle_pct_start})."
+            )
+        effective_warmup_steps = 0
     if is_main and effective_warmup_steps > 0:
         print(
             f"LR warmup: {effective_warmup_steps} steps "
@@ -2247,6 +2289,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
                         pg["lr"] = base_lr
             optimizer.step()
+            if per_step_scheduler:
+                try:
+                    scheduler.step()
+                except ValueError:
+                    pass
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
@@ -2321,7 +2368,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if not per_step_scheduler:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
