@@ -119,6 +119,7 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    eval_tta_mirror: bool = False
     debug: bool = False
 
 
@@ -515,6 +516,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        tta_mirror=config.eval_tta_mirror,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -529,6 +531,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    tta_mirror=config.eval_tta_mirror,
                 )
                 for name, loader in val_loaders.items()
             }
@@ -648,6 +651,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             n_params=n_params,
             global_step=global_step,
             total_minutes=total_minutes,
+            tta_mirror=config.eval_tta_mirror,
         )
         wandb.finish()
     finally:

@@ -914,18 +914,44 @@ def _finite_mean(values: Iterable[float]) -> float:
     return sum(finite) / max(len(finite), 1)
 
 
-def accumulate_eval_batch(
-    accumulator: EvalAccumulator,
+def _mirror_y_batch(batch: SurfaceBatch) -> SurfaceBatch:
+    """Return a clone of ``batch`` with y-coordinates flipped about y=0.
+
+    Used for evaluation-time test-time augmentation: the DrivAer geometry is
+    approximately left-right symmetric, so a model's prediction on the mirrored
+    geometry can be un-mirrored and averaged with the original prediction.
+    Surface input channels are ``[x, y, z, nx, ny, nz, area]`` so we negate
+    columns 1 (y) and 4 (ny). Volume input channels are ``[x, y, z, sdf]`` so
+    we negate column 1 (y); the signed distance is unchanged because the
+    mirror is an isometry. Targets are returned by reference because TTA
+    consumers only read the averaged prediction.
+    """
+
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = -surface_x[..., 1]
+    if surface_x.shape[-1] >= 5:
+        surface_x[..., 4] = -surface_x[..., 4]
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = -volume_x[..., 1]
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=batch.surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
+
+
+def _model_predict_norm(
     *,
     model: nn.Module,
     batch: SurfaceBatch,
-    transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-) -> None:
-    batch = batch.to(device)
-    surface_target_norm = transform.apply_surface(batch.surface_y)
-    volume_target_norm = transform.apply_volume(batch.volume_y)
+) -> tuple[torch.Tensor, torch.Tensor]:
     eval_module = unwrap_model(model)
     with autocast_context(device, amp_mode):
         out = eval_module(
@@ -934,16 +960,55 @@ def accumulate_eval_batch(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-    surface_pred_norm = out["surface_preds"].float()
-    volume_pred_norm = out["volume_preds"].float()
+    return out["surface_preds"].float(), out["volume_preds"].float()
+
+
+def accumulate_eval_batch(
+    accumulator: EvalAccumulator,
+    *,
+    model: nn.Module,
+    batch: SurfaceBatch,
+    transform: TargetTransform,
+    device: torch.device,
+    amp_mode: str,
+    tta_mirror: bool = False,
+) -> None:
+    batch = batch.to(device)
+    surface_target_norm = transform.apply_surface(batch.surface_y)
+    volume_target_norm = transform.apply_volume(batch.volume_y)
+    surface_pred_norm, volume_pred_norm = _model_predict_norm(
+        model=model, batch=batch, device=device, amp_mode=amp_mode
+    )
+
+    if tta_mirror:
+        mirrored = _mirror_y_batch(batch)
+        surface_pred_norm_mirror, volume_pred_norm_mirror = _model_predict_norm(
+            model=model, batch=mirrored, device=device, amp_mode=amp_mode
+        )
+        # Average in physical (denormalized) space so the tau_y sign flip is
+        # exact even when normalizer means are nonzero.
+        surface_pred = transform.invert_surface(surface_pred_norm)
+        volume_pred = transform.invert_volume(volume_pred_norm)
+        surface_pred_mirror = transform.invert_surface(surface_pred_norm_mirror)
+        volume_pred_mirror = transform.invert_volume(volume_pred_norm_mirror)
+        # Surface output channels: [cp, tau_x, tau_y, tau_z]; tau_y flips under y-mirror.
+        surface_pred_unmirror = surface_pred_mirror.clone()
+        surface_pred_unmirror[..., 2] = -surface_pred_unmirror[..., 2]
+        # Volume output is scalar pressure: unchanged under mirror.
+        surface_pred = 0.5 * (surface_pred + surface_pred_unmirror)
+        volume_pred = 0.5 * (volume_pred + volume_pred_mirror)
+        surface_pred_norm = transform.apply_surface(surface_pred)
+        volume_pred_norm = transform.apply_volume(volume_pred)
+    else:
+        surface_pred = transform.invert_surface(surface_pred_norm)
+        volume_pred = transform.invert_volume(volume_pred_norm)
+
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
     accumulator.surface_loss_count += surface_count
     accumulator.volume_loss_sse += volume_sse
     accumulator.volume_loss_count += volume_count
-    surface_pred = transform.invert_surface(surface_pred_norm)
-    volume_pred = transform.invert_volume(volume_pred_norm)
 
     if bool(batch.surface_mask.any()):
         surface_abs = (surface_pred - batch.surface_y).abs()
@@ -1088,6 +1153,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    tta_mirror: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1099,6 +1165,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            tta_mirror=tta_mirror,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1398,6 +1465,7 @@ def run_final_evaluation(
     n_params: int,
     global_step: int,
     total_minutes: float,
+    tta_mirror: bool = False,
 ) -> None:
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model"])
@@ -1415,11 +1483,14 @@ def run_final_evaluation(
             "best_val/wall_shear_mae": best_metrics["wall_shear_mae"],
             "best_val/volume_pressure_mae": best_metrics["volume_pressure_mae"],
             "total_train_minutes": total_minutes,
+            "eval_tta_mirror": 1.0 if tta_mirror else 0.0,
         }
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model, loader, transform, device, amp_mode=config.amp_mode, tta_mirror=tta_mirror
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1439,7 +1510,9 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model, loader, transform, device, amp_mode=config.amp_mode, tta_mirror=tta_mirror
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {
