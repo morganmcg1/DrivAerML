@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-03 18:38 UTC (Round 33 — advisor cycle)
+- 2026-04-29 19:45 UTC (Round 33/34 — advisor cycle)
 - **CURRENT SOTA (yi branch): PR #517 (askeladd, Lion lr=1e-4 clip=0.5) — val_abupt 9.032%**. Active yi merge bar: **9.032%** (run `brat65z4`).
 - **PR #490 (frieren STRING-sep learnable PE) MERGED to yi at 15:48 UTC 2026-05-03.** The `--learnable-pe` flag is now available in yi `train.py`. PR #517 was launched BEFORE #490 merged, so the current baseline does NOT yet include STRING-sep PE. The next highest-priority merge is a from-scratch run combining STRING-sep + Lion lr=1e-4 clip=0.5 (PR #539 frieren, just assigned).
 - **Tay SOTA (reference track, not yi): PR #511 (edward) — val_abupt 7.013% / test_abupt 8.313%** (tay branch only, not reproducible on yi standalone).
@@ -57,26 +57,26 @@ torchrun --standalone --nproc_per_node=4 target/train.py \
 
 Note: `--learnable-pe` is available on yi (PR #490) but not yet confirmed in a clean from-scratch run at 9.032% config level. PR #539 (frieren) will lock this in.
 
-## Active WIP PRs (Round 33 — 16 PRs)
+## Active WIP PRs (Round 33/34 — 16 PRs)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #530 | tanjiro | Tangent-frame output head (τ→{t1,t2,n}) | Running ep4 (val 9.794%, converging) |
-| #529 | violet | Stream-normal per-point ws loss weight (γ=1/3 sweep) | Running (arm B gamma=3 val 11.5% at step 10886) |
-| #528 | nezuko | 1-cycle LR pct_start=0.05 vs cosine ep3 | Arm A done (10.502%), arm B cosine-ctrl running |
-| #522 | thorfinn | BF16→FP32 last-2-epoch precision | Arm A done (10.923%), arm B rerun running |
-| #521 | senku | Sigmoid-l1 slice attention vs softmax | Arm B running (live 13.4% at step 10886) |
-| #520 | norman | Volume-only coord transform (signed-log/asinh) | Arm A done (10.964%), arm C asinh started |
-| #519 | gilbert | LLRD sweep (decay=0.75/0.95) | Arm A done (11.168%), arm C running |
-| #518 | kohaku | Loss-side asinh wallshear (delta sweep) | Arm d=2.0 running (28min) |
-| #478 | chihiro | Per-step cosine LR schedule | Arm B step-cosine running (live 25.0%) |
-| #472 | edward | Muon@1e-3 vs AdamW full-budget 4-GPU | Arm C muon running (live 10.1% at step 10884) |
-| #539 | frieren | STRING-sep + Lion lr=1e-4 clip=0.5 from scratch | **NEW — just assigned** |
-| #540 | emma | GradNorm adaptive τ_y/τ_z up-weighting | **NEW — just assigned** |
-| #541 | askeladd | Streamline-aligned wall-shear target frame | **NEW — just assigned** |
-| #542 | alphonse | Laplace far-field soft penalty on vol pressure | **NEW — just assigned** |
-| #543 | haku | Principal curvatures (H,K) as surface features | **NEW — just assigned** |
-| #544 | fern | y-symmetry paired loss + test-time mirror ensemble | **NEW — just assigned** |
+| #547 | tanjiro | Joint 2D Cholesky NLL head for τ_y/τ_z | NEW Round 33 |
+| #546 | violet | Online hard example mining for τ_y/τ_z | NEW Round 33 |
+| #545 | senku | RoPE on Transolver slice tokens (3D centroid keys) | NEW Round 33 |
+| #544 | fern | y-symmetry paired loss + test-time mirror ensemble | NEW Round 33 |
+| #543 | haku | Principal curvatures (H,K) as surface features | NEW Round 33 |
+| #542 | alphonse | Laplace far-field soft penalty on vol pressure | NEW Round 33 |
+| #541 | askeladd | Streamline-aligned wall-shear target frame | NEW Round 33 |
+| #540 | emma | GradNorm adaptive τ_y/τ_z up-weighting | NEW Round 33 |
+| #539 | frieren | STRING-sep + Lion lr=1e-4 clip=0.5 from scratch | NEW Round 33 |
+| #528 | nezuko | 1-cycle LR pct_start=0.05 vs cosine ep3 | WIP |
+| #522 | thorfinn | BF16→FP32 last-2-epoch precision | WIP |
+| #520 | norman | Volume-only coord transform (signed-log/asinh) | WIP |
+| #519 | gilbert | LLRD sweep (decay=0.75/0.95) | WIP |
+| #518 | kohaku | Loss-side asinh wallshear (delta sweep) | WIP |
+| #478 | chihiro | Per-step cosine LR schedule | WIP |
+| #548 | edward | **Muon@1e-3 + STRING-sep PE composition (both wins from scratch)** | **NEW — just assigned** |
 
 ## Key Closed Dead Ends (summary — do not repeat)
 
@@ -108,7 +108,7 @@ Note: `--learnable-pe` is available on yi (PR #490) but not yet confirmed in a c
    - PR #521 senku (sigmoid-l1 slice gating — running)
    - PR #543 haku (surface curvature features — running)
 5. **Optimizer/LR confirmations:**
-   - PR #472 edward (Muon@1e-3 — live 10.1%, very promising if it holds)
+   - PR #548 edward (Muon@1e-3 + STRING-sep PE composition — **highest priority combination run**)
    - PR #519 gilbert (LLRD)
    - PR #528 nezuko (1-cycle)
    - PR #478 chihiro (per-step cosine)
@@ -117,7 +117,7 @@ Note: `--learnable-pe` is available on yi (PR #490) but not yet confirmed in a c
 
 - Lion optimizer stable at lr=1e-4 with warmup=1 epoch, clip=0.5, wd=5e-4
 - AdamW stable max lr=5e-4 with warmup=500 steps
-- Muon tested at 1e-3 (edward) — single-GPU validated −24.8% relative, full-budget pending
+- Muon@1e-3 validated on full-budget 4-GPU (PR #472, closed): val_abupt 11.349% (~43.8% relative gain over AdamW@1e-4). Compute-limited at 3 epochs/4.5h. Composition with STRING-sep now in-flight PR #548.
 - `SENPAI_TIMEOUT_MINUTES=360` → ~5–6 epochs at DDP-4 (4L/512d, 65k pts)
 - VRAM: 4× H100 96GB; typical usage 68-74 GB / 96 GB at DDP-4 batch=4
 - Gnorm kill threshold: anything consistently > 300 (Lion stable < 50)

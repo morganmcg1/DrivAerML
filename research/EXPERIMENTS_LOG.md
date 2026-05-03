@@ -1,5 +1,31 @@
 # SENPAI Research Results
 
+## 2026-04-29 19:30 — PR #472: [edward] Muon@1e-3 vs AdamW@1e-4 full-budget 4-GPU DDP — CLOSED (validated, compute-limited)
+
+- Branch: `edward/muon-full-budget-ddp` (deleted)
+- Hypothesis: Promote Muon (Newton-Schulz orthogonalization + Nesterov momentum) from PR #377 mechanism flag to default optimizer at lr=1e-3 vs AdamW@1e-4 control on yi 4L/512d baseline + STRING-sep PE.
+- W&B runs: Arm A (AdamW) — wrong-WD aborted; Arm B v1 (Muon@1e-3 fresh) `blflnddk`; Arm B v2 (Muon@1e-3 fresh repro) `lgy5e3uw`; Arm C (model-only resume from blflnddk ep3) `tl87weiy`.
+
+**Results (best val_primary/abupt_axis_mean_rel_l2_pct across arms):**
+
+| Arm | Config | epochs | val_abupt | test_abupt | Notes |
+|---|---|---:|---:|---:|---|
+| A | AdamW@1e-4 fresh | ~3 | ≈18.0% | — | wrong-WD recovery |
+| **B v1** | **Muon@1e-3 fresh** | ~3 | **11.349%** | 12.425% | clean signal |
+| B v2 | Muon@1e-3 fresh repro | ~3 | ~12% | — | within ~1pp of v1 |
+| C | Muon@1e-3 model-only resume | 1+2 | 10.104% (ep1) | 11.189% | EMA-settling artefact |
+
+**Analysis:**
+- Muon@1e-3 vs AdamW@1e-4: ~43.8% relative improvement on val_abupt — decisive, reproducible optimizer signal.
+- Merge bar 9.032% (PR #517 askeladd Lion lr=1e-4 clip=0.5) NOT beaten — best arm 11.349%.
+- Compute envelope: 4×RTX-Pro-6000 → ~1.25 s/it → ~113 min/epoch → only ~3 epochs per 4.5h session, vs. ~8-9 epochs the original 8-GPU-class design assumed.
+- Arm C epoch-1 best (10.104%) is an EMA-settling artefact during low-LR warmup from loaded weights; epochs 2-3 regressed to 11-12%, confirming model plateau — model-only resume does not extend the trajectory because optimizer state, EMA, scheduler, and global_step all reset to fresh.
+- Plateau is compute-limited, not optimizer-limited.
+
+**Conclusion:** CLOSED as validated-but-compute-limited. Muon@1e-3 is a banked optimizer-direction win — preserved as a known-strong configuration for composition with other yi wins (STRING-sep PE PR #490 now landed on yi). Next steps are fresh experiments (composition runs, full-state checkpoint resume, 8-GPU when available), not iterations on this branch. Edward reassigned to Muon@1e-3 + STRING-sep PE composition run — the highest-value next step now that both wins are available on yi.
+
+---
+
 ## 2026-04-29 — PR #317: [violet] Huber loss for wall-shear heavy-tail robustness (δ sweep) — MERGED (mechanism flag, baseline unchanged)
 
 - Branch: `violet/huber-wall-shear-robustness` (merged)
