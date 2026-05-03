@@ -738,6 +738,7 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    resume_from: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1915,6 +1916,18 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     model = build_model(config).to(device)
+    if config.resume_from:
+        resume_path = Path(config.resume_from)
+        if not resume_path.is_file():
+            raise FileNotFoundError(f"--resume-from path does not exist: {resume_path}")
+        resume_ckpt = torch.load(resume_path, map_location=device, weights_only=True)
+        model.load_state_dict(resume_ckpt["model"], strict=True)
+        if is_main:
+            src_epoch = resume_ckpt.get("epoch", "?")
+            print(
+                f"Resumed model state_dict from {resume_path} (src epoch={src_epoch}). "
+                f"Optimizer/EMA/scheduler/global_step are fresh init."
+            )
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
