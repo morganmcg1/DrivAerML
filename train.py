@@ -763,6 +763,8 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    lr_schedule_steps: bool = False
+    lr_schedule_cosine_t_max_override: int = 0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2039,12 +2041,28 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"lr={config.lr} wd={config.weight_decay}"
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
-    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
         effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
+    if config.lr_schedule_steps:
+        if config.lr_schedule_cosine_t_max_override > 0:
+            cosine_steps = config.lr_schedule_cosine_t_max_override
+        else:
+            cosine_steps = max(1, total_estimated_steps - effective_warmup_steps)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=cosine_steps, eta_min=0.0
+        )
+        if is_main:
+            print(
+                f"LR schedule: per-step cosine, T_max={cosine_steps} "
+                f"(total_estimated_steps={total_estimated_steps}, "
+                f"effective_warmup_steps={effective_warmup_steps}, "
+                f"override={config.lr_schedule_cosine_t_max_override})"
+            )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     if is_main and effective_warmup_steps > 0:
         print(
             f"LR warmup: {effective_warmup_steps} steps "
@@ -2076,6 +2094,16 @@ def main(argv: Iterable[str] | None = None) -> None:
             "ddp_effective_batch_size": config.batch_size * world_size,
             "lr_warmup_steps_effective": effective_warmup_steps,
             **resume_info,
+            "lr_schedule_mode": "step" if config.lr_schedule_steps else "epoch",
+            "lr_schedule_cosine_t_max_effective": (
+                (
+                    config.lr_schedule_cosine_t_max_override
+                    if config.lr_schedule_cosine_t_max_override > 0
+                    else max(1, total_estimated_steps - effective_warmup_steps)
+                )
+                if config.lr_schedule_steps
+                else max_epochs
+            ),
         },
         mode=(
             os.environ.get("WANDB_MODE", "online") if is_main else "disabled"
@@ -2246,6 +2274,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 elif global_step == effective_warmup_steps:
                     for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
                         pg["lr"] = base_lr
+            if (
+                config.lr_schedule_steps
+                and global_step > effective_warmup_steps
+                and scheduler.last_epoch < scheduler.T_max
+            ):
+                scheduler.step()
             optimizer.step()
             ema_decay_now: float | None = None
             if ema is not None:
@@ -2321,7 +2355,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if not config.lr_schedule_steps:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
