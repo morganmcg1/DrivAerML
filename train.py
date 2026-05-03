@@ -606,6 +606,7 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     optimizer: str = "adamw"
+    log_x_coord: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1356,6 +1357,18 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def apply_log_x_coord(x: torch.Tensor) -> torch.Tensor:
+    """Soft-log compression on channel 0 (x-coord): sign(x) * log1p(|x|).
+
+    Approximates per-axis frequency tuning for the fixed-omega sincos PE by
+    bringing the streamwise span (~[-2,2]) closer to the y/z span (~[-0.5,0.5]).
+    Other channels (y, z, normals, area, sdf) pass through unchanged.
+    """
+    out = x.clone()
+    out[..., 0] = out[..., 0].sign() * (out[..., 0].abs() + 1.0).log()
+    return out
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1370,15 +1383,22 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    log_x_coord: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if log_x_coord:
+        surface_x_in = apply_log_x_coord(batch.surface_x)
+        volume_x_in = apply_log_x_coord(batch.volume_x)
+    else:
+        surface_x_in = batch.surface_x
+        volume_x_in = batch.volume_x
     with autocast_context(device, amp_mode):
         out = model(
-            surface_x=batch.surface_x,
+            surface_x=surface_x_in,
             surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
+            volume_x=volume_x_in,
             volume_mask=batch.volume_mask,
         )
         surface_pred_norm = out["surface_preds"]
@@ -1499,6 +1519,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    log_x_coord: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1529,11 +1550,17 @@ def evaluate_split(
         batch = batch.to(device)
         surface_target_norm = transform.apply_surface(batch.surface_y)
         volume_target_norm = transform.apply_volume(batch.volume_y)
+        if log_x_coord:
+            surface_x_in = apply_log_x_coord(batch.surface_x)
+            volume_x_in = apply_log_x_coord(batch.volume_x)
+        else:
+            surface_x_in = batch.surface_x
+            volume_x_in = batch.volume_x
         with autocast_context(device, amp_mode):
             out = model(
-                surface_x=batch.surface_x,
+                surface_x=surface_x_in,
                 surface_mask=batch.surface_mask,
-                volume_x=batch.volume_x,
+                volume_x=volume_x_in,
                 volume_mask=batch.volume_mask,
             )
         surface_pred_norm = out["surface_preds"].float()
@@ -1938,6 +1965,38 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            if global_step == 0 and is_main:
+                # Sanity check: log x-coord max before/after transform so the
+                # advisor can confirm Arm A vs Arm B coordinate input differs.
+                sx0 = batch.surface_x[..., 0]
+                vx0 = batch.volume_x[..., 0]
+                surface_x_max_raw = float(sx0.abs().max().item())
+                volume_x_max_raw = float(vx0.abs().max().item())
+                if config.log_x_coord:
+                    sxt = sx0.sign() * (sx0.abs() + 1.0).log()
+                    vxt = vx0.sign() * (vx0.abs() + 1.0).log()
+                    surface_x_max_in = float(sxt.abs().max().item())
+                    volume_x_max_in = float(vxt.abs().max().item())
+                else:
+                    surface_x_max_in = surface_x_max_raw
+                    volume_x_max_in = volume_x_max_raw
+                wandb.log(
+                    {
+                        "train/x_coord_max/surface_raw": surface_x_max_raw,
+                        "train/x_coord_max/surface_input": surface_x_max_in,
+                        "train/x_coord_max/volume_raw": volume_x_max_raw,
+                        "train/x_coord_max/volume_input": volume_x_max_in,
+                        "train/x_coord_max/log_x_coord_enabled": float(config.log_x_coord),
+                        "global_step": 0,
+                    }
+                )
+                print(
+                    f"[log_x_coord={config.log_x_coord}] "
+                    f"surface_x[..., 0] |max| raw={surface_x_max_raw:.4f} "
+                    f"in={surface_x_max_in:.4f} | "
+                    f"volume_x[..., 0] |max| raw={volume_x_max_raw:.4f} "
+                    f"in={volume_x_max_in:.4f}"
+                )
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -1951,6 +2010,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                log_x_coord=config.log_x_coord,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2144,7 +2204,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, log_x_coord=config.log_x_coord)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2271,7 +2331,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, log_x_coord=config.log_x_coord)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2306,7 +2366,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, log_x_coord=config.log_x_coord)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
