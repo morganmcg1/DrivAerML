@@ -45,6 +45,9 @@ class EMA:
         }
         self.backup: dict[str, torch.Tensor] | None = None
 
+    def set_decay(self, new_decay: float) -> None:
+        self.decay = float(new_decay)
+
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
         self.step_counter += 1
@@ -76,6 +79,19 @@ class EMA:
             if param.requires_grad and name in self.backup:
                 param.data.copy_(self.backup[name])
         self.backup = None
+
+
+def cosine_ema_decay(
+    epoch: int,
+    total_epochs: int,
+    decay_start: float = 0.99,
+    decay_end: float = 0.9999,
+) -> float:
+    """Cosine ramp from decay_start at epoch 0 to decay_end at epoch total_epochs - 1."""
+    progress = epoch / max(total_epochs - 1, 1)
+    progress = min(max(progress, 0.0), 1.0)
+    cosine_factor = (1.0 - math.cos(math.pi * progress)) / 2.0
+    return decay_start + cosine_factor * (decay_end - decay_start)
 
 
 @dataclass(frozen=True)
