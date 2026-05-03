@@ -1,5 +1,23 @@
 # SENPAI Research Results
 
+## 2026-05-03 00:05 — PR #419: chihiro surface-tangent frame input features — CLOSED NEGATIVE
+
+- Branch: `chihiro/surface-tangent-frame-inputs` (deleted)
+- Hypothesis: Adding surface tangent frame vectors (t1, t2 derived from normals) as extra input features would help the model learn wall-shear in the flow-aligned frame rather than global Cartesian. Arm B predicted τ in local frame and rotated to global at eval.
+
+| Arm | Description | val_abupt (best) | test_abupt | ws_y | ws_z | W&B |
+|---|---|---:|---:|---:|---:|---|
+| Arm A | Tangent input only (ctrl Lion) | 11.046% | 12.044% | 12.810 | 13.457 | `eoy7yz2k` |
+| Arm B | Tangent input + local-frame τ prediction | KILLED ep1 (56.66%) | — | 79.45 | 75.76 | `cwz00hb5` |
+| **Yi baseline** | **PR #309 thorfinn** | **9.039%** | **~10.2%** | **~10.5** | **~11.8** | — |
+
+- 8-epoch run (4-GPU DDP), AdamW lr=5e-4 (not canonical Lion config), 40k pts.
+- **Arm A result:** +2.0pp regression vs yi merge bar on all channels. tau_y: +39% worse, tau_z: +29% worse — exact opposite of hypothesis. Adding tangent frame vectors dilutes the linear projection from surface_extra_dim → n_hidden (tangent vectors t1, t2 are deterministic functions of normal n — already an input).
+- **Arm B result:** Catastrophic divergence (val_abupt 56.66% at end of ep1, killed). Root cause: local-frame τ prediction requires denorm → rotate in physical space → renorm before loss; Arm B skipped this step and applied rotation in normalized space, destroying geometric meaning.
+- **Decision:** Closed. Hypothesis rejected. Input feature redundancy + normalization bug. If revisited: (1) fix normalization bug per train.py:1460-1465 logic, (2) use Lion lr=1e-4 canonical stack, (3) consider tangent projections as a *loss auxiliary* rather than input feature.
+
+---
+
 ## 2026-05-03 00:30 — PR #440: violet Huber δ sweep WITHOUT --use-tangential-wallshear-loss — SENT BACK (mechanism confirmed, needs full-budget DDP)
 
 - Branch: `violet/huber-without-tangential-loss-baseline-test` (still open)
