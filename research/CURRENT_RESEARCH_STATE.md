@@ -1,28 +1,31 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-03 (post-#454 closeout, frieren + edward reassigned — 8 students active, 0 idle)
+- **Date:** 2026-05-01 (post-#489 MERGE — thorfinn vol-curriculum is new SOTA; 8 students active, 0 idle)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Current SOTA — PR #387 (alphonse feat16 RFF + QK-norm + STRING-sep), val_abupt **7.3816%** (EP11)
+## Current SOTA — PR #489 (thorfinn vol-points curriculum 16k→65k), val_abupt **7.1792%** (EP11)
 
-W&B run `wj6mn6ve`, group `alphonse-rff-sweep`. All future PRs must beat val_abupt < **7.3816%**.
+W&B run `r5rw40rn`, group `thorfinn-vol-curriculum`. All future PRs must beat val_abupt < **7.1792%**.
 
-| Metric | PR #387 SOTA (val EP11 / test) | AB-UPT |
+| Metric | PR #489 SOTA (val EP11) | AB-UPT |
 |---|---:|---:|
-| `abupt` (val_abupt EP11) | **7.3816%** | — |
-| `abupt` (test_abupt) | **8.5936%** | — |
-| `surface_pressure` (test) | 4.4377% | 3.82% |
-| `wall_shear` (test) | 7.9989% | 7.29% |
-| **`volume_pressure` (test)** | **12.1885%** | **6.08% (×2.0 gap — primary laggard)** |
-| `tau_x` / `tau_y` / `tau_z` (test) | 6.96 / 9.11 / 10.27 | 5.35 / 3.65 / 3.63 |
+| `abupt` (val_abupt EP11) | **7.1792%** | — |
+| `surface_pressure` (val) | 4.783% | 3.82% |
+| `wall_shear` (val) | 8.098% | 7.29% |
+| `volume_pressure` (val) | **4.207%** | **6.08% (BEATEN)** |
+| `tau_x` (val) | 7.019% | 5.35% |
+| `tau_y` (val) | 9.187% | 3.65% |
+| `tau_z` (val) | 10.701% | 3.63% |
+
+Test metrics (best-val checkpoint): test_abupt=8.497%
 
 ---
 
 ## Latest research direction from human researcher team
 
-No new directives in last cycle. All 3 open human issues already responded to. Still working off Issue #252 (Modded-NanoGPT-derived levers) plus organic vol_p / tau-axis attack.
+No new directives since last cycle. All open human issues already responded to. Working off Issue #252 (Modded-NanoGPT-derived levers) plus organic vol_p / tau-axis attack programme.
 
 ---
 
@@ -30,105 +33,109 @@ No new directives in last cycle. All 3 open human issues already responded to. S
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #499 | fern | TTA mirror-y (post-hoc on frozen #387) | newly assigned, pre-first-val |
-| #496 | tanjiro | Uncertainty-weighted multitask loss | newly assigned, pre-first-val |
-| **#501** | **frieren** | **Anisotropic per-axis STRING freq (sigma_x/y/z, 3 arms)** | **NEW** — targets tau_y/z gap directly |
-| **#500** | **edward** | **Surface curvature (mean H + Gaussian K) input features** | **NEW** — targets tau_y/z gap via geometric prior |
-| #458 | nezuko | model-mlp-ratio=8 (Run 2) | EP5 slope-waiver granted; converging slow |
-| #488 | alphonse | Multi-sigma log_freq STRING-sep init | tau_y/z spectral attack, pre-EP5 |
-| #489 | thorfinn | Volume-points curriculum 16k→65k | pre-gate |
-| #471 | askeladd | Signed-log vol target (arm-b) | arm-a vol_p 4.62% recorded; arm-b in early warmup |
-
-(Detailed step/val trajectories last captured at the W&B snapshot earlier 2026-05-03 — see git history of this file.)
-
----
-
-## Latest signals (W&B snapshot — late EP7-9 region)
-
-### Fern #480 — APPROACHING SOTA
-- W&B `2u6twuu4` step 23171: **val_abupt=7.745%** (only +0.36pp above SOTA 7.3816%, descending)
-- vol_p=**4.688%** (well below AB-UPT 6.08%) — vol_p BREAKTHROUGH confirmed
-- tau_y=9.982%, tau_z=11.543% — best tau_y/z of any in-flight run
-- Slope: **−0.076 pp/1k steps** at EP9.5 — projected EP12 val ≈ **7.28%** (BELOW SOTA 7.3816%)
-- Trajectory log: EP1.1: 39.50% → EP3.4: 11.47% → EP5.6: 8.69% → EP7.8: 7.95% → EP9.0: 7.745%
-- **Strongest in-flight run on `tay`. Continue to EP12; needs test metrics from best-val checkpoint for SOTA decision.**
-
-### Tanjiro #481 — vol_p strong, tau-axis flat
-- W&B `hnrpuptg` step 22436: val_abupt=8.064% (+0.68pp above SOTA, descending)
-- vol_p=4.827% (below AB-UPT 6.08%) — log1p compression confirmed working on vol target
-- tau_y=10.71% / tau_z=12.32% — log1p NOT closing tau gap
-
-### Frieren #454 — confirms tau_yz weighting is inert
-- W&B `l8nu1ajz` step 20493: val_abupt=8.248% (descending)
-- vol_p=5.220% (below AB-UPT 6.08%)
-- tau_y=10.39% / tau_z=12.07% — tau_yz weight=1.5x NOT narrowing the gap
-- Combined with #142 (w=2.0 NEG), #467 (per-axis scale NEG) → loss-weighting tau is exhausted; problem is upstream
-
-### Edward #483 — EP5 borderline gate pass
-- W&B `ok98szul` EP5.6: val_abupt=8.969% (+0.069pp above 8.9% gate — slope-waiver granted)
-- vol_p=5.457% (below AB-UPT 6.08%)
-- Slope: −0.469 pp/1k steps — healthy descent
-
-### Nezuko #458 — EP5 slope-waiver granted
-- W&B `he54fm6v` EP4.5: val_abupt=9.805%, vol_p=6.316%
-- Slope: **−1.377 pp/1k steps** (steepest in fleet) → projected EP5 ≈ 8.05% (clean gate pass)
-- mlp_ratio=8 is slow-converging — expected given param-count increase
-
-### Alphonse #488 — primary tau_y/z attack, pre-gate
-- W&B `ki2q9ko9` EP4.1: val_abupt=13.99% (early, descending)
-- Multi-sigma init [0.25, 0.5, 1.0, 2.0, 4.0] — slow-warmup expected; slope-waiver pre-approved
-- Most important final metrics: test tau_y, test tau_z
-
-### Thorfinn #489 — vol-curriculum, pre-first-val
-- step=8617 EP3.5, no val checkpoint yet — first val at EP4 completion
-
-### Askeladd #471 — Arm-a complete, arm-b launched
-- Arm-a (`a2skzz6m`) EP12: val_abupt=7.793% (+0.41pp above SOTA), vol_p=**4.618%** (BEST VOL_P EVER, below AB-UPT)
-- Signed-log transform crushes vol_p but doesn't recover headline → composition target with fern (orthogonal vol_p levers)
-- Arm-b (`wlb9zv1v`) EP2.6 val_abupt=38.36% (early warmup)
-
-### Cross-cutting observation: vol_p victory broadly, tau_y/z stagnation
-- All four late-epoch runs (fern/tanjiro/frieren + askeladd arm-a) now beat AB-UPT vol_p benchmark (4.69% / 4.83% / 5.22% / 4.62% < 6.08%) — **vol_p attack succeeding broadly**
-- All four runs have tau_y ~9.98-10.71% and tau_z ~11.54-12.32% — none breaking through to AB-UPT 3.65/3.63%
-- Implication: log1p / loss-weight / EMA / signed-log all leave tau_y/z gap intact → confirms tau_y/z is a representational/spectral problem (PR #488 alphonse multi-sigma is the right attack)
+| #523 | thorfinn | GradNorm dynamic loss balancing (Chen et al. NeurIPS 2018) | newly assigned post-#489 MERGE |
+| #499 | fern | TTA mirror-y (post-hoc on frozen #387) | run `dy3viqmk` live, EP1=11.18%, EP5 gate ≤9.2% |
+| #496 | tanjiro | Uncertainty-weighted multitask loss (dual-optimizer fix) | relaunched with AdamW for log_sigma, monitor sigma spread at EP2 |
+| #501 | frieren | Anisotropic per-axis STRING freq (sigma_x/y/z, 3 arms) | run `kvywdebn` EP2=30.74%, in early warmup |
+| #506 | nezuko | Surface point density 2× (65k→131k surface pts) | run `e4gz48nf` EP1=52.47%, very early |
+| #510 | alphonse | Surface-loss-weight sweep (multi-arm) | runs `9aw9kqm9`/`fbu24ylm` ~1186 steps, no val yet |
+| #511 | edward | Extended training to EP15 (best-val extension) | runs `7h6vivvh`/`xilwwdkz` ~828 steps, no val yet |
+| #516 | askeladd | Per-channel tau_y/tau_z loss reweighting | newly assigned, pre-launch |
 
 ---
 
 ## Recent closeouts
 
+- **PR #489 thorfinn (vol-points curriculum 16k→65k) — MERGED NEW SOTA.** val_abupt=7.1792% (EP11), test_abupt=8.497%. −0.1880pp (−2.55%) vs #488. Architecture: 4-stage ramp 16k→32k→49k→65k vol-points over first 9 epochs. W&B run `r5rw40rn`.
+- **PR #471 askeladd (signed-log transform) — CLOSED-NEG.** A/B test conclusive: arm-b (signed-log) EP9=10.5449% vs arm-a (control) ~7.96%. Signed-log makes vol_p worse, not better. Dead end confirmed.
+- **PR #458 nezuko (mlp_ratio=8) — CLOSED-NEG.** Non-monotonic capacity: wider FFN hurts. mlp4 optimal. Dead end confirmed.
 - **PR #454 frieren (tau_yz w=1.5) — CLOSED-NEG.** Third NEG result in tau_yz loss-weight family. Spawned anisotropic STRING attack #501.
-- **PR #483 edward (surf↔vol cross-attn bridge) — CLOSED.** Did not beat SOTA. Edward reassigned to surface curvature features #500.
-- **PR #482 thorfinn (TTA mirror-y) — CLOSED (EP5 gate fail).** EP6 val_abupt=10.989%; TTA must be inference-only (now revisited as fern #499).
+- **PR #483 edward (surf↔vol cross-attn bridge) — CLOSED.** Did not beat SOTA. Edward reassigned to extended training #511.
+- **PR #482 thorfinn (TTA mirror-y in training) — CLOSED (EP5 gate fail).** TTA must be inference-only (revisited as fern #499).
 - **PR #467 alphonse (per-axis output scaling) — CLOSED-NEG.** Confirms tau_y/tau_z gap is upstream in spectral representation. Spawned PR #488.
-- **PR #142 frieren (tau_yz weight=2.0) — CLOSED-NEG.** w=1.5 follow-up was #454, also NEG.
-- **PR #458 nezuko mlp6 (Run 1) — CLOSED-NEG.** mlp8 (Run 2) currently in flight.
+
+---
+
+## Latest signals
+
+### Alphonse #510 — surface loss-weight sweep
+- Runs `9aw9kqm9`/`fbu24ylm` at ~1186 steps — no val checkpoint yet
+- Watch at EP5 for gate pass
+
+### Edward #511 — extended training EP15
+- Runs `7h6vivvh`/`xilwwdkz` at ~828 steps — no val checkpoint yet
+
+### Fern #499 — TTA mirror-y (inference-only on frozen SOTA #387)
+- Run `dy3viqmk` + 7 DDP rank siblings live, EP1=11.18%
+- EP5 gate: ≤9.2%; TTA overhead adds ~20 min/eval pass
+- Beat target: val_abupt < **7.1792%** (updated from stale PR body which references 7.3816%)
+
+### Tanjiro #496 — uncertainty-weighted multitask loss (dual-optimizer fix)
+- Original Lion lockstep failure diagnosed: all log_sigma_sq parameters moved identically (±1e-4/step), eliminating per-task adaptation
+- Fix: separate AdamW(lr=1e-3, wd=0.0) for 5 log_sigma scalars; Lion for backbone
+- Monitor sigma spread at EP2 (want >0.01 spread)
+
+### Frieren #501 — anisotropic STRING frequencies (3-arm sweep: sigma_x/y/z)
+- Run `kvywdebn` step=7477, EP2=30.74% — still in early warmup
+- Warm-up expected slow; check at EP5 gate (~step 54320)
+
+### Nezuko #506 — surface pts 131k (2× density)
+- Run `e4gz48nf` step=5173, EP1=52.47% — very early
+- Check at EP5
+
+### Askeladd #516 — per-channel tau_y/tau_z loss reweighting
+- Newly assigned post-#471 closeout — pre-launch, awaiting first run confirmation
+- Beat target: val_abupt < **7.1792%** (note: PR body may reference stale 7.3672% — correct beat target is 7.1792%)
+
+### Thorfinn #523 — GradNorm dynamic loss balancing
+- Newly assigned post-#489 MERGE — pre-launch
+- Chen et al. NeurIPS 2018: adaptive per-task loss weighting via gradient norm monitoring
+- Primary target: close tau_y/tau_z gap without hand-tuning
+
+---
+
+## Cross-cutting observations
+
+### vol_p: MISSION ACCOMPLISHED broadly
+- SOTA (PR #489) has vp=4.207%, well below AB-UPT ref 6.08%
+- Multiple approaches achieved sub-AB-UPT vol_p: multi-sigma STRING-sep (spectral), vol-curriculum (data density)
+- **DO NOT stack target-space transforms (signed-log/log1p)** — transforms degrade the already-excellent vol_p
+
+### tau_y/tau_z: PRIMARY OPEN PROBLEM
+- Current SOTA per-axis (PR #489 val EP11): tau_y=**9.187%**, tau_z=**10.701%**
+- AB-UPT references: tau_y=3.65%, tau_z=3.63% — gap remains large (~2.5–3× relative)
+- Loss reweighting confirmed inert (#142, #454, #467 — three NEGs, family exhausted)
+- Active spectral attack: frieren #501 anisotropic per-axis STRING freq
+- Active dynamic balancing attack: thorfinn #523 GradNorm
+- Active uncertainty-weighting attack: tanjiro #496 (dual-optimizer fix)
+- Active per-channel reweighting: askeladd #516
+- Active data density attack: nezuko #506 131k surface pts
+- Active TTA attack: fern #499 mirror-y inference
 
 ---
 
 ## Current research focus and themes
 
-1. **Closing the volume_pressure gap (×2.0 vs AB-UPT) — succeeding broadly across the fleet:**
-   - **EMA dynamics:** PR #480 fern (cosine ramp) — val vol_p=4.69% at EP9.5; primary SOTA candidate
-   - **Target transform:** PR #471 askeladd (signed-log) — vol_p=4.62% best ever on arm-a
-   - **Cross-attn coupling:** PR #483 edward (surface↔volume bridge) — borderline gate pass
-   - **Data curriculum:** PR #489 thorfinn (16k→65k vol-points ramp)
-   - **log1p target:** PR #481 tanjiro — vol_p=4.83%
+1. **Closing the tau_y/tau_z gap (×2.5–3 vs AB-UPT) — full-fleet upstream attack:**
+   - **Dynamic loss balancing (GradNorm):** PR #523 thorfinn — data-driven adaptive task weighting, targets tau_y/z convergence speed
+   - **Spectral representation, anisotropic per-axis:** PR #501 frieren (sigma_x/y/z 3-arm sweep) — directly targets anisotropic flow features
+   - **Multitask uncertainty weighting:** PR #496 tanjiro (dual-optimizer fix, AdamW for log_sigma)
+   - **Per-channel reweighting:** PR #516 askeladd (tau_y/z direct weight boost)
+   - **Surface resolution:** PR #506 nezuko (131k surface pts)
+   - **Inference TTA:** PR #499 fern (mirror-y on frozen SOTA)
+   - **Loss reweighting (confirmed inert):** PRs #142, #454, #467 — THREE NEG results, family exhausted
 
-2. **Closing the tau_y/tau_z gap (×2.5 / ×2.8 vs AB-UPT) — full-fleet upstream attack:**
-   - **Spectral representation, isotropic:** PR #488 alphonse (multi-sigma STRING-sep init)
-   - **Spectral representation, anisotropic per-axis:** **PR #501 frieren (sigma_x/y/z 3-arm sweep — NEW)**
-   - **Geometric prior (input features):** **PR #500 edward (mean H + Gaussian K curvature — NEW)**
-   - **Multitask balance:** PR #496 tanjiro (uncertainty weighting)
-   - **Inference-only TTA:** PR #499 fern (mirror-y on frozen SOTA)
-   - **Loss weighting (confirmed inert):** PR #142, #454, #467 — three NEG results, family exhausted
+2. **Consolidating vol_p gains and pushing further:**
+   - SOTA vp=4.207% (PR #489) well below AB-UPT 6.08%
+   - **DO NOT** stack target-space transforms (signed-log/log1p) on top — confirmed NEGATIVE
 
-3. **Capacity scaling:** PR #458 nezuko (mlp_ratio=8, slow-warmup, slope-waiver granted)
+3. **Data curriculum and resolution:**
+   - PR #489 thorfinn vol-curriculum MERGED as new SOTA
+   - PR #506 nezuko (65k→131k surface pts) — orthogonal surface resolution lever
+   - PR #511 edward — extended training to EP15 on best-val checkpoint
 
-4. **Composition candidates (when winners land):**
-   - fern cosine EMA + askeladd signed-log = orthogonal vol_p attacks (data + optimization)
-   - thorfinn vol-curriculum + fern cosine EMA = orthogonal data + optimization
-   - edward cross-attn bridge + alphonse multi-sigma STRING = orthogonal coupling + spectral
-   - DO NOT compose: tanjiro log1p × askeladd signed-log (both target same vol target distribution)
+4. **Capacity scaling — CONFIRMED DEAD END:**
+   - mlp_ratio=6 and mlp_ratio=8 both NEGATIVE; mlp4 is optimal for this stack
 
 ---
 
@@ -151,20 +158,34 @@ No new directives in last cycle. All 3 open human issues already responded to. S
 | Learnable per-axis output head scaling (#467) | NEGATIVE — tau_y/tau_z gap is upstream |
 | TTA mirror-y in training loop (#482) | NEGATIVE — TTA must be inference-only |
 | tau_yz loss-weight reweighting (#142, #454, #467) | EXHAUSTED — three NEG results, problem is upstream |
+| mlp_ratio=6 FFN wider | NEGATIVE (#458 run 1) — non-monotonic; mlp4 is optimal |
+| mlp_ratio=8 FFN wider | NEGATIVE (#458 run 2) — non-monotonic; mlp4 is optimal |
+| Signed-log target transform for vol_p (#471 arm-b) | NEGATIVE — 10.5449% vs 7.96% control; SOTA multi-sigma init already handles vol_p better |
+| log1p target transform for vol_p (#481 tanjiro) | NEGATIVE headline — vol_p OK (4.83%) but tau_y/z not helped |
 
 ---
 
-## Potential next research directions (when slots open / Round 26)
+## Composition candidates (when winners land)
 
-1. **TTA post-hoc on frozen SOTA checkpoint** — apply mirror-y augmentation strictly at eval/test time on PR #387 checkpoint; near-zero compute. Assign to thorfinn after #489.
-2. **Compose fern #480 (cosine EMA) + askeladd signed-log** if both win on vol_p, stack them.
-3. **GradNorm / uncertainty-weighted multitask loss** — addresses coupled-multitask redistribution; principled fix vs hand-tuned weights.
-4. **Surface curvature input features (H03)** — geometric prior for tau_y/tau_z high-freq content.
-5. **Compose cross-attn bridge #483 with multi-sigma STRING init #488** — orthogonal coupling + spectral.
-6. **Slice-conditioned FFN width** — wider FFN only in middle (volumetric) slices.
-7. **EMA model-soup average** — port from yi-track if it wins there.
-8. **Surface point density 2x** — confirmatory port of yi-track result.
-9. **Test-time augmentation: mirror-y + reflect-z + 90-deg rotations** — extends TTA if post-hoc baseline wins.
-10. **Vol-points curriculum + tanjiro log1p composition** — orthogonal data density + target transform.
-11. **Wavelet/multi-resolution input encoding** — alternative tau_y/z spectral attack if multi-sigma STRING fails.
-12. **Anisotropic positional encoding** — separate freq sets per spatial axis (tau_y/z gap may reflect anisotropic flow features).
+- thorfinn vol-curriculum (#489 MERGED SOTA) + fern TTA (#499) = orthogonal data density + inference augmentation
+- frieren anisotropic STRING (#501) + thorfinn GradNorm (#523) = orthogonal spectral + dynamic balancing tau attack
+- frieren anisotropic STRING (#501) + tanjiro uncertainty weighting (#496) = two orthogonal multitask balance approaches
+- **DO NOT compose:** any two target-space transforms (signed-log × log1p both touch vol_p distribution)
+- **DO NOT compose:** additional loss reweighting on top of STRING-sep SOTA (three NEGs, confirmed inert)
+
+---
+
+## Potential next research directions (Round 28+)
+
+1. **Compose thorfinn vol-curriculum (#489 SOTA) + frieren anisotropic STRING (#501 if wins)** — stack spectral + data density.
+2. **Compose thorfinn vol-curriculum (#489 SOTA) + GradNorm (#523 if wins)** — data density + dynamic balancing.
+3. **Wavelet/multi-resolution input encoding** — alternative tau_y/z spectral attack if #501 fails.
+4. **Anisotropic positional encoding** — separate freq sets per spatial axis; extends #501 frieren logic.
+5. **Surface point density 3× (196608 pts)** — if 2× (#506) wins, escalate.
+6. **Learnable Fourier basis (NTK-style)** — learn a small Fourier basis matrix instead of STRING-sep fixed sinusoids; richer spectral coverage.
+7. **Signed-log target for surface_pressure** — if SOTA surface_p shows multiplicative zero-region errors (separate from vol_p).
+8. **EMA model-soup average** — port from yi-track if it wins there.
+9. **Test-time augmentation: mirror-y + reflect-z + 90-deg rotations** — extend TTA family if fern #499 wins.
+10. **Vol-points curriculum + anisotropic STRING composition** — thorfinn curriculum provides data density; frieren #501 provides spectral coverage.
+11. **Slice-conditioned FFN width** — wider FFN only in middle (volumetric) slices; avoids global capacity penalty.
+12. **Physics-informed boundary condition loss** — enforce no-slip wall condition explicitly via auxiliary loss on tau magnitude near wall.
