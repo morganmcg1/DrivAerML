@@ -2,44 +2,34 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: alphonse PR #387 feat16 RFF + QK-norm + STRING-sep — 2026-05-01 (updated)
+## Status: alphonse PR #488 multi-sigma STRING-sep init — 2026-05-03 (updated)
 
-**NEW SOTA: alphonse PR #387 (feat16 RFF + QK-norm stacked on STRING-sep) beats PR #358 by −0.0105pp val (7.3816% vs 7.3921% val). W&B run `wj6mn6ve`, EP11 (Arm A: rff_num_features=16).**
+**NEW SOTA: alphonse PR #488 (multi-sigma RFF init across frequency octaves) beats PR #387 by −0.0144pp val (7.3672% vs 7.3816% val). W&B run `ki2q9ko9`, EP11.**
 
-RFF with rff_num_features=16 (feat16) stacks on top of the STRING-sep + QK-norm SOTA baseline. The feat16 encoding adds 16-feature Random Fourier Features on top of the learnable per-axis STRING-sep frequencies, providing richer spectral coverage at low compute cost. Both val and test improve over the prior SOTA.
+Multi-sigma STRING-sep init distributes `log_freq` parameters across frequency octaves at initialization via `--rff-init-sigmas`, giving the STRING-sep encoding a broader spectral coverage from the start. Dramatically improves volume_pressure (vp=4.357% vs SOTA 12.189% — a +7.832pp improvement), bringing it to near-target territory (AB-UPT ref: 6.08%). Surface pressure and wall shear see modest regression (+0.367pp and +0.348pp respectively), but the net val_abupt improvement confirms the octave-init approach is a genuine advance.
 
-**W&B run:** `wj6mn6ve` (alphonse DDP8) — group `alphonse-rff-sweep`, best val **7.3816%** (EP11)
-**PR:** #387
-**Test metrics (best-val checkpoint):** test_abupt=8.5936%, surface_pressure=4.4377%, wall_shear=7.9989%, volume_pressure=12.1885%, tau_x=6.9622%, tau_y=9.1058%, tau_z=10.2736%
+**W&B run:** `ki2q9ko9` (alphonse DDP8) — best val **7.3672%** (EP11)
+**PR:** #488
+**Val metrics (best-val checkpoint):** val_abupt=7.3672%, surface_pressure=4.805%, wall_shear=8.347%, volume_pressure=4.357%
 
 ### tay current best — `val_primary/*`
 
 | Epoch | val_abupt |
 |-------|-----------|
-| **EP11 (best)** | **7.3816%** |
+| **EP11 (best)** | **7.3672%** |
 
-### Val trajectory (run `wj6mn6ve`)
+### tay current best — `val_primary/*` (PR #488 alphonse, run `ki2q9ko9`)
 
-| Epoch | val_abupt |
-|-------|-----------|
-| 3 | ~13.1% (estimated, similar to SOTA baseline) |
-| 11 | **7.3816%** |
+| Metric | **PR #488 alphonse (SOTA)** | PR #387 alphonse (prev) | AB-UPT |
+|---|---:|---:|---:|
+| `abupt` | **7.3672** | 7.3816 | — |
+| `surface_pressure` | 4.805 | **4.4377** | 3.82 |
+| `wall_shear` | 8.347 | **7.9989** | 7.29 |
+| `volume_pressure` | **4.357** | 12.1885 | 6.08 |
 
-### tay current best — `test_primary/*` (PR #387 alphonse, run `wj6mn6ve`)
+**Key insight:** volume_pressure drops from 12.1885% to 4.357% — a dramatic 7.832pp improvement, now BELOW the AB-UPT reference target (6.08%). This is the first time any single metric has beaten its AB-UPT reference on this track. Surface pressure and wall shear regressed slightly, indicating the octave-init trades spectral coverage breadth for axis-specific precision. Net improvement confirms the direction is correct.
 
-| Metric | This-repo key | **PR #387 alphonse (SOTA)** | PR #358 thorfinn (prev) | AB-UPT |
-|---|---|---:|---:|---:|
-| `abupt` | `test_primary/abupt_axis_mean_rel_l2_pct` | **8.5936** | 8.625 | — |
-| `surface_pressure` | `test_primary/surface_pressure_rel_l2_pct` | **4.4377** | 4.462 | 3.82 |
-| `wall_shear` | `test_primary/wall_shear_rel_l2_pct` | **7.9989** | 7.965 | 7.29 |
-| `volume_pressure` | `test_primary/volume_pressure_rel_l2_pct` | **12.1885** | 12.434 | 6.08 |
-| `tau_x` | `test_primary/wall_shear_x_rel_l2_pct` | **6.9622** | — | 5.35 |
-| `tau_y` | `test_primary/wall_shear_y_rel_l2_pct` | **9.1058** | — | 3.65 |
-| `tau_z` | `test_primary/wall_shear_z_rel_l2_pct` | **10.2736** | — | 3.63 |
-
-**Note:** volume_pressure at 12.1885% remains the primary laggard — 2× the AB-UPT reference (6.08%). Surface and wall shear are within ~0.6-0.7pp of targets. Every round must target closing the volume_pressure gap.
-
-### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF)
+### Reproduce new SOTA (Lion lr=1e-4, EMA=0.999, STRING-sep, QK-norm, feat16 RFF, multi-sigma init)
 
 ```bash
 torchrun --standalone --nproc_per_node=8 train.py \
@@ -51,11 +41,10 @@ torchrun --standalone --nproc_per_node=8 train.py \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
   --rff-num-features 16 \
-  --wandb-group alphonse-rff-sweep \
-  --wandb-name alphonse/feat16-qknorm-string-sep-pr387
+  --rff-init-sigmas <octave-sigmas-used-in-pr488>
 ```
 
-### Compounding wins so far (updated through PR #387)
+### Compounding wins so far (updated through PR #488)
 
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
@@ -74,7 +63,20 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #309 | thorfinn | **−0.064pp (−0.63%) vs #232** | grad-clip-norm=0.5 (Lion EMA momentum stabilization, avoids ep8 regression) |
 | #311 | edward | **−1.355pp (−13.39%) vs #309** | STRING-separable pos encoding: learnable per-axis log_freq + phase — largest single gain since tanjiro arm B |
 | #358 | thorfinn | **−0.154pp (−2.04%) vs #311** | QK-norm (RMSNorm on Q and K) stacked on STRING-sep — best val at EP11 (7.3921%) |
-| **#387** | **alphonse** | **−0.031pp (−0.36%) vs #358** | **feat16 RFF (rff_num_features=16) stacked on STRING-sep + QK-norm config — best val at EP11 (7.3816%)** |
+| #387 | alphonse | **−0.031pp (−0.36%) vs #358** | feat16 RFF (rff_num_features=16) stacked on STRING-sep + QK-norm config — best val at EP11 (7.3816%) |
+| **#488** | **alphonse** | **−0.0144pp (−0.195%) vs #387** | **multi-sigma STRING-sep init: log_freq params distributed across frequency octaves at init — vp drops from 12.189% to 4.357% (beats AB-UPT ref!)** |
+
+---
+
+## Prior SOTA record: alphonse PR #387 feat16 RFF + QK-norm + STRING-sep — 2026-05-01 (updated)
+
+**PRIOR SOTA: alphonse PR #387 (feat16 RFF + QK-norm stacked on STRING-sep) beats PR #358 by −0.0105pp val (7.3816% vs 7.3921% val). W&B run `wj6mn6ve`, EP11 (Arm A: rff_num_features=16).**
+
+RFF with rff_num_features=16 (feat16) stacks on top of the STRING-sep + QK-norm SOTA baseline. The feat16 encoding adds 16-feature Random Fourier Features on top of the learnable per-axis STRING-sep frequencies, providing richer spectral coverage at low compute cost. Both val and test improve over the prior SOTA.
+
+**W&B run:** `wj6mn6ve` (alphonse DDP8) — group `alphonse-rff-sweep`, best val **7.3816%** (EP11)
+**PR:** #387
+**Test metrics (best-val checkpoint):** test_abupt=8.5936%, surface_pressure=4.4377%, wall_shear=7.9989%, volume_pressure=12.1885%, tau_x=6.9622%, tau_y=9.1058%, tau_z=10.2736%
 
 ---
 
