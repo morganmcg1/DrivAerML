@@ -738,6 +738,7 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    llrd_decay: float = 1.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -898,6 +899,92 @@ def build_model(config: Config) -> SurfaceTransolver:
         film_encoder_dim=config.film_encoder_dim,
         pos_max_wavelength=config.pos_max_wavelength,
     )
+
+
+def build_llrd_param_groups(
+    model: SurfaceTransolver,
+    base_lr: float,
+    decay: float,
+) -> list[dict]:
+    """Build BERT-style layer-wise LR decay parameter groups.
+
+    Group ordering (group 0 = embed = smallest LR ... group N = head = full LR):
+        0: pe_embed   (PE, surface_bias, volume_bias, projects, placeholders, geom_encoder)
+        1..n_layers:  one per transformer block (and matching FiLM layer if present)
+        n_layers+1:   head (final norm, surface_out, volume_out)
+
+    With n_groups = n_layers + 2 groups, multiplier of group i is decay^(n_groups-1-i).
+    """
+    n_layers = len(model.backbone.blocks)
+    n_groups = n_layers + 2
+
+    embed_modules: list[tuple[str, nn.Module]] = [
+        ("pos_embed", model.pos_embed),
+        ("surface_bias", model.surface_bias),
+        ("volume_bias", model.volume_bias),
+    ]
+    if model.project_surface_features is not None:
+        embed_modules.append(("project_surface_features", model.project_surface_features))
+    if model.project_volume_features is not None:
+        embed_modules.append(("project_volume_features", model.project_volume_features))
+    if model.geom_encoder is not None:
+        embed_modules.append(("geom_encoder", model.geom_encoder))
+
+    head_modules: list[tuple[str, nn.Module]] = [
+        ("norm", model.norm),
+        ("surface_out", model.surface_out),
+        ("volume_out", model.volume_out),
+    ]
+
+    embed_params: list[nn.Parameter] = []
+    for _name, mod in embed_modules:
+        embed_params.extend(mod.parameters())
+    embed_params.append(model.surface_placeholder)
+    embed_params.append(model.volume_placeholder)
+
+    block_params: list[list[nn.Parameter]] = [[] for _ in range(n_layers)]
+    for i, block in enumerate(model.backbone.blocks):
+        block_params[i].extend(block.parameters())
+    if model.backbone.film_layers is not None:
+        for i, film in enumerate(model.backbone.film_layers):
+            block_params[i].extend(film.parameters())
+
+    head_params: list[nn.Parameter] = []
+    for _name, mod in head_modules:
+        head_params.extend(mod.parameters())
+
+    multipliers = [decay ** (n_groups - 1 - i) for i in range(n_groups)]
+    param_groups: list[dict] = [
+        {"params": embed_params, "lr": base_lr * multipliers[0], "name": "embed"},
+    ]
+    for i in range(n_layers):
+        param_groups.append(
+            {
+                "params": block_params[i],
+                "lr": base_lr * multipliers[1 + i],
+                "name": f"block_{i}",
+            }
+        )
+    param_groups.append(
+        {"params": head_params, "lr": base_lr * multipliers[-1], "name": "head"}
+    )
+
+    assigned_param_ids = set()
+    for pg in param_groups:
+        for p in pg["params"]:
+            assigned_param_ids.add(id(p))
+    all_trainable = [p for p in model.parameters() if p.requires_grad]
+    missing = [p for p in all_trainable if id(p) not in assigned_param_ids]
+    extra = len(assigned_param_ids) - sum(1 for p in all_trainable)
+    if missing:
+        raise RuntimeError(
+            f"build_llrd_param_groups: {len(missing)} trainable parameters not assigned to any group"
+        )
+    if extra != 0:
+        raise RuntimeError(
+            f"build_llrd_param_groups: param count mismatch (extra={extra})"
+        )
+    return param_groups
 
 
 def _metric_path(name: str) -> str:
@@ -1932,16 +2019,38 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_model = model
 
     optimizer_name = config.optimizer.lower()
-    if optimizer_name == "adamw":
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+    use_llrd = config.llrd_decay < 1.0
+    if use_llrd and optimizer_name == "muon":
+        raise ValueError(
+            "--llrd-decay < 1.0 is not supported with --optimizer muon (Muon already uses its own param groups)."
         )
+    if use_llrd and (config.llrd_decay <= 0.0 or config.llrd_decay > 1.0):
+        raise ValueError(
+            f"--llrd-decay must be in (0, 1]; got {config.llrd_decay}"
+        )
+
+    if optimizer_name == "adamw":
+        if use_llrd:
+            llrd_groups = build_llrd_param_groups(model, config.lr, config.llrd_decay)
+            optimizer = torch.optim.AdamW(
+                llrd_groups, lr=config.lr, weight_decay=config.weight_decay
+            )
+        else:
+            optimizer = torch.optim.AdamW(
+                model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "lion":
         from lion_pytorch import Lion
 
-        optimizer = Lion(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
-        )
+        if use_llrd:
+            llrd_groups = build_llrd_param_groups(model, config.lr, config.llrd_decay)
+            optimizer = Lion(
+                llrd_groups, lr=config.lr, weight_decay=config.weight_decay
+            )
+        else:
+            optimizer = Lion(
+                model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "muon":
         muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
         muon_other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
@@ -1990,6 +2099,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         print(
             f"Optimizer: {optimizer.__class__.__name__} "
             f"lr={config.lr} wd={config.weight_decay}"
+        )
+    if is_main and use_llrd:
+        print(
+            f"LLRD: decay={config.llrd_decay} across {len(optimizer.param_groups)} groups; "
+            "per-group LRs: "
+            + ", ".join(
+                f"{pg.get('name', f'g{i}')}={pg['lr']:.3e}"
+                for i, pg in enumerate(optimizer.param_groups)
+            )
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
@@ -2060,6 +2178,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/film/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
+    wandb.define_metric("train/lr_group_*", step_metric="global_step")
+    wandb.define_metric("train/lr_group/*", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
 
@@ -2234,6 +2354,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 **gradient_metrics,
                 **weight_metrics,
             }
+            if use_llrd:
+                for pg_idx, pg in enumerate(optimizer.param_groups):
+                    pg_name = pg.get("name", f"group_{pg_idx}")
+                    train_log[f"train/lr_group_{pg_idx}"] = float(pg["lr"])
+                    train_log[f"train/lr_group/{pg_name}"] = float(pg["lr"])
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
