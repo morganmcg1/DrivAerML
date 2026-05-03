@@ -302,6 +302,180 @@ class Transformer(nn.Module):
         return x
 
 
+class SurfaceVolumeCrossAttn(nn.Module):
+    """Bidirectional slice-level cross-attention bridge between surface and volume tokens.
+
+    Surface points query volume slice tokens; volume points query surface slice tokens.
+    Each modality builds its own ``num_slices`` Physics-Attention-style soft pool, so
+    cross-attention is ``S x S`` (default 128 x 128) per head rather than the full
+    65k x 65k point-level matrix. A per-head tanh gate initialised at zero keeps the
+    bridge as identity at training start, so the model begins exactly at the SOTA
+    baseline and only deviates if the cross-coupling actually helps validation loss.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        dropout: float = 0.0,
+        gate_init: float = 0.0,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.num_slices = num_slices
+        self.dropout = dropout
+
+        self.norm_s = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_v = nn.LayerNorm(hidden_dim, eps=1e-6)
+
+        # Surface slice creator (Physics-Attention-style soft pool per modality).
+        self.surface_temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
+        self.surface_in_x = LinearProjection(hidden_dim, hidden_dim)
+        self.surface_in_fx = LinearProjection(hidden_dim, hidden_dim)
+        self.surface_in_slice = LinearProjection(self.dim_head, num_slices)
+        # Volume slice creator
+        self.volume_temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
+        self.volume_in_x = LinearProjection(hidden_dim, hidden_dim)
+        self.volume_in_fx = LinearProjection(hidden_dim, hidden_dim)
+        self.volume_in_slice = LinearProjection(self.dim_head, num_slices)
+
+        # K, V projections from per-head slice tokens (B, H, S, dim_head).
+        self.surface_kv = LinearProjection(self.dim_head, self.dim_head * 2, bias=False)
+        self.volume_kv = LinearProjection(self.dim_head, self.dim_head * 2, bias=False)
+
+        # Q projections from each modality's unpooled point tokens (B, N, hidden_dim).
+        self.surface_q = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.volume_q = LinearProjection(hidden_dim, hidden_dim, bias=False)
+
+        # Per-direction output projections.
+        self.proj_s = LinearProjection(hidden_dim, hidden_dim)
+        self.proj_v = LinearProjection(hidden_dim, hidden_dim)
+        self.proj_dropout = nn.Dropout(dropout)
+
+        # Per-head Flamingo-style tanh gates, init=0 -> identity at start.
+        self.gate_s = nn.Parameter(torch.full((num_heads,), float(gate_init)))
+        self.gate_v = nn.Parameter(torch.full((num_heads,), float(gate_init)))
+
+    def _create_slices(
+        self,
+        x_norm: torch.Tensor,
+        mask: torch.Tensor | None,
+        in_x: nn.Module,
+        in_fx: nn.Module,
+        in_slice: nn.Module,
+        temperature: nn.Parameter,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch, num_tokens, _ = x_norm.shape
+        fx_mid = (
+            in_fx(x_norm).view(batch, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
+        )
+        x_mid = (
+            in_x(x_norm).view(batch, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
+        )
+        slice_logits = in_slice(x_mid) / temperature
+        slice_weights = F.softmax(slice_logits, dim=-1)
+        if mask is not None:
+            slice_weights = slice_weights * mask[:, None, :, None].to(
+                device=slice_weights.device,
+                dtype=slice_weights.dtype,
+            )
+        slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
+        slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
+        return slice_tokens, slice_norm
+
+    @staticmethod
+    def _slice_attn_mask(slice_norm: torch.Tensor, dtype: torch.dtype, eps: float = 1e-5) -> torch.Tensor:
+        # slice_norm: (B, H, S, 1) -> attn_mask: (B, H, 1, S) for SDPA broadcasting.
+        slice_valid = slice_norm.squeeze(-1) > eps
+        attn_mask = torch.zeros(slice_valid.shape, dtype=dtype, device=slice_valid.device)
+        attn_mask = attn_mask.masked_fill(~slice_valid, torch.finfo(dtype).min)
+        return attn_mask.unsqueeze(2)
+
+    def forward(
+        self,
+        x_s: torch.Tensor,
+        x_v: torch.Tensor,
+        mask_s: torch.Tensor | None = None,
+        mask_v: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch, num_surface, _ = x_s.shape
+        num_volume = x_v.shape[1]
+        if num_surface == 0 or num_volume == 0:
+            return x_s, x_v
+
+        x_s_norm = self.norm_s(x_s)
+        x_v_norm = self.norm_v(x_v)
+
+        slice_s, slice_norm_s = self._create_slices(
+            x_s_norm,
+            mask_s,
+            self.surface_in_x,
+            self.surface_in_fx,
+            self.surface_in_slice,
+            self.surface_temperature,
+        )
+        slice_v, slice_norm_v = self._create_slices(
+            x_v_norm,
+            mask_v,
+            self.volume_in_x,
+            self.volume_in_fx,
+            self.volume_in_slice,
+            self.volume_temperature,
+        )
+
+        K_s, V_s = self.surface_kv(slice_s).chunk(2, dim=-1)
+        K_v, V_v = self.volume_kv(slice_v).chunk(2, dim=-1)
+
+        Q_s = (
+            self.surface_q(x_s_norm)
+            .view(batch, num_surface, self.num_heads, self.dim_head)
+            .permute(0, 2, 1, 3)
+        )
+        Q_v = (
+            self.volume_q(x_v_norm)
+            .view(batch, num_volume, self.num_heads, self.dim_head)
+            .permute(0, 2, 1, 3)
+        )
+
+        attn_mask_s = self._slice_attn_mask(slice_norm_s, dtype=Q_s.dtype)
+        attn_mask_v = self._slice_attn_mask(slice_norm_v, dtype=Q_v.dtype)
+
+        out_s = F.scaled_dot_product_attention(
+            Q_s,
+            K_v,
+            V_v,
+            attn_mask=attn_mask_v,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        out_v = F.scaled_dot_product_attention(
+            Q_v,
+            K_s,
+            V_s,
+            attn_mask=attn_mask_s,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+
+        gate_s = self.gate_s.view(1, self.num_heads, 1, 1).tanh().to(out_s.dtype)
+        gate_v = self.gate_v.view(1, self.num_heads, 1, 1).tanh().to(out_v.dtype)
+        out_s = out_s * gate_s
+        out_v = out_v * gate_v
+
+        out_s = out_s.permute(0, 2, 1, 3).contiguous().view(batch, num_surface, self.hidden_dim)
+        out_v = out_v.permute(0, 2, 1, 3).contiguous().view(batch, num_volume, self.hidden_dim)
+        out_s = self.proj_dropout(self.proj_s(out_s))
+        out_v = self.proj_dropout(self.proj_v(out_v))
+
+        out_s = _apply_token_mask(out_s, mask_s)
+        out_v = _apply_token_mask(out_v, mask_v)
+
+        return x_s + out_s, x_v + out_v
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -323,6 +497,8 @@ class SurfaceTransolver(nn.Module):
         rff_sigma: float = 1.0,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_cross_attn_bridge: bool = False,
+        cross_attn_position: str = "pre_heads",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -334,6 +510,12 @@ class SurfaceTransolver(nn.Module):
         self.rff_sigma = rff_sigma
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_cross_attn_bridge = use_cross_attn_bridge
+        if cross_attn_position not in ("pre_heads", "mid_trunk"):
+            raise ValueError(
+                f"cross_attn_position must be 'pre_heads' or 'mid_trunk', got {cross_attn_position!r}"
+            )
+        self.cross_attn_position = cross_attn_position
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -395,6 +577,16 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        if use_cross_attn_bridge:
+            self.cross_attn_bridge = SurfaceVolumeCrossAttn(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                num_slices=slice_num,
+                dropout=dropout,
+            )
+        else:
+            self.cross_attn_bridge = None
 
     def _encode_group(
         self,
@@ -472,7 +664,28 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        bridge_active = (
+            self.use_cross_attn_bridge
+            and self.cross_attn_bridge is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        )
+        if bridge_active and self.cross_attn_position == "mid_trunk":
+            half = len(self.backbone.blocks) // 2
+            for block in self.backbone.blocks[:half]:
+                hidden = block(hidden, attn_mask=attn_mask)
+            x_s_mid = hidden[:, :surface_tokens]
+            x_v_mid = hidden[:, surface_tokens : surface_tokens + volume_tokens]
+            x_s_mid, x_v_mid = self.cross_attn_bridge(
+                x_s_mid, x_v_mid, surface_mask, volume_mask
+            )
+            hidden = _apply_token_mask(torch.cat([x_s_mid, x_v_mid], dim=1), attn_mask)
+            for block in self.backbone.blocks[half:]:
+                hidden = block(hidden, attn_mask=attn_mask)
+        else:
+            hidden = self.backbone(hidden, attn_mask=attn_mask)
+
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -480,6 +693,13 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if bridge_active and self.cross_attn_position == "pre_heads":
+            surface_hidden, volume_hidden = self.cross_attn_bridge(
+                surface_hidden, volume_hidden, surface_mask, volume_mask
+            )
+            surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
