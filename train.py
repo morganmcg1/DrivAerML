@@ -131,6 +131,7 @@ class Config:
     gradnorm_init_warmup_steps: int = 10
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
+    gradnorm_min_weight: float = 0.0
     debug: bool = False
 
 
@@ -202,6 +203,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "EMA decay for the per-task loss tracker used in "
             "mode='ema_proxy' (ema = beta * ema + (1-beta) * L_i.detach()). "
             "Default 0.9 matches the advisor spec. Unused in mode='full'."
+        ),
+        "gradnorm_min_weight": (
+            "Asymmetric per-task weight floor applied in mode='ema_proxy'. "
+            "Each pre-normalisation w_raw_i is clamped to >= min_weight "
+            "before the closed-form sum-T renormalisation; the up-weighting "
+            "ceiling is left free. Prevents over-aggressive down-weighting "
+            "of fast-converging tasks (sp/vp) while still allowing slow "
+            "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
+            "(matches Run 1 behavior). Recommended 0.7 for soft "
+            "redistribution. Unused in mode='full'."
         ),
     }
     for field in fields(Config):
@@ -357,13 +368,18 @@ class GradNormBalancer:
             ema_i      = beta * ema_i + (1 - beta) * L_i.detach()
             r_i        = ema_i / initial_loss_i              # relative rate
             r_norm_i   = r_i / mean(r)                       # mean-1 rate
-            w_raw_i    = r_norm_i ** alpha
+            w_raw_i    = max(r_norm_i ** alpha, min_weight)  # asym floor
             w_i        = w_raw_i * T / sum(w_raw_j)          # sum=T => mean=1
 
         No autograd over the balancer => ~1x overhead. Tasks whose losses
         decrease slower than average (high r_norm_i) get up-weighted; the
         alpha exponent controls how aggressively. ``log_weights.data`` is
         set from log(w_i) each step for unified logging and DDP broadcast.
+
+        ``min_weight`` (default 0.0) is an asymmetric pre-normalisation
+        floor applied to ``w_raw_i``: it caps how aggressively a fast
+        task can be down-weighted while leaving the up-weighting ceiling
+        free. Recommended 0.7 for soft redistribution.
 
         Note on the advisor spec:
             The original spec wrote ``w_i = (1/ema_i) / sum(1/ema_j) * T``
@@ -396,6 +412,7 @@ class GradNormBalancer:
         init_warmup_steps: int,
         log_clip: float,
         ema_beta: float,
+        min_weight: float = 0.0,
     ):
         if mode not in GRADNORM_MODES:
             raise ValueError(
@@ -408,6 +425,7 @@ class GradNormBalancer:
         self.init_warmup_steps = max(1, init_warmup_steps)
         self.log_clip = float(log_clip)
         self.ema_beta = float(ema_beta)
+        self.min_weight = float(min_weight)
         self.log_weights = nn.Parameter(torch.zeros(num_tasks, device=device))
         if mode == "full":
             self.optimizer: torch.optim.Optimizer | None = torch.optim.Adam(
@@ -419,6 +437,7 @@ class GradNormBalancer:
         self._init_loss_count = 0
         self.initial_loss: torch.Tensor | None = None
         self.ema_loss: torch.Tensor | None = None
+        self.last_floor_active: int = 0
 
     @property
     def ready(self) -> bool:
@@ -475,7 +494,15 @@ class GradNormBalancer:
             )
             r = (self.ema_loss / self.initial_loss).clamp(min=1e-12)
             r = r / r.mean().clamp(min=1e-12)
-            w_raw = r.pow(self.alpha).clamp(min=1e-12)
+            w_raw_pre = r.pow(self.alpha).clamp(min=1e-12)
+            if self.min_weight > 0.0:
+                self.last_floor_active = int(
+                    (w_raw_pre < self.min_weight).sum().item()
+                )
+                w_raw = w_raw_pre.clamp(min=self.min_weight)
+            else:
+                self.last_floor_active = 0
+                w_raw = w_raw_pre
             w = w_raw * (self.num_tasks / w_raw.sum().clamp(min=1e-12))
             with torch.no_grad():
                 self.log_weights.data = w.log().clamp(
@@ -698,6 +725,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 init_warmup_steps=config.gradnorm_init_warmup_steps,
                 log_clip=config.gradnorm_log_clip,
                 ema_beta=config.gradnorm_ema_beta,
+                min_weight=config.gradnorm_min_weight,
             )
             if config.gradnorm_mode == "full":
                 gradnorm_shared_params = [
@@ -724,6 +752,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"ema_beta={config.gradnorm_ema_beta}; "
                         f"warmup={config.gradnorm_init_warmup_steps} steps; "
                         f"log_clip={config.gradnorm_log_clip}; "
+                        f"min_weight={config.gradnorm_min_weight}; "
                         f"closed-form weights from r_i = ema_loss_i / initial_loss_i"
                     )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -882,6 +911,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             gradnorm_metrics[f"gradnorm/initial_loss_{name}"] = float(
                                 balancer.initial_loss[i].cpu().item()
                             )
+                    if balancer.mode == "ema_proxy" and balancer.min_weight > 0.0:
+                        gradnorm_metrics["gradnorm/min_weight_floor_count"] = float(
+                            balancer.last_floor_active
+                        )
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
