@@ -49,6 +49,7 @@ from trainer_runtime import (
     init_wandb_run,
     is_valid_primary_metric,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     squared_relative_l2_loss,
@@ -117,6 +118,9 @@ class Config:
     raw_rel_l2_weight: float = 0.0
     fourier_pe: bool = False
     fourier_pe_num_freqs: int = 8
+    ohem_surface_ratio: float = 1.0
+    ohem_warmup_epochs: int = 0
+    ohem_min_k: int = 100
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -167,10 +171,13 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     raw_rel_l2_weight: float = 0.0,
+    ohem_surface_ratio: float = 1.0,
+    ohem_min_k: int = 100,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    ohem_metrics: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -178,7 +185,55 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        N_surface = out["surface_preds"].shape[1]
+        ohem_active = ohem_surface_ratio < 1.0 and N_surface > 0
+        if ohem_active:
+            # OHEM: compute per-point squared error [B, N, C], rank points by mean
+            # across channels, keep the top-K% hardest per sample, then reduce.
+            surface_sq = (out["surface_preds"] - surface_target).square()  # [B, N, C]
+            mask_bool = batch.surface_mask.to(torch.bool)                  # [B, N]
+            mask_float = mask_bool.to(dtype=surface_sq.dtype)
+            # fp32 ranking signal: bf16 ties produce noisy topk indices
+            per_point_loss = (surface_sq.float().mean(dim=-1)) * mask_float.float()  # [B, N]
+            # Use mean valid count across batch so all samples get ~ratio fraction.
+            n_valid = mask_float.sum(dim=1).clamp_min(1.0)                  # [B]
+            mean_n_valid = float(n_valid.mean().item())
+            k = int(round(ohem_surface_ratio * mean_n_valid))
+            k = max(int(ohem_min_k), k)
+            k = min(N_surface, k)
+            _, hard_idx = per_point_loss.topk(k, dim=1)                    # [B, k]
+            hard_sq = surface_sq.gather(
+                1,
+                hard_idx.unsqueeze(-1).expand(-1, -1, surface_sq.shape[-1]),
+            )                                                                # [B, k, C]
+            hard_mask = mask_bool.gather(1, hard_idx)                       # [B, k]
+            surface_loss = masked_mean(hard_sq, hard_mask)
+            with torch.no_grad():
+                hard_per_pt_loss = per_point_loss.gather(1, hard_idx)       # [B, k]
+                threshold_loss = float(
+                    hard_per_pt_loss.amin(dim=1).mean().detach().cpu().item()
+                )
+                full_per_pt = per_point_loss[mask_bool]
+                mean_full_loss = float(full_per_pt.mean().detach().cpu().item()) if full_per_pt.numel() else 0.0
+                hard_mean_loss = float(hard_per_pt_loss.mean().detach().cpu().item())
+                # Easy = remaining fraction by removing the hard ones; estimate via
+                # difference using the global mean weighted by counts.
+                total_valid = float(mask_float.sum().detach().cpu().item())
+                hard_count = float(hard_mask.to(mask_float.dtype).sum().detach().cpu().item())
+                easy_count = max(total_valid - hard_count, 1.0)
+                easy_mean_loss = (
+                    (mean_full_loss * total_valid - hard_mean_loss * hard_count) / easy_count
+                ) if total_valid > 0 else 0.0
+                ohem_metrics["ohem/active"] = 1.0
+                ohem_metrics["ohem/k_selected"] = float(k)
+                ohem_metrics["ohem/k_fraction"] = float(k) / max(mean_n_valid, 1.0)
+                ohem_metrics["ohem/threshold_loss"] = threshold_loss
+                ohem_metrics["ohem/hard_mean_loss"] = hard_mean_loss
+                ohem_metrics["ohem/easy_mean_loss"] = easy_mean_loss
+                ohem_metrics["ohem/full_mean_loss"] = mean_full_loss
+        else:
+            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            ohem_metrics["ohem/active"] = 0.0
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -211,6 +266,7 @@ def train_loss(
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
         **aux_metrics,
+        **ohem_metrics,
     }
 
 
@@ -310,6 +366,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_loss_sum = 0.0
             n_batches = 0
 
+            in_ohem_warmup = epoch < config.ohem_warmup_epochs
+            effective_ohem_ratio = 1.0 if in_ohem_warmup else config.ohem_surface_ratio
             for batch in tqdm(
                 train_loader,
                 desc=f"Epoch {epoch + 1}/{max_epochs}",
@@ -325,6 +383,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
                     raw_rel_l2_weight=config.raw_rel_l2_weight,
+                    ohem_surface_ratio=effective_ohem_ratio,
+                    ohem_min_k=config.ohem_min_k,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -350,6 +410,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "lr": current_lr,
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/ohem_surface_ratio": config.ohem_surface_ratio,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
@@ -368,6 +429,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                                      "raw_rel_l2/vol_pressure"):
                         if _aux_key in batch_loss_metrics:
                             train_log[f"train/{_aux_key}"] = batch_loss_metrics[_aux_key]
+                    # Log OHEM diagnostics whenever they were emitted by train_loss.
+                    for _ohem_key in (
+                        "ohem/active",
+                        "ohem/k_selected",
+                        "ohem/k_fraction",
+                        "ohem/threshold_loss",
+                        "ohem/hard_mean_loss",
+                        "ohem/easy_mean_loss",
+                        "ohem/full_mean_loss",
+                    ):
+                        if _ohem_key in batch_loss_metrics:
+                            train_log[f"train/{_ohem_key}"] = batch_loss_metrics[_ohem_key]
+                    train_log["train/ohem/in_warmup"] = 1.0 if in_ohem_warmup else 0.0
+                    train_log["train/ohem/configured_ratio"] = float(config.ohem_surface_ratio)
+                    train_log["train/ohem/effective_ratio"] = float(effective_ohem_ratio)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
