@@ -1446,7 +1446,7 @@ def weighted_masked_mse_per_channel(
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
     wallshear_ohem_k: float = 0.0,
-) -> tuple[torch.Tensor, list[float], float]:
+) -> tuple[torch.Tensor, list[float], dict[str, float]]:
     """Per-channel weighted masked loss for surface predictions.
 
     pred, target: [B, N, C]. mask: [B, N] bool.
@@ -1486,14 +1486,19 @@ def weighted_masked_mse_per_channel(
     per_axis_mean : list[float]
         Per-channel masked MSE diagnostics over *all* valid points (independent
         of OHEM/Huber selection) for cross-run comparability.
-    ohem_mean_yz_residual : float
-        Mean ``τ_y² + τ_z²`` residual on the OHEM-selected hard points. NaN when
-        OHEM is disabled.
+    ohem_metrics : dict[str, float]
+        Empty when OHEM is disabled. When enabled, contains diagnostics on the
+        hard-mined subset: ``mean_yz_residual`` (mean τ_y²+τ_z² on hard points),
+        ``mask_frac_tau_y`` / ``mask_frac_tau_z`` (effective hard-point fraction
+        of valid points; identical for joint-yz OHEM), ``loss_tau_y_hard`` /
+        ``loss_tau_y_easy`` and ``loss_tau_z_hard`` / ``loss_tau_z_easy`` (mean
+        squared residual on the hard vs easy subsets — ratio should grow over
+        training as easy points are mastered first).
     """
     weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
     if not bool(mask.any()):
         per_axis = [0.0] * int(weights.numel())
-        return pred.sum() * 0.0, per_axis, float("nan")
+        return pred.sum() * 0.0, per_axis, {}
     diff = pred - target  # [B, N, C]
     diff_sq = diff.pow(2)
     mask_f = mask.unsqueeze(-1).to(pred.dtype)
@@ -1501,7 +1506,7 @@ def weighted_masked_mse_per_channel(
     n_channels = diff_sq.shape[-1]
 
     use_ohem = wallshear_ohem_k > 0.0 and n_channels >= 4
-    ohem_mean_yz_residual = float("nan")
+    ohem_metrics: dict[str, float] = {}
 
     if use_ohem:
         # Score per surface point = τ_y² + τ_z² residual (channels 2 and 3).
@@ -1531,16 +1536,45 @@ def weighted_masked_mse_per_channel(
         # Per-axis diagnostic: full-coverage masked MSE on every channel.
         per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
         per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
-        # Mean τ_y² + τ_z² on selected hard points (averaged over valid hard points).
-        yz_residual_hard = yz_residual.gather(1, hard_idx)  # [B, k]
-        yz_valid_count = hard_mask.to(pred.dtype).sum().clamp_min(1).detach()
-        ohem_mean_yz_residual = float(
-            (
-                (yz_residual_hard * hard_mask.to(pred.dtype)).sum().detach().float()
-                / yz_valid_count.float()
-            ).cpu().item()
-        )
-        return weighted_loss, per_axis_mean, ohem_mean_yz_residual
+
+        # ---- OHEM diagnostics (no grad) ----
+        # Build a per-point boolean "is_hard" indicator over [B, N].
+        is_hard = torch.zeros_like(mask)  # [B, N] bool
+        is_hard.scatter_(1, hard_idx, hard_mask)
+        easy_mask = mask & ~is_hard  # valid AND not selected
+        valid_easy_f = easy_mask.to(pred.dtype).sum().clamp_min(1).detach()
+        valid_hard_f = is_hard.to(pred.dtype).sum().clamp_min(1).detach()
+        valid_total_f = mask.to(pred.dtype).sum().clamp_min(1).detach()
+
+        ds = diff_sq.detach()
+        tau_y_sq = ds[..., 2]
+        tau_z_sq = ds[..., 3]
+        is_hard_f = is_hard.to(pred.dtype)
+        easy_mask_f = easy_mask.to(pred.dtype)
+
+        loss_tau_y_hard = (tau_y_sq * is_hard_f).sum() / valid_hard_f
+        loss_tau_y_easy = (tau_y_sq * easy_mask_f).sum() / valid_easy_f
+        loss_tau_z_hard = (tau_z_sq * is_hard_f).sum() / valid_hard_f
+        loss_tau_z_easy = (tau_z_sq * easy_mask_f).sum() / valid_easy_f
+        # Effective hard-point fraction (≈ k_fraction; deviates only when masks
+        # are not fully populated). One mask is shared across τ_y/τ_z under
+        # joint-yz OHEM, so both per-channel reports collapse to the same value.
+        mask_frac = (valid_hard_f / valid_total_f).float()
+
+        ohem_metrics = {
+            "ohem_hard_frac": float(wallshear_ohem_k),
+            "ohem_mask_frac_tau_y": float(mask_frac.cpu().item()),
+            "ohem_mask_frac_tau_z": float(mask_frac.cpu().item()),
+            "ohem_loss_tau_y_hard": float(loss_tau_y_hard.float().cpu().item()),
+            "ohem_loss_tau_y_easy": float(loss_tau_y_easy.float().cpu().item()),
+            "ohem_loss_tau_z_hard": float(loss_tau_z_hard.float().cpu().item()),
+            "ohem_loss_tau_z_easy": float(loss_tau_z_easy.float().cpu().item()),
+            "ohem_mean_yz_residual": float(
+                ((tau_y_sq + tau_z_sq) * is_hard_f).sum().float().cpu().item()
+                / float(valid_hard_f.cpu().item())
+            ),
+        }
+        return weighted_loss, per_axis_mean, ohem_metrics
 
     if wallshear_huber_delta > 0.0 and n_channels >= 4:
         abs_err = diff.abs()
@@ -1561,7 +1595,7 @@ def weighted_masked_mse_per_channel(
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
-    return weighted_loss, per_axis_mean, ohem_mean_yz_residual
+    return weighted_loss, per_axis_mean, ohem_metrics
 
 
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
@@ -1630,7 +1664,7 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss, per_axis_unweighted, ohem_mean_yz_residual = (
+        surface_loss, per_axis_unweighted, ohem_metrics = (
             weighted_masked_mse_per_channel(
                 surface_pred_used,
                 surface_target_used,
@@ -1664,9 +1698,8 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
-    if wallshear_ohem_k > 0.0:
-        metrics["ohem_hard_frac"] = float(wallshear_ohem_k)
-        metrics["ohem_mean_yz_residual"] = float(ohem_mean_yz_residual)
+    if wallshear_ohem_k > 0.0 and ohem_metrics:
+        metrics.update(ohem_metrics)
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -2356,13 +2389,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
-            if "ohem_hard_frac" in batch_loss_metrics:
-                train_log["train/ohem_hard_frac"] = batch_loss_metrics[
-                    "ohem_hard_frac"
-                ]
-                train_log["train/ohem_mean_yz_residual"] = batch_loss_metrics[
-                    "ohem_mean_yz_residual"
-                ]
+            for ohem_key in (
+                "ohem_hard_frac",
+                "ohem_mean_yz_residual",
+                "ohem_mask_frac_tau_y",
+                "ohem_mask_frac_tau_z",
+                "ohem_loss_tau_y_hard",
+                "ohem_loss_tau_y_easy",
+                "ohem_loss_tau_z_hard",
+                "ohem_loss_tau_z_easy",
+            ):
+                if ohem_key in batch_loss_metrics:
+                    train_log[f"train/{ohem_key}"] = batch_loss_metrics[ohem_key]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
