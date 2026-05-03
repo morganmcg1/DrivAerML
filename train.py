@@ -764,6 +764,7 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     fp32_final_epochs: int = 0
+    fp32_final_accum_steps: int = 1
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1515,6 +1516,35 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def _split_surface_batch(batch: SurfaceBatch, n_chunks: int) -> list[SurfaceBatch]:
+    if n_chunks <= 1:
+        return [batch]
+    bs = batch.surface_x.shape[0]
+    if bs < 2:
+        return [batch]
+    n = min(n_chunks, bs)
+    base = bs // n
+    sizes = [base + (1 if i < bs - base * n else 0) for i in range(n)]
+    chunks: list[SurfaceBatch] = []
+    start = 0
+    for sz in sizes:
+        end = start + sz
+        chunks.append(
+            SurfaceBatch(
+                case_ids=list(batch.case_ids[start:end]),
+                surface_x=batch.surface_x[start:end],
+                surface_y=batch.surface_y[start:end],
+                surface_mask=batch.surface_mask[start:end],
+                volume_x=batch.volume_x[start:end],
+                volume_y=batch.volume_y[start:end],
+                volume_mask=batch.volume_mask[start:end],
+                metadata=list(batch.metadata[start:end]),
+            )
+        )
+        start = end
+    return chunks
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -2176,6 +2206,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.log(
                 {
                     "train/amp_dtype_active": 0 if use_fp32_this_epoch else 1,
+                    "train/precision_mode_int": 1 if use_fp32_this_epoch else 0,
                     "train/fp32_final_epochs_remaining_estimate": float(
                         remaining_epochs_estimate
                     ),
@@ -2190,10 +2221,29 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"fp32_final_epochs={config.fp32_final_epochs})"
                 )
 
+        accum_steps = (
+            max(1, config.fp32_final_accum_steps)
+            if use_fp32_this_epoch
+            else 1
+        )
         if is_distributed and isinstance(train_loader.sampler, DistributedSampler):
             train_loader.sampler.set_epoch(epoch)
         if torch.cuda.is_available():
+            torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
+        if is_main:
+            wandb.log(
+                {
+                    "train/grad_accum_steps": accum_steps,
+                    "epoch": epoch + 1,
+                    "global_step": global_step,
+                }
+            )
+            if accum_steps > 1:
+                print(
+                    f"Epoch {epoch + 1}/{max_epochs}: gradient accumulation "
+                    f"with {accum_steps} micro-batches per step"
+                )
         t0 = time.time()
         train_model.train()
         train_loss_sum = 0.0
@@ -2205,39 +2255,103 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
-            loss, batch_loss_metrics = train_loss(
-                train_model,
-                batch,
-                transform,
-                device,
-                epoch_amp_mode,
-                surface_loss_weight=config.surface_loss_weight,
-                volume_loss_weight=config.volume_loss_weight,
-                aux_rel_l2_weight=config.aux_rel_l2_weight,
-                use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
-                wallshear_y_weight=config.wallshear_y_weight,
-                wallshear_z_weight=config.wallshear_z_weight,
-                wallshear_huber_delta=config.wallshear_huber_delta,
-            )
             optimizer.zero_grad(set_to_none=True)
-            loss_is_finite = bool(torch.isfinite(loss).item())
-            if not loss_is_finite:
-                nonfinite_skip_count += 1
-                wandb.log(
-                    {
-                        "train/nonfinite_skip_count": nonfinite_skip_count,
-                        "train/nonfinite_skip_kind": 1,
-                        "global_step": global_step,
-                    }
+            if accum_steps > 1:
+                sub_batches = _split_surface_batch(batch, accum_steps)
+                effective_steps = len(sub_batches)
+                sub_losses: list[float] = []
+                sub_metrics_list: list[dict[str, float]] = []
+                nonfinite_in_micro = False
+                supports_no_sync = (
+                    is_distributed and hasattr(train_model, "no_sync")
                 )
-                if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
-                    raise RuntimeError(
-                        f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
-                        f"loss/grad steps; training is structurally broken."
+                for i, sub in enumerate(sub_batches):
+                    is_last = i == effective_steps - 1
+                    sync_ctx = (
+                        train_model.no_sync()
+                        if (not is_last and supports_no_sync)
+                        else nullcontext()
                     )
-                global_step += 1
-                continue
-            loss.backward()
+                    with sync_ctx:
+                        sub_loss, sub_metrics = train_loss(
+                            train_model,
+                            sub,
+                            transform,
+                            device,
+                            epoch_amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            aux_rel_l2_weight=config.aux_rel_l2_weight,
+                            use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                            wallshear_y_weight=config.wallshear_y_weight,
+                            wallshear_z_weight=config.wallshear_z_weight,
+                            wallshear_huber_delta=config.wallshear_huber_delta,
+                        )
+                        if not bool(torch.isfinite(sub_loss).item()):
+                            nonfinite_in_micro = True
+                            break
+                        (sub_loss / float(effective_steps)).backward()
+                        sub_losses.append(float(sub_loss.detach().item()))
+                        sub_metrics_list.append(sub_metrics)
+                if nonfinite_in_micro:
+                    optimizer.zero_grad(set_to_none=True)
+                    nonfinite_skip_count += 1
+                    wandb.log(
+                        {
+                            "train/nonfinite_skip_count": nonfinite_skip_count,
+                            "train/nonfinite_skip_kind": 1,
+                            "global_step": global_step,
+                        }
+                    )
+                    if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                        raise RuntimeError(
+                            f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                            f"loss/grad steps; training is structurally broken."
+                        )
+                    global_step += 1
+                    continue
+                loss_value = sum(sub_losses) / max(len(sub_losses), 1)
+                loss = torch.tensor(loss_value, device=device)
+                batch_loss_metrics = {
+                    k: float(
+                        sum(m[k] for m in sub_metrics_list)
+                        / len(sub_metrics_list)
+                    )
+                    for k in sub_metrics_list[0]
+                }
+            else:
+                loss, batch_loss_metrics = train_loss(
+                    train_model,
+                    batch,
+                    transform,
+                    device,
+                    epoch_amp_mode,
+                    surface_loss_weight=config.surface_loss_weight,
+                    volume_loss_weight=config.volume_loss_weight,
+                    aux_rel_l2_weight=config.aux_rel_l2_weight,
+                    use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                    wallshear_y_weight=config.wallshear_y_weight,
+                    wallshear_z_weight=config.wallshear_z_weight,
+                    wallshear_huber_delta=config.wallshear_huber_delta,
+                )
+                loss_is_finite = bool(torch.isfinite(loss).item())
+                if not loss_is_finite:
+                    nonfinite_skip_count += 1
+                    wandb.log(
+                        {
+                            "train/nonfinite_skip_count": nonfinite_skip_count,
+                            "train/nonfinite_skip_kind": 1,
+                            "global_step": global_step,
+                        }
+                    )
+                    if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                        raise RuntimeError(
+                            f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                            f"loss/grad steps; training is structurally broken."
+                        )
+                    global_step += 1
+                    continue
+                loss.backward()
             should_log_gradients = (
                 config.gradient_log_every > 0
                 and (global_step + 1) % config.gradient_log_every == 0
@@ -2385,6 +2499,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             "epoch_time_s_fp32": dt if use_fp32_this_epoch else 0.0,
             "epoch_time_s_bf16": 0.0 if use_fp32_this_epoch else dt,
             "epoch_amp_dtype_active": 0 if use_fp32_this_epoch else 1,
+            "epoch_precision_mode_int": 1 if use_fp32_this_epoch else 0,
             "global_step": global_step,
         }
         if early_stop_reason is not None:
