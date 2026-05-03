@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-03 06:15 UTC (Round 25 active — PR #489 assigned; 8 students active)
+- **Date:** 2026-05-03 (post W&B snapshot, Round 25 active — PR #489 assigned; 8 students active)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -41,39 +41,47 @@ No new directives in last cycle. Still working off Issue #252 (Modded-NanoGPT-de
 
 ---
 
-## Latest signals (06:15 UTC snapshot)
+## Latest signals (W&B snapshot — late EP7-8 region)
 
-### Fern #480 — VOL_P BREAKTHROUGH
-- EP6.3: val_abupt=**8.687%** (gate PASS), vol_p=**5.299%** (beats AB-UPT 6.08% on val)
-- This is the first in-flight result to beat the AB-UPT vol_p benchmark
-- Cosine EMA ramp with fixed 12-epoch span is confirmed working; still descending
-- Continue to EP12; need test metrics from best-val checkpoint
+### Fern #480 — APPROACHING SOTA
+- W&B `2u6twuu4` step 21879: **val_abupt=7.745%** (only **+0.36pp above SOTA 7.3816%** — still descending)
+- vol_p=**4.688%** (well below AB-UPT 6.08%, improved from 5.30% at EP6)
+- surf_p=5.08% / wall_shear=8.67% / tau_x=7.43% / tau_y=9.98% / tau_z=11.54%
+- Strongest in-flight run on `tay`. Continue to EP12; **needs test metrics from best-val checkpoint** for SOTA decision
 
-### Tanjiro #481 — Gate waiver granted
-- EP5.8→EP6.0: 10.158%→9.090% (slope −1.07 pp in ~750 steps — 3-4× faster than fern)
-- vol_p already at 5.573% (below AB-UPT) — log1p compression working on vol target
-- Gate waiver: continue to EP12; must break 8.5% by EP8 or will close
-- tau_y=11.85% / tau_z=13.48% — watch for log1p improvement here
+### Tanjiro #481 — GATE WAIVER MET ✓
+- W&B `hnrpuptg` step 21300: **val_abupt=8.309%** (waiver required <8.5% by EP8 — MET)
+- vol_p=5.140% (below AB-UPT 6.08%) — log1p compression confirmed working on vol target
+- tau_y=10.71% / tau_z=12.32% — log1p has NOT yet shown clear tau-axis improvement vs fern/frieren
+- Continue to EP12; report best-val checkpoint val+test metrics
 
-### Askeladd #471 — Arm-a complete, arm-b pending
+### Frieren #454 — GATE PASS
+- W&B `l8nu1ajz` step 19292: val_abupt=**8.248%** (well below 8.9% gate threshold)
+- vol_p=5.220% (below AB-UPT 6.08%)
+- tau_y=10.39% / tau_z=12.07% — tau_yz weight=1.5x not narrowing gap vs other runs
+- Continue to EP12
+
+### Cross-cutting observation: vol_p victory, tau_y/z stagnation
+- All three late-epoch runs (fern/tanjiro/frieren) now beat AB-UPT vol_p benchmark (4.69%, 5.14%, 5.22% < 6.08%) — vol_p attack succeeding broadly
+- All three runs have tau_y ~10-11% and tau_z ~11.5-12.3% — none breaking through to AB-UPT 3.65/3.63%
+- Implication: log1p / loss-weight / EMA all leave tau_y/z gap intact → confirms tau_y/z is a representational/spectral problem (PR #488 alphonse multi-sigma is the right attack)
+
+### Askeladd #471 — Arm-a complete, arm-b launched
 - Arm-a EP12: val_abupt=7.793% (+0.41pp above SOTA), vol_p=**4.618%** (BEST VOL_P EVER, below AB-UPT)
 - Signed-log transform crushes vol_p but increases other axes → no headline win
-- Arm-b (variation of signed-log, presumably different scale) should be launching
-- Candidate for composition with cross-attn bridge (#483) or vol-curriculum (#489)
+- Arm-b just launched at EP1 val_abupt=62.53% (early)
+- Candidate for composition with fern (cosine EMA) — both target vol_p
 
-### Frieren #454 — Gate pending (next val at step ~13604, EP6.0)
-- EP4.8: val_abupt=10.285% (pre-gate, EP5 val not yet logged)
-- Slope: EP3.6→EP4.8 was −3.65 pp/1.2-epoch — similar trajectory to tanjiro
-- Similar slope to tanjiro suggests gate outcome will be borderline; watch EP6 reading
+### Edward #483 — EP4, pre-gate
+- val_abupt ~10.24% — descending, on trajectory
 
-### Edward #483 — EP3.3, pre-gate
-- EP3.3: val_abupt=29.6% (still very early — high-level descent expected)
+### Nezuko #458 (mlp_ratio=8) — EP4, pre-gate
+- val_abupt ~9.80% — descending
 
-### Nezuko #458 (mlp_ratio=8) — EP2.4, pre-gate
-- EP2.4: val_abupt=33.2% (still very early)
+### Alphonse #488 — EP3, pre-gate
+- val_abupt ~32.28% — early
 
-### Alphonse #488 — EP0.7, pre-gate
-- Multi-sigma STRING-sep init just launched, no val data yet
+### Thorfinn #489 — vol-curriculum, just launched
 
 ---
 
