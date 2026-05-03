@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-03 12:15Z — frieren #501 timed out EP10 (7.269%), test 8.492% ties SOTA — sent back for EP11 rerun; nezuko/fern PRs closed NEG, reassigned; askeladd EP5=8.503% strong; tanjiro EP9=7.565%; thorfinn EMA-proxy running; 8 students active, 0 idle
+- **Date:** 2026-05-03 ~14:00Z — all 8 students active; tanjiro #534 assigned (multi-scale STRING-sep bands); edward #511 HOT (EP11 val=7.1275% — below SOTA); full fleet attacking tau_y/tau_z gap
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -33,14 +33,14 @@ No new directives since last cycle. All open human issues already responded to. 
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #523 | thorfinn | GradNorm EMA-proxy dynamic loss balancing | EMA-proxy run `9477cjoh` running at step~2467/EP0.9; `--gradnorm-mode ema_proxy`; formula confirmed correct |
-| #531 | fern | Unit-vector cosine similarity direction loss on wall shear tau (new) | **NEW ASSIGNMENT** — code impl required, tau_y/tau_z direction fidelity; 3-arm sweep (tau_unit_loss_weight=0/0.1/0.5) |
-| #496 | tanjiro | Uncertainty-weighted multitask loss (dual-optimizer fix) | EP9=7.565%, step 25423, runtime 237min; ~180min remaining; strong trajectory ~0.18pp/epoch improvement |
-| #501 | frieren | Anisotropic per-axis STRING freq priors (sigma_x/y/z) | Finished 282.6min, EP10 val=7.269%, **test=8.492% ≈ SOTA 8.497%**; SENT BACK for EP11 rerun |
-| #510 | alphonse | Surface-loss-weight sweep 0.5/2.0/4.0 | Arm A (slw=0.5) 3rd relaunch running at step~1520; Arms B/C (slw=2.0/4.0) NEVER LAUNCHED; advisor posted correction + direction |
-| #511 | edward | Extended training EP13 on current SOTA stack | EP7=7.827%, step 21703; EP8 val imminent; timeout ~170min remaining; monotonic descent |
-| #516 | askeladd | Per-channel tau_y/tau_z loss reweighting (tau_y×2.0, tau_z×2.5) | EP5=8.503%, already 0.204pp ahead of SOTA at same epoch; run `jeagf5zr`; strong candidate |
-| #532 | nezuko | AdamW vs Lion optimizer comparison on SOTA stack (new) | **NEW ASSIGNMENT** — Arm A=Lion, Arm B=AdamW lr=5e-4 wd=1e-2; test if optimizer choice affects tau_y/tau_z |
+| #511 | edward | Extended training EP13 on current SOTA stack | **HOT**: run `5o7jc7wi`, EP11 val=**7.1275%** — below SOTA 7.1792%; watch EP12/13 for final best |
+| #516 | askeladd | Per-channel tau_y/tau_z reweighting (tau_y×2.0, tau_z×2.5) | run `jeagf5zr`, rt=3.05h, val=7.6684%, slope=-0.118%/1k; EP8 gate passed; Run B (tau_y×3.0, tau_z×4.0) queued |
+| #523 | thorfinn | GradNorm EMA-proxy dynamic loss balancing | run `9477cjoh`, rt=1.34h, EP1=30.09%; formula confirmed correct; EP3 gate (≤14%) pending |
+| #501 | frieren | Anisotropic STRING priors + vol-curriculum composition | Arm A (aniso-only `kvywdebn`) 7.2688%, doesn't beat SOTA; composed run `i5fgc06e` (aniso+vol-curriculum) running |
+| #510 | alphonse | Surface-loss-weight sweep slw=0.5/2.0/4.0 | Arm B first (slw=2.0, run `qqtdnlwq`), rt=0.81h, no val yet; order B→C→A |
+| #531 | fern | Unit-vector cosine direction loss on tau (denormalize-first) | Arm B (w=0.1, run `3lurbotq`) running; normalization fix confirmed correct; Arm A = PR #489 control |
+| #532 | nezuko | AdamW vs Lion optimizer comparison on SOTA stack | Arm B (AdamW, run `3hm5ae1j`) running; DRAFT PR — advisor nudge posted for status update; Arm A (Lion) sequential |
+| #534 | tanjiro | Multi-scale STRING-sep bands: 3 independent band modules (σ=0.25/1.0/4.0, 8 feats/band, output_dim=144) | Just assigned; group `tanjiro-multi-scale-bands`; implementation in progress |
 
 ---
 
@@ -63,11 +63,12 @@ No new directives since last cycle. All open human issues already responded to. 
 - Timed out before EP11 val — sent back for rerun to capture EP11. Projected EP11 ~7.14% (below SOTA 7.1792%)
 - Anisotropic sigma (sigma_y=sigma_z=2.0 vs sigma_x=1.0) targets cross-stream/vertical axis spectral coverage directly
 
-### Tanjiro #496 — uncertainty-weighted multitask loss
-- EP9=7.565%, step 25423, runtime 237min; ~122min remaining at 360min timeout
-- Rate: −0.182pp/epoch (EP8→EP9). Projected EP13: ~6.84% if rate holds
-- Dual-optimizer (Lion backbone + AdamW for log_sigma) avoids Lion lockstep failure mode
-- Asks: has log_sigma diverged meaningfully across tasks by EP2?
+### Tanjiro #534 — multi-scale STRING-sep bands (NEW, just assigned)
+- 3 independent `StringSeparableEncoding` modules: coarse (σ=0.25, 8 feats), medium (σ=1.0, 8 feats), fine (σ=4.0, 8 feats)
+- Concatenated output_dim=144 vs current 96; hypothesis: single shared encoding forces coarse+fine gradients to compete
+- Fine-band module free to specialize for high-freq tau_y/tau_z surface signals
+- Group `tanjiro-multi-scale-bands`; EP3 gate ≤10.5% expected; watch fine-band sigma gradient evolution
+- Previous tanjiro #496 (uncertainty-weighted multitask) CLOSED-NEG at EP9=7.565% → 8.27% best val (down-weighted hard tau tasks)
 
 ### Askeladd #516 — per-channel tau_y/tau_z reweighting
 - EP5=8.503%, step 13604. Already 0.204pp ahead of SOTA trajectory at EP5 (SOTA EP5=8.707%)
@@ -113,7 +114,7 @@ No new directives since last cycle. All open human issues already responded to. 
 - 2× surface points: CLOSED-NEG (#506) — slower training outweighs resolution gain
 - Active spectral attack: frieren #501 anisotropic per-axis STRING freq (VERY PROMISING — test ties SOTA)
 - Active dynamic balancing attack: thorfinn #523 EMA-proxy GradNorm
-- Active uncertainty-weighting attack: tanjiro #496 (dual-optimizer)
+- Active multi-scale spectral bands: tanjiro #534 (3-band STRING-sep, output_dim=144, fine band free to specialize tau_y/z)
 - Active per-channel reweighting: askeladd #516 (STRONG early signal)
 - Active direction-loss attack: fern #531 unit-vector cosine similarity on tau (NEW)
 - Active optimizer comparison: nezuko #532 AdamW vs Lion (NEW)
@@ -125,7 +126,7 @@ No new directives since last cycle. All open human issues already responded to. 
 1. **Closing the tau_y/tau_z gap (×2.5–3 vs AB-UPT) — full-fleet upstream attack:**
    - **Dynamic loss balancing (GradNorm):** PR #523 thorfinn — data-driven adaptive task weighting, targets tau_y/z convergence speed
    - **Spectral representation, anisotropic per-axis:** PR #501 frieren (sigma_x/y/z 3-arm sweep) — directly targets anisotropic flow features
-   - **Multitask uncertainty weighting:** PR #496 tanjiro (dual-optimizer fix, AdamW for log_sigma)
+   - **Multi-scale spectral bands:** PR #534 tanjiro (3-band STRING-sep, fine band σ=4.0 specializes for tau_y/z)
    - **Per-channel reweighting:** PR #516 askeladd (tau_y/z direct weight boost)
    - **Surface resolution:** PR #506 nezuko (131k surface pts)
    - **Inference TTA:** PR #499 fern (mirror-y on frozen SOTA)
@@ -176,7 +177,7 @@ No new directives since last cycle. All open human issues already responded to. 
 
 - thorfinn vol-curriculum (#489 MERGED SOTA) + fern TTA (#499) = orthogonal data density + inference augmentation
 - frieren anisotropic STRING (#501) + thorfinn GradNorm (#523) = orthogonal spectral + dynamic balancing tau attack
-- frieren anisotropic STRING (#501) + tanjiro uncertainty weighting (#496) = two orthogonal multitask balance approaches
+- frieren anisotropic STRING (#501) + tanjiro multi-scale bands (#534) = orthogonal spectral resolution approaches (per-axis freq vs per-scale freq)
 - **DO NOT compose:** any two target-space transforms (signed-log × log1p both touch vol_p distribution)
 - **DO NOT compose:** additional loss reweighting on top of STRING-sep SOTA (three NEGs, confirmed inert)
 
