@@ -358,12 +358,20 @@ informational targets to match or beat on tay/DDP8:
 
 | Metric | Best on yi | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **15.82** | yi#13 | wio9pqw2 | 2026-04-29 |
-| `test_primary/surface_pressure_rel_l2_pct` | **9.99** | yi#13 | wio9pqw2 | 2026-04-29 |
-| `test_primary/wall_shear_rel_l2_pct` | **16.60** | yi#13 | wio9pqw2 | 2026-04-29 |
-| `test_primary/volume_pressure_rel_l2_pct` | **14.21** | yi#13 | wio9pqw2 | 2026-04-29 |
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **8.087** | yi#490 | zwh9qzjw | 2026-05-01 |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **9.373** | yi#490 | zwh9qzjw | 2026-05-01 |
+| `test_primary/surface_pressure_rel_l2_pct` | **4.996** | yi#490 | zwh9qzjw | 2026-05-01 |
+| `test_primary/wall_shear_rel_l2_pct` | **9.068** | yi#490 | zwh9qzjw | 2026-05-01 |
+| `test_primary/volume_pressure_rel_l2_pct` | **11.792** | yi#490 | zwh9qzjw | 2026-05-01 |
 
-(yi#13 was norman's progressive cosine EMA 0.99→0.9999, pending merge on yi.)
+(yi#490 was frieren's STRING-separable learnable PE port: per-axis `log_freq` + `phase`
+as `nn.Parameter` in `ContinuousSincosEmbed`, enabled with `--learnable-pe`.
+Resumed from compute-starved run `0p3rjqzz`. Beats old yi#13 test_abupt 15.82→9.373,
+−37.3% relative. val_abupt 8.087 also beats tay SOTA 7.013 on val but tay test_abupt
+remains tay baseline at 6.862.)
+
+Previous yi best (yi#13, norman's progressive cosine EMA 0.99→0.9999):
+test_abupt=15.82, surf_p=9.99, wall_shear=16.60, vol_p=14.21 (W&B: wio9pqw2, 2026-04-29)
 
 ## Confirmed-orthogonal levers from yi (to compose on tay)
 
