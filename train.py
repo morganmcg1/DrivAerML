@@ -762,6 +762,7 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    resume_from: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1940,6 +1941,27 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     model = build_model(config).to(device)
+    resume_info: dict[str, float | str | int] = {}
+    if config.resume_from:
+        ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
+        model.load_state_dict(ckpt["model"], strict=True)
+        prev_epoch = ckpt.get("epoch", -1)
+        prev_val_metrics = ckpt.get("val_metrics", {}) or {}
+        prev_primary_val = float(
+            (prev_val_metrics.get("val_surface", {}) or {}).get(
+                "abupt_axis_mean_rel_l2_pct", float("nan")
+            )
+        )
+        resume_info = {
+            "resume_from_path": str(config.resume_from),
+            "resume_prev_epoch": int(prev_epoch) if isinstance(prev_epoch, (int, float)) else -1,
+            "resume_prev_val_abupt_pct": prev_primary_val,
+        }
+        if is_main:
+            print(
+                f"Resumed model weights from {config.resume_from} "
+                f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%)"
+            )
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
@@ -2053,6 +2075,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             "ddp_world_size": world_size,
             "ddp_effective_batch_size": config.batch_size * world_size,
             "lr_warmup_steps_effective": effective_warmup_steps,
+            **resume_info,
         },
         mode=(
             os.environ.get("WANDB_MODE", "online") if is_main else "disabled"
