@@ -1132,3 +1132,24 @@ Round 1 at lr=5e-4: all 3 arms diverged (6L/384d/4h @step 3206, 8L/256d @step 88
   5. **The tau_y/z gap is NOT a locality/receptive-field problem.** The Transolver global-attention mechanism already has sufficient receptive field; adding KNN locality layers actively interferes with the learned global representation.
   - Peak VRAM: A=74.8GB, B=72.1GB, C=71.4GB, D=72.2GB on H200 96GB.
   - Direction closed. Do not re-assign local surface attention variants.
+
+---
+
+## 2026-05-03 12:00 — PR #367: haku theta-conditioned wall-shear loss weight (alpha=2.0 full-convergence) — CLOSED NEGATIVE / DIVERGED
+- Branch: `haku/theta-conditioned-wallshear-loss`
+- Hypothesis: weight wall-shear loss by `1 + alpha * sin^2(theta)` where theta is the angle between surface normal and freestream direction, alpha=2.0. Up-weights cross-flow-facing panels where ws_y/z error is structurally largest. Sub-epoch screen on prior PR run showed alpha=2.0 beats control by −2.5pp val_abupt, suggesting full-convergence DDP-4 would close the merge bar.
+- Results (W&B run `zvros0ej`, group `haku-theta-wallshear-full`, DDP-4 Lion@1e-4 wd=1e-4 clip=0.5 lr-warmup-epochs=1):
+
+| Epoch | Step | val_abupt | wall_shear_z | wall_shear_y | wall_shear_x | surface_pressure |
+|---|---|---:|---:|---:|---:|---:|
+| 1 (warmup) | 5442 | 50.39% | 119.51% | 56.34% | — | 17.82% |
+| 2 | 10885 | 43.72% | **122.68%** | 43.96% | 36.15% | 8.11% |
+| ~3 (proj/run-stop) | 11726 | 43.72% (last) | 122.68% (last) | — | — | — |
+
+- Run terminated by ADVISOR at 256min runtime, mid-epoch-3, val_abupt 43.72% (4.84× over 9.039% bar).
+- Commentary:
+  1. **Targeted channel WORSENED**: wall_shear_z rose ep1→ep2 (+3.17pp); slope `val/slope/val_primary_wall_shear_z_rel_l2_pct/per_1k_steps = +0.5823` (positive = degrading). The very metric this experiment was designed to drive down went up.
+  2. **Mechanism failure**: Cross-flow upweight inflates gradient magnitude on the very samples where the model lacks capacity to track tau_z. The loss landscape is driven into a region the model cannot fit.
+  3. **Sub-epoch screen ≠ full-convergence DDP**: the ordering signal at sub-epoch (alpha=2.0 wins by 2.5pp) did not survive scaling to full DDP-4 budget. Confirms a known pattern that 1-epoch tangential-loss screens overfit to early-training dynamics.
+  4. **Direction added to DEAD ENDS**: Theta-conditioned wallshear loss weighting on yi confirmed dead-end at this architecture/budget. PR #529 (violet, stream-normal per-point ws weighting) is the principled descendant — uses geometric weights at smaller magnitude.
+- Decision: closed; haku reassigned to PR #533 (adaptive surface_pressure loss-weight decay).
