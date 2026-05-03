@@ -395,6 +395,7 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.surface_output_scale = nn.Parameter(torch.ones(self.surface_output_dim))
 
     def _encode_group(
         self,
@@ -482,7 +483,7 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden) * self.surface_output_scale * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)

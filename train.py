@@ -649,6 +649,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             global_step=global_step,
             total_minutes=total_minutes,
         )
+        if hasattr(base_model, "surface_output_scale"):
+            scale_values = base_model.surface_output_scale.detach().cpu().tolist()
+            scale_summary = {
+                f"surface_output_scale/ch{i}": float(v) for i, v in enumerate(scale_values)
+            }
+            print(f"Best-checkpoint surface_output_scale: {scale_values}")
+            wandb.summary.update(scale_summary)
         wandb.finish()
     finally:
         cleanup_distributed(state)
