@@ -39,7 +39,7 @@ ran under 1-epoch tangential-loss conditions (SENPAI_TIMEOUT_MINUTES=360 limits 
 1 epoch on single-GPU). The flag is available for composition with asinh (#374) and
 full-budget DDP runs. W&B runs: ctrl `g1s45tbt`/`6649fm5e`, d10 `52urviip`/`zni9if9p`.
 
-**Active merge bar on yi as it actually exists today: val_abupt 9.039% (PR #309 thorfinn).**
+**Active merge bar on yi as it actually exists today: val_abupt 9.032% (PR #517 askeladd, Lion lr=1e-4 clip=0.5).**
 **Aspirational target once PR #420 lands STRING-sep PE on yi: val_abupt 7.546% (PR #311 tay run `gcwx9yaa`).**
 
 ## Status: edward PR #311 wins — new baseline 2026-05-02
@@ -85,6 +85,7 @@ previous SoTA architecture.
 11. PR #309 thorfinn — gradient clipping max_norm=0.5 (val 9.039%)
 12. ~~PR #311 edward — STRING-separable learnable position encoding (val 7.546%, test 8.771%)~~ **NOT ON YI: PR #311 merged to `tay`, not `yi`. Yi `train.py` still has fixed-omega `ContinuousSincosEmbed`. Port via PR #420 (fern) is in flight.**
 13. PR #355 emma — DDP infrastructure restored (cherry-pick bfbe975+1a8f7b7: init_process_group, DistributedSampler, DDP wrap, Lion optimizer wiring; unblocks full fleet 4/8-GPU torchrun; metrics bar unchanged)
+14. PR #517 askeladd — Lion optimizer lr=1e-4 clip=0.5 confirmed optimal (val 9.032%, W&B run brat65z4). Iso-product hypothesis FALSIFIED: Arm B lr=5e-5 clip=1.0 (same lr·clip=5e-5) reached 9.860% — lr and clip are NOT redundant controls.
 
 **New recommended base config (PR #222 winning arm):**
 
@@ -197,44 +198,61 @@ better.
 Lower is better. Final claims must come from `test_primary/*` after best-validation
 checkpoint reload.
 
+## Current best on `tay`
+
+**Updated 2026-05-03: PR #511 (edward, extended cosine T_max=13) — new tay SOTA**
+
+| Metric | Best (val) | Best (test) | PR | W&B run | Date |
+|---|---:|---:|---|---|---|
+| `abupt_axis_mean_rel_l2_pct` | **7.0134** | **8.3130** | #511 | 5o7jc7wi | 2026-05-03 |
+| `surface_pressure_rel_l2_pct` | 4.5104 | **4.2709** | #511 | 5o7jc7wi | 2026-05-03 |
+| `wall_shear_rel_l2_pct` | 7.9649 | **7.7863** | #511 | 5o7jc7wi | 2026-05-03 |
+| `volume_pressure_rel_l2_pct` | 4.2168 (val) | 11.8673 | #511 | 5o7jc7wi | 2026-05-03 |
+| `wall_shear_x_rel_l2_pct` | 7.0052 | **6.9184** | #511 | 5o7jc7wi | 2026-05-03 |
+| `wall_shear_y_rel_l2_pct` | 8.7717 | **8.5819** | #511 | 5o7jc7wi | 2026-05-03 |
+| `wall_shear_z_rel_l2_pct` | 10.5629 | **9.9267** | #511 | 5o7jc7wi | 2026-05-03 |
+
+**Key finding (PR #511):** Extended cosine T_max=13 (vs T_max=11 in PR #488 baseline) bought 2 additional training epochs at near-zero LR (EP12 6.67e-6, EP13 2.44e-6). Monotone descent every epoch EP1→EP13. The anisotropic τ_y/τ_z axes improved the fastest at near-floor LR (τ_y −0.191pp, τ_z −0.132pp EP11→EP13), confirming these axes were still under-trained. Wins on 6 of 7 test metrics vs PR #488. Only `volume_pressure` regressed on test (+0.364pp) despite val improvement — likely test-split outlier cases.
+
+**Previous tay SOTA (PR #488 alphonse EP11):** val_abupt=7.3672%, test_abupt=8.4791%
+**Fleet leader before PR #511 (PR #489 thorfinn):** val_abupt=7.1792%
+
 ## Current best on `yi`
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **7.546** | **8.771** | #311 | gcwx9yaa | 2026-05-02 |
-| `surface_pressure_rel_l2_pct` | — | **4.485** | #311 | gcwx9yaa | 2026-05-02 |
-| `wall_shear_rel_l2_pct` | — | **8.227** | #311 | gcwx9yaa | 2026-05-02 |
-| `volume_pressure_rel_l2_pct` | — | **12.438** | #311 | gcwx9yaa | 2026-05-02 |
-| `wall_shear_x_rel_l2_pct` | — | **7.253** | #311 | gcwx9yaa | 2026-05-02 |
-| `wall_shear_y_rel_l2_pct` | — | **9.233** | #311 | gcwx9yaa | 2026-05-02 |
-| `wall_shear_z_rel_l2_pct` | — | **10.449** | #311 | gcwx9yaa | 2026-05-02 |
+| `abupt_axis_mean_rel_l2_pct` | **9.032** | — | #517 | brat65z4 | 2026-04-29 |
+| `surface_pressure_rel_l2_pct` | **5.702** | — | #517 | brat65z4 | 2026-04-29 |
+| `wall_shear_rel_l2_pct` | **10.257** | — | #517 | brat65z4 | 2026-04-29 |
+| `volume_pressure_rel_l2_pct` | **5.075** | — | #517 | brat65z4 | 2026-04-29 |
+| `wall_shear_x_rel_l2_pct` | **8.520** | — | #517 | brat65z4 | 2026-04-29 |
+| `wall_shear_y_rel_l2_pct` | **12.907** | — | #517 | brat65z4 | 2026-04-29 |
+| `wall_shear_z_rel_l2_pct` | **12.957** | — | #517 | brat65z4 | 2026-04-29 |
 
-Note: PR #311 (edward, STRING-separable position encoding) merged 2026-05-02 —
-the first new-architecture win in many rounds. Prior compounding wins:
-PR #309 (thorfinn, grad-clip=0.5, val 9.039%), PR #222 (fern, lr_warmup_epochs=1, val 9.291%).
-Additional code wins in history: PRs #98 (emma weight-decay), #106 (thorfinn yw2.5-zw2.5),
-#97 (edward slices192), #63 (askeladd sq-rel), #104 (senku ema9997), #102 (haku dropout),
-#8 (frieren FiLM), #169 (thorfinn infra), #183 (fern omega-bank).
-**Merge bar: val_abupt 9.039% on the yi codebase as it exists today (PR #309 thorfinn).**
+Note: PR #517 (askeladd, Lion lr=1e-4 clip=0.5) merged 2026-04-29 — confirms Lion
+optimizer with these hyperparameters as yi SOTA. Iso-product hypothesis falsified:
+Arm B at same lr·clip=5e-5 reached only 9.860%.
+Prior compounding wins include PR #309 (thorfinn, grad-clip=0.5, val 9.039%),
+PR #222 (fern, lr_warmup_epochs=1, val 9.291%).
+**Merge bar: val_abupt 9.032% on the yi codebase as it exists today (PR #517 askeladd, Lion lr=1e-4 clip=0.5).**
 **Aspirational target once PR #420 lands STRING-sep PE: val_abupt 7.546% (PR #311 tay run `gcwx9yaa`, not currently in yi).**
 
 **Distance from AB-UPT targets (test, multiple of target):**
 
-| Metric | yi best test (PR #311) | AB-UPT | Ratio |
-|---|---:|---:|---:|
-| surface_pressure | 4.485 | 3.82 | 1.17× |
-| wall_shear | 8.227 | 7.29 | 1.13× |
-| volume_pressure | 12.438 | 6.08 | 2.05× |
-| wall_shear_x | 7.253 | 5.35 | 1.36× |
-| wall_shear_y | 9.233 | 3.65 | 2.53× |
-| wall_shear_z | 10.449 | 3.63 | 2.88× |
-| abupt_axis_mean | 8.771 | — | — |
+| Metric | tay SOTA (PR #511) | yi best (PR #311) | AB-UPT | tay Ratio |
+|---|---:|---:|---:|---:|
+| surface_pressure | 4.2709 | 4.485 | 3.82 | 1.12× |
+| wall_shear | 7.7863 | 8.227 | 7.29 | 1.07× |
+| volume_pressure | 11.8673 | 12.438 | 6.08 | 1.95× |
+| wall_shear_x | 6.9184 | 7.253 | 5.35 | 1.29× |
+| wall_shear_y | 8.5819 | 9.233 | 3.65 | 2.35× |
+| wall_shear_z | 9.9267 | 10.449 | 3.63 | 2.73× |
+| abupt_axis_mean | 8.3130 | 8.771 | — | — |
 
-Surface pressure and wall_shear (vector) have closed substantially with PR #311.
-The dominant remaining gaps are **wall_shear_y/z (2.5×, 2.9×)** and
+PR #511 closed the gap vs PR #488 on surface_pressure (1.12× vs ~1.16×) and wall_shear (1.07× vs ~1.12×).
+The dominant remaining gaps are **wall_shear_y/z (2.4×, 2.7×)** and
 **volume_pressure (2.0×)** — these are the key research targets for upcoming
-rounds. PR #311 STRING-sep also showed all val slopes still negative at terminal
-epoch, so longer training on this architecture is itself a candidate.
+rounds.
 
 ## Reference config (`train.py` defaults on `yi`)
 
