@@ -672,6 +672,43 @@ class EMA:
         self.backup = None
 
 
+def _resolve_soup_dir(config: "Config") -> Path:
+    if config.soup_snapshot_dir:
+        return Path(config.soup_snapshot_dir)
+    return Path(config.output_dir) / "ema_snapshots"
+
+
+def _save_ema_snapshot(
+    ema: "EMA",
+    *,
+    snap_dir: Path,
+    keep_last: int,
+    global_step: int,
+    epoch: int,
+    val_primary: float,
+) -> Path:
+    """Save the EMA shadow tensors to disk and rotate to keep only the last K."""
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    snap_path = snap_dir / f"ema_step_{global_step:08d}.pt"
+    payload = {
+        "ema_state_dict": {k: v.detach().cpu().clone() for k, v in ema.shadow.items()},
+        "global_step": int(global_step),
+        "epoch": int(epoch),
+        "val_primary": float(val_primary),
+    }
+    tmp_path = snap_path.with_suffix(".pt.tmp")
+    torch.save(payload, tmp_path)
+    tmp_path.replace(snap_path)
+    snaps = sorted(snap_dir.glob("ema_step_*.pt"))
+    if keep_last > 0:
+        for old in snaps[:-keep_last]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    return snap_path
+
+
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
@@ -725,6 +762,9 @@ class Config:
     ema_start_step: int = 50
     ema_decay_start: float = 0.0
     ema_decay_end: float = 0.9999
+    soup_snapshots: int = 0
+    soup_snapshot_dir: str = ""
+    soup_eval: bool = False
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -1868,8 +1908,174 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
     )
 
 
+def _average_state_dicts(state_dicts: list[dict[str, Tensor]]) -> dict[str, Tensor]:
+    """Uniform-weight average of a list of state-dict-style {name: tensor} mappings.
+
+    Accumulates in float32 to avoid bf16 rounding drift, then casts back to the
+    dtype of the first snapshot so the result is drop-in-loadable.
+    """
+    if not state_dicts:
+        raise ValueError("Cannot average zero state_dicts")
+    keys = list(state_dicts[0].keys())
+    averaged: dict[str, Tensor] = {}
+    for key in keys:
+        if not all(key in sd for sd in state_dicts):
+            missing = [i for i, sd in enumerate(state_dicts) if key not in sd]
+            raise KeyError(f"Snapshot indices {missing} are missing key '{key}'")
+        stacked = torch.stack([sd[key].float() for sd in state_dicts], dim=0)
+        averaged[key] = stacked.mean(dim=0).to(state_dicts[0][key].dtype)
+    return averaged
+
+
+def run_soup_eval(config: Config) -> None:
+    """Load the K saved EMA snapshots, average them, and run full_val + test_eval."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    snap_dir = _resolve_soup_dir(config)
+    snap_paths = sorted(snap_dir.glob("ema_step_*.pt"))
+    if not snap_paths:
+        raise FileNotFoundError(
+            f"[soup-eval] no ema_step_*.pt snapshots found in {snap_dir}"
+        )
+
+    snap_payloads = []
+    snap_meta = []
+    for path in snap_paths:
+        payload = torch.load(path, map_location="cpu", weights_only=True)
+        snap_payloads.append(payload["ema_state_dict"])
+        snap_meta.append(
+            {
+                "file": path.name,
+                "global_step": int(payload.get("global_step", -1)),
+                "epoch": int(payload.get("epoch", -1)),
+                "val_primary": float(payload.get("val_primary", float("nan"))),
+            }
+        )
+
+    print(f"[soup-eval] averaging {len(snap_paths)} snapshots from {snap_dir}:")
+    for meta in snap_meta:
+        print(
+            f"  {meta['file']:>32}  step={meta['global_step']:>8d}  "
+            f"epoch={meta['epoch']:>4d}  val_primary={meta['val_primary']:.4f}"
+        )
+
+    averaged_shadow = _average_state_dicts(snap_payloads)
+
+    train_loader, val_loaders, test_loaders, stats = make_loaders(
+        config, is_distributed=False, world_size=1, rank=0
+    )
+    transform = TargetTransform(
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
+    )
+
+    model = build_model(config).to(device)
+    n_params = sum(param.numel() for param in model.parameters())
+
+    state = model.state_dict()
+    n_overwritten = 0
+    n_unmatched = 0
+    for key, value in averaged_shadow.items():
+        if key in state:
+            state[key].copy_(value.to(device=device, dtype=state[key].dtype))
+            n_overwritten += 1
+        else:
+            n_unmatched += 1
+    if n_unmatched:
+        print(
+            f"[soup-eval] WARNING {n_unmatched} keys in soup not present in model "
+            f"(likely architecture mismatch); they were ignored"
+        )
+    print(
+        f"[soup-eval] applied {n_overwritten}/{len(averaged_shadow)} averaged "
+        f"params to fresh model ({n_params / 1e6:.2f}M params)"
+    )
+
+    run = wandb.init(
+        entity=os.environ.get("WANDB_ENTITY"),
+        project=os.environ.get("WANDB_PROJECT"),
+        group=config.wandb_group or None,
+        name=config.wandb_name or None,
+        tags=([config.agent] if config.agent else []) + ["soup_eval"],
+        config={
+            **asdict(config),
+            "n_params": n_params,
+            "soup_n_snapshots": len(snap_paths),
+            "soup_snapshot_files": [p.name for p in snap_paths],
+            "soup_snapshot_steps": [m["global_step"] for m in snap_meta],
+            "soup_snapshot_epochs": [m["epoch"] for m in snap_meta],
+            "soup_snapshot_val_primary": [m["val_primary"] for m in snap_meta],
+        },
+        mode=os.environ.get("WANDB_MODE", "online"),
+    )
+    wandb.define_metric("global_step")
+    wandb.define_metric("soup_val/*", step_metric="global_step")
+    wandb.define_metric("soup_val_primary/*", step_metric="global_step")
+    wandb.define_metric("soup_test/*", step_metric="global_step")
+    wandb.define_metric("soup_test_primary/*", step_metric="global_step")
+
+    soup_global_step = max(m["global_step"] for m in snap_meta)
+
+    soup_val_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in val_loaders.items()
+    }
+    soup_val_log: dict[str, object] = {
+        "soup_val_primary/abupt_axis_mean_rel_l2_pct": soup_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"],
+        "soup_val_primary/abupt_axis_mean_rel_l2": soup_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+        "soup_val_primary/surface_pressure_mae": soup_val_metrics["val_surface"]["surface_pressure_mae"],
+        "soup_val_primary/wall_shear_mae": soup_val_metrics["val_surface"]["wall_shear_mae"],
+        "soup_val_primary/volume_pressure_mae": soup_val_metrics["val_surface"]["volume_pressure_mae"],
+        "soup_val_primary/surface_pressure_rel_l2_pct": soup_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+        "soup_val_primary/wall_shear_rel_l2_pct": soup_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+        "soup_val_primary/wall_shear_x_rel_l2_pct": soup_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+        "soup_val_primary/wall_shear_y_rel_l2_pct": soup_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+        "soup_val_primary/wall_shear_z_rel_l2_pct": soup_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+        "soup_val_primary/volume_pressure_rel_l2_pct": soup_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+        "soup/n_snapshots": float(len(snap_paths)),
+        "global_step": soup_global_step,
+    }
+    for split_name, metrics in soup_val_metrics.items():
+        for key, value in metrics.items():
+            soup_val_log[f"soup_val/{split_name}/{key}"] = value
+    wandb.log(soup_val_log)
+    wandb.summary.update(_numeric_metric_items(soup_val_log))
+    print_metrics("soup_val", soup_val_metrics["val_surface"])
+
+    soup_test_metrics = {
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        for name, loader in test_loaders.items()
+    }
+    soup_test_log: dict[str, object] = {
+        "soup_test_primary/abupt_axis_mean_rel_l2_pct": soup_test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"],
+        "soup_test_primary/abupt_axis_mean_rel_l2": soup_test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
+        "soup_test_primary/surface_pressure_mae": soup_test_metrics["test_surface"]["surface_pressure_mae"],
+        "soup_test_primary/wall_shear_mae": soup_test_metrics["test_surface"]["wall_shear_mae"],
+        "soup_test_primary/volume_pressure_mae": soup_test_metrics["test_surface"]["volume_pressure_mae"],
+        "soup_test_primary/surface_pressure_rel_l2_pct": soup_test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+        "soup_test_primary/wall_shear_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+        "soup_test_primary/wall_shear_x_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+        "soup_test_primary/wall_shear_y_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+        "soup_test_primary/wall_shear_z_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
+        "soup_test_primary/volume_pressure_rel_l2_pct": soup_test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
+        "global_step": soup_global_step,
+    }
+    for split_name, metrics in soup_test_metrics.items():
+        for key, value in metrics.items():
+            soup_test_log[f"soup_test/{split_name}/{key}"] = value
+    wandb.log(soup_test_log)
+    wandb.summary.update(_numeric_metric_items(soup_test_log))
+    print_metrics("soup_test", soup_test_metrics["test_surface"])
+
+    wandb.finish()
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     config = parse_args(argv)
+    if config.soup_eval:
+        run_soup_eval(config)
+        return
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     rank = int(os.environ.get("RANK", "0"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -2077,6 +2283,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     if is_main:
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
+    if is_main and config.soup_snapshots > 0:
+        snap_dir = _resolve_soup_dir(config)
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        stale = list(snap_dir.glob("ema_step_*.pt"))
+        for old in stale:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        if stale:
+            print(f"Cleared {len(stale)} stale EMA snapshot(s) from {snap_dir}")
+        print(
+            f"EMA soup snapshots enabled: keep_last={config.soup_snapshots} dir={snap_dir}"
+        )
     if is_distributed:
         dist.barrier()
 
@@ -2360,6 +2580,25 @@ def main(argv: Iterable[str] | None = None) -> None:
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
         wandb.log(log_metrics)
+
+        if (
+            is_main
+            and ema is not None
+            and config.soup_snapshots > 0
+            and math.isfinite(primary_val)
+        ):
+            snap_dir = _resolve_soup_dir(config)
+            snap_path = _save_ema_snapshot(
+                ema,
+                snap_dir=snap_dir,
+                keep_last=config.soup_snapshots,
+                global_step=global_step,
+                epoch=epoch + 1,
+                val_primary=primary_val,
+            )
+            print(f"  ema-snapshot saved: {snap_path.name} (val_primary={primary_val:.4f})")
+        if is_distributed:
+            dist.barrier()
 
         primary_val_is_valid = math.isfinite(primary_val) and primary_val > 0.0
         improved = primary_val_is_valid and primary_val < best_val
