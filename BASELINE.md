@@ -2,28 +2,15 @@
 
 **Branch:** `yi` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml`
 
-## Status: yi-baseline reset — PR #311 STRING-sep PE was a tay-branch result, NOT on yi (2026-05-02 19:00 UTC)
+## Status update — 2026-05-03 18:38 UTC
 
-**CRITICAL CORRECTION:** PR #311 (edward, STRING-separable learnable PE, val_abupt 7.546%
-on W&B run `gcwx9yaa`) was implemented and merged into the **`tay`** branch, not `yi`.
-The `yi` branch `train.py` only has the original fixed-omega `ContinuousSincosEmbed`.
-The 7.546% number was an aspirational target lifted from a different codebase; it is
-NOT a result reproduced on the current yi stack.
+**STRING-sep learnable PE is now on yi.** PR #490 (frieren, `frieren/string-sep-pe-yi-v2`) merged at 15:48 UTC 2026-05-03. The `--learnable-pe` flag is available in yi `train.py`. The frieren resumed run `zwh9qzjw` achieved val_abupt=8.087% using STRING-sep + Lion lr=1e-4 clip=0.5 (from a checkpoint resume — non-canonical merge candidate).
 
-**True yi-architecture baseline (until STRING-sep PE lands here):** PR #309 thorfinn
-grad-clip=0.5 — `val_abupt 9.039%`. The merge bar for "beats yi as it actually exists
-today" is therefore **9.039%**, not 7.546%.
+**Current active merge bar: val_abupt 9.032%** (PR #517 askeladd, `brat65z4`, Lion lr=1e-4 clip=0.5 without STRING-sep — launched before PR #490 merged). The bar has NOT yet been updated to reflect STRING-sep because PR #517's run predates the merge.
 
-**Path forward:** PR #420 (fern, `fern/string-sep-pe-yi`) ports STRING-sep PE to yi
-with DDP cherry-picks + `--learnable-pe` flag (commit `6f2e991`). When that PR lands
-and reproduces ≤7.546%, the 7.546% bar resumes. Until then, the live merge bar on
-yi is **9.039%** for any yi-codebase architectural change. PRs whose sole comparison
-is "didn't beat 7.546%" should not be closed for that reason alone — they need to be
-re-evaluated against 9.039%.
+**Expected next bar: ~8.1–8.5%** once PR #539 (frieren, from-scratch canonical STRING-sep + Lion run) completes.
 
-Compounding-wins entries 1–11 below remain valid (all merged on yi). Entry 12 (PR #311)
-is **historical** and is retained only as the target-to-port via PR #420; it is not
-present in yi `train.py` and should not be cited as a yi merge until #420 reproduces it.
+Compounding-wins entries 1–14 below remain valid (all merged on yi).
 
 ## Mechanism flag landed: PR #317 violet (Huber wall-shear loss) — 2026-04-29
 

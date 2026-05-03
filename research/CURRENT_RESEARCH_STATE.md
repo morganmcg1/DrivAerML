@@ -1,159 +1,123 @@
 # SENPAI Research State
-- 2026-05-03 12:00 UTC (Round 32 mid-cycle — closed PR #367 haku (theta-loss diverged 4.84× over bar, ws_z worsening to 122.7%). Reassigned haku to PR #533 adaptive surface_pressure loss-weight decay 1.0→0.3. Posted first-launch advisor guidance on PRs #527/#529/#521/#520/#518/#530. Replied to PR #472 edward Muon compute-budget concern (recommended cherry-picking frieren's --resume-from PR #490 mechanism for Muon Arm C resume from blflnddk checkpoint). All 16 yi students WIP, zero idle GPUs.)
+- 2026-05-03 18:38 UTC (Round 33 — advisor cycle)
+- **CURRENT SOTA (yi branch): PR #517 (askeladd, Lion lr=1e-4 clip=0.5) — val_abupt 9.032%**. Active yi merge bar: **9.032%** (run `brat65z4`).
+- **PR #490 (frieren STRING-sep learnable PE) MERGED to yi at 15:48 UTC 2026-05-03.** The `--learnable-pe` flag is now available in yi `train.py`. PR #517 was launched BEFORE #490 merged, so the current baseline does NOT yet include STRING-sep PE. The next highest-priority merge is a from-scratch run combining STRING-sep + Lion lr=1e-4 clip=0.5 (PR #539 frieren, just assigned).
+- **Tay SOTA (reference track, not yi): PR #511 (edward) — val_abupt 7.013% / test_abupt 8.313%** (tay branch only, not reproducible on yi standalone).
 
-## Most Recent Human Researcher Directives (Issue #18)
+## Key Merges Since Round 30
 
-1. Be bold with architecture — complete backbone replacements encouraged
-2. Cross-branch inspiration (check noam/radford branches)
-3. Priority experiments: surface-tangent frame, Perceiver-IO, asinh/log norm, RANS div-free, 1-cycle LR
-4. Use all W&B signals (gradient norms, weight histograms, loss slopes) to identify epoch-limited vs broken runs
-5. Current architecture focus: structural wall_shear_y/z gap (2.5–2.9×), volume_pressure (2.0×)
+| PR | Student | What | Impact |
+|---|---|---|---|
+| #490 | frieren | STRING-sep learnable PE port to yi | Mechanism now on yi; from-scratch combination pending |
+| #517 | askeladd | Lion lr=1e-4 clip=0.5 (new yi bar) | val_abupt 9.032% (from 9.039%) |
 
-## Current SOTA on yi
+## Most Recent Research Direction from Human Researcher Team
 
-| Metric | Yi baseline (PR #309 thorfinn) | Aspirational (PR #311 tay) | AB-UPT Target |
-|--------|-------------------------------|---------------------------|---------------|
-| val_abupt (primary) | **9.039%** | 7.546% | — |
-| test_abupt | ~10.2% | 8.771% | — |
-| surface_pressure | ~5.5% | 4.485% | 3.82% |
-| wall_shear (vector) | ~10.5% | 8.227% | 7.29% |
-| wall_shear_y | ~10.5% | 9.233% | 3.65% |
-| wall_shear_z | ~11.8% | 10.449% | 3.63% |
-| volume_pressure | ~13.5% | 12.438% | 6.08% |
+**Issue #18** (open, standing directive):
+> "Stop incremental tuning. Be bold with architecture. Empower students to replace the model backbone while maintaining logging/validation/checkpointing. Mine noam/radford branches."
 
-**Active yi merge bar: val_abupt < 9.039%**
-**Aspirational once PR #420 (STRING-sep PE on yi) lands: < 7.546%**
+**Issue #252** (open): "Get inspired by Modded-NanoGPT" — already addressed Rounds 15-25. Muon optimizer (edward #472), sigmoid slice attention (senku #521), LLRD (gilbert #519) are the current modded-NanoGPT follow-ons.
 
-## Infrastructure Status
-- **DDP**: Working (PR #355 emma merged). All students use `torchrun --standalone --nproc_per_node=4`.
-- **Muon optimizer**: Landed on yi (PR #377 edward merged 2026-05-02). Use `--optimizer muon --lr 1e-3`.
-- **Huber loss**: `--wallshear-huber-delta` flag available (PR #317 violet merged).
-- **STRING-sep PE**: NOT on yi yet — PR #420 (fern) is the port, in progress.
-- **Per-step `train/lr` logging**: MISSING from yi `train.py`. PR #474 (frieren) will add it.
-- **Key infra gap**: `--lr-warmup-epochs` and per-step cosine scheduling both absent on yi.
+## Current Baseline: PR #517 (askeladd) — yi — val_abupt 9.032%
 
-## Dominant Gaps vs AB-UPT (test metrics, post PR #311 aspirational)
-- wall_shear_z: 2.88× (LARGEST GAP — top priority)
-- wall_shear_y: 2.53×
-- volume_pressure: 2.05×
-- surface_pressure: 1.17×
+**Active yi merge bar: val_abupt < 9.032%** (run `brat65z4`)
 
-## Active WIP Fleet (Round 32 — all 16 yi students WIP)
+| Metric | yi bar (test, PR #517) | Tay SOTA ref (PR #511 test) | AB-UPT target |
+|---|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | 10.119 | 8.313 | — |
+| `surface_pressure_rel_l2_pct` | — | 4.271 | 3.82 (1.12×) |
+| `wall_shear_rel_l2_pct` | — | 7.786 | 7.29 (1.07×) |
+| `volume_pressure_rel_l2_pct` | — | 11.867 | 6.08 (**1.95×**) |
+| `wall_shear_x_rel_l2_pct` | — | 6.918 | 5.35 (1.29×) |
+| `wall_shear_y_rel_l2_pct` | — | 8.582 | 3.65 (**2.35×**) |
+| `wall_shear_z_rel_l2_pct` | — | 9.927 | 3.63 (**2.73×**) |
+
+Dominant open gaps: τ_z (2.73×), τ_y (2.35×), vol_p (1.95×).
+
+## Architecture Configuration (Current Best)
+
+```bash
+torchrun --standalone --nproc_per_node=4 target/train.py \
+  --learnable-pe \          # PR #490, now on yi
+  --optimizer lion \
+  --lr 1e-4 \
+  --grad-clip-norm 0.5 \
+  --weight-decay 5e-4 \
+  --lr-warmup-epochs 1 \
+  --ema-decay 0.999 \
+  --model-layers 4 \
+  --model-hidden-dim 512 \
+  --model-heads 8 \
+  --model-slices 128 \
+  --batch-size 4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --epochs 50
+```
+
+Note: `--learnable-pe` is available on yi (PR #490) but not yet confirmed in a clean from-scratch run at 9.032% config level. PR #539 (frieren) will lock this in.
+
+## Active WIP PRs (Round 33 — 16 PRs)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #529 | violet | Stream-normal per-point wall-shear loss weight (ws_y/z gap attack) | NEW (R32) |
-| #528 | nezuko | 1-cycle LR pct_start=0.05 vs cosine (DDP-4 full budget) | NEW (R32) |
-| #527 | fern | SWA flat-LR tail (20% of budget at constant swa_lr=5e-6) | NEW (R32) |
-| #522 | thorfinn | BF16 → FP32 last-2-epoch fine-final-precision policy | WIP (R31) |
-| #521 | senku | Sigmoid-L1 slice gating (replace softmax slice) | WIP (R31) |
-| #520 | norman | Volume-only coord transform (signed-log / asinh) | WIP (R31) |
-| #519 | gilbert | Layer-wise LR decay (LLRD) for transformer blocks | WIP (R31) |
-| #518 | kohaku | Loss-side asinh wallshear (no inverse pipeline) | WIP (R31) |
-| #517 | askeladd | Lion (lr, clip) joint sweep at fixed lr·clip product | WIP (R31) |
-| #490 | frieren | STRING-sep PE port to yi | WIP — HIGH PRIORITY |
-| #478 | chihiro | Per-step cosine LR schedule (fix epoch-step decay) | WIP |
-| #473 | alphonse | Per-axis coord normalization | WIP |
-| #472 | edward | Muon@1e-3 full-budget 4-GPU DDP | WIP — HIGH PRIORITY |
-| #430 | emma | Cosine EMA decay ramp 0.99→0.9999 | WIP |
-| #370 | tanjiro | Cross-flow exposure index as input feature | WIP |
-| #533 | haku | Adaptive surface_pressure loss-weight decay 1.0→0.3 (gradient capacity reflow) | NEW (R32) |
-| #530 | tanjiro | Tangent-frame output head for wall-shear (τ→{t1,t2,n}) | NEW (R32) |
+| #530 | tanjiro | Tangent-frame output head (τ→{t1,t2,n}) | Running ep4 (val 9.794%, converging) |
+| #529 | violet | Stream-normal per-point ws loss weight (γ=1/3 sweep) | Running (arm B gamma=3 val 11.5% at step 10886) |
+| #528 | nezuko | 1-cycle LR pct_start=0.05 vs cosine ep3 | Arm A done (10.502%), arm B cosine-ctrl running |
+| #522 | thorfinn | BF16→FP32 last-2-epoch precision | Arm A done (10.923%), arm B rerun running |
+| #521 | senku | Sigmoid-l1 slice attention vs softmax | Arm B running (live 13.4% at step 10886) |
+| #520 | norman | Volume-only coord transform (signed-log/asinh) | Arm A done (10.964%), arm C asinh started |
+| #519 | gilbert | LLRD sweep (decay=0.75/0.95) | Arm A done (11.168%), arm C running |
+| #518 | kohaku | Loss-side asinh wallshear (delta sweep) | Arm d=2.0 running (28min) |
+| #478 | chihiro | Per-step cosine LR schedule | Arm B step-cosine running (live 25.0%) |
+| #472 | edward | Muon@1e-3 vs AdamW full-budget 4-GPU | Arm C muon running (live 10.1% at step 10884) |
+| #539 | frieren | STRING-sep + Lion lr=1e-4 clip=0.5 from scratch | **NEW — just assigned** |
+| #540 | emma | GradNorm adaptive τ_y/τ_z up-weighting | **NEW — just assigned** |
+| #541 | askeladd | Streamline-aligned wall-shear target frame | **NEW — just assigned** |
+| #542 | alphonse | Laplace far-field soft penalty on vol pressure | **NEW — just assigned** |
+| #543 | haku | Principal curvatures (H,K) as surface features | **NEW — just assigned** |
+| #544 | fern | y-symmetry paired loss + test-time mirror ensemble | **NEW — just assigned** |
 
-## Round 32 assignments (2026-05-03 09:55 UTC)
+## Key Closed Dead Ends (summary — do not repeat)
 
-Three students freed from closed PRs, reassigned immediately:
+- Optimizer: Adam/AdamW (replaced by Lion). SAM. AGC. β2 sweep (null). Muon single-GPU (promising → promoted to PR #472).
+- Architecture: Perceiver-IO replacement (PR #122), Mamba-2 SSM (PR #45), K-NN local attention (PR #197), dual-stream cross-attention (PR #421), multi-scale radius pooling.
+- Loss formulation: Asinh wall-shear scale sweep (PR #485, 3 scales, null), Huber δ sweep no-tangential (PR #440, negative), magnitude+direction decomposition (PR #200), uncertainty weighting homoscedastic Kendall (PR #496, mechanism inverted — DOWN-weights lagging tasks).
+- Input features: Surface-tangent wall-shear input (PR #312/419, closed), NIG evidential regression (PR #38).
+- LR: 1-cycle 1e-3 (PR #125, closed), WSD linear warmdown (PR #262, null), cosine T_max mismatch (PR #478 active — per-step variant).
+- Data: Coord jitter (PR #314, null), surface-loss-weight static sweeps (PRs #244, #454, null).
+- Regularization: SWA (PR #527 fern, closed), DropPath (PR #338, frieren, null), stochastic depth+dropout (PR #479, thorfinn).
+- EMA: Decay ramp 0.99→0.9999 (PR #430, null). Model soup (PR #491, frieren, null).
+- Grad clip: Structural sweep (PR #431, null — only tighter clip than 0.5 hurts).
+- Augmentation: Random mirror aug train-time (PR #225, haku, null).
+- PE: Omega-bank sweep (PR #183, done → PR #490 STRING-sep is the follow-through). Per-axis coord normalization (PR #473, alphonse).
 
-- **#527 fern** — SWA flat-LR tail. Structural evolution of the EMA-soup (#491 closed null). Key difference: saves raw model weights during a constant-LR plateau (last 20% of budget at swa_lr=5e-6) and averages them. Literature-canonical SWA setup targeting flat-basin averaging.
-- **#528 nezuko** — 1-cycle LR with pct_start=0.05. Closes the dead-end note from #429 (OneCycleLR pct_start=0.3 was structurally broken — 30% warmup never fired cosine decay). Short warmup (5%) + long descent. Also informed by nezuko's own PR #262 finding: lower LR more effective per step at ep2→3 (slope ratio 0.74×). Natural follow-up.
-- **#529 violet** — Stream-normal per-point wall-shear loss weight. Physics-informed per-point loss weighting: points where the surface normal is perpendicular to the freestream (cross-flow panels: underbody, wheel arch, sides) get upweighted by `1 + gamma * |n_yz|`. Targets the dominant ws_y/z gap (2.5–2.9× AB-UPT) without architecture change.
+## Research Themes (Round 33 priority order)
 
-## Round 31 assignments (2026-05-03 09:25 UTC)
+1. **Lock in STRING-sep + Lion combination** (PR #539 frieren) — highest confidence, lowest risk, drops bar to ~8.1%.
+2. **Structural τ_y/τ_z gap attack:**
+   - Streamline frame target rotation (PR #541 askeladd) — coordinate-frame fix
+   - GradNorm adaptive task weighting (PR #540 emma) — principled up-weighting
+   - y-symmetry paired loss + TTA (PR #544 fern) — equivariance enforcement
+   - PR #530 tanjiro (tangent-frame head — currently running, converging)
+   - PR #529 violet (stream-normal ws weight — running)
+3. **Volume pressure gap attack:**
+   - Laplace far-field penalty (PR #542 alphonse) — physics-informed regularizer
+   - PR #520 norman (coord transform — running)
+4. **Architecture improvements:**
+   - PR #521 senku (sigmoid-l1 slice gating — running)
+   - PR #543 haku (surface curvature features — running)
+5. **Optimizer/LR confirmations:**
+   - PR #472 edward (Muon@1e-3 — live 10.1%, very promising if it holds)
+   - PR #519 gilbert (LLRD)
+   - PR #528 nezuko (1-cycle)
+   - PR #478 chihiro (per-step cosine)
 
-Six new single-question hypotheses launched:
+## Fleet Stability Constraints
 
-- **#517 askeladd** — Lion (lr, clip) joint sweep at fixed `lr·clip` product.
-- **#518 kohaku** — loss-side asinh wallshear (residual transform inside loss only, no inverse pipeline).
-- **#519 gilbert** — layer-wise LR decay (LLRD) for transformer blocks.
-- **#520 norman** — volume-only signed-log/asinh coordinate transform.
-- **#521 senku** — sigmoid-L1 slice gating (replace softmax).
-- **#522 thorfinn** — BF16 → FP32 last-2-epoch fine-final-precision policy.
-
-## Current Research Themes
-
-1. **STRING-sep PE port to yi** (PR #420 fern): The single most important in-flight work. When merged, it resets the merge bar from 9.039% to 7.546% and unlocks the multi-scale STRING-sep follow-up (PR #385 finding: k=4 beats k=1 with corrected init).
-
-2. **Coordinate anisotropy attacks** (PRs #473 alphonse, #449 norman): Two complementary approaches — per-axis range normalization (alphonse) and log-x compression (norman) — both targeting the same root cause of tau_y/z gap (x spans ±2.0, y/z only ±0.5). These are cheap, zero-architecture changes that could yield significant channel-specific gains. Norman advisor-responded: separate surface vs volume asymmetry key to interpretation.
-
-3. **tau_y/z direct attacks** (PRs #370 tanjiro, #367 haku, #425 stark): Three complementary angles — cross-flow exposure index, theta-conditioned loss weighting, channel upweighting. #419 chihiro tangent-frame input feature approach rejected (input redundancy).
-
-4. **Optimizer frontier** (PR #472 edward): Muon@1e-3 showed −24.8% val_abupt at matched-compute vs AdamW. Now promoted to full-budget DDP run. This is the highest-leverage short-term win candidate.
-
-5. **LR scheduling fix** (PR #478 chihiro): Current `CosineAnnealingLR(T_max=max_epochs)` stepped per epoch effectively gives constant LR for 9-epoch runs (T_max=50 default). Per-step cosine with `T_max=total_steps` would provide proper full-budget decay. Potentially a meaningful convergence improvement with a small code change.
-
-6. **Post-training free wins** (PR #474 frieren): EMA-soup (last-K checkpoint averaging) adds zero training cost. Literature predicts 0.5–2pp gain when checkpoint-to-checkpoint variance is high.
-
-7. **Architecture bold** (PR #421 kohaku): Dual-stream Transformer with O(NK) register-token cross-attention. If it works, blueprint for full Perceiver-IO replacement.
-
-8. **Loss rebalancing** (PRs #440 violet, #366 gilbert, #367 haku): Huber loss for wall-shear tail, vol_weight=0.5 for pressure balance, theta-conditioned loss weighting.
-
-9. **Generalization regularization** (PR #479 thorfinn): PR #450 confirmed val→test gap (~0.81pp) is dataset-shift-driven, not wd-driven. PR #479 tests stochastic depth (`--stochastic-depth-prob 0.05`) + dropout (`--model-dropout 0.05`) in a 2×2 grid — both are already-wired flags with zero code risk, targeting smoother representations that generalize better under covariate shift.
-
-## Recently Reviewed (this session — 2026-05-03)
-
-| PR | Student | Result | Decision |
-|----|---------|--------|----------|
-| #262 | nezuko | linear-warmdown vs cosine: 11.8048% vs 11.7493%, slope ratio 0.74× (opposite of hypothesis). 4 Lion divergence crashes documented. AdamW + cosine = correct. | CLOSED NULL — followed up by #528 (1-cycle LR pct=0.05) |
-| #491 | fern | EMA soup: K=3 collapsed (23.29%, warmup snapshot poisons average); K=2 = +0.375pp vs single best. Under-converged single-ckpt at 2.4 epochs. Budget mismatch. | CLOSED NULL — followed up by #527 (SWA flat-LR tail) |
-| #440 | violet | Huber δ=1.0 vs MSE: Huber +1.55pp worse on val_abupt (13.51% vs 11.97%). Worse on ALL channels. Mechanism: early-training heavy residuals + Huber clipping = gradient starvation. | CLOSED NEGATIVE — followed up by #529 (stream-normal per-point ws weight) |
-| #485 | kohaku | asinh wallshear target normalization — best 18.09% vs 9.04% bar; Jacobian amplification | CLOSED NEGATIVE — followed up by #518 |
-| #431 | askeladd | gradient-clip sweep — structural finding: clip = effective-LR scaler at 97.5% clip rate | CLOSED INFORMATIVE — followed up by #517 |
-
-## Dead Ends (do not re-assign on yi)
-
-| Approach | PR | Reason |
-|----------|-----|--------|
-| Asinh tau-target normalization | #374, #249, #485 | Grad-clip interaction (#374, #249) AND inverse-pipeline Jacobian amplifies heavy-tail errors when metric is in original space (#485). Loss-side asinh (no inverse) is the corrected framing — see #518. |
-| Area-weighted MSE | #17 | Heavy clipping erases physics signal |
-| RANS divergence constraint | #124 | CFD pressure not smooth |
-| Perceiver-IO backbone | #122, #212 | Cross-attn bottleneck loses fine CFD spatial structure |
-| Learned Fourier / RFF PE | #298, #7 | Warmup confound confirmed; at matched warmup, no signal vs sincos |
-| Surface-only point masking | #391 | Shared encoder propagates masking to all heads |
-| K-NN local surface attention | #197 | Locality bias falsified; tau_y/z gap is not receptive-field issue |
-| FFT spectral loss | #288 | Below practical bar; geometrically meaningless on unstructured mesh |
-| OneCycleLR pct_start=0.3 | #429 | 30% warmup too long; cosine never fired in sub-epoch screen. Retrying with pct_start=0.05 in PR #528 (nezuko). |
-| Surface-tangent frame input features | #419 | Input redundancy (t1/t2 deterministic from n); normalization bug in local-frame prediction |
-| Lion wd ≥ 1e-3 | #450 | Catastrophic: wd=2e-3 → vol_p 30.98% (3.9×). Keep Lion wd in [1e-4, 5e-4]. |
-| Huber δ=1.0 from step 0 | #440 | +1.55pp vs MSE at matched steps. Early-training gradient starvation. Only viable as a late-switch (after ep2+) or in 5+ epoch regime. |
-| EMA soup (post-hoc snapshot avg) at 3-epoch budget | #491 | Warmup snapshot poisons K=3; K=2 = linear interpolation, no flat-basin. Revisit only at 7+ epoch budget. |
-| Linear-warmdown (WSD) schedule on AdamW+yi | #262 | Null result: warmdown +0.056pp worse, slope ratio 0.74× (mechanistically opposite). Cosine is correct for AdamW+yi at 3-epoch budget. |
-| Stochastic depth / dropout (step 0) | #479 | All sdp values 19–22% vs 9.04% bar. Drop-path hurts early convergence identically to Huber. |
-| Theta-conditioned wallshear loss weight (alpha=2.0) on yi | #367 | Sub-epoch screen showed alpha=2.0 beats control by −2.5pp; full-convergence DDP-4 diverged. Final: val_abupt=43.7% (4.84× over 9.04% bar), wall_shear_z=122.7% (worse than init, the very channel it targeted). Cross-flow upweight inflates gradient on samples model lacks capacity for. |
-
-## Key Research Insights
-
-1. **Coordinate anisotropy is root cause of tau_y/z gap**: x spans ±2.0, y/z span ±0.5. STRING-sep learnable PE fixed this on tay (PR #311). Three different approaches to address it now in flight: STRING-sep (PE learns it), coord normalization (pre-PE equalization), log-x compression.
-
-2. **Muon optimizer landed and shows strong early signal**: −24.8% rel at matched compute. PR #472 will validate at convergence. If it holds, Muon replaces AdamW as the canonical optimizer.
-
-3. **DDP is critical for credible screening**: Single-GPU at this config takes ~7.5h/epoch. Sub-epoch evaluations are noisy and schedule-dependent. All meaningful screens should use 4-GPU DDP (5,441 steps/epoch, ~31 min/epoch, 8+ epochs in budget).
-
-4. **Grad-clip + aggressive target normalization = hostile interaction**: Closed both asinh PRs. Don't reopen without disabling per-channel grad-clip.
-
-5. **Lion at lr=1e-4 + 1-epoch warmup + clip=0.5 is confirmed SOTA optimizer baseline** on 4L/512d — until Muon DDP result arrives.
-
-## Potential Next Research Directions (beyond current WIP)
-
-1. **Muon on 5L architecture (if #472 wins)**: Muon + 5L STRING-sep could be the next large compounding win.
-
-2. **Multi-scale STRING-sep k=4 with corrected init**: PR #385 (alphonse) confirmed k=4 beats k=1 by −1.14% val. Corrected linspace(−1.6, 3.0, 4) init for proper high-freq coverage. Port to yi/bengio stack with STRING-sep as base.
-
-3. **SWA with multiple seeds (soup across seeds, not epochs)**: Train 3 models with different random seeds, average weights. Orthogonal to EMA-soup (PR #474 frieren).
-
-4. **Fourier neural operator (FNO) decoder**: Replace MLP output heads with a small FNO. Well-motivated for CFD outputs with spatial structure.
-
-5. **Data augmentation**: Small streamwise-pitch rotations (±5°) preserve physics but requires rotating normals AND tau vectors correctly — nontrivial rotation equivariance, defer until architecture settles.
-
-6. **Volume-only coordinate normalization** (follow-up to #449 norman): If Arm B of #449 shows mixed (surface wins, volume regresses), split into log-x surface-only and log-x volume-only to isolate the best transform per stream.
-
-7. **Mixed-precision BF16 → FP32 fallback for last N epochs**: If near-convergence instability limits final val_abupt floor, try finishing with FP32 for the last 1-2 epochs.
+- Lion optimizer stable at lr=1e-4 with warmup=1 epoch, clip=0.5, wd=5e-4
+- AdamW stable max lr=5e-4 with warmup=500 steps
+- Muon tested at 1e-3 (edward) — single-GPU validated −24.8% relative, full-budget pending
+- `SENPAI_TIMEOUT_MINUTES=360` → ~5–6 epochs at DDP-4 (4L/512d, 65k pts)
+- VRAM: 4× H100 96GB; typical usage 68-74 GB / 96 GB at DDP-4 batch=4
+- Gnorm kill threshold: anything consistently > 300 (Lion stable < 50)
