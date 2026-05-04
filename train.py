@@ -722,6 +722,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    ws_asinh_scale: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1528,6 +1529,7 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    ws_asinh_scale: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1567,6 +1569,38 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
+        if ws_asinh_scale > 0.0:
+            # asinh(x/scale) wall-shear target-norm. Denormalize ch1:4 to
+            # physical Pa, transform in fp32 (bf16 underflows the asinh
+            # derivative 1/sqrt(1+(x/s)^2) at large x/s), then keep the asinh
+            # result in fp32 alongside the cp channel cast to fp32. The
+            # downstream MSE auto-promotes (target is fp32) so this matches the
+            # baseline's effective fp32 MSE compute. cp (ch0) is untouched
+            # numerically. Eval/metrics see raw surface_pred_norm.
+            ws_std_t = transform.surface_y_std[1:4].to(
+                device=surface_pred_used.device, dtype=torch.float32
+            )
+            ws_mean_t = transform.surface_y_mean[1:4].to(
+                device=surface_pred_used.device, dtype=torch.float32
+            )
+            ws_pred_phys = surface_pred_used[..., 1:4].float() * ws_std_t + ws_mean_t
+            ws_true_phys = surface_target_used[..., 1:4].float() * ws_std_t + ws_mean_t
+            scale_t = float(ws_asinh_scale)
+            ws_pred_asinh = torch.asinh(ws_pred_phys / scale_t)
+            ws_true_asinh = torch.asinh(ws_true_phys / scale_t)
+            surface_pred_used = torch.cat(
+                [surface_pred_used[..., :1].float(), ws_pred_asinh], dim=-1
+            )
+            surface_target_used = torch.cat(
+                [surface_target_used[..., :1].float(), ws_true_asinh], dim=-1
+            )
+            if ws_pred_asinh.numel() > 0:
+                ws_asinh_max_pred_t = ws_pred_asinh.detach().abs().amax()
+                ws_asinh_max_target_t = ws_true_asinh.detach().abs().amax()
+            else:
+                _zero = torch.zeros((), device=ws_pred_asinh.device)
+                ws_asinh_max_pred_t = _zero
+                ws_asinh_max_target_t = _zero
         surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
             surface_pred_used,
             surface_target_used,
@@ -1598,6 +1632,10 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if ws_asinh_scale > 0.0:
+        metrics["ws_asinh_scale"] = float(ws_asinh_scale)
+        metrics["ws_asinh_max_pred"] = float(ws_asinh_max_pred_t.cpu().item())
+        metrics["ws_asinh_max_target"] = float(ws_asinh_max_target_t.cpu().item())
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -2172,6 +2210,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                ws_asinh_scale=config.ws_asinh_scale,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2290,6 +2329,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            for asinh_key in ("ws_asinh_scale", "ws_asinh_max_pred", "ws_asinh_max_target"):
+                if asinh_key in batch_loss_metrics:
+                    train_log[f"train/{asinh_key}"] = batch_loss_metrics[asinh_key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
