@@ -57,7 +57,43 @@ uv run python ensemble_eval.py \
 
 ---
 
-## SINGLE-MODEL SOTA: askeladd PR #516 per-channel tau_y/tau_z loss reweighting — 2026-05-04
+## SINGLE-MODEL SOTA: askeladd PR #571 tau_y×1.5 / tau_z×2.0 weight intensification — 2026-05-04
+
+**W&B run:** `nh96x7m4` (askeladd DDP8, rank-0) — group `askeladd-tau-sweep`, best val **6.7644%** (Arm A: tau_y×1.5 / tau_z×2.0), runtime ~4.7h
+**PR:** #571
+**Val metrics (best-val checkpoint):** val_abupt=6.7644%, surface_pressure=4.455%, wall_shear=7.593%, volume_pressure=4.249%, tau_x=~6.7%, tau_y=8.489%, tau_z=9.997%
+**Test metrics:** test_abupt=8.171%
+
+**Key insight:** Moderate tau weight intensification (tau_y×1.5, tau_z×2.0) on the PR #516 SOTA stack further improves val_abupt by −0.106pp (−1.54% relative). tau_y improves from 8.663%→8.489% (−0.174pp), tau_z from 10.266%→9.997% (−0.269pp). The increased weights do not destabilize surface_pressure or volume_pressure — surface_pressure actually improves (4.515%→4.455%). Test gate: 8.171% < 8.25% threshold.
+
+**Single-model training gate:** val_abupt < **6.7644%** (previously 6.8701% from PR #516)
+
+### Reproduce (tau_y×1.5, tau_z×2.0, Lion lr=9e-5, no GradNorm)
+
+```bash
+torchrun --standalone --nproc_per_node=8 target/train.py \
+  --agent askeladd --optimizer lion --lr 9e-5 --weight-decay 5e-4 \
+  --tau-y-loss-weight 1.5 --tau-z-loss-weight 2.0 \
+  --surface-loss-weight 2.0 \
+  --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
+  --pos-encoding-mode string_separable --use-qk-norm \
+  --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --no-compile-model \
+  --lr-cosine-t-max 13 --epochs 13 \
+  --wandb-group askeladd-tau-sweep \
+  --wandb-name askeladd/tau-sweep-y1.5-z2.0
+```
+
+**NOTE:** `--no-compile-model` required — torch.compile + DDP NCCL deadlock at step 1.
+
+---
+
+## Previous Single-Model SOTA: askeladd PR #516 per-channel tau_y/tau_z loss reweighting — 2026-05-04
 
 **W&B run:** `9mm3sz7x` (askeladd DDP8, rank-0) — group `askeladd-tau-reweight-micro`, best val **6.8701%** (EP5), runtime ~4.7h
 **PR:** #516
@@ -65,8 +101,6 @@ uv run python ensemble_eval.py \
 **Test metrics:** test_abupt=8.1229%
 
 **Key insight:** Simple fixed per-channel tau reweighting (tau_y×1.2, tau_z×1.3) WITHOUT GradNorm outperforms EMA-proxy GradNorm (6.8701% < 6.9246%). Lion optimizer, lr=9e-5, surface_loss_weight=2.0, ema_decay=0.999.
-
-**Single-model training gate:** val_abupt < **6.8701%** (previously 6.9246% from PR #523)
 
 ### Reproduce (tau_y×1.2, tau_z×1.3, Lion lr=9e-5, no GradNorm)
 
