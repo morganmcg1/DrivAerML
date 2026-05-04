@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 (Round 12 — all 8 students active, 0 review-ready, 0 idle)
+- **Date:** 2026-05-01 (updated: all 8 students now active — PR #562 nezuko assigned after PR #556 ensemble merged)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -63,39 +63,37 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 | PR | Student | Lever | Status |
 |---|---|---|---|
-| #516 | askeladd | per-channel tau_y/tau_z reweight v2 (1.2x/1.3x) — rebased onto #556 | EP3=7.5660% (`akjwpzd8`); on track → EP6 best-val expected ~6.87% |
-| #538 | fern | SGDR cosine warm restarts T_max=2 Tmult=1 (v3) | EP3=7.4551% (`9motyy0i`); warm restart fired correctly; EP4 in-flight |
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep (0.5 / 0.3) | acknowledged; arms queued; awaiting EP1 |
-| #553 | alphonse | input coord jitter regularization (sigma sweep 0.0→0.02) | sigma=0.0 sanity EP2=8.727% tracking SOTA; sweep arms queued |
-| #555 | frieren | GradNorm alpha sweep (alpha=0.25 / 0.75) | Arm B (0.75) EP2=9.0395% (`glir84cj`); Arm A queued |
-| #557 | tanjiro | multi-band fused encoding (24-feat) + hidden_dim 576 | assigned; awaiting acknowledgment |
-| #561 | edward | rff-num-features 32 clean retry on SOTA GradNorm stack | assigned; awaiting first comment |
-| #562 | nezuko | greedy forward ensemble selection (Caruana 2004) from val≤7.5% pool | assigned; awaiting first comment |
+| #571 | askeladd | tau_y/tau_z weight intensity sweep — 3-arm: ×1.5/×2.0, ×2.0/×2.5, ×1.0/×1.5 (group `askeladd-tau-sweep`) | sequential arms running |
+| #568 | fern | NorMuon optimizer (normalized Muon for 2D weight matrices, Lion for 1D/embeddings) | running |
+| #561 | edward | rff-num-features 32 clean retry — group `edward-rff32-v2` | running (rebased clean) |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | running |
+| #553 | alphonse | input coord jitter regularization — 4-arm sigma sweep (0.0, 0.001, 0.005, 0.01) | running; rebase onto tay pending between arms |
+| #555 | frieren | GradNorm alpha sweep / tau-channel reweighting v2 | running |
+| #562 | nezuko | greedy forward ensemble member selection (Caruana 2004) on K=5 candidate pool | running |
+| #557 | tanjiro | multi-band fused encoding (24-feat) + hidden_dim 576 (PR #534 follow-up) | running |
 
-Round-12 focus: attack tau_y/tau_z gap from multiple orthogonal angles simultaneously (regularization, dynamic rebalancing, multi-band capacity, schedule diversity, ensemble selection) while defending single-model SOTA 6.9246%.
+Round-12 focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (regularization, weight averaging, dynamic rebalancing, multi-band capacity).
 
 ---
 
 ## This-cycle review actions (just completed)
 
+### PR #556 nezuko K=5 inference-time ensemble — MERGED (NEW ENSEMBLE SOTA)
+- val_abupt=6.2681%, test_abupt=7.5813% — beats previous single-model SOTA by −8.76% relative on val
+- First result to beat AB-UPT on surface_pressure AND wall_shear simultaneously
+- W&B group `ensemble-inference-v1`, members: `9mm3sz7x`, `49aimdiz`, `wyz68o8r`, `qqtdnlwq`, `5o7jc7wi`
+- Follow-up: PR #562 nezuko — greedy forward ensemble selection (Caruana 2004) to improve K=5 pool composition
+
 ### PR #534 tanjiro fused multi-band 24-feat StringSep — CLOSED NEAR-MISS
-- run `19qf6di1`, group `multi-scale-fused-3band-8feat`, finished 6 epochs
-- Per-epoch trajectory: EP1=28.92%, EP2=9.17%, EP3=7.53%, EP4=7.11% (gate missed), EP5=6.964%, EP6=**6.956%**
-- Final test_abupt=8.3764% vs SOTA 8.2355% (+0.141pp)
-- Beats alphonse val SOTA (7.0063%), does NOT beat tay SOTA #523 (6.9246%)
-- Run was still descending EP5→EP6 (-0.008pp) — follow-up PR #557 spun up with hidden_dim 576 (was 512) and 14 epochs
-- Encoding implementation is clean and SOTA-speed; the architectural contribution is preserved in the follow-up
+- run `19qf6di1`, group `multi-scale-fused-3band-8feat`, finished 6 epochs; EP6 val_abupt=**6.956%**
+- Beats alphonse SOTA, misses tay SOTA #523 (6.9246%); still descending → follow-up PR #557 with hidden_dim 576 + 14 epochs
 
 ### PR #537 alphonse slw=2.0 13-epoch — CLOSED NEGATIVE
-- val_abupt=6.8994% at EP5 (270min cap), beats old #510 baseline by 0.107pp on val
-- Within seed-variance noise (~0.4pp); does NOT beat current SOTA #523 (6.9246%)
-- test_abupt=8.2972% essentially flat vs #510's 8.2921%
+- val_abupt=6.8994% at EP5; within seed-variance noise, does NOT beat current SOTA #523 (6.9246%)
 
 ### PR #536 nezuko y-mirror training augmentation — CLOSED NEGATIVE (hypothesis falsified)
-- val_abupt=7.2315% at EP11 (270min timeout), well above SOTA 6.9246%
-- Mirror_aug_frac=0.498 (correct firing). Tau_y did NOT improve selectively
-- Gap closed uniformly across all channels → tau_y/tau_z gap is structural, not data-symmetry addressable
-- Important update to negative results catalog: y-mirror training aug joins TTA mirror-y inference (#499) as both negative
+- val_abupt=7.2315% at EP11; tau_y did NOT improve selectively — gap is structural, not symmetry-addressable
+- PR #516 askeladd and PR #538 fern also superseded by new assignments #571 and #568 respectively
 
 ---
 
@@ -105,13 +103,13 @@ Round-12 focus: attack tau_y/tau_z gap from multiple orthogonal angles simultane
 - **Gap status:** tau_y=8.72%, tau_z=10.30% vs AB-UPT 3.65%/3.63% (2.4–2.8× above)
 - **Active attacks (this round):**
   - GradNorm-EMA tighter floor (#552 thorfinn) — proven mechanism, more aggressive redistribution
-  - Coord jitter regularization (#553 alphonse) — Tikhonov regularizer, attack overfitting on hard channels
-  - Greedy ensemble selection (#562 nezuko) — Caruana 2004 applied to full val≤7.5% candidate pool
-  - Per-channel reweight v2 (#516 askeladd) — micro-bump 1.2x/1.3x; EP3=7.57% already tracking SOTA+beat
-  - Multi-band fused StringSep + hidden_dim 576 (#557 tanjiro) — capacity + spectral diversity
-  - rff-num-features 32 (#561 edward) — double feature budget on SOTA stack
-  - GradNorm alpha sweep (#555 frieren) — alpha=0.25 (faster equalization) vs 0.75 (slower)
-  - SGDR warm restarts (#538 fern) — multi-cycle convergence; EP3=7.4551%, warm restart fired correctly
+  - Coord jitter regularization (#553 alphonse) — Tikhonov regularizer, attack overfitting on hard channels; 4-arm sigma sweep
+  - Greedy ensemble pool selection (#562 nezuko) — Caruana 2004 forward greedy on val, improve ensemble composition
+  - tau weight intensity sweep (#571 askeladd) — 3-arm: ×1.5/×2.0, ×2.0/×2.5, ×1.0/×1.5; last attempt at this angle
+  - Multi-band fused StringSep wide (#557 tanjiro) — hidden_dim 576 + 14 epochs, PR #534 near-miss follow-up
+  - rff-num-features 32 (#561 edward) — double feature budget, clean retry on SOTA stack
+  - GradNorm alpha sweep (#555 frieren) — stronger tau_y/tau_z gradient pull via alpha tuning
+  - NorMuon optimizer (#568 fern) — normalized Muon for 2D weights; addressing instability of vanilla Muon (#261)
 
 ### 2. Negative-direction confirmed (do not retry on current stack)
 - **Static channel reweighting** is now 4× negative (#142, #454, #467, #531) — askeladd #516 v2 is final attempt at this angle before the lever is exhausted
