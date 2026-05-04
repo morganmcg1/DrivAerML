@@ -1887,7 +1887,8 @@ def compute_density_weights(
     gamma: float = 1.0,
     max_weight: float = 10.0,
     n_anchors: int = 4096,
-) -> torch.Tensor:
+    return_diagnostics: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, float]]:
     """Inverse-density per-point weights from k-th nearest-anchor distance.
 
     Subsamples ``n_anchors`` points uniformly from the valid set and computes
@@ -1907,10 +1908,21 @@ def compute_density_weights(
     """
     B, N, _ = coords.shape
     device = coords.device
+    empty_diag: dict[str, float] = {
+        "raw_weight_mean": float("nan"),
+        "raw_weight_std": float("nan"),
+        "raw_weight_min": float("nan"),
+        "raw_weight_max": float("nan"),
+        "cap_binding_frac": float("nan"),
+    }
     if gamma == 0.0:
-        return mask.to(coords.dtype)
+        out0 = mask.to(coords.dtype)
+        return (out0, empty_diag) if return_diagnostics else out0
     coords_f = coords.float()
     weights = torch.zeros(B, N, dtype=torch.float32, device=device)
+    raw_pieces: list[torch.Tensor] = []
+    cap_count = 0
+    raw_count = 0
     for b in range(B):
         m = mask[b]
         n_valid = int(m.sum().item())
@@ -1926,14 +1938,33 @@ def compute_density_weights(
         kth_d, _ = d.kthvalue(kth_idx, dim=1)
         kth_d = kth_d.clamp_min(1e-8)
         w = kth_d.pow(gamma)
-        w_mean = w.mean().clamp_min(1e-12)
-        w = w.clamp_max(max_weight * w_mean)
-        w_mean = w.mean().clamp_min(1e-12)
-        w = w / w_mean
+        w_mean_raw = w.mean().clamp_min(1e-12)
+        raw_norm = w / w_mean_raw
+        raw_pieces.append(raw_norm.detach())
+        cap_count += int((raw_norm >= max_weight).sum().item())
+        raw_count += int(raw_norm.numel())
+        w = w.clamp_max(max_weight * w_mean_raw)
+        w_mean_post = w.mean().clamp_min(1e-12)
+        w = w / w_mean_post
         full_w = torch.zeros(N, device=device, dtype=torch.float32)
         full_w[m] = w
         weights[b] = full_w
-    return weights.to(coords.dtype)
+    diag: dict[str, float] = {
+        "raw_weight_mean": float("nan"),
+        "raw_weight_std": float("nan"),
+        "raw_weight_min": float("nan"),
+        "raw_weight_max": float("nan"),
+        "cap_binding_frac": float("nan"),
+    }
+    if raw_pieces:
+        all_raw = torch.cat(raw_pieces)
+        diag["raw_weight_mean"] = float(all_raw.mean().detach().cpu().item())
+        diag["raw_weight_std"] = float(all_raw.std().detach().cpu().item())
+        diag["raw_weight_min"] = float(all_raw.min().detach().cpu().item())
+        diag["raw_weight_max"] = float(all_raw.max().detach().cpu().item())
+        diag["cap_binding_frac"] = cap_count / max(raw_count, 1)
+    out = weights.to(coords.dtype)
+    return (out, diag) if return_diagnostics else out
 
 
 def masked_mse(
@@ -2129,27 +2160,31 @@ def train_loss(
     surf_w_max = float("nan")
     vol_w_mean = float("nan")
     vol_w_max = float("nan")
+    surf_diag: dict[str, float] = {}
+    vol_diag: dict[str, float] = {}
     if density_weight_gamma > 0.0 and not use_beta_nll:
-        surface_point_weights = compute_density_weights(
+        surface_point_weights, surf_diag = compute_density_weights(
             batch.surface_x[..., :3],
             batch.surface_mask,
             k=density_weight_k,
             gamma=density_weight_gamma,
             max_weight=density_weight_cap,
             n_anchors=density_weight_anchors,
+            return_diagnostics=True,
         )
         if bool(batch.surface_mask.any()):
             valid_w = surface_point_weights[batch.surface_mask].float()
             surf_w_mean = float(valid_w.mean().detach().cpu().item())
             surf_w_max = float(valid_w.max().detach().cpu().item())
         if density_weight_volume:
-            volume_point_weights = compute_density_weights(
+            volume_point_weights, vol_diag = compute_density_weights(
                 batch.volume_x[..., :3],
                 batch.volume_mask,
                 k=density_weight_k,
                 gamma=density_weight_gamma,
                 max_weight=density_weight_cap,
                 n_anchors=density_weight_anchors,
+                return_diagnostics=True,
             )
             if bool(batch.volume_mask.any()):
                 valid_w = volume_point_weights[batch.volume_mask].float()
@@ -2261,9 +2296,13 @@ def train_loss(
     if density_weight_gamma > 0.0 and not use_beta_nll:
         metrics["mean_weight_surface"] = surf_w_mean
         metrics["max_weight_surface"] = surf_w_max
+        for k_, v_ in surf_diag.items():
+            metrics[f"{k_}_surface"] = v_
         if density_weight_volume:
             metrics["mean_weight_volume"] = vol_w_mean
             metrics["max_weight_volume"] = vol_w_max
+            for k_, v_ in vol_diag.items():
+                metrics[f"{k_}_volume"] = v_
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
