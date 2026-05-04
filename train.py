@@ -1982,7 +1982,9 @@ def weighted_masked_beta_nll_per_channel(
     n_channels = pred_mean.shape[-1]
     if not bool(mask.any()):
         zero_per_axis = [0.0] * int(weights.numel())
-        return pred_mean.sum() * 0.0, zero_per_axis, zero_per_axis
+        # Touch both heads so DDP allreduce sees the log_var params even on
+        # ranks whose batch has no valid points for this modality.
+        return (pred_mean.sum() + pred_log_var.sum()) * 0.0, zero_per_axis, zero_per_axis
 
     log_var = pred_log_var.clamp(LOG_VAR_CLAMP_MIN, LOG_VAR_CLAMP_MAX)
     var = log_var.exp()
