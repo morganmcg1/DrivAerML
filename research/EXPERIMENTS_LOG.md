@@ -1732,3 +1732,27 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 
 ### Yi merge bar: 8.2528% (PR #576 frieren STRING-sep + Lion)
 ### Tay merge bar: 6.5985% (PR #592 alphonse depth-L=5)
+
+---
+
+## 2026-05-04 23:30 — PR #633: [norman] 6L/512d depth scale-up — CLOSED (null: EP1 abort gate)
+
+- Branch: `norman/6l-512d-depth-scale-up`
+- Hypothesis: Increasing model depth from 4L to 6L (same 512d/8h) would improve τ_y/τ_z representation by learning deeper feature hierarchies combining local geometry with global flow context.
+- W&B run: `pf7qeig9` (group: `yi-round36-depth-scaleup`)
+- **Note:** Run was layered (6L + k1_k2 curvature + β-NLL) rather than clean depth isolation.
+
+| Metric | EP1 (6L+layered) | yi PR #576 best (4L) | AB-UPT target |
+|---|---|---|---|
+| **val_abupt** | **18.8959%** | 8.2528% | — |
+| surface_pressure | 11.8498% | 5.127% | 3.82% |
+| wall_shear | 18.9183% | 9.233% | 7.29% |
+| τ_x | 15.8048% | 7.815% | 5.35% |
+| τ_y | 22.8913% | 9.233% | 3.65% |
+| τ_z | 25.0254% | 10.449% | 3.63% |
+| volume_pressure | 18.9083% | 12.438% | 6.08% |
+
+- Model: 18.52M params (vs 12.70M for 4L/512d), trained at 1.85 s/it on 4×H100 → ~167 min/epoch
+- EP1 val_abupt = 18.9% >> EP1 abort gate of 15% → killed after EP1
+- Root causes: (1) 6L trains much slower from scratch at 4L-tuned LR (1e-4) — 7-9 pp behind 4L at EP1; (2) layered confounds (k1_k2 + β-NLL) made attribution impossible; (3) τ_y/τ_z particularly bad (2.5× worse than 4L) suggesting depth without more epochs is counterproductive
+- **Conclusion:** 6L/512d at current budget is not viable. Clean isolated depth ablation with longer warmup would be needed to fairly assess depth scaling. Depth scaling remains a valid research direction but requires 3+ epoch budget. Norman reassigned.
