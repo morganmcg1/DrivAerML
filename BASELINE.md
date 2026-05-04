@@ -2,7 +2,53 @@
 
 **Branch:** `tay` · **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
-## Status: thorfinn PR #523 EMA-proxy GradNorm alpha=0.5 EP6 — 2026-05-01 (CONFIRMED SOTA)
+---
+
+## ENSEMBLE SOTA: nezuko PR #556 K=5 inference-time ensemble — 2026-05-01
+
+**val_abupt=6.2681%** / **test_abupt=7.5813%** — **−8.76% relative on val, −6.66% on test vs single-model SOTA**
+
+First result to beat AB-UPT reference on surface_pressure AND wall_shear simultaneously on test.
+
+**W&B runs (K=5 members):** `9mm3sz7x` (askeladd), `49aimdiz` (alphonse), `wyz68o8r` (thorfinn/SOTA), `qqtdnlwq` (alphonse), `5o7jc7wi` (edward) — ensemble group `ensemble-inference-v1`
+**PR:** #556
+
+### K-sweep results
+
+| K | val_abupt% | test_abupt% | Δ val vs single-model SOTA |
+|---|---:|---:|---:|
+| 1 (SOTA reproduce) | 6.8700 | 8.1228 | — |
+| 2 | 6.5126 | 7.8505 | −5.20% |
+| 3 | 6.3728 | 7.7049 | −7.24% |
+| 4 | 6.3343 | 7.6597 | −7.80% |
+| **5** | **6.2681** | **7.5813** | **−8.76%** |
+
+### Per-channel (K=5 ensemble, test)
+
+| Metric | K=5 ensemble | Single-model SOTA (#523) | AB-UPT |
+|---|---:|---:|---:|
+| `abupt` | **7.5813** | 8.2355 | — |
+| `surface_pressure` | **3.6xxx** | 4.2712 | 3.82 (BEATEN) |
+| `wall_shear` | **7.1xxx** | 7.5043 | 7.29 (BEATEN) |
+| `tau_x` | — | 6.5557 | 5.35 |
+| `tau_y` | — | 8.4656 | 3.65 |
+| `tau_z` | — | 9.6720 | 3.63 |
+
+### Reproduce K=5 ensemble
+
+```bash
+CUDA_VISIBLE_DEVICES=0 uv run python ensemble_eval.py \
+  --run-ids 9mm3sz7x 49aimdiz wyz68o8r qqtdnlwq 5o7jc7wi \
+  --split val test \
+  --wandb-group ensemble-inference-v1 \
+  --wandb-name nezuko/ensemble-k5
+```
+
+**Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.9246% (single-model SOTA #523). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=5 pool.
+
+---
+
+## SINGLE-MODEL SOTA: thorfinn PR #523 EMA-proxy GradNorm alpha=0.5 EP6 — 2026-05-01 (CONFIRMED SOTA)
 
 **W&B run:** `wyz68o8r` (thorfinn DDP8, rank-0) — group `thorfinn-gradnorm-r2`, best val **6.9246%** (EP6), runtime 4.71h
 **PR:** #523

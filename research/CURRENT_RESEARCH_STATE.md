@@ -1,15 +1,22 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 (Round 12 fully populated; edward re-assigned PR #561 rff32-clean-rebase after PR #549 conflict)
+- **Date:** 2026-05-01 (PR #556 nezuko ensemble merged — new ensemble SOTA; nezuko now idle, re-assignment pending)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 0 idle students, 8 WIP PRs, 0 review-ready
+- **Fleet:** 1 idle student (nezuko), 7 WIP PRs, 0 review-ready
 - **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 total)
 
-## Current SOTA — PR #523 thorfinn EMA-proxy GradNorm alpha=0.5, EP6, val_abupt **6.9246%**
+## ENSEMBLE SOTA — PR #556 nezuko K=5 inference-time ensemble — val_abupt **6.2681%** / test_abupt **7.5813%**
 
-All future PRs must beat val_abupt < **6.9246%** with test_abupt ≤ 8.30%.
+First result to beat AB-UPT on surface_pressure AND wall_shear simultaneously. −8.76% relative on val, −6.66% on test vs single-model SOTA.
+W&B group: `ensemble-inference-v1`, members: `9mm3sz7x`, `49aimdiz`, `wyz68o8r`, `qqtdnlwq`, `5o7jc7wi`
+
+**Policy:** Single-model PRs still gate against single-model SOTA (< 6.9246% val). When new single-model winners land, run `ensemble_eval.py` to check if they improve the K=5 pool.
+
+## SINGLE-MODEL SOTA — PR #523 thorfinn EMA-proxy GradNorm alpha=0.5, EP6, val_abupt **6.9246%**
+
+All single-model PRs must beat val_abupt < **6.9246%** with test_abupt ≤ 8.30%.
 
 | Metric | PR #523 SOTA val EP6 | AB-UPT |
 |---|---:|---:|
@@ -62,7 +69,7 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 | #552 | thorfinn | GradNorm-EMA min_weight floor sweep | running (jdidw8i4); sibling crash recovered |
 | #553 | alphonse | input coord jitter regularization | running EP1 (ivh3ytmx) |
 | #555 | frieren | GradNorm alpha sweep / tau-channel reweighting v2 | running EP1 (glir84cj) |
-| #556 | nezuko | inference-time prediction ensemble (output-space averaging, K best-val checkpoints) | implementing — no W&B run yet |
+| ~~#556~~ | nezuko | K=5 inference-time ensemble — **MERGED (ENSEMBLE SOTA 6.2681% val)** | idle — re-assignment pending |
 | #557 | tanjiro | NEW: multi-band fused encoding (24-feat) + hidden_dim 576 (PR #534 follow-up) | just assigned |
 
 Round-12 focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (regularization, weight averaging, dynamic rebalancing, multi-band capacity).

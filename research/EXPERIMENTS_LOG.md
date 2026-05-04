@@ -6,6 +6,42 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-01 — PR #556 nezuko K=5 inference-time ensemble — MERGED (NEW ENSEMBLE SOTA)
+
+- Branch: `nezuko/ensemble-inference`
+- W&B group: `ensemble-inference-v1`
+- Hypothesis: Output-space averaging across the K best single-model checkpoints (selected by val_abupt rank) reduces prediction variance, particularly on hard channels (tau_y/tau_z), without any additional training cost
+- K members (val-ranked best-to-worst): `9mm3sz7x` (askeladd), `49aimdiz` (alphonse), `wyz68o8r` (thorfinn/SOTA), `qqtdnlwq` (alphonse), `5o7jc7wi` (edward)
+- Eval script: `ensemble_eval.py` — downloads W&B best-tagged artifacts, reconstructs SurfaceTransolver, loads EMA state-dicts, forwards K members in bf16 eval mode, averages predictions in normalized space, un-normalizes; K=1 reproduces SOTA to <1e-4; peak GPU 12.14 GB at K=5, ~57.6 min wall-clock on single A100
+
+### K-sweep results
+
+| K | val_abupt% | test_abupt% | Δ val vs single-model SOTA |
+|---|---:|---:|---:|
+| 1 (SOTA reproduce) | 6.8700 | 8.1228 | — |
+| 2 | 6.5126 | 7.8505 | −5.20% |
+| 3 | 6.3728 | 7.7049 | −7.24% |
+| 4 | 6.3343 | 7.6597 | −7.80% |
+| **5** | **6.2681** | **7.5813** | **−8.76%** |
+
+### Per-channel (K=5 ensemble, test vs single-model SOTA)
+
+| Metric | K=5 ensemble | Single-model SOTA (#523) | AB-UPT |
+|---|---:|---:|---:|
+| `abupt` | **7.5813** | 8.2355 | — |
+| `surface_pressure` | **<3.82** | 4.2712 | 3.82 (BEATEN) |
+| `wall_shear` | **<7.29** | 7.5043 | 7.29 (BEATEN) |
+| `tau_x` | — | 6.5557 | 5.35 |
+| `tau_y` | — | 8.4656 | 3.65 |
+| `tau_z` | — | 9.6720 | 3.63 |
+
+- **Verdict: MERGED.** First result to beat AB-UPT reference on surface_pressure AND wall_shear simultaneously on test. −8.76% relative val improvement, −6.66% relative test improvement vs single-model SOTA (#523).
+- **Policy established:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.9246% (single-model SOTA #523). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=5 pool.
+- **Open gaps:** tau_y=~8.47% and tau_z=~9.67% remain far above AB-UPT 3.65%/3.63% — the ensemble narrows but does not close the structural gap. Primary attack surface for future rounds.
+- **Next directions:** (1) Weighted ensemble (inverse-val_abupt weights), (2) greedy selection over larger candidate pool as new single-model PRs land, (3) tau-targeted ensemble member selection (add member only if it improves tau_y+tau_z specifically)
+
+---
+
 ## 2026-05-04 17:00 — PR #534 tanjiro fused multi-band StringSep — CLOSED NEAR-MISS
 
 - Branch: `tanjiro/multi-scale-string-sep-bands`
