@@ -871,6 +871,8 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        rff_dim: int = 0,
+        rff_sigma: float = 10.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -885,6 +887,18 @@ class SurfaceTransolver(nn.Module):
         self.pos_max_wavelength = pos_max_wavelength
         self.learnable_pe = learnable_pe
         self.beta_nll = beta_nll
+        self.rff_dim = rff_dim
+
+        if rff_dim > 0:
+            # Random Fourier Features (Rahimi & Recht 2007): fixed random projection
+            # matrix B ~ N(0, sigma^2) of shape (rff_dim, 3).  At forward time we lift
+            # the surface xyz coords as [sin(xyz @ B.T), cos(xyz @ B.T)] and append the
+            # resulting 2*rff_dim channels to the surface feature vector.  The buffer is
+            # non-trainable but persisted in checkpoints so inference is deterministic.
+            rff_B = torch.randn(rff_dim, 3) * rff_sigma
+            self.register_buffer("rff_B", rff_B)
+        else:
+            self.rff_B = None
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -967,6 +981,15 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
+            # Apply Random Fourier Features to surface xyz coords when enabled.
+            # rff_B has shape (rff_dim, 3); xyz has shape (B, N, 3).
+            # The RFF expansion [sin(xyz @ B.T), cos(xyz @ B.T)] is appended
+            # as additional feature channels after the existing surface features.
+            if self.rff_dim > 0 and self.rff_B is not None:
+                xyz = surface_x[:, :, : self.space_dim].float()
+                proj = xyz @ self.rff_B.T  # (B, N, rff_dim)
+                rff_feats = torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)  # (B, N, 2*rff_dim)
+                surface_x = torch.cat([surface_x, rff_feats.to(surface_x.dtype)], dim=-1)
             tokens.append(
                 self._encode_group(
                     surface_x,
@@ -1159,6 +1182,8 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    surface_rff_dim: int = 0
+    surface_rff_sigma: float = 10.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1351,7 +1376,8 @@ def make_loaders(
 
 def build_model(config: Config) -> SurfaceTransolver:
     extra_curv = 2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
-    surface_input_dim = SURFACE_X_DIM + extra_curv
+    # RFF adds 2*rff_dim channels (sin + cos) to the surface feature vector.
+    surface_input_dim = SURFACE_X_DIM + extra_curv + 2 * config.surface_rff_dim
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -1366,6 +1392,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        rff_dim=config.surface_rff_dim,
+        rff_sigma=config.surface_rff_sigma,
     )
 
 
@@ -2666,7 +2694,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             "ddp_effective_batch_size": config.batch_size * world_size,
             "lr_warmup_steps_effective": effective_warmup_steps,
             "surface_input_dim_effective": SURFACE_X_DIM
-            + (2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0),
+            + (2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0)
+            + 2 * config.surface_rff_dim,
             "curvature_k_neighbors": (
                 CURVATURE_K_NEIGHBORS
                 if config.surface_curvature_features in ("h_k", "k1_k2")
