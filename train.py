@@ -762,6 +762,11 @@ class Config:
     lr_warmup_steps: int = 0
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
+    one_cycle_lr: bool = False
+    one_cycle_peak_lr: float = 1e-3
+    one_cycle_pct_start: float = 0.3
+    one_cycle_div_factor: float = 0.0  # 0 -> auto: peak_lr / lr (uses --lr as initial lr)
+    one_cycle_final_div_factor: float = 100.0
     resume_from: str = ""
 
 
@@ -2039,17 +2044,45 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"lr={config.lr} wd={config.weight_decay}"
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
-    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
-    effective_warmup_steps = config.lr_warmup_steps
-    if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
-        effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
-    if is_main and effective_warmup_steps > 0:
-        print(
-            f"LR warmup: {effective_warmup_steps} steps "
-            f"(start_lr={config.lr_warmup_start_lr} -> peak_lr={config.lr})"
+    if config.one_cycle_lr:
+        steps_per_epoch = max(len(train_loader), 1)
+        total_steps = max_epochs * steps_per_epoch
+        div_factor = config.one_cycle_div_factor
+        if div_factor <= 0.0:
+            div_factor = config.one_cycle_peak_lr / max(config.lr, 1e-12)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=config.one_cycle_peak_lr,
+            total_steps=total_steps,
+            pct_start=config.one_cycle_pct_start,
+            anneal_strategy="cos",
+            div_factor=div_factor,
+            final_div_factor=config.one_cycle_final_div_factor,
         )
+        warmup_steps_oc = int(round(config.one_cycle_pct_start * total_steps))
+        if is_main:
+            initial_oc_lr = config.one_cycle_peak_lr / div_factor
+            final_oc_lr = initial_oc_lr / config.one_cycle_final_div_factor
+            print(
+                f"OneCycleLR: peak_lr={config.one_cycle_peak_lr} "
+                f"initial_lr={initial_oc_lr:.2e} final_lr={final_oc_lr:.2e} "
+                f"total_steps={total_steps} warmup_steps={warmup_steps_oc} "
+                f"cooldown_steps={total_steps - warmup_steps_oc} "
+                f"div_factor={div_factor:.3f} final_div_factor={config.one_cycle_final_div_factor}"
+            )
+        effective_warmup_steps = 0
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+        effective_warmup_steps = config.lr_warmup_steps
+        if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
+            effective_warmup_steps = config.lr_warmup_epochs * max(len(train_loader), 1)
+        if is_main and effective_warmup_steps > 0:
+            print(
+                f"LR warmup: {effective_warmup_steps} steps "
+                f"(start_lr={config.lr_warmup_start_lr} -> peak_lr={config.lr})"
+            )
+    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     if is_main and kill_thresholds:
         print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
     train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
@@ -2247,6 +2280,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
                         pg["lr"] = base_lr
             optimizer.step()
+            if config.one_cycle_lr:
+                scheduler.step()
             ema_decay_now: float | None = None
             if ema is not None:
                 if config.ema_decay_start > 0.0:
@@ -2321,7 +2356,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if not config.one_cycle_lr:
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
