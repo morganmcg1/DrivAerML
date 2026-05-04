@@ -137,6 +137,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    coord_jitter_sigma: float = 0.0
     debug: bool = False
 
 
@@ -219,6 +220,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "coord_jitter_sigma": (
+            "Per-axis isotropic Gaussian noise added to input xyz coords "
+            "during training only (eval/val/test always use clean coords). "
+            "Acts as a data augmentation / Lipschitz regularizer encouraging "
+            "the model to learn smoother fields w.r.t. spatial position. "
+            "Coords are already in roughly metre-scaled units (surface std "
+            "~[1.4, 0.7, 0.4]); a sigma of 0.005 is roughly one grid cell. "
+            "Noise is masked to valid points so padded tokens stay zero. "
+            "Default 0.0 disables jitter."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +311,29 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def _apply_coord_jitter_inplace(
+    batch,
+    sigma: float,
+    *,
+    training: bool,
+) -> None:
+    """Add per-axis isotropic Gaussian noise to xyz coords (training only).
+
+    Mutates ``batch.surface_x[..., :3]`` and ``batch.volume_x[..., :3]`` in
+    place. Noise is zeroed at padded positions via the masks so the
+    invariant that padded tokens carry zeros is preserved.
+    """
+
+    if sigma <= 0.0 or not training:
+        return
+    s_mask = batch.surface_mask.unsqueeze(-1).to(dtype=batch.surface_x.dtype)
+    s_noise = torch.randn_like(batch.surface_x[..., :3]) * sigma
+    batch.surface_x[..., :3] = batch.surface_x[..., :3] + s_noise * s_mask
+    v_mask = batch.volume_mask.unsqueeze(-1).to(dtype=batch.volume_x.dtype)
+    v_noise = torch.randn_like(batch.volume_x[..., :3]) * sigma
+    batch.volume_x[..., :3] = batch.volume_x[..., :3] + v_noise * v_mask
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,8 +344,10 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    coord_jitter_sigma: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    _apply_coord_jitter_inplace(batch, coord_jitter_sigma, training=model.training)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -353,6 +389,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    coord_jitter_sigma: float = 0.0,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -363,6 +401,7 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
+    _apply_coord_jitter_inplace(batch, coord_jitter_sigma, training=model.training)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -917,7 +956,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model, batch, transform, device, config.amp_mode,
+                        coord_jitter_sigma=config.coord_jitter_sigma,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1008,6 +1048,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        coord_jitter_sigma=config.coord_jitter_sigma,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
