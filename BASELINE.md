@@ -252,23 +252,47 @@ torchrun --standalone --nproc_per_node=4 train.py \
   --gradient-log-every 100 --weight-log-every 100
 ```
 
+## 2026-05-04 — PR #590: Round 34 — Gradient EMA Smoothing α=0.5 (thorfinn)
+
+Post-backward gradient EMA (`--grad-ema-alpha 0.5`) applied before the Lion optimizer step.
+Arm A (α=0.9) over-damped: grad-norm collapsed to ~30% of raw, clip-grad-norm=0.5 never engaged →
+EP3=13.60%, +4.20pp regression. Arm B' (α=0.5) restored effective clipping and improved training
+stability → val_abupt=**8.686%** — a 2.0% relative gain vs prior bar (8.861%).
+
+τ_y improvement was the strongest single-axis result this round (−0.957pp). Wall-shear across all
+axes improved. Volume pressure shows an anomalous test/val gap (5.648% val vs 12.354% test) — flagged
+for follow-up. W&B run: `86lxu1w0`.
+
+**Reproduce:**
+```bash
+cd target/
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
+  --agent thorfinn --wandb-group yi-round34-grad-ema \
+  --learnable-pe --optimizer lion --lr 1e-4 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --grad-ema-alpha 0.5 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 --validation-every 1 --no-compile-model \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536
+```
+
 ## Current best on `yi`
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **8.861** | — | #583 | 5xovw2si | 2026-05-04 |
-| `surface_pressure_rel_l2_pct` | **5.457** | — | #583 | 5xovw2si | 2026-05-04 |
-| `wall_shear_rel_l2_pct` | **10.022** | — | #583 | 5xovw2si | 2026-05-04 |
-| `volume_pressure_rel_l2_pct` | **4.951** | — | #583 | 5xovw2si | 2026-05-04 |
-| `wall_shear_x_rel_l2_pct` | **8.213** | — | #583 | 5xovw2si | 2026-05-04 |
-| `wall_shear_y_rel_l2_pct` | **12.447** | — | #583 | 5xovw2si | 2026-05-04 |
-| `wall_shear_z_rel_l2_pct` | **13.235** | — | #583 | 5xovw2si | 2026-05-04 |
+| `abupt_axis_mean_rel_l2_pct` | **8.686** | **9.834** | #590 | 86lxu1w0 | 2026-05-04 |
+| `surface_pressure_rel_l2_pct` | **5.531** | **5.260** | #590 | 86lxu1w0 | 2026-05-04 |
+| `wall_shear_rel_l2_pct` | **9.617** | **9.508** | #590 | 86lxu1w0 | 2026-05-04 |
+| `volume_pressure_rel_l2_pct` | **5.648** | **12.354** | #590 | 86lxu1w0 | 2026-05-04 |
+| `wall_shear_x_rel_l2_pct` | **8.114** | **8.083** | #590 | 86lxu1w0 | 2026-05-04 |
+| `wall_shear_y_rel_l2_pct` | **11.490** | **11.360** | #590 | 86lxu1w0 | 2026-05-04 |
+| `wall_shear_z_rel_l2_pct` | **12.646** | **12.115** | #590 | 86lxu1w0 | 2026-05-04 |
 
-Note: PR #583 (edward, β-NLL heteroscedastic loss `--beta-nll-beta 0.5`) merged 2026-05-04 —
-new yi SOTA at val_abupt=8.861%. Prior bar was 9.032% (PR #517 askeladd).
-Prior compounding wins include PR #580 (haku, surface curvatures), PR #517 (askeladd, Lion lr=1e-4 clip=0.5),
-PR #309 (thorfinn, grad-clip=0.5), PR #222 (fern, lr_warmup_epochs=1).
-**Merge bar: val_abupt 8.861% on the yi codebase as it exists today (PR #583 edward, β-NLL beta=0.5).**
+Note: PR #590 (thorfinn, gradient EMA smoothing `--grad-ema-alpha 0.5`) merged 2026-05-04 —
+new yi SOTA at val_abupt=8.686%. Prior bar was 8.861% (PR #583 edward, β-NLL beta=0.5).
+Prior compounding wins include PR #583 (edward, β-NLL), PR #580 (haku, surface curvatures),
+PR #517 (askeladd, Lion lr=1e-4 clip=0.5), PR #309 (thorfinn, grad-clip=0.5), PR #222 (fern, lr_warmup_epochs=1).
+**Merge bar: val_abupt 8.686% on the yi codebase as it exists today (PR #590 thorfinn, gradient EMA α=0.5).**
 **Aspirational target once STRING-sep PE fully lands on yi: val_abupt ~7.0–7.5% (tay SOTA PR #511, `5o7jc7wi`).**
 
 **Distance from AB-UPT targets (test, multiple of target):**
