@@ -4,7 +4,26 @@
 
 ---
 
-## ENSEMBLE SOTA: nezuko PR #602 greedy forward ensemble selection K=7 (pool 22→23, Caruana 2004) — 2026-05-04
+## ENSEMBLE SOTA: nezuko PR #612 greedy forward ensemble selection K=7 (pool 23→24, Caruana 2004) — 2026-05-01
+
+**val_abupt=6.1751%** / **test_abupt=7.5347%** — −0.0311pp val (−0.50% relative) vs prior K=7 (#602); test within noise (+0.0183pp)
+
+Pool expanded from 23→24 by adding PR #594 run `d777epep` (askeladd rff32, val=6.7258%). Greedy forward selection re-run; `d777epep` selected as seed. `nh2ke150` dropped from prior K=7; remaining 6 members retained. K=7 pool 24 is the new ensemble SOTA.
+
+**W&B run:** `5veexq8r` (group `nezuko-ensemble-greedy-v3`)
+**PR:** #612
+**K=7 members:** d777epep, nh96x7m4, 5o7jc7wi, wyz68o8r, 9mm3sz7x, 49aimdiz, 19qf6di1
+
+**Val per-channel (K=7):** surface_pressure=3.5868%, volume_pressure=3.6128%, wall_shear=6.2832%, tau_x=5.3712%, tau_y=7.7921%, tau_z=9.2984%
+**Test per-channel (K=7):** surface_pressure=3.5560%, volume_pressure=11.4652%, wall_shear=6.8449%, tau_x=5.4834%, tau_y=8.6249%, tau_z=9.6523%
+
+**Key finding:** Ensemble val SOTA 6.1751%. Volume_pressure test-vs-val gap remains chronic (val≈3.6%, test≈11.5%, ~3×) — primary systematic issue to investigate in pool 25.
+
+**Ensemble gate:** val_abupt < **6.1751%**
+
+---
+
+## Prior Ensemble SOTA: nezuko PR #602 greedy forward ensemble selection K=7 (pool 22→23, Caruana 2004) — 2026-05-04
 
 **val_abupt=6.2062%** / **test_abupt=7.5164%** — −0.0283pp val (−0.45% relative), −0.0269pp test vs prior K=7 (#562)
 
