@@ -848,6 +848,91 @@ class Transformer(nn.Module):
         return x
 
 
+EXTRA_FEATURES_MODES = ("none", "cos_theta_area", "cos_theta_area_vol")
+
+
+@torch.no_grad()
+def chunked_knn_log_area(
+    xyz: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    k: int = 8,
+    chunk_size: int = 2048,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Per-point log mean k-nearest-neighbor distance, masked-aware and chunked.
+
+    The full pairwise cdist for 65536 points is ~16 GB at fp32, so we chunk along
+    the query axis. Padded points are skipped (their log_area row stays zero) and
+    excluded from neighbor candidates by setting their distances to +inf.
+    """
+    bsz, n_pts, _ = xyz.shape
+    log_area = xyz.new_zeros(bsz, n_pts, 1)
+    if n_pts == 0:
+        return log_area
+    xyz_f = xyz.float()
+    for b in range(bsz):
+        valid = mask[b].bool() if mask is not None else torch.ones(n_pts, dtype=torch.bool, device=xyz.device)
+        n_valid = int(valid.sum().item())
+        if n_valid == 0:
+            continue
+        v_idx = torch.nonzero(valid, as_tuple=False).squeeze(-1)
+        x_valid = xyz_f[b][v_idx]
+        kk = min(k + 1, n_valid)
+        knn_means = x_valid.new_empty(n_valid)
+        for start in range(0, n_valid, chunk_size):
+            end = min(start + chunk_size, n_valid)
+            chunk = x_valid[start:end]
+            d = torch.cdist(chunk, x_valid)
+            top_d, _ = d.topk(kk, dim=-1, largest=False)
+            if kk > 1:
+                knn_means[start:end] = top_d[:, 1:].mean(dim=-1)
+            else:
+                knn_means[start:end] = top_d[:, 0]
+        log_vals = torch.log(knn_means + eps).to(xyz.dtype).unsqueeze(-1)
+        log_area[b].index_copy_(0, v_idx, log_vals)
+    return log_area
+
+
+@torch.no_grad()
+def chunked_nearest_surface_normal(
+    volume_xyz: torch.Tensor,
+    surface_xyz: torch.Tensor,
+    surface_normals: torch.Tensor,
+    surface_mask: torch.Tensor,
+    *,
+    chunk_size: int = 2048,
+) -> torch.Tensor:
+    """For each volume point, look up the surface normal at the nearest valid surface point.
+
+    Returns zeros for any sample whose surface_mask has no valid points, and chunks
+    the cdist along the volume axis to bound peak memory.
+    """
+    bsz, n_vol, _ = volume_xyz.shape
+    out = volume_xyz.new_zeros(bsz, n_vol, 3)
+    if n_vol == 0:
+        return out
+    vol_f = volume_xyz.float()
+    surf_f = surface_xyz.float()
+    for b in range(bsz):
+        valid = surface_mask[b].bool() if surface_mask is not None else torch.ones(
+            surface_xyz.shape[1], dtype=torch.bool, device=surface_xyz.device
+        )
+        n_valid = int(valid.sum().item())
+        if n_valid == 0:
+            continue
+        v_idx = torch.nonzero(valid, as_tuple=False).squeeze(-1)
+        s_xyz_valid = surf_f[b][v_idx]
+        s_norm_valid = surface_normals[b][v_idx]
+        for start in range(0, n_vol, chunk_size):
+            end = min(start + chunk_size, n_vol)
+            chunk = vol_f[b][start:end]
+            d = torch.cdist(chunk, s_xyz_valid)
+            argmin = d.argmin(dim=-1)
+            out[b, start:end] = s_norm_valid[argmin].to(out.dtype)
+    return out
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -871,12 +956,22 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        extra_features_mode: str = "none",
+        knn_chunk_size: int = 2048,
     ):
         super().__init__()
+        if extra_features_mode not in EXTRA_FEATURES_MODES:
+            raise ValueError(
+                f"extra_features_mode must be one of {EXTRA_FEATURES_MODES}, got {extra_features_mode!r}"
+            )
         self.space_dim = space_dim
-        self.surface_input_dim = surface_input_dim
+        self.extra_features_mode = extra_features_mode
+        self.knn_chunk_size = int(knn_chunk_size)
+        surface_extra_added = 2 if extra_features_mode in ("cos_theta_area", "cos_theta_area_vol") else 0
+        volume_extra_added = 3 if extra_features_mode == "cos_theta_area_vol" else 0
+        self.surface_input_dim = surface_input_dim + surface_extra_added
         self.surface_output_dim = surface_output_dim
-        self.volume_input_dim = volume_input_dim
+        self.volume_input_dim = volume_input_dim + volume_extra_added
         self.volume_output_dim = volume_output_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
@@ -945,6 +1040,50 @@ class SurfaceTransolver(nn.Module):
             hidden = hidden + project_features(x[:, :, self.space_dim :])
         return bias(hidden) + placeholder
 
+    def _augment_inputs(
+        self,
+        surface_x: torch.Tensor | None,
+        surface_mask: torch.Tensor | None,
+        volume_x: torch.Tensor | None,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        if self.extra_features_mode == "none":
+            return surface_x, volume_x
+        # Volume augmentation must use the *original* surface coords/normals
+        # (channels 0:3 and 3:6) so we capture them before augmenting surface_x.
+        new_volume_x = volume_x
+        if (
+            self.extra_features_mode == "cos_theta_area_vol"
+            and volume_x is not None
+            and surface_x is not None
+            and surface_mask is not None
+        ):
+            nearest_normals = chunked_nearest_surface_normal(
+                volume_x[..., : self.space_dim],
+                surface_x[..., : self.space_dim],
+                surface_x[..., 3:6],
+                surface_mask,
+                chunk_size=self.knn_chunk_size,
+            )
+            new_volume_x = torch.cat([volume_x, nearest_normals], dim=-1)
+        new_surface_x = surface_x
+        if (
+            self.extra_features_mode in ("cos_theta_area", "cos_theta_area_vol")
+            and surface_x is not None
+            and surface_mask is not None
+        ):
+            cos_theta = surface_x[..., 3:4]
+            log_area = chunked_knn_log_area(
+                surface_x[..., : self.space_dim],
+                surface_mask,
+                k=8,
+                chunk_size=self.knn_chunk_size,
+            )
+            mask_f = surface_mask.unsqueeze(-1).to(surface_x.dtype)
+            new_surface_x = torch.cat(
+                [surface_x, cos_theta * mask_f, log_area * mask_f], dim=-1
+            )
+        return new_surface_x, new_volume_x
+
     def forward(
         self,
         *,
@@ -959,6 +1098,8 @@ class SurfaceTransolver(nn.Module):
             raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
+
+        surface_x, volume_x = self._augment_inputs(surface_x, surface_mask, volume_x)
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
@@ -1133,6 +1274,8 @@ class Config:
     film_encoder_dim: int = 64
     pos_max_wavelength: int = 1000
     learnable_pe: bool = False
+    surface_extra_features: str = "none"
+    knn_chunk_size: int = 2048
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -1366,6 +1509,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        extra_features_mode=config.surface_extra_features,
+        knn_chunk_size=config.knn_chunk_size,
     )
 
 
