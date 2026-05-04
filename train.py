@@ -128,6 +128,10 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    normuon_lr: float = 0.02
+    normuon_momentum: float = 0.95
+    normuon_beta2: float = 0.95
+    normuon_ns_steps: int = 5
     vol_points_schedule: str = ""
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
@@ -233,6 +237,175 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+class NorMuon(torch.optim.Optimizer):
+    """Row-RMS NorMuon (PR #568 redesign, advisor-spec).
+
+    For each 2D weight matrix:
+      1. Maintain per-row second-moment EMA on the gradient:
+           v_t = beta2 * v_{t-1} + (1 - beta2) * mean_cols(g * g)
+         and divide each row of the gradient by sqrt(v_t) + eps.
+      2. Apply standard Muon momentum (with Nesterov) on the row-normalised g.
+      3. Newton-Schulz5 orthogonalize the momentum-augmented update.
+      4. Apply the canonical sqrt(max(rows, cols)) scaling to keep RMS ~1.
+
+    Reference: arxiv 2510.05491; Modded-NanoGPT records #41 / #144.
+    Per-row pre-NS5 RMS replaces the failed whole-tensor pre-norm (PR #568
+    runs `1nf7rm2d`/`ii3vh18d`, which diverged at the EP1->EP2 transition).
+
+    Only intended for params with ndim == 2. Any accidentally-included
+    1D/ND param falls back to plain SGD-momentum.
+    """
+
+    def __init__(
+        self,
+        params,
+        lr: float = 0.02,
+        momentum: float = 0.95,
+        nesterov: bool = True,
+        beta2: float = 0.95,
+        ns_steps: int = 5,
+        eps: float = 1e-8,
+    ):
+        defaults = dict(
+            lr=lr,
+            momentum=momentum,
+            nesterov=nesterov,
+            beta2=beta2,
+            ns_steps=ns_steps,
+            eps=eps,
+        )
+        super().__init__(params, defaults)
+
+    @staticmethod
+    def _zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 5) -> torch.Tensor:
+        assert G.ndim >= 2
+        a, b, c = (3.4445, -4.7750, 2.0315)
+        X = G.float()
+        X = X / (X.norm() + 1e-7)
+        transposed = G.size(-2) > G.size(-1)
+        if transposed:
+            X = X.T
+        for _ in range(steps):
+            A = X @ X.T
+            X = a * X + b * A @ X + c * A @ A @ X
+        if transposed:
+            X = X.T
+        return X.to(dtype=G.dtype)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            lr = group["lr"]
+            momentum = group["momentum"]
+            nesterov = group["nesterov"]
+            beta2 = group["beta2"]
+            ns_steps = group["ns_steps"]
+            eps = group["eps"]
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                g = p.grad
+                if g.ndim < 2:
+                    state = self.state[p]
+                    if "momentum_buffer" not in state:
+                        state["momentum_buffer"] = torch.zeros_like(p)
+                    buf = state["momentum_buffer"]
+                    buf.mul_(momentum).add_(g)
+                    if nesterov:
+                        g = g + momentum * buf
+                    else:
+                        g = buf
+                    p.add_(g, alpha=-lr)
+                    continue
+
+                state = self.state[p]
+
+                # Per-row RMSNorm of the gradient (advisor-spec). row_v
+                # tracks an EMA of per-row second moment. Bias-corrected
+                # so step 1 row_rms is close to sqrt(row_sq) rather than
+                # ~sqrt(1-beta2)*sqrt(row_sq) (which would amplify g
+                # ~1/sqrt(1-beta2)x at startup before LR warmup absorbs it).
+                if "row_v" not in state:
+                    state["row_v"] = torch.zeros(
+                        g.shape[0], device=g.device, dtype=torch.float32
+                    )
+                    state["row_v_step"] = 0
+                row_v = state["row_v"]
+                row_sq = (g.float() * g.float()).mean(
+                    dim=tuple(range(1, g.ndim))
+                )
+                row_v.mul_(beta2).add_(row_sq, alpha=(1.0 - beta2))
+                state["row_v_step"] += 1
+                bias_correction = 1.0 - (beta2 ** state["row_v_step"])
+                row_rms = (
+                    (row_v / bias_correction).sqrt() + eps
+                ).reshape(-1, *([1] * (g.ndim - 1))).to(dtype=g.dtype)
+                g = g / row_rms
+
+                if "momentum_buffer" not in state:
+                    state["momentum_buffer"] = torch.zeros_like(g)
+                buf = state["momentum_buffer"]
+                buf.mul_(momentum).add_(g)
+                if nesterov:
+                    g = g + momentum * buf
+                else:
+                    g = buf
+
+                g = self._zeropower_via_newtonschulz5(g, steps=ns_steps)
+
+                # Canonical Muon RMS-1 scaling (sqrt of larger dim).
+                scale = max(p.size(-2), p.size(-1)) ** 0.5
+                p.add_(g, alpha=-lr * scale)
+
+        return loss
+
+
+class CompositeOptimizer(torch.optim.Optimizer):
+    """Wrap multiple sub-optimizers behind a single torch.optim.Optimizer-like API.
+
+    Inherits from ``torch.optim.Optimizer`` only to satisfy the isinstance
+    check inside ``torch.optim.lr_scheduler``; the real state lives in the
+    wrapped sub-optimizers. ``param_groups`` is shared (a flat concatenation
+    of each sub-optimizer's groups), so LR schedulers update the sub-groups
+    in place.
+    """
+
+    def __init__(self, optimizers):
+        self.optimizers = list(optimizers)
+        self.param_groups = []
+        for opt in self.optimizers:
+            self.param_groups.extend(opt.param_groups)
+        self.defaults = {}
+        self.state = {}
+
+    def zero_grad(self, set_to_none: bool = True):
+        for opt in self.optimizers:
+            opt.zero_grad(set_to_none=set_to_none)
+
+    def step(self, closure=None):
+        for opt in self.optimizers:
+            opt.step(closure)
+
+    def state_dict(self):
+        return {"optimizers": [opt.state_dict() for opt in self.optimizers]}
+
+    def load_state_dict(self, state_dict):
+        for opt, sd in zip(self.optimizers, state_dict["optimizers"]):
+            opt.load_state_dict(sd)
+
+    def add_param_group(self, param_group):
+        raise NotImplementedError(
+            "CompositeOptimizer does not support add_param_group; "
+            "configure sub-optimizers at construction time."
+        )
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
@@ -251,7 +424,38 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
         )
-    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+    if optimizer_name == "normuon":
+        from lion_pytorch import Lion
+
+        # Partition: pure 2D matrices (Linear weights, etc.) -> NorMuon.
+        # Everything else (1D bias/scale, 3D/4D placeholders & temperature) -> Lion.
+        normuon_params = [
+            p for p in model.parameters() if p.requires_grad and p.ndim == 2
+        ]
+        other_params = [
+            p for p in model.parameters() if p.requires_grad and p.ndim != 2
+        ]
+        normuon_opt = NorMuon(
+            [{"params": normuon_params}],
+            lr=config.normuon_lr,
+            momentum=config.normuon_momentum,
+            nesterov=True,
+            beta2=config.normuon_beta2,
+            ns_steps=config.normuon_ns_steps,
+        )
+        if not other_params:
+            return normuon_opt
+        lion_opt = Lion(
+            [{"params": other_params}],
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+        return CompositeOptimizer([normuon_opt, lion_opt])
+    raise ValueError(
+        f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion, normuon."
+    )
 
 
 def parse_rff_init_sigmas(spec: str) -> list[float] | None:
