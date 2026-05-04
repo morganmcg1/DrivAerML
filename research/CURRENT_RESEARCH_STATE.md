@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 (alphonse → PR #592 model-depth-sweep; frieren → PR #593 lr-min-cosine-floor; all 8 students now assigned)
+- **Date:** 2026-05-01 (PR #571 askeladd Arm A MERGED — new single-model SOTA val=6.7644%; alphonse → PR #592 model-depth-sweep; frieren → PR #593 lr-min-cosine-floor; all 8 students assigned)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -11,16 +11,22 @@
 
 Beats prior K=5 ensemble (PR #556 val=6.2681%) by Caruana 2004 greedy forward selection from 22 candidates.
 
-## SINGLE-MODEL SOTA — PR #516 askeladd tau-weight v2 — val_abupt **6.8701%** / test_abupt **8.1229%**
+## SINGLE-MODEL SOTA — PR #571 askeladd tau_y×1.5 / tau_z×2.0 weight intensification — val_abupt **6.7644%** / test_abupt **8.171%**
 
-All single-model PRs must beat val_abupt < **6.8701%** with test_abupt ≤ ~8.20%.
+Beats prior SOTA PR #516 (6.8701%) by −0.106pp (−1.54% relative). W&B run `nh96x7m4`, group `askeladd-tau-sweep`, runtime ~4.7h.
 
-### Noise-floor calibration (askeladd PR #571 rebased SOTA repro)
+All single-model PRs must beat val_abupt < **6.7644%** with test_abupt ≤ ~8.20%.
+
+**Key insight:** Moderate tau weight intensification (tau_y×1.5, tau_z×2.0) on the SOTA stack further closes the tau_y/tau_z gap. tau_y: 8.663%→8.489% (−0.174pp), tau_z: 10.266%→9.997% (−0.269pp). GradNorm-EMA NOT used — pure fixed-weight reweighting outperformed GradNorm on this stack.
+
+### Previous Single-Model SOTA: PR #516 — val_abupt 6.8701% / test_abupt 8.1229%
+
+### Noise-floor calibration (askeladd PR #571 rebased SOTA repro — now MERGED)
 - Identical-config rerun of SOTA stack: val=6.9226% vs claimed 6.8701% (+0.052pp on identical code)
 - **Treat improvements within ±0.05pp of SOTA as noise**, not signal
-- Genuine win threshold: val_abupt < 6.82%
-- Borderline (need replicate): 6.82–6.92%
-- No signal / regression: > 6.92%
+- Genuine win threshold: val_abupt < **6.71%** (was 6.82% vs PR #516; now recalibrated against 6.7644%)
+- Borderline (need replicate): 6.71–6.81%
+- No signal / regression: > 6.81%
 
 | Metric | PR #523 SOTA val EP6 | AB-UPT |
 |---|---:|---:|
@@ -69,18 +75,25 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 |---|---|---|---|
 | #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; Arm B (floor=0.3) DONE val=6.9569% — floor NEVER binds (negative result, hypothesis falsified); alpha=1.5 follow-up commanded |
 | #568 | fern | NorMuon optimizer | Canonical NorMuon (row-wise RMS) — in progress |
-| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) FINISHED val=6.7644% WIN; Arm B (×2.0/×2.5) in progress |
+| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | **MERGED** — Arm A (×1.5/×2.0) MERGED val=6.7644% NEW SOTA; Arm B (×2.0/×2.5) still running (`62yojciu`) — if val < 6.7644% will trigger another merge |
 | #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | Arm A in progress |
 | #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | Arm A in progress |
 | #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | Arm A in progress |
 | #592 | alphonse | Model depth sweep — layers=5 vs layers=6 on SOTA stack | **NEW — just assigned 2026-05-01** |
 | #593 | frieren | lr-min cosine floor sweep — lr-min=1e-6 vs lr-min=1e-5 | **NEW — just assigned 2026-05-01** |
 
-Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal angles (structural frame rotation, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity).
+Round-12 focus: build on PR #571 new SOTA (6.7644%); further close tau_y/tau_z gap (tau_y still 8.489% vs AB-UPT 3.65%, tau_z still 9.997% vs AB-UPT 3.63%); attack from orthogonal angles (structural frame rotation, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity). New gate: val < 6.7644%.
 
 ---
 
-## Recent merges / closures (Round 11 → Round 12 boundary)
+## Recent merges / closures (Round 11 → Round 12 boundary; updated 2026-05-01)
+
+### PR #571 askeladd tau_y/tau_z weight intensity Arm A — MERGED (NEW SINGLE-MODEL SOTA)
+- val_abupt=6.7644% (−0.106pp vs PR #516), test_abupt=8.171%
+- W&B run `nh96x7m4`, group `askeladd-tau-sweep`
+- tau_y: 8.663%→8.489% (−0.174pp), tau_z: 10.266%→9.997% (−0.269pp)
+- New gate: val_abupt < 6.7644%
+- Arm B (tau_y×2.0/tau_z×2.5, run `62yojciu`) still running — watch for further improvement
 
 ### PR #553 alphonse coord-jitter regularization — CLOSED NEGATIVE
 - Hypothesis: Gaussian coordinate noise (sigma=0.001–0.01) as Tikhonov regularizer would improve tau_y/tau_z via preventing surface-coordinate overfitting
@@ -106,7 +119,7 @@ Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal 
 ## Active research themes
 
 ### 1. tau_y/tau_z gap closure (primary open problem)
-- **Gap status:** tau_y=8.66%, tau_z=10.27% vs AB-UPT 3.65%/3.63% (2.4–2.8× above; values from PR #516 best-val EP5)
+- **Gap status:** tau_y=8.489%, tau_z=9.997% vs AB-UPT 3.65%/3.63% (2.3–2.7× above; values from PR #571 Arm A best-val — improvement from PR #516: tau_y −0.174pp, tau_z −0.269pp)
 - **Active attacks (this round):**
   - GradNorm-EMA tighter floor (#552 thorfinn) — proven mechanism, more aggressive redistribution
   - Tangent-frame rotation for tau loss (#575 alphonse) — structural: predict tau in local (t̂, b̂, n̂) frame to remove coordinate-axis-aligned bias
@@ -161,7 +174,7 @@ Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal 
 | TTA mirror-y inference (#499) | NEGATIVE — TTA hurts +1.18pp |
 | **Y-mirror training aug (#536)** | **NEGATIVE — gap is structural, not symmetry-addressable** |
 | 2× surface point density (#506) | NEGATIVE — slower/epoch beats density |
-| tau_yz scalar loss-weight reweight (#142, #454, #467, #531) | EXHAUSTED — 4× NEG, problem upstream |
+| tau_yz scalar loss-weight reweight (#142, #454, #467, #531) | Previously 4× NEG on simpler stacks; **PR #571 Arm A (tau_y×1.5/tau_z×2.0 on SOTA Lion+GradNorm stack) SUCCEEDED — MERGED** |
 | mlp_ratio=6/8 wider FFN (#458) | NEGATIVE — mlp4 is optimal |
 | Signed-log target transform (#471 arm-b) | NEGATIVE |
 | log1p target transform (#481) | NEGATIVE |
