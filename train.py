@@ -137,6 +137,14 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    abupt_style: bool = False
+    abupt_num_anchors: int = 1024
+    abupt_num_layers: int = 5
+    abupt_rope_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
+    abupt_rope_after_qk_norm: bool = True
+    abupt_share_anchor_stack: bool = False
+    abupt_pooling: str = "supernode"
+    abupt_pool_k: int = 32
     debug: bool = False
 
 
@@ -266,6 +274,18 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def parse_abupt_rope_sigmas(spec: str) -> tuple[float, ...]:
+    spec = (spec or "").strip()
+    if not spec:
+        return (0.25, 0.5, 1.0, 2.0, 4.0)
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        raise ValueError("--abupt-rope-init-sigmas must contain at least one sigma")
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--abupt-rope-init-sigmas must be positive: {spec!r}")
+    return tuple(sigmas)
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -278,6 +298,20 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
         metrics[f"{prefix}/log_freq_std"] = float(log_freq.std().item())
         metrics[f"{prefix}/log_freq_min"] = float(log_freq.min().item())
         metrics[f"{prefix}/log_freq_max"] = float(log_freq.max().item())
+        for axis in range(log_freq.shape[0]):
+            metrics[f"{prefix}/freq_axis_{axis}_mean"] = float(log_freq[axis].mean().item())
+            metrics[f"{prefix}/freq_axis_{axis}_std"] = float(log_freq[axis].std().item())
+    rope = getattr(model, "abupt_rope", None)
+    if rope is not None:
+        log_freq = rope.log_freq.detach().float()
+        phase = rope.phase.detach().float()
+        prefix = "abupt_rope"
+        metrics[f"{prefix}/log_freq_mean"] = float(log_freq.mean().item())
+        metrics[f"{prefix}/log_freq_std"] = float(log_freq.std().item())
+        metrics[f"{prefix}/log_freq_min"] = float(log_freq.min().item())
+        metrics[f"{prefix}/log_freq_max"] = float(log_freq.max().item())
+        metrics[f"{prefix}/phase_mean"] = float(phase.mean().item())
+        metrics[f"{prefix}/phase_std"] = float(phase.std().item())
         for axis in range(log_freq.shape[0]):
             metrics[f"{prefix}/freq_axis_{axis}_mean"] = float(log_freq[axis].mean().item())
             metrics[f"{prefix}/freq_axis_{axis}_std"] = float(log_freq[axis].std().item())
@@ -297,6 +331,14 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        abupt_style=config.abupt_style,
+        abupt_num_anchors=config.abupt_num_anchors,
+        abupt_num_layers=config.abupt_num_layers,
+        abupt_rope_init_sigmas=parse_abupt_rope_sigmas(config.abupt_rope_init_sigmas),
+        abupt_rope_after_qk_norm=config.abupt_rope_after_qk_norm,
+        abupt_share_anchor_stack=config.abupt_share_anchor_stack,
+        abupt_pooling=config.abupt_pooling,
+        abupt_pool_k=config.abupt_pool_k,
     )
 
 
@@ -753,6 +795,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if config.abupt_style:
+                # Multi-view data: some batch elements may have an empty
+                # surface or volume slice (cross-view boundary), which leaves
+                # the corresponding branch's parameters unused on that step.
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
