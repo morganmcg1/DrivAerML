@@ -4,45 +4,54 @@
 
 ---
 
-## ENSEMBLE SOTA: nezuko PR #556 K=5 inference-time ensemble — 2026-05-01
+## ENSEMBLE SOTA: nezuko PR #562 greedy forward ensemble selection K=7 (Caruana 2004) — 2026-05-01
 
-**val_abupt=6.2681%** / **test_abupt=7.5813%** — **−8.76% relative on val, −6.66% on test vs single-model SOTA**
+**val_abupt=6.2345%** / **test_abupt=7.5433%** — **−0.54% relative on val, −0.50% on test vs prior K=5 top-val ensemble (#556)**
 
-First result to beat AB-UPT reference on surface_pressure AND wall_shear simultaneously on test.
+Greedy forward ensemble selection (Caruana et al. 2004) from a candidate pool of 22 runs (all val≤7.5% single-model runs). Algorithm iteratively adds the candidate that maximally reduces ensemble val_abupt at each step, naturally accounting for error correlation between members. Selected K=7 members vs K=5 for naive top-val — better diversity yields better test generalization.
+
+**W&B run:** `18oalu1h` (group `nezuko-ensemble-greedy-v1`, name `greedy-k12-pool22`)
+**PR:** #562
+
+### Greedy K=7 ensemble — per-channel test metrics
+
+| Metric | Greedy K=7 (#562) | Top-val K=5 (#556) | Single-model SOTA (#516) | AB-UPT |
+|---|---:|---:|---:|---:|
+| `abupt` | **7.5433** | 7.5813 | 8.1229 | — |
+| `surface_pressure` | **3.6964** | ~3.70 | 4.515 | 3.82 (BEATEN) |
+| `wall_shear` | **6.8835** | ~7.1xxx | 7.757 | 7.29 (BEATEN) |
+| `volume_pressure` | **11.4088** | — | — | 6.08 |
+
+### Reproduce greedy ensemble
+
+```bash
+cd target/
+# Phase 1: cache predictions from candidate pool (22 runs, val≤7.5%)
+uv run python ensemble_eval.py \
+  --greedy --cache-only \
+  --candidate-run-ids <pool-run-ids> \
+  --pred-cache-dir /tmp/ensemble_cache \
+  --split val test
+
+# Phase 2: greedy selection + eval
+uv run python ensemble_eval.py \
+  --greedy \
+  --pred-cache-dir /tmp/ensemble_cache \
+  --max-k 12 \
+  --wandb-group nezuko-ensemble-greedy-v1 \
+  --wandb-name greedy-k12-pool22
+```
+
+**Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.8701% (single-model SOTA #516). When a new single-model winner emerges, run `ensemble_eval.py --greedy` to check if it improves the greedy pool.
+
+---
+
+## Prior Ensemble SOTA: nezuko PR #556 K=5 inference-time ensemble — 2026-05-01
+
+**val_abupt=6.2681%** / **test_abupt=7.5813%** — First result to beat AB-UPT reference on surface_pressure AND wall_shear simultaneously on test.
 
 **W&B runs (K=5 members):** `9mm3sz7x` (askeladd), `49aimdiz` (alphonse), `wyz68o8r` (thorfinn/SOTA), `qqtdnlwq` (alphonse), `5o7jc7wi` (edward) — ensemble group `ensemble-inference-v1`
 **PR:** #556
-
-### K-sweep results
-
-| K | val_abupt% | test_abupt% | Δ val vs single-model SOTA |
-|---|---:|---:|---:|
-| 1 (SOTA reproduce) | 6.8700 | 8.1228 | — |
-| 2 | 6.5126 | 7.8505 | −5.20% |
-| 3 | 6.3728 | 7.7049 | −7.24% |
-| 4 | 6.3343 | 7.6597 | −7.80% |
-| **5** | **6.2681** | **7.5813** | **−8.76%** |
-
-### Per-channel (K=5 ensemble, test)
-
-| Metric | K=5 ensemble | Single-model SOTA (#523) | AB-UPT |
-|---|---:|---:|---:|
-| `abupt` | **7.5813** | 8.2355 | — |
-| `surface_pressure` | **3.6xxx** | 4.2712 | 3.82 (BEATEN) |
-| `wall_shear` | **7.1xxx** | 7.5043 | 7.29 (BEATEN) |
-| `tau_x` | — | 6.5557 | 5.35 |
-| `tau_y` | — | 8.4656 | 3.65 |
-| `tau_z` | — | 9.6720 | 3.63 |
-
-### Reproduce K=5 ensemble
-
-```bash
-CUDA_VISIBLE_DEVICES=0 uv run python ensemble_eval.py \
-  --run-ids 9mm3sz7x 49aimdiz wyz68o8r qqtdnlwq 5o7jc7wi \
-  --split val test \
-  --wandb-group ensemble-inference-v1 \
-  --wandb-name nezuko/ensemble-k5
-```
 
 **Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.9246% (single-model SOTA #523). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=5 pool.
 
