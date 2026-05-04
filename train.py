@@ -1159,6 +1159,8 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    sdf_proximity_alpha: float = 0.0
+    sdf_proximity_sigma: float = 0.1
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1874,10 +1876,23 @@ def check_kill_thresholds(
     return None
 
 
-def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    if bool(mask.any()):
+def masked_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    per_point_weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if not bool(mask.any()):
+        return pred.sum() * 0.0
+    if per_point_weight is None:
         return F.mse_loss(pred[mask], target[mask])
-    return pred.sum() * 0.0
+    diff_sq = (pred - target).pow(2)
+    mask_f = mask.unsqueeze(-1).to(pred.dtype)
+    weight = per_point_weight.to(pred.dtype).unsqueeze(-1)
+    n_channels = diff_sq.shape[-1]
+    valid = mask_f.sum().clamp_min(1)
+    return (diff_sq * weight * mask_f).sum() / valid / n_channels
 
 
 def weighted_masked_mse_per_channel(
@@ -1957,6 +1972,7 @@ def weighted_masked_beta_nll_per_channel(
     *,
     channel_weights: Iterable[float],
     beta: float,
+    per_point_weight: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float], list[float]]:
     """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
 
@@ -1998,6 +2014,8 @@ def weighted_masked_beta_nll_per_channel(
     mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
     valid = mask_f.sum().clamp_min(1)
     weighted_diff = nll * weights.view(1, 1, -1)
+    if per_point_weight is not None:
+        weighted_diff = weighted_diff * per_point_weight.to(pred_mean.dtype).unsqueeze(-1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
 
     per_axis_diff_sq_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
@@ -2034,11 +2052,19 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    sdf_proximity_alpha: float = 0.0,
+    sdf_proximity_sigma: float = 0.1,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
+    if sdf_proximity_alpha > 0.0:
+        sdf_vals = batch.volume_x[..., 3]
+        sigma = max(sdf_proximity_sigma, 1e-6)
+        prox_w = 1.0 + sdf_proximity_alpha * torch.exp(-sdf_vals.abs() / sigma)
+    else:
+        prox_w = None
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -2095,6 +2121,7 @@ def train_loss(
                 batch.volume_mask,
                 channel_weights=(1.0,),
                 beta=beta_nll_beta,
+                per_point_weight=prox_w,
             )
             volume_log_var_mean = vol_log_var_per_axis[0] if vol_log_var_per_axis else 0.0
         else:
@@ -2105,7 +2132,9 @@ def train_loss(
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 wallshear_huber_delta=wallshear_huber_delta,
             )
-            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            volume_loss = masked_mse(
+                out["volume_preds"], volume_target, batch.volume_mask, per_point_weight=prox_w
+            )
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
@@ -2127,6 +2156,10 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if prox_w is not None and bool(batch.volume_mask.any()):
+        metrics["sdf_prox_weight_mean"] = float(
+            prox_w[batch.volume_mask].float().mean().detach().cpu().item()
+        )
     if use_tangential_wallshear_loss and not use_beta_nll:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if use_beta_nll and per_axis_log_var is not None:
@@ -2788,6 +2821,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                sdf_proximity_alpha=config.sdf_proximity_alpha,
+                sdf_proximity_sigma=config.sdf_proximity_sigma,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2955,6 +2990,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
+                ]
+            if "sdf_prox_weight_mean" in batch_loss_metrics:
+                train_log["train/sdf_prox_weight_mean"] = batch_loss_metrics[
+                    "sdf_prox_weight_mean"
                 ]
             for log_var_key in (
                 "log_var_surface_pressure",
