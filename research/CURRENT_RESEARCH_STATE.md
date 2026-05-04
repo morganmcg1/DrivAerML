@@ -1,10 +1,10 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 (PR #556 nezuko ensemble merged — new ensemble SOTA; nezuko now idle, re-assignment pending)
+- **Date:** 2026-05-04 (Round 12 — all 8 students active, 0 review-ready, 0 idle)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 1 idle student (nezuko), 7 WIP PRs, 0 review-ready
+- **Fleet:** 0 idle students, 8 WIP PRs, 0 review-ready
 - **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 total)
 
 ## ENSEMBLE SOTA — PR #556 nezuko K=5 inference-time ensemble — val_abupt **6.2681%** / test_abupt **7.5813%**
@@ -63,16 +63,16 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 | PR | Student | Lever | Status |
 |---|---|---|---|
-| #516 | askeladd | per-channel tau_y/tau_z reweight v2 (1.2x/1.3x) — micro rebased | running EP1 (rs06rnob) |
-| #538 | fern | SGDR cosine warm restarts T0=6 Tmult=2 (group `fern-sgdr-budget-aware`) | running EP1 (9motyy0i) |
-| #561 | edward | rff-num-features 32 clean retry — group `edward-rff32-v2` | just assigned (PR #549 closed: merge conflict, run data preserved) |
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | running (jdidw8i4); sibling crash recovered |
-| #553 | alphonse | input coord jitter regularization | running EP1 (ivh3ytmx) |
-| #555 | frieren | GradNorm alpha sweep / tau-channel reweighting v2 | running EP1 (glir84cj) |
-| ~~#556~~ | nezuko | K=5 inference-time ensemble — **MERGED (ENSEMBLE SOTA 6.2681% val)** | idle — re-assignment pending |
-| #557 | tanjiro | NEW: multi-band fused encoding (24-feat) + hidden_dim 576 (PR #534 follow-up) | just assigned |
+| #516 | askeladd | per-channel tau_y/tau_z reweight v2 (1.2x/1.3x) — rebased onto #556 | EP3=7.5660% (`akjwpzd8`); on track → EP6 best-val expected ~6.87% |
+| #538 | fern | SGDR cosine warm restarts T_max=2 Tmult=1 (v3) | EP3=7.4551% (`9motyy0i`); warm restart fired correctly; EP4 in-flight |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep (0.5 / 0.3) | acknowledged; arms queued; awaiting EP1 |
+| #553 | alphonse | input coord jitter regularization (sigma sweep 0.0→0.02) | sigma=0.0 sanity EP2=8.727% tracking SOTA; sweep arms queued |
+| #555 | frieren | GradNorm alpha sweep (alpha=0.25 / 0.75) | Arm B (0.75) EP2=9.0395% (`glir84cj`); Arm A queued |
+| #557 | tanjiro | multi-band fused encoding (24-feat) + hidden_dim 576 | assigned; awaiting acknowledgment |
+| #561 | edward | rff-num-features 32 clean retry on SOTA GradNorm stack | assigned; awaiting first comment |
+| #562 | nezuko | greedy forward ensemble selection (Caruana 2004) from val≤7.5% pool | assigned; awaiting first comment |
 
-Round-12 focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (regularization, weight averaging, dynamic rebalancing, multi-band capacity).
+Round-12 focus: attack tau_y/tau_z gap from multiple orthogonal angles simultaneously (regularization, dynamic rebalancing, multi-band capacity, schedule diversity, ensemble selection) while defending single-model SOTA 6.9246%.
 
 ---
 
@@ -106,12 +106,12 @@ Round-12 focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (
 - **Active attacks (this round):**
   - GradNorm-EMA tighter floor (#552 thorfinn) — proven mechanism, more aggressive redistribution
   - Coord jitter regularization (#553 alphonse) — Tikhonov regularizer, attack overfitting on hard channels
-  - Checkpoint averaging / model soup (#554 nezuko) — variance reduction, target slow-converging channels
-  - Per-channel reweight v2 (#516 askeladd) — micro-bump 1.2x/1.3x
-  - Multi-band fused StringSep (#534 tanjiro) — spectral diversity per-band
-  - rff-num-features 32 (#549 edward) — double feature budget
-  - lr-min cosine floor (#550 frieren) — prevent decay-to-zero
-  - SGDR warm restarts (#538 fern) — multi-cycle convergence
+  - Greedy ensemble selection (#562 nezuko) — Caruana 2004 applied to full val≤7.5% candidate pool
+  - Per-channel reweight v2 (#516 askeladd) — micro-bump 1.2x/1.3x; EP3=7.57% already tracking SOTA+beat
+  - Multi-band fused StringSep + hidden_dim 576 (#557 tanjiro) — capacity + spectral diversity
+  - rff-num-features 32 (#561 edward) — double feature budget on SOTA stack
+  - GradNorm alpha sweep (#555 frieren) — alpha=0.25 (faster equalization) vs 0.75 (slower)
+  - SGDR warm restarts (#538 fern) — multi-cycle convergence; EP3=7.4551%, warm restart fired correctly
 
 ### 2. Negative-direction confirmed (do not retry on current stack)
 - **Static channel reweighting** is now 4× negative (#142, #454, #467, #531) — askeladd #516 v2 is final attempt at this angle before the lever is exhausted
