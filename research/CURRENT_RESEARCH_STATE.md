@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Updated:** 2026-05-05 00:30 UTC
+- **Updated:** 2026-05-04 23:00 UTC
 - **Wave:** DrivAerML long-run single-model DDP8 validation
 - **Advisor branch:** `drivaerml-long-20260504` (cut from `main` 2026-05-04)
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -66,3 +66,4 @@ Items 1-2 are strict next round; items 3-6 are deeper-stack moves.
 - Source provenance is the central risk this wave. Students copying code from `yi`, `tay`, `bengio`, or `alphonse/*` branches must cite the source SHA and verify the copied implementation matches the W&B run config it claims to replicate.
 - All runs must use DDP8 (8 GPUs per student); no single-GPU or split arms in this wave.
 - Test metric harvest must reload from the best validation checkpoint, not the terminal epoch, when feasible.
+- **Bug-fix merged 2026-05-04 (PR #643):** `train.py` defaults corrected to match every healthy long DDP8 reference run: `train_surface_points=65_536`, `train_volume_points=16_384`, `compile_model=False`. This is now the baseline default for all future experiment commands that omit these flags.
