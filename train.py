@@ -699,6 +699,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    wallshear_asinh_loss_delta: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1418,6 +1419,7 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
+    wallshear_asinh_loss_delta: float = 0.0,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked loss for surface predictions.
 
@@ -1433,6 +1435,19 @@ def weighted_masked_mse_per_channel(
         loss_elem = r^2                          if |r| <  delta
                   = 2 * delta * (|r| - delta/2)  if |r| >= delta
     Channel 0 (cp / surface_pressure) keeps the standard MSE loss.
+
+    With ``wallshear_asinh_loss_delta > 0.0`` (PR #518), channels 1..3 use a
+    soft-Huber-via-asinh on the standardized residual:
+        loss_elem = asinh(r / delta)^2 * delta^2
+    For ``|r| << delta`` this recovers MSE (asinh(x) ≈ x for small x); for
+    ``|r| >> delta`` the gradient is log-bounded (asinh(x) ≈ ln(2x)), giving a
+    smooth Huber-like saturation that reduces gradient dominance from heavy-tail
+    tau_x outliers. Crucially this is *inside-loss only* — predictions, eval,
+    and metric computation see no transform, so there is no inverse-pipeline
+    Jacobian amplification (the failure mode of the target-space asinh in PR
+    #485). Channel 0 (cp) keeps MSE. ``wallshear_asinh_loss_delta`` and
+    ``wallshear_huber_delta`` are mutually exclusive; if both are positive,
+    asinh wins.
 
     Note: PR #317's spec used a *relative* Huber ``(pred-target)/(|target|+eps)``,
     but standardized targets cross zero frequently, so dividing by ``|target|``
@@ -1454,7 +1469,15 @@ def weighted_masked_mse_per_channel(
     valid = mask_f.sum().clamp_min(1)
     n_channels = diff_sq.shape[-1]
 
-    if wallshear_huber_delta > 0.0 and n_channels >= 4:
+    if wallshear_asinh_loss_delta > 0.0 and n_channels >= 4:
+        delta_t = pred.new_full((), float(wallshear_asinh_loss_delta))
+        # Soft-Huber via asinh on standardized residuals; bounded gradient at heavy tails.
+        # asinh(r/delta)^2 * delta^2 -> r^2 for |r|<<delta, log-bounded for |r|>>delta.
+        asinh_elem = torch.asinh(diff / delta_t).pow(2) * delta_t.pow(2)
+        loss_elem = torch.cat([diff_sq[..., :1], asinh_elem[..., 1:4]], dim=-1)
+        if n_channels > 4:
+            loss_elem = torch.cat([loss_elem, diff_sq[..., 4:]], dim=-1)
+    elif wallshear_huber_delta > 0.0 and n_channels >= 4:
         abs_err = diff.abs()
         delta_t = pred.new_full((), float(wallshear_huber_delta))
         huber_elem = torch.where(
@@ -1502,6 +1525,7 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    wallshear_asinh_loss_delta: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1547,6 +1571,7 @@ def train_loss(
             batch.surface_mask,
             channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
             wallshear_huber_delta=wallshear_huber_delta,
+            wallshear_asinh_loss_delta=wallshear_asinh_loss_delta,
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -2124,6 +2149,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                wallshear_asinh_loss_delta=config.wallshear_asinh_loss_delta,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
