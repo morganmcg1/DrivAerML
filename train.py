@@ -28,6 +28,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.utils.checkpoint
 import wandb
 import yaml
 from torch import Tensor
@@ -743,18 +744,20 @@ class SparseMoE(nn.Module):
             dispatch_dtype = x_flat.dtype
         x_flat_disp = x_flat.to(dtype=dispatch_dtype)
         weights_disp = topk_weights.to(dtype=dispatch_dtype)
-        out_flat = torch.zeros_like(x_flat_disp)
-        # Always call every expert (even with empty input) so DDP keeps every
-        # expert's parameters in the autograd graph and find_unused_parameters
-        # is not required. Use in-place index_add_ to avoid allocating E
-        # intermediate (T, D) tensors that backward would otherwise hold.
-        for e in range(self.num_experts):
-            mask = topk_idx == e  # (T, k) bool
-            token_idx, slot_idx = mask.nonzero(as_tuple=True)
-            weights_e = weights_disp[token_idx, slot_idx].unsqueeze(-1)
-            expert_in = x_flat_disp.index_select(0, token_idx)
-            expert_out = self.experts[e](expert_in) * weights_e
-            out_flat.index_add_(0, token_idx, expert_out)
+        # Gradient-checkpoint the dispatch: the FF in this Transolver runs on
+        # per-point tokens (T = B * N_points ~ 5e5), so 2x top-k experts each
+        # storing (T_e, mlp_hidden) activations OOMs. Recompute experts during
+        # backward; ~30% extra compute but fits in 95 GiB.
+        if self.training and torch.is_grad_enabled():
+            out_flat = torch.utils.checkpoint.checkpoint(
+                self._dispatch_experts,
+                x_flat_disp,
+                weights_disp,
+                topk_idx,
+                use_reentrant=False,
+            )
+        else:
+            out_flat = self._dispatch_experts(x_flat_disp, weights_disp, topk_idx)
         out = out_flat.reshape(B, S, D)
 
         if self.training:
@@ -768,6 +771,26 @@ class SparseMoE(nn.Module):
             self._last_expert_load = None
             self._last_router_entropy = None
         return out
+
+    def _dispatch_experts(
+        self,
+        x_flat_disp: torch.Tensor,
+        weights_disp: torch.Tensor,
+        topk_idx: torch.Tensor,
+    ) -> torch.Tensor:
+        out_flat = torch.zeros_like(x_flat_disp)
+        # Always call every expert (even with empty input) so DDP keeps every
+        # expert's parameters in the autograd graph and find_unused_parameters
+        # is not required. Use in-place index_add_ to avoid allocating E
+        # intermediate (T, D) tensors that backward would otherwise hold.
+        for e in range(self.num_experts):
+            mask = topk_idx == e  # (T, k) bool
+            token_idx, slot_idx = mask.nonzero(as_tuple=True)
+            weights_e = weights_disp[token_idx, slot_idx].unsqueeze(-1)
+            expert_in = x_flat_disp.index_select(0, token_idx)
+            expert_out = self.experts[e](expert_in) * weights_e
+            out_flat.index_add_(0, token_idx, expert_out)
+        return out_flat
 
 
 def collect_moe_state(model: nn.Module) -> dict[str, list[torch.Tensor]]:
