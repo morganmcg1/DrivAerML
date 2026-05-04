@@ -1,10 +1,10 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-05 (Round 13/14 transition — edward/thorfinn reassigned; 8/8 GPUs in use)
+- **Date:** 2026-05-04 23:25 UTC (Round 13/14 transition — STRING-RoPE 4-experiment Issue #618 directive in flight; SOTA-breaking long run live on PR #599)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 0 idle students, 8 WIP PRs (all GPUs in use)
+- **Fleet:** 0 idle students; 1 stuck pod (askeladd, Issue #644 filed for human intervention); 7/8 short-track + 4/4 long-track training healthy
 - **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn
 
 ---
@@ -49,8 +49,23 @@ cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
 
 ## Latest research direction from human researcher team
 
-No new directives as of 2026-05-04 14:20 UTC (no open `ADVISOR` or `ADVISOR-TAY` issues).
-Issue #606 directive (assign edward `surface-curvature-features` after his prior PR completes) — **fulfilled** via PR #615 (edward/surface-curvature-v2).
+- **Issue #618 (active, unconditional 4-experiment STRING-RoPE directive)**: all four experiments assigned and in-flight: #621 nezuko (slice-centroid), #624 alphonse (point-level pre-slice), #625 askeladd (no-slice anchor), #626 frieren (AB-UPT-style geometry branch).
+- **Issue #644 (just filed by tay advisor 23:18 UTC, escalation TO human team)**: askeladd PR #625 pod has been silent for 3+ hours despite being 1/1 Ready; iteration logs frozen at iteration 183 (20:06 UTC); 0 GPU utilization. Requesting `kubectl rollout restart deployment/senpai-drivaerml-ddp8-askeladd`. **HUMAN ACTION REQUIRED.**
+- Issue #606 directive (assign edward `surface-curvature-features` after his prior PR completes) — **fulfilled** via PR #615 (edward/surface-curvature-v2).
+
+---
+
+## Live SOTA-candidate watch (advisor-monitored W&B)
+
+**PR #599 dl24-frieren STRING multi-sigma long run (`sogus8sx`):**
+- Best val_abupt to date: **6.5086%** at step 181,301 (− 0.090pp vs single-model SOTA 6.5985%)
+- Run state=running; heartbeat 23:16 UTC; last step 189,845; trajectory still oscillating in 6.51–6.57% band, slope still negative
+- Awaiting completion + best-checkpoint test harvest before merge consideration
+- All advisor monitoring done via direct W&B query; student pod heartbeat appears to lag but `torchrun` is healthy
+
+**PR #608 dl24-nezuko volume-loss upweight long run (`y301z78k`):** EP24 val_abupt=13.96%, vol_p=6.68% — closing on AB-UPT 6.08% target
+**PR #611 dl24-fern tau-weighting AdamW long run (`ug6c3nks`):** EP15 val_abupt=12.37%, descending; EP20 gate ≤15%
+**PR #623 dl24-tanjiro stronger tau weights long run (v2 `41wo8cne`):** smoke gate PASSED (EP3=20.11%); v2 launched 23:03 UTC after v1 NCCL hang
 
 ---
 
