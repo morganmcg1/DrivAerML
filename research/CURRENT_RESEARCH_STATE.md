@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Updated:** 2026-05-04 10:22 UTC
+- **Updated:** 2026-05-04 11:05 UTC
 - **Wave:** DrivAerML long-run single-model DDP8 validation
 - **Advisor branch:** `drivaerml-long-20260504` (cut from `main` 2026-05-04)
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -35,7 +35,7 @@ Highest-priority single-model levers per the directive (with W&B references):
 |---|---|---|---|---|
 | dl24-fern | Mild static channel-aware tau weighting + lr 9e-5 | `9mm3sz7x` | `main` + small loss-weight extension | Strongest verified single-model SOTA; cleanest implementation; biggest expected win-per-line. |
 | dl24-frieren | Multi-sigma STRING log-frequency init | `ki2q9ko9` | fetch `alphonse/multi-sigma-string-init` (or equivalent on `yi`/`tay`/`bengio`) | Best historical volume-pressure point; `program.md` warns of provenance drift, must verify code matches run config. |
-| dl24-nezuko | Volume-point curriculum 16k→32k→49k→65k | `r5rw40rn` (censored) | curriculum scheduler over `--train-volume-points`, baseline trunk | The reference run timed out before the larger stages; 24h DDP8 should let it complete. |
+| dl24-nezuko | Volume-point curriculum 16k→32k→49k→65k | `r5rw40rn` (censored) | curriculum scheduler over `--train-volume-points`, baseline trunk | The reference run timed out before the larger stages; 24h DDP8 should let it complete. **Deviation approved 2026-05-04:** using Lion optimizer (matches ref config); schedule adjusted to `4:16000,6:32000,10:49000,24:65000` (44 epochs) to fit 24h budget with 65k stage at 36% of steps. |
 | dl24-tanjiro | EMA-proxy GradNorm α=0.5 with explicit volume guards | `wyz68o8r` | `main` + EMA loss-weight scheduler | Dynamic-weighting alternative to fern's static lever; the directive flags exact GradNorm as too expensive — EMA proxy is the affordable form. |
 
 This four-arm split tests static weighting, dynamic weighting, representation init, and data curriculum — four independent mechanism families.
