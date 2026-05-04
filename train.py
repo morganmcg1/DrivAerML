@@ -1064,6 +1064,100 @@ class EMA:
 
 
 # ---------------------------------------------------------------------------
+# GradNorm dynamic multi-task balancing (Chen et al. 2018)
+# Tasks are 5 unweighted MSE losses on standardized targets:
+#   0: surface_pressure (cp)
+#   1: wall_shear_x (tau_x)
+#   2: wall_shear_y (tau_y)
+#   3: wall_shear_z (tau_z)
+#   4: volume_pressure (vp)
+# A learnable weight w_i per task is updated each step by minimizing
+#   L_grad = sum_i |G_i - G_target_i|
+# where G_i = ||grad_{shared}(w_i * L_i)||_2 and
+#   G_target_i = mean_j(G_j) * (r_i)^alpha
+#   r_i = (L_i(t)/L_i(0)) / mean_j(L_j(t)/L_j(0))
+# Anchors L_i(0) are an EMA of the first init_steps batches.
+# ---------------------------------------------------------------------------
+
+GRADNORM_TASK_NAMES = ("sp", "tx", "ty", "tz", "vp")
+
+
+class GradNormBalancer(nn.Module):
+    """Maintains per-task weights and updates them via the GradNorm objective.
+
+    Weight optimizer is owned externally so the rest of the training script
+    can keep its single-source-of-truth pattern for `optimizer.step()`.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_tasks: int = 5,
+        alpha: float = 1.0,
+        init_steps: int = 10,
+        ema_momentum: float = 0.9,
+        max_loss_ratio: float = 5.0,
+        weight_floor: float = 1e-4,
+    ) -> None:
+        super().__init__()
+        self.num_tasks = num_tasks
+        self.alpha = float(alpha)
+        self.init_steps = int(init_steps)
+        self.ema_momentum = float(ema_momentum)
+        self.max_loss_ratio = float(max_loss_ratio)
+        self.weight_floor = float(weight_floor)
+        self.task_weights = nn.Parameter(torch.ones(num_tasks))
+        # -1 sentinel signals "anchor not yet captured"
+        self.register_buffer("loss_anchor", torch.full((num_tasks,), -1.0))
+        self.register_buffer("anchor_steps_done", torch.zeros((), dtype=torch.long))
+
+    @property
+    def is_warmed_up(self) -> bool:
+        return int(self.anchor_steps_done.item()) >= self.init_steps
+
+    @torch.no_grad()
+    def update_anchor(self, task_losses_detached: torch.Tensor) -> None:
+        """task_losses_detached: [num_tasks] cpu/gpu tensor of detached current losses."""
+        if int(self.anchor_steps_done.item()) >= self.init_steps:
+            return
+        if int(self.anchor_steps_done.item()) == 0:
+            self.loss_anchor.copy_(task_losses_detached.to(self.loss_anchor))
+        else:
+            m = self.ema_momentum
+            self.loss_anchor.mul_(m).add_(task_losses_detached.to(self.loss_anchor), alpha=1.0 - m)
+        self.anchor_steps_done.add_(1)
+
+    @torch.no_grad()
+    def renormalize(self) -> None:
+        """Project weights to be positive and sum to T."""
+        self.task_weights.data.clamp_(min=self.weight_floor)
+        self.task_weights.data.mul_(self.num_tasks / self.task_weights.data.sum().clamp_min(1e-8))
+
+    def relative_training_rates(self, task_losses_detached: torch.Tensor) -> torch.Tensor:
+        """Compute r_i = (L_i / L_i(0)) / mean_j(L_j / L_j(0)) with capped ratio."""
+        ratios = task_losses_detached / self.loss_anchor.clamp_min(1e-8)
+        ratios = ratios.clamp(max=self.max_loss_ratio)
+        return ratios / ratios.mean().clamp_min(1e-8)
+
+
+def gradnorm_shared_params(raw_model: nn.Module) -> list[nn.Parameter]:
+    """Return parameters of the last shared computation between heads.
+
+    Per PR #607: "final transformer block output before the surface/volume
+    prediction heads diverge". We use the last TransformerBlock + the final
+    LayerNorm — both are between the backbone and the surface_out/volume_out
+    head split.
+    """
+    params: list[nn.Parameter] = []
+    if hasattr(raw_model, "backbone") and hasattr(raw_model.backbone, "blocks"):
+        last_block = raw_model.backbone.blocks[-1]
+        params.extend(p for p in last_block.parameters() if p.requires_grad)
+    if hasattr(raw_model, "norm"):
+        params.extend(p for p in raw_model.norm.parameters() if p.requires_grad)
+    return params
+
+
+# ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
 
@@ -1132,6 +1226,13 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    # GradNorm dynamic multi-task balancing (Chen et al. 2018, arXiv 1711.02257).
+    # Activated when gradnorm_alpha >= 0.0; replaces per-axis static weights with
+    # learnable task weights {w_cp, w_tx, w_ty, w_tz, w_vp} updated to equalize
+    # per-task gradient norms scaled by relative training rate r_i^alpha.
+    gradnorm_alpha: float = -1.0  # <0 disables; 0=norm-equalize, 1=canonical, 1.5=aggressive
+    gradnorm_lr: float = 1e-3
+    gradnorm_init_steps: int = 10  # EMA window for L_i(0) anchor
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1859,7 +1960,7 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
-) -> tuple[torch.Tensor, list[float]]:
+) -> tuple[torch.Tensor, list[float], torch.Tensor]:
     """Per-channel weighted masked loss for surface predictions.
 
     pred, target: [B, N, C]. mask: [B, N] bool.
@@ -1888,7 +1989,9 @@ def weighted_masked_mse_per_channel(
     weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
     if not bool(mask.any()):
         per_axis = [0.0] * int(weights.numel())
-        return pred.sum() * 0.0, per_axis
+        zero = pred.sum() * 0.0
+        per_axis_diff = torch.zeros(int(weights.numel()), device=pred.device, dtype=pred.dtype)
+        return zero, per_axis, per_axis_diff
     diff = pred - target  # [B, N, C]
     diff_sq = diff.pow(2)
     mask_f = mask.unsqueeze(-1).to(pred.dtype)
@@ -1912,9 +2015,11 @@ def weighted_masked_mse_per_channel(
 
     weighted_diff = loss_elem * weights.view(1, 1, -1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
-    per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
-    per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
-    return weighted_loss, per_axis_mean
+    # Differentiable per-axis MSE for GradNorm (always uses diff_sq, not Huber, so
+    # all 4 surface tasks live on the same scale regardless of wallshear_huber_delta).
+    per_axis_diff = (diff_sq * mask_f).sum(dim=(0, 1)) / valid
+    per_axis_mean = per_axis_diff.detach().float().cpu().tolist()
+    return weighted_loss, per_axis_mean, per_axis_diff
 
 
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
@@ -1943,7 +2048,8 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    return_task_losses: bool = False,
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -1982,7 +2088,7 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
+        surface_loss, per_axis_unweighted, per_axis_diff = weighted_masked_mse_per_channel(
             surface_pred_used,
             surface_target_used,
             batch.surface_mask,
@@ -1991,6 +2097,13 @@ def train_loss(
         )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        # 5 differentiable per-task losses for GradNorm: cp, tau_x, tau_y, tau_z, vp.
+        # Always unweighted MSE so tasks live on a comparable scale.
+        task_losses_diff: torch.Tensor | None = None
+        if return_task_losses:
+            task_losses_diff = torch.stack(
+                [per_axis_diff[0], per_axis_diff[1], per_axis_diff[2], per_axis_diff[3], volume_loss]
+            )
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
             surf_pred_f = surface_pred_norm.float()
@@ -2021,7 +2134,7 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
-    return loss, metrics
+    return loss, metrics, task_losses_diff
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -2508,6 +2621,33 @@ def main(argv: Iterable[str] | None = None) -> None:
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+    gradnorm_enabled = config.gradnorm_alpha >= 0.0
+    gradnorm_balancer: GradNormBalancer | None = None
+    gradnorm_optimizer: torch.optim.Optimizer | None = None
+    gradnorm_shared: list[nn.Parameter] = []
+    if gradnorm_enabled:
+        gradnorm_balancer = GradNormBalancer(
+            num_tasks=len(GRADNORM_TASK_NAMES),
+            alpha=config.gradnorm_alpha,
+            init_steps=config.gradnorm_init_steps,
+        ).to(device)
+        gradnorm_optimizer = torch.optim.AdamW(
+            gradnorm_balancer.parameters(), lr=config.gradnorm_lr, weight_decay=0.0
+        )
+        gradnorm_shared = gradnorm_shared_params(model)
+        if not gradnorm_shared:
+            raise RuntimeError(
+                "GradNorm enabled but no shared parameters found on model "
+                "(expected raw_model.backbone.blocks[-1] and raw_model.norm)."
+            )
+        if is_main:
+            n_shared = sum(p.numel() for p in gradnorm_shared)
+            print(
+                f"GradNorm: enabled (alpha={config.gradnorm_alpha}, lr={config.gradnorm_lr}, "
+                f"init_steps={config.gradnorm_init_steps}, "
+                f"shared_params={n_shared / 1e3:.1f}K)"
+            )
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
@@ -2595,6 +2735,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
+    wandb.define_metric("train/gradnorm_*", step_metric="global_step")
+    wandb.define_metric("train/loss_gradnorm_aux", step_metric="global_step")
 
     if is_distributed:
         run_id_holder = [run.id if is_main else None]
@@ -2644,7 +2786,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
-            loss, batch_loss_metrics = train_loss(
+            loss, batch_loss_metrics, task_losses_diff = train_loss(
                 train_model,
                 batch,
                 transform,
@@ -2657,6 +2799,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                return_task_losses=gradnorm_enabled,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2676,6 +2819,74 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 global_step += 1
                 continue
+            gradnorm_log: dict[str, float] = {}
+            if (
+                gradnorm_enabled
+                and gradnorm_balancer is not None
+                and gradnorm_optimizer is not None
+                and task_losses_diff is not None
+            ):
+                # 1. Per-task UNSCALED gradient norms ||grad_shared(L_i)||_2.
+                # Retain graph so subsequent autograd.grad calls + the main
+                # loss.backward() can re-walk the first-order graph.
+                # We exploit the linearity ||grad(w*L)||_2 = w * ||grad(L)||_2
+                # to avoid create_graph=True (5x activation memory savings).
+                unscaled_list: list[torch.Tensor] = []
+                for i in range(gradnorm_balancer.num_tasks):
+                    task_grads = torch.autograd.grad(
+                        task_losses_diff[i],
+                        gradnorm_shared,
+                        retain_graph=True,
+                        allow_unused=False,
+                    )
+                    flat = torch.cat([g.reshape(-1) for g in task_grads])
+                    unscaled_list.append(flat.norm(p=2))
+                unscaled_norms = torch.stack(unscaled_list).detach()
+                # 2. All-reduce per-task losses + unscaled norms for synced weight updates.
+                detached_task_losses = task_losses_diff.detach().clone()
+                if is_distributed:
+                    dist.all_reduce(unscaled_norms, op=dist.ReduceOp.SUM)
+                    unscaled_norms = unscaled_norms / float(world_size)
+                    dist.all_reduce(detached_task_losses, op=dist.ReduceOp.SUM)
+                    detached_task_losses = detached_task_losses / float(world_size)
+                # 3. Update anchor (only fills loss_anchor during the first init_steps).
+                gradnorm_balancer.update_anchor(detached_task_losses)
+                # 4. Always log current task weights.
+                with torch.no_grad():
+                    weight_values = gradnorm_balancer.task_weights.detach().cpu().tolist()
+                    for name, w_val in zip(GRADNORM_TASK_NAMES, weight_values):
+                        gradnorm_log[f"train/gradnorm_w_{name}"] = float(w_val)
+                    for name, gn_val in zip(
+                        GRADNORM_TASK_NAMES, unscaled_norms.detach().cpu().tolist()
+                    ):
+                        gradnorm_log[f"train/gradnorm_unscaled_norm_{name}"] = float(gn_val)
+                # 5. After warmup, update weights via GradNorm aux loss.
+                if gradnorm_balancer.is_warmed_up:
+                    r = gradnorm_balancer.relative_training_rates(detached_task_losses)
+                    G = gradnorm_balancer.task_weights * unscaled_norms
+                    G_target = (G.detach().mean() * r.pow(gradnorm_balancer.alpha)).detach()
+                    aux_loss = (G - G_target).abs().sum()
+                    if torch.isfinite(aux_loss).item():
+                        gradnorm_optimizer.zero_grad(set_to_none=True)
+                        aux_loss.backward()
+                        gradnorm_optimizer.step()
+                        gradnorm_balancer.renormalize()
+                        gradnorm_log["train/loss_gradnorm_aux"] = float(
+                            aux_loss.detach().cpu().item()
+                        )
+                        for name, r_val in zip(GRADNORM_TASK_NAMES, r.detach().cpu().tolist()):
+                            gradnorm_log[f"train/gradnorm_r_{name}"] = float(r_val)
+                        for name, gt_val in zip(
+                            GRADNORM_TASK_NAMES, G_target.detach().cpu().tolist()
+                        ):
+                            gradnorm_log[f"train/gradnorm_G_target_{name}"] = float(gt_val)
+                # 6. Replace `loss` with GradNorm-weighted version using detached weights.
+                # GradNorm subsumes surface/volume/per-axis static weights, so the arms
+                # in PR #607 set those to defaults (=1.0).
+                detached_w = gradnorm_balancer.task_weights.detach()
+                loss = (detached_w * task_losses_diff).sum() / float(
+                    gradnorm_balancer.num_tasks
+                )
             loss.backward()
             should_log_gradients = (
                 config.gradient_log_every > 0
@@ -2766,6 +2977,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "global_step": global_step,
                 **gradient_metrics,
                 **weight_metrics,
+                **gradnorm_log,
             }
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
