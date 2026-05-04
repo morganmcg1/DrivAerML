@@ -83,10 +83,13 @@ torchrun --standalone --nproc_per_node=8 target/train.py \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
   --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --no-compile-model \
   --lr-cosine-t-max 13 --epochs 13 \
   --wandb-group askeladd-tau-reweight-micro \
   --wandb-name askeladd/tau-reweight-w1.2-w1.3-lr9e-5
 ```
+
+**NOTE:** `--no-compile-model` is required. The actual SOTA run `9mm3sz7x` had `compile_model: False` in its config. Using `torch.compile` with DDP on this cluster causes NCCL all_reduce deadlocks at step 1. Always include `--no-compile-model` in reproduce commands.
 
 ### Previous SOTA: thorfinn PR #523 EMA-proxy GradNorm alpha=0.5 EP6 — 2026-05-01
 
