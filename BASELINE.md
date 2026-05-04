@@ -98,6 +98,16 @@ torchrun --standalone --nproc_per_node=8 target/train.py \
 **Val metrics:** val_abupt=6.9246%, surface_pressure=4.5840%, wall_shear=7.7457%, volume_pressure=4.3040%, tau_x=6.7193%, tau_y=8.7197%, tau_z=10.2960%
 **Test metrics:** test_abupt=8.2355%, surface_pressure=4.2712%, wall_shear=7.5043%, volume_pressure=12.2131%, tau_x=6.5557%, tau_y=8.4656%, tau_z=9.6720%
 
+### Merged result: frieren PR #555 GradNorm alpha=1.0 tau-channel-reweighting-v2 — 2026-05-04
+
+**W&B run:** `341czkol` (frieren DDP8, rank-0) — group `frieren-gradnorm-alpha-sweep`, Arm B alpha=1.0, best val **6.8738%**
+**PR:** #555
+**Val metrics:** val_abupt=6.8738%, surface_pressure=4.4965%, wall_shear=7.6909%, volume_pressure=4.3764%, tau_x=6.7109%, tau_y=8.5156%, tau_z=10.2697%
+**Test metrics:** test_abupt=8.2433%, surface_pressure=4.2205%, wall_shear=7.5321%, volume_pressure=12.4069%, tau_x=6.6947%, tau_y=8.3054%, tau_z=9.5893%
+
+**Note:** val_abupt=6.8738% does NOT beat PR #516 SOTA (6.8701%); beats PR #523 (6.9246%) by −0.051pp. Single-model SOTA remains PR #516.
+**Key finding:** alpha=1.0 confirms tau_y/tau_z benefit from higher GradNorm exponent (tau_y −0.204pp val, −0.160pp test vs #523); volume_pressure regresses on test (+0.194pp). Merged as incremental improvement over #523 baseline.
+
 ### Previous SOTA: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03
 
 **alphonse PR #510 (surface-loss-weight=2.0, heavier surface gradient emphasis) beats PR #511 by −0.007pp val, −0.021pp test (7.0063% val, 8.2921% test). W&B run `qqtdnlwq`, EP5 EMA. Delta −0.10% relative on val.**
