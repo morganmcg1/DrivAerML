@@ -669,6 +669,125 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class SparseMoE(nn.Module):
+    """Sparse top-k Mixture-of-Experts feedforward, drop-in for UpActDownMlp.
+
+    Each expert is a 2-layer MLP matching UpActDownMlp's structure. Gate
+    softmax is computed in fp32 for numerical stability under bf16 autocast
+    (per ST-MoE). Implements Switch-style load-balance aux loss and ST-MoE
+    z-loss; both are stored on the module after the forward pass and consumed
+    by the outer trainer via collect_moe_state().
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        mlp_hidden_dim: int,
+        num_experts: int,
+        top_k: int = 2,
+        gate_init_std: float = 0.01,
+    ):
+        super().__init__()
+        if num_experts < 1:
+            raise ValueError("num_experts must be >= 1")
+        self.hidden_dim = hidden_dim
+        self.mlp_hidden_dim = mlp_hidden_dim
+        self.num_experts = num_experts
+        self.top_k = min(top_k, num_experts)
+        self.experts = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(hidden_dim, mlp_hidden_dim),
+                    nn.GELU(),
+                    nn.Linear(mlp_hidden_dim, hidden_dim),
+                )
+                for _ in range(num_experts)
+            ]
+        )
+        for expert in self.experts:
+            expert.apply(_init_linear)
+        self.gate = nn.Linear(hidden_dim, num_experts, bias=False)
+        nn.init.normal_(self.gate.weight, std=gate_init_std)
+        self._last_aux_loss: torch.Tensor | None = None
+        self._last_z_loss: torch.Tensor | None = None
+        self._last_expert_load: torch.Tensor | None = None
+        self._last_router_entropy: torch.Tensor | None = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, S, D = x.shape
+        x_flat = x.reshape(B * S, D)
+        # Router logits in fp32 to avoid bf16 softmax instability (ST-MoE).
+        logits = self.gate(x_flat).float()  # (T, E)
+        topk_logits, topk_idx = torch.topk(logits, self.top_k, dim=-1)  # (T, k)
+        # Mixtral-style: renormalize softmax over selected experts only.
+        topk_weights = F.softmax(topk_logits, dim=-1)  # (T, k)
+        # Switch aux load-balance loss (top-1 hard count for f_i, soft P_i).
+        full_softmax = F.softmax(logits, dim=-1)
+        P_i = full_softmax.mean(dim=0)  # (E,)
+        top1 = topk_idx[:, 0]
+        f_i = F.one_hot(top1, num_classes=self.num_experts).float().mean(dim=0)
+        aux_loss = self.num_experts * (f_i * P_i).sum()
+        # ST-MoE z-loss: penalize large pre-softmax logits.
+        z_loss = (torch.logsumexp(logits, dim=-1) ** 2).mean()
+        with torch.no_grad():
+            expert_load = f_i.detach().clone()
+            log_p = torch.log(full_softmax.clamp_min(1e-12))
+            router_entropy = -(full_softmax * log_p).sum(dim=-1).mean().detach()
+
+        topk_weights_cast = topk_weights.to(dtype=x_flat.dtype)
+        out_flat = torch.zeros_like(x_flat)
+        # Always call every expert (even with empty input) so DDP keeps every
+        # expert's parameters in the autograd graph and find_unused_parameters
+        # is not required.
+        for e in range(self.num_experts):
+            mask = topk_idx == e  # (T, k) bool
+            token_idx, slot_idx = mask.nonzero(as_tuple=True)
+            weights_e = topk_weights_cast[token_idx, slot_idx].unsqueeze(-1)
+            expert_in = x_flat.index_select(0, token_idx)
+            expert_out = self.experts[e](expert_in) * weights_e
+            out_flat = out_flat.index_add(0, token_idx, expert_out)
+        out = out_flat.reshape(B, S, D)
+
+        if self.training:
+            self._last_aux_loss = aux_loss
+            self._last_z_loss = z_loss
+            self._last_expert_load = expert_load
+            self._last_router_entropy = router_entropy
+        else:
+            self._last_aux_loss = None
+            self._last_z_loss = None
+            self._last_expert_load = None
+            self._last_router_entropy = None
+        return out
+
+
+def collect_moe_state(model: nn.Module) -> dict[str, list[torch.Tensor]]:
+    """Walk model, return current MoE telemetry per layer; clear stored state.
+
+    Keys: aux_losses, z_losses, expert_loads, entropies.
+    """
+    aux_losses: list[torch.Tensor] = []
+    z_losses: list[torch.Tensor] = []
+    expert_loads: list[torch.Tensor] = []
+    entropies: list[torch.Tensor] = []
+    for m in model.modules():
+        if isinstance(m, SparseMoE) and m._last_aux_loss is not None:
+            aux_losses.append(m._last_aux_loss)
+            z_losses.append(m._last_z_loss)
+            expert_loads.append(m._last_expert_load)
+            entropies.append(m._last_router_entropy)
+            m._last_aux_loss = None
+            m._last_z_loss = None
+            m._last_expert_load = None
+            m._last_router_entropy = None
+    return {
+        "aux_losses": aux_losses,
+        "z_losses": z_losses,
+        "expert_loads": expert_loads,
+        "entropies": entropies,
+    }
+
+
 class TransolverAttention(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
         super().__init__()
@@ -729,6 +848,8 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         drop_path_prob: float = 0.0,
+        moe_experts: int = 0,
+        moe_top_k: int = 2,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -740,7 +861,17 @@ class TransformerBlock(nn.Module):
             dropout=dropout,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        if moe_experts > 0:
+            self.mlp = SparseMoE(
+                hidden_dim=hidden_dim,
+                mlp_hidden_dim=mlp_hidden_dim,
+                num_experts=moe_experts,
+                top_k=moe_top_k,
+            )
+        else:
+            self.mlp = UpActDownMlp(
+                hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim
+            )
         self.drop_path = DropPath(drop_path_prob)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
@@ -805,6 +936,8 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         stochastic_depth_prob: float = 0.0,
         film_geom_dim: int = 0,
+        moe_experts: int = 0,
+        moe_top_k: int = 2,
     ):
         super().__init__()
         if depth <= 1:
@@ -822,6 +955,8 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     drop_path_prob=drop_path_rates[i],
+                    moe_experts=moe_experts,
+                    moe_top_k=moe_top_k,
                 )
                 for i in range(depth)
             ]
@@ -871,6 +1006,8 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        moe_experts: int = 0,
+        moe_top_k: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -916,6 +1053,8 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             stochastic_depth_prob=stochastic_depth_prob,
             film_geom_dim=film_encoder_dim if use_film else 0,
+            moe_experts=moe_experts,
+            moe_top_k=moe_top_k,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -1158,6 +1297,10 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    moe_experts: int = 0
+    moe_top_k: int = 2
+    moe_aux_loss_weight: float = 0.01
+    moe_z_loss_weight: float = 0.001
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1365,6 +1508,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        moe_experts=config.moe_experts,
+        moe_top_k=config.moe_top_k,
     )
 
 
@@ -2033,6 +2178,8 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    moe_aux_loss_weight: float = 0.0,
+    moe_z_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -2116,6 +2263,32 @@ def train_loss(
             aux_rel_l2 = num / den
             loss = loss + aux_rel_l2_weight * aux_rel_l2
             aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+        moe_state = collect_moe_state(model)
+        moe_aux_value: float | None = None
+        moe_z_value: float | None = None
+        moe_router_entropy_value: float | None = None
+        moe_load_max_imbalance_value: float | None = None
+        moe_load_min_value: float | None = None
+        moe_load_max_value: float | None = None
+        if moe_state["aux_losses"]:
+            moe_aux_total = torch.stack(moe_state["aux_losses"]).sum()
+            moe_z_total = torch.stack(moe_state["z_losses"]).sum()
+            if moe_aux_loss_weight > 0.0:
+                loss = loss + moe_aux_loss_weight * moe_aux_total
+            if moe_z_loss_weight > 0.0:
+                loss = loss + moe_z_loss_weight * moe_z_total
+            moe_aux_value = float(moe_aux_total.detach().cpu().item())
+            moe_z_value = float(moe_z_total.detach().cpu().item())
+            entropies = torch.stack(moe_state["entropies"])
+            moe_router_entropy_value = float(entropies.mean().detach().cpu().item())
+            loads = torch.stack(moe_state["expert_loads"])  # (L, E)
+            min_load = loads.min(dim=-1).values  # (L,)
+            max_load = loads.max(dim=-1).values  # (L,)
+            moe_load_min_value = float(min_load.min().detach().cpu().item())
+            moe_load_max_value = float(max_load.max().detach().cpu().item())
+            moe_load_max_imbalance_value = (
+                moe_load_max_value - moe_load_min_value
+            )
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -2126,6 +2299,20 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if moe_aux_value is not None:
+        metrics["moe_aux_loss"] = moe_aux_value
+        metrics["moe_z_loss"] = moe_z_value
+        metrics["moe_router_entropy"] = moe_router_entropy_value
+        metrics["moe_load_min"] = moe_load_min_value
+        metrics["moe_load_max"] = moe_load_max_value
+        metrics["moe_load_max_imbalance"] = moe_load_max_imbalance_value
+        # Per-layer per-expert load fractions for collapse detection.
+        for layer_idx, layer_load in enumerate(moe_state["expert_loads"]):
+            layer_load_cpu = layer_load.detach().cpu()
+            for expert_idx in range(layer_load_cpu.numel()):
+                metrics[f"moe_load/layer{layer_idx}_e{expert_idx}"] = float(
+                    layer_load_cpu[expert_idx].item()
+                )
     if use_tangential_wallshear_loss and not use_beta_nll:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if use_beta_nll and per_axis_log_var is not None:
@@ -2780,6 +2967,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                moe_aux_loss_weight=config.moe_aux_loss_weight,
+                moe_z_loss_weight=config.moe_z_loss_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2907,6 +3096,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             ):
                 if log_var_key in batch_loss_metrics:
                     train_log[f"train/{log_var_key}"] = batch_loss_metrics[log_var_key]
+            for moe_key in (
+                "moe_aux_loss",
+                "moe_z_loss",
+                "moe_router_entropy",
+                "moe_load_min",
+                "moe_load_max",
+                "moe_load_max_imbalance",
+            ):
+                if moe_key in batch_loss_metrics:
+                    train_log[f"train/{moe_key}"] = batch_loss_metrics[moe_key]
+            for key, value in batch_loss_metrics.items():
+                if key.startswith("moe_load/"):
+                    train_log[f"train/{key}"] = value
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
