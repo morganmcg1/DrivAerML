@@ -3085,6 +3085,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "max_weight_surface",
                 "mean_weight_volume",
                 "max_weight_volume",
+                "raw_weight_mean_surface",
+                "raw_weight_std_surface",
+                "raw_weight_min_surface",
+                "raw_weight_max_surface",
+                "cap_binding_frac_surface",
+                "raw_weight_mean_volume",
+                "raw_weight_std_volume",
+                "raw_weight_min_volume",
+                "raw_weight_max_volume",
+                "cap_binding_frac_volume",
             ):
                 if key in batch_loss_metrics:
                     train_log[f"train/{key}"] = batch_loss_metrics[key]
