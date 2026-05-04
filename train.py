@@ -206,15 +206,18 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        # Per-channel surface MSE: channels are [cp=0, tau_x=1, tau_y=2, tau_z=3]
+        # Per-channel surface MSE: channels are [cp=0, tau_x=1, tau_y=2, tau_z=3].
+        # Divide channel sums by n_channels so surface_loss matches masked_mse(...) over
+        # all channels when all channel weights are 1.0.
         ch_losses = masked_mse_per_channel(out["surface_preds"], surface_target, batch.surface_mask)
-        surface_loss = ch_losses[0] + ch_losses[1] + ch_losses[2] + ch_losses[3]
+        n_ch = len(ch_losses)
+        surface_loss = (ch_losses[0] + ch_losses[1] + ch_losses[2] + ch_losses[3]) / n_ch
         surface_loss_weighted = (
             ch_losses[0]
             + ch_losses[1]
             + tau_y_loss_weight * ch_losses[2]
             + tau_z_loss_weight * ch_losses[3]
-        )
+        ) / n_ch
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss_weighted
         weighted_volume_loss = volume_loss_weight * volume_loss
