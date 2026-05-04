@@ -1387,7 +1387,13 @@ def init_wandb_run(
     tags = [config.agent] if config.agent else []
     if state.enabled:
         tags.extend(["ddp", f"rank:{state.rank}"])
-    run = wandb.init(
+    # Serialize wandb.init() across DDP ranks to prevent NCCL timeout caused by
+    # the wandb-core service-spawn race: 8 concurrent wandb.init() calls can
+    # leave one rank stuck in "setting up run" indefinitely, triggering the
+    # 10-minute NCCL allreduce timeout and killing the entire process group.
+    # Fix: only one rank calls wandb.init() at a time, gated by a barrier loop.
+    os.environ.setdefault("WANDB__SERVICE_WAIT", "300")
+    init_kwargs = dict(
         entity=os.environ.get("WANDB_ENTITY"),
         project=os.environ.get("WANDB_PROJECT"),
         group=wandb_group_for_rank(config, state),
@@ -1411,6 +1417,14 @@ def init_wandb_run(
         },
         mode=os.environ.get("WANDB_MODE", "online"),
     )
+    if state.enabled:
+        run = None
+        for r in range(state.world_size):
+            if state.rank == r:
+                run = wandb.init(**init_kwargs)
+            distributed_barrier(state)
+    else:
+        run = wandb.init(**init_kwargs)
     define_wandb_metrics()
     return run
 
