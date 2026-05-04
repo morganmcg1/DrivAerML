@@ -399,6 +399,7 @@ class TransolverAttention(nn.Module):
         self.slice_rope = slice_rope
         # Telemetry — populated per forward when slice_rope is enabled.
         self.last_centroid_spread: float = 0.0
+        self.last_centroid_spread_std: float = 0.0
         self.last_rope_q_cos_sim: float = 1.0
 
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
@@ -439,23 +440,25 @@ class TransolverAttention(nn.Module):
         q, k, v = qkv.chunk(3, dim=-1)
 
         if self.slice_rope is not None and point_coords is not None:
-            slice_centroids = self._compute_slice_centroids(slice_weights, point_coords).detach()
+            # Keep gradients flowing through centroids → slice_weights → backbone params
+            # (per advisor: "RoPE through differentiable centroids is what makes this learnable").
+            slice_centroids = self._compute_slice_centroids(slice_weights, point_coords)
             q_pre = q
             q, k = self.slice_rope(q, k, slice_centroids)
             with torch.no_grad():
-                # Telemetry: detach to avoid graph extension.
                 B, H, S, _ = slice_centroids.shape
                 # Mean pairwise L2 distance between slice centroids (per head, then averaged).
-                c = slice_centroids.float()  # (B, H, S, 3)
+                c = slice_centroids.detach().float()  # (B, H, S, 3)
                 diffs = c.unsqueeze(3) - c.unsqueeze(2)  # (B, H, S, S, 3)
                 dists = diffs.norm(dim=-1)  # (B, H, S, S)
                 eye = torch.eye(S, device=c.device, dtype=torch.bool).view(1, 1, S, S)
                 pairwise_count = max(S * (S - 1), 1)
                 spread = dists.masked_fill(eye, 0.0).sum(dim=(-2, -1)) / pairwise_count  # (B, H)
                 self.last_centroid_spread = float(spread.mean().item())
+                self.last_centroid_spread_std = float(spread.std(unbiased=False).item()) if spread.numel() > 1 else 0.0
                 rd = self.slice_rope.rot_dim
-                a = q_pre[..., :rd].float()
-                b = q[..., :rd].float()
+                a = q_pre[..., :rd].detach().float()
+                b = q[..., :rd].detach().float()
                 cos = F.cosine_similarity(a, b, dim=-1).mean()
                 self.last_rope_q_cos_sim = float(cos.item())
 
@@ -1332,14 +1335,18 @@ def collect_slice_rope_metrics(model: nn.Module) -> dict[str, float]:
 
     base_model = getattr(model, "_orig_mod", model)
     spreads: list[float] = []
+    spread_stds: list[float] = []
     cos_sims: list[float] = []
     for module in base_model.modules():
         if isinstance(module, TransolverAttention) and module.slice_rope is not None:
             spreads.append(float(module.last_centroid_spread))
+            spread_stds.append(float(module.last_centroid_spread_std))
             cos_sims.append(float(module.last_rope_q_cos_sim))
     metrics: dict[str, float] = {}
     if spreads:
         metrics["train/slice_centroid_spread_mean"] = sum(spreads) / len(spreads)
+    if spread_stds:
+        metrics["train/slice_centroid_spread_std"] = sum(spread_stds) / len(spread_stds)
     if cos_sims:
         metrics["train/slice_rope_q_cos_sim"] = sum(cos_sims) / len(cos_sims)
     return metrics
