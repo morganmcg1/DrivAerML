@@ -734,18 +734,27 @@ class SparseMoE(nn.Module):
             log_p = torch.log(full_softmax.clamp_min(1e-12))
             router_entropy = -(full_softmax * log_p).sum(dim=-1).mean().detach()
 
-        topk_weights_cast = topk_weights.to(dtype=x_flat.dtype)
-        out_flat = torch.zeros_like(x_flat)
+        # Run dispatch in autocast dtype (bf16) when active to halve activation
+        # memory; LayerNorm produces fp32 input but the original UpActDownMlp
+        # also runs in bf16 internally under autocast, so behavior is matched.
+        if torch.is_autocast_enabled():
+            dispatch_dtype = torch.get_autocast_gpu_dtype()
+        else:
+            dispatch_dtype = x_flat.dtype
+        x_flat_disp = x_flat.to(dtype=dispatch_dtype)
+        weights_disp = topk_weights.to(dtype=dispatch_dtype)
+        out_flat = torch.zeros_like(x_flat_disp)
         # Always call every expert (even with empty input) so DDP keeps every
         # expert's parameters in the autograd graph and find_unused_parameters
-        # is not required.
+        # is not required. Use in-place index_add_ to avoid allocating E
+        # intermediate (T, D) tensors that backward would otherwise hold.
         for e in range(self.num_experts):
             mask = topk_idx == e  # (T, k) bool
             token_idx, slot_idx = mask.nonzero(as_tuple=True)
-            weights_e = topk_weights_cast[token_idx, slot_idx].unsqueeze(-1)
-            expert_in = x_flat.index_select(0, token_idx)
+            weights_e = weights_disp[token_idx, slot_idx].unsqueeze(-1)
+            expert_in = x_flat_disp.index_select(0, token_idx)
             expert_out = self.experts[e](expert_in) * weights_e
-            out_flat = out_flat.index_add(0, token_idx, expert_out)
+            out_flat.index_add_(0, token_idx, expert_out)
         out = out_flat.reshape(B, S, D)
 
         if self.training:
