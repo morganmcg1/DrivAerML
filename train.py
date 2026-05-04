@@ -695,6 +695,35 @@ class EMA:
         self.backup = None
 
 
+def make_model_soup_state(checkpoint_paths: list) -> dict[str, torch.Tensor]:
+    """Equal-weight average of checkpoint state_dicts (Wortsman et al. 2022).
+
+    Float tensors are averaged in float32 then cast back to the original dtype.
+    Non-float entries (e.g. int counters) are passed through from the first
+    checkpoint, which is fine because they should be identical across our soup
+    range (no BatchNorm; no scheduler state in these checkpoints)."""
+    n = len(checkpoint_paths)
+    if n == 0:
+        raise ValueError("make_model_soup_state needs at least one checkpoint path")
+    state_dicts = [
+        torch.load(p, map_location="cpu", weights_only=True)["model"]
+        for p in checkpoint_paths
+    ]
+    keys = list(state_dicts[0].keys())
+    soup_state: dict[str, torch.Tensor] = {}
+    for key in keys:
+        ref0 = state_dicts[0][key]
+        if not torch.is_tensor(ref0):
+            soup_state[key] = ref0
+            continue
+        if ref0.is_floating_point():
+            stacked = torch.stack([sd[key].to(torch.float32) for sd in state_dicts])
+            soup_state[key] = stacked.mean(dim=0).to(ref0.dtype)
+        else:
+            soup_state[key] = ref0.clone()
+    return soup_state
+
+
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
@@ -763,6 +792,10 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    model_soup: bool = False
+    soup_save_freq: int = 2
+    soup_start_epoch: int = 40
+    soup_ema_targets: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2089,6 +2122,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("full_val_primary/*", step_metric="global_step")
     wandb.define_metric("test/*", step_metric="global_step")
     wandb.define_metric("test_primary/*", step_metric="global_step")
+    wandb.define_metric("soup/*", step_metric="global_step")
     wandb.define_metric("train/slope/*", step_metric="global_step")
     wandb.define_metric("val/slope/*", step_metric="global_step")
     wandb.define_metric("full_val/slope/*", step_metric="global_step")
@@ -2325,6 +2359,35 @@ def main(argv: Iterable[str] | None = None) -> None:
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
+
+        if config.model_soup and is_main:
+            epoch_one_indexed = epoch + 1
+            soup_freq = max(config.soup_save_freq, 1)
+            if (
+                epoch_one_indexed >= config.soup_start_epoch
+                and (epoch_one_indexed - config.soup_start_epoch) % soup_freq == 0
+            ):
+                soup_path = output_dir / f"soup_epoch_{epoch_one_indexed:03d}.pt"
+                if config.soup_ema_targets and ema is not None:
+                    ema.store(model)
+                    ema.copy_to(model)
+                    torch.save(
+                        {"model": model.state_dict(), "epoch": epoch_one_indexed},
+                        soup_path,
+                    )
+                    ema.restore(model)
+                else:
+                    torch.save(
+                        {"model": model.state_dict(), "epoch": epoch_one_indexed},
+                        soup_path,
+                    )
+                print(
+                    f"  saved soup checkpoint epoch {epoch_one_indexed} "
+                    f"(ema_targets={config.soup_ema_targets})"
+                )
+        if is_distributed:
+            dist.barrier()
+
         should_validate = (
             epoch == 0
             or (epoch + 1) % max(config.validation_every, 1) == 0
@@ -2562,6 +2625,97 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.summary.update(_numeric_metric_items(test_log))
     if is_main:
         print_metrics("test_surface", test_metrics["test_surface"])
+
+    if config.model_soup:
+        soup_ckpt_path = output_dir / "soup_checkpoint.pt"
+        soup_paths_present: list[Path] = []
+        if is_main:
+            soup_paths_present = sorted(output_dir.glob("soup_epoch_*.pt"))
+            if soup_paths_present:
+                print(
+                    f"\nBuilding model soup from {len(soup_paths_present)} checkpoints: "
+                    f"{[p.name for p in soup_paths_present]}"
+                )
+                soup_state = make_model_soup_state(soup_paths_present)
+                soup_meta = {
+                    "model": soup_state,
+                    "soup_checkpoint_files": [p.name for p in soup_paths_present],
+                    "soup_n_checkpoints": len(soup_paths_present),
+                    "soup_ema_targets": bool(config.soup_ema_targets),
+                }
+                torch.save(soup_meta, soup_ckpt_path)
+            else:
+                print("\nmodel_soup enabled but no soup_epoch_*.pt checkpoints found; skipping soup eval.")
+        if is_distributed:
+            dist.barrier()
+
+        if soup_ckpt_path.exists():
+            soup_ckpt = torch.load(soup_ckpt_path, map_location=device, weights_only=True)
+            model.load_state_dict(soup_ckpt["model"])
+            n_soup = int(soup_ckpt.get("soup_n_checkpoints", 0))
+            soup_files = soup_ckpt.get("soup_checkpoint_files", [])
+
+            soup_full_val_metrics = {
+                name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in val_loaders.items()
+            }
+            soup_test_metrics = {
+                name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in test_loaders.items()
+            }
+            soup_full_val_primary = soup_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+            soup_test_primary = soup_test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
+
+            soup_log: dict[str, object] = {
+                "soup/n_checkpoints": n_soup,
+                "soup/ema_targets": 1.0 if config.soup_ema_targets else 0.0,
+                "soup/full_val_primary/abupt_axis_mean_rel_l2_pct": soup_full_val_primary,
+                "soup/full_val_primary/abupt_axis_mean_rel_l2": soup_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+                "soup/full_val_primary/surface_pressure_rel_l2_pct": soup_full_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+                "soup/full_val_primary/wall_shear_rel_l2_pct": soup_full_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+                "soup/full_val_primary/wall_shear_x_rel_l2_pct": soup_full_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+                "soup/full_val_primary/wall_shear_y_rel_l2_pct": soup_full_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+                "soup/full_val_primary/wall_shear_z_rel_l2_pct": soup_full_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+                "soup/full_val_primary/volume_pressure_rel_l2_pct": soup_full_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+                "soup/full_val_primary/surface_pressure_mae": soup_full_val_metrics["val_surface"]["surface_pressure_mae"],
+                "soup/full_val_primary/wall_shear_mae": soup_full_val_metrics["val_surface"]["wall_shear_mae"],
+                "soup/full_val_primary/volume_pressure_mae": soup_full_val_metrics["val_surface"]["volume_pressure_mae"],
+                "soup/test_primary/abupt_axis_mean_rel_l2_pct": soup_test_primary,
+                "soup/test_primary/abupt_axis_mean_rel_l2": soup_test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
+                "soup/test_primary/surface_pressure_rel_l2_pct": soup_test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+                "soup/test_primary/wall_shear_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+                "soup/test_primary/wall_shear_x_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+                "soup/test_primary/wall_shear_y_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+                "soup/test_primary/wall_shear_z_rel_l2_pct": soup_test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
+                "soup/test_primary/volume_pressure_rel_l2_pct": soup_test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
+                "soup/test_primary/surface_pressure_mae": soup_test_metrics["test_surface"]["surface_pressure_mae"],
+                "soup/test_primary/wall_shear_mae": soup_test_metrics["test_surface"]["wall_shear_mae"],
+                "soup/test_primary/volume_pressure_mae": soup_test_metrics["test_surface"]["volume_pressure_mae"],
+                "global_step": global_step,
+            }
+            for split_name, metrics in soup_full_val_metrics.items():
+                for key, value in metrics.items():
+                    soup_log[f"soup/full_val/{split_name}/{key}"] = value
+            for split_name, metrics in soup_test_metrics.items():
+                for key, value in metrics.items():
+                    soup_log[f"soup/test/{split_name}/{key}"] = value
+            wandb.log(soup_log)
+            wandb.summary.update(_numeric_metric_items(soup_log))
+            if is_main:
+                wandb.summary["soup/checkpoint_files"] = ",".join(soup_files)
+                best_full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                best_test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
+                delta_full_val = soup_full_val_primary - best_full_val_primary
+                delta_test = soup_test_primary - best_test_primary
+                wandb.summary["soup/delta_full_val_abupt_pct"] = delta_full_val
+                wandb.summary["soup/delta_test_abupt_pct"] = delta_test
+                print(
+                    f"Soup eval ({n_soup} ckpts, ema_targets={config.soup_ema_targets}): "
+                    f"full_val_abupt_pct={soup_full_val_primary:.4f} (best={best_full_val_primary:.4f}, delta={delta_full_val:+.4f}); "
+                    f"test_abupt_pct={soup_test_primary:.4f} (best={best_test_primary:.4f}, delta={delta_test:+.4f})"
+                )
+                print_metrics("soup_full_val", soup_full_val_metrics["val_surface"])
+                print_metrics("soup_test", soup_test_metrics["test_surface"])
 
     if is_main:
         log_model_artifact(
