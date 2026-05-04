@@ -1,7 +1,7 @@
 # SENPAI Research State
-- 2026-05-04 01:36 UTC (Round 34 — advisor cycle)
+- 2026-05-04 10:52 UTC (Round 33/34 — advisor cycle)
 - **CURRENT SOTA (yi branch): PR #517 (askeladd, Lion lr=1e-4 clip=0.5) — val_abupt 9.032%**. Active yi merge bar: **9.032%** (run `brat65z4`).
-- **PR #490 (frieren STRING-sep learnable PE) MERGED to yi at 15:48 UTC 2026-05-03.** The `--learnable-pe` flag is now available in yi `train.py`. The next highest-priority merge is a from-scratch run combining STRING-sep + Lion lr=1e-4 clip=0.5 (PR #539 frieren, in-flight).
+- **PR #490 (frieren STRING-sep learnable PE) MERGED to yi at 15:48 UTC 2026-05-03.** The `--learnable-pe` flag is now available in yi `train.py`. Requires `--no-compile-model` (torch.compile inductor broadcast bug).
 - **Tay SOTA (reference track, not yi): PR #511 (edward) — val_abupt 7.013% / test_abupt 8.313%** (tay branch only).
 
 ## Most Recent Research Direction from Human Researcher Team
@@ -24,79 +24,82 @@
 
 Dominant open gaps: τ_z (2.73×), τ_y (2.35×), vol_p (1.95×).
 
-## Active WIP PRs (Round 34 — 14 PRs as of 2026-05-04 01:36 UTC)
+## Active WIP PRs (Round 33/34 — 16 PRs as of 2026-05-04 10:52 UTC)
 
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
-| #563 | edward | Variance-matching aux loss for τ_y/τ_z std collapse | **NEW — just assigned** |
-| #566 | norman | Vol-to-surface cross-attention (near-wall pressure coupling) | **NEW — just assigned** |
-| #567 | thorfinn | SDF-proximity surface loss weighting (geometry-based point weights) | **NEW — just assigned** |
-| #547 | tanjiro | Coupled yz prediction head (Cholesky NLL, recovering from compile bugs) | Running |
-| #546 | violet | Online hard example mining for τ_y/τ_z (Arm B k=0.25 running) | Running |
-| #545 | senku | RoPE on Transolver slice tokens (3D centroid keys) | Approved, not launched — prodded 01:36 UTC |
-| #544 | fern | y-symmetry paired loss + TTA (Arm B v3 with --no-compile-model running) | Running |
-| #543 | haku | Surface curvature features (Arm A done 10.39%, Arm B running) | Running |
-| #542 | alphonse | Laplace far-field soft penalty on vol pressure | Approved, not launched — prodded 01:36 UTC |
-| #541 | askeladd | Streamline-aligned wall-shear target frame (tau.n non-zero finding) | Running |
-| #540 | emma | GradNorm adaptive τ_y/τ_z up-weighting | Approved, not launched — prodded 01:36 UTC |
-| #539 | frieren | STRING-sep + Lion lr=1e-4 clip=0.5 from scratch (run `t7g7hhed`) | Running |
-| #528 | nezuko | 1-cycle LR pct_start=0.05 + STRING-sep (Arm C `up4xxvt7` running) | Running |
-| #519 | gilbert | LLRD sweep (Arm A done 11.17%, Arm C running, Arm B to relaunch) | Running |
-| #518 | kohaku | Loss-side asinh wallshear delta sweep | Running/stale |
-| #478 | chihiro | Per-step cosine LR + eta_min fix (Arm B' `u72dousk`, ETA ~07:00 UTC) | Running |
+| #597 | fern | RANS Laplace regularizer on far-field volume pressure (vol_p 1.95× gap) | Running |
+| #596 | emma | 1-cycle LR with 1e-3 peak for Lion optimizer | Running |
+| #595 | alphonse | asinh target-space normalization for wall-shear loss (τ_y/τ_z gap) | Running |
+| #591 | violet | Model Soup: weight-space checkpoint averaging | Running |
+| #590 | thorfinn | Gradient EMA smoothing before optimizer update | Running |
+| #589 | tanjiro | SDF gradient direction as auxiliary volume input | Running (Arm A in-flight `i7hi8rgu`) |
+| #588 | senku | ADOPT optimizer (provably convergent Adam variant) | Running |
+| #587 | norman | Dual-tower vol/surface cross-attention encoder | Running |
+| #586 | nezuko | Progressive resolution curriculum | Running |
+| #585 | kohaku | Angle-to-freestream + log local area surface features | Running (Arm A in-flight `425gcyt7`) |
+| #584 | gilbert | Inverse local point density loss weighting | Running |
+| #583 | edward | β-NLL heteroscedastic loss | Running |
+| #582 | chihiro | Multi-EMA ensemble (3 shadow decays) | Running |
+| #580 | haku | Principal surface curvatures as input features | Running |
+| #578 | askeladd | Streamline-aligned wall-shear target frame | Running |
+| #576 | frieren | STRING-sep + Lion from-scratch anchor run | Running |
 
-## Students with Reassignment Deadline (60 min from ~01:36 UTC)
+**Note on "stale" flags**: PRs #589 (tanjiro) and #585 (kohaku) are flagged stale by GitHub update time but confirmed active — both have W&B experiments in-flight. Arm A runs launched ~07:30–07:35 UTC; results expected within the 6h budget window.
 
-These students were approved >5h ago with no launch. They have until ~02:36 UTC to post launch confirmation or their PRs will be reassigned:
-- **senku** (#545) — RoPE on slice tokens
-- **alphonse** (#542) — Laplace far-field penalty
-- **emma** (#540) — GradNorm adaptive weighting
+## Research Themes (Round 33/34 priority order)
 
-## Recent Closed PRs (this session)
-
-| PR | Reason |
-|---|---|
-| #551 (stark) | No student pod exists — hypothesis reassigned to edward (#563) |
-| #520 (norman) | Null: coord transforms flat-to-worse on vol_pressure (6.12–6.19%) |
-| #522 (thorfinn) | Null: FP32 last-epoch regresses val_abupt by +0.25pp (model not near basin) |
-| #564 (norman duplicate) | Duplicate of askeladd #541 (streamline frame already running) — closed immediately |
-| #565 (thorfinn duplicate) | Duplicate of haku #543 (surface curvature already running) — closed immediately |
-
-## Research Themes (Round 34 priority order)
-
-1. **Lock in STRING-sep + Lion combination** (PR #539 frieren) — highest confidence, locks bar to ~8.1%
+1. **Lock in STRING-sep + Lion combination** (PR #576 frieren) — anchor run combining both known wins, expected ~8.1% if orthogonal
 2. **τ_y/τ_z structural attack (multi-prong):**
-   - Variance-matching aux loss (PR #563 edward) — 2nd-moment regularizer
-   - Streamline frame target rotation (PR #541 askeladd) — coordinate frame
-   - GradNorm adaptive task weighting (PR #540 emma) — principled up-weighting
-   - OHEM hard example mining (PR #546 violet) — gradient-based mining
-   - Coupled yz head (PR #547 tanjiro) — joint modeling
-   - y-symmetry paired loss (PR #544 fern) — equivariance enforcement
-   - SDF-proximity loss weighting (PR #567 thorfinn) — geometry-based mining
+   - asinh target normalization for wall-shear (PR #595 alphonse) — compresses heavy tail
+   - SDF gradient direction as aux vol input (PR #589 tanjiro) — geometry-informed representation
+   - Streamline-aligned target frame (PR #578 askeladd) — coordinate frame rotation
+   - β-NLL heteroscedastic loss (PR #583 edward) — per-point uncertainty modeling
+   - Inverse density loss weighting (PR #584 gilbert) — upweight sparse high-error regions
 3. **Volume pressure gap attack:**
-   - Laplace far-field penalty (PR #542 alphonse) — physics-informed regularizer
-   - Vol-to-surface cross-attention (PR #566 norman) — cross-stream coupling
-4. **Architecture/geometric features:**
-   - RoPE on slice tokens (PR #545 senku) — attention PE
-   - Surface curvature features (PR #543 haku) — geometric input (Arm B running)
-5. **Optimizer/LR confirmations:**
-   - 1-cycle LR + STRING-sep (PR #528 nezuko, Arm C)
-   - LLRD sweep (PR #519 gilbert — likely null, all arms may miss bar)
-   - Per-step cosine eta_min fix (PR #478 chihiro, ETA ~07:00 UTC)
+   - RANS Laplace regularizer (PR #597 fern) — physics-informed far-field ∇²p ≈ 0 penalty
+   - Dual-tower cross-attention vol/surf (PR #587 norman) — cross-stream coupling
+4. **Architecture/input features:**
+   - Angle-to-freestream + log area (PR #585 kohaku) — 9-channel surface + 7-channel volume
+   - Principal surface curvatures (PR #580 haku) — geometric input enrichment
+   - Dual-tower cross-attention (PR #587 norman) — architectural rethink
+   - ADOPT optimizer (PR #588 senku) — provably convergent Adam variant
+5. **Training dynamics:**
+   - 1-cycle LR with 1e-3 peak (PR #596 emma) — aggressive LR schedule
+   - Gradient EMA smoothing (PR #590 thorfinn) — gradient conditioning
+   - Progressive resolution curriculum (PR #586 nezuko) — curriculum learning
+   - Multi-EMA ensemble (PR #582 chihiro) — 3 shadow decays for model averaging
+   - Model soup checkpoint averaging (PR #591 violet) — weight-space ensembling
 
 ## Known Null Results (do not repeat)
 
-- Volume coord transforms: signed-log, asinh on volume stream — flat (#520)
+- Volume coord transforms: signed-log, asinh on volume stream input — flat (#520)
 - BF16→FP32 final epoch — slight regression at <3 epoch horizon (#522)
 - BERT-direction LLRD (decay < 1 on later layers) — hurts from-scratch training (#519 Arm A 11.17%)
 - Model-only checkpoint resume — EMA/optimizer reset undoes gains (#472)
 - Per-axis static loss weight sweeps (#244, #454)
 - Uncertainty weighting Kendall (#496) — inverts gradient for lagging tasks
 - LLRD: tentatively null for all 3 arms if B and C also miss by >10%
+- Coordinate frame transforms on vol stream (#520): signed-log, asinh flat
+- FP32 final-epoch upcast (#522): slight regression
 
 ## Fleet Stability Constants
 
 - Lion optimizer: lr=1e-4, warmup=1 epoch, clip=0.5, wd=5e-4
-- 4×H100 DDP: ~1.25 s/it × 5442 steps/epoch → ~113 min/epoch → ~3 epochs in 6h budget
+- 4×H100/H200 DDP: ~1.25 s/it × 5442 steps/epoch → ~113–191 min/epoch → ~2–3 epochs in 6h budget
 - `--no-compile-model` required when `--learnable-pe` is active (torch.compile inductor bug with multi-axis broadcast in ContinuousSincosEmbed)
 - Flag name: `--clip-grad-norm 0.5` (NOT `--grad-clip-norm`) — verified via `python train.py --help`
+- OOM mitigation: chunked cdist (chunk_size=2048–4096) for pairwise distance computations over 65k-point clouds
+
+## Recommended Base Config (from PR #222 + #490 learnable-PE)
+
+```bash
+torchrun --standalone --nproc_per_node=4 train.py \
+  --agent <student> --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
+  --clip-grad-norm 0.5 --no-compile-model --learnable-pe \
+  --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 \
+  --model-slices 128 --ema-decay 0.999 --lr-warmup-epochs 1
+```
