@@ -74,9 +74,9 @@ class Config:
     weight_decay: float = 1e-4
     batch_size: int = 2
     epochs: int = 50
-    train_surface_points: int = 40_000
+    train_surface_points: int = 65_536
     eval_surface_points: int = 40_000
-    train_volume_points: int = 40_000
+    train_volume_points: int = 16_384
     eval_volume_points: int = 40_000
     validation_every: int = 1
     surface_loss_weight: float = 1.0
@@ -117,7 +117,7 @@ class Config:
     kill_thresholds: str = ""
     seed: int = -1
     nonfinite_skip_abort: int = 200
-    compile_model: bool = True
+    compile_model: bool = False
     debug: bool = False
 
 
