@@ -26,8 +26,8 @@ ran under 1-epoch tangential-loss conditions (SENPAI_TIMEOUT_MINUTES=360 limits 
 1 epoch on single-GPU). The flag is available for composition with asinh (#374) and
 full-budget DDP runs. W&B runs: ctrl `g1s45tbt`/`6649fm5e`, d10 `52urviip`/`zni9if9p`.
 
-**Active merge bar on yi as it actually exists today: val_abupt 9.032% (PR #517 askeladd, Lion lr=1e-4 clip=0.5).**
-**Aspirational target once PR #420 lands STRING-sep PE on yi: val_abupt 7.546% (PR #311 tay run `gcwx9yaa`).**
+**Active merge bar on yi as it actually exists today: val_abupt 8.861% (PR #583 edward, β-NLL beta=0.5, W&B run `5xovw2si`).**
+**Aspirational target once STRING-sep PE is fully on yi: val_abupt ~7.0–7.5% (tay SOTA PR #511, `5o7jc7wi`).**
 
 ## Status: edward PR #311 wins — new baseline 2026-05-02
 
@@ -223,25 +223,53 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 15. PR #580 haku — principal surface curvatures (κ₁, κ₂) as 9-channel input features (infrastructure, `--surface-curvature-features k1_k2`; metric bar unchanged)
 
+## 2026-05-04 — PR #583: Round 33 — β-NLL Heteroscedastic Loss (edward)
+
+β-NLL (Seitzer 2022) with `--beta-nll-beta 0.5` merged on yi. Training from EP4 checkpoint
+of run `nr9oenyl`, resumed as run `5xovw2si` (EP5 = global EP5 of full run).
+
+**Result:** val_abupt improved from 9.032% → **8.861%** — a 1.9% relative gain.
+
+Note: the log_var heads collapsed to ~-6.8 across all channels by EP5, meaning active
+heteroscedastic reweighting was minimal — the gain came primarily from extra training time.
+The β-NLL flag is in `train.py` and available for composition runs.
+
+**Reproduce:**
+```bash
+cd /workspace/senpai/target
+torchrun --standalone --nproc_per_node=4 train.py \
+  --resume-from outputs/drivaerml/run-nr9oenyl/checkpoint.pt \
+  --agent edward --wandb-group yi-round33-beta-nll \
+  --wandb-name "edward/beta-nll-resume-nr9oenyl-ep4" \
+  --learnable-pe --optimizer lion --lr 1e-4 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --lr-warmup-epochs 0 --ema-decay 0.999 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --beta-nll-beta 0.5 --epochs 20 \
+  --validation-every 1 --no-compile-model \
+  --gradient-log-every 100 --weight-log-every 100
+```
+
 ## Current best on `yi`
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **9.032** | — | #517 | brat65z4 | 2026-04-29 |
-| `surface_pressure_rel_l2_pct` | **5.702** | — | #517 | brat65z4 | 2026-04-29 |
-| `wall_shear_rel_l2_pct` | **10.257** | — | #517 | brat65z4 | 2026-04-29 |
-| `volume_pressure_rel_l2_pct` | **5.075** | — | #517 | brat65z4 | 2026-04-29 |
-| `wall_shear_x_rel_l2_pct` | **8.520** | — | #517 | brat65z4 | 2026-04-29 |
-| `wall_shear_y_rel_l2_pct` | **12.907** | — | #517 | brat65z4 | 2026-04-29 |
-| `wall_shear_z_rel_l2_pct` | **12.957** | — | #517 | brat65z4 | 2026-04-29 |
+| `abupt_axis_mean_rel_l2_pct` | **8.861** | — | #583 | 5xovw2si | 2026-05-04 |
+| `surface_pressure_rel_l2_pct` | **5.457** | — | #583 | 5xovw2si | 2026-05-04 |
+| `wall_shear_rel_l2_pct` | **10.022** | — | #583 | 5xovw2si | 2026-05-04 |
+| `volume_pressure_rel_l2_pct` | **4.951** | — | #583 | 5xovw2si | 2026-05-04 |
+| `wall_shear_x_rel_l2_pct` | **8.213** | — | #583 | 5xovw2si | 2026-05-04 |
+| `wall_shear_y_rel_l2_pct` | **12.447** | — | #583 | 5xovw2si | 2026-05-04 |
+| `wall_shear_z_rel_l2_pct` | **13.235** | — | #583 | 5xovw2si | 2026-05-04 |
 
-Note: PR #517 (askeladd, Lion lr=1e-4 clip=0.5) merged 2026-04-29 — confirms Lion
-optimizer with these hyperparameters as yi SOTA. Iso-product hypothesis falsified:
-Arm B at same lr·clip=5e-5 reached only 9.860%.
-Prior compounding wins include PR #309 (thorfinn, grad-clip=0.5, val 9.039%),
-PR #222 (fern, lr_warmup_epochs=1, val 9.291%).
-**Merge bar: val_abupt 9.032% on the yi codebase as it exists today (PR #517 askeladd, Lion lr=1e-4 clip=0.5).**
-**Aspirational target once PR #420 lands STRING-sep PE: val_abupt 7.546% (PR #311 tay run `gcwx9yaa`, not currently in yi).**
+Note: PR #583 (edward, β-NLL heteroscedastic loss `--beta-nll-beta 0.5`) merged 2026-05-04 —
+new yi SOTA at val_abupt=8.861%. Prior bar was 9.032% (PR #517 askeladd).
+Prior compounding wins include PR #580 (haku, surface curvatures), PR #517 (askeladd, Lion lr=1e-4 clip=0.5),
+PR #309 (thorfinn, grad-clip=0.5), PR #222 (fern, lr_warmup_epochs=1).
+**Merge bar: val_abupt 8.861% on the yi codebase as it exists today (PR #583 edward, β-NLL beta=0.5).**
+**Aspirational target once STRING-sep PE fully lands on yi: val_abupt ~7.0–7.5% (tay SOTA PR #511, `5o7jc7wi`).**
 
 **Distance from AB-UPT targets (test, multiple of target):**
 
