@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 ~14:55 UTC (Round 13 — fleet 8/8 fully utilized; PR #592 alphonse depth-L5 merged as new single-model SOTA)
+- **Date:** 2026-05-05 (Round 13/14 transition — edward/thorfinn reassigned; 8/8 GPUs in use)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -63,13 +63,15 @@ Each student listed against the most recently-assigned PR; older PRs from the sa
 | #593 | frieren | lr-min cosine floor sweep (1e-6 vs 1e-5) | Arm A v2 (lr-min=1e-6, run `axpkjoku`) reached EP8 timeout — awaiting full per-epoch comparison vs SOTA |
 | #594 | askeladd | RFF spectral budget sweep (8 vs 32 features) — Arm A (rff32, `d777epep`) finished val=6.7173%; Arm B (rff8) ablation | Arm B att #5 (`6z3qcg6n`) running with full per-rank serialization wandb init fix (multi-attempt wandb-DDP race resolved); Arm A no longer beats new L=5 gate but already part of ensemble pool |
 | #603 | tanjiro | EMA decay sweep {0.9993, 0.9997, 0.9999} on PR #592 SOTA stack | Arm A (0.9993) aborted at EP2 (val=8.95%, exceeds 8.5% kill gate); Arm B (0.9997) relaunched after wandb init crash |
-| #613 | thorfinn | Flow-aligned tau tangent-frame outputs (predict in (t̂, n̂, ŝ) basis) | New approach to tau_y/tau_z gap closure; impl uses provided surface_normals (deviates from k=20 PCA spec for memory) |
 | #614 | fern | Lion β2 momentum sweep (0.95 vs 0.99 vs 0.999) | Probing under-smoothing of sign estimates for tau channels |
-| #615 | edward | Surface curvature features v2 (mean H + Gaussian K via k-NN PCA k=20) | Reissue of #605 which logged no results; on PR #594 SOTA stack |
 | #619 | alphonse | NorMuon optimizer (normalized Muon for 2D weight matrices) on L=5 SOTA | Bigger swing — fundamentally different optimizer family |
 | #621 | nezuko | Slice-centroid STRING-RoPE for Transolver attention | Architectural change to attention spectral coverage |
+| #603 | tanjiro | EMA decay sweep {0.9993, 0.9997, 0.9999} on PR #592 SOTA stack | Arm A (0.9993) aborted at EP2 (val=8.95%); Arm B (0.9997) relaunched |
+| #593 | frieren | lr-min cosine floor sweep (1e-6 vs 1e-5) | Arm A v2 (lr-min=1e-6) awaiting full per-epoch comparison vs SOTA |
+| #640 | edward | NorMuon optimizer on L=5 SOTA (fresh clean assignment) | Replaces #615 surface-curvature-v2; NorMuon hybrid 2D+AdamW1D, lr=2e-4 |
+| #641 | thorfinn | Flow-aligned tau: predict in local surface tangent frame (t̂, b̂) | Replaces prior #613 iteration; physics-motivated attack on tau_y/tau_z 2.3–2.7× gap |
 
-**Round 13 focus:** push past PR #592 SOTA (6.5985%); continue closing tau_y/tau_z gap; expand ensemble pool with each new winner; orthogonal sweeps (β2, EMA, lr-floor) for stacking; flow-aligned tau output basis (#613) and curvature features (#615) as geometric levers; NorMuon (#619) and slice-centroid RoPE (#621) as bigger architectural swings.
+**Round 13/14 focus:** push past PR #592 SOTA (6.5985%); close tau_y/tau_z gap (currently 2.3–2.7× above AB-UPT floor); expand ensemble pool with each new winner; orthogonal sweeps (β2, EMA, lr-floor) for stacking; flow-aligned tau output basis (#641 thorfinn) as physics-motivated geometric lever; NorMuon (#640 edward, #619 alphonse) and slice-centroid RoPE (#621 nezuko) as bigger optimizer/architectural swings.
 
 ---
 
