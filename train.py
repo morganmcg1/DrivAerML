@@ -1007,6 +1007,7 @@ class SurfaceTransolver(nn.Module):
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
+            "hidden_norm": hidden_norm,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
@@ -1138,23 +1139,6 @@ class GradNormBalancer(nn.Module):
         ratios = task_losses_detached / self.loss_anchor.clamp_min(1e-8)
         ratios = ratios.clamp(max=self.max_loss_ratio)
         return ratios / ratios.mean().clamp_min(1e-8)
-
-
-def gradnorm_shared_params(raw_model: nn.Module) -> list[nn.Parameter]:
-    """Return parameters of the last shared computation between heads.
-
-    Per PR #607: "final transformer block output before the surface/volume
-    prediction heads diverge". We use the last TransformerBlock + the final
-    LayerNorm — both are between the backbone and the surface_out/volume_out
-    head split.
-    """
-    params: list[nn.Parameter] = []
-    if hasattr(raw_model, "backbone") and hasattr(raw_model.backbone, "blocks"):
-        last_block = raw_model.backbone.blocks[-1]
-        params.extend(p for p in last_block.parameters() if p.requires_grad)
-    if hasattr(raw_model, "norm"):
-        params.extend(p for p in raw_model.norm.parameters() if p.requires_grad)
-    return params
 
 
 # ---------------------------------------------------------------------------
@@ -1990,7 +1974,10 @@ def weighted_masked_mse_per_channel(
     if not bool(mask.any()):
         per_axis = [0.0] * int(weights.numel())
         zero = pred.sum() * 0.0
-        per_axis_diff = torch.zeros(int(weights.numel()), device=pred.device, dtype=pred.dtype)
+        # pred.sum(dim=(0,1))*0 preserves gradient flow to surface_out (one channel
+        # per output index) so DDP find_unused_parameters=False stays satisfied
+        # even on ranks whose surface_mask is all-False this batch.
+        per_axis_diff = pred.sum(dim=(0, 1)) * 0.0
         return zero, per_axis, per_axis_diff
     diff = pred - target  # [B, N, C]
     diff_sq = diff.pow(2)
@@ -2049,7 +2036,7 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     return_task_losses: bool = False,
-) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None, torch.Tensor | None]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -2100,10 +2087,13 @@ def train_loss(
         # 5 differentiable per-task losses for GradNorm: cp, tau_x, tau_y, tau_z, vp.
         # Always unweighted MSE so tasks live on a comparable scale.
         task_losses_diff: torch.Tensor | None = None
+        hidden_norm_out: torch.Tensor | None = None
         if return_task_losses:
             task_losses_diff = torch.stack(
                 [per_axis_diff[0], per_axis_diff[1], per_axis_diff[2], per_axis_diff[3], volume_loss]
             )
+            # Activation tap for DDP-safe gradient norms (no autograd hooks on activations).
+            hidden_norm_out = out["hidden_norm"]
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
             surf_pred_f = surface_pred_norm.float()
@@ -2134,7 +2124,7 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
-    return loss, metrics, task_losses_diff
+    return loss, metrics, task_losses_diff, hidden_norm_out
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -2625,7 +2615,6 @@ def main(argv: Iterable[str] | None = None) -> None:
     gradnorm_enabled = config.gradnorm_alpha >= 0.0
     gradnorm_balancer: GradNormBalancer | None = None
     gradnorm_optimizer: torch.optim.Optimizer | None = None
-    gradnorm_shared: list[nn.Parameter] = []
     if gradnorm_enabled:
         gradnorm_balancer = GradNormBalancer(
             num_tasks=len(GRADNORM_TASK_NAMES),
@@ -2635,18 +2624,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         gradnorm_optimizer = torch.optim.AdamW(
             gradnorm_balancer.parameters(), lr=config.gradnorm_lr, weight_decay=0.0
         )
-        gradnorm_shared = gradnorm_shared_params(model)
-        if not gradnorm_shared:
-            raise RuntimeError(
-                "GradNorm enabled but no shared parameters found on model "
-                "(expected raw_model.backbone.blocks[-1] and raw_model.norm)."
-            )
         if is_main:
-            n_shared = sum(p.numel() for p in gradnorm_shared)
             print(
                 f"GradNorm: enabled (alpha={config.gradnorm_alpha}, lr={config.gradnorm_lr}, "
                 f"init_steps={config.gradnorm_init_steps}, "
-                f"shared_params={n_shared / 1e3:.1f}K)"
+                f"shared_tap=hidden_norm activation [DDP-safe])"
             )
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
@@ -2786,7 +2768,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
-            loss, batch_loss_metrics, task_losses_diff = train_loss(
+            loss, batch_loss_metrics, task_losses_diff, hidden_norm_act = train_loss(
                 train_model,
                 batch,
                 transform,
@@ -2825,22 +2807,28 @@ def main(argv: Iterable[str] | None = None) -> None:
                 and gradnorm_balancer is not None
                 and gradnorm_optimizer is not None
                 and task_losses_diff is not None
+                and hidden_norm_act is not None
             ):
-                # 1. Per-task UNSCALED gradient norms ||grad_shared(L_i)||_2.
+                # 1. Per-task UNSCALED gradient norms ||grad_h(L_i)||_2 against the
+                # shared activation `hidden_norm_act` (last shared representation
+                # before head split). Activations carry no DDP autograd hooks, so
+                # autograd.grad() here is DDP-safe and does not interfere with the
+                # subsequent main loss.backward(). Mathematically equivalent to
+                # using shared parameters for GradNorm: both measure how strongly
+                # each task pulls on the shared representation.
                 # Retain graph so subsequent autograd.grad calls + the main
                 # loss.backward() can re-walk the first-order graph.
-                # We exploit the linearity ||grad(w*L)||_2 = w * ||grad(L)||_2
-                # to avoid create_graph=True (5x activation memory savings).
+                # We exploit ||grad(w*L)|| = w*||grad(L)|| to avoid
+                # create_graph=True (5x activation memory savings).
                 unscaled_list: list[torch.Tensor] = []
                 for i in range(gradnorm_balancer.num_tasks):
-                    task_grads = torch.autograd.grad(
+                    (task_grad,) = torch.autograd.grad(
                         task_losses_diff[i],
-                        gradnorm_shared,
+                        hidden_norm_act,
                         retain_graph=True,
                         allow_unused=False,
                     )
-                    flat = torch.cat([g.reshape(-1) for g in task_grads])
-                    unscaled_list.append(flat.norm(p=2))
+                    unscaled_list.append(task_grad.reshape(-1).norm(p=2))
                 unscaled_norms = torch.stack(unscaled_list).detach()
                 # 2. All-reduce per-task losses + unscaled norms for synced weight updates.
                 detached_task_losses = task_losses_diff.detach().clone()
