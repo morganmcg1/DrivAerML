@@ -10,6 +10,7 @@ import math
 import os
 import re
 import subprocess
+import time
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -1387,7 +1388,13 @@ def init_wandb_run(
     tags = [config.agent] if config.agent else []
     if state.enabled:
         tags.extend(["ddp", f"rank:{state.rank}"])
-    run = wandb.init(
+    # Serialize wandb.init across DDP ranks to avoid the wandb-core service-spawn
+    # race and graphql 404 retry loops that intermittently leave one rank stuck in
+    # "setting up run" forever, hanging the next NCCL collective. Each rank waits
+    # for the previous rank to finish init before starting its own. ~10s/rank →
+    # ~80s total startup overhead vs ~37 min/epoch is negligible.
+    os.environ.setdefault("WANDB__SERVICE_WAIT", "300")
+    init_kwargs = dict(
         entity=os.environ.get("WANDB_ENTITY"),
         project=os.environ.get("WANDB_PROJECT"),
         group=wandb_group_for_rank(config, state),
@@ -1411,6 +1418,14 @@ def init_wandb_run(
         },
         mode=os.environ.get("WANDB_MODE", "online"),
     )
+    if state.enabled:
+        run = None
+        for r in range(state.world_size):
+            if state.rank == r:
+                run = wandb.init(**init_kwargs)
+            distributed_barrier(state)
+    else:
+        run = wandb.init(**init_kwargs)
     define_wandb_metrics()
     return run
 
