@@ -763,6 +763,11 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    vol_pressure_laplace_lambda: float = 0.0
+    vol_pressure_laplace_sdf_thresh: float = 0.5
+    vol_pressure_laplace_radius: float = 0.1
+    vol_pressure_laplace_anchors: int = 2048
+    vol_pressure_laplace_chunk: int = 256
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1514,6 +1519,119 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def laplace_pressure_penalty(
+    vol_preds: torch.Tensor,
+    vol_coords: torch.Tensor,
+    sdf_vals: torch.Tensor,
+    vol_mask: torch.Tensor,
+    *,
+    sdf_thresh: float,
+    radius: float,
+    num_anchors: int,
+    chunk_size: int,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Discrete-Laplacian smoothness regularizer on far-field volume pressure.
+
+    For each anchor point i with sdf > sdf_thresh, computes
+        L_i = (sum_j w_ij p_j) / (sum_j w_ij) - p_i,
+    with neighbors j drawn from the far-field set within `radius` and
+    w_ij = 1 / (|x_i - x_j|^2 + eps). The penalty is mean(L_i^2) over anchors,
+    averaged over batch. Gradients flow only through `vol_preds` — distances
+    and the neighbor mask are computed under no_grad.
+    """
+    B, N, _ = vol_preds.shape
+    device = vol_preds.device
+    eps = 1e-8
+
+    penalty_terms: list[torch.Tensor] = []
+    total_anchors = 0
+    total_with_neighbors = 0
+    sum_neighbor_count = 0.0
+    sum_lap_abs = 0.0
+    sum_lap_sq = 0.0
+    sum_lap_n = 0
+
+    preds_f = vol_preds[..., 0].float()
+    coords_f = vol_coords.float()
+    sdf_f = sdf_vals[..., 0].float()
+
+    for b in range(B):
+        sample_mask = vol_mask[b]
+        sample_sdf = sdf_f[b]
+        ff_mask = sample_mask & (sample_sdf > sdf_thresh)
+        ff_count = int(ff_mask.sum().item())
+        if ff_count < 2:
+            continue
+
+        ff_coords = coords_f[b][ff_mask]   # [M, 3]
+        ff_preds = preds_f[b][ff_mask]      # [M] (graph-attached)
+        M = ff_coords.shape[0]
+
+        K = min(num_anchors, M)
+        if M > num_anchors:
+            anchor_idx = torch.randperm(M, device=device)[:K]
+        else:
+            anchor_idx = torch.arange(M, device=device)
+        anchor_coords = ff_coords[anchor_idx]   # [K, 3]
+        anchor_preds = ff_preds[anchor_idx]     # [K]
+
+        sample_lap: list[torch.Tensor] = []
+        for i in range(0, K, chunk_size):
+            chunk_c = anchor_coords[i : i + chunk_size]                   # [C, 3]
+            chunk_p = anchor_preds[i : i + chunk_size]                    # [C]
+            with torch.no_grad():
+                dists = torch.cdist(chunk_c, ff_coords)                   # [C, M]
+                neighbor_mask = (dists < radius) & (dists > eps)
+                weights = 1.0 / (dists * dists + eps)
+                weights = weights * neighbor_mask.to(weights.dtype)
+                w_sum = weights.sum(dim=1)                                # [C]
+                has_n = w_sum > eps
+                neighbor_counts = neighbor_mask.sum(dim=1).float()
+            if not bool(has_n.any().item()):
+                continue
+            weighted_p = weights @ ff_preds                               # [C]
+            inv_w = torch.where(has_n, 1.0 / w_sum.clamp_min(eps), torch.zeros_like(w_sum))
+            weighted_avg = weighted_p * inv_w                             # [C]
+            lap = (weighted_avg - chunk_p) * has_n.to(chunk_p.dtype)      # [C]
+            lap_valid = lap[has_n]
+            if lap_valid.numel() == 0:
+                continue
+            sample_lap.append(lap_valid)
+            sum_with_n = int(has_n.sum().item())
+            total_with_neighbors += sum_with_n
+            sum_neighbor_count += float(neighbor_counts[has_n].sum().detach().cpu().item())
+            with torch.no_grad():
+                sum_lap_abs += float(lap_valid.abs().sum().detach().cpu().item())
+                sum_lap_sq += float((lap_valid * lap_valid).sum().detach().cpu().item())
+                sum_lap_n += int(lap_valid.numel())
+
+        total_anchors += K
+        if sample_lap:
+            sample_l = torch.cat(sample_lap)
+            penalty_terms.append((sample_l * sample_l).mean())
+
+    if not penalty_terms:
+        return torch.zeros((), device=device), {
+            "lap_penalty": 0.0,
+            "lap_anchors": 0.0,
+            "lap_with_neighbors": 0.0,
+            "lap_mean_neighbors": 0.0,
+            "lap_mean_abs": 0.0,
+            "lap_rms": 0.0,
+        }
+
+    penalty = torch.stack(penalty_terms).mean()
+    metrics = {
+        "lap_penalty": float(penalty.detach().cpu().item()),
+        "lap_anchors": float(total_anchors),
+        "lap_with_neighbors": float(total_with_neighbors),
+        "lap_mean_neighbors": float(sum_neighbor_count / max(total_with_neighbors, 1)),
+        "lap_mean_abs": float(sum_lap_abs / max(sum_lap_n, 1)),
+        "lap_rms": float((sum_lap_sq / max(sum_lap_n, 1)) ** 0.5),
+    }
+    return penalty, metrics
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1528,6 +1646,11 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    vol_pressure_laplace_lambda: float = 0.0,
+    vol_pressure_laplace_sdf_thresh: float = 0.5,
+    vol_pressure_laplace_radius: float = 0.1,
+    vol_pressure_laplace_anchors: int = 2048,
+    vol_pressure_laplace_chunk: int = 256,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1586,6 +1709,19 @@ def train_loss(
             aux_rel_l2 = num / den
             loss = loss + aux_rel_l2_weight * aux_rel_l2
             aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+    lap_metrics: dict[str, float] | None = None
+    if vol_pressure_laplace_lambda > 0.0:
+        lap_penalty, lap_metrics = laplace_pressure_penalty(
+            vol_preds=out["volume_preds"].float(),
+            vol_coords=batch.volume_x[..., :3],
+            sdf_vals=batch.volume_x[..., 3:4],
+            vol_mask=batch.volume_mask,
+            sdf_thresh=vol_pressure_laplace_sdf_thresh,
+            radius=vol_pressure_laplace_radius,
+            num_anchors=vol_pressure_laplace_anchors,
+            chunk_size=vol_pressure_laplace_chunk,
+        )
+        loss = loss + vol_pressure_laplace_lambda * lap_penalty
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -1606,6 +1742,16 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    if lap_metrics is not None:
+        metrics["loss_laplace"] = lap_metrics["lap_penalty"]
+        metrics["loss_laplace_weighted"] = (
+            vol_pressure_laplace_lambda * lap_metrics["lap_penalty"]
+        )
+        metrics["laplace_anchors"] = lap_metrics["lap_anchors"]
+        metrics["laplace_with_neighbors"] = lap_metrics["lap_with_neighbors"]
+        metrics["laplace_mean_neighbors"] = lap_metrics["lap_mean_neighbors"]
+        metrics["laplace_mean_abs"] = lap_metrics["lap_mean_abs"]
+        metrics["laplace_rms"] = lap_metrics["lap_rms"]
     return loss, metrics
 
 
@@ -2172,6 +2318,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                vol_pressure_laplace_lambda=config.vol_pressure_laplace_lambda,
+                vol_pressure_laplace_sdf_thresh=config.vol_pressure_laplace_sdf_thresh,
+                vol_pressure_laplace_radius=config.vol_pressure_laplace_radius,
+                vol_pressure_laplace_anchors=config.vol_pressure_laplace_anchors,
+                vol_pressure_laplace_chunk=config.vol_pressure_laplace_chunk,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2290,6 +2441,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            for lap_key in (
+                "loss_laplace",
+                "loss_laplace_weighted",
+                "laplace_anchors",
+                "laplace_with_neighbors",
+                "laplace_mean_neighbors",
+                "laplace_mean_abs",
+                "laplace_rms",
+            ):
+                if lap_key in batch_loss_metrics:
+                    train_log[f"train/{lap_key}"] = batch_loss_metrics[lap_key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
