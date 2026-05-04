@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 ~08:00 UTC (refreshed after EP4 fleet read; askeladd armA GENUINE WIN 6.7644%)
+- **Date:** 2026-05-04 ~08:10 UTC (askeladd ArmA val=6.764% / test=8.171% — pre-agreed merge thresholds satisfied; ArmB launched; alphonse stale run finished naturally)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -65,16 +65,16 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle)
 
-| PR | Student | Lever | Status (2026-05-01 08:00 UTC) |
+| PR | Student | Lever | Status (2026-05-04 08:10 UTC) |
 |---|---|---|---|
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; Arm B (floor=0.3) DONE EP4.1=**6.9569%** — floor NEVER binds (weights stayed ≥0.578); negative result confirmed; alpha=1.5 launch command posted |
-| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE val=6.9421%; **Arm B α=1.0 running: EP3.5=7.042%, EP4.0=6.893%** — within noise of SOTA; EP5 @step~48,898 is decision gate |
-| #568 | fern | NorMuon optimizer | Canonical NorMuon redesign (row-wise RMS) — run `qsa5e4zp` step=7,756, **no val yet** (EP1 gate ~step 10,864) |
-| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) run `nh96x7m4`: **EP4.1=6.7644% — GENUINE WIN** (-0.106pp below SOTA 6.8701%); Arm B (×2.0/×2.5) auto-launching via chain orchestrator |
-| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | Arm A `6ox291lb` step=23,500, EP2=10.289% — **passes pragmatic gate (≤11.0%)**; EP3 gate @step~32,594 if val>8.5% abort |
-| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | Arm A `olrwgvav` step=17,826, EP1=28.692% — normal warmup; EP3 gate @step~32,594 |
-| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | Arm A `3nn65ume` step=16,921, EP1=28.647% — normal warmup; EP2 gate @step~21,729 |
-| #575 | alphonse | Tangent-frame rotation for tau loss — predict tau in local (t̂, b̂, n̂) frame | run `s2433mox` step=43,172, EP3.5=8.2581% — STALE, 3 advisor escalations posted, no student response; W&B group still `coord-jitter-s0.001` |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; Arm B (floor=0.3) DONE val=6.9569% — floor NEVER binds (negative result, hypothesis falsified); **alpha=1.5 follow-up commanded 07:42 UTC, no student ack yet** |
+| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE val=6.9421%; **Arm B α=1.0 running step=44,047, current val=6.8738%** (within DDP noise of SOTA); EP5 @step~48,898 is decision gate |
+| #568 | fern | NorMuon optimizer | Canonical NorMuon (row-wise RMS) — run `qsa5e4zp` step=9,962, **no val yet** (EP1 gate ~step 10,864 imminent) |
+| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | **Arm A (×1.5/×2.0) FINISHED**: val=**6.7644% (-0.106pp WIN)**, test=**8.1711% (+0.048pp regression)** — clears pre-agreed merge gate (val 6.75–6.87% AND test<8.25%); per-channel test broadly regressed +0.02 to +0.08pp except tau_z. **Arm B (×2.0/×2.5) launched 07:54Z run `62yojciu`**, mid-EP1; merge held until Arm B EP2 gate |
+| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | Arm A `6ox291lb` step=25,370, EP2=10.289% — passes pragmatic gate (≤11.0%); EP3 gate @step~32,594 if val>8.5% abort |
+| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | Arm A `olrwgvav` step=20,359, EP1=28.692% — normal warmup; EP2 gate @step~21,729 imminent |
+| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | Arm A `3nn65ume` step=19,347, EP1=28.647% — normal warmup; EP2 gate @step~21,729 imminent |
+| #575 | alphonse | Tangent-frame rotation for tau loss — predict tau in local (t̂, b̂, n̂) frame | Stale `s2433mox` (coord-jitter from closed PR #553) FINISHED naturally at 270.6 min wall-clock cap; alphonse pod watchdog should pick up PR #575 next harness wake; new run not yet started |
 
 Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal angles (structural frame rotation, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity).
 
