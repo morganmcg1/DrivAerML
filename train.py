@@ -722,6 +722,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    wallshear_frame: str = "cartesian"
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1514,6 +1515,93 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+# Bumper-tip threshold: when |n . e_x| > BUMPER_THRESH the projected e_x is too
+# short to seed a stable t1, so we fall back to seeding from e_y. The threshold
+# is on |proj_x|^2 = 1 - n_x^2 < 0.01 i.e. |n_x| > 0.995, but we follow the PR
+# spec's |proj_x| < 0.1 wording (proj_x is the projected length, not n_x).
+_STREAMLINE_BUMPER_PROJ_THRESH = 0.1
+
+
+def build_streamline_frame(
+    normals: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-point orthonormal frame R aligned with the freestream-projected tangent.
+
+    Args:
+        normals: [B, N, 3] surface normals (assumed unit, but renormalized).
+
+    Returns:
+        R: [B, N, 3, 3] rotation; rows are (t1, t2, n).
+            t1 = streamwise tangent (project e_x onto surface tangent plane),
+            t2 = n x t1 (cross-tangent),
+            n  = surface normal.
+        fallback_mask: [B, N] bool, true where |proj of e_x| < BUMPER_THRESH and
+            we used e_y as the seed instead. Logged as a frame-quality diagnostic.
+
+    The frame is mathematically orthogonal: R R^T = I (verified to ~1e-6 in fp32).
+    fp32 internally for bf16 stability.
+    """
+    n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    e_x = n_hat.new_tensor([1.0, 0.0, 0.0]).view(1, 1, 3).expand_as(n_hat)
+    e_y = n_hat.new_tensor([0.0, 1.0, 0.0]).view(1, 1, 3).expand_as(n_hat)
+    proj_x = e_x - (e_x * n_hat).sum(dim=-1, keepdim=True) * n_hat
+    proj_x_len = proj_x.norm(dim=-1, keepdim=True)
+    fallback_mask = (proj_x_len.squeeze(-1) < _STREAMLINE_BUMPER_PROJ_THRESH)
+    proj_y = e_y - (e_y * n_hat).sum(dim=-1, keepdim=True) * n_hat
+    seed = torch.where(fallback_mask.unsqueeze(-1), proj_y, proj_x)
+    t1 = F.normalize(seed, dim=-1, eps=1e-6)
+    t2 = torch.cross(n_hat, t1, dim=-1)
+    R = torch.stack([t1, t2, n_hat], dim=-2)
+    return R, fallback_mask
+
+
+def _ws_iso_sigma(transform: TargetTransform) -> torch.Tensor:
+    """Isotropic σ_iso = sqrt(mean(σ_per_channel^2)) for the wallshear channels.
+
+    Single rotation-invariant scalar so a streamline-frame rotation does not
+    couple per-channel scales (which would break τ·n = 0 on the n channel).
+    """
+    ws_std = transform.surface_y_std[1:4].float()
+    return torch.sqrt((ws_std * ws_std).mean())
+
+
+def rotate_target_to_frame(
+    ws_target_norm: torch.Tensor,
+    transform: TargetTransform,
+    R: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convert per-channel-normalized wallshear target -> σ_iso-frame-normalized.
+
+    Returns (ws_target_frame_norm, ws_target_frame_phys) so the caller can also
+    inspect the n-channel of the rotated physical target (τ·n diagnostic).
+    """
+    ws_std = transform.surface_y_std[1:4].to(ws_target_norm.device).float()
+    ws_mean = transform.surface_y_mean[1:4].to(ws_target_norm.device).float()
+    ws_target_phys = ws_target_norm.float() * ws_std + ws_mean
+    ws_target_frame_phys = (R @ ws_target_phys.unsqueeze(-1)).squeeze(-1)
+    sigma_iso = _ws_iso_sigma(transform).to(ws_target_norm.device)
+    ws_target_frame_norm = ws_target_frame_phys / sigma_iso
+    return ws_target_frame_norm.to(ws_target_norm.dtype), ws_target_frame_phys
+
+
+def rotate_pred_from_frame_to_cart_norm(
+    ws_pred_frame_norm: torch.Tensor,
+    transform: TargetTransform,
+    R: torch.Tensor,
+) -> torch.Tensor:
+    """Convert σ_iso-frame-normalized prediction -> per-channel-cartesian-normalized.
+
+    Inverse path used at eval to feed the standard Cartesian-physical metric.
+    """
+    ws_std = transform.surface_y_std[1:4].to(ws_pred_frame_norm.device).float()
+    ws_mean = transform.surface_y_mean[1:4].to(ws_pred_frame_norm.device).float()
+    sigma_iso = _ws_iso_sigma(transform).to(ws_pred_frame_norm.device)
+    ws_frame_phys = ws_pred_frame_norm.float() * sigma_iso
+    ws_cart_phys = (R.transpose(-2, -1) @ ws_frame_phys.unsqueeze(-1)).squeeze(-1)
+    ws_cart_norm = (ws_cart_phys - ws_mean) / ws_std
+    return ws_cart_norm.to(ws_pred_frame_norm.dtype)
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1528,7 +1616,15 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    wallshear_frame: str = "cartesian",
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    if wallshear_frame not in ("cartesian", "streamline"):
+        raise ValueError(f"unknown wallshear_frame={wallshear_frame!r}")
+    if wallshear_frame == "streamline" and use_tangential_wallshear_loss:
+        raise ValueError(
+            "wallshear_frame=streamline already imposes a tangent constraint via "
+            "the third basis row; do not combine with use_tangential_wallshear_loss."
+        )
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -1541,7 +1637,38 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
-        if use_tangential_wallshear_loss:
+        streamline_metrics: dict[str, float] = {}
+        if wallshear_frame == "streamline":
+            normals = batch.surface_x[..., 3:6]
+            R, fallback_mask = build_streamline_frame(normals)
+            ws_target_cart_norm = surface_target[..., 1:4]
+            ws_target_frame_norm, ws_target_frame_phys = rotate_target_to_frame(
+                ws_target_cart_norm, transform, R
+            )
+            ws_pred_frame_norm = surface_pred_norm[..., 1:4]
+            surface_pred_used = torch.cat(
+                [surface_pred_norm[..., :1], ws_pred_frame_norm], dim=-1
+            )
+            surface_target_used = torch.cat(
+                [surface_target[..., :1], ws_target_frame_norm], dim=-1
+            )
+            mask_bool = batch.surface_mask.bool()
+            if bool(mask_bool.any()):
+                tau_n_phys = ws_target_frame_phys[..., 2][mask_bool]
+                streamline_metrics["tau_dot_n_l2_mean"] = float(
+                    tau_n_phys.float().square().mean().sqrt().detach().cpu().item()
+                )
+                streamline_metrics["bumper_fallback_count"] = float(
+                    fallback_mask[mask_bool].sum().detach().cpu().item()
+                )
+                streamline_metrics["bumper_fallback_fraction"] = float(
+                    fallback_mask[mask_bool].float().mean().detach().cpu().item()
+                )
+            else:
+                streamline_metrics["tau_dot_n_l2_mean"] = float("nan")
+                streamline_metrics["bumper_fallback_count"] = 0.0
+                streamline_metrics["bumper_fallback_fraction"] = 0.0
+        elif use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
             # Denormalize -> project in physical space -> renormalize.
@@ -1594,6 +1721,15 @@ def train_loss(
         "loss_tau_y": per_axis_unweighted[2],
         "loss_tau_z": per_axis_unweighted[3],
     }
+    if wallshear_frame == "streamline":
+        # Per-axis losses are in the rotated frame; surface "tau_x/y/z" keys are
+        # actually t1/t2/n. Mirror under the streamline names so dashboards stay
+        # interpretable, but do NOT delete the legacy keys (downstream wandb
+        # logging hardcodes them).
+        metrics["loss_ws_t1"] = per_axis_unweighted[1]
+        metrics["loss_ws_t2"] = per_axis_unweighted[2]
+        metrics["loss_ws_n"] = per_axis_unweighted[3]
+        metrics.update(streamline_metrics)
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss:
@@ -1657,6 +1793,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    wallshear_frame: str = "cartesian",
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -1696,6 +1833,15 @@ def evaluate_split(
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
+        if wallshear_frame == "streamline":
+            normals = batch.surface_x[..., 3:6]
+            R, _ = build_streamline_frame(normals)
+            ws_cart_norm = rotate_pred_from_frame_to_cart_norm(
+                surface_pred_norm[..., 1:4], transform, R
+            )
+            surface_pred_norm = torch.cat(
+                [surface_pred_norm[..., :1], ws_cart_norm], dim=-1
+            )
         surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
@@ -2172,6 +2318,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                wallshear_frame=config.wallshear_frame,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2286,6 +2433,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            for streamline_key in (
+                "loss_ws_t1",
+                "loss_ws_t2",
+                "loss_ws_n",
+                "tau_dot_n_l2_mean",
+                "bumper_fallback_count",
+                "bumper_fallback_fraction",
+            ):
+                if streamline_key in batch_loss_metrics:
+                    train_log[f"train/{streamline_key}"] = batch_loss_metrics[
+                        streamline_key
+                    ]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
@@ -2367,7 +2526,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, wallshear_frame=config.wallshear_frame)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -2494,7 +2653,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, wallshear_frame=config.wallshear_frame)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -2529,7 +2688,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, wallshear_frame=config.wallshear_frame)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
