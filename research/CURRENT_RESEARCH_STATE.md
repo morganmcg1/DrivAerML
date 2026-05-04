@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Updated:** 2026-05-04 15:30 UTC
+- **Updated:** 2026-05-04 23:00 UTC
 - **Wave:** DrivAerML long-run single-model DDP8 validation
 - **Advisor branch:** `drivaerml-long-20260504` (cut from `main` 2026-05-04)
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -40,15 +40,15 @@ Highest-priority single-model levers per the directive (with W&B references):
 
 This four-arm split tests static weighting (mild on fern, stronger on tanjiro), representation init (frieren STRING), and data curriculum (nezuko).
 
-**Wave-level SOTA so far:** frieren run `sogus8sx` (PR #599, STRING multi-sigma PE) val_abupt ≈ 6.582% — new single-model best in this wave.
+**Wave-level SOTA so far:** frieren run `sogus8sx` (PR #599, STRING multi-sigma PE) val_abupt = **6.5281%** (step 153,831, EP14) — new single-model best in this wave, deepening SOTA breach from prior 6.582%. Run at EP15/50 as of 2026-05-04 23:00 UTC, continuing to EP50.
 
 ## Potential next research directions
 
-**Active PR status (2026-05-04 15:30 UTC):**
-- PR #599 (frieren) — STRING multi-sigma PE, run `sogus8sx` at val≈6.582%, still active
-- PR #608 (nezuko) — volume-loss ×2.0, EP11=17.0%, slow convergence
-- PR #611 (fern) — tau mild y=1.2/z=1.3 AdamW, long run active
-- PR #623 (tanjiro) — tau strong y=1.5/z=2.0, smoke + 50-epoch DDP8 just dispatched
+**Active PR status (2026-05-04 22:00 UTC):**
+- PR #599 (frieren) — STRING multi-sigma PE, run `sogus8sx` at EP15/50 (step 164,819, val=6.5451%). Best checkpoint: step 153,831, val=**6.5281%**. SOTA gate breached (gate=6.7644%); vol=3.81%. Test harvest + terminal SENPAI-RESULT pending at EP50 completion.
+- PR #608 (nezuko) — volume-loss ×2.0, run `y301z78k` at EP19/50 (step 206,453, val=14.62%, vol=7.02%). EP20 gate (vol ≤ 6.9%) imminent. Not an aggregate SOTA candidate (wall_shear~17%) but valid volume mechanism readout.
+- PR #611 (fern) — tau mild y=1.2/z=1.3 AdamW, run `ug6c3nks` at EP14/50 (step 152,123, val=12.42%, vol=6.29%). Checkpoint/stop rule posted: EP20 gate (val > 15% → kill), EP30 gate (val < 11% → EP50; val > 12.5% → kill).
+- PR #623 (tanjiro) — tau strong y=1.5/z=2.0. v4 smoke run `b7pbsdx7` at step 8,808 (EP~0.81, epochs=3). Config confirmed correct (lr=3e-4, warmup=0, tau_y=1.5, tau_z=2.0). EP1 val expected imminently. Long run to follow if smoke passes.
 
 When the round-1 results land, the candidate next moves are (in priority order):
 
