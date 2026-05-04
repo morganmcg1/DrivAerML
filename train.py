@@ -870,6 +870,7 @@ class SurfaceTransolver(nn.Module):
         film_encoder_dim: int = 64,
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
+        beta_nll: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -883,6 +884,7 @@ class SurfaceTransolver(nn.Module):
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
         self.learnable_pe = learnable_pe
+        self.beta_nll = beta_nll
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -918,6 +920,16 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        if self.beta_nll:
+            self.surface_log_var_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.volume_log_var_out = LinearProjection(n_hidden, self.volume_output_dim)
+            # Zero-init so the model starts predicting log_var=0 (var=1 in normalized
+            # space). This makes the β-NLL loss equivalent to MSE at step 0 and lets
+            # the variance head adjust gradually as gradients arrive.
+            nn.init.zeros_(self.surface_log_var_out.project.weight)
+            nn.init.zeros_(self.surface_log_var_out.project.bias)
+            nn.init.zeros_(self.volume_log_var_out.project.weight)
+            nn.init.zeros_(self.volume_log_var_out.project.bias)
 
     def _encode_group(
         self,
@@ -1010,6 +1022,19 @@ class SurfaceTransolver(nn.Module):
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if self.beta_nll:
+            if surface_x is not None:
+                surface_log_var = self.surface_log_var_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            else:
+                batch_size = volume_x.shape[0]
+                surface_log_var = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+            if volume_x is not None:
+                volume_log_var = self.volume_log_var_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            else:
+                batch_size = surface_x.shape[0]
+                volume_log_var = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+            result["surface_log_var"] = surface_log_var
+            result["volume_log_var"] = volume_log_var
         if geom_token is not None:
             result["geom_token"] = geom_token
         return result
@@ -1090,6 +1115,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    beta_nll_beta: float = -1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1338,6 +1364,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_max_wavelength=config.pos_max_wavelength,
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
+        beta_nll=config.beta_nll_beta >= 0.0,
     )
 
 
@@ -1917,6 +1944,66 @@ def weighted_masked_mse_per_channel(
     return weighted_loss, per_axis_mean
 
 
+LOG_VAR_CLAMP_MIN = -10.0
+LOG_VAR_CLAMP_MAX = 5.0
+
+
+def weighted_masked_beta_nll_per_channel(
+    pred_mean: torch.Tensor,
+    pred_log_var: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    channel_weights: Iterable[float],
+    beta: float,
+) -> tuple[torch.Tensor, list[float], list[float]]:
+    """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
+
+    pred_mean, pred_log_var, target: [B, N, C]; mask: [B, N] bool.
+
+    Canonical β-NLL form (cf. https://github.com/martius-lab/beta-nll):
+        nll      = 0.5 * [ (target - mean)² / var + log var ]
+        loss_elem = stop_grad(var ** beta) * nll
+    where ``β=0`` recovers standard NLL (variance collapse possible),
+    ``β=1`` decouples the variance head from the mean-head gradient (mean
+    head gradient ≡ MSE), and ``β=0.5`` is the canonical pitfall-free form.
+
+    log_var is clamped to ``[LOG_VAR_CLAMP_MIN, LOG_VAR_CLAMP_MAX]`` before
+    exponentiation to keep the residual term and the β-weight bounded.
+
+    Returns:
+        weighted_loss: scalar β-NLL averaged across channels.
+        per_axis_diff_sq_mean: list of per-channel masked mean of squared
+            residuals (independent of β; for cross-arm comparability).
+        per_axis_log_var_mean: list of per-channel masked mean of clamped
+            log_var (post-clamp).
+    """
+    weights = torch.tensor(list(channel_weights), device=pred_mean.device, dtype=pred_mean.dtype)
+    n_channels = pred_mean.shape[-1]
+    if not bool(mask.any()):
+        zero_per_axis = [0.0] * int(weights.numel())
+        return pred_mean.sum() * 0.0, zero_per_axis, zero_per_axis
+
+    log_var = pred_log_var.clamp(LOG_VAR_CLAMP_MIN, LOG_VAR_CLAMP_MAX)
+    var = log_var.exp()
+    diff = pred_mean - target  # [B, N, C]
+    diff_sq = diff.pow(2)
+    nll = 0.5 * (diff_sq / var + log_var)
+    if beta > 0.0:
+        nll = nll * var.detach().pow(beta)
+
+    mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
+    valid = mask_f.sum().clamp_min(1)
+    weighted_diff = nll * weights.view(1, 1, -1)
+    weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
+
+    per_axis_diff_sq_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
+    per_axis_diff_sq_mean = (per_axis_diff_sq_sum / valid.detach().float()).cpu().tolist()
+    per_axis_log_var_sum = (log_var * mask_f).sum(dim=(0, 1)).detach().float()
+    per_axis_log_var_mean = (per_axis_log_var_sum / valid.detach().float()).cpu().tolist()
+    return weighted_loss, per_axis_diff_sq_mean, per_axis_log_var_mean
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -1943,10 +2030,12 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    beta_nll_beta: float = -1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    use_beta_nll = beta_nll_beta >= 0.0
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -1956,7 +2045,7 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
-        if use_tangential_wallshear_loss:
+        if use_tangential_wallshear_loss and not use_beta_nll:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
             # Denormalize -> project in physical space -> renormalize.
@@ -1982,14 +2071,38 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
-        surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
-            surface_pred_used,
-            surface_target_used,
-            batch.surface_mask,
-            channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
-            wallshear_huber_delta=wallshear_huber_delta,
-        )
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+
+        per_axis_log_var: list[float] | None = None
+        volume_log_var_mean: float | None = None
+        if use_beta_nll:
+            surface_log_var = out["surface_log_var"]
+            volume_log_var = out["volume_log_var"]
+            surface_loss, per_axis_unweighted, per_axis_log_var = weighted_masked_beta_nll_per_channel(
+                surface_pred_used,
+                surface_log_var,
+                surface_target_used,
+                batch.surface_mask,
+                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                beta=beta_nll_beta,
+            )
+            volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
+                out["volume_preds"],
+                volume_log_var,
+                volume_target,
+                batch.volume_mask,
+                channel_weights=(1.0,),
+                beta=beta_nll_beta,
+            )
+            volume_log_var_mean = vol_log_var_per_axis[0] if vol_log_var_per_axis else 0.0
+        else:
+            surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
+                surface_pred_used,
+                surface_target_used,
+                batch.surface_mask,
+                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                wallshear_huber_delta=wallshear_huber_delta,
+            )
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
@@ -2011,8 +2124,15 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
-    if use_tangential_wallshear_loss:
+    if use_tangential_wallshear_loss and not use_beta_nll:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if use_beta_nll and per_axis_log_var is not None:
+        metrics["log_var_surface_pressure"] = per_axis_log_var[0]
+        metrics["log_var_wall_shear_x"] = per_axis_log_var[1]
+        metrics["log_var_wall_shear_y"] = per_axis_log_var[2]
+        metrics["log_var_wall_shear_z"] = per_axis_log_var[3]
+        if volume_log_var_mean is not None:
+            metrics["log_var_volume_pressure"] = volume_log_var_mean
     if "geom_token" in out:
         geom_token = out["geom_token"].detach().float()
         metrics["film/geom_token_norm_mean"] = float(
@@ -2657,6 +2777,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                beta_nll_beta=config.beta_nll_beta,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2775,6 +2896,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            for log_var_key in (
+                "log_var_surface_pressure",
+                "log_var_wall_shear_x",
+                "log_var_wall_shear_y",
+                "log_var_wall_shear_z",
+                "log_var_volume_pressure",
+            ):
+                if log_var_key in batch_loss_metrics:
+                    train_log[f"train/{log_var_key}"] = batch_loss_metrics[log_var_key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
