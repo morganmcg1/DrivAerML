@@ -128,6 +128,13 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    normuon_momentum: float = 0.95
+    normuon_beta2: float = 0.9
+    normuon_ns_steps: int = 5
+    normuon_adamw_lr_mult: float = 3.0
+    normuon_adamw_beta1: float = 0.9
+    normuon_adamw_beta2: float = 0.95
+    normuon_shape_lr_scale: bool = True
     vol_points_schedule: str = ""
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
@@ -233,6 +240,203 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+    """Newton-Schulz iteration to approximate the polar factor U from G = U Σ V^T.
+
+    Runs in bfloat16 for speed; uses the classic 5-step coefficient triple
+    (3.4445, -4.7750, 2.0315) from Jordan's modded-nanogpt Muon recipe.
+    """
+    assert G.ndim == 2
+    a, b, c = (3.4445, -4.7750, 2.0315)
+    X = G.bfloat16()
+    X = X / (X.norm() + eps)
+    transposed = G.size(0) > G.size(1)
+    if transposed:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        X = a * X + b * (A @ X) + c * (A @ A @ X)
+    if transposed:
+        X = X.T
+    return X.to(G.dtype)
+
+
+class NorMuon(torch.optim.Optimizer):
+    """NorMuon: Muon (Newton-Schulz orthogonalized momentum) + Adafactor-style
+    per-row variance reduction for 2D weight matrices, with AdamW fallback for
+    non-2D parameters (biases, norms, scalars, embedding/freq tables).
+
+    Param-group 0 ('use_muon'=True) holds the 2D weights and uses NorMuon.
+    Param-group 1 ('use_muon'=False) holds everything else and uses AdamW.
+
+    DDP: standard contract — gradients are already allreduced by DDP backward
+    hooks before step() is called, so each rank's optimizer state evolves
+    identically. No custom communication.
+
+    References
+    ----------
+    - Muon: https://github.com/KellerJordan/modded-nanogpt
+    - NorMuon variance reduction: https://arxiv.org/abs/2510.05491
+    """
+
+    def __init__(
+        self,
+        params_2d: list[torch.nn.Parameter],
+        params_1d: list[torch.nn.Parameter],
+        lr: float = 2e-4,
+        momentum: float = 0.95,
+        beta2: float = 0.9,
+        ns_steps: int = 5,
+        weight_decay: float = 0.0,
+        shape_lr_scale: bool = True,
+        adamw_lr: float = 6e-4,
+        adamw_betas: tuple[float, float] = (0.9, 0.95),
+        adamw_eps: float = 1e-8,
+        adamw_weight_decay: float = 0.0,
+    ):
+        if not params_2d and not params_1d:
+            raise ValueError("NorMuon requires at least one parameter")
+        param_groups = [
+            {
+                "params": list(params_2d),
+                "use_muon": True,
+                "lr": lr,
+                "momentum": momentum,
+                "beta2": beta2,
+                "ns_steps": ns_steps,
+                "weight_decay": weight_decay,
+                "shape_lr_scale": shape_lr_scale,
+            },
+            {
+                "params": list(params_1d),
+                "use_muon": False,
+                "lr": adamw_lr,
+                "betas": adamw_betas,
+                "eps": adamw_eps,
+                "weight_decay": adamw_weight_decay,
+            },
+        ]
+        super().__init__(param_groups, defaults={})
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+        for group in self.param_groups:
+            if group.get("use_muon", False):
+                self._normuon_step(group)
+            else:
+                self._adamw_step(group)
+        return loss
+
+    def _normuon_step(self, group: dict) -> None:
+        lr = group["lr"]
+        momentum = group["momentum"]
+        beta2 = group["beta2"]
+        ns_steps = group["ns_steps"]
+        weight_decay = group["weight_decay"]
+        shape_lr_scale = group["shape_lr_scale"]
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            assert p.ndim == 2, "NorMuon path requires 2D parameters"
+            g = p.grad.float()
+            state = self.state[p]
+            if len(state) == 0:
+                state["momentum_buffer"] = torch.zeros_like(p, dtype=torch.float32)
+                # Per-row second moment along the longer axis. After Newton-Schulz
+                # the orthogonalized step has rank min(rows, cols); the longer
+                # axis carries redundant directions that benefit from
+                # row-wise (Adafactor-style) variance reduction.
+                red_dim = -1 if p.shape[0] >= p.shape[1] else -2
+                sm_shape = list(p.shape)
+                sm_shape[red_dim] = 1
+                state["second_moment"] = torch.zeros(
+                    sm_shape, dtype=torch.float32, device=p.device
+                )
+                state["red_dim"] = red_dim
+            buf = state["momentum_buffer"]
+            sm = state["second_moment"]
+            red_dim = state["red_dim"]
+            # Heavy-ball + Nesterov-style lookahead
+            buf.mul_(momentum).add_(g)
+            g_eff = g.add(buf, alpha=momentum)
+            v = zeropower_via_newtonschulz5(g_eff, steps=ns_steps).float()
+            # Adafactor-style per-row second-moment normalization (the "Nor"
+            # in NorMuon).
+            v_sq_mean = v.square().mean(dim=red_dim, keepdim=True)
+            sm.lerp_(v_sq_mean, 1.0 - beta2)
+            denom = sm.clamp_min(1e-10).sqrt()
+            v_norm = v / denom
+            # Renormalize to preserve the orthogonalized step's global magnitude.
+            ref_norm = v.norm()
+            cur_norm = v_norm.norm().clamp_min(1e-10)
+            v_norm = v_norm * (ref_norm / cur_norm)
+            if shape_lr_scale:
+                fan_out, fan_in = p.shape[0], p.shape[1]
+                step_lr = lr * (max(1.0, fan_out / fan_in) ** 0.5)
+            else:
+                step_lr = lr
+            if weight_decay > 0.0:
+                p.mul_(1.0 - step_lr * weight_decay)
+            p.add_(v_norm.to(p.dtype), alpha=-step_lr)
+
+    def _adamw_step(self, group: dict) -> None:
+        lr = group["lr"]
+        b1, b2 = group["betas"]
+        eps = group["eps"]
+        wd = group["weight_decay"]
+        for p in group["params"]:
+            if p.grad is None:
+                continue
+            g = p.grad.float()
+            state = self.state[p]
+            if len(state) == 0:
+                state["step"] = 0
+                state["exp_avg"] = torch.zeros_like(p, dtype=torch.float32)
+                state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
+            state["step"] += 1
+            t = state["step"]
+            m, v = state["exp_avg"], state["exp_avg_sq"]
+            m.lerp_(g, 1.0 - b1)
+            v.lerp_(g.square(), 1.0 - b2)
+            m_hat = m / (1.0 - b1**t)
+            v_hat = v / (1.0 - b2**t)
+            update = m_hat / (v_hat.sqrt() + eps)
+            if wd > 0.0:
+                p.mul_(1.0 - lr * wd)
+            p.add_(update.to(p.dtype), alpha=-lr)
+
+
+def split_params_for_normuon(
+    model: nn.Module,
+) -> tuple[list[torch.nn.Parameter], list[torch.nn.Parameter], list[str], list[str]]:
+    """Split trainable parameters into (NorMuon 2D, AdamW non-2D) groups.
+
+    Excludes string-separable RoPE frequency tables (`*_string_sep.log_freq`,
+    `*_string_sep.phase`) from the NorMuon group: those are 2D but are learned
+    frequency tables, not weight matrices, and Newton-Schulz orthogonalization
+    is inappropriate for them.
+    """
+    params_2d: list[torch.nn.Parameter] = []
+    params_1d: list[torch.nn.Parameter] = []
+    names_2d: list[str] = []
+    names_1d: list[str] = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        is_freq_table = "string_sep" in name
+        if p.dim() == 2 and not is_freq_table:
+            params_2d.append(p)
+            names_2d.append(name)
+        else:
+            params_1d.append(p)
+            names_1d.append(name)
+    return params_2d, params_1d, names_2d, names_1d
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
@@ -251,7 +455,45 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
         )
-    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+    if optimizer_name == "normuon":
+        params_2d, params_1d, names_2d, names_1d = split_params_for_normuon(model)
+        if not params_2d:
+            raise RuntimeError(
+                "NorMuon requires at least one 2D weight parameter; none found "
+                "(check that string_sep filter is not removing every 2D param)."
+            )
+        if int(os.environ.get("RANK", "0")) == 0:
+            n_2d = sum(p.numel() for p in params_2d)
+            n_1d = sum(p.numel() for p in params_1d)
+            print(
+                f"NorMuon param split: 2D group {len(params_2d)} tensors, "
+                f"{n_2d / 1e6:.2f}M params (NorMuon path); "
+                f"non-2D group {len(params_1d)} tensors, {n_1d / 1e6:.3f}M "
+                f"params (AdamW path)"
+            )
+            print(f"  NorMuon lr={config.lr:.2e} momentum={config.normuon_momentum} "
+                  f"beta2={config.normuon_beta2} ns_steps={config.normuon_ns_steps} "
+                  f"shape_lr_scale={config.normuon_shape_lr_scale}")
+            print(f"  AdamW lr={config.lr * config.normuon_adamw_lr_mult:.2e} "
+                  f"betas=({config.normuon_adamw_beta1},{config.normuon_adamw_beta2}) "
+                  f"weight_decay={config.weight_decay}")
+        return NorMuon(
+            params_2d,
+            params_1d,
+            lr=config.lr,
+            momentum=config.normuon_momentum,
+            beta2=config.normuon_beta2,
+            ns_steps=config.normuon_ns_steps,
+            weight_decay=config.weight_decay,
+            shape_lr_scale=config.normuon_shape_lr_scale,
+            adamw_lr=config.lr * config.normuon_adamw_lr_mult,
+            adamw_betas=(config.normuon_adamw_beta1, config.normuon_adamw_beta2),
+            adamw_eps=1e-8,
+            adamw_weight_decay=config.weight_decay,
+        )
+    raise ValueError(
+        f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion, normuon."
+    )
 
 
 def parse_rff_init_sigmas(spec: str) -> list[float] | None:
