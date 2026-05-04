@@ -204,6 +204,25 @@ checkpoint reload.
 **Previous tay SOTA (PR #488 alphonse EP11):** val_abupt=7.3672%, test_abupt=8.4791%
 **Fleet leader before PR #511 (PR #489 thorfinn):** val_abupt=7.1792%
 
+## Infrastructure merge — 2026-05-04: PR #580 (haku, principal surface curvatures)
+
+PR #580 (haku, `--surface-curvature-features {none,h_k,k1_k2}`) merged as an infrastructure PR. The feature is now available on `yi`. Best arm: Arm C (κ₁, κ₂), val_abupt=9.7225%, test_abupt=10.795% (W&B runs: Arm A `k5kp1rdp`, Arm B `hdpl64cf`, Arm C `c5685y3e`).
+
+Arm C edges out Arm B (H, K) by a hair on every primary metric. Both arms confirm the mechanism: τ_y/τ_z improvement is monotone with curvedness (per-decile analysis, τ_y −8.7%, τ_z −6.5% at the sharpest decile 10). The feature adds zero measurable per-step training overhead.
+
+**Metric bar unchanged: val_abupt 9.032% (PR #517).** The 3-epoch compute budget limited curvature runs to val_abupt=9.7225% — above the merge bar. The plumbing is clean and ready for full-budget composition runs.
+
+**Reproduce (Arm C):**
+```bash
+cd target/
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
+  --no-compile-model --validation-every 1 \
+  --optimizer lion --lr 1e-4 --weight-decay 5e-4 --grad-clip 0.5 \
+  --surface-curvature-features k1_k2
+```
+
+15. PR #580 haku — principal surface curvatures (κ₁, κ₂) as 9-channel input features (infrastructure, `--surface-curvature-features k1_k2`; metric bar unchanged)
+
 ## Current best on `yi`
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
