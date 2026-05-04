@@ -48,11 +48,42 @@ CUDA_VISIBLE_DEVICES=0 uv run python ensemble_eval.py \
 
 ---
 
-## SINGLE-MODEL SOTA: thorfinn PR #523 EMA-proxy GradNorm alpha=0.5 EP6 — 2026-05-01 (CONFIRMED SOTA)
+## SINGLE-MODEL SOTA: askeladd PR #516 per-channel tau_y/tau_z loss reweighting — 2026-05-04
 
-**W&B run:** `wyz68o8r` (thorfinn DDP8, rank-0) — group `thorfinn-gradnorm-r2`, best val **6.9246%** (EP6), runtime 4.71h
+**W&B run:** `9mm3sz7x` (askeladd DDP8, rank-0) — group `askeladd-tau-reweight-micro`, best val **6.8701%** (EP5), runtime ~4.7h
+**PR:** #516
+**Val metrics (best-val checkpoint, EP5):** val_abupt=6.8701%, surface_pressure=4.515%, wall_shear=7.757%, volume_pressure=4.144%, tau_x=6.763%, tau_y=8.663%, tau_z=10.266%
+**Test metrics:** test_abupt=8.1229%
+
+**Key insight:** Simple fixed per-channel tau reweighting (tau_y×1.2, tau_z×1.3) WITHOUT GradNorm outperforms EMA-proxy GradNorm (6.8701% < 6.9246%). Lion optimizer, lr=9e-5, surface_loss_weight=2.0, ema_decay=0.999.
+
+**Single-model training gate:** val_abupt < **6.8701%** (previously 6.9246% from PR #523)
+
+### Reproduce (tau_y×1.2, tau_z×1.3, Lion lr=9e-5, no GradNorm)
+
+```bash
+torchrun --standalone --nproc_per_node=8 target/train.py \
+  --agent askeladd --optimizer lion --lr 9e-5 --weight-decay 5e-4 \
+  --tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3 \
+  --surface-loss-weight 2.0 \
+  --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
+  --pos-encoding-mode string_separable --use-qk-norm \
+  --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --lr-cosine-t-max 13 --epochs 13 \
+  --wandb-group askeladd-tau-reweight-micro \
+  --wandb-name askeladd/tau-reweight-w1.2-w1.3-lr9e-5
+```
+
+### Previous SOTA: thorfinn PR #523 EMA-proxy GradNorm alpha=0.5 EP6 — 2026-05-01
+
+**W&B run:** `wyz68o8r` (thorfinn DDP8, rank-0) — group `thorfinn-gradnorm-r2`, best val **6.9246%** (EP6)
 **PR:** #523
-**Val metrics (best-val checkpoint, EP6):** val_abupt=6.9246%, surface_pressure=4.5840%, wall_shear=7.7457%, volume_pressure=4.3040%, tau_x=6.7193%, tau_y=8.7197%, tau_z=10.2960%
+**Val metrics:** val_abupt=6.9246%, surface_pressure=4.5840%, wall_shear=7.7457%, volume_pressure=4.3040%, tau_x=6.7193%, tau_y=8.7197%, tau_z=10.2960%
 **Test metrics:** test_abupt=8.2355%, surface_pressure=4.2712%, wall_shear=7.5043%, volume_pressure=12.2131%, tau_x=6.5557%, tau_y=8.4656%, tau_z=9.6720%
 
 ### Previous SOTA: alphonse PR #510 surface-loss-weight slw=2.0 EP5 — 2026-05-03
@@ -111,7 +142,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 (Note: multi-sigma STRING-sep init from PR #488 model.py is required — `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"`)
 
-### Compounding wins so far (updated through PR #523)
+### Compounding wins so far (updated through PR #516)
 
 | PR | Who | Delta | Lever |
 |---|---|---:|---|
@@ -136,6 +167,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | #511 | edward | **−0.1658pp (−2.31%) vs #489** | extended cosine T_max 11→13: 2 extra convergence epochs on descending tail — EP13 val_abupt=7.0134%, test_abupt=8.3130% |
 | **#510** | **alphonse** | **−0.0071pp (−0.10%) vs #511** | **surface-loss-weight=2.0: heavier surface gradient emphasis closes tau_x/tau_z/wall_shear at EP5 — val_abupt=7.0063%, test_abupt=8.2921%** |
 | **#523** | **thorfinn** | **−0.0817pp (−1.16%) vs #510** | **EMA-proxy GradNorm alpha=0.5, floor=0.7: dynamic tau_y/tau_z upweighting (1.16×/1.24×), closed-form EMA weight updates ~0% overhead — val_abupt=6.9246%, test_abupt=8.2355%** |
+| **#516** | **askeladd** | **−0.0545pp (−0.79%) vs #523** | **Per-channel tau_y×1.2 / tau_z×1.3 fixed loss reweighting (no GradNorm): simple static channel weights beat EMA-proxy GradNorm — val_abupt=6.8701%, test_abupt=8.1229%** |
 
 ---
 
