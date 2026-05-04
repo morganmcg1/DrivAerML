@@ -1,10 +1,10 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 ~07:00 UTC (refreshed after EP3 fleet read; fern NorMuon sent back for canonical redesign)
+- **Date:** 2026-05-01 ~08:00 UTC (refreshed after EP4 fleet read; askeladd armA GENUINE WIN 6.7644%)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 0 idle students, 8 WIP PRs, 0 review-ready (full GPU utilization)
+- **Fleet:** 0 idle students, 8 WIP PRs, 1 review-ready (full GPU utilization)
 - **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 total)
 
 ## ENSEMBLE SOTA — PR #562 nezuko greedy K=7 forward selection — val_abupt **6.2345%**
@@ -65,16 +65,16 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle)
 
-| PR | Student | Lever | Status (2026-05-04 06:30 UTC) |
+| PR | Student | Lever | Status (2026-05-01 08:00 UTC) |
 |---|---|---|---|
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; **Arm B EP3=7.55%** (≈SOTA); confirmed floor-not-binding; pivot to α=1.5 launch instructions posted |
-| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE val=6.9421% (test tau_y/tau_z improved); **Arm B α=1.0 EP3=7.46%** — best-of-fleet at EP3, narrowly ahead of SOTA EP3 7.49% |
-| #568 | fern | NorMuon optimizer | **DIVERGED — Arm A `ii3vh18d` blew up post-EP1**; sent back for canonical row-wise RMS NorMuon redesign |
-| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) **EP3=7.93%** — gap widening as predicted; let finish for clean test; reconsider Arm C launch |
-| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | **Arm A EP1=38.58%** (+7.76pp vs SOTA EP1) — concerning; EP2 hard gate at 11.0% |
-| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | Arm A relaunched as `olrwgvav` (prior `y5f4ptmm` killed); too early for val (~EP0.6) |
-| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | Arm A `3nn65ume` running after `--no-compile-model` fix; too early for val (~EP0.5) |
-| #575 | alphonse | Tangent-frame rotation for tau loss — predict tau in local (t̂, b̂, n̂) frame | running but **W&B group is `coord-jitter-s0.001`** (suggests student is running coord-jitter, not tangent-frame); EP3=8.53% — needs student check-in to clarify |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; Arm B (floor=0.3) DONE EP4.1=**6.9569%** — floor NEVER binds (weights stayed ≥0.578); negative result confirmed; alpha=1.5 launch command posted |
+| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE val=6.9421%; **Arm B α=1.0 running: EP3.5=7.042%, EP4.0=6.893%** — within noise of SOTA; EP5 @step~48,898 is decision gate |
+| #568 | fern | NorMuon optimizer | Canonical NorMuon redesign (row-wise RMS) — run `qsa5e4zp` step=7,756, **no val yet** (EP1 gate ~step 10,864) |
+| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) run `nh96x7m4`: **EP4.1=6.7644% — GENUINE WIN** (-0.106pp below SOTA 6.8701%); Arm B (×2.0/×2.5) auto-launching via chain orchestrator |
+| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | Arm A `6ox291lb` step=23,500, EP2=10.289% — **passes pragmatic gate (≤11.0%)**; EP3 gate @step~32,594 if val>8.5% abort |
+| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | Arm A `olrwgvav` step=17,826, EP1=28.692% — normal warmup; EP3 gate @step~32,594 |
+| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | Arm A `3nn65ume` step=16,921, EP1=28.647% — normal warmup; EP2 gate @step~21,729 |
+| #575 | alphonse | Tangent-frame rotation for tau loss — predict tau in local (t̂, b̂, n̂) frame | run `s2433mox` step=43,172, EP3.5=8.2581% — STALE, 3 advisor escalations posted, no student response; W&B group still `coord-jitter-s0.001` |
 
 Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal angles (structural frame rotation, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity).
 
@@ -118,7 +118,7 @@ Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal 
   - RFF spectral density expansion (#574 tanjiro) — double feature budget or wider sigma range for better spectral coverage
 
 ### 2. Negative-direction confirmed (do not retry on current stack)
-- **Static channel reweighting** is now 4× negative (#142, #454, #467, #531) — askeladd #516 v2 is final attempt at this angle before the lever is exhausted
+- **Static channel reweighting**: Prior round showed 4× negative (#142, #454, #467, #531); however askeladd PR #571 Arm A (tau_y×1.5, tau_z×2.0 on SOTA GradNorm+Lion stack) now shows val=6.7644% — **GENUINE WIN**. Prior negatives used simpler stacks. Intensity sweep Arm B (×2.0/×2.5) in progress to find optimal point.
 - **Y-mirror data augmentation** (#536) — gap is structural
 - **Direction loss on tau** (#531) — gap is not direction-prediction
 
