@@ -69,12 +69,46 @@ uv run python ensemble_eval.py \
 
 ---
 
-## SINGLE-MODEL SOTA: askeladd PR #594 rff32 on PR #571 SOTA stack — 2026-05-04
+## SINGLE-MODEL SOTA: alphonse PR #592 depth-L5 (model-layers=5) — 2026-05-04
+
+**W&B run:** `4k25s25e` (alphonse DDP8, rank-0) — group `model-depth-sweep`, name `alphonse/depth-L5`, best val **6.5985%** (EP4, step 43,459)
+**PR:** #592
+
+**Val metrics (best-val checkpoint, EP4):** val_abupt=6.5985%, surface_pressure=4.3322%, volume_pressure=3.9456%, wall_shear_x=6.5420%, wall_shear_y=8.3631%, wall_shear_z=9.8099%
+**Test metrics:** test_abupt=7.9915%
+**Model params:** ~15.9M | VRAM ~52GB/96GB | Training time ~270.8 min
+
+**Key insight:** Increasing model depth from L=4 to L=5 (5 transformer layers, hidden_dim=512, heads=4, slices=128) beats the prior single-model SOTA (PR #594, val=6.7258%) by −0.1273pp (−1.90% relative). Surface pressure improves to 4.3322% (PR #571 was 4.455%). Near-wall tau physics also improve. L=5 adds ~4M params (~15.9M vs ~12M for L=4) at the cost of ~52GB VRAM vs ~42GB.
+
+**Single-model training gate:** val_abupt < **6.5985%** (previously 6.7258% from PR #594)
+
+### Reproduce (L=5, Lion lr=9e-5, tau_y×1.5/tau_z×2.0, surface_w=2.0, no-compile)
+
+```bash
+cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
+  --agent alphonse --optimizer lion --lr 9e-5 --weight-decay 5e-4 \
+  --tau-y-loss-weight 1.5 --tau-z-loss-weight 2.0 --surface-loss-weight 2.0 \
+  --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
+  --pos-encoding-mode string_separable --use-qk-norm \
+  --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --lr-cosine-t-max 13 --epochs 13 \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
+  --no-compile-model \
+  --model-layers 5 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --wandb-group model-depth-sweep --wandb-name alphonse/depth-L5
+```
+
+**Artifact:** `model-alphonse-depth-L5-4k25s25e`
+
+---
+
+## Prior Single-Model SOTA: askeladd PR #594 rff32 on PR #571 SOTA stack — 2026-05-04
 
 **W&B run:** `d777epep` (askeladd DDP8, rank-0) — group `askeladd-rff32-pr571-sota`, best val **6.7258%** (EP4, step 43,462)
 **PR:** #594
-
-**Single-model training gate:** val_abupt < **6.7258%** (previously 6.7644% from PR #571)
 
 ---
 
