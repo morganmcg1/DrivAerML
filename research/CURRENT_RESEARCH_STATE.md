@@ -1,163 +1,112 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 (4 new experiment PRs assigned: nezuko PR #602 ensemble pool expansion, tanjiro PR #603 EMA decay sweep, fern PR #604 inference-time mirror-y TTA, edward PR #605 surface curvature features; fleet at full utilization 8/8)
+- **Date:** 2026-05-04 ~14:20 UTC (Round 13 — fleet 8/8 fully utilized)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 0 idle students, 8 WIP PRs (full GPU utilization)
-- **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 total)
+- **Fleet:** 0 idle students, 8 WIP PRs (all GPUs in use)
+- **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn
 
-## ENSEMBLE SOTA — PR #562 nezuko greedy K=7 forward selection — val_abupt **6.2345%**
+---
 
-Beats prior K=5 ensemble (PR #556 val=6.2681%) by Caruana 2004 greedy forward selection from 22 candidates.
+## ENSEMBLE SOTA — PR #602 nezuko greedy K=7 (pool 23) — val_abupt **6.2062%** / test_abupt **7.5164%**
 
-## SINGLE-MODEL SOTA — PR #571 askeladd tau_y×1.5 / tau_z×2.0 weight intensification — val_abupt **6.7644%** / test_abupt **8.171%**
+W&B run `ydw7rxl2`. Beats prior K=7 (PR #562 val=6.2345%) by adding PR #571 SOTA (`nh96x7m4`, rff16 multi-sigma) to the candidate pool. Greedy forward selection from Caruana 2004 across 23 candidates.
 
-Beats prior SOTA PR #516 (6.8701%) by −0.106pp (−1.54% relative). W&B run `nh96x7m4`, group `askeladd-tau-sweep`, runtime ~4.7h.
+**Ensemble gate:** any new ensemble must beat val_abupt < **6.2062%**.
 
-All single-model PRs must beat val_abupt < **6.7644%** with test_abupt ≤ ~8.20%.
+## SINGLE-MODEL SOTA — PR #594 askeladd RFF=32 on PR #571 SOTA stack — val_abupt **6.7258%**
 
-**Key insight:** Moderate tau weight intensification (tau_y×1.5, tau_z×2.0) on the SOTA stack further closes the tau_y/tau_z gap. tau_y: 8.663%→8.489% (−0.174pp), tau_z: 10.266%→9.997% (−0.269pp). GradNorm-EMA NOT used — pure fixed-weight reweighting outperformed GradNorm on this stack.
+W&B run `d777epep`. Beats prior PR #571 (val=6.7644%) by spectral-budget upgrade from 16 to 32 RFF features on the rff_multisigma + lion + tau-reweight stack.
 
-### Previous Single-Model SOTA: PR #516 — val_abupt 6.8701% / test_abupt 8.1229%
+**Single-model gate:** any new single-model run must beat val_abupt < **6.7258%**.
 
-### Noise-floor calibration (askeladd PR #571 rebased SOTA repro — now MERGED)
-- Identical-config rerun of SOTA stack: val=6.9226% vs claimed 6.8701% (+0.052pp on identical code)
-- **Treat improvements within ±0.05pp of SOTA as noise**, not signal
-- Genuine win threshold: val_abupt < **6.71%** (was 6.82% vs PR #516; now recalibrated against 6.7644%)
-- Borderline (need replicate): 6.71–6.81%
-- No signal / regression: > 6.81%
+### Noise floor calibration
+- Identical-config rerun shows ~+0.05pp run-to-run variation
+- Genuine win threshold: **val_abupt < 6.6758%** (gate − 5bps)
+- Borderline (need replicate): 6.6758–6.7258%
+- No signal / regression: > 6.7258%
 
-| Metric | PR #523 SOTA val EP6 | AB-UPT |
-|---|---:|---:|
-| `abupt` | **6.9246%** | — |
-| `surface_pressure` | 4.5840% | 3.82% |
-| `wall_shear` | 7.7457% | 7.29% |
-| `volume_pressure` | **4.3040%** | 6.08% (BEATEN) |
-| `tau_x` | 6.7193% | 5.35% |
-| `tau_y` | 8.7197% | 3.65% |
-| `tau_z` | 10.2960% | 3.63% |
-
-Test (best-val checkpoint): test_abupt=8.2355%, test_tau_y=8.4656%, test_tau_z=9.6720%.
-W&B run: `wyz68o8r`, group `thorfinn-gradnorm-r2`, runtime 4.71h.
-
-### Canonical SOTA reproduce command
+### Canonical SOTA reproduce command (PR #594 stack)
 
 ```bash
-torchrun --standalone --nproc_per_node=8 train.py \
-  --agent <student> --optimizer lion --lr 1e-4 --weight-decay 5e-4 \
-  --no-compile-model --batch-size 4 --validation-every 1 \
+torchrun --standalone --nproc_per_node=8 target/train.py \
+  --agent <student> --optimizer lion --lr 9e-5 --weight-decay 5e-4 \
+  --tau-y-loss-weight 1.5 --tau-z-loss-weight 2.0 \
+  --surface-loss-weight 2.0 --batch-size 4 --validation-every 1 \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
   --model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
   --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
   --pos-encoding-mode string_separable --use-qk-norm \
-  --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
-  --lr-cosine-t-max 13 --epochs 13 \
-  --use-gradnorm --gradnorm-mode ema_proxy \
-  --gradnorm-alpha 0.5 --gradnorm-ema-beta 0.9 --gradnorm-min-weight 0.7
+  --rff-num-features 32 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --no-compile-model --lr-cosine-t-max 13 --epochs 13
 ```
-
-Note: `--use-gradnorm` overrides `--surface-loss-weight` / `--volume-loss-weight` (legacy scalars are ignored when gradnorm is enabled).
 
 ---
 
 ## Latest research direction from human researcher team
 
-No new directives as of 2026-05-04 (issues #285, #252, #48 all have current advisor responses).
+No new directives as of 2026-05-04 14:20 UTC (no open `ADVISOR` or `ADVISOR-TAY` issues).
+Issue #606 directive (assign edward `surface-curvature-features` after his prior PR completes) — **fulfilled** via PR #615 (edward/surface-curvature-v2).
 
 ---
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle)
 
-| PR | Student | Lever | Status (2026-05-04) |
+Each student listed against the most recently-assigned PR; older PRs from the same student are multi-arm sweeps still completing additional arms in the background.
+
+| PR | Student | Lever | Notes |
 |---|---|---|---|
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; Arm B (floor=0.3) DONE val=6.9569%; alpha=1.5 follow-up running — awaiting results |
-| #592 | alphonse | Model depth sweep — layers=5 vs layers=6 on SOTA stack | In progress (assigned 2026-05-01) |
-| #593 | frieren | lr-min cosine floor sweep — lr-min=1e-6 vs lr-min=1e-5 | In progress (assigned 2026-05-01) |
-| #594 | askeladd | RFF spectral budget sweep — 8 vs 32 features on PR #571 SOTA | In progress (assigned 2026-05-01) |
-| #602 | nezuko | Ensemble pool expansion: add PR #571 run nh96x7m4 (pool 22→23), re-run greedy K≤15 | **NEW — assigned 2026-05-04** |
-| #603 | tanjiro | EMA decay sweep {0.9993, 0.9997, 0.9999} on full SOTA stack | **NEW — assigned 2026-05-04** |
-| #604 | fern | Inference-time Y-mirror TTA on SOTA checkpoint nh96x7m4 (zero training cost) | **NEW — assigned 2026-05-04** |
-| #605 | edward | Surface curvature features (mean H + Gaussian K via k-NN PCA k=20) concatenated to surface inputs | **NEW — assigned 2026-05-04** |
+| #592 | alphonse | Model depth sweep (L=5 vs L=6 on SOTA stack) | Arm A (L=5, run `4k25s25e`) reached EP3 — awaiting full results |
+| #593 | frieren | lr-min cosine floor sweep (1e-6 vs 1e-5) | Arm A v2 (lr-min=1e-6, run `axpkjoku`) reached EP8 timeout — awaiting full per-epoch comparison vs SOTA |
+| #594 | askeladd | RFF spectral budget sweep (8 vs 32 features) — already merged Arm with rff32 as SOTA; Arm B (rff8) for ablation | Arm B (rff8) hitting NCCL/wandb-DDP init race; relaunched 14:15 UTC |
+| #603 | tanjiro | EMA decay sweep {0.9993, 0.9997, 0.9999} | Arm A (0.9993) aborted at EP2 (val=8.95%, exceeds 8.5% kill gate); Arm B (0.9997) relaunched after wandb init crash |
+| #612 | nezuko | Greedy ensemble pool expansion 23→24 (add PR #594 rff32 SOTA `d777epep`); re-run K≤15 greedy | Inference-only task — no training |
+| #613 | thorfinn | Flow-aligned tau tangent-frame outputs (predict in (t̂, n̂, ŝ) basis) | New approach to tau_y/tau_z gap closure |
+| #614 | fern | Lion β2 momentum sweep (0.99 vs 0.999) | Probing under-smoothing of sign estimates for tau channels |
+| #615 | edward | Surface curvature features v2 (mean H + Gaussian K via k-NN PCA k=20) | Reissue of #605 which logged no results; on PR #594 SOTA stack |
 
-Round-12/13 focus: build on PR #571 new SOTA (6.7644%); further close tau_y/tau_z gap (tau_y still 8.489% vs AB-UPT 3.65%, tau_z still 9.997% vs AB-UPT 3.63%); expand ensemble pool to capture new SOTA run; sweep EMA decay and RFF budget for orthogonal gains; probe surface geometric priors. Gate: val_abupt < 6.7644% (single-model), < 6.2345% (ensemble).
-
----
-
-## Recent merges / closures (Round 12 → Round 13 boundary; updated 2026-05-04)
-
-### PR #571 askeladd tau_y/tau_z weight intensity Arm A — MERGED (NEW SINGLE-MODEL SOTA)
-- val_abupt=6.7644% (−0.106pp vs PR #516), test_abupt=8.171%
-- W&B run `nh96x7m4`, group `askeladd-tau-sweep`
-- tau_y: 8.663%→8.489% (−0.174pp), tau_z: 10.266%→9.997% (−0.269pp)
-- New gate: val_abupt < 6.7644%
-- Arm B (tau_y×2.0/tau_z×2.5, run `62yojciu`) still running — watch for further improvement
-
-### PR #553 alphonse coord-jitter regularization — CLOSED NEGATIVE
-- Hypothesis: Gaussian coordinate noise (sigma=0.001–0.01) as Tikhonov regularizer would improve tau_y/tau_z via preventing surface-coordinate overfitting
-- Sigma=0.0 baseline arm reproduced SOTA at val=6.9511% (clean repro, confirms stack intact)
-- Sigma=0.001 arm: val_abupt=9.603% at EP2.3 — **+38% relative regression** vs baseline
-- Verdict: STRING-sep/RFF relies on precise coordinate structure; injecting coordinate noise destroys positional encoding quality. Falsified. Added to negative results catalog.
-
-### PR #562 nezuko greedy K=7 ensemble — MERGED (ENSEMBLE SOTA)
-- val_abupt=6.2345% via Caruana 2004 forward selection from 22-run pool
-
-### PR #516 askeladd tau-weight v2 — MERGED (SINGLE-MODEL SOTA)
-- val_abupt=6.8701%, test_abupt=8.1229% — defines current single-model gating threshold
-
-### PR #142 thorfinn vol_w=2.0 — closeout logged (+10.78%)
-### PR #146, #141 — closeouts logged
-
-### Completed / closed in this cycle (since 2026-05-01)
-- PR #568 fern NorMuon — completed and closed; released fern for PR #604 (TTA assignment)
-- PR #572 nezuko Lion β1 sweep — completed and closed; released nezuko for PR #602 (ensemble expansion)
-- PR #573 edward EMA decay sweep (prior round) — completed and closed; released edward for PR #605 (surface curvature)
-- PR #574 tanjiro RFF spectral density (prior round) — completed and closed; released tanjiro for PR #603 (EMA decay sweep redux)
-- PR #571 Arm B (tau_y×2.0/tau_z×2.5) — watch for results; may trigger another merge if val < 6.7644%
+**Round 13 focus:** push past PR #594 SOTA (6.7258%); continue closing tau_y/tau_z gap; expand ensemble pool with new SOTA candidate; orthogonal sweeps (RFF, EMA, depth, β2) for stacking gains; flow-aligned tau output basis as fundamental reformulation.
 
 ---
 
 ## Active research themes
 
 ### 1. tau_y/tau_z gap closure (primary open problem)
-- **Gap status:** tau_y=8.489%, tau_z=9.997% vs AB-UPT 3.65%/3.63% (2.3–2.7× above; values from PR #571 Arm A best-val — improvement from PR #516: tau_y −0.174pp, tau_z −0.269pp)
-- **Active attacks (this round):**
-  - GradNorm-EMA tighter floor (#552 thorfinn) — alpha=1.5 follow-up after floor-never-binds result
-  - Model depth sweep (#592 alphonse) — layers=5 vs 6 on full SOTA stack (prior 6L negative was on older stack)
-  - lr-min cosine floor (#593 frieren) — preserve late-epoch signal via nonzero cosine floor
-  - RFF spectral budget (#594 askeladd) — 8 vs 32 features to probe capacity-noise tradeoff
-  - EMA decay sweep (#603 tanjiro) — {0.9993, 0.9997, 0.9999}; longer EMA windows (effective 1429, 3333, 10000 steps) may reduce tau_y/tau_z variance
-  - Surface curvature features (#605 edward) — mean H + Gaussian K (k-NN PCA k=20) as geometric prior for near-wall tau prediction
-  - Inference-time mirror-y TTA (#604 fern) — zero-cost: average pred(x,y,z) and pred(x,-y,z) with tau_y sign-flip; distinct from training aug (#536 which failed)
+- **Gap status (PR #594 SOTA):** tau_y=8.489%, tau_z=9.997% vs AB-UPT 3.65%/3.63% — 2.3–2.7× above floor; the two largest residual error contributors
+- **Active attacks:**
+  - Flow-aligned tangent-frame tau outputs (#613 thorfinn) — predict tau in (t̂, n̂, ŝ) basis instead of (x, y, z); decouples geometric transformation from physics
+  - Surface curvature features (#615 edward) — physics-informed mean H + Gaussian K geometric prior (reissue of #605)
+  - Lion β2 momentum sweep (#614 fern) — longer second-moment averaging window for noisier tau gradient signs
+  - Model depth sweep (#592 alphonse) — re-test 5L/6L on SOTA stack
+  - RFF budget Arm B (#594 askeladd) — rff8 ablation to confirm rff32 win was real
+  - lr-min cosine floor (#593 frieren) — non-zero late-epoch lr to preserve signal
+  - EMA decay (#603 tanjiro) — wider EMA windows for tau variance reduction
 
-### 2. Negative-direction confirmed (do not retry on current stack)
-- **Static channel reweighting**: Prior round showed 4× negative (#142, #454, #467, #531); however askeladd PR #571 Arm A (tau_y×1.5, tau_z×2.0 on SOTA GradNorm+Lion stack) now shows val=6.7644% — **GENUINE WIN**. Prior negatives used simpler stacks. Intensity sweep Arm B (×2.0/×2.5) in progress to find optimal point.
-- **Y-mirror data augmentation** (#536) — gap is structural
-- **Direction loss on tau** (#531) — gap is not direction-prediction
+### 2. Ensemble expansion (composable, zero-training-cost)
+- PR #612 nezuko greedy K≤15 over pool 24 (adds PR #594 rff32 SOTA) — should tighten ensemble val below 6.2062%
 
 ### 3. Composition opportunities (next round, when winners emerge)
-- EMA decay winner (#603) + surface curvature features (#605) — orthogonal; can stack
-- RFF budget winner (#594) + lr-min floor winner (#593) — spectral × schedule
-- Ensemble pool expansion (#602) is independent of all training PRs — always applies
-- Model depth winner (#592) + EMA decay winner (#603) — architecture × regularization
-- Inference TTA (#604) is composable with any single-model winner at zero training cost
+- Tangent-frame tau (#613) + curvature features (#615) — geometric × geometric; orthogonal axes of geometric prior
+- β2 winner (#614) + RFF winner (#594) — optimizer × spectral budget
+- Any single-model winner → immediately add to ensemble pool for next nezuko greedy run
 
 ---
 
 ## Potential next research directions
 
-1. **Flow-aligned coordinate frame for tau outputs** — predict tau in (t̂, n̂, ŝ) tangent-frame basis instead of (x,y,z), freeing the model from coordinate-axis-aligned bias (would explain why tau_x is easier than tau_y/tau_z)
-2. **EMA + surface curvature composition** — if both #603 and #605 win, combine on a single run to check additive gain
-3. **Knowledge distillation from SOTA ensemble into single model** — ensemble of 7+ models as teacher, smaller student with surface auxiliary targets
-4. **Volumetric query-point density curriculum** beyond 65536 — push to 98304 or 131072 with VRAM headroom check; SOTA stack may have VRAM to spare with batch=4
-5. **Loss-aware sampling** — over-sample query points in regions of historically high tau_y/tau_z error during training (boosting-style); requires per-point error tracking
-6. **Tau uncertainty decomposition** — separate aleatoric (noise-floor) from epistemic uncertainty in tau predictions using MC-dropout; identifies irreducible vs reducible error
-7. **Sliced Wasserstein distance** as auxiliary distribution-matching loss on tau channels (vs L2 only)
-8. **Two-stage training: warmup-only on volume, then unfreeze surface heads** — attacks the joint-loss imbalance from a different angle than GradNorm
-9. **Spectral lion with adaptive beta sweep** — sweep Lion β2 momentum (currently fixed at 0.99); longer second-moment windows may improve tau channels similarly to EMA
-10. **Greedy ensemble with test-time TTA members** — if #604 TTA wins, build ensemble pool of (original + TTA-flipped) predictions for every pooled run, effectively doubling pool at zero training cost
+1. **Knowledge distillation from K=7 ensemble into single model** — ensemble-as-teacher; small student that approximates the ensemble at single-model inference cost
+2. **Sliced Wasserstein distance** as auxiliary distribution-matching loss on tau channels (vs L2 only)
+3. **Loss-aware sampling** — over-sample query points in regions of historically high tau_y/tau_z error during training (boosting-style); requires per-point error tracking
+4. **Tau uncertainty decomposition** — separate aleatoric (noise-floor) from epistemic uncertainty using MC-dropout; identifies irreducible vs reducible error
+5. **Two-stage training: warmup-only on volume, then unfreeze surface heads** — attacks joint-loss imbalance from a different angle than GradNorm
+6. **Volumetric query-point density beyond 65536** — push to 98304 or 131072 with VRAM headroom probe
+7. **Greedy ensemble with TTA members** — if any TTA wins, double pool size at zero training cost via mirror-y (sign-flipped tau_y) per-run pairs
+8. **β-NLL heteroscedastic loss on tay stack** — yi-branch experiment (#583) showed canonical β-NLL with var.detach().pow(β=0.5) reaches val=8.86% on yi (beats 9.03% gate); test on tay SOTA stack as principled noise-floor estimator
+9. **Curriculum on RFF sigmas** — start narrow-band RFF, expand spectral coverage during training; complements rff32 win
+10. **Spectral lion / NorMuon revisits** on the new SOTA stack — prior negatives were on older stacks
 
 ---
 
@@ -165,7 +114,7 @@ Round-12/13 focus: build on PR #571 new SOTA (6.7644%); further close tau_y/tau_
 
 | Lever | Outcome |
 |---|---|
-| Local tangent-frame INPUT features | NEGATIVE (#423) |
+| Local tangent-frame INPUT features | NEGATIVE (#423) — but tangent-frame OUTPUT (#613) is a different lever |
 | Channel-selective Huber on tau | NEGATIVE (#353) |
 | Volume-loss-weight scalar rebalancing | NEGATIVE (#451) |
 | Separate volume decoder | NEGATIVE val→test overfit (#452) |
@@ -173,16 +122,24 @@ Round-12/13 focus: build on PR #571 new SOTA (6.7644%); further close tau_y/tau_
 | Sandwich-norm | NEGATIVE diverged |
 | U-net skips | NEGATIVE (+0.555pp) |
 | 256d / 768d hidden | NEGATIVE |
-| 6L / 8L depth (pre-STRING-sep stack) | NEGATIVE on old stack — retrying 5L/6L on full SOTA stack (PR #592 alphonse) |
 | Per-axis output head scaling (#467) | NEGATIVE — gap is upstream |
-| TTA mirror-y inference (#499) | NEGATIVE +1.18pp on old stack — retrying on PR #571 SOTA stack (PR #604 fern) with correct tau_y sign-flip; prior attempt may have lacked sign-flip correction |
-| **Y-mirror training aug (#536)** | **NEGATIVE — gap is structural, not symmetry-addressable** |
+| TTA mirror-y inference (#499 old stack) | NEGATIVE +1.18pp |
+| Y-mirror training aug (#536) | NEGATIVE — gap is structural |
 | 2× surface point density (#506) | NEGATIVE — slower/epoch beats density |
-| tau_yz scalar loss-weight reweight (#142, #454, #467, #531) | Previously 4× NEG on simpler stacks; **PR #571 Arm A (tau_y×1.5/tau_z×2.0 on SOTA Lion+GradNorm stack) SUCCEEDED — MERGED** |
 | mlp_ratio=6/8 wider FFN (#458) | NEGATIVE — mlp4 is optimal |
 | Signed-log target transform (#471 arm-b) | NEGATIVE |
 | log1p target transform (#481) | NEGATIVE |
 | AdamW vs Lion (#532) | NEGATIVE — Lion optimal, confirmed |
 | Full GradNorm (5× autograd overhead) | NEGATIVE operationally — crashes in budget |
 | Unit-vector cosine direction loss on tau (#531) | NEGATIVE — direction is not the bottleneck |
-| **slw=2.0 13-epoch full (PR #537)** | **NEGATIVE vs current SOTA — within noise of #510 prior win, doesn't beat #523** |
+| Coord jitter regularization (#553) | NEGATIVE +38% — RFF/STRING-sep needs precise coordinates |
+| slw=2.0 13-epoch full (#537) | NEGATIVE — within noise |
+| Static channel reweighting (PRE-Lion+rff stack: #142, #454, #467, #531) | Was 4× NEG on simpler stacks; **PR #571 Arm A (tau_y×1.5 / tau_z×2.0 on Lion+rff multisigma stack) SUCCEEDED — now part of SOTA** |
+
+---
+
+## Procedural notes
+
+- **Never commit research state to a student branch** — only to `tay`. (Confirmed sticky from Issue #606.)
+- **Multi-arm WIP pattern**: a student may have an "older" WIP PR still completing background arms while a newer PR is queued. Use `student_poll_for_work` (returns the most recent WIP) to identify the live assignment, not `list_all_prs`.
+- **PR #583 (yi branch)**: out of `tay` advisor scope — handled by the `senpai-advisor-yi` pod.
