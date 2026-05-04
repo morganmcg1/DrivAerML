@@ -52,6 +52,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     make_loaders,
     masked_mse,
+    masked_mse_per_channel,
     metric_namespace,
     parse_kill_thresholds,
     primary_metric_log,
@@ -81,6 +82,11 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    tau_y_loss_weight: float = 1.0
+    tau_z_loss_weight: float = 1.0
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -181,6 +187,29 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    optimizer_name = config.optimizer.lower()
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+    if optimizer_name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(
+        f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion."
+    )
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -190,6 +219,8 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    tau_y_loss_weight: float = 1.0,
+    tau_z_loss_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -201,18 +232,30 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_per_ch = masked_mse_per_channel(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )  # [4]: 0=cp, 1=tau_x, 2=tau_y, 3=tau_z
+        channel_weights = out["surface_preds"].new_tensor(
+            [1.0, 1.0, tau_y_loss_weight, tau_z_loss_weight]
+        )
+        surface_loss = (surface_per_ch * channel_weights).mean()
+        surface_loss_unweighted = surface_per_ch.mean()
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
+        base_mse_loss = surface_loss_unweighted + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
+        "surface_loss_unweighted": float(surface_loss_unweighted.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "surface_loss_cp": float(surface_per_ch[0].detach().cpu().item()),
+        "surface_loss_tau_x": float(surface_per_ch[1].detach().cpu().item()),
+        "surface_loss_tau_y": float(surface_per_ch[2].detach().cpu().item()),
+        "surface_loss_tau_z": float(surface_per_ch[3].detach().cpu().item()),
     }
 
 
@@ -257,7 +300,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -329,6 +372,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    tau_y_loss_weight=config.tau_y_loss_weight,
+                    tau_z_loss_weight=config.tau_z_loss_weight,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -364,9 +409,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/loss": float(loss.detach().cpu().item()),
                             "train/base_mse_loss": batch_loss_metrics["base_mse_loss"],
                             "train/surface_loss": batch_loss_metrics["surface_loss"],
+                            "train/surface_loss_unweighted": batch_loss_metrics["surface_loss_unweighted"],
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/surface_loss_cp": batch_loss_metrics["surface_loss_cp"],
+                            "train/surface_loss_tau_x": batch_loss_metrics["surface_loss_tau_x"],
+                            "train/surface_loss_tau_y": batch_loss_metrics["surface_loss_tau_y"],
+                            "train/surface_loss_tau_z": batch_loss_metrics["surface_loss_tau_z"],
                         }
                     )
 

@@ -831,6 +831,16 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_mse_per_channel(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """MSE per output channel [C]; pred/target: [B, N, C], mask: [B, N]."""
+    sq = (pred - target).square()
+    mask_f = mask.unsqueeze(-1).to(dtype=sq.dtype, device=sq.device)
+    n_valid = mask_f.expand_as(sq).sum(dim=(0, 1))
+    return (sq * mask_f).sum(dim=(0, 1)) / n_valid.clamp_min(1.0)
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
