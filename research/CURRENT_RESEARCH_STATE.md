@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 (Round 12 fully populated; PR #534 closed near-miss)
+- **Date:** 2026-05-01 (Round 12 fully populated; edward re-assigned PR #561 rff32-clean-rebase after PR #549 conflict)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -58,7 +58,7 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 |---|---|---|---|
 | #516 | askeladd | per-channel tau_y/tau_z reweight v2 (1.2x/1.3x) — micro rebased | running EP1 (rs06rnob) |
 | #538 | fern | SGDR cosine warm restarts T0=6 Tmult=2 (group `fern-sgdr-budget-aware`) | running EP1 (9motyy0i) |
-| #549 | edward | rff-num-features 32 — group `edward-rff32-string-sep` | running EP2=8.53% (lpz2bi7a) — STILL NEEDS REBASE |
+| #561 | edward | rff-num-features 32 clean retry — group `edward-rff32-v2` | just assigned (PR #549 closed: merge conflict, run data preserved) |
 | #552 | thorfinn | GradNorm-EMA min_weight floor sweep | running (jdidw8i4); sibling crash recovered |
 | #553 | alphonse | input coord jitter regularization | running EP1 (ivh3ytmx) |
 | #555 | frieren | GradNorm alpha sweep / tau-channel reweighting v2 | running EP1 (glir84cj) |
