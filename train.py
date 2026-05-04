@@ -49,6 +49,135 @@ from data import (
 
 
 # ---------------------------------------------------------------------------
+# ADOPT optimizer (Adam variant with provable O(1/sqrt(T)) convergence for any eps>0)
+# Tamura et al., NeurIPS 2024. https://arxiv.org/abs/2411.02853
+# Reference implementation: https://github.com/iShohei220/adopt
+# ---------------------------------------------------------------------------
+
+
+class ADOPT(torch.optim.Optimizer):
+    """ADOPT: provably-convergent Adam variant that decouples the adaptive
+    denominator from the current gradient.
+
+    Update (per parameter, t >= 1):
+        denom_t   = max(sqrt(v_{t-1}), eps)
+        g_norm_t  = g_t / denom_t                       # (optionally clipped to [-c, c])
+        m_t       = beta1 * m_{t-1} + (1 - beta1) * g_norm_t
+        theta_t   = theta_{t-1} - lr * m_t
+        v_t       = beta2 * v_{t-1} + (1 - beta2) * g_t^2
+
+    Step 0 is special: v_0 <- g_0^2 and the parameter update is skipped.
+    This avoids the 0/0 condition on the first step and matches Algorithm 1
+    of the paper / the official iShohei220/adopt reference implementation.
+
+    Args:
+        lr: learning rate.
+        betas: (beta1, beta2). Note that beta2=0.9999 is the canonical default
+            (load-bearing for the convergence guarantee), not Adam's 0.999.
+        eps: lower bound for the denominator (paper uses 1e-6).
+        weight_decay: coefficient (decoupled AdamW-style by default).
+        clip_lambda: optional per-coordinate clip on the normalized update;
+            0 disables, positive value applies a constant clamp to [-c, c].
+        decoupled: if True, weight decay is applied to the parameter directly
+            (AdamW-style). If False, weight decay is added into the gradient
+            before normalization (Adam-style L2).
+    """
+
+    def __init__(
+        self,
+        params,
+        lr: float = 1e-3,
+        betas: tuple[float, float] = (0.9, 0.9999),
+        eps: float = 1e-6,
+        weight_decay: float = 0.0,
+        clip_lambda: float = 0.0,
+        decoupled: bool = True,
+    ):
+        if lr <= 0.0:
+            raise ValueError(f"ADOPT lr must be > 0, got {lr}")
+        if not 0.0 <= betas[0] < 1.0:
+            raise ValueError(f"ADOPT beta1 must be in [0, 1), got {betas[0]}")
+        if not 0.0 <= betas[1] < 1.0:
+            raise ValueError(f"ADOPT beta2 must be in [0, 1), got {betas[1]}")
+        if eps <= 0.0:
+            raise ValueError(f"ADOPT eps must be > 0, got {eps}")
+        if clip_lambda < 0.0:
+            raise ValueError(f"ADOPT clip_lambda must be >= 0, got {clip_lambda}")
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            clip_lambda=clip_lambda,
+            decoupled=decoupled,
+        )
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            beta1, beta2 = group["betas"]
+            lr = group["lr"]
+            eps = group["eps"]
+            wd = group["weight_decay"]
+            clip_lambda = group.get("clip_lambda", 0.0)
+            decoupled = group.get("decoupled", True)
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                g = p.grad
+                if g.is_sparse:
+                    raise RuntimeError("ADOPT does not support sparse gradients")
+
+                state = self.state[p]
+                if len(state) == 0:
+                    state["step"] = 0
+                    state["m"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    state["v"] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                step_count = state["step"]
+                m = state["m"]
+                v = state["v"]
+
+                if step_count == 0:
+                    # Initialize v with g^2; skip the parameter update.
+                    v.addcmul_(g, g, value=1.0)
+                    state["step"] = 1
+                    continue
+
+                # Decoupled (AdamW) weight decay applied directly to the parameter,
+                # so that the adaptive normalization sees only the raw task gradient.
+                if wd > 0.0 and decoupled:
+                    p.data.mul_(1.0 - lr * wd)
+
+                grad_for_v = g
+                if wd > 0.0 and not decoupled:
+                    grad_for_v = g.add(p, alpha=wd)
+
+                # ADOPT denominator uses v from the PREVIOUS step.
+                denom = v.sqrt().clamp_(min=eps)
+                normed_g = grad_for_v / denom
+                if clip_lambda > 0.0:
+                    normed_g.clamp_(-clip_lambda, clip_lambda)
+
+                m.mul_(beta1).add_(normed_g, alpha=1.0 - beta1)
+                p.data.add_(m, alpha=-lr)
+
+                # Update second moment with current raw gradient (for next step).
+                v.mul_(beta2).addcmul_(grad_for_v, grad_for_v, value=1.0 - beta2)
+
+                state["step"] = step_count + 1
+
+        return loss
+
+
+# ---------------------------------------------------------------------------
 # Muon optimizer (Newton-Schulz orthogonalized momentum)
 # Reference: https://github.com/KellerJordan/Muon  (Keller Jordan, 2024)
 # ---------------------------------------------------------------------------
@@ -704,10 +833,15 @@ class EMA:
 class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-4
-    optimizer: str = "adamw"  # "adamw" or "muon"
+    optimizer: str = "adamw"  # "adamw", "lion", "muon", or "adopt"
     muon_momentum: float = 0.95
     muon_ns_steps: int = 5
     muon_adamw_lr_scale: float = 0.1  # adamw fallback LR = lr * this
+    adopt_beta1: float = 0.9
+    adopt_beta2: float = 0.9999  # canonical ADOPT default (NOT Adam's 0.999)
+    adopt_eps: float = 1e-6
+    adopt_clip_lambda: float = 0.0  # 0 = no per-coord clipping
+    adopt_decoupled_wd: bool = True  # AdamW-style decoupled weight decay
     batch_size: int = 2
     epochs: int = 50
     train_surface_points: int = 40_000
@@ -1989,6 +2123,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = Lion(
             model.parameters(), lr=config.lr, weight_decay=config.weight_decay
         )
+    elif optimizer_name == "adopt":
+        if is_main:
+            print(
+                f"Optimizer: ADOPT (lr={config.lr}, betas=({config.adopt_beta1}, "
+                f"{config.adopt_beta2}), eps={config.adopt_eps}, wd={config.weight_decay} "
+                f"decoupled={config.adopt_decoupled_wd}, clip_lambda={config.adopt_clip_lambda})"
+            )
+        optimizer = ADOPT(
+            model.parameters(),
+            lr=config.lr,
+            betas=(config.adopt_beta1, config.adopt_beta2),
+            eps=config.adopt_eps,
+            weight_decay=config.weight_decay,
+            clip_lambda=config.adopt_clip_lambda,
+            decoupled=config.adopt_decoupled_wd,
+        )
     elif optimizer_name == "muon":
         muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
         muon_other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
@@ -2031,9 +2181,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
     else:
         raise ValueError(
-            f"Unknown optimizer '{config.optimizer}'. Supported: 'adamw', 'lion', 'muon'."
+            f"Unknown optimizer '{config.optimizer}'. Supported: 'adamw', 'lion', 'muon', 'adopt'."
         )
-    if is_main and optimizer_name != "muon":
+    if is_main and optimizer_name not in ("muon", "adopt"):
         print(
             f"Optimizer: {optimizer.__class__.__name__} "
             f"lr={config.lr} wd={config.weight_decay}"
