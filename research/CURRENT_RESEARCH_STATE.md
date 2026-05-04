@@ -1,6 +1,6 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 04:55 UTC (refreshed mid-Round-12 monitoring cycle)
+- **Date:** 2026-05-04 ~07:00 UTC (refreshed after EP3 fleet read; fern NorMuon sent back for canonical redesign)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -65,22 +65,28 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle)
 
-| PR | Student | Lever | Status (2026-05-04 04:55 UTC) |
+| PR | Student | Lever | Status (2026-05-04 06:30 UTC) |
 |---|---|---|---|
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602% (within noise); Arm B (floor=0.3) running. Floor-not-binding finding → pivot to alpha=1.5 next |
-| #553 | alphonse | input coord jitter — 4-arm sigma sweep (0.0/0.001/0.005/0.01) | sigma=0.0 baseline DONE (val=6.9511%, clean repro); sigma=0.001 in flight; rebased onto PR #516 SOTA |
-| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE (val=6.9421% borderline, but tau_y/tau_z test improved); Arm B α=1.0 mid-EP2 (run `341czkol`) |
-| #568 | fern | NorMuon optimizer (normalized Muon for 2D weights) | relaunched at `--normuon-lr 0.02` (was 1e-5); run `ii3vh18d` |
-| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) mid-EP2; chain orchestrator B→C ready |
-| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | running; no comments yet |
-| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | running; no comments yet |
-| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | running; no comments yet |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602%; **Arm B EP3=7.55%** (≈SOTA); confirmed floor-not-binding; pivot to α=1.5 launch instructions posted |
+| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE val=6.9421% (test tau_y/tau_z improved); **Arm B α=1.0 EP3=7.46%** — best-of-fleet at EP3, narrowly ahead of SOTA EP3 7.49% |
+| #568 | fern | NorMuon optimizer | **DIVERGED — Arm A `ii3vh18d` blew up post-EP1**; sent back for canonical row-wise RMS NorMuon redesign |
+| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) **EP3=7.93%** — gap widening as predicted; let finish for clean test; reconsider Arm C launch |
+| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | **Arm A EP1=38.58%** (+7.76pp vs SOTA EP1) — concerning; EP2 hard gate at 11.0% |
+| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | Arm A relaunched as `olrwgvav` (prior `y5f4ptmm` killed); too early for val (~EP0.6) |
+| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | Arm A `3nn65ume` running after `--no-compile-model` fix; too early for val (~EP0.5) |
+| #575 | alphonse | Tangent-frame rotation for tau loss — predict tau in local (t̂, b̂, n̂) frame | running but **W&B group is `coord-jitter-s0.001`** (suggests student is running coord-jitter, not tangent-frame); EP3=8.53% — needs student check-in to clarify |
 
-Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal angles (regularization, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity).
+Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal angles (structural frame rotation, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity).
 
 ---
 
 ## Recent merges / closures (Round 11 → Round 12 boundary)
+
+### PR #553 alphonse coord-jitter regularization — CLOSED NEGATIVE
+- Hypothesis: Gaussian coordinate noise (sigma=0.001–0.01) as Tikhonov regularizer would improve tau_y/tau_z via preventing surface-coordinate overfitting
+- Sigma=0.0 baseline arm reproduced SOTA at val=6.9511% (clean repro, confirms stack intact)
+- Sigma=0.001 arm: val_abupt=9.603% at EP2.3 — **+38% relative regression** vs baseline
+- Verdict: STRING-sep/RFF relies on precise coordinate structure; injecting coordinate noise destroys positional encoding quality. Falsified. Added to negative results catalog.
 
 ### PR #562 nezuko greedy K=7 ensemble — MERGED (ENSEMBLE SOTA)
 - val_abupt=6.2345% via Caruana 2004 forward selection from 22-run pool
@@ -100,16 +106,16 @@ Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal 
 ## Active research themes
 
 ### 1. tau_y/tau_z gap closure (primary open problem)
-- **Gap status:** tau_y=8.72%, tau_z=10.30% vs AB-UPT 3.65%/3.63% (2.4–2.8× above)
+- **Gap status:** tau_y=8.66%, tau_z=10.27% vs AB-UPT 3.65%/3.63% (2.4–2.8× above; values from PR #516 best-val EP5)
 - **Active attacks (this round):**
   - GradNorm-EMA tighter floor (#552 thorfinn) — proven mechanism, more aggressive redistribution
-  - Coord jitter regularization (#553 alphonse) — Tikhonov regularizer, attack overfitting on hard channels; 4-arm sigma sweep
-  - Greedy ensemble pool selection (#562 nezuko) — Caruana 2004 forward greedy on val, improve ensemble composition
+  - Tangent-frame rotation for tau loss (#575 alphonse) — structural: predict tau in local (t̂, b̂, n̂) frame to remove coordinate-axis-aligned bias
   - tau weight intensity sweep (#571 askeladd) — 3-arm: ×1.5/×2.0, ×2.0/×2.5, ×1.0/×1.5; last attempt at this angle
-  - Multi-band fused StringSep wide (#557 tanjiro) — hidden_dim 576 + 14 epochs, PR #534 near-miss follow-up
-  - rff-num-features 32 (#561 edward) — double feature budget, clean retry on SOTA stack
   - GradNorm alpha sweep (#555 frieren) — stronger tau_y/tau_z gradient pull via alpha tuning
   - NorMuon optimizer (#568 fern) — normalized Muon for 2D weights; addressing instability of vanilla Muon (#261)
+  - Lion β1 sweep (#572 nezuko) — lower momentum may improve tau channels
+  - EMA decay sweep (#573 edward) — longer EMA windows may reduce tau variance
+  - RFF spectral density expansion (#574 tanjiro) — double feature budget or wider sigma range for better spectral coverage
 
 ### 2. Negative-direction confirmed (do not retry on current stack)
 - **Static channel reweighting** is now 4× negative (#142, #454, #467, #531) — askeladd #516 v2 is final attempt at this angle before the lever is exhausted
