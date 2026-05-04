@@ -1410,6 +1410,7 @@ def init_wandb_run(
             "val_budget_minutes": val_budget_minutes,
         },
         mode=os.environ.get("WANDB_MODE", "online"),
+        settings=wandb.Settings(init_timeout=300),
     )
     define_wandb_metrics()
     return run
