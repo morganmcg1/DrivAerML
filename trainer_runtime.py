@@ -18,6 +18,7 @@ from typing import Iterable, Mapping
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Sampler
@@ -187,6 +188,8 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.surface_y_mean_local: torch.Tensor | None = None
+        self.surface_y_std_local: torch.Tensor | None = None
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -205,6 +208,81 @@ class TargetTransform:
 
     def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
         return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+
+    def configure_local_surface_stats(self) -> None:
+        """Derive 3-channel local-frame stats (cp, tau_t, tau_b) from the global ones.
+
+        The tau_t / tau_b channels share a single rotation-invariant scale =
+        sqrt(mean(std_x^2, std_y^2, std_z^2)) so the local-frame normalisation is
+        invariant under the choice of tangent seed (||tau||^2 is preserved under
+        any orthogonal rotation, so the magnitude scale must be too).
+        """
+
+        device = self.surface_y_std.device
+        cp_mean = self.surface_y_mean[0:1]
+        cp_std = self.surface_y_std[0:1]
+        tau_var_mean = (self.surface_y_std[1:4] ** 2).mean().clamp(min=1e-12)
+        tau_scale = tau_var_mean.sqrt().to(device).reshape(1)
+        zero = torch.zeros(1, dtype=cp_mean.dtype, device=device)
+        self.surface_y_mean_local = torch.cat([cp_mean, zero, zero], dim=0)
+        self.surface_y_std_local = torch.cat(
+            [cp_std, tau_scale, tau_scale], dim=0
+        ).clamp(min=1e-6)
+
+    def apply_surface_local(self, y_local: torch.Tensor) -> torch.Tensor:
+        """Normalise a 3-channel local-frame target (cp, tau_t, tau_b)."""
+
+        if self.surface_y_mean_local is None or self.surface_y_std_local is None:
+            raise RuntimeError(
+                "TargetTransform.apply_surface_local: local stats not configured. "
+                "Call configure_local_surface_stats() first."
+            )
+        return (
+            y_local - self.surface_y_mean_local.to(y_local.device)
+        ) / self.surface_y_std_local.to(y_local.device)
+
+    def invert_surface_local(self, y_local: torch.Tensor) -> torch.Tensor:
+        if self.surface_y_mean_local is None or self.surface_y_std_local is None:
+            raise RuntimeError(
+                "TargetTransform.invert_surface_local: local stats not configured. "
+                "Call configure_local_surface_stats() first."
+            )
+        return (
+            y_local * self.surface_y_std_local.to(y_local.device)
+            + self.surface_y_mean_local.to(y_local.device)
+        )
+
+
+def compute_tangent_frame(
+    normals: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build a per-point orthonormal local frame (t_hat, b_hat, n_hat).
+
+    normals: tensor of shape ``[..., 3]``. Need not be unit-norm; defensive
+    renormalisation handles non-unit and zero-padded rows.
+
+    Uses Gram-Schmidt with the axis-of-minimum-magnitude seed: for each point
+    the seed is the Cartesian unit vector ê_i for ``i = argmin(|n_hat|)``. This
+    guarantees ``|n_hat × seed| >= sqrt(2/3) ≈ 0.816`` in the non-degenerate
+    case, avoiding numerical collapse when n_hat is nearly aligned with a
+    Cartesian axis. Padded zero-norm rows produce a finite (degenerate) frame
+    that the surface_mask zeroes out downstream.
+
+    Returns three tensors each shaped like ``normals``:
+        t_hat: first tangent vector (in surface)
+        b_hat: binormal (also in surface), b_hat = n_hat × t_hat (right-handed)
+        n_hat: outward unit normal
+    """
+
+    n_hat = F.normalize(normals.float(), dim=-1, eps=1e-12)
+    abs_n = n_hat.abs()
+    min_axis = abs_n.argmin(dim=-1, keepdim=True)
+    ref = torch.zeros_like(n_hat)
+    ref.scatter_(-1, min_axis, 1.0)
+    t_unnorm = ref - (ref * n_hat).sum(-1, keepdim=True) * n_hat
+    t_hat = F.normalize(t_unnorm, dim=-1, eps=1e-12)
+    b_hat = torch.linalg.cross(n_hat, t_hat)
+    return t_hat, b_hat, n_hat
 
 
 def autocast_context(device: torch.device, amp_mode: str):
@@ -955,9 +1033,20 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    use_flow_aligned_tau: bool = False,
 ) -> None:
     batch = batch.to(device)
-    surface_target_norm = transform.apply_surface(batch.surface_y)
+    if use_flow_aligned_tau:
+        normals = batch.surface_x[..., 3:6]
+        t_hat, b_hat, n_hat = compute_tangent_frame(normals)
+        cp_target = batch.surface_y[..., 0:1]
+        tau_global_target = batch.surface_y[..., 1:4]
+        tau_t_target = (tau_global_target * t_hat).sum(-1, keepdim=True)
+        tau_b_target = (tau_global_target * b_hat).sum(-1, keepdim=True)
+        target_local_raw = torch.cat([cp_target, tau_t_target, tau_b_target], dim=-1)
+        surface_target_norm = transform.apply_surface_local(target_local_raw)
+    else:
+        surface_target_norm = transform.apply_surface(batch.surface_y)
     volume_target_norm = transform.apply_volume(batch.volume_y)
     eval_module = unwrap_model(model)
     with autocast_context(device, amp_mode):
@@ -975,7 +1064,18 @@ def accumulate_eval_batch(
     accumulator.surface_loss_count += surface_count
     accumulator.volume_loss_sse += volume_sse
     accumulator.volume_loss_count += volume_count
-    surface_pred = transform.invert_surface(surface_pred_norm)
+    if use_flow_aligned_tau:
+        # Invert local-frame normalisation, then rotate (tau_t, tau_b) back to
+        # global Cartesian so all downstream metrics stay in the original frame
+        # and remain directly comparable to baseline.
+        surface_pred_local_raw = transform.invert_surface_local(surface_pred_norm)
+        pred_cp = surface_pred_local_raw[..., 0:1]
+        pred_tau_t = surface_pred_local_raw[..., 1:2]
+        pred_tau_b = surface_pred_local_raw[..., 2:3]
+        pred_tau_global = pred_tau_t * t_hat + pred_tau_b * b_hat
+        surface_pred = torch.cat([pred_cp, pred_tau_global], dim=-1)
+    else:
+        surface_pred = transform.invert_surface(surface_pred_norm)
     volume_pred = transform.invert_volume(volume_pred_norm)
 
     if bool(batch.surface_mask.any()):
@@ -1121,6 +1221,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    use_flow_aligned_tau: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1132,6 +1233,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            use_flow_aligned_tau=use_flow_aligned_tau,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1446,6 +1548,7 @@ def run_final_evaluation(
     global_step: int,
     total_minutes: float,
 ) -> None:
+    use_flow_aligned_tau = bool(getattr(config, "use_flow_aligned_tau", False))
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model"])
     print(
@@ -1466,7 +1569,14 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_flow_aligned_tau=use_flow_aligned_tau,
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1486,7 +1596,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_flow_aligned_tau=use_flow_aligned_tau,
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

@@ -44,6 +44,7 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    compute_tangent_frame,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -137,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_flow_aligned_tau: bool = False
     debug: bool = False
 
 
@@ -219,6 +221,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_flow_aligned_tau": (
+            "Predict wall shear stress in a per-point local surface tangent "
+            "frame (cp, tau_t, tau_b) instead of global Cartesian (cp, tau_x, "
+            "tau_y, tau_z). The frame (t_hat, b_hat, n_hat) is built from the "
+            "dataset surface normals via Gram-Schmidt with an "
+            "axis-of-minimum-magnitude seed for numerical stability. The "
+            "model's surface head outputs 3 channels instead of 4, encoding "
+            "the physical no-slip constraint that wall shear has zero "
+            "wall-normal component. tau_t / tau_b normalisation uses a "
+            "rotation-invariant scale = sqrt(mean(std_x^2, std_y^2, std_z^2)). "
+            "At evaluation time predictions are rotated back to global "
+            "Cartesian for direct comparison with the global-frame baseline."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -285,6 +300,9 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    # In flow-aligned-tau mode the surface head emits (cp, tau_t, tau_b); the
+    # wall-normal component is constrained to zero by physics so we drop it.
+    surface_output_dim = 3 if config.use_flow_aligned_tau else 4
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -297,6 +315,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        surface_output_dim=surface_output_dim,
     )
 
 
@@ -310,9 +329,36 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_flow_aligned_tau: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
-    surface_target = transform.apply_surface(batch.surface_y)
+    extra_metrics: dict[str, float] = {}
+    if use_flow_aligned_tau:
+        normals = batch.surface_x[..., 3:6]
+        t_hat, b_hat, n_hat = compute_tangent_frame(normals)
+        cp_target = batch.surface_y[..., 0:1]
+        tau_global_target = batch.surface_y[..., 1:4]
+        tau_t_target = (tau_global_target * t_hat).sum(-1, keepdim=True)
+        tau_b_target = (tau_global_target * b_hat).sum(-1, keepdim=True)
+        target_local_raw = torch.cat([cp_target, tau_t_target, tau_b_target], dim=-1)
+        surface_target = transform.apply_surface_local(target_local_raw)
+        # Diagnostic: tau_n residual should be ~0 in raw units if normals and
+        # tau live in the same coordinate system. Logged to detect data
+        # misalignment early.
+        with torch.no_grad():
+            mask_f = batch.surface_mask.to(dtype=tau_global_target.dtype)
+            tau_n_abs = (tau_global_target * n_hat).sum(-1).abs()
+            denom = mask_f.sum().clamp_min(1.0)
+            extra_metrics["tau_n_residual_mean"] = float(
+                ((tau_n_abs * mask_f).sum() / denom).detach().cpu().item()
+            )
+            tau_norm = tau_global_target.norm(dim=-1)
+            tau_norm_mean = (tau_norm * mask_f).sum() / denom
+            extra_metrics["tau_n_residual_rel"] = float(
+                (extra_metrics["tau_n_residual_mean"] / max(float(tau_norm_mean.detach().cpu().item()), 1e-12))
+            )
+    else:
+        surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
         out = model(
@@ -335,13 +381,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(extra_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -734,16 +782,28 @@ def main(argv: Iterable[str] | None = None) -> None:
             volume_y_mean=stats["volume_y_mean"].to(device),
             volume_y_std=stats["volume_y_std"].to(device),
         )
+        if config.use_flow_aligned_tau:
+            transform.configure_local_surface_stats()
 
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())
-        # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
-        # the largest gap to AB-UPT, so we expose per-channel weights here.
-        surface_channel_weights = torch.tensor(
-            [1.0, 1.0, config.tau_y_loss_weight, config.tau_z_loss_weight],
-            device=device,
-            dtype=torch.float32,
-        )
+        # Surface channel weights:
+        #  - global (default): [cp, tau_x, tau_y, tau_z], 4 channels
+        #  - flow-aligned tau: [cp, tau_t, tau_b], 3 channels — the advisor
+        #    keeps the global-frame --tau-y-loss-weight / --tau-z-loss-weight
+        #    flags but applies them to the local tangent components.
+        if config.use_flow_aligned_tau:
+            surface_channel_weights = torch.tensor(
+                [1.0, config.tau_y_loss_weight, config.tau_z_loss_weight],
+                device=device,
+                dtype=torch.float32,
+            )
+        else:
+            surface_channel_weights = torch.tensor(
+                [1.0, 1.0, config.tau_y_loss_weight, config.tau_z_loss_weight],
+                device=device,
+                dtype=torch.float32,
+            )
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
@@ -765,6 +825,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
         if config.use_gradnorm:
+            if config.use_flow_aligned_tau:
+                raise ValueError(
+                    "--use-gradnorm is not supported together with "
+                    "--use-flow-aligned-tau: GradNorm task names are tied to "
+                    "the global-frame channels (sp, tau_x, tau_y, tau_z, vp) "
+                    "and the local-frame surface head only emits 3 channels."
+                )
             if config.gradnorm_mode == "full" and config.compile_model:
                 raise ValueError(
                     "--use-gradnorm --gradnorm-mode full requires --no-compile-model "
@@ -826,9 +893,28 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"(log_freq[d, f] = log(sigmas[f % len(sigmas)]))"
                 )
             if use_channel_weights:
+                if config.use_flow_aligned_tau:
+                    print(
+                        f"Surface channel weights (local frame): cp=1.0 "
+                        f"tau_t={config.tau_y_loss_weight} "
+                        f"tau_b={config.tau_z_loss_weight}"
+                    )
+                else:
+                    print(
+                        f"Surface channel weights: cp=1.0 tau_x=1.0 "
+                        f"tau_y={config.tau_y_loss_weight} "
+                        f"tau_z={config.tau_z_loss_weight}"
+                    )
+            if config.use_flow_aligned_tau:
+                local_std = transform.surface_y_std_local
+                local_mean = transform.surface_y_mean_local
                 print(
-                    f"Surface channel weights: cp=1.0 tau_x=1.0 "
-                    f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                    "Flow-aligned tau enabled: surface head outputs "
+                    "(cp, tau_t, tau_b); tau_t/tau_b normalised by "
+                    f"rotation-invariant scale={float(local_std[1].cpu().item()):.4g} "
+                    f"(cp_mean={float(local_mean[0].cpu().item()):.4g}, "
+                    f"cp_std={float(local_std[0].cpu().item()):.4g}); "
+                    "tangent frame: Gram-Schmidt with axis-of-min-magnitude seed."
                 )
 
         run = init_wandb_run(
@@ -1008,6 +1094,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_flow_aligned_tau=config.use_flow_aligned_tau,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1135,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "tau_n_residual_mean" in batch_loss_metrics:
+                        train_log["train/flow_aligned/tau_n_residual_mean"] = (
+                            batch_loss_metrics["tau_n_residual_mean"]
+                        )
+                        train_log["train/flow_aligned/tau_n_residual_rel"] = (
+                            batch_loss_metrics["tau_n_residual_rel"]
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
@@ -1211,6 +1305,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        use_flow_aligned_tau=config.use_flow_aligned_tau,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1225,6 +1320,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    use_flow_aligned_tau=config.use_flow_aligned_tau,
                 )
                 for name, loader in val_loaders.items()
             }
