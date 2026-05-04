@@ -1695,3 +1695,40 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 ### PR #544 — fern: y-symmetry paired loss + test-time mirror ensemble
 - Branch: `fern/symm-pair-equivariance`
 - Hypothesis: Enforce y-symmetry (cars are left-right symmetric; τ_y flips sign under y-reflection) as a paired-batch constraint: `L = 0.5·L(f(x), y) + 0.5·L(R_y·f(mirror_y(x)), y)`. PR #225 (haku random mirror aug) closed null — this differs by always presenting BOTH orientations simultaneously with correct sign, not random flips. Test-time mirror ensemble is a free 2× average that enforces exact symmetry.
+
+## 2026-05-04 19:55 — Round 34 fleet review (advisor session)
+
+### PR #613 (thorfinn flow-aligned-tau, tay) — CLOSED null
+- Branch: `thorfinn/flow-aligned-tau-tangent-frame`
+- Hypothesis: rotate τ targets into local surface tangent frame (t̂,n̂,ŝ) and apply anisotropic channel weights (cp=1.0, τ_t=1.0, τ_n=1.5, τ_s=2.0) to encode no-slip/streamwise priors.
+- Run `41xowt6c`: 6 epochs (270-min cap), best val=7.1358%, test=8.3313%. tay SOTA=6.5985% → +0.537pp regression.
+- Same-step EP4 vs PR #594: 7.2626% vs 6.7258% → +0.54pp regression confirms it's not a maturity issue.
+- Per-channel: τ_y +1.18pp, τ_z +1.12pp — exact opposite of intended target.
+- Mechanism (student analysis): (1) streamwise/normal/spanwise priors are wrong on average because n̂ rotates significantly across geometry, mixing what was streamwise globally into local t̂/n̂/ŝ; (2) Mahalanobis coupling — anisotropic weights in rotated frame project back to global frame as off-diagonal coupling that hurts independent per-axis error reduction.
+- V2 confirmation kicked off but killed at advisor request to save GPU.
+- **Conclusion:** Local-frame loss-rotation with these channel weights is a clean negative. Promising follow-ups: (a) head-side local-frame *prediction* (output (τ_t, τ_n, τ_s) directly), (b) auxiliary tangential-flow alignment loss with isotropic weights on top of standard global loss.
+
+### PR #594 (askeladd RFF spectral budget sweep, tay) — CLOSED ablation (closed prior to this entry)
+- Sweep result: RFF=8 (7.0903%) > RFF=16 (6.7644%) > RFF=32 (6.7173%). Best 6.7173% does not beat tay SOTA 6.5985%.
+- Monotonic improvement 8→16→32 with diminishing returns. Recommended layering RFF=32 onto depth-L=5 stack as a follow-up.
+- Valuable wandb-DDP per-rank serialised init bug fix included (`trainer_runtime.py::init_wandb_run`).
+
+### PR #584 (gilbert inverse-density volume loss weighting, yi) — CLOSED (close decision posted prior)
+- Arm B (γ=0.5) +0.081pp over control; Arm C (γ=1.0) over-weighted and failed gate.
+- Best result (Arm B EP3 10.167%) is 1.91pp above yi bar 8.2528%.
+- γ=0.5 is a positive-signal future ingredient but volume density weighting is inappropriate for DrivAerML standalone.
+
+### Active fleet snapshot at 19:55 UTC
+| PR | Student | Branch | Run | State | Step | Val | Notes |
+|---|---|---|---|---|---|---|---|
+| #607 | haku | yi (GradNorm) | pwxy4oy7 (armB α=0.5) | running | 3,153 | N/A | new arm; α=1.0 re-run pending; advisor poll posted |
+| #615 | edward | tay (curvature H+K) | tcfll0lk | running | 35,371 | 7.578% | EP3 done, EP4 imminent; per-channel regression on τ_y/τ_z (+1.1pp) |
+| #616 | chihiro | yi (PerceiverIO) | achht6dr | running | 668 | N/A | very early (EP1 ~22:35 UTC) |
+| #622 | thorfinn | yi (SDF-prox) | w51b83zx | running | 5,539 | 24.95% | EP0.5 warming; α-sweep launched |
+| #614 | fern | tay (Lion β2) | wapj7o9t finished | finished | 44,250 | 7.219% | Run C done; B and A queued sequentially |
+| #621 | nezuko | tay (slice-centroid RoPE) | xixwhi2m | running | 16,123 | 28.20% | Arm A control, EP1.5 |
+| #624 | alphonse | tay (point-level pre-slice STRING) | u61ciwhw | running | 18,811 | N/A | smoke test EP3 |
+| #603 | tanjiro | tay (EMA decay sweep) | smd0u05l finished | finished | 44,217 | 7.115% | Arm B done at +0.52pp above tay bar; Arm C (ema=0.9999) launched 19:32 UTC |
+
+### Yi merge bar: 8.2528% (PR #576 frieren STRING-sep + Lion)
+### Tay merge bar: 6.5985% (PR #592 alphonse depth-L=5)
