@@ -722,6 +722,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    var_match_lambda: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -825,6 +826,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "separate checks. STEP is a global optimizer step and METRIC must match "
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
+        ),
+        "var_match_lambda": (
+            "Weight for per-case std-matching auxiliary loss on tau_y (channel 2) "
+            "and tau_z (channel 3) of the surface predictions. Penalises the squared "
+            "difference between per-sample-in-batch std of pred and target over valid "
+            "(non-padded) surface points. 0.0 = off (default)."
         ),
     }
     for field in fields(Config):
@@ -1514,6 +1521,65 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def _masked_per_case_std(
+    x: torch.Tensor, mask: torch.Tensor, eps: float = 1e-8
+) -> torch.Tensor:
+    """Per-case std over valid (mask=1) points along the last dim.
+
+    x: [B, N], mask: [B, N] bool (1=valid, 0=padding). Returns: [B] std per case.
+
+    Implements ``sqrt(mean((x - mean)^2) + eps)`` with population denominator (n,
+    not n-1) over valid points, so a single-valid-point case gives std=0+eps
+    instead of dividing by zero. The eps clamp before sqrt avoids the infinite
+    gradient of ``sqrt`` at zero — needed when an early-training prediction is
+    near-constant within a case.
+    """
+    mask_f = mask.to(dtype=x.dtype)
+    n_valid = mask_f.sum(dim=-1).clamp(min=1.0)  # [B]
+    x_masked = x * mask_f
+    x_mean = (x_masked.sum(dim=-1) / n_valid).unsqueeze(-1)  # [B, 1]
+    centered = (x - x_mean) * mask_f  # padded entries -> 0 contribute nothing
+    var = centered.pow(2).sum(dim=-1) / n_valid
+    return (var + eps).sqrt()
+
+
+def var_match_loss(
+    pred_surface: torch.Tensor,
+    target_surface: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    lambda_vm: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Per-case std matching for tau_y (channel 2) and tau_z (channel 3).
+
+    Penalises ``Σ_{c ∈ {y,z}} mean_b (std_pred_c - std_true_c)^2`` where stds are
+    computed per sample over valid surface points. Operates in normalized
+    (z-scored) space — the same space the MSE backbone uses, so loss units
+    are commensurate.
+
+    Returns (lambda_vm * loss, diagnostics). Diagnostics contain mean per-case
+    std_pred / std_true / std_ratio for tauY and tauZ for W&B logging.
+    """
+    diag: dict[str, float] = {}
+    if lambda_vm <= 0.0:
+        return pred_surface.sum() * 0.0, diag
+    if not bool(mask.any()):
+        return pred_surface.sum() * 0.0, diag
+    loss = pred_surface.new_zeros(())
+    for ch, name in [(2, "tauY"), (3, "tauZ")]:
+        pred_ch = pred_surface[..., ch]    # [B, N]
+        tgt_ch = target_surface[..., ch]   # [B, N]
+        std_pred = _masked_per_case_std(pred_ch, mask)
+        std_true = _masked_per_case_std(tgt_ch, mask)
+        loss = loss + (std_pred - std_true).pow(2).mean()
+        std_pred_mean = float(std_pred.mean().detach().cpu().item())
+        std_true_mean = float(std_true.mean().detach().cpu().item())
+        diag[f"std_pred_{name}"] = std_pred_mean
+        diag[f"std_true_{name}"] = std_true_mean
+        diag[f"std_ratio_{name}"] = std_pred_mean / max(std_true_mean, 1e-8)
+    return lambda_vm * loss, diag
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -1528,6 +1594,7 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    var_match_lambda: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -1586,6 +1653,17 @@ def train_loss(
             aux_rel_l2 = num / den
             loss = loss + aux_rel_l2_weight * aux_rel_l2
             aux_rel_l2_value = float(aux_rel_l2.detach().cpu().item())
+        var_match_value: float | None = None
+        var_match_diag: dict[str, float] = {}
+        if var_match_lambda > 0.0:
+            vm_term, var_match_diag = var_match_loss(
+                surface_pred_norm.float(),
+                surface_target.float(),
+                batch.surface_mask,
+                lambda_vm=var_match_lambda,
+            )
+            loss = loss + vm_term
+            var_match_value = float(vm_term.detach().cpu().item())
     metrics: dict[str, float] = {
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
@@ -1596,6 +1674,10 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
+    if var_match_value is not None:
+        metrics["loss_var_match"] = var_match_value
+        for key, value in var_match_diag.items():
+            metrics[key] = value
     if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if "geom_token" in out:
@@ -2172,6 +2254,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                var_match_lambda=config.var_match_lambda,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2290,6 +2373,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
                 ]
+            if "loss_var_match" in batch_loss_metrics:
+                train_log["train/loss_var_match"] = batch_loss_metrics[
+                    "loss_var_match"
+                ]
+                for vm_key in (
+                    "std_pred_tauY",
+                    "std_true_tauY",
+                    "std_ratio_tauY",
+                    "std_pred_tauZ",
+                    "std_true_tauZ",
+                    "std_ratio_tauZ",
+                ):
+                    if vm_key in batch_loss_metrics:
+                        train_log[f"train/{vm_key}"] = batch_loss_metrics[vm_key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
