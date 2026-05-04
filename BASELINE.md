@@ -4,7 +4,19 @@
 
 ---
 
-## ENSEMBLE SOTA: nezuko PR #562 greedy forward ensemble selection K=7 (Caruana 2004) — 2026-05-01
+## ENSEMBLE SOTA: nezuko PR #602 greedy forward ensemble selection K=7 (pool 22→23, Caruana 2004) — 2026-05-04
+
+**val_abupt=6.2062%** / **test_abupt=7.5164%** — −0.0283pp val (−0.45% relative), −0.0269pp test vs prior K=7 (#562)
+
+Pool expanded from 22→23 runs by adding PR #571 run `nh96x7m4` (askeladd, val=6.7644%). Greedy forward selection re-run with max-k=15. New K=7 selection retains strong diversity across students.
+
+**W&B run:** `ydw7rxl2` (group `nezuko-ensemble-greedy-v2`)
+**PR:** #602
+**K=7 members:** nh96x7m4, 5o7jc7wi, wyz68o8r, 9mm3sz7x, 49aimdiz, 19qf6di1, nh2ke150
+
+---
+
+## Prior Ensemble SOTA: nezuko PR #562 greedy forward ensemble selection K=7 (Caruana 2004) — 2026-05-01
 
 **val_abupt=6.2345%** / **test_abupt=7.5433%** — **−0.54% relative on val, −0.50% on test vs prior K=5 top-val ensemble (#556)**
 
@@ -57,7 +69,16 @@ uv run python ensemble_eval.py \
 
 ---
 
-## SINGLE-MODEL SOTA: askeladd PR #571 tau_y×1.5 / tau_z×2.0 weight intensification — 2026-05-04
+## SINGLE-MODEL SOTA: askeladd PR #594 rff32 on PR #571 SOTA stack — 2026-05-04
+
+**W&B run:** `d777epep` (askeladd DDP8, rank-0) — group `askeladd-rff32-pr571-sota`, best val **6.7258%** (EP4, step 43,462)
+**PR:** #594
+
+**Single-model training gate:** val_abupt < **6.7258%** (previously 6.7644% from PR #571)
+
+---
+
+## Prior Single-Model SOTA: askeladd PR #571 tau_y×1.5 / tau_z×2.0 weight intensification — 2026-05-04
 
 **W&B run:** `nh96x7m4` (askeladd DDP8, rank-0) — group `askeladd-tau-sweep`, best val **6.7644%** (Arm A: tau_y×1.5 / tau_z×2.0), runtime ~4.7h
 **PR:** #571
