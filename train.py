@@ -1159,6 +1159,9 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    surface_density_weight_scale: float = 0.0
+    surface_density_weight_k: int = 10
+    surface_density_weight_clamp_quantile: float = 0.95
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1880,6 +1883,96 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return pred.sum() * 0.0
 
 
+@torch.no_grad()
+def compute_inverse_density_weights(
+    surface_pos: torch.Tensor,
+    surface_mask: torch.Tensor,
+    *,
+    scale: float,
+    k: int = 10,
+    chunk_size: int = 4096,
+    clamp_quantile: float = 0.95,
+    eps: float = 1e-8,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Per-point inverse-density weights for the surface loss.
+
+    For each surface point, the raw weight is the mean Euclidean distance to its
+    k nearest **valid** neighbours (sparse regions get larger weight, dense
+    regions get smaller). The cdist matrix is built in chunks of ``chunk_size``
+    query rows, batched over B in a single fused call, to keep peak memory at
+    O(B * chunk_size * N * 4B) instead of O(B * N^2 * 4B). Padded points are
+    removed from the candidate set via masked_fill (so they are never selected
+    as neighbours) and receive output weight 1.0.
+
+    Per sample b, given valid raw weights w_raw (= mean_nn_dist + eps):
+        p95     = quantile(w_raw, clamp_quantile)
+        w_clamp = w_raw.clamp(max=p95)
+        w_norm  = w_clamp / mean(w_clamp)              # mean over valid = 1.0
+        w_blend = 1.0 + scale * (w_norm - 1.0)         # scale=0 → 1; scale=1 → full
+
+    Returns the [B, N] weight tensor (padded entries = 1.0) plus diagnostic
+    statistics aggregated over valid points across the batch.
+    """
+    B, N, _ = surface_pos.shape
+    device = surface_pos.device
+    weight = torch.ones((B, N), device=device, dtype=torch.float32)
+    diag_zero = {
+        "density_weight/max": 1.0,
+        "density_weight/min": 1.0,
+        "density_weight/std": 0.0,
+        "density_weight/pre_clamp_max_ratio": 1.0,
+    }
+    if scale == 0.0:
+        return weight, diag_zero
+
+    pos_f = surface_pos.float()
+    INF_DIST = 1.0e10
+    invalid = ~surface_mask  # [B, N]
+    mean_dists = torch.empty((B, N), device=device, dtype=torch.float32)
+    for start in range(0, N, chunk_size):
+        end = min(start + chunk_size, N)
+        chunk_pts = pos_f[:, start:end, :]  # [B, chunk, 3]
+        d = torch.cdist(chunk_pts, pos_f)  # [B, chunk, N]
+        d = d.masked_fill(invalid.unsqueeze(1), INF_DIST)
+        topk_d, _ = torch.topk(d, k + 1, dim=-1, largest=False)
+        mean_dists[:, start:end] = topk_d[..., 1:].mean(dim=-1)
+
+    diag_max = -float("inf")
+    diag_min = float("inf")
+    diag_std_max = 0.0
+    diag_pre_clamp_max_ratio = 0.0
+    for b in range(B):
+        mask_b = surface_mask[b]
+        n_valid = int(mask_b.sum().item())
+        if n_valid <= k + 1:
+            continue
+        valid_dists = mean_dists[b].masked_select(mask_b)
+        w_raw = valid_dists + eps
+        median_v = torch.quantile(w_raw, 0.5).clamp_min(eps)
+        diag_pre_clamp_max_ratio = max(
+            diag_pre_clamp_max_ratio, float((w_raw.max() / median_v).item())
+        )
+        p95 = torch.quantile(w_raw, clamp_quantile)
+        w_clamped_v = w_raw.clamp(max=p95)
+        mean_v = w_clamped_v.mean().clamp_min(eps)
+        w_norm_v = w_clamped_v / mean_v
+        w_blend_v = 1.0 + scale * (w_norm_v - 1.0)
+        full = torch.ones(N, device=device, dtype=torch.float32)
+        full = full.masked_scatter(mask_b, w_blend_v)
+        weight[b] = full
+        diag_max = max(diag_max, float(w_blend_v.max().item()))
+        diag_min = min(diag_min, float(w_blend_v.min().item()))
+        diag_std_max = max(diag_std_max, float(w_blend_v.std().item()))
+
+    diag = {
+        "density_weight/max": diag_max if math.isfinite(diag_max) else 1.0,
+        "density_weight/min": diag_min if math.isfinite(diag_min) else 1.0,
+        "density_weight/std": diag_std_max,
+        "density_weight/pre_clamp_max_ratio": diag_pre_clamp_max_ratio,
+    }
+    return weight, diag
+
+
 def weighted_masked_mse_per_channel(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -1887,6 +1980,7 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
+    point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked loss for surface predictions.
 
@@ -1939,6 +2033,8 @@ def weighted_masked_mse_per_channel(
         loss_elem = diff_sq
 
     weighted_diff = loss_elem * weights.view(1, 1, -1)
+    if point_weights is not None:
+        weighted_diff = weighted_diff * point_weights.to(pred.dtype).unsqueeze(-1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
@@ -1957,6 +2053,7 @@ def weighted_masked_beta_nll_per_channel(
     *,
     channel_weights: Iterable[float],
     beta: float,
+    point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float], list[float]]:
     """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
 
@@ -1998,6 +2095,8 @@ def weighted_masked_beta_nll_per_channel(
     mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
     valid = mask_f.sum().clamp_min(1)
     weighted_diff = nll * weights.view(1, 1, -1)
+    if point_weights is not None:
+        weighted_diff = weighted_diff * point_weights.to(pred_mean.dtype).unsqueeze(-1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
 
     per_axis_diff_sq_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
@@ -2034,11 +2133,24 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    surface_density_weight_scale: float = 0.0,
+    surface_density_weight_k: int = 10,
+    surface_density_weight_clamp_quantile: float = 0.95,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
+    surface_point_weights: torch.Tensor | None = None
+    density_diag: dict[str, float] = {}
+    if surface_density_weight_scale > 0.0:
+        surface_point_weights, density_diag = compute_inverse_density_weights(
+            batch.surface_x[..., :3],
+            batch.surface_mask,
+            scale=surface_density_weight_scale,
+            k=surface_density_weight_k,
+            clamp_quantile=surface_density_weight_clamp_quantile,
+        )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -2087,6 +2199,7 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 beta=beta_nll_beta,
+                point_weights=surface_point_weights,
             )
             volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
                 out["volume_preds"],
@@ -2104,6 +2217,7 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 wallshear_huber_delta=wallshear_huber_delta,
+                point_weights=surface_point_weights,
             )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -2144,6 +2258,8 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    for k, v in density_diag.items():
+        metrics[k] = v
     return loss, metrics
 
 
@@ -2788,6 +2904,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                surface_density_weight_scale=config.surface_density_weight_scale,
+                surface_density_weight_k=config.surface_density_weight_k,
+                surface_density_weight_clamp_quantile=config.surface_density_weight_clamp_quantile,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2968,7 +3087,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
-                if key.startswith("film/"):
+                if key.startswith("film/") or key.startswith("density_weight/"):
                     train_log[f"train/{key}"] = value
             train_log.update(
                 train_slope_tracker.update(
