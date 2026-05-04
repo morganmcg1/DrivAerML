@@ -275,6 +275,7 @@ class NorMuon(torch.optim.Optimizer):
             eps=eps,
         )
         super().__init__(params, defaults)
+        self._last_post_ns5_step_rms: list[float] = []
 
     @staticmethod
     def _zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 5) -> torch.Tensor:
@@ -298,6 +299,8 @@ class NorMuon(torch.optim.Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        post_ns5_step_rms_tensors: list[torch.Tensor] = []
 
         for group in self.param_groups:
             lr = group["lr"]
@@ -361,9 +364,42 @@ class NorMuon(torch.optim.Optimizer):
 
                 # Canonical Muon RMS-1 scaling (sqrt of larger dim).
                 scale = max(p.size(-2), p.size(-1)) ** 0.5
+                update = g.float() * (lr * scale)
+                post_ns5_step_rms_tensors.append(
+                    update.pow(2).mean().sqrt()
+                )
                 p.add_(g, alpha=-lr * scale)
 
+        if post_ns5_step_rms_tensors:
+            self._last_post_ns5_step_rms = (
+                torch.stack(post_ns5_step_rms_tensors).detach().cpu().tolist()
+            )
+        else:
+            self._last_post_ns5_step_rms = []
+
         return loss
+
+
+def _collect_normuon_step_rms(opt) -> list[float]:
+    """Return per-parameter post-NS5 update RMS values from any NorMuon
+    sub-optimizer wrapped inside ``opt`` (or ``opt`` itself if it is NorMuon).
+
+    Used for the advisor's "post-NS5 update RMS" diagnostic — the actual
+    per-element step magnitude after Newton-Schulz orthogonalization and the
+    canonical sqrt(max_dim) scaling, evaluated at peak LR. The orthogonalized
+    update is unit-norm by construction, so this quantity ≈ lr × 1, but the
+    diagnostic catches any drift from that design value.
+    """
+    if isinstance(opt, NorMuon):
+        return list(opt._last_post_ns5_step_rms)
+    sub_opts = getattr(opt, "optimizers", None)
+    if sub_opts is None:
+        return []
+    out: list[float] = []
+    for sub in sub_opts:
+        if isinstance(sub, NorMuon):
+            out.extend(sub._last_post_ns5_step_rms)
+    return out
 
 
 class CompositeOptimizer(torch.optim.Optimizer):
@@ -1308,6 +1344,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        normuon_rms = _collect_normuon_step_rms(optimizer)
+                        if normuon_rms:
+                            train_log["train/normuon/post_ns5_step_rms_max"] = max(normuon_rms)
+                            train_log["train/normuon/post_ns5_step_rms_mean"] = sum(normuon_rms) / len(normuon_rms)
 
                 train_log.update(
                     train_slope_tracker.update(
