@@ -102,6 +102,10 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_surface_curvature: bool = False
+    curvature_knn_k: int = 20
+    curvature_chunk_size: int = 4096
+    curvature_ref_size: int = 4096
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -297,6 +301,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_surface_curvature=config.use_surface_curvature,
+        curvature_knn_k=config.curvature_knn_k,
+        curvature_chunk_size=config.curvature_chunk_size,
+        curvature_ref_size=config.curvature_ref_size,
     )
 
 
