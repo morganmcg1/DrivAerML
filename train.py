@@ -129,6 +129,8 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    use_tangent_frame_tau: bool = False
+    tangent_frame_seed_axis: str = "x"
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -219,6 +221,33 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_tangent_frame_tau": (
+            "Predict wall shear (tau_x, tau_y, tau_z) loss in the local "
+            "surface tangent frame [t_hat, n_hat, s_hat] instead of the "
+            "global Cartesian (x, y, z) frame. Rotates pred and target tau "
+            "vectors into the local frame before computing the MSE; cp "
+            "(channel 0) and the volume_pressure loss are unaffected. "
+            "n_hat is taken directly from the provided surface normals "
+            "(channels 3:6 of surface_x), avoiding the PCA cost / sign "
+            "ambiguity of estimating normals from k-NN; t_hat is built via "
+            "Gram-Schmidt against --tangent-frame-seed-axis (default 'x', "
+            "the DrivAerML freestream direction); s_hat = n_hat x t_hat. "
+            "Combined with non-trivial --tau-y-loss-weight / "
+            "--tau-z-loss-weight (which now apply to the n_hat / s_hat "
+            "components in the rotated frame) this produces a different "
+            "anisotropic loss; with isotropic channel weights the rotation "
+            "is mathematically a no-op (orthogonal MSE invariance). The "
+            "model still outputs tau in the global frame and all reported "
+            "metrics are in the global frame. Default: False."
+        ),
+        "tangent_frame_seed_axis": (
+            "Tangent seed axis used by --use-tangent-frame-tau. 'x' "
+            "(DrivAerML freestream / streamwise direction) gives a "
+            "(streamwise-tangent, normal, spanwise) decomposition. 'y' "
+            "is also accepted. Points whose normal is nearly parallel to "
+            "the seed are handled with an automatic orthogonal fallback "
+            "to avoid a singular Gram-Schmidt projection. Default: 'x'."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +329,75 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+_TANGENT_SEED_AXES = {
+    "x": (1.0, 0.0, 0.0),
+    "y": (0.0, 1.0, 0.0),
+    "z": (0.0, 0.0, 1.0),
+}
+
+
+def build_tangent_frame_from_normals(
+    normals: torch.Tensor,
+    seed_axis: str = "x",
+) -> torch.Tensor:
+    """Build a per-point local surface tangent frame from given unit normals.
+
+    Args:
+        normals: tensor of shape (..., 3) of unit-norm surface normals.
+            Padded points may carry zero-norm rows; they get a degenerate
+            but finite frame and are masked out of the loss downstream.
+        seed_axis: 'x' (default, DrivAerML freestream/streamwise direction),
+            'y', or 'z'. Points whose normal is nearly parallel to this
+            axis fall back to the next coordinate axis to avoid a
+            singular Gram-Schmidt projection.
+
+    Returns:
+        R: (..., 3, 3) rotation matrices. ``R @ tau`` yields
+        ``[t_component, n_component, s_component]``; rows are
+        ``[t_hat, n_hat, s_hat]``.
+    """
+
+    seed_axis = seed_axis.lower()
+    if seed_axis not in _TANGENT_SEED_AXES:
+        raise ValueError(
+            f"--tangent-frame-seed-axis must be one of {sorted(_TANGENT_SEED_AXES)}; "
+            f"got '{seed_axis}'"
+        )
+    seed_idx = "xyz".index(seed_axis)
+    fallback_idx = (seed_idx + 1) % 3
+
+    n = torch.nn.functional.normalize(normals.float(), dim=-1, eps=1e-12)
+
+    seed_primary = torch.zeros_like(n)
+    seed_primary[..., seed_idx] = 1.0
+    seed_fallback = torch.zeros_like(n)
+    seed_fallback[..., fallback_idx] = 1.0
+    use_fallback = n[..., seed_idx : seed_idx + 1].abs() > 0.9
+    seed = torch.where(use_fallback, seed_fallback, seed_primary)
+
+    t = seed - (seed * n).sum(dim=-1, keepdim=True) * n
+    t = torch.nn.functional.normalize(t, dim=-1, eps=1e-12)
+    s = torch.linalg.cross(n, t, dim=-1)
+    return torch.stack([t, n, s], dim=-2)
+
+
+def rotate_tau_to_local_frame(
+    surface_tensor: torch.Tensor,
+    R: torch.Tensor,
+) -> torch.Tensor:
+    """Rotate the wall-shear channels (1:4) of a surface tensor into the local frame.
+
+    Channel 0 (surface_pressure / cp) is left unchanged. Returns a new tensor
+    of the same shape with float32 dtype to keep the loss numerically clean
+    under bf16 autocast.
+    """
+
+    cp = surface_tensor[..., 0:1].float()
+    tau = surface_tensor[..., 1:4].float()
+    tau_local = torch.einsum("...ij,...j->...i", R, tau)
+    return torch.cat([cp, tau_local], dim=-1)
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,6 +408,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_tangent_frame_tau: bool = False,
+    tangent_frame_seed_axis: str = "x",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -321,15 +421,26 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_pred_for_loss = out["surface_preds"]
+        surface_target_for_loss = surface_target
+        if use_tangent_frame_tau:
+            R = build_tangent_frame_from_normals(
+                batch.surface_x[..., 3:6],
+                seed_axis=tangent_frame_seed_axis,
+            )
+            surface_pred_for_loss = rotate_tau_to_local_frame(out["surface_preds"], R)
+            surface_target_for_loss = rotate_tau_to_local_frame(surface_target, R)
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
+                surface_pred_for_loss,
+                surface_target_for_loss,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(
+                surface_pred_for_loss, surface_target_for_loss, batch.surface_mask
+            )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -826,9 +937,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"(log_freq[d, f] = log(sigmas[f % len(sigmas)]))"
                 )
             if use_channel_weights:
+                if config.use_tangent_frame_tau:
+                    print(
+                        f"Surface channel weights (local frame, seed={config.tangent_frame_seed_axis}): "
+                        f"cp=1.0 tau_t=1.0 tau_n={config.tau_y_loss_weight} "
+                        f"tau_s={config.tau_z_loss_weight}"
+                    )
+                else:
+                    print(
+                        f"Surface channel weights: cp=1.0 tau_x=1.0 "
+                        f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                    )
+            if config.use_tangent_frame_tau:
                 print(
-                    f"Surface channel weights: cp=1.0 tau_x=1.0 "
-                    f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                    f"Tangent-frame tau loss enabled: rotating tau (chan 1:4) "
+                    f"to local frame [t_hat, n_hat, s_hat] from provided "
+                    f"surface normals; seed_axis={config.tangent_frame_seed_axis}"
                 )
 
         run = init_wandb_run(
@@ -861,6 +985,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/use_tangent_frame_tau"] = bool(config.use_tangent_frame_tau)
+            wandb.summary["loss/tangent_frame_seed_axis"] = (
+                config.tangent_frame_seed_axis if config.use_tangent_frame_tau else ""
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1008,6 +1136,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_tangent_frame_tau=config.use_tangent_frame_tau,
+                        tangent_frame_seed_axis=config.tangent_frame_seed_axis,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
