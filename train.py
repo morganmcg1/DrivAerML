@@ -765,6 +765,7 @@ class Config:
     resume_from: str = ""
     lr_schedule_steps: bool = False
     lr_schedule_cosine_t_max_override: int = 0
+    lr_schedule_eta_min: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2051,17 +2052,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         else:
             cosine_steps = max(1, total_estimated_steps - effective_warmup_steps)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=cosine_steps, eta_min=0.0
+            optimizer, T_max=cosine_steps, eta_min=config.lr_schedule_eta_min
         )
         if is_main:
             print(
                 f"LR schedule: per-step cosine, T_max={cosine_steps} "
+                f"eta_min={config.lr_schedule_eta_min} "
                 f"(total_estimated_steps={total_estimated_steps}, "
                 f"effective_warmup_steps={effective_warmup_steps}, "
                 f"override={config.lr_schedule_cosine_t_max_override})"
             )
     else:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max_epochs, eta_min=config.lr_schedule_eta_min
+        )
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     if is_main and effective_warmup_steps > 0:
         print(
