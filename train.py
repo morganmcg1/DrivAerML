@@ -1150,6 +1150,7 @@ class Config:
     slope_log_fraction: float = 0.05
     kill_thresholds: str = ""
     clip_grad_norm: float = 0.0
+    grad_ema_alpha: float = 0.0
     compile_model: bool = True
     debug: bool = False
     seed: int = -1
@@ -2701,6 +2702,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("full_val/slope/*", step_metric="global_step")
     wandb.define_metric("test/slope/*", step_metric="global_step")
     wandb.define_metric("train/grad/*", step_metric="global_step")
+    wandb.define_metric("train/grad_ema_alpha", step_metric="global_step")
+    wandb.define_metric("train/grad_norm_raw", step_metric="global_step")
+    wandb.define_metric("train/grad_norm_smoothed", step_metric="global_step")
+    wandb.define_metric("train/grad_noise_ratio", step_metric="global_step")
     wandb.define_metric("train/grad_module/*", step_metric="global_step")
     wandb.define_metric("train/grad_param/*", step_metric="global_step")
     wandb.define_metric("train/grad_type/*", step_metric="global_step")
@@ -2744,6 +2749,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     train_start = time.time()
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
+    grad_ema_state: dict[int, torch.Tensor] = {}
+    if config.grad_ema_alpha > 0 and is_main:
+        print(f"Gradient EMA smoothing: alpha={config.grad_ema_alpha}")
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
@@ -2816,6 +2824,55 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_gradients
                 else {}
             )
+            grad_ema_metrics: dict[str, float] = {}
+            if config.grad_ema_alpha > 0:
+                raw_sq = torch.zeros((), device=device)
+                smooth_sq = torch.zeros((), device=device)
+                diff_sq = torch.zeros((), device=device)
+                grads_finite_local = True
+                with torch.no_grad():
+                    for p in model.parameters():
+                        if p.grad is None:
+                            continue
+                        g = p.grad
+                        raw_sq = raw_sq + g.float().pow(2).sum()
+                        if not torch.isfinite(g).all():
+                            grads_finite_local = False
+                            break
+                    if grads_finite_local:
+                        for p in model.parameters():
+                            if p.grad is None:
+                                continue
+                            pid = id(p)
+                            if pid not in grad_ema_state:
+                                grad_ema_state[pid] = p.grad.detach().clone()
+                                smooth_sq = smooth_sq + grad_ema_state[pid].float().pow(2).sum()
+                            else:
+                                grad_ema_state[pid].mul_(config.grad_ema_alpha).add_(
+                                    p.grad.data, alpha=1.0 - config.grad_ema_alpha
+                                )
+                                smooth_sq = smooth_sq + grad_ema_state[pid].float().pow(2).sum()
+                                diff_sq = diff_sq + (
+                                    p.grad - grad_ema_state[pid]
+                                ).float().pow(2).sum()
+                                p.grad.data.copy_(grad_ema_state[pid])
+                if grads_finite_local:
+                    raw_norm = float(torch.sqrt(raw_sq).item())
+                    smooth_norm = float(torch.sqrt(smooth_sq).item())
+                    diff_norm = float(torch.sqrt(diff_sq).item())
+                    grad_ema_metrics = {
+                        "train/grad_ema_alpha": config.grad_ema_alpha,
+                        "train/grad_norm_raw": raw_norm,
+                        "train/grad_norm_smoothed": smooth_norm,
+                        "train/grad_noise_ratio": diff_norm / max(smooth_norm, 1e-12),
+                    }
+                else:
+                    grad_ema_metrics = {
+                        "train/grad_ema_alpha": config.grad_ema_alpha,
+                        "train/grad_norm_raw": float("nan"),
+                        "train/grad_norm_smoothed": float("nan"),
+                        "train/grad_noise_ratio": float("nan"),
+                    }
             grad_is_finite = True
             if config.clip_grad_norm > 0:
                 pre_clip_norm = torch.nn.utils.clip_grad_norm_(
@@ -2888,6 +2945,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/nonfinite_skip_count": nonfinite_skip_count,
                 "global_step": global_step,
                 **gradient_metrics,
+                **grad_ema_metrics,
                 **weight_metrics,
             }
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
