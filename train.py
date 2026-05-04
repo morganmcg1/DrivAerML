@@ -24,6 +24,7 @@ from typing import Iterable
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import wandb
 import yaml
@@ -52,6 +53,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     make_loaders,
     masked_mse,
+    masked_mse_per_channel,
     metric_namespace,
     parse_kill_thresholds,
     primary_metric_log,
@@ -118,6 +120,14 @@ class Config:
     seed: int = -1
     nonfinite_skip_abort: int = 200
     compile_model: bool = True
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
+    gradnorm_alpha: float = 0.0
+    gradnorm_beta: float = 0.5
+    gradnorm_weight_min: float = 0.5
+    gradnorm_weight_max: float = 4.0
+    volume_guard_pct: float = 0.0
     debug: bool = False
 
 
@@ -181,6 +191,79 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    name = config.optimizer.lower()
+    if name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        )
+    if name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+
+
+# Channel index convention shared with logging. Surface output has 4 channels:
+# [cp, tau_x, tau_y, tau_z]; volume output has 1 channel: [volume_p].
+GRADNORM_CHANNEL_NAMES = ("cp", "tau_x", "tau_y", "tau_z", "volume")
+
+
+class GradNormEMAWeighter:
+    """EMA-proxy GradNorm for per-channel loss weighting.
+
+    Tracks an EMA of each channel's gradient-norm proxy and updates per-channel
+    loss weights so that all channels learn at a similar rate. The 4 surface
+    channels share the surface_out gradient-norm proxy (so they receive
+    identical dynamic weights), and the volume channel uses the volume_out
+    gradient-norm proxy. Weights are clamped per-channel and renormalised so
+    sum(weights) = n_channels.
+    """
+
+    def __init__(
+        self,
+        n_channels: int,
+        alpha: float,
+        beta: float,
+        w_min: float = 0.5,
+        w_max: float = 4.0,
+    ):
+        self.alpha = alpha
+        self.beta = beta
+        self.w_min = w_min
+        self.w_max = w_max
+        self.n = n_channels
+        self.grad_norm_ema = [1.0] * n_channels
+        self.weights = [1.0] * n_channels
+        self.steps = 0
+
+    def update(self, grad_norms: list[float]) -> list[float]:
+        """Update the per-channel EMA and weights given current gradient norms."""
+        for i, gn in enumerate(grad_norms):
+            safe_gn = max(float(gn), 1e-8)
+            self.grad_norm_ema[i] = (
+                self.alpha * self.grad_norm_ema[i] + (1.0 - self.alpha) * safe_gn
+            )
+        mean_g = sum(self.grad_norm_ema) / self.n
+        new_weights = []
+        for i in range(self.n):
+            ratio = mean_g / max(self.grad_norm_ema[i], 1e-8)
+            new_w = self.weights[i] * (ratio ** self.beta)
+            new_w = max(self.w_min, min(self.w_max, new_w))
+            new_weights.append(new_w)
+        total = sum(new_weights)
+        if total > 0:
+            self.weights = [w * self.n / total for w in new_weights]
+        self.steps += 1
+        return self.weights
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -190,7 +273,17 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    channel_weights: list[float] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    """Compute the weighted training loss.
+
+    When ``channel_weights`` is provided (length 5: cp, tau_x, tau_y, tau_z,
+    volume), the per-channel surface MSE losses and the volume MSE loss are
+    multiplied by these weights before being averaged into the final loss. The
+    surface contribution is averaged across the 4 surface channels so the
+    overall scale matches the unweighted (mean-of-channels) baseline when all
+    weights are 1.
+    """
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -201,10 +294,18 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_per_ch = masked_mse_per_channel(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )
+        surface_loss = surface_per_ch.mean()
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
+        if channel_weights is not None:
+            cw = surface_per_ch.new_tensor(channel_weights)
+            weighted_surface_loss = surface_loss_weight * (surface_per_ch * cw[:4]).mean()
+            weighted_volume_loss = volume_loss_weight * cw[4] * volume_loss
+        else:
+            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
     return loss, {
@@ -213,7 +314,21 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "surface_loss_cp": float(surface_per_ch[0].detach().cpu().item()),
+        "surface_loss_tau_x": float(surface_per_ch[1].detach().cpu().item()),
+        "surface_loss_tau_y": float(surface_per_ch[2].detach().cpu().item()),
+        "surface_loss_tau_z": float(surface_per_ch[3].detach().cpu().item()),
     }
+
+
+def _module_grad_norm(module: nn.Module) -> float:
+    """Compute the L2 norm of all gradients in a module's parameters."""
+    total_sq = 0.0
+    for p in module.parameters():
+        if p.grad is None:
+            continue
+        total_sq += float(p.grad.detach().float().pow(2).sum().item())
+    return math.sqrt(total_sq)
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -257,9 +372,23 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        weighter: GradNormEMAWeighter | None = None
+        if config.gradnorm_alpha > 0.0:
+            weighter = GradNormEMAWeighter(
+                n_channels=len(GRADNORM_CHANNEL_NAMES),
+                alpha=config.gradnorm_alpha,
+                beta=config.gradnorm_beta,
+                w_min=config.gradnorm_weight_min,
+                w_max=config.gradnorm_weight_max,
+            )
+            if state.is_main:
+                print(
+                    f"GradNormEMA: alpha={config.gradnorm_alpha} beta={config.gradnorm_beta} "
+                    f"clamp=[{config.gradnorm_weight_min}, {config.gradnorm_weight_max}]"
+                )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -321,6 +450,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                channel_weights = list(weighter.weights) if weighter is not None else None
                 loss, batch_loss_metrics = train_loss(
                     model,
                     batch,
@@ -329,6 +459,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    channel_weights=channel_weights,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -367,6 +498,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/surface_loss_cp": batch_loss_metrics["surface_loss_cp"],
+                            "train/surface_loss_tau_x": batch_loss_metrics["surface_loss_tau_x"],
+                            "train/surface_loss_tau_y": batch_loss_metrics["surface_loss_tau_y"],
+                            "train/surface_loss_tau_z": batch_loss_metrics["surface_loss_tau_z"],
                         }
                     )
 
@@ -374,6 +509,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
+                    surface_grad_norm = volume_grad_norm = 0.0
+                    if weighter is not None:
+                        surface_grad_norm = _module_grad_norm(base_model.surface_out)
+                        volume_grad_norm = _module_grad_norm(base_model.volume_out)
+                        if state.enabled:
+                            grad_norm_buf = torch.tensor(
+                                [surface_grad_norm, volume_grad_norm],
+                                device=device,
+                                dtype=torch.float32,
+                            )
+                            dist.all_reduce(grad_norm_buf, op=dist.ReduceOp.AVG)
+                            surface_grad_norm = float(grad_norm_buf[0].item())
+                            volume_grad_norm = float(grad_norm_buf[1].item())
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
@@ -411,6 +559,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if skip_step:
                         optimizer.zero_grad(set_to_none=True)
                     else:
+                        if weighter is not None:
+                            weighter.update([
+                                surface_grad_norm,
+                                surface_grad_norm,
+                                surface_grad_norm,
+                                surface_grad_norm,
+                                volume_grad_norm,
+                            ])
                         set_optimizer_lr(optimizer, current_lr)
                         optimizer.step()
                         if ema is not None:
@@ -427,6 +583,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        if weighter is not None:
+                            train_log.update(
+                                {
+                                    "train/gradnorm_w_cp": weighter.weights[0],
+                                    "train/gradnorm_w_tau_x": weighter.weights[1],
+                                    "train/gradnorm_w_tau_y": weighter.weights[2],
+                                    "train/gradnorm_w_tau_z": weighter.weights[3],
+                                    "train/gradnorm_w_volume": weighter.weights[4],
+                                    "train/gradnorm_ema_surface": weighter.grad_norm_ema[0],
+                                    "train/gradnorm_ema_volume": weighter.grad_norm_ema[4],
+                                    "train/gradnorm_grad_surface": surface_grad_norm,
+                                    "train/gradnorm_grad_volume": volume_grad_norm,
+                                }
+                            )
 
                 if skip_step:
                     nonfinite_skip_count += 1
