@@ -848,6 +848,107 @@ class Transformer(nn.Module):
         return x
 
 
+class EdgeConvBlock(nn.Module):
+    """Dynamic-EdgeConv (DGCNN-style) message-passing pre-encoder.
+
+    Builds a k-NN graph on the surface point cloud using XYZ coordinates and
+    aggregates edge features cat(h_i, h_j - h_i) through a 2-layer MLP with
+    LayerNorm + GELU, max-pooled across the k neighbours. Produces a per-point
+    feature update of the same dimensionality as the input so it can be added
+    as a residual to the raw surface features before the Transolver encoder.
+
+    Padding is masked so padded points are never selected as neighbours and
+    receive zero output. The final Linear is zero-initialised so the block is
+    identity at training start (residual-safe).
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        k: int = 16,
+        knn_chunk: int = 8192,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.k = k
+        self.knn_chunk = knn_chunk
+        self.mlp = nn.Sequential(
+            nn.Linear(2 * in_dim, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+            nn.Linear(out_dim, out_dim),
+            nn.LayerNorm(out_dim),
+            nn.GELU(),
+        )
+        nn.init.trunc_normal_(self.mlp[0].weight, std=0.02)
+        nn.init.zeros_(self.mlp[0].bias)
+        nn.init.zeros_(self.mlp[3].weight)
+        nn.init.zeros_(self.mlp[3].bias)
+
+    @torch.no_grad()
+    def _build_knn(
+        self,
+        coords: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Chunked k-NN over XYZ. Padded rows are excluded as candidates and
+        self-loops are removed. Returns int64 indices of shape [B, N, k].
+        """
+        B, N, _ = coords.shape
+        coords_f = coords.float()
+        all_idx: list[torch.Tensor] = []
+        for b in range(B):
+            pts = coords_f[b]  # [N, 3]
+            pad_mask = ~mask[b].bool() if mask is not None else None  # True = padded
+            chunks: list[torch.Tensor] = []
+            for i in range(0, N, self.knn_chunk):
+                seg = pts[i : i + self.knn_chunk]
+                d = torch.cdist(
+                    seg, pts, compute_mode="use_mm_for_euclid_dist"
+                )  # [chunk_i, N]
+                if pad_mask is not None:
+                    d.masked_fill_(pad_mask.unsqueeze(0), float("inf"))
+                rows = torch.arange(seg.shape[0], device=coords.device)
+                d[rows, rows + i] = float("inf")
+                _, idx = d.topk(self.k, dim=-1, largest=False)
+                chunks.append(idx)
+            all_idx.append(torch.cat(chunks, dim=0))  # [N, k]
+        return torch.stack(all_idx, dim=0)  # [B, N, k]
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, C = x.shape
+        if C < 3:
+            raise ValueError(
+                f"EdgeConvBlock expects first 3 input dims to be XYZ; got C={C}"
+            )
+        if N == 0:
+            # No real points to process. Run a dummy forward through the MLP so
+            # all params participate in the autograd graph: keeps DDP happy
+            # without enabling find_unused_parameters when other ranks have N>0.
+            dummy_in = x.new_zeros(1, 1, 2 * C)
+            dummy_out = self.mlp(dummy_in)
+            return x.new_zeros(B, 0, self.out_dim) + 0.0 * dummy_out.sum()
+        coords = x[:, :, :3]
+        knn_idx = self._build_knn(coords, mask)  # [B, N, k]
+        batch_idx = (
+            torch.arange(B, device=x.device).view(B, 1, 1).expand(B, N, self.k)
+        )
+        x_j = x[batch_idx, knn_idx]  # [B, N, k, C]
+        x_i = x.unsqueeze(2).expand(-1, -1, self.k, -1)  # [B, N, k, C]
+        edge_feat = torch.cat([x_i, x_j - x_i], dim=-1)  # [B, N, k, 2C]
+        h = self.mlp(edge_feat)  # [B, N, k, out_dim]
+        out = h.amax(dim=2)  # [B, N, out_dim]
+        if mask is not None:
+            out = out * mask.to(dtype=out.dtype).unsqueeze(-1)
+        return out
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -871,6 +972,8 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        gnn_surface_preenc: str = "none",
+        gnn_k: int = 16,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -885,6 +988,22 @@ class SurfaceTransolver(nn.Module):
         self.pos_max_wavelength = pos_max_wavelength
         self.learnable_pe = learnable_pe
         self.beta_nll = beta_nll
+        self.gnn_surface_preenc = gnn_surface_preenc
+        self.gnn_k = gnn_k
+
+        if gnn_surface_preenc == "edgeconv":
+            self.gnn_preenc = EdgeConvBlock(
+                in_dim=surface_input_dim,
+                out_dim=surface_input_dim,
+                k=gnn_k,
+            )
+        elif gnn_surface_preenc == "none":
+            self.gnn_preenc = None
+        else:
+            raise ValueError(
+                f"Unknown gnn_surface_preenc={gnn_surface_preenc!r}; "
+                f"supported: 'none', 'edgeconv'"
+            )
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -964,6 +1083,9 @@ class SurfaceTransolver(nn.Module):
         masks: list[torch.Tensor] = []
         surface_tokens = 0
         volume_tokens = 0
+
+        if surface_x is not None and self.gnn_preenc is not None:
+            surface_x = surface_x + self.gnn_preenc(surface_x, surface_mask)
 
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
@@ -1158,6 +1280,8 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    gnn_surface_preenc: str = "none"
+    gnn_k: int = 16
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1365,6 +1489,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        gnn_surface_preenc=config.gnn_surface_preenc,
+        gnn_k=config.gnn_k,
     )
 
 
