@@ -1,22 +1,26 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-01 (updated: all 8 students now active — PR #562 nezuko assigned after PR #556 ensemble merged)
+- **Date:** 2026-05-04 04:55 UTC (refreshed mid-Round-12 monitoring cycle)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 0 idle students, 8 WIP PRs, 0 review-ready
+- **Fleet:** 0 idle students, 8 WIP PRs, 0 review-ready (full GPU utilization)
 - **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 total)
 
-## ENSEMBLE SOTA — PR #556 nezuko K=5 inference-time ensemble — val_abupt **6.2681%** / test_abupt **7.5813%**
+## ENSEMBLE SOTA — PR #562 nezuko greedy K=7 forward selection — val_abupt **6.2345%**
 
-First result to beat AB-UPT on surface_pressure AND wall_shear simultaneously. −8.76% relative on val, −6.66% on test vs single-model SOTA.
-W&B group: `ensemble-inference-v1`, members: `9mm3sz7x`, `49aimdiz`, `wyz68o8r`, `qqtdnlwq`, `5o7jc7wi`
+Beats prior K=5 ensemble (PR #556 val=6.2681%) by Caruana 2004 greedy forward selection from 22 candidates.
 
-**Policy:** Single-model PRs still gate against single-model SOTA (< 6.9246% val). When new single-model winners land, run `ensemble_eval.py` to check if they improve the K=5 pool.
+## SINGLE-MODEL SOTA — PR #516 askeladd tau-weight v2 — val_abupt **6.8701%** / test_abupt **8.1229%**
 
-## SINGLE-MODEL SOTA — PR #523 thorfinn EMA-proxy GradNorm alpha=0.5, EP6, val_abupt **6.9246%**
+All single-model PRs must beat val_abupt < **6.8701%** with test_abupt ≤ ~8.20%.
 
-All single-model PRs must beat val_abupt < **6.9246%** with test_abupt ≤ 8.30%.
+### Noise-floor calibration (askeladd PR #571 rebased SOTA repro)
+- Identical-config rerun of SOTA stack: val=6.9226% vs claimed 6.8701% (+0.052pp on identical code)
+- **Treat improvements within ±0.05pp of SOTA as noise**, not signal
+- Genuine win threshold: val_abupt < 6.82%
+- Borderline (need replicate): 6.82–6.92%
+- No signal / regression: > 6.92%
 
 | Metric | PR #523 SOTA val EP6 | AB-UPT |
 |---|---:|---:|
@@ -61,39 +65,35 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 ## Currently in-flight (8 active WIP PRs on tay, ZERO idle)
 
-| PR | Student | Lever | Status |
+| PR | Student | Lever | Status (2026-05-04 04:55 UTC) |
 |---|---|---|---|
-| #571 | askeladd | tau_y/tau_z weight intensity sweep — 3-arm: ×1.5/×2.0, ×2.0/×2.5, ×1.0/×1.5 (group `askeladd-tau-sweep`) | sequential arms running |
-| #568 | fern | NorMuon optimizer (normalized Muon for 2D weight matrices, Lion for 1D/embeddings) | running |
-| #561 | edward | rff-num-features 32 clean retry — group `edward-rff32-v2` | running (rebased clean) |
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | running |
-| #553 | alphonse | input coord jitter regularization — 4-arm sigma sweep (0.0, 0.001, 0.005, 0.01) | running; rebase onto tay pending between arms |
-| #555 | frieren | GradNorm alpha sweep / tau-channel reweighting v2 | running |
-| #562 | nezuko | greedy forward ensemble member selection (Caruana 2004) on K=5 candidate pool | running |
-| #557 | tanjiro | multi-band fused encoding (24-feat) + hidden_dim 576 (PR #534 follow-up) | running |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | Arm A (floor=0.5) DONE val=6.9602% (within noise); Arm B (floor=0.3) running. Floor-not-binding finding → pivot to alpha=1.5 next |
+| #553 | alphonse | input coord jitter — 4-arm sigma sweep (0.0/0.001/0.005/0.01) | sigma=0.0 baseline DONE (val=6.9511%, clean repro); sigma=0.001 in flight; rebased onto PR #516 SOTA |
+| #555 | frieren | GradNorm alpha sweep — α∈{0.75, 1.0, 1.5} | Arm A α=0.75 DONE (val=6.9421% borderline, but tau_y/tau_z test improved); Arm B α=1.0 mid-EP2 (run `341czkol`) |
+| #568 | fern | NorMuon optimizer (normalized Muon for 2D weights) | relaunched at `--normuon-lr 0.02` (was 1e-5); run `ii3vh18d` |
+| #571 | askeladd | tau_y/tau_z weight intensity sweep (3-arm) | Arm A (×1.5/×2.0) mid-EP2; chain orchestrator B→C ready |
+| #572 | nezuko | Lion β1 sweep (0.9 → 0.8/0.7) | running; no comments yet |
+| #573 | edward | EMA decay sweep (0.999 → 0.9993/0.9997/0.9999) | running; no comments yet |
+| #574 | tanjiro | RFF spectral density expansion (3-arm: 32f same / 32f wider / 64f) | running; no comments yet |
 
-Round-12 focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (regularization, weight averaging, dynamic rebalancing, multi-band capacity).
+Round-12 focus: defend PR #516 SOTA; attack tau_y/tau_z gap from new orthogonal angles (regularization, dynamic rebalancing, alpha intensification, EMA stabilization, RFF capacity).
 
 ---
 
-## This-cycle review actions (just completed)
+## Recent merges / closures (Round 11 → Round 12 boundary)
 
-### PR #556 nezuko K=5 inference-time ensemble — MERGED (NEW ENSEMBLE SOTA)
-- val_abupt=6.2681%, test_abupt=7.5813% — beats previous single-model SOTA by −8.76% relative on val
-- First result to beat AB-UPT on surface_pressure AND wall_shear simultaneously
-- W&B group `ensemble-inference-v1`, members: `9mm3sz7x`, `49aimdiz`, `wyz68o8r`, `qqtdnlwq`, `5o7jc7wi`
-- Follow-up: PR #562 nezuko — greedy forward ensemble selection (Caruana 2004) to improve K=5 pool composition
+### PR #562 nezuko greedy K=7 ensemble — MERGED (ENSEMBLE SOTA)
+- val_abupt=6.2345% via Caruana 2004 forward selection from 22-run pool
 
-### PR #534 tanjiro fused multi-band 24-feat StringSep — CLOSED NEAR-MISS
-- run `19qf6di1`, group `multi-scale-fused-3band-8feat`, finished 6 epochs; EP6 val_abupt=**6.956%**
-- Beats alphonse SOTA, misses tay SOTA #523 (6.9246%); still descending → follow-up PR #557 with hidden_dim 576 + 14 epochs
+### PR #516 askeladd tau-weight v2 — MERGED (SINGLE-MODEL SOTA)
+- val_abupt=6.8701%, test_abupt=8.1229% — defines current single-model gating threshold
 
-### PR #537 alphonse slw=2.0 13-epoch — CLOSED NEGATIVE
-- val_abupt=6.8994% at EP5; within seed-variance noise, does NOT beat current SOTA #523 (6.9246%)
+### PR #142 thorfinn vol_w=2.0 — closeout logged (+10.78%)
+### PR #146, #141 — closeouts logged
 
-### PR #536 nezuko y-mirror training augmentation — CLOSED NEGATIVE (hypothesis falsified)
-- val_abupt=7.2315% at EP11; tau_y did NOT improve selectively — gap is structural, not symmetry-addressable
-- PR #516 askeladd and PR #538 fern also superseded by new assignments #571 and #568 respectively
+### Pending in this cycle
+- PR #552 Arm A: borderline (within noise floor, not a real regression); pivoting thorfinn to alpha=1.5
+- PR #555 Arm A α=0.75: borderline val (+0.018pp), but tau_y test -0.119pp / tau_z test -0.124pp — Arm B α=1.0 is the tiebreaker
 
 ---
 
