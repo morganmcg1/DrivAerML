@@ -1159,9 +1159,110 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    progressive_points_schedule: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
+
+
+def parse_progressive_schedule(schedule_str: str) -> list[tuple[int, int]]:
+    """Parse '16384:10,32768:25,65536:50' into [(16384, 10), (32768, 25), (65536, 50)].
+
+    Each pair is ``(n_points_per_view, end_epoch_inclusive_1based)``. ``end_epoch``
+    must be strictly increasing. Returns ``[]`` for an empty/whitespace string.
+    """
+    if not schedule_str.strip():
+        return []
+    phases: list[tuple[int, int]] = []
+    for raw_part in schedule_str.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            raise ValueError(
+                f"progressive_points_schedule entry {part!r} must be 'N_POINTS:END_EPOCH'"
+            )
+        n_pts_str, end_epoch_str = part.split(":", 1)
+        n_pts = int(n_pts_str)
+        end_epoch = int(end_epoch_str)
+        if n_pts <= 0 or end_epoch <= 0:
+            raise ValueError(
+                f"progressive_points_schedule entry {part!r} must be positive integers"
+            )
+        if phases and end_epoch <= phases[-1][1]:
+            raise ValueError(
+                f"progressive_points_schedule end_epoch values must be strictly increasing: "
+                f"{schedule_str!r}"
+            )
+        phases.append((n_pts, end_epoch))
+    return phases
+
+
+def get_current_resolution(
+    epoch_zero_based: int, schedule: list[tuple[int, int]], default: int
+) -> int:
+    """Return the points-per-view for the current 0-indexed epoch.
+
+    Schedule end_epochs are 1-based and inclusive (``end_epoch=10`` covers
+    epochs 1..10, i.e. zero-based 0..9). Past the end of the schedule, the
+    final phase's resolution sticks.
+    """
+    if not schedule:
+        return default
+    epoch_1based = epoch_zero_based + 1
+    for n_pts, end_epoch in schedule:
+        if epoch_1based <= end_epoch:
+            return n_pts
+    return schedule[-1][0]
+
+
+def _subsample_modality(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    mask: torch.Tensor,
+    n_target: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Sample ``n_target`` rows per batch item, preferring valid (mask=True) rows.
+
+    Padding rows (mask=False) are sampled only if there are fewer valid rows than
+    ``n_target``. Output rows are sorted by index within each item to preserve a
+    stable ordering.
+    """
+    B, N = mask.shape
+    if N <= n_target:
+        return x, y, mask
+    scores = torch.rand(B, N, device=x.device)
+    scores = scores.masked_fill(~mask, float("inf"))
+    idx = scores.argsort(dim=-1)[:, :n_target]
+    idx, _ = idx.sort(dim=-1)
+    new_x = torch.gather(x, 1, idx.unsqueeze(-1).expand(-1, -1, x.shape[-1]))
+    new_y = torch.gather(y, 1, idx.unsqueeze(-1).expand(-1, -1, y.shape[-1]))
+    new_mask = torch.gather(mask, 1, idx)
+    return new_x, new_y, new_mask
+
+
+def subsample_batch(
+    batch: "SurfaceBatch",
+    n_surface: int,
+    n_volume: int,
+) -> "SurfaceBatch":
+    """Randomly subsample each item to ``n_surface`` and ``n_volume`` rows."""
+    surface_x, surface_y, surface_mask = _subsample_modality(
+        batch.surface_x, batch.surface_y, batch.surface_mask, n_surface
+    )
+    volume_x, volume_y, volume_mask = _subsample_modality(
+        batch.volume_x, batch.volume_y, batch.volume_mask, n_volume
+    )
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=surface_mask,
+        volume_x=volume_x,
+        volume_y=volume_y,
+        volume_mask=volume_mask,
+        metadata=list(batch.metadata),
+    )
 
 
 class TargetTransform:
@@ -2753,6 +2854,22 @@ def main(argv: Iterable[str] | None = None) -> None:
     if config.grad_ema_alpha > 0 and is_main:
         print(f"Gradient EMA smoothing: alpha={config.grad_ema_alpha}")
 
+    progressive_schedule = parse_progressive_schedule(config.progressive_points_schedule)
+    if progressive_schedule:
+        max_schedule_pts = max(n for n, _ in progressive_schedule)
+        if max_schedule_pts > config.train_surface_points:
+            raise ValueError(
+                f"progressive_points_schedule max {max_schedule_pts} exceeds "
+                f"--train-surface-points {config.train_surface_points}"
+            )
+        if max_schedule_pts > config.train_volume_points:
+            raise ValueError(
+                f"progressive_points_schedule max {max_schedule_pts} exceeds "
+                f"--train-volume-points {config.train_volume_points}"
+            )
+        if is_main:
+            print(f"Progressive resolution schedule: {progressive_schedule}")
+
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
             if is_main:
@@ -2768,12 +2885,25 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        current_surface_pts = get_current_resolution(
+            epoch, progressive_schedule, config.train_surface_points
+        )
+        current_volume_pts = get_current_resolution(
+            epoch, progressive_schedule, config.train_volume_points
+        )
+        progressive_active = bool(progressive_schedule) and (
+            current_surface_pts < config.train_surface_points
+            or current_volume_pts < config.train_volume_points
+        )
+
         train_iter = train_loader
         if is_main:
             train_iter = tqdm(
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            if progressive_active:
+                batch = subsample_batch(batch, current_surface_pts, current_volume_pts)
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -2943,6 +3073,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "train/lr": float(optimizer.param_groups[0]["lr"]),
                 "train/nonfinite_skip_count": nonfinite_skip_count,
+                "train/current_surface_points": current_surface_pts,
+                "train/current_volume_points": current_volume_pts,
                 "global_step": global_step,
                 **gradient_metrics,
                 **grad_ema_metrics,
