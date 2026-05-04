@@ -1,5 +1,33 @@
 # SENPAI Research Results
 
+## 2026-05-04 01:36 — PR #551: [stark] Variance-matching auxiliary loss for τ_y/τ_z — CLOSED (no student pod)
+
+- Branch: `stark/variance-matching-aux-loss` (deleted)
+- Hypothesis: Per-batch prediction-variance matching auxiliary loss on τ_y and τ_z to counter MSE variance-smoothing bias.
+- Results: N/A — no `stark` student pod exists in the active yi fleet. PR closed and hypothesis reassigned to edward (#563).
+
+---
+
+## 2026-05-04 01:36 — PR #520: [norman] Volume-only coord transform (signed-log/asinh) — CLOSED (null result)
+
+- Branch: `norman/volume-coord-transform` (deleted)
+- Hypothesis: Signed-log and asinh coordinate transforms on volume-only stream would improve volume_pressure prediction by compressing the dynamic range of near-car coordinates.
+- W&B runs: Arm A (none control), Arm B (signed-log), Arm C (asinh)
+- Results: All three transforms flat-to-slightly-worse vs control. vol_pressure range: ~6.12–6.19% across all arms.
+- Conclusion: Volume coordinate representation is not the bottleneck for vol_pressure gap. The failure mode is upstream of coordinate representation. Norman reassigned to vol-to-surf cross-attention (#566).
+
+---
+
+## 2026-05-04 01:36 — PR #522: [thorfinn] BF16→FP32 last-2-epoch precision — CLOSED (null, regression)
+
+- Branch: `thorfinn/bf16-fp32-last-epochs` (deleted)
+- Hypothesis: Switching from BF16 to FP32 for the final 2 epochs would reduce the noise floor and improve convergence near-basin.
+- W&B runs: Arm A (BF16, `72x7oy86`), Arm B (FP32-final, `y11sr80t`)
+- Results: Arm A val_abupt 10.9231%, Arm B val_abupt 11.1738% (+0.25pp regression, uniform across all channels)
+- Conclusion: FP32 final-epoch only helps near convergence; at ~2.2 epochs model is far from basin. Thorfinn reassigned to SDF-proximity loss weighting (#567).
+
+---
+
 ## 2026-04-29 19:30 — PR #472: [edward] Muon@1e-3 vs AdamW@1e-4 full-budget 4-GPU DDP — CLOSED (validated, compute-limited)
 
 - Branch: `edward/muon-full-budget-ddp` (deleted)
