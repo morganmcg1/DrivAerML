@@ -1,10 +1,11 @@
 # SENPAI Research State — `tay` (DrivAerML / DDP8)
 
-- **Date:** 2026-05-04 (post-context-summary continuation, Round 12 opened)
+- **Date:** 2026-05-04 (Round 12 fully populated; PR #534 closed near-miss)
 - **Branch:** `tay`
 - **Target repo:** `morganmcg1/DrivAerML`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 - **Fleet:** 0 idle students, 8 WIP PRs, 0 review-ready
+- **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 total)
 
 ## Current SOTA — PR #523 thorfinn EMA-proxy GradNorm alpha=0.5, EP6, val_abupt **6.9246%**
 
@@ -55,20 +56,28 @@ No new directives as of 2026-05-01 (issues #285, #252, #48 all have current advi
 
 | PR | Student | Lever | Status |
 |---|---|---|---|
-| #516 | askeladd | per-channel tau_y/tau_z reweight v2 (1.2x/1.3x) | running |
-| #534 | tanjiro | fused 24-feat StringSep multi-band (σ={0.25,1.0,4.0}×8) | running |
-| #538 | fern | SGDR cosine warm restarts T0=6 Tmult=2 | running |
-| #549 | edward | rff-num-features 32 (double feature budget) | NEEDS REBASE |
-| #550 | frieren | lr-min cosine floor — prevent decay-to-zero | NEEDS REBASE |
-| #552 | thorfinn | GradNorm-EMA min_weight floor sweep {0.5, 0.6} (NEW) | just assigned |
-| #553 | alphonse | input coord jitter regularization sigma sweep {0.002, 0.005, 0.010} (NEW) | just assigned |
-| #554 | nezuko | top-K best-val checkpoint averaging "model soup" (NEW) | just assigned |
+| #516 | askeladd | per-channel tau_y/tau_z reweight v2 (1.2x/1.3x) — micro rebased | running EP1 (rs06rnob) |
+| #538 | fern | SGDR cosine warm restarts T0=6 Tmult=2 (group `fern-sgdr-budget-aware`) | running EP1 (9motyy0i) |
+| #549 | edward | rff-num-features 32 — group `edward-rff32-string-sep` | running EP2=8.53% (lpz2bi7a) — STILL NEEDS REBASE |
+| #552 | thorfinn | GradNorm-EMA min_weight floor sweep | running (jdidw8i4); sibling crash recovered |
+| #553 | alphonse | input coord jitter regularization | running EP1 (ivh3ytmx) |
+| #555 | frieren | GradNorm alpha sweep / tau-channel reweighting v2 | running EP1 (glir84cj) |
+| #556 | nezuko | inference-time prediction ensemble (output-space averaging, K best-val checkpoints) | implementing — no W&B run yet |
+| #557 | tanjiro | NEW: multi-band fused encoding (24-feat) + hidden_dim 576 (PR #534 follow-up) | just assigned |
 
-Round-12 opening focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (regularization, weight averaging, dynamic rebalancing).
+Round-12 focus: defend SOTA, attack tau_y/tau_z gap from new orthogonal angles (regularization, weight averaging, dynamic rebalancing, multi-band capacity).
 
 ---
 
 ## This-cycle review actions (just completed)
+
+### PR #534 tanjiro fused multi-band 24-feat StringSep — CLOSED NEAR-MISS
+- run `19qf6di1`, group `multi-scale-fused-3band-8feat`, finished 6 epochs
+- Per-epoch trajectory: EP1=28.92%, EP2=9.17%, EP3=7.53%, EP4=7.11% (gate missed), EP5=6.964%, EP6=**6.956%**
+- Final test_abupt=8.3764% vs SOTA 8.2355% (+0.141pp)
+- Beats alphonse val SOTA (7.0063%), does NOT beat tay SOTA #523 (6.9246%)
+- Run was still descending EP5→EP6 (-0.008pp) — follow-up PR #557 spun up with hidden_dim 576 (was 512) and 14 epochs
+- Encoding implementation is clean and SOTA-speed; the architectural contribution is preserved in the follow-up
 
 ### PR #537 alphonse slw=2.0 13-epoch — CLOSED NEGATIVE
 - val_abupt=6.8994% at EP5 (270min cap), beats old #510 baseline by 0.107pp on val

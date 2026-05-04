@@ -6,6 +6,27 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-04 17:00 — PR #534 tanjiro fused multi-band StringSep — CLOSED NEAR-MISS
+
+- Branch: `tanjiro/multi-scale-string-sep-bands`
+- W&B run: `19qf6di1` (rank 0), group `multi-scale-fused-3band-8feat`, finished 6 epochs
+- Hypothesis: Multi-scale 3-band StringSep encoding (σ ∈ {0.25, 1.0, 4.0} × 8 features each, fused 24-feat single encoding for SOTA-parity speed) provides spectral diversity that closes tau_y/tau_z gap
+- Per-epoch trajectory:
+
+| Epoch | val_abupt | tau_y | tau_z | tau_axis_mean |
+|---|---:|---:|---:|---:|
+| EP1 | 28.924% | 38.955% | 40.325% | 32.498% |
+| EP2 | 9.174% | 11.930% | 13.309% | 10.183% |
+| EP3 | 7.534% | 9.792% | 11.265% | 8.535% |
+| EP4 | 7.110% | 9.146% | 10.712% | 8.039% — EP4 gate missed (≤6.9246%) |
+| EP5 | 6.964% | 8.889% | 10.533% | 7.866% |
+| EP6 | **6.9556%** | **8.878%** | **10.520%** | **7.854%** — best |
+
+- Final test_abupt=**8.3764%** vs SOTA #523 8.2355% (+0.141pp)
+- Verdict: Beats alphonse val SOTA (7.0063%), DOES NOT beat tay SOTA #523 (val 6.9246%, test 8.2355%) on either metric
+- Convergence: monotonic descent EP3→EP6, EP5→EP6 only -0.008pp — possibly under-utilising 144-dim encoding output at hidden_dim=512
+- Conclusion: Closed as near-miss. Direction is valid (clean implementation, SOTA-parity speed, near-SOTA val). Follow-up PR #557 launched with hidden_dim 576 + 14 epochs.
+
 ## 2026-05-04 — Round 12 opened: 3 new assignments, 2 closed dead-ends
 
 ### Closures
