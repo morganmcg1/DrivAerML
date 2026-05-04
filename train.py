@@ -52,6 +52,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     make_loaders,
     masked_mse,
+    masked_mse_per_channel,
     metric_namespace,
     parse_kill_thresholds,
     primary_metric_log,
@@ -81,6 +82,8 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    tau_y_loss_weight: float = 1.0
+    tau_z_loss_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -190,6 +193,8 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    tau_y_loss_weight: float = 1.0,
+    tau_z_loss_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -201,15 +206,27 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        # Per-channel surface MSE: channels are [cp=0, tau_x=1, tau_y=2, tau_z=3]
+        ch_losses = masked_mse_per_channel(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_loss = ch_losses[0] + ch_losses[1] + ch_losses[2] + ch_losses[3]
+        surface_loss_weighted = (
+            ch_losses[0]
+            + ch_losses[1]
+            + tau_y_loss_weight * ch_losses[2]
+            + tau_z_loss_weight * ch_losses[3]
+        )
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
+        weighted_surface_loss = surface_loss_weight * surface_loss_weighted
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
+        "surface_loss_ch0_cp": float(ch_losses[0].detach().cpu().item()),
+        "surface_loss_ch1_tau_x": float(ch_losses[1].detach().cpu().item()),
+        "surface_loss_ch2_tau_y": float(ch_losses[2].detach().cpu().item()),
+        "surface_loss_ch3_tau_z": float(ch_losses[3].detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
@@ -329,6 +346,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    tau_y_loss_weight=config.tau_y_loss_weight,
+                    tau_z_loss_weight=config.tau_z_loss_weight,
                 )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1

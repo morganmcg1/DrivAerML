@@ -831,6 +831,21 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_mse_per_channel(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> list:
+    """Per-channel MSE for surface predictions.
+
+    Args:
+        pred:   (batch, n_pts, n_channels)
+        target: (batch, n_pts, n_channels)
+        mask:   (batch, n_pts)
+
+    Returns:
+        List of n_channels scalar tensors, one per channel.
+    """
+    n_channels = pred.shape[-1]
+    return [masked_mse(pred[..., c : c + 1], target[..., c : c + 1], mask) for c in range(n_channels)]
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
