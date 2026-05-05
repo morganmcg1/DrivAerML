@@ -1116,6 +1116,7 @@ class Config:
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
     beta_nll_beta: float = -1.0
+    ws_asinh_scale: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1221,6 +1222,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "separate checks. STEP is a global optimizer step and METRIC must match "
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
+        ),
+        "ws_asinh_scale": (
+            "If > 0, apply asinh(target / scale) transform to wall-shear targets and "
+            "predictions before loss computation (normalized space). Predictions remain "
+            "in raw space; only the loss is affected. Useful for compressing heavy-tailed "
+            "tau_y/tau_z distributions. Default 0.0 = disabled."
         ),
     }
     for field in fields(Config):
@@ -2034,6 +2041,7 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    ws_asinh_scale: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -2074,6 +2082,16 @@ def train_loss(
         else:
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
+
+        if ws_asinh_scale > 0.0:
+            ws_pred_loss = torch.asinh(surface_pred_used[..., 1:4] / ws_asinh_scale)
+            ws_target_loss = torch.asinh(surface_target_used[..., 1:4] / ws_asinh_scale)
+            surface_pred_used = torch.cat(
+                [surface_pred_used[..., :1], ws_pred_loss, surface_pred_used[..., 4:]], dim=-1
+            )
+            surface_target_used = torch.cat(
+                [surface_target_used[..., :1], ws_target_loss, surface_target_used[..., 4:]], dim=-1
+            )
 
         per_axis_log_var: list[float] | None = None
         volume_log_var_mean: float | None = None
@@ -2788,6 +2806,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                ws_asinh_scale=config.ws_asinh_scale,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
