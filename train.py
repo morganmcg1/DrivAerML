@@ -332,6 +332,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "pe_source_run_ki2q9ko9": (
                         config.model_pe == "string_multisigma"
                     ),
+                    "pe_source_run_sogus8sx": (
+                        config.model_pe == "string_multisigma"
+                    ),
+                    "surface_out_scale_init": (
+                        base_model.surface_out_scale.detach().cpu().tolist()
+                    ),
                 },
                 allow_val_change=True,
             )
@@ -620,6 +626,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                     log_metrics.update(primary_metric_log("val_raw_primary", raw_surface))
                     for split_name, metrics in raw_val_metrics.items():
                         log_metrics.update(metric_namespace("val_raw", split_name, metrics))
+                scale_values = base_model.surface_out_scale.detach().cpu().tolist()
+                scale_names = ["cp", "tau_x", "tau_y", "tau_z"]
+                for name, value in zip(scale_names, scale_values):
+                    log_metrics[f"train/surface_out_scale/{name}"] = float(value)
                 primary_val = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
                 log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
@@ -729,6 +739,21 @@ def main(argv: Iterable[str] | None = None) -> None:
             n_params=n_params,
             global_step=global_step,
             total_minutes=total_minutes,
+        )
+        final_scale_values = base_model.surface_out_scale.detach().cpu().tolist()
+        scale_names = ["cp", "tau_x", "tau_y", "tau_z"]
+        wandb.summary.update(
+            {
+                **{
+                    f"final/surface_out_scale/{n}": float(v)
+                    for n, v in zip(scale_names, final_scale_values)
+                },
+                "final/surface_out_scale": final_scale_values,
+            }
+        )
+        print(
+            "Final surface_out_scale "
+            + ", ".join(f"{n}={v:.4f}" for n, v in zip(scale_names, final_scale_values))
         )
         wandb.finish()
     finally:
