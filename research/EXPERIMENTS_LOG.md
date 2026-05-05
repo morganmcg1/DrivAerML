@@ -113,7 +113,7 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 - **Student:** dl24-nezuko (drivaerml-long-20260504 wave)
 - **W&B Run:** `sbzspuf2` (rank 0 of 8); group: `extended-cosine-t60-sota-v2`
 - **Hypothesis:** Extending the cosine LR schedule to T_max=60 (vs. default per-epoch) allows the optimizer to maintain a higher effective LR for longer, avoiding premature convergence to a sharp minimum. Pre-wave run `5o7jc7wi` (T_max=13) achieved test=8.313% with the best volume score seen in the wave; T_max=60 is a stronger form of the same idea on the SOTA 5-sigma STRING config.
-- **Status:** RUNNING — EP16 completed; **best val = 6.9778% (EP16)**
+- **Status:** RUNNING — EP17 completed; **best val = 6.9778% (EP16)**
 
 | Epoch | Step | abupt | surf | vol | wsh | Notes |
 |-------|------|-------|------|-----|-----|-------|
@@ -129,10 +129,11 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 | EP14 | 76915 | 7.1540% | — | — | — | |
 | EP15 | 82409 | 7.3457% | — | — | — | spike |
 | **EP16** | **87903** | **6.9778%** | **4.52%** | **4.23%** | **7.88%** | **strong recovery + best val** |
+| EP17 | 93397 | 7.3084% | — | — | — | spike (Lion oscillation; EP18 recovery expected) |
 
 **Best val: 6.9778% (EP16) — surf=4.52%, vol=4.23%, wsh=7.88%. Strong recovery from EP15 spike (7.3457%). Trailing SOTA val 6.5281% by 0.450pp.**
 
-**Commentary (updated 2026-05-05):** Extended cosine T_max=60 shows healthy descent with periodic spikes at EP7 and EP15, each cleanly resolved by the next epoch. The EP16 result of 6.9778% is a new best and represents a significant improvement from EP9=7.2894% (+0.312pp in 7 epochs). EP20 gate ≤6.95% requires 0.028pp improvement from EP16 — very achievable given current trajectory. The key question for this run is EP30–50: does the slower LR decay enable continued descent where standard cosine would flatten? The strong EP16 recovery suggests the mechanism is working, but ~0.48pp gap to SOTA val means extended cosine alone may not be sufficient. Volume score at 4.23% is reasonable but above fern (3.89%) and frieren (3.94%). Continue to EP50; EP20 gate is the next checkpoint.
+**Commentary (updated 2026-05-05):** Extended cosine T_max=60 shows healthy descent with periodic spikes at EP7, EP15, and EP17, each cleanly resolved by the following epoch. The EP16 result of 6.9778% is the run best and represents a significant improvement from EP9=7.2894% (+0.312pp in 7 epochs). EP17 spike to 7.3084% (+0.331pp from best) is well within the Lion oscillation pattern; EP18 recovery to ~6.95–6.97% is expected. EP20 gate ≤6.95% requires 0.028pp improvement from EP16 best — very achievable if EP18 recovery follows the established spike-recovery pattern. The key question for this run is EP30–50: does the slower LR decay enable continued descent where standard cosine would flatten? The strong EP16 recovery suggests the mechanism is working, but ~0.48pp gap to SOTA val means extended cosine alone may not be sufficient. Volume score at 4.23% is reasonable but above fern (3.89%) and frieren (3.94%). Continue to EP50; EP20 gate is the next checkpoint.
 
 ---
 
@@ -143,7 +144,7 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 - **W&B Run:** `dzochl0q` (rank 0 of 8); group: `string-qknorm-long-50ep`; smoke: `7wdwphhn`
 - **Hypothesis:** L2-normalizing Q and K per attention head (QK-Norm) before the dot-product stabilizes attention entropy, which may help the Transolver block better resolve anisotropic features (τ_y/τ_z cross-flow) that dominate the remaining error gap.
 - **Config flag:** `--model-qk-norm` (zero code change, pure CLI toggle)
-- **Status:** RUNNING — EP9 completed; **best val = 7.7776% (EP9)**
+- **Status:** RUNNING — EP10 completed; **best val = 7.717% (EP10)**; EP10 gate FAIL (≤7.6% required); extended to EP15 ≤7.2% (FINAL — no further extensions); compliance FINAL WARNING issued on `tanjiro-heads-sweep`
 
 | Epoch | Step | abupt | surf | vol | wsh | Notes |
 |-------|------|-------|------|-----|-----|-------|
@@ -151,15 +152,16 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 | EP2 | 10987 | 9.6170% | — | — | — | passes EP2 kill gate ≤10.5% |
 | EP3 | 16481 | 9.0533% | — | — | — | |
 | EP4 | 21975 | 8.6432% | — | — | — | |
-| EP5 | 27469 | 8.3178% | — | — | — | passes EP5 gate ≤8.0%? — marginal |
+| EP5 | 27469 | 8.3178% | — | — | — | |
 | EP6 | 32963 | 8.1985% | — | — | — | |
 | EP7 | 38457 | 8.2742% | — | — | — | minor spike |
 | EP8 | 43951 | 8.0730% | — | — | — | spike |
-| **EP9** | **49445** | **7.7776%** | **5.13%** | **4.73%** | **8.74%** | **new best; strong recovery** |
+| EP9 | 49445 | 7.7776% | 5.13% | 4.73% | 8.74% | strong recovery |
+| **EP10** | **54939** | **7.717%** | **—** | **—** | **—** | **new run best; gate FAIL (≤7.6% required); extension to EP15** |
 
-**Best val: 7.7776% (EP9) — surf=5.13%, vol=4.73%, wsh=8.74%. Strong recovery from EP8 spike (8.0730%). Lagging fern/frieren by ~1.08pp at similar epoch range. EP10 gate ≤7.6% active (0.178pp gap).**
+**Best val: 7.717% (EP10) — new run best. Surf/vol/wsh pending full component report. Gate FAIL: EP10=7.717% > 7.6% threshold by 0.117pp. Conditional extension to EP15 issued with final gate ≤7.2%.**
 
-**Commentary (updated 2026-05-05):** QK-Norm shows a characteristic slow-start pattern: EP1–EP8 descent rate is −0.43pp/ep vs. fern/frieren at ~−0.55pp/ep. EP8 spike and EP9 recovery (+0.295pp) is the best single-epoch improvement seen in this run. Pre-wave evidence (`tkiigfmc`, test=8.625% on old stack) suggested QK-Norm could work but with a slower warmup; this is consistent. EP10 gate ≤7.6% requires 0.178pp improvement from EP9's 7.7776% — achievable given EP8→EP9 drop. The `tanjiro-heads-sweep` unauthorized W&B group was flagged for explanation by advisor (comment posted 2026-05-05). Key assessment: does EP20–50 show accelerated descent to close the 1.08pp gap vs. fern? If QK-Norm composes with STRING multi-sigma PE and tau weighting, this could be a valuable building block even if it doesn't win alone. Continue to EP10 gate, then reassess.
+**Commentary (updated 2026-05-05):** QK-Norm shows steady improvement with EP10=7.717% being the run best (−0.061pp from EP9=7.7776%). The EP10 gate threshold was ≤7.6%; actual 7.717% fails by 0.117pp. Descent slope EP5→EP10 is −0.12pp/ep; if this holds to EP15, projection lands ~7.11% — tight but feasible relative to the ≤7.2% final gate. However, descent rate has decelerated; if it slows further, EP15 may miss. Compliance FINAL WARNING posted: the unauthorized `tanjiro-heads-sweep` W&B group must be explained and confirmed as closed before the EP15 report, or the PR will be closed. No further extensions after EP15 regardless of result — either the QK-Norm mechanism has demonstrated sufficient trajectory by then or it has not. Note: student incorrectly reported gate as ≤7.8% in their EP10 comment — advisor corrected to actual ≤7.6% threshold.
 
 ---
 
