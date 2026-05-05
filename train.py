@@ -73,6 +73,157 @@ CURVATURE_FEATURE_MODES = ("none", "h_k", "k1_k2")
 CURVATURE_CACHE_ROOT = CURVATURE_CACHE_ROOT_HK
 
 
+# ---------------------------------------------------------------------------
+# Geometry-aware mixup (PR #727 / round 41)
+# Pair training cars by surface-normal-orientation histogram similarity (kNN),
+# then linearly interpolate surface_x / surface_y at lam ~ Beta(alpha, alpha).
+# Volume inputs/targets are NEVER mixed.
+# ---------------------------------------------------------------------------
+
+
+GEOMIX_HIST_BINS_AZ = 8
+GEOMIX_HIST_BINS_EL = 4
+GEOMIX_EMB_DIM = GEOMIX_HIST_BINS_AZ * GEOMIX_HIST_BINS_EL  # 32
+
+
+def _compute_normal_histogram(normals: "np.ndarray") -> "np.ndarray":
+    """Build a 32-dim normal-orientation histogram for a single case.
+
+    Bins normalized normals into 8 azimuth × 4 elevation cells, normalises by
+    total point count, then L2-normalises so cosine-distance is meaningful.
+    """
+    import numpy as np
+
+    n = np.asarray(normals, dtype=np.float32)
+    norm = np.linalg.norm(n, axis=1, keepdims=True)
+    n = n / np.maximum(norm, 1e-8)
+    az = np.arctan2(n[:, 1], n[:, 0])  # [-pi, pi]
+    el = np.arcsin(n[:, 2].clip(-1.0, 1.0))  # [-pi/2, pi/2]
+    az_idx = ((az + np.pi) / (2.0 * np.pi) * GEOMIX_HIST_BINS_AZ).astype(np.int64)
+    az_idx = az_idx.clip(0, GEOMIX_HIST_BINS_AZ - 1)
+    el_idx = ((el + 0.5 * np.pi) / np.pi * GEOMIX_HIST_BINS_EL).astype(np.int64)
+    el_idx = el_idx.clip(0, GEOMIX_HIST_BINS_EL - 1)
+    flat_idx = az_idx * GEOMIX_HIST_BINS_EL + el_idx
+    hist = np.bincount(flat_idx, minlength=GEOMIX_EMB_DIM).astype(np.float32)
+    hist /= max(float(hist.sum()), 1e-8)
+    hist /= max(float(np.linalg.norm(hist)), 1e-8)
+    return hist
+
+
+def build_geometry_pairing(
+    store: DrivAerMLCaseStore,
+    train_case_ids: list[str],
+    *,
+    k: int,
+) -> tuple["np.ndarray", "np.ndarray"]:
+    """Compute per-case 32-dim normal histograms and a kNN pairing table.
+
+    Returns
+    -------
+    embs : float32 [N, 32], L2-normalised
+    pairing_table : int64 [N, k], rows are kNN indices excluding self
+    """
+    import numpy as np
+
+    embs = np.zeros((len(train_case_ids), GEOMIX_EMB_DIM), dtype=np.float32)
+    for i, cid in enumerate(train_case_ids):
+        case_dir = store.root / cid
+        normals_path = _resolve_artifact_path(case_dir / "surface_normals.npy")
+        normals = np.asarray(np.load(normals_path), dtype=np.float32)
+        embs[i] = _compute_normal_histogram(normals)
+    sq = (embs * embs).sum(axis=1)
+    dists = sq[:, None] + sq[None, :] - 2.0 * (embs @ embs.T)
+    np.fill_diagonal(dists, np.inf)
+    pairing = np.argsort(dists, axis=1)[:, :k].astype(np.int64)
+    return embs, pairing
+
+
+def apply_geometry_mixup(
+    batch: SurfaceBatch,
+    *,
+    pairing_table: "np.ndarray",
+    case_id_to_train_idx: dict[str, int],
+    train_case_ids: list[str],
+    store: DrivAerMLCaseStore,
+    alpha: float,
+    feature_mode: str,
+    curv_mean: "np.ndarray | None",
+    curv_std: "np.ndarray | None",
+    curv_cache_root: "Path | None",
+) -> tuple[SurfaceBatch, float]:
+    """Linear-interpolate surface_x / surface_y with a kNN-similar partner.
+
+    Mixed shear vectors are re-projected onto the mixed tangent plane so they
+    remain physically consistent with the mixed normal (researcher-agent
+    finding: tangential-component invariant must be preserved).
+    """
+    import numpy as np
+
+    if alpha <= 0.0:
+        return batch, 1.0
+    lam = float(np.random.beta(alpha, alpha))
+    has_curv = feature_mode in ("h_k", "k1_k2") and curv_mean is not None
+    surface_x = batch.surface_x.clone()
+    surface_y = batch.surface_y.clone()
+    surface_mask = batch.surface_mask
+    n_pairs = int(pairing_table.shape[1])
+    base_dim = SURFACE_X_DIM  # xyz(3) + normals(3) + area(1)
+    for b, cur_id in enumerate(batch.case_ids):
+        train_idx = case_id_to_train_idx.get(cur_id)
+        if train_idx is None:
+            continue
+        n_valid = int(surface_mask[b].sum().item())
+        if n_valid <= 0:
+            continue
+        partner_train_idx = int(pairing_table[train_idx][np.random.randint(n_pairs)])
+        partner_id = train_case_ids[partner_train_idx]
+        n_partner = int(store.case_point_counts(partner_id)["n_surface"])
+        rows = np.random.randint(0, n_partner, size=n_valid).astype(np.int64)
+        rows.sort()
+        empty_vol_rows = np.empty(0, dtype=np.int64)
+        partner_case = store.load_case(
+            partner_id, surface_rows=rows, volume_rows=empty_vol_rows
+        )
+        partner_x_base = partner_case.surface_x  # [n_valid, base_dim]
+        partner_y = partner_case.surface_y       # [n_valid, 4]
+        if has_curv:
+            curv_full = np.load(curv_cache_root / f"{partner_id}.npy", mmap_mode="r")
+            curv_view = np.asarray(curv_full[rows], dtype=np.float32)
+            curv_view = (curv_view - curv_mean) / curv_std
+            partner_x = torch.cat(
+                [partner_x_base, torch.from_numpy(np.ascontiguousarray(curv_view))], dim=-1
+            )
+        else:
+            partner_x = partner_x_base
+        partner_x = partner_x.to(surface_x.device, dtype=surface_x.dtype)
+        partner_y = partner_y.to(surface_y.device, dtype=surface_y.dtype)
+        cur_slice_x = surface_x[b, :n_valid]
+        cur_slice_y = surface_y[b, :n_valid]
+        mixed_x = lam * cur_slice_x + (1.0 - lam) * partner_x
+        mixed_y = lam * cur_slice_y + (1.0 - lam) * partner_y
+        # Re-project mixed wall-shear onto mixed tangent plane.
+        # surface_x channels 3:6 are normals; surface_y channels 1:4 are wall shear.
+        n_mix = mixed_x[..., 3:6].float()
+        n_norm = n_mix.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+        n_unit = n_mix / n_norm
+        ws = mixed_y[..., 1:4].float()
+        ws = ws - (ws * n_unit).sum(dim=-1, keepdim=True) * n_unit
+        mixed_y = torch.cat([mixed_y[..., :1], ws.to(mixed_y.dtype)], dim=-1)
+        surface_x[b, :n_valid] = mixed_x
+        surface_y[b, :n_valid] = mixed_y
+    new_batch = SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=batch.volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
+    return new_batch, lam
+
+
 def _curvature_cache_root_for(feature_mode: str) -> Path:
     if feature_mode == "h_k":
         return CURVATURE_CACHE_ROOT_HK
@@ -1163,6 +1314,8 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    geometry_mixup_alpha: float = 0.0
+    geometry_mixup_knn: int = 5
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2527,6 +2680,61 @@ def main(argv: Iterable[str] | None = None) -> None:
         curvature_stats=curvature_stats,
         curvature_cache_root=curvature_cache_root,
     )
+
+    geomix_pairing: "np.ndarray | None" = None
+    geomix_train_case_ids: list[str] = []
+    geomix_case_id_to_train_idx: dict[str, int] = {}
+    geomix_store: DrivAerMLCaseStore | None = None
+    geomix_curv_mean: "np.ndarray | None" = None
+    geomix_curv_std: "np.ndarray | None" = None
+    geomix_curv_cache_root: "Path | None" = None
+    if config.geometry_mixup_alpha > 0.0:
+        import numpy as np
+
+        store = DrivAerMLCaseStore(
+            manifest_path=config.manifest, root=config.data_root or None
+        )
+        geomix_store = store
+        geomix_train_case_ids = store.case_ids("train")
+        if config.debug:
+            geomix_train_case_ids = geomix_train_case_ids[:4]
+        geomix_case_id_to_train_idx = {
+            cid: i for i, cid in enumerate(geomix_train_case_ids)
+        }
+        effective_k = max(1, min(config.geometry_mixup_knn, len(geomix_train_case_ids) - 1))
+        if is_main:
+            print(
+                f"[geomix] building kNN pairing (k={effective_k}) over "
+                f"{len(geomix_train_case_ids)} train cases..."
+            )
+            _, pairing_np = build_geometry_pairing(
+                store,
+                geomix_train_case_ids,
+                k=effective_k,
+            )
+        else:
+            pairing_np = np.zeros(
+                (len(geomix_train_case_ids), effective_k), dtype=np.int64
+            )
+        if is_distributed:
+            pairing_t = torch.from_numpy(np.ascontiguousarray(pairing_np)).to(device)
+            dist.broadcast(pairing_t, src=0)
+            pairing_np = pairing_t.cpu().numpy()
+        geomix_pairing = pairing_np
+        if config.surface_curvature_features in ("h_k", "k1_k2") and curvature_stats is not None:
+            geomix_curv_mean = np.asarray(
+                curvature_stats["mean"], dtype=np.float32
+            ).reshape(1, 2)
+            geomix_curv_std = np.asarray(
+                curvature_stats["std"], dtype=np.float32
+            ).reshape(1, 2)
+            geomix_curv_cache_root = curvature_cache_root
+        if is_main:
+            print(
+                f"[geomix] pairing ready: alpha={config.geometry_mixup_alpha} "
+                f"k={config.geometry_mixup_knn} curvature={config.surface_curvature_features}"
+            )
+
     transform = TargetTransform(
         surface_y_mean=stats["surface_y_mean"].to(device),
         surface_y_std=stats["surface_y_std"].to(device),
@@ -2745,6 +2953,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
+    wandb.define_metric("train/geomix_lam", step_metric="global_step")
+    wandb.define_metric("train/geomix_lam_strength", step_metric="global_step")
     wandb.define_metric("swa/*", step_metric="global_step")
     wandb.define_metric("swa_full_val/*", step_metric="global_step")
     wandb.define_metric("swa_full_val_primary/*", step_metric="global_step")
@@ -2820,6 +3030,24 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            mixup_lam: float | None = None
+            if (
+                config.geometry_mixup_alpha > 0.0
+                and geomix_pairing is not None
+                and geomix_store is not None
+            ):
+                batch, mixup_lam = apply_geometry_mixup(
+                    batch,
+                    pairing_table=geomix_pairing,
+                    case_id_to_train_idx=geomix_case_id_to_train_idx,
+                    train_case_ids=geomix_train_case_ids,
+                    store=geomix_store,
+                    alpha=config.geometry_mixup_alpha,
+                    feature_mode=config.surface_curvature_features,
+                    curv_mean=geomix_curv_mean,
+                    curv_std=geomix_curv_std,
+                    curv_cache_root=geomix_curv_cache_root,
+                )
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -3017,6 +3245,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
                 ]
+            if mixup_lam is not None:
+                train_log["train/geomix_lam"] = float(mixup_lam)
+                train_log["train/geomix_lam_strength"] = float(
+                    min(mixup_lam, 1.0 - mixup_lam)
+                )
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
                     "aux_rel_l2_loss"
