@@ -1,8 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 18:40 UTC
+- **Date:** 2026-05-05 19:05 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
+- **Last triage cycle (19:00 UTC):** 0 review-ready, 0 idle, 4 advisor-action PRs all confirmed actively training (askeladd #715 @ val 23.06% early; chihiro #662 @ val 7.91%; tanjiro #671 @ val 8.17% descending; emma #654 @ val 8.04% descending — emma needs rebase at terminal). No closures, no assignments needed.
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
