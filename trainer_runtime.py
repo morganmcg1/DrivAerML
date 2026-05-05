@@ -899,6 +899,11 @@ VOLUME_REGION_KEYS = (
 VOLUME_REGION_X_LO = 0.5
 VOLUME_REGION_X_HI = 3.0
 VOLUME_REGION_Z_ABS = 1.5
+# Dataset-mean fallback (matches DRIVAERML_FALLBACK_* in train.py); needed for
+# views from the multi-view sampler that have no valid surface points.
+VOLUME_REGION_FALLBACK_CX = 1.5046
+VOLUME_REGION_FALLBACK_CZ = 0.3942
+VOLUME_REGION_FALLBACK_S_REF = 4.6720
 
 
 def _volume_region_masks(
@@ -922,30 +927,51 @@ def _volume_region_masks(
     upstream); they are mutually exclusive and cover every volume
     point. The classification is independent of training-time loss
     weighting and therefore stable across w_near / w_far choices.
+
+    Batch elements with no valid surface points (e.g., volume-only views
+    from the multi-view sampler) fall back to dataset-mean ``(cx, cz,
+    s_ref)`` so eval region counts include all volume points rather
+    than dropping the volume-only views.
     """
     batch_size, num_volume_points = volume_x.shape[0], volume_x.shape[1]
+    device = volume_x.device
     empty_bool = torch.zeros(
-        (batch_size, num_volume_points), device=volume_x.device, dtype=torch.bool
+        (batch_size, num_volume_points), device=device, dtype=torch.bool
     )
-    if surface_x.shape[1] == 0 or num_volume_points == 0:
+    if num_volume_points == 0:
         return empty_bool, empty_bool, empty_bool
-    valid = surface_mask.bool()
-    if not bool(valid.any()):
-        return empty_bool, empty_bool, empty_bool
-    surface_xyz = surface_x[..., :3].float()
-    big = torch.finfo(surface_xyz.dtype).max
-    has_surface = valid.any(dim=1, keepdim=True)
-    surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
-    surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
-    surf_z_for_min = surface_xyz[..., 2].masked_fill(~valid, big)
-    surf_z_for_max = surface_xyz[..., 2].masked_fill(~valid, -big)
-    surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
-    surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
-    surf_z_min = surf_z_for_min.min(dim=1, keepdim=True).values
-    surf_z_max = surf_z_for_max.max(dim=1, keepdim=True).values
-    cx = 0.5 * (surf_x_min + surf_x_max)
-    cz = 0.5 * (surf_z_min + surf_z_max)
-    s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+
+    fallback_cx = torch.full(
+        (batch_size, 1), VOLUME_REGION_FALLBACK_CX, device=device, dtype=torch.float32
+    )
+    fallback_cz = torch.full(
+        (batch_size, 1), VOLUME_REGION_FALLBACK_CZ, device=device, dtype=torch.float32
+    )
+    fallback_s_ref = torch.full(
+        (batch_size, 1), VOLUME_REGION_FALLBACK_S_REF, device=device, dtype=torch.float32
+    )
+
+    if surface_x.shape[1] == 0:
+        cx, cz, s_ref = fallback_cx, fallback_cz, fallback_s_ref
+    else:
+        valid = surface_mask.bool()
+        has_surface = valid.any(dim=1, keepdim=True)  # [B, 1]
+        surface_xyz = surface_x[..., :3].float()
+        big = torch.finfo(surface_xyz.dtype).max
+        surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
+        surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
+        surf_z_for_min = surface_xyz[..., 2].masked_fill(~valid, big)
+        surf_z_for_max = surface_xyz[..., 2].masked_fill(~valid, -big)
+        surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
+        surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
+        surf_z_min = surf_z_for_min.min(dim=1, keepdim=True).values
+        surf_z_max = surf_z_for_max.max(dim=1, keepdim=True).values
+        per_elem_cx = 0.5 * (surf_x_min + surf_x_max)
+        per_elem_cz = 0.5 * (surf_z_min + surf_z_max)
+        per_elem_s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+        cx = torch.where(has_surface, per_elem_cx, fallback_cx)
+        cz = torch.where(has_surface, per_elem_cz, fallback_cz)
+        s_ref = torch.where(has_surface, per_elem_s_ref, fallback_s_ref)
 
     volume_xyz = volume_x[..., :3].float()
     x_rel = (volume_xyz[..., 0] - cx) / s_ref
@@ -955,10 +981,9 @@ def _volume_region_masks(
         & (x_rel < VOLUME_REGION_X_HI)
         & (z_rel > -VOLUME_REGION_Z_ABS)
         & (z_rel < VOLUME_REGION_Z_ABS)
-        & has_surface
     )
-    far = (x_rel >= VOLUME_REGION_X_HI) & has_surface
-    upstream = (x_rel <= VOLUME_REGION_X_LO) & has_surface
+    far = x_rel >= VOLUME_REGION_X_HI
+    upstream = x_rel <= VOLUME_REGION_X_LO
     return near, far, upstream
 
 

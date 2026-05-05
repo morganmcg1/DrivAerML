@@ -252,8 +252,8 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(car body spans x_rel in [-0.5, +0.5]) so the mask captures "
             "the immediate base recirculation zone where wake error "
             "lives. Setting 1.0 (the literal PR-737 spec) captures only "
-            "~1.4% of points on DrivAerML; 0.5 captures ~7% and matches "
-            "the 5-15% sanity-check coverage stated in the PR."
+            "~1.4%% of points on DrivAerML; 0.5 captures ~7%% and matches "
+            "the 5-15%% sanity-check coverage stated in the PR."
         ),
         "vol_loss_near_x_hi": (
             "Upper bound on x_rel for the near-wake mask. Default 3.0 = "
@@ -345,6 +345,17 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+# DrivAerML dataset-mean surface bbox stats over 50 train cases:
+#   cx=1.5046+/-0.0805, cz=0.3942+/-0.0286, s_ref=4.6720+/-0.1369.
+# The dataset's view-splitting in train_random mode produces views with empty
+# surface (view_index >= surface_view_count when volume_view_count > surface_view_count
+# at small train_volume_points), so we fall back to the dataset-mean reference
+# frame for those batch elements rather than collapsing the mask to zero.
+DRIVAERML_FALLBACK_CX = 1.5046
+DRIVAERML_FALLBACK_CZ = 0.3942
+DRIVAERML_FALLBACK_S_REF = 4.6720
+
+
 def compute_volume_region_weights(
     volume_x: torch.Tensor,
     surface_x: torch.Tensor,
@@ -371,31 +382,54 @@ def compute_volume_region_weights(
     ``(vx, vy, vz)`` falls inside the near-wake mask iff
     ``near_x_lo < (vx - cx) / s_ref < near_x_hi`` AND
     ``|(vz - cz) / s_ref| < near_z_abs``.
+
+    Batch elements with no valid surface points (e.g., volume-only views from
+    the multi-view sampler) fall back to dataset-mean ``(cx, cz, s_ref)``.
+    DrivAerML cars are dimensionally consistent (per-case std is <8% of
+    mean), so the fallback is a good approximation.
     """
     batch_size, num_volume_points = volume_x.shape[0], volume_x.shape[1]
+    device = volume_x.device
     fallback_weights = torch.full(
-        (batch_size, num_volume_points), float(w_far), device=volume_x.device, dtype=torch.float32
+        (batch_size, num_volume_points), float(w_far), device=device, dtype=torch.float32
     )
     fallback_near = torch.zeros_like(fallback_weights)
+    if num_volume_points == 0:
+        return fallback_weights, fallback_near
+
+    fallback_cx = torch.full(
+        (batch_size, 1), DRIVAERML_FALLBACK_CX, device=device, dtype=torch.float32
+    )
+    fallback_cz = torch.full(
+        (batch_size, 1), DRIVAERML_FALLBACK_CZ, device=device, dtype=torch.float32
+    )
+    fallback_s_ref = torch.full(
+        (batch_size, 1), DRIVAERML_FALLBACK_S_REF, device=device, dtype=torch.float32
+    )
+
     if surface_x.shape[1] == 0:
-        return fallback_weights, fallback_near
-    valid = surface_mask.bool()
-    if not bool(valid.any()):
-        return fallback_weights, fallback_near
-    surface_xyz = surface_x[..., :3].float()
-    big = torch.finfo(surface_xyz.dtype).max
-    has_surface = valid.any(dim=1, keepdim=True)
-    surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
-    surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
-    surf_z_for_min = surface_xyz[..., 2].masked_fill(~valid, big)
-    surf_z_for_max = surface_xyz[..., 2].masked_fill(~valid, -big)
-    surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
-    surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
-    surf_z_min = surf_z_for_min.min(dim=1, keepdim=True).values
-    surf_z_max = surf_z_for_max.max(dim=1, keepdim=True).values
-    cx = 0.5 * (surf_x_min + surf_x_max)
-    cz = 0.5 * (surf_z_min + surf_z_max)
-    s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+        cx, cz, s_ref = fallback_cx, fallback_cz, fallback_s_ref
+    else:
+        valid = surface_mask.bool()
+        has_surface = valid.any(dim=1, keepdim=True)  # [B, 1]
+        surface_xyz = surface_x[..., :3].float()
+        big = torch.finfo(surface_xyz.dtype).max
+        # masked_fill needs valid points; pad rows have invalid==True.
+        surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
+        surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
+        surf_z_for_min = surface_xyz[..., 2].masked_fill(~valid, big)
+        surf_z_for_max = surface_xyz[..., 2].masked_fill(~valid, -big)
+        surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
+        surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
+        surf_z_min = surf_z_for_min.min(dim=1, keepdim=True).values
+        surf_z_max = surf_z_for_max.max(dim=1, keepdim=True).values
+        per_elem_cx = 0.5 * (surf_x_min + surf_x_max)
+        per_elem_cz = 0.5 * (surf_z_min + surf_z_max)
+        per_elem_s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+        # Replace per-element values with fallback when no valid surface.
+        cx = torch.where(has_surface, per_elem_cx, fallback_cx)
+        cz = torch.where(has_surface, per_elem_cz, fallback_cz)
+        s_ref = torch.where(has_surface, per_elem_s_ref, fallback_s_ref)
 
     volume_xyz = volume_x[..., :3].float()
     x_rel = (volume_xyz[..., 0] - cx) / s_ref
@@ -405,7 +439,6 @@ def compute_volume_region_weights(
         & (x_rel < near_x_hi)
         & (z_rel > -near_z_abs)
         & (z_rel < near_z_abs)
-        & has_surface
     )
     near_mask = near_mask_bool.float()
     weights = near_mask * (w_near - w_far) + w_far
