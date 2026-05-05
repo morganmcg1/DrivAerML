@@ -48,21 +48,26 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 - **Student:** dl24-fern (drivaerml-long-20260504 wave)
 - **W&B Run:** `a8emaoxm`
 - **Hypothesis:** A learnable 4-element scale vector on the surface output head (one scalar per output channel: τ_x, τ_y, τ_z, c_p) would let the model automatically compensate for per-channel magnitude differences without hand-tuning loss weights.
-- **Status:** RUNNING — EP7 completed, best val at EP6
+- **Status:** RUNNING — EP25 completed; **new in-wave val best = 6.7422% (EP24)**
 
-| Epoch | Step | abupt | sp | vp | ws |
-|-------|------|-------|----|----|-----|
-| EP1 | 5493 | 11.9803% | 8.03% | 7.59% | 13.28% |
-| EP2 | 10987 | 8.3599% | 5.43% | 4.98% | 9.38% |
-| EP3 | 16481 | 7.7554% | 5.05% | 4.58% | 8.73% |
-| EP4 | 21975 | 7.5013% | 4.91% | 4.37% | 8.46% |
-| EP5 | 27469 | 7.3224% | 4.79% | 4.24% | 8.28% |
-| **EP6** | **32963** | **7.2351%** | **4.74%** | **4.19%** | **8.18%** |
-| EP7 | 38457 | 7.3616% | 4.81% | 4.53% | 8.24% |
+| Epoch | Step | abupt | Notes |
+|-------|------|-------|-------|
+| EP1 | 5493 | 11.9803% | |
+| EP2 | 10987 | 8.3599% | |
+| EP3 | 16481 | 7.7554% | |
+| EP4 | 21975 | 7.5013% | |
+| EP5 | 27469 | 7.3224% | |
+| EP6 | 32963 | 7.2351% | |
+| EP7 | 38457 | 7.3616% | minor regression |
+| EP21 | 115373 | 6.7758% | |
+| EP22 | 120867 | 6.7690% | |
+| EP23 | 126361 | 6.8196% | |
+| **EP24** | **131855** | **6.7422%** | **new in-wave val best** |
+| EP25 | 137349 | 6.7814% | |
 
-**Best val: 7.2351% (EP6) — below yi SOTA bar of 7.3914%.**
+**Best val: 6.7422% (EP24) — new in-wave record; trailing wave SOTA val 6.5281% by 0.214pp.**
 
-**Commentary:** Per-axis output scaling is outperforming the yi EMA baseline (7.3914%). EP6 best (7.2351%) is a strong result. EP7 shows minor regression (plateau noise). Continue to EP10+; if best val reaches 7.0% this becomes a priority merge candidate. Test metrics pending terminal evaluation.
+**Commentary:** Per-axis output scaling is the in-wave validation leader. Convergence is slow-descending in late epochs (EP21→EP24: −0.034pp/ep), oscillating around 6.74%. High confidence this will beat wave SOTA test=7.9303% once terminal. EP30 gate ≤7.0%; run to EP50 for terminal SENPAI-RESULT. Test metrics pending terminal evaluation.
 
 ---
 
@@ -70,19 +75,64 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 - **Branch:** `dl24-frieren/tau-pc-surface-weighting`
 - **Student:** dl24-frieren (drivaerml-long-20260504 wave)
-- **W&B Run:** `dcaiwsyg`
+- **W&B Run:** `er8wmo8d` (corrected; earlier entry referenced stale run `dcaiwsyg`)
 - **Hypothesis:** Upweighting τ_y (×1.2) and τ_z (×1.3) in the loss would directly pressure the model to close the sub-component gap that persists across the yi wave.
-- **Status:** RUNNING — EP5 completed, passes kill gate (<10%)
+- **Status:** RUNNING — EP17 completed; **best val = 6.8276% (EP16)**
 
-| Epoch | Step | abupt | sp | vp | ws |
-|-------|------|-------|----|----|-----|
-| EP1 | 5493 | 19.6455% | 14.05% | 12.06% | 21.76% |
-| EP2 | 10987 | 12.9506% | 9.07% | 7.47% | 14.54% |
-| EP3 | 16481 | 11.2878% | 7.84% | 6.51% | 12.72% |
-| EP4 | 21975 | 10.3924% | 7.18% | 5.97% | 11.74% |
-| **EP5** | **27469** | **9.8756%** | **6.79%** | **5.71%** | **11.15%** |
+| Epoch | Step | abupt | Notes |
+|-------|------|-------|-------|
+| EP12 | 65927 | 6.9353% | |
+| EP13 | 71421 | 6.8935% | |
+| EP14 | 76915 | 6.8622% | |
+| EP15 | 82409 | 6.9744% | spike (transient) |
+| **EP16** | **87903** | **6.8276%** | **best val** |
+| EP17 | 93397 | 6.8838% | slight regression |
 
-**Commentary:** Convergence is slower than fern/nezuko (EP5=9.88% vs fern EP5=7.32%), consistent with a higher-loss starting point from explicit τ upweighting. The deceleration (EP4→5: −0.52pp) is slower than earlier epochs. Projected EP10: ~8.5–8.8%. Currently trailing the yi SOTA significantly. EP10 gate: continue if abupt < 8.5%.
+**Best val: 6.8276% (EP16) — second-best in-wave; 0.095pp behind fern EP24=6.7422%.**
+
+**Commentary:** Tau channel weighting (τ_y×1.2, τ_z×1.3) is converging well but not yet outperforming fern's per-axis output scaling. The EP15 transient spike resolved to a new best at EP16, consistent with normal stochastic oscillation. Descent rate: ~−0.03pp/epoch in the EP12–EP16 window. Projected EP20: ~6.71–6.75%; EP20 gate ≤7.0% (already well inside). If EP20 best surpasses fern's 6.7422%, request terminal run comparison. Continue to EP50 for terminal SENPAI-RESULT.
+
+---
+
+## 2026-05-05 (ongoing) — PR #678: Extended cosine T_max=60 (dl24-nezuko)
+
+- **Branch:** `dl24-nezuko/extended-cosine-tmax60`
+- **Student:** dl24-nezuko (drivaerml-long-20260504 wave)
+- **W&B Run:** `sbzspuf2` (rank 0 of 8); group: `extended-cosine-t60-sota-v2`
+- **Hypothesis:** Extending the cosine LR schedule to T_max=60 (vs. default per-epoch) allows the optimizer to maintain a higher effective LR for longer, avoiding premature convergence to a sharp minimum. Pre-wave run `5o7jc7wi` (T_max=13) achieved test=8.313% with the best volume score seen in the wave; T_max=60 is a stronger form of the same idea on the SOTA 5-sigma STRING config.
+- **Status:** RUNNING — EP9 completed; **best val = 7.2894% (EP9)**
+
+| Epoch | Step | abupt | Notes |
+|-------|------|-------|-------|
+| EP5 | 27469 | 7.6977% | |
+| EP6 | 32963 | 7.5317% | |
+| EP7 | 38457 | 7.8574% | spike (transient) |
+| EP8 | 43951 | 7.2974% | recovery + new best |
+| **EP9** | **49445** | **7.2894%** | **best val; EP10 gate cleared** |
+
+**Best val: 7.2894% (EP9) — EP10 gate (≤7.5%) cleared at EP8. Descent resuming after EP7 spike.**
+
+**Commentary:** The EP7 transient spike (7.86%) resolved cleanly with EP8 dropping to 7.2974% — a new best. EP9 essentially flat (7.2894%). The plateau at ~7.29% may be temporary; extended cosine keeps LR elevated through EP60 so descent could resume. EP15 gate ≤7.2%; if EP15 best < 7.20% this is competitive with frieren. If extended cosine T_max=60 closes the final %, it validates the schedule hypothesis from `5o7jc7wi`. Continue to EP50.
+
+---
+
+## 2026-05-05 (ongoing) — PR #696: QK-Norm + STRING PE (dl24-tanjiro)
+
+- **Branch:** `dl24-tanjiro/string-qknorm-long-50ep`
+- **Student:** dl24-tanjiro (drivaerml-long-20260504 wave)
+- **W&B Run:** `dzochl0q` (rank 0 of 8); group: `string-qknorm-long-50ep`; smoke: `7wdwphhn`
+- **Hypothesis:** L2-normalizing Q and K per attention head (QK-Norm) before the dot-product stabilizes attention entropy, which may help the Transolver block better resolve anisotropic features (τ_y/τ_z cross-flow) that dominate the remaining error gap.
+- **Config flag:** `--model-qk-norm` (zero code change, pure CLI toggle)
+- **Status:** RUNNING — EP2 completed; EP5 gate ≤8.0% pending (~step 27,469)
+
+| Epoch | Step | abupt | Notes |
+|-------|------|-------|-------|
+| EP1 | 5493 | 13.1298% | |
+| **EP2** | **10987** | **9.6170%** | **passes EP2 kill gate ≤10.5%** |
+
+**Best val: 9.6170% (EP2) — ~1.25pp worse than fern/frieren at same epoch (EP2: 8.36%/8.53%). Concerning but very early.**
+
+**Commentary:** EP2=9.6170% passes the kill gate (≤10.5%) but notably lags peers. Fern at EP2=8.36%, frieren at EP2=8.53% (from those runs' early trajectory). The wider gap may reflect the QK-Norm disrupting early attention pattern formation, a known phenomenon with normalised attention requiring longer warmup. EP5 gate ≤8.0% is critical: if QK-Norm recovers to EP5 < 8.0%, the hypothesis remains viable. Pre-wave evidence: `tkiigfmc` (old stack) test=8.625% vs SOTA 7.93% — moderate pre-wave performance. Current step=14,762 (~EP2.7); EP3 expected shortly.
 
 ---
 
