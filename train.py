@@ -871,6 +871,8 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        surface_normal_rff_dim: int = 0,
+        surface_normal_rff_sigma: float = 4.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -885,6 +887,20 @@ class SurfaceTransolver(nn.Module):
         self.pos_max_wavelength = pos_max_wavelength
         self.learnable_pe = learnable_pe
         self.beta_nll = beta_nll
+        self.surface_normal_rff_dim = int(surface_normal_rff_dim)
+        self.surface_normal_rff_sigma = float(surface_normal_rff_sigma)
+        if self.surface_normal_rff_dim > 0:
+            # Deterministic, rank-independent init so DDP ranks share the same RFF
+            # frequency basis. Buffer is also broadcast by DDP at forward-pass start.
+            rff_gen = torch.Generator()
+            rff_gen.manual_seed(0xCAFE + self.surface_normal_rff_dim)
+            normal_rff_B = (
+                torch.randn(self.surface_normal_rff_dim, 3, generator=rff_gen)
+                * self.surface_normal_rff_sigma
+            )
+        else:
+            normal_rff_B = torch.zeros(0, 3)
+        self.register_buffer("normal_rff_B", normal_rff_B, persistent=True)
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -945,6 +961,17 @@ class SurfaceTransolver(nn.Module):
             hidden = hidden + project_features(x[:, :, self.space_dim :])
         return bias(hidden) + placeholder
 
+    def _augment_surface_with_normal_rff(self, x: torch.Tensor) -> torch.Tensor:
+        if self.surface_normal_rff_dim <= 0:
+            return x
+        # surface_x layout: [x, y, z, nx, ny, nz, area, ...curvature...]
+        # Extract unit normals at channels [3:6] and project onto random Gaussian B,
+        # then concatenate sin/cos as 2 * surface_normal_rff_dim extra channels.
+        n = x[:, :, 3:6]
+        proj = n @ self.normal_rff_B.t()
+        rff = torch.cat([torch.sin(proj), torch.cos(proj)], dim=-1)
+        return torch.cat([x, rff.to(dtype=x.dtype)], dim=-1)
+
     def forward(
         self,
         *,
@@ -966,6 +993,7 @@ class SurfaceTransolver(nn.Module):
         volume_tokens = 0
 
         if surface_x is not None:
+            surface_x = self._augment_surface_with_normal_rff(surface_x)
             surface_tokens = surface_x.shape[1]
             tokens.append(
                 self._encode_group(
@@ -1159,6 +1187,8 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    surface_normal_rff_dim: int = 0
+    surface_normal_rff_sigma: float = 4.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1351,7 +1381,8 @@ def make_loaders(
 
 def build_model(config: Config) -> SurfaceTransolver:
     extra_curv = 2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
-    surface_input_dim = SURFACE_X_DIM + extra_curv
+    extra_normal_rff = 2 * max(0, int(config.surface_normal_rff_dim))
+    surface_input_dim = SURFACE_X_DIM + extra_curv + extra_normal_rff
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -1366,6 +1397,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        surface_normal_rff_dim=int(config.surface_normal_rff_dim),
+        surface_normal_rff_sigma=float(config.surface_normal_rff_sigma),
     )
 
 
@@ -2666,7 +2699,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             "ddp_effective_batch_size": config.batch_size * world_size,
             "lr_warmup_steps_effective": effective_warmup_steps,
             "surface_input_dim_effective": SURFACE_X_DIM
-            + (2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0),
+            + (2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0)
+            + (2 * max(0, int(config.surface_normal_rff_dim))),
+            "surface_normal_rff_dim": int(config.surface_normal_rff_dim),
+            "surface_normal_rff_sigma": float(config.surface_normal_rff_sigma),
+            "surface_normal_rff_extra_channels": 2 * max(0, int(config.surface_normal_rff_dim)),
             "curvature_k_neighbors": (
                 CURVATURE_K_NEIGHBORS
                 if config.surface_curvature_features in ("h_k", "k1_k2")
