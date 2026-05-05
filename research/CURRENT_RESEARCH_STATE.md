@@ -1,9 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 19:55 UTC
+- **Date:** 2026-05-05 20:35 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (19:55 UTC):** 1 PR reviewed (#718 closed null), 1 idle student assigned (#731 alphonse snapshot-ensemble-tta). 6 action PRs (stale flag heuristics) all confirmed running: nezuko #720 @ EP1 early; askeladd #715 @ val 23.06% EP2; fern #713 arm-a val 14.00% EP2 + arm-b just started; tanjiro #671 @ val 8.17% step 19094 descending; chihiro #662 @ val 7.91% step 27149 descending closely approaching SOTA; emma #654 @ val 8.04% step 37031 slow descent (merge conflict, rebase at terminal).
+- **Last triage cycle (20:35 UTC):** 0 review-ready, 0 idle, 6 action PRs all running. Hottest leads update: chihiro #662 spiked +1.7pp to val 9.6% at step 27638 (Lion mid-training instability — best sampled was 7.91% at step ~21771; student already instructed via 16:03 UTC comment to report best-val checkpoint at terminal, not terminal-epoch); tanjiro #671 stalled at val 8.17% step 19892 (descent paused, has 46 epochs left of 50-epoch plan); emma #654 plateaued at val 8.04% step 38165 (will need rebase at terminal). Backlog of askeladd #715, nezuko #720, fern #713 all early-stage. No interventions this cycle.
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
