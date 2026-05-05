@@ -1,64 +1,70 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~10:35 UTC)
-- Most recent research direction from human researcher team: None (no open issues)
+- 2026-05-05 (updated ~12:30 UTC)
+- Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
 
-**Wave: drivaerml-long-20260504** — 24h DDP8 long runs testing mechanisms that showed promise in shorter waves but were either censored (timed out) or untested at full scale. Base config is now well-established: Lion, lr=1e-4, bs=2, train_surface_points=40k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), no-compile-model, surface_loss_weight=1.0, lr_warmup_epochs=1.
+**Wave: drivaerml-long-20260504** — 24h DDP8 long runs validating mechanisms that showed promise under short-run or censored budgets. Base config is now well-established: Lion, lr=1e-4, lr-warmup-steps=500, bs=2, train_surface_points=40k, train_volume_points=65k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), ema_decay=0.999, no-compile-model, model-layers=4, model-hidden-dim=512, model-heads=4, model-slices=128.
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
 ### Active Experiments
 
-| PR | Student | Hypothesis | Key Mechanism | Status |
-|----|---------|------------|---------------|--------|
-| #664 | fern | Per-axis output scaling on STRING backbone | Combines per-axis output scaling (wgvvevb9) with multi-sigma STRING PE (ki2q9ko9) | Long run `a8emaoxm` EP10+. Best EP8=7.0915%. Oscillating ~7.1-7.6% after EP8. Merge conflict pending rebase post-run. Monitor EP20 gate. |
-| #669 | frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | New `masked_mse_per_channel` helper + CLI flags `--tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3`; requires code addition | Long run `er8wmo8d` EP3=7.78%. Strong trajectory. EP5 gate: kill if ≥8.5%. EP10 gate: kill if ≥7.2%. |
-| #673 | tanjiro | Denser multi-sigma STRING PE with 7 sigmas [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0] | `--pe-init-sigmas '0.1,0.25,0.5,1.0,2.0,4.0,8.0'` — pure CLI | Long run `zk35lops` EP7=8.54%. Decelerating slope. EP10 gate: kill if ≥8.0%. Wall_shear bottleneck at ~9.77%. |
-| #678 | nezuko | Extended cosine schedule T_max=60 on SOTA base config (50-epoch long run) | `--lr-cosine-t-max 60` — pure CLI; cosine decay reaches ~26% of peak LR at EP50 instead of zero | JUST ASSIGNED — `nezuko/extended-cosine-t60-long`; long run pending start. PR #670 admin-merged, only 3-ep smoke `rse0oh3w` ran; 50-epoch confirmation never executed. |
+| PR | Student | Hypothesis | Run ID | Status |
+|----|---------|------------|--------|--------|
+| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Highly promising.** EP15 val=6.8912% (new run-best, -0.18pp below EP8). Convergence resumed after EP8-EP14 oscillation. Trending toward SOTA territory. Merge conflict needs rebase post-run. Kill gate: none (run to EP50). |
+| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d`/`dcaiwsyg` | Running at step ~55k. Val ~7.31% at latest check. Early in training, slope not yet fully established. EP10 gate: ≤7.8%. |
+| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2` | Running, EP2 val=8.47%. Healthy. v2 launched after earlier runs used wrong model size. EP5 gate: ≤8.5%. |
+| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | (new) | JUST ASSIGNED. Code change: ~15 lines in model.py/train.py. Smoke gate: EP3 < 9.0%. Long run: 50 epochs. |
 
 ### Closed / Negative Results This Wave
 
 | PR | Student | Hypothesis | Outcome |
 |----|---------|------------|---------|
-| #611 | fern | Per-channel tau weighting (bugfix v2) | Closed negative: test=12.406% — mechanism not effective in isolation on this config |
-| #623 | tanjiro | EMA-proxy GradNorm α=0.5 + Lion + volume guard | Infrastructure kill required (student ignored 5 kill orders). Best val=12.4377%. Strongly negative. |
-| #659 | norman | Width-over-Depth 4L/768d/12h cold-start | CLOSED: EP2=10.0258%, test=11.2020%. OOM at slices=128 forced slices=64; undertrained at termination. Hypothesis not falsified. |
-| #677 | nezuko | Tau×1.2/1.3 + volume×2.0 combination on SOTA | Admin-only merge (code scaffolding, no experiment ran). No SENPAI-RESULT. Reassigned to extended cosine (#678). |
+| #673 | dl24-tanjiro | 7-sigma STRING PE [0.1..8.0] — expand sigma range | CLOSED: test=9.4198% (+1.49pp regression vs SOTA). Config mismatch (3L not 4L) confounds result, but slope deceleration makes clean re-run unlikely to beat SOTA. |
+| #611 | dl24-fern | Per-channel tau weighting (bugfix v2) | Closed negative: test=12.406% — not effective on old config |
+| #623 | dl24-tanjiro | EMA-proxy GradNorm α=0.5 | Infrastructure kill required (ignored kill orders). Best val=12.4377%. |
+| #659 | norman | Width-over-Depth 4L/768d/12h cold-start | Closed: test=11.2020%. OOM forced slices=64; undertrained. |
+| #677 | dl24-nezuko | Tau×1.2/1.3 + volume×2.0 combination | Admin-only merge (scaffolding). No experiment ran. |
 
-### Critical Config Constraints (drivaerml-long-20260504 branch, no tay stack)
+### Critical Config Constraints
 
-1. **`surface_loss_weight=1.0` REQUIRED**: Without the tay stack, `--surface-loss-weight 2.0` causes catastrophic EP1 val ~70-72% divergence.
-2. **`--no-compile-model` REQUIRED at bs=4**: compile_model=True + bs=4 + large surface/volume points causes NCCL ALLREDUCE deadlock from per-rank recompilation desync. Also required at bs=2 to be safe.
-3. **GradNorm + AdamW = catastrophic instability**: GradNorm must use Lion optimizer.
-4. **`lr_warmup_epochs=1` REQUIRED**: ~21,976 steps at bs=4 (or ~43,952 steps at bs=2); 500-step warmup is insufficient.
-5. **SOTA base config**: Lion optimizer, lr=1e-4, bs=2, train_surface_points=40k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), ema-decay=0.999, no-compile-model.
+1. **`--surface-loss-weight 1.0` REQUIRED**: Without tay stack, ≥2.0 causes EP1 divergence at ~70-72%.
+2. **`--no-compile-model` REQUIRED**: compile_model=True causes NCCL ALLREDUCE deadlock with DDP8.
+3. **`--model-layers 4 --model-hidden-dim 512 --model-heads 4 --model-slices 128` REQUIRED**: omitting falls to 1.45M default model instead of 12.93M SOTA model — causes catastrophic EP1 performance.
+4. **`--train-volume-points 65000` REQUIRED**: default 16384 inverts volume:surface gradient ratio.
+5. **`--lr-warmup-steps 500` NOT `--lr-warmup-epochs 1`**: epoch-based warmup = 43k steps, far too long.
+6. **GradNorm + AdamW = catastrophic instability**: if running GradNorm, must use Lion.
 
-### Pre-wave Reference Points (targets to beat)
+### Pre-wave Reference Scoreboard (single-model, background context)
 
-| Run | Mechanism | Test agg | Surface | Volume |
-|-----|-----------|----------|---------|--------|
-| `9mm3sz7x` | tau_y=1.2/tau_z=1.3, lr=9e-5, AdamW | 8.1229 | 4.128 | 12.051 |
-| `wyz68o8r` | EMA-proxy GradNorm α=0.5, Lion | 8.236 | 4.271 | 12.213 |
-| `5o7jc7wi` | extended cosine T_max=13 | 8.313 | 4.271 | 11.867 |
-| `ki2q9ko9` | multi-sigma STRING init | 8.479 | 4.449 | 11.503 |
-| `r5rw40rn` | vol curriculum (censored) | 8.497 | 4.363 | 12.199 |
+| Run | Mechanism | Test agg | Surface | Volume | Wall | τy / τz |
+|-----|-----------|----------|---------|--------|------|---------|
+| `9mm3sz7x` | tau_y=1.2/tau_z=1.3, lr=9e-5 | 8.123 | 4.128 | 12.051 | 7.454 | 8.326 / 9.543 |
+| `nh96x7m4` | tau_y=1.5/tau_z=2.0 | 8.171 | 4.209 | 12.118 | 7.505 | 8.348 / 9.531 |
+| `wyz68o8r` | EMA-proxy GradNorm α=0.5 | 8.236 | 4.271 | 12.213 | 7.504 | 8.466 / 9.672 |
+| `341czkol` | GradNorm α=1.0 | 8.243 | 4.221 | 12.407 | 7.532 | 8.305 / 9.589 |
+| `5o7jc7wi` | extended cosine T_max=13 | 8.313 | 4.271 | 11.867 | 7.786 | 8.582 / 9.927 |
+| `tkiigfmc` | STRING + QK-Norm (old stack) | 8.625 | 4.462 | 12.434 | — | 9.00 / 10.28 |
 
-### Key Open Questions This Wave Addresses
+## Research Themes and Open Questions
 
-1. **Tau channel weighting (frieren #669):** Does per-channel tau_y×1.2/tau_z×1.3 surface weighting beat SOTA on the Lion+STRING base config? (First clean isolated test on SOTA config — prior fern tests were on different/buggy configs)
-2. **Per-axis output scaling (fern #664):** Does combining wgvvevb9-style per-axis scaling with STRING PE backbone improve axis-specific metrics? Best so far EP8=7.0915%.
-3. **Denser multi-sigma PE (tanjiro #673):** Does 7-sigma `[0.1..8.0]` PE improve over 5-sigma SOTA? EP10 gate imminent.
-4. **Extended cosine T_max=60 (nezuko #678):** Does keeping LR at ~26% of peak at EP50 (vs 0% with T_max=50) improve final convergence? Pre-wave T_max=13 gave best volume score (11.867%); T_max=60 is a stronger form of the same idea.
+1. **Can per-axis output scaling (fern #664) beat wave SOTA?** EP15 val=6.89% is tracking toward SOTA; the mechanism (global amplitude attenuation per channel) is working. Test metrics pending terminal evaluation. High confidence this will beat 7.9303%.
 
-## Potential Next Research Directions
+2. **Does mild tau weighting (frieren #669) help on the STRING stack?** Prior evidence from `9mm3sz7x` (test=8.12%) used AdamW+non-STRING. This is the first clean test on Lion+STRING. If it matches the pre-wave evidence, it's a real lever.
 
-- **Tau + vol combination:** Once frieren's #669 code merges (tau flags available), assign tau_y×1.2/tau_z×1.3 + volume_loss_weight=2.0 combo to a student.
-- **Extended cosine + tau weighting combination:** If #669 shows gains and #678 confirms T_max=60 helps, combine T_max=60 with tau_y×1.2/tau_z×1.3.
-- **Extended cosine + volume upweight:** If #678 (T_max=60) shows gains, also try volume_loss_weight=2.0 with T_max=60.
-- **Higher bs with gradient accumulation:** bs=2 with DDP8 = effective bs=16. Could try bs=4 (effective bs=32) with gradient accumulation to maintain steps per epoch.
-- **Adaptive curriculum:** Instead of fixed stage boundaries, advance curriculum when validation plateaus.
-- **Spectral loss terms:** Add frequency-domain supervision for better high-frequency pressure field fidelity.
-- **Architecture scale-up:** Current runs use default model size; scale-up with the 24h budget may be feasible.
-- **Checkpoint averaging:** Post-wave combining of best checkpoints from multiple wave experiments.
+3. **Does extended cosine T_max=60 (nezuko #678) improve late-epoch convergence?** Pre-wave `5o7jc7wi` (T_max=13) gave best volume score. T_max=60 is a stronger form of the same idea.
+
+4. **Does QK-Norm (tanjiro #696) stabilise attention and help cross-flow tau_y/z?** Pre-wave `tkiigfmc` showed promise but was on old 4.7h stack. First long DDP8 test on current SOTA config.
+
+## Potential Next Research Directions (after current arms complete)
+
+- **Compose STRING + QK-Norm + tau weighting**: if #696 wins and #669 shows gains, combine both on the SOTA STRING base.
+- **5L STRING** (`--model-layers 5`): pure CLI, zero code change. Pre-wave `70lnb3dt` test=8.769%. Could stack with QK-Norm.
+- **lr=9e-5 control on SOTA STRING base**: isolate the LR lever. `9mm3sz7x` used lr=9e-5 with AdamW; worth testing on Lion.
+- **EMA-proxy GradNorm α=0.5 (clean re-run)**: prior PR #623 failed on logistics not mechanism. Need kill-gate discipline.
+- **Surface-loss weight 2.0 with tay stack**: `qqtdnlwq` test=8.292%. Blocked until tay stack is available or workaround found.
+- **Volume MLP head**: replace volume Transolver decoder with a separate MLP for independent volume capacity (`8x7c537j` pre-wave evidence).
+- **Beta-NLL heteroscedastic surface head**: principled loss for heteroscedastic tau_y/z. Higher risk.
+- **y-symmetry data augmentation**: physics-valid 2× training set. tau_y sign-flip required on flipped cases.
