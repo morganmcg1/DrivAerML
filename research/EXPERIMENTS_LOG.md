@@ -1984,3 +1984,28 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - Future y-symmetry variants need: cosine LR decay (1e-4 → 1e-7 over 30 epochs), clip_grad_norm=0.25 (down from 0.5), kill threshold val>11% from step 10k.
 - Tanjiro reassigned to per-case hard-mining polish from SOTA (PR #744).
 
+---
+
+## 2026-05-05 22:10 — PR #727: [haku] Geometry-aware mixup for τ_y/τ_z generalization — CLOSED (null / fundamental mechanism failure)
+
+- Branch: `haku/geometry-aware-mixup`
+- Hypothesis: Mixing surface fields between kNN-similar vehicle pairs (by global body-shape normal histogram) at α=0.2/0.4 would create physically plausible augmented training examples, regularize the model against overfit, and help τ_y/τ_z generalize. "Geometrically similar" cars share similar flow structures → mixup is physically meaningful.
+- W&B runs: `2qe5d482` (Arm A, α=0.2, knn=5)
+
+| Metric | Arm A EP1 | yi SOTA val | Δ |
+|---|---:|---:|---:|
+| val_abupt | **24.476%** | 7.377% | +17.10pp |
+| τ_y | 32.08% | 9.58% | +22.50pp |
+| τ_z | 35.18% | 11.04% | +24.14pp |
+| surface_p | 16.21% | 4.85% | +11.36pp |
+| vol_p | 17.88% | 4.31% | +13.57pp |
+
+- EP1 gate was ≤20% val_abupt; Arm A at 24.48% failed decisively. Arm B (α=0.4) skipped as it would only compound failure.
+- Student's post-mortem correctly identified the failure modes:
+  1. **α=0.2 is too aggressive for continuous field data** — even "gentle" mixing creates chimeric targets at every single surface point simultaneously (unlike classification mixup where only the logit is averaged)
+  2. **Cross-stream coupling via shared trunk** — vol_p regressed +13.6pp despite untouched volume targets; surface noise corrupts the shared trunk representation
+  3. **τ_y/τ_z degraded MOST** — high-curvature separation-zone shear is most sample-specific; interpolating two real shear fields produces a third field that exists nowhere on either car
+  4. **Body-style histogram pairing too coarse** — global orientation similarity ≠ local feature alignment at separation bubbles
+- Falsified assumption: "Physically plausible per-point interpolants exist between kNN-similar cars." Not true for unstructured DrivAerML surface fields at body-style granularity.
+- Haku reassigned to y-flip training augmentation (PR #746) — exploits exact physics symmetry (bilateral y-reflection) rather than approximate geometric similarity.
+
