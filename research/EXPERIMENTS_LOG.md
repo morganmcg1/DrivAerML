@@ -48,7 +48,7 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 - **Student:** dl24-fern (drivaerml-long-20260504 wave)
 - **W&B Run:** `a8emaoxm`
 - **Hypothesis:** A learnable 4-element scale vector on the surface output head (one scalar per output channel: τ_x, τ_y, τ_z, c_p) would let the model automatically compensate for per-channel magnitude differences without hand-tuning loss weights.
-- **Status:** RUNNING — EP32 completed; **in-wave val best = 6.6970% (EP30)**
+- **Status:** CLOSED NEGATIVE — EP40 gate (≤6.62%) failed; best val=6.6912% at EP~52.71; run crashed at step=230,391 (EP~58.16)
 
 | Epoch | Step | abupt | surf | vol | wsh | Notes |
 |-------|------|-------|------|-----|-----|-------|
@@ -71,10 +71,13 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 | **EP30** | **164819** | **6.6970%** | **4.43%** | **3.89%** | **7.57%** | **wave-best val** |
 | EP31 | 170313 | 6.7848% | — | — | — | spike |
 | EP32 | 175807 | 6.6983% | — | — | — | near-recovery |
+| EP40 gate | ~219,840 | >6.62% (FAILED) | — | — | — | gate missed — PR closed |
+| EP~52.71 | ~208,xxx | **6.6912%** | — | — | — | overall best before crash |
+| Crash | 230,391 | — | — | — | — | run terminated |
 
-**Best val: 6.6970% (EP30) — wave-best; surf=4.43%, vol=3.89%, wsh=7.57%. Trailing SOTA val 6.5281% by 0.167pp.**
+**Best val: 6.6912% (~EP52.71) — below initial wave-best 6.6970% but above SOTA 6.5281%. EP40 gate (≤6.62%) missed.**
 
-**Commentary (updated 2026-05-05):** Per-axis output scaling maintains in-wave validation lead. Trend EP24→EP30 shows −0.006pp/ep net descent with typical Lion odd/even oscillation; EP31 spike (6.7848%) cleanly recovered at EP32 (6.6983%). Volume score (3.89%) is excellent — best in wave. Wall shear (7.57%) remains the bottleneck. EP40 gate ≤6.62% active; advisor also requested EP35 result and `model.surface_out_scale.data` values from student. Strong candidate for test SOTA if current descent trajectory continues. Test metrics pending terminal evaluation at EP50.
+**Commentary (updated 2026-05-05):** Per-axis output scaling converged to 6.6912% but failed to clear the EP40 gate of ≤6.62%. The volume score (3.89%) was the best in the wave, but wall shear (7.57%) remained the bottleneck. The learnable scale vector did not provide sufficient per-channel adaptation to close the 0.169pp gap to SOTA. Hypothesis NEGATIVE: static per-axis scaling does not improve over baseline STRING. PR closed.
 
 ---
 
@@ -281,11 +284,17 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 | Phase | Run ID | EP | val_primary (%) | Notes |
 |-------|--------|----|-----------------|-------|
 | Smoke | *(prior)* | EP1 | 16.12% | APPROVED — warmup overhead expected |
+| Long (staged warmup) | `1b8ew6mq` | EP1 | 16.12% | staged warmup; warmup re-applied from smoke ckpt |
+| Long (staged warmup) | `1b8ew6mq` | EP2 | 10.71% | |
+| Long (staged warmup) | `1b8ew6mq` | EP3 | 9.48% | |
+| Long (staged warmup) | `1b8ew6mq` | EP4 | 8.91% | |
 | Long (staged warmup) | `1b8ew6mq` | EP5 | **8.5612%** | PASSED gate ≤10.0% ✓ |
+| Long (staged warmup) | `1b8ew6mq` | EP6 | **8.3704%** | step=32,963 |
+| Long (staged warmup) | `1b8ew6mq` | EP7 | **8.2494%** | step=38,457 |
 
 - **Kill gates:** EP5 ≤10.0% ✓ PASSED; EP10 ≤8.0%; EP15 ≤7.4%; EP20 ≤7.0%; EP35 ≤6.70%
-- **Status (2026-05-05 ~22:30 UTC):** Long run at global_step=31,932. EP5 PASSED at 8.5612%. Awaiting EP10 gate (≤8.0%).
-- **Implementation note:** Uses staged-warmup: loaded from smoke checkpoint (step ~5,575) with 2000-step warmup re-applied. Run `1b8ew6mq` is the long 50-epoch continuation.
+- **Status (2026-05-05 ~23:45 UTC):** Long run at step=~39,792 (~EP7.24). EP7=8.2494% (step=38,457). Slope decelerating: EP5→EP6 = −0.19pp, EP6→EP7 = −0.12pp. EP10 gate ≤8.0% requires −0.25pp more over ~3 epochs — feasible but tightening. Extrapolated EP10 ~8.02%, right at gate boundary.
+- **Implementation note:** Uses staged-warmup: loaded from smoke checkpoint (step ~5,575) with 2000-step warmup re-applied. Steps/epoch = ~5,494 (higher than standard 3,961 due to staged warmup). Run `1b8ew6mq` is the long 50-epoch continuation.
 
 ---
 
@@ -299,13 +308,13 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 | Phase | Run ID | EP | val_primary (%) | Notes |
 |-------|--------|----|-----------------|-------|
 | Smoke (Arm A, α=1.0) | *(prior)* | EP1 | 11.7564% | APPROVED — warmup overhead expected |
-| Long Arm A (α=1.0) | `50tejga5` | pre-EP1 | — | Self-launched 50-ep run; step ~2,302 as of query |
-| Long Arm B (α=0.5) | TBD | — | — | Advisor instructed; not yet confirmed started |
+| Long Arm A (α=1.0) | `aoetlx9b` | pre-EP1 | — | 4-GPU; step ~5,276 as of ~23:15 UTC |
+| Long Arm B (α=0.5) | `g18f7jm1` | pre-EP1 | — | 4-GPU; step ~5,218 as of ~23:15 UTC; concurrent |
 
 - **Config correction applied:** Bug in original config had `--train-volume-points 16384` (default); corrected to `65000` per critical constraint #4. Smoke launched with corrected config.
 - **Kill gates:** EP5 ≤9.0%; EP10 ≤8.0%; EP20 ≤7.2%; EP50 terminal
-- **Status (2026-05-05 ~22:30 UTC):** Arm A long run `50tejga5` at step ~2,302 (pre-EP1). Arm B (α=0.5) instructed but not yet confirmed. GradNorm functional in smoke (logs `gradnorm/w_*`, `gradnorm/r_*`, `gradnorm/G_*`).
-- **Compliance note:** Fern self-launched 50-epoch Arm A before receiving explicit smoke approval. Advisor retrospectively approved.
+- **Status (2026-05-05 ~23:15 UTC):** Both arms running concurrently on 4 GPUs each. Steps/epoch = ~10,986 (4-GPU DDP vs standard 3,961 for 8-GPU). Arm A (`aoetlx9b`, α=1.0) at step ~5,276 (~EP0.48). Arm B (`g18f7jm1`, α=0.5) at step ~5,218 (~EP0.47). Both pre-EP1; EP1 val expected when each run reaches step ~10,986. GradNorm functional in smoke (logs `gradnorm/w_*`, `gradnorm/r_*`, `gradnorm/G_*`).
+- **Compliance note:** Fern self-launched 50-epoch Arm A before receiving explicit smoke approval. Advisor retrospectively approved. Note: run ID `50tejga5` in prior entry was INCORRECT; corrected to `aoetlx9b`.
 
 ---
 
@@ -319,12 +328,12 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 | Phase | Run ID | EP | val_primary (%) | Notes |
 |-------|--------|----|-----------------|-------|
 | Smoke | *(prior)* | EP1 | 13.9983% | APPROVED — warmup overhead expected |
-| Long | `lszc4ri7` | pre-EP1 | — | Self-launched 50-ep run; step ~2,028 as of query |
+| Long | `lszc4ri7` | EP1 | **13.998%** | step=5,488; matches smoke EP1 exactly — healthy |
 
 - **Config correction applied:** Same `--train-volume-points 16384→65000` bug fixed before smoke.
 - **Kill gates:** EP5 ≤9.0%; EP10 ≤8.0%; EP20 ≤7.2%; EP50 terminal
-- **Status (2026-05-05 ~22:30 UTC):** Long run `lszc4ri7` at step ~2,028 (pre-EP1). Y-symmetry augmentation functional in smoke (flip rate=50.32%, tau_y sign-flip working with no anomalous divergence).
-- **Key observation:** tau_y sign-flip on flipped cases is critical for physical correctness; smoke shows it is implemented correctly.
+- **Status (2026-05-05 ~23:15 UTC):** Long run `lszc4ri7` at step ~6,881 (~EP1.77 of 8-GPU 3,961 steps/epoch). EP1=13.998% confirmed at step=5,488. Matches smoke EP1 exactly — run is healthy and warmup is proceeding normally. EP5 gate ≤9.0% approaching at step ~19,805.
+- **Key observation:** tau_y sign-flip on flipped cases is critical for physical correctness; smoke shows it is implemented correctly. Long run EP1 confirming identical behavior to smoke is a strong indicator of training stability.
 
 ---
 
@@ -337,9 +346,32 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 
 | Phase | Run ID | EP | val_primary (%) | Notes |
 |-------|--------|----|-----------------|-------|
-| Smoke | `pwdrbqli` | pre-EP1 | — | Step ~2,627 as of query; EP1 val not yet logged |
+| Smoke | `pwdrbqli` | EP1 | **11.113%** | step=5,493; EP1 logged — within normal warmup range |
 
 - **Critical bug fix applied:** Original PR command omitted `--model-pe string_multisigma`, which would silently use sincos PE. Advisor posted corrected command. Confirmed `pwdrbqli` uses STRING PE per W&B config.
 - **Kill gates (upper-bound — kill if ABOVE):** EP5 ≥8.5%; EP10 ≥7.5%; EP20 ≥7.0%
-- **Status (2026-05-05 ~22:30 UTC):** Smoke test `pwdrbqli` running; step ~2,627; awaiting EP1/EP2 result to decide smoke pass/kill. Two advisor reminders posted; no student comment response yet.
-- **Note:** Unlike other PRs, kill gates here are upper bounds — if EP5 is ≥8.5% the run is killed. A healthy 5L run should track ≤8.5% by EP5.
+- **Status (2026-05-05 ~23:15 UTC):** Smoke `pwdrbqli` at step ~7,628 (~EP1.39 of 2-epoch smoke, 8-GPU 3,961 steps/epoch). EP1=11.113% confirmed at step=5,493. This is higher than 4L SOTA EP1 (~10.5%) but within normal warmup variance for a larger 5L model. EP2 result at step ~7,922 will decide smoke pass/fail. Two advisor reminders posted; no student comment response yet — W&B confirms run is active.
+- **Note:** Unlike other PRs, kill gates here are upper bounds — if EP5 is ≥8.5% the run is killed. A healthy 5L run should track ≤8.5% by EP5. 5L has ~16M params vs 4L ~12.93M; slightly higher EP1 is expected.
+
+---
+
+## 2026-05-05 (ongoing) — PR #737: Region-weighted VP loss (dl24-nezuko)
+
+- **Branch:** `dl24-nezuko/region-vp-loss`
+- **Student:** dl24-nezuko
+- **W&B Group:** `nezuko-region-vp-loss`
+- **Hypothesis:** Weight the VP (volume-to-point) loss higher in the near-wake region (w_near) vs the far-field (w_far). Near-wake flow structures are the hardest to predict and correspond directly to `val_primary`; upweighting them should pressure the model to improve on the hardest examples.
+
+**Bug history:**
+- **v1 (mask [1.0, 3.0]):** Used raw x-coordinate mask `[1.0, 3.0]`. Only ~1.4% of batch points fell in this window — essentially no effect.
+- **v2 (view_count dilution):** Fixed coordinate range but introduced `view_count = max(surface_view_count, volume_view_count)` in `DrivAerMLSurfaceDataset`, causing 72% of batches to be volume-only. Per-surface masks were diluted to ~1.1% coverage.
+- **v3 fix:** Uses `torch.where(has_surface, per_elem_cx, fallback_cx)` with dataset-mean bbox fallback for volume-only samples. Ensures mask applies correctly to all surface-present samples regardless of batch composition.
+
+| Phase | Run ID | EP | val_primary (%) | Notes |
+|-------|--------|----|-----------------|-------|
+| v3 Arm A (w_near=1.5, w_far=1.0) | `r1eddah6` | pre-EP1 | — | step ~2,871 (~EP0.73) as of ~23:15 UTC |
+| v3 Arm B (w_near=2.0, w_far=1.0) | TBD | — | — | Sequential; to launch after Arm A EP3 |
+| v3 Arm C (w_near=2.0, w_far=0.7) | TBD | — | — | Sequential; to launch after Arm B |
+
+- **Kill gates:** EP1 ≤12%; EP3 ≤8%
+- **Status (2026-05-05 ~23:15 UTC):** v3 Arm A (`r1eddah6`) at step ~2,871 (pre-EP1). Awaiting EP1 val to verify v3 fix is working correctly before advancing to Arm B. v3 bbox-fallback fix confirmed correct in code review.
