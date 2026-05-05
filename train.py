@@ -102,6 +102,9 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    slice_string_rope: bool = False
+    slice_string_rope_after_qk_norm: bool = True
+    rope_init_sigmas: str = ""
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -285,6 +288,10 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    rff_init_sigmas = parse_rff_init_sigmas(config.rff_init_sigmas)
+    rope_init_sigmas = parse_rff_init_sigmas(config.rope_init_sigmas)
+    if rope_init_sigmas is None and config.slice_string_rope:
+        rope_init_sigmas = rff_init_sigmas
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -294,9 +301,12 @@ def build_model(config: Config) -> SurfaceTransolver:
         slice_num=config.model_slices,
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
-        rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
+        rff_init_sigmas=rff_init_sigmas,
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        slice_string_rope=config.slice_string_rope,
+        slice_string_rope_after_qk_norm=config.slice_string_rope_after_qk_norm,
+        rope_init_sigmas=rope_init_sigmas,
     )
 
 
