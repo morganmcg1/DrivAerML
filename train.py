@@ -102,6 +102,9 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    pre_slice_string_rope: bool = False
+    pre_slice_string_rope_full: bool = False
+    pre_slice_string_rope_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -284,6 +287,54 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_pre_slice_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Aggregate ``log_freq`` and ``phase`` statistics across all
+    ``PreSliceStringRoPE`` instances in the backbone.
+
+    Logs both backbone-wide aggregates and per-layer log_freq means so we can
+    track whether early vs late layers learn different frequencies. Active
+    pairs only (per-axis ``pairs_per_axis`` slice) are included; padded slots
+    in non-rectangular layouts are ignored.
+    """
+
+    metrics: dict[str, float] = {}
+    backbone = getattr(model, "backbone", None)
+    if backbone is None or not hasattr(backbone, "blocks"):
+        return metrics
+    layer_log_freqs: list[torch.Tensor] = []
+    for layer_idx, block in enumerate(backbone.blocks):
+        rope = getattr(block.attention, "pre_slice_rope", None)
+        if rope is None:
+            continue
+        active_log_freq_parts: list[torch.Tensor] = []
+        active_phase_parts: list[torch.Tensor] = []
+        for axis, pairs in enumerate(rope.pairs_per_axis):
+            active_log_freq_parts.append(rope.log_freq[axis, :pairs].detach().float())
+            active_phase_parts.append(rope.phase[axis, :pairs].detach().float())
+        if not active_log_freq_parts:
+            continue
+        layer_lf = torch.cat(active_log_freq_parts, dim=0)
+        layer_ph = torch.cat(active_phase_parts, dim=0)
+        layer_log_freqs.append(layer_lf)
+        prefix = f"pre_slice_rope/layer_{layer_idx}"
+        metrics[f"{prefix}/log_freq_mean"] = float(layer_lf.mean().item())
+        metrics[f"{prefix}/log_freq_std"] = float(layer_lf.std().item())
+        metrics[f"{prefix}/phase_mean"] = float(layer_ph.mean().item())
+        metrics[f"{prefix}/phase_std"] = float(layer_ph.std().item())
+        for axis, pairs in enumerate(rope.pairs_per_axis):
+            axis_lf = rope.log_freq[axis, :pairs].detach().float()
+            metrics[f"{prefix}/log_freq_axis_{axis}_mean"] = float(axis_lf.mean().item())
+            metrics[f"{prefix}/log_freq_axis_{axis}_std"] = float(axis_lf.std().item())
+    if layer_log_freqs:
+        all_lf = torch.cat(layer_log_freqs, dim=0)
+        metrics["pre_slice_rope/log_freq_mean"] = float(all_lf.mean().item())
+        metrics["pre_slice_rope/log_freq_std"] = float(all_lf.std().item())
+        metrics["pre_slice_rope/log_freq_min"] = float(all_lf.min().item())
+        metrics["pre_slice_rope/log_freq_max"] = float(all_lf.max().item())
+        metrics["pre_slice_rope/num_active_layers"] = float(len(layer_log_freqs))
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +348,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        pre_slice_string_rope=config.pre_slice_string_rope,
+        pre_slice_string_rope_full=config.pre_slice_string_rope_full,
+        pre_slice_string_rope_init_sigmas=parse_rff_init_sigmas(
+            config.pre_slice_string_rope_init_sigmas
+        ),
     )
 
 
@@ -1240,6 +1296,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_pre_slice_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
