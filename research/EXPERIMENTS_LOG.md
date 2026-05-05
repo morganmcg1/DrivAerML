@@ -1824,3 +1824,43 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - **Key structural negative:** SOTA input features are saturated. Richer input lifting at this scale cannot buy expressivity. Focus should shift to output-side formulations (tangent-frame τ targets #720, CRPS loss #721) and volume architecture changes (multigrid #725).
 - Violet reassigned to multigrid hierarchical volume attention (PR #725).
 
+
+---
+
+## 2026-05-05 18:35 — PR #668: asinh wall-shear target norm (gilbert) — CLOSED (null result)
+
+- Branch: `gilbert/asinh-wallshear-target-norm-sota` (deleted)
+- Hypothesis: Applying `asinh(target/scale)` inside the wall-shear loss would compress heavy tails, equalising gradient contributions across the τ magnitude range.
+- W&B runs: Arm A (`scale=0.1`, killed at EP3 > 12%), Arm B (`scale=0.5`, EP3=11.596%), Arm C (`scale=1.0`, terminal `z02089nc`)
+
+| Metric | Arm C val (best EP3) | yi SOTA val (PR #681) | Δ |
+|---|---:|---:|---:|
+| abupt_axis_mean | 12.035% | 7.377% | **+4.66pp (1.63×)** |
+| wall_shear_y (τ_y) | 17.071% | 9.583% | **+7.49pp (1.78×)** |
+| wall_shear_z (τ_z) | 17.034% | 11.038% | **+6.00pp (1.54×)** |
+
+- **Mechanism contradicted:** asinh on targets compresses the residual magnitude near zero — the opposite of what was needed. The model receives *weaker* gradient signal precisely where τ_y/τ_z lives. Chain-rule diagnosis: `∂(asinh(r/s))/∂r = 1/√(1+(r/s)²)` → shrinks gradient for large |r|, not small.
+- **All 3 arms** showed uniform regression vs SOTA. scale=1.0 (near-linear for typical τ magnitudes) was still ~12% at EP3, 4.66pp above baseline. Scale is not the issue; the transform direction is wrong.
+- **Key finding:** asinh-on-targets is mechanistically backwards for heavy-tail loss. The right approach is CRPS / quantile-aware loss that gives *more* weight to tails, not less. Thorfinn's #721 (CRPS on wall-shear) is the correct successor.
+- Gilbert reassigned to SAM optimizer polish (PR #726).
+
+---
+
+## 2026-05-05 18:35 — PR #661: RFF surface geometry lift (haku) — CLOSED (null result)
+
+- Branch: `haku/surface-rff-clean-iso` (deleted)
+- Hypothesis: Random Fourier Features on surface xyz coordinates (dim=64/128, σ=10) would enrich the geometry representation and improve τ_y/τ_z via high-frequency geometric basis functions.
+- W&B runs: Arm A `02muovdp` (dim=64, resume from EP1), Arm B `2p7oiqpe` (dim=128, resume)
+
+| Metric | Arm A val (best) | yi SOTA val (PR #681) | Δ |
+|---|---:|---:|---:|
+| abupt_axis_mean | 9.996% | 7.377% | **+2.62pp (1.36×)** |
+| wall_shear_y (τ_y) | 13.062% | 9.583% | **+3.48pp (1.36×)** |
+| wall_shear_z (τ_z) | 15.681% | 11.038% | **+4.64pp (1.42×)** |
+| abupt (test) | 11.066% | 8.702% | **+2.36pp** |
+
+- Arm B (dim=128) uniformly behind Arm A at EP2 (+0.64pp). Direction flip from EP1 (Arm B led at EP1 → Arm A led at EP2); dim=64 converges faster.
+- **Both arms at partial global EP3 when timeout fired (~17:57 UTC).** Best EP = EP2 (partial global EP3 showed only minor gains ~-0.2pp).
+- **Structural negative (combined with PR #674 normal-RFF null):** Surface input feature space is saturated. The SOTA's LinearProjection of [nx,ny,nz,area] + STRING-sep PE already captures sufficient geometric signal. RFF lifts on xyz or normals add redundant channels that slow convergence without buying expressivity. Future input-feature experiments need strong mechanistic differentiation.
+- Haku reassigned to geometry-aware mixup (PR #727).
+

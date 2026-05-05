@@ -1,6 +1,6 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 18:20 UTC
+- **Date:** 2026-05-05 18:40 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
@@ -43,7 +43,9 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
 | #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix via pxsnrw36 features) | WIP |
-| #725 | violet | Multigrid hierarchical volume attention (target: vol_p 11.37% test → ≤9.0%) | NEW — assigned 2026-05-05 18:18 UTC |
+| #725 | violet | Multigrid hierarchical volume attention (target: vol_p 11.37% test → ≤9.0%) | Assigned 2026-05-05 18:18 UTC |
+| #726 | gilbert | SAM optimizer polish from yi SOTA (ρ sweep 0.02/0.05/0.10) | Assigned 2026-05-05 18:35 UTC |
+| #727 | haku | Geometry-aware mixup (kNN surface pairs, α=0.2/0.4) | Assigned 2026-05-05 18:38 UTC |
 
 ---
 
@@ -80,6 +82,8 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 
 | PR | Student | Outcome |
 |----|---------|---------|
+| #668 | gilbert | CLOSED — asinh wallshear norm null; chain-rule inversion → weaker not stronger gradient on tails |
+| #661 | haku | CLOSED — RFF surface-xyz null (+ structural confirmation with #674); input features saturated |
 | #674 | violet | CLOSED — surface normal RFF null; τ_y/τ_z regressed most, input features saturated |
 | #697 | alphonse | CLOSED — fourier surface-RFF duplicate of #674 |
 | #707 | nezuko | CLOSED — full-mesh volume density duplicate of #719 |
@@ -96,7 +100,6 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 ## Potential Next Research Directions (Round 42+)
 
 ### High priority
-- **SAM (sharpness-aware fine-tuning)** from yi SOTA checkpoint — flatter minima generalize better; Card 7 from round-40 research file
 - **8L/512d ultra-deep** — if senku's 6L retry (#714) shows gains, push to 8L next; if not, 6L stays dead
 - **DualTower continuation run** — if emma #654 beats baseline, immediately queue lr=1e-5 or lower continuation from best ckpt
 - **RANS divergence-free constraint** — soft physics loss on volume velocity; targets vol_pressure generalization via physical constraint
