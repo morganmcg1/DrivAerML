@@ -1114,6 +1114,7 @@ class Config:
     use_tangential_wallshear_loss: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
+    wallshear_weight_anneal_epochs: int = 0
     wallshear_huber_delta: float = 0.0
     beta_nll_beta: float = -1.0
     manifest: str = "data/split_manifest.json"
@@ -2814,6 +2815,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loss_sum = 0.0
         n_batches = 0
 
+        if config.wallshear_weight_anneal_epochs > 0:
+            anneal_epochs = config.wallshear_weight_anneal_epochs
+            ramp = min(epoch + 1, anneal_epochs) / anneal_epochs
+            current_wy = 1.0 + (config.wallshear_y_weight - 1.0) * ramp
+            current_wz = 1.0 + (config.wallshear_z_weight - 1.0) * ramp
+        else:
+            current_wy = config.wallshear_y_weight
+            current_wz = config.wallshear_z_weight
+
         train_iter = train_loader
         if is_main:
             train_iter = tqdm(
@@ -2830,8 +2840,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
-                wallshear_y_weight=config.wallshear_y_weight,
-                wallshear_z_weight=config.wallshear_z_weight,
+                wallshear_y_weight=current_wy,
+                wallshear_z_weight=current_wz,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
             )
@@ -3080,6 +3090,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             "global_step": global_step,
             "swa/active": int(swa_active),
             "swa/n_updates": swa_n_updates,
+            "train/wallshear_y_weight": float(current_wy),
+            "train/wallshear_z_weight": float(current_wz),
         }
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
