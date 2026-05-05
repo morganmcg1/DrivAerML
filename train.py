@@ -1115,6 +1115,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    wallshear_curvature_focal_gamma: float = 0.0
     beta_nll_beta: float = -1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
@@ -1884,6 +1885,32 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return pred.sum() * 0.0
 
 
+def _curvature_focal_multiplier(
+    curvature: torch.Tensor,
+    *,
+    gamma: float,
+    n_channels: int,
+    focal_channels: Iterable[int] | None,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Per-element focal weight broadcastable to ``[B, N, C]``.
+
+    ``focal_w(i) = 1 + |kappa(i)|^gamma`` for channels in ``focal_channels``;
+    other channels get a multiplier of 1.0 (standard MSE / NLL). When
+    ``focal_channels`` is None the multiplier applies to every channel.
+    Curvature is detached so no gradient flows back through the data tensor.
+    """
+    focal_w_point = 1.0 + curvature.detach().abs().pow(gamma)  # [B, N]
+    focal_w_point = focal_w_point.to(dtype).unsqueeze(-1)  # [B, N, 1]
+    if focal_channels is None:
+        return focal_w_point
+    apply_mask = torch.zeros(n_channels, device=curvature.device, dtype=dtype)
+    for c in focal_channels:
+        apply_mask[c] = 1.0
+    # 1 for non-focal channels; focal_w_point for focal channels.
+    return 1.0 + (focal_w_point - 1.0) * apply_mask.view(1, 1, -1)
+
+
 def weighted_masked_mse_per_channel(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -1891,6 +1918,9 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
+    focal_curvature: torch.Tensor | None = None,
+    focal_gamma: float = 0.0,
+    focal_channels: Iterable[int] | None = None,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked loss for surface predictions.
 
@@ -1942,6 +1972,16 @@ def weighted_masked_mse_per_channel(
     else:
         loss_elem = diff_sq
 
+    if focal_curvature is not None and focal_gamma > 0.0:
+        focal_mult = _curvature_focal_multiplier(
+            focal_curvature,
+            gamma=float(focal_gamma),
+            n_channels=n_channels,
+            focal_channels=focal_channels,
+            dtype=pred.dtype,
+        )
+        loss_elem = loss_elem * focal_mult
+
     weighted_diff = loss_elem * weights.view(1, 1, -1)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
@@ -1961,6 +2001,9 @@ def weighted_masked_beta_nll_per_channel(
     *,
     channel_weights: Iterable[float],
     beta: float,
+    focal_curvature: torch.Tensor | None = None,
+    focal_gamma: float = 0.0,
+    focal_channels: Iterable[int] | None = None,
 ) -> tuple[torch.Tensor, list[float], list[float]]:
     """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
 
@@ -1998,6 +2041,16 @@ def weighted_masked_beta_nll_per_channel(
     nll = 0.5 * (diff_sq / var + log_var)
     if beta > 0.0:
         nll = nll * var.detach().pow(beta)
+
+    if focal_curvature is not None and focal_gamma > 0.0:
+        focal_mult = _curvature_focal_multiplier(
+            focal_curvature,
+            gamma=float(focal_gamma),
+            n_channels=n_channels,
+            focal_channels=focal_channels,
+            dtype=pred_mean.dtype,
+        )
+        nll = nll * focal_mult
 
     mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
     valid = mask_f.sum().clamp_min(1)
@@ -2037,12 +2090,25 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    wallshear_curvature_focal_gamma: float = 0.0,
+    surface_curvature_features: str = "none",
     beta_nll_beta: float = -1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
+    use_curvature_focal = (
+        wallshear_curvature_focal_gamma > 0.0
+        and surface_curvature_features in ("h_k", "k1_k2")
+    )
+    if use_curvature_focal:
+        # Curvature features occupy the LAST 2 channels of surface_x
+        # (k1_k2 -> [k1_tilde_std, k2_tilde_std]; h_k -> [H_tilde_std, K_tilde_std]).
+        # Magnitude proxy = mean of |c1|, |c2| in standardized signed-log space.
+        focal_curvature = batch.surface_x[..., -2:].abs().mean(dim=-1)
+    else:
+        focal_curvature = None
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -2091,6 +2157,9 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 beta=beta_nll_beta,
+                focal_curvature=focal_curvature,
+                focal_gamma=wallshear_curvature_focal_gamma,
+                focal_channels=(1, 2, 3),
             )
             volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
                 out["volume_preds"],
@@ -2108,6 +2177,9 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 wallshear_huber_delta=wallshear_huber_delta,
+                focal_curvature=focal_curvature,
+                focal_gamma=wallshear_curvature_focal_gamma,
+                focal_channels=(1, 2, 3),
             )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -2148,6 +2220,24 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    if focal_curvature is not None:
+        # Diagnostics: distribution of the per-point focal multiplier
+        # (1 + |kappa|^gamma) over valid surface points.
+        with torch.no_grad():
+            mask_b = batch.surface_mask
+            if bool(mask_b.any()):
+                focal_w = 1.0 + focal_curvature.detach().abs().pow(
+                    float(wallshear_curvature_focal_gamma)
+                )
+                focal_w_valid = focal_w[mask_b].float()
+                metrics["focal/curv_mag_mean"] = float(
+                    focal_curvature.detach().abs()[mask_b].float().mean().cpu().item()
+                )
+                metrics["focal/weight_mean"] = float(focal_w_valid.mean().cpu().item())
+                metrics["focal/weight_max"] = float(focal_w_valid.max().cpu().item())
+                metrics["focal/weight_p99"] = float(
+                    torch.quantile(focal_w_valid, 0.99).cpu().item()
+                )
     return loss, metrics
 
 
@@ -2741,6 +2831,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/focal/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -2833,6 +2924,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                wallshear_curvature_focal_gamma=config.wallshear_curvature_focal_gamma,
+                surface_curvature_features=config.surface_curvature_features,
                 beta_nll_beta=config.beta_nll_beta,
             )
             optimizer.zero_grad(set_to_none=True)
@@ -3033,7 +3126,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
-                if key.startswith("film/"):
+                if key.startswith("film/") or key.startswith("focal/"):
                     train_log[f"train/{key}"] = value
             train_log.update(
                 train_slope_tracker.update(
