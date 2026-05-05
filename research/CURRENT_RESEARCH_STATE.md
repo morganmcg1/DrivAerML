@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-05
+- **Date:** 2026-05-05 (updated 12:40 UTC)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -43,23 +43,24 @@ No new directives from the human research team. Issue #618 (STRING/RoPE queue) a
 
 ### 2. Optimizer / Training Dynamics (2 PRs in-flight)
 
-- **PR #649** (edward): GradNorm min-weight floor sweep — running, arms B/C pending completion; EP3 PASS on best arm.
-- **PR #667** (fern): Weight decay sweep {1e-4, 5e-4, 1e-3} — pre-EP1.
+- **PR #667** (fern): Weight decay sweep {5e-4 control, 1e-3, 1e-4}. Arm A control complete: val=6.959% (timeout at EP4/13, 2.80× vol val→test gap fully present). Arm B (wd=1e-3) EP2 PASS at 8.670% (slightly worse than control 8.581%, vol_p +0.27pp worse). EP3 gate ETA ~13:35 UTC.
+- **PR #695** (edward): RFF num_features=32 (doubled from 16) for tau_y/tau_z. Pre-EP1.
 
 **Closed (null):**
 - PR #603 (tanjiro): EMA decay sweep — {0.9993, 0.9997, 0.9999} all no improvement.
 - PR #614 (fern): Lion β2 sweep — β2=0.99 (default) confirmed optimal; no arm beats SOTA.
 - PR #640 (edward): NorMuon optimizer — diverged (val=69.15%), dead end.
+- PR #649 (edward): GradNorm min-weight floor sweep — closed dead end (Arm A val=6.9999%, Arm B val=7.134%, both worse than SOTA). GradNorm at alpha=1.5 strips domain-knowledge surface weight (2.0→0.49).
 - PR #650 (tanjiro): LR cosine floor sweep — closed null, no arm beat SOTA.
 
-**Open question:** Can weight decay tuning narrow the vol_pressure val→test gap via stronger regularization?
+**Open question:** Can weight decay tuning narrow the vol_pressure val→test gap via stronger regularization? Early signal from PR #667 Arm B suggests stronger WD (1e-3) does not help.
 
 ### 3. Attention Mechanism (2 PRs in-flight)
 
 - **PR #692** (tanjiro): Attention heads sweep — arm-a: heads=8 (dim_head=64); arm-b: heads=2 (dim_head=256). Just assigned, pre-EP1.
-- **PR #665** (frieren): Cross-slice attention — adds global inter-slice MHA layer to Transolver blocks. Pre-EP1.
+- **PR #665** (frieren): Cross-slice attention — adds global inter-slice MHA layer. Arm A control complete: val=6.9349% (timeout at EP4/13). Arm B (with cross-slice attn, +5.25M params, zero-init proj) EP1 −3.82pp ahead, but EP2 reversed: 10.92% PASS but +2.22pp behind control (wall-shear z +2.75pp regression). EP3 gate at high kill risk (ETA ~13:50 UTC).
 
-**Open question:** Does more diverse (heads=8) or higher-capacity (heads=2) attention improve over SOTA heads=4? Does inter-slice attention capture global geometry correlations?
+**Open question:** Does more diverse (heads=8) or higher-capacity (heads=2) attention improve over SOTA heads=4? Does inter-slice attention capture global geometry correlations? (Early signal from PR #665: cross-slice attn slows late-EP convergence, likely due to +33% params needing more training to escape zero-init.)
 
 ### 4. Architecture Scaling (2 PRs in-flight)
 
@@ -94,18 +95,18 @@ All 8 students running:
 | askeladd | #691 | RFF sigma expansion {7-wide, 6-low-ext} | Just assigned — pre-EP1 |
 | tanjiro | #692 | Heads sweep {8, 2} vs SOTA heads=4 | Just assigned — pre-EP1 |
 | thorfinn | #694 | Depth L=6 hidden=384 heads=4 (budget-safe) | Just assigned — pre-EP1 |
-| edward | #649 | GradNorm min-weight floor sweep | Arms B/C running, EP3 PASS on best arm |
-| fern | #667 | Weight decay sweep {1e-4, 5e-4, 1e-3} | Pre-EP1 |
-| frieren | #665 | Cross-slice attention over Transolver slices | Pre-EP1 |
-| nezuko | #676 | (running experiment) | Watch EP gates |
+| edward | #695 | RFF num_features=32 (doubled) for tau_y/tau_z | Pre-EP1 |
+| fern | #667 | Weight decay sweep {5e-4 ctrl=6.959%, 1e-3 EP2 PASS, 1e-4 queued} | Arm B EP3 gate ~13:35 UTC |
+| frieren | #665 | Cross-slice attention (Arm A=6.9349%, Arm B EP2 PASS but trailing) | Arm B EP3 gate ~13:50 UTC |
+| nezuko | #676 | Ensemble K=7 distillation teacher (kd-alpha=0.7) | EP1=28.62%, EP2 gate ~12:56 UTC |
 
 **Zero idle students. Zero idle GPUs.**
 
 **Upcoming gate actions:**
-- All new PRs (#690, #691, #692, #694): EP1 informational (+ epoch-time gate for #694: kill if > 75 min/epoch), EP2 gate at step ~21,729 — KILL if > 12.0%; EP3 gate — KILL if > 8.0%
-- Edward PR #649: post SENPAI-RESULT when done; run greedy ensemble (pool-25) if any arm beats 6.5985%
-- Fern PR #667: EP1/EP2 gates — KILL if > 12.0% at EP2
-- Frieren PR #665: EP1/EP2 gates — KILL if > 12.0% at EP2
+- All new PRs (#690, #691, #692, #694, #695): EP1 informational (+ epoch-time gate for #694: kill if > 75 min/epoch), EP2 gate at step ~21,729 — KILL if > 12.0%; EP3 gate — KILL if > 8.0%
+- Fern PR #667 Arm B (wd=1e-3): EP3 gate ~13:35 UTC — KILL if > 8.0%; queue Arm C (wd=1e-4) if Arm B doesn't beat Arm A by ≥0.30pp
+- Frieren PR #665 Arm B (cross-slice attn): EP3 gate ~13:50 UTC — KILL if > 8.0%; high kill risk (needs 2.92pp drop in one epoch vs Arm A's 1.38pp)
+- Nezuko PR #676 Arm A (kd-alpha=0.7): EP2 gate ~12:56 UTC — KILL if > 12.0%
 
 ---
 
