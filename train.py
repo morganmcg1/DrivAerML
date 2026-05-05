@@ -1159,9 +1159,36 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    asinh_tau_channels: str = ""  # "" disabled; e.g. "y,z" applies asinh on z-scored τ_y/τ_z; "x,y,z" all axes
 
 
 NONFINITE_SKIP_ABORT = 200
+
+
+# sinh(SINH_CLAMP) ≈ 1.65e38, well below float32 max (~3.4e38). Loss space sees raw
+# (unclamped) values; clamp only kicks in for inverse-transform during eval to avoid
+# overflow from rogue model outputs.
+SINH_CLAMP = 88.0
+
+_TAU_AXIS_TO_CHANNEL = {"x": 1, "y": 2, "z": 3}
+
+
+def parse_asinh_tau_channels(spec: str) -> tuple[int, ...]:
+    spec = (spec or "").strip().lower()
+    if not spec or spec == "none":
+        return ()
+    out: list[int] = []
+    for part in spec.replace(";", ",").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if token not in _TAU_AXIS_TO_CHANNEL:
+            raise ValueError(
+                f"Unknown asinh_tau_channels token={token!r}; expected subset of "
+                "{'x','y','z'} (e.g. 'y,z' for Arm A, 'x,y,z' for Arm B)."
+            )
+        out.append(_TAU_AXIS_TO_CHANNEL[token])
+    return tuple(sorted(set(out)))
 
 
 class TargetTransform:
@@ -1174,6 +1201,7 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        surface_asinh_channels: tuple[int, ...] = (),
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -1191,6 +1219,7 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.surface_asinh_channels = tuple(sorted(set(int(c) for c in surface_asinh_channels)))
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -1199,9 +1228,19 @@ class TargetTransform:
         return self.invert_surface(y)
 
     def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+        z = (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+        if not self.surface_asinh_channels:
+            return z
+        z = z.clone()
+        for c in self.surface_asinh_channels:
+            z[..., c] = torch.asinh(z[..., c])
+        return z
 
     def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
+        if self.surface_asinh_channels:
+            y = y.clone()
+            for c in self.surface_asinh_channels:
+                y[..., c] = torch.sinh(y[..., c].clamp(-SINH_CLAMP, SINH_CLAMP))
         return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
 
     def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
@@ -2523,12 +2562,24 @@ def main(argv: Iterable[str] | None = None) -> None:
         curvature_stats=curvature_stats,
         curvature_cache_root=curvature_cache_root,
     )
+    asinh_channels = parse_asinh_tau_channels(config.asinh_tau_channels)
+    if asinh_channels and config.use_tangential_wallshear_loss:
+        raise ValueError(
+            "asinh_tau_channels is incompatible with use_tangential_wallshear_loss: "
+            "tangential projection requires wall-shear targets in z-score space, but "
+            "asinh remaps the targets nonlinearly."
+        )
     transform = TargetTransform(
         surface_y_mean=stats["surface_y_mean"].to(device),
         surface_y_std=stats["surface_y_std"].to(device),
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
+        surface_asinh_channels=asinh_channels,
     )
+    if is_main and asinh_channels:
+        names = {1: "tau_x", 2: "tau_y", 3: "tau_z"}
+        names_str = ",".join(names.get(c, f"ch{c}") for c in asinh_channels)
+        print(f"asinh target normalization enabled on channels: {names_str}")
 
     model = build_model(config).to(device)
     resume_info: dict[str, float | str | int] = {}
