@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~13:15 UTC)
+- 2026-05-05 (updated ~14:30 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -13,10 +13,10 @@
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** EP21 val=6.7758% (current wave-best, 0.250pp behind SOTA val of 6.5281%). Convergence strong and improving steadily. **Merge conflict** — rebase required before merge. EP25 gate: ≤7.0% (safety-only). Run to EP50. |
-| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d`/`dcaiwsyg` | EP13 val=6.8935% (new run-best). Strong recovery after Lion spike at EP11. Trending well below wave SOTA. EP15 gate: ≤7.2% (easily achievable). |
-| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2` | EP6 val=7.5317% (slope resuming after EP5 flat). EP5=7.6977%, EP6=7.5317% (-0.166pp). EP10 gate: ≤7.5%. Needs ~0.033pp more over 4 epochs. |
-| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | `7wdwphhn`+7 ranks (group: `string-qknorm`) | Smoke run running since 12:27 UTC. EP1=13.13%, EP2=9.62%. EP3 pending. Smoke gate: EP3 ≤8.5%. All 8 DDP ranks active. Also: crashed `tanjiro-heads-sweep` (5L/8H, lr=9e-5) group unexplained — awaiting student clarification. |
+| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** Latest W&B: val=6.8196% (EP22+). Slope slightly positive (+0.009 pct/1k steps) — plateau risk. Run to EP50. |
+| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | Latest W&B: val=6.9744% (EP14+). Slope rising (+0.020 pct/1k steps) — yellow flag, may be past best. |
+| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2`+7 ranks | Latest W&B: val=7.857% (EP6). All slopes positive — early training. EP10 gate: ≤7.5% (needs 0.36pp descent in 4 epochs, feasible). |
+| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | `dzochl0q`+7 ranks (group: `string-qknorm-long-50ep`) | Smoke `7wdwphhn` EP3=8.7821%. Gate extended to EP5 ≤8.0%. Long 50-ep run launched. Long run at EP1=13.13% (step ~6106, ~1 epoch complete). EP5 gate still pending. |
 
 ### Closed / Negative Results This Wave
 
