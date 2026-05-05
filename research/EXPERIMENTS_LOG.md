@@ -2009,3 +2009,54 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - Falsified assumption: "Physically plausible per-point interpolants exist between kNN-similar cars." Not true for unstructured DrivAerML surface fields at body-style granularity.
 - Haku reassigned to y-flip training augmentation (PR #746) — exploits exact physics symmetry (bilateral y-reflection) rather than approximate geometric similarity.
 
+---
+
+## 2026-05-05 22:31 — PR #724: [norman] Residual correction MLP on frozen SOTA — MERGED (new SOTA)
+
+- Branch: `norman/residual-correction-mlp`
+- Hypothesis: A small 3-layer GELU MLP (zero/identity-init final layer) reading per-point frozen backbone features [hidden_512, xyz_3, frozen_preds_4] can learn the structured residual error of the SOTA — particularly the τ_y/τ_z bias — with negligible overhead. Freezing the backbone ensures clean attribution.
+- W&B run: `u7obwlh7` (group `yi-round41-residual-correction`, name `norman/correction-mlp-d64-frozen-sota`)
+- Resumed from: `pxsnrw36` checkpoint (PR #658 SWA EMA, val 7.3914%)
+
+| Metric | EP1 | EP2 | EP3 | EP4 | **EP5 (final)** | Prior SOTA (dc031qpt) | Δ |
+|---|---|---|---|---|---|---|---|
+| val_abupt | 7.3790% | 7.3662% | 7.3610% | 7.3592% | **7.3588%** | 7.3767% | **−0.0179pp** |
+| τ_y val | 9.5753% | 9.5371% | 9.5239% | 9.5195% | **9.5185%** | 9.5832% | −0.0647pp (largest) |
+| τ_z val | 11.0475% | 11.0324% | 11.0233% | 11.0197% | **11.0188%** | 11.0377% | −0.0189pp |
+| surface_p val | 4.8478% | 4.8451% | 4.8443% | 4.8440% | **4.8440%** | 4.8515% | −0.0075pp |
+| vol_p val | 4.3156% | 4.3156% | 4.3156% | 4.3156% | **4.3156%** | 4.3066% | +0.0090pp (noise) |
+| **test_abupt** | — | — | — | — | **8.6884%** | 8.7015% | **−0.0131pp** |
+| τ_y test | — | — | — | — | **9.5287%** | 9.5964% | −0.0677pp |
+
+- **37,700 trainable params** (correction MLP only; backbone 100% frozen) — 0.27% overhead.
+- Trajectory monotonically descending on every surface metric across all 5 epochs. vol_p exactly constant (surface-only correction by construction).
+- Largest gain on τ_y as predicted — MLP learns structured τ_y residual bias in backbone features.
+- Stage 2 follow-on assigned to norman: unfreeze last 1 Transolver layer + correction MLP jointly (PR #747).
+
+---
+
+## 2026-05-05 23:03 — PR #743: [senku] Multi-checkpoint inference ensemble (K=2) — PENDING MERGE (awaiting terminal marker)
+
+- Branch: `senku/multi-checkpoint-inference-ensemble`
+- Hypothesis: Uniform averaging of two high-quality polished SOTA checkpoints (dc031qpt and pxsnrw36) at inference time reduces prediction variance via residual-error decorrelation, even though both checkpoints share ~99.9% prediction correlation.
+- W&B runs: `87hyv4tq` (K=1A dc031qpt), `5g5vypm6` (K=1B pxsnrw36), `vi2tpzbm` (K=2 uniform avg)
+
+| Metric | K=1A (dc031qpt) | K=1B (pxsnrw36) | **K=2 ensemble** | Δ vs K=1A |
+|---|---:|---:|---:|---:|
+| **val_abupt** | 7.3767% | 7.3914% | **7.2733%** | **−0.1034pp** |
+| τ_y val | 9.5832% | 9.6123% | **9.4105%** | −0.1727pp (largest) |
+| τ_z val | 11.0377% | 11.0573% | **10.8918%** | −0.1459pp |
+| surface_p val | 4.8515% | 4.8552% | **4.7967%** | −0.0548pp |
+| vol_p val | 4.3066% | 4.3156% | **4.2412%** | −0.0654pp |
+| **test_abupt** | 8.7015% | 8.7189% | **8.5989%** | **−0.1026pp** |
+| τ_y test | 9.5964% | 9.6221% | **9.4208%** | −0.1756pp |
+| τ_z test | 10.7383% | 10.7549% | **10.5942%** | −0.1441pp |
+
+- Sanity gates all pass: K=1A exactly reproduces SOTA (±0.0pp), K=1B matches published metric, K=2 beats both singles.
+- Pearson r ≈ 0.999 between checkpoints on all channels — very high prediction correlation but residual-error vectors still decorrelate meaningfully.
+- All 5 channels improve on both val AND test. Every gain is ~1–2% relative reduction.
+- Key theoretical insight: improvement comes from imperfect correlation in the ERROR component specifically, not the prediction correlation per se.
+- Zero training cost, ~30 min inference. Orthogonal to all training-time improvements.
+- Merge-eligible vs new bar (7.3588%): K=2 = 7.2733% beats by −0.0855pp ✓. Awaiting terminal SENPAI-RESULT marker from student.
+- Follow-up: K=3 (add u7obwlh7 to dc031qpt+pxsnrw36) expected to give additional ~0.02-0.05pp.
+
