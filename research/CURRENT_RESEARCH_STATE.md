@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-04 (updated mid-wave)
+- 2026-05-05 (updated ~06:45 UTC)
 - Most recent research direction from human researcher team: None (no open issues)
 
 ## Current Research Focus and Themes
@@ -13,10 +13,10 @@
 
 | PR | Student | Hypothesis | Key Mechanism | Status |
 |----|---------|------------|---------------|--------|
-| #608 | nezuko | Direct volume-loss upweight ×2.0 | `--volume-loss-weight 2.0` — most direct lever for volume-pressure gap | EP43/50, approaching completion (~2.5h ETA). EP41 vol_pressure=6.1862% (0.11pp from AB-UPT 6.08% target). Approaching convergence. |
-| #664 | fern | Per-axis output scaling on STRING backbone | Combines per-axis output scaling (wgvvevb9) with multi-sigma STRING PE (ki2q9ko9) | EP2/50 Phase 2 long run active. Kill gates: EP5>20%, EP10>15%, EP20>10%, EP30 not trending below 6.5281%. |
-| #669 | frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | New `masked_mse_per_channel` helper + CLI flags `--tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3`; requires code addition | Smoke run just started. Reference: 9mm3sz7x=8.123% (but older config). NEVER tested on Lion+STRING SOTA config. |
-| #670 | tanjiro | Extended cosine schedule T_max=60 on SOTA base config (50-epoch run) | `--lr-cosine-t-max 60` — pure CLI; LR decays to ~26% at epoch 50 instead of 0% with default T_max=50 | Smoke run just launched. Pure CLI experiment, no code changes needed. Reference: 5o7jc7wi=8.313%/vol=11.867% (older config, shorter run). |
+| #608 | nezuko | Direct volume-loss upweight ×2.0 | `--volume-loss-weight 2.0` — most direct lever for volume-pressure gap | WIP — EP43 complete. vol_pressure=6.1769% (0.10pp from AB-UPT 6.08% target). LR=6.5e-6 (93% off peak). Plateau slope nearly flat. Continuing to EP50 for final harvest. |
+| #664 | fern | Per-axis output scaling on STRING backbone | Combines per-axis output scaling (wgvvevb9) with multi-sigma STRING PE (ki2q9ko9) | WIP — Long run EP1 val=8.3599% (faster early descent vs smoke EP1=11.98%). Trajectory excellent. W&B group: fern-string-per-axis-scale-long. Awaiting EP5 gate report. |
+| #669 | frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | New `masked_mse_per_channel` helper + CLI flags `--tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3`; requires code addition | ACTIVE — Root cause of prior stall identified: label was `student:frieren` instead of `student:dl24-frieren`. Fixed ~06:40 UTC. Pod confirmed iteration 19 assigned to this PR. Code implementation required before smoke run. |
+| #673 | tanjiro | Denser multi-sigma STRING PE with 7 sigmas [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0] | `--pe-init-sigmas '0.1,0.25,0.5,1.0,2.0,4.0,8.0'` — expands SOTA 5-sigma init to 7 sigmas for broader spectral coverage (both finer low-end σ=0.1 and coarser high-end σ=8.0); pure CLI experiment | ASSIGNED — New assignment replacing tanjiro after #670 was merged without terminal results. Pod READY. Smoke run expected shortly. |
 
 ### Closed / Negative Results This Wave
 
@@ -53,8 +53,9 @@
 ## Potential Next Research Directions
 
 - **Tau weighting + volume upweight combination:** If #669 and #608 both show independent gains, combine tau_y×1.2/tau_z×1.3 with volume_loss_weight=2.0 in a subsequent wave.
-- **Extended cosine + tau weighting combination:** If #670 and #669 both show gains, combine them.
-- **Denser multi-sigma PE init:** Try more sigma points, e.g. sigmas=[0.1,0.25,0.5,1.0,2.0,4.0,8.0] — 7 sigmas for broader spectral coverage.
+- **Extended cosine + tau weighting combination:** If #669 shows gains and #670 results are recovered, combine T_max=60 with tau_y×1.2/tau_z×1.3.
+- **Denser multi-sigma PE (7 sigmas):** NOW ACTIVE as PR #673 — testing `[0.1,0.25,0.5,1.0,2.0,4.0,8.0]`.
+- ~~**Denser multi-sigma PE init:**~~ NOW ASSIGNED as PR #673 to tanjiro.
 - **Higher bs with gradient accumulation:** bs=2 with DDP8 = effective bs=16. Could try bs=4 (effective bs=32) with gradient accumulation to maintain steps per epoch.
 - **Adaptive curriculum:** Instead of fixed stage boundaries, advance curriculum when validation plateaus.
 - **Spectral loss terms:** Add frequency-domain supervision for better high-frequency pressure field fidelity.
