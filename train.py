@@ -920,6 +920,8 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.tau_yz_head = MLP(input_dim=n_hidden, hidden_dim=256, output_dim=2)
+        self.decouple_tau_yz = False
         if self.beta_nll:
             self.surface_log_var_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_log_var_out = LinearProjection(n_hidden, self.volume_output_dim)
@@ -1005,6 +1007,9 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.decouple_tau_yz:
+                tau_yz = self.tau_yz_head(surface_hidden) * surface_mask.unsqueeze(-1)
+                surface_preds = torch.cat([surface_preds[..., :2], tau_yz], dim=-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -1200,6 +1205,8 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    decouple_tau_yz: bool = False
+    tau_yz_head_lr_mult: float = 1.0
     beta_nll_beta: float = -1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
@@ -1243,6 +1250,7 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    resume_strict: bool = True
     surface_curvature_features: str = "none"
     swa_start_fraction: float = -1.0
     swa_lr: float = 5e-6
@@ -3099,10 +3107,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         return
 
     model = build_model(config).to(device)
+    model.decouple_tau_yz = config.decouple_tau_yz
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        load_result = model.load_state_dict(ckpt["model"], strict=config.resume_strict)
+        missing_keys = list(getattr(load_result, "missing_keys", []) or [])
+        unexpected_keys = list(getattr(load_result, "unexpected_keys", []) or [])
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
@@ -3114,12 +3125,20 @@ def main(argv: Iterable[str] | None = None) -> None:
             "resume_from_path": str(config.resume_from),
             "resume_prev_epoch": int(prev_epoch) if isinstance(prev_epoch, (int, float)) else -1,
             "resume_prev_val_abupt_pct": prev_primary_val,
+            "resume_strict": bool(config.resume_strict),
+            "resume_missing_keys": missing_keys,
+            "resume_unexpected_keys": unexpected_keys,
         }
         if is_main:
             print(
                 f"Resumed model weights from {config.resume_from} "
-                f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%)"
+                f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%, "
+                f"strict={config.resume_strict})"
             )
+            if missing_keys:
+                print(f"  Missing keys (re-init from random): {missing_keys}")
+            if unexpected_keys:
+                print(f"  Unexpected keys (ignored): {unexpected_keys}")
     if config.correction_mode:
         if not config.resume_from:
             raise ValueError(
@@ -3162,16 +3181,44 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer_name = config.optimizer.lower()
+    head_param_ids: set[int] = set()
+    if (
+        config.decouple_tau_yz
+        and config.tau_yz_head_lr_mult != 1.0
+        and hasattr(model, "tau_yz_head")
+    ):
+        head_param_ids = {id(p) for p in model.tau_yz_head.parameters() if p.requires_grad}
+    head_lr_mult = config.tau_yz_head_lr_mult if head_param_ids else 1.0
+    head_lr = config.lr * head_lr_mult
+
+    def _split_param_groups() -> list[dict]:
+        trunk_params = [p for p in model.parameters() if p.requires_grad and id(p) not in head_param_ids]
+        head_params = [p for p in model.parameters() if p.requires_grad and id(p) in head_param_ids]
+        groups: list[dict] = [{"params": trunk_params, "lr": config.lr, "name": "trunk"}]
+        if head_params:
+            groups.append({"params": head_params, "lr": head_lr, "name": "tau_yz_head"})
+        return groups
+
     if optimizer_name == "adamw":
-        optimizer = torch.optim.AdamW(
-            trainable_params, lr=config.lr, weight_decay=config.weight_decay
-        )
+        if head_param_ids:
+            optimizer = torch.optim.AdamW(
+                _split_param_groups(), lr=config.lr, weight_decay=config.weight_decay
+            )
+        else:
+            optimizer = torch.optim.AdamW(
+                trainable_params, lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "lion":
         from lion_pytorch import Lion
 
-        optimizer = Lion(
-            trainable_params, lr=config.lr, weight_decay=config.weight_decay
-        )
+        if head_param_ids:
+            optimizer = Lion(
+                _split_param_groups(), lr=config.lr, weight_decay=config.weight_decay
+            )
+        else:
+            optimizer = Lion(
+                trainable_params, lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "muon":
         muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
         muon_other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
@@ -3221,6 +3268,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"Optimizer: {optimizer.__class__.__name__} "
             f"lr={config.lr} wd={config.weight_decay}"
         )
+        if head_param_ids:
+            n_head = sum(p.numel() for p in model.tau_yz_head.parameters() if p.requires_grad)
+            print(
+                f"Param-group split: tau_yz_head ({n_head/1e3:.1f}K params) at lr={head_lr:g}, "
+                f"trunk at lr={config.lr:g} (head_lr_mult={head_lr_mult:g})"
+            )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
@@ -3596,6 +3649,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "train/lr": float(optimizer.param_groups[0]["lr"]),
+                "train/lr_tau_yz_head": (
+                    float(optimizer.param_groups[1]["lr"])
+                    if len(optimizer.param_groups) > 1 and head_param_ids
+                    else float(optimizer.param_groups[0]["lr"])
+                ),
                 "train/nonfinite_skip_count": nonfinite_skip_count,
                 "global_step": global_step,
                 **gradient_metrics,
