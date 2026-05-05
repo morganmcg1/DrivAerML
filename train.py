@@ -1164,6 +1164,7 @@ class Config:
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
     y_symmetry_pair_loss: bool = False
+    y_symmetry_augment: bool = False
     y_symmetry_test_avg: bool = False
 
 
@@ -2895,6 +2896,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            mirror_this_step = (
+                config.y_symmetry_augment
+                and not config.y_symmetry_pair_loss
+                and (global_step % 2 == 1)
+            )
+            if mirror_this_step:
+                batch = _mirror_batch_y(batch)
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -2911,6 +2919,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 beta_nll_beta=config.beta_nll_beta,
                 y_symmetry_pair_loss=config.y_symmetry_pair_loss,
             )
+            if config.y_symmetry_augment and not config.y_symmetry_pair_loss:
+                batch_loss_metrics["sym_aug_mirrored"] = float(mirror_this_step)
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
             if not loss_is_finite:
@@ -3347,7 +3357,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     if is_main:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
-    if config.y_symmetry_pair_loss:
+    if config.y_symmetry_pair_loss or config.y_symmetry_augment:
         full_val_alt_avg = not config.y_symmetry_test_avg
         full_val_metrics_alt = {
             name: evaluate_split(
@@ -3514,7 +3524,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         checkpoint_reload = torch.load(model_path, map_location=device, weights_only=True)
         model.load_state_dict(checkpoint_reload["model"], strict=True)
 
-    if config.y_symmetry_pair_loss:
+    if config.y_symmetry_pair_loss or config.y_symmetry_augment:
         test_alt_avg = not config.y_symmetry_test_avg
         test_metrics_alt = {
             name: evaluate_split(
