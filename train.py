@@ -14,14 +14,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gc
+import hashlib
 import math
 import os
 import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -32,7 +35,14 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import (
+    DrivAerMLCaseStore,
+    DrivAerMLSurfaceDataset,
+    SURFACE_Y_DIM,
+    VOLUME_Y_DIM,
+    pad_collate,
+)
+from data.loader import DrivAerMLCase, SurfaceBatch
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -137,6 +147,13 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    kd_teacher_runs: str = ""
+    kd_alpha: float = 0.0
+    kd_cache_root: str = "/tmp/senpai_kd_cache"
+    kd_build_cache_only: bool = False
+    kd_cache_eval_surface_points: int = 65_536
+    kd_cache_eval_volume_points: int = 65_536
+    kd_cache_chunk_batch_size: int = 4
     debug: bool = False
 
 
@@ -218,6 +235,51 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "kd_teacher_runs": (
+            "Comma-separated W&B run IDs for ensemble distillation teachers. "
+            "Empty disables KD (default training behavior). When set, the "
+            "trainer caches per-case averaged teacher predictions on local "
+            "disk (see --kd-cache-root), then mixes a distillation MSE term "
+            "into the loss. The teacher cache is rebuilt from scratch when a "
+            "different teacher set is requested (the cache is keyed by a "
+            "stable hash of the sorted run IDs)."
+        ),
+        "kd_alpha": (
+            "Distillation mixing weight in [0, 1]. Total loss is "
+            "(1-kd_alpha) * label_loss + kd_alpha * teacher_loss. Both terms "
+            "use the same per-channel weighting (surface_loss_weight, "
+            "tau_y_loss_weight, tau_z_loss_weight, volume_loss_weight). "
+            "0 disables distillation even when --kd-teacher-runs is set. "
+            "Hinton et al. (2015), Furlanello et al. (ICML 2018) recommend "
+            "0.5-1.0 for ensemble->single distillation."
+        ),
+        "kd_cache_root": (
+            "Local-disk root for the teacher prediction cache. Each unique "
+            "set of teacher run IDs is stored under a content-addressed "
+            "subdirectory (k<N>_<sha1[:10]>/cases/<case_id>.pt). Uses tmpfs "
+            "by default since per-case files are read once on init."
+        ),
+        "kd_build_cache_only": (
+            "If set, the trainer builds the teacher cache and exits "
+            "without training. Use this as a separate run before the "
+            "training arms so cache build time is amortised across arms."
+        ),
+        "kd_cache_eval_surface_points": (
+            "Surface eval_chunk size used during teacher cache inference. "
+            "Should match the student's --eval-surface-points so the teacher "
+            "predicts at the same per-chunk resolution the student validates "
+            "with."
+        ),
+        "kd_cache_eval_volume_points": (
+            "Volume eval_chunk size used during teacher cache inference. "
+            "See --kd-cache-eval-surface-points for matching guidance."
+        ),
+        "kd_cache_chunk_batch_size": (
+            "Per-rank micro-batch size (in chunks, not cases) used during "
+            "teacher cache inference. Each chunk is a 65k-point view of one "
+            "case; bigger micro-batches reduce launch overhead but raise "
+            "inference VRAM. 4 is safe for L=5/512 teachers on H100 80GB."
         ),
     }
     for field in fields(Config):
@@ -310,10 +372,23 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    surface_teacher: torch.Tensor | None = None,
+    volume_teacher: torch.Tensor | None = None,
+    kd_alpha: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    use_kd = (
+        kd_alpha > 0.0 and surface_teacher is not None and volume_teacher is not None
+    )
+    if use_kd:
+        # Teacher predictions are stored in the *normalised* output space
+        # (matching what the student's forward returns), so they can be
+        # compared directly against ``out["surface_preds"]`` without applying
+        # the target transform.
+        surface_teacher = surface_teacher.to(device, non_blocking=True)
+        volume_teacher = volume_teacher.to(device, non_blocking=True)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -333,15 +408,51 @@ def train_loss(
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        label_loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+
+        if use_kd:
+            if surface_channel_weights is not None:
+                kd_surface_loss = weighted_channel_mse(
+                    out["surface_preds"],
+                    surface_teacher,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+            else:
+                kd_surface_loss = masked_mse(
+                    out["surface_preds"], surface_teacher, batch.surface_mask
+                )
+            kd_volume_loss = masked_mse(
+                out["volume_preds"], volume_teacher, batch.volume_mask
+            )
+            kd_weighted_surface = surface_loss_weight * kd_surface_loss
+            kd_weighted_volume = volume_loss_weight * kd_volume_loss
+            kd_loss = kd_weighted_surface + kd_weighted_volume
+            loss = (1.0 - kd_alpha) * label_loss + kd_alpha * kd_loss
+        else:
+            loss = label_loss
+
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if use_kd:
+        metrics.update(
+            {
+                "kd_loss": float(kd_loss.detach().cpu().item()),
+                "kd_surface_loss": float(kd_surface_loss.detach().cpu().item()),
+                "kd_volume_loss": float(kd_volume_loss.detach().cpu().item()),
+                "kd_surface_loss_weighted": float(kd_weighted_surface.detach().cpu().item()),
+                "kd_volume_loss_weighted": float(kd_weighted_volume.detach().cpu().item()),
+                "label_loss_weighted": float(label_loss.detach().cpu().item()),
+                "kd_alpha": float(kd_alpha),
+            }
+        )
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -648,6 +759,563 @@ def vol_points_for_epoch(
     return current
 
 
+# ---------------------------------------------------------------------------
+# Knowledge distillation: ensemble teacher cache + dataset wrapper + collator
+# ---------------------------------------------------------------------------
+
+
+KD_CACHE_FILE_VERSION = 1
+KD_TEACHER_SURFACE_KEY = "kd_teacher_surface_pred"
+KD_TEACHER_VOLUME_KEY = "kd_teacher_volume_pred"
+
+
+def parse_kd_teacher_runs(text: str) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    raw = text.replace(";", ",").split(",")
+    ids = [token.strip() for token in raw if token.strip()]
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for run_id in ids:
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        deduped.append(run_id)
+    return deduped
+
+
+def kd_cache_dir_for(base: Path, run_ids: list[str]) -> Path:
+    sorted_ids = sorted(run_ids)
+    digest = hashlib.sha1(",".join(sorted_ids).encode("utf-8")).hexdigest()[:10]
+    return Path(base) / f"k{len(sorted_ids)}_{digest}"
+
+
+def kd_case_cache_path(cache_dir: Path, case_id: str) -> Path:
+    return cache_dir / "cases" / f"{case_id}.pt"
+
+
+def kd_artifact_dir(cache_root: Path) -> Path:
+    return Path(cache_root) / "artifacts"
+
+
+def _kd_chunk_indices(total: int, view_index: int, view_count: int) -> torch.Tensor:
+    """eval_chunk index list for one (case, view) pair.
+
+    Mirrors ``DrivAerMLSurfaceDataset._indices`` for the eval_chunk branch but
+    works directly on raw arguments so we can drive teacher inference without
+    instantiating a per-case dataset.
+    """
+
+    if total <= 0:
+        return torch.empty(0, dtype=torch.long)
+    if view_count <= 1:
+        return torch.arange(total, dtype=torch.long)
+    if view_index >= view_count:
+        return torch.empty(0, dtype=torch.long)
+    return torch.arange(view_index, total, view_count, dtype=torch.long)
+
+
+def _kd_view_count(total: int, points_per_view: int) -> int:
+    if points_per_view <= 0 or total <= points_per_view:
+        return 1
+    return max(1, math.ceil(total / points_per_view))
+
+
+@torch.no_grad()
+def _kd_teacher_chunk_forward(
+    teacher: nn.Module,
+    cases: list[DrivAerMLCase],
+    device: torch.device,
+    amp_mode: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Run teacher on a micro-batch of (case, view) chunks. Returns padded
+    surface/volume predictions with their masks (mask is True for real rows).
+    """
+
+    surface_lengths = [c.surface_x.shape[0] for c in cases]
+    volume_lengths = [c.volume_x.shape[0] for c in cases]
+    max_surface = max(surface_lengths) if surface_lengths else 0
+    max_volume = max(volume_lengths) if volume_lengths else 0
+    surface_dim = cases[0].surface_x.shape[1] if cases else 0
+    volume_dim = cases[0].volume_x.shape[1] if cases else 0
+    bsz = len(cases)
+    surface_x = torch.zeros((bsz, max(max_surface, 1), surface_dim), dtype=torch.float32)
+    volume_x = torch.zeros((bsz, max(max_volume, 1), volume_dim), dtype=torch.float32)
+    surface_mask = torch.zeros((bsz, max(max_surface, 1)), dtype=torch.bool)
+    volume_mask = torch.zeros((bsz, max(max_volume, 1)), dtype=torch.bool)
+    for i, case in enumerate(cases):
+        sl = surface_lengths[i]
+        vl = volume_lengths[i]
+        if sl > 0:
+            surface_x[i, :sl] = case.surface_x
+            surface_mask[i, :sl] = True
+        if vl > 0:
+            volume_x[i, :vl] = case.volume_x
+            volume_mask[i, :vl] = True
+    surface_x = surface_x.to(device, non_blocking=True)
+    volume_x = volume_x.to(device, non_blocking=True)
+    surface_mask = surface_mask.to(device, non_blocking=True)
+    volume_mask = volume_mask.to(device, non_blocking=True)
+    with autocast_context(device, amp_mode):
+        out = teacher(
+            surface_x=surface_x,
+            surface_mask=surface_mask,
+            volume_x=volume_x,
+            volume_mask=volume_mask,
+        )
+    surface_pred = out["surface_preds"].float()
+    volume_pred = out["volume_preds"].float()
+    return surface_pred, volume_pred, surface_mask, volume_mask
+
+
+def _kd_load_teacher(
+    run_id: str,
+    artifact_root: Path,
+    device: torch.device,
+    api,
+    entity: str,
+    project: str,
+    state=None,
+) -> SurfaceTransolver:
+    """Load a teacher checkpoint. The W&B artifact download happens on rank 0
+    only — all ranks then read the cached files. Without this, concurrent
+    ``art.download`` calls to the same path can corrupt each other.
+    """
+
+    from ensemble_eval import download_checkpoint, load_member
+
+    if state is None or not state.enabled or state.is_main:
+        artifact_dir = download_checkpoint(api, entity, project, run_id, artifact_root)
+    if state is not None:
+        distributed_barrier(state)
+    artifact_dir = artifact_root / run_id
+    teacher, _ = load_member(run_id, artifact_dir, device)
+    teacher.eval()
+    for p in teacher.parameters():
+        p.requires_grad = False
+    return teacher
+
+
+def _kd_iter_case_chunks(
+    case_id: str,
+    store: DrivAerMLCaseStore,
+    eval_surface_points: int,
+    eval_volume_points: int,
+    chunk_batch_size: int,
+) -> Iterable[tuple[list[DrivAerMLCase], list[torch.Tensor], list[torch.Tensor]]]:
+    """Yield micro-batches of chunks for a single case.
+
+    Each yielded element is ``(cases, surface_indices, volume_indices)`` where
+    ``cases`` is a list of length up to ``chunk_batch_size`` and the indices
+    list aligns with each case's per-modality view (empty tensors mark a view
+    that exhausted that modality first).
+    """
+
+    counts = store.case_point_counts(case_id)
+    n_surface = int(counts["n_surface"])
+    n_volume = int(counts["n_volume"])
+    surface_views = _kd_view_count(n_surface, eval_surface_points)
+    volume_views = _kd_view_count(n_volume, eval_volume_points)
+    view_count = max(surface_views, volume_views)
+    pending_cases: list[DrivAerMLCase] = []
+    pending_surface_idx: list[torch.Tensor] = []
+    pending_volume_idx: list[torch.Tensor] = []
+    for view_idx in range(view_count):
+        if view_idx < surface_views and surface_views > 1:
+            surface_idx = _kd_chunk_indices(n_surface, view_idx, surface_views)
+        elif surface_views == 1 and view_idx == 0 and n_surface > 0:
+            surface_idx = torch.arange(n_surface, dtype=torch.long)
+        else:
+            surface_idx = torch.empty(0, dtype=torch.long)
+        if view_idx < volume_views and volume_views > 1:
+            volume_idx = _kd_chunk_indices(n_volume, view_idx, volume_views)
+        elif volume_views == 1 and view_idx == 0 and n_volume > 0:
+            volume_idx = torch.arange(n_volume, dtype=torch.long)
+        else:
+            volume_idx = torch.empty(0, dtype=torch.long)
+        case = store.load_case(
+            case_id,
+            surface_rows=None if surface_idx.numel() == 0 else surface_idx.numpy(),
+            volume_rows=None if volume_idx.numel() == 0 else volume_idx.numpy(),
+        )
+        pending_cases.append(case)
+        pending_surface_idx.append(surface_idx)
+        pending_volume_idx.append(volume_idx)
+        if len(pending_cases) >= chunk_batch_size:
+            yield pending_cases, pending_surface_idx, pending_volume_idx
+            pending_cases = []
+            pending_surface_idx = []
+            pending_volume_idx = []
+    if pending_cases:
+        yield pending_cases, pending_surface_idx, pending_volume_idx
+
+
+def _kd_save_case_cache(
+    cache_dir: Path,
+    case_id: str,
+    surface_full: torch.Tensor,
+    volume_full: torch.Tensor,
+    teacher_run_ids: list[str],
+) -> None:
+    payload = {
+        "version": KD_CACHE_FILE_VERSION,
+        "case_id": case_id,
+        "teacher_run_ids": list(teacher_run_ids),
+        "surface_pred": surface_full.to(dtype=torch.bfloat16, copy=True).contiguous(),
+        "volume_pred": volume_full.to(dtype=torch.bfloat16, copy=True).contiguous(),
+    }
+    target = kd_case_cache_path(cache_dir, case_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
+    torch.save(payload, tmp)
+    tmp.replace(target)
+
+
+def build_teacher_cache(
+    teacher_run_ids: list[str],
+    config: Config,
+    state,
+    device: torch.device,
+) -> Path:
+    """Build the K-teacher averaged prediction cache for the train split.
+
+    Each teacher checkpoint is loaded sequentially on each rank. For each
+    case in this rank's shard we run ``view_count`` eval_chunk(
+    ``--kd-cache-eval-*-points``) micro-batches through the teacher and place
+    the per-chunk predictions back into a full-resolution per-case fp32
+    accumulator. After all teachers finish for a case we average and save the
+    bf16 prediction to ``cases/<case_id>.pt``.
+
+    The build is idempotent: any case whose ``.pt`` file already exists is
+    skipped, so a partial build can be resumed by re-running the cache
+    builder.
+    """
+
+    cache_dir = kd_cache_dir_for(Path(config.kd_cache_root), teacher_run_ids)
+    cases_dir = cache_dir / "cases"
+    cases_dir.mkdir(parents=True, exist_ok=True)
+
+    store = DrivAerMLCaseStore(
+        manifest_path=config.manifest, root=config.data_root or None
+    )
+    all_train_ids = store.case_ids("train")
+    if config.debug:
+        all_train_ids = all_train_ids[:4]
+
+    todo_ids = [cid for cid in all_train_ids if not kd_case_cache_path(cache_dir, cid).exists()]
+    if state.is_main:
+        n_have = len(all_train_ids) - len(todo_ids)
+        print(
+            f"[KD] cache_dir={cache_dir} teachers={len(teacher_run_ids)} "
+            f"cached={n_have}/{len(all_train_ids)} todo={len(todo_ids)}"
+        )
+
+    if not todo_ids:
+        distributed_barrier(state)
+        if state.is_main:
+            print("[KD] cache already complete; skipping build.")
+        return cache_dir
+
+    # Shard cases across ranks (case-contiguous, no chunk-level sharding so each
+    # rank owns the full per-case prediction tensor it accumulates into).
+    rank = state.rank if state.enabled else 0
+    world = state.world_size if state.enabled else 1
+    shard_ids = [cid for i, cid in enumerate(todo_ids) if i % world == rank]
+    print(
+        f"[KD][rank {rank}] shard_size={len(shard_ids)} of {len(todo_ids)} "
+        f"todo cases (world={world})"
+    )
+
+    api = wandb.Api()
+    entity = os.environ.get("WANDB_ENTITY", "wandb-applied-ai-team")
+    project = os.environ.get("WANDB_PROJECT", "senpai-v1-drivaerml-ddp8")
+    artifact_root = kd_artifact_dir(Path(config.kd_cache_root))
+    artifact_root.mkdir(parents=True, exist_ok=True)
+
+    # Pre-allocate per-case accumulators only for this rank's shard, lazily on
+    # first touch by a teacher to avoid loading point counts twice.
+    n_teachers = len(teacher_run_ids)
+    cases_remaining_per_teacher: dict[str, int] = {cid: 0 for cid in shard_ids}
+    surface_sums: dict[str, torch.Tensor] = {}
+    volume_sums: dict[str, torch.Tensor] = {}
+
+    for teacher_idx, run_id in enumerate(teacher_run_ids):
+        t_load_start = time.time()
+        print(f"[KD][rank {rank}] loading teacher {teacher_idx + 1}/{n_teachers} ({run_id})")
+        teacher = _kd_load_teacher(
+            run_id, artifact_root, device, api, entity, project, state=state
+        )
+        print(
+            f"[KD][rank {rank}] teacher {run_id} loaded in "
+            f"{time.time() - t_load_start:.1f}s"
+        )
+        teacher_case_start = time.time()
+        for case_idx, case_id in enumerate(shard_ids):
+            counts = store.case_point_counts(case_id)
+            n_surface = int(counts["n_surface"])
+            n_volume = int(counts["n_volume"])
+            if case_id not in surface_sums:
+                surface_sums[case_id] = torch.zeros(
+                    (max(n_surface, 1), SURFACE_Y_DIM), dtype=torch.float32
+                )
+                volume_sums[case_id] = torch.zeros(
+                    (max(n_volume, 1), VOLUME_Y_DIM), dtype=torch.float32
+                )
+            for cases, surface_idx_list, volume_idx_list in _kd_iter_case_chunks(
+                case_id,
+                store,
+                config.kd_cache_eval_surface_points,
+                config.kd_cache_eval_volume_points,
+                config.kd_cache_chunk_batch_size,
+            ):
+                surface_pred, volume_pred, _, _ = _kd_teacher_chunk_forward(
+                    teacher, cases, device, config.amp_mode
+                )
+                surface_pred_cpu = surface_pred.detach().cpu()
+                volume_pred_cpu = volume_pred.detach().cpu()
+                for j, (s_idx, v_idx) in enumerate(zip(surface_idx_list, volume_idx_list)):
+                    s_n = s_idx.numel()
+                    v_n = v_idx.numel()
+                    if s_n > 0:
+                        surface_sums[case_id][s_idx] += surface_pred_cpu[j, :s_n]
+                    if v_n > 0:
+                        volume_sums[case_id][v_idx] += volume_pred_cpu[j, :v_n]
+            cases_remaining_per_teacher[case_id] += 1
+            if (case_idx + 1) % 10 == 0:
+                dt = time.time() - teacher_case_start
+                rate = (case_idx + 1) / max(dt, 1e-6)
+                print(
+                    f"[KD][rank {rank}] teacher {run_id}: "
+                    f"{case_idx + 1}/{len(shard_ids)} cases ({dt:.1f}s, "
+                    f"{rate:.2f} case/s)"
+                )
+        print(
+            f"[KD][rank {rank}] teacher {run_id} done in "
+            f"{time.time() - teacher_case_start:.1f}s"
+        )
+        del teacher
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        # If this is the last teacher, we can finalise per-case caches. Otherwise
+        # we keep accumulating across teachers.
+
+    print(f"[KD][rank {rank}] averaging and saving {len(shard_ids)} cases")
+    for case_id in shard_ids:
+        surface_avg = surface_sums[case_id] / max(n_teachers, 1)
+        volume_avg = volume_sums[case_id] / max(n_teachers, 1)
+        _kd_save_case_cache(cache_dir, case_id, surface_avg, volume_avg, teacher_run_ids)
+        # free per-case memory promptly
+        surface_sums.pop(case_id, None)
+        volume_sums.pop(case_id, None)
+
+    distributed_barrier(state)
+    if state.is_main:
+        all_present = sum(
+            1 for cid in all_train_ids if kd_case_cache_path(cache_dir, cid).exists()
+        )
+        print(
+            f"[KD] cache build complete: {all_present}/{len(all_train_ids)} per-case files at "
+            f"{cache_dir}"
+        )
+    return cache_dir
+
+
+# ---------------------------------------------------------------------------
+# Distillation training loader
+# ---------------------------------------------------------------------------
+
+
+class DistillationDataset(DrivAerMLSurfaceDataset):
+    """DrivAerML training dataset that also returns per-point teacher predictions.
+
+    The wrapper computes the same train_random / eval_chunk indices that the
+    parent ``__getitem__`` would compute, loads the case at those indices, and
+    additionally gathers cached teacher predictions at the same indices. Cached
+    teacher tensors are stashed in ``DrivAerMLCase.metadata`` under the
+    ``KD_TEACHER_*`` keys so the collator can pad them alongside the targets
+    without modifying ``data/loader.py`` or the ``DrivAerMLCase`` schema.
+    """
+
+    def __init__(
+        self,
+        case_ids: list[str],
+        *,
+        store: DrivAerMLCaseStore,
+        max_surface_points: int,
+        max_volume_points: int,
+        sampling_mode: str,
+        teacher_cache: dict[str, dict[str, torch.Tensor]],
+    ):
+        super().__init__(
+            case_ids,
+            store=store,
+            max_surface_points=max_surface_points,
+            max_volume_points=max_volume_points,
+            sampling_mode=sampling_mode,
+        )
+        # ``teacher_cache`` is loaded once on the main process before fork; on
+        # Linux the workers share these tensors via copy-on-read.
+        self.teacher_cache = teacher_cache
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        volume_idx = self._indices(
+            counts["n_volume"],
+            self.max_volume_points,
+            view,
+            group_view_count=view.volume_view_count,
+        )
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode
+        metadata["joint_view_count"] = int(view.view_count)
+
+        teacher_entry = self.teacher_cache.get(view.case_id)
+        if teacher_entry is not None:
+            t_surface_full = teacher_entry["surface_pred"]
+            t_volume_full = teacher_entry["volume_pred"]
+            if surface_idx is None:
+                surface_teacher = t_surface_full[: case.surface_x.shape[0]]
+            elif surface_idx.numel() == 0:
+                surface_teacher = torch.zeros(
+                    (0, t_surface_full.shape[-1]), dtype=t_surface_full.dtype
+                )
+            else:
+                surface_teacher = t_surface_full[surface_idx]
+            if volume_idx is None:
+                volume_teacher = t_volume_full[: case.volume_x.shape[0]]
+            elif volume_idx.numel() == 0:
+                volume_teacher = torch.zeros(
+                    (0, t_volume_full.shape[-1]), dtype=t_volume_full.dtype
+                )
+            else:
+                volume_teacher = t_volume_full[volume_idx]
+            metadata[KD_TEACHER_SURFACE_KEY] = surface_teacher.contiguous()
+            metadata[KD_TEACHER_VOLUME_KEY] = volume_teacher.contiguous()
+
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
+def pad_collate_with_teacher(samples: list[DrivAerMLCase]) -> SurfaceBatch:
+    """Pad a batch of samples and attach padded teacher predictions.
+
+    Surface/volume teacher tensors are popped out of each sample's metadata so
+    they don't pollute the printed metadata, then padded to the same
+    ``[B, N_max, C]`` layout as the targets and attached to the returned
+    ``SurfaceBatch`` as ``surface_teacher`` / ``volume_teacher`` attributes.
+    Padding rows are zero, matching how ``surface_y`` is padded; the existing
+    masks correctly disable padded rows in the loss.
+    """
+
+    teacher_surface_list: list[torch.Tensor] = []
+    teacher_volume_list: list[torch.Tensor] = []
+    has_teacher = True
+    for sample in samples:
+        ts = sample.metadata.pop(KD_TEACHER_SURFACE_KEY, None)
+        tv = sample.metadata.pop(KD_TEACHER_VOLUME_KEY, None)
+        if ts is None or tv is None:
+            has_teacher = False
+        teacher_surface_list.append(ts)
+        teacher_volume_list.append(tv)
+    batch = pad_collate(samples)
+    if not has_teacher:
+        return batch
+    bsz = batch.surface_y.shape[0]
+    max_surface = batch.surface_y.shape[1]
+    max_volume = batch.volume_y.shape[1]
+    surface_dim = batch.surface_y.shape[2]
+    volume_dim = batch.volume_y.shape[2]
+    teacher_surface = torch.zeros((bsz, max_surface, surface_dim), dtype=torch.float32)
+    teacher_volume = torch.zeros((bsz, max_volume, volume_dim), dtype=torch.float32)
+    for i, (ts, tv) in enumerate(zip(teacher_surface_list, teacher_volume_list)):
+        if ts is not None and ts.numel() > 0:
+            teacher_surface[i, : ts.shape[0]] = ts.float()
+        if tv is not None and tv.numel() > 0:
+            teacher_volume[i, : tv.shape[0]] = tv.float()
+    setattr(batch, "surface_teacher", teacher_surface)
+    setattr(batch, "volume_teacher", teacher_volume)
+    return batch
+
+
+def _kd_load_case_cache(cache_dir: Path, case_id: str) -> dict[str, torch.Tensor] | None:
+    path = kd_case_cache_path(cache_dir, case_id)
+    if not path.exists():
+        return None
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return {
+        "surface_pred": payload["surface_pred"],
+        "volume_pred": payload["volume_pred"],
+    }
+
+
+def preload_teacher_cache(
+    cache_dir: Path,
+    case_ids: list[str],
+    *,
+    log: bool = False,
+) -> dict[str, dict[str, torch.Tensor]]:
+    """Load the per-case teacher prediction cache into RAM on the calling
+    process. Returned dict is read-only by convention; DataLoader workers
+    forked from this process inherit the same memory pages on Linux.
+    """
+
+    cache: dict[str, dict[str, torch.Tensor]] = {}
+    missing: list[str] = []
+    t0 = time.time()
+    n_surface_bytes = 0
+    n_volume_bytes = 0
+    for case_id in case_ids:
+        entry = _kd_load_case_cache(cache_dir, case_id)
+        if entry is None:
+            missing.append(case_id)
+            continue
+        cache[case_id] = entry
+        n_surface_bytes += entry["surface_pred"].element_size() * entry["surface_pred"].numel()
+        n_volume_bytes += entry["volume_pred"].element_size() * entry["volume_pred"].numel()
+    if missing:
+        raise FileNotFoundError(
+            f"Missing teacher cache for {len(missing)} case(s) at {cache_dir}: "
+            f"{missing[:5]}{'...' if len(missing) > 5 else ''}"
+        )
+    if log:
+        gb = (n_surface_bytes + n_volume_bytes) / (1024 ** 3)
+        print(
+            f"[KD] preloaded teacher cache: {len(cache)} cases, "
+            f"{gb:.2f} GiB resident (surface={n_surface_bytes/1e9:.2f}GB, "
+            f"volume={n_volume_bytes/1e9:.2f}GB) in {time.time()-t0:.1f}s"
+        )
+    return cache
+
+
 def rebuild_train_loader_with_vol_points(
     config: Config,
     old_train_loader: DataLoader,
@@ -660,19 +1328,35 @@ def rebuild_train_loader_with_vol_points(
     artifact-path resolutions survive the swap. The view list is recomputed
     because ``max_volume_points`` changes the per-case view count, which in
     turn changes the dataset length that the distributed sampler must see.
+    When the previous loader was a ``DistillationDataset`` we preserve the
+    teacher cache attached to the dataset and the matching collator so the
+    KD loss term keeps firing across vol-points breakpoints.
     """
 
     old_ds = old_train_loader.dataset
     sampling_mode = (
         "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
     )
-    train_ds = DrivAerMLSurfaceDataset(
-        old_ds.case_ids,
-        store=old_ds.store,
-        max_surface_points=config.train_surface_points,
-        max_volume_points=n_points,
-        sampling_mode=sampling_mode,
-    )
+    teacher_cache = getattr(old_ds, "teacher_cache", None)
+    if isinstance(old_ds, DistillationDataset) and teacher_cache is not None:
+        train_ds: DrivAerMLSurfaceDataset = DistillationDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+            teacher_cache=teacher_cache,
+        )
+        collate_fn = pad_collate_with_teacher
+    else:
+        train_ds = DrivAerMLSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+        )
+        collate_fn = pad_collate
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
@@ -684,13 +1368,15 @@ def rebuild_train_loader_with_vol_points(
             drop_last=True,
         )
         train_shuffle = False
+    kwargs = loader_kwargs(config)
+    kwargs["collate_fn"] = collate_fn
     return DataLoader(
         train_ds,
         batch_size=config.batch_size,
         shuffle=train_shuffle,
         sampler=train_sampler,
         drop_last=True,
-        **loader_kwargs(config),
+        **kwargs,
     )
 
 
@@ -701,6 +1387,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         config = parse_args(argv)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
+        teacher_run_ids = parse_kd_teacher_runs(config.kd_teacher_runs)
+        if not 0.0 <= config.kd_alpha <= 1.0:
+            raise ValueError(
+                f"--kd-alpha must be in [0, 1]; got {config.kd_alpha}"
+            )
+        if config.kd_alpha > 0.0 and not teacher_run_ids:
+            raise ValueError(
+                "--kd-alpha > 0 requires at least one teacher via --kd-teacher-runs."
+            )
+        if config.kd_build_cache_only and not teacher_run_ids:
+            raise ValueError(
+                "--kd-build-cache-only requires --kd-teacher-runs."
+            )
+        kd_enabled = bool(teacher_run_ids) and config.kd_alpha > 0.0
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -710,6 +1410,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
+            if teacher_run_ids:
+                print(
+                    f"[KD] teachers={len(teacher_run_ids)} alpha={config.kd_alpha} "
+                    f"build_cache_only={config.kd_build_cache_only} "
+                    f"enabled={kd_enabled}"
+                )
+
+        if teacher_run_ids:
+            kd_cache_dir = build_teacher_cache(teacher_run_ids, config, state, device)
+            distributed_barrier(state)
+            if config.kd_build_cache_only:
+                if state.is_main:
+                    print(f"[KD] --kd-build-cache-only set; cache at {kd_cache_dir}; exiting.")
+                return
+        else:
+            kd_cache_dir = None
 
         if vol_points_schedule:
             initial_vol_points = vol_points_for_epoch(
@@ -726,6 +1442,43 @@ def main(argv: Iterable[str] | None = None) -> None:
         current_train_vol_points = config.train_volume_points
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if kd_enabled:
+            assert kd_cache_dir is not None
+            old_train_ds = train_loader.dataset
+            teacher_cache = preload_teacher_cache(
+                kd_cache_dir,
+                list(old_train_ds.case_ids),
+                log=state.is_main,
+            )
+            train_ds = DistillationDataset(
+                old_train_ds.case_ids,
+                store=old_train_ds.store,
+                max_surface_points=config.train_surface_points,
+                max_volume_points=config.train_volume_points,
+                sampling_mode=old_train_ds.sampling_mode,
+                teacher_cache=teacher_cache,
+            )
+            train_sampler = None
+            train_shuffle = True
+            if state.enabled:
+                train_sampler = DistributedSampler(
+                    train_ds,
+                    num_replicas=state.world_size,
+                    rank=state.rank,
+                    shuffle=True,
+                    drop_last=True,
+                )
+                train_shuffle = False
+            kwargs = loader_kwargs(config)
+            kwargs["collate_fn"] = pad_collate_with_teacher
+            train_loader = DataLoader(
+                train_ds,
+                batch_size=config.batch_size,
+                shuffle=train_shuffle,
+                sampler=train_sampler,
+                drop_last=True,
+                **kwargs,
+            )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -861,6 +1614,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["kd/enabled"] = 1.0 if kd_enabled else 0.0
+            wandb.summary["kd/teacher_count"] = len(teacher_run_ids)
+            wandb.summary["kd/teacher_run_ids"] = list(teacher_run_ids)
+            wandb.summary["kd/alpha"] = float(config.kd_alpha)
+            if kd_cache_dir is not None:
+                wandb.summary["kd/cache_dir"] = str(kd_cache_dir)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -999,6 +1758,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    surface_teacher_batch = getattr(batch, "surface_teacher", None)
+                    volume_teacher_batch = getattr(batch, "volume_teacher", None)
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1008,6 +1769,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        surface_teacher=surface_teacher_batch if kd_enabled else None,
+                        volume_teacher=volume_teacher_batch if kd_enabled else None,
+                        kd_alpha=config.kd_alpha if kd_enabled else 0.0,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1812,24 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "kd_loss" in batch_loss_metrics:
+                        train_log.update(
+                            {
+                                "train/kd/loss": batch_loss_metrics["kd_loss"],
+                                "train/kd/surface_loss": batch_loss_metrics["kd_surface_loss"],
+                                "train/kd/volume_loss": batch_loss_metrics["kd_volume_loss"],
+                                "train/kd/surface_loss_weighted": batch_loss_metrics[
+                                    "kd_surface_loss_weighted"
+                                ],
+                                "train/kd/volume_loss_weighted": batch_loss_metrics[
+                                    "kd_volume_loss_weighted"
+                                ],
+                                "train/kd/label_loss_weighted": batch_loss_metrics[
+                                    "label_loss_weighted"
+                                ],
+                                "train/kd/alpha": batch_loss_metrics["kd_alpha"],
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
