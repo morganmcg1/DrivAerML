@@ -2052,7 +2052,7 @@ def train_loss(
         )
         surface_pred_norm = out["surface_preds"]
         normal_rms = float("nan")
-        if use_tangential_wallshear_loss and not use_beta_nll:
+        if use_tangential_wallshear_loss:
             # Wall-shear stds are non-uniform ([2.08, 1.36, 1.11]), so projecting
             # in normalized space does not equal physical-space tangent projection.
             # Denormalize -> project in physical space -> renormalize.
@@ -2131,7 +2131,7 @@ def train_loss(
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
-    if use_tangential_wallshear_loss and not use_beta_nll:
+    if use_tangential_wallshear_loss:
         metrics["wallshear_pred_normal_rms"] = normal_rms
     if use_beta_nll and per_axis_log_var is not None:
         metrics["log_var_surface_pressure"] = per_axis_log_var[0]
