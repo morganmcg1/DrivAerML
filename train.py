@@ -1040,6 +1040,87 @@ class SurfaceTransolver(nn.Module):
         return result
 
 
+class Lookahead(torch.optim.Optimizer):
+    """Lookahead optimizer wrapper (Zhang et al. 2019, arxiv 1907.08610).
+
+    Maintains slow weights that interpolate toward fast weights every ``k`` steps:
+    ``slow <- slow + alpha * (fast - slow)``, then ``fast <- slow``. The wrapped
+    base optimizer (e.g. Lion) keeps its own momentum/state intact — Lookahead
+    only modifies the parameter values themselves.
+    """
+
+    def __init__(
+        self,
+        base_optimizer: torch.optim.Optimizer,
+        k: int = 5,
+        alpha: float = 0.5,
+    ):
+        if k < 1:
+            raise ValueError(f"Lookahead k must be >= 1, got {k}")
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError(f"Lookahead alpha must be in (0, 1], got {alpha}")
+        self.base_optimizer = base_optimizer
+        self.k = int(k)
+        self.alpha = float(alpha)
+        self._step_count = 0
+        self.slow_weights: list[list[torch.Tensor]] = []
+        for group in self.base_optimizer.param_groups:
+            self.slow_weights.append(
+                [p.detach().clone() for p in group["params"]]
+            )
+
+    @property
+    def param_groups(self):
+        return self.base_optimizer.param_groups
+
+    @property
+    def state(self):
+        return self.base_optimizer.state
+
+    @property
+    def defaults(self):
+        return self.base_optimizer.defaults
+
+    def zero_grad(self, set_to_none: bool = True) -> None:
+        self.base_optimizer.zero_grad(set_to_none=set_to_none)
+
+    @torch.no_grad()
+    def _sync_slow_weights(self) -> None:
+        for group, slow_group in zip(self.base_optimizer.param_groups, self.slow_weights):
+            for fast, slow in zip(group["params"], slow_group):
+                slow.add_(fast.data - slow, alpha=self.alpha)
+                fast.data.copy_(slow)
+
+    def step(self, closure=None):
+        loss = self.base_optimizer.step(closure)
+        self._step_count += 1
+        if self._step_count % self.k == 0:
+            self._sync_slow_weights()
+        return loss
+
+    def state_dict(self) -> dict:
+        return {
+            "base_optimizer": self.base_optimizer.state_dict(),
+            "k": self.k,
+            "alpha": self.alpha,
+            "step_count": self._step_count,
+            "slow_weights": [
+                [t.detach().cpu() for t in group] for group in self.slow_weights
+            ],
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        self.base_optimizer.load_state_dict(state["base_optimizer"])
+        self.k = int(state.get("k", self.k))
+        self.alpha = float(state.get("alpha", self.alpha))
+        self._step_count = int(state.get("step_count", 0))
+        slow = state.get("slow_weights")
+        if slow is not None:
+            for group_slow, saved_group in zip(self.slow_weights, slow):
+                for tensor, saved in zip(group_slow, saved_group):
+                    tensor.data.copy_(saved.to(tensor.device))
+
+
 class EMA:
     def __init__(self, model: nn.Module, decay: float = 0.999, start_step: int = 0):
         self.decay = decay
@@ -1097,7 +1178,10 @@ class EMA:
 class Config:
     lr: float = 3e-4
     weight_decay: float = 1e-4
-    optimizer: str = "adamw"  # "adamw" or "muon"
+    optimizer: str = "adamw"  # "adamw", "lion", or "muon"
+    use_lookahead: bool = False
+    lookahead_k: int = 5
+    lookahead_alpha: float = 0.5
     muon_momentum: float = 0.95
     muon_ns_steps: int = 5
     muon_adamw_lr_scale: float = 0.1  # adamw fallback LR = lr * this
@@ -2628,6 +2712,16 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"Optimizer: {optimizer.__class__.__name__} "
             f"lr={config.lr} wd={config.weight_decay}"
         )
+    if config.use_lookahead:
+        base_optimizer_name = optimizer.__class__.__name__
+        optimizer = Lookahead(
+            optimizer, k=config.lookahead_k, alpha=config.lookahead_alpha
+        )
+        if is_main:
+            print(
+                f"Lookahead wrapper enabled: base={base_optimizer_name} "
+                f"k={config.lookahead_k} alpha={config.lookahead_alpha}"
+            )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
