@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-05 (post-Round-12 idle assignment refresh)
+- **Date:** 2026-05-05 (post-Round-12 idle assignment refresh; thorfinn re-routed to Issue #618 Exp 3 Redux)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -35,10 +35,9 @@
 
 ### 1. Volume_pressure test-transfer (Issue #717) — primary focus
 
-**In flight (3 PRs):**
+**In flight (2 PRs):**
 - **PR #729 (alphonse)** — Exp 1D: single-model knowledge distillation from K=7 ensemble, soft-target loss on volume.
 - **PR #728 (frieren)** — Exp 1B: volume anomaly/outlier-aware sampling (per-point residual EMA + geometric distance arms).
-- **PR #723 (thorfinn)** — Exp 1C P1: per-sample coordinate normalization (centroid-subtract + scale) before pos-encoder.
 
 **Just assigned (5 PRs, 2026-05-05):**
 - **PR #734 (askeladd)** — Exp 1C P3: soft distance-to-surface scalar feature (4-channel kernel encoding via cdist) concatenated to volume input.
@@ -46,6 +45,9 @@
 - **PR #736 (fern)** — Inter-sample mixup on volume coords + volume_pressure targets only (alpha=0.2 / 0.4).
 - **PR #737 (nezuko)** — Region-weighted volume loss: near-wake band emphasis (1<x_rel<3, |z_rel|<1.5) at 3 weight ratios.
 - **PR #738 (tanjiro)** — Train-time Gaussian noise on volume coordinates (sigma 5mm/20mm/anneal).
+
+**Issue #618 STRING/RoPE re-attempt (1 PR, 2026-05-05):**
+- **PR #742 (thorfinn)** — Exp 3 Redux: Anchor-STRING stabilized. Fixes PR #647's EP1=48.27% divergence with (1) differential LR 0.1× for RoPE freq params, (2) RoPE-path grad-clip=1.0 (separate from global 0.5), (3) conservative log-spaced freq init in [0.1, 10.0]. Targets vol_pressure val→test gap compression toward PR #626's 2.07× (vs SOTA 3.17×).
 
 ### 2. Closed dead ends from prior round (Issue #717-aligned closures)
 
@@ -78,7 +80,7 @@ All 8 students running on Issue #717 volume push:
 |---|---|---|---|
 | alphonse | #729 | Single-model KD from K=7 ensemble (Exp 1D) | WIP |
 | frieren | #728 | Volume outlier-aware sampling (Exp 1B) | WIP |
-| thorfinn | #723 | Coord-normalization (Exp 1C P1) | WIP |
+| thorfinn | **#742** | Anchor-STRING stabilized (Issue #618 Exp 3 Redux) | Just assigned |
 | askeladd | **#734** | SDF distance-to-surface feature (Exp 1C P3) | Just assigned |
 | edward | **#735** | TTA Y-mirror + jitter (orthogonal to Exp 1*) | Just assigned |
 | fern | **#736** | Volume input-mixup regularizer | Just assigned |
@@ -87,7 +89,7 @@ All 8 students running on Issue #717 volume push:
 
 **Zero idle students. Zero idle GPUs.**
 
-**Upcoming gate actions (all 5 newly assigned PRs):**
+**Upcoming gate actions (6 newly assigned PRs incl. #742):**
 - EP1 informational + time gate kill if epoch_time > 80 min.
 - EP2 (step ~21,729): kill if val_abupt > 12.0%.
 - EP3 (step ~32,594): kill if val_abupt > 8.0%.
