@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-05 (updated 12:40 UTC)
+- **Date:** 2026-05-05 (updated 15:30 UTC)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -43,8 +43,8 @@ No new directives from the human research team. Issue #618 (STRING/RoPE queue) a
 
 ### 2. Optimizer / Training Dynamics (2 PRs in-flight)
 
-- **PR #667** (fern): Weight decay sweep {5e-4 control, 1e-3, 1e-4}. Arm A control complete: val=6.959% (timeout at EP4/13, 2.80× vol val→test gap fully present). Arm B (wd=1e-3) EP2 PASS at 8.670% (slightly worse than control 8.581%, vol_p +0.27pp worse). EP3 gate ETA ~13:35 UTC.
-- **PR #695** (edward): RFF num_features=32 (doubled from 16) for tau_y/tau_z. Pre-EP1.
+- **PR #667** (fern): Weight decay sweep {5e-4 ctrl=6.959% test=8.135% vol-ratio 2.80×, 1e-3 final=6.913% test=8.097% vol-ratio 2.85×, 1e-4 running}. **Arm B finalized — WD direction scientifically null on volume val→test gap.** Test_vp essentially flat across WD values; ratio actually widened slightly with stronger WD. Arm C running for completeness.
+- **PR #695** (edward): RFF num_features=32 (doubled from 16) for tau_y/tau_z. Silent since 13:20Z receipt; follow-up nudge posted 15:23Z requesting EP1 status.
 
 **Closed (null):**
 - PR #603 (tanjiro): EMA decay sweep — {0.9993, 0.9997, 0.9999} all no improvement.
@@ -57,8 +57,10 @@ No new directives from the human research team. Issue #618 (STRING/RoPE queue) a
 
 ### 3. Attention Mechanism (2 PRs in-flight)
 
-- **PR #692** (tanjiro): Attention heads sweep — arm-a: heads=8 (dim_head=64); arm-b: heads=2 (dim_head=256). Just assigned, pre-EP1.
-- **PR #665** (frieren): Cross-slice attention — adds global inter-slice MHA layer. Arm A control complete: val=6.9349% (timeout at EP4/13). Arm B (with cross-slice attn, +5.25M params, zero-init proj) EP1 −3.82pp ahead, but EP2 reversed: 10.92% PASS but +2.22pp behind control (wall-shear z +2.75pp regression). EP3 gate at high kill risk (ETA ~13:50 UTC).
+- **PR #692** (tanjiro): Attention heads sweep — arm-a: heads=8 (dim_head=64) EP2 PASS 8.5458%; arm-b: heads=2 (dim_head=256) queued. EP3 watch for Arm A.
+
+**Closed (this round):**
+- PR #665 (frieren): Cross-slice attention — direction closed.
 
 **Open question:** Does more diverse (heads=8) or higher-capacity (heads=2) attention improve over SOTA heads=4? Does inter-slice attention capture global geometry correlations? (Early signal from PR #665: cross-slice attn slows late-EP convergence, likely due to +33% params needing more training to escape zero-init.)
 
@@ -73,6 +75,14 @@ No new directives from the human research team. Issue #618 (STRING/RoPE queue) a
 - L=6/hidden=448/heads=7 (PR #693): CLOSED — 98 min/epoch (heads=7 kills SDPA fast path). Key lesson: heads must be power-of-2 for budget-feasible training.
 
 **Open question:** Does L=6/hidden=384/heads=4 (PR #694) continue the depth scaling trend? Is slices=128 optimal or does smaller/larger over-fragment or under-communicate geometry (PR #690)?
+
+### 4b. Knowledge Distillation (1 PR in-flight)
+
+- **PR #676** (nezuko): K=7 ensemble teacher → student KD with kd_alpha sweep. **Arm A (kd-alpha=0.7) FINAL:** val=7.0153% test=8.2539% — misses merge bar 6.5985% by +0.42pp. **Budget-limited:** KD doubles per-step time (2.37 it/s vs ~5 it/s) → only 4 epochs in 270-min cap; trajectory slope at EP4 still -0.42pp/epoch (would plausibly cross merge bar at ~9 epochs). **Volume val→test ratio narrowed 3.17×→2.78×** — first lever in the round to actually move the chronic surface↔volume gap. Arm B (kd-alpha=0.5) launched 15:10Z. **Open follow-ups documented:** (a) batched KD cache / fused volume KD kernel to halve per-step overhead, (b) channel-selective KD on volume only, (c) T_max=4 cosine fix, (d) scheduled kd_alpha 0.9→0.1.
+
+### 4c. Boundary Condition Encoding (1 PR in-flight)
+
+- **PR #716** (frieren): nn.Embedding(3, 16) for wall=0/inlet=1/outlet=2 injected before Transolver encoder. Primary target: wall_shear_z (SOTA 9.81%). Hypothesis received 15:20Z; data-shape inspection requested.
 
 ### 5. Physics-Informed Loss / Output Formulation
 
@@ -91,22 +101,25 @@ All 8 students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | #690 | Slice count sweep {64, 192, 256} vs SOTA 128 | Just assigned — pre-EP1 |
-| askeladd | #691 | RFF sigma expansion {7-wide, 6-low-ext} | Just assigned — pre-EP1 |
-| tanjiro | #692 | Heads sweep {8, 2} vs SOTA heads=4 | Just assigned — pre-EP1 |
-| thorfinn | #694 | Depth L=6 hidden=384 heads=4 (budget-safe) | Just assigned — pre-EP1 |
-| edward | #695 | RFF num_features=32 (doubled) for tau_y/tau_z | Pre-EP1 |
-| fern | #667 | Weight decay sweep {5e-4 ctrl=6.959%, 1e-3 EP2 PASS, 1e-4 queued} | Arm B EP3 gate ~13:35 UTC |
-| frieren | #665 | Cross-slice attention (Arm A=6.9349%, Arm B EP2 PASS but trailing) | Arm B EP3 gate ~13:50 UTC |
-| nezuko | #676 | Ensemble K=7 distillation teacher (kd-alpha=0.7) | EP1=28.62%, EP2 gate ~12:56 UTC |
+| alphonse | #690 | Slice count sweep {64, 192, 256} vs SOTA 128 | Arm A heads=64 EP1 ~25.87%; EP2 gate watch |
+| askeladd | #691 | RFF sigma expansion {7-wide, 6-low-ext} | Arm A EP1 ~29.43%; EP2 gate watch |
+| tanjiro | #692 | Heads sweep {8, 2} vs SOTA heads=4 | Arm A heads=8 EP2 PASS 8.5458%; EP3 gate next |
+| thorfinn | #694 | Depth L=6 hidden=384 heads=4 (budget-safe) | EP3 PASS 7.3175% (gap closing); EP4 final ETA ~15:43 UTC |
+| edward | #695 | RFF num_features=32 (doubled) for tau_y/tau_z | Silent since 13:20Z ADVISOR receipt; follow-up nudge posted 15:23Z |
+| fern | #667 | Weight decay sweep {5e-4 ctrl=6.959%, 1e-3 final=6.913%, 1e-4 running} | Arm B FINAL: WD direction scientifically null on volume gap; Arm C running |
+| frieren | #716 | BC-type embedding (nn.Embedding(3,16)) — wall_shear_z primary target | Hypothesis received; Arm A control + Arm B BC starting; EP1 watch |
+| nezuko | #676 | Ensemble K=7 distillation teacher (kd-alpha sweep) | Arm A FINAL: val=7.0153% (misses bar, budget-limited); Arm B kd=0.5 running since 15:10Z |
 
 **Zero idle students. Zero idle GPUs.**
 
-**Upcoming gate actions:**
-- All new PRs (#690, #691, #692, #694, #695): EP1 informational (+ epoch-time gate for #694: kill if > 75 min/epoch), EP2 gate at step ~21,729 — KILL if > 12.0%; EP3 gate — KILL if > 8.0%
-- Fern PR #667 Arm B (wd=1e-3): EP3 gate ~13:35 UTC — KILL if > 8.0%; queue Arm C (wd=1e-4) if Arm B doesn't beat Arm A by ≥0.30pp
-- Frieren PR #665 Arm B (cross-slice attn): EP3 gate ~13:50 UTC — KILL if > 8.0%; high kill risk (needs 2.92pp drop in one epoch vs Arm A's 1.38pp)
-- Nezuko PR #676 Arm A (kd-alpha=0.7): EP2 gate ~12:56 UTC — KILL if > 12.0%
+**Upcoming gate actions (UTC):**
+- thorfinn PR #694: EP4 final ~15:43 — verdict on merge bar < 6.5985% (forecast 6.85–7.05%, tail ≤6.6%)
+- fern PR #667 Arm C (wd=1e-4): EP1 ~15:50 (info), EP2 ~17:05 (kill > 12%), EP3 ~18:20 (kill > 8%), final ~19:08
+- nezuko PR #676 Arm B (kd=0.5): EP2 ~17:30 (kill > 12%), EP3 ~18:45 (kill > 8%), final ~19:40
+- tanjiro PR #692 Arm A (heads=8): EP3 ~16:00 (kill > 8%), final ~16:21
+- askeladd PR #691, alphonse PR #690: EP2 gate watch (kill > 12%)
+- edward PR #695: pending student EP1 status update
+- frieren PR #716: data-shape inspection result + EP1 informational
 
 ---
 
