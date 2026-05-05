@@ -1,10 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 19:25 UTC
+- **Date:** 2026-05-05 19:55 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (19:25 UTC):** 0 review-ready, 0 idle, 4 advisor-action PRs all confirmed actively training (askeladd #715 @ val 23.06% step 10316 early; chihiro #662 @ val 7.91% step 26559 descending −0.371%/1k; tanjiro #671 @ val 8.17% step 18503 descending −0.371%/1k; emma #654 @ val 8.04% step 36245 plateauing — needs rebase at terminal). No new closures of running experiments, no assignments needed.
-- **Cleanup (19:25 UTC):** Closed 9 orphaned draft PRs without `status:wip` labels. Two were duplicate assignments to active students (#711 thorfinn-FiLM duplicates active #721; #706 kohaku-mixed-res duplicates active #719). Seven were assigned to deprecated student names not in current 16-student lineup (#683 armin, #684 dazai, #685 kafka, #686 levi, #687 mikasa, #688 mob, #689 noam) — never started, no W&B runs.
+- **Last triage cycle (19:55 UTC):** 1 PR reviewed (#718 closed null), 1 idle student assigned (#731 alphonse snapshot-ensemble-tta). 6 action PRs (stale flag heuristics) all confirmed running: nezuko #720 @ EP1 early; askeladd #715 @ val 23.06% EP2; fern #713 arm-a val 14.00% EP2 + arm-b just started; tanjiro #671 @ val 8.17% step 19094 descending; chihiro #662 @ val 7.91% step 27149 descending closely approaching SOTA; emma #654 @ val 8.04% step 37031 slow descent (merge conflict, rebase at terminal).
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
@@ -58,7 +57,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #721 | thorfinn | CRPS/MAE loss for τ_y/τ_z (replace β-NLL on wall-shear only) | Running |
 | #720 | nezuko | Surface-tangent frame τ targets (remove Cartesian τ_y/τ_z entanglement) | Running |
 | #719 | kohaku | SDF-stratified volume norm (diagnose + fix vol_p val/test gap) | Running |
-| #718 | alphonse | Selective τ_y TTA at inference (zero training cost) | Running |
+| #731 | alphonse | EMA snapshot ensemble TTA (K=1/3/5, variance reduction for τ_y/τ_z) | Assigned 2026-05-05 19:50 UTC |
 | #715 | askeladd | Annealed per-axis wallshear loss weighting | Running (corrected launch 15:19 UTC) |
 | #714 | senku | 6L/512d depth retry (900-min budget, run `0zr5g357`) | Running (launched 15:33 UTC) |
 | #713 | fern | Normal-penalty wallshear tangency regularizer (λ·|ws·n̂|²) | Running |
@@ -87,6 +86,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #668 | gilbert | CLOSED — asinh wallshear norm null; chain-rule inversion → weaker not stronger gradient on tails |
 | #661 | haku | CLOSED — RFF surface-xyz null (+ structural confirmation with #674); input features saturated |
 | #674 | violet | CLOSED — surface normal RFF null; τ_y/τ_z regressed most, input features saturated |
+| #718 | alphonse | CLOSED — selective y-flip TTA null (+12.3% τ_y regression); SOTA not y-equivariant (no aug training) |
 | #697 | alphonse | CLOSED — fourier surface-RFF duplicate of #674 |
 | #707 | nezuko | CLOSED — full-mesh volume density duplicate of #719 |
 | #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%) |

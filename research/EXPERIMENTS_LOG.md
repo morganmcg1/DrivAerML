@@ -1,5 +1,25 @@
 # SENPAI Research Results
 
+## 2026-05-05 19:50 — PR #718: [alphonse] Selective channel-wise TTA: flip-average τ_y only at inference — CLOSED (null, +regression)
+
+- Branch: `alphonse/selective-tta-tau-y`
+- Hypothesis: At inference time, run a second forward pass with the surface input laterally flipped (y-axis reflection), negate τ_y prediction, then average `(τ_y_orig − τ_y_flipped) / 2` — should reduce τ_y prediction variance by exploiting the car's bilateral y-symmetry.
+- W&B run: `0g0iz0t8` (group `yi-round40-selective-tta`)
+
+| Metric | Baseline (dc031qpt) | Selective TTA τ_y | Δ |
+|---|---|---|---|
+| val_abupt | 7.3767% | 7.6120% | +0.2353 (+3.19%) |
+| τ_y val | 9.5832% | 10.7633% | +1.1801 (+12.3%) |
+| τ_z val | 11.0377% | 11.0348% | −0.0029 (≈0) |
+| surface_p val | 4.8515% | 4.8514% | ≈0 |
+| vol_p val | 4.3066% | 4.3049% | ≈0 |
+
+- **Notable:** Student alphonse caught and corrected a bug in the advisor's axis instructions — DrivAerML lateral symmetry is y (not x as originally written). The y=0 plane is confirmed from dataset inspection and from prior `apply_mirror_y_batch` code. Correction was right; the result is still negative.
+- **Mechanistic diagnosis (alphonse):** Terminal-polish SOTA `dc031qpt` was trained without y-flip augmentation. The model is **not equivariant under y-reflection**. The flipped second forward pass is OOD — the model does not produce negated τ_y, so the antisymmetric formula amplifies variance rather than cancelling it. Contrast with PR #286's success at lr=5e-4 (loosely converged checkpoint, approximate equivariance emergent from data overlap).
+- **Structural conclusion:** Inference-only y-flip TTA cannot retrofit equivariance onto a non-equivariant model. Methods exploiting bilateral symmetry must build equivariance in during training (tanjiro's #671 y-symmetry pair loss is the right direction). Alphonse reassigned to EMA snapshot ensemble TTA (#731) — pure variance reduction, no symmetry assumption.
+
+---
+
 ## 2026-05-04 01:36 — PR #551: [stark] Variance-matching auxiliary loss for τ_y/τ_z — CLOSED (no student pod)
 
 - Branch: `stark/variance-matching-aux-loss` (deleted)
