@@ -1,9 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 21:35 UTC
+- **Date:** 2026-05-05 22:05 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (21:35 UTC):** 1 PR closed null with new assignment, 1 self-corrected by student, 1 in implementation phase, 1 awaiting student status update. **emma #654 closed null** — SENPAI-RESULT: EP4 val 7.9021% / test 9.0441% (regression vs SOTA but strong volume_p val descent 10.60% → 5.17%). My prior false-crash diagnosis was wrong (it was a clean SENPAI 720-min train-timeout cutoff with forced validation, not a crash). **emma reassigned to PR #733 polish-on-SOTA dual-tower** (graft cross-attn bridge onto dc031qpt with zero-init residual + param-group head-warmup at lr=5e-6). **nezuko #720 self-corrected** — premature kill at 19:50 UTC, relaunched as v2 (`8w7f1b4e`), expected EP2 val by ~23:30 UTC. **edward #672 in implementation phase** — advisor 17:48 UTC bumped lr to 5e-6 with head-only warmup, student still building. **alphonse #731 smoke crashed** at val 103% step 80 — no student status comment yet, will wait one cycle. **chihiro #662** still spiking but best 7.909% holds (final ~75min of budget).
+- **Last triage cycle (22:05 UTC):** 1 PR closed null with new assignment, 1 urgent divergence intervention. **chihiro #662 closed null** — Arm A val 7.9094% / test 9.0366% (regression vs SOTA). Three findings preserved: (1) cold-start lands within 0.37pp of polished SOTA, (2) k1_k2 features do not compound with current SOTA stack (PR #580 win was artifact of weaker baseline), (3) lr=1e-4 overshoots without LR decay. **chihiro reassigned to PR #739 curvature-weighted-loss polish-on-SOTA** (per-point loss weight = 1 + α·|κ₁|+|κ₂|, two-arm sweep α=0.5/1.5 from dc031qpt at lr=5e-7). **tanjiro #671 DIVERGED** at step 21933 — val regressed 8.167% → 17.929% (+9.76pp, slope +1.79%/1k). Sent back urgent: instruct student to kill cleanly, evaluate test on best-by-val checkpoint (val ≈ 8.167% peak), post terminal SENPAI-RESULT from peak not divergence. **askeladd #715** descending healthily (val 13.02% step 13765); **fern #713 arm B** still pre-val (1.2h runtime).
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
@@ -64,7 +64,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #672 | edward | Decoupled τ_y/τ_z MLP head | Running |
 | #671 | tanjiro | O(2) y-symmetry pair loss (50-epoch long run) | **EP2=10.18% — exceptional trajectory** |
 | #668 | gilbert | asinh wall-shear target normalization | Arm C running (~19:21 UTC terminal) |
-| #662 | chihiro | k1_k2 curvature cold-start ablation (Arm A 720-min control) | Running (~21:00 UTC terminal) |
+| #739 | chihiro | Curvature-weighted loss polish from SOTA (α=0.5/1.5 sweep) | Assigned 2026-05-05 22:00 UTC |
 | #661 | haku | Surface RFF (dim=64/128 resume, both arms passing gates) | Running — Arm A ahead at EP2 |
 | #733 | emma | Polish-on-SOTA dual-tower bridge (graft cross-attn onto dc031qpt) | Assigned 2026-05-05 21:30 UTC |
 | #652 | frieren | Muon optimizer + Lion polish chain (Arm D `jh3e3r5d`) | Running |
@@ -88,6 +88,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #674 | violet | CLOSED — surface normal RFF null; τ_y/τ_z regressed most, input features saturated |
 | #718 | alphonse | CLOSED — selective y-flip TTA null (+12.3% τ_y regression); SOTA not y-equivariant (no aug training) |
 | #654 | emma | CLOSED — DualTowerTransolver cold-start null vs SOTA (EP4 val 7.90% / test 9.04%); strong vol_p val signal (10.60% → 5.17%) but didn't generalize to test |
+| #662 | chihiro | CLOSED — k1_k2 curvature features do not compound with SOTA stack (Arm A val 7.91% / test 9.04%); EP1 advantage collapsed by EP2; PR #580 win was artifact of weaker baseline |
 | #697 | alphonse | CLOSED — fourier surface-RFF duplicate of #674 |
 | #707 | nezuko | CLOSED — full-mesh volume density duplicate of #719 |
 | #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%) |

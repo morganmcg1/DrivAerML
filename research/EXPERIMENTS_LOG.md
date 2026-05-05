@@ -1,5 +1,36 @@
 # SENPAI Research Results
 
+## 2026-05-05 22:00 — PR #662: [chihiro] Compose surface curvature features (κ₁/κ₂) with full yi SOTA stack — CLOSED (null vs SOTA)
+
+- Branch: `chihiro/curvature-full-sota-composition`
+- Hypothesis: Adding surface principal curvature features (k1, k2) as extra input channels would compound with the full yi SOTA stack (STRING-sep PE + Lion + grad-EMA + β-NLL) to improve τ_y/τ_z predictions. Two-arm cold-start ablation (Arm A=control no_curv, Arm B=k1_k2).
+- W&B runs: `4abva8us` (Arm A, 720min budget), `i19r9aj6` (Arm B, 270min budget cut at EP3)
+
+| Metric | baseline (val) | Arm A (val) | Δ | baseline (test) | Arm A (test) | Δ |
+|---|---|---|---|---|---|---|
+| **abupt_axis_mean** | **7.5373** | **7.9094** | **+0.37** | **8.8533** | **9.0366** | **+0.18** |
+| surface_p | 4.93 | 4.91 | -0.02 | 4.70 | 4.63 | -0.06 |
+| wall_shear | 8.48 | 8.94 | +0.46 | 8.50 | 8.78 | +0.29 |
+| volume_p | 4.41 | 4.49 | +0.08 | 11.46 | 11.25 | -0.21 |
+| τ_y | 9.87 | 10.73 | +0.86 | 9.86 | 10.59 | +0.73 |
+| τ_z | 11.25 | 11.98 | +0.73 | 10.94 | 11.35 | +0.41 |
+
+Arm A trajectory (cold start, 4L/512d, lr=1e-4): EP1=21.32% → EP2=10.93% → EP3=9.13% → **EP4=7.91% best** → EP5=9.61% (regression) → EP6 partial=12.46% (timeout cut).
+
+Like-for-like Arm A vs Arm B (k1_k2):
+- EP1 (step 5442): k1_k2 advantage +3.46pp on abupt (17.86 vs 21.32), large gains on every axis
+- EP2 (step 10885): inversion — no_curv wins +0.20pp on abupt; k1_k2 retains weak τ_y advantage (-0.66pp) but loses on volume_p (+1.61pp)
+- EP3+: Arm B cut at 270min budget, no like-for-like comparison possible
+
+**Three findings worth keeping:**
+1. **Cold-start nearly matches polished SOTA.** Arm A at 7.91% val_abupt is only 0.37pp behind the lr=1e-5 polished-resume baseline. Future cold-start hypotheses do not need a special warm-start — useful for workflow simplification.
+2. **Curvature features do not compound with the SOTA stack.** EP1 head start collapses by EP2. PR #580's curvature win was an artifact of comparing against a pre-STRING-sep / pre-grad-EMA / pre-β-NLL baseline that couldn't extract τ_y/τ_z geometry from raw normals. Curvature signal is now fully absorbed into the existing geometric encoding.
+3. **Cold-start lr=1e-4 overshoots without LR decay.** Arm A peaked EP4 then regressed EP5 → EP6 partial. Constant-lr cold-start with grad-EMA has plasticity loss after ~5 epochs. Future cold-start hypotheses should pair with cosine LR decay.
+
+Reassignment: chihiro → PR #739 Curvature-weighted loss polish from SOTA (operationalises chihiro's own follow-up #3: curvature as diagnostic, not input — per-point loss weight = 1 + α·|κ₁|+|κ₂| applied to wall-shear and surface-pressure losses, two-arm sweep α=0.5/1.5 from dc031qpt at lr=5e-7).
+
+---
+
 ## 2026-05-05 21:30 — PR #654: [emma] Dual-Tower surface+volume cross-attention encoder — CLOSED (null vs SOTA, strong val volume_p signal)
 
 - Branch: `emma/dual-tower-vol-surface-crossattn`
