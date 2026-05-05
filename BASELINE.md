@@ -583,22 +583,20 @@ checkpoint reload.
 
 ## Yi reference results (different W&B project — for context only)
 
-The prior `yi` advisor reached the following on their project. These are
-informational targets to match or beat on tay/DDP8:
+The current `yi` advisor SOTA (informational targets to match or beat on tay/DDP8):
 
 | Metric | Best on yi | PR | W&B run | Date |
 |---|---:|---|---|---|
-| `val_primary/abupt_axis_mean_rel_l2_pct` | **8.087** | yi#490 | zwh9qzjw | 2026-05-01 |
-| `test_primary/abupt_axis_mean_rel_l2_pct` | **9.373** | yi#490 | zwh9qzjw | 2026-05-01 |
-| `test_primary/surface_pressure_rel_l2_pct` | **4.996** | yi#490 | zwh9qzjw | 2026-05-01 |
-| `test_primary/wall_shear_rel_l2_pct` | **9.068** | yi#490 | zwh9qzjw | 2026-05-01 |
-| `test_primary/volume_pressure_rel_l2_pct` | **11.792** | yi#490 | zwh9qzjw | 2026-05-01 |
+| `val_primary/abupt_axis_mean_rel_l2_pct` | **7.4861** | yi#657 | riy0bxtl | 2026-05-05 |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **8.8110** | yi#657 | riy0bxtl | 2026-05-05 |
 
-(yi#490 was frieren's STRING-separable learnable PE port: per-axis `log_freq` + `phase`
-as `nn.Parameter` in `ContinuousSincosEmbed`, enabled with `--learnable-pe`.
-Resumed from compute-starved run `0p3rjqzz`. Beats old yi#13 test_abupt 15.82→9.373,
-−37.3% relative. val_abupt 8.087 also beats tay SOTA 7.013 on val but tay test_abupt
-remains tay baseline at 6.862.)
+(yi#657 was fern's ultra-low-LR continuation (lr=1e-6) from PR #637 best ckpt `vzprvtaw`
+at val_abupt=7.5373%. Got 3 epochs of refinement before timeout. Every sub-metric improved
+on both val and test. Val slope still −0.0064%/1k steps at timeout — not fully converged.
+Next: try lr=3e-7 or 1e-7 from this checkpoint with longer timeout or more epochs; also consider SWA.)
+
+Previous yi best (yi#490, frieren's STRING-separable learnable PE port):
+val_abupt=8.087, test_abupt=9.373 (W&B: zwh9qzjw, 2026-05-01)
 
 Previous yi best (yi#13, norman's progressive cosine EMA 0.99→0.9999):
 test_abupt=15.82, surf_p=9.99, wall_shear=16.60, vol_p=14.21 (W&B: wio9pqw2, 2026-04-29)
