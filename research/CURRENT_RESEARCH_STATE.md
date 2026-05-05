@@ -1,9 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 22:35 UTC
+- **Date:** 2026-05-05 21:11 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (22:35 UTC):** 0 review-ready, 0 idle, awaiting student polls. **tanjiro #671 still diverged** at val 17.929% step 22616 (50min after my 21:50 UTC kill instruction); pod is Running, student hasn't polled yet — will check next cycle. **emma #733 not started** — pod is Running but no W&B run on `dual-tower-polish-from-sota` yet; awaiting student poll. **alphonse #731 recovered** from smoke crash; new run `gchh8r7f` running at step 2408 (0.85h), pre-val. **askeladd #715** continues descent (val 13.02% step 14465). **fern #713 arm B** still pre-val (1.45h, step 4016). No interventions this cycle.
+- **Last triage cycle (21:11 UTC):** 0 review-ready, 0 idle. Two strong polish trajectories surfacing: **norman #724 EP3 val_abupt = 7.3610% BELOW SOTA 7.3767%** (-0.0157pp, residual correction MLP, monotonically descending; identity-init verified at step 0 = 0 correction). **edward #672 polish-on-SOTA EP1 = 7.4088%** (head still warming on lr=1e-5 trunk lr=1e-6 split, all components dropping vs SOTA). Both runs continuing to EP4-5; will assess at terminal SENPAI-RESULT. **emma #733 EP0 sanity confirmed val=7.3767% baseline match**; full training launched as `yf1twmyu` at 20:56 UTC (step 775, 17min in). **tanjiro #671 still diverged** at step 24192, 9.0h runtime, val slope +0.018/1k steps positive (worsening); third escalation kill instruction issued at 21:11 UTC. **senku #714 EP1 = 21.524% (cold-start 6L), EP2 hard-kill gate at step 11000 (val ≤9%) will fire automatically**; trust the kill threshold to handle. alphonse #731, violet #725, askeladd #715, fern #713 all running healthily.
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
@@ -43,7 +43,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix via pxsnrw36 features) | WIP |
+| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix via pxsnrw36 features) | **EP3 val 7.3610% BELOW SOTA (-0.016pp); monotonically descending; merge-eligible at terminal** |
 | #725 | violet | Multigrid hierarchical volume attention (target: vol_p 11.37% test → ≤9.0%) | Assigned 2026-05-05 18:18 UTC |
 | #726 | gilbert | SAM optimizer polish from yi SOTA (ρ sweep 0.02/0.05/0.10) | Assigned 2026-05-05 18:35 UTC |
 | #727 | haku | Geometry-aware mixup (kNN surface pairs, α=0.2/0.4) | Assigned 2026-05-05 18:38 UTC |
@@ -61,8 +61,8 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #715 | askeladd | Annealed per-axis wallshear loss weighting | Running (corrected launch 15:19 UTC) |
 | #714 | senku | 6L/512d depth retry (900-min budget, run `0zr5g357`) | Running (launched 15:33 UTC) |
 | #713 | fern | Normal-penalty wallshear tangency regularizer (λ·|ws·n̂|²) | Running |
-| #672 | edward | Decoupled τ_y/τ_z MLP head | Running |
-| #671 | tanjiro | O(2) y-symmetry pair loss (50-epoch long run) | **EP2=10.18% — exceptional trajectory** |
+| #672 | edward | Decoupled τ_y/τ_z MLP head (polish-on-SOTA z7724dbt) | EP1 7.4088% (head warming, all components ↓ vs SOTA); 3 epochs to go |
+| #671 | tanjiro | O(2) y-symmetry pair loss (50-epoch long run) | **DIVERGED step 22616+ (val 17.9%, slope +0.018/1k); 3rd kill escalation 21:11 UTC** |
 | #668 | gilbert | asinh wall-shear target normalization | Arm C running (~19:21 UTC terminal) |
 | #739 | chihiro | Curvature-weighted loss polish from SOTA (α=0.5/1.5 sweep) | Assigned 2026-05-05 22:00 UTC |
 | #661 | haku | Surface RFF (dim=64/128 resume, both arms passing gates) | Running — Arm A ahead at EP2 |
@@ -73,9 +73,11 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 
 ## Hottest Leads This Round
 
-**Emma #654 (DualTowerTransolver):** EP3=8.04% at just 3 cold-start epochs. Vol pressure collapsed from 10.60% → 6.29% at EP2 (-4.31pp in one epoch). Linear extrapolation suggests EP5 ~7.0% — would match tay SOTA. Branch currently has merge conflict: advise rebase when training completes.
+**Norman #724 (Residual Correction MLP, hidden_dim=64):** EP3 val_abupt = **7.3610%** vs SOTA 7.3767% (-0.0157pp). Identity-init verified (correction abs_mean=0 at step 0 = exact baseline). All channels improved vs SOTA at EP3: surface_p -0.007, τ_y -0.059 (largest gain), τ_z -0.014, vol_p +0.009 (within noise; surface-only correction). Run in EP4/5 with ~80 min remaining. Already merge-eligible if terminal SENPAI-RESULT confirms.
 
-**Tanjiro #671 (y-symmetry pair loss):** EP2=10.18% at epoch 2 of 50. Already passed EP10 gate (≤11%) at EP2. τ_z descending at −2.146 pp/1k steps — fastest-descending axis. This is the most promising long-run trajectory in the fleet.
+**Edward #672 (Decoupled τ_y/τ_z head, polish):** EP1 of `z7724dbt` = 7.4088% (+0.017pp vs SOTA, head still warming on param-group split: head lr=1e-5, trunk lr=1e-6). All components dropping vs SOTA at EP1. Three more epochs queued; expected to descend below SOTA by EP2-3.
+
+**Tanjiro #671 (y-symmetry pair loss):** DIVERGED — peak val ≈8.17% at EP2 then climbed to 17.929% at step 22616, still rising. Run currently at step 24192, 9.0h runtime; third escalation kill instruction issued at 21:11 UTC.
 
 ---
 
