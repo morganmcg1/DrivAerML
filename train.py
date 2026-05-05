@@ -288,6 +288,91 @@ def compute_curvature_stats(
     return stats
 
 
+class CurvatureLossWeightDataset(DrivAerMLSurfaceDataset):
+    """Wraps DrivAerMLSurfaceDataset to append a single trailing channel
+    `kappa_abs_sum = |k1| + |k2|` to surface_x for use as a per-point loss
+    weight (NOT as a model input feature). The cache stores signed-log
+    `(k1_tilde, k2_tilde)`; we recover raw `|kappa| = expm1(|k_tilde|)` and
+    sum across the two principal curvatures. Per-batch [0, 1] normalization
+    is deferred to `train_loss` so it sees the full padded batch context.
+    """
+
+    def __init__(
+        self,
+        *args,
+        curvature_cache_root: Path,
+        feature_mode: str = "k1_k2",
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.curvature_cache_root = Path(curvature_cache_root)
+        self.feature_mode = feature_mode
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        import numpy as np
+
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        volume_idx = self._indices(
+            counts["n_volume"],
+            self.max_volume_points,
+            view,
+            group_view_count=view.volume_view_count,
+        )
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        curv_path = self.curvature_cache_root / f"{view.case_id}.npy"
+        curv_full = np.load(curv_path, mmap_mode="r")
+        if surface_idx is None:
+            curv_view = np.asarray(curv_full)
+        else:
+            curv_view = np.asarray(curv_full[surface_idx.numpy()])
+        if curv_view.shape[0] != case.surface_x.shape[0]:
+            raise RuntimeError(
+                f"Curvature row count {curv_view.shape[0]} != surface row count "
+                f"{case.surface_x.shape[0]} for case {view.case_id}"
+            )
+        # Cache stores signed-log: k_tilde = sign(k) * log1p(|k|).
+        # Recover raw |k| = expm1(|k_tilde|) for both principal curvatures and sum.
+        kappa_abs_sum = (
+            np.expm1(np.abs(curv_view[:, 0].astype(np.float32)))
+            + np.expm1(np.abs(curv_view[:, 1].astype(np.float32)))
+        ).astype(np.float32)
+        kappa_t = torch.from_numpy(np.ascontiguousarray(kappa_abs_sum)).unsqueeze(-1)
+        surface_x_aug = torch.cat([case.surface_x, kappa_t], dim=-1)
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode
+        metadata["joint_view_count"] = int(view.view_count)
+        metadata["surface_curvature_features"] = self.feature_mode
+        metadata["curvature_loss_only"] = True
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=surface_x_aug,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
 class CurvatureSurfaceDataset(DrivAerMLSurfaceDataset):
     """Wraps DrivAerMLSurfaceDataset to append 2 standardized curvature channels
     to surface_x along the feature dim. Channel layout is dictated by the cache
@@ -941,8 +1026,14 @@ class SurfaceTransolver(nn.Module):
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
-        if project_features is not None and x.shape[-1] > self.space_dim:
-            hidden = hidden + project_features(x[:, :, self.space_dim :])
+        if project_features is not None:
+            feat_in = project_features.project.in_features
+            feat_end = self.space_dim + feat_in
+            if feat_in > 0 and x.shape[-1] >= feat_end:
+                # Slice to the projection's expected width so callers can append
+                # extra trailing channels (e.g. per-point loss-weight diagnostics)
+                # without breaking the input projection.
+                hidden = hidden + project_features(x[:, :, self.space_dim : feat_end])
         return bias(hidden) + placeholder
 
     def forward(
@@ -993,7 +1084,9 @@ class SurfaceTransolver(nn.Module):
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
         geom_token: torch.Tensor | None = None
         if self.use_film and self.geom_encoder is not None and surface_x is not None:
-            geom_token = self.geom_encoder(surface_x, surface_mask)
+            geom_token = self.geom_encoder(
+                surface_x[..., : self.surface_input_dim], surface_mask
+            )
         hidden = self.backbone(hidden, attn_mask=attn_mask, geom_token=geom_token)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
@@ -1158,7 +1251,10 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    resume_strict: bool = True
     surface_curvature_features: str = "none"
+    curvature_loss_alpha: float = 0.0
+    curvature_loss_clip_quantile: float = 0.95
     swa_start_fraction: float = -1.0
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
@@ -1275,6 +1371,18 @@ def _wrap_curvature(
     return wrapped
 
 
+def _wrap_curvature_loss_only(
+    ds: DrivAerMLSurfaceDataset,
+    cache_root: Path,
+    feature_mode: str,
+) -> CurvatureLossWeightDataset:
+    wrapped = CurvatureLossWeightDataset.__new__(CurvatureLossWeightDataset)
+    wrapped.__dict__.update(ds.__dict__)
+    wrapped.curvature_cache_root = Path(cache_root)
+    wrapped.feature_mode = feature_mode
+    return wrapped
+
+
 def make_loaders(
     config: Config,
     *,
@@ -1293,7 +1401,27 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
-    if config.surface_curvature_features != "none":
+    use_curvature_loss_only = config.curvature_loss_alpha > 0.0
+    if use_curvature_loss_only:
+        if config.surface_curvature_features == "none":
+            raise ValueError(
+                "curvature_loss_alpha > 0 requires "
+                "surface_curvature_features in {'h_k', 'k1_k2'}"
+            )
+        feature_mode = config.surface_curvature_features
+        train_ds = _wrap_curvature_loss_only(
+            train_ds, curvature_cache_root, feature_mode
+        )
+        val_splits = {
+            name: _wrap_curvature_loss_only(ds, curvature_cache_root, feature_mode)
+            for name, ds in val_splits.items()
+        }
+        test_splits = {
+            name: _wrap_curvature_loss_only(ds, curvature_cache_root, feature_mode)
+            for name, ds in test_splits.items()
+        }
+        collate = pad_collate_dynamic
+    elif config.surface_curvature_features != "none":
         if curvature_stats is None:
             raise ValueError(
                 "curvature_stats must be provided when "
@@ -1354,7 +1482,14 @@ def make_loaders(
 
 
 def build_model(config: Config) -> SurfaceTransolver:
-    extra_curv = 2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
+    # When curvature_loss_alpha > 0, curvature is appended to surface_x as a
+    # trailing single channel for use as a per-point loss weight; the model
+    # input projection should still see only the original SURFACE_X_DIM.
+    use_curv_features_as_input = (
+        config.surface_curvature_features in ("h_k", "k1_k2")
+        and config.curvature_loss_alpha == 0.0
+    )
+    extra_curv = 2 if use_curv_features_as_input else 0
     surface_input_dim = SURFACE_X_DIM + extra_curv
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -1891,6 +2026,7 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
+    point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked loss for surface predictions.
 
@@ -1943,7 +2079,16 @@ def weighted_masked_mse_per_channel(
         loss_elem = diff_sq
 
     weighted_diff = loss_elem * weights.view(1, 1, -1)
-    weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
+    if point_weights is not None:
+        # Per-point weighting in (weighted_sum / weight_sum) form so a uniform
+        # rescaling of `point_weights` does not change the loss magnitude.
+        # `point_weights` is `[B, N]`, broadcast to `[B, N, 1]` here.
+        pw = point_weights.unsqueeze(-1).to(pred.dtype)
+        numer = (weighted_diff * mask_f * pw).sum()
+        denom = ((mask_f * pw).sum() * n_channels).clamp_min(1e-8)
+        weighted_loss = numer / denom
+    else:
+        weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
     per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
     return weighted_loss, per_axis_mean
@@ -1961,6 +2106,7 @@ def weighted_masked_beta_nll_per_channel(
     *,
     channel_weights: Iterable[float],
     beta: float,
+    point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float], list[float]]:
     """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
 
@@ -2002,7 +2148,13 @@ def weighted_masked_beta_nll_per_channel(
     mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
     valid = mask_f.sum().clamp_min(1)
     weighted_diff = nll * weights.view(1, 1, -1)
-    weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
+    if point_weights is not None:
+        pw = point_weights.unsqueeze(-1).to(pred_mean.dtype)
+        numer = (weighted_diff * mask_f * pw).sum()
+        denom = ((mask_f * pw).sum() * n_channels).clamp_min(1e-8)
+        weighted_loss = numer / denom
+    else:
+        weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
 
     per_axis_diff_sq_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
     per_axis_diff_sq_mean = (per_axis_diff_sq_sum / valid.detach().float()).cpu().tolist()
@@ -2038,11 +2190,70 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    curvature_loss_alpha: float = 0.0,
+    curvature_loss_clip_quantile: float = 0.95,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
+
+    point_weights: torch.Tensor | None = None
+    point_weight_metrics: dict[str, float] = {}
+    # Volume-only views produce empty surface tensors; skip curvature reweighting
+    # for those batches and fall through to standard loss.
+    has_surface_points = (
+        batch.surface_x.numel() > 0 and batch.surface_x.shape[1] > 0
+    )
+    if curvature_loss_alpha > 0.0 and has_surface_points:
+        # CurvatureLossWeightDataset packs raw |k1|+|k2| as the trailing surface_x
+        # channel. Extract it, per-batch normalize to [0, 1] (after percentile
+        # clipping to suppress mesh-defect outliers), and form `1 + alpha * kappa_norm`.
+        kappa_raw = batch.surface_x[..., -1].float()  # [B, N]
+        mask_f_pt = batch.surface_mask.to(kappa_raw.dtype)  # [B, N]
+        # Per-sample percentile clipping to keep gradients well-behaved when a
+        # handful of mesh defects produce extreme curvature spikes. Use a vectorised
+        # quantile over masked points: replace padding with -inf so it does not
+        # affect the per-sample quantile.
+        if 0.0 < curvature_loss_clip_quantile < 1.0:
+            kappa_for_q = torch.where(
+                batch.surface_mask, kappa_raw, torch.full_like(kappa_raw, float("-inf"))
+            )
+            q = torch.quantile(kappa_for_q, curvature_loss_clip_quantile, dim=-1, keepdim=True)
+            # All-padding samples (e.g. volume-only views from view-count
+            # balancing) yield NaN q because torch.quantile of all -inf is NaN.
+            # Substitute 0 so torch.minimum doesn't NaN-poison the masked-out
+            # positions; the where(mask, ..., 0) below then ignores them.
+            q = torch.where(torch.isnan(q), torch.zeros_like(q), q)
+            kappa_clipped = torch.where(
+                batch.surface_mask,
+                torch.minimum(kappa_raw, q),
+                torch.zeros_like(kappa_raw),
+            )
+        else:
+            kappa_clipped = torch.where(
+                batch.surface_mask, kappa_raw, torch.zeros_like(kappa_raw)
+            )
+        # Per-sample [0, 1] normalization. amax over masked points.
+        kappa_max = kappa_clipped.amax(dim=-1, keepdim=True).clamp_min(1e-8)
+        kappa_norm = (kappa_clipped / kappa_max).clamp(0.0, 1.0)
+        point_weights = 1.0 + curvature_loss_alpha * kappa_norm  # [B, N]
+        point_weights = point_weights * mask_f_pt
+        # Diagnostics for W&B.
+        with torch.no_grad():
+            valid = mask_f_pt.sum().clamp_min(1)
+            point_weight_metrics["curvature/loss_weight_mean"] = float(
+                (point_weights.sum() / valid).detach().cpu().item()
+            )
+            point_weight_metrics["curvature/loss_weight_max"] = float(
+                point_weights.max().detach().cpu().item()
+            )
+            point_weight_metrics["curvature/kappa_clip_max"] = float(
+                kappa_clipped.max().detach().cpu().item()
+            )
+            point_weight_metrics["curvature/kappa_raw_max"] = float(
+                kappa_raw.max().detach().cpu().item()
+            )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -2091,6 +2302,7 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 beta=beta_nll_beta,
+                point_weights=point_weights,
             )
             volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
                 out["volume_preds"],
@@ -2108,6 +2320,7 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 wallshear_huber_delta=wallshear_huber_delta,
+                point_weights=point_weights,
             )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
@@ -2148,6 +2361,7 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    metrics.update(point_weight_metrics)
     return loss, metrics
 
 
@@ -2538,7 +2752,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        load_result = model.load_state_dict(ckpt["model"], strict=config.resume_strict)
+        if not config.resume_strict and is_main:
+            missing = list(load_result.missing_keys)
+            unexpected = list(load_result.unexpected_keys)
+            if missing:
+                print(f"resume_strict=False: missing_keys={missing[:8]}{'...' if len(missing) > 8 else ''}")
+            if unexpected:
+                print(f"resume_strict=False: unexpected_keys={unexpected[:8]}{'...' if len(unexpected) > 8 else ''}")
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
@@ -2741,6 +2962,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/weight_hist/*", step_metric="global_step")
     wandb.define_metric("train/weight_hist_param/*", step_metric="global_step")
     wandb.define_metric("train/film/*", step_metric="global_step")
+    wandb.define_metric("train/curvature/*", step_metric="global_step")
     wandb.define_metric("lr", step_metric="global_step")
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
@@ -2834,6 +3056,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                curvature_loss_alpha=config.curvature_loss_alpha,
+                curvature_loss_clip_quantile=config.curvature_loss_clip_quantile,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -3034,6 +3258,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
+                    train_log[f"train/{key}"] = value
+                elif key.startswith("curvature/"):
                     train_log[f"train/{key}"] = value
             train_log.update(
                 train_slope_tracker.update(
