@@ -871,6 +871,7 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        volume_sdf_augment: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -878,8 +879,11 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.volume_sdf_augment = volume_sdf_augment
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        if self.volume_sdf_augment:
+            volume_extra_dim += 2
         self.use_film = use_film
         self.film_encoder_dim = film_encoder_dim
         self.pos_max_wavelength = pos_max_wavelength
@@ -979,6 +983,14 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
+            if self.volume_sdf_augment:
+                # Append [sdf^2, log(|sdf|+1e-4)] per PR #719 hypothesis: explicit
+                # nonlinear SDF features compress the dynamic range from near-wall
+                # boundary layers (small SDF) to far-field flow (large SDF).
+                sdf = volume_x[:, :, 3:4]
+                sdf_sq = sdf * sdf
+                log_abs_sdf = torch.log(sdf.abs() + 1e-4)
+                volume_x = torch.cat([volume_x, sdf_sq, log_abs_sdf], dim=-1)
             tokens.append(
                 self._encode_group(
                     volume_x,
@@ -1163,6 +1175,7 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    volume_sdf_augment: bool = False  # PR #719: append [sdf^2, log(|sdf|+1e-4)] to volume features
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1353,6 +1366,62 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
+def _expand_volume_sdf_augment_weights(
+    ckpt_state: dict[str, torch.Tensor],
+    new_state: dict[str, torch.Tensor],
+    *,
+    is_main: bool = True,
+) -> dict[str, torch.Tensor]:
+    """Zero-pad project_volume_features.project.weight from [hidden, k] to [hidden, k+2].
+
+    When --volume-sdf-augment is on with --resume-from, the SOTA checkpoint has
+    a single-column volume feature projection (just SDF). Zero-pad the new
+    [sdf^2, log(|sdf|+1e-4)] columns so the model's outputs match the SOTA at
+    step 0. Bias is unchanged.
+    """
+    key = "project_volume_features.project.weight"
+    candidate_keys = [key, f"_orig_mod.{key}", f"module.{key}"]
+    matched = None
+    for cand in candidate_keys:
+        if cand in ckpt_state:
+            matched = cand
+            break
+    if matched is None:
+        if is_main:
+            print(
+                f"[sdf-augment] no project_volume_features.project.weight in ckpt; "
+                f"keeping fresh init for new volume projection"
+            )
+        return ckpt_state
+    new_key = matched
+    if new_key not in new_state:
+        for alt in candidate_keys:
+            if alt in new_state:
+                new_key = alt
+                break
+    new_weight = new_state[new_key]
+    old_weight = ckpt_state[matched]
+    new_in = new_weight.shape[1]
+    old_in = old_weight.shape[1]
+    if new_in == old_in:
+        return ckpt_state
+    if new_in < old_in:
+        raise RuntimeError(
+            f"--volume-sdf-augment expansion expected new in_dim >= old in_dim, "
+            f"got new={new_in}, old={old_in} for {matched}"
+        )
+    expanded = torch.zeros_like(new_weight)
+    expanded[:, :old_in] = old_weight
+    if is_main:
+        print(
+            f"[sdf-augment] expanded {matched} from in_dim={old_in} to {new_in} "
+            f"by zero-padding {new_in - old_in} new feature columns"
+        )
+    new_ckpt = dict(ckpt_state)
+    new_ckpt[matched] = expanded
+    return new_ckpt
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     extra_curv = 2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
     surface_input_dim = SURFACE_X_DIM + extra_curv
@@ -1370,6 +1439,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        volume_sdf_augment=config.volume_sdf_augment,
     )
 
 
@@ -2538,7 +2608,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        ckpt_state = ckpt["model"]
+        if config.volume_sdf_augment:
+            # PR #719: when augmenting volume features with [sdf^2, log(|sdf|+1e-4)],
+            # project_volume_features.project.weight grows from [hidden, 1] to
+            # [hidden, 3]. Zero-pad the new feature columns so the model's behavior
+            # at step 0 is identical to the SOTA checkpoint, then let the optimizer
+            # gradually learn how to use the new features.
+            ckpt_state = _expand_volume_sdf_augment_weights(
+                ckpt_state, model.state_dict(), is_main=is_main
+            )
+        model.load_state_dict(ckpt_state, strict=True)
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
