@@ -1,12 +1,12 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 23:10 UTC
+- **Date:** 2026-05-05 23:25 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (23:10 UTC):** 2 PRs merged. **Norman #724 MERGED** → new bar 7.3588%/8.6884% (residual correction MLP, `u7obwlh7`). **Senku #743 awaiting terminal marker** (K=2 ensemble = 7.2733%, −0.086pp vs new bar, will merge as soon as terminal posted). **Norman reassigned → PR #747** (Stage 2: correction MLP + unfreeze last Transolver layer from u7obwlh7). **Haku #727 closed** (geometry-aware mixup +17pp regression), **haku reassigned → PR #746** (y-flip training aug). **Edward #672** at EP2 val 7.3660%, projecting to **~7.28% by EP4** at current slope (−0.0079%/1k) — potential major win; EP3 val expected ~23:55 UTC.
+- **Last triage cycle (23:25 UTC):** **Senku #743** sent back to wip — K=2 val 7.2733% beats new bar by −0.086pp but PR is missing terminal SENPAI-RESULT marker AND mergeable=CONFLICTING after norman #724 merge. Pod restarted to force pickup. **Edward #672** sent back to wip — final EP3 val 7.3638% (+0.005pp behind new bar), but slopes still negative across all primary metrics; extension run from `z7724dbt` for 3 more epochs at lr=1e-6 with kill gate val<7.4% at step 5442. Pod restarted. Norman #747 (Stage 2 correction + unfreeze) and haku #746 (y-flip aug) launched 23:05–23:10 UTC and active.
 - **Current merge bar:** val_abupt = **7.3588%**, test_abupt = **8.6884%** (PR #724, norman, residual correction MLP, W&B run `u7obwlh7`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
-- **Next likely merge:** Senku #743 K=2 ensemble (7.2733%) once terminal marker posted; edward #672 EP4 (~01:55 UTC) if trajectory holds
+- **Next likely merge:** Senku #743 K=2 ensemble (7.2733%) once terminal marker posted + rebase done; edward #672 extension EP6 (~03:30 UTC) if slope holds; norman #747 EP2 (~02:00 UTC); haku #746 EP10 (~05:00 UTC)
 
 ---
 
@@ -52,7 +52,8 @@ Current yi SOTA per-axis (val/test, PR #724 norman, u7obwlh7):
 |----|---------|------------|--------|
 | #747 | norman | Stage 2: correction MLP + unfreeze last Transolver layer from u7obwlh7 | Assigned 2026-05-05 23:05 UTC |
 | #746 | haku | Y-flip training augmentation (50% prob, cold-start, 30 epochs) | Assigned 2026-05-05 22:10 UTC |
-| #743 | senku | Multi-checkpoint inference ensemble (K=2, pending terminal marker for merge) | **val 7.2733% — AWAITING TERMINAL MARKER** |
+| #743 | senku | Multi-checkpoint inference ensemble (K=2, pending terminal marker for merge) | **val 7.2733% — sent back to wip 23:25 UTC for terminal marker + rebase; pod restarted** |
+| #672 | edward | Decoupled τ_y/τ_z MLP head — extension run from z7724dbt (3 more epochs at lr=1e-6) | **Final EP3 7.3638%; sent back to wip 23:25 UTC for rebase + extension; pod restarted** |
 
 ---
 
@@ -60,7 +61,6 @@ Current yi SOTA per-axis (val/test, PR #724 norman, u7obwlh7):
 
 | PR | Student | Hypothesis | Last Update / State |
 |----|---------|------------|---------------------|
-| #672 | edward | Decoupled τ_y/τ_z MLP head polish (head_lr=1e-5, trunk_lr=1e-6) | **EP2 val 7.3660% (step 11129), projecting ~7.28% by EP4; EP3 expected ~23:55 UTC** |
 | #744 | tanjiro | Per-case hard-mining polish from SOTA (β-sweep 0.5/1.0, 5 epochs) | Running (assigned 21:38 UTC) |
 | #739 | chihiro | Curvature-weighted loss polish from SOTA (α=0.5/1.5 sweep) | Running |
 | #733 | emma | Polish-on-SOTA dual-tower bridge (graft cross-attn onto dc031qpt) | Architecture deviations approved (−curvature features, −β-NLL); run started |
@@ -78,9 +78,9 @@ Current yi SOTA per-axis (val/test, PR #724 norman, u7obwlh7):
 
 ## Hottest Leads This Round
 
-**Senku #743 (Multi-checkpoint K=2 ensemble):** K=2 ensemble of dc031qpt+pxsnrw36 = **val 7.2733%** (−0.086pp vs new bar). All channels improved. Test 8.5989%. Awaiting terminal SENPAI-RESULT to merge. **Once merged, will become new bar; senku to be reassigned to K=3 (add u7obwlh7).**
+**Senku #743 (Multi-checkpoint K=2 ensemble):** K=2 ensemble of dc031qpt+pxsnrw36 = **val 7.2733%** (−0.086pp vs new bar). All channels improved. Test 8.5989%. Sent back to wip 23:25 UTC — needs terminal SENPAI-RESULT marker AND rebase against current yi (CONFLICTING after norman merge). Pod restarted to force pickup. **Once merged, will become new bar; senku to be reassigned to K=3 (add u7obwlh7).**
 
-**Edward #672 (Decoupled τ_y/τ_z MLP head):** EP2 = **7.3660%** at step 11129. Slope −0.0079%/1k, τ_y slope −0.0189%/1k. **Projected EP4 ≈ 7.28%** (linear). If confirmed at EP3, will be a clean merge candidate. τ_y 9.5531% → projected ~9.34% by EP4.
+**Edward #672 (Decoupled τ_y/τ_z MLP head):** Final EP3 val 7.3638%, +0.005pp behind new bar. All slopes still negative (val_abupt −0.0017%/1k, τ_y −0.0044%/1k, τ_z −0.0016%/1k) — wall-clock bound, not converged. τ_y −0.32pp vs SOTA is largest single-axis improvement of round. Sent back to wip 23:25 UTC for rebase + 3-epoch extension from z7724dbt at lr=1e-6, head_lr=1e-5; kill gate val<7.4% at step 5442. Pod restarted.
 
 **Norman #747 (Stage 2 correction MLP + partial unfreeze):** New assignment from u7obwlh7. Expected to add another 0.02–0.08pp on top of Stage 1 by letting the top Transolver layer re-tune to the correction target.
 

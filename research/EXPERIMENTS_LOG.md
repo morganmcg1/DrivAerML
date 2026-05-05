@@ -2060,3 +2060,30 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - Merge-eligible vs new bar (7.3588%): K=2 = 7.2733% beats by −0.0855pp ✓. Awaiting terminal SENPAI-RESULT marker from student.
 - Follow-up: K=3 (add u7obwlh7 to dc031qpt+pxsnrw36) expected to give additional ~0.02-0.05pp.
 
+## 2026-05-05 23:25 — PR #672 [edward]: Decoupled τ_y/τ_z MLP head — final EP3 result + sent back for extension
+- branch: edward/decouple-tau-yz-head-polish
+- hypothesis: Polish from pxsnrw36 SOTA with separate MLP head for τ_y/τ_z, head_lr_mult=10× over trunk_lr=1e-6, target val_abupt < 7.30%
+
+| Metric | Polish best (z7724dbt) | pxsnrw36 SOTA | Δ vs SOTA | yi current bar (norman u7obwlh7) | Δ vs current bar |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt** | **7.3638%** | 7.3914% | **−0.0276pp ✓** | 7.3588% | **+0.0050pp** ✗ |
+| **test_abupt** | **8.6894%** | 8.8533% (vzprvtaw) | **−0.1639pp ✓** | 8.6884% | +0.0010pp |
+| τ_y val | 9.5473% | 9.8691% | −0.3218pp ✓✓ | 9.5185% | +0.0288pp |
+| τ_z val | 11.0210% | 11.2477% | −0.2267pp ✓ | 11.0188% | +0.0022pp |
+| τ_y test | 9.5581% | 9.8648% | −0.3067pp ✓✓ | 9.5287% | +0.0294pp |
+| τ_z test | 10.7203% | 10.9403% | −0.2200pp ✓ | 10.7254% | −0.0051pp ✓ |
+
+- Mechanism cleanly proven: every channel improved vs pxsnrw36 SOTA (cp, τ_x, τ_y, τ_z, vol_p — all). Largest single-axis improvement of round (τ_y −0.32pp on val, −0.31pp on test).
+- BUT: norman #724 merged in parallel and pushed bar to 7.3588%, leaving edward at +0.005pp behind. The decoupled head is provably orthogonal to norman's residual MLP correction (different mechanism, different layer).
+- All slopes still negative at termination: val_abupt −0.0017%/1k, τ_y −0.0044%/1k, τ_z −0.0016%/1k. Run was wall-clock bound, not converged.
+- Decision: SENT BACK to wip 23:25 UTC for 3-epoch extension from z7724dbt at lr=1e-6, head_lr=1e-5, kill gate val<7.4% at step 5442. Need to also rebase against current yi (CONFLICTING after norman merge added correction_mode logic). Pod restarted via `kubectl delete pod` to force pickup.
+- Targets for extension: Win val ≤ 7.32% (beat current bar by ≥0.04pp); Marginal 7.32 < val ≤ 7.358%; Null val ≥ 7.358%.
+
+## 2026-05-05 23:25 — Cycle 13 triage summary
+- Both review-ready PRs (senku #743, edward #672) sent back to wip:
+  - **senku #743**: K=2 ensemble val 7.2733% beats current bar by −0.086pp BUT lacks terminal SENPAI-RESULT marker AND is mergeable=CONFLICTING after norman merge. Needs both fixes before merge. Pod restarted.
+  - **edward #672**: Final EP3 7.3638% lands +0.005pp behind new bar but decoupled-head mechanism cleanly proven (every channel improved); slopes still negative. Sent back for 3-epoch extension at same config + rebase. Pod restarted.
+- All other students still actively training (verified GPU 25-100% util on violet/thorfinn/nezuko/kohaku/etc.).
+- Active assignments: round 42 = norman #747, haku #746, senku #743, edward #672. Round 41 = #744 tanjiro, #739 chihiro, #733 emma, #731 alphonse, #726 gilbert, #725 violet, #721 thorfinn, #720 nezuko, #719 kohaku, #715 askeladd, #713 fern, #652 frieren.
+- Next likely merge: senku #743 (once marker + rebase done) → bar to 7.2733%; then edward extension (~03:30 UTC).
+
