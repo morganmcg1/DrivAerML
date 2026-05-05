@@ -106,7 +106,7 @@ class Config:
     tau_z_loss_weight: float = 1.0
     vol_loss_w_near: float = 1.0
     vol_loss_w_far: float = 1.0
-    vol_loss_near_x_lo: float = 1.0
+    vol_loss_near_x_lo: float = 0.5
     vol_loss_near_x_hi: float = 3.0
     vol_loss_near_z_abs: float = 1.5
     amp_mode: str = "bf16"
@@ -248,7 +248,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "vol_loss_near_x_lo": (
             "Lower bound on x_rel (body-length-normalized downstream "
             "distance from the surface bbox center) for the near-wake "
-            "mask. Default 1.0 = 1 body length downstream of centroid."
+            "mask. Default 0.5 places the lower edge at the rear bumper "
+            "(car body spans x_rel in [-0.5, +0.5]) so the mask captures "
+            "the immediate base recirculation zone where wake error "
+            "lives. Setting 1.0 (the literal PR-737 spec) captures only "
+            "~1.4% of points on DrivAerML; 0.5 captures ~7% and matches "
+            "the 5-15% sanity-check coverage stated in the PR."
         ),
         "vol_loss_near_x_hi": (
             "Upper bound on x_rel for the near-wake mask. Default 3.0 = "

@@ -896,7 +896,7 @@ VOLUME_REGION_KEYS = (
     "volume_pressure_far",
     "volume_pressure_upstream",
 )
-VOLUME_REGION_X_LO = 1.0
+VOLUME_REGION_X_LO = 0.5
 VOLUME_REGION_X_HI = 3.0
 VOLUME_REGION_Z_ABS = 1.5
 
