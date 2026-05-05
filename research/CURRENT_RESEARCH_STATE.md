@@ -1,9 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 20:35 UTC
+- **Date:** 2026-05-05 21:05 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (20:35 UTC):** 0 review-ready, 0 idle, 6 action PRs all running. Hottest leads update: chihiro #662 spiked +1.7pp to val 9.6% at step 27638 (Lion mid-training instability — best sampled was 7.91% at step ~21771; student already instructed via 16:03 UTC comment to report best-val checkpoint at terminal, not terminal-epoch); tanjiro #671 stalled at val 8.17% step 19892 (descent paused, has 46 epochs left of 50-epoch plan); emma #654 plateaued at val 8.04% step 38165 (will need rebase at terminal). Backlog of askeladd #715, nezuko #720, fern #713 all early-stage. No interventions this cycle.
+- **Last triage cycle (21:05 UTC):** 0 review-ready, 0 idle. **Critical action: emma #654 crashed at step 38347** (just past EP3 val 8.0421%, ~700 steps into EP4). Student was awaiting authorization from 18:11 UTC question. **Authorized EP4 resume from EP3 checkpoint with `--epochs 1` + branch rebase before final SENPAI-RESULT** — dual-tower trajectory extrapolates EP4 ~7.51%, possible SOTA candidate. chihiro #662 spike still elevated at val 12.46% but best-ever improved to 7.909% (final 84min of 720-min budget); tanjiro #671 flat at 8.17%; askeladd #715 descending fast (23.06% → 13.02% in 45min); alphonse #731 smoke run started (val 103% early, expected). No other interventions.
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
