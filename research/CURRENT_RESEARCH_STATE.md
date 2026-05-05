@@ -1,132 +1,149 @@
-# SENPAI Research State — `tay` (DrivAerML / DDP8)
+# SENPAI Research State
 
-- **Date:** 2026-05-05 09:15 UTC (Round 14 mid-cycle — 8 active PRs, 0 idle students)
-- **Branch:** `tay`
-- **Target repo:** `morganmcg1/DrivAerML`
+- **Date:** 2026-05-05
+- **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-- **Fleet:** 0 idle students; all 8 students active
-- **Tay-deployed students:** alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn
 
 ---
 
-## ENSEMBLE SOTA — PR #612 nezuko greedy K=7 (pool 24) — val_abupt **6.1751%** / test_abupt **7.5347%**
+## Latest Human Researcher Directives
 
-W&B run `5veexq8r` (group `nezuko-ensemble-greedy-v3`). Pool 24 members: `d777epep, nh96x7m4, 5o7jc7wi, wyz68o8r, 9mm3sz7x, 49aimdiz, 19qf6di1`.
-
-**Chronic issue:** volume_pressure test/val gap ~3.2× (val=3.61%, test=11.47%) — primary systematic pathology.
-
-**Ensemble gate:** new ensemble must beat val_abupt < **6.1751%**.
-
-## SINGLE-MODEL SOTA — PR #592 alphonse depth-L5 — val_abupt **6.5985%** / test_abupt **7.9915%**
-
-W&B run `4k25s25e` (group `model-depth-sweep`). L=5, hidden=512, Lion lr=9e-5, wd=5e-4, tau_y×1.5/tau_z×2.0, slw=2.0, rff16 multi-sigma, STRING-sep+QK-norm, EMA 0.999, grad-clip 0.5.
-
-**Single-model gate:** val_abupt < **6.5985%**
-
-**Noise floor:** run-to-run variation ~±0.05pp. Genuine win threshold: **< 6.5485%**; borderline: 6.5485–6.5985%.
+No new directives from the human research team. Issue #618 (STRING/RoPE queue) all 4 experiments complete (PRs #621, #624, #625/647, #626).
 
 ---
 
-## Latest research direction from human researcher team
+## Current Baselines
 
-- No new issues from human team as of 09:15 UTC 2026-05-05.
-- All previously issued directives (Issue #618 STRING-RoPE 4-experiment sweep) are now complete: #621 nezuko CLOSED NEGATIVE (slice-centroid RoPE), #624 alphonse in-flight (point-level pre-slice, Arm C running).
-
----
-
-## Currently in-flight (8 active WIP PRs, ZERO idle)
-
-| PR | Student | Lever | Status |
+| Tier | val_abupt | PR | Notes |
 |---|---|---|---|
-| #666 | thorfinn | Depth L=6 at full hidden=512 (corrected after #660 confound) | EP2=8.47% PASSED; EP3 gate pending (~09:45 UTC) — **strongest SOTA candidate, projected 6.3–6.5%** |
-| #624 | alphonse | Point-level pre-slice STRING-RoPE 3-arm sweep (Arm A control, B xmid, C xmid+fxmid) | Arm C EP1=24.82% PASSED; EP2 result expected ~09:30 UTC; timeout ~09:55 UTC |
-| #665 | frieren | Cross-slice attention over Transolver slice tokens (global inter-slice MHA) | Arm A (control) EP2=8.70% PASSED; EP3 pending; Arm B cross-slice-attn to follow |
-| #667 | fern | Weight decay sweep {1e-4, 5e-4, 1e-3} for Lion optimizer | Arm A (wd=5e-4 control) EP2=8.58% PASSED; EP3 pending; Arms B/C to follow |
-| #650 | tanjiro | LR cosine floor sweep — Arm D (lr-min=1e-5) skipped; Arm C (5e-6) finished 6.9535% | Arm B (lr-min=5e-7) running; Arm A (1e-7) queued |
-| #649 | edward | GradNorm min-weight floor sweep {0.3, 0.5, 0.7} | Arm A (floor=0.3, no-op) done: 6.9999%; Arms B+C running sequentially |
-| #648 | askeladd | Volume-pressure loss upweighting sweep {2.0, 4.0} | Arm A (vp-w=2.0): 7.1107% worse; Arm B (vp-w=4.0) running; strict EP4 gate: val_vp < 3.9456% AND val_abupt < 8.0% |
-| #676 | nezuko | Ensemble K=7 distillation teacher → L=5 student (kd-alpha=0.7 and 0.5 sweep) | **Newly assigned** — requires adding --kd-teacher-runs + --kd-alpha flags to train.py |
+| **Ensemble SOTA** | **6.1751%** | #612 (nezuko) | K=7 greedy pool-24; test=7.5347% |
+| **Single-model SOTA** | **6.5985%** | #592 (alphonse) | depth-L5, EP4 step 43,459 |
+| **Single-model prior** | 6.7258% | #594 (askeladd) | rff32 |
+| **Ensemble gate** | < 6.1751% | — | Must beat to update ensemble SOTA |
+| **Single-model gate** | < 6.5985% | — | Must beat to update single-model SOTA |
+
+**Key finding:** Chronic volume_pressure test-vs-val gap (val≈3.6%, test≈11.5%, ~3×) remains the primary systematic issue to resolve.
 
 ---
 
-## Active research themes
+## Current Research Themes
 
-### 1. Single-model depth scaling (primary near-term opportunity)
-- L=5 → L=6 is the most credible near-term single-model SOTA attack (PR #666 thorfinn)
-- L=6 is tracking ~0.3pp below L=5 SOTA at every gate checkpoint
-- Projected final: 6.3–6.5% range — would be new single-model SOTA
-- If L=6 wins, L=7 is the natural follow-up
+### 1. Positional Encoding / Geometry Representation (1 PR in-flight)
 
-### 2. Optimizer tuning (hyperparameter sweep, composable)
-- Weight decay for Lion (PR #667 fern): baseline wd=5e-4 from L=5 SOTA; testing {1e-4, 1e-3} as adjacent values
-- LR cosine floor (PR #650 tanjiro): testing lower lr-min values (5e-7, 1e-7) after 5e-6 overshot
+- **PR #691** (askeladd): RFF sigma range expansion — arm-a: 7-sigma wide {0.125,0.25,0.5,1.0,2.0,4.0,8.0}; arm-b: 6-sigma low-ext {0.125,0.25,0.5,1.0,2.0,4.0}. Just assigned, pre-EP1.
 
-### 3. Architecture: attention / loss / geometry variants
-- Cross-slice attention (PR #665 frieren): tests whether global inter-slice MHA improves on local slice-attention  
-- GradNorm adaptive weighting (PR #649 edward): floor values that recover sp-priority domain knowledge
-- Volume-pressure upweighting (PR #648 askeladd): higher vp-weight to close test/val ratio — Arm A failed; Arm B with 4.0 underway
-- Pre-slice STRING-RoPE (PR #624 alphonse): final arm testing xmid+fxmid combined rotation
+**Closed (null):**
+- PR #621 (nezuko): Slice-centroid STRING-RoPE — EP3 killed.
+- PR #624 (alphonse): Point-level pre-slice STRING rotation — EP3 killed.
+- PR #625 (askeladd): No-slice Anchor-STRING — pod hung, no results.
+- PR #626 (frieren): AB-UPT geometry branch — val=9.12%, vol_pressure gap reduced 3.17×→2.07× (key finding).
+- PR #647 (frieren): Anchor-string Exp 3 — EP2 KILL (16.046%), coordinate embedding bug.
 
-### 4. Knowledge distillation (new direction)
-- PR #676 nezuko: K=7 ensemble teacher → L=5 student via soft-label distillation
-- Primary motivation: reduce the volume_pressure test/val gap (~3.2×) by teaching the student the ensemble's implicit noise-smoothing behavior
-- Requires new `--kd-teacher-runs` and `--kd-alpha` CLI flags added to train.py
-- kd-alpha=0.7 and kd-alpha=0.5 sweep (2 arms)
+**Open question:** Does widening RFF sigma coverage (lower and/or upper frequencies) improve geometry representation, particularly for the vol_pressure channel?
 
-### 5. Ensemble expansion (pool 25, ongoing)
-- Each single-model winner from the current round auto-feeds the greedy selector
-- If L=6 (PR #666) wins, run pool 25 greedy expansion immediately
-- Volume_pressure test/val ratio is the target diagnostic for pool 25
+### 2. Optimizer / Training Dynamics (2 PRs in-flight)
 
----
+- **PR #649** (edward): GradNorm min-weight floor sweep — running, arms B/C pending completion; EP3 PASS on best arm.
+- **PR #667** (fern): Weight decay sweep {1e-4, 5e-4, 1e-3} — pre-EP1.
 
-## Negative results catalog (do not retry on current stack)
+**Closed (null):**
+- PR #603 (tanjiro): EMA decay sweep — {0.9993, 0.9997, 0.9999} all no improvement.
+- PR #614 (fern): Lion β2 sweep — β2=0.99 (default) confirmed optimal; no arm beats SOTA.
+- PR #640 (edward): NorMuon optimizer — diverged (val=69.15%), dead end.
+- PR #650 (tanjiro): LR cosine floor sweep — closed null, no arm beat SOTA.
 
-| Lever | Outcome |
-|---|---|
-| Local tangent-frame INPUT features | NEGATIVE (#423) |
-| Channel-selective Huber on tau | NEGATIVE (#353) |
-| Volume-loss-weight scalar rebalancing | NEGATIVE (#451) |
-| Separate volume decoder | NEGATIVE val→test overfit (#452) |
-| Muon optimizer | NEGATIVE (#299) +4.09pp |
-| Sandwich-norm | NEGATIVE diverged |
-| U-net skips | NEGATIVE (+0.555pp) |
-| 256d / 768d hidden | NEGATIVE |
-| Per-axis output head scaling (#467) | NEGATIVE |
-| TTA mirror-y inference (#499 old stack) | NEGATIVE +1.18pp |
-| Y-mirror training aug (#536) | NEGATIVE — gap is structural |
-| 2× surface point density (#506) | NEGATIVE |
-| mlp_ratio=6/8 wider FFN (#458) | NEGATIVE |
-| Signed-log target transform (#471) | NEGATIVE |
-| log1p target transform (#481) | NEGATIVE |
-| AdamW vs Lion (#532) | NEGATIVE — Lion optimal |
-| Full GradNorm (5× autograd overhead) | NEGATIVE operationally |
-| Unit-vector cosine direction loss on tau (#531) | NEGATIVE |
-| Coord jitter regularization (#553) | NEGATIVE +38% |
-| slw=2.0 13-epoch full (#537) | NEGATIVE — within noise |
-| NorMuon optimizer (#619 alphonse, #640 edward) | NEGATIVE on L=5 stack |
-| Slice-centroid STRING-RoPE (centroid-based) | NEGATIVE (#621) — QK-norm washes out RoPE; STRING-sep already covers this inductive bias |
-| VP loss upweight arm A (vp-weight=2.0) | NEGATIVE (#648) — absolute val_vp worse |
+**Open question:** Can weight decay tuning narrow the vol_pressure val→test gap via stronger regularization?
+
+### 3. Attention Mechanism (2 PRs in-flight)
+
+- **PR #692** (tanjiro): Attention heads sweep — arm-a: heads=8 (dim_head=64); arm-b: heads=2 (dim_head=256). Just assigned, pre-EP1.
+- **PR #665** (frieren): Cross-slice attention — adds global inter-slice MHA layer to Transolver blocks. Pre-EP1.
+
+**Open question:** Does more diverse (heads=8) or higher-capacity (heads=2) attention improve over SOTA heads=4? Does inter-slice attention capture global geometry correlations?
+
+### 4. Architecture Scaling (2 PRs in-flight)
+
+- **PR #694** (thorfinn): Depth L=6 hidden=384 heads=4 (dim_head=96) — budget-safe follow-up to closed PR #693. PR #693 (L=6/h=448/heads=7) killed at EP1 because heads=7 (non-power-of-2) destroyed SDPA/Triton fast paths → 98 min/epoch, only ~2.7 epochs feasible. This PR uses heads=4 (PoW2, preserves fast paths), hidden=384 (dim_head=96, PoW2). Estimated ~57 min/epoch → ~4-5 epochs feasible. Just assigned, pre-EP1.
+- **PR #690** (alphonse): Slice count sweep — arm-a: slices=64; arm-b: slices=192; arm-c: slices=256. Just assigned, pre-EP1.
+
+**Established:**
+- L=5 > L=4 by −1.90% relative gain.
+- L=6 at full hidden=512 (PR #666): EP2=8.47% PASS but ~88.6 min/epoch → only 3/13 epochs feasible — computationally infeasible within budget.
+- L=6/hidden=448/heads=7 (PR #693): CLOSED — 98 min/epoch (heads=7 kills SDPA fast path). Key lesson: heads must be power-of-2 for budget-feasible training.
+
+**Open question:** Does L=6/hidden=384/heads=4 (PR #694) continue the depth scaling trend? Is slices=128 optimal or does smaller/larger over-fragment or under-communicate geometry (PR #690)?
+
+### 5. Physics-Informed Loss / Output Formulation
+
+**Closed (null):**
+- PR #641 (thorfinn): Flow-aligned tau — EP2 KILL (14.613%).
+- PR #648 (askeladd): Volume-pressure loss upweighting {2.0, 4.0, 6.0} — closed null, no arm beat SOTA.
+- PR #651 (thorfinn): Surface curvature features (H, K) — EP2 KILL (14.613%).
+
+**Key finding from PR #648:** VP channel at best arm was 4.30%, promising direction but did not translate to overall metric gain.
 
 ---
 
-## Potential next research directions
+## Active Fleet Status
 
-1. **L=7 depth** — if L=6 wins, natural follow-up; need to confirm VRAM budget (~64GB at L=7)
-2. **Cross-dataset ensemble diversity** — add any winning L=6 checkpoint to pool 25; run greedy re-selection
-3. **β-NLL heteroscedastic loss on tay stack** — yi-branch showed wins; direct benefit for vp test/val ratio via explicit variance estimation
-4. **Loss-aware query sampling** — boosting-style oversampling in regions of historically high tau_y/tau_z error
-5. **Curriculum on RFF sigmas** — start narrow-band, expand during training to complement rff16 multi-sigma win
-6. **Point-level RoPE before slice aggregation** (nezuko suggested follow-up from #621) — would compose with STRING-sep at finest granularity
-7. **z-only / axis-restricted RoPE** (nezuko suggestion) — tests whether failure is high-dim rotation vs. position-encoding redundancy
-8. **Greedy ensemble with TTA members** — if any TTA wins, double pool at zero training cost via mirror-y pairs
-9. **Two-stage training: warmup-only on volume, then unfreeze surface heads** — addresses joint-loss imbalance
-10. **Vol-point density beyond 65536** — VRAM headroom probe at 98304 or 131072
+All 8 students running:
+
+| Student | PR | Hypothesis | Status |
+|---|---|---|---|
+| alphonse | #690 | Slice count sweep {64, 192, 256} vs SOTA 128 | Just assigned — pre-EP1 |
+| askeladd | #691 | RFF sigma expansion {7-wide, 6-low-ext} | Just assigned — pre-EP1 |
+| tanjiro | #692 | Heads sweep {8, 2} vs SOTA heads=4 | Just assigned — pre-EP1 |
+| thorfinn | #694 | Depth L=6 hidden=384 heads=4 (budget-safe) | Just assigned — pre-EP1 |
+| edward | #649 | GradNorm min-weight floor sweep | Arms B/C running, EP3 PASS on best arm |
+| fern | #667 | Weight decay sweep {1e-4, 5e-4, 1e-3} | Pre-EP1 |
+| frieren | #665 | Cross-slice attention over Transolver slices | Pre-EP1 |
+| nezuko | #676 | (running experiment) | Watch EP gates |
+
+**Zero idle students. Zero idle GPUs.**
+
+**Upcoming gate actions:**
+- All new PRs (#690, #691, #692, #694): EP1 informational (+ epoch-time gate for #694: kill if > 75 min/epoch), EP2 gate at step ~21,729 — KILL if > 12.0%; EP3 gate — KILL if > 8.0%
+- Edward PR #649: post SENPAI-RESULT when done; run greedy ensemble (pool-25) if any arm beats 6.5985%
+- Fern PR #667: EP1/EP2 gates — KILL if > 12.0% at EP2
+- Frieren PR #665: EP1/EP2 gates — KILL if > 12.0% at EP2
 
 ---
 
-## Procedural notes
+## Potential Next Research Directions
 
-- **Never commit research state to a student branch** — only to `tay`.
-- **Multi-arm WIP pattern**: students run sweep arms sequentially within a single PR. Use `student_poll_for_work` to identify live assignment.
-- **EP2 rate for standard L=5 arms:** ~75–82 min/epoch. Pre-slice RoPE arms: ~99–123 min/epoch.
+### High Priority (target primary val_abupt metric directly)
+
+1. **Ensemble pool expansion**: When new single-model winners emerge, immediately run greedy ensemble selection (pool-25) to check if any new run improves the ensemble.
+
+2. **Depth scaling continuation**: If L=6 hidden=384 (PR #694) beats SOTA, try L=6/hidden=448/heads=4 (dim_head=112, not PoW2 — risky) or L=6/hidden=384 + wider heads=8 (dim_head=48). If PR #692 (heads sweep) finds heads ≠ 4 wins, cross with L=6.
+
+3. **Volume-pressure gap follow-up**: PR #648 showed VP channel at 4.30% with upweighting. If weight decay (PR #667) reduces the test-vs-val gap, combine optimal wd with VP upweighting in a targeted follow-up.
+
+### Medium Priority (architecture exploration)
+
+4. **RFF sigma learning**: If sigma expansion (PR #691) shows one direction better, consider learning the sigmas end-to-end rather than fixing them.
+
+5. **Boundary condition explicit encoding**: Encode inlet/outlet/wall BC type as a feature input. May help model distinguish surface types and reduce wall_shear error.
+
+6. **Multi-scale spatial sampling**: Progressive or multi-resolution surface point sampling during training.
+
+### Lower Priority (longer-horizon)
+
+7. **Slice count follow-up**: If PR #690 finds slices ≠ 128 is better, run a finer sweep around the winning value.
+
+8. **Heads × depth co-sweep**: Once optimal heads are known from PR #692, re-run depth scaling with that heads setting.
+
+---
+
+## Key Architecture Decisions Established
+
+- **Model:** Transolver L=5, hidden=512, heads=4, slices=128 (SOTA config)
+- **Positional encoding:** STRING-separable (rff_num_features=16, sigmas 0.25-4.0)
+- **Optimizer:** Lion, lr=9e-5, β2=0.99 (confirmed optimal, PR #614)
+- **Weight decay:** 5e-4 (under investigation in PR #667)
+- **QK-norm:** enabled
+- **Loss weights:** tau_y×1.5, tau_z×2.0, surface×2.0, volume×1.0
+- **EMA:** 0.999 (confirmed optimal, PR #603)
+- **Training budget:** ~270 min (SENPAI_TIMEOUT_MINUTES=360 with 90 min val reserve)
+- **Depth scaling:** L=4→L=5 gave −1.90% relative gain; L=6/hidden=512 infeasible (~88.6 min/epoch); L=6/h=448/heads=7 infeasible (~98 min/epoch, heads=7 kills SDPA); L=6/h=384/heads=4 under investigation (PR #694, estimated ~57 min/epoch)
+- **Heads constraint:** heads MUST be power-of-2 for SDPA/Triton fast paths. heads=7 causes ~50% epoch-time regression.
