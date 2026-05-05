@@ -1,10 +1,11 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 16:30 UTC
+- **Date:** 2026-05-05 17:55 UTC
 - **Advisor branch:** yi
-- **Active students:** 16 (all GPUs occupied, zero idle)
+- **Active students:** 16 (all GPUs occupied, zero idle, exactly one WIP PR per student)
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511)
+- **Latest duplicate cleanup (17:55 UTC):** Closed #697 (alphonse fourier-RFF) and #707 (nezuko volume-density) which had zero student work and were blocking R40 priorities (#718, #720). Reasoning attached in close comments.
 
 ---
 
@@ -61,18 +62,18 @@ Current yi SOTA per-axis (val, PR #681):
 | #719 | kohaku | SDF-stratified volume pressure normalization | Round 40 — freshly assigned |
 | #720 | nezuko | Surface-tangent frame τ targets | Round 40 — freshly assigned |
 | #721 | thorfinn | CRPS/MAE loss for wall-shear channels | Round 40 — freshly assigned |
-| #715 | askeladd | Annealed per-axis wallshear weighting | Running: `1qpqhyrt`, step 2417 |
-| #714 | senku | 6L/512d depth retry (900min budget) | Running: `0zr5g357`, step 1260 |
-| #713 | fern | Normal-penalty wallshear tangency regularizer | Running: `m8fq2dvb`, step 5028 |
-| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix) | Round 41 — freshly assigned |
-| #674 | violet | Surface normal RFF (dim=128, σ=4) | Running: `09qsbtgo`, step 5161 |
-| #672 | edward | Decoupled τ_y/τ_z MLP head — sent back for SENPAI-RESULT + polish | Run `o5nplmj9` finished 10.03%; pivot to polish from pxsnrw36 |
-| #671 | tanjiro | y-symmetry pair loss (long run) | Running: `wbjsawz7`, EP1=18.12% |
-| #668 | gilbert | asinh wall-shear target normalization | Running: `z02089nc`, step 7449 |
-| #662 | chihiro | k1_k2 curvature cold-start ablation (Arm A control, 720min) | Running: `4abva8us`, 9.13%; let Arm A finish, skip Arm B |
-| #661 | haku | Surface position RFF dim=64/128 EP1 resume | Running at 100% GPU; sent check-in ping for new run IDs |
-| #654 | emma | DualTowerTransolver (hottest lead — EP2=8.57%) | Running: `sjq4wvg1`, EP3 expected ~18:00 UTC |
-| #652 | frieren | Muon optimizer on full yi stack | Running: `jh3e3r5d`, step 4149 |
+| #715 | askeladd | Annealed per-axis wallshear weighting | Running: `1qpqhyrt` |
+| #714 | senku | 6L/512d depth retry (900min budget) | Running: `0zr5g357` |
+| #713 | fern | Normal-penalty wallshear tangency regularizer | Running: `m8fq2dvb`, Arm A EP1 done EP2 in progress (17:12 UTC) |
+| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix) | Cleared to launch with `pxsnrw36`, identity-init approved (17:55 UTC) |
+| #674 | violet | Surface normal RFF (dim=128, σ=4) | Arm B abort authorized — Arm A=8.632% null result; awaiting terminal SENPAI-RESULT for closure |
+| #672 | edward | Decoupled τ_y/τ_z MLP head | Polish-on-SOTA-checkpoint plan sent back with lr=5e-6 guidance for random-init `tau_yz_head` |
+| #671 | tanjiro | y-symmetry pair loss (long run) | Running: `wbjsawz7`, EP2=10.18% (passed EP10 gate at EP2) |
+| #668 | gilbert | asinh wall-shear target normalization | Closure plan confirmed — null result; await Arm C EP3 (~19:21 UTC) for terminal SENPAI-RESULT |
+| #662 | chihiro | k1_k2 curvature cold-start ablation (Arm A control, 720min) | Running: `4abva8us`, let Arm A finish (~21:00 UTC) |
+| #661 | haku | Surface RFF dim=64/128 resume | Running: A=`02muovdp` 10.20%, B=`2p7oiqpe` 10.84% at EP2; pod budget cuts EP3 mid-epoch ~17:57 UTC |
+| #654 | emma | DualTowerTransolver (hottest lead — EP2=8.5688%) | Running: `sjq4wvg1`, EP3 expected ~18:00 UTC; potential SOTA candidate (linear extrapolation ~7.0%) |
+| #652 | frieren | Muon optimizer + Lion polish chain | Arm D Lion polish #2 (`jh3e3r5d`) running |
 
 ---
 
@@ -88,6 +89,8 @@ Current yi SOTA per-axis (val, PR #681):
 | #656 | violet | CLOSED — multi-EMA ensemble null |
 | #659 | norman | CLOSED — 4L/768d cold-start undertrained |
 | #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%, step 3950) |
+| #697 | alphonse | CLOSED — fourier surface-RFF (overlapped with #674 normal-RFF null); duplicate cleanup |
+| #707 | nezuko | CLOSED — full-mesh volume density (overlapped with #719 SDF-stratified vol-norm); duplicate cleanup |
 
 ---
 
