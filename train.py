@@ -1040,20 +1040,52 @@ class SurfaceTransolver(nn.Module):
         return result
 
 
-class EMA:
-    def __init__(self, model: nn.Module, decay: float = 0.999, start_step: int = 0):
-        self.decay = decay
+class MultiEMA:
+    """Maintains one or more EMA shadows of model parameters at different decays.
+
+    With a single decay this matches the previous single-shadow EMA. With
+    multiple decays, ``copy_mean_to`` writes the element-wise mean of all
+    shadows into the live model — a free ensemble over different time
+    horizons of the same training trajectory.
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        decays: list[float] | tuple[float, ...] = (0.999,),
+        start_step: int = 0,
+    ):
+        if not decays:
+            raise ValueError("MultiEMA requires at least one decay")
+        self.decays = [float(d) for d in decays]
         self.start_step = start_step
         self.step_counter = 0
-        self.shadow = {
-            name: param.detach().clone()
-            for name, param in model.named_parameters()
-            if param.requires_grad
-        }
+        self.shadows: list[dict[str, torch.Tensor]] = [
+            {
+                name: param.detach().clone()
+                for name, param in model.named_parameters()
+                if param.requires_grad
+            }
+            for _ in self.decays
+        ]
         self.backup: dict[str, torch.Tensor] | None = None
 
+    @property
+    def num_shadows(self) -> int:
+        return len(self.decays)
+
+    @property
+    def decay(self) -> float:
+        # Backward-compat: report the primary (last) decay used as the single
+        # EMA in the original implementation.
+        return self.decays[-1] if len(self.decays) == 1 else self.decays[len(self.decays) // 2]
+
     def set_decay(self, new_decay: float) -> None:
-        self.decay = float(new_decay)
+        # Compatibility shim — used by the cosine ema-decay schedule. Rescales
+        # only the primary (middle) decay; outer decays stay fixed so the
+        # ensemble keeps its spread.
+        idx = 0 if len(self.decays) == 1 else len(self.decays) // 2
+        self.decays[idx] = float(new_decay)
 
     @torch.no_grad()
     def update(self, model: nn.Module) -> None:
@@ -1061,22 +1093,44 @@ class EMA:
         if self.step_counter < self.start_step:
             return
         for name, param in model.named_parameters():
-            if param.requires_grad and name in self.shadow:
-                self.shadow[name].mul_(self.decay).add_(param.detach(), alpha=1 - self.decay)
+            if not param.requires_grad:
+                continue
+            param_d = param.detach()
+            for shadow, decay in zip(self.shadows, self.decays):
+                if name in shadow:
+                    shadow[name].mul_(decay).add_(param_d, alpha=1 - decay)
 
     @torch.no_grad()
     def store(self, model: nn.Module) -> None:
+        primary = self.shadows[0]
         self.backup = {
             name: param.detach().clone()
             for name, param in model.named_parameters()
-            if param.requires_grad and name in self.shadow
+            if param.requires_grad and name in primary
         }
 
     @torch.no_grad()
-    def copy_to(self, model: nn.Module) -> None:
+    def copy_to(self, model: nn.Module, idx: int = 0) -> None:
+        """Copy the shadow at ``idx`` into the live model."""
+        shadow = self.shadows[idx]
         for name, param in model.named_parameters():
-            if param.requires_grad and name in self.shadow:
-                param.data.copy_(self.shadow[name])
+            if param.requires_grad and name in shadow:
+                param.data.copy_(shadow[name])
+
+    @torch.no_grad()
+    def copy_mean_to(self, model: nn.Module) -> None:
+        """Copy the element-wise mean of all shadows into the live model."""
+        if len(self.shadows) == 1:
+            self.copy_to(model, idx=0)
+            return
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            tensors = [s[name] for s in self.shadows if name in s]
+            if not tensors:
+                continue
+            mean_w = torch.stack(tensors).mean(0)
+            param.data.copy_(mean_w)
 
     @torch.no_grad()
     def restore(self, model: nn.Module) -> None:
@@ -1086,6 +1140,10 @@ class EMA:
             if param.requires_grad and name in self.backup:
                 param.data.copy_(self.backup[name])
         self.backup = None
+
+
+# Backwards-compatible alias: existing code/tests referencing ``EMA`` still work.
+EMA = MultiEMA
 
 
 # ---------------------------------------------------------------------------
@@ -1143,6 +1201,7 @@ class Config:
     ema_start_step: int = 50
     ema_decay_start: float = 0.0
     ema_decay_end: float = 0.9999
+    ema_multi_decays: str = ""  # comma-separated decays e.g. "0.9995,0.999,0.995"; empty -> single ema_decay
     gradient_log_every: int = 1
     log_gradient_histograms: bool = True
     weight_log_every: int = 1
@@ -1221,6 +1280,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "separate checks. STEP is a global optimizer step and METRIC must match "
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
+        ),
+        "ema_multi_decays": (
+            "Optional comma-separated EMA decays for the multi-EMA ensemble, e.g. "
+            "'0.9995,0.999,0.995'. When set, validation/test use the element-wise "
+            "mean of all shadows. Empty string (default) keeps the single-shadow "
+            "EMA driven by --ema-decay."
         ),
     }
     for field in fields(Config):
@@ -2630,7 +2695,38 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
-    ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+    if config.use_ema:
+        if config.ema_multi_decays.strip():
+            try:
+                ema_decays = [
+                    float(tok.strip())
+                    for tok in config.ema_multi_decays.split(",")
+                    if tok.strip()
+                ]
+            except ValueError as exc:
+                raise ValueError(
+                    f"Could not parse --ema-multi-decays={config.ema_multi_decays!r}: {exc}"
+                ) from exc
+            if not ema_decays:
+                raise ValueError(
+                    "--ema-multi-decays parsed to an empty list; pass at least one decay or leave the flag empty"
+                )
+            for d in ema_decays:
+                if not (0.0 < d < 1.0):
+                    raise ValueError(
+                        f"EMA decay must be in (0, 1); got {d} from --ema-multi-decays"
+                    )
+        else:
+            ema_decays = [config.ema_decay]
+        ema = MultiEMA(model, decays=ema_decays, start_step=config.ema_start_step)
+        if is_main:
+            print(
+                f"EMA: {len(ema_decays)} shadow(s), decays={ema_decays}, "
+                f"start_step={config.ema_start_step}"
+            )
+    else:
+        ema = None
+        ema_decays = []
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
@@ -3040,7 +3136,7 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         if ema is not None:
             ema.store(model)
-            ema.copy_to(model)
+            ema.copy_mean_to(model)
         val_metrics = {
             name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
             for name, loader in val_loaders.items()
@@ -3092,7 +3188,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             if is_main:
                 if ema is not None:
                     ema.store(model)
-                    ema.copy_to(model)
+                    ema.copy_mean_to(model)
                 torch.save(
                     {
                         "model": model.state_dict(),
