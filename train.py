@@ -1163,9 +1163,39 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    y_symmetry_pair_loss: bool = False
+    y_symmetry_test_avg: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
+
+
+def _mirror_batch_y(batch: SurfaceBatch) -> SurfaceBatch:
+    """Reflect a SurfaceBatch about the y=0 plane.
+
+    Surface input layout `[x, y, z, nx, ny, nz, area, ...]`: y-coord (idx 1) and
+    ny normal (idx 4) flip sign. Surface targets `[cp, tau_x, tau_y, tau_z]`:
+    only tau_y (idx 2) flips. Volume input `[x, y, z, sdf]`: only y (idx 1)
+    flips. Volume target (scalar pressure) is invariant. Optional curvature
+    channels (idx 7..) are intrinsic invariants and are preserved.
+    """
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = -surface_x[..., 1]
+    surface_x[..., 4] = -surface_x[..., 4]
+    surface_y = batch.surface_y.clone()
+    surface_y[..., 2] = -surface_y[..., 2]
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = -volume_x[..., 1]
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
 
 
 class TargetTransform:
@@ -2038,7 +2068,37 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    y_symmetry_pair_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
+    if y_symmetry_pair_loss:
+        batch = batch.to(device)
+        kwargs = dict(
+            surface_loss_weight=surface_loss_weight,
+            volume_loss_weight=volume_loss_weight,
+            aux_rel_l2_weight=aux_rel_l2_weight,
+            use_tangential_wallshear_loss=use_tangential_wallshear_loss,
+            wallshear_y_weight=wallshear_y_weight,
+            wallshear_z_weight=wallshear_z_weight,
+            wallshear_huber_delta=wallshear_huber_delta,
+            beta_nll_beta=beta_nll_beta,
+        )
+        loss_orig, metrics_orig = train_loss(
+            model, batch, transform, device, amp_mode, **kwargs
+        )
+        batch_mirror = _mirror_batch_y(batch)
+        loss_mirror, metrics_mirror = train_loss(
+            model, batch_mirror, transform, device, amp_mode, **kwargs
+        )
+        loss = 0.5 * (loss_orig + loss_mirror)
+        metrics: dict[str, float] = dict(metrics_orig)
+        for k, v in metrics_mirror.items():
+            metrics[f"mirror_{k}"] = v
+        metrics["sym_loss_orig"] = float(loss_orig.detach().cpu().item())
+        metrics["sym_loss_mirror"] = float(loss_mirror.detach().cpu().item())
+        metrics["sym_loss_diff_abs"] = abs(
+            metrics["sym_loss_orig"] - metrics["sym_loss_mirror"]
+        )
+        return loss, metrics
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -2199,6 +2259,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    y_symmetry_test_avg: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -2238,6 +2299,20 @@ def evaluate_split(
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
+        if y_symmetry_test_avg:
+            batch_mirror = _mirror_batch_y(batch)
+            with autocast_context(device, amp_mode):
+                out_mirror = model(
+                    surface_x=batch_mirror.surface_x,
+                    surface_mask=batch_mirror.surface_mask,
+                    volume_x=batch_mirror.volume_x,
+                    volume_mask=batch_mirror.volume_mask,
+                )
+            surface_pred_mirror = out_mirror["surface_preds"].float()
+            volume_pred_mirror = out_mirror["volume_preds"].float()
+            surface_pred_mirror[..., 2] = -surface_pred_mirror[..., 2]
+            surface_pred_norm = 0.5 * (surface_pred_norm + surface_pred_mirror)
+            volume_pred_norm = 0.5 * (volume_pred_norm + volume_pred_mirror)
         surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
@@ -2834,6 +2909,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                y_symmetry_pair_loss=config.y_symmetry_pair_loss,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -3110,7 +3186,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, y_symmetry_test_avg=config.y_symmetry_test_avg)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -3237,7 +3313,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, y_symmetry_test_avg=config.y_symmetry_test_avg)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3271,8 +3347,37 @@ def main(argv: Iterable[str] | None = None) -> None:
     if is_main:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
+    if config.y_symmetry_pair_loss:
+        full_val_alt_avg = not config.y_symmetry_test_avg
+        full_val_metrics_alt = {
+            name: evaluate_split(
+                model, loader, transform, device,
+                amp_mode=config.amp_mode,
+                y_symmetry_test_avg=full_val_alt_avg,
+            )
+            for name, loader in val_loaders.items()
+        }
+        alt_suffix = "tta" if full_val_alt_avg else "no_tta"
+        full_val_alt_log: dict[str, object] = {
+            f"full_val_primary_{alt_suffix}/abupt_axis_mean_rel_l2_pct": full_val_metrics_alt["val_surface"]["abupt_axis_mean_rel_l2_pct"],
+            f"full_val_primary_{alt_suffix}/surface_pressure_rel_l2_pct": full_val_metrics_alt["val_surface"]["surface_pressure_rel_l2_pct"],
+            f"full_val_primary_{alt_suffix}/wall_shear_rel_l2_pct": full_val_metrics_alt["val_surface"]["wall_shear_rel_l2_pct"],
+            f"full_val_primary_{alt_suffix}/wall_shear_x_rel_l2_pct": full_val_metrics_alt["val_surface"]["wall_shear_x_rel_l2_pct"],
+            f"full_val_primary_{alt_suffix}/wall_shear_y_rel_l2_pct": full_val_metrics_alt["val_surface"]["wall_shear_y_rel_l2_pct"],
+            f"full_val_primary_{alt_suffix}/wall_shear_z_rel_l2_pct": full_val_metrics_alt["val_surface"]["wall_shear_z_rel_l2_pct"],
+            f"full_val_primary_{alt_suffix}/volume_pressure_rel_l2_pct": full_val_metrics_alt["val_surface"]["volume_pressure_rel_l2_pct"],
+            "global_step": global_step,
+        }
+        for split_name, metrics in full_val_metrics_alt.items():
+            for key, value in metrics.items():
+                full_val_alt_log[f"full_val_{alt_suffix}/{split_name}/{key}"] = value
+        wandb.log(full_val_alt_log)
+        wandb.summary.update(_numeric_metric_items(full_val_alt_log))
+        if is_main:
+            print_metrics(f"full_val_{alt_suffix}", full_val_metrics_alt["val_surface"])
+
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, y_symmetry_test_avg=config.y_symmetry_test_avg)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3408,6 +3513,35 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Logged SWA artifact '{swa_artifact_name}'")
         checkpoint_reload = torch.load(model_path, map_location=device, weights_only=True)
         model.load_state_dict(checkpoint_reload["model"], strict=True)
+
+    if config.y_symmetry_pair_loss:
+        test_alt_avg = not config.y_symmetry_test_avg
+        test_metrics_alt = {
+            name: evaluate_split(
+                model, loader, transform, device,
+                amp_mode=config.amp_mode,
+                y_symmetry_test_avg=test_alt_avg,
+            )
+            for name, loader in test_loaders.items()
+        }
+        alt_suffix = "tta" if test_alt_avg else "no_tta"
+        test_alt_log: dict[str, object] = {
+            f"test_primary_{alt_suffix}/abupt_axis_mean_rel_l2_pct": test_metrics_alt["test_surface"]["abupt_axis_mean_rel_l2_pct"],
+            f"test_primary_{alt_suffix}/surface_pressure_rel_l2_pct": test_metrics_alt["test_surface"]["surface_pressure_rel_l2_pct"],
+            f"test_primary_{alt_suffix}/wall_shear_rel_l2_pct": test_metrics_alt["test_surface"]["wall_shear_rel_l2_pct"],
+            f"test_primary_{alt_suffix}/wall_shear_x_rel_l2_pct": test_metrics_alt["test_surface"]["wall_shear_x_rel_l2_pct"],
+            f"test_primary_{alt_suffix}/wall_shear_y_rel_l2_pct": test_metrics_alt["test_surface"]["wall_shear_y_rel_l2_pct"],
+            f"test_primary_{alt_suffix}/wall_shear_z_rel_l2_pct": test_metrics_alt["test_surface"]["wall_shear_z_rel_l2_pct"],
+            f"test_primary_{alt_suffix}/volume_pressure_rel_l2_pct": test_metrics_alt["test_surface"]["volume_pressure_rel_l2_pct"],
+            "global_step": global_step,
+        }
+        for split_name, metrics in test_metrics_alt.items():
+            for key, value in metrics.items():
+                test_alt_log[f"test_{alt_suffix}/{split_name}/{key}"] = value
+        wandb.log(test_alt_log)
+        wandb.summary.update(_numeric_metric_items(test_alt_log))
+        if is_main:
+            print_metrics(f"test_surface_{alt_suffix}", test_metrics_alt["test_surface"])
 
     if is_main:
         log_model_artifact(
