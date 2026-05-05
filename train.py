@@ -1116,6 +1116,10 @@ class Config:
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
     beta_nll_beta: float = -1.0
+    wake_x_threshold: float = 4.0
+    wake_loss_weight: float = 1.0
+    near_wake_x_min: float = 2.5
+    near_wake_loss_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -1874,10 +1878,58 @@ def check_kill_thresholds(
     return None
 
 
-def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    if bool(mask.any()):
+def masked_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    point_weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if not bool(mask.any()):
+        return pred.sum() * 0.0
+    if point_weights is None:
         return F.mse_loss(pred[mask], target[mask])
-    return pred.sum() * 0.0
+    diff_sq = (pred - target).pow(2)
+    mask_f = mask.unsqueeze(-1).to(pred.dtype)
+    weight_f = point_weights.unsqueeze(-1).to(pred.dtype)
+    valid = mask_f.sum().clamp_min(1)
+    n_channels = pred.shape[-1]
+    return (diff_sq * mask_f * weight_f).sum() / valid / n_channels
+
+
+def compute_volume_point_weights(
+    volume_x: torch.Tensor,
+    *,
+    wake_x_threshold: float,
+    wake_loss_weight: float,
+    near_wake_x_min: float,
+    near_wake_loss_weight: float,
+) -> torch.Tensor | None:
+    """Per-point loss weights for volume points based on x-coordinate.
+
+    volume_x: [B, N, F] with feature 0 = physical x (meters).
+    Returns [B, N] tensor of weights, or ``None`` if all weights would be 1.
+
+    Order of application: x >= wake_x_threshold takes precedence over the
+    near-wake band, so the wake band is the highest-weight region.
+    """
+    wake_active = wake_loss_weight != 1.0
+    near_active = near_wake_loss_weight != 1.0 and near_wake_x_min < wake_x_threshold
+    if not wake_active and not near_active:
+        return None
+    x = volume_x[..., 0]
+    weights = torch.ones_like(x)
+    if near_active:
+        near_mask = (x >= near_wake_x_min) & (x < wake_x_threshold)
+        weights = torch.where(
+            near_mask, x.new_full((), float(near_wake_loss_weight)), weights
+        )
+    if wake_active:
+        wake_mask = x >= wake_x_threshold
+        weights = torch.where(
+            wake_mask, x.new_full((), float(wake_loss_weight)), weights
+        )
+    return weights
 
 
 def weighted_masked_mse_per_channel(
@@ -1957,6 +2009,7 @@ def weighted_masked_beta_nll_per_channel(
     *,
     channel_weights: Iterable[float],
     beta: float,
+    point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[float], list[float]]:
     """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
 
@@ -1998,6 +2051,8 @@ def weighted_masked_beta_nll_per_channel(
     mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
     valid = mask_f.sum().clamp_min(1)
     weighted_diff = nll * weights.view(1, 1, -1)
+    if point_weights is not None:
+        weighted_diff = weighted_diff * point_weights.unsqueeze(-1).to(pred_mean.dtype)
     weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
 
     per_axis_diff_sq_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
@@ -2034,11 +2089,38 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    wake_x_threshold: float = 4.0,
+    wake_loss_weight: float = 1.0,
+    near_wake_x_min: float = 2.5,
+    near_wake_loss_weight: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
+    volume_point_weights = compute_volume_point_weights(
+        batch.volume_x,
+        wake_x_threshold=wake_x_threshold,
+        wake_loss_weight=wake_loss_weight,
+        near_wake_x_min=near_wake_x_min,
+        near_wake_loss_weight=near_wake_loss_weight,
+    )
+    wake_mask_fraction = float("nan")
+    near_wake_mask_fraction = float("nan")
+    if bool(batch.volume_mask.any()):
+        valid_x = batch.volume_x[..., 0][batch.volume_mask]
+        if valid_x.numel() > 0:
+            wake_mask_fraction = float(
+                (valid_x >= wake_x_threshold).float().mean().detach().cpu().item()
+            )
+            near_wake_mask_fraction = float(
+                ((valid_x >= near_wake_x_min) & (valid_x < wake_x_threshold))
+                .float()
+                .mean()
+                .detach()
+                .cpu()
+                .item()
+            )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -2095,6 +2177,7 @@ def train_loss(
                 batch.volume_mask,
                 channel_weights=(1.0,),
                 beta=beta_nll_beta,
+                point_weights=volume_point_weights,
             )
             volume_log_var_mean = vol_log_var_per_axis[0] if vol_log_var_per_axis else 0.0
         else:
@@ -2105,7 +2188,12 @@ def train_loss(
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 wallshear_huber_delta=wallshear_huber_delta,
             )
-            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            volume_loss = masked_mse(
+                out["volume_preds"],
+                volume_target,
+                batch.volume_mask,
+                point_weights=volume_point_weights,
+            )
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
@@ -2124,6 +2212,8 @@ def train_loss(
         "loss_tau_x": per_axis_unweighted[1],
         "loss_tau_y": per_axis_unweighted[2],
         "loss_tau_z": per_axis_unweighted[3],
+        "wake_mask_fraction": wake_mask_fraction,
+        "near_wake_mask_fraction": near_wake_mask_fraction,
     }
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
@@ -2788,6 +2878,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                wake_x_threshold=config.wake_x_threshold,
+                wake_loss_weight=config.wake_loss_weight,
+                near_wake_x_min=config.near_wake_x_min,
+                near_wake_loss_weight=config.near_wake_loss_weight,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2965,6 +3059,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             ):
                 if log_var_key in batch_loss_metrics:
                     train_log[f"train/{log_var_key}"] = batch_loss_metrics[log_var_key]
+            for wake_key in ("wake_mask_fraction", "near_wake_mask_fraction"):
+                if wake_key in batch_loss_metrics:
+                    train_log[f"train/{wake_key}"] = batch_loss_metrics[wake_key]
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
