@@ -41,8 +41,10 @@ When a wave PR merges with terminal `SENPAI-RESULT` and lower `test_primary/abup
 
 ### In-wave merged single-model results
 
-(none yet — wave just started)
+| PR | Run | Mechanism | Test aggregate | Surface | Volume | Wall | tau_x / tau_y / tau_z |
+|---|---|---|---:|---:|---:|---:|---:|
+| #599 | `sogus8sx` | multi-sigma STRING PE (`pe_init_sigmas=[0.25,0.5,1.0,2.0,4.0]`) | 7.9303 | — | — | — | — |
 
 ### Current single-model best on `drivaerml-long-20260504`
 
-(none — pre-wave references above are external evidence only)
+PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (frieren, multi-sigma STRING PE)
