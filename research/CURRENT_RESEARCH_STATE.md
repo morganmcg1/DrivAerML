@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-05 03:10 UTC (Round 37 — advisor cycle, updated: PR #658 nezuko SWA + PR #659 norman 4L/768d assigned)
+- 2026-05-05 (Round 37 — advisor cycle, updated: PR #662 chihiro curvature + PR #663 kohaku stochastic-depth assigned)
 - **CURRENT SOTA (yi branch): PR #637 (fern, extended low-LR training at lr=1e-5 from t4qaysur checkpoint) — val_abupt 7.5373%**. Active yi merge bar: **7.5373%** (run `vzprvtaw`).
 - **PR #576 (frieren STRING-sep learnable PE + Lion) MERGED to yi.** The `--learnable-pe` flag is available in yi `train.py`. Requires `--no-compile-model` (torch.compile inductor broadcast bug).
 - **PR #637 (fern extended low-LR continuation) MERGED to yi.** New SOTA 7.5373%.
@@ -47,6 +47,8 @@ Dominant open gaps: τ_z (~2.45×), τ_y (~2.05×), vol_p (~1.78×).
 | #657 | fern | Ultra-low LR 1e-6 continuation from PR #637 yi best checkpoint | WIP |
 | #658 | nezuko | SWA staged trajectory: resume PR #637 SOTA, 2ep at lr=5e-6, swa-start-fraction=0.0 | WIP |
 | #659 | norman | Width-over-depth 4L/768d/12h bold capacity increase (Issue #18) | WIP |
+| #662 | chihiro | Compose surface curvature features (κ₁/κ₂) with full yi SOTA stack | WIP |
+| #663 | kohaku | Stochastic depth (DropPath) sweep: prob=0.05 vs 0.10 on yi SOTA | WIP |
 
 ### Recently closed this cycle:
 | PR | Student | Result |

@@ -1756,3 +1756,47 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - EP1 val_abupt = 18.9% >> EP1 abort gate of 15% → killed after EP1
 - Root causes: (1) 6L trains much slower from scratch at 4L-tuned LR (1e-4) — 7-9 pp behind 4L at EP1; (2) layered confounds (k1_k2 + β-NLL) made attribution impossible; (3) τ_y/τ_z particularly bad (2.5× worse than 4L) suggesting depth without more epochs is counterproductive
 - **Conclusion:** 6L/512d at current budget is not viable. Clean isolated depth ablation with longer warmup would be needed to fairly assess depth scaling. Depth scaling remains a valid research direction but requires 3+ epoch budget. Norman reassigned.
+
+---
+
+## 2026-05-05 02:20 — PR #631: Cosine annealing warm restarts (violet) — CLOSED (null result)
+
+- Branch: `violet/cosine-warm-restarts-arm-c`
+- Hypothesis: CosineAnnealingWarmRestarts (T_0=2, T_mult=2) on Lion optimizer would help escape local minima, improving τ_y/τ_z gaps.
+- W&B run: `d2hh4w0f` (Arm C, T_0=2)
+
+| Metric | Arm C val (T_0=2) | yi SOTA at submission (PR #576) | Change |
+|---|---:|---:|---:|
+| **val_abupt** | **10.74%** | 8.2528% | **+2.49pp (30% worse)** |
+| surface_pressure | ~5.8% | ~5.1% | regression |
+| volume_pressure | 6.90% (val) / 12.64% (test) | ~12.4% | val OK, test regression |
+| wall_shear | ~11.2% | ~9.2% | regression |
+
+- **Result:** Hypothesis not supported in cold-start 3-epoch regime. Root cause is structural: within T_0=2 cosine cycle, LR decays from 1e-4 to ~1e-6 by epoch 2. Nearly an entire epoch spent at near-zero LR. Post-restart improvement was 0.08pp — noise level.
+- Arm B (T_0=5): Gate failed (val_abupt > 8.5%). Correctly skipped.
+- Original T_0=3 Arm: Correctly killed before running (2.3-epoch budget cannot reach first restart).
+- Volume_pressure anomaly: val=6.90% vs test=12.64% — suggests overfitting on validation set during cool-down phase.
+- **Conclusion:** Warm restarts are structurally incompatible with cold-start training in ≤3 epoch budget. The mechanism could still be tested as fine-tuning from a converged checkpoint (resume from yi SOTA, T_0=1, lr=1e-5), which is a different hypothesis.
+
+---
+
+## 2026-05-05 02:22 — PR #634: Stochastic Weight Averaging (nezuko) — CLOSED (positive mechanism, below bar)
+
+- Branch: `nezuko/stochastic-weight-averaging`
+- Hypothesis: SWA over last 30% of training would improve generalization by averaging near-convergence weight configurations, especially for τ_y/τ_z heavy tails.
+- W&B run: `ty6cnqmz`
+
+| Metric | SWA model | Best checkpoint | Improvement from SWA |
+|---|---:|---:|---:|
+| **val_abupt** | **9.0118%** | 9.6244% | **-0.61pp** |
+| test_abupt | ~9.6% | ~10.25% | -0.65pp |
+| τ_y | — | — | -0.87pp |
+| τ_z | — | — | -0.79pp |
+| surface_pressure | — | — | -0.41pp |
+| volume_pressure | — | — | -0.72pp |
+| wall_shear | — | — | -0.64pp |
+
+- **Result:** Hypothesis confirmed — SWA consistently improved ALL metrics vs best-checkpoint baseline. τ_y and τ_z saw the largest absolute improvements (0.87pp and 0.79pp), exactly the hardest channels. Test improvements were larger than val improvements (strong generalization signal).
+- **Why below bar (7.5373%):** SWA was applied to a 3-epoch cold-start run (floor 9.01% vs bar 7.54%). Wrong regime — SWA works near convergence.
+- **Caveat:** SWA window truncated by train timeout (270 min) to only 6 snapshots (~1200 steps) instead of the intended ~27 over full epoch.
+- **Conclusion:** Strong positive mechanistic signal. Recommended follow-up: apply SWA on top of extended staged trajectory — resume from yi SOTA checkpoint (7.5373%), run 1-2 epochs at lr=5e-6, collect SWA snapshots every 500 steps. Expected to compound with existing improvements.
