@@ -53,9 +53,9 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #664 | `a8emaoxm` | fern | EP24 | **6.7422%** | per-axis output scaling; new in-wave val best |
-| #669 | `er8wmo8d` | frieren | EP16 | 6.8276% | per-channel tau weighting (tau_y=1.2, tau_z=1.5) |
-| #678 | `sbzspuf2` | nezuko | EP9 | 7.2894% | extended cosine T_max=60 |
-| #696 | `dzochl0q` | tanjiro | EP2 | 9.6170% | QK-Norm + STRING PE; very early |
+| #664 | `a8emaoxm` | fern | EP36 | **6.6916%** | per-axis output scaling; new in-wave val best (updated EP36) |
+| #669 | `er8wmo8d` | frieren | EP27 | 6.7633% | per-channel tau weighting (tau_y=1.2, tau_z=1.5); EP35 gate ≤6.70% |
+| #678 | `sbzspuf2` | nezuko | EP20 | 6.8946% (best EP18=6.8820%) | extended cosine T_max=60; EP25 gate ≤6.82% |
+| #696 | `dzochl0q` | tanjiro | EP13 | 7.5933% | QK-Norm + STRING PE; **CLOSED** — gate fail + compliance violations |
 
 _Last updated: 2026-05-05_
