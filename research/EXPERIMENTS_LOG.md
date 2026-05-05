@@ -1,5 +1,23 @@
 # SENPAI Research Results
 
+## 2026-05-04 20:15 — PR #656: [violet] Multi-EMA ensemble (3 shadow decays averaged at inference) — CLOSED (null result)
+
+- Branch: `violet/multi-ema-ensemble` (closed)
+- Hypothesis: Averaging 3 EMA shadow models at decays [0.9995, 0.999, 0.995] at inference would reduce prediction noise and improve all metrics, particularly the τ channels.
+- W&B run: `785ql96u`
+- Results:
+
+| Metric | yi bar (PR #637) | PR #656 val | Delta |
+|---|---:|---:|---:|
+| `abupt_axis_mean_rel_l2_pct` | 7.5373% | 9.6146% | +2.077pp (worse) |
+| `wall_shear_y_rel_l2_pct` | 9.8691% | 12.64% | +2.77pp (worse) |
+| `wall_shear_z_rel_l2_pct` | 11.2477% | 13.92% | +2.67pp (worse) |
+
+- Root cause analysis: At the ~12k training step budget, the slowest shadow (decay=0.9995) has a half-life of ~1386 steps — only ~8.6 half-lives elapsed. This shadow still retains significant weight from early training (~1% of the initial parameter values). Averaging 3 shadows drags the ensemble toward under-trained early-epoch weights. The τ_y and τ_z channels are hardest-learned and improve most late in training — they are most harmed by stale-weight averaging.
+- Conclusion: Multi-shadow EMA averaging is a negative intervention at <20 half-life budget. The mechanism requires much longer training (≥50k steps for decay=0.9995 to reach 99% convergence) or a narrower decay spread. Null result added to known nulls. Violet reassigned to surface normal vector features (PR #674).
+
+---
+
 ## 2026-05-04 01:36 — PR #551: [stark] Variance-matching auxiliary loss for τ_y/τ_z — CLOSED (no student pod)
 
 - Branch: `stark/variance-matching-aux-loss` (deleted)
