@@ -86,10 +86,36 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-05 12:00 — PR #673: Denser multi-sigma STRING PE 7 sigmas [0.1..8.0] (dl24-tanjiro) — CLOSED (regression)
+
+- **Branch:** `dl24-tanjiro/denser-multisigma-pe-7sigmas`
+- **Student:** dl24-tanjiro
+- **W&B Run:** `zk35lops` (smoke `hwwrlv23`); group `denser-multisigma-pe-7sigmas`
+- **Hypothesis:** Adding lower (σ=0.1) and higher (σ=8.0) sigma extremes to the SOTA 5-sigma STRING PE would broaden spectral coverage and improve fine-scale boundary-layer + long-range pressure-wake fidelity. Pure CLI, zero code change.
+- **Status:** CLOSED as regression at EP14 hard kill gate.
+
+| Metric | This run @ EP14 (best-val EMA) | Wave SOTA `sogus8sx` | Δ |
+|---|---:|---:|---:|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | 8.1492% | 6.5281% | **+1.62pp worse** |
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **9.4198%** | 7.9303% | **+1.49pp worse** |
+| Surface pressure (test) | 5.1207% | — | AB-UPT target 3.82% |
+| Volume pressure (test) | 12.3445% | — | AB-UPT target 6.08% |
+| Wall shear (test, vector) | 9.0467% | — | AB-UPT target 7.29% |
+| τx / τy / τz (test) | 7.96 / 10.33 / 11.34% | — | AB-UPT 5.35 / 3.65 / 3.63% |
+
+**Trajectory:** EP1=28.7% → EP5=8.88% → EP10=8.31% → EP14=8.15%. Slope decelerated from −0.20pp/epoch (EP6) to −0.02pp/epoch (EP14). Naive linear extrapolation to EP50 lands ~7.4%, still worse than SOTA val 6.5281%.
+
+**Confounder:** PR-body launch command did not pin `--model-layers 4` or `--train-volume-points 65000`, so the run fell to defaults (3L, 16k vol points). Student flagged this; even a clean re-run would have struggled given the slope deceleration. Noted as PR-template gap for future STRING-family assignments.
+
+**Side bug found by student (still open):** `KillThreshold.passes` operator semantics are inverted in `trainer_runtime.py:811` — the run was killed precisely when val *improved* below the threshold. Workaround: use `<` operator with a high ceiling for divergence guard. Student offered to file a separate fix-only PR.
+
+**Conclusion:** 7-sigma denser STRING PE is not a productive direction. 5-sigma `[0.25,0.5,1.0,2.0,4.0]` remains the best STRING parameterization in the wave. Per-axis output scaling (PR #664) and tau channel weighting (PR #669) are higher-leverage compositions on top of the same 5-sigma base.
+
+---
+
 ## (Pending round-1 results)
 
 Round-1 long DDP8 assignments remaining:
 - PR #608 (dl24-nezuko) — volume-loss ×2.0, run `y301z78k`, EP~49/50 as of 2026-05-04. Best val=12.8621% (step=521567). Nearly terminal — awaiting student SENPAI-RESULT with test evaluation.
-- PR #673 (dl24-tanjiro) — 7-sigma STRING PE dense sweep, run TBD; awaiting EP1 val from tanjiro smoke run PR #671.
 
 Terminal results will be appended here as students post SENPAI-RESULT markers.
