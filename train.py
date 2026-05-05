@@ -1159,6 +1159,9 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    lr_cosine_t0: int = 0
+    lr_cosine_t_mult: int = 1
+    lr_cosine_eta_min: float = 1e-6
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2629,7 +2632,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"lr={config.lr} wd={config.weight_decay}"
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    if config.lr_cosine_t0 > 0:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=config.lr_cosine_t0,
+            T_mult=config.lr_cosine_t_mult,
+            eta_min=config.lr_cosine_eta_min,
+        )
+        if is_main:
+            print(
+                f"LR scheduler: CosineAnnealingWarmRestarts "
+                f"T_0={config.lr_cosine_t0} T_mult={config.lr_cosine_t_mult} "
+                f"eta_min={config.lr_cosine_eta_min}"
+            )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+        if is_main:
+            print(f"LR scheduler: CosineAnnealingLR T_max={max_epochs}")
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
