@@ -1112,6 +1112,7 @@ class Config:
     volume_loss_weight: float = 1.0
     aux_rel_l2_weight: float = 0.0
     use_tangential_wallshear_loss: bool = False
+    tangent_frame_wallshear: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
@@ -2019,6 +2020,119 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+# Singular-axis cutoff for the freestream-Gram-Schmidt construction:
+# when |n_hat . e_x| > this, fall back to e_y as the seed.
+TANGENT_FRAME_X_SEED_CUTOFF = 0.9
+
+
+def compute_tangent_frame(normals: torch.Tensor) -> torch.Tensor:
+    """Per-point right-handed orthonormal frame (t, b, n_hat).
+
+    The tangent direction `t` is the freestream direction `e_x = (1, 0, 0)`
+    projected onto the local tangent plane and renormalized; near singular
+    points (|n_hat . e_x| > TANGENT_FRAME_X_SEED_CUTOFF) we fall back to
+    `e_y = (0, 1, 0)` as the seed for stability. The binormal is
+    `b = n_hat x t`.
+
+    normals: [..., 3] in world frame (need not be unit).
+    Returns R: [..., 3, 3] with rows R[..., 0, :] = t, R[..., 1, :] = b,
+    R[..., 2, :] = n_hat. Convention:
+        tau_local = einsum('...ij,...j->...i', R, tau_world)
+        tau_world = einsum('...ji,...j->...i', R, tau_local)  # R^T action
+    """
+    n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    e_x = torch.zeros_like(n_hat)
+    e_x[..., 0] = 1.0
+    e_y = torch.zeros_like(n_hat)
+    e_y[..., 1] = 1.0
+    dot_x = (n_hat * e_x).sum(dim=-1, keepdim=True)
+    use_y_seed = dot_x.abs() > TANGENT_FRAME_X_SEED_CUTOFF
+    seed = torch.where(use_y_seed, e_y, e_x)
+    dot_seed = (n_hat * seed).sum(dim=-1, keepdim=True)
+    t = F.normalize(seed - dot_seed * n_hat, dim=-1, eps=1e-8)
+    b = torch.cross(n_hat, t, dim=-1)
+    return torch.stack([t, b, n_hat], dim=-2)
+
+
+def compute_tangent_frame_stats(
+    store: DrivAerMLCaseStore,
+    case_ids: list[str],
+    *,
+    sample_per_case: int = 200_000,
+    seed: int = 0,
+) -> dict[str, list[float]]:
+    """Compute (tau_t, tau_b, tau_n) train-set mean/std using a stratified sample.
+
+    Loads only surface_normals.npy and surface_wallshearstress.npy per case via
+    mmap, samples up to ``sample_per_case`` rows per case, applies the same
+    Gram-Schmidt construction as ``compute_tangent_frame`` in fp64 numpy, and
+    returns mean/std over all sampled points. Used to set the local-frame
+    normalization for the tangent-frame head.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    sum_local = np.zeros(3, dtype=np.float64)
+    sum_sq_local = np.zeros(3, dtype=np.float64)
+    n_pts = 0
+    print(
+        f"[tangent-frame] computing stats over {len(case_ids)} train cases "
+        f"(sample={sample_per_case}/case)"
+    )
+    t0 = time.time()
+    for i, case_id in enumerate(case_ids):
+        case_dir = store.root / case_id
+        normals_path = _resolve_artifact_path(case_dir / "surface_normals.npy")
+        wss_path = _resolve_artifact_path(case_dir / "surface_wallshearstress.npy")
+        normals_full = np.load(normals_path, mmap_mode="r")
+        wss_full = np.load(wss_path, mmap_mode="r")
+        N = int(normals_full.shape[0])
+        if N > sample_per_case:
+            idx = rng.choice(N, size=sample_per_case, replace=False)
+            idx.sort()
+            normals = np.asarray(normals_full[idx], dtype=np.float64)
+            tau = np.asarray(wss_full[idx], dtype=np.float64)
+        else:
+            normals = np.asarray(normals_full, dtype=np.float64)
+            tau = np.asarray(wss_full, dtype=np.float64)
+        if tau.ndim == 1:
+            tau = tau.reshape(-1, 3)
+        n_norm = normals / np.maximum(
+            np.linalg.norm(normals, axis=-1, keepdims=True), 1e-8
+        )
+        dot_x = n_norm[:, 0:1]
+        e_x = np.array([[1.0, 0.0, 0.0]])
+        e_y = np.array([[0.0, 1.0, 0.0]])
+        seed_vec = np.where(np.abs(dot_x) > TANGENT_FRAME_X_SEED_CUTOFF, e_y, e_x)
+        dot_seed = (n_norm * seed_vec).sum(axis=-1, keepdims=True)
+        t_vec = seed_vec - dot_seed * n_norm
+        t_vec = t_vec / np.maximum(
+            np.linalg.norm(t_vec, axis=-1, keepdims=True), 1e-8
+        )
+        b_vec = np.cross(n_norm, t_vec)
+        tau_t = (t_vec * tau).sum(axis=-1)
+        tau_b = (b_vec * tau).sum(axis=-1)
+        tau_n = (n_norm * tau).sum(axis=-1)
+        tau_local = np.stack([tau_t, tau_b, tau_n], axis=-1)
+        sum_local += tau_local.sum(axis=0)
+        sum_sq_local += (tau_local ** 2).sum(axis=0)
+        n_pts += int(tau_local.shape[0])
+        if (i + 1) % 50 == 0 or i + 1 == len(case_ids):
+            elapsed = time.time() - t0
+            print(
+                f"[tangent-frame] {i + 1}/{len(case_ids)} cases "
+                f"({n_pts:,d} pts) elapsed={elapsed:.1f}s"
+            )
+    mean = sum_local / max(n_pts, 1)
+    var = sum_sq_local / max(n_pts, 1) - mean ** 2
+    std = np.sqrt(np.clip(var, 1e-12, None))
+    return {
+        "mean": [float(x) for x in mean.tolist()],
+        "std": [float(max(s, 1e-6)) for s in std.tolist()],
+        "count": int(n_pts),
+    }
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -2030,6 +2144,9 @@ def train_loss(
     volume_loss_weight: float = 1.0,
     aux_rel_l2_weight: float = 0.0,
     use_tangential_wallshear_loss: bool = False,
+    tangent_frame_wallshear: bool = False,
+    tangent_y_mean: torch.Tensor | None = None,
+    tangent_y_std: torch.Tensor | None = None,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
@@ -2039,6 +2156,22 @@ def train_loss(
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
+    if tangent_frame_wallshear:
+        if tangent_y_mean is None or tangent_y_std is None:
+            raise ValueError(
+                "tangent_frame_wallshear requires tangent_y_mean and tangent_y_std"
+            )
+        normals_world = batch.surface_x[..., 3:6]
+        rot = compute_tangent_frame(normals_world)  # [B, N, 3, 3] fp32
+        tau_world_phys = batch.surface_y[..., 1:4].float()
+        tau_local_phys = torch.einsum("bnij,bnj->bni", rot, tau_world_phys)
+        tan_mean = tangent_y_mean.to(tau_local_phys.device)
+        tan_std = tangent_y_std.to(tau_local_phys.device)
+        tau_local_norm = (tau_local_phys - tan_mean) / tan_std
+        surface_target = torch.cat(
+            [surface_target[..., :1], tau_local_norm.to(surface_target.dtype)],
+            dim=-1,
+        )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -2195,7 +2328,14 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    tangent_frame_wallshear: bool = False,
+    tangent_y_mean: torch.Tensor | None = None,
+    tangent_y_std: torch.Tensor | None = None,
 ) -> dict[str, float]:
+    if tangent_frame_wallshear and (tangent_y_mean is None or tangent_y_std is None):
+        raise ValueError(
+            "tangent_frame_wallshear requires tangent_y_mean and tangent_y_std"
+        )
     model.eval()
     surface_loss_sse = 0.0
     surface_loss_count = 0
@@ -2234,13 +2374,48 @@ def evaluate_split(
             )
         surface_pred_norm = out["surface_preds"].float()
         volume_pred_norm = out["volume_preds"].float()
-        surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
+        if tangent_frame_wallshear:
+            normals_world = batch.surface_x[..., 3:6]
+            rot = compute_tangent_frame(normals_world)  # [B, N, 3, 3] fp32
+            tan_mean = tangent_y_mean.to(surface_pred_norm.device)
+            tan_std = tangent_y_std.to(surface_pred_norm.device)
+            tau_world_target_phys = batch.surface_y[..., 1:4].float()
+            tau_local_target_phys = torch.einsum(
+                "bnij,bnj->bni", rot, tau_world_target_phys
+            )
+            tau_local_target_norm = (tau_local_target_phys - tan_mean) / tan_std
+            surface_target_for_sse = torch.cat(
+                [
+                    surface_target_norm[..., :1],
+                    tau_local_target_norm.to(surface_target_norm.dtype),
+                ],
+                dim=-1,
+            )
+        else:
+            surface_target_for_sse = surface_target_norm
+        surface_sse, surface_count = _masked_sse_count(
+            surface_pred_norm, surface_target_for_sse, batch.surface_mask
+        )
         volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
         surface_loss_sse += surface_sse
         surface_loss_count += surface_count
         volume_loss_sse += volume_sse
         volume_loss_count += volume_count
-        surface_pred = transform.invert_surface(surface_pred_norm)
+        if tangent_frame_wallshear:
+            cp_pred_phys = (
+                surface_pred_norm[..., :1] * transform.surface_y_std[0]
+                + transform.surface_y_mean[0]
+            )
+            tau_local_pred_phys = surface_pred_norm[..., 1:4] * tan_std + tan_mean
+            # Inverse rotation: world = R^T @ local => einsum('bnji,bnj->bni', R, local).
+            tau_world_pred_phys = torch.einsum(
+                "bnji,bnj->bni", rot, tau_local_pred_phys
+            )
+            surface_pred = torch.cat(
+                [cp_pred_phys, tau_world_pred_phys], dim=-1
+            )
+        else:
+            surface_pred = transform.invert_surface(surface_pred_norm)
         volume_pred = transform.invert_volume(volume_pred_norm)
 
         if bool(batch.surface_mask.any()):
@@ -2515,6 +2690,52 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"supported: {CURVATURE_FEATURE_MODES}"
         )
 
+    tangent_y_mean: torch.Tensor | None = None
+    tangent_y_std: torch.Tensor | None = None
+    if config.tangent_frame_wallshear:
+        tangent_stats_path = (
+            Path(config.output_dir) / "tangent_frame_stats.json"
+        )
+        tangent_stats: dict[str, list[float]] | None = None
+        if is_main:
+            import json as _json
+
+            store_for_stats = DrivAerMLCaseStore(
+                manifest_path=config.manifest, root=config.data_root or None
+            )
+            if tangent_stats_path.exists():
+                with tangent_stats_path.open() as f:
+                    tangent_stats = _json.load(f)
+                print(
+                    f"[tangent-frame] loaded cached stats from {tangent_stats_path}: "
+                    f"mean={tangent_stats['mean']} std={tangent_stats['std']}"
+                )
+            else:
+                tangent_stats = compute_tangent_frame_stats(
+                    store_for_stats,
+                    store_for_stats.case_ids("train"),
+                )
+                tangent_stats_path.parent.mkdir(parents=True, exist_ok=True)
+                with tangent_stats_path.open("w") as f:
+                    _json.dump(tangent_stats, f)
+                print(
+                    f"[tangent-frame] stats: mean={tangent_stats['mean']} "
+                    f"std={tangent_stats['std']} -> {tangent_stats_path}"
+                )
+        if is_distributed:
+            dist.barrier()
+        if not is_main:
+            import json as _json
+
+            with tangent_stats_path.open() as f:
+                tangent_stats = _json.load(f)
+        tangent_y_mean = torch.tensor(
+            tangent_stats["mean"], dtype=torch.float32, device=device
+        )
+        tangent_y_std = torch.tensor(
+            tangent_stats["std"], dtype=torch.float32, device=device
+        ).clamp_min(1e-6)
+
     train_loader, val_loaders, test_loaders, stats = make_loaders(
         config,
         is_distributed=is_distributed,
@@ -2784,6 +3005,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                tangent_frame_wallshear=config.tangent_frame_wallshear,
+                tangent_y_mean=tangent_y_mean,
+                tangent_y_std=tangent_y_std,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
@@ -3042,7 +3266,16 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(
+                model,
+                loader,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                tangent_frame_wallshear=config.tangent_frame_wallshear,
+                tangent_y_mean=tangent_y_mean,
+                tangent_y_std=tangent_y_std,
+            )
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -3169,7 +3402,16 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            tangent_frame_wallshear=config.tangent_frame_wallshear,
+            tangent_y_mean=tangent_y_mean,
+            tangent_y_std=tangent_y_std,
+        )
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3204,7 +3446,16 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            tangent_frame_wallshear=config.tangent_frame_wallshear,
+            tangent_y_mean=tangent_y_mean,
+            tangent_y_std=tangent_y_std,
+        )
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
