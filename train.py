@@ -57,6 +57,7 @@ from trainer_runtime import (
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
+    numeric_metric_items,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -106,6 +107,8 @@ class Config:
     dual_tower_surface_layers: int = 3
     dual_tower_volume_layers: int = 3
     dual_tower_cross_attn_heads: int = 4
+    save_epoch_snapshots: str = ""
+    track_best_volp: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -860,7 +863,14 @@ def main(argv: Iterable[str] | None = None) -> None:
         output_dir = Path(config.output_dir) / f"run-{run.id}"
         output_dir.mkdir(parents=True, exist_ok=True)
         model_path = output_dir / "checkpoint.pt"
+        volp_model_path = output_dir / "checkpoint_best_volp.pt"
         config_path = output_dir / "config.yaml"
+        snapshot_epochs: set[int] = set()
+        if config.save_epoch_snapshots.strip():
+            for tok in config.save_epoch_snapshots.split(","):
+                tok = tok.strip()
+                if tok:
+                    snapshot_epochs.add(int(tok))
         with config_path.open("w") as f:
             yaml.safe_dump(asdict(config), f)
 
@@ -877,6 +887,9 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
+        best_volp_val = float("inf")
+        best_volp_metrics: dict[str, float] = {}
+        snapshot_records: list[dict[str, object]] = []
         best_checkpoint_source = "ema" if ema is not None else "raw"
         global_step = 0
         early_stop_reason: str | None = None
@@ -1285,6 +1298,49 @@ def main(argv: Iterable[str] | None = None) -> None:
                         },
                         model_path,
                     )
+                # Track best-val-volume_pressure separately so we can harvest
+                # test metrics from a checkpoint that minimises volume error
+                # (the primary target of Issue #717), not just abupt aggregate.
+                if config.track_best_volp:
+                    volp_val = float(val_metrics["val_surface"].get("volume_pressure_rel_l2_pct", float("inf")))
+                    volp_improved = should_update_best_checkpoint(volp_val, best_volp_val)
+                    if volp_improved:
+                        best_volp_val = volp_val
+                        best_volp_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
+                        torch.save(
+                            {
+                                "model": base_model.state_dict(),
+                                "config": asdict(config),
+                                "epoch": epoch + 1,
+                                "val_metrics": val_metrics,
+                                "checkpoint_source": best_checkpoint_source,
+                                "selection_metric": "val_primary/volume_pressure_rel_l2_pct",
+                            },
+                            volp_model_path,
+                        )
+                    log_metrics["best_volp_checkpoint/updated"] = 1.0 if volp_improved else 0.0
+                # Save per-epoch EMA snapshot at requested epochs for separate
+                # post-training test eval.
+                if (epoch + 1) in snapshot_epochs:
+                    snap_path = output_dir / f"snapshot_ep{epoch + 1}.pt"
+                    torch.save(
+                        {
+                            "model": base_model.state_dict(),
+                            "config": asdict(config),
+                            "epoch": epoch + 1,
+                            "val_metrics": val_metrics,
+                            "checkpoint_source": best_checkpoint_source,
+                            "selection_metric": f"snapshot_ep{epoch + 1}",
+                        },
+                        snap_path,
+                    )
+                    snapshot_records.append(
+                        {
+                            "epoch": epoch + 1,
+                            "path": snap_path,
+                            "val_metrics": dict(val_metrics["val_surface"]),
+                        }
+                    )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
                 wandb.log(log_metrics)
@@ -1359,6 +1415,60 @@ def main(argv: Iterable[str] | None = None) -> None:
             global_step=global_step,
             total_minutes=total_minutes,
         )
+
+        # Post-training: load each per-epoch snapshot and the best-val-volp
+        # checkpoint, run full_val + test eval on each, log under namespaced
+        # W&B summary keys so the PR comment can compare checkpoints.
+        extra_checkpoints: list[tuple[str, Path, dict[str, float]]] = []
+        if config.track_best_volp and best_volp_metrics:
+            extra_checkpoints.append(
+                ("best_volp", volp_model_path, best_volp_metrics)
+            )
+        for record in snapshot_records:
+            ep = int(record["epoch"])
+            extra_checkpoints.append(
+                (
+                    f"snapshot_ep{ep}",
+                    Path(record["path"]),
+                    dict(record["val_metrics"]),
+                )
+            )
+        for label, path, val_record in extra_checkpoints:
+            if not path.exists():
+                continue
+            try:
+                ckpt = torch.load(path, map_location=device, weights_only=True)
+                base_model.load_state_dict(ckpt["model"])
+            except Exception as exc:  # pragma: no cover - defensive
+                print(f"[{label}] failed to load {path}: {exc}")
+                continue
+            full_val_metrics = {
+                name: evaluate_split(base_model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in final_val_loaders.items()
+            }
+            test_metrics = {
+                name: evaluate_split(base_model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in final_test_loaders.items()
+            }
+            extra_log: dict[str, object] = {"global_step": global_step}
+            full_val_log = primary_metric_log(
+                f"{label}/full_val_primary", full_val_metrics["val_surface"]
+            )
+            test_log = primary_metric_log(
+                f"{label}/test_primary", test_metrics["test_surface"]
+            )
+            extra_log.update(full_val_log)
+            extra_log.update(test_log)
+            for split_name, metrics in full_val_metrics.items():
+                extra_log.update(metric_namespace(f"{label}/full_val", split_name, metrics))
+            for split_name, metrics in test_metrics.items():
+                extra_log.update(metric_namespace(f"{label}/test", split_name, metrics))
+            extra_log[f"{label}/checkpoint_epoch"] = float(val_record.get("epoch", 0))
+            wandb.log(extra_log)
+            wandb.summary.update(numeric_metric_items(extra_log))
+            print(f"\n=== {label} (epoch {int(val_record.get('epoch', 0))}) ===")
+            print_metrics(f"{label}/test_surface", test_metrics["test_surface"])
+
         wandb.finish()
     finally:
         cleanup_distributed(state)
