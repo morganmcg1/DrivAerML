@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~14:00 UTC)
+- 2026-05-05 (updated ~21:30 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,15 +9,15 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments
+### Active Experiments (as of 2026-05-05 ~21:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** EP38 (gs=208,772). Summary best=**6.6912%** (EP38, after brief uptick EP37). Plateau EP33–38 (range 6.6912–6.6996%). **EP40 gate ≤6.62% HIGH RISK** — needs 0.071pp in ~1.4 epochs. Late cosine LR decay is only remaining mechanism. Wall shear (7.57%) bottleneck. |
-| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | EP30 (gs=164,820). Summary best=**6.7573%** (EP30). EP30 gate ≤6.73% **PASSED**. Next gate EP35 ≤6.70% — needs 0.057pp in ~5 epochs. Consistent downward trend; approaching fern territory. |
-| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2` (group: `extended-cosine-t60-sota-v2`) | EP23 (gs=126,362). Summary best=**6.8820%** (EP18). Oscillating EP19–23 (6.8898–6.9268%). **EP25 gate ≤6.82% HIGH RISK** — needs 0.062pp in ~2 epochs; oscillation since EP18 suggests possible plateau. Real test of T_max=60 is EP30–50 phase. |
-| #722 | dl24-tanjiro | DualTowerTransolver: 3L SurfaceEncoder + 3L VolumeEncoder + cross-attention (Issue #717, `tay` branch, 13 epochs) | `e6v7okbu` + 7 DDP ranks (group: `vol-pressure-dual-tower`) | EP3 complete, mid-EP4. EP3 best=**7.4706%** (surf=4.854%, vol=4.774%, wall=8.381%). Steps/epoch=10865. Test harvest post-EP13 est. ~22:00–23:00 UTC 2026-05-05. Architecture separate from wave base. |
-| #652 | dl24-frieren | Muon optimizer on yi stack — Newton-Schulz orthogonalized Nesterov momentum on 2-D weights (yi wave) | `2erq99fy`→`xuj1wfbn`→`jh3e3r5d` polish chain | **DRAFT — Arm E pending.** Arm D val=**7.4054%**, test=**8.5295%** (yi bar: val=7.3914%, test=8.7189%). Val misses bar by 0.014pp; test already beats bar. Arm E (3rd Lion polish from Arm D ckpt, lr=1e-5) requested. Gates: EP1 ≤7.39%; kill if EP1 >7.42%. Muon cold-start 17–22% faster convergence; val→test gap improved 1.328pp→1.124pp (+0.20pp). |
+| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | EP33 current=6.7539%, best=**6.7488%** (EP31). EP35 gate ≤6.70% will be missed (plateau 13 epochs, EP20–EP33). Run continues to EP50, next gate ≤6.65%. |
+| #732 | dl24-tanjiro | STRING + QK-Norm at lr=5e-5 with 2000-step warmup | group: `string-qknorm-lr5e5` | Smoke test EP1=16.12% (approved — warmup overhead). Long run (50 epochs) launched. EP5 gate ≤10.0%, EP10 ≤8.0%, EP20 ≤7.0%. Awaiting EP5 results. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 and α=0.5 arms) on SOTA Lion+STRING | TBD (group: `gradnorm-adaptive`) | Config correction posted (train-volume-points 16384→65000 bug). Advisor nudge sent 2026-05-05T21:01 — student must start smoke test immediately. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | TBD (group: `y-symmetry-aug`) | Config correction posted (same volume-points bug). Advisor nudge sent 2026-05-05T21:01 — student must start smoke test immediately. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base — pure CLI, zero code change | TBD (group: `5l-string-long`) | **Newly assigned 2026-05-05T21:30 UTC.** Smoke test required first (2 epochs). Kill gates: EP5 ≥8.5%, EP10 ≥7.5%, EP20 ≥7.0%. Hypothesis: 3→4L improvement was +0.549pp; 4→5L could yield similar gain. |
 
 ### Closed / Negative Results This Wave
 
