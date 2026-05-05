@@ -1115,6 +1115,7 @@ class Config:
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
+    wallshear_curvature_focal_gamma: float = 0.0
     beta_nll_beta: float = -1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
@@ -1945,6 +1946,80 @@ def weighted_masked_mse_per_channel(
     return weighted_loss, per_axis_mean
 
 
+def curvature_focal_weighted_mse_per_channel(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    surface_x: torch.Tensor,
+    *,
+    channel_weights: Iterable[float],
+    curvature_focal_gamma: float,
+    n_curvature_channels: int = 2,
+    wallshear_huber_delta: float = 0.0,
+) -> tuple[torch.Tensor, list[float]]:
+    """Per-channel weighted masked surface loss with per-point curvature focal upweight.
+
+    For tau channels (1..3), each surface point i gets an additional multiplicative
+    weight ``focal_w(i) = 1 + |kappa(i)|^gamma`` where
+    ``|kappa(i)| = sqrt(k1_tilde^2 + k2_tilde^2)`` is sourced from the last
+    ``n_curvature_channels`` of ``surface_x`` (already standardized in the loader).
+    Channel 0 (cp) is unaffected. ``gamma=0`` reduces to standard weighted MSE.
+
+    Diagnostic per-axis MSE returned without focal or channel-weight scaling so the
+    keys remain comparable across runs.
+    """
+    weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
+    if not bool(mask.any()):
+        per_axis = [0.0] * int(weights.numel())
+        return pred.sum() * 0.0, per_axis
+
+    diff = pred - target  # [B, N, C]
+    diff_sq = diff.pow(2)
+    mask_f = mask.unsqueeze(-1).to(pred.dtype)
+    valid = mask_f.sum().clamp_min(1)
+    n_channels = diff_sq.shape[-1]
+
+    if wallshear_huber_delta > 0.0 and n_channels >= 4:
+        abs_err = diff.abs()
+        delta_t = pred.new_full((), float(wallshear_huber_delta))
+        huber_elem = torch.where(
+            abs_err < delta_t,
+            diff_sq,
+            2.0 * delta_t * (abs_err - 0.5 * delta_t),
+        )
+        loss_elem = torch.cat([diff_sq[..., :1], huber_elem[..., 1:4]], dim=-1)
+        if n_channels > 4:
+            loss_elem = torch.cat([loss_elem, diff_sq[..., 4:]], dim=-1)
+    else:
+        loss_elem = diff_sq
+
+    if curvature_focal_gamma > 0.0 and n_curvature_channels > 0 and n_channels >= 4:
+        curv = surface_x[..., -n_curvature_channels:].float()  # [B, N, n_curv]
+        curv_mag = curv.pow(2).sum(dim=-1, keepdim=True).clamp_min(1e-12).sqrt()
+        focal_w = 1.0 + curv_mag.pow(curvature_focal_gamma)  # [B, N, 1]
+        focal_w = focal_w.to(loss_elem.dtype)
+        ones_cp = torch.ones_like(focal_w)
+        focal_tau = focal_w.expand(-1, -1, 3)
+        if n_channels > 4:
+            ones_extra = torch.ones(
+                focal_w.shape[0],
+                focal_w.shape[1],
+                n_channels - 4,
+                device=focal_w.device,
+                dtype=focal_w.dtype,
+            )
+            focal_scale = torch.cat([ones_cp, focal_tau, ones_extra], dim=-1)
+        else:
+            focal_scale = torch.cat([ones_cp, focal_tau], dim=-1)
+        loss_elem = loss_elem * focal_scale.detach()
+
+    weighted_diff = loss_elem * weights.view(1, 1, -1)
+    weighted_loss = (weighted_diff * mask_f).sum() / valid / n_channels
+    per_axis_sum = (diff_sq * mask_f).sum(dim=(0, 1)).detach().float()
+    per_axis_mean = (per_axis_sum / valid.detach().float()).cpu().tolist()
+    return weighted_loss, per_axis_mean
+
+
 LOG_VAR_CLAMP_MIN = -10.0
 LOG_VAR_CLAMP_MAX = 5.0
 
@@ -1957,6 +2032,9 @@ def weighted_masked_beta_nll_per_channel(
     *,
     channel_weights: Iterable[float],
     beta: float,
+    surface_x: torch.Tensor | None = None,
+    curvature_focal_gamma: float = 0.0,
+    n_curvature_channels: int = 2,
 ) -> tuple[torch.Tensor, list[float], list[float]]:
     """Per-channel weighted masked β-NLL loss (Seitzer et al. 2022, ICLR).
 
@@ -1994,6 +2072,31 @@ def weighted_masked_beta_nll_per_channel(
     nll = 0.5 * (diff_sq / var + log_var)
     if beta > 0.0:
         nll = nll * var.detach().pow(beta)
+
+    if (
+        curvature_focal_gamma > 0.0
+        and n_curvature_channels > 0
+        and surface_x is not None
+        and n_channels >= 4
+    ):
+        curv = surface_x[..., -n_curvature_channels:].float()  # [B, N, n_curv]
+        curv_mag = curv.pow(2).sum(dim=-1, keepdim=True).clamp_min(1e-12).sqrt()
+        focal_w = 1.0 + curv_mag.pow(curvature_focal_gamma)  # [B, N, 1]
+        focal_w = focal_w.to(nll.dtype)
+        ones_cp = torch.ones_like(focal_w)
+        focal_tau = focal_w.expand(-1, -1, 3)
+        if n_channels > 4:
+            ones_extra = torch.ones(
+                focal_w.shape[0],
+                focal_w.shape[1],
+                n_channels - 4,
+                device=focal_w.device,
+                dtype=focal_w.dtype,
+            )
+            focal_scale = torch.cat([ones_cp, focal_tau, ones_extra], dim=-1)
+        else:
+            focal_scale = torch.cat([ones_cp, focal_tau], dim=-1)
+        nll = nll * focal_scale.detach()
 
     mask_f = mask.unsqueeze(-1).to(pred_mean.dtype)
     valid = mask_f.sum().clamp_min(1)
@@ -2033,6 +2136,8 @@ def train_loss(
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
+    wallshear_curvature_focal_gamma: float = 0.0,
+    n_curvature_channels: int = 0,
     beta_nll_beta: float = -1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
@@ -2077,6 +2182,9 @@ def train_loss(
 
         per_axis_log_var: list[float] | None = None
         volume_log_var_mean: float | None = None
+        focal_active = (
+            wallshear_curvature_focal_gamma > 0.0 and n_curvature_channels > 0
+        )
         if use_beta_nll:
             surface_log_var = out["surface_log_var"]
             volume_log_var = out["volume_log_var"]
@@ -2087,6 +2195,11 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 beta=beta_nll_beta,
+                surface_x=batch.surface_x if focal_active else None,
+                curvature_focal_gamma=(
+                    wallshear_curvature_focal_gamma if focal_active else 0.0
+                ),
+                n_curvature_channels=n_curvature_channels if focal_active else 0,
             )
             volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
                 out["volume_preds"],
@@ -2098,13 +2211,25 @@ def train_loss(
             )
             volume_log_var_mean = vol_log_var_per_axis[0] if vol_log_var_per_axis else 0.0
         else:
-            surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
-                surface_pred_used,
-                surface_target_used,
-                batch.surface_mask,
-                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
-                wallshear_huber_delta=wallshear_huber_delta,
-            )
+            if focal_active:
+                surface_loss, per_axis_unweighted = curvature_focal_weighted_mse_per_channel(
+                    surface_pred_used,
+                    surface_target_used,
+                    batch.surface_mask,
+                    batch.surface_x,
+                    channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                    curvature_focal_gamma=wallshear_curvature_focal_gamma,
+                    n_curvature_channels=n_curvature_channels,
+                    wallshear_huber_delta=wallshear_huber_delta,
+                )
+            else:
+                surface_loss, per_axis_unweighted = weighted_masked_mse_per_channel(
+                    surface_pred_used,
+                    surface_target_used,
+                    batch.surface_mask,
+                    channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                    wallshear_huber_delta=wallshear_huber_delta,
+                )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
         aux_rel_l2_value: float | None = None
@@ -2773,6 +2898,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_iter = tqdm(
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
+        n_curv_channels_for_loss = (
+            2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
+        )
         for batch in train_iter:
             loss, batch_loss_metrics = train_loss(
                 train_model,
@@ -2787,6 +2915,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
+                wallshear_curvature_focal_gamma=config.wallshear_curvature_focal_gamma,
+                n_curvature_channels=n_curv_channels_for_loss,
                 beta_nll_beta=config.beta_nll_beta,
             )
             optimizer.zero_grad(set_to_none=True)
