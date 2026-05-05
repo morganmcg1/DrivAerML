@@ -1,9 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 21:05 UTC
+- **Date:** 2026-05-05 21:35 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (21:05 UTC):** 0 review-ready, 0 idle. **Critical action: emma #654 crashed at step 38347** (just past EP3 val 8.0421%, ~700 steps into EP4). Student was awaiting authorization from 18:11 UTC question. **Authorized EP4 resume from EP3 checkpoint with `--epochs 1` + branch rebase before final SENPAI-RESULT** — dual-tower trajectory extrapolates EP4 ~7.51%, possible SOTA candidate. chihiro #662 spike still elevated at val 12.46% but best-ever improved to 7.909% (final 84min of 720-min budget); tanjiro #671 flat at 8.17%; askeladd #715 descending fast (23.06% → 13.02% in 45min); alphonse #731 smoke run started (val 103% early, expected). No other interventions.
+- **Last triage cycle (21:35 UTC):** 1 PR closed null with new assignment, 1 self-corrected by student, 1 in implementation phase, 1 awaiting student status update. **emma #654 closed null** — SENPAI-RESULT: EP4 val 7.9021% / test 9.0441% (regression vs SOTA but strong volume_p val descent 10.60% → 5.17%). My prior false-crash diagnosis was wrong (it was a clean SENPAI 720-min train-timeout cutoff with forced validation, not a crash). **emma reassigned to PR #733 polish-on-SOTA dual-tower** (graft cross-attn bridge onto dc031qpt with zero-init residual + param-group head-warmup at lr=5e-6). **nezuko #720 self-corrected** — premature kill at 19:50 UTC, relaunched as v2 (`8w7f1b4e`), expected EP2 val by ~23:30 UTC. **edward #672 in implementation phase** — advisor 17:48 UTC bumped lr to 5e-6 with head-only warmup, student still building. **alphonse #731 smoke crashed** at val 103% step 80 — no student status comment yet, will wait one cycle. **chihiro #662** still spiking but best 7.909% holds (final ~75min of budget).
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
@@ -66,7 +66,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #668 | gilbert | asinh wall-shear target normalization | Arm C running (~19:21 UTC terminal) |
 | #662 | chihiro | k1_k2 curvature cold-start ablation (Arm A 720-min control) | Running (~21:00 UTC terminal) |
 | #661 | haku | Surface RFF (dim=64/128 resume, both arms passing gates) | Running — Arm A ahead at EP2 |
-| #654 | emma | DualTowerTransolver | **EP3=8.04%, still descending — ⚠️ branch has merge conflict, rebase needed at terminal** |
+| #733 | emma | Polish-on-SOTA dual-tower bridge (graft cross-attn onto dc031qpt) | Assigned 2026-05-05 21:30 UTC |
 | #652 | frieren | Muon optimizer + Lion polish chain (Arm D `jh3e3r5d`) | Running |
 
 ---
@@ -87,6 +87,7 @@ Surface input feature saturation confirmed: RFF on normals was a null result —
 | #661 | haku | CLOSED — RFF surface-xyz null (+ structural confirmation with #674); input features saturated |
 | #674 | violet | CLOSED — surface normal RFF null; τ_y/τ_z regressed most, input features saturated |
 | #718 | alphonse | CLOSED — selective y-flip TTA null (+12.3% τ_y regression); SOTA not y-equivariant (no aug training) |
+| #654 | emma | CLOSED — DualTowerTransolver cold-start null vs SOTA (EP4 val 7.90% / test 9.04%); strong vol_p val signal (10.60% → 5.17%) but didn't generalize to test |
 | #697 | alphonse | CLOSED — fourier surface-RFF duplicate of #674 |
 | #707 | nezuko | CLOSED — full-mesh volume density duplicate of #719 |
 | #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%) |

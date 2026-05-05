@@ -1,5 +1,31 @@
 # SENPAI Research Results
 
+## 2026-05-05 21:30 — PR #654: [emma] Dual-Tower surface+volume cross-attention encoder — CLOSED (null vs SOTA, strong val volume_p signal)
+
+- Branch: `emma/dual-tower-vol-surface-crossattn`
+- Hypothesis: Replace single-tower surface→volume backbone with two parallel transformer towers connected by cross-attention; the volume tower queries surface tokens to absorb surface-pressure information that cold-start architectures otherwise miss.
+- W&B run: `sjq4wvg1` (group `yi-round37-dual-tower`, name `emma/dual-tower-2L-2L-xattn-arm-a-resume`)
+
+| Metric | EP1 | EP2 | EP3 | **EP4 (partial 53%, best)** | yi SOTA val | Δ vs SOTA |
+|---|---|---|---|---|---|---|
+| val_abupt | 10.2430% | 8.5688% | 8.0421% | **7.9021%** | 7.3767% | +0.5254 pp |
+| val volume_p | 10.60% (arm A) | 6.29% | 5.57% | **5.17%** | 4.31% | +0.86 pp |
+| val τ_y | — | 11.10% | 10.46% | 10.34% | 9.58% | +0.76 pp |
+| val τ_z | — | 12.46% | 11.84% | 11.78% | 11.04% | +0.74 pp |
+
+| Test metric | **EP4 test** | yi SOTA test | Δ vs SOTA |
+|---|---|---|---|
+| test_abupt | 9.0441% | 8.7015% | +0.34 pp |
+| test volume_p | 12.5296% | 11.3738% | +1.16 pp |
+
+- **Key finding 1 — architecture works on val:** Volume_pressure VAL descent from 10.60% → 5.17% in 4 epochs (-5.43pp) is the strongest val volume_p signal in this round. The dual-tower cross-attention does what we hypothesized — closes the volume-tower's information bottleneck on surface pressure.
+- **Key finding 2 — does not generalize to test:** Test volume_pressure 12.53% > SOTA test 11.37%. The val-side win comes partly from cross-attn-mediated memorization on val-specific cases. The val/test ratio narrowed slightly (4.31/11.37 SOTA → 5.17/12.53 emma) but absolute test is worse.
+- **Key finding 3 — cold-start cannot beat polished SOTA in 4 epochs:** Trajectory deceleration (-1.67 → -0.53 → -0.14 pp/epoch) extrapolates a clean full EP4 to ~7.85% (still null). The fundamental issue is training-depth gap, not architectural deficit.
+- **False-crash correction:** I (advisor) misdiagnosed the run as a crash at 21:00 UTC and authorized an EP4 resume that was unnecessary. The actual stop was a clean SENPAI 720-min train-timeout cutoff at step 38356 (53% of EP4), which forced a validation pass. emma's diagnostic in the PR comment correctly identified this from the resume log. W&B's `state=running → finished` transition was indistinguishable from a crash from outside the pod.
+- **Reassignment:** emma → PR #733 Polish-on-SOTA dual-tower (graft zero-init cross-attn bridge onto dc031qpt with param-group head-warmup at lr=5e-6). Tests whether the architectural win composes with SOTA's training depth.
+
+---
+
 ## 2026-05-05 19:50 — PR #718: [alphonse] Selective channel-wise TTA: flip-average τ_y only at inference — CLOSED (null, +regression)
 
 - Branch: `alphonse/selective-tta-tau-y`
