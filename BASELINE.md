@@ -367,13 +367,13 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **7.3914** | **8.7189** | #658 | pxsnrw36 | 2026-05-05 |
+| `abupt_axis_mean_rel_l2_pct` | **7.3767** | **8.7015** | #681 | dc031qpt | 2026-05-05 |
 
-Note: PR #658 (nezuko, SWA staged trajectory / EMA best-ckpt from lr=5e-6 continuation) merged 2026-05-05 —
-new yi SOTA at val_abupt=7.3914%. Prior bar was 7.4861% (PR #657 fern, ultra-low LR 1e-6 continuation).
-EMA best-ckpt (decay=0.999) dominated SWA uniform average (7.4537%) in near-converged regime.
-Key lesson: SWA beneficial in cold-start / exploring regime; EMA optimal in flat, near-convergence regime.
-**Merge bar: val_abupt 7.3914% on the yi codebase (PR #658 nezuko, EMA best-ckpt from lr=5e-6 SWA run).**
+Note: PR #681 (nezuko, terminal LR polish lr=3e-7 from PR #658 SOTA checkpoint `pxsnrw36`) merged 2026-05-05 —
+new yi SOTA at val_abupt=7.3767%. Prior bar was 7.3914% (PR #658 nezuko, EMA best-ckpt from lr=5e-6 SWA).
+τ_y and τ_z saw the largest gains (−0.0291pp and −0.0196pp respectively), exactly the highest-error components.
+Key lesson: Extremely low LR (3e-7, 17× below PR #658 lr) still extracts marginal consistent gains from a near-converged SOTA checkpoint.
+**Merge bar: val_abupt 7.3767% on the yi codebase (PR #681 nezuko, terminal LR polish lr=3e-7).**
 **Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
 
 ### PR #658 full metrics (val / test, EMA best-ckpt EP2)
@@ -407,6 +407,63 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536
 ```
+
+---
+
+## 2026-05-05 — PR #681: Terminal LR polish lr=3e-7 from PR #658 SOTA checkpoint (nezuko) — NEW yi SOTA
+
+PR #681 (nezuko, lr=3e-7 continuation from PR #658 SOTA checkpoint `pxsnrw36`) merged 2026-05-05.
+Resumed from PR #658's best val checkpoint (val_abupt=7.3914%) and trained at lr=3e-7 (17× lower than PR #658 lr=5e-6) for 2 epochs.
+
+**Result:** val_abupt improved from 7.3914% → **7.3767%** (−0.0147pp). Test: 8.7189% → **8.7015%** (−0.0174pp).
+Every primary surface field improved on both val and test. Gain concentrated on τ_y and τ_z — the highest-error components.
+
+Key findings:
+- τ_y saw the largest gain: val −0.0291pp (9.6123% → 9.5832%)
+- τ_z: val −0.0196pp (11.0573% → 11.0377%)
+- τ_x: val −0.0121pp (7.1166% → 7.1045%)
+- Kill gate (EP1 val_abupt > 7.55%) never close to firing
+- τ_z slope was marginally positive (+4.18e-7/step per W&B) during this run — worth monitoring in future polish
+
+W&B run: `dc031qpt` (group: `yi-round39-terminal-lr-polish`, name: `nezuko/terminal-lr-3e-7`)
+Resumed from: `pxsnrw36` (PR #658 yi SOTA)
+
+### PR #681 full metrics (val / test)
+
+| Metric | Baseline val (#658) | PR #681 val | Baseline test (#658) | PR #681 test |
+|---|---:|---:|---:|---:|
+| abupt_axis_mean_rel_l2_pct | 7.3914% | **7.3767%** | 8.7189% | **8.7015%** |
+| surface_pressure_rel_l2_pct | 4.8552% | **4.8515%** | — | 4.6236% |
+| wall_shear_rel_l2_pct | 8.3192% | **8.3016%** | — | 8.3214% |
+| volume_pressure_rel_l2_pct | 4.3156% | **4.3066%** | — | 11.3738% |
+| wall_shear_x_rel_l2_pct (τ_x) | 7.1166% | **7.1045%** | — | 7.1753% |
+| wall_shear_y_rel_l2_pct (τ_y) | 9.6123% | **9.5832%** | — | 9.5964% |
+| wall_shear_z_rel_l2_pct (τ_z) | 11.0573% | **11.0377%** | — | 10.7383% |
+
+### Reproduce PR #681
+
+```bash
+cd /workspace/senpai/target
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
+  --resume-from /workspace/senpai/target/artifacts/pxsnrw36/checkpoint.pt \
+  --agent nezuko \
+  --wandb-group yi-round39-terminal-lr-polish \
+  --wandb-name nezuko/terminal-lr-3e-7 \
+  --learnable-pe \
+  --optimizer lion --lr 3e-7 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --lr-warmup-epochs 0 \
+  --ema-decay 0.999 \
+  --epochs 2 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 --validation-every 1 --no-compile-model \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536
+```
+
+Note: Do NOT add `--surface-curvature-features k1_k2`, `--beta-nll-beta`, or `--grad-ema-alpha` —
+the `pxsnrw36` checkpoint was trained with surface_input_dim=4. Those flags would cause shape mismatches.
+
+---
 
 ### PR #637 full metrics (val / test)
 
