@@ -1,9 +1,9 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 22:05 UTC
+- **Date:** 2026-05-05 22:35 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (22:05 UTC):** 1 PR closed null with new assignment, 1 urgent divergence intervention. **chihiro #662 closed null** — Arm A val 7.9094% / test 9.0366% (regression vs SOTA). Three findings preserved: (1) cold-start lands within 0.37pp of polished SOTA, (2) k1_k2 features do not compound with current SOTA stack (PR #580 win was artifact of weaker baseline), (3) lr=1e-4 overshoots without LR decay. **chihiro reassigned to PR #739 curvature-weighted-loss polish-on-SOTA** (per-point loss weight = 1 + α·|κ₁|+|κ₂|, two-arm sweep α=0.5/1.5 from dc031qpt at lr=5e-7). **tanjiro #671 DIVERGED** at step 21933 — val regressed 8.167% → 17.929% (+9.76pp, slope +1.79%/1k). Sent back urgent: instruct student to kill cleanly, evaluate test on best-by-val checkpoint (val ≈ 8.167% peak), post terminal SENPAI-RESULT from peak not divergence. **askeladd #715** descending healthily (val 13.02% step 13765); **fern #713 arm B** still pre-val (1.2h runtime).
+- **Last triage cycle (22:35 UTC):** 0 review-ready, 0 idle, awaiting student polls. **tanjiro #671 still diverged** at val 17.929% step 22616 (50min after my 21:50 UTC kill instruction); pod is Running, student hasn't polled yet — will check next cycle. **emma #733 not started** — pod is Running but no W&B run on `dual-tower-polish-from-sota` yet; awaiting student poll. **alphonse #731 recovered** from smoke crash; new run `gchh8r7f` running at step 2408 (0.85h), pre-val. **askeladd #715** continues descent (val 13.02% step 14465). **fern #713 arm B** still pre-val (1.45h, step 4016). No interventions this cycle.
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
