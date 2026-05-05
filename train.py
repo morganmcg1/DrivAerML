@@ -102,6 +102,8 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_bc_type_embedding: bool = False
+    bc_type_embedding_dim: int = 16
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -219,6 +221,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_bc_type_embedding": (
+            "Add a 3-way categorical BC-type embedding to surface points. "
+            "DrivAerML lacks explicit zone IDs, so labels are derived "
+            "geometrically per-case from z (vertical): bottom 5%% (=>1), "
+            "top 5%% (=>2), middle 90%% (=>0=wall). Embedding "
+            "(nn.Embedding(3, --bc-type-embedding-dim)) is concatenated with "
+            "existing surface features before the first projection. Default "
+            "normal(0,1) init breaks symmetry from step 0. Adds "
+            "3 * embedding_dim parameters."
+        ),
+        "bc_type_embedding_dim": (
+            "Embedding dimensionality for --use-bc-type-embedding. "
+            "Default 16 keeps the added parameter count tiny."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -297,6 +313,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_bc_type_embedding=config.use_bc_type_embedding,
+        bc_type_embedding_dim=config.bc_type_embedding_dim,
     )
 
 
@@ -829,6 +847,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                )
+            if config.use_bc_type_embedding:
+                bc_emb = getattr(base_model, "bc_type_embedding", None)
+                bc_added_params = bc_emb.weight.numel() if bc_emb is not None else 0
+                print(
+                    f"BC-type embedding enabled: 3 zones x dim={config.bc_type_embedding_dim} "
+                    f"(+{bc_added_params} params). Geometric labels (per-batch z 5th/95th "
+                    f"percentile): 0=wall (mid 90%), 1=low-z (bottom 5%), 2=high-z (top 5%)."
                 )
 
         run = init_wandb_run(

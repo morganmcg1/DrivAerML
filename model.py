@@ -342,6 +342,8 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_bc_type_embedding: bool = False,
+        bc_type_embedding_dim: int = 16,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +356,8 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_bc_type_embedding = use_bc_type_embedding
+        self.bc_type_embedding_dim = bc_type_embedding_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -399,7 +403,19 @@ class SurfaceTransolver(nn.Module):
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
 
-        surface_proj_in = surface_extra_dim + rff_out_dim
+        if use_bc_type_embedding:
+            # BC-type categorical embedding for surface points only.
+            # 3 zones (wall=0, low-z=1, high-z=2) inferred geometrically from
+            # per-batch z 5th/95th percentile (DrivAerML lacks explicit BC labels;
+            # this is a coarse geometric segmentation of the car body).
+            # Default normal(0,1) init breaks symmetry from step 0.
+            self.bc_type_embedding = nn.Embedding(3, bc_type_embedding_dim)
+            surface_bc_extra = bc_type_embedding_dim
+        else:
+            self.bc_type_embedding = None
+            surface_bc_extra = 0
+
+        surface_proj_in = surface_extra_dim + rff_out_dim + surface_bc_extra
         volume_proj_in = volume_extra_dim + rff_out_dim
         self.project_surface_features = (
             LinearProjection(surface_proj_in, n_hidden) if surface_proj_in > 0 else None
@@ -422,6 +438,38 @@ class SurfaceTransolver(nn.Module):
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
+    def _compute_bc_labels(
+        self,
+        pos: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Per-case z-percentile BC zones: 0=wall (default), 1=low-z, 2=high-z.
+
+        DrivAerML surface arrays do not carry explicit zone IDs, so labels are
+        derived geometrically from the per-case z (vertical) distribution:
+        low-z 5% (wheels/underbody) and high-z 5% (roof) get distinct labels;
+        the remaining ~90% (main car body) stays at 0. Padding tokens are
+        excluded from the percentile via NaN masking and labelled 0 (they are
+        masked out downstream anyway).
+        """
+        if pos.shape[1] == 0:
+            return pos.new_zeros(pos.shape[0], 0, dtype=torch.long)
+        z = pos[..., 2].float()
+        if mask is not None:
+            valid = mask.to(dtype=torch.bool)
+            z_for_quantile = torch.where(valid, z, torch.full_like(z, float("nan")))
+            z_lo = torch.nanquantile(z_for_quantile, 0.05, dim=1, keepdim=True)
+            z_hi = torch.nanquantile(z_for_quantile, 0.95, dim=1, keepdim=True)
+        else:
+            z_lo = torch.quantile(z, 0.05, dim=1, keepdim=True)
+            z_hi = torch.quantile(z, 0.95, dim=1, keepdim=True)
+        bc = torch.zeros_like(z, dtype=torch.long)
+        bc = torch.where(z < z_lo, torch.ones_like(bc), bc)
+        bc = torch.where(z > z_hi, torch.full_like(bc, 2), bc)
+        if mask is not None:
+            bc = torch.where(mask.to(dtype=torch.bool), bc, torch.zeros_like(bc))
+        return bc
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -431,6 +479,8 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        bc_type_embedding: nn.Embedding | None = None,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
@@ -441,6 +491,10 @@ class SurfaceTransolver(nn.Module):
             feature_parts.append(string_sep(pos))
         elif rff is not None:
             feature_parts.append(rff(pos))
+        if bc_type_embedding is not None:
+            bc_labels = self._compute_bc_labels(pos, mask)
+            bc_emb = bc_type_embedding(bc_labels).to(dtype=hidden.dtype)
+            feature_parts.append(bc_emb)
         if project_features is not None and feature_parts:
             features = (
                 feature_parts[0] if len(feature_parts) == 1 else torch.cat(feature_parts, dim=-1)
@@ -478,6 +532,8 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
+                    bc_type_embedding=self.bc_type_embedding,
+                    mask=surface_mask,
                 )
             )
             masks.append(surface_mask)
