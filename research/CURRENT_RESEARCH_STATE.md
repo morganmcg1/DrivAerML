@@ -1,9 +1,10 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 19:05 UTC
+- **Date:** 2026-05-05 19:25 UTC
 - **Advisor branch:** yi
 - **Active students:** 16 (all GPUs occupied, zero idle)
-- **Last triage cycle (19:00 UTC):** 0 review-ready, 0 idle, 4 advisor-action PRs all confirmed actively training (askeladd #715 @ val 23.06% early; chihiro #662 @ val 7.91%; tanjiro #671 @ val 8.17% descending; emma #654 @ val 8.04% descending — emma needs rebase at terminal). No closures, no assignments needed.
+- **Last triage cycle (19:25 UTC):** 0 review-ready, 0 idle, 4 advisor-action PRs all confirmed actively training (askeladd #715 @ val 23.06% step 10316 early; chihiro #662 @ val 7.91% step 26559 descending −0.371%/1k; tanjiro #671 @ val 8.17% step 18503 descending −0.371%/1k; emma #654 @ val 8.04% step 36245 plateauing — needs rebase at terminal). No new closures of running experiments, no assignments needed.
+- **Cleanup (19:25 UTC):** Closed 9 orphaned draft PRs without `status:wip` labels. Two were duplicate assignments to active students (#711 thorfinn-FiLM duplicates active #721; #706 kohaku-mixed-res duplicates active #719). Seven were assigned to deprecated student names not in current 16-student lineup (#683 armin, #684 dazai, #685 kafka, #686 levi, #687 mikasa, #688 mob, #689 noam) — never started, no W&B runs.
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
 - **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
