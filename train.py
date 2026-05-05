@@ -1116,6 +1116,7 @@ class Config:
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
     beta_nll_beta: float = -1.0
+    wallshear_loss: str = "beta_nll"  # "beta_nll" | "crps" | "mae"
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -2011,6 +2012,37 @@ def weighted_masked_beta_nll_per_channel(
     return weighted_loss, per_axis_diff_sq_mean, per_axis_log_var_mean
 
 
+def weighted_masked_mae_per_channel(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    channel_weights: Iterable[float],
+) -> tuple[torch.Tensor, list[float]]:
+    """Per-channel weighted masked MAE (L1 / CRPS for deterministic models).
+
+    pred, target: [B, N, C]; mask: [B, N] bool.
+
+    Returns:
+        weighted_loss: scalar MAE averaged across channels.
+        per_axis_abs_mean: list of per-channel masked mean absolute errors
+            (for cross-arm comparability).
+    """
+    weights = torch.tensor(list(channel_weights), device=pred.device, dtype=pred.dtype)
+    n_channels = pred.shape[-1]
+    if not bool(mask.any()):
+        return pred.sum() * 0.0, [0.0] * int(weights.numel())
+    mask_f = mask.unsqueeze(-1).to(pred.dtype)
+    valid = mask_f.sum().clamp_min(1)
+    abs_diff = (pred - target).abs()
+    weighted = abs_diff * weights.view(1, 1, -1)
+    weighted_loss = (weighted * mask_f).sum() / valid / n_channels
+    per_axis_abs_mean = (
+        (abs_diff * mask_f).sum(dim=(0, 1)).detach().float() / valid.detach().float()
+    ).cpu().tolist()
+    return weighted_loss, per_axis_abs_mean
+
+
 def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     """Project per-point 3-vectors onto the local tangent plane.
 
@@ -2038,6 +2070,7 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    wallshear_loss: str = "beta_nll",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -2081,7 +2114,44 @@ def train_loss(
 
         per_axis_log_var: list[float] | None = None
         volume_log_var_mean: float | None = None
-        if use_beta_nll:
+        if use_beta_nll and wallshear_loss in ("crps", "mae"):
+            # Hybrid: cp (index 0) → β-NLL; wall-shear (indices 1-3) → MAE/CRPS;
+            # volume → β-NLL. The unused ws log_var is touched with zero weight for
+            # DDP allreduce to see the parameters even when not used in loss.
+            surface_log_var = out["surface_log_var"]
+            volume_log_var = out["volume_log_var"]
+            # cp channel via β-NLL
+            cp_loss, cp_per_axis, cp_log_var_stats = weighted_masked_beta_nll_per_channel(
+                surface_pred_used[..., :1],
+                surface_log_var[..., :1],
+                surface_target_used[..., :1],
+                batch.surface_mask,
+                channel_weights=(1.0,),
+                beta=beta_nll_beta,
+            )
+            # wall-shear channels via MAE (CRPS for deterministic predictions)
+            ws_loss, ws_per_axis = weighted_masked_mae_per_channel(
+                surface_pred_used[..., 1:4],
+                surface_target_used[..., 1:4],
+                batch.surface_mask,
+                channel_weights=(1.0, wallshear_y_weight, wallshear_z_weight),
+            )
+            # Touch ws log_var to keep DDP allreduce happy (all-reduce needs all
+            # parameters to appear in the forward graph of every rank).
+            ws_log_var_touch = surface_log_var[..., 1:4].sum() * 0.0
+            surface_loss = (cp_loss + ws_loss) * 0.5 + ws_log_var_touch
+            per_axis_unweighted = cp_per_axis + ws_per_axis
+            per_axis_log_var = cp_log_var_stats + [0.0, 0.0, 0.0]
+            volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
+                out["volume_preds"],
+                volume_log_var,
+                volume_target,
+                batch.volume_mask,
+                channel_weights=(1.0,),
+                beta=beta_nll_beta,
+            )
+            volume_log_var_mean = vol_log_var_per_axis[0] if vol_log_var_per_axis else 0.0
+        elif use_beta_nll:
             surface_log_var = out["surface_log_var"]
             volume_log_var = out["volume_log_var"]
             surface_loss, per_axis_unweighted, per_axis_log_var = weighted_masked_beta_nll_per_channel(
@@ -2538,7 +2608,24 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        # Allow resuming from a non-beta-nll checkpoint into a beta-nll model:
+        # the log_var heads are zero-init by construction (see TransolverModel),
+        # so they correspond to the model predicting var=1 (β-NLL ≡ MSE at step 0).
+        load_result = model.load_state_dict(ckpt["model"], strict=False)
+        missing = list(load_result.missing_keys)
+        unexpected = list(load_result.unexpected_keys)
+        # Only allow log_var heads to be missing — every other key must match.
+        non_log_var_missing = [k for k in missing if "log_var" not in k]
+        if non_log_var_missing or unexpected:
+            raise RuntimeError(
+                f"Checkpoint load mismatch. Missing (non-log_var): {non_log_var_missing}; "
+                f"Unexpected: {unexpected}"
+            )
+        if missing and is_main:
+            print(
+                f"Resumed checkpoint missing {len(missing)} log_var keys "
+                f"(zero-init); first: {missing[:4]}"
+            )
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
@@ -2834,6 +2921,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                wallshear_loss=config.wallshear_loss,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
