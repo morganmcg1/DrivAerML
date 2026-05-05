@@ -906,6 +906,11 @@ def _kd_iter_case_chunks(
 ) -> Iterable[tuple[list[DrivAerMLCase], list[torch.Tensor], list[torch.Tensor]]]:
     """Yield micro-batches of chunks for a single case.
 
+    Loads the full case from disk *once* at start, then slices the in-memory
+    tensors for each chunk. This is dramatically faster than repeatedly
+    indexing into mmapped .npy files (strided eval_chunk patterns translate
+    to page-thrashing reads when we iterate ~215 views per case).
+
     Each yielded element is ``(cases, surface_indices, volume_indices)`` where
     ``cases`` is a list of length up to ``chunk_batch_size`` and the indices
     list aligns with each case's per-modality view (empty tensors mark a view
@@ -918,6 +923,30 @@ def _kd_iter_case_chunks(
     surface_views = _kd_view_count(n_surface, eval_surface_points)
     volume_views = _kd_view_count(n_volume, eval_volume_points)
     view_count = max(surface_views, volume_views)
+    full_case = store.load_case(case_id)
+
+    def _slice(case: DrivAerMLCase, surface_idx: torch.Tensor, volume_idx: torch.Tensor) -> DrivAerMLCase:
+        if surface_idx.numel() == 0:
+            sx = torch.zeros((0, case.surface_x.shape[1]), dtype=case.surface_x.dtype)
+            sy = torch.zeros((0, case.surface_y.shape[1]), dtype=case.surface_y.dtype)
+        else:
+            sx = case.surface_x.index_select(0, surface_idx)
+            sy = case.surface_y.index_select(0, surface_idx)
+        if volume_idx.numel() == 0:
+            vx = torch.zeros((0, case.volume_x.shape[1]), dtype=case.volume_x.dtype)
+            vy = torch.zeros((0, case.volume_y.shape[1]), dtype=case.volume_y.dtype)
+        else:
+            vx = case.volume_x.index_select(0, volume_idx)
+            vy = case.volume_y.index_select(0, volume_idx)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=sx,
+            surface_y=sy,
+            volume_x=vx,
+            volume_y=vy,
+            metadata=dict(case.metadata),
+        )
+
     pending_cases: list[DrivAerMLCase] = []
     pending_surface_idx: list[torch.Tensor] = []
     pending_volume_idx: list[torch.Tensor] = []
@@ -934,12 +963,8 @@ def _kd_iter_case_chunks(
             volume_idx = torch.arange(n_volume, dtype=torch.long)
         else:
             volume_idx = torch.empty(0, dtype=torch.long)
-        case = store.load_case(
-            case_id,
-            surface_rows=None if surface_idx.numel() == 0 else surface_idx.numpy(),
-            volume_rows=None if volume_idx.numel() == 0 else volume_idx.numpy(),
-        )
-        pending_cases.append(case)
+        chunk_case = _slice(full_case, surface_idx, volume_idx)
+        pending_cases.append(chunk_case)
         pending_surface_idx.append(surface_idx)
         pending_volume_idx.append(volume_idx)
         if len(pending_cases) >= chunk_batch_size:
@@ -980,12 +1005,12 @@ def build_teacher_cache(
 ) -> Path:
     """Build the K-teacher averaged prediction cache for the train split.
 
-    Each teacher checkpoint is loaded sequentially on each rank. For each
-    case in this rank's shard we run ``view_count`` eval_chunk(
-    ``--kd-cache-eval-*-points``) micro-batches through the teacher and place
-    the per-chunk predictions back into a full-resolution per-case fp32
-    accumulator. After all teachers finish for a case we average and save the
-    bf16 prediction to ``cases/<case_id>.pt``.
+    All teachers are loaded onto the device once and held in memory; cases
+    are then iterated as the outer loop so each full case is read from disk
+    *exactly once* per build (rather than ``K`` times). For each case we
+    chunk it into ``view_count`` eval_chunk(``--kd-cache-eval-*-points``)
+    micro-batches and run all K teachers over the same micro-batches, then
+    average and save bf16 predictions to ``cases/<case_id>.pt``.
 
     The build is idempotent: any case whose ``.pt`` file already exists is
     skipped, so a partial build can be resumed by re-running the cache
@@ -1033,16 +1058,16 @@ def build_teacher_cache(
     artifact_root = kd_artifact_dir(Path(config.kd_cache_root))
     artifact_root.mkdir(parents=True, exist_ok=True)
 
-    # Pre-allocate per-case accumulators only for this rank's shard, lazily on
-    # first touch by a teacher to avoid loading point counts twice.
     n_teachers = len(teacher_run_ids)
-    cases_remaining_per_teacher: dict[str, int] = {cid: 0 for cid in shard_ids}
-    surface_sums: dict[str, torch.Tensor] = {}
-    volume_sums: dict[str, torch.Tensor] = {}
 
+    # Load all teachers once. Each is ~150 MB on GPU at L=5 hidden=512; 7
+    # teachers + activation peaks fit comfortably on H100 80GB.
+    teachers: list[tuple[str, nn.Module]] = []
     for teacher_idx, run_id in enumerate(teacher_run_ids):
         t_load_start = time.time()
-        print(f"[KD][rank {rank}] loading teacher {teacher_idx + 1}/{n_teachers} ({run_id})")
+        print(
+            f"[KD][rank {rank}] loading teacher {teacher_idx + 1}/{n_teachers} ({run_id})"
+        )
         teacher = _kd_load_teacher(
             run_id, artifact_root, device, api, entity, project, state=state
         )
@@ -1050,65 +1075,75 @@ def build_teacher_cache(
             f"[KD][rank {rank}] teacher {run_id} loaded in "
             f"{time.time() - t_load_start:.1f}s"
         )
-        teacher_case_start = time.time()
-        for case_idx, case_id in enumerate(shard_ids):
-            counts = store.case_point_counts(case_id)
-            n_surface = int(counts["n_surface"])
-            n_volume = int(counts["n_volume"])
-            if case_id not in surface_sums:
-                surface_sums[case_id] = torch.zeros(
-                    (max(n_surface, 1), SURFACE_Y_DIM), dtype=torch.float32
-                )
-                volume_sums[case_id] = torch.zeros(
-                    (max(n_volume, 1), VOLUME_Y_DIM), dtype=torch.float32
-                )
-            for cases, surface_idx_list, volume_idx_list in _kd_iter_case_chunks(
+        teachers.append((run_id, teacher))
+
+    build_start = time.time()
+    for case_idx, case_id in enumerate(shard_ids):
+        case_start = time.time()
+        counts = store.case_point_counts(case_id)
+        n_surface = int(counts["n_surface"])
+        n_volume = int(counts["n_volume"])
+        surface_sum = torch.zeros(
+            (max(n_surface, 1), SURFACE_Y_DIM), dtype=torch.float32
+        )
+        volume_sum = torch.zeros(
+            (max(n_volume, 1), VOLUME_Y_DIM), dtype=torch.float32
+        )
+
+        # Materialise chunk batches once per case (full case is read once,
+        # then sliced in-memory for each chunk) so all K teachers reuse the
+        # same in-memory tensors.
+        chunks = list(
+            _kd_iter_case_chunks(
                 case_id,
                 store,
                 config.kd_cache_eval_surface_points,
                 config.kd_cache_eval_volume_points,
                 config.kd_cache_chunk_batch_size,
-            ):
+            )
+        )
+
+        for run_id, teacher in teachers:
+            for cases, surface_idx_list, volume_idx_list in chunks:
                 surface_pred, volume_pred, _, _ = _kd_teacher_chunk_forward(
                     teacher, cases, device, config.amp_mode
                 )
                 surface_pred_cpu = surface_pred.detach().cpu()
                 volume_pred_cpu = volume_pred.detach().cpu()
-                for j, (s_idx, v_idx) in enumerate(zip(surface_idx_list, volume_idx_list)):
+                for j, (s_idx, v_idx) in enumerate(
+                    zip(surface_idx_list, volume_idx_list)
+                ):
                     s_n = s_idx.numel()
                     v_n = v_idx.numel()
                     if s_n > 0:
-                        surface_sums[case_id][s_idx] += surface_pred_cpu[j, :s_n]
+                        surface_sum[s_idx] += surface_pred_cpu[j, :s_n]
                     if v_n > 0:
-                        volume_sums[case_id][v_idx] += volume_pred_cpu[j, :v_n]
-            cases_remaining_per_teacher[case_id] += 1
-            if (case_idx + 1) % 10 == 0:
-                dt = time.time() - teacher_case_start
-                rate = (case_idx + 1) / max(dt, 1e-6)
-                print(
-                    f"[KD][rank {rank}] teacher {run_id}: "
-                    f"{case_idx + 1}/{len(shard_ids)} cases ({dt:.1f}s, "
-                    f"{rate:.2f} case/s)"
-                )
-        print(
-            f"[KD][rank {rank}] teacher {run_id} done in "
-            f"{time.time() - teacher_case_start:.1f}s"
+                        volume_sum[v_idx] += volume_pred_cpu[j, :v_n]
+
+        # free chunk tensors before averaging+saving
+        del chunks
+
+        surface_avg = surface_sum / max(n_teachers, 1)
+        volume_avg = volume_sum / max(n_teachers, 1)
+        _kd_save_case_cache(
+            cache_dir, case_id, surface_avg, volume_avg, teacher_run_ids
         )
-        del teacher
-        torch.cuda.empty_cache()
-        gc.collect()
+        del surface_sum, volume_sum, surface_avg, volume_avg
 
-        # If this is the last teacher, we can finalise per-case caches. Otherwise
-        # we keep accumulating across teachers.
-
-    print(f"[KD][rank {rank}] averaging and saving {len(shard_ids)} cases")
-    for case_id in shard_ids:
-        surface_avg = surface_sums[case_id] / max(n_teachers, 1)
-        volume_avg = volume_sums[case_id] / max(n_teachers, 1)
-        _kd_save_case_cache(cache_dir, case_id, surface_avg, volume_avg, teacher_run_ids)
-        # free per-case memory promptly
-        surface_sums.pop(case_id, None)
-        volume_sums.pop(case_id, None)
+        case_dt = time.time() - case_start
+        if (case_idx + 1) % 1 == 0:
+            total_dt = time.time() - build_start
+            rate = (case_idx + 1) / max(total_dt, 1e-6)
+            remaining = len(shard_ids) - (case_idx + 1)
+            eta_min = (remaining / max(rate, 1e-6)) / 60.0
+            print(
+                f"[KD][rank {rank}] case {case_idx + 1}/{len(shard_ids)} "
+                f"({case_id}) {case_dt:.1f}s; rate={rate:.2f} case/s; "
+                f"eta={eta_min:.1f} min"
+            )
+        if (case_idx + 1) % 5 == 0:
+            torch.cuda.empty_cache()
+            gc.collect()
 
     distributed_barrier(state)
     if state.is_main:
@@ -1119,6 +1154,13 @@ def build_teacher_cache(
             f"[KD] cache build complete: {all_present}/{len(all_train_ids)} per-case files at "
             f"{cache_dir}"
         )
+    # Free teachers before returning so the training stage starts with a
+    # clean GPU.
+    for _, teacher in teachers:
+        del teacher
+    teachers.clear()
+    torch.cuda.empty_cache()
+    gc.collect()
     return cache_dir
 
 
