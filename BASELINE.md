@@ -306,14 +306,44 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **8.2528** | **9.5339** | #576 | t4qaysur | 2026-05-04 |
+| `abupt_axis_mean_rel_l2_pct` | **7.5373** | **8.8533** | #637 | vzprvtaw | 2026-05-04 |
 
-Note: PR #576 (frieren, STRING-sep learnable PE + Lion lr=1e-4 clip=0.5) merged 2026-05-04 —
-new yi SOTA at val_abupt=8.2528%. Prior bar was 8.686% (PR #590 thorfinn, gradient EMA α=0.5).
-Prior compounding wins: PR #590 (thorfinn, grad-ema α=0.5), PR #583 (edward, β-NLL), PR #580 (haku, surface curvatures),
-PR #517 (askeladd, Lion lr=1e-4 clip=0.5), PR #490 (frieren, STRING-sep PE infrastructure).
-**Merge bar: val_abupt 8.2528% on the yi codebase as it exists today (PR #576 frieren, STRING-sep PE + Lion).**
-**Aspirational target: val_abupt ~7.0–7.5% (tay SOTA PR #511, `5o7jc7wi`).**
+Note: PR #637 (fern, extended low-LR continued training at lr=1e-5 from t4qaysur checkpoint) merged 2026-05-04 —
+new yi SOTA at val_abupt=7.5373%. Prior bar was 8.2528% (PR #576 frieren, STRING-sep learnable PE + Lion lr=1e-4).
+Key per-axis improvements: τ_y 11.13% → 9.87% val (−11.4% rel), τ_z 12.22% → 11.25% val (−7.9% rel).
+**Merge bar: val_abupt 7.5373% on the yi codebase (PR #637 fern, extended low-LR polishing from t4qaysur).**
+**Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
+
+### PR #637 full metrics (val / test)
+
+| Metric | Baseline val (#576) | PR #637 val | Baseline test (#576) | PR #637 test |
+|---|---:|---:|---:|---:|
+| abupt_axis_mean_rel_l2_pct | 8.2528% | **7.5373%** | 9.5339% | **8.8533%** |
+| surface_pressure_rel_l2_pct | 5.3122% | 4.9322% | 5.0626% | 4.6968% |
+| wall_shear_rel_l2_pct | 9.2735% | 8.4774% | 9.2639% | 8.4954% |
+| volume_pressure_rel_l2_pct | 4.8089% | 4.4102% | 11.8456% | 11.4599% |
+| wall_shear_x_rel_l2_pct (τ_x) | 7.7882% | 7.2272% | 7.8602% | 7.3046% |
+| wall_shear_y_rel_l2_pct (τ_y) | 11.1334% | 9.8691% | 11.0889% | 9.8648% |
+| wall_shear_z_rel_l2_pct (τ_z) | 12.2211% | 11.2477% | 11.8121% | 10.9403% |
+
+W&B run: `vzprvtaw` (group: `yi-round36-extended-training`, name: `fern/extended-low-lr-arm-a-lr1e-5`)
+Resumed from: `t4qaysur` (PR #576 yi SOTA) via artifact `model-frieren-string-sep-lion-resume-from-ym8x8301-ep3-t4qaysur:v0/checkpoint.pt`
+
+### Reproduce PR #637
+
+```bash
+cd /workspace/senpai/target
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
+  --resume-from /workspace/senpai/target/artifacts/model-frieren-string-sep-lion-resume-from-ym8x8301-ep3-t4qaysur:v0/checkpoint.pt \
+  --agent fern --wandb-group yi-round36-extended-training \
+  --wandb-name fern/extended-low-lr-arm-a-lr1e-5 \
+  --learnable-pe --optimizer lion --lr 1e-5 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --lr-warmup-epochs 0 --ema-decay 0.999 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 --validation-every 1 --no-compile-model \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536
+```
 
 **Distance from AB-UPT targets (test, multiple of target):**
 
