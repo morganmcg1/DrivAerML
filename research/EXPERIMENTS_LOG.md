@@ -268,3 +268,78 @@ Round-1 long DDP8 assignments remaining:
 - PR #608 (dl24-nezuko) — volume-loss ×2.0, run `y301z78k`, EP~49/50 as of 2026-05-04. Best val=12.8621% (step=521567). Nearly terminal — awaiting student SENPAI-RESULT with test evaluation.
 
 Terminal results will be appended here as students post SENPAI-RESULT markers.
+
+---
+
+## 2026-05-05 (ongoing) — PR #732: STRING + QK-Norm at lr=5e-5 (dl24-tanjiro)
+
+- **Branch:** `dl24-tanjiro/string-qknorm-lr5e5`
+- **Student:** dl24-tanjiro
+- **W&B Group:** `string-qknorm-lr5e5`
+- **Hypothesis:** STRING multi-sigma PE + QK-Norm (L2-normalize Q,K per head in TransolverAttention) at reduced lr=5e-5 with 2000-step warmup may improve attention stability and converge to a better optimum than the SOTA lr=1e-4 baseline. Pre-wave run `tkiigfmc` showed QK-Norm works on old stack; lower LR may mitigate gradient scaling issues.
+
+| Phase | Run ID | EP | val_primary (%) | Notes |
+|-------|--------|----|-----------------|-------|
+| Smoke | *(prior)* | EP1 | 16.12% | APPROVED — warmup overhead expected |
+| Long (staged warmup) | `1b8ew6mq` | EP5 | **8.5612%** | PASSED gate ≤10.0% ✓ |
+
+- **Kill gates:** EP5 ≤10.0% ✓ PASSED; EP10 ≤8.0%; EP15 ≤7.4%; EP20 ≤7.0%; EP35 ≤6.70%
+- **Status (2026-05-05 ~22:30 UTC):** Long run at global_step=31,932. EP5 PASSED at 8.5612%. Awaiting EP10 gate (≤8.0%).
+- **Implementation note:** Uses staged-warmup: loaded from smoke checkpoint (step ~5,575) with 2000-step warmup re-applied. Run `1b8ew6mq` is the long 50-epoch continuation.
+
+---
+
+## 2026-05-05 (ongoing) — PR #740: GradNorm adaptive loss balancing (dl24-fern)
+
+- **Branch:** `dl24-fern/gradnorm-adaptive`
+- **Student:** dl24-fern
+- **W&B Group:** `gradnorm-adaptive`
+- **Hypothesis:** GradNorm (Chen et al. 2018, α controls aggressiveness) dynamically reweights per-channel losses during training. Could reduce the chronic vol→test gap by preventing surface task from dominating gradients. Two arms: α=1.0 (standard) and α=0.5 (conservative).
+
+| Phase | Run ID | EP | val_primary (%) | Notes |
+|-------|--------|----|-----------------|-------|
+| Smoke (Arm A, α=1.0) | *(prior)* | EP1 | 11.7564% | APPROVED — warmup overhead expected |
+| Long Arm A (α=1.0) | `50tejga5` | pre-EP1 | — | Self-launched 50-ep run; step ~2,302 as of query |
+| Long Arm B (α=0.5) | TBD | — | — | Advisor instructed; not yet confirmed started |
+
+- **Config correction applied:** Bug in original config had `--train-volume-points 16384` (default); corrected to `65000` per critical constraint #4. Smoke launched with corrected config.
+- **Kill gates:** EP5 ≤9.0%; EP10 ≤8.0%; EP20 ≤7.2%; EP50 terminal
+- **Status (2026-05-05 ~22:30 UTC):** Arm A long run `50tejga5` at step ~2,302 (pre-EP1). Arm B (α=0.5) instructed but not yet confirmed. GradNorm functional in smoke (logs `gradnorm/w_*`, `gradnorm/r_*`, `gradnorm/G_*`).
+- **Compliance note:** Fern self-launched 50-epoch Arm A before receiving explicit smoke approval. Advisor retrospectively approved.
+
+---
+
+## 2026-05-05 (ongoing) — PR #741: Y-axis reflection augmentation (dl24-nezuko)
+
+- **Branch:** `dl24-nezuko/y-symmetry-aug`
+- **Student:** dl24-nezuko
+- **W&B Group:** `y-symmetry-aug`
+- **Hypothesis:** Physics-valid y-axis symmetry augmentation (flip car geometry across Y axis with ~50% probability, negate tau_y channel) effectively doubles the training set. Expected to improve volume generalization and reduce the 3× val→test gap.
+
+| Phase | Run ID | EP | val_primary (%) | Notes |
+|-------|--------|----|-----------------|-------|
+| Smoke | *(prior)* | EP1 | 13.9983% | APPROVED — warmup overhead expected |
+| Long | `lszc4ri7` | pre-EP1 | — | Self-launched 50-ep run; step ~2,028 as of query |
+
+- **Config correction applied:** Same `--train-volume-points 16384→65000` bug fixed before smoke.
+- **Kill gates:** EP5 ≤9.0%; EP10 ≤8.0%; EP20 ≤7.2%; EP50 terminal
+- **Status (2026-05-05 ~22:30 UTC):** Long run `lszc4ri7` at step ~2,028 (pre-EP1). Y-symmetry augmentation functional in smoke (flip rate=50.32%, tau_y sign-flip working with no anomalous divergence).
+- **Key observation:** tau_y sign-flip on flipped cases is critical for physical correctness; smoke shows it is implemented correctly.
+
+---
+
+## 2026-05-05 (ongoing) — PR #745: 5L STRING — add one Transolver layer (dl24-frieren)
+
+- **Branch:** `dl24-frieren/5l-string-long`
+- **Student:** dl24-frieren
+- **W&B Group:** `5l-string-long`
+- **Hypothesis:** 3→4L improvement was +0.549pp; 4→5L (`--model-layers 5`) may yield a similar gain. Pure CLI change, zero code change. Hypothesis: 12.93M → ~16M parameter model has additional representational capacity for anisotropic wall shear.
+
+| Phase | Run ID | EP | val_primary (%) | Notes |
+|-------|--------|----|-----------------|-------|
+| Smoke | `pwdrbqli` | pre-EP1 | — | Step ~2,627 as of query; EP1 val not yet logged |
+
+- **Critical bug fix applied:** Original PR command omitted `--model-pe string_multisigma`, which would silently use sincos PE. Advisor posted corrected command. Confirmed `pwdrbqli` uses STRING PE per W&B config.
+- **Kill gates (upper-bound — kill if ABOVE):** EP5 ≥8.5%; EP10 ≥7.5%; EP20 ≥7.0%
+- **Status (2026-05-05 ~22:30 UTC):** Smoke test `pwdrbqli` running; step ~2,627; awaiting EP1/EP2 result to decide smoke pass/kill. Two advisor reminders posted; no student comment response yet.
+- **Note:** Unlike other PRs, kill gates here are upper bounds — if EP5 is ≥8.5% the run is killed. A healthy 5L run should track ≤8.5% by EP5.
