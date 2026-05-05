@@ -102,6 +102,10 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    dual_tower: bool = False
+    dual_tower_surface_layers: int = 3
+    dual_tower_volume_layers: int = 3
+    dual_tower_cross_attn_heads: int = 4
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -297,6 +301,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        dual_tower=config.dual_tower,
+        dual_tower_surface_layers=config.dual_tower_surface_layers,
+        dual_tower_volume_layers=config.dual_tower_volume_layers,
+        dual_tower_cross_attn_heads=config.dual_tower_cross_attn_heads,
     )
 
 
@@ -753,6 +761,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            # Dual-tower can skip the cross-attention bridge on batches where
+            # one modality has zero tokens, leaving the bridge's parameters
+            # unused on that step — DDP fails reduction without this flag.
+            if config.dual_tower:
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:

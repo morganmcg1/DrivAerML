@@ -342,6 +342,10 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        dual_tower: bool = False,
+        dual_tower_surface_layers: int = 3,
+        dual_tower_volume_layers: int = 3,
+        dual_tower_cross_attn_heads: int = 4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +358,10 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.dual_tower = dual_tower
+        self.dual_tower_surface_layers = dual_tower_surface_layers
+        self.dual_tower_volume_layers = dual_tower_volume_layers
+        self.dual_tower_cross_attn_heads = dual_tower_cross_attn_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -409,15 +417,57 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
-        self.backbone = Transformer(
-            depth=n_layers,
-            hidden_dim=n_hidden,
-            num_heads=n_head,
-            mlp_expansion_factor=mlp_ratio,
-            num_slices=slice_num,
-            dropout=dropout,
-            use_qk_norm=use_qk_norm,
-        )
+        if dual_tower:
+            self.backbone = None
+            self.surface_backbone = Transformer(
+                depth=dual_tower_surface_layers,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_expansion_factor=mlp_ratio,
+                num_slices=slice_num,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
+            self.volume_backbone = Transformer(
+                depth=dual_tower_volume_layers,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_expansion_factor=mlp_ratio,
+                num_slices=slice_num,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
+            # Volume queries attend to surface keys/values. Pre-norm both
+            # streams so the bridge sees calibrated activations and remains
+            # stable as the towers update independently.
+            self.cross_attn_q_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.cross_attn_kv_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.cross_attn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=dual_tower_cross_attn_heads,
+                dropout=dropout,
+                batch_first=True,
+            )
+            # Tanh-gated residual: tanh(0)=0 keeps the bridge as identity at
+            # init so the towers train independently first, and the gate
+            # learns when to open. Standard pattern from OpenFlamingo.
+            self.cross_attn_gate = nn.Parameter(torch.zeros(1))
+        else:
+            self.surface_backbone = None
+            self.volume_backbone = None
+            self.cross_attn_q_norm = None
+            self.cross_attn_kv_norm = None
+            self.cross_attn = None
+            self.cross_attn_gate = None
+            self.backbone = Transformer(
+                depth=n_layers,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_expansion_factor=mlp_ratio,
+                num_slices=slice_num,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
@@ -462,6 +512,14 @@ class SurfaceTransolver(nn.Module):
             raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
+
+        if self.dual_tower:
+            return self._forward_dual_tower(
+                surface_x=surface_x,
+                surface_mask=surface_mask,
+                volume_x=volume_x,
+                volume_mask=volume_mask,
+            )
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
@@ -525,4 +583,124 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+        }
+
+    def _forward_dual_tower(
+        self,
+        *,
+        surface_x: torch.Tensor | None,
+        surface_mask: torch.Tensor | None,
+        volume_x: torch.Tensor | None,
+        volume_mask: torch.Tensor | None,
+    ) -> dict[str, torch.Tensor]:
+        # The data loader can hand a rank a batch where the surface views are
+        # exhausted but volume views remain (or vice versa) — in that case the
+        # absent modality arrives as a zero-token tensor. Cross-attention is
+        # undefined with an empty key/value sequence, so we treat zero-token
+        # inputs as "modality absent" for the bridge.
+        surface_present = surface_x is not None and surface_x.shape[1] > 0
+        volume_present = volume_x is not None and volume_x.shape[1] > 0
+
+        if surface_present:
+            surface_hidden_in = self._encode_group(
+                surface_x,
+                rff=self.surface_rff,
+                string_sep=self.surface_string_sep,
+                project_features=self.project_surface_features,
+                bias=self.surface_bias,
+                placeholder=self.surface_placeholder,
+            )
+            surface_hidden_in = _apply_token_mask(surface_hidden_in, surface_mask)
+            surface_backbone_out = self.surface_backbone(
+                surface_hidden_in, attn_mask=surface_mask
+            )
+            surface_backbone_out = _apply_token_mask(surface_backbone_out, surface_mask)
+        else:
+            surface_backbone_out = None
+
+        if volume_present:
+            volume_hidden_in = self._encode_group(
+                volume_x,
+                rff=self.volume_rff,
+                string_sep=self.volume_string_sep,
+                project_features=self.project_volume_features,
+                bias=self.volume_bias,
+                placeholder=self.volume_placeholder,
+            )
+            volume_hidden_in = _apply_token_mask(volume_hidden_in, volume_mask)
+            volume_backbone_out = self.volume_backbone(
+                volume_hidden_in, attn_mask=volume_mask
+            )
+            volume_backbone_out = _apply_token_mask(volume_backbone_out, volume_mask)
+        else:
+            volume_backbone_out = None
+
+        # Cross-attention bridge: volume queries pull surface context. Skip if
+        # either modality is empty, OR if any sample has all-padded surface
+        # tokens — F.multi_head_attention_forward NaNs on an all-True
+        # key_padding_mask row.
+        run_cross_attn = (
+            surface_backbone_out is not None
+            and volume_backbone_out is not None
+            and bool((surface_mask.sum(dim=1) > 0).all().item())
+        )
+        if run_cross_attn:
+            q = self.cross_attn_q_norm(volume_backbone_out)
+            kv = self.cross_attn_kv_norm(surface_backbone_out)
+            # nn.MultiheadAttention treats key_padding_mask True as "ignore".
+            key_padding_mask = ~surface_mask.bool()
+            vol_ctx, _ = self.cross_attn(
+                query=q,
+                key=kv,
+                value=kv,
+                key_padding_mask=key_padding_mask,
+                need_weights=False,
+            )
+            vol_ctx = _apply_token_mask(vol_ctx, volume_mask)
+            volume_backbone_out = volume_backbone_out + torch.tanh(self.cross_attn_gate) * vol_ctx
+            volume_backbone_out = _apply_token_mask(volume_backbone_out, volume_mask)
+
+        # Reference tensor for batch_size/device/dtype when a tower output
+        # is missing. Either surface_x or volume_x is guaranteed non-None
+        # by the caller.
+        ref = surface_x if surface_x is not None else volume_x
+        batch_size = ref.shape[0]
+
+        if surface_backbone_out is not None:
+            surface_hidden = surface_backbone_out
+            surface_hidden_norm = _apply_token_mask(
+                self.norm(surface_hidden), surface_mask
+            )
+            surface_preds = self.surface_out(surface_hidden_norm) * surface_mask.unsqueeze(-1)
+        else:
+            surface_hidden = ref.new_zeros(batch_size, 0, self.norm.normalized_shape[0])
+            surface_hidden_norm = surface_hidden
+            surface_preds = ref.new_zeros(batch_size, 0, self.surface_output_dim)
+
+        if volume_backbone_out is not None:
+            volume_hidden = volume_backbone_out
+            volume_hidden_norm = _apply_token_mask(
+                self.norm(volume_hidden), volume_mask
+            )
+            volume_preds = self.volume_out(volume_hidden_norm) * volume_mask.unsqueeze(-1)
+        else:
+            volume_hidden = ref.new_zeros(batch_size, 0, self.norm.normalized_shape[0])
+            volume_hidden_norm = volume_hidden
+            volume_preds = ref.new_zeros(batch_size, 0, self.volume_output_dim)
+
+        # Recreate the joint hidden tensor for telemetry consumers that
+        # expect the concatenated representation.
+        if surface_hidden.shape[1] > 0 and volume_hidden.shape[1] > 0:
+            hidden = torch.cat([surface_hidden, volume_hidden], dim=1)
+        elif surface_hidden.shape[1] > 0:
+            hidden = surface_hidden
+        else:
+            hidden = volume_hidden
+
+        return {
+            "surface_preds": surface_preds,
+            "volume_preds": volume_preds,
+            "hidden": hidden,
+            "surface_hidden": surface_hidden_norm,
+            "volume_hidden": volume_hidden_norm,
         }
