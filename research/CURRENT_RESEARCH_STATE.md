@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~06:45 UTC)
+- 2026-05-05 (updated ~10:10 UTC)
 - Most recent research direction from human researcher team: None (no open issues)
 
 ## Current Research Focus and Themes
@@ -13,10 +13,10 @@
 
 | PR | Student | Hypothesis | Key Mechanism | Status |
 |----|---------|------------|---------------|--------|
-| #608 | nezuko | Direct volume-loss upweight ×2.0 | `--volume-loss-weight 2.0` — most direct lever for volume-pressure gap | WIP — EP43 complete. vol_pressure=6.1769% (0.10pp from AB-UPT 6.08% target). LR=6.5e-6 (93% off peak). Plateau slope nearly flat. Continuing to EP50 for final harvest. |
-| #664 | fern | Per-axis output scaling on STRING backbone | Combines per-axis output scaling (wgvvevb9) with multi-sigma STRING PE (ki2q9ko9) | WIP — Long run EP1 val=8.3599% (faster early descent vs smoke EP1=11.98%). Trajectory excellent. W&B group: fern-string-per-axis-scale-long. Awaiting EP5 gate report. |
-| #669 | frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | New `masked_mse_per_channel` helper + CLI flags `--tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3`; requires code addition | ACTIVE — Root cause of prior stall identified: label was `student:frieren` instead of `student:dl24-frieren`. Fixed ~06:40 UTC. Pod confirmed iteration 19 assigned to this PR. Code implementation required before smoke run. |
-| #673 | tanjiro | Denser multi-sigma STRING PE with 7 sigmas [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0] | `--pe-init-sigmas '0.1,0.25,0.5,1.0,2.0,4.0,8.0'` — expands SOTA 5-sigma init to 7 sigmas for broader spectral coverage (both finer low-end σ=0.1 and coarser high-end σ=8.0); pure CLI experiment | ASSIGNED — New assignment replacing tanjiro after #670 was merged without terminal results. Pod READY. Smoke run expected shortly. |
+| #664 | fern | Per-axis output scaling on STRING backbone | Combines per-axis output scaling (wgvvevb9) with multi-sigma STRING PE (ki2q9ko9) | Long run `a8emaoxm` EP10+. Best EP8=7.0915%. Oscillating ~7.1-7.6% after EP8. Merge conflict pending rebase post-run. Monitor EP20 gate. |
+| #669 | frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | New `masked_mse_per_channel` helper + CLI flags `--tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3`; requires code addition | Long run `er8wmo8d` EP3=7.78%. Strong trajectory. EP5 gate: kill if ≥8.5%. EP10 gate: kill if ≥7.2%. |
+| #673 | tanjiro | Denser multi-sigma STRING PE with 7 sigmas [0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0] | `--pe-init-sigmas '0.1,0.25,0.5,1.0,2.0,4.0,8.0'` — pure CLI | Long run `zk35lops` EP7=8.54%. Decelerating slope. EP10 gate: kill if ≥8.0%. Wall_shear bottleneck at ~9.77%. |
+| #677 | nezuko | Tau channel weighting + volume upweight **combination** on SOTA config | `--tau-y-loss-weight 1.2 --tau-z-loss-weight 1.3 --volume-loss-weight 2.0` + code changes for tau flags | JUST ASSIGNED — smoke run expected shortly. First joint test of both mechanisms on Lion+STRING SOTA. |
 
 ### Closed / Negative Results This Wave
 
@@ -45,17 +45,16 @@
 
 ### Key Open Questions This Wave Addresses
 
-1. **Tau channel weighting (frieren #669):** Does per-channel tau_y×1.2/tau_z×1.3 surface weighting beat SOTA on the Lion+STRING base config? (Prior fern tests were on different/buggy configs — this is the first clean isolated test on SOTA config)
-2. **Extended cosine (tanjiro #670):** Does T_max=60 on a 50-epoch run improve generalization by preventing LR from hitting near-zero too early? Builds on 5o7jc7wi=8.313% evidence but on SOTA config.
-3. **Volume upweight (nezuko #608):** Does direct `--volume-loss-weight 2.0` reduce the volume-pressure gap (best: 11.503 vs target 6.08)? Vol at EP41=6.1862% is close.
-4. **Per-axis output scaling (fern #664):** Does combining wgvvevb9-style per-axis scaling with STRING PE backbone improve axis-specific metrics?
+1. **Tau channel weighting (frieren #669):** Does per-channel tau_y×1.2/tau_z×1.3 surface weighting beat SOTA on the Lion+STRING base config? (First clean isolated test on SOTA config — prior fern tests were on different/buggy configs)
+2. **Per-axis output scaling (fern #664):** Does combining wgvvevb9-style per-axis scaling with STRING PE backbone improve axis-specific metrics? Best so far EP8=7.0915%.
+3. **Denser multi-sigma PE (tanjiro #673):** Does 7-sigma `[0.1..8.0]` PE improve over 5-sigma SOTA? EP10 gate imminent.
+4. **Tau + volume combo (nezuko #677):** Do tau_y×1.2/tau_z×1.3 AND volume_loss_weight=2.0 together on the SOTA config produce synergistic gains? First joint test.
 
 ## Potential Next Research Directions
 
-- **Tau weighting + volume upweight combination:** If #669 and #608 both show independent gains, combine tau_y×1.2/tau_z×1.3 with volume_loss_weight=2.0 in a subsequent wave.
-- **Extended cosine + tau weighting combination:** If #669 shows gains and #670 results are recovered, combine T_max=60 with tau_y×1.2/tau_z×1.3.
-- **Denser multi-sigma PE (7 sigmas):** NOW ACTIVE as PR #673 — testing `[0.1,0.25,0.5,1.0,2.0,4.0,8.0]`.
-- ~~**Denser multi-sigma PE init:**~~ NOW ASSIGNED as PR #673 to tanjiro.
+- **Extended cosine + tau weighting combination:** If #669 shows gains, combine T_max=60 with tau_y×1.2/tau_z×1.3.
+- **Extended cosine + volume upweight:** If #677 combo shows gains, also try adding T_max=60 to the mixture.
+- **Tau + vol + extended cosine triple combination:** If individual mechanisms all show gains, combine all three.
 - **Higher bs with gradient accumulation:** bs=2 with DDP8 = effective bs=16. Could try bs=4 (effective bs=32) with gradient accumulation to maintain steps per epoch.
 - **Adaptive curriculum:** Instead of fixed stage boundaries, advance curriculum when validation plateaus.
 - **Spectral loss terms:** Add frequency-domain supervision for better high-frequency pressure field fidelity.
