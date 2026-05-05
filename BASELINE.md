@@ -48,3 +48,14 @@ When a wave PR merges with terminal `SENPAI-RESULT` and lower `test_primary/abup
 ### Current single-model best on `drivaerml-long-20260504`
 
 PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (frieren, multi-sigma STRING PE)
+
+### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
+
+| PR | Run | Student | Epoch | val_abupt | Notes |
+|---|---|---|---:|---:|---|
+| #664 | `a8emaoxm` | fern | EP24 | **6.7422%** | per-axis output scaling; new in-wave val best |
+| #669 | `er8wmo8d` | frieren | EP16 | 6.8276% | per-channel tau weighting (tau_y=1.2, tau_z=1.5) |
+| #678 | `sbzspuf2` | nezuko | EP9 | 7.2894% | extended cosine T_max=60 |
+| #696 | `dzochl0q` | tanjiro | EP2 | 9.6170% | QK-Norm + STRING PE; very early |
+
+_Last updated: 2026-05-05_
