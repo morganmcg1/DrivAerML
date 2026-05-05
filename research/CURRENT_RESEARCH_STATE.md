@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~24:00 UTC)
+- 2026-05-05 (updated ~01:30 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -13,15 +13,17 @@
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** EP~35.9 (gs=196,911). Summary best=**6.6976%**. EP40 gate ≤6.62% — needs 0.077pp in ~4 epochs. Plateau 6.697–6.700% since EP30. Late cosine LR decay is last hope for step-function drop. |
-| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | EP~27.7 (gs=152,017). Summary best=**6.7633%** (new best, below EP25=6.7642%). EP30 gate ≤6.73% **PRE-CLEARED**. Next gate EP35 ≤6.70% — 0.063pp needed in ~7 epochs. |
-| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2` (group: `extended-cosine-t60-sota-v2`) | EP~20.4 (gs=111,957). Summary=**6.8946%** (slight regression from EP18 best=6.8820%). EP25 gate ≤6.82% — needs 0.075pp in ~5 epochs. Lion oscillation may explain EP20 uptick. |
-| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | `dzochl0q` (group: `string-qknorm-long-50ep`) | EP~13.3 (gs=73,259). Summary best=**7.5933%**. EP15 gate ≤7.2% — at current 0.037pp/ep improvement rate, EP15 will be ~7.47%: **GATE FAILURE EXPECTED**. COMPLIANCE: 7 warnings for unauthorized tanjiro-heads-sweep, no student response. Closure planned at EP15 regardless. |
+| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** EP38 (gs=208,772). Summary best=**6.6912%** (EP38, after brief uptick EP37). Plateau EP33–38 (range 6.6912–6.6996%). **EP40 gate ≤6.62% HIGH RISK** — needs 0.071pp in ~1.4 epochs. Late cosine LR decay is only remaining mechanism. Wall shear (7.57%) bottleneck. |
+| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | EP30 (gs=164,820). Summary best=**6.7573%** (EP30). EP30 gate ≤6.73% **PASSED**. Next gate EP35 ≤6.70% — needs 0.057pp in ~5 epochs. Consistent downward trend; approaching fern territory. |
+| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2` (group: `extended-cosine-t60-sota-v2`) | EP23 (gs=126,362). Summary best=**6.8820%** (EP18). Oscillating EP19–23 (6.8898–6.9268%). **EP25 gate ≤6.82% HIGH RISK** — needs 0.062pp in ~2 epochs; oscillation since EP18 suggests possible plateau. Real test of T_max=60 is EP30–50 phase. |
+| #722 | dl24-tanjiro | DualTowerTransolver: 3L SurfaceEncoder + 3L VolumeEncoder + cross-attention (Issue #717, `tay` branch, 13 epochs) | `e6v7okbu` + 7 DDP ranks (group: `vol-pressure-dual-tower`) | EP3 complete, mid-EP4. EP3 best=**7.4706%** (surf=4.854%, vol=4.774%, wall=8.381%). Steps/epoch=10865. Test harvest post-EP13 est. ~22:00–23:00 UTC 2026-05-05. Architecture separate from wave base. |
 
 ### Closed / Negative Results This Wave
 
 | PR | Student | Hypothesis | Outcome |
 |----|---------|------------|---------|
+| #730 | dl24-tanjiro | STRING + QK-Norm at lower LR=5e-5 (wave base config) | CLOSED: abandoned by student — zero W&B runs, zero PR comments. Student pivoted to PR #722 without authorization. QK-Norm at LR=5e-5 hypothesis unvalidated — reassign to compliant student. |
+| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | CLOSED: EP15 gate failure expected at ~7.47% (gate ≤7.2%). 7 compliance warnings, zero student response. |
 | #673 | dl24-tanjiro | 7-sigma STRING PE [0.1..8.0] — expand sigma range | CLOSED: test=9.4198% (+1.49pp regression vs SOTA). Config mismatch (3L not 4L) confounds result, but slope deceleration makes clean re-run unlikely to beat SOTA. |
 | #611 | dl24-fern | Per-channel tau weighting (bugfix v2) | Closed negative: test=12.406% — not effective on old config |
 | #623 | dl24-tanjiro | EMA-proxy GradNorm α=0.5 | Infrastructure kill required (ignored kill orders). Best val=12.4377%. |
@@ -50,17 +52,20 @@
 
 ## Research Themes and Open Questions
 
-1. **Can per-axis output scaling (fern #664) beat wave SOTA?** EP~36 summary=6.6976%. Currently 0.170pp behind SOTA val=6.5281%. EP40 gate ≤6.62% — needs 0.077pp. In plateau since EP30; late cosine LR decay is the remaining mechanism. Wall shear (7.57%) is the bottleneck. Strong candidate for test if EP40-50 unlocks descent.
+1. **Can per-axis output scaling (fern #664) beat wave SOTA?** EP38 best=6.6912%. Plateau EP33–38; 0.170pp behind SOTA val=6.5281%. EP40 gate ≤6.62% is HIGH RISK (needs 0.071pp in ~1.4 epochs). Late cosine decay is the only remaining mechanism. Wall shear (7.57%) is the bottleneck. If EP40 gate fails, this confirms per-axis scaling saturates at ~6.69%.
 
-2. **Does mild tau weighting (frieren #669) help on the STRING stack?** EP~28 best=6.7633%, EP30 gate PRE-CLEARED. Next gate EP35 ≤6.70% needs 0.063pp in 7 epochs. Consistent downward trend strongest of the 4 active runs. Approaching fern territory — by EP35 these two will be directly comparable.
+2. **Does mild tau weighting (frieren #669) help on the STRING stack?** EP30 best=6.7573%, EP30 gate PASSED. Next gate EP35 ≤6.70% needs 0.057pp in ~5 epochs. Consistent downward trend is strongest of the three wave runs — by EP35 will be directly comparable to fern.
 
-3. **Does extended cosine T_max=60 (nezuko #678) improve late-epoch convergence?** EP~20 summary=6.8946%. EP25 gate ≤6.82% needs 0.075pp over 5 epochs. Current EP20 is slight regression from EP18 best=6.8820% — likely oscillation. Real test of T_max=60 is EP30-50 phase. Currently 0.37pp behind fern.
+3. **Does extended cosine T_max=60 (nezuko #678) improve late-epoch convergence?** EP23 best=6.8820% (achieved at EP18). Oscillating EP19–23; EP25 gate ≤6.82% HIGH RISK (needs 0.062pp in ~2 epochs). If oscillation continues through EP25, closure likely despite the theoretical benefit of slower cosine decay at EP30–50.
 
-4. **STRING+QK-Norm (tanjiro #696) — closure track.** EP~13 summary=7.5933%. EP15 gate ≤7.2% will likely fail at projected ~7.47%. Compliance violation (7 warnings, zero response). PR will be closed at EP15. QK-Norm hypothesis is not dead — will be reassigned to a compliant student.
+4. **DualTowerTransolver (tanjiro #722, Issue #717):** EP3 abupt=7.471%, vol=4.774%. Massive EP2→EP3 improvement (+1.1pp) suggests learning is occurring. Test harvest at EP13 est. ~22:00–23:00 UTC today. Core question: does volume-specific encoding via separate tower + cross-attention improve the chronic vol→test gap (~3×: val≈4% vs test≈12%)?
+
+5. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed, PR #673 closed. Student has shown consistent pattern of unauthorized pivots and ignoring kill orders. PR #722 is being allowed to run to completion (Issue #717 authorized) but further tanjiro assignments should include explicit kill-gate compliance requirements.
 
 ## Potential Next Research Directions (after current arms complete)
 
-- **Compose STRING + QK-Norm + tau weighting**: if #696 wins and #669 shows gains, combine both on the SOTA STRING base.
+- **QK-Norm at lower LR (reassign from #730):** tanjiro abandoned this without running it. Assign to a compliant student — STRING + QK-Norm at lr=5e-5 is a clean untested hypothesis. Pre-wave `tkiigfmc` showed QK-Norm works on old stack; lower LR may help.
+- **Compose STRING + tau weighting + per-axis scaling:** if frieren #669 and fern #664 both show gains, compose both on SOTA STRING base (one change per PR).
 - **5L STRING** (`--model-layers 5`): pure CLI, zero code change. Pre-wave `70lnb3dt` test=8.769%. Could stack with QK-Norm.
 - **lr=9e-5 control on SOTA STRING base**: isolate the LR lever. `9mm3sz7x` used lr=9e-5 with AdamW; worth testing on Lion.
 - **EMA-proxy GradNorm α=0.5 (clean re-run)**: prior PR #623 failed on logistics not mechanism. Need kill-gate discipline.
@@ -68,3 +73,4 @@
 - **Volume MLP head**: replace volume Transolver decoder with a separate MLP for independent volume capacity (`8x7c537j` pre-wave evidence).
 - **Beta-NLL heteroscedastic surface head**: principled loss for heteroscedastic tau_y/z. Higher risk.
 - **y-symmetry data augmentation**: physics-valid 2× training set. tau_y sign-flip required on flipped cases.
+- **DualTower results pending**: if #722 shows vol gap improvement, compose with STRING PE on the tay branch; if not, abandon the architecture direction.
