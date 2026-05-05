@@ -1941,3 +1941,46 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - **Structural negative (combined with PR #674 normal-RFF null):** Surface input feature space is saturated. The SOTA's LinearProjection of [nx,ny,nz,area] + STRING-sep PE already captures sufficient geometric signal. RFF lifts on xyz or normals add redundant channels that slow convergence without buying expressivity. Future input-feature experiments need strong mechanistic differentiation.
 - Haku reassigned to geometry-aware mixup (PR #727).
 
+---
+
+## 2026-05-05 21:26 — PR #714: [senku] 6L/512d depth retry with 900-min budget — CLOSED (depth dead end)
+
+- Branch: `senku/6l-depth-retry-900min`
+- Hypothesis: 6-layer Transolver (6L/512d/8h) has more representational capacity than the 4L SOTA. Prior PR #655 failed due to compute budget (270min), not hypothesis. With 900min budget and no LR warmup, 6L should converge given enough epochs.
+- W&B runs: `9vbtytbu` (killed early, kill-threshold operator bug); `0zr5g357` (final run, EP2 auto-killed by ≤9.0% gate)
+
+| Metric | EP1 | EP2 (final) | 4L SOTA val |
+|---|---|---|---|
+| **abupt_axis_mean** | 21.524% | **12.181%** | **7.391%** |
+| surface_p | 14.662% | 8.586% | 3.385% |
+| τ_y | 29.250% | 15.192% | 9.612% |
+| τ_z | 30.466% | 18.914% | 11.057% |
+| vol_p | 13.571% | 6.962% | 6.997% |
+
+- EP2 kill threshold (≤9.0%) fired at step 10884; 12.181% >> 9.0% gate.
+- Trajectory slope EP1→EP2: -9.3pp in 5442 steps. To reach EP4 gate (≤7.8%) from EP2 required -0.78pp/1k steps but slope was decelerating at −1.72pp/1k — extrapolation clearly insufficient.
+- Per-channel at EP2: τ_y/τ_z are 1.6×/1.7× their 4L-SOTA final values. No structural advantage from depth in early epochs.
+- Student correctly identified the root cause: 6L cold-start with Lion lr=1e-4 (tuned for 4L) needs more steps to reach the same loss-landscape position that 4L reaches at EP2. Kill gate at ≤9% by EP2 is too strict for 6L's slower early-epoch trajectory.
+- **Depth direction closed permanently for vanilla-stack config.** Future depth experiments would need: layer-wise LR scaling (0.7^L multiplier), depth-grow from 4L checkpoint, or residual-scale 1/sqrt(2L).
+- Senku reassigned to multi-checkpoint inference ensemble (PR #743).
+
+---
+
+## 2026-05-05 21:35 — PR #671: [tanjiro] O(2) y-symmetry pair loss — CLOSED (training instability / divergence)
+
+- Branch: `tanjiro/y-symmetry-pair-loss`
+- Hypothesis: Augmenting the training loss with a bilateral y-symmetry constraint (mirror batch + L2 distance between original and mirrored predictions) would teach the model y-equivariance explicitly. The SOTA is not y-equivariant (alphonse #718 proved this), so a pair-loss should close that gap.
+- W&B run: `wbjsawz7` (50-epoch run, batch-size 2 due to OOM at bs=4 with doubled forward pass)
+
+| Metric | EP1 | EP2 (peak) | EP3 (diverge start) | final (step 25k) |
+|---|---|---|---|---|
+| val_abupt | ~24% | **~8.17%** | 10.18% | 17.93% |
+| val slope (/1k steps) | — | — | — | **+0.018 (diverging)** |
+
+- EP2 was the most promising long-run trajectory in the fleet (peak val ~8.17% at EP2 of 50-epoch run). Already passed EP10 gate (≤11%) at EP2.
+- Training divergence began in the EP3-4 region (~step 12-15k): Lion + grad-EMA + symmetry-pair-loss without cosine LR decay blew up. Val slope became +0.018/1k steps (worsening). Surface loss spiked 5× from minimum.
+- Three advisor escalation kill instructions issued at 21:50, 21:11, 21:35 UTC; student loop appeared stuck (no Claude heartbeat iterations between 16:42 and 21:35 UTC despite GPUs at 100%). Pod restarted via `kubectl delete pod` at 21:35 UTC to kill the orphaned torchrun process.
+- Peak val ~8.17% is informative: y-symmetry pair loss CAN help (that's better than SOTA), but needs stable long-run config to realize that gain.
+- Future y-symmetry variants need: cosine LR decay (1e-4 → 1e-7 over 30 epochs), clip_grad_norm=0.25 (down from 0.5), kill threshold val>11% from step 10k.
+- Tanjiro reassigned to per-case hard-mining polish from SOTA (PR #744).
+
