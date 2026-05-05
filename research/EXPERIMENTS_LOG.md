@@ -22,12 +22,74 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 - **Risk:** Low — all existing long DDP8 commands already explicitly override these defaults. The fix only changes behavior for new commands that omit these flags.
 - **Merged to advisor branch 2026-05-04 via direct squash-merge (code fix, no experiment SENPAI-RESULT).**
 
+## 2026-05-04 (ongoing) — PR #659: Width-over-Depth 4L/768d/12h (yi-norman)
+
+- **Branch:** `norman/4l-768d-12h-cold-start`
+- **Student:** norman (yi wave)
+- **W&B Run:** `q03gty6i` (group: `yi-round37-width-768d`)
+- **Hypothesis:** Increasing hidden width from 512→768d (50% more width, ~3× parameters) would improve anisotropic τ_y/τ_z representation better than depth increases.
+- **Status:** CLOSED (not validated within budget)
+
+| Epoch | Step | abupt | sp | vp | ws |
+|-------|------|-------|----|----|-----|
+| EP1 | ~5442 | 15.9627% | — | — | — |
+| EP2 (terminal) | ~10884 | **10.0258%** | — | — | **13.30% τ_y / 14.35% τ_z** |
+| Test | — | **11.2020%** | — | — | — |
+
+**Yi SOTA reference:** val_abupt=7.3914%, test_abupt=8.7189% (PR #658 EMA)
+
+**Commentary:** EP2=10.0258% passes the EP2 gate (≤10.5%) but is +2.49pp worse than yi SOTA. The τ_y/τ_z gap widened rather than closed (13.30%/14.35% vs. baseline ~9.87%/11.25%), so the hypothesis is not validated. Root cause: OOM at slices=128 forced fallback to slices=64 (−30% training throughput); combined with cold-start 3-epoch budget, the 28M-parameter model was severely undertrained at termination (loss slopes still strongly negative). **The width hypothesis is not falsified — it was not given a fair test.** Follow-up: 4L/640d/10h at slices=128 with ≥10 epoch budget, or redirect to τ loss weighting (already live in frieren PR #669).
+
+---
+
+## 2026-05-04 (ongoing) — PR #664: Per-axis Output Scaling on STRING backbone (dl24-fern)
+
+- **Branch:** `dl24-fern/per-axis-output-scaling`
+- **Student:** dl24-fern (drivaerml-long-20260504 wave)
+- **W&B Run:** `a8emaoxm`
+- **Hypothesis:** A learnable 4-element scale vector on the surface output head (one scalar per output channel: τ_x, τ_y, τ_z, c_p) would let the model automatically compensate for per-channel magnitude differences without hand-tuning loss weights.
+- **Status:** RUNNING — EP7 completed, best val at EP6
+
+| Epoch | Step | abupt | sp | vp | ws |
+|-------|------|-------|----|----|-----|
+| EP1 | 5493 | 11.9803% | 8.03% | 7.59% | 13.28% |
+| EP2 | 10987 | 8.3599% | 5.43% | 4.98% | 9.38% |
+| EP3 | 16481 | 7.7554% | 5.05% | 4.58% | 8.73% |
+| EP4 | 21975 | 7.5013% | 4.91% | 4.37% | 8.46% |
+| EP5 | 27469 | 7.3224% | 4.79% | 4.24% | 8.28% |
+| **EP6** | **32963** | **7.2351%** | **4.74%** | **4.19%** | **8.18%** |
+| EP7 | 38457 | 7.3616% | 4.81% | 4.53% | 8.24% |
+
+**Best val: 7.2351% (EP6) — below yi SOTA bar of 7.3914%.**
+
+**Commentary:** Per-axis output scaling is outperforming the yi EMA baseline (7.3914%). EP6 best (7.2351%) is a strong result. EP7 shows minor regression (plateau noise). Continue to EP10+; if best val reaches 7.0% this becomes a priority merge candidate. Test metrics pending terminal evaluation.
+
+---
+
+## 2026-05-04 (ongoing) — PR #669: Per-channel τ surface weighting (dl24-frieren)
+
+- **Branch:** `dl24-frieren/tau-pc-surface-weighting`
+- **Student:** dl24-frieren (drivaerml-long-20260504 wave)
+- **W&B Run:** `dcaiwsyg`
+- **Hypothesis:** Upweighting τ_y (×1.2) and τ_z (×1.3) in the loss would directly pressure the model to close the sub-component gap that persists across the yi wave.
+- **Status:** RUNNING — EP5 completed, passes kill gate (<10%)
+
+| Epoch | Step | abupt | sp | vp | ws |
+|-------|------|-------|----|----|-----|
+| EP1 | 5493 | 19.6455% | 14.05% | 12.06% | 21.76% |
+| EP2 | 10987 | 12.9506% | 9.07% | 7.47% | 14.54% |
+| EP3 | 16481 | 11.2878% | 7.84% | 6.51% | 12.72% |
+| EP4 | 21975 | 10.3924% | 7.18% | 5.97% | 11.74% |
+| **EP5** | **27469** | **9.8756%** | **6.79%** | **5.71%** | **11.15%** |
+
+**Commentary:** Convergence is slower than fern/nezuko (EP5=9.88% vs fern EP5=7.32%), consistent with a higher-loss starting point from explicit τ upweighting. The deceleration (EP4→5: −0.52pp) is slower than earlier epochs. Projected EP10: ~8.5–8.8%. Currently trailing the yi SOTA significantly. EP10 gate: continue if abupt < 8.5%.
+
+---
+
 ## (Pending round-1 results)
 
-Round-1 long DDP8 assignments are actively running:
-- PR #599 (dl24-frieren) — multi-sigma STRING log-freq init, run `sogus8sx`, EP~15.7/50 as of 2026-05-05 00:30 UTC. Wave SOTA: val_abupt=**6.5281%** at step 153,831.
-- PR #608 (dl24-nezuko) — volume-loss ×2.0, run `y301z78k`, EP~20.4/50 as of 2026-05-05 00:30 UTC. val=14.46%, vol=6.99%.
-- PR #611 (dl24-fern) — mild tau_y=1.2/tau_z=1.3 AdamW, run `ug6c3nks`, EP~15.7/50 as of 2026-05-05 00:30 UTC. val=12.370%, vol=6.42%.
-- PR #623 (dl24-tanjiro) — strong tau_y=1.5/tau_z=2.0, smoke run `b7pbsdx7` at EP1 PASS (step 10,865, val=25.996%). Awaiting EP2/EP3 to authorize full long run.
+Round-1 long DDP8 assignments remaining:
+- PR #608 (dl24-nezuko) — volume-loss ×2.0, run `y301z78k`, EP~49/50 as of 2026-05-04. Best val=12.8621% (step=521567). Nearly terminal — awaiting student SENPAI-RESULT with test evaluation.
+- PR #673 (dl24-tanjiro) — 7-sigma STRING PE dense sweep, run TBD; awaiting EP1 val from tanjiro smoke run PR #671.
 
 Terminal results will be appended here as students post SENPAI-RESULT markers.
