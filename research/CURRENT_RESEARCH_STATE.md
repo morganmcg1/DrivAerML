@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~14:30 UTC)
+- 2026-05-05 (updated ~15:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -13,10 +13,10 @@
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** Latest W&B: val=6.8196% (EP22+). Slope slightly positive (+0.009 pct/1k steps) — plateau risk. Run to EP50. |
-| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | Latest W&B: val=6.9744% (EP14+). Slope rising (+0.020 pct/1k steps) — yellow flag, may be past best. |
-| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2`+7 ranks | Latest W&B: val=7.857% (EP6). All slopes positive — early training. EP10 gate: ≤7.5% (needs 0.36pp descent in 4 epochs, feasible). |
-| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | `dzochl0q`+7 ranks (group: `string-qknorm-long-50ep`) | Smoke `7wdwphhn` EP3=8.7821%. Gate extended to EP5 ≤8.0%. Long 50-ep run launched. Long run at EP1=13.13% (step ~6106, ~1 epoch complete). EP5 gate still pending. |
+| #664 | dl24-fern | Per-axis output scaling on STRING backbone — learnable 4-element scale vector on surface output head | `a8emaoxm` | **Wave-best val.** EP22=6.7690% (best). Merge conflict — 3rd rebase request sent. EP25 gate ≤7.0% safety-only. Run to EP50. |
+| #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | EP14=6.8622% (best). Steady descent. EP15 gate ≤7.2% easily achievable. |
+| #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2`+7 ranks (group: `extended-cosine-t60-sota-v2`) | EP6=7.5317% (best). EP7 spike to 7.8574% — transient expected. EP10 gate ≤7.5% still achievable if descent resumes EP8–EP9. All 8 ranks healthy. |
+| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | `dzochl0q`+7 ranks (group: `string-qknorm-long-50ep`) | Smoke `7wdwphhn` EP3=8.7821% — gate extended to EP5 ≤8.0%. Long 50-ep run launched at ~13:44Z. Rank0 at step ~2083 (~EP0.38). EP1 expected soon. EP5 gate still pending. |
 
 ### Closed / Negative Results This Wave
 
@@ -56,7 +56,7 @@
 
 3. **Does extended cosine T_max=60 (nezuko #678) improve late-epoch convergence?** EP6=7.5317%, slope resuming. EP10 gate ≤7.5% is tight (needs 0.033pp more). Pre-wave `5o7jc7wi` (T_max=13) gave best volume score. T_max=60 is a stronger form of the same idea.
 
-4. **Does QK-Norm (tanjiro #696) stabilise attention and help cross-flow tau_y/z?** Smoke run at EP2=9.62% shows normal early-epoch behaviour. EP3 smoke gate ≤8.5%. Pre-wave `tkiigfmc` showed promise but was on old 4.7h stack. First long DDP8 test on current SOTA config.
+4. **Does QK-Norm (tanjiro #696) stabilise attention and help cross-flow tau_y/z?** Smoke EP3=8.7821%, gate extended to EP5 ≤8.0%. Long 50-ep run just launched (~EP0.38 as of 15:00Z). Pre-wave `tkiigfmc` showed promise on old stack. EP5 gate decision pending.
 
 ## Potential Next Research Directions (after current arms complete)
 
