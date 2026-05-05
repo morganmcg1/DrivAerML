@@ -367,14 +367,46 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **7.4861** | **8.8110** | #657 | riy0bxtl | 2026-05-05 |
+| `abupt_axis_mean_rel_l2_pct` | **7.3914** | **8.7189** | #658 | pxsnrw36 | 2026-05-05 |
 
-Note: PR #657 (fern, ultra-low LR 1e-6 continuation from PR #637 checkpoint) merged 2026-05-05 —
-new yi SOTA at val_abupt=7.4861%. Prior bar was 7.5373% (PR #637 fern, extended low-LR polishing at lr=1e-5).
-Key per-axis improvements: τ_y 9.87% → 9.76% val (−1.09% rel), τ_z 11.25% → 11.18% val (−0.56% rel).
-Val slope at timeout: −0.0064%/1k steps (still slightly negative, diminishing returns).
-**Merge bar: val_abupt 7.4861% on the yi codebase (PR #657 fern, ultra-low LR 1e-6 polishing from PR #637).**
+Note: PR #658 (nezuko, SWA staged trajectory / EMA best-ckpt from lr=5e-6 continuation) merged 2026-05-05 —
+new yi SOTA at val_abupt=7.3914%. Prior bar was 7.4861% (PR #657 fern, ultra-low LR 1e-6 continuation).
+EMA best-ckpt (decay=0.999) dominated SWA uniform average (7.4537%) in near-converged regime.
+Key lesson: SWA beneficial in cold-start / exploring regime; EMA optimal in flat, near-convergence regime.
+**Merge bar: val_abupt 7.3914% on the yi codebase (PR #658 nezuko, EMA best-ckpt from lr=5e-6 SWA run).**
 **Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
+
+### PR #658 full metrics (val / test, EMA best-ckpt EP2)
+
+| Metric | Baseline val (#657) | PR #658 EMA val | Baseline test (#657) | PR #658 EMA test |
+|---|---:|---:|---:|---:|
+| abupt_axis_mean_rel_l2_pct | 7.4861% | **7.3914%** | 8.8110% | **8.7189%** |
+| surface_pressure_rel_l2_pct | — | **4.8552%** | — | — |
+| wall_shear_rel_l2_pct | — | **8.3192%** | — | — |
+| volume_pressure_rel_l2_pct | — | **4.3156%** | — | — |
+| wall_shear_x_rel_l2_pct (τ_x) | — | **7.1166%** | — | — |
+| wall_shear_y_rel_l2_pct (τ_y) | — | **9.6123%** | — | — |
+| wall_shear_z_rel_l2_pct (τ_z) | — | **11.0573%** | — | — |
+
+W&B run: `pxsnrw36` (group: `yi-round37-swa-staged`, name: `nezuko/swa-staged-trajectory`)
+Resumed from: `vzprvtaw` (PR #637 yi SOTA) at lr=5e-6 for 2 epochs.
+
+### Reproduce PR #658 (EMA best-ckpt)
+
+```bash
+cd /workspace/senpai/target
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
+  --resume-from <vzprvtaw_checkpoint.pt> \
+  --agent nezuko --wandb-group yi-round37-swa-staged \
+  --wandb-name nezuko/swa-staged-trajectory \
+  --learnable-pe --optimizer lion --lr 5e-6 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --lr-warmup-epochs 0 --ema-decay 0.999 \
+  --swa --swa-lr 5e-6 --swa-start 0 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 --validation-every 1 --no-compile-model \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536
+```
 
 ### PR #637 full metrics (val / test)
 
