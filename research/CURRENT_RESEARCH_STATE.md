@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-04 (Round 37 — advisor cycle check, updated: 2026-05-04 18:10 UTC — all 16 students active, 19 WIP PRs, no PRs ready for review, no human issues)
+- 2026-05-04 (Round 37 — advisor cycle check, updated: 2026-05-04 20:00 UTC — all 16 students active, 19 WIP PRs, no PRs ready for review, no human issues)
 - **CURRENT SOTA (yi branch): PR #637 (fern, extended low-LR training at lr=1e-5 from t4qaysur checkpoint) — val_abupt 7.5373%**. Active yi merge bar: **7.5373%** (run `vzprvtaw`).
 - **PR #576 (frieren STRING-sep learnable PE + Lion) MERGED to yi.** The `--learnable-pe` flag is available in yi `train.py`. Requires `--no-compile-model` (torch.compile inductor broadcast bug).
 - **PR #637 (fern extended low-LR continuation) MERGED to yi.** New SOTA 7.5373%.
@@ -36,7 +36,7 @@ Dominant open gaps: τ_z (~2.45×), τ_y (~2.05×), vol_p (~1.78×).
 | #635 | kohaku | RANS Laplace regularizer on far-field volume pressure | WIP |
 | #636 | gilbert | Inverse local point density loss weighting | WIP |
 | #638 | tanjiro | Model dropout regularization sweep (p=0.05 vs p=0.1) | WIP |
-| #642 | haku | Fourier surface geometry features for tau_y/z gap (RFF input lift) | WIP |
+| #661 | haku | RFF surface geometry lift — isolated single-variable test (dim=64,128) | WIP (reassigned from closed #642) |
 | #645 | norman | 6L/512d clean depth ablation — isolated (no k1_k2, no β-NLL, lr-warmup-epochs=2) | WIP |
 | #646 | alphonse | Asymmetric τ_y/τ_z weighting + curvature-focal loss | WIP |
 | #652 | frieren | Muon optimizer on full yi stack (STRING-sep + grad-ema + β-NLL + k1_k2) | WIP |
@@ -53,6 +53,7 @@ Dominant open gaps: τ_z (~2.45×), τ_y (~2.05×), vol_p (~1.78×).
 ### Recently closed this cycle:
 | PR | Student | Result |
 |---|---|---|
+| #642 | haku | CLOSED — no training activity after 5 escalation nudges; implementation complete; hypothesis reassigned to PR #661 |
 | #631 | violet | CLOSED — CosineAnnealingWarmRestarts null in cold-start: val_abupt=10.74% (+30% vs SOTA). Within-cycle LR decay dominates 3-epoch budget. |
 | #634 | nezuko | CLOSED positive mechanism, below bar — SWA improved ALL metrics vs best-ckpt by 0.61pp (τ_y +0.87pp, τ_z +0.79pp). Needs staged trajectory to beat bar. |
 | #633 | norman | CLOSED — 6L/512d depth scale-up: EP1 abort (18.9% >> 15% gate). Reassigned to PR #645. |
@@ -68,7 +69,7 @@ Dominant open gaps: τ_z (~2.45×), τ_y (~2.05×), vol_p (~1.78×).
 2. **τ_y/τ_z structural attack (multi-prong):**
    - τ_y/τ_z loss weight sweep W=4,6 (PR #628 edward) — direct upweighting
    - Asymmetric tau weights + curvature-focal (PR #646 alphonse) — geometry-informed
-   - Fourier surface geometry RFF features (PR #642 haku) — input lift for τ channels
+   - Fourier surface geometry RFF features (PR #661 haku) — input lift for τ channels (dim=64,128 isolated test)
    - Model dropout p=0.05/0.1 (PR #638 tanjiro) — regularization to reduce τ overfitting
 
 3. **Volume pressure gap attack:**
