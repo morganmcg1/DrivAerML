@@ -1163,6 +1163,7 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    selective_tta_tau_y: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2199,6 +2200,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    selective_tta_tau_y: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -2246,6 +2248,37 @@ def evaluate_split(
         volume_loss_count += volume_count
         surface_pred = transform.invert_surface(surface_pred_norm)
         volume_pred = transform.invert_volume(volume_pred_norm)
+
+        if selective_tta_tau_y and batch.surface_x is not None and bool(batch.surface_mask.any()):
+            # DrivAerML symmetry plane is y=0 (longitudinal x, vertical z, lateral y).
+            # Flip y and ny in the surface input, and y in the volume input, so the
+            # second forward pass sees a geometrically consistent reflected body.
+            surface_x_flipped = batch.surface_x.clone()
+            surface_x_flipped[..., 1] = -surface_x_flipped[..., 1]
+            surface_x_flipped[..., 4] = -surface_x_flipped[..., 4]
+            volume_x_flipped = batch.volume_x.clone() if batch.volume_x is not None else None
+            if volume_x_flipped is not None:
+                volume_x_flipped[..., 1] = -volume_x_flipped[..., 1]
+            with autocast_context(device, amp_mode):
+                out_flipped = model(
+                    surface_x=surface_x_flipped,
+                    surface_mask=batch.surface_mask,
+                    volume_x=volume_x_flipped,
+                    volume_mask=batch.volume_mask,
+                )
+            surface_pred_flipped_norm = out_flipped["surface_preds"].float()
+            surface_pred_flipped = transform.invert_surface(surface_pred_flipped_norm)
+            # tau_y is antisymmetric under y-flip: tau_y(x,-y,z) ≈ -tau_y(x,y,z).
+            # Average original with sign-corrected flipped prediction.
+            tau_y_avg = (surface_pred[..., 2:3] - surface_pred_flipped[..., 2:3]) / 2.0
+            surface_pred = torch.cat(
+                [
+                    surface_pred[..., 0:2],
+                    tau_y_avg,
+                    surface_pred[..., 3:],
+                ],
+                dim=-1,
+            )
 
         if bool(batch.surface_mask.any()):
             surface_abs = (surface_pred - batch.surface_y).abs()
@@ -3110,7 +3143,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, selective_tta_tau_y=config.selective_tta_tau_y)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -3237,7 +3270,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, selective_tta_tau_y=config.selective_tta_tau_y)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3272,7 +3305,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, selective_tta_tau_y=config.selective_tta_tau_y)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3326,11 +3359,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             dist.barrier()
         model.load_state_dict(swa_model.module.state_dict(), strict=True)
         swa_full_val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, selective_tta_tau_y=config.selective_tta_tau_y)
             for name, loader in val_loaders.items()
         }
         swa_test_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, selective_tta_tau_y=config.selective_tta_tau_y)
             for name, loader in test_loaders.items()
         }
         swa_full_val_primary = swa_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
