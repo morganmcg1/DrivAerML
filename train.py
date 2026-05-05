@@ -1040,6 +1040,219 @@ class SurfaceTransolver(nn.Module):
         return result
 
 
+class TowerEncoder(nn.Module):
+    """Single-group (surface or volume) encoder: pos-embed + feature-project + Transformer."""
+
+    def __init__(
+        self,
+        *,
+        space_dim: int = 3,
+        input_dim: int,
+        n_layers: int,
+        n_hidden: int,
+        dropout: float = 0.0,
+        n_head: int = 8,
+        mlp_ratio: int = 4,
+        slice_num: int = 128,
+        stochastic_depth_prob: float = 0.0,
+        pos_max_wavelength: int = 1000,
+        learnable_pe: bool = False,
+    ):
+        super().__init__()
+        self.space_dim = space_dim
+        extra_dim = max(0, input_dim - space_dim)
+        self.pos_embed = ContinuousSincosEmbed(
+            hidden_dim=n_hidden,
+            input_dim=space_dim,
+            max_wavelength=pos_max_wavelength,
+            learnable=learnable_pe,
+        )
+        self.project_features = (
+            LinearProjection(extra_dim, n_hidden) if extra_dim > 0 else None
+        )
+        self.bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
+        self.placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.backbone = Transformer(
+            depth=n_layers,
+            hidden_dim=n_hidden,
+            num_heads=n_head,
+            mlp_expansion_factor=mlp_ratio,
+            num_slices=slice_num,
+            dropout=dropout,
+            stochastic_depth_prob=stochastic_depth_prob,
+        )
+        self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Encode tokens. Returns normalized hidden states [B, N, n_hidden]."""
+        pos = x[:, :, : self.space_dim]
+        hidden = self.pos_embed(pos)
+        if self.project_features is not None and x.shape[-1] > self.space_dim:
+            hidden = hidden + self.project_features(x[:, :, self.space_dim :])
+        hidden = self.bias(hidden) + self.placeholder
+        hidden = _apply_token_mask(hidden, mask)
+        hidden = self.backbone(hidden, attn_mask=mask)
+        hidden = _apply_token_mask(hidden, mask)
+        return _apply_token_mask(self.norm(hidden), mask)
+
+
+class DualTowerTransolver(nn.Module):
+    """Dual-tower encoder: separate surface and volume Transformers with cross-attention bridge.
+
+    The volume tower queries surface features via cross-attention, giving volume tokens
+    a structured way to incorporate boundary-condition information.
+    """
+
+    def __init__(
+        self,
+        *,
+        space_dim: int = 3,
+        surface_input_dim: int = SURFACE_X_DIM,
+        surface_output_dim: int = SURFACE_Y_DIM,
+        volume_input_dim: int = VOLUME_X_DIM,
+        volume_output_dim: int = VOLUME_Y_DIM,
+        n_layers: int = 4,
+        n_hidden: int = 512,
+        dropout: float = 0.0,
+        n_head: int = 8,
+        mlp_ratio: int = 4,
+        slice_num: int = 128,
+        stochastic_depth_prob: float = 0.0,
+        pos_max_wavelength: int = 1000,
+        learnable_pe: bool = False,
+        beta_nll: bool = False,
+    ):
+        super().__init__()
+        self.surface_output_dim = surface_output_dim
+        self.volume_output_dim = volume_output_dim
+        self.beta_nll = beta_nll
+
+        tower_layers = max(1, n_layers // 2)
+
+        self.surface_tower = TowerEncoder(
+            space_dim=space_dim,
+            input_dim=surface_input_dim,
+            n_layers=tower_layers,
+            n_hidden=n_hidden,
+            dropout=dropout,
+            n_head=n_head,
+            mlp_ratio=mlp_ratio,
+            slice_num=slice_num,
+            stochastic_depth_prob=stochastic_depth_prob,
+            pos_max_wavelength=pos_max_wavelength,
+            learnable_pe=learnable_pe,
+        )
+        self.volume_tower = TowerEncoder(
+            space_dim=space_dim,
+            input_dim=volume_input_dim,
+            n_layers=tower_layers,
+            n_hidden=n_hidden,
+            dropout=dropout,
+            n_head=n_head,
+            mlp_ratio=mlp_ratio,
+            slice_num=slice_num,
+            stochastic_depth_prob=stochastic_depth_prob,
+            pos_max_wavelength=pos_max_wavelength,
+            learnable_pe=learnable_pe,
+        )
+
+        # Cross-attention: volume tokens (Q) attend to surface tokens (K, V).
+        # batch_first=True enables PyTorch 2.x Flash Attention for O(N) memory.
+        self.cross_attn = nn.MultiheadAttention(
+            embed_dim=n_hidden,
+            num_heads=n_head,
+            dropout=0.0,
+            batch_first=True,
+        )
+        # Zero-init output projection so cross-attention is a no-op at init.
+        # The model starts as if only the volume tower is used and gradually
+        # learns to incorporate surface context (ControlNet / AdaLN-zero trick).
+        nn.init.zeros_(self.cross_attn.out_proj.weight)
+        nn.init.zeros_(self.cross_attn.out_proj.bias)
+
+        # Learnable null token prepended to surface keys so every sample has at
+        # least one valid (unmasked) key. Removes the need for a data-dependent
+        # branch around cross-attn (which broke DDP find_unused_parameters=False
+        # on volume-only views) and avoids softmax(-inf) NaN when a sample has
+        # no valid surface points.
+        self.cross_attn_null = nn.Parameter(torch.zeros(1, 1, n_hidden))
+
+        self.surface_out = LinearProjection(n_hidden, surface_output_dim)
+        self.volume_out = LinearProjection(n_hidden, volume_output_dim)
+        if self.beta_nll:
+            self.surface_log_var_out = LinearProjection(n_hidden, surface_output_dim)
+            self.volume_log_var_out = LinearProjection(n_hidden, volume_output_dim)
+            nn.init.zeros_(self.surface_log_var_out.project.weight)
+            nn.init.zeros_(self.surface_log_var_out.project.bias)
+            nn.init.zeros_(self.volume_log_var_out.project.weight)
+            nn.init.zeros_(self.volume_log_var_out.project.bias)
+
+    def forward(
+        self,
+        *,
+        surface_x: torch.Tensor | None = None,
+        surface_mask: torch.Tensor | None = None,
+        volume_x: torch.Tensor | None = None,
+        volume_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if surface_x is None or volume_x is None:
+            raise ValueError("DualTowerTransolver requires both surface_x and volume_x")
+        if surface_mask is None:
+            raise ValueError("DualTowerTransolver requires surface_mask")
+        if volume_mask is None:
+            raise ValueError("DualTowerTransolver requires volume_mask")
+
+        # 1. Encode each group independently through its tower.
+        surf_feats = self.surface_tower(surface_x, surface_mask)  # [B, N_s, d]
+        vol_feats = self.volume_tower(volume_x, volume_mask)       # [B, N_v, d]
+
+        # 2. Cross-attention: volume queries attend to surface keys/values.
+        #    Prepend a learnable null token so every sample has ≥1 valid key
+        #    (handles volume-only views where surface_mask can be all-False or
+        #    surface_x can have N_s=0). Cross-attn always runs → DDP-safe with
+        #    find_unused_parameters=False, no CPU sync from .any()/.all() calls.
+        B = vol_feats.shape[0]
+        N_s = surf_feats.shape[1]
+        null_token = self.cross_attn_null.expand(B, 1, -1).to(vol_feats.dtype)
+        if N_s > 0:
+            keys = torch.cat([null_token, surf_feats], dim=1)  # [B, 1+N_s, d]
+            null_pad = surface_mask.new_zeros(B, 1)
+            key_pad_mask = torch.cat([null_pad, ~surface_mask.bool()], dim=1)
+        else:
+            keys = null_token
+            key_pad_mask = surface_mask.new_zeros(B, 1)
+        vol_ctx, _ = self.cross_attn(
+            vol_feats,
+            keys,
+            keys,
+            key_padding_mask=key_pad_mask,
+            need_weights=False,
+        )
+
+        # 3. Residual fusion with masking.
+        vol_feats = _apply_token_mask(vol_feats + vol_ctx, volume_mask)
+
+        # 4. Output heads.
+        surface_preds = self.surface_out(surf_feats) * surface_mask.unsqueeze(-1)
+        volume_preds = self.volume_out(vol_feats) * volume_mask.unsqueeze(-1)
+
+        result: dict[str, torch.Tensor] = {
+            "surface_preds": surface_preds,
+            "volume_preds": volume_preds,
+            "hidden": vol_feats,
+            "surface_hidden": surf_feats,
+            "volume_hidden": vol_feats,
+        }
+
+        if self.beta_nll:
+            surface_log_var = self.surface_log_var_out(surf_feats) * surface_mask.unsqueeze(-1)
+            volume_log_var = self.volume_log_var_out(vol_feats) * volume_mask.unsqueeze(-1)
+            result["surface_log_var"] = surface_log_var
+            result["volume_log_var"] = volume_log_var
+
+        return result
+
+
 class EMA:
     def __init__(self, model: nn.Module, decay: float = 0.999, start_step: int = 0):
         self.decay = decay
@@ -1163,6 +1376,7 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    dual_tower: bool = False
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1353,9 +1567,23 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
-def build_model(config: Config) -> SurfaceTransolver:
+def build_model(config: Config) -> SurfaceTransolver | DualTowerTransolver:
     extra_curv = 2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
     surface_input_dim = SURFACE_X_DIM + extra_curv
+    if config.dual_tower:
+        return DualTowerTransolver(
+            n_layers=config.model_layers,
+            n_hidden=config.model_hidden_dim,
+            dropout=config.model_dropout,
+            n_head=config.model_heads,
+            mlp_ratio=config.model_mlp_ratio,
+            slice_num=config.model_slices,
+            stochastic_depth_prob=config.stochastic_depth_prob,
+            pos_max_wavelength=config.pos_max_wavelength,
+            learnable_pe=config.learnable_pe,
+            surface_input_dim=surface_input_dim,
+            beta_nll=config.beta_nll_beta >= 0.0,
+        )
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -2560,14 +2788,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
     if is_main:
-        print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+        model_type = "DualTowerTransolver" if config.dual_tower else "SurfaceTransolver grouped surface+volume"
+        print(f"Model: {model_type} ({n_params / 1e6:.2f}M params)")
 
     if is_distributed:
         train_model = DistributedDataParallel(
             model,
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=False,
+            find_unused_parameters=config.dual_tower,
         )
     else:
         train_model = model
