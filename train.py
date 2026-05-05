@@ -93,6 +93,12 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    model_pe: str = "sincos"
+    pe_num_features: int = 16
+    pe_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
+    optimizer: str = "adamw"
+    lion_beta1: float = 0.9
+    lion_beta2: float = 0.99
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -170,6 +176,14 @@ def set_optimizer_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
         param_group["lr"] = lr
 
 
+def parse_pe_init_sigmas(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    sigmas = [float(s) for s in spec.split(",") if s.strip()]
+    return sigmas or None
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -178,6 +192,32 @@ def build_model(config: Config) -> SurfaceTransolver:
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
+        pe_kind=config.model_pe,
+        pe_num_features=config.pe_num_features,
+        pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+    )
+
+
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    optimizer_name = config.optimizer.lower()
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+        )
+    if optimizer_name == "lion":
+        from lion_pytorch import Lion
+
+        return Lion(
+            model.parameters(),
+            lr=config.lr,
+            weight_decay=config.weight_decay,
+            betas=(config.lion_beta1, config.lion_beta2),
+            use_triton=False,
+        )
+    raise ValueError(
+        f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion."
     )
 
 
@@ -257,7 +297,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
-        optimizer = torch.optim.AdamW(base_model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+        optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
@@ -278,6 +318,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_timeout_minutes=train_timeout_minutes,
             val_budget_minutes=val_budget_minutes,
         )
+        if state.is_main:
+            pe_class = type(base_model.pos_embed).__name__
+            run.config.update(
+                {
+                    "pe_class": pe_class,
+                    "pe_source_branch": (
+                        "origin/tay" if config.model_pe == "string_multisigma" else "n/a"
+                    ),
+                    "pe_source_sha": (
+                        "d97fb09" if config.model_pe == "string_multisigma" else "n/a"
+                    ),
+                    "pe_source_run_ki2q9ko9": (
+                        config.model_pe == "string_multisigma"
+                    ),
+                },
+                allow_val_change=True,
+            )
 
         output_dir = Path(config.output_dir) / f"run-{run.id}"
         output_dir.mkdir(parents=True, exist_ok=True)

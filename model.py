@@ -72,6 +72,92 @@ class ContinuousSincosEmbed(nn.Module):
         return emb
 
 
+class StringSeparableEncoding(nn.Module):
+    """STRING-separable positional encoding with multi-sigma log-frequency init.
+
+    Per-axis learnable spectral basis:
+        phi_d(x_d) = sin(exp(log_freq_d) * 2pi * x_d + phase_d)
+        psi_d(x_d) = cos(exp(log_freq_d) * 2pi * x_d + phase_d)
+
+    With ``init_sigmas`` of length > 1, ``log_freq`` is initialised round-robin per
+    feature so the encoding starts with broad spectral coverage across frequency
+    octaves; per-axis specialisation is acquired through gradient descent.
+
+    Source: copied verbatim from origin/tay@d97fb09:model.py (PR #511 reapply of
+    PR #488 multi-sigma init that powered W&B run ki2q9ko9). Identical class
+    body and constructor semantics; only the in-line comments were trimmed.
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        num_features: int = 32,
+        sigma: float = 1.0,
+        init_sigmas: list[float] | None = None,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features = num_features
+        if init_sigmas is not None and len(init_sigmas) > 1:
+            log_sigmas = torch.tensor(
+                [math.log(init_sigmas[f % len(init_sigmas)]) for f in range(num_features)],
+                dtype=torch.float32,
+            )
+            log_freq_init = log_sigmas.unsqueeze(0).expand(in_dim, num_features).clone()
+            self.log_freq = nn.Parameter(log_freq_init)
+        else:
+            self.log_freq = nn.Parameter(
+                torch.full((in_dim, num_features), math.log(sigma))
+            )
+        self.phase = nn.Parameter(torch.zeros(in_dim, num_features))
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.in_dim * self.num_features
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        freq = torch.exp(self.log_freq.to(dtype=x.dtype))
+        phase = self.phase.to(dtype=x.dtype)
+        proj = 2.0 * math.pi * x.unsqueeze(-1) * freq + phase
+        enc = torch.cat([proj.sin(), proj.cos()], dim=-1)
+        return enc.flatten(start_dim=-2)
+
+
+class MultiSigmaStringPosEmbed(nn.Module):
+    """Drop-in replacement for ContinuousSincosEmbed using multi-sigma STRING.
+
+    Wraps StringSeparableEncoding (per-axis learnable log-frequency basis with
+    multi-sigma init) plus a linear projection to ``hidden_dim`` so the
+    surrounding model sees the same [B, N, hidden_dim] interface.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        input_dim: int,
+        num_features: int = 16,
+        init_sigmas: list[float] | None = None,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
+        self.num_features = num_features
+        self.init_sigmas = list(init_sigmas) if init_sigmas else None
+        self.string = StringSeparableEncoding(
+            in_dim=input_dim,
+            num_features=num_features,
+            init_sigmas=self.init_sigmas,
+        )
+        self.project = nn.Linear(self.string.output_dim, hidden_dim)
+        nn.init.trunc_normal_(self.project.weight, std=0.02)
+        nn.init.zeros_(self.project.bias)
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords_f = coords.float()
+        enc = self.string(coords_f)
+        return self.project(enc)
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super().__init__()
@@ -226,6 +312,9 @@ class SurfaceTransolver(nn.Module):
         n_head: int = 3,
         mlp_ratio: int = 4,
         slice_num: int = 96,
+        pe_kind: str = "sincos",
+        pe_num_features: int = 16,
+        pe_init_sigmas: list[float] | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -233,10 +322,27 @@ class SurfaceTransolver(nn.Module):
         self.surface_output_dim = surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
+        self.pe_kind = pe_kind
+        self.pe_num_features = pe_num_features
+        self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
-        self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
+        if pe_kind == "sincos":
+            self.pos_embed: nn.Module = ContinuousSincosEmbed(
+                hidden_dim=n_hidden, input_dim=space_dim
+            )
+        elif pe_kind == "string_multisigma":
+            self.pos_embed = MultiSigmaStringPosEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                num_features=pe_num_features,
+                init_sigmas=self.pe_init_sigmas,
+            )
+        else:
+            raise ValueError(
+                f"Unknown pe_kind '{pe_kind}'. Supported: sincos, string_multisigma."
+            )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
