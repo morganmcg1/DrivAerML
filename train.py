@@ -1040,6 +1040,91 @@ class SurfaceTransolver(nn.Module):
         return result
 
 
+class CorrectionMLP(nn.Module):
+    """Per-point residual-correction MLP for frozen-SOTA stacking (PR #724).
+
+    Input: concatenation of [surface_hidden (D), surface_xyz (3), frozen_preds (4)].
+    Output: per-point 4-channel residual added to the frozen surface predictions
+    in normalized space. The final layer is zero-initialized so the wrapped model
+    is exactly identity at step 0 (correction=0), preventing immediate degradation.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int = 64, output_dim: int = 4):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class FrozenBackboneWithCorrection(nn.Module):
+    """Wraps a frozen Transolver backbone and a trainable CorrectionMLP head.
+
+    The frozen backbone runs under torch.no_grad() so no autograd graph is built
+    through it. Training-mode toggling is overridden so the backbone always stays
+    in eval() mode (dropout/etc disabled) while the correction MLP follows normal
+    train/eval semantics. Surface predictions are replaced with
+    `frozen_preds + correction(surface_hidden, xyz, frozen_preds)` masked to valid
+    surface points; volume predictions are passed through unchanged.
+    """
+
+    def __init__(
+        self,
+        frozen_model: nn.Module,
+        correction_mlp: nn.Module,
+        *,
+        space_dim: int = 3,
+    ):
+        super().__init__()
+        self.frozen_model = frozen_model
+        self.correction_mlp = correction_mlp
+        self.space_dim = space_dim
+        for param in self.frozen_model.parameters():
+            param.requires_grad_(False)
+        self.frozen_model.eval()
+
+    def train(self, mode: bool = True) -> "FrozenBackboneWithCorrection":
+        super().train(mode)
+        self.correction_mlp.train(mode)
+        self.frozen_model.eval()
+        return self
+
+    def forward(
+        self,
+        *,
+        surface_x: torch.Tensor | None = None,
+        surface_mask: torch.Tensor | None = None,
+        volume_x: torch.Tensor | None = None,
+        volume_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        with torch.no_grad():
+            out = self.frozen_model(
+                surface_x=surface_x,
+                surface_mask=surface_mask,
+                volume_x=volume_x,
+                volume_mask=volume_mask,
+            )
+        if surface_x is None or surface_mask is None:
+            return out
+        surface_xyz = surface_x[..., : self.space_dim]
+        surface_hidden = out["surface_hidden"]
+        frozen_surface_preds = out["surface_preds"]
+        features = torch.cat([surface_hidden, surface_xyz, frozen_surface_preds], dim=-1)
+        correction = self.correction_mlp(features) * surface_mask.unsqueeze(-1)
+        out["surface_preds_frozen"] = frozen_surface_preds
+        out["surface_preds"] = frozen_surface_preds + correction
+        out["correction"] = correction
+        return out
+
+
 class EMA:
     def __init__(self, model: nn.Module, decay: float = 0.999, start_step: int = 0):
         self.decay = decay
@@ -1163,6 +1248,8 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    correction_mode: bool = False
+    correction_mlp_hidden: int = 64
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2148,6 +2235,16 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    if "correction" in out and bool(batch.surface_mask.any()):
+        correction = out["correction"].detach().float()
+        valid = correction[batch.surface_mask]  # [N_valid, 4]
+        if valid.numel() > 0:
+            metrics["correction/abs_mean"] = float(valid.abs().mean().cpu().item())
+            metrics["correction/rms"] = float(valid.square().mean().sqrt().cpu().item())
+            for ch_idx, ch_name in enumerate(("cp", "tau_x", "tau_y", "tau_z")):
+                ch = valid[:, ch_idx]
+                metrics[f"correction/{ch_name}_abs_mean"] = float(ch.abs().mean().cpu().item())
+                metrics[f"correction/{ch_name}_rms"] = float(ch.square().mean().sqrt().cpu().item())
     return loss, metrics
 
 
@@ -2556,11 +2653,35 @@ def main(argv: Iterable[str] | None = None) -> None:
                 f"Resumed model weights from {config.resume_from} "
                 f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%)"
             )
+    if config.correction_mode:
+        if not config.resume_from:
+            raise ValueError(
+                "--correction-mode requires --resume-from <SOTA checkpoint>"
+            )
+        backbone_hidden_dim = config.model_hidden_dim
+        correction_input_dim = backbone_hidden_dim + 3 + SURFACE_Y_DIM
+        correction_mlp = CorrectionMLP(
+            input_dim=correction_input_dim,
+            hidden_dim=config.correction_mlp_hidden,
+            output_dim=SURFACE_Y_DIM,
+        ).to(device)
+        model = FrozenBackboneWithCorrection(model, correction_mlp).to(device)
+        if is_main:
+            n_correction = sum(p.numel() for p in correction_mlp.parameters())
+            print(
+                f"Correction mode: backbone frozen, "
+                f"CorrectionMLP({correction_input_dim}->{config.correction_mlp_hidden}->{config.correction_mlp_hidden}->{SURFACE_Y_DIM}) "
+                f"with {n_correction:,} trainable params"
+            )
     if config.compile_model:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if is_main:
-        print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+        print(
+            f"Model: SurfaceTransolver grouped surface+volume "
+            f"({n_params / 1e6:.2f}M params; {n_trainable / 1e6:.2f}M trainable)"
+        )
 
     if is_distributed:
         train_model = DistributedDataParallel(
@@ -2572,16 +2693,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     else:
         train_model = model
 
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
         optimizer = torch.optim.AdamW(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            trainable_params, lr=config.lr, weight_decay=config.weight_decay
         )
     elif optimizer_name == "lion":
         from lion_pytorch import Lion
 
         optimizer = Lion(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            trainable_params, lr=config.lr, weight_decay=config.weight_decay
         )
     elif optimizer_name == "muon":
         muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
@@ -3033,7 +3155,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema_decay_now is not None:
                 train_log["train/ema_decay"] = ema_decay_now
             for key, value in batch_loss_metrics.items():
-                if key.startswith("film/"):
+                if key.startswith("film/") or key.startswith("correction/"):
                     train_log[f"train/{key}"] = value
             train_log.update(
                 train_slope_tracker.update(
