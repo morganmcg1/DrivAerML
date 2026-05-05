@@ -1121,11 +1121,16 @@ class DualTowerTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        cross_attn_keys: int = 0,
     ):
         super().__init__()
         self.surface_output_dim = surface_output_dim
         self.volume_output_dim = volume_output_dim
         self.beta_nll = beta_nll
+        # Cap on surface tokens used as cross-attn keys. 0 disables subsampling.
+        # The default in build_model is 4096 to keep cross-attn cost linear in
+        # surface tokens (full quadratic at N_s=65536 is ~3.4h/epoch on 4 GPUs).
+        self.cross_attn_keys = cross_attn_keys
 
         tower_layers = max(1, n_layers // 2)
 
@@ -1211,13 +1216,30 @@ class DualTowerTransolver(nn.Module):
         #    (handles volume-only views where surface_mask can be all-False or
         #    surface_x can have N_s=0). Cross-attn always runs → DDP-safe with
         #    find_unused_parameters=False, no CPU sync from .any()/.all() calls.
+        #    Optional key subsampling caps the cross-attn cost: at N_s=65536 the
+        #    full O(N_v · N_s) attention dominates the step time, so we
+        #    randomly subsample to ≤ self.cross_attn_keys per step. Each step
+        #    sees a different subset → over training the model sees all surface
+        #    tokens (stochastic Linformer-style approximation).
         B = vol_feats.shape[0]
         N_s = surf_feats.shape[1]
+        keys_surf = surf_feats
+        keys_mask = surface_mask
+        if self.cross_attn_keys > 0 and N_s > self.cross_attn_keys:
+            if self.training:
+                idx = torch.randperm(N_s, device=surf_feats.device)[: self.cross_attn_keys]
+            else:
+                # Deterministic subsample at eval — stride sampling preserves
+                # spatial coverage for reproducible val/test metrics.
+                stride = max(1, N_s // self.cross_attn_keys)
+                idx = torch.arange(0, N_s, stride, device=surf_feats.device)[: self.cross_attn_keys]
+            keys_surf = surf_feats.index_select(1, idx)
+            keys_mask = surface_mask.index_select(1, idx)
         null_token = self.cross_attn_null.expand(B, 1, -1).to(vol_feats.dtype)
-        if N_s > 0:
-            keys = torch.cat([null_token, surf_feats], dim=1)  # [B, 1+N_s, d]
+        if keys_surf.shape[1] > 0:
+            keys = torch.cat([null_token, keys_surf], dim=1)
             null_pad = surface_mask.new_zeros(B, 1)
-            key_pad_mask = torch.cat([null_pad, ~surface_mask.bool()], dim=1)
+            key_pad_mask = torch.cat([null_pad, ~keys_mask.bool()], dim=1)
         else:
             keys = null_token
             key_pad_mask = surface_mask.new_zeros(B, 1)
@@ -1377,6 +1399,7 @@ class Config:
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
     dual_tower: bool = False
+    dual_tower_cross_attn_keys: int = 4096
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1583,6 +1606,7 @@ def build_model(config: Config) -> SurfaceTransolver | DualTowerTransolver:
             learnable_pe=config.learnable_pe,
             surface_input_dim=surface_input_dim,
             beta_nll=config.beta_nll_beta >= 0.0,
+            cross_attn_keys=config.dual_tower_cross_attn_keys,
         )
     return SurfaceTransolver(
         n_layers=config.model_layers,
