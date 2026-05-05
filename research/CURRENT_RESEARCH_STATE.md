@@ -45,6 +45,14 @@ Current yi SOTA per-axis (val, PR #681):
 
 ---
 
+## Round 41 — New Assignments (2026-05-05)
+
+| PR | Student | Hypothesis | Priority |
+|----|---------|------------|----------|
+| #724 | norman | Residual correction MLP on frozen SOTA — lightweight bias-correction head trained on frozen pxsnrw36 backbone features targeting τ_y/τ_z gap | HIGH |
+
+---
+
 ## Active WIP PRs — Round 40
 
 | PR | Student | Hypothesis | W&B / State |
@@ -56,7 +64,7 @@ Current yi SOTA per-axis (val, PR #681):
 | #715 | askeladd | Annealed per-axis wallshear weighting | Running: `1qpqhyrt`, step 2417 |
 | #714 | senku | 6L/512d depth retry (900min budget) | Running: `0zr5g357`, step 1260 |
 | #713 | fern | Normal-penalty wallshear tangency regularizer | Running: `m8fq2dvb`, step 5028 |
-| #675 | norman | Perceiver-IO backbone replacement | Running: `yorhbhi9`, val 29.69% |
+| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix) | Round 41 — freshly assigned |
 | #674 | violet | Surface normal RFF (dim=128, σ=4) | Running: `09qsbtgo`, step 5161 |
 | #672 | edward | Decoupled τ_y/τ_z MLP head — sent back for SENPAI-RESULT + polish | Run `o5nplmj9` finished 10.03%; pivot to polish from pxsnrw36 |
 | #671 | tanjiro | y-symmetry pair loss (long run) | Running: `wbjsawz7`, EP1=18.12% |
@@ -79,6 +87,7 @@ Current yi SOTA per-axis (val, PR #681):
 | #646 | alphonse | CLOSED — asymmetric W_y/W_z + curvature-focal both regression |
 | #656 | violet | CLOSED — multi-EMA ensemble null |
 | #659 | norman | CLOSED — 4L/768d cold-start undertrained |
+| #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%, step 3950) |
 
 ---
 
@@ -103,7 +112,6 @@ Current yi SOTA per-axis (val, PR #681):
 
 ### High priority (queued for next idle slots)
 - **Multigrid hierarchical volume attention** — two-resolution coarse-to-fine for elliptic vol_p (Card 5 from round-40 research file)
-- **Residual correction MLP on frozen SOTA** — lightweight bias correction (Card 6)
 - **SAM optimizer** — sharpness-aware fine-tuning from yi SOTA (Card 7)
 - **Geometry-aware mixup** — kNN-constrained mixup on similar vehicle pairs (Card 8)
 
