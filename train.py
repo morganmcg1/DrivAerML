@@ -137,6 +137,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    mixup_alpha: float = 0.0
+    mixup_prob: float = 0.5
     debug: bool = False
 
 
@@ -218,6 +220,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "mixup_alpha": (
+            "Volume-only inter-sample mixup (Zhang et al. 2017, "
+            "https://arxiv.org/abs/1710.09412). When > 0, with probability "
+            "--mixup-prob each minibatch samples lambda ~ Beta(alpha,alpha) "
+            "and a permutation pi, then mixes both volume_x (xyz+sdf) and "
+            "volume_y (pressure) as lam*x + (1-lam)*x[pi]. Surface inputs "
+            "and targets are unchanged. Eval is always clean. 0.0 disables."
+        ),
+        "mixup_prob": (
+            "Probability of applying volume mixup to a given training "
+            "minibatch when --mixup-alpha > 0. Default 0.5."
         ),
     }
     for field in fields(Config):
@@ -594,6 +608,64 @@ def synced_per_task_tensor(
     return stacked
 
 
+def sample_volume_mixup_decision(
+    *,
+    alpha: float,
+    prob: float,
+    device: torch.device,
+    state,
+) -> tuple[bool, float]:
+    """Sample (do_mix, lambda) for volume mixup, synced across DDP ranks.
+
+    Rank 0 draws the decision and lambda; both are broadcast so every rank
+    applies the same mix decision and lambda. Permutations are still drawn
+    per-rank (each rank holds different cars). Returns (False, 1.0) when
+    alpha<=0 or prob<=0 — the no-op path.
+    """
+
+    if alpha <= 0.0 or prob <= 0.0:
+        return False, 1.0
+    decision = torch.zeros(2, device=device, dtype=torch.float32)
+    if (not state.enabled) or state.is_main:
+        do_mix = 1.0 if (torch.rand((), device=device).item() < prob) else 0.0
+        if do_mix > 0.5:
+            alpha_t = torch.tensor(float(alpha), device=device)
+            lam = float(torch.distributions.Beta(alpha_t, alpha_t).sample().item())
+        else:
+            lam = 1.0
+        decision[0] = do_mix
+        decision[1] = lam
+    if state.enabled:
+        dist.broadcast(decision, src=0)
+    return bool(decision[0].item() > 0.5), float(decision[1].item())
+
+
+def apply_volume_mixup(
+    batch,
+    *,
+    do_mix: bool,
+    lam: float,
+    device: torch.device,
+):
+    """Mix volume_x and volume_y across the batch dim with a random permutation.
+
+    Surface inputs/targets and masks are not modified. The original
+    volume_mask is preserved: loss/metrics on padded positions are still
+    masked out. With train-mode replacement sampling (full per-view fill)
+    all positions are valid, so the mixed values are well-defined.
+    """
+
+    if not do_mix:
+        return batch
+    batch_size = batch.volume_x.shape[0]
+    if batch_size <= 1:
+        return batch
+    pi = torch.randperm(batch_size, device=device)
+    batch.volume_x = lam * batch.volume_x + (1.0 - lam) * batch.volume_x[pi]
+    batch.volume_y = lam * batch.volume_y + (1.0 - lam) * batch.volume_y[pi]
+    return batch
+
+
 def parse_vol_points_schedule(text: str) -> list[tuple[int, int]]:
     if not text:
         return []
@@ -830,6 +902,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.mixup_alpha > 0.0:
+                print(
+                    f"Volume mixup enabled: alpha={config.mixup_alpha} "
+                    f"prob={config.mixup_prob} (volume_x and volume_y mixed; "
+                    f"surface unchanged; eval always clean)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -861,6 +939,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["mixup/alpha"] = float(config.mixup_alpha)
+            wandb.summary["mixup/prob"] = float(config.mixup_prob)
+            wandb.summary["mixup/scope"] = (
+                "volume_x_and_volume_y" if config.mixup_alpha > 0.0 else "disabled"
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -914,6 +997,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                batch = batch.to(device)
+                mixup_do, mixup_lam = sample_volume_mixup_decision(
+                    alpha=config.mixup_alpha,
+                    prob=config.mixup_prob,
+                    device=device,
+                    state=state,
+                )
+                batch = apply_volume_mixup(
+                    batch, do_mix=mixup_do, lam=mixup_lam, device=device
+                )
+                mixup_metrics: dict[str, float] = {
+                    "mixup/applied": 1.0 if mixup_do else 0.0,
+                    "mixup/lambda": float(mixup_lam) if mixup_do else float("nan"),
+                    "mixup/alpha": float(config.mixup_alpha),
+                    "mixup/prob": float(config.mixup_prob),
+                }
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1050,6 +1149,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if config.mixup_alpha > 0.0:
+                    train_log.update(mixup_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
