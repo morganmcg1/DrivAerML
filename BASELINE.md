@@ -513,6 +513,41 @@ The dominant remaining gaps are **wall_shear_y/z (2.4×, 2.7×)** and
 **volume_pressure (2.0×)** — these are the key research targets for upcoming
 rounds.
 
+## 2026-05-05 22:31 UTC — PR #724: Residual correction MLP on frozen SOTA (norman)
+
+**New yi best (single-checkpoint): val_abupt = 7.3588%, test_abupt = 8.6884%**
+
+- **val_abupt:** 7.3588% (−0.0179pp vs prior SOTA 7.3767%)
+- **test_abupt:** 8.6884% (−0.0131pp vs prior SOTA 8.7015%)
+- **Per-axis val:** surface_p=4.8440%, τ_x=7.0969%, τ_y=9.5185%, τ_z=11.0188%, vol_p=4.3156%
+- **Per-axis test:** surface_p=4.6156%, τ_x=7.1661%, τ_y=9.5287%, τ_z=10.7254%, vol_p=11.4062%
+- **W&B run:** `u7obwlh7` (group `yi-round41-residual-correction`, name `norman/correction-mlp-d64-frozen-sota`)
+- **Reproduce:**
+```bash
+cd target/
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
+  --resume-from /workspace/senpai/target/artifacts/pxsnrw36/checkpoint.pt \
+  --agent norman \
+  --wandb-group yi-round41-residual-correction \
+  --wandb-name norman/correction-mlp-d64-frozen-sota \
+  --correction-mode \
+  --correction-mlp-hidden 64 \
+  --learnable-pe \
+  --optimizer lion --lr 1e-4 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --lr-warmup-steps 500 \
+  --ema-decay 0.999 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 --validation-every 1 --no-compile-model \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --epochs 5 \
+  --kill-thresholds "5400:val_primary/abupt_axis_mean_rel_l2_pct<7.5"
+```
+
+Key: `--correction-mode` + `--correction-mlp-hidden 64` — adds a 3-layer GELU MLP (37.7k trainable params) on top of frozen backbone; final layer zero-initialized (identity at step 0). Largest gain on τ_y (−0.0647pp val / −0.0677pp test).
+
+---
+
 ## Reference config (`train.py` defaults on `yi`)
 
 ```
