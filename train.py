@@ -1250,6 +1250,7 @@ class Config:
     swa_update_every_steps: int = 500
     correction_mode: bool = False
     correction_mlp_hidden: int = 64
+    ensemble_checkpoints: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2453,6 +2454,264 @@ def evaluate_split(
     }
 
 
+@torch.no_grad()
+def evaluate_split_ensemble(
+    models: list[nn.Module],
+    loader,
+    transform: TargetTransform,
+    device: torch.device,
+    *,
+    amp_mode: str = "none",
+    track_correlation: bool = False,
+) -> dict[str, object]:
+    """Average per-batch predictions across `models`, then compute the same
+    metrics as `evaluate_split` on the averaged prediction.
+
+    Averaging happens in normalized target space; because `TargetTransform`
+    is shared across models, this is mathematically identical to averaging
+    in the original target space.
+    """
+    for ensemble_model in models:
+        ensemble_model.eval()
+    K = len(models)
+    if K == 0:
+        raise ValueError("evaluate_split_ensemble requires at least one model")
+
+    surface_loss_sse = 0.0
+    surface_loss_count = 0
+    volume_loss_sse = 0.0
+    volume_loss_count = 0
+    abs_sums = {
+        "surface_pressure": 0.0,
+        "wall_shear": 0.0,
+        "wall_shear_x": 0.0,
+        "wall_shear_y": 0.0,
+        "wall_shear_z": 0.0,
+        "volume_pressure": 0.0,
+    }
+    abs_counts = {key: 0 for key in abs_sums}
+    wall_shear_vector_abs_sum = 0.0
+    wall_shear_vector_count = 0
+    case_sums = {
+        "surface_pressure": {},
+        "wall_shear": {},
+        "wall_shear_x": {},
+        "wall_shear_y": {},
+        "wall_shear_z": {},
+        "volume_pressure": {},
+    }
+
+    corr_state: dict[str, dict[str, float]] = {}
+    if track_correlation and K == 2:
+        for ch_name in (
+            "surface_pressure",
+            "wall_shear_x",
+            "wall_shear_y",
+            "wall_shear_z",
+            "volume_pressure",
+        ):
+            corr_state[ch_name] = {
+                "n": 0.0,
+                "sxA": 0.0,
+                "sxB": 0.0,
+                "sxxA": 0.0,
+                "sxxB": 0.0,
+                "sxy": 0.0,
+            }
+
+    for batch in loader:
+        batch = batch.to(device)
+        surface_target_norm = transform.apply_surface(batch.surface_y)
+        volume_target_norm = transform.apply_volume(batch.volume_y)
+
+        surface_preds_norm: list[torch.Tensor] = []
+        volume_preds_norm: list[torch.Tensor] = []
+        for ensemble_model in models:
+            with autocast_context(device, amp_mode):
+                out = ensemble_model(
+                    surface_x=batch.surface_x,
+                    surface_mask=batch.surface_mask,
+                    volume_x=batch.volume_x,
+                    volume_mask=batch.volume_mask,
+                )
+            surface_preds_norm.append(out["surface_preds"].float())
+            volume_preds_norm.append(out["volume_preds"].float())
+
+        surface_pred_norm = torch.stack(surface_preds_norm, dim=0).mean(dim=0)
+        volume_pred_norm = torch.stack(volume_preds_norm, dim=0).mean(dim=0)
+
+        surface_sse, surface_count = _masked_sse_count(
+            surface_pred_norm, surface_target_norm, batch.surface_mask
+        )
+        volume_sse, volume_count = _masked_sse_count(
+            volume_pred_norm, volume_target_norm, batch.volume_mask
+        )
+        surface_loss_sse += surface_sse
+        surface_loss_count += surface_count
+        volume_loss_sse += volume_sse
+        volume_loss_count += volume_count
+        surface_pred = transform.invert_surface(surface_pred_norm)
+        volume_pred = transform.invert_volume(volume_pred_norm)
+
+        if bool(batch.surface_mask.any()):
+            surface_abs = (surface_pred - batch.surface_y).abs()
+            valid_surface_abs = surface_abs[batch.surface_mask]
+            abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
+            abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
+            wall_abs = valid_surface_abs[:, 1:4]
+            abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
+            abs_counts["wall_shear"] += int(wall_abs.numel())
+            for offset, axis in enumerate(("x", "y", "z")):
+                channel = wall_abs[:, offset]
+                abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
+                abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
+            wall_vector_error = torch.linalg.vector_norm(
+                surface_pred[batch.surface_mask][:, 1:4] - batch.surface_y[batch.surface_mask][:, 1:4],
+                dim=-1,
+            )
+            wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
+            wall_shear_vector_count += int(wall_vector_error.numel())
+
+        if bool(batch.volume_mask.any()):
+            volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
+            abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
+            abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
+
+        for case_idx, case_id in enumerate(batch.case_ids):
+            surface_valid = batch.surface_mask[case_idx].bool()
+            if bool(surface_valid.any()):
+                surface_pred_valid = surface_pred[case_idx][surface_valid]
+                surface_target_valid = batch.surface_y[case_idx][surface_valid]
+                _accumulate_case_rel_l2(
+                    case_sums["surface_pressure"],
+                    case_id=case_id,
+                    pred=surface_pred_valid[:, 0:1],
+                    target=surface_target_valid[:, 0:1],
+                )
+                _accumulate_case_rel_l2(
+                    case_sums["wall_shear"],
+                    case_id=case_id,
+                    pred=surface_pred_valid[:, 1:4],
+                    target=surface_target_valid[:, 1:4],
+                )
+                for channel, axis in enumerate(("x", "y", "z"), start=1):
+                    _accumulate_case_rel_l2(
+                        case_sums[f"wall_shear_{axis}"],
+                        case_id=case_id,
+                        pred=surface_pred_valid[:, channel : channel + 1],
+                        target=surface_target_valid[:, channel : channel + 1],
+                    )
+            volume_valid = batch.volume_mask[case_idx].bool()
+            if bool(volume_valid.any()):
+                _accumulate_case_rel_l2(
+                    case_sums["volume_pressure"],
+                    case_id=case_id,
+                    pred=volume_pred[case_idx][volume_valid],
+                    target=batch.volume_y[case_idx][volume_valid],
+                )
+
+        if corr_state:
+            sA_norm = surface_preds_norm[0]
+            sB_norm = surface_preds_norm[1]
+            vA_norm = volume_preds_norm[0]
+            vB_norm = volume_preds_norm[1]
+            if bool(batch.surface_mask.any()):
+                sA_valid = sA_norm[batch.surface_mask].float()
+                sB_valid = sB_norm[batch.surface_mask].float()
+                for ch_idx, ch_name in enumerate((
+                    "surface_pressure",
+                    "wall_shear_x",
+                    "wall_shear_y",
+                    "wall_shear_z",
+                )):
+                    a = sA_valid[:, ch_idx]
+                    b = sB_valid[:, ch_idx]
+                    state = corr_state[ch_name]
+                    state["n"] += float(a.numel())
+                    state["sxA"] += float(a.sum().detach().cpu().item())
+                    state["sxB"] += float(b.sum().detach().cpu().item())
+                    state["sxxA"] += float(a.square().sum().detach().cpu().item())
+                    state["sxxB"] += float(b.square().sum().detach().cpu().item())
+                    state["sxy"] += float((a * b).sum().detach().cpu().item())
+            if bool(batch.volume_mask.any()):
+                vA_valid = vA_norm[batch.volume_mask][:, 0].float()
+                vB_valid = vB_norm[batch.volume_mask][:, 0].float()
+                state = corr_state["volume_pressure"]
+                state["n"] += float(vA_valid.numel())
+                state["sxA"] += float(vA_valid.sum().detach().cpu().item())
+                state["sxB"] += float(vB_valid.sum().detach().cpu().item())
+                state["sxxA"] += float(vA_valid.square().sum().detach().cpu().item())
+                state["sxxB"] += float(vB_valid.square().sum().detach().cpu().item())
+                state["sxy"] += float((vA_valid * vB_valid).sum().detach().cpu().item())
+
+    surface_pressure_rel_l2, surface_cases = _rel_l2(case_sums["surface_pressure"])
+    wall_shear_rel_l2, wall_shear_cases = _rel_l2(case_sums["wall_shear"])
+    wall_shear_x_rel_l2, _ = _rel_l2(case_sums["wall_shear_x"])
+    wall_shear_y_rel_l2, _ = _rel_l2(case_sums["wall_shear_y"])
+    wall_shear_z_rel_l2, _ = _rel_l2(case_sums["wall_shear_z"])
+    volume_pressure_rel_l2, volume_cases = _rel_l2(case_sums["volume_pressure"])
+    abupt_axis_mean_rel_l2 = _finite_mean(
+        [
+            surface_pressure_rel_l2,
+            wall_shear_x_rel_l2,
+            wall_shear_y_rel_l2,
+            wall_shear_z_rel_l2,
+            volume_pressure_rel_l2,
+        ]
+    )
+    mae_values = {key: abs_sums[key] / max(abs_counts[key], 1) for key in abs_sums}
+    wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
+    loss = (surface_loss_sse + volume_loss_sse) / max(
+        surface_loss_count + volume_loss_count, 1
+    )
+
+    correlations: dict[str, float] = {}
+    for ch_name, state in corr_state.items():
+        n = state["n"]
+        if n <= 1:
+            continue
+        mA = state["sxA"] / n
+        mB = state["sxB"] / n
+        varA = max(state["sxxA"] / n - mA * mA, 0.0)
+        varB = max(state["sxxB"] / n - mB * mB, 0.0)
+        cov = state["sxy"] / n - mA * mB
+        denom = math.sqrt(varA * varB)
+        correlations[ch_name] = (cov / denom) if denom > 0 else float("nan")
+
+    metrics: dict[str, object] = {
+        "loss": loss,
+        "surface_loss": surface_loss_sse / max(surface_loss_count, 1),
+        "volume_loss": volume_loss_sse / max(volume_loss_count, 1),
+        "surface_pressure_mae": mae_values["surface_pressure"],
+        "wall_shear_mae": mae_values["wall_shear"],
+        "wall_shear_vector_mae": wall_shear_vector_mae,
+        "wall_shear_x_mae": mae_values["wall_shear_x"],
+        "wall_shear_y_mae": mae_values["wall_shear_y"],
+        "wall_shear_z_mae": mae_values["wall_shear_z"],
+        "volume_pressure_mae": mae_values["volume_pressure"],
+        "surface_pressure_rel_l2": surface_pressure_rel_l2,
+        "surface_pressure_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
+        "wall_shear_rel_l2": wall_shear_rel_l2,
+        "wall_shear_rel_l2_pct": wall_shear_rel_l2 * 100.0,
+        "wall_shear_x_rel_l2": wall_shear_x_rel_l2,
+        "wall_shear_x_rel_l2_pct": wall_shear_x_rel_l2 * 100.0,
+        "wall_shear_y_rel_l2": wall_shear_y_rel_l2,
+        "wall_shear_y_rel_l2_pct": wall_shear_y_rel_l2 * 100.0,
+        "wall_shear_z_rel_l2": wall_shear_z_rel_l2,
+        "wall_shear_z_rel_l2_pct": wall_shear_z_rel_l2 * 100.0,
+        "volume_pressure_rel_l2": volume_pressure_rel_l2,
+        "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
+        "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
+        "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
+        "cases": max(surface_cases, wall_shear_cases, volume_cases),
+        "surface_cases": surface_cases,
+        "volume_cases": volume_cases,
+    }
+    if correlations:
+        metrics["correlations"] = correlations
+    return metrics
+
+
 def _sanitize_artifact_token(value: str) -> str:
     out = "".join(c if c.isalnum() or c in "-_." else "-" for c in value)
     return out.strip("-_.") or "run"
@@ -2531,6 +2790,201 @@ def print_metrics(prefix: str, metrics: dict[str, float]) -> None:
         f"wall_shear_mae={metrics['wall_shear_mae']:.5f} "
         f"cases={int(metrics['cases'])}"
     )
+
+
+def run_ensemble_eval(
+    *,
+    config: Config,
+    val_loaders: dict,
+    test_loaders: dict,
+    transform: TargetTransform,
+    device: torch.device,
+    is_main: bool,
+    is_distributed: bool,
+    world_size: int,
+) -> None:
+    """Inference-time ensemble: load K checkpoints, average their per-batch
+    predictions, then run full-fidelity val + test eval on the averaged prediction.
+
+    Logs `full_val_primary/*`, `test_primary/*`, and (when K=2)
+    `ensemble/correlation/<channel>` so the ensemble run is comparable with the
+    standard training pipeline's logged keys.
+    """
+    raw_paths = [p.strip() for p in config.ensemble_checkpoints.split(",")]
+    checkpoint_paths = [p for p in raw_paths if p]
+    if not checkpoint_paths:
+        raise ValueError("--ensemble-checkpoints was set but parsed to an empty list")
+    for path in checkpoint_paths:
+        if not Path(path).is_file():
+            raise FileNotFoundError(f"Ensemble checkpoint not found: {path}")
+    K = len(checkpoint_paths)
+
+    if is_main:
+        print(f"[ensemble] K={K} checkpoint{'s' if K != 1 else ''}:")
+        for idx, path in enumerate(checkpoint_paths):
+            print(f"[ensemble]   [{idx}] {path}")
+
+    models: list[nn.Module] = []
+    checkpoint_meta: list[dict[str, object]] = []
+    for path in checkpoint_paths:
+        ensemble_model = build_model(config).to(device)
+        ckpt = torch.load(path, map_location=device, weights_only=True)
+        ensemble_model.load_state_dict(ckpt["model"], strict=True)
+        ensemble_model.eval()
+        prev_epoch = ckpt.get("epoch", -1)
+        prev_val = (ckpt.get("val_metrics", {}) or {}).get("val_surface", {}) or {}
+        prev_primary_val = float(prev_val.get("abupt_axis_mean_rel_l2_pct", float("nan")))
+        meta = {
+            "path": path,
+            "saved_epoch": int(prev_epoch) if isinstance(prev_epoch, (int, float)) else -1,
+            "saved_val_abupt_pct": prev_primary_val,
+        }
+        checkpoint_meta.append(meta)
+        if is_main:
+            print(
+                f"[ensemble] loaded {path} "
+                f"(saved epoch={meta['saved_epoch']}, val_abupt={prev_primary_val:.4f}%)"
+            )
+        models.append(ensemble_model)
+
+    n_params = sum(p.numel() for p in models[0].parameters())
+
+    run_config = {
+        **asdict(config),
+        "n_params": n_params,
+        "ensemble_K": K,
+        "ensemble_paths": checkpoint_paths,
+        "ensemble_checkpoint_meta": checkpoint_meta,
+        "val_views": {k: len(v.dataset) for k, v in val_loaders.items()},
+        "test_views": {k: len(v.dataset) for k, v in test_loaders.items()},
+        "ddp_world_size": world_size,
+        "surface_input_dim_effective": SURFACE_X_DIM
+        + (2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0),
+    }
+
+    run = wandb.init(
+        entity=os.environ.get("WANDB_ENTITY"),
+        project=os.environ.get("WANDB_PROJECT"),
+        group=config.wandb_group or None,
+        name=config.wandb_name or None,
+        tags=[config.agent] if config.agent else [],
+        config=run_config,
+        mode=(os.environ.get("WANDB_MODE", "online") if is_main else "disabled"),
+    )
+    wandb.define_metric("global_step")
+    wandb.define_metric("full_val/*", step_metric="global_step")
+    wandb.define_metric("full_val_primary/*", step_metric="global_step")
+    wandb.define_metric("test/*", step_metric="global_step")
+    wandb.define_metric("test_primary/*", step_metric="global_step")
+    wandb.define_metric("ensemble/*", step_metric="global_step")
+
+    track_correlation = K == 2
+
+    full_val_metrics = {
+        name: evaluate_split_ensemble(
+            models,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            track_correlation=track_correlation,
+        )
+        for name, loader in val_loaders.items()
+    }
+    val_surface = full_val_metrics["val_surface"]
+    full_val_log: dict[str, object] = {
+        "full_val_primary/abupt_axis_mean_rel_l2_pct": val_surface["abupt_axis_mean_rel_l2_pct"],
+        "full_val_primary/abupt_axis_mean_rel_l2": val_surface["abupt_axis_mean_rel_l2"],
+        "full_val_primary/surface_pressure_mae": val_surface["surface_pressure_mae"],
+        "full_val_primary/wall_shear_mae": val_surface["wall_shear_mae"],
+        "full_val_primary/volume_pressure_mae": val_surface["volume_pressure_mae"],
+        "full_val_primary/surface_pressure_rel_l2_pct": val_surface["surface_pressure_rel_l2_pct"],
+        "full_val_primary/wall_shear_rel_l2_pct": val_surface["wall_shear_rel_l2_pct"],
+        "full_val_primary/wall_shear_x_rel_l2_pct": val_surface["wall_shear_x_rel_l2_pct"],
+        "full_val_primary/wall_shear_y_rel_l2_pct": val_surface["wall_shear_y_rel_l2_pct"],
+        "full_val_primary/wall_shear_z_rel_l2_pct": val_surface["wall_shear_z_rel_l2_pct"],
+        "full_val_primary/volume_pressure_rel_l2_pct": val_surface["volume_pressure_rel_l2_pct"],
+        "global_step": 0,
+    }
+    val_correlations = val_surface.get("correlations") if track_correlation else None
+    if val_correlations:
+        for ch_name, value in val_correlations.items():
+            full_val_log[f"ensemble/correlation/val_{ch_name}"] = float(value)
+    for split_name, metrics in full_val_metrics.items():
+        for key, value in metrics.items():
+            if key == "correlations":
+                continue
+            full_val_log[f"full_val/{split_name}/{key}"] = value
+    wandb.log(full_val_log)
+    wandb.summary.update(_numeric_metric_items(full_val_log))
+    if is_main:
+        print_metrics("ensemble_full_val", val_surface)
+        if val_correlations:
+            print(
+                "[ensemble] val per-channel Pearson r between checkpoints: "
+                + ", ".join(f"{ch}={val_correlations[ch]:.4f}" for ch in val_correlations)
+            )
+
+    test_metrics = {
+        name: evaluate_split_ensemble(
+            models,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            track_correlation=track_correlation,
+        )
+        for name, loader in test_loaders.items()
+    }
+    test_surface = test_metrics["test_surface"]
+    test_log: dict[str, object] = {
+        "test_primary/abupt_axis_mean_rel_l2_pct": test_surface["abupt_axis_mean_rel_l2_pct"],
+        "test_primary/abupt_axis_mean_rel_l2": test_surface["abupt_axis_mean_rel_l2"],
+        "test_primary/surface_pressure_mae": test_surface["surface_pressure_mae"],
+        "test_primary/wall_shear_mae": test_surface["wall_shear_mae"],
+        "test_primary/volume_pressure_mae": test_surface["volume_pressure_mae"],
+        "test_primary/surface_pressure_rel_l2_pct": test_surface["surface_pressure_rel_l2_pct"],
+        "test_primary/wall_shear_rel_l2_pct": test_surface["wall_shear_rel_l2_pct"],
+        "test_primary/wall_shear_x_rel_l2_pct": test_surface["wall_shear_x_rel_l2_pct"],
+        "test_primary/wall_shear_y_rel_l2_pct": test_surface["wall_shear_y_rel_l2_pct"],
+        "test_primary/wall_shear_z_rel_l2_pct": test_surface["wall_shear_z_rel_l2_pct"],
+        "test_primary/volume_pressure_rel_l2_pct": test_surface["volume_pressure_rel_l2_pct"],
+        "global_step": 0,
+    }
+    test_correlations = test_surface.get("correlations") if track_correlation else None
+    if test_correlations:
+        for ch_name, value in test_correlations.items():
+            test_log[f"ensemble/correlation/test_{ch_name}"] = float(value)
+    for split_name, metrics in test_metrics.items():
+        for key, value in metrics.items():
+            if key == "correlations":
+                continue
+            test_log[f"test/{split_name}/{key}"] = value
+    wandb.log(test_log)
+    wandb.summary.update(_numeric_metric_items(test_log))
+    if is_main:
+        print_metrics("ensemble_test", test_surface)
+        if test_correlations:
+            print(
+                "[ensemble] test per-channel Pearson r between checkpoints: "
+                + ", ".join(f"{ch}={test_correlations[ch]:.4f}" for ch in test_correlations)
+            )
+
+    if is_main:
+        print(
+            "SENPAI-RESULT: "
+            f"ensemble_K={K} "
+            f"val_abupt={val_surface['abupt_axis_mean_rel_l2_pct']:.4f}% "
+            f"test_abupt={test_surface['abupt_axis_mean_rel_l2_pct']:.4f}% "
+            f"surface_p_val={val_surface['surface_pressure_rel_l2_pct']:.4f}% "
+            f"surface_p_test={test_surface['surface_pressure_rel_l2_pct']:.4f}% "
+            f"vol_p_val={val_surface['volume_pressure_rel_l2_pct']:.4f}% "
+            f"vol_p_test={test_surface['volume_pressure_rel_l2_pct']:.4f}%"
+        )
+
+    wandb.finish()
+    if is_distributed:
+        dist.destroy_process_group()
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -2630,6 +3084,19 @@ def main(argv: Iterable[str] | None = None) -> None:
         volume_y_mean=stats["volume_y_mean"].to(device),
         volume_y_std=stats["volume_y_std"].to(device),
     )
+
+    if config.ensemble_checkpoints:
+        run_ensemble_eval(
+            config=config,
+            val_loaders=val_loaders,
+            test_loaders=test_loaders,
+            transform=transform,
+            device=device,
+            is_main=is_main,
+            is_distributed=is_distributed,
+            world_size=world_size,
+        )
+        return
 
     model = build_model(config).to(device)
     resume_info: dict[str, float | str | int] = {}
