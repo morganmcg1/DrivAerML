@@ -276,6 +276,67 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
   --train-volume-points 65536 --eval-volume-points 65536
 ```
 
+## 2026-05-05 — PR #657: Ultra-low LR 1e-6 continuation from PR #637 yi best (fern) — NEW yi SOTA
+
+PR #657 (fern, lr=1e-6 continuation from PR #637 best checkpoint `vzprvtaw`) merged 2026-05-05.
+Resumed from PR #637's best val checkpoint (val_abupt=7.5373% at EP3) and trained at lr=1e-6 for 3 epochs
+before the 260-min timeout fired mid-epoch 3.
+
+**Result:** val_abupt improved from 7.5373% → **7.4861%** — a 0.68% relative gain. Every sub-metric improved on both val and test.
+
+Key findings:
+- τ_y saw the strongest relative improvement: val −1.09% rel (9.87% → 9.76%), test −0.99% rel
+- τ_z: val −0.56% rel (11.25% → 11.18%)
+- Val slope at termination: −0.0064%/1k steps (still negative but firmly in diminishing-returns zone)
+- Epoch deltas: −0.031 → −0.015 → −0.005 (flattening sharply; further training at this LR unlikely to yield much)
+
+W&B run: `riy0bxtl` (group: `yi-round37-ultra-low-lr`, name: `fern/ultra-low-lr-1e6-from-pr637`)
+Resumed from: `vzprvtaw` (PR #637 best checkpoint, val_abupt=7.5373%)
+
+### PR #657 full metrics (val / test)
+
+| Metric | Baseline val (#637) | PR #657 val | Baseline test (#637) | PR #657 test |
+|---|---:|---:|---:|---:|
+| abupt_axis_mean_rel_l2_pct | 7.5373% | **7.4861%** | 8.8533% | **8.8110%** |
+| surface_pressure_rel_l2_pct | 4.9322% | 4.9155% | 4.6968% | 4.6834% |
+| wall_shear_rel_l2_pct | 8.4774% | 8.4180% | 8.4954% | 8.4440% |
+| volume_pressure_rel_l2_pct | 4.4102% | 4.3813% | 11.4599% | 11.4463% |
+| wall_shear_x_rel_l2_pct (τ_x) | 7.2272% | 7.1880% | 7.3046% | 7.2727% |
+| wall_shear_y_rel_l2_pct (τ_y) | 9.8691% | **9.7611%** | 9.8648% | **9.7675%** |
+| wall_shear_z_rel_l2_pct (τ_z) | 11.2477% | **11.1846%** | 10.9403% | **10.8851%** |
+
+### Per-epoch validation trajectory (PR #657)
+
+| Epoch | val_abupt | Δ vs prev |
+|---|---:|---:|
+| 0 (resume from PR #637 best) | 7.5373% | — |
+| 1 | 7.5060% | −0.0313 |
+| 2 | 7.4915% | −0.0145 |
+| 3 (timeout, forced val) | **7.4861%** | −0.0054 |
+
+### Reproduce PR #657
+
+```bash
+cd /workspace/senpai/target
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
+  --resume-from artifacts/fern-pr637-vzprvtaw/checkpoint.pt \
+  --agent fern --wandb-group yi-round37-ultra-low-lr \
+  --wandb-name fern/ultra-low-lr-1e6-from-pr637 \
+  --learnable-pe --optimizer lion --lr 1e-6 --weight-decay 5e-4 --clip-grad-norm 0.5 \
+  --lr-warmup-epochs 0 --ema-decay 0.999 \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 --validation-every 1 --no-compile-model \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --epochs 20
+```
+
+Note: Do NOT add `--surface-curvature-features k1_k2`, `--beta-nll-beta 0.5`, or `--grad-ema-alpha` —
+the `vzprvtaw` checkpoint was trained with surface_input_dim=4 and output_dim=4. Those flags would cause
+strict state_dict shape mismatches on load.
+
+---
+
 ## 2026-05-04 — PR #576: STRING-sep PE + Lion lr=1e-4 clip=0.5 (frieren) — NEW yi SOTA
 
 PR #576 (frieren, STRING-sep learnable PE composed with Lion lr=1e-4 clip=0.5) merged 2026-05-04.
@@ -306,12 +367,13 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **7.5373** | **8.8533** | #637 | vzprvtaw | 2026-05-04 |
+| `abupt_axis_mean_rel_l2_pct` | **7.4861** | **8.8110** | #657 | riy0bxtl | 2026-05-05 |
 
-Note: PR #637 (fern, extended low-LR continued training at lr=1e-5 from t4qaysur checkpoint) merged 2026-05-04 —
-new yi SOTA at val_abupt=7.5373%. Prior bar was 8.2528% (PR #576 frieren, STRING-sep learnable PE + Lion lr=1e-4).
-Key per-axis improvements: τ_y 11.13% → 9.87% val (−11.4% rel), τ_z 12.22% → 11.25% val (−7.9% rel).
-**Merge bar: val_abupt 7.5373% on the yi codebase (PR #637 fern, extended low-LR polishing from t4qaysur).**
+Note: PR #657 (fern, ultra-low LR 1e-6 continuation from PR #637 checkpoint) merged 2026-05-05 —
+new yi SOTA at val_abupt=7.4861%. Prior bar was 7.5373% (PR #637 fern, extended low-LR polishing at lr=1e-5).
+Key per-axis improvements: τ_y 9.87% → 9.76% val (−1.09% rel), τ_z 11.25% → 11.18% val (−0.56% rel).
+Val slope at timeout: −0.0064%/1k steps (still slightly negative, diminishing returns).
+**Merge bar: val_abupt 7.4861% on the yi codebase (PR #657 fern, ultra-low LR 1e-6 polishing from PR #637).**
 **Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
 
 ### PR #637 full metrics (val / test)
