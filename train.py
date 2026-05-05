@@ -1040,6 +1040,396 @@ class SurfaceTransolver(nn.Module):
         return result
 
 
+# ---------------------------------------------------------------------------
+# Perceiver-IO backbone (PR #616 / chihiro)
+# Replaces the slice-attention Transolver with a Perceiver-IO style
+# learned-latent bottleneck. Encoder: latent ← (surface ∪ volume) cross-attn,
+# alternating with latent self-attn. Decoder: per-modality output queries
+# cross-attend the latent, with shared cross-attn weights and separate heads.
+# ---------------------------------------------------------------------------
+
+
+class PerceiverCrossAttention(nn.Module):
+    """Cross-attention with separate pre-LayerNorms on query and KV streams.
+
+    Uses ``F.scaled_dot_product_attention`` with a boolean attn_mask
+    (True == KEEP, False == MASK) so padded keys contribute zero weight.
+    """
+
+    def __init__(
+        self,
+        query_dim: int,
+        kv_dim: int,
+        hidden_dim: int,
+        num_heads: int,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.norm_q = nn.LayerNorm(query_dim, eps=1e-6)
+        self.norm_kv = nn.LayerNorm(kv_dim, eps=1e-6)
+        self.q_proj = LinearProjection(query_dim, hidden_dim, bias=False)
+        self.k_proj = LinearProjection(kv_dim, hidden_dim, bias=False)
+        self.v_proj = LinearProjection(kv_dim, hidden_dim, bias=False)
+        self.out_proj = LinearProjection(hidden_dim, query_dim)
+        self.dropout = dropout
+
+    def forward(
+        self,
+        queries: torch.Tensor,
+        kv: torch.Tensor,
+        kv_pad_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # queries: [B, M, Dq]; kv: [B, N, Dk]; kv_pad_mask: [B, N] (1=valid, 0=pad).
+        b, m, _ = queries.shape
+        n = kv.shape[1]
+        q = self.norm_q(queries)
+        k_v = self.norm_kv(kv)
+        q_h = (
+            self.q_proj(q)
+            .view(b, m, self.num_heads, self.dim_head)
+            .transpose(1, 2)
+        )
+        k_h = (
+            self.k_proj(k_v)
+            .view(b, n, self.num_heads, self.dim_head)
+            .transpose(1, 2)
+        )
+        v_h = (
+            self.v_proj(k_v)
+            .view(b, n, self.num_heads, self.dim_head)
+            .transpose(1, 2)
+        )
+        attn_mask: torch.Tensor | None = None
+        if kv_pad_mask is not None:
+            attn_mask = kv_pad_mask.bool()[:, None, None, :]
+        out = F.scaled_dot_product_attention(
+            q_h,
+            k_h,
+            v_h,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        out = out.transpose(1, 2).contiguous().view(b, m, self.num_heads * self.dim_head)
+        return self.out_proj(out)
+
+
+class PerceiverSelfAttention(nn.Module):
+    """Pre-norm multi-head self-attention on the latent array (no mask)."""
+
+    def __init__(self, hidden_dim: int, num_heads: int, dropout: float = 0.0):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.qkv = LinearProjection(hidden_dim, hidden_dim * 3, bias=False)
+        self.out_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.dropout = dropout
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, m, _ = x.shape
+        x_n = self.norm(x)
+        qkv = (
+            self.qkv(x_n)
+            .view(b, m, 3, self.num_heads, self.dim_head)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = qkv.unbind(dim=0)
+        out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        out = out.transpose(1, 2).contiguous().view(b, m, self.num_heads * self.dim_head)
+        return self.out_proj(out)
+
+
+class PerceiverFeedForward(nn.Module):
+    """Pre-norm GELU MLP block, expansion=mlp_ratio."""
+
+    def __init__(self, hidden_dim: int, mlp_ratio: int = 4):
+        super().__init__()
+        mlp_hidden = hidden_dim * mlp_ratio
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.fc1 = nn.Linear(hidden_dim, mlp_hidden)
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(mlp_hidden, hidden_dim)
+        self.fc1.apply(_init_linear)
+        self.fc2.apply(_init_linear)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.act(self.fc1(self.norm(x))))
+
+
+class PerceiverEncoderBlock(nn.Module):
+    """One round: cross-attn(latent ← inputs) → FF → self-attn(latent) → FF.
+
+    All sublayers are pre-norm with residual connections.
+    """
+
+    def __init__(
+        self,
+        latent_dim: int,
+        kv_dim: int,
+        num_heads: int,
+        mlp_ratio: int = 4,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.cross_attn = PerceiverCrossAttention(
+            query_dim=latent_dim,
+            kv_dim=kv_dim,
+            hidden_dim=latent_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+        )
+        self.cross_ff = PerceiverFeedForward(latent_dim, mlp_ratio=mlp_ratio)
+        self.self_attn = PerceiverSelfAttention(latent_dim, num_heads=num_heads, dropout=dropout)
+        self.self_ff = PerceiverFeedForward(latent_dim, mlp_ratio=mlp_ratio)
+
+    def forward(
+        self,
+        latent: torch.Tensor,
+        kv: torch.Tensor,
+        kv_pad_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        latent = latent + self.cross_attn(latent, kv, kv_pad_mask=kv_pad_mask)
+        latent = latent + self.cross_ff(latent)
+        latent = latent + self.self_attn(latent)
+        latent = latent + self.self_ff(latent)
+        return latent
+
+
+class PerceiverDecoderBlock(nn.Module):
+    """Decoder block: cross-attn(point queries ← latent) → FF (no mask)."""
+
+    def __init__(
+        self,
+        query_dim: int,
+        latent_dim: int,
+        num_heads: int,
+        mlp_ratio: int = 4,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.cross_attn = PerceiverCrossAttention(
+            query_dim=query_dim,
+            kv_dim=latent_dim,
+            hidden_dim=query_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+        )
+        self.ff = PerceiverFeedForward(query_dim, mlp_ratio=mlp_ratio)
+
+    def forward(self, queries: torch.Tensor, latent: torch.Tensor) -> torch.Tensor:
+        queries = queries + self.cross_attn(queries, latent, kv_pad_mask=None)
+        queries = queries + self.ff(queries)
+        return queries
+
+
+class PerceiverIO(nn.Module):
+    """Perceiver-IO backbone for grouped surface/volume CFD prediction.
+
+    Architecture:
+      * Per-modality input encoding: ContinuousSincosEmbed(xyz, learnable=True)
+        plus a Linear projection of the remaining channels (normals/area for
+        surface, sdf for volume), summed and refined by a per-modality MLP.
+        A learned modality token is added to mark surface vs volume identity.
+      * Encoder: ``encoder_depth`` rounds of (cross-attn from latent → inputs)
+        + (latent self-attn). Both halves are pre-norm with residual+FF.
+      * Decoder: per-modality point queries (built from the same input
+        encoding) cross-attend the latent over ``decoder_depth`` rounds.
+        Cross-attn weights are SHARED between modalities (modality identity
+        is carried by the input encoding); only the final 4-channel surface
+        head and 1-channel volume head are separate.
+      * Padded surface/volume tokens are masked out of cross-attention via a
+        boolean attn_mask, and the final per-modality outputs are
+        multiplicatively zeroed by ``*_mask`` before being returned.
+    """
+
+    def __init__(
+        self,
+        *,
+        space_dim: int = 3,
+        surface_input_dim: int = SURFACE_X_DIM,
+        surface_output_dim: int = SURFACE_Y_DIM,
+        volume_input_dim: int = VOLUME_X_DIM,
+        volume_output_dim: int = VOLUME_Y_DIM,
+        num_latents: int = 512,
+        latent_dim: int = 512,
+        encoder_depth: int = 4,
+        encoder_heads: int = 8,
+        decoder_depth: int = 2,
+        decoder_heads: int = 8,
+        mlp_ratio: int = 4,
+        dropout: float = 0.0,
+        pos_max_wavelength: int = 1000,
+    ):
+        super().__init__()
+        self.space_dim = space_dim
+        self.surface_input_dim = surface_input_dim
+        self.surface_output_dim = surface_output_dim
+        self.volume_input_dim = volume_input_dim
+        self.volume_output_dim = volume_output_dim
+        self.num_latents = num_latents
+        self.latent_dim = latent_dim
+        surface_extra_dim = max(0, self.surface_input_dim - space_dim)
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+
+        self.pos_embed = ContinuousSincosEmbed(
+            hidden_dim=latent_dim,
+            input_dim=space_dim,
+            max_wavelength=pos_max_wavelength,
+            learnable=True,
+        )
+        self.surface_feat_proj = (
+            LinearProjection(surface_extra_dim, latent_dim) if surface_extra_dim > 0 else None
+        )
+        self.volume_feat_proj = (
+            LinearProjection(volume_extra_dim, latent_dim) if volume_extra_dim > 0 else None
+        )
+        self.surface_input_mlp = MLP(
+            input_dim=latent_dim, hidden_dim=latent_dim, output_dim=latent_dim
+        )
+        self.volume_input_mlp = MLP(
+            input_dim=latent_dim, hidden_dim=latent_dim, output_dim=latent_dim
+        )
+        self.surface_modality = nn.Parameter(torch.zeros(1, 1, latent_dim))
+        self.volume_modality = nn.Parameter(torch.zeros(1, 1, latent_dim))
+        nn.init.trunc_normal_(self.surface_modality, std=0.02)
+        nn.init.trunc_normal_(self.volume_modality, std=0.02)
+
+        self.latents = nn.Parameter(torch.zeros(num_latents, latent_dim))
+        nn.init.trunc_normal_(self.latents, std=0.02)
+
+        self.encoder_blocks = nn.ModuleList(
+            [
+                PerceiverEncoderBlock(
+                    latent_dim=latent_dim,
+                    kv_dim=latent_dim,
+                    num_heads=encoder_heads,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
+                for _ in range(encoder_depth)
+            ]
+        )
+        self.encoder_norm = nn.LayerNorm(latent_dim, eps=1e-6)
+
+        self.decoder_blocks = nn.ModuleList(
+            [
+                PerceiverDecoderBlock(
+                    query_dim=latent_dim,
+                    latent_dim=latent_dim,
+                    num_heads=decoder_heads,
+                    mlp_ratio=mlp_ratio,
+                    dropout=dropout,
+                )
+                for _ in range(decoder_depth)
+            ]
+        )
+        self.decoder_norm = nn.LayerNorm(latent_dim, eps=1e-6)
+
+        self.surface_out = LinearProjection(latent_dim, self.surface_output_dim)
+        self.volume_out = LinearProjection(latent_dim, self.volume_output_dim)
+
+    def _encode_inputs(
+        self,
+        x: torch.Tensor,
+        *,
+        feat_proj: LinearProjection | None,
+        input_mlp: MLP,
+        modality: torch.Tensor,
+    ) -> torch.Tensor:
+        pos = x[:, :, : self.space_dim]
+        h = self.pos_embed(pos)
+        if feat_proj is not None and x.shape[-1] > self.space_dim:
+            h = h + feat_proj(x[:, :, self.space_dim :])
+        h = input_mlp(h)
+        h = h + modality
+        return h
+
+    def forward(
+        self,
+        *,
+        surface_x: torch.Tensor | None = None,
+        surface_mask: torch.Tensor | None = None,
+        volume_x: torch.Tensor | None = None,
+        volume_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if surface_x is None and volume_x is None:
+            raise ValueError("PerceiverIO requires surface_x or volume_x")
+        if surface_x is not None and surface_mask is None:
+            raise ValueError("PerceiverIO requires surface_mask when surface_x is provided")
+        if volume_x is not None and volume_mask is None:
+            raise ValueError("PerceiverIO requires volume_mask when volume_x is provided")
+
+        kv_tokens: list[torch.Tensor] = []
+        kv_masks: list[torch.Tensor] = []
+        surface_h: torch.Tensor | None = None
+        volume_h: torch.Tensor | None = None
+        ref = surface_x if surface_x is not None else volume_x
+        batch_size = ref.shape[0]
+
+        if surface_x is not None:
+            surface_h = self._encode_inputs(
+                surface_x,
+                feat_proj=self.surface_feat_proj,
+                input_mlp=self.surface_input_mlp,
+                modality=self.surface_modality,
+            )
+            surface_h = _apply_token_mask(surface_h, surface_mask)
+            kv_tokens.append(surface_h)
+            kv_masks.append(surface_mask)
+        if volume_x is not None:
+            volume_h = self._encode_inputs(
+                volume_x,
+                feat_proj=self.volume_feat_proj,
+                input_mlp=self.volume_input_mlp,
+                modality=self.volume_modality,
+            )
+            volume_h = _apply_token_mask(volume_h, volume_mask)
+            kv_tokens.append(volume_h)
+            kv_masks.append(volume_mask)
+
+        kv = torch.cat(kv_tokens, dim=1)
+        kv_pad = torch.cat(kv_masks, dim=1)
+
+        latent = self.latents.unsqueeze(0).expand(batch_size, -1, -1).contiguous()
+        for block in self.encoder_blocks:
+            latent = block(latent, kv, kv_pad)
+        latent = self.encoder_norm(latent)
+
+        if surface_x is not None and surface_h is not None:
+            q_surf = surface_h
+            for block in self.decoder_blocks:
+                q_surf = block(q_surf, latent)
+            q_surf = self.decoder_norm(q_surf)
+            surface_preds = self.surface_out(q_surf) * surface_mask.unsqueeze(-1)
+        else:
+            surface_preds = latent.new_zeros(batch_size, 0, self.surface_output_dim)
+
+        if volume_x is not None and volume_h is not None:
+            q_vol = volume_h
+            for block in self.decoder_blocks:
+                q_vol = block(q_vol, latent)
+            q_vol = self.decoder_norm(q_vol)
+            volume_preds = self.volume_out(q_vol) * volume_mask.unsqueeze(-1)
+        else:
+            volume_preds = latent.new_zeros(batch_size, 0, self.volume_output_dim)
+
+        return {
+            "surface_preds": surface_preds,
+            "volume_preds": volume_preds,
+        }
+
+
 class EMA:
     def __init__(self, model: nn.Module, decay: float = 0.999, start_step: int = 0):
         self.decay = decay
@@ -1158,6 +1548,14 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    model_type: str = "transolver"
+    num_latents: int = 512
+    latent_dim: int = 512
+    encoder_depth: int = 4
+    encoder_heads: int = 8
+    decoder_depth: int = 2
+    decoder_heads: int = 8
+    perceiver_mlp_ratio: int = 4
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1348,23 +1746,43 @@ def make_loaders(
     return train_loader, val_loaders, test_loaders, stats
 
 
-def build_model(config: Config) -> SurfaceTransolver:
+def build_model(config: Config) -> nn.Module:
     extra_curv = 2 if config.surface_curvature_features in ("h_k", "k1_k2") else 0
     surface_input_dim = SURFACE_X_DIM + extra_curv
-    return SurfaceTransolver(
-        n_layers=config.model_layers,
-        n_hidden=config.model_hidden_dim,
-        dropout=config.model_dropout,
-        n_head=config.model_heads,
-        mlp_ratio=config.model_mlp_ratio,
-        slice_num=config.model_slices,
-        stochastic_depth_prob=config.stochastic_depth_prob,
-        use_film=config.use_film,
-        film_encoder_dim=config.film_encoder_dim,
-        pos_max_wavelength=config.pos_max_wavelength,
-        learnable_pe=config.learnable_pe,
-        surface_input_dim=surface_input_dim,
-        beta_nll=config.beta_nll_beta >= 0.0,
+    model_type = config.model_type.lower()
+    if model_type == "transolver":
+        return SurfaceTransolver(
+            n_layers=config.model_layers,
+            n_hidden=config.model_hidden_dim,
+            dropout=config.model_dropout,
+            n_head=config.model_heads,
+            mlp_ratio=config.model_mlp_ratio,
+            slice_num=config.model_slices,
+            stochastic_depth_prob=config.stochastic_depth_prob,
+            use_film=config.use_film,
+            film_encoder_dim=config.film_encoder_dim,
+            pos_max_wavelength=config.pos_max_wavelength,
+            learnable_pe=config.learnable_pe,
+            surface_input_dim=surface_input_dim,
+            beta_nll=config.beta_nll_beta >= 0.0,
+        )
+    if model_type == "perceiver":
+        if config.beta_nll_beta >= 0.0:
+            raise ValueError("PerceiverIO does not support --beta-nll-beta yet")
+        return PerceiverIO(
+            surface_input_dim=surface_input_dim,
+            num_latents=config.num_latents,
+            latent_dim=config.latent_dim,
+            encoder_depth=config.encoder_depth,
+            encoder_heads=config.encoder_heads,
+            decoder_depth=config.decoder_depth,
+            decoder_heads=config.decoder_heads,
+            mlp_ratio=config.perceiver_mlp_ratio,
+            dropout=config.model_dropout,
+            pos_max_wavelength=config.pos_max_wavelength,
+        )
+    raise ValueError(
+        f"Unknown model_type={config.model_type!r}; supported: 'transolver', 'perceiver'"
     )
 
 
@@ -2555,7 +2973,10 @@ def main(argv: Iterable[str] | None = None) -> None:
         model = torch.compile(model)
     n_params = sum(param.numel() for param in model.parameters())
     if is_main:
-        print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+        print(
+            f"Model: {model.__class__.__name__} ({config.model_type}) "
+            f"grouped surface+volume ({n_params / 1e6:.2f}M params)"
+        )
 
     if is_distributed:
         train_model = DistributedDataParallel(
