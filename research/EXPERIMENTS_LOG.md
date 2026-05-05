@@ -6,6 +6,38 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-05 09:10 UTC — PR #621 nezuko slice-centroid STRING-RoPE — CLOSED NEGATIVE
+
+- Branch: `nezuko/slice-centroid-string-rope`
+- W&B runs: `xixwhi2m` (Arm A control), `mekagz7v` (Arm B rope-after-qknorm), `0rtvbg2c` (Arm C rope-before-qknorm)
+- Hypothesis: Slice-centroid STRING-RoPE injected into Transolver attention would extend the STRING-separable encoding's geometric inductive bias from the input-feature level to the attention level, improving tau_y and tau_z by giving the model explicit position-relative attention weights per slice
+
+### Final 3-arm results (best-epoch validation, 34-case val split)
+
+| Arm | Config | Best EP | val_abupt | surf_p | vol_p | wall_shear | ws_x | ws_y | ws_z | W&B |
+|-----|--------|---------|-----------|--------|-------|-----------|------|------|------|-----|
+| A | control (no RoPE) | 4 | 6.9903% | 4.5386% | 4.3008% | 7.9111% | 6.9530% | 8.8042% | 10.3548% | `xixwhi2m` |
+| B | rope-after-qknorm | 4 | 7.1221% | 4.6832% | 4.2433% | 8.1045% | 7.1477% | 8.9700% | 10.5660% | `mekagz7v` |
+| C | rope-before-qknorm | 4 | **6.9892%** | 4.5715% | 4.2520% | 7.9227% | 6.9734% | 8.8388% | 10.3102% | `0rtvbg2c` |
+
+### Best-epoch test
+
+| Arm | test_abupt | surf_p | vol_p | wall_shear |
+|-----|-----------|--------|-------|-----------|
+| A | 8.3117% | 4.2724% | 12.2923% | 7.6516% |
+| B | 8.3577% | 4.3098% | 12.2661% | 7.7203% |
+| C | 8.3347% | 4.2843% | 12.0254% | 7.8019% |
+
+### Analysis and conclusions
+- All three arms ran to 360-min timeout cap; best epoch = 4/13; cosine T_max=13 did not fully decay
+- Arm C (rope-before-qknorm) is essentially tied with control (Δ=−0.0011 pp) — well inside noise
+- Arm B (rope-after-qknorm) is strictly worse (+0.132 pp) — RoPE after QK-norm perturbs the already-normalized attention manifold without adding usable information
+- **Mechanistic explanation:** STRING-separable encoding already injects per-axis geometric structure at the input level before slice aggregation. Centroid-based RoPE is downstream of the aggregation step (defined on the slice centroid, not the original points), so it cannot add new spatial information. QK-norm in Arm C re-normalizes the RoPE rotation magnitude, leaving only angular structure that is already captured by STRING-sep.
+- **Failure mode matches the hypothesis**: the PR body correctly identified this as the primary risk; clean negative result validates the experimental design
+- **Follow-ups preserved** for future exploration: point-level RoPE applied *before* slice aggregation; z-only axis-restricted RoPE to test high-dim rotation vs. redundancy
+
+---
+
 ## 2026-05-01 — PR #556 nezuko K=5 inference-time ensemble — MERGED (NEW ENSEMBLE SOTA)
 
 - Branch: `nezuko/ensemble-inference`
