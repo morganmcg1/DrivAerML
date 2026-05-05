@@ -1159,6 +1159,10 @@ class Config:
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
     surface_curvature_features: str = "none"
+    swa_start_fraction: float = -1.0
+    swa_lr: float = 5e-6
+    swa_anneal_epochs: int = 1
+    swa_update_every_steps: int = 500
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2631,6 +2635,25 @@ def main(argv: Iterable[str] | None = None) -> None:
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+    swa_enabled = config.swa_start_fraction >= 0
+    swa_start_epoch = (
+        max(0, int(config.swa_start_fraction * max_epochs)) if swa_enabled else max_epochs + 1
+    )
+    swa_model: torch.optim.swa_utils.AveragedModel | None = None
+    swa_active = False
+    swa_active_first_epoch = -1
+    swa_pre_lr = 0.0
+    swa_n_updates = 0
+    if swa_enabled:
+        swa_model = torch.optim.swa_utils.AveragedModel(model)
+        if is_main:
+            print(
+                f"SWA: enabled, start_epoch={swa_start_epoch}/{max_epochs} "
+                f"(fraction={config.swa_start_fraction}), swa_lr={config.swa_lr}, "
+                f"anneal_epochs={config.swa_anneal_epochs}, "
+                f"update_every_steps={config.swa_update_every_steps}"
+            )
     total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
     effective_warmup_steps = config.lr_warmup_steps
     if config.lr_warmup_epochs > 0 and config.lr_warmup_steps == 0:
@@ -2722,6 +2745,11 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/lr", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_count", step_metric="global_step")
     wandb.define_metric("train/nonfinite_skip_kind", step_metric="global_step")
+    wandb.define_metric("swa/*", step_metric="global_step")
+    wandb.define_metric("swa_full_val/*", step_metric="global_step")
+    wandb.define_metric("swa_full_val_primary/*", step_metric="global_step")
+    wandb.define_metric("swa_test/*", step_metric="global_step")
+    wandb.define_metric("swa_test_primary/*", step_metric="global_step")
 
     if is_distributed:
         run_id_holder = [run.id if is_main else None]
@@ -2763,6 +2791,24 @@ def main(argv: Iterable[str] | None = None) -> None:
             train_loader.sampler.set_epoch(epoch)
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
+        if swa_enabled and not swa_active and (epoch + 1) > swa_start_epoch:
+            swa_active = True
+            swa_active_first_epoch = epoch
+            swa_pre_lr = float(optimizer.param_groups[0]["lr"])
+            if is_main:
+                print(
+                    f"SWA window starts at epoch {epoch + 1} "
+                    f"(pre-SWA lr={swa_pre_lr:.3e}, target swa_lr={config.swa_lr:.3e}, "
+                    f"anneal_epochs={config.swa_anneal_epochs})"
+                )
+        if swa_enabled and swa_active:
+            epochs_in_swa = epoch - swa_active_first_epoch
+            anneal_steps = max(1, config.swa_anneal_epochs)
+            anneal_progress = min(1.0, epochs_in_swa / anneal_steps)
+            cos_alpha = 0.5 * (1.0 + math.cos(math.pi * anneal_progress))
+            new_lr = cos_alpha * swa_pre_lr + (1.0 - cos_alpha) * config.swa_lr
+            for pg in optimizer.param_groups:
+                pg["lr"] = float(new_lr)
         t0 = time.time()
         train_model.train()
         train_loss_sum = 0.0
@@ -2922,6 +2968,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                     ema.set_decay(ema_decay_now)
                 ema.update(model)
+            if (
+                swa_enabled
+                and swa_active
+                and swa_model is not None
+                and global_step > 0
+                and global_step % max(1, config.swa_update_every_steps) == 0
+            ):
+                swa_model.update_parameters(model)
+                swa_n_updates += 1
+                if is_main:
+                    wandb.log(
+                        {
+                            "swa/active": 1,
+                            "swa/n_updates": swa_n_updates,
+                            "swa/snapshot_step": global_step,
+                            "swa/snapshot_lr": float(optimizer.param_groups[0]["lr"]),
+                            "global_step": global_step,
+                        }
+                    )
             weight_metrics = (
                 collect_weight_metrics(
                     model,
@@ -2996,7 +3061,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 timeout_hit = True
                 break
 
-        scheduler.step()
+        if not (swa_enabled and swa_active):
+            scheduler.step()
         epoch_train_loss = train_loss_sum / max(n_batches, 1)
         dt = time.time() - t0
         peak_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0.0
@@ -3009,9 +3075,11 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
-            "lr": scheduler.get_last_lr()[0],
+            "lr": float(optimizer.param_groups[0]["lr"]),
             "epoch_time_s": dt,
             "global_step": global_step,
+            "swa/active": int(swa_active),
+            "swa/n_updates": swa_n_updates,
         }
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
@@ -3237,6 +3305,109 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.summary.update(_numeric_metric_items(test_log))
     if is_main:
         print_metrics("test_surface", test_metrics["test_surface"])
+
+    if swa_enabled and swa_model is not None and swa_n_updates > 0:
+        if is_main:
+            swa_path = output_dir / "swa_checkpoint.pt"
+            torch.save(
+                {
+                    "model": swa_model.module.state_dict(),
+                    "config": asdict(config),
+                    "swa_n_updates": swa_n_updates,
+                    "swa_start_epoch": swa_start_epoch,
+                },
+                swa_path,
+            )
+            print(
+                f"\nEvaluating SWA model (n_updates={swa_n_updates}, "
+                f"start_epoch={swa_start_epoch})..."
+            )
+        if is_distributed:
+            dist.barrier()
+        model.load_state_dict(swa_model.module.state_dict(), strict=True)
+        swa_full_val_metrics = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            for name, loader in val_loaders.items()
+        }
+        swa_test_metrics = {
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            for name, loader in test_loaders.items()
+        }
+        swa_full_val_primary = swa_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+        swa_test_primary = swa_test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
+        swa_log: dict[str, object] = {
+            "swa_full_val_primary/abupt_axis_mean_rel_l2_pct": swa_full_val_primary,
+            "swa_full_val_primary/abupt_axis_mean_rel_l2": swa_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+            "swa_full_val_primary/surface_pressure_mae": swa_full_val_metrics["val_surface"]["surface_pressure_mae"],
+            "swa_full_val_primary/wall_shear_mae": swa_full_val_metrics["val_surface"]["wall_shear_mae"],
+            "swa_full_val_primary/volume_pressure_mae": swa_full_val_metrics["val_surface"]["volume_pressure_mae"],
+            "swa_full_val_primary/surface_pressure_rel_l2_pct": swa_full_val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_x_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_y_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+            "swa_full_val_primary/wall_shear_z_rel_l2_pct": swa_full_val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+            "swa_full_val_primary/volume_pressure_rel_l2_pct": swa_full_val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+            "swa_test_primary/abupt_axis_mean_rel_l2_pct": swa_test_primary,
+            "swa_test_primary/abupt_axis_mean_rel_l2": swa_test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
+            "swa_test_primary/surface_pressure_mae": swa_test_metrics["test_surface"]["surface_pressure_mae"],
+            "swa_test_primary/wall_shear_mae": swa_test_metrics["test_surface"]["wall_shear_mae"],
+            "swa_test_primary/volume_pressure_mae": swa_test_metrics["test_surface"]["volume_pressure_mae"],
+            "swa_test_primary/surface_pressure_rel_l2_pct": swa_test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+            "swa_test_primary/wall_shear_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+            "swa_test_primary/wall_shear_x_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+            "swa_test_primary/wall_shear_y_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+            "swa_test_primary/wall_shear_z_rel_l2_pct": swa_test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
+            "swa_test_primary/volume_pressure_rel_l2_pct": swa_test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
+            "swa/n_updates_final": swa_n_updates,
+            "swa/start_epoch_final": swa_start_epoch,
+            "global_step": global_step,
+        }
+        for split_name, metrics in swa_full_val_metrics.items():
+            for key, value in metrics.items():
+                swa_log[f"swa_full_val/{split_name}/{key}"] = value
+        for split_name, metrics in swa_test_metrics.items():
+            for key, value in metrics.items():
+                swa_log[f"swa_test/{split_name}/{key}"] = value
+        wandb.log(swa_log)
+        wandb.summary.update(_numeric_metric_items(swa_log))
+        if is_main:
+            print(
+                f"\nSWA full_val_abupt={swa_full_val_primary:.4f}%, "
+                f"test_abupt={swa_test_primary:.4f}% (n_updates={swa_n_updates})"
+            )
+            print_metrics("swa_full_val", swa_full_val_metrics["val_surface"])
+            print_metrics("swa_test", swa_test_metrics["test_surface"])
+        if is_main:
+            swa_artifact_name = (
+                f"model-{_sanitize_artifact_token(config.wandb_name or config.agent or 'drivaerml')}"
+                f"-{run.id}-swa"
+            )
+            swa_artifact = wandb.Artifact(
+                name=swa_artifact_name,
+                type="model",
+                description=(
+                    "DrivAerML SWA-averaged checkpoint; "
+                    f"swa_full_val_abupt={swa_full_val_primary:.4f}% "
+                    f"swa_test_abupt={swa_test_primary:.4f}% "
+                    f"n_updates={swa_n_updates}"
+                ),
+                metadata={
+                    "run_id": run.id,
+                    "swa_n_updates": swa_n_updates,
+                    "swa_start_epoch": swa_start_epoch,
+                    "swa_lr": config.swa_lr,
+                    "swa_anneal_epochs": config.swa_anneal_epochs,
+                    "swa_update_every_steps": config.swa_update_every_steps,
+                    "swa_full_val/abupt_axis_mean_rel_l2_pct": swa_full_val_primary,
+                    "swa_test/abupt_axis_mean_rel_l2_pct": swa_test_primary,
+                },
+            )
+            swa_artifact.add_file(str(swa_path), name="checkpoint.pt")
+            swa_artifact.add_file(str(config_path), name="config.yaml")
+            run.log_artifact(swa_artifact, aliases=["swa", f"swa-n{swa_n_updates}"])
+            print(f"Logged SWA artifact '{swa_artifact_name}'")
+        checkpoint_reload = torch.load(model_path, map_location=device, weights_only=True)
+        model.load_state_dict(checkpoint_reload["model"], strict=True)
 
     if is_main:
         log_model_artifact(
