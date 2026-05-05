@@ -1,7 +1,8 @@
 # SENPAI Research State
-- 2026-05-04 23:30 UTC (Round 36 — advisor cycle, updated)
-- **CURRENT SOTA (yi branch): PR #576 (frieren, STRING-sep PE + Lion lr=1e-4 clip=0.5) — val_abupt 8.2528%**. Active yi merge bar: **8.2528%** (run `t4qaysur`).
+- 2026-05-05 03:10 UTC (Round 37 — advisor cycle, updated: PR #658 nezuko SWA + PR #659 norman 4L/768d assigned)
+- **CURRENT SOTA (yi branch): PR #637 (fern, extended low-LR training at lr=1e-5 from t4qaysur checkpoint) — val_abupt 7.5373%**. Active yi merge bar: **7.5373%** (run `vzprvtaw`).
 - **PR #576 (frieren STRING-sep learnable PE + Lion) MERGED to yi.** The `--learnable-pe` flag is available in yi `train.py`. Requires `--no-compile-model` (torch.compile inductor broadcast bug).
+- **PR #637 (fern extended low-LR continuation) MERGED to yi.** New SOTA 7.5373%.
 - **Tay SOTA (reference track, not yi): PR #511 (edward) — val_abupt 7.013% / test_abupt 8.313%** (tay branch only).
 
 ## Most Recent Research Direction from Human Researcher Team
@@ -9,96 +10,78 @@
 **Issue #18** (open, standing directive):
 > "Stop incremental tuning. Be bold with architecture. Empower students to replace the model backbone while maintaining logging/validation/checkpointing."
 
-## Current Baseline: PR #576 (frieren) — yi — val_abupt 8.2528%
+## Current Baseline: PR #637 (fern) — yi — val_abupt 7.5373%
 
-**Active yi merge bar: val_abupt < 8.2528%** (run `t4qaysur`)
+**Active yi merge bar: val_abupt < 7.5373%** (run `vzprvtaw`)
 
-| Metric | yi bar (val, PR #576) | Tay SOTA ref (PR #511 test) | AB-UPT target | Gap |
+| Metric | yi bar (val, PR #637) | Tay SOTA ref (PR #511 test) | AB-UPT target | Gap |
 |---|---:|---:|---:|---:|
-| `abupt_axis_mean_rel_l2_pct` | 8.2528 | 8.313 | — | — |
-| `surface_pressure_rel_l2_pct` | — | 4.271 | 3.82 | 1.12× |
-| `wall_shear_rel_l2_pct` | — | 7.786 | 7.29 | 1.07× |
-| `volume_pressure_rel_l2_pct` | — | 11.867 | 6.08 | **1.95×** |
-| `wall_shear_y_rel_l2_pct` | — | 8.582 | 3.65 | **2.35×** |
-| `wall_shear_z_rel_l2_pct` | — | 9.927 | 3.63 | **2.73×** |
+| `abupt_axis_mean_rel_l2_pct` | 7.5373 | 8.313 | — | — |
+| `surface_pressure_rel_l2_pct` | ~4.5% | 4.271 | 3.82 | ~1.18× |
+| `wall_shear_rel_l2_pct` | ~8.1% | 7.786 | 7.29 | ~1.11× |
+| `volume_pressure_rel_l2_pct` | ~10.8% | 11.867 | 6.08 | **~1.78×** |
+| `wall_shear_y_rel_l2_pct` | ~7.5% | 8.582 | 3.65 | **~2.05×** |
+| `wall_shear_z_rel_l2_pct` | ~8.9% | 9.927 | 3.63 | **~2.45×** |
 
-Dominant open gaps: τ_z (2.73×), τ_y (2.35×), vol_p (1.95×).
+Dominant open gaps: τ_z (~2.45×), τ_y (~2.05×), vol_p (~1.78×).
 
-## Active WIP PRs (Round 36 — as of 2026-05-04 22:00 UTC)
+## Active WIP PRs (Round 37 — as of 2026-05-05 02:25 UTC)
 
-### In-flight experiments (confirmed W&B runs running):
-| PR | Student | Hypothesis | W&B Run | Status |
-|---|---|---|---|---|
-| #622 | thorfinn | SDF-proximity volume loss weighting (α=2.0, σ=0.1) | w51b83zx | Running EP2 (97% done) |
-| #627 | frieren | Tangent-frame wall-shear head | qrdhyxbs | Running EP1 (65%) |
-| #616 | chihiro | Perceiver-IO backbone replacement (bold arch) | achht6dr | Running EP1 (72%) |
-
-### Advisor-prompted PRs (WIP, awaiting results):
+### In-flight experiments (all status:wip):
 | PR | Student | Hypothesis | Status |
 |---|---|---|---|
+| #616 | chihiro | Perceiver-IO backbone replacement (bold arch) | Running EP1 |
+| #622 | thorfinn | SDF-proximity volume loss weighting (α=2.0, σ=0.1) | Running |
 | #628 | edward | τ_y/τ_z loss weight sweep: W=4 and W=6 arms | WIP |
-| #629 | askeladd | asinh target normalization for wall shear τ_y/τ_z heavy tails | WIP |
-| #630 | emma | Lookahead wrapper around Lion optimizer | WIP |
-| #631 | violet | Cosine annealing warm restarts (Arm C: T_0=2, T_mult=2) | WIP — Arm C pending |
-| #632 | senku | Wake-region volume pressure upweighting (2× downstream) | WIP |
-| #634 | nezuko | Stochastic Weight Averaging (SWA) over last 30% | WIP |
 | #635 | kohaku | RANS Laplace regularizer on far-field volume pressure | WIP |
 | #636 | gilbert | Inverse local point density loss weighting | WIP |
-| #637 | fern | Extended low-LR continued training from yi best checkpoint | WIP |
 | #638 | tanjiro | Model dropout regularization sweep (p=0.05 vs p=0.1) | WIP |
-| #639 | alphonse | 4L/768d width scale-up | WIP |
-| #640 | nezuko | NorMuon optimizer on L=5 SOTA stack | WIP |
-| #641 | askeladd | Flow-aligned tau: predict wall shear in local surface tangent frame | WIP |
 | #642 | haku | Fourier surface geometry features for tau_y/z gap (RFF input lift) | WIP |
-| #624 | alphonse | Point-level pre-slice STRING rotation in Transolver | WIP |
-| #625 | askeladd | No-slice Anchor-STRING / AB-UPT-lite (Issue #618 Exp 3) | WIP |
-| #626 | frieren | Full AB-UPT-style geometry branch (Issue #618 Exp 4) | WIP |
-| #621 | nezuko | Slice-centroid STRING-RoPE for Transolver attention | WIP |
-| #623 | tanjiro | Stronger bounded tau weights τ_y×1.5 / τ_z×2.0 | WIP |
+| #645 | norman | 6L/512d clean depth ablation — isolated (no k1_k2, no β-NLL, lr-warmup-epochs=2) | WIP |
+| #646 | alphonse | Asymmetric τ_y/τ_z weighting + curvature-focal loss | WIP |
+| #652 | frieren | Muon optimizer on full yi stack (STRING-sep + grad-ema + β-NLL + k1_k2) | WIP |
+| #653 | askeladd | 1-cycle LR with 1e-3 peak (OneCycleLR) | WIP |
+| #654 | emma | Dual-Tower surface+volume cross-attention encoder | WIP |
+| #655 | senku | 6L/512d depth scale-up on full yi stack | WIP |
+| #656 | violet | Multi-EMA ensemble (3 shadow decays averaged at inference) | WIP |
+| #657 | fern | Ultra-low LR 1e-6 continuation from PR #637 yi best checkpoint | WIP |
+| #658 | nezuko | SWA staged trajectory: resume PR #637 SOTA, 2ep at lr=5e-6, swa-start-fraction=0.0 | WIP |
+| #659 | norman | Width-over-depth 4L/768d/12h bold capacity increase (Issue #18) | WIP |
 
 ### Recently closed this cycle:
 | PR | Student | Result |
 |---|---|---|
+| #631 | violet | CLOSED — CosineAnnealingWarmRestarts null in cold-start: val_abupt=10.74% (+30% vs SOTA). Within-cycle LR decay dominates 3-epoch budget. |
+| #634 | nezuko | CLOSED positive mechanism, below bar — SWA improved ALL metrics vs best-ckpt by 0.61pp (τ_y +0.87pp, τ_z +0.79pp). Needs staged trajectory to beat bar. |
 | #633 | norman | CLOSED — 6L/512d depth scale-up: EP1 abort (18.9% >> 15% gate). Reassigned to PR #645. |
 
-### Norman reassigned:
-| PR | Student | Hypothesis | Status |
-|---|---|---|---|
-| #645 | norman | 6L/512d clean depth ablation — isolated (no k1_k2, no β-NLL, lr-warmup-epochs=2) | WIP |
-
-## Research Themes (Round 36 priority order)
+## Research Themes (Round 37 priority order)
 
 1. **Bold architecture replacement** (Issue #18 mandate):
    - Perceiver-IO backbone (PR #616 chihiro) — full backbone swap, 32.8M params
-   - AB-UPT-style geometry branch (PR #626 frieren) — Issue #618 Exp 4
-   - No-slice Anchor-STRING (PR #625 askeladd) — Issue #618 Exp 3
-   - NorMuon optimizer (PR #640 nezuko) — second-order orthogonalization
-   
+   - Dual-Tower surface+volume cross-attention (PR #654 emma) — architecture-level separation
+   - 6L/512d depth scale-up (PR #655 senku) — capacity increase (clean run)
+   - NorMuon / Muon optimizer (PR #652 frieren) — second-order orthogonalization
+
 2. **τ_y/τ_z structural attack (multi-prong):**
-   - Tangent-frame wall-shear head (PR #627 frieren) — coordinate frame decomposition
-   - Flow-aligned tau frame (PR #641 askeladd) — local tangent frame prediction
-   - asinh target normalization (PR #629 alphonse) — heavy-tail compression
-   - τ_y/τ_z loss weight sweep W=4,6 (PR #628 thorfinn) — direct upweighting
-   - Stronger bounded tau weights τ_z×2.0 (PR #623 tanjiro) — aggressive weighting
+   - τ_y/τ_z loss weight sweep W=4,6 (PR #628 edward) — direct upweighting
+   - Asymmetric tau weights + curvature-focal (PR #646 alphonse) — geometry-informed
+   - Fourier surface geometry RFF features (PR #642 haku) — input lift for τ channels
+   - Model dropout p=0.05/0.1 (PR #638 tanjiro) — regularization to reduce τ overfitting
 
 3. **Volume pressure gap attack:**
    - SDF-proximity volume loss weighting (PR #622 thorfinn) — near-surface upweight
-   - Wake-region upweighting 2× downstream (PR #632 fern) — physics-informed spatial weight
-   - RANS Laplace regularizer (PR #635 senku) — physics-informed far-field ∇²p ≈ 0
+   - RANS Laplace regularizer (PR #635 kohaku) — physics-informed far-field ∇²p ≈ 0
+   - Inverse local point density loss weighting (PR #636 gilbert) — sparse region emphasis
 
-4. **Architecture/input features:**
-   - 6L/512d depth scale-up (PR #633 gilbert) — capacity increase
-   - 4L/768d width scale-up (PR #639 haku) — hidden dim expansion
-   - Fourier surface geometry RFF features (PR #642 haku) — input lift
-   - Point-level pre-slice STRING rotation (PR #624 alphonse) — Transolver PE
-   - Slice-centroid STRING-RoPE (PR #621 nezuko) — attention geometry
+4. **Training dynamics / optimization:**
+   - Ultra-low LR 1e-6 continuation (PR #657 fern) — pushing further from current SOTA
+   - 1-cycle LR with 1e-3 peak (PR #653 askeladd) — aggressive warm-up
+   - Multi-EMA ensemble 3 decays (PR #656 violet) — inference-time averaging
 
-5. **Training dynamics:**
-   - Extended low-LR training from yi checkpoint (PR #637 edward) — LR floor exploitation
-   - Cosine annealing warm restarts T_0=3 (PR #631 emma) — LR schedule
-   - Lookahead + Lion (PR #630 violet) — optimizer wrapper
-   - SWA over last 30% (PR #634 tanjiro) — weight averaging
-   - Model dropout p=0.05/0.1 (PR #638 kohaku) — regularization
+5. **Pending follow-up ideas (from closed PRs):**
+   - **SWA on staged trajectory** → ASSIGNED: PR #658 (nezuko)
+   - **Warm restarts as fine-tuning** (from PR #631 violet): T_0=1, lr=1e-5, resume from SOTA checkpoint. Different hypothesis from cold-start. (unassigned)
 
 ## Known Null Results (do not repeat)
 
@@ -113,8 +96,10 @@ Dominant open gaps: τ_z (2.73×), τ_y (2.35×), vol_p (1.95×).
 - FP32 final-epoch upcast (#522): slight regression
 - Flow-aligned tau v1 (PR #613) — null result, no improvement
 - Principal surface curvatures k1_k2 (PR #580) — infrastructure-only (plumbing merged, metric bar unchanged at 3-epoch budget)
-- ADOPT optimizer (PR #588) — completed but below bar (status pending review)
-- SDF gradient direction as aux input (PR #589 tanjiro) — EP2 24.9506%, compare to grad-ema control EP2 26.99% → marginal improvement, still above bar
+- ADOPT optimizer (PR #588) — completed but below bar
+- SDF gradient direction as aux input (PR #589 tanjiro) — above bar
+- CosineAnnealingWarmRestarts cold-start (PR #631 violet) — null in ≤3 epoch budget: LR decay penalty dominates
+- SWA from-scratch 3-epoch (PR #634 nezuko) — positive mechanism but wrong regime; floor too high
 
 ## Fleet Stability Constants
 
