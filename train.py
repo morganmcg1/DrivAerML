@@ -137,6 +137,11 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    coord_norm_mode: str = "none"
+    coord_norm_inject_log_scale: bool = False
+    coord_norm_log_scale_init_std: float = 1e-4
+    save_snapshot_epochs: str = ""
+    track_best_volp_checkpoint: bool = False
     debug: bool = False
 
 
@@ -219,6 +224,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "save_snapshot_epochs": (
+            "Optional comma-separated list of 1-indexed epoch numbers at which "
+            "to save an extra snapshot checkpoint (regardless of val "
+            "improvement). After training, run_final_evaluation runs test eval "
+            "on each saved snapshot and logs metrics under "
+            "test_ep<N>_primary/* and test_ep<N>/test_surface/*. Empty "
+            "string disables snapshot saving. Example: '3,5,7'."
+        ),
+        "track_best_volp_checkpoint": (
+            "Track and save a separate best-val volume_pressure checkpoint at "
+            "output_dir/checkpoint_volp.pt, in addition to the standard "
+            "best-val abupt checkpoint. After training, run_final_evaluation "
+            "runs test eval on this checkpoint and logs metrics under "
+            "test_volp_primary/* and test_volp/test_surface/*."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -297,6 +317,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        coord_norm_mode=config.coord_norm_mode,
+        coord_norm_inject_log_scale=config.coord_norm_inject_log_scale,
+        coord_norm_log_scale_init_std=config.coord_norm_log_scale_init_std,
     )
 
 
@@ -865,6 +888,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
         best_checkpoint_source = "ema" if ema is not None else "raw"
+        snapshot_epochs: set[int] = {
+            int(e.strip())
+            for e in config.save_snapshot_epochs.split(",")
+            if e.strip()
+        }
+        snapshot_checkpoints: dict[str, Path] = {}
+        best_val_volp = float("inf")
+        best_volp_metrics: dict[str, float] = {}
+        volp_checkpoint_path = output_dir / "checkpoint_volp.pt"
         global_step = 0
         early_stop_reason: str | None = None
         timeout_hit = False
@@ -1274,6 +1306,52 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+
+                primary_volp = float(
+                    val_metrics["val_surface"].get(
+                        "volume_pressure_rel_l2_pct", float("nan")
+                    )
+                )
+                if config.track_best_volp_checkpoint:
+                    volp_improved = should_update_best_checkpoint(primary_volp, best_val_volp)
+                    if volp_improved:
+                        best_val_volp = primary_volp
+                        best_volp_metrics = {
+                            "epoch": float(epoch + 1),
+                            **val_metrics["val_surface"],
+                        }
+                        torch.save(
+                            {
+                                "model": base_model.state_dict(),
+                                "config": asdict(config),
+                                "epoch": epoch + 1,
+                                "val_metrics": val_metrics,
+                                "checkpoint_source": best_checkpoint_source,
+                                "selection_metric": "val_primary/volume_pressure_rel_l2_pct",
+                            },
+                            volp_checkpoint_path,
+                        )
+                    log_metrics["best_volp_checkpoint/updated"] = 1.0 if volp_improved else 0.0
+                    log_metrics["best_volp_checkpoint/valid_primary"] = (
+                        1.0 if is_valid_primary_metric(primary_volp) else 0.0
+                    )
+
+                if (epoch + 1) in snapshot_epochs:
+                    snapshot_path = output_dir / f"checkpoint_ep{epoch + 1}.pt"
+                    torch.save(
+                        {
+                            "model": base_model.state_dict(),
+                            "config": asdict(config),
+                            "epoch": epoch + 1,
+                            "val_metrics": val_metrics,
+                            "checkpoint_source": best_checkpoint_source,
+                            "selection_metric": f"epoch_snapshot_ep{epoch + 1}",
+                        },
+                        snapshot_path,
+                    )
+                    snapshot_checkpoints[f"ep{epoch + 1}"] = snapshot_path
+                    log_metrics[f"snapshot_checkpoint/ep{epoch + 1}_saved"] = 1.0
+
                 wandb.log(log_metrics)
                 tag = " *" if improved else ""
                 print(
@@ -1330,6 +1408,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.finish()
             return
 
+        extra_checkpoints: dict[str, Path] = {}
+        if config.track_best_volp_checkpoint and volp_checkpoint_path.exists():
+            extra_checkpoints["volp"] = volp_checkpoint_path
+        for tag, path in snapshot_checkpoints.items():
+            extra_checkpoints[tag] = path
+
         run_final_evaluation(
             run=run,
             model=base_model,
@@ -1345,6 +1429,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             n_params=n_params,
             global_step=global_step,
             total_minutes=total_minutes,
+            extra_checkpoints=extra_checkpoints,
         )
         wandb.finish()
     finally:

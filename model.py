@@ -33,6 +33,62 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+def _normalize_coords_with_mask(
+    pos: torch.Tensor,
+    mask: torch.Tensor,
+    mode: str,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Per-sample coordinate normalization that respects the token mask.
+
+    Parameters
+    ----------
+    pos: ``[B, N, 3]`` xyz coordinates (padded tokens may carry arbitrary values).
+    mask: ``[B, N]`` boolean/float token mask (1 = valid, 0 = padding).
+    mode: one of ``'none'``, ``'centroid_scale'``, ``'centroid_rms'``.
+
+    Returns
+    -------
+    (pos_normalized, log_scale)
+        ``pos_normalized`` matches ``pos`` shape; ``log_scale`` is ``[B, 1]``
+        when normalization is active and ``None`` otherwise.
+    """
+    if mode == "none":
+        return pos, None
+    if pos.shape[-2] == 0:
+        # Empty view (e.g. trailing modality after curriculum exhaustion).
+        # Skip normalization; downstream code already tolerates N=0.
+        log_scale = pos.new_zeros((pos.shape[0], 1))
+        return pos, log_scale
+    orig_dtype = pos.dtype
+    pos_f = pos.to(dtype=torch.float32)
+    mask_f = mask.to(dtype=torch.float32)
+    mask_exp = mask_f.unsqueeze(-1)
+    raw_valid_count = mask_f.sum(dim=-1, keepdim=True)
+    valid_count = raw_valid_count.clamp(min=1.0)
+    has_valid = (raw_valid_count.squeeze(-1) > 0)  # [B]
+    centroid = (pos_f * mask_exp).sum(dim=-2) / valid_count
+    centered = pos_f - centroid.unsqueeze(-2)
+    invalid_mask = (mask_f == 0).unsqueeze(-1)
+    if mode == "centroid_scale":
+        masked_for_max = centered.masked_fill(invalid_mask, float("-inf"))
+        masked_for_min = centered.masked_fill(invalid_mask, float("inf"))
+        bbox_max = masked_for_max.max(dim=-2).values
+        bbox_min = masked_for_min.min(dim=-2).values
+        scale = (bbox_max - bbox_min).max(dim=-1).values
+    elif mode == "centroid_rms":
+        sq = (centered ** 2).sum(dim=-1) * mask_f
+        ms = sq.sum(dim=-1) / valid_count.squeeze(-1)
+        scale = ms.sqrt()
+    else:
+        raise ValueError(f"Unknown coord_norm_mode: {mode!r}")
+    # Samples with no valid tokens get a unit scale so we don't divide by zero
+    # or take log(0); their centered positions are already zero (centroid 0).
+    scale = torch.where(has_valid, scale, torch.ones_like(scale)).clamp(min=1e-6)
+    pos_normalized = (centered / scale.view(-1, 1, 1)).to(dtype=orig_dtype)
+    log_scale = scale.log().unsqueeze(-1).to(dtype=orig_dtype)
+    return pos_normalized, log_scale
+
+
 class LinearProjection(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, bias: bool = True):
         super().__init__()
@@ -342,6 +398,9 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        coord_norm_mode: str = "none",
+        coord_norm_inject_log_scale: bool = False,
+        coord_norm_log_scale_init_std: float = 1e-4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,8 +413,20 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        if coord_norm_mode not in ("none", "centroid_scale", "centroid_rms"):
+            raise ValueError(
+                f"coord_norm_mode must be 'none', 'centroid_scale', or 'centroid_rms'; got {coord_norm_mode!r}"
+            )
+        self.coord_norm_mode = coord_norm_mode
+        self.coord_norm_inject_log_scale = (
+            coord_norm_inject_log_scale and coord_norm_mode != "none"
+        )
+        self.coord_norm_log_scale_init_std = coord_norm_log_scale_init_std
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        if self.coord_norm_inject_log_scale:
+            surface_extra_dim += 1
+            volume_extra_dim += 1
 
         if pos_encoding_mode == "string_separable":
             # STRING-separable: learnable per-axis log_freq + phase,
@@ -407,6 +478,20 @@ class SurfaceTransolver(nn.Module):
         self.project_volume_features = (
             LinearProjection(volume_proj_in, n_hidden) if volume_proj_in > 0 else None
         )
+        if self.coord_norm_inject_log_scale:
+            # Log-scale lives at index `surface_extra_orig` of the feature
+            # vector for the surface branch (we appended it after the existing
+            # extras), and at index `volume_extra_orig` for the volume branch.
+            # Initialise that input column with a tiny std so the model starts
+            # from a coord-norm-only baseline (no log-scale signal).
+            with torch.no_grad():
+                std = self.coord_norm_log_scale_init_std
+                if self.project_surface_features is not None:
+                    surf_log_col = max(0, self.surface_input_dim - space_dim)
+                    self.project_surface_features.project.weight[:, surf_log_col].normal_(0.0, std)
+                if self.project_volume_features is not None:
+                    vol_log_col = max(0, self.volume_input_dim - space_dim)
+                    self.project_volume_features.project.weight[:, vol_log_col].normal_(0.0, std)
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.backbone = Transformer(
@@ -425,6 +510,7 @@ class SurfaceTransolver(nn.Module):
     def _encode_group(
         self,
         x: torch.Tensor,
+        mask: torch.Tensor,
         *,
         rff: nn.Module | None,
         string_sep: nn.Module | None,
@@ -433,10 +519,20 @@ class SurfaceTransolver(nn.Module):
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
+        if self.coord_norm_mode != "none":
+            pos, log_scale = _normalize_coords_with_mask(pos, mask, self.coord_norm_mode)
+        else:
+            log_scale = None
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
+        if self.coord_norm_inject_log_scale and log_scale is not None:
+            # log_scale: [B, 1] -> broadcast to [B, N, 1]
+            num_tokens = pos.shape[-2]
+            feature_parts.append(
+                log_scale.unsqueeze(-2).expand(-1, num_tokens, -1).to(dtype=pos.dtype)
+            )
         if string_sep is not None:
             feature_parts.append(string_sep(pos))
         elif rff is not None:
@@ -473,6 +569,7 @@ class SurfaceTransolver(nn.Module):
             tokens.append(
                 self._encode_group(
                     surface_x,
+                    surface_mask,
                     rff=self.surface_rff,
                     string_sep=self.surface_string_sep,
                     project_features=self.project_surface_features,
@@ -487,6 +584,7 @@ class SurfaceTransolver(nn.Module):
             tokens.append(
                 self._encode_group(
                     volume_x,
+                    volume_mask,
                     rff=self.volume_rff,
                     string_sep=self.volume_string_sep,
                     project_features=self.project_volume_features,

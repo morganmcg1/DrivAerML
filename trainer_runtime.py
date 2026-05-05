@@ -1445,6 +1445,7 @@ def run_final_evaluation(
     n_params: int,
     global_step: int,
     total_minutes: float,
+    extra_checkpoints: dict[str, Path] | None = None,
 ) -> None:
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model"])
@@ -1514,3 +1515,51 @@ def run_final_evaluation(
         test_metrics=test_metrics,
         n_params=n_params,
     )
+
+    if extra_checkpoints:
+        for tag, ckpt_path in extra_checkpoints.items():
+            if not Path(ckpt_path).exists():
+                print(f"[extra_eval] Skipping '{tag}': checkpoint missing at {ckpt_path}")
+                continue
+            try:
+                extra_ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+                model.load_state_dict(extra_ckpt["model"])
+            except Exception as exc:
+                print(f"[extra_eval] Failed to load '{tag}' checkpoint at {ckpt_path}: {exc}")
+                continue
+            extra_epoch = int(extra_ckpt.get("epoch", -1))
+            extra_selection = str(extra_ckpt.get("selection_metric", tag))
+            print(f"[extra_eval] Evaluating '{tag}' (epoch={extra_epoch}, selection={extra_selection})")
+
+            extra_val_metrics = {
+                name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in final_val_loaders.items()
+            }
+            extra_val_log: dict[str, object] = {
+                "global_step": global_step,
+                **primary_metric_log(f"full_val_{tag}_primary", extra_val_metrics["val_surface"]),
+            }
+            for split_name, metrics in extra_val_metrics.items():
+                extra_val_log.update(metric_namespace(f"full_val_{tag}", split_name, metrics))
+            wandb.log(extra_val_log)
+            wandb.summary.update(numeric_metric_items(extra_val_log))
+
+            extra_test_metrics = {
+                name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+                for name, loader in final_test_loaders.items()
+            }
+            extra_test_log: dict[str, object] = {
+                "global_step": global_step,
+                **primary_metric_log(f"test_{tag}_primary", extra_test_metrics["test_surface"]),
+            }
+            for split_name, metrics in extra_test_metrics.items():
+                extra_test_log.update(metric_namespace(f"test_{tag}", split_name, metrics))
+            extra_test_log[f"test_{tag}/source_epoch"] = float(extra_epoch)
+            wandb.log(extra_test_log)
+            wandb.summary.update(numeric_metric_items(extra_test_log))
+            print_metrics(f"test_{tag}", extra_test_metrics["test_surface"])
+
+        # Reload the primary best-val-abupt checkpoint so any downstream code
+        # sees the model in its canonical state.
+        primary_ckpt = torch.load(model_path, map_location=device, weights_only=True)
+        model.load_state_dict(primary_ckpt["model"])
