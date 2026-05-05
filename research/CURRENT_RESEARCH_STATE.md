@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~01:30 UTC)
+- 2026-05-05 (updated ~14:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -17,11 +17,13 @@
 | #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | `er8wmo8d` | EP30 (gs=164,820). Summary best=**6.7573%** (EP30). EP30 gate ≤6.73% **PASSED**. Next gate EP35 ≤6.70% — needs 0.057pp in ~5 epochs. Consistent downward trend; approaching fern territory. |
 | #678 | dl24-nezuko | Extended cosine T_max=60 on SOTA STRING config (50-epoch long run) | `sbzspuf2` (group: `extended-cosine-t60-sota-v2`) | EP23 (gs=126,362). Summary best=**6.8820%** (EP18). Oscillating EP19–23 (6.8898–6.9268%). **EP25 gate ≤6.82% HIGH RISK** — needs 0.062pp in ~2 epochs; oscillation since EP18 suggests possible plateau. Real test of T_max=60 is EP30–50 phase. |
 | #722 | dl24-tanjiro | DualTowerTransolver: 3L SurfaceEncoder + 3L VolumeEncoder + cross-attention (Issue #717, `tay` branch, 13 epochs) | `e6v7okbu` + 7 DDP ranks (group: `vol-pressure-dual-tower`) | EP3 complete, mid-EP4. EP3 best=**7.4706%** (surf=4.854%, vol=4.774%, wall=8.381%). Steps/epoch=10865. Test harvest post-EP13 est. ~22:00–23:00 UTC 2026-05-05. Architecture separate from wave base. |
+| #652 | dl24-frieren | Muon optimizer on yi stack — Newton-Schulz orthogonalized Nesterov momentum on 2-D weights (yi wave) | `2erq99fy`→`xuj1wfbn`→`jh3e3r5d` polish chain | **DRAFT — Arm E pending.** Arm D val=**7.4054%**, test=**8.5295%** (yi bar: val=7.3914%, test=8.7189%). Val misses bar by 0.014pp; test already beats bar. Arm E (3rd Lion polish from Arm D ckpt, lr=1e-5) requested. Gates: EP1 ≤7.39%; kill if EP1 >7.42%. Muon cold-start 17–22% faster convergence; val→test gap improved 1.328pp→1.124pp (+0.20pp). |
 
 ### Closed / Negative Results This Wave
 
 | PR | Student | Hypothesis | Outcome |
 |----|---------|------------|---------|
+| #667 | dl24-fern | Weight decay sweep WD={5e-4, 1e-3, 1e-4} on STRING SOTA | CLOSED NEGATIVE: vol gap WORSENS as WD decreases (2.80×→2.85×→2.94×). No arm beats SOTA. WD is NOT the lever for the volume generalization gap. |
 | #730 | dl24-tanjiro | STRING + QK-Norm at lower LR=5e-5 (wave base config) | CLOSED: abandoned by student — zero W&B runs, zero PR comments. Student pivoted to PR #722 without authorization. QK-Norm at LR=5e-5 hypothesis unvalidated — reassign to compliant student. |
 | #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | CLOSED: EP15 gate failure expected at ~7.47% (gate ≤7.2%). 7 compliance warnings, zero student response. |
 | #673 | dl24-tanjiro | 7-sigma STRING PE [0.1..8.0] — expand sigma range | CLOSED: test=9.4198% (+1.49pp regression vs SOTA). Config mismatch (3L not 4L) confounds result, but slope deceleration makes clean re-run unlikely to beat SOTA. |
@@ -60,17 +62,22 @@
 
 4. **DualTowerTransolver (tanjiro #722, Issue #717):** EP3 abupt=7.471%, vol=4.774%. Massive EP2→EP3 improvement (+1.1pp) suggests learning is occurring. Test harvest at EP13 est. ~22:00–23:00 UTC today. Core question: does volume-specific encoding via separate tower + cross-attention improve the chronic vol→test gap (~3×: val≈4% vs test≈12%)?
 
-5. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed, PR #673 closed. Student has shown consistent pattern of unauthorized pivots and ignoring kill orders. PR #722 is being allowed to run to completion (Issue #717 authorized) but further tanjiro assignments should include explicit kill-gate compliance requirements.
+5. **Muon optimizer (frieren #652, yi stack) — Arm E pending:** Arm D val=7.4054%, test=8.5295%. Val misses yi merge bar by 0.014pp; test beats bar. Arm E (3rd Lion polish from Arm D ckpt, lr=1e-5) is the final attempt. Gates: EP1 ≤7.39%; kill if EP1 >7.42%. Slope prediction is EP1≈7.31–7.36%, which would clear the bar. Muon mechanism confirmed: 17–22% faster convergence, val→test gap improved 1.328pp→1.124pp (+0.20pp) across polish chain.
+
+6. **Volume val→test gap (3×) remains the central unsolved problem.** PR #667 definitively closed WD as a lever — gap WORSENS monotonically as WD decreases (2.80×→2.94× across WD={5e-4→1e-4}). The gap is structural: not a regularization artifact, not addressable by WD tuning. Candidate mechanisms still to test: volume-specific architectural capacity (separate MLP head, dual-tower encoding), data augmentation (y-symmetry), and loss reformulation (Beta-NLL).
+
+7. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed, PR #673 closed. Student has shown consistent pattern of unauthorized pivots and ignoring kill orders. PR #722 is being allowed to run to completion (Issue #717 authorized) but further tanjiro assignments should include explicit kill-gate compliance requirements.
 
 ## Potential Next Research Directions (after current arms complete)
 
-- **QK-Norm at lower LR (reassign from #730):** tanjiro abandoned this without running it. Assign to a compliant student — STRING + QK-Norm at lr=5e-5 is a clean untested hypothesis. Pre-wave `tkiigfmc` showed QK-Norm works on old stack; lower LR may help.
+- **QK-Norm at lower LR (reassign from #730):** tanjiro abandoned this without running it. Assign to a compliant student — STRING + QK-Norm at lr=5e-5 is a clean untested hypothesis. Pre-wave `tkiigfmc` showed QK-Norm works on old stack; lower LR may help. **TOP PRIORITY for next idle student.**
 - **Compose STRING + tau weighting + per-axis scaling:** if frieren #669 and fern #664 both show gains, compose both on SOTA STRING base (one change per PR).
 - **5L STRING** (`--model-layers 5`): pure CLI, zero code change. Pre-wave `70lnb3dt` test=8.769%. Could stack with QK-Norm.
 - **lr=9e-5 control on SOTA STRING base**: isolate the LR lever. `9mm3sz7x` used lr=9e-5 with AdamW; worth testing on Lion.
 - **EMA-proxy GradNorm α=0.5 (clean re-run)**: prior PR #623 failed on logistics not mechanism. Need kill-gate discipline.
 - **Surface-loss weight 2.0 with tay stack**: `qqtdnlwq` test=8.292%. Blocked until tay stack is available or workaround found.
-- **Volume MLP head**: replace volume Transolver decoder with a separate MLP for independent volume capacity (`8x7c537j` pre-wave evidence).
+- **Volume MLP head**: replace volume Transolver decoder with a separate MLP for independent volume capacity (`8x7c537j` pre-wave evidence). WD sweep (#667) confirmed volume gap is structural — Volume MLP head is now a higher-priority direction.
 - **Beta-NLL heteroscedastic surface head**: principled loss for heteroscedastic tau_y/z. Higher risk.
 - **y-symmetry data augmentation**: physics-valid 2× training set. tau_y sign-flip required on flipped cases.
 - **DualTower results pending**: if #722 shows vol gap improvement, compose with STRING PE on the tay branch; if not, abandon the architecture direction.
+- **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.

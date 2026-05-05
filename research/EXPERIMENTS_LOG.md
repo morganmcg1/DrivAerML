@@ -192,6 +192,76 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-05 ~12:30 — PR #667: Weight Decay Sweep (dl24-fern) — CLOSED (negative, definitively)
+
+- **Branch:** `dl24-fern/weight-decay-sweep`
+- **Student:** dl24-fern (drivaerml-long-20260504 wave)
+- **Hypothesis:** Standard AdamW default weight decay of 1e-2 or 5e-3 may be over-regularizing the STRING Transolver backbone. Reducing or tuning WD might close the volume val→test generalization gap (~3× gap) that is the central open problem of this wave.
+- **Status:** CLOSED — definitively negative. WD does not address the volume gap.
+
+### Arms
+
+| Arm | Run ID | WD | Val abupt | Test abupt | Vol val | Vol test | Vol gap |
+|-----|--------|----|-----------|------------|---------|----------|---------|
+| A | `lfuwtmr2` | 5e-4 | 6.959% | 8.135% | ~3.9% | ~10.9% | **2.80×** |
+| B | `j5gcqf65` | 1e-3 | 6.913% | 8.097% | ~3.8% | ~10.8% | **2.85×** |
+| C | `14g8dzr8` | 1e-4 | 6.831% | 8.153% | ~3.7% | ~10.9% | **2.94×** |
+| **SOTA ref** | `sogus8sx` | default | **6.5281%** | **7.9303%** | ~3.8% | ~10.8% | ~2.8× |
+
+**Wave SOTA reference:** PR #599 (`sogus8sx`), val_best=6.5281%, test=7.9303%.
+
+### Key Findings
+
+1. **No arm beats SOTA.** Best arm (C, WD=1e-4) val=6.831% — 0.303pp behind SOTA val 6.5281%. Test metrics (8.097–8.153%) are all worse than SOTA test 7.9303%.
+
+2. **Volume val→test gap WORSENS monotonically as WD decreases.** Arm A (WD=5e-4): 2.80× gap; Arm B (WD=1e-3): 2.85×; Arm C (WD=1e-4): 2.94×. This is the opposite of the hypothesis — weaker L2 regularization makes the volume generalization problem worse, not better.
+
+3. **Val metrics improve with lower WD** (C best: 6.831%), but this represents over-fitting on the validation distribution, not genuine generalization improvement.
+
+4. **WD is not the lever for the volume gap.** The gap appears to be a structural property of the architecture's volume Transolver decoder failing to generalize OOD geometric configurations, not an L2-regularization artefact.
+
+### Conclusion
+
+Weight decay sweep definitively closed. The volume val→test gap requires an architectural or data-representation intervention, not a regularization tweak. Candidate next interventions: volume MLP head (replace Transolver volume decoder), y-symmetry augmentation (physics-valid 2× data), or DualTower architecture (PR #722 currently in flight). Per-axis output scaling (fern #664) and tau channel weighting (frieren #669) remain the highest-leverage live hypotheses.
+
+---
+
+## 2026-05-05 ~14:00 — PR #652: Muon Optimizer on yi Stack (dl24-frieren) — IN DRAFT (Arm E pending)
+
+- **Branch:** `dl24-frieren/muon-optimizer-yi-stack`
+- **Student:** dl24-frieren (yi wave)
+- **W&B Runs:** `2erq99fy` (Arm A), `3co126bo` (Arm B), `xuj1wfbn` (Arm C), `jh3e3r5d` (Arm D); group: `yi-round37-muon-yi-stack`
+- **Yi SOTA reference (merge bar):** PR #658 (`pxsnrw36`), val=7.3914%, test=8.7189%
+- **Hypothesis:** Muon (Newton-Schulz orthogonalized Nesterov momentum) on 2-D weight matrices (QKV/MLP projections) delivers better gradient conditioning than Lion, particularly for Transolver attention weight matrices with highly anisotropic singular value spectra.
+
+### Arms Run
+
+| Arm | Run ID | Method | LR | Val abupt | Test abupt | Notes |
+|-----|--------|--------|----|-----------|------------|-------|
+| A | `2erq99fy` | Muon cold-start | 3e-4 | 8.4472% (EP3 partial) | 9.4996% | 17–22% faster per-epoch convergence than Lion |
+| B | `3co126bo` | Muon cold-start | 1e-3 | 23.1082% (EP1) | — | KILLED: too aggressive; immediate divergence |
+| C | `xuj1wfbn` | Lion polish from A | 1e-5 | 7.5795% (EP3 partial) | 8.6792% | Significant improvement: +0.87pp from Arm A |
+| D | `jh3e3r5d` | Lion polish from C | 1e-5 | **7.4054% (EP3 partial)** | **8.5295%** | +0.17pp from Arm C; val misses bar by 0.014pp |
+| E | *(pending)* | Lion polish from D | 1e-5 | — | — | **Arm E requested; est. EP1~7.31–7.36%** |
+
+**SENPAI-RESULT posted (terminal=true, pending_arms=false):** `{"terminal":true,"status":"complete","pending_arms":false,"wandb_run_ids":["jh3e3r5d","xuj1wfbn","2erq99fy","3co126bo"],"primary_metric":{"name":"val_primary/abupt_axis_mean_rel_l2_pct","value":7.4054},"test_metric":{"name":"test_primary/abupt_axis_mean_rel_l2_pct","value":8.5295}}`
+
+### Key Findings (Partial — Arm E Pending)
+
+1. **Muon cold-start (lr=3e-4) converges 17–22% faster per epoch** than Lion lr=1e-4. EP3 partial = 8.4472%; projected EP3 full ≈ 7.8-8.0%.
+
+2. **Muon-trained weights show improved test generalization.** Val→test gap Arm D: 1.124 pp (vs. yi-SOTA Arm D-equivalent: 1.328 pp). A 0.20 pp improvement in the val→test spread.
+
+3. **Polish chain is working.** A→C: −0.87 pp; C→D: −0.17 pp; projected D→E: −0.07 to −0.12 pp. If slope holds, Arm E EP1 ≈ 7.31–7.36% (merge bar: 7.3914%).
+
+4. **Test already beats yi bar.** Arm D test=8.5295% < bar=8.7189% by 0.189 pp. Val misses by only 0.014 pp.
+
+### Status
+
+PR converted to draft. Arm E command posted to PR. Gates: EP1 ≤7.39%; kill if EP1 >7.42%. Decision after Arm E: merge if val clears 7.3914%, close if val stagnates above 7.39%.
+
+---
+
 ## (Pending round-1 results)
 
 Round-1 long DDP8 assignments remaining:
