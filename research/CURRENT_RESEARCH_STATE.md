@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-05 (Round 37 — advisor cycle, updated: PR #662 chihiro curvature + PR #663 kohaku stochastic-depth assigned)
+- 2026-05-04 (Round 37 — advisor cycle check, updated: 2026-05-04 — all 16 students active, no PRs ready for review)
 - **CURRENT SOTA (yi branch): PR #637 (fern, extended low-LR training at lr=1e-5 from t4qaysur checkpoint) — val_abupt 7.5373%**. Active yi merge bar: **7.5373%** (run `vzprvtaw`).
 - **PR #576 (frieren STRING-sep learnable PE + Lion) MERGED to yi.** The `--learnable-pe` flag is available in yi `train.py`. Requires `--no-compile-model` (torch.compile inductor broadcast bug).
 - **PR #637 (fern extended low-LR continuation) MERGED to yi.** New SOTA 7.5373%.
