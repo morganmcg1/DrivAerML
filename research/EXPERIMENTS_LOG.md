@@ -1800,3 +1800,27 @@ SENPAI_VAL_BUDGET_MINUTES=30 torchrun --standalone --nproc_per_node=8 train.py \
 - **Why below bar (7.5373%):** SWA was applied to a 3-epoch cold-start run (floor 9.01% vs bar 7.54%). Wrong regime — SWA works near convergence.
 - **Caveat:** SWA window truncated by train timeout (270 min) to only 6 snapshots (~1200 steps) instead of the intended ~27 over full epoch.
 - **Conclusion:** Strong positive mechanistic signal. Recommended follow-up: apply SWA on top of extended staged trajectory — resume from yi SOTA checkpoint (7.5373%), run 1-2 epochs at lr=5e-6, collect SWA snapshots every 500 steps. Expected to compound with existing improvements.
+
+---
+
+## 2026-05-05 18:15 — PR #674: [violet] Surface normal RFF features on full SOTA stack — CLOSED (null result)
+
+- Branch: `violet/fourier-surface-geometry-features-full-stack`
+- Hypothesis: Adding random Fourier features (RFF) on surface unit normals (B ~ N(0, σ²I₃), σ=4) as extra surface input channels would give the model directional frequency basis functions for τ_y/τ_z decomposition.
+- W&B runs: Arm A `1x1qgydv` (dim=64, run-of-record); Arm B `09qsbtgo` (dim=128, aborted at EP2 per advisor)
+
+| Metric | Arm A val (EP4 best) | Arm A test | yi SOTA val (PR #681) | yi SOTA test | Δ val |
+|---|---:|---:|---:|---:|---:|
+| **abupt_axis_mean** | **7.8363%** | **8.8655%** | 7.3767% | 8.7015% | **+0.46pp worse** |
+| surface_pressure | 4.8956% | 4.5492% | 4.8515% | 4.6236% | +0.04pp |
+| wall_shear | 8.7779% | 8.5411% | 8.3016% | 8.3214% | +0.48pp |
+| wall_shear_y (τ_y) | 10.3098% | 10.0650% | 9.5832% | 9.5964% | **+0.73pp worse** |
+| wall_shear_z (τ_z) | 11.8168% | 11.0230% | 11.0377% | 10.7383% | **+0.78pp worse** |
+| volume_pressure | 4.7688% | 11.4156% | 4.3066% | 11.3738% | +0.46pp |
+
+- Arm B (dim=128) aborted at EP2 per advisor: EP1 val_abupt=17.78% (+1.22pp behind Arm A at same epoch), τ_y/τ_z 2.5pp+ worse than Arm A.
+- Implementation quality: excellent — deterministic RFF init via separate Generator, DDP broadcast_buffers=True, original normals preserved for downstream tangent-loss consumers, smoke tests passing.
+- **Mechanism contradicted:** The direction-sensitive channels (τ_y, τ_z) regressed MOST (+0.73pp, +0.78pp val), opposite to hypothesis. The model's existing LinearProjection of channels [3:6] already encodes all directional info needed — the SOTA is not bottlenecked by missing normal frequency content.
+- **Key structural negative:** SOTA input features are saturated. Richer input lifting at this scale cannot buy expressivity. Focus should shift to output-side formulations (tangent-frame τ targets #720, CRPS loss #721) and volume architecture changes (multigrid #725).
+- Violet reassigned to multigrid hierarchical volume attention (PR #725).
+

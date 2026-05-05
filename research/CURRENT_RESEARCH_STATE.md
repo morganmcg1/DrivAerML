@@ -1,19 +1,18 @@
 # SENPAI Research State — yi branch (DrivAerML)
 
-- **Date:** 2026-05-05 17:55 UTC
+- **Date:** 2026-05-05 18:20 UTC
 - **Advisor branch:** yi
-- **Active students:** 16 (all GPUs occupied, zero idle, exactly one WIP PR per student)
+- **Active students:** 16 (all GPUs occupied, zero idle)
 - **Current merge bar:** val_abupt = **7.3767%**, test_abupt = **8.7015%** (PR #681, nezuko, terminal LR polish lr=3e-7, W&B run `dc031qpt`)
-- **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511)
-- **Latest duplicate cleanup (17:55 UTC):** Closed #697 (alphonse fourier-RFF) and #707 (nezuko volume-density) which had zero student work and were blocking R40 priorities (#718, #720). Reasoning attached in close comments.
+- **Aspirational target:** val_abupt ~7.0% (tay branch SOTA PR #511, `5o7jc7wi`)
 
 ---
 
 ## Latest Human Research Directives (from Issue #18)
 
-- **Bold architecture changes**: Don't rely on incremental tweaks — completely replace model architectures. Only constraint is maintaining strong logging, validation, and checkpointing.
-- **Cross-branch inspiration**: Before finalizing new hypothesis assignments, scan PRs from `noam` and `radford` branches in wandb/senpai for prior art.
-- **Epoch-limited signal detection**: Use gradient norms, weight histograms, and loss slopes from W&B to identify runs that were training well but hit the epoch cap.
+- **Bold architecture changes**: Don't rely on incremental tweaks — completely replace model architectures (Perceiver-IO, neural operators, equivariant networks). Only constraint is maintaining strong logging, validation, and checkpointing.
+- **Cross-branch inspiration**: Before finalizing hypothesis assignments, scan PRs from `noam` and `radford` branches in wandb/senpai for prior art.
+- **Epoch-limited signal detection**: Use gradient norms, weight histograms, and loss slopes from W&B to identify gradient-healthy runs hitting the epoch cap.
 - **Wall shear structural fix**: Surface-tangent frame wall-shear head (highest priority), Perceiver-IO backbone, asinh/log normalization, RANS divergence-free constraint, 1-cycle LR.
 
 No new human messages since last check (2026-05-04).
@@ -22,108 +21,91 @@ No new human messages since last check (2026-05-04).
 
 ## Current Research Focus and Themes
 
-### Primary Gap: Wall Shear τ_y/τ_z (still ~2.6× and ~3.0× above AB-UPT)
+### Primary Gap: Wall Shear τ_y/τ_z (~2.6× and ~3.0× above AB-UPT)
 
-Current yi SOTA per-axis (val, PR #681):
-- τ_y: 9.5832% val vs AB-UPT 3.65% → ~2.6× gap
-- τ_z: 11.0377% val vs AB-UPT 3.63% → ~3.0× gap
-- surface_p: 4.8515% val vs AB-UPT 3.82% → 1.27× gap
+Current yi SOTA per-axis (val/test, PR #681 nezuko):
+- τ_y: 9.5832% val / 9.5964% test vs AB-UPT 3.65% → ~2.6× gap
+- τ_z: 11.0377% val / 10.7383% test vs AB-UPT 3.63% → ~3.0× gap
+- surface_p: 4.8515% val / 4.6236% test vs AB-UPT 3.82% → 1.27× gap
 
 ### Secondary Gap: Volume Pressure val/test anomaly
 
-- vol_pressure: 4.31% val vs 11.46% test (2.7× ratio) — the largest unexplained residual in current results
+- vol_pressure: 4.31% val vs 11.37% test (2.64× ratio) — biggest unexplained residual. Two attacks in flight: SDF-stratified norm (kohaku #719, normalization approach) and multigrid volume attention (violet #725, architecture approach).
+
+### Key Structural Finding This Round (PR #674)
+
+Surface input feature saturation confirmed: RFF on normals was a null result — τ_y/τ_z regressed +0.73/+0.78pp. The SOTA is not bottlenecked by missing normal frequency content. LinearProjection of existing [nx, ny, nz, area] channels is sufficient. Future input-feature experiments need a strong mechanistic differentiation.
 
 ---
 
-## Round 40 — New Assignments (2026-05-05)
+## Round 41 — Active Assignments
 
-| PR | Student | Hypothesis | Priority |
-|----|---------|------------|----------|
-| #718 | alphonse | Selective τ_y TTA at inference (zero training cost, +2.79% τ_y shown in PR #286) | HIGH |
-| #719 | kohaku | SDF-stratified volume norm (diagnose + fix 4.3% val / 11.5% test vp gap) | HIGH |
-| #720 | nezuko | Surface-tangent frame τ targets (remove Cartesian τ_y/τ_z entanglement) | MEDIUM |
-| #721 | thorfinn | CRPS/MAE loss for wall-shear only (vs β-NLL over-smoothing hypothesis) | MEDIUM |
+| PR | Student | Hypothesis | Status |
+|----|---------|------------|--------|
+| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix via pxsnrw36 features) | WIP |
+| #725 | violet | Multigrid hierarchical volume attention (target: vol_p 11.37% test → ≤9.0%) | NEW — assigned 2026-05-05 18:18 UTC |
 
 ---
 
-## Round 41 — New Assignments (2026-05-05)
+## Round 40 — Active WIP PRs
 
-| PR | Student | Hypothesis | Priority |
-|----|---------|------------|----------|
-| #724 | norman | Residual correction MLP on frozen SOTA — lightweight bias-correction head trained on frozen pxsnrw36 backbone features targeting τ_y/τ_z gap | HIGH |
-
----
-
-## Active WIP PRs — Round 40
-
-| PR | Student | Hypothesis | W&B / State |
-|----|---------|------------|-------------|
-| #718 | alphonse | Selective TTA τ_y at inference | Round 40 — freshly assigned |
-| #719 | kohaku | SDF-stratified volume pressure normalization | Round 40 — freshly assigned |
-| #720 | nezuko | Surface-tangent frame τ targets | Round 40 — freshly assigned |
-| #721 | thorfinn | CRPS/MAE loss for wall-shear channels | Round 40 — freshly assigned |
-| #715 | askeladd | Annealed per-axis wallshear weighting | Running: `1qpqhyrt` |
-| #714 | senku | 6L/512d depth retry (900min budget) | Running: `0zr5g357` |
-| #713 | fern | Normal-penalty wallshear tangency regularizer | Running: `m8fq2dvb`, Arm A EP1 done EP2 in progress (17:12 UTC) |
-| #724 | norman | Residual correction MLP on frozen SOTA (τ_y/τ_z bias fix) | Cleared to launch with `pxsnrw36`, identity-init approved (17:55 UTC) |
-| #674 | violet | Surface normal RFF (dim=128, σ=4) | Arm B abort authorized — Arm A=8.632% null result; awaiting terminal SENPAI-RESULT for closure |
-| #672 | edward | Decoupled τ_y/τ_z MLP head | Polish-on-SOTA-checkpoint plan sent back with lr=5e-6 guidance for random-init `tau_yz_head` |
-| #671 | tanjiro | y-symmetry pair loss (long run) | Running: `wbjsawz7`, EP2=10.18% (passed EP10 gate at EP2) |
-| #668 | gilbert | asinh wall-shear target normalization | Closure plan confirmed — null result; await Arm C EP3 (~19:21 UTC) for terminal SENPAI-RESULT |
-| #662 | chihiro | k1_k2 curvature cold-start ablation (Arm A control, 720min) | Running: `4abva8us`, let Arm A finish (~21:00 UTC) |
-| #661 | haku | Surface RFF dim=64/128 resume | Running: A=`02muovdp` 10.20%, B=`2p7oiqpe` 10.84% at EP2; pod budget cuts EP3 mid-epoch ~17:57 UTC |
-| #654 | emma | DualTowerTransolver (hottest lead — EP2=8.5688%) | Running: `sjq4wvg1`, EP3 expected ~18:00 UTC; potential SOTA candidate (linear extrapolation ~7.0%) |
-| #652 | frieren | Muon optimizer + Lion polish chain | Arm D Lion polish #2 (`jh3e3r5d`) running |
+| PR | Student | Hypothesis | Last Update / State |
+|----|---------|------------|---------------------|
+| #721 | thorfinn | CRPS/MAE loss for τ_y/τ_z (replace β-NLL on wall-shear only) | Running |
+| #720 | nezuko | Surface-tangent frame τ targets (remove Cartesian τ_y/τ_z entanglement) | Running |
+| #719 | kohaku | SDF-stratified volume norm (diagnose + fix vol_p val/test gap) | Running |
+| #718 | alphonse | Selective τ_y TTA at inference (zero training cost) | Running |
+| #715 | askeladd | Annealed per-axis wallshear loss weighting | Running (corrected launch 15:19 UTC) |
+| #714 | senku | 6L/512d depth retry (900-min budget, run `0zr5g357`) | Running (launched 15:33 UTC) |
+| #713 | fern | Normal-penalty wallshear tangency regularizer (λ·|ws·n̂|²) | Running |
+| #672 | edward | Decoupled τ_y/τ_z MLP head | Running |
+| #671 | tanjiro | O(2) y-symmetry pair loss (50-epoch long run) | **EP2=10.18% — exceptional trajectory** |
+| #668 | gilbert | asinh wall-shear target normalization | Arm C running (~19:21 UTC terminal) |
+| #662 | chihiro | k1_k2 curvature cold-start ablation (Arm A 720-min control) | Running (~21:00 UTC terminal) |
+| #661 | haku | Surface RFF (dim=64/128 resume, both arms passing gates) | Running — Arm A ahead at EP2 |
+| #654 | emma | DualTowerTransolver | **EP3=8.04%, still descending — ⚠️ branch has merge conflict, rebase needed at terminal** |
+| #652 | frieren | Muon optimizer + Lion polish chain (Arm D `jh3e3r5d`) | Running |
 
 ---
 
-## Closed This Round (R37–40)
+## Hottest Leads This Round
+
+**Emma #654 (DualTowerTransolver):** EP3=8.04% at just 3 cold-start epochs. Vol pressure collapsed from 10.60% → 6.29% at EP2 (-4.31pp in one epoch). Linear extrapolation suggests EP5 ~7.0% — would match tay SOTA. Branch currently has merge conflict: advise rebase when training completes.
+
+**Tanjiro #671 (y-symmetry pair loss):** EP2=10.18% at epoch 2 of 50. Already passed EP10 gate (≤11%) at EP2. τ_z descending at −2.146 pp/1k steps — fastest-descending axis. This is the most promising long-run trajectory in the fleet.
+
+---
+
+## Closed This Round
 
 | PR | Student | Outcome |
 |----|---------|---------|
-| #622 | thorfinn | CLOSED — SDF-proximity volume loss weighting null |
-| #628 | edward | CLOSED — symmetric τ-weight sweep zero-sum |
-| #636 | gilbert | CLOSED — inverse density weighting null |
-| #638 | tanjiro | CLOSED — dropout null |
-| #646 | alphonse | CLOSED — asymmetric W_y/W_z + curvature-focal both regression |
-| #656 | violet | CLOSED — multi-EMA ensemble null |
+| #674 | violet | CLOSED — surface normal RFF null; τ_y/τ_z regressed most, input features saturated |
+| #697 | alphonse | CLOSED — fourier surface-RFF duplicate of #674 |
+| #707 | nezuko | CLOSED — full-mesh volume density duplicate of #719 |
+| #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%) |
 | #659 | norman | CLOSED — 4L/768d cold-start undertrained |
-| #675 | norman | CLOSED — Perceiver-IO backbone undertrained (val 29.69%, step 3950) |
-| #697 | alphonse | CLOSED — fourier surface-RFF (overlapped with #674 normal-RFF null); duplicate cleanup |
-| #707 | nezuko | CLOSED — full-mesh volume density (overlapped with #719 SDF-stratified vol-norm); duplicate cleanup |
+| #646 | alphonse | CLOSED — asymmetric W_y/W_z + curvature-focal both regression |
+| #638 | tanjiro | CLOSED — dropout null |
+| #636 | gilbert | CLOSED — inverse density weighting null |
+| #628 | edward | CLOSED — symmetric τ-weight sweep zero-sum |
+| #622 | thorfinn | CLOSED — SDF-proximity volume loss weighting null |
 
 ---
 
-## Merged (running SOTA chain on yi)
+## Potential Next Research Directions (Round 42+)
 
-| PR | Student | Result | Key finding |
-|----|---------|--------|-------------|
-| #681 | nezuko | **7.3767% val / 8.7015% test** ← current bar | lr=3e-7 still extracts gains from near-converged SOTA |
-| #658 | nezuko | 7.3914% val / 8.7189% test | SWA EMA best-ckpt; EMA dominates SWA in flat-basin |
-| #657 | fern | 7.4861% val / 8.8110% test | lr=1e-6 continuation; diminishing returns |
-| #637 | fern | 7.5373% val / 8.8533% test | Extended training at lr=1e-5 from STRING-sep SOTA |
-| #576 | frieren | 8.2528% val | STRING-sep PE + Lion + grad-EMA cold-start |
-| #590 | thorfinn | 8.686% val | grad-EMA α=0.5 |
-| #583 | edward | 8.861% val | β-NLL β=0.5 |
-| #517 | askeladd | 9.032% val | Lion lr=1e-4 clip=0.5 confirmed optimal |
-| #580 | haku | Infrastructure: κ₁/κ₂ curvature feature flag | |
-| #490 | frieren | Infrastructure: STRING-sep learnable PE | |
+### High priority
+- **SAM (sharpness-aware fine-tuning)** from yi SOTA checkpoint — flatter minima generalize better; Card 7 from round-40 research file
+- **8L/512d ultra-deep** — if senku's 6L retry (#714) shows gains, push to 8L next; if not, 6L stays dead
+- **DualTower continuation run** — if emma #654 beats baseline, immediately queue lr=1e-5 or lower continuation from best ckpt
+- **RANS divergence-free constraint** — soft physics loss on volume velocity; targets vol_pressure generalization via physical constraint
 
----
-
-## Potential Next Research Directions (Round 41+)
-
-### High priority (queued for next idle slots)
-- **Multigrid hierarchical volume attention** — two-resolution coarse-to-fine for elliptic vol_p (Card 5 from round-40 research file)
-- **SAM optimizer** — sharpness-aware fine-tuning from yi SOTA (Card 7)
-- **Geometry-aware mixup** — kNN-constrained mixup on similar vehicle pairs (Card 8)
-
-### Architecture
-- **8L/512d ultra-deep** — push beyond 6L if senku's 6L retry shows improvement
-- **DualTower continuation** — emma #654 EP2=8.57%; if EP3 trajectory continues → long-run candidate
-- **4L/640d/10h width** — fair width test (follow-up to closed PR #659)
+### Architecture (bold)
+- **Geometry-aware mixup** — kNN-constrained mixup on geometrically similar vehicle pairs (Card 8 from round-40 research file)
+- **Equivariant backbone** — E(3)/SE(3)-equivariant architecture for τ_y/τ_z; symmetry-guaranteed (distinct from data augmentation)
+- **4L/640d/10h width** — isolated width test beyond 512d
 
 ### Physics-informed
-- **RANS divergence-free constraint** — soft physics loss on volume velocity field
-- **Boundary layer thickness feature** — estimate δ from geometry as surface input
-- **SDF-augmented features** — `[sdf^2, log|sdf|]` appended to volume input (Card 2 Phase 2)
+- **Boundary layer thickness feature** — estimate δ_99 from geometry as surface input
+- **SDF-augmented volume features** — append `[sdf², log|sdf|]` to volume input (Phase 2 after #719 diagnostic)
