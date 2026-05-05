@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-05 (updated 15:30 UTC)
+- **Date:** 2026-05-05 (updated 17:30 UTC)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -8,7 +8,19 @@
 
 ## Latest Human Researcher Directives
 
-No new directives from the human research team. Issue #618 (STRING/RoPE queue) all 4 experiments complete (PRs #621, #624, #625/647, #626).
+**Issue #717 (Volume Pressure Improvement Plan)**: Human team has set an explicit multi-phase programme to reduce `test_primary/volume_pressure_rel_l2_pct` from ~11.5% toward the AB-UPT reference of 6.08%.
+
+**Hard constraint (Issue #717):** Zero model ensembling. All reported metrics must be single-model only.
+
+**Baseline anchors for all VP experiments:**
+- `sogus8sx` (PR #599): test vol=11.694%, test wall=7.299%, test tau_y=7.941%, test tau_z=9.535%
+- `4k25s25e` (PR #592): test vol=11.933%, test wall=7.334%, test tau_y=8.145%, test tau_z=9.298%
+
+**Issue #717 VP promotion ladder:**
+- Weak win: test vol_pressure ≤ 10.8%
+- Solid win: test vol_pressure ≤ 10.0%
+- Major win: test vol_pressure ≤ 9.5%
+- Target: test vol_pressure ≤ 6.08% (AB-UPT reference)
 
 ---
 
@@ -28,9 +40,32 @@ No new directives from the human research team. Issue #618 (STRING/RoPE queue) a
 
 ## Current Research Themes
 
-### 1. Positional Encoding / Geometry Representation (1 PR in-flight)
+### 1. Volume Pressure Improvement (Issue #717 — Phase 1 Probes)
 
-- **PR #691** (askeladd): RFF sigma range expansion — arm-a: 7-sigma wide {0.125,0.25,0.5,1.0,2.0,4.0,8.0}; arm-b: 6-sigma low-ext {0.125,0.25,0.5,1.0,2.0,4.0}. Just assigned, pre-EP1.
+Active experiments targeting the chronic 3× vol_pressure test-vs-val gap:
+
+- **PR #722** (tanjiro): **Exp 1A** — Dual-tower volume/surface cross-attention. Separate 3L surface encoder + 3L volume encoder + cross-attention bridge. Running — EP1 PASSED (val=8.57%, vol_pressure=6.47%, epoch_time=37.6min ✅).
+
+- **PR #723** (thorfinn): **Exp 1C** — Coordinate normalization geometry conditioning. Per-sample centroid-subtraction + bounding-box scale normalization before RFF encoding. Running — EP1 in progress.
+
+- **PR #728** (frieren): **Exp 1B** — Volume outlier-aware point sampling. Two arms: (A) EMA-residual case-level reweighted DataLoader, (B) geometric-distance stratified near/far volume points (3× up-weight far-wake). Just assigned — pre-EP1.
+
+- **PR #729** (alphonse): **Exp 1D** — Single-model KD from K=7 ensemble (PR #612). Pre-cache ensemble predictions; soft-target loss (alpha=0.5) on vol_pressure only. Tests whether ensemble knowledge can transfer to single model. Just assigned — pre-EP1.
+
+**Closed (null) — do not repeat:**
+- BC-type feature embedding (PR #716): KILLED — arm-a EP2 val=26.61% >> 12%; arm-b EP1 val=27.12%, epoch_time=180min >> 80min gate
+- Slice count sweep (PR #690): CLOSED — slices=64 val=6.896% (+0.30pp miss); slices=192 epoch_time=92min (13ep infeasible); slices=128 confirmed near-optimal
+- Vol-pressure loss upweighting (PR #648): closed null, no arm beat SOTA
+- Abrupt VP curriculum, strong tau weights, hard tangency/normal penalties: failed
+- Flow-aligned tau (PR #641): EP2 KILL
+- Surface curvature features (PR #651): EP2 KILL
+- Y-symmetry pair loss: failed
+
+**Open question:** Can architectural separation (Exp 1A dual-tower) or point-sampling emphasis (Exp 1B) or coordinate-space normalization (Exp 1C) or ensemble KD (Exp 1D) reduce the 3× vol_pressure test-vs-val gap?
+
+### 2. Positional Encoding / Geometry Representation
+
+- **PR #691** (askeladd): RFF sigma range expansion — arm-a: 7-sigma wide {0.125,0.25,0.5,1.0,2.0,4.0,8.0}; arm-b: 6-sigma low-ext {0.125,0.25,0.5,1.0,2.0,4.0}. Running — val=8.47%, vol_pressure=5.35% (below AB-UPT reference on val!), step=23332.
 
 **Closed (null):**
 - PR #621 (nezuko): Slice-centroid STRING-RoPE — EP3 killed.
@@ -39,113 +74,98 @@ No new directives from the human research team. Issue #618 (STRING/RoPE queue) a
 - PR #626 (frieren): AB-UPT geometry branch — val=9.12%, vol_pressure gap reduced 3.17×→2.07× (key finding).
 - PR #647 (frieren): Anchor-string Exp 3 — EP2 KILL (16.046%), coordinate embedding bug.
 
-**Open question:** Does widening RFF sigma coverage (lower and/or upper frequencies) improve geometry representation, particularly for the vol_pressure channel?
+**Open question:** Does widening RFF sigma coverage improve geometry representation, particularly for vol_pressure?
 
-### 2. Optimizer / Training Dynamics (2 PRs in-flight)
+### 3. Optimizer / Training Dynamics
 
-- **PR #667** (fern): Weight decay sweep {5e-4 ctrl=6.959% test=8.135% vol-ratio 2.80×, 1e-3 final=6.913% test=8.097% vol-ratio 2.85×, 1e-4 running}. **Arm B finalized — WD direction scientifically null on volume val→test gap.** Test_vp essentially flat across WD values; ratio actually widened slightly with stronger WD. Arm C running for completeness.
-- **PR #695** (edward): RFF num_features=32 (doubled from 16) for tau_y/tau_z. Silent since 13:20Z receipt; follow-up nudge posted 15:23Z requesting EP1 status.
+- **PR #667** (fern): Weight decay sweep {5e-4 ctrl=6.959% test=8.135% vol-ratio 2.80×, 1e-3 final=6.913% test=8.097% vol-ratio 2.85×, 1e-4 running}. **Arm B FINAL — WD scientifically null on volume val→test gap.** Test_vp flat across WD values; Arm C running.
+- **PR #695** (edward): RFF num_features=32 — val=8.53%, vol_pressure=5.37% (below AB-UPT reference on val!). Critical EP3 gate (must drop below 8.0%).
 
 **Closed (null):**
-- PR #603 (tanjiro): EMA decay sweep — {0.9993, 0.9997, 0.9999} all no improvement.
-- PR #614 (fern): Lion β2 sweep — β2=0.99 (default) confirmed optimal; no arm beats SOTA.
-- PR #640 (edward): NorMuon optimizer — diverged (val=69.15%), dead end.
-- PR #649 (edward): GradNorm min-weight floor sweep — closed dead end (Arm A val=6.9999%, Arm B val=7.134%, both worse than SOTA). GradNorm at alpha=1.5 strips domain-knowledge surface weight (2.0→0.49).
-- PR #650 (tanjiro): LR cosine floor sweep — closed null, no arm beat SOTA.
+- PR #603 (tanjiro): EMA decay sweep.
+- PR #614 (fern): Lion β2 sweep — β2=0.99 confirmed optimal.
+- PR #640 (edward): NorMuon optimizer — diverged.
+- PR #649 (edward): GradNorm min-weight floor sweep — closed null.
+- PR #650 (tanjiro): LR cosine floor sweep — closed null.
 
-**Open question:** Can weight decay tuning narrow the vol_pressure val→test gap via stronger regularization? Early signal from PR #667 Arm B suggests stronger WD (1e-3) does not help.
+### 4. Knowledge Distillation
 
-### 3. Attention Mechanism (2 PRs in-flight)
+- **PR #676** (nezuko): K=7 ensemble KD, Arm A (kd=0.7) final val=7.0153% — misses bar, budget-limited (2.37 it/s vs ~5 it/s normal → only 4 epochs). **Volume val→test ratio narrowed 3.17×→2.78%** — first lever to move vol gap. Arm B (kd=0.5) running. val=8.78%, approaching EP3 gate (8.0%).
+- **PR #729** (alphonse): New Exp 1D — single-model KD from K=7 ensemble on vol_pressure only (channel-selective). Learning from PR #676 budget issue.
 
-- **PR #692** (tanjiro): Attention heads sweep — arm-a: heads=8 (dim_head=64) EP2 PASS 8.5458%; arm-b: heads=2 (dim_head=256) queued. EP3 watch for Arm A.
+### 5. Architecture / Attention
 
-**Closed (this round):**
-- PR #665 (frieren): Cross-slice attention — direction closed.
-
-**Open question:** Does more diverse (heads=8) or higher-capacity (heads=2) attention improve over SOTA heads=4? Does inter-slice attention capture global geometry correlations? (Early signal from PR #665: cross-slice attn slows late-EP convergence, likely due to +33% params needing more training to escape zero-init.)
-
-### 4. Architecture Scaling (2 PRs in-flight)
-
-- **PR #694** (thorfinn): Depth L=6 hidden=384 heads=4 (dim_head=96) — budget-safe follow-up to closed PR #693. PR #693 (L=6/h=448/heads=7) killed at EP1 because heads=7 (non-power-of-2) destroyed SDPA/Triton fast paths → 98 min/epoch, only ~2.7 epochs feasible. This PR uses heads=4 (PoW2, preserves fast paths), hidden=384 (dim_head=96, PoW2). Estimated ~57 min/epoch → ~4-5 epochs feasible. Just assigned, pre-EP1.
-- **PR #690** (alphonse): Slice count sweep — arm-a: slices=64; arm-b: slices=192; arm-c: slices=256. Just assigned, pre-EP1.
+- **PR #692** (tanjiro): NOW SUPERSEDED by PR #722 (tanjiro → Exp 1A). Closed null (heads=8 EP2 PASS 8.55%, final result below SOTA; heads=2 not tested). Heads=4 confirmed optimal.
+- **PR #694** (thorfinn): L=6/hidden=384/heads=4 — NOW SUPERSEDED by PR #723 (thorfinn → Exp 1C). L=6/h=384 closed null.
 
 **Established:**
-- L=5 > L=4 by −1.90% relative gain.
-- L=6 at full hidden=512 (PR #666): EP2=8.47% PASS but ~88.6 min/epoch → only 3/13 epochs feasible — computationally infeasible within budget.
-- L=6/hidden=448/heads=7 (PR #693): CLOSED — 98 min/epoch (heads=7 kills SDPA fast path). Key lesson: heads must be power-of-2 for budget-feasible training.
+- L=5 > L=4 by −1.90% relative gain; L=6 variants all infeasible or null within budget.
+- Heads=4 confirmed optimal; power-of-2 constraint for SDPA.
+- Slices=128 confirmed near-optimal (PR #690 closed).
 
-**Open question:** Does L=6/hidden=384/heads=4 (PR #694) continue the depth scaling trend? Is slices=128 optimal or does smaller/larger over-fragment or under-communicate geometry (PR #690)?
-
-### 4b. Knowledge Distillation (1 PR in-flight)
-
-- **PR #676** (nezuko): K=7 ensemble teacher → student KD with kd_alpha sweep. **Arm A (kd-alpha=0.7) FINAL:** val=7.0153% test=8.2539% — misses merge bar 6.5985% by +0.42pp. **Budget-limited:** KD doubles per-step time (2.37 it/s vs ~5 it/s) → only 4 epochs in 270-min cap; trajectory slope at EP4 still -0.42pp/epoch (would plausibly cross merge bar at ~9 epochs). **Volume val→test ratio narrowed 3.17×→2.78×** — first lever in the round to actually move the chronic surface↔volume gap. Arm B (kd-alpha=0.5) launched 15:10Z. **Open follow-ups documented:** (a) batched KD cache / fused volume KD kernel to halve per-step overhead, (b) channel-selective KD on volume only, (c) T_max=4 cosine fix, (d) scheduled kd_alpha 0.9→0.1.
-
-### 4c. Boundary Condition Encoding (1 PR in-flight)
-
-- **PR #716** (frieren): nn.Embedding(3, 16) for wall=0/inlet=1/outlet=2 injected before Transolver encoder. Primary target: wall_shear_z (SOTA 9.81%). Hypothesis received 15:20Z; data-shape inspection requested.
-
-### 5. Physics-Informed Loss / Output Formulation
+### 5b. Physics-Informed Loss
 
 **Closed (null):**
-- PR #641 (thorfinn): Flow-aligned tau — EP2 KILL (14.613%).
-- PR #648 (askeladd): Volume-pressure loss upweighting {2.0, 4.0, 6.0} — closed null, no arm beat SOTA.
-- PR #651 (thorfinn): Surface curvature features (H, K) — EP2 KILL (14.613%).
-
-**Key finding from PR #648:** VP channel at best arm was 4.30%, promising direction but did not translate to overall metric gain.
+- PR #641, #648, #651 — VP upweighting, flow-aligned tau, surface curvature features all null.
 
 ---
 
 ## Active Fleet Status
 
-All 8 students running:
+All 8 tay-branch students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | #690 | Slice count sweep {64, 192, 256} vs SOTA 128 | Arm A heads=64 EP1 ~25.87%; EP2 gate watch |
-| askeladd | #691 | RFF sigma expansion {7-wide, 6-low-ext} | Arm A EP1 ~29.43%; EP2 gate watch |
-| tanjiro | #692 | Heads sweep {8, 2} vs SOTA heads=4 | Arm A heads=8 EP2 PASS 8.5458%; EP3 gate next |
-| thorfinn | #694 | Depth L=6 hidden=384 heads=4 (budget-safe) | EP3 PASS 7.3175% (gap closing); EP4 final ETA ~15:43 UTC |
-| edward | #695 | RFF num_features=32 (doubled) for tau_y/tau_z | Silent since 13:20Z ADVISOR receipt; follow-up nudge posted 15:23Z |
-| fern | #667 | Weight decay sweep {5e-4 ctrl=6.959%, 1e-3 final=6.913%, 1e-4 running} | Arm B FINAL: WD direction scientifically null on volume gap; Arm C running |
-| frieren | #716 | BC-type embedding (nn.Embedding(3,16)) — wall_shear_z primary target | Hypothesis received; Arm A control + Arm B BC starting; EP1 watch |
-| nezuko | #676 | Ensemble K=7 distillation teacher (kd-alpha sweep) | Arm A FINAL: val=7.0153% (misses bar, budget-limited); Arm B kd=0.5 running since 15:10Z |
+| tanjiro | #722 | Exp 1A: Dual-tower vol/surface cross-attn (Issue #717) | Running — EP1 PASS (val=8.57%, vol_vp=6.47%, 37.6min/ep) |
+| thorfinn | #723 | Exp 1C: Coordinate normalization geometry conditioning | Running — EP1 in progress |
+| frieren | #728 | Exp 1B: Volume outlier-aware point sampling (Issue #717) | Just assigned — pre-EP1 |
+| askeladd | #691 | RFF sigma expansion {7-wide, 6-low-ext} | Running — val=8.47%, vol_pressure=5.35%, step=23332 |
+| alphonse | #729 | Exp 1D: Single-model KD from K=7 ensemble (Issue #717) | Just assigned — pre-EP1 |
+| edward | #695 | rff-num-features=32 (doubled RFF encoding) | Running — val=8.53%, vol_pressure=5.37% **EP3 CRITICAL** |
+| fern | #667 | Weight decay sweep {1e-4, 5e-4, 1e-3} | Running — Arm C (wd=1e-4) in progress; WD null on vol gap |
+| nezuko | #676 | Ensemble distillation K=7 teacher → L=5 student | Running — val=8.78%, Arm B (kd=0.5) approaching EP3 |
 
 **Zero idle students. Zero idle GPUs.**
 
-**Upcoming gate actions (UTC):**
-- thorfinn PR #694: EP4 final ~15:43 — verdict on merge bar < 6.5985% (forecast 6.85–7.05%, tail ≤6.6%)
-- fern PR #667 Arm C (wd=1e-4): EP1 ~15:50 (info), EP2 ~17:05 (kill > 12%), EP3 ~18:20 (kill > 8%), final ~19:08
-- nezuko PR #676 Arm B (kd=0.5): EP2 ~17:30 (kill > 12%), EP3 ~18:45 (kill > 8%), final ~19:40
-- tanjiro PR #692 Arm A (heads=8): EP3 ~16:00 (kill > 8%), final ~16:21
-- askeladd PR #691, alphonse PR #690: EP2 gate watch (kill > 12%)
-- edward PR #695: pending student EP1 status update
-- frieren PR #716: data-shape inspection result + EP1 informational
+**Kills executed this cycle:**
+- PR #716 (frieren, BC-type): KILLED — arm-a EP2 val=26.61% >> 12%; arm-b EP1 val=27.12% + epoch_time=180min >> 80min gate
+- PR #690 (alphonse, slice-count): CLOSED — slices=64 val=6.896% miss; slices=192 epoch_time=92min infeasible; slices=128 confirmed optimal
+
+**Upcoming gate actions:**
+- PR #722 (tanjiro): EP2 KILL if > 12.0%; EP3 KILL if > 8.0%
+- PR #723 (thorfinn): EP1 epoch-time gate (kill if > 80min); EP2 KILL if > 12.0%; EP3 KILL if > 8.0%
+- PR #728 (frieren): EP1 epoch-time gate; EP2 KILL if > 12.0%; EP3 KILL if > 8.0%
+- PR #729 (alphonse): EP1 epoch-time gate; EP2 KILL if > 12.0%; EP3 KILL if > 8.0%
+- PR #695 (edward): EP3 CRITICAL — val=8.53%, must drop below 8.0% at EP3 or kill
+- PR #691 (askeladd): EP3 gate approach — val=8.47%
+- PR #667 (fern): Arm C (wd=1e-4) running; report final result
+- PR #676 (nezuko): Arm B EP3 approach — val=8.78%
 
 ---
 
 ## Potential Next Research Directions
 
-### High Priority (target primary val_abupt metric directly)
+### High Priority (Issue #717 Phase 1 — when students become idle)
 
-1. **Ensemble pool expansion**: When new single-model winners emerge, immediately run greedy ensemble selection (pool-25) to check if any new run improves the ensemble.
+1. **Exp 1E: Scheduled KD alpha (0.9→0.1)** — If PR #676 Arm B (kd=0.5) shows that KD helps vol gap but val_abupt is too high from ensemble label noise on surface/tau, try dynamically decaying kd_alpha from 0.9 (early epochs, ensemble teaches overall distribution) to 0.1 (late epochs, GT supervision dominates for refinement).
 
-2. **Depth scaling continuation**: If L=6 hidden=384 (PR #694) beats SOTA, try L=6/hidden=448/heads=4 (dim_head=112, not PoW2 — risky) or L=6/hidden=384 + wider heads=8 (dim_head=48). If PR #692 (heads sweep) finds heads ≠ 4 wins, cross with L=6.
+2. **Exp 1F: Batched KD with faster inference** — PR #676 showed KD at 2.37 it/s vs ~5 it/s normal (2× slowdown). If Exp 1D (#729) shows improvement, implement a batch-precomputed KD cache on GPU to halve per-step overhead and allow more epochs.
 
-3. **Volume-pressure gap follow-up**: PR #648 showed VP channel at 4.30% with upweighting. If weight decay (PR #667) reduces the test-vs-val gap, combine optimal wd with VP upweighting in a targeted follow-up.
+3. **Ensemble pool expansion**: When new single-model winners emerge (val_abupt < 6.5985%), run greedy ensemble (pool-25) immediately.
 
-### Medium Priority (architecture exploration)
+### Medium Priority
 
-4. **RFF sigma learning**: If sigma expansion (PR #691) shows one direction better, consider learning the sigmas end-to-end rather than fixing them.
+4. **RFF sigma learning**: If sigma expansion (PR #691) shows one direction better, consider learning the sigmas end-to-end.
 
-5. **Boundary condition explicit encoding**: Encode inlet/outlet/wall BC type as a feature input. May help model distinguish surface types and reduce wall_shear error.
+5. **Depth × coord-norm cross**: If coord normalization (PR #723) improves vol_pressure, combine with L=5 + expanded RFF.
 
-6. **Multi-scale spatial sampling**: Progressive or multi-resolution surface point sampling during training.
+6. **Weight decay × VP upweighting**: WD direction confirmed null on vol gap (PR #667). VP upweighting (PR #648) showed VP channel 4.30% — consider coupling with Exp 1B/1D findings.
 
 ### Lower Priority (longer-horizon)
 
-7. **Slice count follow-up**: If PR #690 finds slices ≠ 128 is better, run a finer sweep around the winning value.
+7. **Multi-scale spatial sampling**: Progressive or multi-resolution surface point sampling during training.
 
-8. **Heads × depth co-sweep**: Once optimal heads are known from PR #692, re-run depth scaling with that heads setting.
+8. **Geometry-aware positional encoding**: Following PR #626 finding (vol_pressure gap 3.17→2.07× with AB-UPT geometry features), revisit with a cleaner implementation that avoids the coordinate embedding bug that killed PR #647.
 
 ---
 
@@ -159,5 +179,6 @@ All 8 students running:
 - **Loss weights:** tau_y×1.5, tau_z×2.0, surface×2.0, volume×1.0
 - **EMA:** 0.999 (confirmed optimal, PR #603)
 - **Training budget:** ~270 min (SENPAI_TIMEOUT_MINUTES=360 with 90 min val reserve)
-- **Depth scaling:** L=4→L=5 gave −1.90% relative gain; L=6/hidden=512 infeasible (~88.6 min/epoch); L=6/h=448/heads=7 infeasible (~98 min/epoch, heads=7 kills SDPA); L=6/h=384/heads=4 under investigation (PR #694, estimated ~57 min/epoch)
-- **Heads constraint:** heads MUST be power-of-2 for SDPA/Triton fast paths. heads=7 causes ~50% epoch-time regression.
+- **Depth scaling:** L=4→L=5 gave −1.90% relative gain; L=6/hidden=512 infeasible (~88.6 min/epoch); L=6/h=448/heads=7 infeasible (~98 min/epoch, heads=7 kills SDPA); L=6/h=384/heads=4 (PR #694) closed null.
+- **Heads constraint:** heads MUST be power-of-2 for SDPA/Triton fast paths. heads=4 confirmed optimal.
+- **Slice count:** slices=128 confirmed near-optimal (PR #690 closed — slices=64 misses, slices=192/256 infeasible).
