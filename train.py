@@ -416,6 +416,35 @@ def pad_collate_dynamic(samples: list[DrivAerMLCase]) -> SurfaceBatch:
     )
 
 
+def y_flip_batch(batch: SurfaceBatch) -> SurfaceBatch:
+    """Reflect a batch about the y=0 plane — exploits DrivAerML bilateral symmetry.
+
+    Surface_x layout [x, y, z, nx, ny, nz, area, *curvature]:
+      cols 1 (y) and 4 (n_y) are ODD; positions, normals, area, curvature otherwise EVEN.
+    Surface_y layout [cp, ws_x, ws_y, ws_z]:
+      col 2 (ws_y) is ODD; cp/ws_x/ws_z EVEN.
+    Volume_x layout [x, y, z, sdf]: col 1 (y) is ODD; sdf EVEN.
+    Volume_y is volume_pressure (scalar, EVEN).
+    """
+    surface_x = batch.surface_x.clone()
+    surface_x[..., 1] = -surface_x[..., 1]
+    surface_x[..., 4] = -surface_x[..., 4]
+    surface_y = batch.surface_y.clone()
+    surface_y[..., 2] = -surface_y[..., 2]
+    volume_x = batch.volume_x.clone()
+    volume_x[..., 1] = -volume_x[..., 1]
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x,
+        volume_y=batch.volume_y,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Muon optimizer (Newton-Schulz orthogonalized momentum)
 # Reference: https://github.com/KellerJordan/Muon  (Keller Jordan, 2024)
@@ -1163,6 +1192,7 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    y_flip_prob: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2781,6 +2811,11 @@ def main(argv: Iterable[str] | None = None) -> None:
     if config.grad_ema_alpha > 0 and is_main:
         print(f"Gradient EMA smoothing: alpha={config.grad_ema_alpha}")
 
+    y_flip_count = 0
+    y_flip_steps = 0
+    if config.y_flip_prob > 0 and is_main:
+        print(f"Y-flip augmentation: prob={config.y_flip_prob}")
+
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
             if is_main:
@@ -2820,6 +2855,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            y_flip_applied = 0
+            if config.y_flip_prob > 0 and torch.rand(1).item() < config.y_flip_prob:
+                batch = y_flip_batch(batch)
+                y_flip_applied = 1
+            y_flip_count += y_flip_applied
+            y_flip_steps += 1
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -3013,6 +3054,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 **grad_ema_metrics,
                 **weight_metrics,
             }
+            if config.y_flip_prob > 0:
+                train_log["train/y_flip_applied"] = float(y_flip_applied)
+                train_log["train/y_flip_running_avg"] = (
+                    y_flip_count / max(1, y_flip_steps)
+                )
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
