@@ -104,6 +104,11 @@ class Config:
     use_qk_norm: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    vol_loss_w_near: float = 1.0
+    vol_loss_w_far: float = 1.0
+    vol_loss_near_x_lo: float = 1.0
+    vol_loss_near_x_hi: float = 3.0
+    vol_loss_near_z_abs: float = 1.5
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -219,6 +224,41 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_loss_w_near": (
+            "Per-volume-point loss weight applied to query points inside "
+            "the near-wake geometric mask (default 1.0 = off). The near-"
+            "wake mask is defined per sample using the surface bounding "
+            "box: x_rel = (vx - cx) / s_ref, z_rel = (vz - cz) / s_ref "
+            "where (cx, cz) is the surface bbox center along x and z and "
+            "s_ref is the surface bbox extent along x. A point is in the "
+            "near-wake mask iff vol_loss_near_x_lo < x_rel < "
+            "vol_loss_near_x_hi AND |z_rel| < vol_loss_near_z_abs. The "
+            "weighted volume MSE is sum(w_i * (pred - target)^2) / sum("
+            "w_i) so total magnitude is preserved; only the spatial "
+            "gradient allocation changes. Setting both --vol-loss-w-near "
+            "and --vol-loss-w-far to 1.0 reproduces the legacy uniform "
+            "MSE exactly. Surface losses are unaffected."
+        ),
+        "vol_loss_w_far": (
+            "Per-volume-point loss weight applied to query points outside "
+            "the near-wake geometric mask (default 1.0). Lower values "
+            "(e.g. 0.7) de-emphasize the easy upstream/far-wake field "
+            "while leaving --vol-loss-w-near to upweight the wake."
+        ),
+        "vol_loss_near_x_lo": (
+            "Lower bound on x_rel (body-length-normalized downstream "
+            "distance from the surface bbox center) for the near-wake "
+            "mask. Default 1.0 = 1 body length downstream of centroid."
+        ),
+        "vol_loss_near_x_hi": (
+            "Upper bound on x_rel for the near-wake mask. Default 3.0 = "
+            "3 body lengths downstream of centroid."
+        ),
+        "vol_loss_near_z_abs": (
+            "Absolute upper bound on z_rel for the near-wake mask. "
+            "Default 1.5 = +/- 1.5 body lengths vertically from the "
+            "surface bbox z-center."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +340,101 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def compute_volume_region_weights(
+    volume_x: torch.Tensor,
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    *,
+    w_near: float,
+    w_far: float,
+    near_x_lo: float,
+    near_x_hi: float,
+    near_z_abs: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Static, sample-invariant geometric weighting of volume query points.
+
+    Returns
+        weights: ``[B, V]`` per-point loss weights (``w_near`` inside
+            the near-wake mask, ``w_far`` elsewhere). Detached from the
+            autograd graph since coordinates carry no gradient.
+        near_mask: ``[B, V]`` float in {0, 1} — 1 where in the near-wake
+            band, used for diagnostic logging only.
+
+    The reference frame is per-sample, derived from the surface point
+    cloud bounding box. ``cx``, ``cz`` are the bbox center along x and z;
+    ``s_ref`` is the bbox extent along x (body length). A volume point at
+    ``(vx, vy, vz)`` falls inside the near-wake mask iff
+    ``near_x_lo < (vx - cx) / s_ref < near_x_hi`` AND
+    ``|(vz - cz) / s_ref| < near_z_abs``.
+    """
+    batch_size, num_volume_points = volume_x.shape[0], volume_x.shape[1]
+    fallback_weights = torch.full(
+        (batch_size, num_volume_points), float(w_far), device=volume_x.device, dtype=torch.float32
+    )
+    fallback_near = torch.zeros_like(fallback_weights)
+    if surface_x.shape[1] == 0:
+        return fallback_weights, fallback_near
+    valid = surface_mask.bool()
+    if not bool(valid.any()):
+        return fallback_weights, fallback_near
+    surface_xyz = surface_x[..., :3].float()
+    big = torch.finfo(surface_xyz.dtype).max
+    has_surface = valid.any(dim=1, keepdim=True)
+    surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
+    surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
+    surf_z_for_min = surface_xyz[..., 2].masked_fill(~valid, big)
+    surf_z_for_max = surface_xyz[..., 2].masked_fill(~valid, -big)
+    surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
+    surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
+    surf_z_min = surf_z_for_min.min(dim=1, keepdim=True).values
+    surf_z_max = surf_z_for_max.max(dim=1, keepdim=True).values
+    cx = 0.5 * (surf_x_min + surf_x_max)
+    cz = 0.5 * (surf_z_min + surf_z_max)
+    s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+
+    volume_xyz = volume_x[..., :3].float()
+    x_rel = (volume_xyz[..., 0] - cx) / s_ref
+    z_rel = (volume_xyz[..., 2] - cz) / s_ref
+    near_mask_bool = (
+        (x_rel > near_x_lo)
+        & (x_rel < near_x_hi)
+        & (z_rel > -near_z_abs)
+        & (z_rel < near_z_abs)
+        & has_surface
+    )
+    near_mask = near_mask_bool.float()
+    weights = near_mask * (w_near - w_far) + w_far
+    return weights.detach(), near_mask.detach()
+
+
+def region_weighted_volume_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    point_mask: torch.Tensor,
+    region_weight: torch.Tensor,
+) -> torch.Tensor:
+    """Weighted volume-point MSE: ``sum(w_i * sq_err_i) / sum(w_i)``.
+
+    ``pred`` / ``target`` are ``[B, V, C]`` (C=1 for volume_pressure);
+    ``point_mask`` is ``[B, V]`` bool (padding aware); ``region_weight``
+    is ``[B, V]`` non-negative float. The denominator is summed over
+    valid (mask=True) points only, so padding never contributes. With
+    ``region_weight = 1`` everywhere, this matches ``masked_mse``.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    sq_err = (pred.float() - target.float()).square()
+    valid = point_mask.to(dtype=sq_err.dtype)
+    expanded_mask = valid.unsqueeze(-1)
+    weight2d = (region_weight.to(dtype=sq_err.dtype) * valid)
+    weight3d = weight2d.unsqueeze(-1).expand_as(sq_err)
+    weighted_sq = sq_err * weight3d
+    denominator = weight3d.sum().clamp_min(1.0)
+    if bool(expanded_mask.expand_as(sq_err).sum().detach().cpu().item() > 0):
+        return weighted_sq.sum() / denominator
+    return pred.sum() * 0.0
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,6 +445,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    volume_region_weight_args: dict | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -330,18 +466,39 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if volume_region_weight_args is not None:
+            region_weight, near_mask = compute_volume_region_weights(
+                batch.volume_x,
+                batch.surface_x,
+                batch.surface_mask,
+                **volume_region_weight_args,
+            )
+            volume_loss = region_weighted_volume_mse(
+                out["volume_preds"], volume_target, batch.volume_mask, region_weight
+            )
+            valid_volume = batch.volume_mask.to(dtype=near_mask.dtype)
+            valid_total = valid_volume.sum().clamp_min(1.0)
+            near_frac = (near_mask * valid_volume).sum() / valid_total
+            mean_weight = (region_weight * valid_volume).sum() / valid_total
+        else:
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            near_frac = None
+            mean_weight = None
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if near_frac is not None:
+        metrics["vol_near_mask_frac"] = float(near_frac.detach().cpu().item())
+        metrics["vol_region_mean_weight"] = float(mean_weight.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -747,6 +904,18 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+        use_volume_region_weights = bool(
+            (config.vol_loss_w_near != 1.0) or (config.vol_loss_w_far != 1.0)
+        )
+        volume_region_weight_args: dict | None = None
+        if use_volume_region_weights:
+            volume_region_weight_args = {
+                "w_near": config.vol_loss_w_near,
+                "w_far": config.vol_loss_w_far,
+                "near_x_lo": config.vol_loss_near_x_lo,
+                "near_x_hi": config.vol_loss_near_x_hi,
+                "near_z_abs": config.vol_loss_near_z_abs,
+            }
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -830,6 +999,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if use_volume_region_weights:
+                print(
+                    f"Volume region weights: w_near={config.vol_loss_w_near} "
+                    f"w_far={config.vol_loss_w_far} mask=("
+                    f"{config.vol_loss_near_x_lo}<x_rel<{config.vol_loss_near_x_hi}, "
+                    f"|z_rel|<{config.vol_loss_near_z_abs})"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -861,6 +1037,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/vol_loss_w_near"] = config.vol_loss_w_near
+            wandb.summary["loss/vol_loss_w_far"] = config.vol_loss_w_far
+            wandb.summary["loss/vol_loss_near_x_lo"] = config.vol_loss_near_x_lo
+            wandb.summary["loss/vol_loss_near_x_hi"] = config.vol_loss_near_x_hi
+            wandb.summary["loss/vol_loss_near_z_abs"] = config.vol_loss_near_z_abs
+            wandb.summary["loss/vol_region_active"] = float(use_volume_region_weights)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1008,6 +1190,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        volume_region_weight_args=volume_region_weight_args,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1231,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "vol_near_mask_frac" in batch_loss_metrics:
+                        train_log["train/vol_near_mask_frac"] = batch_loss_metrics[
+                            "vol_near_mask_frac"
+                        ]
+                        train_log["train/vol_region_mean_weight"] = batch_loss_metrics[
+                            "vol_region_mean_weight"
+                        ]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
