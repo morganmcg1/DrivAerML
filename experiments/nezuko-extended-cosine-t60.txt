@@ -1,0 +1,13 @@
+extended-cosine-t60-long
+wandb_group: extended-cosine-t60-sota
+lr_cosine_t_max: 60
+epochs: 50
+optimizer: lion
+lr: 1e-4
+batch_size: 2
+model_pe: string_multisigma
+pe_init_sigmas: 0.25,0.5,1.0,2.0,4.0
+surface_loss_weight: 1.0
+volume_loss_weight: 1.0
+train_surface_points: 40000
+no_compile_model: true
