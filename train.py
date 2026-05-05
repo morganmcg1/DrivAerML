@@ -658,15 +658,16 @@ class MLP(nn.Module):
 
 
 class UpActDownMlp(nn.Module):
-    def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
+    def __init__(self, hidden_dim: int, mlp_hidden_dim: int, dropout: float = 0.0):
         super().__init__()
         self.fc1 = nn.Linear(hidden_dim, mlp_hidden_dim)
         self.act = nn.GELU()
+        self.drop = nn.Dropout(dropout)
         self.fc2 = nn.Linear(mlp_hidden_dim, hidden_dim)
         self.apply(_init_linear)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.fc2(self.act(self.fc1(x)))
+        return self.fc2(self.drop(self.act(self.fc1(x))))
 
 
 class TransolverAttention(nn.Module):
@@ -740,7 +741,7 @@ class TransformerBlock(nn.Module):
             dropout=dropout,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim, dropout=dropout)
         self.drop_path = DropPath(drop_path_prob)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
