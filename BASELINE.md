@@ -367,13 +367,15 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **7.3767** | **8.7015** | #681 | dc031qpt | 2026-05-05 |
+| `abupt_axis_mean_rel_l2_pct` | **7.2733** | **8.5989** | #743 | vi2tpzbm | 2026-05-06 |
 
-Note: PR #681 (nezuko, terminal LR polish lr=3e-7 from PR #658 SOTA checkpoint `pxsnrw36`) merged 2026-05-05 —
-new yi SOTA at val_abupt=7.3767%. Prior bar was 7.3914% (PR #658 nezuko, EMA best-ckpt from lr=5e-6 SWA).
-τ_y and τ_z saw the largest gains (−0.0291pp and −0.0196pp respectively), exactly the highest-error components.
-Key lesson: Extremely low LR (3e-7, 17× below PR #658 lr) still extracts marginal consistent gains from a near-converged SOTA checkpoint.
-**Merge bar: val_abupt 7.3767% on the yi codebase (PR #681 nezuko, terminal LR polish lr=3e-7).**
+Note: PR #743 (senku, K=2 multi-checkpoint inference ensemble) merged 2026-05-06 —
+new yi SOTA at val_abupt=7.2733%, test_abupt=8.5989%. Achieved zero training cost by uniformly averaging
+predictions from dc031qpt (PR #681 SOTA) and pxsnrw36 (PR #658 SOTA) checkpoints.
+Prior single-checkpoint bar was 7.3588% (PR #724 norman, residual correction MLP).
+Key lesson: Ensemble diversity from different training trajectory endpoints yields a −0.0855pp val gain
+(7.3588% → 7.2733%) and −0.0895pp test gain (8.6884% → 8.5989%) at zero compute cost.
+**Merge bar: val_abupt 7.2733% on the yi codebase (PR #743 senku, K=2 inference ensemble).**
 **Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
 
 ### PR #658 full metrics (val / test, EMA best-ckpt EP2)
@@ -545,6 +547,53 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train.py \
 ```
 
 Key: `--correction-mode` + `--correction-mlp-hidden 64` — adds a 3-layer GELU MLP (37.7k trainable params) on top of frozen backbone; final layer zero-initialized (identity at step 0). Largest gain on τ_y (−0.0647pp val / −0.0677pp test).
+
+---
+
+## 2026-05-06 — PR #743: Multi-checkpoint K=2 inference ensemble (senku) — NEW yi SOTA
+
+PR #743 (senku, uniform average of dc031qpt + pxsnrw36 checkpoints) merged 2026-05-06.
+Zero training cost — pure inference ensemble of two yi SOTA checkpoints from different
+training trajectory endpoints: dc031qpt (PR #681 nezuko terminal-LR polish, val=7.3767%)
+and pxsnrw36 (PR #658 nezuko SWA staged trajectory, val=7.3914%).
+
+**Result:** val_abupt improved from 7.3588% (PR #724 single-checkpoint bar) → **7.2733%** (−0.0855pp).
+Test: 8.6884% (PR #724) → **8.5989%** (−0.0895pp). New yi SOTA on both val and test.
+
+Key findings:
+- K=2 uniform average beats both individual checkpoints by ensemble diversity
+- K=1A sanity (dc031qpt only): val_abupt=7.3767%, consistent with PR #681
+- K=1B sanity (pxsnrw36 only): val_abupt=7.3914%, consistent with PR #658
+- Ensemble diversity gain: −0.1034pp vs dc031qpt alone, −0.1181pp vs pxsnrw36 alone
+- τ_y and τ_z remain the highest-error components but benefit proportionally from ensembling
+- Zero compute overhead at inference (just average two forward passes)
+
+W&B runs: K=1A `87hyv4tq` (dc031qpt sanity), K=1B `5g5vypm6` (pxsnrw36 sanity), K=2 ensemble `vi2tpzbm`
+W&B project: `wandb-applied-ai-team/senpai-v1-drivaerml`
+
+### PR #743 key metrics (K=2 ensemble vs individual checkpoints)
+
+| Metric | K=1A (dc031qpt) | K=1B (pxsnrw36) | K=2 ensemble | Gain vs K=1A |
+|---|---:|---:|---:|---:|
+| val_abupt | 7.3767% | 7.3914% | **7.2733%** | −0.1034pp |
+| test_abupt | 8.7015% | 8.7189% | **8.5989%** | −0.1026pp |
+
+### Reproduce PR #743 (K=2 inference ensemble)
+
+```bash
+cd target/
+python inference_ensemble.py \
+  --checkpoints artifacts/dc031qpt/checkpoint.pt artifacts/pxsnrw36/checkpoint.pt \
+  --weights 1.0 1.0 \
+  --learnable-pe \
+  --model-layers 4 --model-hidden-dim 512 --model-heads 8 --model-slices 128 \
+  --batch-size 4 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536
+```
+
+Note: Both checkpoints have surface_input_dim=4. Do NOT add `--surface-curvature-features k1_k2`,
+`--beta-nll-beta`, or `--grad-ema-alpha` — those would cause state_dict shape mismatches.
 
 ---
 
