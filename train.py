@@ -871,6 +871,9 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        dual_tower_bridge_only: bool = False,
+        dual_tower_cross_attn_keys: int = 0,
+        bridge_detach_kv: bool = True,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -885,6 +888,11 @@ class SurfaceTransolver(nn.Module):
         self.pos_max_wavelength = pos_max_wavelength
         self.learnable_pe = learnable_pe
         self.beta_nll = beta_nll
+        self.dual_tower_bridge_only = dual_tower_bridge_only
+        self.dual_tower_cross_attn_keys = dual_tower_cross_attn_keys
+        self.bridge_detach_kv = bridge_detach_kv
+        self.n_head = n_head
+        self.n_hidden = n_hidden
 
         self.pos_embed = ContinuousSincosEmbed(
             hidden_dim=n_hidden,
@@ -931,6 +939,26 @@ class SurfaceTransolver(nn.Module):
             nn.init.zeros_(self.volume_log_var_out.project.weight)
             nn.init.zeros_(self.volume_log_var_out.project.bias)
 
+        if self.dual_tower_bridge_only:
+            # Cross-attention bridge: volume queries attend to surface keys/values
+            # AFTER the shared backbone but BEFORE the volume head. Output projection
+            # is zero-init so the bridge is a strict no-op at step 0 (ControlNet/
+            # AdaLN-zero pattern). With strict=False checkpoint loading, dc031qpt
+            # SOTA weights load cleanly and missing-keys = ['cross_attn_bridge.*'].
+            self.cross_attn_bridge = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                dropout=0.0,
+                batch_first=True,
+            )
+            nn.init.zeros_(self.cross_attn_bridge.out_proj.weight)
+            nn.init.zeros_(self.cross_attn_bridge.out_proj.bias)
+            # Learnable null token prepended to surface keys so every sample has at
+            # least one valid (unmasked) key. Avoids softmax(-inf) NaN when a sample
+            # has no valid surface points and keeps DDP find_unused_parameters=False
+            # safe by removing data-dependent branching around the bridge.
+            self.cross_attn_bridge_null = nn.Parameter(torch.zeros(1, 1, n_hidden))
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -944,6 +972,69 @@ class SurfaceTransolver(nn.Module):
         if project_features is not None and x.shape[-1] > self.space_dim:
             hidden = hidden + project_features(x[:, :, self.space_dim :])
         return bias(hidden) + placeholder
+
+    def _apply_bridge(
+        self,
+        *,
+        volume_hidden: torch.Tensor,
+        volume_mask: torch.Tensor,
+        surface_hidden: torch.Tensor,
+        surface_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        # Cross-attention bridge: volume queries (Q) attend to surface keys/values
+        # (K, V). Adds a residual to volume_hidden BEFORE the volume head. With
+        # zero-init out_proj, the residual is exactly zero at step 0 — so the
+        # model behaves identically to dc031qpt SOTA. The bridge wakes up via
+        # gradient through the upstream Q/K/V/attn-weight paths.
+        B = volume_hidden.shape[0]
+        N_s = surface_hidden.shape[1]
+
+        # Optional KV-detach so the bridge is a pure residual decoder on top of
+        # frozen-trunk features (matches the polish-on-SOTA intent: bridge learns
+        # a small correction without disturbing surface_hidden's quality).
+        kv_source = surface_hidden.detach() if self.bridge_detach_kv else surface_hidden
+
+        # Optional key subsampling to keep cross-attn cost linear at N_s=65k.
+        # Random at train (each step sees a different subset), stride at eval
+        # for reproducibility. Same scheme as the prior dual-tower run.
+        keys_kv = kv_source
+        keys_mask = surface_mask
+        if (
+            self.dual_tower_cross_attn_keys > 0
+            and N_s > self.dual_tower_cross_attn_keys
+        ):
+            if self.training:
+                idx = torch.randperm(N_s, device=kv_source.device)[
+                    : self.dual_tower_cross_attn_keys
+                ]
+            else:
+                stride = max(1, N_s // self.dual_tower_cross_attn_keys)
+                idx = torch.arange(0, N_s, stride, device=kv_source.device)[
+                    : self.dual_tower_cross_attn_keys
+                ]
+            keys_kv = kv_source.index_select(1, idx)
+            keys_mask = surface_mask.index_select(1, idx)
+
+        # Prepend a learnable null token so every sample has ≥1 valid key
+        # (handles all-padded surface batches without softmax(-inf) NaN).
+        null_token = self.cross_attn_bridge_null.expand(B, 1, -1).to(volume_hidden.dtype)
+        if keys_kv.shape[1] > 0:
+            keys = torch.cat([null_token, keys_kv], dim=1)
+            null_pad = surface_mask.new_zeros(B, 1)
+            key_pad_mask = torch.cat([null_pad, ~keys_mask.bool()], dim=1)
+        else:
+            keys = null_token
+            key_pad_mask = surface_mask.new_zeros(B, 1)
+
+        bridge_residual, _ = self.cross_attn_bridge(
+            volume_hidden,
+            keys,
+            keys,
+            key_padding_mask=key_pad_mask,
+            need_weights=False,
+        )
+        bridge_residual = _apply_token_mask(bridge_residual, volume_mask)
+        return _apply_token_mask(volume_hidden + bridge_residual, volume_mask)
 
     def forward(
         self,
@@ -1002,6 +1093,20 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.dual_tower_bridge_only
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            volume_hidden = self._apply_bridge(
+                volume_hidden=volume_hidden,
+                volume_mask=volume_mask,
+                surface_hidden=surface_hidden,
+                surface_mask=surface_mask,
+            )
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
@@ -1163,6 +1268,12 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    dual_tower_bridge_only: bool = False
+    dual_tower_cross_attn_keys: int = 0
+    bridge_lr: float = 5e-6
+    bridge_lr_e3: float = 1e-6
+    bridge_detach_kv: bool = True
+    resume_strict: bool = True
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1370,6 +1481,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        dual_tower_bridge_only=config.dual_tower_bridge_only,
+        dual_tower_cross_attn_keys=config.dual_tower_cross_attn_keys,
+        bridge_detach_kv=config.bridge_detach_kv,
     )
 
 
@@ -2538,7 +2652,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        if config.resume_strict:
+            model.load_state_dict(ckpt["model"], strict=True)
+            missing_keys: list[str] = []
+            unexpected_keys: list[str] = []
+        else:
+            load_result = model.load_state_dict(ckpt["model"], strict=False)
+            missing_keys = list(load_result.missing_keys)
+            unexpected_keys = list(load_result.unexpected_keys)
+            if is_main:
+                print(
+                    f"Resume (strict=False): "
+                    f"missing keys = {missing_keys}; "
+                    f"unexpected keys = {unexpected_keys}"
+                )
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
@@ -2550,6 +2677,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             "resume_from_path": str(config.resume_from),
             "resume_prev_epoch": int(prev_epoch) if isinstance(prev_epoch, (int, float)) else -1,
             "resume_prev_val_abupt_pct": prev_primary_val,
+            "resume_strict": bool(config.resume_strict),
+            "resume_missing_keys": missing_keys,
+            "resume_unexpected_keys": unexpected_keys,
         }
         if is_main:
             print(
@@ -2567,22 +2697,58 @@ def main(argv: Iterable[str] | None = None) -> None:
             model,
             device_ids=[local_rank],
             output_device=local_rank,
-            find_unused_parameters=False,
+            find_unused_parameters=config.dual_tower_bridge_only,
         )
     else:
         train_model = model
 
     optimizer_name = config.optimizer.lower()
+    bridge_param_names: list[str] = []
+    trunk_param_names: list[str] = []
+    bridge_params: list[torch.nn.Parameter] = []
+    trunk_params: list[torch.nn.Parameter] = []
+    if config.dual_tower_bridge_only:
+        for name, p in model.named_parameters():
+            if name.startswith("cross_attn_bridge"):
+                bridge_param_names.append(name)
+                bridge_params.append(p)
+            else:
+                trunk_param_names.append(name)
+                trunk_params.append(p)
+        if is_main:
+            print(
+                f"Bridge param-group split: trunk={len(trunk_params)} params @ lr={config.lr}, "
+                f"bridge={len(bridge_params)} params @ lr={config.bridge_lr}"
+            )
+            print(f"Bridge params: {bridge_param_names}")
     if optimizer_name == "adamw":
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
-        )
+        if config.dual_tower_bridge_only:
+            optimizer = torch.optim.AdamW(
+                [
+                    {"params": trunk_params, "lr": config.lr},
+                    {"params": bridge_params, "lr": config.bridge_lr},
+                ],
+                weight_decay=config.weight_decay,
+            )
+        else:
+            optimizer = torch.optim.AdamW(
+                model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "lion":
         from lion_pytorch import Lion
 
-        optimizer = Lion(
-            model.parameters(), lr=config.lr, weight_decay=config.weight_decay
-        )
+        if config.dual_tower_bridge_only:
+            optimizer = Lion(
+                [
+                    {"params": trunk_params, "lr": config.lr},
+                    {"params": bridge_params, "lr": config.bridge_lr},
+                ],
+                weight_decay=config.weight_decay,
+            )
+        else:
+            optimizer = Lion(
+                model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "muon":
         muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
         muon_other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
@@ -2809,6 +2975,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             new_lr = cos_alpha * swa_pre_lr + (1.0 - cos_alpha) * config.swa_lr
             for pg in optimizer.param_groups:
                 pg["lr"] = float(new_lr)
+        # Bridge param-group LR schedule: override the bridge group's lr
+        # explicitly per-epoch so it follows the PR-prescribed step schedule
+        # (5e-6 for ep1-2, 1e-6 for ep3) regardless of the cosine LR scheduler
+        # that handles the trunk group.
+        if (
+            config.dual_tower_bridge_only
+            and len(optimizer.param_groups) >= 2
+        ):
+            target_bridge_lr = (
+                config.bridge_lr_e3 if epoch >= 2 else config.bridge_lr
+            )
+            optimizer.param_groups[1]["lr"] = float(target_bridge_lr)
+            if is_main:
+                print(
+                    f"Epoch {epoch + 1}: bridge_lr={target_bridge_lr:.2e}, "
+                    f"trunk_lr={optimizer.param_groups[0]['lr']:.2e}"
+                )
         t0 = time.time()
         train_model.train()
         train_loss_sum = 0.0
@@ -3013,6 +3196,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 **grad_ema_metrics,
                 **weight_metrics,
             }
+            if (
+                config.dual_tower_bridge_only
+                and len(optimizer.param_groups) >= 2
+            ):
+                train_log["train/bridge_lr"] = float(
+                    optimizer.param_groups[1]["lr"]
+                )
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
@@ -3209,12 +3399,43 @@ def main(argv: Iterable[str] | None = None) -> None:
         return
 
     if not best_metrics:
-        if is_main:
-            print("No validation checkpoint was saved.")
-        wandb.finish()
-        if is_distributed:
-            dist.destroy_process_group()
-        return
+        # EP0 sanity-check path: when --epochs 0 (or no train batches) and we
+        # loaded weights via --resume-from, treat the loaded weights as the
+        # "best" pseudo-checkpoint so full_val/test runs against the resumed
+        # model. This is the kill-gate sanity check for grafted modules
+        # (zero-init bridge → val_abupt should reproduce the source SOTA).
+        if config.resume_from and config.epochs == 0:
+            if is_main:
+                print(
+                    "EP0 sanity-check mode: --epochs 0 + --resume-from set. "
+                    "Saving loaded weights as best-checkpoint and proceeding "
+                    "to full_val + test evaluation."
+                )
+                torch.save(
+                    {
+                        "model": model.state_dict(),
+                        "config": asdict(config),
+                        "epoch": 0,
+                        "val_metrics": {},
+                    },
+                    model_path,
+                )
+            best_metrics = {
+                "epoch": 0.0,
+                "abupt_axis_mean_rel_l2_pct": float("nan"),
+                "surface_pressure_mae": float("nan"),
+                "wall_shear_mae": float("nan"),
+                "volume_pressure_mae": float("nan"),
+            }
+            if is_distributed:
+                dist.barrier()
+        else:
+            if is_main:
+                print("No validation checkpoint was saved.")
+            wandb.finish()
+            if is_distributed:
+                dist.destroy_process_group()
+            return
 
     if is_distributed:
         dist.barrier()
