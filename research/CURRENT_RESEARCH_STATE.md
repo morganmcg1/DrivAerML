@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~15:00 UTC)
+- 2026-05-05 (updated ~05:30 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,14 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-06 ~09:00 UTC)
+### Active Experiments (as of 2026-05-05 ~05:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | v2 at EP3=7.3245% (cp=4.75%, tau_z=11.05%). On track; EP5 gate ≤7.5% will clear. Advisor check-in posted. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP12=6.8483% — Cycle 3 trough ARRIVED, BEST NEZUKO EVER** (cp=4.47%, tau_x=6.78%, tau_y=8.66%, tau_z=10.32%, vol_p=4.01%). Cycle pattern: C1 trough EP4=7.654%, C2 trough EP9=7.240%, C3 trough EP12=6.848%. C4 trough (EP15-16) predicted ~6.50% — near SOTA. EP13 spike expected. DO NOT KILL. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | **CRASHED at EP5** (both arms dead). Arm B final=6.7438% (wave best; cp=4.42%, tau_x=6.62%, tau_y=8.45%, tau_z=9.97%, vol_p=4.26%). Advisor comment requesting crash diagnosis + Arm B relaunch posted. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP9=7.0923%** (cp=4.65%, tau_x=6.90%, tau_y=8.93%, tau_z=10.75%, vol_p=4.23%). Steady improvement, deceleration noted. EP10 gate ≤8.0% trivially cleared. Advisor check-in posted. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP8=6.7249%** (sp=4.42%, tau_x=6.60%, tau_y=8.41%, tau_z=10.31%, vol_p=3.99%). 0.197pp from SOTA. EP9 in progress (~47% done). Advisor check-in posted. Strong trajectory — candidate for new SOTA by EP15. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP16=6.6890% (best), EP17=7.2835% (Cycle 5 spike)**. C4 trough 6.689% cleared in-wave val target. Cycle pattern confirmed: C1 trough EP4=7.654%, C2 trough EP7=7.150%, C4 trough EP12-16 monotonic 6.848%→6.689%. EP17 spike is expected oscillation — best checkpoint preserved at EP16. EP18 projected trough ~6.63–6.67% (potential new best). Advisor: DO NOT KILL, continuing to EP20. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `em8bnk1a`; Arm B: `5x8wofzm` | **v2 restart at EP2**: Arm A=7.5078%, Arm B=7.4012% (0.107pp gap). Perfect 4 d.p. reproducibility from v1. GradNorm weights healthy: tau_z upweighted 2.94× (α=1.0) and 2.11× (α=0.5). EP3 in progress. EP5 will be first decision point. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP13=6.9902%** — first sub-7.0%. Monotonic descent EP7–EP13 (~0.02pp/epoch). Stable control run confirming baseline recipe. EP15 projected ~6.946%, EP20 ~6.846%. Advisor check-in posted. |
 
 ### Closed / Negative Results This Wave
 
