@@ -127,6 +127,8 @@ class Config:
     debug: bool = False
     use_y_symmetry_aug: bool = False
     y_symmetry_aug_prob: float = 0.5
+    eval_only: bool = False
+    eval_checkpoint: str = ""
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -293,11 +295,97 @@ def train_loss(
     }
 
 
+def run_eval_only(config: Config, state) -> None:
+    """Load a saved checkpoint and run full val + test evaluation."""
+    if config.seed >= 0:
+        seed_everything(config.seed)
+    device = state.device
+    if state.is_main:
+        ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
+        print(f"[eval-only] Device: {device}{ddp_suffix}")
+        print(f"[eval-only] Checkpoint: {config.eval_checkpoint}")
+
+    train_loader, val_loaders, test_loaders, stats = make_loaders(
+        config, distributed_state=state
+    )
+    final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
+    final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+    transform = TargetTransform(
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
+    )
+
+    model: nn.Module = build_model(config).to(device)
+    n_params = sum(param.numel() for param in model.parameters())
+    if state.enabled:
+        ddp_kwargs = {}
+        if device.type == "cuda":
+            ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+        model = DistributedDataParallel(model, **ddp_kwargs)
+    base_model = unwrap_model(model)
+
+    run = init_wandb_run(
+        config=config,
+        state=state,
+        n_params=n_params,
+        train_loader=train_loader,
+        val_loaders=val_loaders,
+        test_loaders=test_loaders,
+        total_estimated_steps=1,
+        max_epochs=0,
+        train_timeout_minutes=0.0,
+        val_budget_minutes=0.0,
+    )
+
+    distributed_barrier(state)
+    if not state.is_main:
+        wandb.finish()
+        return
+
+    ckpt_path = Path(config.eval_checkpoint)
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=True)
+    val_metrics = checkpoint["val_metrics"]["val_surface"]
+    best_metrics = {
+        "epoch": float(checkpoint["epoch"]),
+        "abupt_axis_mean_rel_l2_pct": val_metrics["abupt_axis_mean_rel_l2_pct"],
+        "surface_pressure_mae": val_metrics["surface_pressure_mae"],
+        "wall_shear_mae": val_metrics["wall_shear_mae"],
+        "volume_pressure_mae": val_metrics["volume_pressure_mae"],
+    }
+    config_path = ckpt_path.parent / "config.yaml"
+    if not config_path.exists():
+        with config_path.open("w") as f:
+            yaml.safe_dump(asdict(config), f)
+
+    run_final_evaluation(
+        run=run,
+        model=base_model,
+        model_path=ckpt_path,
+        config_path=config_path,
+        config=config,
+        transform=transform,
+        device=device,
+        final_val_loaders=final_val_loaders,
+        final_test_loaders=final_test_loaders,
+        best_metrics=best_metrics,
+        best_checkpoint_source=checkpoint.get("checkpoint_source", "eval-only"),
+        n_params=n_params,
+        global_step=int(checkpoint["epoch"]),
+        total_minutes=0.0,
+    )
+    wandb.finish()
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     state = init_distributed()
     run = None
     try:
         config = parse_args(argv)
+        if config.eval_only:
+            run_eval_only(config, state)
+            return
         if config.seed >= 0:
             seed_everything(config.seed)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
