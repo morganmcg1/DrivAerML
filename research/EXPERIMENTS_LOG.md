@@ -6,6 +6,94 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+---
+
+## 2026-05-06 ~15:10 UTC — Live W&B Monitoring Session (EP14–EP39 developments)
+
+### PR #740 — GradNorm adaptive loss (fern, `5x8wofzm`) — EP12–14 WAVE BEST
+
+| EP | Step | val_primary | wsz | wsy | sp | ws | vp | Note |
+|----|------|------------|-----|-----|----|----|----|------|
+| 11 | 120,857 | 6.4388% | 9.6697% | — | — | 7.2711% | — | Prior wave best |
+| 12 | 131,843 | 6.4340% | — | — | — | — | — | New wave best −0.0048pp (cp_updated=1) |
+| 13 | 142,830 | ~6.434% | — | — | — | — | — | Within noise of EP12 |
+| 14 | 153,817 | **6.4170%** | — | — | — | — | — | **New wave best −0.0170pp vs EP12; −0.0218pp vs EP11** |
+
+**Current state** (step 156,767): EP~14.09, val=6.4170% (wave leader, −0.1111pp below SOTA). LR=8.205e-5. EP15 in progress (~8,037 steps to target). GradNorm τz upweight persisting.
+
+**Commentary:** EP12 set quiet wave best (+cp at step 131,843). EP13 hovered within noise. EP14 at step 153,817 was a major leap: −0.0170pp from EP12, −0.0218pp from EP11. GradNorm α=0.5 continues to rebalance τz aggressively. At this rate (~0.01pp/ep in deep cosine taper), sub-6.40% is plausible by EP17–20. EP15 mandatory check-in; trigger: ≤6.40% post immediately.
+
+---
+
+### PR #741 — Y-axis reflection augmentation (nezuko, `lszc4ri7`) — EP33 TEST EVAL + EP37 hover
+
+| EP | Step | val_primary | wsz | wsy | sp | ws | vp | Note |
+|----|------|------------|-----|-----|----|----|----|------|
+| 32 | ~176k | 6.5041% | — | 8.0752% | — | — | — | EP32 best checkpoint; test eval authorized |
+| 33 | ~182k | **6.4984%** | **9.9544%** | 8.0568% | 4.2497% | 7.4198% | 3.7307% | **New run-best; BEATS SOTA val; test eval confirmed** |
+| 34 | — | 6.5038% | — | 8.0672% | — | — | — | +0.0054pp hover |
+| 35 | — | 6.5108% | 9.9721% | 8.0654% | — | — | — | Hover; EP33 best holds |
+| 37 | 203,998 | 6.4997% | 9.9571% | 8.0431% | 4.2496% | 7.4180% | 3.7308% | Back on descent; 0.0013pp above EP33 |
+
+**EP33 TEST EVAL:** 7.8232% — first wave run to beat SOTA test (7.9303%). Significant result.
+
+**W&B slopes at EP37** (per 1k steps):
+- abupt: −0.001041 (2.4× frieren's rate)
+- wsz: −0.001865 (strong τz descent)
+- wsy: −0.001969 (strong τy descent — Y-sym active)
+
+**Commentary:** EP33 breakthrough (6.4984%) beats SOTA val_best=6.5281% by 0.0297pp. EP33 test eval=7.8232% beats SOTA test=7.9303% by 0.1071pp — a strong result. The EP33→EP35 hover (wsz 9.9544→9.9721) has reversed at EP37 (wsz 9.9571%), resuming descent. The hover pattern at EP37 (only 0.0013pp above EP33) mirrors the EP31/EP32 hover-then-EP33-breakout pattern. EP40 mandatory check-in. Second test eval trigger: val < 6.480%.
+
+---
+
+### PR #745 — 5L STRING PE (frieren, `co0xlqap`) — EP26–29 run-bests
+
+| EP | Step | val_primary | wsz | wsy | sp | ws | vp | Note |
+|----|------|------------|-----|-----|----|----|----|------|
+| 24 | — | ~6.543% | — | — | — | — | — | Pre-wave-SOTA gap narrowing |
+| 25 | 137,349 | 6.5323% | 10.0987% | 8.0464% | 4.3027% | 7.3943% | 3.7772% | |
+| 26 | 142,843 | 6.5159% | 10.0754% | 8.0214% | 4.2917% | 7.3769% | 3.7673% | First beats SOTA val (6.5281%) |
+| 27 | 148,337 | 6.5207% | 10.0858% | 8.0287% | 4.2949% | 7.3802% | 3.7712% | +0.0048pp noise |
+| 28 | 153,831 | 6.5134% | 10.0654% | 8.0175% | 4.2962% | 7.3717% | 3.7687% | New run-best; 4/7 channel bests |
+| **29** | **159,325** | **6.5110%** | **10.0641%** | 8.0220% | **4.2898%** | **7.3704%** | **3.7637%** | **New run-best; 6/7 channel bests** |
+
+**Current state** (step 160,594): EP~29.14, val=6.5110% (run-best). LR=3.819e-5. EP30 ~4,225 steps away.
+
+**W&B slopes at EP29** (per 1k steps):
+- abupt: −0.000441
+- wsz: −0.000233 (slow but descending)
+- wsy: +0.000816 (**degrading** — no Y-sym augmentation)
+- surface_pressure: −0.001176 (fastest channel)
+
+**Commentary:** EP26 was the first frieren epoch to beat SOTA val (6.5281%). EP27 had a +0.0048pp noise spike (EP27=6.5207% > EP26=6.5159%), then EP28/EP29 restored descent. EP29=6.5110% is 6/7 simultaneous channel bests. wsy is the only laggard and is slightly degrading (no Y-sym aug). wsz sub-10.0% projected EP36–37 based on EP25→EP29 slope of −0.00865pp/epoch. EP30 mandatory check-in; triggers: val ≤ 6.500% or wsz < 10.050% → post immediately.
+
+---
+
+### PR #749 — Lion lr=9e-5 control (tanjiro, `oi2a01zy`) — plateau EP27+
+
+| EP | Step | val_primary | wsz | Note |
+|----|------|------------|-----|------|
+| 27 | ~151k | 6.8479% | ~10.5% | Last run-best (W&B) |
+| ~39 | 219,758 | 6.8592% | — | Plateau confirmed (cp_updated=0 since EP27) |
+
+**Commentary:** Lion optimizer at lr=9e-5 confirmed on plateau after EP27. No new best checkpoint for ~12 epochs. Tanjiro confirmed to continue to EP50 for auto test eval per protocol. Three advisor nudge comments posted (no student responses since 10:31Z). EP50 auto test eval expected ~18:42Z. Terminal SENPAI-RESULT expected after EP50 auto eval. Merge decision post-EP50: run will not beat SOTA val; merge/close decision depends on whether test metric beats SOTA test (7.9303%).
+
+---
+
+**Wave standings at 2026-05-06 ~15:10 UTC:**
+
+| Rank | Student | PR | Run | EP | val_best | test_best | wsz | Status |
+|------|---------|----|----|----|----|------|-----|--------|
+| 1 | fern | #740 | `5x8wofzm` | 14 | **6.4170%** | — | ~9.7%* | RUNNING; EP15 next; −0.1111pp SOTA |
+| 2 | nezuko | #741 | `lszc4ri7` | 33 | **6.4984%** | **7.8232%** | 9.9544% | RUNNING; EP37 hover; −0.0297pp SOTA |
+| 3 | frieren | #745 | `co0xlqap` | 29 | **6.5110%** | — | 10.0641% | RUNNING; EP30 next; −0.0171pp SOTA |
+| 4 | tanjiro | #749 | `oi2a01zy` | 27 | 6.8479% | — | ~10.5% | RUNNING; plateau; EP50 auto eval |
+
+*fern wsz: last confirmed 9.6697% at EP11; EP14 wsz not reported by student yet.
+SOTA reference: val=6.5281%, test=7.9303% (PR #599, `sogus8sx`). Three runs now beating SOTA val; one (nezuko) beats SOTA test.
+
+---
+
 ## 2026-05-05 ~20:30 UTC — Advisor Session: PR Reviews + Test Eval Authorization
 
 ### PR #740 — GradNorm adaptive loss balancing (dl24-fern, `5x8wofzm`) — EP11 WAVE BEST

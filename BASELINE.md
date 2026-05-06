@@ -44,10 +44,11 @@ When a wave PR merges with terminal `SENPAI-RESULT` and lower `test_primary/abup
 | PR | Run | Mechanism | Test aggregate | Surface | Volume | Wall | tau_x / tau_y / tau_z |
 |---|---|---|---:|---:|---:|---:|---:|
 | #599 | `sogus8sx` | multi-sigma STRING PE (`pe_init_sigmas=[0.25,0.5,1.0,2.0,4.0]`) | 7.9303 | — | — | — | — |
+| #741 | `lszc4ri7` / `1tal40wr` | Y-axis symmetry augmentation (bilateral car geometry) | **7.8232** | 3.9821 | 11.3345 | 7.3076 | 6.5304 / 7.9248 / 9.3444 |
 
 ### Current single-model best on `drivaerml-long-20260504`
 
-PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (frieren, multi-sigma STRING PE)
+PR #741 (`lszc4ri7` / `1tal40wr`), test_primary/abupt_axis_mean_rel_l2_pct = **7.8232%** (nezuko, Y-axis symmetry augmentation) — improved from 7.9303% (+0.107pp)
 
 ### In-wave val target (to beat before merging)
 
@@ -63,4 +64,4 @@ In-wave val target: **6.3828%** (PR #740 fern, EP18, run `5x8wofzm`) — wave le
 | #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 within 6.8479-6.8700% |
 | #780 | TBD | dl24-tanjiro | — | — | GradNorm α=0.25; newly assigned; awaiting student pickup |
 
-_Last updated: 2026-05-05 (EP18 fern wave leader update; PR #780 tanjiro α=0.25 assigned)_
+_Last updated: 2026-05-05 (PR #741 nezuko merged as new in-wave test SOTA 7.8232%; EP18 fern wave leader update; PR #780 tanjiro α=0.25 assigned)_
