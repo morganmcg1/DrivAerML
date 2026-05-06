@@ -550,6 +550,34 @@ Key: `--correction-mode` + `--correction-mlp-hidden 64` — adds a 3-layer GELU 
 
 ---
 
+## 2026-05-06 — PR #725: Multigrid hierarchical volume attention warm-start (violet) — NEW yi SOTA
+
+PR #725 (violet, `multigrid-warm-coarse010`) merged 2026-05-06 as yi SOTA. Warm-start resume
+from `dc031qpt` (PR #681 best, val=7.3767%) at lr=1e-5 with multigrid hierarchical attention
+(coarse 10% subset → self-attn → cross-attn, zero-init residual). Model: 20.06M params (+7.4M
+for multigrid attention module).
+
+**Result:** val_abupt improved from 7.3588% (PR #724 bar) → **7.3266%** (−0.0322pp).
+Test: 8.6884% (PR #724) → **8.6516%** (−0.0368pp). New yi SOTA on both val and test.
+
+Key finding: Primary mechanism (vol_p test gap due to 4 restored CFD test cases) was refuted —
+SDF-stratified analysis confirmed a uniform ~2.6× val/test gap across all bucket sizes, and the
+multigrid architecture did NOT reduce the gap. Performance improvement attributed to generic
+fine-tuning gain at lr=1e-5 from dc031qpt checkpoint, not multigrid architecture per se.
+The multigrid attention module itself was successfully integrated and zero-init residual ensured
+no regression at step 0, but the architectural mechanism for vol_p gap reduction was disproven.
+
+W&B run: `1udwx3er` (group: `yi-round42-multigrid-vol-attention`, name: `violet/multigrid-warm-coarse010`)
+Resumed from: `dc031qpt` (PR #681 yi SOTA, val=7.3767%)
+
+### PR #725 key metrics (val / test)
+
+| Metric | Baseline val (#724) | PR #725 val | Baseline test (#724) | PR #725 test |
+|---|---:|---:|---:|---:|
+| abupt_axis_mean_rel_l2_pct | 7.3588% | **7.3266%** | 8.6884% | **8.6516%** |
+
+---
+
 ## 2026-05-06 — PR #743: Multi-checkpoint K=2 inference ensemble (senku) — NEW yi SOTA
 
 PR #743 (senku, uniform average of dc031qpt + pxsnrw36 checkpoints) merged 2026-05-06.
