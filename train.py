@@ -1112,6 +1112,7 @@ class Config:
     volume_loss_weight: float = 1.0
     aux_rel_l2_weight: float = 0.0
     use_tangential_wallshear_loss: bool = False
+    surface_tangent_frame_targets: bool = False
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
@@ -1158,6 +1159,7 @@ class Config:
     lr_warmup_epochs: int = 0
     lr_warmup_start_lr: float = 1e-5
     resume_from: str = ""
+    resume_strict: bool = True
     surface_curvature_features: str = "none"
     swa_start_fraction: float = -1.0
     swa_lr: float = 5e-6
@@ -2023,6 +2025,104 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+def revised_frisvad_tangent_frame(normals: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Branchless deterministic orthonormal tangent frame from unit normals.
+
+    Uses the Pixar revised Frisvad (Duff et al. 2017) construction, which is
+    numerically stable everywhere and avoids the original Frisvad singularity at
+    n_z = -1. For DrivAerML car geometry, this is preferred over reference-vector
+    Gram-Schmidt because dense regions of normals near +/-x and +/-z (hood,
+    windshield, roof, sides) make the reference-vector construction unstable.
+
+    normals: [..., 3] (will be re-normalized internally).
+    Returns (t1, t2): each [..., 3], all in fp32. Together with n_hat they form
+    a right-handed orthonormal basis.
+    """
+    n = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    nx, ny, nz = n[..., 0], n[..., 1], n[..., 2]
+    sign = torch.where(nz >= 0.0, torch.ones_like(nz), -torch.ones_like(nz))
+    a = -1.0 / (sign + nz)
+    b = nx * ny * a
+    t1 = torch.stack([1.0 + sign * nx * nx * a, sign * b, -sign * nx], dim=-1)
+    t2 = torch.stack([b, sign + ny * ny * a, -ny], dim=-1)
+    return t1, t2
+
+
+def cartesian_tau_to_tangent(
+    tau_xyz: torch.Tensor, normals: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Rotate a per-point 3-vector from cartesian into local tangent frame.
+
+    tau_xyz, normals: [..., 3]
+    Returns (tau_t1, tau_t2, tau_n) each [...] (scalar per point), in fp32.
+    """
+    tau_f = tau_xyz.float()
+    n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    t1, t2 = revised_frisvad_tangent_frame(n_hat)
+    tau_t1 = (tau_f * t1).sum(dim=-1)
+    tau_t2 = (tau_f * t2).sum(dim=-1)
+    tau_n = (tau_f * n_hat).sum(dim=-1)
+    return tau_t1, tau_t2, tau_n
+
+
+def tangent_tau_to_cartesian(
+    tau_t1: torch.Tensor,
+    tau_t2: torch.Tensor,
+    normals: torch.Tensor,
+    tau_n: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Back-project per-point tangent components to cartesian.
+
+    tau_t1, tau_t2, tau_n (optional): [...]; normals: [..., 3]. Returns [..., 3]
+    in fp32. If tau_n is None, the normal component is treated as zero (used by
+    masking-style variants); if provided, the full 3-component back-projection
+    is performed.
+    """
+    n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+    t1, t2 = revised_frisvad_tangent_frame(n_hat)
+    out = tau_t1.unsqueeze(-1).float() * t1 + tau_t2.unsqueeze(-1).float() * t2
+    if tau_n is not None:
+        out = out + tau_n.unsqueeze(-1).float() * n_hat
+    return out
+
+
+def rotate_surface_y_to_tangent(
+    surface_y: torch.Tensor, normals: torch.Tensor
+) -> torch.Tensor:
+    """Replace cartesian wallshear channels with tangent-frame components.
+
+    surface_y: [B, N, SURFACE_Y_DIM] with channel layout
+        [cp, tau_x, tau_y, tau_z] (SURFACE_Y_DIM == 4).
+    normals: [B, N, 3].
+    Returns: [B, N, SURFACE_Y_DIM] with the same dtype as surface_y but channels
+        [cp, tau_t1, tau_t2, tau_n]. Channel 0 (cp) is unchanged.
+    """
+    cp = surface_y[..., 0:1]
+    tau_t1, tau_t2, tau_n = cartesian_tau_to_tangent(surface_y[..., 1:4], normals)
+    rotated = torch.stack([tau_t1, tau_t2, tau_n], dim=-1).to(surface_y.dtype)
+    return torch.cat([cp, rotated], dim=-1)
+
+
+def back_project_surface_pred_to_cartesian(
+    surface_pred: torch.Tensor, normals: torch.Tensor
+) -> torch.Tensor:
+    """Convert tangent-frame predicted surface_y back to cartesian.
+
+    surface_pred: [B, N, SURFACE_Y_DIM] in physical units, channel layout
+        [cp, tau_t1, tau_t2, tau_n]. Returns same shape with channels
+        [cp, tau_x, tau_y, tau_z]. Channel 0 (cp) is unchanged. The
+        predicted tau_n is used in the back-projection (no masking).
+    """
+    cp = surface_pred[..., 0:1]
+    tau_xyz = tangent_tau_to_cartesian(
+        surface_pred[..., 1],
+        surface_pred[..., 2],
+        normals,
+        tau_n=surface_pred[..., 3],
+    ).to(surface_pred.dtype)
+    return torch.cat([cp, tau_xyz], dim=-1)
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -2034,13 +2134,53 @@ def train_loss(
     volume_loss_weight: float = 1.0,
     aux_rel_l2_weight: float = 0.0,
     use_tangential_wallshear_loss: bool = False,
+    surface_tangent_frame_targets: bool = False,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
-    surface_target = transform.apply_surface(batch.surface_y)
+    surface_y_for_target = batch.surface_y
+    sanity_max_orth_err: float | None = None
+    sanity_max_recon_err: float | None = None
+    sanity_normal_rms_phys: float | None = None
+    if surface_tangent_frame_targets and use_tangential_wallshear_loss:
+        raise ValueError(
+            "surface_tangent_frame_targets and use_tangential_wallshear_loss are "
+            "mutually exclusive: the first rotates the target into the tangent "
+            "frame, the second projects predictions to the tangent plane in "
+            "physical space; combining them double-rotates the target."
+        )
+    if surface_tangent_frame_targets:
+        normals_for_rot = batch.surface_x[..., 3:6]
+        # Optional cheap per-step orthogonality / reconstruction sanity check
+        # over the first few valid surface points; logged as a heartbeat.
+        with torch.no_grad():
+            mask = batch.surface_mask
+            if bool(mask.any()):
+                flat_mask = mask.reshape(-1)
+                idx = torch.where(flat_mask)[0][:32]
+                if idx.numel() > 0:
+                    n_flat = normals_for_rot.reshape(-1, 3)[idx].float()
+                    n_hat = F.normalize(n_flat, dim=-1, eps=1e-8)
+                    t1, t2 = revised_frisvad_tangent_frame(n_hat)
+                    dot_t1_n = (t1 * n_hat).sum(dim=-1).abs()
+                    dot_t2_n = (t2 * n_hat).sum(dim=-1).abs()
+                    dot_t1_t2 = (t1 * t2).sum(dim=-1).abs()
+                    sanity_max_orth_err = float(
+                        torch.stack([dot_t1_n.max(), dot_t2_n.max(), dot_t1_t2.max()]).max().cpu().item()
+                    )
+                    tau_xyz_phys = batch.surface_y.reshape(-1, batch.surface_y.shape[-1])[idx, 1:4].float()
+                    tau_t1 = (tau_xyz_phys * t1).sum(dim=-1)
+                    tau_t2 = (tau_xyz_phys * t2).sum(dim=-1)
+                    tau_n = (tau_xyz_phys * n_hat).sum(dim=-1)
+                    tau_recon = tau_t1.unsqueeze(-1) * t1 + tau_t2.unsqueeze(-1) * t2 + tau_n.unsqueeze(-1) * n_hat
+                    recon_err = (tau_recon - tau_xyz_phys).abs().max()
+                    sanity_max_recon_err = float(recon_err.cpu().item())
+                    sanity_normal_rms_phys = float(tau_n.square().mean().sqrt().cpu().item())
+        surface_y_for_target = rotate_surface_y_to_tangent(batch.surface_y, normals_for_rot)
+    surface_target = transform.apply_surface(surface_y_for_target)
     volume_target = transform.apply_volume(batch.volume_y)
     use_beta_nll = beta_nll_beta >= 0.0
     with autocast_context(device, amp_mode):
@@ -2079,6 +2219,14 @@ def train_loss(
             surface_pred_used = surface_pred_norm
             surface_target_used = surface_target
 
+        # Channel weights: in tangent-frame mode the channel layout is
+        # [cp, tau_t1, tau_t2, tau_n]; we keep all 3 wallshear components in the
+        # loss because the DrivAerML data does not satisfy tau.n == 0 exactly
+        # (sanity check showed an irreducible ~11% normal component). Option B
+        # tests whether predicting tau in a locally-consistent surface frame is
+        # easier than the global Cartesian frame, without discarding any signal.
+        surface_channel_weights = (1.0, 1.0, wallshear_y_weight, wallshear_z_weight)
+
         per_axis_log_var: list[float] | None = None
         volume_log_var_mean: float | None = None
         if use_beta_nll:
@@ -2089,7 +2237,7 @@ def train_loss(
                 surface_log_var,
                 surface_target_used,
                 batch.surface_mask,
-                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                channel_weights=surface_channel_weights,
                 beta=beta_nll_beta,
             )
             volume_loss, _, vol_log_var_per_axis = weighted_masked_beta_nll_per_channel(
@@ -2106,7 +2254,7 @@ def train_loss(
                 surface_pred_used,
                 surface_target_used,
                 batch.surface_mask,
-                channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
+                channel_weights=surface_channel_weights,
                 wallshear_huber_delta=wallshear_huber_delta,
             )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
@@ -2129,6 +2277,18 @@ def train_loss(
         "loss_tau_y": per_axis_unweighted[2],
         "loss_tau_z": per_axis_unweighted[3],
     }
+    if surface_tangent_frame_targets:
+        # Aliases that reflect the actual semantics of channels 1..3 in tangent
+        # frame mode. Keep the loss_tau_x/y/z aliases for log compatibility.
+        metrics["loss_tau_t1"] = per_axis_unweighted[1]
+        metrics["loss_tau_t2"] = per_axis_unweighted[2]
+        metrics["loss_tau_n"] = per_axis_unweighted[3]
+        if sanity_max_orth_err is not None:
+            metrics["tangent_frame/max_orthogonality_err"] = sanity_max_orth_err
+        if sanity_max_recon_err is not None:
+            metrics["tangent_frame/max_reconstruction_err"] = sanity_max_recon_err
+        if sanity_normal_rms_phys is not None:
+            metrics["tangent_frame/gt_tau_normal_rms_phys"] = sanity_normal_rms_phys
     if aux_rel_l2_value is not None:
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss and not use_beta_nll:
@@ -2199,6 +2359,7 @@ def evaluate_split(
     device: torch.device,
     *,
     amp_mode: str = "none",
+    surface_tangent_frame_targets: bool = False,
 ) -> dict[str, float]:
     model.eval()
     surface_loss_sse = 0.0
@@ -2227,7 +2388,14 @@ def evaluate_split(
 
     for batch in loader:
         batch = batch.to(device)
-        surface_target_norm = transform.apply_surface(batch.surface_y)
+        if surface_tangent_frame_targets:
+            normals_for_rot = batch.surface_x[..., 3:6]
+            surface_y_for_target = rotate_surface_y_to_tangent(
+                batch.surface_y, normals_for_rot
+            )
+        else:
+            surface_y_for_target = batch.surface_y
+        surface_target_norm = transform.apply_surface(surface_y_for_target)
         volume_target_norm = transform.apply_volume(batch.volume_y)
         with autocast_context(device, amp_mode):
             out = model(
@@ -2244,7 +2412,14 @@ def evaluate_split(
         surface_loss_count += surface_count
         volume_loss_sse += volume_sse
         volume_loss_count += volume_count
+        # invert_surface gives [cp, tau_t1, tau_t2, tau_n] in physical units when
+        # tangent-frame mode is on; back-project tau channels to cartesian so
+        # all downstream metrics match batch.surface_y (which is cartesian).
         surface_pred = transform.invert_surface(surface_pred_norm)
+        if surface_tangent_frame_targets:
+            surface_pred = back_project_surface_pred_to_cartesian(
+                surface_pred, batch.surface_x[..., 3:6]
+            )
         volume_pred = transform.invert_volume(volume_pred_norm)
 
         if bool(batch.surface_mask.any()):
@@ -2538,7 +2713,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        load_result = model.load_state_dict(ckpt["model"], strict=config.resume_strict)
+        if not config.resume_strict and is_main:
+            missing = list(getattr(load_result, "missing_keys", []) or [])
+            unexpected = list(getattr(load_result, "unexpected_keys", []) or [])
+            if missing or unexpected:
+                print(
+                    f"Resumed with strict=False: missing={len(missing)} keys "
+                    f"({missing[:5]}{'...' if len(missing) > 5 else ''}), "
+                    f"unexpected={len(unexpected)} keys "
+                    f"({unexpected[:5]}{'...' if len(unexpected) > 5 else ''})"
+                )
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
@@ -2830,6 +3015,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                surface_tangent_frame_targets=config.surface_tangent_frame_targets,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
@@ -3035,6 +3221,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             for key, value in batch_loss_metrics.items():
                 if key.startswith("film/"):
                     train_log[f"train/{key}"] = value
+                elif key.startswith("tangent_frame/"):
+                    train_log[f"train/{key}"] = value
+                elif key in ("loss_tau_t1", "loss_tau_t2", "loss_tau_n"):
+                    train_log[f"train/{key}"] = value
             train_log.update(
                 train_slope_tracker.update(
                     global_step=global_step,
@@ -3110,7 +3300,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ema.store(model)
             ema.copy_to(model)
         val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_targets=config.surface_tangent_frame_targets)
             for name, loader in val_loaders.items()
         }
         if ema is not None:
@@ -3237,7 +3427,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_targets=config.surface_tangent_frame_targets)
         for name, loader in val_loaders.items()
     }
     full_val_primary = full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3272,7 +3462,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_targets=config.surface_tangent_frame_targets)
         for name, loader in test_loaders.items()
     }
     test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
@@ -3326,11 +3516,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             dist.barrier()
         model.load_state_dict(swa_model.module.state_dict(), strict=True)
         swa_full_val_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_targets=config.surface_tangent_frame_targets)
             for name, loader in val_loaders.items()
         }
         swa_test_metrics = {
-            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+            name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, surface_tangent_frame_targets=config.surface_tangent_frame_targets)
             for name, loader in test_loaders.items()
         }
         swa_full_val_primary = swa_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
