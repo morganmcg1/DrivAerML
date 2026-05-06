@@ -57,6 +57,6 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 | #741 | `lszc4ri7` | nezuko | EP9 | **7.2399%** | Y-axis symmetry aug; 2-step oscillation cycles confirmed; EP9 beats EP7 on all sub-metrics |
 | #740 Arm B | `g18f7jm1` | fern | EP9 | **6.872%** | GradNorm α=0.5; leads Arm A by 0.21pp at EP9 |
 | #740 Arm A | `aoetlx9b` | fern | EP9 | 7.084% | GradNorm α=1.0 |
-| #749 | `oi2a01zy` | tanjiro | EP2 | 9.262% | lr=9e-5 control; EP5 gate ≤9.0% pending |
+| #749 | `oi2a01zy` | tanjiro | EP5 | **7.314%** | lr=9e-5 control; EP5 gate ≤9.0% PASSED ✓; vol_p already beats public target (4.42%); tau_z=11.009% bottleneck |
 
 _Last updated: 2026-05-06_
