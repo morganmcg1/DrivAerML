@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 11:20 UTC (Round 13 mid-flight — 8 PRs WIP, 0 review-ready, 0 idle)
+- **Date:** 2026-05-06 11:42 UTC (Round 13 mid-flight — 8 PRs WIP, 0 review-ready, 0 idle)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -93,9 +93,9 @@ All 8 students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 | WIP, Arm A `1gv5s938` near EP4 end; best val_abupt=7.40% (does NOT beat 6.5985% baseline). Stale 3+ hr; status nudge sent. Arm B halt requested. |
-| askeladd | **#752** | x-slab wake stratified vol sampling (Issue #717) | WIP, Arm B `jc2t6sxa` near EP3 (step 30192/32594, ~93%); EP3 gate ETA ~11:35 UTC. Arm A closed neg test_vol_p=12.49%. Arm B EP2=8.79% (Δ −0.23pp vs Arm A) — slightly ahead. |
-| edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, mid-EP2 (step 19212/21729). EP1 val_abupt=30.32% (in band). EP1=83 min (vs 80-min gate, accepted within stated 10-15% overhead). |
+| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 | WIP, Arm A `1gv5s938` EP4 landed: val_abupt=**6.98%**, vol_p=4.10% (still below SOTA 6.5985%). Run still going at step 36799/270min. Arm B halted; awaiting student final + test report. |
+| askeladd | **#752** | x-slab wake stratified vol sampling (Issue #717) | WIP, Arm B `jc2t6sxa` cleared EP3 gate: val_abupt=**7.44%**, vol_p=4.86% (passes <8% gate). Run at step 33001. Arm A closed neg test_vol_p=12.49%. |
+| edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, EP3 territory (step 21786). EP1 val_abupt=30.32% (anomalous), EP2=**8.58%, vol_p=5.20%** (passes EP2 gate cleanly). Student silent 2.5+ hr; advisor nudge posted demanding EP1/EP2 retrospective + EP3 watch. |
 | fern | **#765** | No-slice Anchor-STRING transformer (Issue #618 Exp 3) | WIP, Run 1 (`klw97qgk`) crashed at EP1=54.89% (per-layer anchor resampling bug + train/eval anchor mismatch). Student diagnosed, fixed (commit 772ae1c), 3-epoch corrected Run 1b approved. |
 | frieren | **#761** | Dedicated 2-layer volume head (capacity-additive) | WIP, mid-EP3 (step 25743). EP2 val_abupt=8.088% (+0.15pp vs SOTA EP2 7.940%); EP3 gate <8% is tight but plausible. |
 | nezuko | **#763** | Upstream-region supervised attention (w_upstream=1.5) | WIP, ~EP2 boundary (step 21591/21729). EP1 val_abupt=27.57%; per-region: upstream 92.42% pts at 15.59% rel_l2, near 7.34% at 39.84%, far 0.23% at 203.41%. |
@@ -105,8 +105,9 @@ All 8 students running:
 **Zero idle students. Zero idle GPUs.**
 
 **Open advisor actions (this cycle):**
-- alphonse #760: nudged for Arm A final + halt Arm B (vol_w=3.0 unwarranted given Arm A neg).
-- fern #765: approved corrected Run 1b (3 epochs, single-anchor-resample fix).
+- alphonse #760: Arm B halted by student; awaiting Arm A final EP-end + 9-col test table.
+- edward #762: Advisor nudge posted at 11:42 UTC demanding retrospective EP1/EP2 reports + EP3 status (silent since 09:06; W&B shows EP2 passed cleanly at val_abupt=8.58%).
+- fern #765: approved corrected Run 1b (3 epochs, single-anchor-resample fix); EP1 ETA ~12:43 UTC.
 - All other PRs: gate-watching at EP2/EP3 thresholds; passive.
 
 **Issue #717 status:** No arm has yet beaten the weak win gate `test_vol_p < 11.374%`. Tanjiro Arm A (12.38%) and askeladd Arm A (12.49%) both regress. The remaining six in-flight arms are the live attempt set.
