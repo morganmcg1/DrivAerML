@@ -51,16 +51,15 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.6231%** (PR #741 nezuko, EP19, run `lszc4ri7`)
+In-wave val target: **6.5789%** (PR #741 nezuko, EP22, run `lszc4ri7`)
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #741 | `lszc4ri7` | nezuko | EP19 (best) | **6.6231%** | Y-axis symmetry aug; C5 spike EP17=7.2835%, C5 trough EP18=6.6596%, EP19=6.6231% (new best, extended descent); EP20 imminent; test eval + review submit after terminal |
-| #745 | `co0xlqap` | frieren | EP10 | **6.6727%** | 5L STRING PE; clean monotonic descent EP1→EP10; 0.050pp behind wave leader; EP20 projected ~6.515%; wsz=10.264% bottleneck; EP12+ in progress |
-| #740 Arm B | `5x8wofzm` | fern | EP4 (v2) | 6.8721% | GradNorm α=0.5; Arm B leads Arm A by 0.211pp at EP4 (widening gap); EP5 decision gate pending |
-| #740 Arm A | `em8bnk1a` | fern | EP4 (v2) | 7.0836% | GradNorm α=1.0; 4 GPUs each; EP5 is next decision gate |
-| #749 | `oi2a01zy` | tanjiro | EP18 | 6.9511% | Lion lr=9e-5 control; monotonic descent EP7→EP18; wsz plateau signal; auto test eval at EP50 completion |
+| #741 | `lszc4ri7` | nezuko | EP22 (best) | **6.5789%** | Y-axis symmetry aug; EP22=6.5789% new best (↓0.0442pp vs EP19); wsz sub-10% within reach (EP22=10.0085%); LR ~5.98e-5 at 40% decay; run continuing toward EP30-35 |
+| #745 | `co0xlqap` | frieren | EP12 | **6.6392%** | 5L STRING PE; EP11→EP12 recovery confirmed (-0.0269pp); vp=3.8533% excellent; wsz slope -0.0169pp/ep toward 10% barrier; EP15 kill gate <7.2% |
+| #740 Arm B | `5x8wofzm` | fern | EP5 (Arm B solo) | 6.7438% | GradNorm α=0.5; Arm A killed at EP5=6.9162%; Arm B solo EP6→EP31; EP10 gate at ~10:55Z |
+| #749 | `oi2a01zy` | tanjiro | EP21 | **6.8907%** | Lion lr=9e-5 control; EP19→EP21 new bests (6.9110→6.8907%); clean descent resumed after EP17/18 spike |
 
 _Last updated: 2026-05-05_
