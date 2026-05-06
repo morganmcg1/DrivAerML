@@ -1892,6 +1892,7 @@ def weighted_masked_mse_per_channel(
     *,
     channel_weights: Iterable[float],
     wallshear_huber_delta: float = 0.0,
+    wallshear_l1: bool = False,
 ) -> tuple[torch.Tensor, list[float]]:
     """Per-channel weighted masked loss for surface predictions.
 
@@ -1928,7 +1929,14 @@ def weighted_masked_mse_per_channel(
     valid = mask_f.sum().clamp_min(1)
     n_channels = diff_sq.shape[-1]
 
-    if wallshear_huber_delta > 0.0 and n_channels >= 4:
+    if wallshear_l1 and n_channels >= 4:
+        # cp keeps MSE; tau channels use MAE = L1 on standardized residual
+        # (CRPS deterministic form per Gneiting & Raftery 2007).
+        abs_err = diff.abs()
+        loss_elem = torch.cat([diff_sq[..., :1], abs_err[..., 1:4]], dim=-1)
+        if n_channels > 4:
+            loss_elem = torch.cat([loss_elem, diff_sq[..., 4:]], dim=-1)
+    elif wallshear_huber_delta > 0.0 and n_channels >= 4:
         abs_err = diff.abs()
         delta_t = pred.new_full((), float(wallshear_huber_delta))
         huber_elem = torch.where(
@@ -2178,6 +2186,7 @@ def train_loss(
                 batch.surface_mask,
                 channel_weights=(1.0, 1.0, wallshear_y_weight, wallshear_z_weight),
                 wallshear_huber_delta=wallshear_huber_delta,
+                wallshear_l1=wallshear_loss in ("crps", "mae"),
             )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
