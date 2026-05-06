@@ -137,6 +137,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_decoder_sdf_gating: bool = False
+    vol_decoder_sdf_gating_hidden: int = 64
     debug: bool = False
 
 
@@ -297,7 +299,44 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_decoder_sdf_gating=config.vol_decoder_sdf_gating,
+        vol_decoder_sdf_gating_hidden=config.vol_decoder_sdf_gating_hidden,
     )
+
+
+def collect_gate_metrics(model: nn.Module, prefix: str) -> dict[str, float]:
+    """Read the most recent ``(a, b)`` stash from the SDF gate.
+
+    Returns an empty dict if gating is off or the gate has not been called
+    yet on this rank. Stats are computed over the per-case scalars from
+    the most recent forward pass.
+    """
+
+    base = unwrap_model(model)
+    gate = getattr(base, "vol_decoder_sdf_gate", None)
+    if gate is None or gate.last_a is None or gate.last_b is None:
+        return {}
+    a = gate.last_a.flatten()
+    b = gate.last_b.flatten()
+    n = int(a.numel())
+    metrics = {
+        f"{prefix}/scale_mean": float(a.mean().cpu().item()),
+        f"{prefix}/scale_min": float(a.min().cpu().item()),
+        f"{prefix}/scale_max": float(a.max().cpu().item()),
+        f"{prefix}/scale_max_abs": float(a.abs().max().cpu().item()),
+        f"{prefix}/bias_mean": float(b.mean().cpu().item()),
+        f"{prefix}/bias_min": float(b.min().cpu().item()),
+        f"{prefix}/bias_max": float(b.max().cpu().item()),
+        f"{prefix}/bias_max_abs": float(b.abs().max().cpu().item()),
+        f"{prefix}/n_cases": float(n),
+    }
+    if n > 1:
+        metrics[f"{prefix}/scale_std"] = float(a.std(unbiased=False).cpu().item())
+        metrics[f"{prefix}/bias_std"] = float(b.std(unbiased=False).cpu().item())
+    else:
+        metrics[f"{prefix}/scale_std"] = 0.0
+        metrics[f"{prefix}/bias_std"] = 0.0
+    return metrics
 
 
 def train_loss(
@@ -1050,6 +1089,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if config.vol_decoder_sdf_gating:
+                    train_log.update(collect_gate_metrics(model, "train/gate"))
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
@@ -1240,6 +1281,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                if config.vol_decoder_sdf_gating:
+                    log_metrics.update(collect_gate_metrics(model, "val/gate"))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
