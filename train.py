@@ -1197,14 +1197,14 @@ class CorrectionMLP(nn.Module):
 
 
 class FrozenBackboneWithCorrection(nn.Module):
-    """Wraps a frozen Transolver backbone and a trainable CorrectionMLP head.
+    """Wraps a Transolver backbone and a trainable CorrectionMLP head.
 
-    The frozen backbone runs under torch.no_grad() so no autograd graph is built
-    through it. Training-mode toggling is overridden so the backbone always stays
-    in eval() mode (dropout/etc disabled) while the correction MLP follows normal
-    train/eval semantics. Surface predictions are replaced with
-    `frozen_preds + correction(surface_hidden, xyz, frozen_preds)` masked to valid
-    surface points; volume predictions are passed through unchanged.
+    By default the backbone is fully frozen and runs under torch.no_grad() so
+    no autograd graph is built through it (Stage 1, PR #724).
+    When ``unfreeze_top_layers > 0`` (Stage 2, PR #747) the last N transformer
+    blocks of the backbone are unfrozen and trained jointly with the correction
+    MLP; the lower layers remain frozen. The backbone always stays in eval()
+    mode (dropout/etc disabled).
     """
 
     def __init__(
@@ -1213,13 +1213,29 @@ class FrozenBackboneWithCorrection(nn.Module):
         correction_mlp: nn.Module,
         *,
         space_dim: int = 3,
+        unfreeze_top_layers: int = 0,
     ):
         super().__init__()
         self.frozen_model = frozen_model
         self.correction_mlp = correction_mlp
         self.space_dim = space_dim
+        self.unfreeze_top_layers = int(unfreeze_top_layers)
         for param in self.frozen_model.parameters():
             param.requires_grad_(False)
+        if self.unfreeze_top_layers > 0:
+            blocks = self.frozen_model.backbone.blocks
+            n_blocks = len(blocks)
+            if self.unfreeze_top_layers > n_blocks:
+                raise ValueError(
+                    f"unfreeze_top_layers={self.unfreeze_top_layers} "
+                    f"exceeds backbone depth ({n_blocks})"
+                )
+            for i in range(n_blocks - self.unfreeze_top_layers, n_blocks):
+                for p in blocks[i].parameters():
+                    p.requires_grad_(True)
+        self._backbone_has_trainable = any(
+            p.requires_grad for p in self.frozen_model.parameters()
+        )
         self.frozen_model.eval()
 
     def train(self, mode: bool = True) -> "FrozenBackboneWithCorrection":
@@ -1236,13 +1252,21 @@ class FrozenBackboneWithCorrection(nn.Module):
         volume_x: torch.Tensor | None = None,
         volume_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        with torch.no_grad():
+        if self._backbone_has_trainable:
             out = self.frozen_model(
                 surface_x=surface_x,
                 surface_mask=surface_mask,
                 volume_x=volume_x,
                 volume_mask=volume_mask,
             )
+        else:
+            with torch.no_grad():
+                out = self.frozen_model(
+                    surface_x=surface_x,
+                    surface_mask=surface_mask,
+                    volume_x=volume_x,
+                    volume_mask=volume_mask,
+                )
         if surface_x is None or surface_mask is None:
             return out
         surface_xyz = surface_x[..., : self.space_dim]
@@ -1381,6 +1405,8 @@ class Config:
     swa_update_every_steps: int = 500
     correction_mode: bool = False
     correction_mlp_hidden: int = 64
+    correction_unfreeze_top_layers: int = 0
+    correction_backbone_lr_scale: float = 0.1
     ensemble_checkpoints: str = ""
     volume_multigrid_coarse_ratio: float = 0.0
     volume_multigrid_attn_layers: int = 2
@@ -1596,6 +1622,30 @@ def build_model(config: Config) -> SurfaceTransolver:
         volume_multigrid_attn_layers=config.volume_multigrid_attn_layers,
         volume_multigrid_cross_heads=config.volume_multigrid_cross_heads,
     )
+
+
+def _load_resume_state_dict(
+    target: nn.Module,
+    state_dict: dict,
+    *,
+    allow_missing_multigrid: bool,
+    multigrid_prefix: str,
+    is_main: bool,
+) -> None:
+    if not allow_missing_multigrid:
+        target.load_state_dict(state_dict, strict=True)
+        return
+    missing, unexpected = target.load_state_dict(state_dict, strict=False)
+    stray_missing = [k for k in missing if not k.startswith(multigrid_prefix)]
+    if stray_missing or unexpected:
+        raise RuntimeError(
+            f"Resume state_dict mismatch: missing={stray_missing} unexpected={unexpected}"
+        )
+    if is_main:
+        print(
+            f"Resumed with non-strict load: {len(missing)} multigrid keys "
+            "initialized fresh (zero-init residual)"
+        )
 
 
 def _metric_path(name: str) -> str:
@@ -3237,28 +3287,17 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     model = build_model(config).to(device)
     resume_info: dict[str, float | str | int] = {}
+    resume_ckpt = None
+    resume_state_is_wrapped = False
     if config.resume_from:
-        ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        # Allow newly-added zero-init blocks (e.g. multigrid for PR #725) to be
-        # missing from the checkpoint while keeping unexpected-key checks strict.
-        load_strict = config.volume_multigrid_coarse_ratio <= 0.0
-        if load_strict:
-            model.load_state_dict(ckpt["model"], strict=True)
-        else:
-            missing, unexpected = model.load_state_dict(ckpt["model"], strict=False)
-            allowed_missing_prefix = ("volume_multigrid.",)
-            stray_missing = [k for k in missing if not k.startswith(allowed_missing_prefix)]
-            if stray_missing or unexpected:
-                raise RuntimeError(
-                    f"Resume state_dict mismatch: missing={stray_missing} unexpected={unexpected}"
-                )
-            if is_main:
-                print(
-                    f"Resumed with non-strict load: {len(missing)} multigrid keys "
-                    "initialized fresh (zero-init residual)"
-                )
-        prev_epoch = ckpt.get("epoch", -1)
-        prev_val_metrics = ckpt.get("val_metrics", {}) or {}
+        resume_ckpt = torch.load(
+            config.resume_from, map_location=device, weights_only=True
+        )
+        resume_state_is_wrapped = any(
+            k.startswith("frozen_model.") for k in resume_ckpt["model"].keys()
+        )
+        prev_epoch = resume_ckpt.get("epoch", -1)
+        prev_val_metrics = resume_ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
             (prev_val_metrics.get("val_surface", {}) or {}).get(
                 "abupt_axis_mean_rel_l2_pct", float("nan")
@@ -3268,12 +3307,21 @@ def main(argv: Iterable[str] | None = None) -> None:
             "resume_from_path": str(config.resume_from),
             "resume_prev_epoch": int(prev_epoch) if isinstance(prev_epoch, (int, float)) else -1,
             "resume_prev_val_abupt_pct": prev_primary_val,
+            "resume_state_is_wrapped": bool(resume_state_is_wrapped),
         }
-        if is_main:
-            print(
-                f"Resumed model weights from {config.resume_from} "
-                f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%)"
+        if not resume_state_is_wrapped:
+            _load_resume_state_dict(
+                model,
+                resume_ckpt["model"],
+                allow_missing_multigrid=config.volume_multigrid_coarse_ratio > 0.0,
+                multigrid_prefix="volume_multigrid.",
+                is_main=is_main,
             )
+            if is_main:
+                print(
+                    f"Resumed bare-model weights from {config.resume_from} "
+                    f"(saved at epoch {prev_epoch}, val_abupt={prev_primary_val:.4f}%)"
+                )
     if config.correction_mode:
         if not config.resume_from:
             raise ValueError(
@@ -3286,11 +3334,38 @@ def main(argv: Iterable[str] | None = None) -> None:
             hidden_dim=config.correction_mlp_hidden,
             output_dim=SURFACE_Y_DIM,
         ).to(device)
-        model = FrozenBackboneWithCorrection(model, correction_mlp).to(device)
+        model = FrozenBackboneWithCorrection(
+            model,
+            correction_mlp,
+            unfreeze_top_layers=config.correction_unfreeze_top_layers,
+        ).to(device)
+        if resume_state_is_wrapped and resume_ckpt is not None:
+            _load_resume_state_dict(
+                model,
+                resume_ckpt["model"],
+                allow_missing_multigrid=config.volume_multigrid_coarse_ratio > 0.0,
+                multigrid_prefix="frozen_model.volume_multigrid.",
+                is_main=is_main,
+            )
+            if is_main:
+                print(
+                    f"Resumed wrapped (FrozenBackboneWithCorrection) weights from "
+                    f"{config.resume_from} (saved at epoch "
+                    f"{resume_info.get('resume_prev_epoch', -1)}, "
+                    f"val_abupt={resume_info.get('resume_prev_val_abupt_pct', float('nan')):.4f}%)"
+                )
         if is_main:
             n_correction = sum(p.numel() for p in correction_mlp.parameters())
+            backbone_trainable = sum(
+                p.numel() for p in model.frozen_model.parameters() if p.requires_grad
+            )
+            backbone_frozen = sum(
+                p.numel() for p in model.frozen_model.parameters() if not p.requires_grad
+            )
             print(
-                f"Correction mode: backbone frozen, "
+                f"Correction mode: backbone trainable={backbone_trainable:,}, "
+                f"frozen={backbone_frozen:,} (unfreeze_top_layers="
+                f"{config.correction_unfreeze_top_layers}); "
                 f"CorrectionMLP({correction_input_dim}->{config.correction_mlp_hidden}->{config.correction_mlp_hidden}->{SURFACE_Y_DIM}) "
                 f"with {n_correction:,} trainable params"
             )
@@ -3315,17 +3390,49 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_model = model
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]
+    correction_param_groups = None
+    if (
+        config.correction_mode
+        and config.correction_unfreeze_top_layers > 0
+        and isinstance(model, FrozenBackboneWithCorrection)
+    ):
+        mlp_params = [p for p in model.correction_mlp.parameters() if p.requires_grad]
+        backbone_params = [
+            p for p in model.frozen_model.parameters() if p.requires_grad
+        ]
+        backbone_lr = config.lr * config.correction_backbone_lr_scale
+        correction_param_groups = [
+            {"params": mlp_params, "lr": config.lr},
+            {"params": backbone_params, "lr": backbone_lr},
+        ]
+        if is_main:
+            print(
+                f"Correction param groups: MLP lr={config.lr} "
+                f"({sum(p.numel() for p in mlp_params):,} params), "
+                f"backbone lr={backbone_lr} "
+                f"({sum(p.numel() for p in backbone_params):,} params)"
+            )
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
-        optimizer = torch.optim.AdamW(
-            trainable_params, lr=config.lr, weight_decay=config.weight_decay
-        )
+        if correction_param_groups is not None:
+            optimizer = torch.optim.AdamW(
+                correction_param_groups, weight_decay=config.weight_decay
+            )
+        else:
+            optimizer = torch.optim.AdamW(
+                trainable_params, lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "lion":
         from lion_pytorch import Lion
 
-        optimizer = Lion(
-            trainable_params, lr=config.lr, weight_decay=config.weight_decay
-        )
+        if correction_param_groups is not None:
+            optimizer = Lion(
+                correction_param_groups, weight_decay=config.weight_decay
+            )
+        else:
+            optimizer = Lion(
+                trainable_params, lr=config.lr, weight_decay=config.weight_decay
+            )
     elif optimizer_name == "muon":
         muon_2d_params = [p for p in model.parameters() if p.requires_grad and p.ndim == 2]
         muon_other_params = [p for p in model.parameters() if p.requires_grad and p.ndim != 2]
@@ -3463,6 +3570,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("full_val_primary/*", step_metric="global_step")
     wandb.define_metric("test/*", step_metric="global_step")
     wandb.define_metric("test_primary/*", step_metric="global_step")
+    wandb.define_metric("pretrain_val/*", step_metric="global_step")
+    wandb.define_metric("pretrain_val_primary/*", step_metric="global_step")
+    wandb.define_metric("pretrain_val_surface/*", step_metric="global_step")
+    wandb.define_metric("pretrain_val_surface_primary/*", step_metric="global_step")
+    wandb.define_metric("pretrain_val_volume/*", step_metric="global_step")
+    wandb.define_metric("pretrain_val_volume_primary/*", step_metric="global_step")
     wandb.define_metric("train/slope/*", step_metric="global_step")
     wandb.define_metric("val/slope/*", step_metric="global_step")
     wandb.define_metric("full_val/slope/*", step_metric="global_step")
@@ -3518,6 +3631,31 @@ def main(argv: Iterable[str] | None = None) -> None:
     early_stop_reason: str | None = None
     timeout_hit = False
     train_start = time.time()
+
+    if config.correction_mode and config.resume_from:
+        if is_main:
+            print("EP0 sanity: running pre-train validation on resumed checkpoint...")
+        pretrain_val_metrics = {
+            name: evaluate_split(
+                model, loader, transform, device, amp_mode=config.amp_mode
+            )
+            for name, loader in val_loaders.items()
+        }
+        if is_main:
+            primary = pretrain_val_metrics.get("val_surface", {}).get(
+                "abupt_axis_mean_rel_l2_pct", float("nan")
+            )
+            print(
+                f"EP0 sanity: val_abupt_axis_mean_rel_l2_pct = {primary:.4f}% "
+                f"(target ≈ {resume_info.get('resume_prev_val_abupt_pct', float('nan')):.4f}%)"
+            )
+            ep0_log: dict[str, float] = {"global_step": 0}
+            for split_name, metrics in pretrain_val_metrics.items():
+                for key, value in metrics.items():
+                    ep0_log[f"pretrain_{split_name}/{key}"] = value
+                    if key == "abupt_axis_mean_rel_l2_pct":
+                        ep0_log[f"pretrain_{split_name}_primary/{key}"] = value
+            wandb.log(ep0_log)
     val_budget_minutes = float(os.environ.get("SENPAI_VAL_BUDGET_MINUTES", "90"))
     train_timeout_minutes = max(1.0, timeout_minutes - val_budget_minutes)
     grad_ema_state: dict[int, torch.Tensor] = {}
@@ -3750,6 +3888,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
                 "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
                 "train/lr": float(optimizer.param_groups[0]["lr"]),
+                **(
+                    {"train/lr_backbone": float(optimizer.param_groups[1]["lr"])}
+                    if len(optimizer.param_groups) > 1 and correction_param_groups is not None
+                    else {}
+                ),
                 "train/nonfinite_skip_count": nonfinite_skip_count,
                 "global_step": global_step,
                 **gradient_metrics,
