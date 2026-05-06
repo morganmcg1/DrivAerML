@@ -137,6 +137,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_noise_sigma: float = 0.0
+    vol_noise_anneal: str = "off"
     debug: bool = False
 
 
@@ -219,6 +221,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_noise_sigma": (
+            "Standard deviation (in absolute meters, body-frame) of "
+            "isotropic Gaussian noise added to volume xyz coordinates at "
+            "training time only. Surface coordinates are untouched and "
+            "padded volume rows are kept at zero. 0.0 disables (default). "
+            "Bishop 1995 equivalence: small input noise approximates "
+            "Tikhonov regularisation on the Jacobian norm of the predictor "
+            "w.r.t. inputs. See Issue #717 for the volume_pressure transfer "
+            "motivation."
+        ),
+        "vol_noise_anneal": (
+            "Schedule for the volume-coord noise sigma. 'off' keeps it at "
+            "--vol-noise-sigma for the whole run. 'linear' linearly decays "
+            "from --vol-noise-sigma down to 0.0 over the cosine T_max "
+            "horizon (--lr-cosine-t-max), so early epochs see noise and "
+            "late epochs run on clean coords. Default 'off'."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -284,6 +303,46 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def compute_vol_noise_sigma(
+    base_sigma: float,
+    anneal: str,
+    epoch: int,
+    t_max: int,
+) -> float:
+    """Return the effective volume-coord noise sigma for a given epoch.
+
+    'off' keeps base_sigma constant. 'linear' decays linearly from base_sigma
+    at epoch 0 to 0 at epoch >= t_max. Returns 0.0 when base_sigma is 0.0.
+    """
+    if base_sigma <= 0.0:
+        return 0.0
+    if anneal == "off":
+        return float(base_sigma)
+    if anneal == "linear":
+        if t_max <= 0:
+            return float(base_sigma)
+        progress = max(0.0, min(1.0, epoch / float(t_max)))
+        return float(base_sigma) * (1.0 - progress)
+    raise ValueError(f"Unknown vol-noise-anneal mode: {anneal!r}")
+
+
+def _apply_vol_noise(batch, sigma: float) -> None:
+    """In-place inject Gaussian noise into batch.volume_x[..., :3] (xyz only).
+
+    SDF channel (index 3) is left untouched. Padded rows (volume_mask==False)
+    have their noise zeroed so the model still sees zero-input on padding.
+    Caller must ensure sigma > 0 before invoking.
+    """
+    volume_x = batch.volume_x
+    if volume_x.numel() == 0 or volume_x.shape[1] == 0:
+        return
+    noise = torch.randn_like(volume_x[..., :3]) * sigma
+    if batch.volume_mask is not None:
+        valid = batch.volume_mask.to(noise.dtype).unsqueeze(-1)
+        noise = noise * valid
+    volume_x[..., :3].add_(noise)
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -310,8 +369,11 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_noise_sigma: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    if vol_noise_sigma > 0.0:
+        _apply_vol_noise(batch, vol_noise_sigma)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -353,6 +415,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    vol_noise_sigma: float = 0.0,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -363,6 +427,8 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
+    if vol_noise_sigma > 0.0:
+        _apply_vol_noise(batch, vol_noise_sigma)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -861,6 +927,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["vol_noise/sigma_init_m"] = float(config.vol_noise_sigma)
+            wandb.summary["vol_noise/anneal"] = str(config.vol_noise_anneal)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -907,6 +975,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             model.train()
             train_loss_sum = 0.0
             n_batches = 0
+            epoch_vol_noise_sigma = compute_vol_noise_sigma(
+                base_sigma=config.vol_noise_sigma,
+                anneal=config.vol_noise_anneal,
+                epoch=epoch,
+                t_max=config.lr_cosine_t_max,
+            )
+            if state.is_main and config.vol_noise_sigma > 0.0:
+                print(
+                    f"Volume-coord noise: epoch {epoch} -> sigma={epoch_vol_noise_sigma:.6f} m "
+                    f"(base={config.vol_noise_sigma}, anneal={config.vol_noise_anneal}, "
+                    f"t_max={config.lr_cosine_t_max})"
+                )
 
             for batch in tqdm(
                 train_loader,
@@ -917,7 +997,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        vol_noise_sigma=epoch_vol_noise_sigma,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1008,6 +1093,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_noise_sigma=epoch_vol_noise_sigma,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1034,6 +1120,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/vol_noise_effective_sigma": float(epoch_vol_noise_sigma),
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
