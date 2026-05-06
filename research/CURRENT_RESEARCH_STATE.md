@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 ~16:05Z (latest: fern EP14=6.4170% new wave best −0.0111pp vs EP11, EP15 overdue notice posted ~16:00Z; nezuko EP37 W&B obs val=6.4997% wsz=9.9571% resuming descent, EP40 mandatory next; frieren EP30=6.5097% new run-best beats SOTA val by 0.0184pp advisor responded ~16:00Z; tanjiro ~EP42 plateau val=6.8557% running to EP50 auto test eval; PR #768 fern slice-centroid RoPE second activation reminder posted, 0 check-ins)
+- 2026-05-06 ~16:05Z (latest: fern EP14=6.4170% new wave best −0.0111pp vs EP11, EP15 overdue notice posted ~16:00Z; nezuko EP37 W&B obs val=6.4997% wsz=9.9571% resuming descent, EP40 mandatory next; frieren EP30=6.5097% new run-best beats SOTA val by 0.0184pp advisor responded ~16:00Z; tanjiro ~EP42 plateau val=6.8557% running to EP50 auto test eval)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -17,8 +17,6 @@
 | #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP33=6.4984% val — second in wave. test_primary=7.8232% (W&B `1tal40wr`) BEATS SOTA TEST (7.9303%) by 0.107pp — FIRST WAVE RUN TO CLEAR SOTA TEST.** EP35=6.5108% (hover, EP33 best holds). EP37 W&B obs (15:02Z): val=6.4997%, sp=4.2496%, ws=7.4180%, vp=3.7308%, wsx=6.5180%, wsy=8.0431%, wsz=9.9571% — wsz resuming descent after EP33→EP35 hover. EP40 mandatory check-in. Flags: val < 6.48% → 2nd test eval; wsz < 9.90% → flag; wsz < 9.85% → milestone. DO NOT KILL. |
 | #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP30=6.5097% new run-best — BEATS SOTA val 6.5281% by 0.0184pp.** Channel bests: ws=7.3658%, wsx=6.4112% (first sub-6.42%), wsy=8.0162%, wsz=10.0603%. wsz monotonic descent: EP28(10.0654%)→EP29(10.0641%)→EP30(10.0603%). Advisor responded EP30 ~16:00Z. EP31 triggers: val ≤6.500% → post immediately; wsz <10.050% → post immediately. EP35 next mandatory. Sub-6.50% projected EP32; EP50 projected 6.43–6.45%. DO NOT KILL. |
 | #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **~EP42 running, val=6.8557% (plateau, best_updated=0)** — 0.38pp+ behind wave leader. No student response to escalation comment. ~2–3h to EP50 natural completion; auto test eval fires automatically. Control baseline only. |
-| #768 | dl24-fern | Slice-centroid RoPE: `LearnableCoordinateRoPE` applied to slice Q/K | N/A | **0 check-ins, 0 W&B runs.** Second activation reminder posted. Smoke test command provided (2-epoch, `--model-pe rope_slice_centroid`, `--gradnorm-alpha 0.5`). Fern advised: run #740 doesn't require watching; run #768 in parallel. Waiting for smoke test EP1/EP2. |
-
 ### Closed / Negative Results This Wave
 
 | PR | Student | Hypothesis | Outcome |
@@ -67,11 +65,9 @@
 
 4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — NO.** ~EP42 running, val=6.8557% (plateau, best_updated=0). 0.38pp+ behind wave leader fern. Escalation comment posted, no student response. Value as control baseline only. Terminal at EP50 ~2–3h; auto-test-eval fires automatically. No intervention needed.
 
-5. **Slice-centroid RoPE (fern #768) — zero activity, waiting.** `LearnableCoordinateRoPE` module applied to Transolver's existing slice Q/K using slice centroid coordinates — adds geometry-awareness to attention without architectural redesign. Smoke test command provided. Fern has 2 active PRs; #740 runs autonomously.
+5. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
 
-6. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
-
-7. **Tanjiro compliance track:** PR #730 abandoned, #696 closed (gate fail + compliance), #673 closed (config mismatch), #732 CLOSED NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change; continuing to EP50. Monitor for gate compliance.
+6. **Tanjiro compliance track:** PR #730 abandoned, #696 closed (gate fail + compliance), #673 closed (config mismatch), #732 CLOSED NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change; continuing to EP50. Monitor for gate compliance.
 
 ## Potential Next Research Directions (after current arms complete)
 
@@ -85,4 +81,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-06 ~16:05Z (fern #740 EP14=6.4170% wave leader −0.1111pp SOTA, EP15 overdue notice posted; fern #768 slice-centroid RoPE 0 check-ins second activation reminder; nezuko #741 EP37 val=6.4997% wsz=9.9571% resuming descent EP40 next; frieren #745 EP30=6.5097% beats SOTA val 0.0184pp advisor responded EP31 triggers set; tanjiro #749 ~EP42 plateau running to EP50 auto test eval; 0 idle students — fern has 2 PRs)_
+_Last updated: 2026-05-06 ~16:05Z (fern #740 EP14=6.4170% wave leader −0.1111pp SOTA, EP15 overdue notice posted; nezuko #741 EP37 val=6.4997% wsz=9.9571% resuming descent EP40 next; frieren #745 EP30=6.5097% beats SOTA val 0.0184pp advisor responded EP31 triggers set; tanjiro #749 ~EP42 plateau running to EP50 auto test eval; 0 idle students)_
