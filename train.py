@@ -137,6 +137,12 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_grad_cons_lambda: float = 0.0
+    vol_grad_cons_anchors: int = 4096
+    vol_grad_cons_k: int = 8
+    vol_grad_cons_start_epoch: int = 0
+    vol_grad_cons_eps: float = 0.01
+    vol_grad_cons_chunk_size: int = 2048
     debug: bool = False
 
 
@@ -219,6 +225,39 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_grad_cons_lambda": (
+            "Auxiliary volume-pressure gradient-consistency loss weight "
+            "(PR #766 / Issue #717). Loss enforces that finite-difference "
+            "pressure gradients between each anchor and its k-NN neighbors "
+            "(computed at runtime on the sampled volume cloud) match the "
+            "ground-truth gradients via "
+            "mean((dp_pred - dp_true)^2 / (dp_true^2 + eps^2)). Default 0.0 "
+            "disables the loss. Suggested probe: 0.05."
+        ),
+        "vol_grad_cons_anchors": (
+            "Number of random anchor points per batch element used for the "
+            "volume gradient-consistency loss. Total edges per step = "
+            "B * n_anchors * k. Default 4096; reduce to 2048 if memory-bound."
+        ),
+        "vol_grad_cons_k": (
+            "Number of nearest-neighbors per anchor used by the volume "
+            "gradient-consistency loss. Default 8."
+        ),
+        "vol_grad_cons_start_epoch": (
+            "Epoch at which the volume gradient-consistency loss switches on "
+            "(0-indexed). Default 0 (active from the first step)."
+        ),
+        "vol_grad_cons_eps": (
+            "Relative-error denominator stabilizer in the volume "
+            "gradient-consistency loss: denom = dp_true^2 + eps^2. "
+            "Default 0.01."
+        ),
+        "vol_grad_cons_chunk_size": (
+            "Chunk size over the anchor dimension when computing the "
+            "k-NN cdist+topk for the volume gradient-consistency loss. "
+            "Bounds peak memory of the (B, chunk, V) distance tensor. "
+            "Default 2048."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +339,130 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def _vol_grad_cons_topk_chunk(
+    anchor_xyz: torch.Tensor,
+    vol_xyz: torch.Tensor,
+    valid_mask: torch.Tensor,
+    anchor_idx: torch.Tensor,
+    k: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute (topk_distances, topk_indices) for one anchor chunk.
+
+    Distances to padded points and to the anchor itself are set to +inf so
+    they are never selected by ``topk(largest=False)``.
+    """
+    B, n_chunk, _ = anchor_xyz.shape
+    V = vol_xyz.shape[1]
+    dist = torch.cdist(anchor_xyz.float(), vol_xyz.float())  # (B, n_chunk, V)
+    inf_val = torch.finfo(dist.dtype).max
+    invalid = ~valid_mask.unsqueeze(1)  # (B, 1, V)
+    if invalid.any():
+        dist = dist.masked_fill(invalid.expand(B, n_chunk, V), inf_val)
+    self_mask = torch.zeros(B, n_chunk, V, dtype=torch.bool, device=dist.device)
+    self_mask.scatter_(2, anchor_idx.unsqueeze(-1), True)
+    dist = dist.masked_fill(self_mask, inf_val)
+    return dist.topk(k, dim=2, largest=False)
+
+
+def vol_grad_consistency_loss(
+    vol_xyz: torch.Tensor,
+    vol_pred: torch.Tensor,
+    vol_target: torch.Tensor,
+    volume_mask: torch.Tensor,
+    *,
+    n_anchors: int,
+    k: int,
+    eps: float,
+    chunk_size: int,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Runtime k-NN gradient-consistency aux loss on the sampled volume cloud.
+
+    Inputs:
+        vol_xyz: (B, V, 3) volume-point coordinates from the sampled batch.
+        vol_pred: (B, V) predicted normalized volume pressure (autograd-tracked).
+        vol_target: (B, V) target normalized volume pressure.
+        volume_mask: (B, V) bool mask of valid (non-padded) points.
+
+    Pipeline:
+      1. Sample n_anchors valid anchor indices per batch element.
+      2. Chunked cdist + topk(k) over masked self/padded -> neighbor indices.
+      3. Gather neighbor pressures (pred and true) via batched gather.
+      4. Loss = mean( (dp_pred - dp_true)^2 / (dp_true^2 + eps^2) ).
+
+    Returns (loss_scalar, diagnostics_dict). When the batch lacks enough valid
+    points to form a k-NN graph, returns a zero scalar with autograd preserved
+    so the call site can still mix it into the total loss.
+    """
+    B, V, _ = vol_xyz.shape
+    device = vol_xyz.device
+
+    valid_mask = volume_mask.to(device=device, dtype=torch.bool)
+    valid_count_min = int(valid_mask.sum(dim=1).min().item())
+    if valid_count_min < (k + 1):
+        zero_loss = vol_pred.sum() * 0.0
+        return zero_loss, {
+            "vol_grad_cons/anchor_neighbor_dist_mean": 0.0,
+            "vol_grad_cons/anchor_neighbor_dist_max": 0.0,
+            "vol_grad_cons/anchor_neighbor_dist_min": 0.0,
+            "vol_grad_cons/n_anchors_eff": 0.0,
+            "vol_grad_cons/n_edges": 0.0,
+        }
+
+    n_anchors_eff = min(n_anchors, valid_count_min)
+
+    rand_score = torch.rand(B, V, device=device)
+    rand_score = torch.where(
+        valid_mask, rand_score, torch.full_like(rand_score, -1.0)
+    )
+    anchor_idx = rand_score.topk(n_anchors_eff, dim=1).indices  # (B, n_a)
+
+    anchor_xyz = torch.gather(
+        vol_xyz, 1, anchor_idx.unsqueeze(-1).expand(B, n_anchors_eff, 3)
+    )
+
+    chunk_size = max(1, min(chunk_size, n_anchors_eff))
+    topk_vals_chunks: list[torch.Tensor] = []
+    topk_idx_chunks: list[torch.Tensor] = []
+    for start in range(0, n_anchors_eff, chunk_size):
+        end = min(start + chunk_size, n_anchors_eff)
+        vals, idx = _vol_grad_cons_topk_chunk(
+            anchor_xyz[:, start:end],
+            vol_xyz,
+            valid_mask,
+            anchor_idx[:, start:end],
+            k,
+        )
+        topk_vals_chunks.append(vals)
+        topk_idx_chunks.append(idx)
+    topk_vals = torch.cat(topk_vals_chunks, dim=1)  # (B, n_a, k)
+    topk_idx = torch.cat(topk_idx_chunks, dim=1)
+
+    # Flatten for batched 1D gather; cast to fp32 for stable finite-difference.
+    pred = vol_pred.float()
+    target = vol_target.float()
+    topk_idx_flat = topk_idx.reshape(B, n_anchors_eff * k)
+    p_pred_nbrs = torch.gather(pred, 1, topk_idx_flat).reshape(B, n_anchors_eff, k)
+    p_true_nbrs = torch.gather(target, 1, topk_idx_flat).reshape(B, n_anchors_eff, k)
+    p_pred_anchor = torch.gather(pred, 1, anchor_idx)
+    p_true_anchor = torch.gather(target, 1, anchor_idx)
+
+    dp_pred = p_pred_nbrs - p_pred_anchor.unsqueeze(-1)
+    dp_true = p_true_nbrs - p_true_anchor.unsqueeze(-1)
+
+    denom = dp_true.square() + (eps * eps)
+    edge_loss = (dp_pred - dp_true).square() / denom
+    loss = edge_loss.mean()
+
+    diag = {
+        "vol_grad_cons/anchor_neighbor_dist_mean": float(topk_vals.mean().detach().cpu().item()),
+        "vol_grad_cons/anchor_neighbor_dist_max": float(topk_vals.max().detach().cpu().item()),
+        "vol_grad_cons/anchor_neighbor_dist_min": float(topk_vals.min().detach().cpu().item()),
+        "vol_grad_cons/n_anchors_eff": float(n_anchors_eff),
+        "vol_grad_cons/n_edges": float(B * n_anchors_eff * k),
+    }
+    return loss, diag
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,6 +473,12 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_grad_cons_lambda: float = 0.0,
+    vol_grad_cons_anchors: int = 4096,
+    vol_grad_cons_k: int = 8,
+    vol_grad_cons_eps: float = 0.01,
+    vol_grad_cons_chunk_size: int = 2048,
+    vol_grad_cons_active: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -335,13 +504,31 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if vol_grad_cons_active and vol_grad_cons_lambda > 0.0:
+        gc_loss, gc_metrics = vol_grad_consistency_loss(
+            batch.volume_x[..., :3],
+            out["volume_preds"][..., 0],
+            volume_target[..., 0],
+            batch.volume_mask,
+            n_anchors=vol_grad_cons_anchors,
+            k=vol_grad_cons_k,
+            eps=vol_grad_cons_eps,
+            chunk_size=vol_grad_cons_chunk_size,
+        )
+        weighted_gc = vol_grad_cons_lambda * gc_loss
+        loss = loss + weighted_gc
+        metrics["vol_grad_cons_loss"] = float(gc_loss.detach().cpu().item())
+        metrics["vol_grad_cons_loss_weighted"] = float(weighted_gc.detach().cpu().item())
+        for key, val in gc_metrics.items():
+            metrics[key] = val
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -705,6 +892,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
         max_epochs = min(requested_epochs, 3) if config.debug else requested_epochs
+        if config.use_gradnorm and config.vol_grad_cons_lambda > 0.0:
+            raise ValueError(
+                "--vol-grad-cons-lambda > 0 is currently incompatible with "
+                "--use-gradnorm. The aux gradient-consistency loss is wired "
+                "into train_loss; the GradNorm path uses per_task_train_losses. "
+                "Disable one of them."
+            )
         timeout_minutes, val_budget_minutes, train_timeout_minutes = timeout_budget_minutes()
         device = state.device
         if state.is_main:
@@ -999,6 +1193,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    vgc_active = (
+                        config.vol_grad_cons_lambda > 0.0
+                        and epoch >= config.vol_grad_cons_start_epoch
+                    )
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1008,6 +1206,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_grad_cons_lambda=config.vol_grad_cons_lambda,
+                        vol_grad_cons_anchors=config.vol_grad_cons_anchors,
+                        vol_grad_cons_k=config.vol_grad_cons_k,
+                        vol_grad_cons_eps=config.vol_grad_cons_eps,
+                        vol_grad_cons_chunk_size=config.vol_grad_cons_chunk_size,
+                        vol_grad_cons_active=vgc_active,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1252,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key in (
+                        "vol_grad_cons_loss",
+                        "vol_grad_cons_loss_weighted",
+                        "vol_grad_cons/anchor_neighbor_dist_mean",
+                        "vol_grad_cons/anchor_neighbor_dist_max",
+                        "vol_grad_cons/anchor_neighbor_dist_min",
+                        "vol_grad_cons/n_anchors_eff",
+                        "vol_grad_cons/n_edges",
+                    ):
+                        if key in batch_loss_metrics:
+                            log_key = key if key.startswith("vol_grad_cons/") else f"train/{key}"
+                            train_log[log_key] = batch_loss_metrics[key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
