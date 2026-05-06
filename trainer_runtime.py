@@ -865,6 +865,110 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+@torch.no_grad()
+def compute_surface_anchor(
+    vol_coords: torch.Tensor,
+    surf_coords: torch.Tensor,
+    surf_pressure_pred: torch.Tensor,
+    *,
+    surf_mask: torch.Tensor | None = None,
+    chunk_size: int = 4096,
+    dist_decay: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-volume-point surface-pressure anchor via chunked nearest-neighbor.
+
+    For each volume point, finds the nearest valid surface point (k=1, L2)
+    and gathers its predicted surface pressure as the anchor value. The
+    chunked scan over surface points keeps peak memory at
+    ``O(B * N_vol * chunk_size)`` instead of the ``O(B * N_vol * N_surf)``
+    a single cdist call would allocate.
+
+    Inputs:
+        vol_coords:          ``[B, N_vol, 3]`` raw-meter coordinates
+        surf_coords:         ``[B, N_surf, 3]`` raw-meter coordinates
+        surf_pressure_pred:  ``[B, N_surf, 1]`` predicted surface pressure
+                             (already detached/no-grad — gradients are not
+                             expected to flow through the anchor path)
+        surf_mask:           optional ``[B, N_surf]`` bool, ``True`` = valid.
+                             Padded points are excluded from NN selection by
+                             setting their distance to ``+inf``.
+        chunk_size:          surface-axis chunk for the cdist scan
+        dist_decay:          if > 0, scales the anchor by
+                             ``exp(-dist / dist_decay)`` so far-field volume
+                             points relax toward 0 (freestream in normalized
+                             space). 0 disables the decay.
+
+    Returns:
+        anchor_p: ``[B, N_vol, 1]`` per-volume-point anchor pressure
+        nn_dist:  ``[B, N_vol]`` L2 distance to nearest surface point
+    """
+    if vol_coords.shape[0] != surf_coords.shape[0]:
+        raise ValueError("vol_coords and surf_coords must share batch dim")
+    if surf_pressure_pred.shape[:2] != surf_coords.shape[:2]:
+        raise ValueError(
+            f"surf_pressure_pred shape {tuple(surf_pressure_pred.shape)} must "
+            f"match surf_coords first two dims {tuple(surf_coords.shape[:2])}"
+        )
+    if surf_pressure_pred.shape[-1] != 1:
+        raise ValueError(
+            f"surf_pressure_pred last dim must be 1, got {surf_pressure_pred.shape[-1]}"
+        )
+    surf_pressure_pred = surf_pressure_pred.detach()
+
+    B, N_vol, _ = vol_coords.shape
+    N_surf = surf_coords.shape[1]
+    device = vol_coords.device
+    chunk_size = max(1, int(chunk_size))
+
+    # Loader-driven edge cases: surface- or volume-empty batches arise
+    # whenever a case's modality view count differs (per program.md). With
+    # no surface points there is nothing to anchor on; with no volume
+    # points there is nothing to anchor for. In both cases the
+    # downstream volume loss is masked anyway, so a zero-anchor fallback
+    # leaves the standard absolute-mode loss path intact for the batch.
+    if N_surf == 0 or N_vol == 0:
+        anchor_p = torch.zeros((B, N_vol, 1), device=device, dtype=torch.float32)
+        nn_dist = torch.full((B, N_vol), float("inf"), device=device, dtype=torch.float32)
+        return anchor_p, nn_dist
+
+    # Run NN scan in fp32 with autocast disabled — cdist + min are
+    # geometry-only and don't benefit from bf16, and downstream gather
+    # needs a fully materialised contiguous source.
+    with torch.amp.autocast(device_type=device.type, enabled=False):
+        vol_f = vol_coords.detach().float().contiguous()
+        surf_f = surf_coords.detach().float().contiguous()
+        surf_p_f = surf_pressure_pred.float().contiguous()
+
+        best_dist = vol_f.new_full((B, N_vol), float("inf"))
+        best_idx = torch.zeros((B, N_vol), dtype=torch.long, device=device)
+
+        for start in range(0, N_surf, chunk_size):
+            end = min(start + chunk_size, N_surf)
+            surf_chunk = surf_f[:, start:end, :].contiguous()
+            dists = torch.cdist(vol_f, surf_chunk, p=2)
+            if surf_mask is not None:
+                chunk_mask = surf_mask[:, start:end].to(device=device).bool()
+                dists = dists.masked_fill(~chunk_mask.unsqueeze(1), float("inf"))
+            chunk_min, chunk_argmin = dists.min(dim=-1)
+            chunk_argmin_global = chunk_argmin + start
+            update = chunk_min < best_dist
+            best_dist = torch.where(update, chunk_min, best_dist)
+            best_idx = torch.where(update, chunk_argmin_global, best_idx)
+
+        # Advanced indexing avoids a Blackwell torch.gather kernel quirk
+        # that surfaces a "storage of size 0" error on the [B, N_vol, 1]
+        # output shape. surf_p_f is [B, N_surf, 1]; the indexed result is
+        # [B, N_vol, 1] (last dim preserved by integer-array indexing).
+        batch_idx = torch.arange(B, device=device).unsqueeze(-1).expand(B, N_vol)
+        anchor_p = surf_p_f[batch_idx, best_idx]
+
+        if dist_decay > 0.0:
+            decay_w = torch.exp(-best_dist / float(dist_decay)).unsqueeze(-1)
+            anchor_p = decay_w * anchor_p
+
+    return anchor_p.detach(), best_dist.detach()
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -955,6 +1059,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    vol_anchor_cfg: Mapping[str, object] | None = None,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -969,6 +1074,18 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    if vol_anchor_cfg is not None and bool(vol_anchor_cfg.get("enabled", False)):
+        anchor_p_norm, _ = compute_surface_anchor(
+            vol_coords=batch.volume_x[..., :3],
+            surf_coords=batch.surface_x[..., :3],
+            surf_pressure_pred=surface_pred_norm[..., 0:1],
+            surf_mask=batch.surface_mask,
+            chunk_size=int(vol_anchor_cfg.get("chunk_size", 4096)),
+            dist_decay=float(vol_anchor_cfg.get("dist_decay", 0.0)),
+        )
+        # Decoder output is interpreted as a residual; reconstruct absolute
+        # volume pressure prediction in normalized space before metrics.
+        volume_pred_norm = volume_pred_norm + anchor_p_norm
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
@@ -1121,6 +1238,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    vol_anchor_cfg: Mapping[str, object] | None = None,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1132,6 +1250,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            vol_anchor_cfg=vol_anchor_cfg,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1445,6 +1564,7 @@ def run_final_evaluation(
     n_params: int,
     global_step: int,
     total_minutes: float,
+    vol_anchor_cfg: Mapping[str, object] | None = None,
 ) -> None:
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model"])
@@ -1466,7 +1586,14 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            vol_anchor_cfg=vol_anchor_cfg,
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1486,7 +1613,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            vol_anchor_cfg=vol_anchor_cfg,
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

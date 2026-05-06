@@ -44,6 +44,7 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    compute_surface_anchor,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -137,6 +138,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_surface_anchor_residual: bool = False
+    vol_surface_anchor_use_ema: bool = False
+    vol_surface_anchor_dist_decay: float = 0.0
+    vol_surface_anchor_chunk_size: int = 4096
     debug: bool = False
 
 
@@ -219,6 +224,34 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_surface_anchor_residual": (
+            "Decompose the volume_pressure prediction as a per-point residual "
+            "from the nearest predicted surface pressure: "
+            "vol_p_pred(x) = surf_p_anchor(x) + decoder(x), where the anchor "
+            "is gathered from the predicted surface pressure at the nearest "
+            "(k=1, L2) surface point. The decoder is then trained on the "
+            "residual target (vol_target - anchor); at inference the anchor "
+            "is added back to recover absolute pressure. The anchor path is "
+            "no-grad — gradients do not flow back into the surface decoder."
+        ),
+        "vol_surface_anchor_use_ema": (
+            "Source the anchor surface pressure from a separate forward pass "
+            "with EMA weights (more stable than the online model's surf_p "
+            "during early training). Doubles per-step forward cost. At "
+            "validation/test the EMA weights are already swapped in by the "
+            "trainer, so the eval-time anchor is naturally EMA-smoothed "
+            "regardless of this flag."
+        ),
+        "vol_surface_anchor_dist_decay": (
+            "If > 0, multiply the anchor by exp(-nn_dist / decay) so far-field "
+            "volume points relax toward 0 (freestream in normalized space). "
+            "Default 0.0 disables decay (full anchor at all distances)."
+        ),
+        "vol_surface_anchor_chunk_size": (
+            "Surface-axis chunk size for the chunked nearest-neighbor scan. "
+            "Caps peak memory at O(B * N_vol * chunk_size * 4 bytes). Lower "
+            "to reduce VRAM pressure if needed."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +333,49 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def _resolve_anchor_target(
+    *,
+    batch,
+    surface_pred: torch.Tensor,
+    volume_target: torch.Tensor,
+    vol_anchor_cfg: dict | None,
+    surface_pred_for_anchor: torch.Tensor | None,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Adjust volume target into residual space (absolute - anchor) when enabled.
+
+    Returns the (possibly residual-shifted) volume_target tensor and a small
+    diagnostics dict (anchor mean / std / mean abs distance — recorded as
+    floats only if the anchor is actually applied).
+    """
+    diagnostics: dict[str, float] = {}
+    if vol_anchor_cfg is None or not vol_anchor_cfg.get("enabled", False):
+        return volume_target, diagnostics
+    anchor_src = (
+        surface_pred_for_anchor
+        if surface_pred_for_anchor is not None
+        else surface_pred[..., 0:1].detach().float()
+    )
+    anchor_p, nn_dist = compute_surface_anchor(
+        vol_coords=batch.volume_x[..., :3],
+        surf_coords=batch.surface_x[..., :3],
+        surf_pressure_pred=anchor_src,
+        surf_mask=batch.surface_mask,
+        chunk_size=int(vol_anchor_cfg.get("chunk_size", 4096)),
+        dist_decay=float(vol_anchor_cfg.get("dist_decay", 0.0)),
+    )
+    anchor_p = anchor_p.to(dtype=volume_target.dtype)
+    if bool(batch.volume_mask.any()):
+        valid = batch.volume_mask.bool()
+        anchor_valid = anchor_p[..., 0][valid]
+        dist_valid = nn_dist[valid]
+        diagnostics["vol_anchor/anchor_mean"] = float(anchor_valid.mean().detach().cpu().item())
+        diagnostics["vol_anchor/anchor_std"] = float(anchor_valid.std().detach().cpu().item())
+        diagnostics["vol_anchor/nn_dist_mean"] = float(dist_valid.mean().detach().cpu().item())
+        diagnostics["vol_anchor/nn_dist_max"] = float(dist_valid.max().detach().cpu().item())
+    residual_target = volume_target - anchor_p
+    return residual_target, diagnostics
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,6 +386,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_anchor_cfg: dict | None = None,
+    surface_pred_for_anchor: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -330,18 +408,27 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        volume_target_eff, anchor_diag = _resolve_anchor_target(
+            batch=batch,
+            surface_pred=out["surface_preds"],
+            volume_target=volume_target,
+            vol_anchor_cfg=vol_anchor_cfg,
+            surface_pred_for_anchor=surface_pred_for_anchor,
+        )
+        volume_loss = masked_mse(out["volume_preds"], volume_target_eff, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(anchor_diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -353,6 +440,9 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    vol_anchor_cfg: dict | None = None,
+    surface_pred_for_anchor: torch.Tensor | None = None,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -377,7 +467,14 @@ def per_task_train_losses(
         taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
         tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
         tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
-        vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        volume_target_eff, _ = _resolve_anchor_target(
+            batch=batch,
+            surface_pred=surface_pred,
+            volume_target=volume_target,
+            vol_anchor_cfg=vol_anchor_cfg,
+            surface_pred_for_anchor=surface_pred_for_anchor,
+        )
+        vp_loss = masked_mse(out["volume_preds"], volume_target_eff, batch.volume_mask)
     return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
 
 
@@ -575,6 +672,49 @@ class GradNormBalancer:
         with torch.no_grad():
             self.log_weights.clamp_(-self.log_clip, self.log_clip)
         return gradnorm_loss.detach()
+
+
+def compute_ema_anchor_surface_p(
+    *,
+    model: nn.Module,
+    base_model: nn.Module,
+    ema: "EMA",
+    batch,
+    device: torch.device,
+    amp_mode: str,
+) -> torch.Tensor:
+    """Forward pass with EMA weights swapped in to source the anchor.
+
+    Returns the EMA model's surface pressure prediction (channel 0) for the
+    given batch in normalized space, shape ``[B, N_surf, 1]``. Online weights
+    are restored before return so the rest of the training step uses the
+    in-progress optimizer state. The forward is no-grad and runs in eval mode
+    to skip any train-only stochasticity (e.g. dropout).
+    """
+    if ema is None:
+        raise ValueError(
+            "compute_ema_anchor_surface_p called without an EMA tracker; "
+            "--vol-surface-anchor-use-ema requires --use-ema (default)."
+        )
+    ema.store(base_model)
+    ema.copy_to(base_model)
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            with autocast_context(device, amp_mode):
+                out = model(
+                    surface_x=batch.surface_x,
+                    surface_mask=batch.surface_mask,
+                    volume_x=batch.volume_x,
+                    volume_mask=batch.volume_mask,
+                )
+        surf_p_ema = out["surface_preds"][..., 0:1].detach().float()
+    finally:
+        if was_training:
+            model.train()
+        ema.restore(base_model)
+    return surf_p_ema
 
 
 def synced_per_task_tensor(
@@ -810,6 +950,29 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"min_weight={config.gradnorm_min_weight}; "
                         f"closed-form weights from r_i = ema_loss_i / initial_loss_i"
                     )
+        if config.vol_surface_anchor_residual:
+            vol_anchor_cfg: dict | None = {
+                "enabled": True,
+                "chunk_size": int(config.vol_surface_anchor_chunk_size),
+                "dist_decay": float(config.vol_surface_anchor_dist_decay),
+                "use_ema": bool(config.vol_surface_anchor_use_ema),
+            }
+            if config.vol_surface_anchor_use_ema and ema is None:
+                raise ValueError(
+                    "--vol-surface-anchor-use-ema requires --use-ema (default true). "
+                    "EMA tracker is None — re-enable EMA or drop the flag."
+                )
+            if state.is_main:
+                print(
+                    "Vol surface-anchor residual ENABLED: "
+                    f"use_ema={vol_anchor_cfg['use_ema']} "
+                    f"dist_decay={vol_anchor_cfg['dist_decay']} "
+                    f"chunk_size={vol_anchor_cfg['chunk_size']} "
+                    "(decoder learns Δ = vol_target - nearest_surface_p)"
+                )
+        else:
+            vol_anchor_cfg = None
+
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -915,9 +1078,33 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                # Optionally source the anchor surface_p from a separate
+                # forward with EMA weights (Arm B). Computed once per batch
+                # and reused by both the GradNorm and standard loss paths.
+                surface_pred_for_anchor: torch.Tensor | None = None
+                if (
+                    vol_anchor_cfg is not None
+                    and bool(vol_anchor_cfg.get("use_ema", False))
+                    and ema is not None
+                ):
+                    batch_dev = batch.to(device)
+                    surface_pred_for_anchor = compute_ema_anchor_surface_p(
+                        model=model,
+                        base_model=base_model,
+                        ema=ema,
+                        batch=batch_dev,
+                        device=device,
+                        amp_mode=config.amp_mode,
+                    )
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        vol_anchor_cfg=vol_anchor_cfg,
+                        surface_pred_for_anchor=surface_pred_for_anchor,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1008,6 +1195,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_anchor_cfg=vol_anchor_cfg,
+                        surface_pred_for_anchor=surface_pred_for_anchor,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1237,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for k, v in batch_loss_metrics.items():
+                        if k.startswith("vol_anchor/"):
+                            train_log[f"train/{k}"] = v
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
@@ -1211,6 +1403,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        vol_anchor_cfg=vol_anchor_cfg,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1225,6 +1418,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    vol_anchor_cfg=vol_anchor_cfg,
                 )
                 for name, loader in val_loaders.items()
             }
@@ -1345,6 +1539,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             n_params=n_params,
             global_step=global_step,
             total_minutes=total_minutes,
+            vol_anchor_cfg=vol_anchor_cfg,
         )
         wandb.finish()
     finally:
