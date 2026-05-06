@@ -955,17 +955,30 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    g_cache: dict[str, torch.Tensor] | None = None,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
     volume_target_norm = transform.apply_volume(batch.volume_y)
     eval_module = unwrap_model(model)
+    g_override = None
+    if g_cache and getattr(eval_module, "vol_geom_film_enabled", False):
+        n_hidden = getattr(eval_module, "n_hidden")
+        g_list: list[torch.Tensor] = []
+        for case_id in batch.case_ids:
+            cached = g_cache.get(case_id)
+            if cached is not None:
+                g_list.append(cached.to(device=device, dtype=torch.float32))
+            else:
+                g_list.append(torch.zeros(n_hidden, device=device, dtype=torch.float32))
+        g_override = torch.stack(g_list, dim=0)
     with autocast_context(device, amp_mode):
         out = eval_module(
             surface_x=batch.surface_x,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            g_override=g_override,
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
@@ -1113,6 +1126,85 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
 
 
 @torch.no_grad()
+def compute_eval_g_cache(
+    model: nn.Module,
+    loader,
+    device: torch.device,
+    *,
+    amp_mode: str = "none",
+    distributed_state: DistributedState | None = None,
+) -> dict[str, torch.Tensor]:
+    """Pre-compute per-case surface latent g for FiLM-conditioned eval.
+
+    During eval, most volume chunks have empty surface tensors (because
+    DrivAerML cases have ~30M volume points vs ~700k surface points, so
+    volume_views >> surface_views). Without this pre-pass, ~98% of volume
+    eval predictions would skip FiLM and use the unconditioned baseline,
+    causing a train/eval mismatch.
+
+    This helper iterates the loader once, runs surface-only forwards on
+    surface-present batches, computes g via masked mean pool over
+    surface_hidden, and accumulates a running mean per case_id. Cross-rank
+    aggregation guarantees every rank ends up with the same complete cache.
+    """
+    eval_module = unwrap_model(model)
+    if not getattr(eval_module, "vol_geom_film_enabled", False):
+        return {}
+    model.eval()
+    g_sum: dict[str, torch.Tensor] = {}
+    g_count: dict[str, int] = {}
+    for batch in loader:
+        if batch.surface_x.shape[1] == 0 or not bool(batch.surface_mask.any()):
+            continue
+        batch = batch.to(device)
+        with autocast_context(device, amp_mode):
+            out = eval_module(
+                surface_x=batch.surface_x,
+                surface_mask=batch.surface_mask,
+                volume_x=batch.volume_x,
+                volume_mask=batch.volume_mask,
+            )
+        surface_hidden = out["surface_hidden"].float()
+        mask_f = batch.surface_mask.unsqueeze(-1).float()
+        masked_sum = (surface_hidden * mask_f).sum(dim=1)
+        masked_count = mask_f.sum(dim=1).clamp(min=1.0)
+        g = (masked_sum / masked_count).detach().cpu()
+        for i, case_id in enumerate(batch.case_ids):
+            if not bool(batch.surface_mask[i].any()):
+                continue
+            if case_id not in g_sum:
+                g_sum[case_id] = g[i].clone()
+                g_count[case_id] = 1
+            else:
+                g_sum[case_id] = g_sum[case_id] + g[i]
+                g_count[case_id] = g_count[case_id] + 1
+    if distributed_state is not None and distributed_state.enabled:
+        gathered: list[tuple[dict[str, torch.Tensor], dict[str, int]] | None] = [
+            None for _ in range(distributed_state.world_size)
+        ]
+        dist.all_gather_object(gathered, (g_sum, g_count))
+        merged_sum: dict[str, torch.Tensor] = {}
+        merged_count: dict[str, int] = {}
+        for partial in gathered:
+            if partial is None:
+                continue
+            ps, pc = partial
+            for case_id, value in ps.items():
+                if case_id not in merged_sum:
+                    merged_sum[case_id] = value.clone()
+                    merged_count[case_id] = pc[case_id]
+                else:
+                    merged_sum[case_id] = merged_sum[case_id] + value
+                    merged_count[case_id] = merged_count[case_id] + pc[case_id]
+        g_sum = merged_sum
+        g_count = merged_count
+    return {
+        case_id: g_sum[case_id] / max(g_count[case_id], 1)
+        for case_id in g_sum
+    }
+
+
+@torch.no_grad()
 def evaluate_split(
     model: nn.Module,
     loader,
@@ -1122,6 +1214,13 @@ def evaluate_split(
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
 ) -> dict[str, float]:
+    g_cache = compute_eval_g_cache(
+        model,
+        loader,
+        device,
+        amp_mode=amp_mode,
+        distributed_state=distributed_state,
+    )
     model.eval()
     accumulator = EvalAccumulator()
     for batch in loader:
@@ -1132,6 +1231,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            g_cache=g_cache,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
