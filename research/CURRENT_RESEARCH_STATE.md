@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~05:30 UTC)
+- 2026-05-06 (updated ~08:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,14 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-05 ~05:30 UTC)
+### Active Experiments (as of 2026-05-06 ~08:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP8=6.7249%** (sp=4.42%, tau_x=6.60%, tau_y=8.41%, tau_z=10.31%, vol_p=3.99%). 0.197pp from SOTA. EP9 in progress (~47% done). Advisor check-in posted. Strong trajectory — candidate for new SOTA by EP15. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP16=6.6890% (best), EP17=7.2835% (Cycle 5 spike)**. C4 trough 6.689% cleared in-wave val target. Cycle pattern confirmed: C1 trough EP4=7.654%, C2 trough EP7=7.150%, C4 trough EP12-16 monotonic 6.848%→6.689%. EP17 spike is expected oscillation — best checkpoint preserved at EP16. EP18 projected trough ~6.63–6.67% (potential new best). Advisor: DO NOT KILL, continuing to EP20. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP8=6.7249%** (sp=4.42%, tau_x=6.60%, tau_y=8.41%, tau_z=10.31%, vol_p=3.99%). 0.197pp above in-wave SOTA val. Monotonic descent EP3→EP8. Advisor projection: EP10~6.64%, EP15~6.55%, EP20~6.50%. Continue to EP20; test eval at EP20 or first best past EP15. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP16=6.6890% (best), EP17=7.2835% (Cycle 5 spike)**. C4 trough cleared in-wave val target (previously 6.6916%). Five-epoch monotonic descent EP12→EP16. EP17 spike is expected C5 oscillation — EMA preserves EP16. EP18 projected C5 trough ~6.63–6.67% (potential new best). Advisor: DO NOT KILL, continuing to EP20. |
 | #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `em8bnk1a`; Arm B: `5x8wofzm` | **v2 restart at EP2**: Arm A=7.5078%, Arm B=7.4012% (0.107pp gap). Perfect 4 d.p. reproducibility from v1. GradNorm weights healthy: tau_z upweighted 2.94× (α=1.0) and 2.11× (α=0.5). EP3 in progress. EP5 will be first decision point. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP13=6.9902%** — first sub-7.0%. Monotonic descent EP7–EP13 (~0.02pp/epoch). Stable control run confirming baseline recipe. EP15 projected ~6.946%, EP20 ~6.846%. Advisor check-in posted. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP15=6.9511%** — gate ≤7.5% PASSED (by 0.55pp). Monotonic descent EP7–EP15 (~0.01-0.02pp/epoch). 0.4230pp above SOTA val_best 6.5281%. EP20 projected ~6.85-6.90%. Advisor check-in posted EP13. |
 
 ### Closed / Negative Results This Wave
 
@@ -57,13 +57,13 @@
 
 ## Research Themes and Open Questions
 
-1. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** v2 at EP3=7.3245% is on healthy trajectory. EP5 gate will clear; EP10 target is 6.7-6.8%. v1 showed EP6=6.842% (best ever for frieren). Continuing to see if v2 reproduces.
+1. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** EP8=6.7249% — smoothest monotonic descent in current wave (EP3→EP8). 0.197pp above in-wave SOTA val (nezuko EP16=6.6890%). Advisor projection: EP10~6.64%, EP12~6.60%, EP15~6.55%, EP20~6.50% (potential new merged SOTA). Strongest trajectory candidate in the wave; EP20 test eval mandatory.
 
-2. **Does y-symmetry augmentation push below SOTA? (nezuko #741)** C3 trough EP12=6.8483% significantly exceeded predictions (was 7.15-7.18%). Cycle amplitude is growing: ΔC1→C2=0.41%, ΔC2→C3=0.39%. If C4 delivers similar gain, EP15-16 could hit ~6.50% — at or below SOTA 6.5281%. Y-sym is a powerful regularizer on DrivaerML.
+2. **Does y-symmetry augmentation push below SOTA? (nezuko #741)** C4 trough EP16=6.6890% — cleared in-wave val target 6.6916%. Five-epoch monotonic descent EP12→EP16. EP17=7.2835% C5 spike (expected oscillation pattern). C5 trough projected EP18=6.63–6.67% (potential new in-wave best). Y-sym is a powerful regularizer on DrivaerML; best not to kill, EMA at EP16.
 
 3. **Does fern (GradNorm α=0.5) recover after crash? (#740 URGENT)** Both arms died at EP5. Arm B (6.7438%) must be relaunched. This is critical — wave best trajectory killed at EP5 of a 24h run.
 
-4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP9=7.0923% — stable improvement, deceleration noted (EP7→8→9: -0.04%/-0.02%). May plateau around 7.0-7.05% unless LR schedule has further decay to apply.
+4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP15=6.9511% — gate ≤7.5% PASSED by 0.55pp. Steady monotonic descent EP7→EP15 at ~0.01-0.02pp/epoch. 0.4230pp above SOTA val_best. May plateau around 6.85-6.90% by EP20; improvement rate is decelerating slightly.
 
 6. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Current candidates: GradNorm (#740), y-symmetry (#741), Region-VP (#737), Volume MLP head (unassigned).
 
