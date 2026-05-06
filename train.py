@@ -112,6 +112,9 @@ class Config:
     use_ema: bool = True
     ema_decay: float = 0.999
     ema_start_step: int = 50
+    ema_decay_schedule: str = "fixed"
+    ema_decay_start: float = 0.99
+    ema_decay_end: float = 0.9999
     eval_raw_vs_ema: bool = False
     lr_warmup_epochs: int = 0
     lr_cosine_t_max: int = 0
@@ -150,6 +153,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "separate checks. STEP is a global optimizer step and METRIC must match "
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
+        ),
+        "ema_decay_schedule": (
+            "EMA decay scheduling mode. 'fixed' (default) uses --ema-decay "
+            "as a constant for the whole run, preserving previous behavior. "
+            "'cosine_anneal' interpolates from --ema-decay-start at step 0 "
+            "to --ema-decay-end at the final step using a cosine ramp: "
+            "ema_decay_t = end + 0.5 * (start - end) * (1 + cos(pi * t)) "
+            "with t = clamp(global_step / (epochs * steps_per_epoch), 0, 1). "
+            "Cai et al. 2021 / Karras et al. 2024 motivation: low decay "
+            "early (track moving weights) -> high decay late (Polyak-style "
+            "averaging). When 'cosine_anneal', --ema-decay is ignored."
+        ),
+        "ema_decay_start": (
+            "Initial EMA decay at training step 0 when "
+            "--ema-decay-schedule=cosine_anneal. Default 0.99 = aggressive "
+            "tracking of fast-moving early weights."
+        ),
+        "ema_decay_end": (
+            "Final EMA decay at the last training step when "
+            "--ema-decay-schedule=cosine_anneal. Default 0.9999 = long "
+            "Polyak-style averaging window for late-stage refinement."
         ),
         "vol_points_schedule": (
             "Optional epoch-based curriculum for the train-volume-points view "
@@ -230,7 +254,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    config = Config(**vars(namespace))
+    if config.ema_decay_schedule not in EMA_DECAY_SCHEDULES:
+        raise ValueError(
+            f"--ema-decay-schedule must be one of {EMA_DECAY_SCHEDULES}, "
+            f"got {config.ema_decay_schedule!r}."
+        )
+    if config.ema_decay_schedule == "cosine_anneal":
+        if not 0.0 < config.ema_decay_start < 1.0:
+            raise ValueError(
+                f"--ema-decay-start must be in (0, 1), got {config.ema_decay_start}."
+            )
+        if not 0.0 < config.ema_decay_end < 1.0:
+            raise ValueError(
+                f"--ema-decay-end must be in (0, 1), got {config.ema_decay_end}."
+            )
+    return config
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -382,6 +421,23 @@ def per_task_train_losses(
 
 
 GRADNORM_MODES = ("full", "ema_proxy")
+
+
+EMA_DECAY_SCHEDULES = ("fixed", "cosine_anneal")
+
+
+def cosine_anneal_ema_decay(
+    global_step: int, total_steps: int, decay_start: float, decay_end: float
+) -> float:
+    """Cosine ramp from `decay_start` (t=0) to `decay_end` (t=1).
+
+    ema_decay_t = decay_end + 0.5 * (decay_start - decay_end) * (1 + cos(pi * t))
+    t = clamp(global_step / total_steps, 0, 1).
+    """
+    if total_steps <= 0:
+        return float(decay_end)
+    t = max(0.0, min(1.0, float(global_step) / float(total_steps)))
+    return float(decay_end + 0.5 * (decay_start - decay_end) * (1.0 + math.cos(math.pi * t)))
 
 
 class GradNormBalancer:
@@ -761,6 +817,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        if state.is_main and config.use_ema:
+            if config.ema_decay_schedule == "cosine_anneal":
+                print(
+                    f"EMA decay schedule=cosine_anneal: "
+                    f"start={config.ema_decay_start} -> end={config.ema_decay_end} "
+                    f"over total_steps=epochs*steps_per_epoch (--ema-decay ignored)."
+                )
+            else:
+                print(f"EMA decay schedule=fixed at {config.ema_decay}.")
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
@@ -1027,6 +1092,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     and config.weight_log_every > 0
                     and global_step % config.weight_log_every == 0
                 )
+                if config.use_ema and config.ema_decay_schedule == "cosine_anneal":
+                    ema_decay_current = cosine_anneal_ema_decay(
+                        global_step=global_step,
+                        total_steps=total_estimated_steps,
+                        decay_start=config.ema_decay_start,
+                        decay_end=config.ema_decay_end,
+                    )
+                else:
+                    ema_decay_current = float(config.ema_decay)
                 train_log: dict[str, object] = {
                     "global_step": global_step,
                     "train/lr": current_lr,
@@ -1034,6 +1108,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/ema_decay_current": ema_decay_current,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
@@ -1091,6 +1166,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     else:
                         optimizer.step()
                         if ema is not None:
+                            ema.decay = ema_decay_current
                             ema.update(base_model)
                         weight_metrics = (
                             collect_weight_metrics(
