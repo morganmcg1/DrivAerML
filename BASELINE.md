@@ -60,6 +60,6 @@ In-wave val target: **6.4161%** (PR #740 fern, EP15, run `5x8wofzm`) — updated
 | #740 Arm B | `5x8wofzm` | fern | EP15 (best) | **6.4161%** | GradNorm α=0.5; steps_per_epoch=10987; EP15=6.4161% **WAVE LEADER** (−0.112pp below pre-wave SOTA val 6.5281%); EP16 regression vol-dominated (vp: 3.91%→4.42%); GradNorm self-correcting; EP17 recovery expected |
 | #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; EP33=6.4984%; steps_per_epoch=5489; C9 spike at EP39=6.8352%, EP40 partial recovery to 6.5532%; EP41-43 recovery window |
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; EP30=6.5097%; steps_per_epoch=5494; EP32=6.5229% uniform drift at LR floor; wsz bottleneck at 10.06% |
-| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; EP27=6.8479%; steps_per_epoch=5494; complete plateau EP35-44 within 6.8479-6.8659%; ~6 epochs to EP50 auto-test-eval |
+| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; EP27=6.8479%; steps_per_epoch=5494; complete plateau EP35-47 within 6.8479-6.8700%; ~2.8 epochs to EP50 auto-test-eval; terminal imminent |
 
-_Last updated: 2026-05-05 (epoch-boundary W&B scan, EP40 nezuko / EP32 frieren / EP44 tanjiro / EP16.24 fern)_
+_Last updated: 2026-05-05 (epoch-boundary W&B scan, EP43 nezuko / EP35 frieren / EP47 tanjiro / EP17.54 fern)_
