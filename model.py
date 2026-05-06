@@ -324,9 +324,16 @@ class VolGeomFilm(nn.Module):
     """FiLM modulation for volume tokens conditioned on a global surface latent.
 
     Applies ``vol' = gamma(g) * vol + beta(g)`` where ``g`` is a B x D global
-    surface geometry embedding. Initialised to identity (gamma=1, beta=0) so
-    that the first-step output equals the input and the model can recover the
-    baseline at any time during optimisation.
+    surface geometry embedding.
+
+    v2 — bounded tanh modulation:
+      gamma = 1 + tanh(gamma_proj(g))  in (0, 2)
+      beta  = tanh(beta_proj(g))        in (-1, 1)
+
+    Both projections are fully zero-initialised (weight and bias). Since
+    tanh(0) = 0, at initialisation gamma = 1 and beta = 0, preserving the
+    identity transform without requiring a bias=1 hack. The tanh bounds prevent
+    the unbounded gamma deviation seen in v1 (±4.7× by epoch 1).
 
     Reference: Perez et al. 2018, "FiLM: Visual Reasoning with a General
     Conditioning Layer" (https://arxiv.org/abs/1709.07871).
@@ -337,16 +344,18 @@ class VolGeomFilm(nn.Module):
         self.hidden_dim = hidden_dim
         self.gamma_proj = nn.Linear(hidden_dim, hidden_dim)
         self.beta_proj = nn.Linear(hidden_dim, hidden_dim)
+        # Full zero-init: tanh(0)=0 => gamma=1+0=1, beta=0 at step 0 (identity).
         nn.init.zeros_(self.gamma_proj.weight)
-        nn.init.ones_(self.gamma_proj.bias)
+        nn.init.zeros_(self.gamma_proj.bias)
         nn.init.zeros_(self.beta_proj.weight)
         nn.init.zeros_(self.beta_proj.bias)
 
     def forward(
         self, vol_tokens: torch.Tensor, g: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        gamma = self.gamma_proj(g).unsqueeze(1)
-        beta = self.beta_proj(g).unsqueeze(1)
+        # gamma in (0, 2); beta in (-1, 1)
+        gamma = 1.0 + torch.tanh(self.gamma_proj(g).unsqueeze(1))  # B × 1 × D
+        beta = torch.tanh(self.beta_proj(g).unsqueeze(1))            # B × 1 × D
         out = gamma * vol_tokens + beta
         return out, gamma.squeeze(1), beta.squeeze(1)
 
@@ -374,6 +383,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         vol_geom_film: bool = False,
+        vol_geom_film_start_epoch: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -456,6 +466,10 @@ class SurfaceTransolver(nn.Module):
         self.n_hidden = n_hidden
         self.vol_geom_film_enabled = vol_geom_film
         self.vol_geom_film = VolGeomFilm(n_hidden) if vol_geom_film else None
+        self.vol_geom_film_start_epoch = vol_geom_film_start_epoch
+        # Set by the training loop at the start of each epoch via
+        # ``base_model._current_epoch = epoch``. Used to gate delayed FiLM onset.
+        self._current_epoch: int = 0
 
     def _encode_group(
         self,
@@ -545,14 +559,21 @@ class SurfaceTransolver(nn.Module):
 
         diagnostics: dict[str, torch.Tensor] = {}
         surface_g_out: torch.Tensor | None = None
-        # Always run FiLM when volume tokens are present so that gamma/beta
-        # parameters are exercised on every iteration (DDP requires this with
-        # find_unused_parameters=False; without an unconditional path the
-        # FiLM proj weights become stale on volume-only batches).
+        # Delayed FiLM onset: bypass FiLM entirely (identity passthrough) for
+        # epochs before vol_geom_film_start_epoch. This lets the backbone
+        # stabilise during the low-volume-point early curriculum epochs (0-5)
+        # and fires FiLM only when the 49k-point representation is available
+        # (epoch 6+ per the default vol-points schedule).
+        film_active = self._current_epoch >= self.vol_geom_film_start_epoch
+        if self.vol_geom_film is not None and volume_x is not None and volume_tokens > 0:
+            diagnostics["vol_geom_film/film_active"] = torch.tensor(
+                1.0 if film_active else 0.0
+            )
         if (
             self.vol_geom_film is not None
             and volume_x is not None
             and volume_tokens > 0
+            and film_active
         ):
             # Resolution order: live surface latent (with grads back to surface
             # encoder) -> cached g_override (no grads) -> zero fallback (cold
