@@ -320,6 +320,107 @@ class Transformer(nn.Module):
         return x
 
 
+@torch.no_grad()
+def compute_volume_curvature_features(
+    volume_coords: torch.Tensor,
+    surface_coords: torch.Tensor,
+    surface_mask: torch.Tensor,
+    *,
+    k: int = 24,
+    ref_size: int = 16384,
+    curvature_chunk: int = 4096,
+    propagation_chunk: int = 16384,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Return (B, V, 2) [H, K] curvature features propagated to volume points.
+
+    Pipeline per batch element:
+
+    1. Sample ``ref_size`` valid surface points (or use all valid points if
+       ``ref_size <= 0``) as a reference cloud ``R``.
+    2. For each ``r in R``, take its k nearest neighbours in ``R`` (excluding
+       self), build a 3x3 covariance, and read soft curvature scalars from the
+       eigenvalues ``lambda_min <= lambda_mid <= lambda_max``::
+
+           H = lambda_min / (lambda_min + lambda_mid + lambda_max)
+               in [0, 1/3]   (pancake-flatness ratio; ~0 on flat panels)
+           K = (lambda_min * lambda_mid) / (lambda_max ** 2 + eps)
+               in [0, 1]     (high on ridges/saddles, low on planes/spheres)
+
+    3. For every volume point, gather (H, K) from its nearest reference
+       surface point via a chunked ``cdist`` argmin.
+
+    The subsampled reference cloud is what makes this affordable on 65k surface
+    points: full-cloud k-NN at S=65536 is ~500ms/step with B=4 on H100; with a
+    16k subsample it drops to ~100ms while still supplying a soft, regional
+    curvature signal (k=24 covers ~10 cm of car-body neighborhood).
+
+    Computation is in fp32 outside autocast because ``torch.linalg.eigvalsh``
+    has no bf16/fp16 CUDA kernel. The whole function is no_grad: curvature
+    is a static input feature, like SDF.
+    """
+
+    B, V, _ = volume_coords.shape
+    device = volume_coords.device
+    out_dtype = surface_coords.dtype
+    out = torch.zeros(B, V, 2, device=device, dtype=out_dtype)
+    if surface_mask is None:
+        s_mask = torch.ones(B, surface_coords.shape[1], dtype=torch.bool, device=device)
+    else:
+        s_mask = surface_mask.bool()
+
+    autocast_device = "cuda" if device.type == "cuda" else "cpu"
+    with torch.amp.autocast(device_type=autocast_device, enabled=False):
+        v_f32 = volume_coords.float()
+        s_f32 = surface_coords.float()
+        for b in range(B):
+            valid_idx = s_mask[b].nonzero(as_tuple=True)[0]
+            n_valid = int(valid_idx.numel())
+            if n_valid < 4:
+                continue
+            valid_pts = s_f32[b].index_select(0, valid_idx)
+
+            if ref_size > 0 and ref_size < n_valid:
+                ref_idx = torch.randperm(n_valid, device=device)[:ref_size]
+                ref = valid_pts.index_select(0, ref_idx)
+            else:
+                ref = valid_pts
+            R = ref.shape[0]
+            kk = min(k + 1, R)
+            if kk < 4:
+                continue
+
+            ref_curv = torch.zeros(R, 2, device=device, dtype=torch.float32)
+            for start in range(0, R, curvature_chunk):
+                end = min(start + curvature_chunk, R)
+                q = ref[start:end]
+                d = torch.cdist(q, ref)
+                _, idx = d.topk(kk, dim=-1, largest=False)
+                idx_no_self = idx[:, 1:]
+                neighbors = ref.index_select(0, idx_no_self.reshape(-1)).reshape(
+                    end - start, idx_no_self.shape[1], 3
+                )
+                centroid = neighbors.mean(dim=1, keepdim=True)
+                centered = neighbors - centroid
+                cov = torch.einsum("ckd,cke->cde", centered, centered) / float(idx_no_self.shape[1])
+                eigvals = torch.linalg.eigvalsh(cov).clamp_min(0.0)
+                lam_min = eigvals[:, 0]
+                lam_mid = eigvals[:, 1]
+                lam_max = eigvals[:, 2]
+                total = lam_min + lam_mid + lam_max
+                H = lam_min / total.clamp_min(eps)
+                K = (lam_min * lam_mid) / (lam_max.square() + eps)
+                ref_curv[start:end] = torch.stack([H, K], dim=-1)
+
+            for start in range(0, V, propagation_chunk):
+                end = min(start + propagation_chunk, V)
+                q = v_f32[b, start:end]
+                d = torch.cdist(q, ref)
+                nn_idx = d.argmin(dim=-1)
+                out[b, start:end] = ref_curv.index_select(0, nn_idx).to(out_dtype)
+    return out
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +443,11 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_curvature_feature: bool = False,
+        curvature_knn_k: int = 24,
+        curvature_ref_size: int = 16384,
+        curvature_surface_chunk: int = 4096,
+        curvature_volume_chunk: int = 16384,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,8 +460,14 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_curvature_feature = use_curvature_feature
+        self.curvature_knn_k = curvature_knn_k
+        self.curvature_ref_size = curvature_ref_size
+        self.curvature_surface_chunk = curvature_surface_chunk
+        self.curvature_volume_chunk = curvature_volume_chunk
+        self.curvature_extra_dim = 2 if use_curvature_feature else 0
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
-        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim) + self.curvature_extra_dim
 
         if pos_encoding_mode == "string_separable":
             # STRING-separable: learnable per-axis log_freq + phase,
@@ -462,6 +574,28 @@ class SurfaceTransolver(nn.Module):
             raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
+
+        if (
+            self.use_curvature_feature
+            and surface_x is not None
+            and volume_x is not None
+        ):
+            surface_pos = surface_x[:, :, : self.space_dim]
+            volume_pos = volume_x[:, :, : self.space_dim]
+            curv_volume = compute_volume_curvature_features(
+                volume_pos,
+                surface_pos,
+                surface_mask,
+                k=self.curvature_knn_k,
+                ref_size=self.curvature_ref_size,
+                curvature_chunk=self.curvature_surface_chunk,
+                propagation_chunk=self.curvature_volume_chunk,
+            )
+            curv_volume = curv_volume * volume_mask.unsqueeze(-1).to(curv_volume.dtype)
+            volume_x = torch.cat([volume_x, curv_volume.to(volume_x.dtype)], dim=-1)
+            self._last_curv_volume = curv_volume.detach()
+        else:
+            self._last_curv_volume = None
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []

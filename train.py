@@ -102,6 +102,11 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_curvature_feature: bool = False
+    curvature_knn_k: int = 24
+    curvature_ref_size: int = 16384
+    curvature_surface_chunk: int = 4096
+    curvature_volume_chunk: int = 16384
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -297,6 +302,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_curvature_feature=config.use_curvature_feature,
+        curvature_knn_k=config.curvature_knn_k,
+        curvature_ref_size=config.curvature_ref_size,
+        curvature_surface_chunk=config.curvature_surface_chunk,
+        curvature_volume_chunk=config.curvature_volume_chunk,
     )
 
 
@@ -335,12 +345,42 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+    }
+    metrics.update(collect_curvature_metrics(model, batch.volume_mask))
+    return loss, metrics
+
+
+def collect_curvature_metrics(
+    model: nn.Module,
+    volume_mask: torch.Tensor | None,
+) -> dict[str, float]:
+    base = unwrap_model(model)
+    curv = getattr(base, "_last_curv_volume", None)
+    if curv is None:
+        return {}
+    if volume_mask is None:
+        H_mean = float(curv[..., 0].mean().detach().cpu().item())
+        K_mean = float(curv[..., 1].mean().detach().cpu().item())
+        H_max = float(curv[..., 0].max().detach().cpu().item())
+        K_max = float(curv[..., 1].max().detach().cpu().item())
+    else:
+        m = volume_mask.bool()
+        valid = curv[m]
+        H_mean = float(valid[..., 0].mean().detach().cpu().item()) if valid.numel() else 0.0
+        K_mean = float(valid[..., 1].mean().detach().cpu().item()) if valid.numel() else 0.0
+        H_max = float(valid[..., 0].max().detach().cpu().item()) if valid.numel() else 0.0
+        K_max = float(valid[..., 1].max().detach().cpu().item()) if valid.numel() else 0.0
+    return {
+        "train/curv_H_mean": H_mean,
+        "train/curv_K_mean": K_mean,
+        "train/curv_H_max": H_max,
+        "train/curv_K_max": K_max,
     }
 
 
@@ -861,6 +901,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/use_curvature_feature"] = bool(config.use_curvature_feature)
+            if config.use_curvature_feature:
+                wandb.summary["model/curvature_knn_k"] = int(config.curvature_knn_k)
+                wandb.summary["model/curvature_ref_size"] = int(config.curvature_ref_size)
+                wandb.summary["model/curvature_surface_chunk"] = int(config.curvature_surface_chunk)
+                wandb.summary["model/curvature_volume_chunk"] = int(config.curvature_volume_chunk)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1048,6 +1094,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for k_name in (
+                        "train/curv_H_mean",
+                        "train/curv_K_mean",
+                        "train/curv_H_max",
+                        "train/curv_K_max",
+                    ):
+                        if k_name in batch_loss_metrics:
+                            train_log[k_name] = batch_loss_metrics[k_name]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
