@@ -37,13 +37,16 @@ from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
+    StratifiedVolumeDataset,
     TargetTransform,
+    VOL_POINT_EMPHASIS_MODES,
     autocast_context,
     build_lr_scheduler,
     check_kill_thresholds,
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    compute_train_split_sdf_stats,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -129,6 +132,9 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    vol_point_emphasis: str = "none"
+    vol_emphasis_near_frac: float = 0.25
+    vol_emphasis_near_thresh: float = 0.30
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -159,6 +165,33 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "vol_point_emphasis": (
+            "Volume-point sampling emphasis mode for training. 'none' "
+            "(default) is uniform-random sampling over each case's full "
+            "volume mesh. 'geometric_distance' partitions volume points "
+            "into 'near' (sdf<=near_thresh) and 'far' strata using the "
+            "precomputed `volume_sdf.npy` channel and draws "
+            "round(N*near_frac) from near + remainder from far without "
+            "replacement. The DrivAerML watertight CFD mesh is heavily "
+            "concentrated near the surface (~91%% of points within 0.30m), "
+            "so loader-level stratification is required to actually "
+            "achieve the desired near/far ratio (batch-level stratifying "
+            "after a uniform 65k loader sample would degenerate to "
+            "uniform). Eval/test sampling is unchanged."
+        ),
+        "vol_emphasis_near_frac": (
+            "Fraction of volume points to draw from the near stratum "
+            "(sdf<=near_thresh) when --vol-point-emphasis is "
+            "'geometric_distance'. Default 0.25 => 25%% near / 75%% far per "
+            "case per view. Ignored when --vol-point-emphasis is 'none'."
+        ),
+        "vol_emphasis_near_thresh": (
+            "SDF threshold (m) defining the near/far split when "
+            "--vol-point-emphasis is 'geometric_distance'. Negative SDF "
+            "values are clamped to 0 (interior points are treated as "
+            "at the surface). Default 0.30. Ignored when "
+            "--vol-point-emphasis is 'none'."
         ),
         "use_gradnorm": (
             "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
@@ -230,7 +263,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    config = Config(**vars(namespace))
+    if config.vol_point_emphasis not in VOL_POINT_EMPHASIS_MODES:
+        raise ValueError(
+            f"--vol-point-emphasis must be one of {VOL_POINT_EMPHASIS_MODES}; "
+            f"got {config.vol_point_emphasis!r}"
+        )
+    if config.vol_point_emphasis == "geometric_distance":
+        if not (0.0 < config.vol_emphasis_near_frac < 1.0):
+            raise ValueError(
+                "--vol-emphasis-near-frac must be in (0, 1); got "
+                f"{config.vol_emphasis_near_frac}"
+            )
+        if config.vol_emphasis_near_thresh <= 0.0:
+            raise ValueError(
+                "--vol-emphasis-near-thresh must be positive; got "
+                f"{config.vol_emphasis_near_thresh}"
+            )
+    return config
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -594,6 +644,33 @@ def synced_per_task_tensor(
     return stacked
 
 
+def compute_vol_emphasis_diagnostics(
+    batch,
+    *,
+    near_thresh: float,
+) -> dict[str, float]:
+    """Per-step diagnostics on the loaded batch's SDF distribution."""
+    sdf_vals = batch.volume_x[..., 3].clamp(min=0.0)
+    valid_mask = batch.volume_mask.bool()
+    sdf_valid = sdf_vals[valid_mask].detach().float()
+    if sdf_valid.numel() == 0:
+        return {}
+    near_count = int((sdf_valid <= near_thresh).sum().item())
+    far_count = int(sdf_valid.numel()) - near_count
+    total = max(near_count + far_count, 1)
+    p50 = float(sdf_valid.quantile(0.5).item())
+    p95 = float(sdf_valid.quantile(0.95).item())
+    return {
+        "vol_emphasis/near_count": float(near_count),
+        "vol_emphasis/far_count": float(far_count),
+        "vol_emphasis/near_frac_actual": float(near_count) / float(total),
+        "vol_emphasis/sdf_min": float(sdf_valid.min().item()),
+        "vol_emphasis/sdf_max": float(sdf_valid.max().item()),
+        "vol_emphasis/sdf_p50": p50,
+        "vol_emphasis/sdf_p95": p95,
+    }
+
+
 def parse_vol_points_schedule(text: str) -> list[tuple[int, int]]:
     if not text:
         return []
@@ -666,13 +743,24 @@ def rebuild_train_loader_with_vol_points(
     sampling_mode = (
         "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
     )
-    train_ds = DrivAerMLSurfaceDataset(
-        old_ds.case_ids,
-        store=old_ds.store,
-        max_surface_points=config.train_surface_points,
-        max_volume_points=n_points,
-        sampling_mode=sampling_mode,
-    )
+    if config.vol_point_emphasis == "geometric_distance":
+        train_ds = StratifiedVolumeDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+            near_thresh=config.vol_emphasis_near_thresh,
+            near_frac=config.vol_emphasis_near_frac,
+        )
+    else:
+        train_ds = DrivAerMLSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+        )
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
@@ -861,6 +949,21 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if config.vol_point_emphasis == "geometric_distance":
+                try:
+                    sdf_stats = compute_train_split_sdf_stats(
+                        train_loader.dataset.store,
+                        near_thresh=config.vol_emphasis_near_thresh,
+                        sample_cases=10,
+                    )
+                    for key, value in sdf_stats.items():
+                        wandb.summary[key] = value
+                    print(
+                        f"SDF startup stats (10 cases, near_thresh={config.vol_emphasis_near_thresh}): "
+                        + ", ".join(f"{k}={v:.4g}" for k, v in sdf_stats.items())
+                    )
+                except Exception as exc:
+                    print(f"SDF startup stats failed: {exc}")
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1035,6 +1138,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
+                if (
+                    config.vol_point_emphasis == "geometric_distance"
+                    and state.is_main
+                    and global_step % 100 == 0
+                ):
+                    train_log.update(
+                        compute_vol_emphasis_diagnostics(
+                            batch, near_thresh=config.vol_emphasis_near_thresh
+                        )
+                    )
                 if not loss_is_nonfinite:
                     train_log.update(
                         {

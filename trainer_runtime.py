@@ -23,14 +23,20 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Sampler
 from torch.utils.data.distributed import DistributedSampler
 
+import numpy as np
+
 from data import (
     SURFACE_TARGET_NAMES,
+    DrivAerMLCase,
+    DrivAerMLCaseStore,
+    DrivAerMLSurfaceDataset,
     SurfaceBatch,
     VOLUME_TARGET_NAMES,
     VOLUME_Y_DIM,
     load_data,
     pad_collate,
 )
+from data.loader import _resolve_artifact_path
 
 
 class EMA:
@@ -269,6 +275,208 @@ def full_eval_loaders_from(
     }
 
 
+VOL_POINT_EMPHASIS_MODES = ("none", "geometric_distance")
+
+
+class StratifiedVolumeDataset(DrivAerMLSurfaceDataset):
+    """Train-only dataset that stratifies volume points by signed-distance.
+
+    For each case, partitions the full ~10M volume points into a "near"
+    stratum (sdf <= near_thresh) and a "far" stratum (sdf > near_thresh)
+    using the precomputed `volume_sdf.npy` channel. Per-view sampling
+    draws ``round(N * near_frac)`` indices from near + the remainder from
+    far without replacement.
+
+    Loader-level stratification is required because the watertight CFD
+    mesh is heavily concentrated near the surface (~91% of points within
+    0.30m for DrivAerML), so a uniform 65k-point batch carries fewer than
+    10% far points — not enough to fill a 75% far quota. Sampling at the
+    full-mesh level is the natural place where every stratum has plenty
+    of points to draw from.
+
+    Eval/test datasets are NOT wrapped — uniform deterministic chunks on
+    the full mesh remain unchanged.
+    """
+
+    def __init__(
+        self,
+        case_ids,
+        *,
+        store: DrivAerMLCaseStore | None = None,
+        manifest_path=None,
+        root=None,
+        max_surface_points: int = 0,
+        max_volume_points: int = 0,
+        sampling_mode: str = "train_random",
+        near_thresh: float,
+        near_frac: float,
+    ):
+        kwargs = {
+            "store": store,
+            "max_surface_points": max_surface_points,
+            "max_volume_points": max_volume_points,
+            "sampling_mode": sampling_mode,
+        }
+        if manifest_path is not None:
+            kwargs["manifest_path"] = manifest_path
+        if root is not None:
+            kwargs["root"] = root
+        super().__init__(case_ids, **kwargs)
+        self.near_thresh = float(near_thresh)
+        self.near_frac = float(near_frac)
+        self._sdf_split_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+    def _sdf_split_indices(self, case_id: str) -> tuple[np.ndarray, np.ndarray]:
+        cached = self._sdf_split_cache.get(case_id)
+        if cached is not None:
+            return cached
+        case_dir = self.store.root / case_id
+        sdf_path = _resolve_artifact_path(case_dir / "volume_sdf.npy")
+        sdf = np.asarray(np.load(sdf_path, mmap_mode="r"), dtype=np.float32).reshape(-1)
+        sdf_clamped = np.maximum(sdf, 0.0)
+        near_mask = sdf_clamped <= self.near_thresh
+        # Use int32 to halve memory cost of the cached splits; counts well
+        # under 2^31 per case so int32 is safe.
+        near_idx = np.flatnonzero(near_mask).astype(np.int32, copy=False)
+        far_idx = np.flatnonzero(~near_mask).astype(np.int32, copy=False)
+        self._sdf_split_cache[case_id] = (near_idx, far_idx)
+        return near_idx, far_idx
+
+    def _stratified_volume_indices(self, case_id: str, count: int) -> torch.Tensor:
+        near_idx_np, far_idx_np = self._sdf_split_indices(case_id)
+        near_idx = torch.from_numpy(near_idx_np.astype(np.int64, copy=False))
+        far_idx = torch.from_numpy(far_idx_np.astype(np.int64, copy=False))
+
+        n_near_target = int(round(count * self.near_frac))
+        n_far_target = max(0, count - n_near_target)
+        n_near_avail = int(near_idx.numel())
+        n_far_avail = int(far_idx.numel())
+
+        def _draw(idx_pool: torch.Tensor, k: int, n_avail: int) -> torch.Tensor:
+            if k <= 0 or n_avail <= 0:
+                return torch.empty(0, dtype=torch.long)
+            if k <= n_avail:
+                # Without replacement
+                pick = torch.randperm(n_avail)[:k]
+            else:
+                # Fallback within stratum: with replacement
+                pick = torch.randint(0, n_avail, (k,), dtype=torch.long)
+            return idx_pool[pick]
+
+        if n_near_avail >= n_near_target and n_far_avail >= n_far_target:
+            near_picked = _draw(near_idx, n_near_target, n_near_avail)
+            far_picked = _draw(far_idx, n_far_target, n_far_avail)
+        elif n_near_avail < n_near_target:
+            # Take all of near, top up far with the deficit
+            near_picked = near_idx.clone()
+            adjusted_far = count - n_near_avail
+            far_picked = _draw(far_idx, adjusted_far, n_far_avail)
+        else:
+            # Take all of far, top up near with the deficit
+            far_picked = far_idx.clone()
+            adjusted_near = count - n_far_avail
+            near_picked = _draw(near_idx, adjusted_near, n_near_avail)
+
+        combined = torch.cat([near_picked, far_picked])
+        combined, _ = combined.sort()
+        return combined
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+
+        use_stratified = (
+            view.sampling_mode == "train_random"
+            and self.max_volume_points > 0
+            and counts["n_volume"] > self.max_volume_points
+            and view.view_index < view.volume_view_count
+        )
+        if use_stratified:
+            volume_idx = self._stratified_volume_indices(
+                view.case_id, self.max_volume_points
+            )
+        else:
+            volume_idx = self._indices(
+                counts["n_volume"],
+                self.max_volume_points,
+                view,
+                group_view_count=view.volume_view_count,
+            )
+
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode
+        metadata["joint_view_count"] = int(view.view_count)
+        metadata["volume_stratified"] = bool(use_stratified)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
+def compute_train_split_sdf_stats(
+    store: DrivAerMLCaseStore,
+    *,
+    near_thresh: float,
+    sample_cases: int = 10,
+) -> dict[str, float]:
+    """Compute SDF distribution diagnostics across a sample of train cases."""
+    case_ids = store.case_ids("train")[:sample_cases]
+    if not case_ids:
+        return {}
+    sdf_min = math.inf
+    sdf_max = -math.inf
+    p50_vals: list[float] = []
+    p95_vals: list[float] = []
+    near_fracs: list[float] = []
+    total_points = 0
+    for cid in case_ids:
+        case_dir = store.root / cid
+        sdf_path = _resolve_artifact_path(case_dir / "volume_sdf.npy")
+        sdf = np.asarray(np.load(sdf_path, mmap_mode="r"), dtype=np.float32).reshape(-1)
+        sdf_clamped = np.maximum(sdf, 0.0)
+        sdf_min = min(sdf_min, float(sdf.min()))
+        sdf_max = max(sdf_max, float(sdf.max()))
+        p50_vals.append(float(np.median(sdf_clamped)))
+        p95_vals.append(float(np.percentile(sdf_clamped, 95)))
+        near_fracs.append(float(np.mean(sdf_clamped <= near_thresh)))
+        total_points += int(sdf.size)
+    return {
+        "vol_emphasis/startup_sample_cases": float(len(case_ids)),
+        "vol_emphasis/startup_sample_points": float(total_points),
+        "vol_emphasis/startup_sdf_min": sdf_min,
+        "vol_emphasis/startup_sdf_max": sdf_max,
+        "vol_emphasis/startup_sdf_p50_mean": float(np.mean(p50_vals)),
+        "vol_emphasis/startup_sdf_p95_mean": float(np.mean(p95_vals)),
+        f"vol_emphasis/startup_near_frac_thresh_{near_thresh:g}": float(
+            np.mean(near_fracs)
+        ),
+    }
+
+
 def make_loaders(
     config,
     distributed_state: DistributedState | None = None,
@@ -282,6 +490,7 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    train_ds = _maybe_wrap_train_dataset(train_ds, config)
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
@@ -310,6 +519,29 @@ def make_loaders(
         for name, ds in test_splits.items()
     }
     return train_loader, val_loaders, test_loaders, stats
+
+
+def _maybe_wrap_train_dataset(
+    train_ds: DrivAerMLSurfaceDataset,
+    config,
+) -> DrivAerMLSurfaceDataset:
+    """Swap a plain DrivAerMLSurfaceDataset for a stratified one if requested."""
+    mode = getattr(config, "vol_point_emphasis", "none")
+    if mode == "none":
+        return train_ds
+    if mode != "geometric_distance":
+        raise ValueError(
+            f"Unknown --vol-point-emphasis '{mode}'. Supported: {VOL_POINT_EMPHASIS_MODES}."
+        )
+    return StratifiedVolumeDataset(
+        train_ds.case_ids,
+        store=train_ds.store,
+        max_surface_points=train_ds.max_surface_points,
+        max_volume_points=train_ds.max_volume_points,
+        sampling_mode=train_ds.sampling_mode,
+        near_thresh=config.vol_emphasis_near_thresh,
+        near_frac=config.vol_emphasis_near_frac,
+    )
 
 
 def _metric_path(name: str) -> str:
@@ -1366,6 +1598,7 @@ def define_wandb_metrics() -> None:
         "train/weight_type/*",
         "train/weight_hist/*",
         "train/weight_hist_param/*",
+        "vol_emphasis/*",
         "lr",
     ):
         wandb.define_metric(metric_prefix, step_metric="global_step")
