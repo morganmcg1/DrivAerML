@@ -6,6 +6,73 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-01 08:30 — PR #756 thorfinn cosine-annealed EMA decay 0.99→0.9999 — CLOSED NEGATIVE
+
+- Branch: `thorfinn/ema-decay-cosine-anneal`
+- W&B run: `bubrguoh` (group `thorfinn-ema-anneal`, name `thorfinn/ema-anneal-099-09999`)
+- Hypothesis: Cosine-anneal EMA decay from 0.99 → 0.9999 over 13 epochs would beat fixed `ema_decay=0.999`.
+
+| Metric | Arm A (cosine-anneal) | SOTA #592 | Δ |
+|---|---:|---:|---:|
+| best_val_abupt (EP4) | 6.8090% | 6.5985% | +0.21pp |
+| test_abupt | 8.2395% | 7.9915% | +0.25pp |
+| test_vol_p | 12.2635% | 11.933% (#592) / 11.374% (#681) | +0.33 / +0.89pp |
+| EP1/EP2/EP3/EP4 val_abupt | 29.43 / 8.27 / 7.22 / 6.8090 | 27.95 / 7.94 / 6.96 / 6.5985 | +1.48 / +0.33 / +0.26 / +0.21 |
+
+- **Root cause**: 13-epoch cosine schedule clipped by 270-min train cap at EP4, where `ema_decay_current` was still ~0.9923 — schedule never reached the high-decay regime where the hypothesis would have benefited. Mechanically: by EP4, fixed-0.999 has had 4 epochs of strong smoothing; cosine-anneal has had 4 epochs of *weaker* smoothing.
+- **Conclusion**: Closed as negative. Lesson: for ≤4-epoch effective horizons, EMA schedule should *start* at 0.999, not end there. ema_decay_current logging instrumentation should stay in codebase. Reassigned thorfinn to PR #764 (STRING spectral budget expansion, Issue #618).
+
+---
+
+## 2026-05-01 08:30 — PR #737 nezuko region-weighted volume_pressure loss (near-wake) — CLOSED NEGATIVE w/ KEY DIAGNOSTIC
+
+- Branch: `nezuko/farwake-region-loss`
+- W&B group: `nezuko-region-vp-loss`; runs `r1eddah6` (Arm A, w_near=1.5), `ocx2e7r5` (Arm B, w_near=2.0).
+- Hypothesis: Upweight near-wake band (x_rel ∈ [0.5, 3.0], |z_rel| < 1.5) in volume_pressure loss to reduce chronic test_vol_p gap (~3× val→test).
+
+| Run | Best EP | val_abupt | val_vol_p | test_vol_p | test_abupt |
+|---|---:|---:|---:|---:|---:|
+| Arm A (w_near=1.5) | EP4 | 6.892% | 4.185% | **12.219%** | 8.265% |
+| Arm B (w_near=2.0) | EP4 | 7.005% | 4.352% | **11.952%** | 8.228% |
+| #599 anchor | — | — | — | 11.694% | — |
+| #592 SOTA | — | 6.5985% | 3.9456% | 11.933% | 7.9915% |
+
+**Per-region diagnostic (Arm B, the better arm):**
+
+| Region | Point share | val rel_l2 | test rel_l2 | val→test ratio |
+|---|---:|---:|---:|---:|
+| **upstream (x_rel ≤ 0.5)** | **92.43%** | 4.32% | **11.93%** | 2.76× |
+| near (0.5 < x_rel < 3.0, |z_rel|<1.5) | 7.34% | 13.81% | 21.58% | 1.56× |
+| far (x_rel ≥ 3.0) | 0.23% | 70.31% | 78.69% | 1.12× |
+
+- **Bug fix landmark (commit `a4c516e`)**: dataset-mean bbox fallback for volume-only views. Without it, ~52% of training steps had mask=0 due to `view_count = max(surface, volume)` creating volume-only views with no surface bbox. Fix uses dataset-mean cx=1.5046, cz=0.3942, s_ref=4.6720; per-case std <8%. Verification: 0/37k+ zero-coverage steps in both arms; mean coverage 7.21–7.50%. Reuse this pattern in any region-loss work.
+- **Key finding**: Premise "test error dominated by near-wake" is empirically refuted. **Upstream region (92.4% of points × 12% rel_l2) contributes ~4× more L2 mass than near-wake** (7.3% × 21%). Static near-wake upweighting cannot move the aggregate. Counter-intuitively, stronger near-weighting (B) marginally improved test_vol_p via *upstream* val→test transfer (2.76× vs 2.93× in Arm A), not via near-wake gain — Arm B's near-wake test was actually *worse* (21.58% vs 20.88%).
+- **Conclusion**: Closed as informative negative. Reassigned nezuko to PR #763 (upstream-region supervised attention) — the 92% upstream zone is where the test error lives.
+
+---
+
+## 2026-05-01 08:35 — PR #764 thorfinn STRING spectral budget expansion (8-octave) — ASSIGNED
+
+- Branch: `thorfinn/string-coord-norm`
+- Hypothesis: Expand `--rff-init-sigmas` from 5-octave (0.25–4.0) to 8-octave (0.0625–8.0 or 0.125–16.0); increase `--rff-num-features` from 16 → 24 to match. Builds on #488 multi-sigma volume_p win. Tests whether wider spectral coverage captures fine-grained upstream geometric blocking effects (where the #737 diagnostic shows the test error lives).
+- Three arms (A: 8-oct balanced; B: 8-oct shifted high; C: 7-oct shifted low). CLI-only; no code changes.
+- W&B group: `thorfinn-string-spectral-expand`
+- Issue: #618 (STRING/RoPE stabilization)
+- Status: WIP — assigned 2026-05-01
+
+---
+
+## 2026-05-01 08:35 — PR #763 nezuko upstream-region supervised attention — ASSIGNED
+
+- Branch: `nezuko/upstream-region-loss`
+- Hypothesis: Per-point loss reweighting upweighting upstream zone (x_rel ≤ 0.5, 92.4% of volume points, val→test ratio 2.93×). Direct follow-up to #737 diagnostic showing upstream owns 4× more L2 mass than near-wake. Three-arm sweep w_upstream ∈ {1.5, 2.0, 3.0}.
+- Reuses #737's `a4c516e` dataset-mean bbox fallback; new `--vol-loss-w-upstream` / `--vol-loss-upstream-x-hi` / `--vol-loss-w-rest` flags.
+- W&B group: `nezuko-upstream-region-vp-loss`
+- Issue: #717 (vol_pressure gap; #737 follow-up #1)
+- Status: WIP — assigned 2026-05-01
+
+---
+
 ## 2026-05-07 — PR #755 frieren stochastic depth + volume-token dropout — CLOSED NEGATIVE (hypothesis falsified)
 
 - Branch: `frieren/stochastic-depth-vol-reg`

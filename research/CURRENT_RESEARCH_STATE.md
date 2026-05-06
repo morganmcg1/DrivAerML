@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-07 (PR #755 frieren closed — stochastic depth hypothesis falsified; PRs #761 + #762 assigned to frieren/edward)
+- **Date:** 2026-05-01 08:35 UTC (Round 12 closeout — PR #737 nezuko + #756 thorfinn closed negative; PR #763 + #764 assigned)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -36,16 +36,30 @@
 ### 1. Volume_pressure test-transfer (Issue #717) — primary focus
 
 **In flight (8 PRs):**
-- **PR #752 (askeladd)** — Exp 1C P4: x-slab wake stratified vol sampling.
-- **PR #753 (fern)** — Signed-log1p target transform for volume_pressure.
-- **PR #756 (thorfinn)** — Cosine-annealed EMA decay schedule.
-- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7.
-- **PR #760 (alphonse)** — Issue #618 follow-up: volume-loss-weight reweight ablation (vol_w=2.0 vs 3.0).
-- **PR #737 (nezuko)** — Region-weighted volume loss: near-wake emphasis.
-- **PR #761 (frieren)** — JUST ASSIGNED: dedicated 2-layer volume head on shared encoder (capacity-additive, addresses regularization-hurt-val finding from #755).
-- **PR #762 (edward)** — JUST ASSIGNED: surface curvature (H, K) from local PCA propagated to volume points (geometry-conditioning, addresses geometric-envelope-shift hypothesis).
+- **PR #752 (askeladd)** — Exp 1C P4: x-slab wake stratified vol sampling. Arm A (far-wake) closed neg test_vol_p=12.49%; Arm B (near-wake [1m,4m), factor=3.0) launched 07:45 UTC, run `jc2t6sxa`, EP1 due ~09:01 UTC.
+- **PR #753 (fern)** — Signed-log1p target transform for volume_pressure (scale=25). EP3 PASS ✅; vol_p slope > abupt slope (1.25× ratio) — hypothesis signal positive.
+- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7. EP1 done (29.24%); EP1 also showed tau_z is the actual laggard (not vol_p) — diagnostically valuable regardless.
+- **PR #760 (alphonse)** — Issue #618 follow-up: volume-loss-weight reweight ablation (vol_w=2.0 vs 3.0). Arm A run `1gv5s938` ~EP3 in flight; duplicate killed cleanly.
+- **PR #761 (frieren)** — Dedicated 2-layer volume head on shared encoder (capacity-additive). EP1 ~85 min projected (10.7% overhead) — within expected band.
+- **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points. Newly started, EP1 pending.
+- **PR #763 (nezuko)** — **NEW**: upstream-region supervised attention (x_rel ≤ 0.5, w_upstream ∈ {1.5, 2.0, 3.0} sweep). Direct follow-up to #737's diagnostic that upstream owns 92% of vol points × ~12% rel_l2 = 4× more L2 mass than near-wake.
+- **PR #764 (thorfinn)** — **NEW**: STRING spectral budget expansion (sigmas to 8-octave; rff-num-features 16→24). Issue #618. Builds on #488 multi-sigma volume_p win.
 
-**KEY DIAGNOSTIC FROM PR #755 (frieren, just closed):**
+**KEY DIAGNOSTIC FROM PR #737 (nezuko, just closed 2026-05-01):**
+
+The chronic vol_p test-vs-val gap is empirically owned by the **upstream region** (x_rel ≤ 0.5). Per-region split (Arm B):
+- upstream: 92.43% pts, val=4.32%, test=11.93%, val→test=2.76× — owns ~4× more L2 mass than near-wake
+- near: 7.34% pts, val=13.81%, test=21.58%, val→test=1.56× (mechanism works locally but can't move aggregate)
+- far: 0.23% pts, val=70%, test=79%, val→test=1.12×
+
+Static near-wake upweighting cannot move the aggregate; counter-intuitively Arm B's marginal test_vol_p improvement (-0.27pp vs Arm A) came from improved upstream val→test transfer (2.76× vs 2.93×), not from near-wake gain. Arm B's near-wake test was actually worse than Arm A's (21.58% vs 20.88%).
+
+**Consequence**: Three converging interventions now attack the upstream-dominant vol_p:
+1. PR #763 (nezuko): direct upstream-region per-point loss reweighting
+2. PR #760 (alphonse): whole-volume loss reweighting (uniform amplification, less targeted)
+3. PR #761 (frieren): dedicated volume head (capacity-additive — matches #755 finding that volume branch is capacity-limited, not feature-overfit)
+
+**KEY DIAGNOSTIC FROM PR #755 (frieren):**
 Regularization (stochastic depth + volume-token dropout) made val_volume_pressure WORSE (12.48% → 14.14%) while every non-volume metric improved. This FALSIFIES the "memorize-and-fail-OOD" framing of the val/test gap. The volume branch is **capacity-limited**, not feature-overfit. Updated diagnosis: test cases differ in operating regime (wake intensity, geometry envelope) — not in memorized feature compositions. Consequence: 
 - Abandon regularization-based OOD levers for the volume branch.
 - Push toward capacity-additive (PR #761 vol head, item 6) and geometry-conditioning (PR #762 curvature, item 4) approaches.
@@ -73,33 +87,28 @@ Regularization (stochastic depth + volume-token dropout) made val_volume_pressur
 
 ---
 
-## Active Fleet Status (2026-05-07 — post frieren/edward reassignment)
+## Active Fleet Status (2026-05-01 08:35 — post nezuko/thorfinn reassignment)
 
 All 8 students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 (Issue #618 follow-up) | WIP |
-| askeladd | **#752** | x-slab wake stratified vol sampling (Exp 1C P4) | WIP |
-| edward | **#762** | Surface curvature (H, K) propagated to volume points | JUST ASSIGNED |
-| fern | **#753** | Signed-log1p target transform for volume_pressure | WIP |
-| frieren | **#761** | Dedicated 2-layer volume head on shared encoder (capacity-additive) | JUST ASSIGNED |
-| nezuko | **#737** | Region-weighted volume loss: near-wake emphasis | WIP |
-| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7 | WIP |
-| thorfinn | **#756** | Cosine-annealed EMA decay schedule | WIP |
+| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 (Issue #618 follow-up) | WIP, Arm A `1gv5s938` ~EP3 |
+| askeladd | **#752** | x-slab wake stratified vol sampling (Exp 1C P4) | WIP, Arm B `jc2t6sxa` EP1 due ~09:01 UTC |
+| edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, EP1 pending |
+| fern | **#753** | Signed-log1p target transform for volume_pressure (scale=25) | WIP, EP3 PASS — vol_p slope > abupt slope (1.25×) |
+| frieren | **#761** | Dedicated 2-layer volume head (capacity-additive) | WIP, EP1 ~85 min projected |
+| nezuko | **#763** | **Upstream-region supervised attention (w_upstream ∈ {1.5,2.0,3.0})** | **JUST ASSIGNED** (post-#737 closure) |
+| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7 | WIP, EP1 done (29.24%) |
+| thorfinn | **#764** | **STRING spectral budget expansion (8-octave, rff-features=24)** — Issue #618 | **JUST ASSIGNED** (post-#756 closure) |
 
 **Zero idle students. Zero idle GPUs.**
 
-**PR #735 (edward TTA)**: Closed. Both arms negative — Y-mirror TTA corrupts PE encoding; train-time mirror-aug degrades abupt by +0.42pp.
+**Round 12 closures (this cycle, post-#737/#756):**
+- **#737 nezuko** CLOSED NEG w/ KEY DIAGNOSTIC: near-wake upweighting can't move aggregate — upstream owns 92% of vol_p L2 mass. Reassigned to upstream-region attack (#763).
+- **#756 thorfinn** CLOSED NEG: cosine-anneal EMA worse at every epoch; train cap clipped schedule before high-decay regime. Reassigned to STRING spectral expansion (#764).
 
-**PR #737 (nezuko) Arm A finding (CRITICAL DIAGNOSTIC):**
-The near-wake (7.34% points, weight=2.0) weighting did NOT help test transfer. Root cause:
-upstream region (x_rel ≤ 0.5) = 92.43% of points, val→test ratio = 2.93× — this dominates the aggregate.
-Region-weighting on the minor near-wake region can't move the upstream needle.
-
-**PR #757 design rationale**: k-NN ∇p loss specifically targets the 92.43%-upstream failure: by directly supervising spatial pressure gradients (which reflect CFD wake structure and generalize beyond absolute pressure values), the model must learn underlying gradient fields that generalize to OOD test cases — not just point-wise pressure magnitudes that can be memorized from training distribution.
-
-**Upcoming gate actions:**
+**Upcoming gate actions for active runs:**
 - EP1 time-gate: kill if epoch_time > 80 min (4800s).
 - EP2 (step ~21,729): kill if val_abupt > 12.0%.
 - EP3 (step ~32,594): kill if val_abupt > 8.0%.
