@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 14:10 UTC (Round 13 cycle — PR #763 closed, PR #772 assigned, 7 PRs WIP, 0 idle)
+- **Date:** 2026-05-06 15:35 UTC (Round 13 cycle — PR #769/#768 closed, PR #774 assigned to fern, 8 PRs WIP, 0 idle)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -10,7 +10,7 @@
 
 **Issue #717 (DrivAerML Single-Model Volume Pressure Plan, 2026-05-05).** Active. The chronic ~3x volume_pressure test-vs-val gap (val~3.6%, test~11.5%) is the primary systematic problem. Ensembles banned for the volume push; only single-model artifacts at inference. Phase 1 = short probes (3-6h) of dual-tower / outlier-sampling / geometry-conditioning / single-model-KD; Phase 2 = combinations of mechanisms that moved single-model test volume; Phase 3 = long verification. All PRs in this wave must use the 9-column reporting table and compare against the three frozen anchors `sogus8sx` (#599), `4k25s25e` (#592), `dc031qpt` (#681).
 
-**Issue #618 (STRING/RoPE follow-ups, 2026-05-04).** Directive: "assign at least 2 students" to STRING/RoPE when free slots open. SATISFIED — fern #769 (slice-centroid STRING-RoPE, Exp 1) and thorfinn #764 (STRING spectral 8-octave, Exp 2) are both active.
+**Issue #618 (STRING/RoPE follow-ups, 2026-05-04).** Directive: "assign at least 2 students" to STRING/RoPE when free slots open. ACTIVE — fern #774 (Anchor-STRING RoPE v2, Exp 3 Redux: true coord Q/K rotation) and thorfinn #764 (STRING spectral 8-octave, Exp 2) are both active. PR #769 (slice-centroid) was KILLED at EP2 (26.59%, 3× SOTA, zero improvement) — root cause: slice centroids are abstract features not spatial coords; architecture unsound.
 
 ---
 
@@ -61,14 +61,14 @@
 
 ### 2. STRING/RoPE hypothesis (Issue #618)
 
-**Directive satisfied — 2 students assigned:**
-- **PR #769 (fern)** — Slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Exp 1). 4 arms (control / after-QKnorm 0.5×LR / before-QKnorm 0.5×LR / no-diff-LR). Supersedes closed #765 (Exp 3 anchor-STRING, K=1024 too sparse + 0.1×LR froze RoPE).
-- **PR #764 (thorfinn)** — STRING spectral budget expansion (8-octave, 24 RFF features, Exp 2).
+**Directive active — 2 students assigned:**
+- **PR #774 (fern)** — Anchor-STRING RoPE v2 (Exp 3 Redux): true RoPE on actual 3D point coordinates (K=512 anchor sub-sample), not slice centroids. Differential LR 0.1× for log_freqs, log-spaced init 0.1-10.0 Hz, zero-init output proj for safe residual start. NEWLY ASSIGNED (15:35 UTC).
+- **PR #764 (thorfinn)** — STRING spectral budget expansion (8-octave, 24 RFF features, Exp 2). EP1 PASS, Arm B 27.33%, currently in EP2.
 
-**Key lessons from closed PR #765 (anchor-STRING):**
-1. K=1024 random anchors = 0.78% of points — bimodal train loss, gradient signal washed out
-2. 0.1× LR rail froze RoPE (log_freq barely moved); use 0.5× minimum
-3. `LearnableCoordinateRoPE` module is sound — reused in #769 at slice centroids
+**Key lessons from closed experiments:**
+1. **PR #769 (slice-centroid, KILLED EP2):** Transolver slice centroids are abstract learned features not spatial positions. RoPE on them desensitized (log_freq 0.0 → -0.0738). Stuck at 26.59% EP1→EP2, zero improvement. Architecture fundamentally unsound.
+2. **PR #765 (anchor-STRING v1):** K=1024 too sparse (0.78% of points), bimodal loss. 0.1× LR froze RoPE. Correct fix: K=512 with uniform stride + 0.1× LR for log_freqs ONLY (not full RoPE params).
+3. **Current approach (PR #774):** K=512 uniform stride anchors, zero-init output_proj, log-spaced init 0.1-10.0, LR 0.1× for log_freqs.
 
 ### 3. Established architectural decisions (do NOT re-litigate)
 
@@ -81,20 +81,33 @@
 
 ---
 
-## Active Fleet Status (2026-05-06 14:10 UTC)
+## Active Fleet Status (2026-05-06 15:35 UTC)
 
-7 students active, 0 idle:
+8 students active, 0 idle:
 
-| Student | PR | Hypothesis | Theme |
-|---|---|---|---|
-| alphonse | **#766** | Offline k-NN vol_pressure grad-consistency aux loss | Issue #717 geometry-OOD |
-| askeladd | **#771** | Surface-latent global scalar residual offset per case | Issue #717 geometry-OOD |
-| edward | **#762** | Surface curvature (H, K) propagated to volume points | Issue #717 geometry-OOD |
-| fern | **#769** | Slice-centroid Learnable-STRING-RoPE on Q/K (Exp 1) | Issue #618 STRING/RoPE |
-| frieren | **#770** | FiLM block-wise conditioning on surface geometry latent | Issue #717 geometry-OOD |
-| nezuko | **#772** | Per-point surface-anchored residual vol_p decoder | Issue #717 geometry-OOD |
-| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | GradNorm tuning |
-| thorfinn | **#764** | STRING spectral budget expansion (8-octave, RFF=24) | Issue #618 STRING/RoPE |
+| Student | PR | Hypothesis | Theme | Status |
+|---|---|---|---|---|
+| alphonse | **#766** | Offline k-NN vol_pressure grad-consistency aux loss | Issue #717 geometry-OOD | EP1 PASS (28.21%, 78min/ep) |
+| askeladd | **#771** | Surface-latent global scalar residual offset per case | Issue #717 geometry-OOD | Launched 14:47 UTC |
+| edward | **#773** | Surface curvature H,K offline precompute (fixes v1 timeout) | Issue #717 curvature features | Live, 5ms/step confirmed |
+| fern | **#774** | Anchor-STRING RoPE v2: true coord Q/K rotation (Exp 3 Redux) | Issue #618 STRING/RoPE | Just assigned |
+| frieren | **#770** | FiLM block-wise conditioning on surface geometry latent | Issue #717 geometry-OOD | Launched 14:47 UTC |
+| nezuko | **#772** | Per-point surface-anchored residual vol_p decoder | Issue #717 geometry-OOD | Launched 14:47 UTC |
+| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | GradNorm tuning | EP3 PASS (7.63%), in EP4 |
+| thorfinn | **#764** | STRING spectral budget expansion (8-octave, RFF=24) | Issue #618 STRING/RoPE | EP1 PASS, Arm B 27.33% ahead |
+
+### dl24 Long-Run Track (significant results, not yet complete)
+
+Three of four dl24 long runs are **beating the current single-model SOTA (6.5985%)**:
+
+| Student | PR | Run | Epoch | val_abupt | vs SOTA |
+|---|---|---|---|---|---|
+| **dl24-fern** | **#740** | `5x8wofzm` | EP~15 | **6.4170%** | **−0.1815pp BEATS** |
+| dl24-nezuko | #741 | `lszc4ri7` | EP~19.5 | 6.5052% | −0.0933pp BEATS |
+| dl24-frieren | #745 | `co0xlqap` | EP~15.4 | 6.5097% | −0.0888pp BEATS |
+| dl24-tanjiro | #749 | `oi2a01zy` | EP~21 | 6.8557% | +0.26pp worse |
+
+> All three winning runs still training (50-epoch budget). PR #740 at EP15 (6.4170%) is the current long-run wave leader — GradNorm α=0.5 adaptive balancing appears to be a strong mechanism when given more epochs to converge.
 
 ---
 
