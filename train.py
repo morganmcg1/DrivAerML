@@ -138,6 +138,13 @@ class Config:
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
     debug: bool = False
+    backbone_kind: str = "transolver"
+    anchor_tokens: int = 1024
+    anchor_selection: str = "stride"
+    anchor_string_init_sigmas: str = ""
+    anchor_string_coord_scale: str = "35.0,18.0,12.0"
+    rope_lr_scale: float = 1.0
+    rope_grad_clip: float = 0.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -233,19 +240,64 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def _get_rope_params(model: nn.Module) -> tuple[list[nn.Parameter], set[int]]:
+    """Return RoPE parameters and their id-set for AnchorStringAttention backbone."""
+    rope_params: list[nn.Parameter] = []
+    rope_param_ids: set[int] = set()
+    # Access the unwrapped base model when DDP-wrapped
+    base = getattr(model, "module", model)
+    backbone = getattr(base, "backbone", None)
+    if backbone is not None:
+        string_rope = getattr(backbone, "string_rope", None)
+        if string_rope is not None:
+            for p in string_rope.parameters():
+                rope_params.append(p)
+                rope_param_ids.add(id(p))
+    return rope_params, rope_param_ids
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    use_rope_group = (
+        config.backbone_kind == "anchor_string"
+        and config.rope_lr_scale != 1.0
+    )
+    if use_rope_group:
+        rope_params, rope_param_ids = _get_rope_params(model)
+        main_params = [p for p in model.parameters() if id(p) not in rope_param_ids]
+        rope_lr = config.lr * config.rope_lr_scale
+    else:
+        main_params = list(model.parameters())
+        rope_params = []
+        rope_lr = config.lr
+
     if optimizer_name == "adamw":
+        if use_rope_group and rope_params:
+            param_groups = [
+                {"params": main_params, "lr": config.lr, "weight_decay": config.weight_decay},
+                {"params": rope_params, "lr": rope_lr, "weight_decay": config.weight_decay},
+            ]
+            return torch.optim.AdamW(param_groups)
         return torch.optim.AdamW(
-            model.parameters(),
+            main_params,
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
     if optimizer_name == "lion":
         from lion_pytorch import Lion
 
+        if use_rope_group and rope_params:
+            param_groups = [
+                {"params": main_params, "lr": config.lr, "weight_decay": config.weight_decay},
+                {"params": rope_params, "lr": rope_lr, "weight_decay": config.weight_decay},
+            ]
+            return Lion(
+                param_groups,
+                betas=(config.lion_beta1, config.lion_beta2),
+                use_triton=False,
+            )
         return Lion(
-            model.parameters(),
+            main_params,
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
@@ -284,6 +336,90 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def parse_anchor_string_init_sigmas(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        return None
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--anchor-string-init-sigmas must be positive: {spec!r}")
+    return sigmas
+
+
+def parse_anchor_string_coord_scale(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    scales = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not scales:
+        return None
+    if len(scales) != 3:
+        raise ValueError(
+            f"--anchor-string-coord-scale needs 3 comma-separated values "
+            f"(x,y,z), got {len(scales)}: {spec!r}"
+        )
+    if any(s <= 0.0 for s in scales):
+        raise ValueError(f"--anchor-string-coord-scale entries must be positive: {spec!r}")
+    return scales
+
+
+def collect_anchor_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Collect per-axis RoPE freq / phase diagnostics and anchor coord spread.
+
+    Logged once per epoch under keys:
+      rope/log_freq_axis_{0,1,2}_{mean,std,min,max}
+      rope/phase_axis_{0,1,2}_{mean,std}
+      anchor/coord_spread_xyz  (max-min per axis, mean over axes)
+    The coord_spread metric is static (depends only on the last batch's anchor
+    coords), but surfacing it confirms anchors are covering the mesh.
+    """
+    metrics: dict[str, float] = {}
+    base = getattr(model, "module", model)
+    backbone = getattr(base, "backbone", None)
+    if backbone is None:
+        return metrics
+    string_rope = getattr(backbone, "string_rope", None)
+    if string_rope is None:
+        return metrics
+
+    log_freq = string_rope.log_freq.detach().float()  # [num_axes, F]
+    phase = string_rope.phase.detach().float()         # [num_axes, F]
+    num_axes = log_freq.shape[0]
+    axis_names = ["x", "y", "z"]
+    for axis in range(min(num_axes, 3)):
+        ax_lf = log_freq[axis]
+        ax_ph = phase[axis]
+        metrics[f"rope/log_freq_axis_{axis}_mean"] = float(ax_lf.mean().item())
+        metrics[f"rope/log_freq_axis_{axis}_std"] = float(ax_lf.std().item())
+        metrics[f"rope/log_freq_axis_{axis}_min"] = float(ax_lf.min().item())
+        metrics[f"rope/log_freq_axis_{axis}_max"] = float(ax_lf.max().item())
+        metrics[f"rope/phase_axis_{axis}_mean"] = float(ax_ph.mean().item())
+        metrics[f"rope/phase_axis_{axis}_std"] = float(ax_ph.std().item())
+    metrics["rope/log_freq_global_mean"] = float(log_freq.mean().item())
+    metrics["rope/log_freq_global_min"] = float(log_freq.min().item())
+    metrics["rope/log_freq_global_max"] = float(log_freq.max().item())
+    # Anchor coord spread from the most recent (eval-time) forward pass.
+    last_anchor_coords = getattr(backbone, "_last_anchor_coords", None)
+    if last_anchor_coords is not None and last_anchor_coords.numel() > 0:
+        coords_f = last_anchor_coords.float()  # [B, K, 3]
+        per_axis_std: list[float] = []
+        for axis in range(min(coords_f.shape[-1], 3)):
+            ax = axis_names[axis] if axis < len(axis_names) else str(axis)
+            std_val = float(coords_f[..., axis].reshape(-1).std().item())
+            min_val = float(coords_f[..., axis].reshape(-1).min().item())
+            max_val = float(coords_f[..., axis].reshape(-1).max().item())
+            metrics[f"anchor/coord_spread_{ax}"] = std_val
+            metrics[f"anchor/coord_min_{ax}"] = min_val
+            metrics[f"anchor/coord_max_{ax}"] = max_val
+            per_axis_std.append(std_val)
+        if per_axis_std:
+            metrics["anchor/coord_spread_xyz"] = float(sum(per_axis_std) / len(per_axis_std))
+        metrics["anchor/num_anchors"] = float(coords_f.shape[1])
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +433,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        backbone_kind=config.backbone_kind,
+        anchor_tokens=config.anchor_tokens,
+        anchor_selection=config.anchor_selection,
+        anchor_string_init_sigmas=parse_anchor_string_init_sigmas(config.anchor_string_init_sigmas),
+        anchor_string_coord_scale=parse_anchor_string_coord_scale(config.anchor_string_coord_scale),
     )
 
 
@@ -861,6 +1002,26 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            # Log rope LR at step 0 for anchor_string experiments
+            if config.backbone_kind == "anchor_string":
+                rope_lr_val = config.lr * config.rope_lr_scale
+                wandb.summary["optim/rope_lr"] = rope_lr_val
+                # Per-axis coord_scale buffer used to normalise coords before STRING-RoPE.
+                backbone_mod = getattr(base_model, "backbone", None)
+                if backbone_mod is not None:
+                    coord_scale = getattr(backbone_mod, "coord_scale", None)
+                    if coord_scale is not None:
+                        cs = coord_scale.detach().float().cpu().tolist()
+                        for axis_idx, axis_name in enumerate(("x", "y", "z")):
+                            if axis_idx < len(cs):
+                                wandb.summary[f"rope/coord_scale_{axis_name}"] = cs[axis_idx]
+                    string_rope = getattr(backbone_mod, "string_rope", None)
+                    if string_rope is not None and hasattr(string_rope, "log_freq"):
+                        lf = string_rope.log_freq.detach().float()
+                        wandb.summary["rope/init_log_freq_min"] = float(lf.min().item())
+                        wandb.summary["rope/init_log_freq_max"] = float(lf.max().item())
+                        wandb.summary["rope/init_log_freq_mean"] = float(lf.mean().item())
+                        wandb.summary["rope/use_qk_norm"] = bool(config.use_qk_norm)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1055,13 +1216,68 @@ def main(argv: Iterable[str] | None = None) -> None:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
-                    if config.grad_clip_norm > 0.0:
-                        grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
-                            base_model.parameters(),
-                            max_norm=config.grad_clip_norm,
-                        )
+                    # Fix 4: RoPE frequency warmup — zero log_freq grads for step < 500
+                    # This prevents log_freq from diverging before the main backbone has
+                    # warmed up, giving RoPE a stable signal to start learning from.
+                    if config.backbone_kind == "anchor_string" and global_step < 500:
+                        backbone_mod = getattr(base_model, "backbone", None)
+                        if backbone_mod is not None:
+                            string_rope_mod = getattr(backbone_mod, "string_rope", None)
+                            if string_rope_mod is not None and hasattr(string_rope_mod, "log_freq"):
+                                if string_rope_mod.log_freq.grad is not None:
+                                    string_rope_mod.log_freq.grad.zero_()
+
+                    # Fix 2: For anchor_string, exclude RoPE params from the global
+                    # clip so the subsequent per-group RoPE clip (rope_grad_clip) is
+                    # not vacuous (the prior PR applied the global clip first, making
+                    # the secondary clip a no-op).
+                    use_rope_clip = (
+                        config.backbone_kind == "anchor_string"
+                        and config.rope_grad_clip > 0.0
+                    )
+                    if use_rope_clip:
+                        rope_params_clip, rope_param_ids_clip = _get_rope_params(base_model)
+                        main_params_clip = [
+                            p for p in base_model.parameters()
+                            if id(p) not in rope_param_ids_clip
+                        ]
+                        # Compute and log RoPE grad norm before its clip
+                        if rope_params_clip:
+                            rope_grad_norm_pre = torch.nn.utils.clip_grad_norm_(
+                                rope_params_clip,
+                                max_norm=float("inf"),  # measure-only pass
+                            )
+                            rope_grad_norm_pre_val = float(rope_grad_norm_pre.detach().cpu().item())
+                            torch.nn.utils.clip_grad_norm_(
+                                rope_params_clip,
+                                max_norm=config.rope_grad_clip,
+                            )
+                            rope_grad_norm_post = torch.nn.utils.clip_grad_norm_(
+                                rope_params_clip,
+                                max_norm=float("inf"),  # measure post-clip norm
+                            )
+                            rope_grad_norm_post_val = float(rope_grad_norm_post.detach().cpu().item())
+                            train_log["rope/grad_norm_pre_clip"] = rope_grad_norm_pre_val
+                            train_log["rope/grad_norm_post_clip"] = rope_grad_norm_post_val
+                        else:
+                            main_params_clip = list(base_model.parameters())
+
+                        # Global clip applies only to non-RoPE params
+                        if config.grad_clip_norm > 0.0:
+                            grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
+                                main_params_clip,
+                                max_norm=config.grad_clip_norm,
+                            )
+                        else:
+                            grad_norm_tensor = global_grad_norm(main_params_clip, device)
                     else:
-                        grad_norm_tensor = global_grad_norm(base_model.parameters(), device)
+                        if config.grad_clip_norm > 0.0:
+                            grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
+                                base_model.parameters(),
+                                max_norm=config.grad_clip_norm,
+                            )
+                        else:
+                            grad_norm_tensor = global_grad_norm(base_model.parameters(), device)
                     grad_norm_pre_clip = float(grad_norm_tensor.detach().cpu().item())
                     grad_is_nonfinite = not math.isfinite(grad_norm_pre_clip)
                     skip_step = distributed_any(state, grad_is_nonfinite, device)
@@ -1240,6 +1456,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_anchor_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
