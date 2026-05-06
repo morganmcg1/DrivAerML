@@ -32,7 +32,7 @@ import wandb
 import yaml
 from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, Sampler
 from tqdm import tqdm
 
 from data import (
@@ -414,6 +414,126 @@ def pad_collate_dynamic(samples: list[DrivAerMLCase]) -> SurfaceBatch:
         volume_mask=volume_mask,
         metadata=[dict(sample.metadata) for sample in samples],
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-case hard-mining (PR #744)
+# Maintains an EMA difficulty buffer per training case sourced from per-batch
+# rel-L2 over the live model output, and resamples training views with
+# probability proportional to difficulty**beta. Cases the model gets wrong
+# most are loaded more often, focusing capacity on weak spots.
+# ---------------------------------------------------------------------------
+
+
+class HardMiningSampler(Sampler[int]):
+    """Resamples view indices each epoch using a shared weight tensor.
+
+    Holds a *reference* to ``view_weights`` so the trainer can update weights
+    in-place between epochs. ``__iter__`` re-seeds a generator using
+    ``self._epoch + base_seed`` so each epoch (and each rank) draws a fresh
+    independent stream while remaining reproducible.
+    """
+
+    def __init__(
+        self,
+        view_weights: torch.Tensor,
+        num_samples: int,
+        *,
+        base_seed: int,
+    ) -> None:
+        if num_samples <= 0:
+            raise ValueError(f"HardMiningSampler num_samples must be > 0, got {num_samples}")
+        self.view_weights = view_weights  # tensor reference; updated in-place by trainer
+        self.num_samples = int(num_samples)
+        self.base_seed = int(base_seed)
+        self._epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self._epoch = int(epoch)
+
+    def __iter__(self):
+        gen = torch.Generator()
+        gen.manual_seed(self.base_seed + self._epoch)
+        weights = self.view_weights.detach().to(torch.float64).clamp_min(1e-12)
+        idx = torch.multinomial(weights, self.num_samples, replacement=True, generator=gen)
+        return iter(idx.tolist())
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+
+def _gini_coefficient(weights: torch.Tensor) -> float:
+    """Sorted-form Gini coefficient on a 1-D non-negative weight tensor.
+
+    G = (2 * sum_{i=1..n} i * w_sorted[i]) / (n * sum(w)) - (n + 1) / n
+    Returns 0.0 if all weights are equal or sum is 0.
+    """
+    w = weights.detach().to(torch.float64).flatten()
+    if w.numel() == 0:
+        return 0.0
+    total = float(w.sum().item())
+    if total <= 0.0:
+        return 0.0
+    w_sorted, _ = torch.sort(w)
+    n = w_sorted.numel()
+    idx = torch.arange(1, n + 1, dtype=torch.float64, device=w_sorted.device)
+    return float(((2.0 * (idx * w_sorted).sum()) / (n * total)) - (n + 1) / n)
+
+
+def _effective_sample_size(weights: torch.Tensor) -> float:
+    # Kong (1992) effective sample size: N_eff = (sum w)^2 / sum(w^2).
+    # Reaches N when uniform; collapses toward 1 if a single weight dominates.
+    w = weights.detach().to(torch.float64).flatten()
+    if w.numel() == 0:
+        return 0.0
+    s = float(w.sum().item())
+    if s <= 0.0:
+        return 0.0
+    return float(s * s / float((w * w).sum().item()))
+
+
+def _per_case_max_rel_l2(
+    *,
+    surface_pred: torch.Tensor,  # denormalized [B, N_s, 4]
+    surface_target: torch.Tensor,  # [B, N_s, 4]
+    surface_mask: torch.Tensor,  # [B, N_s] bool
+    volume_pred: torch.Tensor,  # denormalized [B, N_v, 1]
+    volume_target: torch.Tensor,
+    volume_mask: torch.Tensor,
+    case_ids: list[str],
+) -> dict[str, float]:
+    """Compute max-across-channel rel-L2 per case in the batch (denormalized space).
+
+    Channels: surface_pressure, wall_shear_x/y/z, volume_pressure. Taking the
+    max instead of the mean ensures cases with one catastrophic channel are
+    surfaced even if their other channels are average.
+    """
+    out: dict[str, float] = {}
+    sp_p = surface_pred.float()
+    sp_t = surface_target.float()
+    vp_p = volume_pred.float()
+    vp_t = volume_target.float()
+    eps = 1e-8
+    for i, cid in enumerate(case_ids):
+        chans: list[float] = []
+        s_mask = surface_mask[i].bool()
+        if bool(s_mask.any()):
+            for ch in range(4):
+                p_ch = sp_p[i, :, ch][s_mask]
+                t_ch = sp_t[i, :, ch][s_mask]
+                den = float(t_ch.square().sum().clamp_min(eps).item())
+                num = float((p_ch - t_ch).square().sum().item())
+                chans.append(math.sqrt(num / den))
+        v_mask = volume_mask[i].bool()
+        if bool(v_mask.any()):
+            p_v = vp_p[i, :, 0][v_mask]
+            t_v = vp_t[i, :, 0][v_mask]
+            den = float(t_v.square().sum().clamp_min(eps).item())
+            num = float((p_v - t_v).square().sum().item())
+            chans.append(math.sqrt(num / den))
+        if chans:
+            out[cid] = max(chans)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1163,6 +1283,8 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    hardmining_alpha: float = 0.0  # EMA decay for per-case difficulty (0=off)
+    hardmining_beta: float = 0.0  # Sampling sharpness; weight = difficulty**beta (0=uniform)
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1325,7 +1447,23 @@ def make_loaders(
     if num_workers > 0:
         loader_kwargs["persistent_workers"] = config.persistent_workers
         loader_kwargs["prefetch_factor"] = config.prefetch_factor
-    if is_distributed:
+    hardmining_active = config.hardmining_beta > 0.0
+    if hardmining_active:
+        n_views = len(train_ds)
+        view_weights = torch.ones(n_views, dtype=torch.float64)
+        per_rank_samples = (
+            math.ceil(n_views / world_size) if is_distributed else n_views
+        )
+        train_sampler = HardMiningSampler(
+            view_weights, num_samples=per_rank_samples, base_seed=12345 + rank
+        )
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=config.batch_size,
+            sampler=train_sampler,
+            **loader_kwargs,
+        )
+    elif is_distributed:
         train_sampler = DistributedSampler(
             train_ds, num_replicas=world_size, rank=rank, shuffle=True, drop_last=False
         )
@@ -2038,6 +2176,7 @@ def train_loss(
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
     beta_nll_beta: float = -1.0,
+    per_case_observer: dict[str, float] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -2148,6 +2287,20 @@ def train_loss(
         metrics["film/geom_token_abs_mean"] = float(
             geom_token.abs().mean().cpu().item()
         )
+    if per_case_observer is not None:
+        with torch.no_grad():
+            sp_pred_phys = transform.invert_surface(surface_pred_norm.detach().float())
+            vp_pred_phys = transform.invert_volume(out["volume_preds"].detach().float())
+            per_case = _per_case_max_rel_l2(
+                surface_pred=sp_pred_phys,
+                surface_target=batch.surface_y,
+                surface_mask=batch.surface_mask,
+                volume_pred=vp_pred_phys,
+                volume_target=batch.volume_y,
+                volume_mask=batch.volume_mask,
+                case_ids=batch.case_ids,
+            )
+        per_case_observer.update(per_case)
     return loss, metrics
 
 
@@ -2534,6 +2687,27 @@ def main(argv: Iterable[str] | None = None) -> None:
         volume_y_std=stats["volume_y_std"].to(device),
     )
 
+    hardmining_active = config.hardmining_beta > 0.0
+    case_difficulty: torch.Tensor | None = None
+    case_id_to_idx: dict[str, int] = {}
+    view_case_idx: torch.Tensor | None = None
+    train_view_weights: torch.Tensor | None = None
+    train_case_ids: list[str] = []
+    if hardmining_active:
+        train_ds = train_loader.dataset
+        train_case_ids = list(train_ds.case_ids)
+        case_id_to_idx = {cid: i for i, cid in enumerate(train_case_ids)}
+        view_case_idx = torch.tensor(
+            [case_id_to_idx[v.case_id] for v in train_ds.views], dtype=torch.long
+        )
+        case_difficulty = torch.ones(len(train_case_ids), dtype=torch.float64, device=device)
+        train_view_weights = train_loader.sampler.view_weights  # ref to shared tensor
+        if is_main:
+            print(
+                f"Hard-mining: alpha={config.hardmining_alpha}, beta={config.hardmining_beta}, "
+                f"n_train_cases={len(train_case_ids)}, n_views={len(view_case_idx)}"
+            )
+
     model = build_model(config).to(device)
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
@@ -2787,7 +2961,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(f"Timeout ({timeout_minutes:.1f} min). Stopping.")
             break
 
-        if is_distributed and isinstance(train_loader.sampler, DistributedSampler):
+        if hasattr(train_loader.sampler, "set_epoch"):
             train_loader.sampler.set_epoch(epoch)
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
@@ -2820,6 +2994,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
+            per_case_observer: dict[str, float] | None = (
+                {} if hardmining_active else None
+            )
             loss, batch_loss_metrics = train_loss(
                 train_model,
                 batch,
@@ -2834,6 +3011,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
                 beta_nll_beta=config.beta_nll_beta,
+                per_case_observer=per_case_observer,
             )
             optimizer.zero_grad(set_to_none=True)
             loss_is_finite = bool(torch.isfinite(loss).item())
@@ -2995,6 +3173,56 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if should_log_weights
                 else {}
             )
+            hardmining_metrics: dict[str, float] = {}
+            if hardmining_active and per_case_observer is not None:
+                with torch.no_grad():
+                    n_cases = case_difficulty.shape[0]
+                    obs_sum = torch.zeros(n_cases, dtype=torch.float64, device=device)
+                    obs_count = torch.zeros(n_cases, dtype=torch.float64, device=device)
+                    for cid, rel_l2 in per_case_observer.items():
+                        ci = case_id_to_idx.get(cid)
+                        if ci is None:
+                            continue
+                        obs_sum[ci] += float(rel_l2)
+                        obs_count[ci] += 1.0
+                    if is_distributed:
+                        dist.all_reduce(obs_sum, op=dist.ReduceOp.SUM)
+                        dist.all_reduce(obs_count, op=dist.ReduceOp.SUM)
+                    seen = obs_count > 0
+                    if bool(seen.any()):
+                        avg_obs = obs_sum / obs_count.clamp_min(1.0)
+                        alpha = float(config.hardmining_alpha)
+                        case_difficulty[seen] = (
+                            alpha * avg_obs[seen]
+                            + (1.0 - alpha) * case_difficulty[seen]
+                        )
+                    hardmining_metrics["train/hardmining_cases_seen_step"] = float(
+                        seen.sum().item()
+                    )
+                    hardmining_metrics["train/hardmining_difficulty_mean"] = float(
+                        case_difficulty.mean().item()
+                    )
+                    hardmining_metrics["train/hardmining_difficulty_max"] = float(
+                        case_difficulty.max().item()
+                    )
+                    hardmining_metrics["train/hardmining_difficulty_min"] = float(
+                        case_difficulty.min().item()
+                    )
+                    hardmining_metrics["train/hardmining_gini"] = _gini_coefficient(
+                        case_difficulty
+                    )
+                    weights_pow = case_difficulty.clamp_min(1e-12) ** float(
+                        config.hardmining_beta
+                    )
+                    hardmining_metrics["train/hardmining_weighted_gini"] = (
+                        _gini_coefficient(weights_pow)
+                    )
+                    n_eff_step = _effective_sample_size(weights_pow)
+                    hardmining_metrics["train/hardmining_n_eff"] = n_eff_step
+                    n_cases_int = int(case_difficulty.numel())
+                    hardmining_metrics["train/hardmining_n_eff_frac"] = (
+                        n_eff_step / max(n_cases_int, 1)
+                    )
             train_loss_sum += float(loss.detach().cpu().item())
             n_batches += 1
             global_step += 1
@@ -3012,6 +3240,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 **gradient_metrics,
                 **grad_ema_metrics,
                 **weight_metrics,
+                **hardmining_metrics,
             }
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
@@ -3073,6 +3302,41 @@ def main(argv: Iterable[str] | None = None) -> None:
             or (timeout_hit and n_batches > 0)
         )
 
+        epoch_hardmining: dict[str, float] = {}
+        if (
+            hardmining_active
+            and case_difficulty is not None
+            and view_case_idx is not None
+            and train_view_weights is not None
+        ):
+            with torch.no_grad():
+                beta = float(config.hardmining_beta)
+                new_view_weights = (
+                    case_difficulty.clamp_min(1e-12).cpu() ** beta
+                )[view_case_idx]
+                train_view_weights.copy_(new_view_weights.to(train_view_weights.dtype))
+            epoch_hardmining["train/hardmining_epoch_difficulty_mean"] = float(
+                case_difficulty.mean().item()
+            )
+            epoch_hardmining["train/hardmining_epoch_gini"] = _gini_coefficient(
+                case_difficulty
+            )
+            epoch_n_eff = _effective_sample_size(
+                case_difficulty.clamp_min(1e-12) ** float(config.hardmining_beta)
+            )
+            epoch_hardmining["train/hardmining_epoch_n_eff"] = epoch_n_eff
+            epoch_hardmining["train/hardmining_epoch_n_eff_frac"] = (
+                epoch_n_eff / max(int(case_difficulty.numel()), 1)
+            )
+            if is_main:
+                top_k = min(10, len(train_case_ids))
+                top_diff_vals, top_diff_idx = torch.topk(case_difficulty, top_k)
+                top_lines = ", ".join(
+                    f"{train_case_ids[int(top_diff_idx[i].item())]}={float(top_diff_vals[i].item()):.4f}"
+                    for i in range(top_k)
+                )
+                print(f"[hardmining] top-{top_k} hardest cases: {top_lines}")
+
         log_metrics = {
             "train/epoch_loss": epoch_train_loss,
             "lr": float(optimizer.param_groups[0]["lr"]),
@@ -3080,6 +3344,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             "global_step": global_step,
             "swa/active": int(swa_active),
             "swa/n_updates": swa_n_updates,
+            **epoch_hardmining,
         }
         if early_stop_reason is not None:
             log_metrics["early_stop/triggered"] = 1.0
@@ -3305,6 +3570,39 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.summary.update(_numeric_metric_items(test_log))
     if is_main:
         print_metrics("test_surface", test_metrics["test_surface"])
+
+    if (
+        is_main
+        and hardmining_active
+        and case_difficulty is not None
+        and len(train_case_ids) > 0
+    ):
+        diff_cpu = case_difficulty.detach().cpu().to(torch.float64)
+        order = torch.argsort(diff_cpu, descending=True)
+        hardmining_table = wandb.Table(
+            columns=["rank", "case_id", "difficulty", "weight_beta"]
+        )
+        beta = float(config.hardmining_beta)
+        for rank_idx in range(min(20, diff_cpu.numel())):
+            ci = int(order[rank_idx].item())
+            d = float(diff_cpu[ci].item())
+            hardmining_table.add_data(
+                rank_idx + 1, train_case_ids[ci], d, d ** beta
+            )
+        wandb.log({"hardmining/top_difficulty_table": hardmining_table})
+        wandb.summary["hardmining/final_gini"] = _gini_coefficient(case_difficulty)
+        wandb.summary["hardmining/final_difficulty_mean"] = float(
+            case_difficulty.mean().item()
+        )
+        wandb.summary["hardmining/final_difficulty_max"] = float(
+            case_difficulty.max().item()
+        )
+        final_weights = case_difficulty.clamp_min(1e-12) ** beta
+        final_n_eff = _effective_sample_size(final_weights)
+        wandb.summary["hardmining/final_n_eff"] = final_n_eff
+        wandb.summary["hardmining/final_n_eff_frac"] = (
+            final_n_eff / max(int(case_difficulty.numel()), 1)
+        )
 
     if swa_enabled and swa_model is not None and swa_n_updates > 0:
         if is_main:
