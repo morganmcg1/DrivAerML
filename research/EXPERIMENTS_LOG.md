@@ -6,6 +6,47 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 00:30 UTC — PR #728 frieren ema_residual per-case sampling (Exp 1B Arm A) — CLOSED NEGATIVE
+
+- Branch: `frieren/exp-1b-volume-outlier-sampling`
+- W&B run: `ufq087v3` (group `frieren-vol-emphasis-sweep`, rank-0)
+- Hypothesis: per-case EMA-residual-weighted sampling would up-weight hard cases and close the 3x test-vs-val volume_pressure gap
+- Result: clean negative — mechanism worked correctly, hypothesis was wrong direction
+
+### Test metrics (best-val checkpoint)
+
+| Metric | Arm A | Baseline #592 | Δ |
+|---|---:|---:|---:|
+| `test_primary/abupt_axis_mean_rel_l2_pct` | 8.207 | 7.992 | +0.215pp (worse) |
+| `test_primary/volume_pressure_rel_l2_pct` | 12.250 | ~11.69 | +0.56pp (worse, +4.8% rel) |
+| `test_primary/surface_pressure_rel_l2_pct` | 4.156 | — | — |
+| `test_primary/wall_shear_rel_l2_pct` | 7.541 | — | — |
+
+### Val metrics (best-val checkpoint, EP4)
+
+| Metric | Arm A | Baseline #592 | Δ |
+|---|---:|---:|---:|
+| `val_primary/abupt_axis_mean_rel_l2_pct` | 6.9052 | 6.5985 | +0.31pp (fails SOTA gate) |
+| `val_primary/volume_pressure_rel_l2_pct` | 4.2650 | 3.9456 | +0.32pp |
+
+### Mechanism diagnostics — all healthy
+- effective_cases stayed 399/400 (no collapse), max_to_uniform_ratio 2.54 → 1.48× over training
+- EMA residual buffer trended down monotonically (0.132 → 0.024) as expected
+- No NaN/non-finite gradients across 37,320 steps; no kill-threshold trips
+- Run hit train_timeout at 270min mid-EP4
+
+### Conclusion
+
+Per-case granularity is too coarse. The 3x test-vs-val volume_pressure gap is dominated by **specific spatial regions** (far wake, vortex shedding, underbody outflow) present in essentially every case. Up-weighting whole cases redistributes batch composition but does not fix sampling density within a case. Cases-with-replacement sampling also reduced effective coverage at the 4-epoch budget actually trained.
+
+Frieren correctly identified that within-case spatial emphasis is the right attack. Reassigned to PR #748 (Exp 1B-2: spatial within-case emphasis using precomputed SDF channel).
+
+Carried forward:
+- The 13-epoch cosine schedule is effectively a 4-epoch cosine in practice (270min timeout) — future PR specs should design for the real 4-5 epoch budget.
+- Per-spatial-bin emphasis (32^3 voxel) and RHO-LOSS-style reducible loss queued in the research-ideas backlog.
+
+---
+
 ## 2026-05-05 09:10 UTC — PR #621 nezuko slice-centroid STRING-RoPE — CLOSED NEGATIVE
 
 - Branch: `nezuko/slice-centroid-string-rope`
