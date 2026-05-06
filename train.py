@@ -137,6 +137,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_head_layers: int = 0
     debug: bool = False
 
 
@@ -219,6 +220,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_head_layers": (
+            "Number of additional Transolver decoder blocks applied to the "
+            "volume tokens after the shared encoder, before the final norm "
+            "and linear projection. The new blocks reuse the encoder's "
+            "hidden_dim/heads/slices/mlp_ratio/dropout/qk-norm. Surface and "
+            "wall-shear paths are unchanged. Default 0 reproduces the "
+            "shared-head SOTA bitwise. PR #761 (Issue #717 Exp 1C) sets "
+            "this to 2 to test whether dedicated volume capacity closes "
+            "the val/test volume_pressure gap."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -297,6 +308,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_head_layers=config.vol_head_layers,
     )
 
 
@@ -756,7 +768,22 @@ def main(argv: Iterable[str] | None = None) -> None:
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
-            print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+            vol_head_blocks_for_print = getattr(base_model, "vol_head_blocks", None)
+            vol_head_param_count = (
+                sum(p.numel() for p in vol_head_blocks_for_print.parameters())
+                if vol_head_blocks_for_print is not None
+                else 0
+            )
+            vol_head_msg = (
+                f", vol_head_layers={config.vol_head_layers} "
+                f"({vol_head_param_count / 1e6:.2f}M)"
+                if config.vol_head_layers > 0
+                else ""
+            )
+            print(
+                f"Model: SurfaceTransolver grouped surface+volume "
+                f"({n_params / 1e6:.2f}M params){vol_head_msg}"
+            )
 
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
@@ -861,6 +888,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/total_params"] = int(n_params)
+            wandb.summary["model/vol_head_layers"] = int(config.vol_head_layers)
+            vol_head_blocks = getattr(base_model, "vol_head_blocks", None)
+            vol_head_params = (
+                sum(p.numel() for p in vol_head_blocks.parameters())
+                if vol_head_blocks is not None
+                else 0
+            )
+            wandb.summary["model/vol_head_params"] = int(vol_head_params)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}

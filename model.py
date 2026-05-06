@@ -342,6 +342,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        vol_head_layers: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +355,7 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.vol_head_layers = int(vol_head_layers)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -421,6 +423,26 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # Optional dedicated volume decoder head (Issue #717 capacity-additive
+        # path). When `vol_head_layers == 0` the model is bitwise identical to
+        # the prior shared-head SOTA; when > 0, volume tokens pass through
+        # `vol_head_layers` additional Transolver blocks (same hidden_dim,
+        # heads, slices, mlp_ratio, dropout, qk-norm as the shared encoder)
+        # before the final norm + linear projection. Surface/wall-shear path
+        # is unchanged.
+        if self.vol_head_layers > 0:
+            self.vol_head_blocks = Transformer(
+                depth=self.vol_head_layers,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_expansion_factor=mlp_ratio,
+                num_slices=slice_num,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
+        else:
+            self.vol_head_blocks = None
 
     def _encode_group(
         self,
@@ -500,6 +522,14 @@ class SurfaceTransolver(nn.Module):
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
         hidden = self.backbone(hidden, attn_mask=attn_mask)
         hidden = _apply_token_mask(hidden, attn_mask)
+
+        if self.vol_head_blocks is not None and volume_tokens > 0:
+            surface_part = hidden[:, :surface_tokens]
+            volume_part = hidden[:, surface_tokens:]
+            volume_part = self.vol_head_blocks(volume_part, attn_mask=volume_mask)
+            hidden = torch.cat([surface_part, volume_part], dim=1)
+            hidden = _apply_token_mask(hidden, attn_mask)
+
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
         cursor = 0
