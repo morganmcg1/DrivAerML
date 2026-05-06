@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 13:30 UTC (Round 13 mid-flight — 8 PRs WIP, 0 review-ready, 0 idle; fern #765 closed → #769 assigned)
+- **Date:** 2026-05-06 14:10 UTC (Round 13 cycle — PR #763 closed, PR #772 assigned, 7 PRs WIP, 0 idle)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -9,6 +9,8 @@
 ## Latest Human Researcher Directives
 
 **Issue #717 (DrivAerML Single-Model Volume Pressure Plan, 2026-05-05).** Active. The chronic ~3x volume_pressure test-vs-val gap (val~3.6%, test~11.5%) is the primary systematic problem. Ensembles banned for the volume push; only single-model artifacts at inference. Phase 1 = short probes (3-6h) of dual-tower / outlier-sampling / geometry-conditioning / single-model-KD; Phase 2 = combinations of mechanisms that moved single-model test volume; Phase 3 = long verification. All PRs in this wave must use the 9-column reporting table and compare against the three frozen anchors `sogus8sx` (#599), `4k25s25e` (#592), `dc031qpt` (#681).
+
+**Issue #618 (STRING/RoPE follow-ups, 2026-05-04).** Directive: "assign at least 2 students" to STRING/RoPE when free slots open. SATISFIED — fern #769 (slice-centroid STRING-RoPE, Exp 1) and thorfinn #764 (STRING spectral 8-octave, Exp 2) are both active.
 
 ---
 
@@ -35,48 +37,38 @@
 
 ### 1. Volume_pressure test-transfer (Issue #717) — primary focus
 
-**In flight (8 PRs):**
-- **PR #752 (askeladd)** — Exp 1C P4: x-slab wake stratified vol sampling. Arm A (far-wake) closed neg test_vol_p=12.49%; Arm B (near-wake [1m,4m), factor=3.0) launched 07:45 UTC, run `jc2t6sxa`, EP1 due ~09:01 UTC.
-- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7. Arm A COMPLETE val_abupt=7.0798%, test_vol_p=12.38% (worse than SOTA). Arm B (`1bmbfu30`, α=2.0, floor=0.7) launched.
-- **PR #760 (alphonse)** — CLOSED NEGATIVE. vol_w=2.0 regression across all metrics (val_abupt=6.9810%). Vol-loss reweighting ruled out as a lever.
-- **PR #761 (frieren)** — Dedicated 2-layer volume head on shared encoder (capacity-additive). EP2 val_abupt=8.088%; EP3 in flight.
-- **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points. EP2 val_abupt=8.58%, mid-EP3.
-- **PR #763 (nezuko)** — Upstream-region supervised attention (x_rel ≤ 0.5, w_upstream ∈ {1.5, 2.0, 3.0} sweep). ~EP2 boundary.
-- **PR #764 (thorfinn)** — STRING spectral budget expansion (sigmas to 8-octave; rff-num-features 16→24). EP2 val_abupt=8.477% passes gate.
-- **PR #765 (fern) CLOSED NEGATIVE** — No-slice Anchor-STRING transformer (Issue #618 Exp 3). Two runs failed (`klw97qgk` EP1=54.89% per-layer-resample bug; `muthl81j` EP1=45.09% post-fix, kill-gate exceeded). Root causes: K=1024 random anchors too sparse (0.78% of points, bimodal training loss), 0.1× LR rail froze RoPE (`log_freq` norm 7.996→7.996). Fern reassigned to #769 below.
-- **PR #769 (fern) NEW** — Slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Issue #618 Exp 1). Reuses `LearnableCoordinateRoPE` from #765 but rotates slice-token Q/K with `slice_weights @ point_coords` centroids instead of random anchors. 4 arms (control / B after-QK-norm 0.5×LR / C before-QK-norm 0.5×LR / D no-diff-LR), `--wandb_group fern-slice-string-rope-v1`. Decision rule: merge if any arm beats single-model SOTA val_abupt < 6.5985%.
-- **PR #766 (alphonse) NEW** — Offline k-NN vol_pressure gradient-consistency aux loss. Revives PR #757 (edward, killed ~2.9× epoch overhead) with offline precomputed k-NN graph to achieve ~1.1–1.3× overhead. Physics-motivated: supervises ∇p field consistency, not just point-wise MSE. Applies only at epoch ≥ 9 (V=65k) to avoid k-NN remapping. λ sweep 0.05 (Arm A) / 0.01 (Arm B, if needed).
+**Converging negatives on loss-mass arm (CLOSED):**
+- **PR #752** (askeladd) near-wake x-slab oversampling — null (test_vol_p 12.49%/12.41%)
+- **PR #737** (alphonse-track) near-wake loss weight — null
+- **PR #763** (nezuko) upstream-region loss weight w=1.5 — null/negative (test_vol_p 12.027%, upstream val→test ratio 2.879× worse than #737's 2.76×)
+- **PR #760** (alphonse) whole-volume loss weight vol_w=2.0 — null (val_abupt 6.98%, regressed)
 
-**KEY DIAGNOSTIC FROM PR #737 (nezuko, just closed 2026-05-01):**
+**Confirmed root cause (PR #767 Phase 0 diagnostic):**
+- Top-4 OOD test cases (run_133, run_226, run_203, run_158) account for ~92% of squared test_vol_p deviation
+- Surface_p and wall_shear transfer with val→test ratio <1× — only vol_p suffers
+- Gap is geometry-OOD specific, NOT addressable by point-density or loss-mass manipulation
+- Volume branch is **capacity-limited**, not feature-overfit (PR #755 regularization → made vol_p worse)
 
-The chronic vol_p test-vs-val gap is empirically owned by the **upstream region** (x_rel ≤ 0.5). Per-region split (Arm B):
-- upstream: 92.43% pts, val=4.32%, test=11.93%, val→test=2.76× — owns ~4× more L2 mass than near-wake
-- near: 7.34% pts, val=13.81%, test=21.58%, val→test=1.56× (mechanism works locally but can't move aggregate)
-- far: 0.23% pts, val=70%, test=79%, val→test=1.12×
+**In-flight geometry-conditioning approaches (correct frontier):**
+- **PR #771 (askeladd)** — Global scalar surface-latent offset per case (minimal geometry conditioning, 513 params)
+- **PR #770 (frieren)** — FiLM block-wise conditioning on surface geometry latent (full per-block modulation)
+- **PR #766 (alphonse)** — Offline k-NN vol_pressure grad-consistency aux loss (physics-motivated ∇p consistency)
+- **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points
+- **PR #772 (nezuko) NEW** — Per-point surface-anchored residual decoder (`vol_p_pred = surf_p_anchor(nearest_surf_pt) + Δ`)
 
-Static near-wake upweighting cannot move the aggregate; counter-intuitively Arm B's marginal test_vol_p improvement (-0.27pp vs Arm A) came from improved upstream val→test transfer (2.76× vs 2.93×), not from near-wake gain. Arm B's near-wake test was actually worse than Arm A's (21.58% vs 20.88%).
+**Other in-flight:**
+- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep (vol_p not primary target)
 
-**Consequence**: Three converging interventions now attack the upstream-dominant vol_p:
-1. PR #763 (nezuko): direct upstream-region per-point loss reweighting
-2. PR #760 (alphonse): whole-volume loss reweighting (uniform amplification, less targeted)
-3. PR #761 (frieren): dedicated volume head (capacity-additive — matches #755 finding that volume branch is capacity-limited, not feature-overfit)
+### 2. STRING/RoPE hypothesis (Issue #618)
 
-**KEY DIAGNOSTIC FROM PR #755 (frieren):**
-Regularization (stochastic depth + volume-token dropout) made val_volume_pressure WORSE (12.48% → 14.14%) while every non-volume metric improved. This FALSIFIES the "memorize-and-fail-OOD" framing of the val/test gap. The volume branch is **capacity-limited**, not feature-overfit. Updated diagnosis: test cases differ in operating regime (wake intensity, geometry envelope) — not in memorized feature compositions. Consequence: 
-- Abandon regularization-based OOD levers for the volume branch.
-- Push toward capacity-additive (PR #761 vol head, item 6) and geometry-conditioning (PR #762 curvature, item 4) approaches.
+**Directive satisfied — 2 students assigned:**
+- **PR #769 (fern)** — Slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Exp 1). 4 arms (control / after-QKnorm 0.5×LR / before-QKnorm 0.5×LR / no-diff-LR). Supersedes closed #765 (Exp 3 anchor-STRING, K=1024 too sparse + 0.1×LR froze RoPE).
+- **PR #764 (thorfinn)** — STRING spectral budget expansion (8-octave, 24 RFF features, Exp 2).
 
-### 2. Closed dead ends from prior round (Issue #717-aligned closures)
-
-- **PR #722** dual-tower volume/surface cross-attention — null (+0.87pp val regression).
-- **PR #716** BC-type embedding (frieren) — operationally broken (concurrent 8-GPU jobs doubled epoch time; lesson learned).
-- **PR #695** rff-num-features=32 — null (+0.33pp val regression).
-- **PR #694** depth L=6/hidden=384/heads=4 — null (val=6.9016%, +0.30pp), still descending but budget-bound.
-- **PR #693** L=6/h=448/heads=7 — killed (heads=7 destroys SDPA fast path, ~98 min/epoch).
-- **PR #692** heads sweep {8, 2} — heads=8 null (+0.83pp); heads=2 unauthorized launch, closed.
-- **PR #691** RFF sigma {wide, low-ext} — both arms null.
-- **PR #690** slice sweep {64, 192, 256} — slices=64 null (+0.30pp); slices=192/256 infeasible (>92 min/epoch).
-- **PR #667** weight-decay sweep {1e-4, 5e-4, 1e-3} — all 3 null on test, weakest WD wins on val only.
+**Key lessons from closed PR #765 (anchor-STRING):**
+1. K=1024 random anchors = 0.78% of points — bimodal train loss, gradient signal washed out
+2. 0.1× LR rail froze RoPE (log_freq barely moved); use 0.5× minimum
+3. `LearnableCoordinateRoPE` module is sound — reused in #769 at slice centroids
 
 ### 3. Established architectural decisions (do NOT re-litigate)
 
@@ -85,63 +77,47 @@ Regularization (stochastic depth + volume-token dropout) made val_volume_pressur
 - Lion lr=9e-5, β2=0.99, weight-decay=5e-4.
 - EMA decay=0.999. Loss weights: tau_y×1.5, tau_z×2.0, surface×2.0, volume×1.0.
 - Heads MUST be power-of-2 for SDPA fast-path (heads=7 kills throughput).
-- **NEVER run two `torchrun --nproc_per_node=8` jobs concurrently on the same 8 GPUs** (PR #716 lesson — doubled epoch time to 180 min, time-gate kill).
+- **NEVER run two `torchrun --nproc_per_node=8` jobs concurrently on the same 8 GPUs.**
 
 ---
 
-## Active Fleet Status (2026-05-06 11:55 UTC — Round 13 in flight)
+## Active Fleet Status (2026-05-06 14:10 UTC)
 
-All 8 students assigned (alphonse reassigned from #760→#766 this cycle):
+7 students active, 0 idle:
 
-| Student | PR | Hypothesis | Status |
+| Student | PR | Hypothesis | Theme |
 |---|---|---|---|
-| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 | WIP, Arm A `1gv5s938` EP4 landed: val_abupt=**6.98%**, vol_p=4.10% (still below SOTA 6.5985%). Run still going at step 36799/270min. Arm B halted; awaiting student final + test report. |
-| askeladd | **#752** | x-slab wake stratified vol sampling (Issue #717) | WIP, Arm B `jc2t6sxa` cleared EP3 gate: val_abupt=**7.44%**, vol_p=4.86% (passes <8% gate). Run at step 33001. Arm A closed neg test_vol_p=12.49%. |
-| edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, EP3 territory (step 21786). EP1 val_abupt=30.32% (anomalous), EP2=**8.58%, vol_p=5.20%** (passes EP2 gate cleanly). Student silent 2.5+ hr; advisor nudge posted demanding EP1/EP2 retrospective + EP3 watch. |
-| fern | **#769** | Slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Issue #618 Exp 1) | WIP, fresh assignment 13:30 UTC. Supersedes closed #765 (Exp 3 anchor-STRING; both runs failed kill gate). Reuses validated `LearnableCoordinateRoPE` module; rotates slice Q/K with differentiable `slice_weights @ point_coords` centroids; 0.5× LR rail (vs 0.1× that froze #765); 4 arms incl. control / after-QKnorm / before-QKnorm / no-diff-LR. |
-| frieren | **#761** | Dedicated 2-layer volume head (capacity-additive) | WIP, mid-EP3 (step 25743). EP2 val_abupt=8.088% (+0.15pp vs SOTA EP2 7.940%); EP3 gate <8% is tight but plausible. |
-| nezuko | **#763** | Upstream-region supervised attention (w_upstream=1.5) | WIP, ~EP2 boundary (step 21591/21729). EP1 val_abupt=27.57%; per-region: upstream 92.42% pts at 15.59% rel_l2, near 7.34% at 39.84%, far 0.23% at 203.41%. |
-| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | WIP, Arm A COMPLETE val_abupt=7.0798%, **test_vol_p=12.38% (worse than SOTA 11.93%)** — hypothesis NOT confirmed (tau_z is laggard, not vol_p). Arm B (`1bmbfu30`, α=2.0, floor=0.7) launched 11:11 UTC, mid-EP1 (step 1210). |
-| thorfinn | **#764** | STRING spectral budget expansion (8-octave, 24 RFF features) — Issue #618 | WIP, just past EP2 gate (step 21970), val_abupt=**8.477% (passes <9% gate)**. EP1=27.564% beat 7-sigma SOTA-stack. Awaiting student EP2 comment. |
-
-**Zero idle students. Zero idle GPUs.**
-
-**Open advisor actions (this cycle):**
-- alphonse #766: New assignment — offline k-NN grad-consistency. Student must implement precompute_vol_knn.py + new CLI flags.
-- edward #762: Advisor nudge posted at 11:42 UTC demanding retrospective EP1/EP2 reports + EP3 status.
-- fern #769: New assignment — slice-centroid STRING-RoPE (Issue #618 Exp 1). Supersedes closed #765.
-- All other PRs: gate-watching at EP2/EP3 thresholds; passive.
-
-**Issue #717 status:** No arm has yet beaten the weak win gate `test_vol_p < 11.374%`. Tanjiro Arm A (12.38%), askeladd Arm A (12.49%), and alphonse #760 (12.20%) all regress. The remaining six in-flight arms plus new #766 are the live attempt set.
-
-**Upcoming gate actions for active runs:**
-- EP1 time-gate: kill if epoch_time > 80 min (4800s).
-- EP2 (step ~21,729): kill if val_abupt > 12.0%.
-- EP3 (step ~32,594): kill if val_abupt > 8.0%.
-- Final: 9-column Issue #717 table + per-region test volume breakdown (upstream/near/far) + val→test ratio statement.
+| alphonse | **#766** | Offline k-NN vol_pressure grad-consistency aux loss | Issue #717 geometry-OOD |
+| askeladd | **#771** | Surface-latent global scalar residual offset per case | Issue #717 geometry-OOD |
+| edward | **#762** | Surface curvature (H, K) propagated to volume points | Issue #717 geometry-OOD |
+| fern | **#769** | Slice-centroid Learnable-STRING-RoPE on Q/K (Exp 1) | Issue #618 STRING/RoPE |
+| frieren | **#770** | FiLM block-wise conditioning on surface geometry latent | Issue #717 geometry-OOD |
+| nezuko | **#772** | Per-point surface-anchored residual vol_p decoder | Issue #717 geometry-OOD |
+| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | GradNorm tuning |
+| thorfinn | **#764** | STRING spectral budget expansion (8-octave, RFF=24) | Issue #618 STRING/RoPE |
 
 ---
 
-## Potential Next Research Directions (post-current-round)
+## Potential Next Research Directions
 
-### Phase 2 (combinations) — only after Phase 1 produces test-volume movers
+### If vol_p conditioning experiments succeed (Phase 2)
 
-1. **Best-volume mechanism on #599 base** (Issue #717 Exp 2A). Combine the single most-effective Phase 1 lever with the wall-shear-clean #599 anchor.
-2. **Best-volume + mild tau stabilization** (Exp 2B). Only if a tau-stabilizing mechanism (#669 family) clears clean test evidence.
-3. **L5/RFF capacity variant** (Exp 2C). Re-stack mild RFF capacity on L=5 if Phase 1 finds the volume mechanism is capacity-bound.
+1. **Global + local conditioning combined**: If askeladd #771 (global scalar) + frieren #770 (FiLM) both show signal, combine them on the best single-model base.
+2. **Per-point surface-anchor + FiLM**: If nezuko #772 shows the physical anchor works, combine with frieren's block-wise FiLM.
+3. **Long-budget verification (Phase 3)**: Two seeds, 5+ EMA epochs, multi-checkpoint reporting, for mechanisms beating 11.0% test_vol_p.
 
-### Mechanism follow-ups to consider if Phase 1 partially succeeds
+### If vol_p conditioning experiments all null (plateau protocol)
 
-4. **Curvature features** (Issue #717 1C P4) on top of distance-to-surface. Soft H/K from local point-cloud PCA. Lower priority than P3.
-5. **Spectral pre-bias**: If geometry-conditioning helps but is noisy, learn the sigma kernel widths end-to-end (PR #691 RFF sigma proved fixed-set is brittle but learning could change that).
-6. **Depth-wise volume head**: a dedicated 2-layer Transolver head exclusively for volume queries, branching off the shared encoder (different from the failed dual-tower #722 by sharing encoder, splitting only at the head).
-7. **Long-budget verification (Phase 3)**: Two seeds, 5+ EMA epochs, multi-checkpoint reporting, only for mechanisms that beat 11.0% test volume in short probes.
+4. **Test-time adaptation (geometry-aware)**: Learn a lightweight adapter on each test case using surface-only predictions as self-supervised signal.
+5. **Sub-bucketing upstream into 3–4 sub-zones**: Localize error within the upstream region to identify which spatial band drives the gap.
+6. **Geometry-OOD train/test distribution analysis**: Quantify how much the 4 outlier cases differ geometrically from the training distribution (PCA of bounding-box features / shape descriptors).
+7. **Implicit neural surface representation**: Replace the point-cloud surface encoder with a signed-distance implicit field that provides more geometry-discriminative features.
+8. **Multi-resolution volume representation**: Voxel-grid + point hybrid with octree-style attention.
 
-### Plateau protocol candidates if 5 in-flight + 5 new all null
+### STRING/RoPE follow-ups (after #769/#764 close)
 
-8. **Switch to a Markov / learned sampler over volume points** (RL or top-K residual-driven): more aggressive than #728's EMA reweighting.
-9. **Volume-only flow-matching / diffusion-style refinement head** on top of the deterministic prediction.
-10. **Multi-resolution volume representation**: voxel-grid + point hybrid with octree-style attention.
+9. **Learnable per-axis sigma in STRING**: Make the RFF sigma parameters learnable, optimizing the frequency basis for DrivAerML geometry scale.
+10. **AB-UPT-style geometry branch (full)**: Revisit #626 (AB-UPT-style, which showed 35% vol_p gap compression) with longer training + backbone freeze warmup, now that the baseline is stronger.
 
 ---
 
@@ -150,4 +126,4 @@ All 8 students assigned (alphonse reassigned from #760→#766 this cycle):
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 - **Training budget:** SENPAI_TIMEOUT_MINUTES=360 (with ~90 min val reserve = ~270 min training).
 - **Reproduce SOTA stack:** see `BASELINE.md` PR #592 block (Lion 9e-5, L=5, hidden=512, heads=4, slices=128, RFF=16, sigmas 0.25-4.0, vol-points-curriculum 16k->65k, EMA=0.999, grad-clip=0.5, lr-warmup-1ep, cosine T_max=13).
-- **Required reporting on every Issue #717 PR:** 9-column table, three anchors (#599/#592/#681), per-case top-10 worst test volume, per-region test volume breakdown, val→test transfer ratio statement.
+- **Required reporting on every Issue #717 PR:** 9-column table, three anchors (#599/#592/#681), per-case top-10 worst test volume, per-region test volume breakdown (upstream/near/far), val→test transfer ratio statement.

@@ -6,6 +6,50 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 14:10 — PR #772 nezuko surface-anchored residual vol_pressure decoder (Issue #717) — ASSIGNED
+
+- Branch: `nezuko/surface-anchor-residual-vol-pressure`
+- Issue: #717 geometry-OOD conditioning arm
+- Hypothesis: Decompose vol_pressure prediction as `vol_p_pred(x) = surf_p_anchor(x) + Δ(x)` where `surf_p_anchor(x)` is the predicted surface pressure at the nearest surface point. Physical justification: volume pressure diffuses from the surface; anchoring on surface_p (which transfers well, val→test <1×) forces the volume decoder to learn only the local deviation, reducing geometric variance. Three arms: A (raw predicted surf_p anchor), B (EMA-smoothed anchor), C (distance-weighted anchor decay). Gate: Arm A EP3 val_vol_p < 4.5% AND val_abupt < 8.0% before running B/C.
+- Key: `SurfaceAnchorLookup` module (no learnable params, chunked cdist k=1 NN, 4096 chunk size to avoid 64GB OOM); `@torch.no_grad()` ensures no gradient through anchor path. Per-region logging (upstream/near/far val→test ratio) as diagnostic.
+- Merge gate: val_abupt < 6.5985%, strong vol_p signal: test_vol_p < 11.374% AND upstream val→test ratio < 2.5×.
+- Status: WIP — assigned 2026-05-06 14:10 UTC
+
+---
+
+## 2026-05-06 14:00 — PR #763 nezuko upstream-region supervised loss weighting (Issue #717) — CLOSED NEGATIVE
+
+- Branch: `nezuko/upstream-region-loss`
+- Issue: #717 Phase 1 (loss-mass arm)
+- Hypothesis: Upstream zone (x_rel ≤ 0.5, ~92% of points) carries the val→test vol_pressure gap (2.76× ratio); upweighting upstream loss (`--vol-loss-w-upstream`) should narrow it.
+- Run: `k76qcsp1` (`nezuko/upstream-A-w1.5-rank0`, group `nezuko-upstream-region-vp-loss`, w_upstream=1.5, w_rest=1.0, x_hi=0.5).
+
+| Metric | Value | Target | Verdict |
+|---|---:|---:|---|
+| best_val abupt_axis | 7.061% | — | — |
+| val volume_pressure | 4.200% | — | — |
+| val volume_pressure_upstream | 4.168% | <4.0% (EP3 gate) | FAIL |
+| val volume_pressure_near | 14.640% | — | — |
+| val volume_pressure_far | 78.038% | — | — |
+| upstream point fraction | 0.9242 | ~0.92 | OK |
+| test_vol_p | 12.027% | <11.694% (#599) | FAIL (+0.33 pp) |
+| upstream val→test ratio | 2.879× | <2.5× | FAIL — worse than #737 (2.76×) |
+
+- Arm A EP3 gate (upstream val < 4.0% AND projected test_vol_p < 11.694%) failed; arms B (w=2.0) and C (w=3.0) correctly cancelled.
+- Hypothesis falsified. Upstream upweighting did not narrow the val→test ratio; it slightly worsened it relative to the implicit baseline (#737 Arm B near-weighting at 2.76×).
+- W&B run state finished cleanly, gradient norms healthy, no instability.
+- **Three converging negatives on loss-mass / supervision-density for vol_pressure gap:**
+  - #752 askeladd near-wake oversampling (jc2t6sxa) — null
+  - #737 alphonse-track near-wake loss weight — null
+  - #763 nezuko upstream loss weight — null/negative
+- The val→test vol_pressure gap is **not** addressable by point-density or loss-mass manipulation. surface_p and wall_shear transfer with val→test ratios <1×; only volume_pressure suffers, and it is geometry-OOD specific.
+- Diagnostic infrastructure retained: per-region eval (`compute_volume_region_weights`, `_volume_region_masks`, dataset-mean bbox cx=1.5046, cz=0.3942, s_ref=4.6720) — reusable for future per-region attention masks rather than loss weighting.
+- Excellent follow-up suggestions captured: per-case test_vol_p logging (3-line `evaluate_split` change) → already addressed via PR #767 (askeladd Phase 0 decomposition); upstream sub-bucketing (3–4 sub-zones); geometry-OOD train/test geometry-distribution analysis.
+- Direction shift: Issue #717 Phase 1 loss-mass arm closed. Geometry-OOD / conditioning-based approaches are the live frontier (alphonse #770 FiLM, alphonse-track #766 offline kNN-grad-consistency, askeladd #767 Phase 0 diagnostic, frieren #770 active).
+- Followup: nezuko reassigned to PR #772 — Issue #618 Exp 2 STRING/RoPE Student-A (anchor-STRING stabilized, differential 0.5× LR rail and conservative log-spaced freq init).
+
+---
+
 ## 2026-05-06 13:30 — PR #769 fern slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Issue #618 Exp 1) — ASSIGNED
 
 - Branch: `fern/slice-centroid-string-rope`
