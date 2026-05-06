@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-05 (post-Round-12 idle assignment refresh; thorfinn re-routed to Issue #618 Exp 3 Redux)
+- **Date:** 2026-05-06 (edward reassigned to PR #757 grad-consistency; PR #735 TTA closed negative; PR #737 Arm A diagnostic complete)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -72,28 +72,37 @@
 
 ---
 
-## Active Fleet Status
+## Active Fleet Status (2026-05-06 — post edward reassignment)
 
-All 8 students running on Issue #717 volume push:
+All 8 students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | #729 | Single-model KD from K=7 ensemble (Exp 1D) | WIP |
-| frieren | #728 | Volume outlier-aware sampling (Exp 1B) | WIP |
-| thorfinn | **#742** | Anchor-STRING stabilized (Issue #618 Exp 3 Redux) | Just assigned |
-| askeladd | **#734** | SDF distance-to-surface feature (Exp 1C P3) | Just assigned |
-| edward | **#735** | TTA Y-mirror + jitter (orthogonal to Exp 1*) | Just assigned |
-| fern | **#736** | Volume input-mixup regularizer | Just assigned |
-| nezuko | **#737** | Region-weighted volume loss (near-wake) | Just assigned |
-| tanjiro | **#738** | Train-time volume coord-noise (Bishop-style) | Just assigned |
+| alphonse | **#750** | Backbone freeze + geometry-branch diff-LR (Issue #618 Exp B) | EP1/4 frozen, EP4 unfreeze ~pending. Geometry LR 2× confirmed. |
+| askeladd | **#752** | x-slab wake stratified vol sampling (Exp 1C P4) | WIP |
+| edward | **#757** | k-NN ∇p gradient-consistency vol_pressure loss (3 λ arms: 0.25/1.0/2.0) | Just assigned |
+| fern | **#753** | Signed-log1p target transform for volume_pressure | WIP |
+| frieren | **#755** | Stochastic depth + volume-token dropout for OOD generalization | WIP |
+| nezuko | **#737** | Region-weighted volume loss: near-wake emphasis (Arm B running, C pending) | Arm A complete (val win, test regression). Arm B at EP1. |
+| tanjiro | **#738** | Train-time volume coord-noise injection | WIP |
+| thorfinn | **#756** | Cosine-annealed EMA decay schedule | WIP |
 
 **Zero idle students. Zero idle GPUs.**
 
-**Upcoming gate actions (6 newly assigned PRs incl. #742):**
-- EP1 informational + time gate kill if epoch_time > 80 min.
+**PR #735 (edward TTA)**: Closed. Both arms negative — Y-mirror TTA corrupts PE encoding; train-time mirror-aug degrades abupt by +0.42pp.
+
+**PR #737 (nezuko) Arm A finding (CRITICAL DIAGNOSTIC):**
+The near-wake (7.34% points, weight=2.0) weighting did NOT help test transfer. Root cause:
+upstream region (x_rel ≤ 0.5) = 92.43% of points, val→test ratio = 2.93× — this dominates the aggregate.
+Region-weighting on the minor near-wake region can't move the upstream needle.
+
+**PR #757 design rationale**: k-NN ∇p loss specifically targets the 92.43%-upstream failure: by directly supervising spatial pressure gradients (which reflect CFD wake structure and generalize beyond absolute pressure values), the model must learn underlying gradient fields that generalize to OOD test cases — not just point-wise pressure magnitudes that can be memorized from training distribution.
+
+**Upcoming gate actions:**
+- EP1 time-gate: kill if epoch_time > 80 min (4800s).
 - EP2 (step ~21,729): kill if val_abupt > 12.0%.
 - EP3 (step ~32,594): kill if val_abupt > 8.0%.
-- Final SENPAI-RESULT must include 9-column Issue #717 table + per-region/per-case test volume diagnostics.
+- Final: 9-column Issue #717 table + per-region test volume breakdown (upstream/near/far) + val→test ratio statement.
 
 ---
 

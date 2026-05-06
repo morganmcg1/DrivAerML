@@ -6,6 +6,73 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 09:15 UTC — PR #735 edward TTA Y-mirror + coord-jitter — CLOSED NEGATIVE
+
+- Branch: `edward/tta-y-mirror-jitter`
+- W&B Arm A: inference-only TTA on `4k25s25e` (PR #592 SOTA). Arm B: `rbnk7zca` (train-time mirror-aug).
+- Hypothesis: Y-mirror + small coord jitter at test time would reduce volume_pressure variance; training with mirror augmentation would improve test transfer.
+
+### Arm A results (inference-only TTA on SOTA `4k25s25e`)
+
+| TTA Mode | val_abupt | test_abupt | test_vol_p | Δ test_vol_p vs no-TTA |
+|---|---:|---:|---:|---:|
+| no-TTA (anchor) | 6.5986 | 7.9915 | 11.933 | — |
+| Y-mirror | 7.9566 | 9.4461 | **13.478** | **+1.545pp WORSE** |
+| jitter (σ=0.005, 4p) | 26.477 | 27.624 | 19.325 | **+7.39pp catastrophic** |
+
+### Arm B results (train-time `--use-mirror-aug --mirror-aug-p 0.5`, run `rbnk7zca`)
+
+| Metric | Arm B | SOTA #592 | Δ |
+|---|---:|---:|---:|
+| val_abupt (best) | 7.0214 | 6.5985 | +0.42pp WORSE |
+| test_vol_p | 12.245 | 11.933 | +0.31pp WORSE |
+| test_abupt | 8.336 | 7.992 | +0.34pp WORSE |
+
+### Analysis and conclusions
+
+Y-mirror TTA is fundamentally incompatible with `string_separable` PE + RFF features which are not y-sign equivariant. Test-time mirroring corrupts the coordinate embedding. Train-time mirror augmentation reduces effective model capacity for the asymmetric ground-truth fields (the car is not y-symmetric in realistic configurations). Both arms negative. **Root cause is architectural incompatibility, not hyperparameter tuning.** Close as definitive negative on the Y-equivariance hypothesis.
+
+---
+
+## 2026-05-06 09:30 UTC — PR #737 nezuko region-weighted volume_pressure loss Arm A — IN FLIGHT (Arm B EP1)
+
+- Branch: `nezuko/region-weighted-vp-loss`
+- W&B Arm A: `r1eddah6` (group `nezuko-region-vp-loss`). Arm B: rank0=`ocx2e7r5` (group same, running).
+- Hypothesis: near-wake region (0.5 < x_rel < 3.0) upweighting would reduce test-vs-val gap by forcing the model to focus on the high-error wake zone.
+
+### Arm A results (near=1.5, far=1.0, run `r1eddah6`)
+
+| Metric | EP4 (best) | SOTA #592 | #599 anchor | Δ vs #599 |
+|---|---:|---:|---:|---:|
+| val_abupt | **6.8921** | 6.5985 | — | +0.29pp (fails SOTA gate) |
+| val_vol_p | **4.1849** | 3.9456 | — | **-2.34pp val WIN** |
+| test_vol_p | **12.219** | 11.933 | **11.694** | **+0.525pp worse** |
+| test_abupt | 8.265 | 7.992 | — | +0.27pp worse |
+
+### CRITICAL per-region diagnostic (Arm A, EP4 test)
+
+| Region | val rel_l2 | test rel_l2 | val→test ratio | point share |
+|---|---:|---:|---:|---:|
+| upstream (x_rel ≤ 0.5) | 4.16% | **12.19%** | **2.93×** | **92.43%** |
+| near-wake (0.5 < x_rel < 3.0) | 13.04% | 20.88% | 1.60× | 7.34% |
+| far (x_rel ≥ 3.0) | 56.45% | 61.52% | 1.09× | 0.23% |
+
+### Analysis
+
+**Val win on volume_p did NOT translate to test.** The per-region diagnostic reveals why: the upstream zone (92.43% of points, 2.93× val→test ratio) dominates the aggregate 4:1 over near-wake. Upweighting the minor near-wake region (7.34%) had no statistical power to move the upstream needle. Arm B (near=2.0, far=1.0) is now at EP1 and may confirm this — but the diagnosis already points clearly away from near-wake weighting and toward **upstream-focused** supervision.
+
+This diagnostic is the most important finding of the current round: the test-vs-val gap is geometrically concentrated in the 92%-upstream zone, not in the near-wake as originally hypothesized.
+
+---
+
+## 2026-05-06 09:45 UTC — PR #757 edward k-NN ∇p gradient-consistency vol_pressure loss — ASSIGNED
+
+- Branch: `edward/grad-consistency-vol-pressure`
+- Hypothesis: Directly supervising spatial pressure gradients (∇p) via k-NN finite differences will force the model to learn gradient fields that generalize beyond absolute pressure values — targeting the upstream (92.43% point share, 2.93× val→test ratio) zone specifically.
+- Design: `--grad-consistency-weight λ` auxiliary loss; n_anchors=4096 subsampled, k=8 LS gradient estimator, relative MSE normalization. Three arms: λ=0.25/1.0/2.0.
+
+---
+
 ## 2026-05-06 00:30 UTC — PR #728 frieren ema_residual per-case sampling (Exp 1B Arm A) — CLOSED NEGATIVE
 
 - Branch: `frieren/exp-1b-volume-outlier-sampling`
