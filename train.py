@@ -102,6 +102,8 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    sdf_film_conditioning: bool = False
+    sdf_film_active_threshold: int = 49152
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -297,7 +299,29 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        sdf_film_conditioning=config.sdf_film_conditioning,
+        sdf_film_active_threshold=config.sdf_film_active_threshold,
     )
+
+
+def collect_sdf_film_metrics(model: nn.Module) -> dict[str, float]:
+    """Read the buffer-cached γ/β stats from the SDFFiLM module (rank-0 only).
+
+    The buffer is updated in-place each forward; with DDP `broadcast_buffers=True`
+    (default) we end up logging rank 0's most recent forward — fine for monitoring.
+    """
+    film = getattr(model, "sdf_film", None)
+    if film is None:
+        return {}
+    s = film.last_stats.detach().cpu()
+    return {
+        "sdf_film/gamma_mean": float(s[0]),
+        "sdf_film/gamma_std": float(s[1]),
+        "sdf_film/gamma_max_abs_dev": float(s[2]),
+        "sdf_film/beta_mean": float(s[3]),
+        "sdf_film/beta_std": float(s[4]),
+        "sdf_film/beta_max_abs": float(s[5]),
+    }
 
 
 def train_loss(
@@ -830,6 +854,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if getattr(base_model, "sdf_film", None) is not None:
+                film_param_count = sum(p.numel() for p in base_model.sdf_film.parameters())
+                print(
+                    f"SDF-FiLM conditioning ENABLED: sdf_dim=4 -> 64 -> 2*{config.model_hidden_dim} "
+                    f"({film_param_count:,d} params); zero-init final layer (identity at start); "
+                    f"γ ∈ (0, 2) via 1+tanh; gated for train_vol_points >= "
+                    f"{config.sdf_film_active_threshold}; always active in eval"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -861,6 +893,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/sdf_film_conditioning"] = bool(config.sdf_film_conditioning)
+            wandb.summary["model/sdf_film_active_threshold"] = int(config.sdf_film_active_threshold)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1240,6 +1274,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_sdf_film_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

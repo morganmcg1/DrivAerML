@@ -320,6 +320,71 @@ class Transformer(nn.Module):
         return x
 
 
+class SDFFiLM(nn.Module):
+    """SDF-statistic FiLM conditioning of the volume token hidden representation.
+
+    Geometry-OOD attack: PR #767 diagnostic showed the val→test vol_pressure gap is
+    case-dominated (4 OOD geometries drive 92% of squared deviation). SDF is already
+    a precomputed input channel; here we route per-case SDF order statistics
+    (mean/std/min/max) through a small MLP that produces FiLM (Perez et al. 2018)
+    affine parameters γ, β applied per-token to the volume hidden representation.
+
+    Bounded scale: γ = 1 + tanh(γ_raw) ∈ (0, 2) prevents blow-up.
+    Final-layer zero-init => γ=1, β=0 at startup, so the module is the identity
+    at init (no degradation guarantee).
+    """
+
+    def __init__(self, sdf_dim: int, hidden_dim: int, mlp_hidden: int = 64):
+        super().__init__()
+        self.fc1 = nn.Linear(sdf_dim, mlp_hidden)
+        self.act = nn.SiLU()
+        self.fc2 = nn.Linear(mlp_hidden, 2 * hidden_dim)
+        nn.init.trunc_normal_(self.fc1.weight, std=0.02)
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.zeros_(self.fc2.weight)
+        nn.init.zeros_(self.fc2.bias)
+        # Buffer for W&B telemetry: [γ_mean, γ_std, γ_max_abs_dev, β_mean, β_std, β_max_abs]
+        self.register_buffer("last_stats", torch.zeros(6))
+
+    def forward(self, sdf_desc: torch.Tensor, vol_tokens: torch.Tensor) -> torch.Tensor:
+        params = self.fc2(self.act(self.fc1(sdf_desc.to(dtype=vol_tokens.dtype))))
+        gamma_raw, beta = params.chunk(2, dim=-1)  # each [B, D]
+        gamma = 1.0 + torch.tanh(gamma_raw)  # γ ∈ (0, 2)
+        with torch.no_grad():
+            gamma_f = gamma.detach().float()
+            beta_f = beta.detach().float()
+            self.last_stats[0] = gamma_f.mean()
+            self.last_stats[1] = gamma_f.std()
+            self.last_stats[2] = (gamma_f - 1.0).abs().max()
+            self.last_stats[3] = beta_f.mean()
+            self.last_stats[4] = beta_f.std()
+            self.last_stats[5] = beta_f.abs().max()
+        return vol_tokens * gamma.unsqueeze(1) + beta.unsqueeze(1)
+
+
+def _masked_sdf_descriptor(volume_x: torch.Tensor, volume_mask: torch.Tensor) -> torch.Tensor:
+    """Compute [B, 4] per-case SDF descriptor (mean, std, min, max) over non-padded volume points.
+
+    ``volume_x`` is ``[B, N, 4]`` with channels (x, y, z, sdf). Padded rows are zero-filled
+    by the loader, so we mask them out — for the SOTA dataset the mask is usually all ones,
+    but eval-time strided sampling can produce ragged batches.
+    """
+    sdf = volume_x[..., 3]  # [B, N]
+    mask = volume_mask.to(device=sdf.device, dtype=sdf.dtype)
+    eps = 1e-6
+    valid = mask.sum(dim=1, keepdim=True).clamp(min=eps)  # [B, 1]
+    sdf_masked = sdf * mask
+    sdf_mean = sdf_masked.sum(dim=1, keepdim=True) / valid
+    diff = (sdf - sdf_mean) * mask
+    sdf_var = diff.pow(2).sum(dim=1, keepdim=True) / valid
+    sdf_std = sdf_var.clamp(min=0.0).sqrt()
+    pos_inf = torch.full_like(sdf, float("inf"))
+    neg_inf = torch.full_like(sdf, float("-inf"))
+    sdf_min = torch.where(mask > 0, sdf, pos_inf).min(dim=1, keepdim=True).values
+    sdf_max = torch.where(mask > 0, sdf, neg_inf).max(dim=1, keepdim=True).values
+    return torch.cat([sdf_mean, sdf_std, sdf_min, sdf_max], dim=-1)  # [B, 4]
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +407,8 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        sdf_film_conditioning: bool = False,
+        sdf_film_active_threshold: int = 49152,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +488,18 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.sdf_film_conditioning = sdf_film_conditioning
+        self.sdf_film_active_threshold = sdf_film_active_threshold
+        if sdf_film_conditioning:
+            volume_sdf_dim = max(0, self.volume_input_dim - space_dim)
+            if volume_sdf_dim < 1:
+                raise ValueError(
+                    "SDF-FiLM conditioning requires volume_input_dim > space_dim "
+                    "(SDF channel must be present in volume_x)."
+                )
+            self.sdf_film = SDFFiLM(sdf_dim=4, hidden_dim=n_hidden)
+        else:
+            self.sdf_film = None
 
     def _encode_group(
         self,
@@ -514,6 +593,25 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
+            if self.sdf_film is not None:
+                # Delayed-onset: at EP1-5 (vol_points<49152) the FiLM stays dormant by
+                # zero-multiplying its output. Always active in eval (N_vol=65536 there).
+                # We invoke FiLM unconditionally so DDP sees its parameters in the
+                # autograd graph (grad=0 in dormant epochs) — avoids needing
+                # find_unused_parameters=True.
+                apply_full = (
+                    not self.training
+                    or volume_x.shape[1] >= self.sdf_film_active_threshold
+                )
+                sdf_desc = _masked_sdf_descriptor(volume_x, volume_mask)  # [B, 4]
+                film_out = self.sdf_film(sdf_desc, volume_hidden)
+                if apply_full:
+                    volume_hidden = film_out
+                else:
+                    # Mathematically identity (volume_hidden + 0*film_out = volume_hidden),
+                    # but the autograd graph still touches FiLM params with grad=0.
+                    volume_hidden = volume_hidden + 0.0 * film_out
+                volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
