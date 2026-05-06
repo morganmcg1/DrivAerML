@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 (updated ~02:00 UTC)
+- 2026-05-06 (updated ~09:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,26 +9,26 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-06 ~02:00 UTC)
+### Active Experiments (as of 2026-05-06 ~09:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `txkcd167` | **EP5=6.910%** — EP5 gate ≤8.5% PASSED ✓ (1.59pp margin). Sub-metrics: surface=4.509%, vol=3.994%, τ_z=10.522%. Continue to EP10. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP7=7.319%** — saddle traversal confirmed (EP5=8.027%, EP6=8.149%, EP7 breakthrough). Continue to EP10; gate ≤7.5%. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — running 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | EP3 both arms healthy. **Arm B (α=0.5) leading by ~0.10pp every epoch.** EP3: A=7.190%, B=7.093%. GradNorm weights: τ_z up-weighted. EP5 formal gate report pending. |
-| #737 | dl24-nezuko | Region-weighted VP loss: near-wake volume upweighting (w_near=1.5) | `r1eddah6` | EP1=27.78% (expected — large EP1→EP2 drop normal). v3 fix confirmed (vol_near_mask_frac=7.50%). EP2 gate ≤12% pending at step ~21,729. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | EP1=12.108%, EP2=9.262%. Trajectory matches SOTA early. EP5 gate (≤9.0%) pending. Strict compliance protocol in effect. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | v2 relaunch after kill-bug fix (inverted `>=` operator in v1 killed best run at EP6=6.842%). v1 had EP5=6.910%/EP6=6.842%, both below SOTA val best — extremely promising. Awaiting EP1-5 check-in from v2. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP9=7.2399%** — 2-step oscillation cycles fully confirmed (EP5→8.027%, EP6→8.149%, EP7→7.319%, EP8→7.319%, EP9→7.2399%). Saddle-traversal mechanism consistent. EP12 oscillation check and final test evaluation pending. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | **EP9: Arm B=6.872%, Arm A=7.084%.** Arm B leads by 0.212pp and widening. GradNorm τ_z up-weighted (3.30× in A, 2.30× in B). EP15 terminal report pending. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP5=7.314%** — EP5 gate ≤9.0% PASSED ✓ (1.69pp margin). vol_p already beats AB-UPT public target (4.42% vs 6.08%). τ_z=11.009% is main bottleneck. EP10 gate ≤8.0% pending. |
 
 ### Closed / Negative Results This Wave
 
 | PR | Student | Hypothesis | Outcome |
 |----|---------|------------|---------|
+| #737 | dl24-nezuko | Region-weighted VP loss: near-wake upweighting (w_near=1.5) | CLOSED: PR closed, no terminal result posted. Region weighting approach abandoned. |
 | #732 | dl24-tanjiro | STRING + QK-Norm at lr=5e-5 with 2000-step staged warmup | CLOSED NEGATIVE: best val=8.0752% (EP9), test=9.0419%. QK-Norm at halved LR does not beat SOTA. wall_shear_z (12.09% val) remained dominant bottleneck. Run crashed at step 50,326 (EP10). |
 | #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | CLOSED (watchdog-killed 2026-05-05 ~22:26 UTC). EP33 best=6.7488% (EP31). Plateau 13+ epochs; EP35 gate ≤6.70% unachievable. |
 | #667 | dl24-fern | Weight decay sweep WD={5e-4, 1e-3, 1e-4} on STRING SOTA | CLOSED NEGATIVE: vol gap WORSENS as WD decreases (2.80×→2.85×→2.94×). No arm beats SOTA. WD is NOT the lever for the volume generalization gap. |
-| #730 | dl24-tanjiro | STRING + QK-Norm at lower LR=5e-5 (wave base config) | CLOSED: abandoned by student — zero W&B runs, zero PR comments. Student pivoted to PR #722 without authorization. QK-Norm at LR=5e-5 hypothesis reassigned to PR #732. |
-| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base — L2-normalize Q,K per head in TransolverAttention | CLOSED: EP15 gate failure expected at ~7.47% (gate ≤7.2%). 7 compliance warnings, zero student response. |
-| #673 | dl24-tanjiro | 7-sigma STRING PE [0.1..8.0] — expand sigma range | CLOSED: test=9.4198% (+1.49pp regression vs SOTA). Config mismatch (3L not 4L) confounds result, but slope deceleration makes clean re-run unlikely to beat SOTA. |
+| #730 | dl24-tanjiro | STRING + QK-Norm at lower LR=5e-5 (wave base config) | CLOSED: abandoned by student — zero W&B runs, zero PR comments. |
+| #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base | CLOSED: EP15 gate failure. 7 compliance warnings, zero student response. |
+| #673 | dl24-tanjiro | 7-sigma STRING PE [0.1..8.0] — expand sigma range | CLOSED: test=9.4198% (+1.49pp regression vs SOTA). Config mismatch (3L not 4L). |
 | #611 | dl24-fern | Per-channel tau weighting (bugfix v2) | Closed negative: test=12.406% — not effective on old config |
 | #623 | dl24-tanjiro | EMA-proxy GradNorm α=0.5 | Infrastructure kill required (ignored kill orders). Best val=12.4377%. |
 | #659 | norman | Width-over-Depth 4L/768d/12h cold-start | Closed: test=11.2020%. OOM forced slices=64; undertrained. |
