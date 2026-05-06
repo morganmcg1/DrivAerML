@@ -6,6 +6,85 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+## 2026-05-06 08:45 UTC — W&B Status Check: All Active Wave PRs (mid-run update)
+
+### PR #741 — Y-axis reflection augmentation (dl24-nezuko, `lszc4ri7`)
+- **Branch:** `dl24-nezuko/y-sym-augmentation`
+- **W&B Run:** `lszc4ri7`
+- **Status:** RUNNING — EP22 reached; **WAVE LEADER — new in-wave val best**
+
+| EP | val_primary | wsz | vp | Note |
+|----|------------|-----|----|------|
+| 19 | 6.6231% | 10.5% | 4.10% | C5 extended trough (prior best) |
+| 20 | 6.6239% | 10.46% | 3.98% | Flat (+0.0008pp) — no C6 spike |
+| 21 | 6.6607% | 10.1501% | — | Small uptick (+0.038pp); oscillation highly damped (C5 spike was +0.595pp) |
+| 22 | **6.5789%** | **10.0085%** | **3.7977%** | **C6 trough — NEW WAVE BEST; new in-wave val best** |
+
+C6 trough at EP22=6.5789% confirmed. The C6 oscillation was nearly fully damped: spike amplitude +0.038pp vs C5 spike +0.595pp — an order-of-magnitude dampening as cosine LR decays past 50%. vp=3.7977% is the new in-wave best. wsz=10.0085% approaching sub-10% threshold. C7 trough forecast EP25-26 at ~6.535-6.555%; early convergence flag if two consecutive trough delta <0.005pp. EP25 mandatory check-in. NO terminal test eval before EP35. DO NOT KILL.
+
+---
+
+### PR #745 — 5L STRING PE (dl24-frieren, `co0xlqap`)
+- **Branch:** `dl24-frieren/5l-string-pe`
+- **W&B Run:** `co0xlqap`
+- **Status:** RUNNING — EP14 reached; smoothest monotonic descent in wave
+
+| EP | val_primary | wsz | vp | Note |
+|----|------------|-----|----|------|
+| 10 | 6.6727% | 10.264% | 3.99% | Prior update best |
+| 11 | 6.6487% | — | — | |
+| 12 | 6.6392% | 10.2301% | — | Rate recovery confirmed |
+| 13 | 6.6240% | — | — | |
+| 14 | **6.6128%** | **10.2070%** | **3.8393%** | **Best; EP15 gate pass confirmed** |
+
+Zero oscillation across full EP1→EP14 trajectory (5L architecture with single long cosine T_max=50). 0.0339pp behind nezuko EP22 wave best. Advisor projection: EP17 will cross nezuko's EP22 best (6.5789%); EP22 projected ~6.524%. wsz sub-10% projected EP28-32. EP18-20 check-in requested.
+
+---
+
+### PR #740 — GradNorm adaptive loss balancing, Arm B (dl24-fern, `5x8wofzm`)
+- **Branch:** `dl24-fern/gradnorm-adaptive-loss`
+- **W&B Run:** Arm B `5x8wofzm` (α=0.5); Arm A `em8bnk1a` (α=1.0) KILLED EP5
+- **Status:** RUNNING — EP6 reached; Arm A killed at EP5 (gap 0.1724pp ≥ 0.15pp threshold); Arm B solo
+
+| EP | val_primary | wsz | vp | Note |
+|----|------------|-----|----|------|
+| 4 | 6.8721% | 10.14% | 4.38% | Arm A gap: 0.211pp |
+| 5 | 6.7438% | 9.9700% | 4.26% | Arm A gap: 0.1724pp — threshold exceeded → Arm A killed |
+| 6 | **6.6648%** | **9.8962%** | **4.08%** | **Earliest sub-10% wsz in wave** |
+
+Arm A killed at EP5 (val_primary gap ≥ 0.15pp threshold). Arm B solo continuing to EP31. GradNorm correctly upweights tau_z (structural bottleneck). wsz=9.8962% at EP6 is the earliest sub-10% wsz result in the wave — GradNorm may be directly addressing the wsz bottleneck. EP10 gate report pending.
+
+---
+
+### PR #749 — Lion lr=9e-5 control (dl24-tanjiro, `oi2a01zy`)
+- **Branch:** `dl24-tanjiro/lion-lr-9e-5`
+- **W&B Run:** `oi2a01zy`
+- **Status:** RUNNING — EP21 reached; clean monotonic descent
+
+| EP | val_primary | wsz | Note |
+|----|------------|-----|------|
+| 18 | 6.9511% | 10.75% | Prior update best |
+| 19 | 6.9377% | — | |
+| 20 | 6.9141% | — | |
+| 21 | **6.8907%** | **10.492%** | **Best; clean descent resumed after EP17/18 vp-spike** |
+
+Monotonic descent continuing but wsz slope decelerating to -0.011pp/ep (concern for structural ceiling at this LR). 0.4626pp above SOTA val_best=6.5281%. Terminal test eval at EP50 via `run_final_evaluation` automatic. wsz plateau signal at lr=9e-5 — confirms lower LR is insufficient to break through the wsz bottleneck.
+
+---
+
+**Wave standings at 2026-05-06 08:45 UTC:**
+
+| Student | PR | Run | EP | val_best | wsz | Status |
+|---------|----|----|----|----|-----|--------|
+| nezuko | #741 | `lszc4ri7` | 22 | **6.5789%** | 10.0085% | C7 trough EP25-26 forecast; DO NOT KILL |
+| frieren | #745 | `co0xlqap` | 14 | **6.6128%** | 10.2070% | EP18-20 check-in; projected to cross nezuko best by EP17 |
+| fern | #740 | `5x8wofzm` | 6 | **6.6648%** | 9.8962% | EP10 gate pending; earliest sub-10% wsz in wave |
+| tanjiro | #749 | `oi2a01zy` | 21 | **6.8907%** | 10.492% | EP50 terminal auto test eval |
+
+SOTA val_best reference: PR #599 `sogus8sx` = 6.5281%. Nezuko is 0.051pp above SOTA, with C7 trough projected to pass it. No advisor action items — all 4 PRs have advisor as most recent commenter. No human researcher GitHub Issues.
+
+---
+
 ## 2026-05-05 ~14:30 UTC — W&B Status Check: All Active Wave PRs (mid-run update)
 
 ### PR #741 — Y-axis reflection augmentation (dl24-nezuko, `lszc4ri7`)

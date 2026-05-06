@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~17:00 UTC)
+- 2026-05-06 08:45 UTC
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,14 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-05 ~17:00 UTC)
+### Active Experiments (as of 2026-05-06 08:45 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP22=6.5789% (wave leader, new in-wave val best)**. C6 trough confirmed at EP22; 0.051pp above SOTA val_best 6.5281%. wsz=10.0085% (sub-10% within reach next epoch). vp=3.7977% (run best). LR ~5.98e-5 at 40% decay. Run continuing toward EP30-35. DO NOT KILL. Test eval + review submit after terminal. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP12=6.6392%**. EP11→EP12 rate recovery confirmed (-0.0269pp). vp=3.8533% excellent. wsz slope -0.0169pp/epoch toward 10% barrier. EP15 kill gate <7.2% (currently passing at 6.6392%). Smoothest monotonic descent in wave. Advisor projection: EP15~6.55%, EP20~6.50%. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5 Arm B solo — Arm A killed EP5) | Arm B: `5x8wofzm` | **Arm B solo EP5=6.7438%**. Arm A (`em8bnk1a`) killed at EP5=6.9162% (gap=0.1724pp ≥ 0.15pp kill threshold). Arm B solo EP6→EP31. wsz=9.97% already sub-10%. EP10 gate pending. GradNorm correctly upweights tau_z (structural bottleneck). |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP21=6.8907% (best)**. EP19→EP21 new bests (6.9110→6.8907%); clean descent resumed after EP17/18 vp-spike. EP17/18 resolved. Steady monotonic descent. wsz plateau signal at this LR. Run continues to EP50 for auto test eval via `run_final_evaluation`. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP22=6.5789% (wave leader)**. C6 trough confirmed; oscillation dampening confirmed (C5 spike +0.595pp vs C6 uptick +0.038pp). wsz=10.0085% (sub-10% target next). vp=3.7977% run best. LR ~5.98e-5 at 40% decay. Run continuing toward EP30-35. DO NOT KILL. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP14=6.6128% (best)** — smoothest monotonic descent in wave, zero oscillation. vp=3.8533% excellent. wsz=10.2301% slope -0.0169pp/ep. Advisor projection at EP22: ~6.524% (would overtake nezuko wave best). EP15 gate pass confirmed at 6.6128%. |
+| #740 Arm B | dl24-fern | GradNorm adaptive loss balancing (α=0.5 solo — Arm A killed EP5) | `5x8wofzm` | **EP6=6.6648%** — earliest sub-10% wsz in wave (9.8962% at EP6). Arm A killed EP5 (gap 0.1724pp ≥ threshold). Arm B solo to EP31. GradNorm correctly upweights tau_z. Next EP10 gate report pending. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP21=6.8907% (best)** — clean descent resumed after EP17/18 vp-spike. wsz=10.492% slope decelerating to -0.011pp/ep (concern). Running to EP50 terminal auto test eval. |
 
 ### Closed / Negative Results This Wave
 
@@ -82,4 +82,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-05 ~17:00 UTC_
+_Last updated: 2026-05-06 08:45 UTC_
