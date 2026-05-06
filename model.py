@@ -271,11 +271,12 @@ class AnchorStringAttention(nn.Module):
       2. Cross-attention from points (queries+coords) to anchors (keys/values
          +coords), with RoPE rotated by point and anchor coords respectively.
 
-    Anchor selection during training is randperm shared across the batch
-    (PR #765 v1 simplification). Evaluation uses evenly-spaced indices for
-    deterministic forward passes. Padded points may be selected as anchors;
-    with the SOTA point-view sizes (65k+65k) the padding fraction is
-    typically zero, so we accept this for v1.
+    Anchor selection: caller passes ``anchor_idx`` sampled once per forward
+    at the encoder level so all blocks attend to the same K anchor positions.
+    Random sampling is used in both training and eval to keep the model's
+    train/eval distribution consistent. Padded points may be selected as
+    anchors; with the SOTA point-view sizes (65k+65k) the padding fraction
+    is typically zero, so we accept this for v1.
 
     Returns the attention delta (not residual'd). The caller (TransformerBlock)
     is responsible for the outer residual connection so this module slots in
@@ -323,16 +324,13 @@ class AnchorStringAttention(nn.Module):
         self,
         x: torch.Tensor,
         coords: torch.Tensor,
-        deterministic: bool,
+        anchor_idx: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        B, N, _ = x.shape
-        K = min(self.num_anchors, N)
-        if deterministic:
-            stride = max(1, N // K)
-            idx = torch.arange(0, K * stride, stride, device=x.device, dtype=torch.long)[:K]
-        else:
-            idx = torch.randperm(N, device=x.device, dtype=torch.long)[:K]
-        return x.index_select(1, idx), coords.index_select(1, idx)
+        if anchor_idx is None:
+            B, N, _ = x.shape
+            K = min(self.num_anchors, N)
+            anchor_idx = torch.randperm(N, device=x.device, dtype=torch.long)[:K]
+        return x.index_select(1, anchor_idx), coords.index_select(1, anchor_idx)
 
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         B, T, _ = x.shape
@@ -347,9 +345,9 @@ class AnchorStringAttention(nn.Module):
         x: torch.Tensor,
         coords: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
+        anchor_idx: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        deterministic = not self.training
-        a, ac = self.select_anchors(x, coords, deterministic=deterministic)
+        a, ac = self.select_anchors(x, coords, anchor_idx=anchor_idx)
 
         q_a = self._split_heads(self.q_self(a))
         k_a = self._split_heads(self.k_self(a))
@@ -489,13 +487,16 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         attn_mask: torch.Tensor | None = None,
         coords: torch.Tensor | None = None,
+        anchor_idx: torch.Tensor | None = None,
     ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
         x_norm = self.norm1(x)
         if self.attn_mode == "anchor_string":
             if coords is None:
                 raise ValueError("coords are required for attn_mode='anchor_string'")
-            attn_out = self.attention(x_norm, coords=coords, attn_mask=attn_mask)
+            attn_out = self.attention(
+                x_norm, coords=coords, attn_mask=attn_mask, anchor_idx=anchor_idx
+            )
         else:
             attn_out = self.attention(x_norm, attn_mask=attn_mask)
         x = x + attn_out
@@ -520,6 +521,7 @@ class Transformer(nn.Module):
     ):
         super().__init__()
         self.attn_mode = attn_mode
+        self.num_anchors = num_anchors
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -542,8 +544,13 @@ class Transformer(nn.Module):
         attn_mask: torch.Tensor | None = None,
         coords: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        anchor_idx: torch.Tensor | None = None
+        if self.attn_mode == "anchor_string":
+            N = x.shape[1]
+            K = min(self.num_anchors, N)
+            anchor_idx = torch.randperm(N, device=x.device, dtype=torch.long)[:K]
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask, coords=coords)
+            x = block(x, attn_mask=attn_mask, coords=coords, anchor_idx=anchor_idx)
         return x
 
 
