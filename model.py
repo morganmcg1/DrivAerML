@@ -188,6 +188,199 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class LearnableCoordinateRoPE(nn.Module):
+    """Learnable per-axis rotary position encoding for 3D continuous coords.
+
+    Splits ``head_dim // 2`` rotation pairs across ``ndim`` axes; the first
+    ``(head_dim // 2) % ndim`` axes get one extra pair so the full
+    ``head_dim`` is consumed. ``log_freq`` is initialised round-robin from
+    ``init_sigmas`` (matching :class:`StringSeparableEncoding`'s multi-sigma
+    pattern). ``phase`` initialises to zero. Both are learnable so the
+    network can specialise per-axis frequency content during training.
+    Issue #618 Experiment 3.
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        ndim: int = 3,
+        init_sigmas: tuple[float, ...] | list[float] = (0.25, 0.5, 1.0, 2.0, 4.0),
+    ):
+        super().__init__()
+        if head_dim % 2 != 0:
+            raise ValueError(f"head_dim must be even; got {head_dim}")
+        self.head_dim = head_dim
+        self.ndim = ndim
+        total_pairs = head_dim // 2
+        base = total_pairs // ndim
+        extra = total_pairs % ndim
+        self.pairs_per_axis: list[int] = [base + (1 if a < extra else 0) for a in range(ndim)]
+        self.rot_dim = 2 * sum(self.pairs_per_axis)
+        max_pairs = max(self.pairs_per_axis)
+
+        log_freq_init = torch.zeros(ndim, max_pairs)
+        for axis in range(ndim):
+            for f in range(self.pairs_per_axis[axis]):
+                log_freq_init[axis, f] = math.log(init_sigmas[f % len(init_sigmas)])
+        self.log_freq = nn.Parameter(log_freq_init)
+        self.phase = nn.Parameter(torch.zeros(ndim, max_pairs))
+
+    def angles(self, coords: torch.Tensor) -> torch.Tensor:
+        # coords: [..., ndim] -> theta: [..., total_pairs]
+        parts: list[torch.Tensor] = []
+        for axis in range(self.ndim):
+            pairs = self.pairs_per_axis[axis]
+            f = self.log_freq[axis, :pairs].exp().to(dtype=coords.dtype)
+            p = self.phase[axis, :pairs].to(dtype=coords.dtype)
+            theta = coords[..., axis : axis + 1] * f + p
+            parts.append(theta)
+        return torch.cat(parts, dim=-1)
+
+    def rotate(self, qk: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+        # qk: [B, H, T, head_dim], theta: [B, T, total_pairs]
+        rot_dim = self.rot_dim
+        if rot_dim == 0:
+            return qk
+        cos = theta.cos().to(dtype=qk.dtype).unsqueeze(1)
+        sin = theta.sin().to(dtype=qk.dtype).unsqueeze(1)
+        rotated = qk[..., :rot_dim]
+        passthrough = qk[..., rot_dim:]
+        rotated = rotated.view(*rotated.shape[:-1], -1, 2)
+        x_a = rotated[..., 0]
+        x_b = rotated[..., 1]
+        out_a = x_a * cos - x_b * sin
+        out_b = x_a * sin + x_b * cos
+        out = torch.stack([out_a, out_b], dim=-1)
+        out = out.flatten(start_dim=-2)
+        if passthrough.shape[-1] > 0:
+            out = torch.cat([out, passthrough], dim=-1)
+        return out
+
+    def forward(self, qk: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
+        theta = self.angles(coords)
+        return self.rotate(qk, theta)
+
+
+class AnchorStringAttention(nn.Module):
+    """No-slice attention: K coordinate-bearing anchors with STRING-RoPE on Q/K.
+
+    Replaces Transolver's slice-token bottleneck with K=``num_anchors``
+    anchor tokens that participate in attention via :class:`LearnableCoordinateRoPE`
+    on Q/K. Two sub-blocks per attention call:
+      1. Anchor self-attention with RoPE rotated by anchor coords.
+      2. Cross-attention from points (queries+coords) to anchors (keys/values
+         +coords), with RoPE rotated by point and anchor coords respectively.
+
+    Anchor selection during training is randperm shared across the batch
+    (PR #765 v1 simplification). Evaluation uses evenly-spaced indices for
+    deterministic forward passes. Padded points may be selected as anchors;
+    with the SOTA point-view sizes (65k+65k) the padding fraction is
+    typically zero, so we accept this for v1.
+
+    Returns the attention delta (not residual'd). The caller (TransformerBlock)
+    is responsible for the outer residual connection so this module slots in
+    place of TransolverAttention without changing block semantics.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_anchors: int = 1024,
+        dropout: float = 0.0,
+        use_qk_norm: bool = True,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.num_anchors = num_anchors
+        self.dropout = dropout
+        self.use_qk_norm = use_qk_norm
+
+        self.q_self = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.k_self = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.v_self = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.out_self = LinearProjection(hidden_dim, hidden_dim)
+
+        self.q_cross = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.k_cross = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.v_cross = LinearProjection(hidden_dim, hidden_dim, bias=False)
+        self.out_cross = LinearProjection(hidden_dim, hidden_dim)
+        self.proj_dropout = nn.Dropout(dropout)
+
+        self.rope = LearnableCoordinateRoPE(self.head_dim, ndim=3)
+        if use_qk_norm:
+            self.q_norm = nn.RMSNorm(self.head_dim, elementwise_affine=True)
+            self.k_norm = nn.RMSNorm(self.head_dim, elementwise_affine=True)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+
+    def select_anchors(
+        self,
+        x: torch.Tensor,
+        coords: torch.Tensor,
+        deterministic: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        B, N, _ = x.shape
+        K = min(self.num_anchors, N)
+        if deterministic:
+            stride = max(1, N // K)
+            idx = torch.arange(0, K * stride, stride, device=x.device, dtype=torch.long)[:K]
+        else:
+            idx = torch.randperm(N, device=x.device, dtype=torch.long)[:K]
+        return x.index_select(1, idx), coords.index_select(1, idx)
+
+    def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, _ = x.shape
+        return x.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+    def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
+        B, H, T, _ = x.shape
+        return x.transpose(1, 2).contiguous().view(B, T, H * self.head_dim)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        deterministic = not self.training
+        a, ac = self.select_anchors(x, coords, deterministic=deterministic)
+
+        q_a = self._split_heads(self.q_self(a))
+        k_a = self._split_heads(self.k_self(a))
+        v_a = self._split_heads(self.v_self(a))
+        if self.q_norm is not None:
+            q_a = self.q_norm(q_a)
+            k_a = self.k_norm(k_a)
+        q_a = self.rope(q_a, ac)
+        k_a = self.rope(k_a, ac)
+        attn_a = F.scaled_dot_product_attention(
+            q_a, k_a, v_a, dropout_p=self.dropout if self.training else 0.0
+        )
+        a = a + self.out_self(self._merge_heads(attn_a))
+
+        q_x = self._split_heads(self.q_cross(x))
+        k_x = self._split_heads(self.k_cross(a))
+        v_x = self._split_heads(self.v_cross(a))
+        if self.q_norm is not None:
+            q_x = self.q_norm(q_x)
+            k_x = self.k_norm(k_x)
+        q_x = self.rope(q_x, coords)
+        k_x = self.rope(k_x, ac)
+        attn_x = F.scaled_dot_product_attention(
+            q_x, k_x, v_x, dropout_p=self.dropout if self.training else 0.0
+        )
+        out = self._merge_heads(attn_x)
+        out = _apply_token_mask(out, attn_mask)
+        out = self.proj_dropout(self.out_cross(out))
+        return _apply_token_mask(out, attn_mask)
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -265,23 +458,47 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        attn_mode: str = "transolver",
+        num_anchors: int = 1024,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
+        self.attn_mode = attn_mode
         self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.attention = TransolverAttention(
-            hidden_dim=hidden_dim,
-            num_heads=num_heads,
-            num_slices=num_slices,
-            dropout=dropout,
-            use_qk_norm=use_qk_norm,
-        )
+        if attn_mode == "anchor_string":
+            self.attention = AnchorStringAttention(
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                num_anchors=num_anchors,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
+        else:
+            self.attention = TransolverAttention(
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                num_slices=num_slices,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x_norm = self.norm1(x)
+        if self.attn_mode == "anchor_string":
+            if coords is None:
+                raise ValueError("coords are required for attn_mode='anchor_string'")
+            attn_out = self.attention(x_norm, coords=coords, attn_mask=attn_mask)
+        else:
+            attn_out = self.attention(x_norm, attn_mask=attn_mask)
+        x = x + attn_out
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -298,8 +515,11 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        attn_mode: str = "transolver",
+        num_anchors: int = 1024,
     ):
         super().__init__()
+        self.attn_mode = attn_mode
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -309,14 +529,21 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    attn_mode=attn_mode,
+                    num_anchors=num_anchors,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, coords=coords)
         return x
 
 
@@ -342,6 +569,8 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        attn_mode: str = "transolver",
+        num_anchors: int = 1024,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +583,8 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.attn_mode = attn_mode
+        self.num_anchors = num_anchors
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -417,6 +648,8 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            attn_mode=attn_mode,
+            num_anchors=num_anchors,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -465,6 +698,7 @@ class SurfaceTransolver(nn.Module):
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
+        coords_list: list[torch.Tensor] = []
         surface_tokens = 0
         volume_tokens = 0
 
@@ -481,6 +715,7 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(surface_mask)
+            coords_list.append(surface_x[:, :, : self.space_dim])
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
@@ -495,10 +730,12 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(volume_mask)
+            coords_list.append(volume_x[:, :, : self.space_dim])
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        coords = torch.cat(coords_list, dim=1) if self.attn_mode == "anchor_string" else None
+        hidden = self.backbone(hidden, attn_mask=attn_mask, coords=coords)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 

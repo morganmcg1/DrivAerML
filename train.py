@@ -33,7 +33,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import DrivAerMLSurfaceDataset
-from model import SurfaceTransolver
+from model import AnchorStringAttention, SurfaceTransolver
 from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
@@ -102,6 +102,9 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    attn_mode: str = "transolver"
+    num_anchors: int = 1024
+    new_module_lr_mult: float = 0.1
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -233,20 +236,47 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def collect_new_module_param_ids(model: nn.Module) -> set[int]:
+    """IDs of params under :class:`AnchorStringAttention` modules.
+
+    Includes the embedded ``LearnableCoordinateRoPE`` because it sits inside
+    AnchorStringAttention; iterating its parameters with ``recurse=True``
+    captures both. Used to build a separate optimizer param group with a
+    reduced LR for the new modules (PR #765 stability rail).
+    """
+
+    seen: set[int] = set()
+    for _, module in model.named_modules():
+        if isinstance(module, AnchorStringAttention):
+            for p in module.parameters(recurse=True):
+                seen.add(id(p))
+    return seen
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    new_param_ids = (
+        collect_new_module_param_ids(model)
+        if config.attn_mode == "anchor_string"
+        else set()
+    )
+    if new_param_ids:
+        new_params = [p for p in model.parameters() if id(p) in new_param_ids]
+        base_params = [p for p in model.parameters() if id(p) not in new_param_ids]
+        new_lr = config.lr * config.new_module_lr_mult
+        param_groups = [
+            {"params": base_params, "lr": config.lr, "name": "base"},
+            {"params": new_params, "lr": new_lr, "name": "new_modules"},
+        ]
+    else:
+        param_groups = [{"params": list(model.parameters()), "lr": config.lr, "name": "base"}]
     if optimizer_name == "adamw":
-        return torch.optim.AdamW(
-            model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay,
-        )
+        return torch.optim.AdamW(param_groups, weight_decay=config.weight_decay)
     if optimizer_name == "lion":
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
-            lr=config.lr,
+            param_groups,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
@@ -284,6 +314,49 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_anchor_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-block log_freq diagnostics for the anchor-STRING RoPE.
+
+    Aggregates across blocks (mean/std/min/max + per-axis mean) and emits
+    one set per block so divergence can be localised.
+    """
+
+    metrics: dict[str, float] = {}
+    blocks = getattr(getattr(model, "backbone", None), "blocks", None)
+    if blocks is None:
+        return metrics
+    all_log_freqs: list[torch.Tensor] = []
+    for block_idx, block in enumerate(blocks):
+        attention = getattr(block, "attention", None)
+        if attention is None or not isinstance(attention, AnchorStringAttention):
+            continue
+        rope = getattr(attention, "rope", None)
+        if rope is None:
+            continue
+        log_freq = rope.log_freq.detach().float()
+        phase = rope.phase.detach().float()
+        prefix = f"anchor_rope/block_{block_idx}"
+        metrics[f"{prefix}/log_freq_mean"] = float(log_freq.mean().item())
+        metrics[f"{prefix}/log_freq_std"] = float(log_freq.std().item())
+        metrics[f"{prefix}/log_freq_min"] = float(log_freq.min().item())
+        metrics[f"{prefix}/log_freq_max"] = float(log_freq.max().item())
+        metrics[f"{prefix}/phase_abs_mean"] = float(phase.abs().mean().item())
+        for axis in range(log_freq.shape[0]):
+            pairs = rope.pairs_per_axis[axis]
+            axis_log_freq = log_freq[axis, :pairs]
+            metrics[f"{prefix}/log_freq_axis_{axis}_mean"] = float(axis_log_freq.mean().item())
+            metrics[f"{prefix}/log_freq_axis_{axis}_max"] = float(axis_log_freq.max().item())
+        all_log_freqs.append(log_freq.flatten())
+    if all_log_freqs:
+        cat = torch.cat(all_log_freqs)
+        metrics["anchor_rope/all/log_freq_mean"] = float(cat.mean().item())
+        metrics["anchor_rope/all/log_freq_std"] = float(cat.std().item())
+        metrics["anchor_rope/all/log_freq_min"] = float(cat.min().item())
+        metrics["anchor_rope/all/log_freq_max"] = float(cat.max().item())
+        metrics["anchor_rope/all/freq_max"] = float(cat.exp().max().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +370,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        attn_mode=config.attn_mode,
+        num_anchors=config.num_anchors,
     )
 
 
@@ -759,6 +834,21 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
         optimizer = build_optimizer(base_model, config)
+        if state.is_main:
+            for group in optimizer.param_groups:
+                group_name = group.get("name", "default")
+                group_params = group.get("params", [])
+                group_n = sum(p.numel() for p in group_params)
+                group_lr = group.get("lr", 0.0)
+                print(
+                    f"Optimizer group '{group_name}': "
+                    f"{len(group_params)} tensors, {group_n:,d} params, lr={group_lr:.2e}"
+                )
+            if config.attn_mode == "anchor_string":
+                print(
+                    f"Anchor-STRING attention enabled: K={config.num_anchors} anchors, "
+                    f"new-module LR mult={config.new_module_lr_mult}"
+                )
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
@@ -861,6 +951,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            for group in optimizer.param_groups:
+                group_name = group.get("name", "default")
+                group_params = group.get("params", [])
+                wandb.summary[f"optimizer/group_{group_name}/num_params"] = sum(
+                    p.numel() for p in group_params
+                )
+                wandb.summary[f"optimizer/group_{group_name}/num_tensors"] = len(group_params)
+                wandb.summary[f"optimizer/group_{group_name}/lr"] = group.get("lr", 0.0)
+            if config.attn_mode == "anchor_string":
+                wandb.summary["model/attn_mode"] = config.attn_mode
+                wandb.summary["model/num_anchors"] = config.num_anchors
+                wandb.summary["model/new_module_lr_mult"] = config.new_module_lr_mult
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1240,6 +1342,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_anchor_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
