@@ -51,15 +51,16 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.4161%** (PR #740 fern, EP15, run `5x8wofzm`) — updated wave leader; beats pre-wave SOTA val 6.5281% by 0.1120pp
+In-wave val target: **6.3828%** (PR #740 fern, EP18, run `5x8wofzm`) — wave leader updated from EP15 (6.4161%) to EP18 (6.3828%); beats pre-wave SOTA val 6.5281% by 0.1453pp
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #740 Arm B | `5x8wofzm` | fern | EP15 (best) | **6.4161%** | GradNorm α=0.5; steps_per_epoch=10987; EP15=6.4161% **WAVE LEADER** (−0.112pp below pre-wave SOTA val 6.5281%); EP16 regression vol-dominated (vp: 3.91%→4.42%); GradNorm self-correcting; EP17 recovery expected |
+| #740 Arm B | `5x8wofzm` | fern | EP18 (best) | **6.3828%** | GradNorm α=0.5; steps_per_epoch=10987; EP18=6.3828% **WAVE LEADER** (−0.1453pp below pre-wave SOTA val 6.5281%); two clean GradNorm oscillations (EP7, EP16) both recovered; EP19=6.3839% near-flat; run continuing to EP50 |
 | #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; EP33=6.4984%; steps_per_epoch=5489; C9 spike at EP39=6.8352%, EP40 partial recovery to 6.5532%; EP41-43 recovery window |
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; EP30=6.5097%; steps_per_epoch=5494; EP32=6.5229% uniform drift at LR floor; wsz bottleneck at 10.06% |
-| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; EP27=6.8479%; steps_per_epoch=5494; complete plateau EP35-47 within 6.8479-6.8700%; ~2.8 epochs to EP50 auto-test-eval; terminal imminent |
+| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 within 6.8479-6.8700% |
+| #780 | TBD | dl24-tanjiro | — | — | GradNorm α=0.25; newly assigned; awaiting student pickup |
 
-_Last updated: 2026-05-05 (epoch-boundary W&B scan, EP43 nezuko / EP35 frieren / EP47 tanjiro / EP17.54 fern)_
+_Last updated: 2026-05-05 (EP18 fern wave leader update; PR #780 tanjiro α=0.25 assigned)_
