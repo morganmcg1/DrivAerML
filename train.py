@@ -102,6 +102,9 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_distance_feature: bool = False
+    dist_sigmas: str = "0.1,0.5,2.0"
+    dist_log_scale: float = 1.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -266,6 +269,18 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def parse_dist_sigmas(spec: str) -> list[float]:
+    spec = (spec or "").strip()
+    if not spec:
+        raise ValueError("--dist-sigmas must contain at least one positive value")
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        raise ValueError("--dist-sigmas must contain at least one positive value")
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--dist-sigmas must be positive: {spec!r}")
+    return sigmas
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -297,6 +312,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_distance_feature=config.use_distance_feature,
+        dist_sigmas=parse_dist_sigmas(config.dist_sigmas),
+        dist_log_scale=config.dist_log_scale,
     )
 
 
@@ -861,6 +879,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/use_distance_feature"] = config.use_distance_feature
+            wandb.summary["model/dist_sigmas"] = list(parse_dist_sigmas(config.dist_sigmas))
+            wandb.summary["model/dist_log_scale"] = config.dist_log_scale
+            wandb.summary["model/dist_feature_dim"] = int(getattr(base_model, "dist_feature_dim", 0))
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}

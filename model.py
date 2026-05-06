@@ -342,6 +342,9 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_distance_feature: bool = False,
+        dist_sigmas: list[float] | None = None,
+        dist_log_scale: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,8 +357,13 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_distance_feature = use_distance_feature
+        self.dist_sigmas = list(dist_sigmas) if dist_sigmas else [0.1, 0.5, 2.0]
+        self.dist_log_scale = dist_log_scale
+        # Distance encoding contributes log1p(d/s_ref) + one Gaussian band per sigma.
+        self.dist_feature_dim = (1 + len(self.dist_sigmas)) if use_distance_feature else 0
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
-        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim) + self.dist_feature_dim
 
         if pos_encoding_mode == "string_separable":
             # STRING-separable: learnable per-axis log_freq + phase,
@@ -422,6 +430,18 @@ class SurfaceTransolver(nn.Module):
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
+    def _compute_distance_features(self, sdf: torch.Tensor) -> torch.Tensor:
+        # sdf: [..., 1] precomputed signed distance to surface mesh. Wake field is
+        # exclusively outside the body, so we clamp small negative numerical noise
+        # to 0 before encoding (also avoids log1p(negative)).
+        d = sdf.clamp(min=0.0)
+        s_ref = self.dist_log_scale
+        bands = [torch.log1p(d / s_ref)]
+        for sigma in self.dist_sigmas:
+            two_sigma_sq = 2.0 * sigma * sigma
+            bands.append(torch.exp(-d.pow(2) / two_sigma_sq))
+        return torch.cat(bands, dim=-1)
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -431,12 +451,15 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        extra_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
+        if extra_features is not None:
+            feature_parts.append(extra_features)
         if string_sep is not None:
             feature_parts.append(string_sep(pos))
         elif rff is not None:
@@ -484,6 +507,11 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
+            volume_extra: torch.Tensor | None = None
+            if self.use_distance_feature and volume_x.shape[-1] > self.space_dim:
+                volume_extra = self._compute_distance_features(
+                    volume_x[:, :, self.space_dim : self.space_dim + 1]
+                )
             tokens.append(
                 self._encode_group(
                     volume_x,
@@ -492,6 +520,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
+                    extra_features=volume_extra,
                 )
             )
             masks.append(volume_mask)
