@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (latest: EP32 nezuko 6.5041% NEW WAVE BEST + test eval authorized; EP23 frieren 6.5326% plateau broken; EP11 fern 6.4388% WAVE LEADER sub-6.44%; EP27 tanjiro 6.8479%)
+- 2026-05-06 ~15:15Z (latest: fern EP13 ~6.4429% val (EP11=6.4388% still run-best), EP12/EP13 check-in overdue — nudge posted; nezuko EP35=6.5108% — EP33=6.4984% still best, EP40 next; frieren EP26=6.5159% NEW RUN-BEST — BEATS SOTA val 6.5281% by 0.0122pp, EP27 overdue nudge posted; tanjiro ~EP38.6 running, EP30+ overdue, no student response; PR #768 fern slice-centroid RoPE — second activation reminder posted, 0 check-ins received)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,15 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-05 ~20:30 UTC)
+### Active Experiments (as of 2026-05-06 ~15:15Z)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5 solo — Arm A killed EP5) | `5x8wofzm` | **EP11=6.4388% — WAVE LEADER**, 0.089pp below pre-wave SOTA val 6.5281%. wall_shear 7.2711% first sub-7.29% AB-UPT target in wave. wsz 9.6697% (threshold 9.60%). Awaiting EP12+ continuation. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP32=6.5041% — second in wave**, BEATS pre-wave SOTA val by 0.0240pp. tau_y 7-epoch monotonic descent. **TEST EVAL AUTHORIZED from EP32 checkpoint** — student running test eval in parallel with training. EP35 mandatory check-in. DO NOT KILL. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP23=6.5326% — third in wave**, plateau (EP20-22) broken. 0.0045pp from pre-wave SOTA. wsz first sub-10.10% at 10.0968%, wsy first sub-8.07% at 8.0511%. EP35 mandatory check-in. Still descending; new flag thresholds: val_abupt < 6.52% immediate report, wsz < 9.95%. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP27=6.8479%** — very slow descent. 0.337pp behind wave leader. CONFIRMED continue to EP50 (auto test eval at terminal). Control baseline only. EP30 check-in next. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5 solo — Arm A killed EP5) | `5x8wofzm` | **EP11=6.4388% — WAVE LEADER**, 0.089pp below pre-wave SOTA val 6.5281%. EP13 ~6.4429% (EP11 still run-best, hover). EP12/EP13 check-in overdue — nudge posted. EP15 mandatory gate. Flag: val < 6.45% → immediate; val < 6.39% → milestone; wsz < 9.60% → flag. DO NOT KILL. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP33=6.4984% val — second in wave. test_primary=7.8232% (W&B `1tal40wr`) BEATS SOTA TEST (7.9303%) by 0.107pp — FIRST WAVE RUN TO CLEAR SOTA TEST.** EP35=6.5108% (hover, EP33 best holds). Advisor acknowledged EP35 hover as normal (matches EP26→EP29 pattern). Continuing to EP50 for best-val auto-test-eval. EP40 mandatory check-in. Flags: val < 6.48% → 2nd test eval; wsz < 9.90% → flag; wsz < 9.85% → milestone; 4 consecutive ≥ 6.525% → plateau. DO NOT KILL. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP26=6.5159% NEW RUN-BEST — BEATS SOTA val 6.5281% by 0.0122pp.** EP27 ~6.5207% (hover, single-epoch noise regression). EP27 check-in overdue — nudge posted. EP30 mandatory gate. Flags: val < 6.52% → immediate; val < 6.51% → milestone; wsz < 9.95% → flag; wsz < 9.90% → milestone. DO NOT KILL. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **~EP38.6 running, val=6.8557% (plateau, best_updated=0)** — 0.34pp+ behind wave leader. EP30+ check-in overdue, escalation comment posted, no student response. Terminal at EP50; auto test eval fires automatically. Control baseline only. |
+| #768 | dl24-fern | Slice-centroid RoPE: `LearnableCoordinateRoPE` applied to slice Q/K | N/A | **0 check-ins, 0 W&B runs.** Second activation reminder posted. Smoke test command provided (2-epoch, `--model-pe rope_slice_centroid`, `--gradnorm-alpha 0.5`). Fern advised: run #740 doesn't require watching; run #768 in parallel. Waiting for smoke test EP1/EP2. |
 
 ### Closed / Negative Results This Wave
 
@@ -58,17 +59,19 @@
 
 ## Research Themes and Open Questions
 
-1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP11=6.4388%, wave leader, 0.089pp below pre-wave SOTA val 6.5281%. wall_shear 7.2711% first sub-7.29% AB-UPT target in wave. wsz 9.6697% approaching 9.60% flag. GradNorm drove correlated multi-axis improvement EP10→EP11. If trajectory continues, sub-6.40% is plausible.
+1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP11=6.4388%, wave leader, 0.089pp below pre-wave SOTA val 6.5281%. EP13 ~6.4429% (EP11 still run-best, normal GradNorm oscillation ±0.01pp). wall_shear 7.2711% first sub-7.29% AB-UPT target in wave. wsz 9.6697% approaching 9.60% flag. EP12/EP13 overdue nudge posted. EP15 mandatory gate.
 
-2. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES.** EP32=6.5041% beats pre-wave SOTA val 6.5281% by 0.0240pp. tau_y 7-epoch monotonic descent (8.1197→8.0752%). TEST EVAL AUTHORIZED from EP32 checkpoint — running in parallel. All-time run bests for abupt+tau_y+vp+sp+ws. EP35 mandatory check-in. DO NOT KILL.
+2. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES on both val AND test.** EP33 val=6.4984% beats pre-wave SOTA val 6.5281% by 0.0297pp. **test_primary=7.8232% (W&B `1tal40wr`) beats SOTA test (7.9303%) by 0.107pp — first wave run to clear SOTA test.** EP35=6.5108% (hover, EP33 best holds). Advisor acknowledged EP35 hover as normal (matches EP26→EP29 pattern). Key: surface/wall_shear channels all flat or better on test; vol_p gap (+7.61pp) is structural, not y-sym artifact. Continuing to EP50 for best-val auto-test-eval. EP40 mandatory check-in. Second test eval if val < 6.48%. DO NOT KILL.
 
-3. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745) — Trending yes.** EP23=6.5326%, plateau (EP20-22) broken with −0.0169pp step. 0.0045pp from pre-wave SOTA. Monotonic descent at ~−0.02pp/ep. Strongest trajectory in structural terms after fern. EP35 mandatory check-in. Flag: val_abupt < 6.52% → immediate report; wsz < 9.95%.
+3. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745) — CONFIRMED YES val.** EP26=6.5159% beats pre-wave SOTA val 6.5281% by 0.0122pp. EP27 ~6.5207% (single-epoch hover noise). Epoch-hover pattern matches nezuko EP26→EP29 before breakthrough. LR ≈5.3e-5 at EP27 (cosine T_max=50, ~54% through). EP27 check-in overdue — nudge posted. EP30 mandatory gate. Flags: val < 6.52% → immediate; val < 6.51% → milestone; wsz < 9.95% → flag; wsz < 9.90% → milestone. No test eval before EP35 unless val < 6.50%.
 
-4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — Trending no.** EP27=6.8479%. Slow plateau descent. 0.337pp behind wave leader fern. Value is as control baseline only. Terminal at EP50.
+4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — NO.** ~EP38.6 running, val=6.8557% (plateau, best_updated=0). 0.34pp+ behind wave leader fern. EP30+ check-in overdue, escalation comment posted, no student response. Value is as control baseline only. Terminal at EP50; auto-test-eval fires automatically.
 
-5. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
+5. **Slice-centroid RoPE (fern #768) — zero activity, waiting.** `LearnableCoordinateRoPE` module applied to Transolver's existing slice Q/K using slice centroid coordinates — adds geometry-awareness to attention without architectural redesign. Smoke test command provided. Fern has 2 active PRs; #740 runs autonomously.
 
-6. **Tanjiro compliance track:** PR #730 abandoned, #696 closed (gate fail + compliance), #673 closed (config mismatch), #732 CLOSED NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change; continuing to EP50. Monitor for gate compliance.
+6. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
+
+7. **Tanjiro compliance track:** PR #730 abandoned, #696 closed (gate fail + compliance), #673 closed (config mismatch), #732 CLOSED NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change; continuing to EP50. Monitor for gate compliance.
 
 ## Potential Next Research Directions (after current arms complete)
 
@@ -82,4 +85,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-05 ~20:30 UTC (fern EP11=6.4388% wave leader; nezuko EP32=6.5041% test eval authorized; frieren EP23=6.5326% plateau broken; tanjiro EP27=6.8479% control; 0 idle students)_
+_Last updated: 2026-05-06 ~15:15Z (fern #740 EP13 ~6.4429% EP11=6.4388% still best, EP12/EP13 overdue nudge posted; fern #768 slice-centroid RoPE 0 check-ins, second activation reminder posted; nezuko #741 EP35=6.5108% hover, EP33 best holds, EP40 next; frieren #745 EP26=6.5159% BEATS SOTA val, EP27 hover nudge posted, EP30 gate next; tanjiro #749 ~EP38.6 plateau val=6.8557% no student response; 0 idle students — fern has 2 PRs)_
