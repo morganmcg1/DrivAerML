@@ -40,8 +40,10 @@ import torch.nn as nn
 import wandb
 import yaml
 
-from data import load_data, pad_collate
-from data.loader import SurfaceBatch
+import numpy as np
+
+from data import DrivAerMLSurfaceDataset, load_data, pad_collate
+from data.loader import DrivAerMLCaseStore, SurfaceBatch
 from model import SurfaceTransolver
 from trainer_runtime import (
     EvalAccumulator,
@@ -663,9 +665,13 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--split",
         nargs="+",
-        choices=["val", "test"],
+        choices=["train", "val", "test"],
         default=["val", "test"],
-        help="Which splits to evaluate the ensemble on.",
+        help=(
+            "Which splits to evaluate the ensemble on. 'train' is only "
+            "supported with --build-kd-cache (full-fidelity per-case averaged "
+            "predictions for offline knowledge distillation)."
+        ),
     )
     parser.add_argument("--eval-surface-points", type=int, default=65536)
     parser.add_argument("--eval-volume-points", type=int, default=65536)
@@ -760,13 +766,74 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
             "then exit. Used for distributing inference across GPUs."
         ),
     )
+    parser.add_argument(
+        "--build-kd-cache",
+        type=str,
+        default="",
+        help=(
+            "Output directory for the per-case averaged ensemble predictions "
+            "used as soft targets in knowledge distillation. When set, the "
+            "tool runs in build-kd-cache mode: it loads the K members listed "
+            "via --candidate-run-ids (or --run-ids), iterates each requested "
+            "split (train/val/test) with deterministic eval_chunk sampling, "
+            "averages predictions across the K members, and writes per-case "
+            "full arrays as float16 .npy files at "
+            "<dir>/<split>/<case_id>/{surface_pred,volume_pred}.npy. Idempotent: "
+            "cases whose files already exist are skipped, so runs can be split "
+            "across multiple processes."
+        ),
+    )
+    parser.add_argument(
+        "--kd-cache-channels",
+        type=str,
+        default="all",
+        choices=["all", "vol_only"],
+        help=(
+            "Which channels to cache when --build-kd-cache is set. 'vol_only' "
+            "writes only the volume_pressure soft targets (~14GB total across "
+            "all splits). Default 'all' caches both surface (4 channels) and "
+            "volume (1 channel) in case the experiment widens to all-channel KD."
+        ),
+    )
+    parser.add_argument(
+        "--kd-cache-case-stride",
+        type=int,
+        default=1,
+        help=(
+            "Process every k-th case for --build-kd-cache. Combined with "
+            "--kd-cache-case-offset, this lets multiple worker processes "
+            "(each pinned to a different GPU via CUDA_VISIBLE_DEVICES) cover "
+            "disjoint case slices in parallel."
+        ),
+    )
+    parser.add_argument(
+        "--kd-cache-case-offset",
+        type=int,
+        default=0,
+        help="Start offset for --kd-cache-case-stride sharding (default 0).",
+    )
     args = parser.parse_args(argv)
-    if args.greedy:
+    if args.build_kd_cache:
+        ids_set = bool(args.run_ids) or bool(args.candidate_run_ids.strip())
+        if not ids_set:
+            parser.error(
+                "--build-kd-cache requires --run-ids or --candidate-run-ids "
+                "(comma-separated)."
+            )
+    elif args.greedy:
         if not args.candidate_run_ids.strip():
             parser.error("--greedy requires --candidate-run-ids")
+        if "train" in args.split:
+            parser.error(
+                "--split train is only supported alongside --build-kd-cache."
+            )
     else:
         if not args.run_ids:
             parser.error("--run-ids is required when --greedy is not set")
+        if "train" in args.split:
+            parser.error(
+                "--split train is only supported alongside --build-kd-cache."
+            )
     return args
 
 
@@ -1135,8 +1202,323 @@ def main_greedy(args: argparse.Namespace) -> None:
         wandb.finish()
 
 
+def kd_cache_paths(output_dir: Path, split: str, case_id: str) -> dict[str, Path]:
+    case_dir = output_dir / split / case_id
+    return {
+        "case_dir": case_dir,
+        "surface_pred": case_dir / "surface_pred.npy",
+        "volume_pred": case_dir / "volume_pred.npy",
+        "_done": case_dir / "_done",
+    }
+
+
+@torch.no_grad()
+def _ensemble_average_batch(
+    members: list[SurfaceTransolver],
+    batch,
+    device: torch.device,
+    amp_mode: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Run K members forward, return averaged surface/volume normalized preds."""
+
+    sum_surf: torch.Tensor | None = None
+    sum_vol: torch.Tensor | None = None
+    for model in members:
+        with autocast_context(device, amp_mode):
+            out = model(
+                surface_x=batch.surface_x,
+                surface_mask=batch.surface_mask,
+                volume_x=batch.volume_x,
+                volume_mask=batch.volume_mask,
+            )
+        sp = out["surface_preds"].float()
+        vp = out["volume_preds"].float()
+        sum_surf = sp if sum_surf is None else sum_surf + sp
+        sum_vol = vp if sum_vol is None else sum_vol + vp
+    k = float(len(members))
+    return sum_surf / k, sum_vol / k
+
+
+def _strided_indices(view_index: int, total: int, view_count: int) -> np.ndarray:
+    """Mirror loader's eval_chunk indexing: torch.arange(view_index, total, view_count)."""
+
+    return np.arange(view_index, total, view_count, dtype=np.int64)
+
+
+def build_kd_cache_for_split(
+    members: list[SurfaceTransolver],
+    *,
+    split: str,
+    case_ids: list[str],
+    store: DrivAerMLCaseStore,
+    eval_surface_points: int,
+    eval_volume_points: int,
+    output_dir: Path,
+    device: torch.device,
+    amp_mode: str,
+    save_surface: bool,
+    save_volume: bool,
+    case_stride: int = 1,
+    case_offset: int = 0,
+    num_workers: int = 4,
+    batch_size: int = 1,
+) -> int:
+    """Cache K-averaged ensemble predictions per case for one split.
+
+    For each requested case, build a single-case ``eval_chunk`` dataset/loader,
+    run the K members on every chunk, average the normalized predictions
+    across members, and place each chunk's predictions at the strided rows of
+    a per-case full-size buffer. Once all chunks are processed, write the full
+    buffer to ``<output_dir>/<split>/<case_id>/{surface_pred,volume_pred}.npy``
+    in float16. The function is idempotent: cases with an existing
+    ``_done`` sentinel file are skipped, so multiple workers can safely
+    process disjoint shards (via ``case_stride`` / ``case_offset``).
+    """
+
+    if not save_surface and not save_volume:
+        raise ValueError("build_kd_cache_for_split requires save_surface or save_volume")
+
+    selected_case_ids = case_ids[case_offset::case_stride]
+    print(
+        f"[build_kd_cache] split={split} cases_total={len(case_ids)} "
+        f"selected={len(selected_case_ids)} "
+        f"(stride={case_stride} offset={case_offset}); "
+        f"save surface={save_surface} volume={save_volume}"
+    )
+    cached_count = 0
+    started_at = time.time()
+
+    for case_idx, case_id in enumerate(selected_case_ids):
+        paths = kd_cache_paths(output_dir, split, case_id)
+        if paths["_done"].exists():
+            cached_count += 1
+            continue
+        paths["case_dir"].mkdir(parents=True, exist_ok=True)
+
+        counts = store.case_point_counts(case_id)
+        n_surface = int(counts["n_surface"])
+        n_volume = int(counts["n_volume"])
+
+        single_ds = DrivAerMLSurfaceDataset(
+            [case_id],
+            store=store,
+            max_surface_points=eval_surface_points,
+            max_volume_points=eval_volume_points,
+            sampling_mode="eval_chunk",
+        )
+        loader = torch.utils.data.DataLoader(
+            single_ds,
+            batch_size=batch_size,
+            shuffle=False,
+            sampler=None,
+            collate_fn=pad_collate,
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=False,
+        )
+
+        surface_buf = (
+            np.zeros((n_surface, 4), dtype=np.float32) if save_surface else None
+        )
+        volume_buf = (
+            np.zeros((n_volume, 1), dtype=np.float32) if save_volume else None
+        )
+        surface_filled = np.zeros(n_surface, dtype=bool) if save_surface else None
+        volume_filled = np.zeros(n_volume, dtype=bool) if save_volume else None
+
+        case_t0 = time.time()
+        for batch in loader:
+            batch = batch.to(device)
+            avg_surf, avg_vol = _ensemble_average_batch(
+                members, batch, device, amp_mode
+            )
+            avg_surf_cpu = avg_surf.detach().cpu().float().numpy()
+            avg_vol_cpu = avg_vol.detach().cpu().float().numpy()
+
+            for item_idx, item_meta in enumerate(batch.metadata):
+                if save_surface:
+                    surface_view_index = int(item_meta["surface_view_index"])
+                    surface_view_count = int(item_meta["surface_view_count"])
+                    n_surface_loaded = int(item_meta["n_surface_loaded"])
+                    if n_surface_loaded > 0 and surface_view_index < surface_view_count:
+                        if n_surface <= eval_surface_points:
+                            rows = np.arange(n_surface, dtype=np.int64)
+                        else:
+                            rows = _strided_indices(
+                                surface_view_index, n_surface, surface_view_count
+                            )
+                        if rows.size != n_surface_loaded:
+                            raise RuntimeError(
+                                f"Surface view shape mismatch for {case_id} "
+                                f"view {surface_view_index}/{surface_view_count}: "
+                                f"loader gave {n_surface_loaded} rows, "
+                                f"strided slice has {rows.size}."
+                            )
+                        surface_buf[rows] = avg_surf_cpu[item_idx, :n_surface_loaded, :]
+                        surface_filled[rows] = True
+                if save_volume:
+                    volume_view_index = int(item_meta["volume_view_index"])
+                    volume_view_count = int(item_meta["volume_view_count"])
+                    n_volume_loaded = int(item_meta["n_volume_loaded"])
+                    if n_volume_loaded > 0 and volume_view_index < volume_view_count:
+                        if n_volume <= eval_volume_points:
+                            rows = np.arange(n_volume, dtype=np.int64)
+                        else:
+                            rows = _strided_indices(
+                                volume_view_index, n_volume, volume_view_count
+                            )
+                        if rows.size != n_volume_loaded:
+                            raise RuntimeError(
+                                f"Volume view shape mismatch for {case_id} "
+                                f"view {volume_view_index}/{volume_view_count}: "
+                                f"loader gave {n_volume_loaded} rows, "
+                                f"strided slice has {rows.size}."
+                            )
+                        volume_buf[rows] = avg_vol_cpu[item_idx, :n_volume_loaded, :]
+                        volume_filled[rows] = True
+
+        if save_surface:
+            unfilled = int((~surface_filled).sum())
+            if unfilled > 0:
+                raise RuntimeError(
+                    f"Surface buffer for {case_id} has {unfilled} unfilled rows "
+                    f"after iterating eval_chunk loader."
+                )
+        if save_volume:
+            unfilled = int((~volume_filled).sum())
+            if unfilled > 0:
+                raise RuntimeError(
+                    f"Volume buffer for {case_id} has {unfilled} unfilled rows "
+                    f"after iterating eval_chunk loader."
+                )
+
+        if save_surface:
+            np.save(paths["surface_pred"], surface_buf.astype(np.float16))
+        if save_volume:
+            np.save(paths["volume_pred"], volume_buf.astype(np.float16))
+        paths["_done"].touch()
+        cached_count += 1
+        case_dt = time.time() - case_t0
+
+        if (case_idx + 1) % 5 == 0 or case_idx == 0 or case_idx == len(selected_case_ids) - 1:
+            elapsed = time.time() - started_at
+            avg_per_case = elapsed / max(case_idx + 1, 1)
+            remaining = avg_per_case * (len(selected_case_ids) - case_idx - 1)
+            print(
+                f"  [{case_idx + 1}/{len(selected_case_ids)}] {case_id}: "
+                f"{case_dt:.1f}s (elapsed={elapsed:.0f}s, "
+                f"~{remaining:.0f}s remaining); n_surface={n_surface} n_volume={n_volume}"
+            )
+    return cached_count
+
+
+def main_build_kd_cache(args: argparse.Namespace) -> None:
+    """Build per-case averaged ensemble predictions for offline KD."""
+
+    entity = os.environ.get("WANDB_ENTITY", "wandb-applied-ai-team")
+    project = os.environ.get("WANDB_PROJECT", "senpai-v1-drivaerml-ddp8")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats(device)
+
+    raw_ids = (
+        args.run_ids
+        if args.run_ids
+        else [rid.strip() for rid in args.candidate_run_ids.split(",") if rid.strip()]
+    )
+    if not raw_ids:
+        raise ValueError("No run IDs provided for --build-kd-cache")
+
+    output_dir = Path(args.build_kd_cache).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"KD cache output: {output_dir}")
+    print(f"Members (K={len(raw_ids)}): {raw_ids}")
+
+    cache_root = Path(args.cache_root)
+    cache_root.mkdir(parents=True, exist_ok=True)
+    api = wandb.Api()
+
+    members: list[SurfaceTransolver] = []
+    for run_id in raw_ids:
+        print(f"Fetching artifact for member {run_id}...")
+        member_dir = download_checkpoint(api, entity, project, run_id, cache_root)
+        model, _cfg = load_member(run_id, member_dir, device)
+        members.append(model)
+    print(f"Loaded {len(members)} members on {device}")
+
+    save_surface = args.kd_cache_channels in {"all", "surface_only"}
+    save_volume = args.kd_cache_channels in {"all", "vol_only"}
+    if not (save_surface or save_volume):
+        raise ValueError("--kd-cache-channels gives no channels to save")
+
+    store = DrivAerMLCaseStore(
+        manifest_path=args.manifest, root=args.data_root or None
+    )
+
+    # Manifest summary so we know the cache covers the expected splits.
+    manifest_summary = {
+        "train": store.case_ids("train"),
+        "val": store.case_ids("val"),
+        "test": store.case_ids("test"),
+    }
+    print(
+        "Split case counts: "
+        + ", ".join(f"{k}={len(v)}" for k, v in manifest_summary.items())
+    )
+    splits_requested = list(args.split)
+    print(f"Splits to cache: {splits_requested}")
+
+    metadata_path = output_dir / "kd_cache_metadata.json"
+    if not metadata_path.exists():
+        import json
+
+        metadata = {
+            "members": list(raw_ids),
+            "k": len(raw_ids),
+            "eval_surface_points": int(args.eval_surface_points),
+            "eval_volume_points": int(args.eval_volume_points),
+            "channels": args.kd_cache_channels,
+            "amp_mode": args.amp_mode,
+            "manifest_path": str(args.manifest),
+        }
+        with metadata_path.open("w") as fh:
+            json.dump(metadata, fh, indent=2)
+        print(f"Wrote KD cache metadata to {metadata_path}")
+
+    total_cached = 0
+    for split in splits_requested:
+        ids = manifest_summary[split]
+        n_cached = build_kd_cache_for_split(
+            members,
+            split=split,
+            case_ids=ids,
+            store=store,
+            eval_surface_points=args.eval_surface_points,
+            eval_volume_points=args.eval_volume_points,
+            output_dir=output_dir,
+            device=device,
+            amp_mode=args.amp_mode,
+            save_surface=save_surface,
+            save_volume=save_volume,
+            case_stride=max(1, int(args.kd_cache_case_stride)),
+            case_offset=max(0, int(args.kd_cache_case_offset)),
+            num_workers=int(args.num_workers),
+            batch_size=int(args.batch_size),
+        )
+        total_cached += n_cached
+        print(f"[build_kd_cache] split={split} cached_or_skipped={n_cached}")
+
+    if torch.cuda.is_available():
+        peak_gb = torch.cuda.max_memory_allocated(device) / 1e9
+        print(f"Peak GPU memory: {peak_gb:.2f} GB")
+    print(f"Done. Total cases cached/skipped: {total_cached}")
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
+    if args.build_kd_cache:
+        main_build_kd_cache(args)
+        return
     if args.greedy:
         main_greedy(args)
         return

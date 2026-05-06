@@ -32,7 +32,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+import numpy as np
+
 from data import DrivAerMLSurfaceDataset
+from data.loader import DrivAerMLCase
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -137,6 +140,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    kd_ensemble_cache_dir: str = ""
+    kd_alpha: float = 0.5
+    kd_channels: str = "vol_only"
+    kd_warmup_epochs: int = 0
     debug: bool = False
 
 
@@ -219,6 +226,31 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "kd_ensemble_cache_dir": (
+            "Path to a per-case averaged ensemble prediction directory "
+            "produced by `ensemble_eval.py --build-kd-cache <dir>`. When set, "
+            "the trainer adds an MSE knowledge-distillation term against the "
+            "cached soft targets at the points sampled by the loader. Empty "
+            "(default) disables KD."
+        ),
+        "kd_alpha": (
+            "Mixing weight for the KD loss term. Final per-channel loss = "
+            "(1 - alpha) * L_gt + alpha * L_kd. Default 0.5. Only used when "
+            "--kd-ensemble-cache-dir is set."
+        ),
+        "kd_channels": (
+            "Which channels to apply KD on: 'vol_only' (default; only "
+            "volume_pressure uses soft targets) or 'all' (all 4 surface "
+            "channels + volume_pressure use soft targets). Surface arm: "
+            "applies the same alpha to surface_pressure and the three "
+            "wall-shear axes."
+        ),
+        "kd_warmup_epochs": (
+            "Linearly ramp the KD alpha from 0 to --kd-alpha over the first "
+            "N epochs (default 0 = full alpha from epoch 0). Useful when the "
+            "student is initially producing very large prediction errors and "
+            "the soft-target gradient could overwhelm the GT gradient."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +332,202 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+class IndexedDrivAerMLDataset(DrivAerMLSurfaceDataset):
+    """DrivAerML dataset that exposes sampled row indices in metadata.
+
+    Identical sampling to ``DrivAerMLSurfaceDataset`` but additionally stores
+    ``surface_row_indices`` and ``volume_row_indices`` (long tensors of row
+    positions in the case's full point arrays) on each ``DrivAerMLCase``'s
+    metadata dict. Downstream KD code uses these indices to slice into the
+    pre-cached per-case ensemble soft-target arrays.
+    """
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        volume_idx = self._indices(
+            counts["n_volume"],
+            self.max_volume_points,
+            view,
+            group_view_count=view.volume_view_count,
+        )
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        metadata = dict(case.metadata)
+        if surface_idx is None:
+            metadata["surface_row_indices"] = torch.arange(
+                counts["n_surface"], dtype=torch.long
+            )
+        else:
+            metadata["surface_row_indices"] = surface_idx.detach().clone().long()
+        if volume_idx is None:
+            metadata["volume_row_indices"] = torch.arange(
+                counts["n_volume"], dtype=torch.long
+            )
+        else:
+            metadata["volume_row_indices"] = volume_idx.detach().clone().long()
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode
+        metadata["joint_view_count"] = int(view.view_count)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
+class KDEnsembleCache:
+    """Lazy mmap-backed reader for per-case averaged ensemble predictions.
+
+    Files are produced by ``ensemble_eval.py --build-kd-cache``. Layout:
+
+        <root>/<split>/<case_id>/{surface_pred,volume_pred}.npy  # float16
+
+    This class memory-maps each requested .npy file on first access and
+    caches the mmap handle in a per-process LRU dict. The training loop
+    only reads small slices (the rows sampled by the loader for the current
+    batch), so cumulative I/O per step is small (<~1 MB).
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        load_surface: bool,
+        load_volume: bool,
+    ):
+        self.root = Path(root)
+        if not self.root.exists():
+            raise FileNotFoundError(
+                f"KD ensemble cache directory does not exist: {self.root}"
+            )
+        self.load_surface = load_surface
+        self.load_volume = load_volume
+        self._surface: dict[str, np.ndarray] = {}
+        self._volume: dict[str, np.ndarray] = {}
+
+    def _resolve(self, split: str, case_id: str) -> Path:
+        return self.root / split / case_id
+
+    def _maybe_load(
+        self,
+        cache: dict[str, np.ndarray],
+        split: str,
+        case_id: str,
+        filename: str,
+    ) -> np.ndarray:
+        if case_id in cache:
+            return cache[case_id]
+        path = self._resolve(split, case_id) / filename
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Missing KD prediction cache for case {case_id} ({split}): {path}"
+            )
+        arr = np.load(path, mmap_mode="r")
+        cache[case_id] = arr
+        return arr
+
+    def get_surface(self, split: str, case_id: str) -> np.ndarray:
+        if not self.load_surface:
+            raise RuntimeError("KDEnsembleCache configured with load_surface=False")
+        return self._maybe_load(self._surface, split, case_id, "surface_pred.npy")
+
+    def get_volume(self, split: str, case_id: str) -> np.ndarray:
+        if not self.load_volume:
+            raise RuntimeError("KDEnsembleCache configured with load_volume=False")
+        return self._maybe_load(self._volume, split, case_id, "volume_pred.npy")
+
+    def has_case(self, split: str, case_id: str) -> bool:
+        case_dir = self._resolve(split, case_id)
+        if not case_dir.exists():
+            return False
+        if self.load_surface and not (case_dir / "surface_pred.npy").exists():
+            return False
+        if self.load_volume and not (case_dir / "volume_pred.npy").exists():
+            return False
+        return True
+
+
+def gather_kd_targets_from_batch(
+    batch,
+    *,
+    cache: KDEnsembleCache,
+    split: str,
+    device: torch.device,
+    n_surface_dim: int,
+    n_volume_dim: int,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Build per-batch teacher target tensors aligned to the loader output.
+
+    For each item in ``batch``, look up the cached full-case averaged
+    predictions and gather the rows at the indices stored in metadata. Pad
+    to the batch's max-N dimensions so the result lines up with
+    ``out['surface_preds']`` and ``out['volume_preds']``. Returns
+    ``(surface_teacher, volume_teacher)``; either may be ``None`` when the
+    cache is configured to skip that channel family.
+    """
+
+    batch_size = len(batch.case_ids)
+    surface_max = batch.surface_x.shape[1] if cache.load_surface else 0
+    volume_max = batch.volume_x.shape[1] if cache.load_volume else 0
+    surface_teacher = (
+        torch.zeros((batch_size, surface_max, n_surface_dim), dtype=torch.float32)
+        if cache.load_surface
+        else None
+    )
+    volume_teacher = (
+        torch.zeros((batch_size, volume_max, n_volume_dim), dtype=torch.float32)
+        if cache.load_volume
+        else None
+    )
+    for item_idx, (case_id, item_meta) in enumerate(zip(batch.case_ids, batch.metadata)):
+        if cache.load_surface:
+            surface_indices = item_meta["surface_row_indices"]
+            n_surface_loaded = int(item_meta["n_surface_loaded"])
+            if n_surface_loaded > 0:
+                full = cache.get_surface(split, case_id)
+                rows = surface_indices[:n_surface_loaded].cpu().numpy().astype(np.int64)
+                sliced = np.asarray(full[rows], dtype=np.float32)
+                surface_teacher[item_idx, :n_surface_loaded, :] = torch.from_numpy(
+                    sliced
+                )
+        if cache.load_volume:
+            volume_indices = item_meta["volume_row_indices"]
+            n_volume_loaded = int(item_meta["n_volume_loaded"])
+            if n_volume_loaded > 0:
+                full = cache.get_volume(split, case_id)
+                rows = volume_indices[:n_volume_loaded].cpu().numpy().astype(np.int64)
+                sliced = np.asarray(full[rows], dtype=np.float32)
+                volume_teacher[item_idx, :n_volume_loaded, :] = torch.from_numpy(
+                    sliced
+                )
+    if surface_teacher is not None:
+        surface_teacher = surface_teacher.to(device, non_blocking=True)
+    if volume_teacher is not None:
+        volume_teacher = volume_teacher.to(device, non_blocking=True)
+    return surface_teacher, volume_teacher
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,6 +538,10 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    kd_alpha_effective: float = 0.0,
+    kd_channels: str = "vol_only",
+    kd_surface_teacher: torch.Tensor | None = None,
+    kd_volume_teacher: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -322,26 +554,80 @@ def train_loss(
             volume_mask=batch.volume_mask,
         )
         if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
+            surface_loss_gt = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
+            surface_loss_gt = masked_mse(
+                out["surface_preds"], surface_target, batch.surface_mask
+            )
+        volume_loss_gt = masked_mse(
+            out["volume_preds"], volume_target, batch.volume_mask
+        )
+
+        kd_active = kd_alpha_effective > 0.0
+        apply_kd_volume = kd_active and (kd_volume_teacher is not None)
+        apply_kd_surface = (
+            kd_active
+            and kd_channels == "all"
+            and (kd_surface_teacher is not None)
+        )
+
+        if apply_kd_volume:
+            volume_loss_kd = masked_mse(
+                out["volume_preds"], kd_volume_teacher, batch.volume_mask
+            )
+            volume_loss_total = (
+                (1.0 - kd_alpha_effective) * volume_loss_gt
+                + kd_alpha_effective * volume_loss_kd
+            )
+        else:
+            volume_loss_kd = volume_loss_gt.detach()
+            volume_loss_total = volume_loss_gt
+
+        if apply_kd_surface:
+            if surface_channel_weights is not None:
+                surface_loss_kd = weighted_channel_mse(
+                    out["surface_preds"],
+                    kd_surface_teacher,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+            else:
+                surface_loss_kd = masked_mse(
+                    out["surface_preds"], kd_surface_teacher, batch.surface_mask
+                )
+            surface_loss_total = (
+                (1.0 - kd_alpha_effective) * surface_loss_gt
+                + kd_alpha_effective * surface_loss_kd
+            )
+        else:
+            surface_loss_kd = surface_loss_gt.detach()
+            surface_loss_total = surface_loss_gt
+
+        weighted_surface_loss = surface_loss_weight * surface_loss_total
+        weighted_volume_loss = volume_loss_weight * volume_loss_total
         loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        base_mse_loss = surface_loss_gt + volume_loss_gt
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
-        "surface_loss": float(surface_loss.detach().cpu().item()),
-        "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss": float(surface_loss_gt.detach().cpu().item()),
+        "volume_loss": float(volume_loss_gt.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if apply_kd_volume:
+        metrics["kd/volume_loss_gt"] = float(volume_loss_gt.detach().cpu().item())
+        metrics["kd/volume_loss_kd"] = float(volume_loss_kd.detach().cpu().item())
+        metrics["kd/volume_loss_total"] = float(volume_loss_total.detach().cpu().item())
+    if apply_kd_surface:
+        metrics["kd/surface_loss_gt"] = float(surface_loss_gt.detach().cpu().item())
+        metrics["kd/surface_loss_kd"] = float(surface_loss_kd.detach().cpu().item())
+        metrics["kd/surface_loss_total"] = float(surface_loss_total.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -666,7 +952,12 @@ def rebuild_train_loader_with_vol_points(
     sampling_mode = (
         "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
     )
-    train_ds = DrivAerMLSurfaceDataset(
+    dataset_cls = (
+        IndexedDrivAerMLDataset
+        if isinstance(old_ds, IndexedDrivAerMLDataset)
+        else DrivAerMLSurfaceDataset
+    )
+    train_ds = dataset_cls(
         old_ds.case_ids,
         store=old_ds.store,
         max_surface_points=config.train_surface_points,
@@ -694,6 +985,70 @@ def rebuild_train_loader_with_vol_points(
     )
 
 
+def make_indexed_train_loader(
+    train_loader: DataLoader,
+    config: Config,
+    distributed_state,
+) -> DataLoader:
+    """Swap a train DataLoader's dataset for ``IndexedDrivAerMLDataset``.
+
+    Preserves the train sampling mode, points-per-view limits, and the case
+    list while replacing the dataset class so each ``__getitem__`` call
+    surfaces the sampled row indices via metadata. The DataLoader itself is
+    rebuilt because the (sampler, dataset) binding does not survive a
+    dataset swap. The reference uses ``rebuild_train_loader_with_vol_points``
+    with the current ``train_volume_points`` value to drive the rebuild
+    machinery.
+    """
+
+    old_ds = train_loader.dataset
+    if isinstance(old_ds, IndexedDrivAerMLDataset):
+        return train_loader
+    sampling_mode = (
+        "train_random"
+        if (config.train_surface_points > 0 or config.train_volume_points > 0)
+        else "full"
+    )
+    indexed_ds = IndexedDrivAerMLDataset(
+        old_ds.case_ids,
+        store=old_ds.store,
+        max_surface_points=config.train_surface_points,
+        max_volume_points=config.train_volume_points,
+        sampling_mode=sampling_mode,
+    )
+    train_sampler = None
+    train_shuffle = True
+    if distributed_state is not None and distributed_state.enabled:
+        train_sampler = DistributedSampler(
+            indexed_ds,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+            shuffle=True,
+            drop_last=True,
+        )
+        train_shuffle = False
+    return DataLoader(
+        indexed_ds,
+        batch_size=config.batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        drop_last=True,
+        **loader_kwargs(config),
+    )
+
+
+def kd_alpha_for_epoch(epoch: int, target_alpha: float, warmup_epochs: int) -> float:
+    """Linear warmup from 0 to ``target_alpha`` over ``warmup_epochs`` epochs."""
+
+    if target_alpha <= 0.0:
+        return 0.0
+    if warmup_epochs <= 0:
+        return target_alpha
+    if epoch >= warmup_epochs:
+        return target_alpha
+    return target_alpha * (float(epoch) / float(warmup_epochs))
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     state = init_distributed()
     run = None
@@ -701,6 +1056,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         config = parse_args(argv)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
+        kd_enabled = bool(config.kd_ensemble_cache_dir)
+        if kd_enabled:
+            if config.kd_channels not in {"all", "vol_only"}:
+                raise ValueError(
+                    f"--kd-channels must be 'all' or 'vol_only'; got "
+                    f"{config.kd_channels!r}"
+                )
+            if not 0.0 <= config.kd_alpha <= 1.0:
+                raise ValueError(
+                    f"--kd-alpha must be in [0, 1]; got {config.kd_alpha}"
+                )
+            if config.use_gradnorm:
+                raise ValueError(
+                    "Knowledge distillation is incompatible with --use-gradnorm "
+                    "in this iteration; pick one."
+                )
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -726,6 +1097,32 @@ def main(argv: Iterable[str] | None = None) -> None:
         current_train_vol_points = config.train_volume_points
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        kd_cache: KDEnsembleCache | None = None
+        if kd_enabled:
+            train_loader = make_indexed_train_loader(train_loader, config, state)
+            kd_cache = KDEnsembleCache(
+                config.kd_ensemble_cache_dir,
+                load_surface=(config.kd_channels == "all"),
+                load_volume=True,
+            )
+            cache_train_ids = train_loader.dataset.case_ids
+            missing_train = [
+                cid for cid in cache_train_ids
+                if not kd_cache.has_case("train", cid)
+            ]
+            if missing_train:
+                raise FileNotFoundError(
+                    f"KD ensemble cache is missing {len(missing_train)} train "
+                    f"cases under {config.kd_ensemble_cache_dir}/train/. "
+                    f"First few: {missing_train[:5]}. Run "
+                    f"`ensemble_eval.py --build-kd-cache` to populate them."
+                )
+            if state.is_main:
+                print(
+                    f"KD enabled: alpha={config.kd_alpha} channels={config.kd_channels} "
+                    f"cache_dir={config.kd_ensemble_cache_dir} "
+                    f"(verified {len(cache_train_ids)} train cases present)"
+                )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -999,6 +1396,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    kd_alpha_effective = kd_alpha_for_epoch(
+                        epoch, config.kd_alpha, config.kd_warmup_epochs
+                    ) if kd_enabled else 0.0
+                    kd_surface_teacher: torch.Tensor | None = None
+                    kd_volume_teacher: torch.Tensor | None = None
+                    if kd_enabled and kd_alpha_effective > 0.0:
+                        kd_surface_teacher, kd_volume_teacher = gather_kd_targets_from_batch(
+                            batch,
+                            cache=kd_cache,
+                            split="train",
+                            device=device,
+                            n_surface_dim=batch.surface_y.shape[-1],
+                            n_volume_dim=batch.volume_y.shape[-1],
+                        )
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1008,7 +1419,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        kd_alpha_effective=kd_alpha_effective,
+                        kd_channels=config.kd_channels,
+                        kd_surface_teacher=kd_surface_teacher,
+                        kd_volume_teacher=kd_volume_teacher,
                     )
+                    if kd_enabled:
+                        batch_loss_metrics["kd/alpha_effective"] = float(kd_alpha_effective)
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1048,6 +1465,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    kd_log_extras = {
+                        f"train/{k}": v
+                        for k, v in batch_loss_metrics.items()
+                        if k.startswith("kd/")
+                    }
+                    if kd_log_extras:
+                        train_log.update(kd_log_extras)
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
