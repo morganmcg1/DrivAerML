@@ -817,6 +817,82 @@ def check_kill_thresholds(
     return None
 
 
+def apply_wake_oversample(
+    batch: SurfaceBatch,
+    factor: float,
+    *,
+    x_low: float = 1.0,
+    x_high: float = 4.0,
+) -> SurfaceBatch:
+    """Spatially stratify volume points by x-coordinate (wake oversampling).
+
+    Splits each case's volume points into 3 x-slabs using ``volume_x[..., 0]``
+    (raw metres):
+        - front:  x < x_low      -> weight 1.0
+        - cabin:  x_low <= x < x_high -> weight 1.0
+        - wake:   x >= x_high    -> weight ``factor``
+    Resamples ``N`` points per case with replacement using a fully batched
+    ``torch.multinomial`` over those weights, then reassembles the batch.
+    Padding tokens (``volume_mask=False``) get weight 0 so they are never
+    sampled; the resampled mask preserves each case's original valid count
+    so padding semantics are unchanged. Implementation is sync-free (no
+    ``.item()`` calls) so it adds negligible overhead per training step.
+
+    No-op when ``factor <= 0`` or ``factor == 1.0`` (uniform baseline).
+    Train-only — eval batches must not call this helper because eval relies
+    on deterministic strided chunks.
+    """
+
+    if not (factor > 0.0) or abs(factor - 1.0) < 1e-12:
+        return batch
+    volume_x = batch.volume_x
+    if volume_x.numel() == 0 or volume_x.shape[1] == 0:
+        return batch
+    volume_y = batch.volume_y
+    volume_mask = batch.volume_mask
+    B, N, _ = volume_x.shape
+
+    x_coord = volume_x[..., 0]
+    factor_t = torch.as_tensor(float(factor), device=volume_x.device, dtype=torch.float32)
+    one_t = torch.as_tensor(1.0, device=volume_x.device, dtype=torch.float32)
+    weights = torch.where(x_coord >= x_high, factor_t, one_t)
+    valid = volume_mask.to(torch.float32)
+    weights = weights * valid
+
+    # Guard against all-zero rows (entire batch padded out): fall back to
+    # uniform-over-valid weights so multinomial does not raise. The safety
+    # tensor is cheap and shape-preserving.
+    row_sum = weights.sum(dim=-1, keepdim=True)
+    fallback_uniform = valid + (1.0 - valid.amax(dim=-1, keepdim=True))
+    weights = torch.where(row_sum > 0, weights, fallback_uniform)
+
+    sampled_idx = torch.multinomial(weights, N, replacement=True)  # [B, N]
+
+    gather_x = sampled_idx.unsqueeze(-1).expand(-1, -1, volume_x.shape[-1])
+    gather_y = sampled_idx.unsqueeze(-1).expand(-1, -1, volume_y.shape[-1])
+    new_volume_x = torch.gather(volume_x, 1, gather_x)
+    new_volume_y = torch.gather(volume_y, 1, gather_y)
+    # Preserve original per-case valid counts: keep mask=True for the first
+    # ``valid_n`` slots of each row (the original ordering had valid first
+    # then padding, so a per-row count cap reproduces that semantic without
+    # a CPU sync). All sampled indices already point into the valid region
+    # because padded weights are zero.
+    valid_counts = volume_mask.sum(dim=-1, keepdim=True)
+    positions = torch.arange(N, device=volume_x.device).unsqueeze(0).expand(B, -1)
+    new_volume_mask = positions < valid_counts
+
+    return SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=batch.surface_x,
+        surface_y=batch.surface_y,
+        surface_mask=batch.surface_mask,
+        volume_x=new_volume_x,
+        volume_y=new_volume_y,
+        volume_mask=new_volume_mask,
+        metadata=list(batch.metadata),
+    )
+
+
 def masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     expanded_mask = mask
     while expanded_mask.ndim < values.ndim:

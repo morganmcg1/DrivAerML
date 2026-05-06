@@ -38,6 +38,7 @@ from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
     TargetTransform,
+    apply_wake_oversample,
     autocast_context,
     build_lr_scheduler,
     check_kill_thresholds,
@@ -129,6 +130,7 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    vol_wake_oversample: float = 1.0
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -159,6 +161,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "vol_wake_oversample": (
+            "Wake-region oversampling factor for training-time volume point "
+            "sampling. Splits volume points into 3 x-slabs using "
+            "`volume_x[..., 0]` (raw metres): front (x<1.0), cabin "
+            "(1.0<=x<4.0), wake (x>=4.0). Each batch's loaded volume points "
+            "are resampled with replacement using weights [1.0, 1.0, FACTOR] "
+            "via torch.multinomial, then fed to the model unchanged. "
+            "FACTOR=1.0 (default) is a no-op = current uniform sampling. "
+            "FACTOR>1.0 makes wake points proportionally more likely. Eval "
+            "sampling is unaffected — deterministic strided chunks remain."
         ),
         "use_gradnorm": (
             "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
@@ -310,8 +323,11 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_wake_oversample: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    if vol_wake_oversample != 1.0:
+        batch = apply_wake_oversample(batch, vol_wake_oversample)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -353,6 +369,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    vol_wake_oversample: float = 1.0,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -363,6 +381,8 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
+    if vol_wake_oversample != 1.0:
+        batch = apply_wake_oversample(batch, vol_wake_oversample)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -917,7 +937,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model, batch, transform, device, config.amp_mode,
+                        vol_wake_oversample=config.vol_wake_oversample,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1008,6 +1029,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_wake_oversample=config.vol_wake_oversample,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
