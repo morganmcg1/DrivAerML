@@ -53,10 +53,10 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #745 | `txkcd167` | frieren | EP5 | **6.910%** | 5L STRING; EP5 gate ≤8.5% PASSED ✓; τ_z=10.522%; vol=3.994% |
-| #741 | `lszc4ri7` | nezuko | EP7 | **7.319%** | Y-axis symmetry aug; saddle traversal EP5-6; new best at EP7 |
-| #740 Arm B | `g18f7jm1` | fern | EP3 | 7.093% | GradNorm α=0.5; leads Arm A by ~0.10pp/ep |
-| #740 Arm A | `aoetlx9b` | fern | EP3 | 7.190% | GradNorm α=1.0 |
+| #745 | `co0xlqap` | frieren | v2 launch | — | v2 relaunch with corrected kill thresholds (`<` operator); 5L STRING; v1 best EP5=6.910%/EP6=6.842% (killed incorrectly) |
+| #741 | `lszc4ri7` | nezuko | EP9 | **7.2399%** | Y-axis symmetry aug; 2-step oscillation cycles confirmed; EP9 beats EP7 on all sub-metrics |
+| #740 Arm B | `g18f7jm1` | fern | EP9 | **6.872%** | GradNorm α=0.5; leads Arm A by 0.21pp at EP9 |
+| #740 Arm A | `aoetlx9b` | fern | EP9 | 7.084% | GradNorm α=1.0 |
 | #749 | `oi2a01zy` | tanjiro | EP2 | 9.262% | lr=9e-5 control; EP5 gate ≤9.0% pending |
 
 _Last updated: 2026-05-06_
