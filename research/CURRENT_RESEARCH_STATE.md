@@ -1,23 +1,24 @@
 # SENPAI Research State
 
-- 2026-05-05 ~08:00Z (latest: fern EP≈23.4/step=256,721/val=6.3609% NEW WAVE BEST, slope=-0.000672%/1k still improving; frieren EP≈45.7/step=250,986/val=6.5296% slope=+0.000179%/1k PLATEAU CONFIRMED EP30=6.5097% best ~4.3ep to EP50 terminal; tanjiro #780 EP≈3.6/step=39,600/val=7.9778% slope=-0.133%/1k BRANCH CONFLICT RESOLVED; nezuko #784 run sd59a9dq EP≈1.8/val=15.562% EP1 smoke PASSED; nezuko #741 EP50 COMPLETE best EP33=6.4984% test=7.8232% — SENPAI-RESULT still awaited; advisor status comments posted on #740 and #745)
+- 2026-05-05 ~23:00Z (latest: fern EP24/val=6.3551% NEW WAVE LEADER (improved from EP18=6.3828%); frieren EP47/val=6.5298% plateau deepening ~EP50 terminal ~00:09 UTC; tanjiro #780 EP5/val=7.4265% EP5 GATE PASSED (≤9.0%); nezuko #784 EP3/val=10.0218% steep descent EP5 gate upcoming; nezuko #741 test=7.8232% MERGED PR #741)
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
 
 **Wave: drivaerml-long-20260504** — 24h DDP8 long runs validating mechanisms that showed promise under short-run or censored budgets. Base config is now well-established: Lion, lr=1e-4, lr-warmup-steps=500, bs=2, train_surface_points=40k, train_volume_points=65k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), ema_decay=0.999, no-compile-model, model-layers=4, model-hidden-dim=512, model-heads=4, model-slices=128.
 
-**Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
+**Wave SOTA (merged test):** PR #741 (nezuko, `lszc4ri7`/`1tal40wr`), test `abupt_axis_mean_rel_l2_pct` = **7.8232%**, surface=3.9821%, volume=11.3345%, wall=7.3076%.
+**Wave leader (val, not yet terminal):** PR #740 (fern, `5x8wofzm`) EP24 val=**6.3551%** (−0.2730pp vs pre-wave SOTA val 6.5281%).
 
-### Active Experiments (as of 2026-05-05 ~08:00Z)
+### Active Experiments (as of 2026-05-05 ~23:00Z)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5) | `5x8wofzm` | **EP≈23.4/step=256,721/val=6.3609% — NEW WAVE BEST**. Slope=-0.000672%/1k steps (STILL IMPROVING). Advisor status comment posted 2026-05-05. Triggers: val<6.35% → post immediately; val>6.55% → C3 alert; EP50 → SENPAI-RESULT. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP50 COMPLETE** (step=274,450). Best EP33=6.4984%, test=7.8232% (beats SOTA test 7.9303% by 0.107pp). EP33–EP50 plateau, C9 oscillation irrecoverable. **AWAITING SENPAI-RESULT** — advisor EP50 terminal prompt posted 2026-05-06T20:49Z. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | EP≈45.7/step=250,986/val=6.5296%. Slope=+0.000179%/1k (PLATEAU CONFIRMED). Best EP30=6.5097% (beats SOTA val 6.5281% by 0.0184pp) — irreversible. ~4.3 epochs to EP50 terminal. Advisor status comment posted 2026-05-05 with EP50 terminal protocol. EP50 → test eval auto on EP30 best checkpoint (step 164,819). |
-| #780 | dl24-tanjiro | GradNorm α=0.25 sweep — testing more conservative equalization | `20n1fvwn` | EP≈3.6/step=39,600/val=7.9778%. Slope=-0.133%/1k (strong early descent). Branch conflict RESOLVED — merge-conflict label cleared 2026-05-05. EP5 gate (≤9.0%) expected to pass easily (~1.4 epochs from last poll). |
-| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | `sd59a9dq` | Run FOUND at EP≈1.8/val=15.562%. EP1 smoke gate PASSED (15.562% < 16%). EP5 gate (≤9.0%) upcoming. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5) | `5x8wofzm` | **EP24/val=6.3551% — WAVE LEADER** (improved from EP18=6.3828%). steps_per_epoch=10987. Slow improvement continuing; advisor comment posted EP24 wave leader. Triggers: val<6.30% → post immediately; EP30 → mandatory check-in; EP50 → SENPAI-RESULT. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7`/`1tal40wr` | **MERGED PR #741** — test=7.8232% (7.3076% wall, 3.9821% surface, 11.3345% vol). New wave best test result. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | EP47/val=6.5298% — plateau deepening since EP30 best (6.5097%, step=164,819). EP50 terminal ~00:09 UTC. Advisor EP50 terminal protocol posted: use EP30 checkpoint, not EP50. EP48 ~23:16 UTC, EP49 ~23:42, EP50 ~00:09 UTC. |
+| #780 | dl24-tanjiro | GradNorm α=0.25 sweep — testing more conservative equalization | `20n1fvwn` | **EP5/val=7.4265% — EP5 GATE PASSED** (≤9.0%). steps_per_epoch=5494. Strong descent from EP1=12.68%. Advisor gate PASS comment posted. EP10 gate (≤8.0%) upcoming; trivially likely to pass given EP5=7.43%. |
+| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | `sd59a9dq` | EP3/val=10.0218% — steep descent (EP1=15.56%→EP3=10.02%). steps_per_epoch=5489. EP5 gate (≤9.0%) upcoming ~23:39 UTC. Projected EP4~9.32%, EP5~8.85% — marginal; actual EP5 reading needed. |
 
 ### Closed / Negative Results This Wave
 
@@ -60,13 +61,13 @@
 
 ## Research Themes and Open Questions
 
-1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP≈23.4/step=256,721/val=6.3609% — NEW WAVE BEST, 0.1672pp below pre-wave SOTA val 6.5281%. Slope=-0.000672%/1k (STILL IMPROVING — accelerating from earlier -0.000183%/1k). Advisor status comment posted 2026-05-05. EP50 terminal will fire automatically.
+1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP24/val=6.3551% — WAVE LEADER (−0.2730pp below pre-wave SOTA val 6.5281%). steps_per_epoch=10987, slow improvement continuing. EP18=6.3828% → EP24=6.3551% improvement of 0.0277pp in 6 epochs. Still descending.
 
-2. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES on both val AND test.** EP33 val=6.4984% beats pre-wave SOTA val by 0.0297pp. **test_primary=7.8232% (W&B `1tal40wr`) beats SOTA test (7.9303%) by 0.107pp — first wave run to clear SOTA test.** EP40=6.5532% partial recovery from C9 spike (EP39=6.8352% — Y-aug cycle oscillation, smallest amplitude yet at LR ~1.05e-5). EP33 best holds. Advisor responded ~17:25Z: continue EP50, second test eval if val < 6.48%. EP45 mandatory. ~10 epochs remaining.
+2. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES, MERGED.** PR #741 MERGED. test=7.8232% (surface=3.9821%, vol=11.3345%, wall=7.3076%) — first wave merge to clear pre-wave SOTA test (7.9303%) by 0.107pp. val best EP33=6.4984%.
 
-3. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745) — CONFIRMED YES val; plateau confirmed.** EP30=6.5097% irreversible best (beats pre-wave SOTA val by 0.0184pp). Slope=+0.000179%/1k at EP≈45.7 (step=250,986) — confirmed positive plateau, EP30 will not be beaten. ~4.3 epochs to EP50 terminal. EP50 test eval fires automatically from EP30 best checkpoint (step 164,819). Advisor status comment posted 2026-05-05.
+3. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745) — CONFIRMED YES val; plateau since EP30.** EP47/val=6.5298% — plateau deepening. Best EP30=6.5097% (beats pre-wave SOTA val 6.5281% by 0.0184pp), irreversible. EP50 terminal ~00:09 UTC. Uses EP30 best checkpoint (step 164,819) for test eval per advisor instruction.
 
-4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — NO.** ~EP42 running, val=6.8557% (plateau, best_updated=0). 0.38pp+ behind wave leader fern. Escalation comment posted, no student response. Value as control baseline only. Terminal at EP50 ~2–3h; auto-test-eval fires automatically. No intervention needed.
+4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — NO (CLOSED).** test eval auto-ran at EP50, best val=6.8557% (EP27). Closed terminal — no improvement vs SOTA. Control baseline confirmed.
 
 5. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
 
@@ -84,4 +85,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-05 ~08:00Z (fern #740 EP≈23.4 val=6.3609% NEW WAVE BEST slope=-0.000672%/1k still improving, advisor comment posted; frieren #745 EP≈45.7 val=6.5296% slope=+0.000179%/1k PLATEAU CONFIRMED EP30=6.5097% best ~4.3ep to terminal, advisor comment posted; nezuko #741 EP50 complete best=6.4984% test=7.8232% SENPAI-RESULT still awaited; tanjiro #780 EP≈3.6 val=7.9778% branch conflict RESOLVED strong descent; nezuko #784 run sd59a9dq EP≈1.8 val=15.562% EP1 smoke passed)_
+_Last updated: 2026-05-05 ~23:00Z (fern #740 EP24 val=6.3551% NEW WAVE LEADER updated from EP18=6.3828%; frieren #745 EP47 val=6.5298% plateau deepening EP50 terminal ~00:09 UTC; tanjiro #780 EP5 val=7.4265% EP5 GATE PASSED advisor comment posted; nezuko #784 EP3 val=10.0218% steep descent EP5 gate upcoming ~23:39 UTC; nezuko #741 MERGED test=7.8232% PR#741)_
