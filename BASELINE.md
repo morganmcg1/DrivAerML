@@ -49,14 +49,18 @@ When a wave PR merges with terminal `SENPAI-RESULT` and lower `test_primary/abup
 
 PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (frieren, multi-sigma STRING PE)
 
+### In-wave val target (to beat before merging)
+
+In-wave val target: **6.6890%** (PR #741 nezuko, EP16, run `lszc4ri7`)
+
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #745 | `co0xlqap` | frieren | v2 launch | — | v2 relaunch with corrected kill thresholds (`<` operator); 5L STRING; v1 best EP5=6.910%/EP6=6.842% (killed incorrectly) |
-| #741 | `lszc4ri7` | nezuko | EP9 | **7.2399%** | Y-axis symmetry aug; 2-step oscillation cycles confirmed; EP9 beats EP7 on all sub-metrics |
-| #740 Arm B | `g18f7jm1` | fern | EP9 | **6.872%** | GradNorm α=0.5; leads Arm A by 0.21pp at EP9 |
-| #740 Arm A | `aoetlx9b` | fern | EP9 | 7.084% | GradNorm α=1.0 |
-| #749 | `oi2a01zy` | tanjiro | EP5 | **7.314%** | lr=9e-5 control; EP5 gate ≤9.0% PASSED ✓; vol_p already beats public target (4.42%); tau_z=11.009% bottleneck |
+| #741 | `lszc4ri7` | nezuko | EP16 (best) | **6.6890%** | Y-axis symmetry aug; EP17=7.2835% (oscillation spike C5); EP18 projected as new best 6.63–6.67%; EMA checkpoint at EP16 |
+| #745 | `co0xlqap` | frieren | EP8 | **6.7249%** | 5L STRING PE; clean monotonic descent EP3→EP8; EP10 projected ~6.64%; strong candidate for new SOTA at EP20 |
+| #740 Arm B | `5x8wofzm` | fern | EP2 (v2) | 7.4012% | GradNorm α=0.5 (v2 restart after watchdog kill); v1 peak EP5=6.7438%; Arm B leads Arm A by 0.107pp consistently |
+| #740 Arm A | `em8bnk1a` | fern | EP2 (v2) | 7.5078% | GradNorm α=1.0 (v2 restart); running 4 GPUs each; EP5 is next decision gate |
+| #749 | `oi2a01zy` | tanjiro | EP15 | **6.9511%** | Lion lr=9e-5 control; steady monotonic descent EP7→EP15; gate ≤7.5% PASSED; 0.423pp above SOTA val; ~0.01-0.02pp/epoch rate |
 
 _Last updated: 2026-05-06_
