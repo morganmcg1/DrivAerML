@@ -256,6 +256,22 @@ class TransolverAttention(nn.Module):
         return _apply_token_mask(out_x, attn_mask)
 
 
+def drop_path(x: torch.Tensor, drop_prob: float, training: bool) -> torch.Tensor:
+    """Stochastic depth: randomly drop entire residual branches during training.
+
+    Huang et al. 2016 "Deep Networks with Stochastic Depth".
+    At inference, all branches are active and no scaling is needed because
+    the kept branches are already rescaled by 1/keep_prob during training.
+    """
+    if drop_prob == 0.0 or not training:
+        return x
+    keep_prob = 1.0 - drop_prob
+    # Shape: (batch, 1, 1, ...) so each sample in the batch is independently dropped
+    shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+    mask = x.new_empty(shape).bernoulli_(keep_prob).div_(keep_prob)
+    return x * mask
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -265,6 +281,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        drop_path_rate: float = 0.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -278,12 +295,13 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.drop_path_rate = drop_path_rate
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + drop_path(self.attention(self.norm1(x), attn_mask=attn_mask), self.drop_path_rate, self.training)
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.mlp(self.norm2(x))
+        x = x + drop_path(self.mlp(self.norm2(x)), self.drop_path_rate, self.training)
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -298,8 +316,11 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        drop_path_rates: list[float] | None = None,
     ):
         super().__init__()
+        if drop_path_rates is None:
+            drop_path_rates = [0.0] * depth
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -309,8 +330,9 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    drop_path_rate=drop_path_rates[i],
                 )
-                for _ in range(depth)
+                for i in range(depth)
             ]
         )
 
@@ -342,11 +364,14 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        drop_path_rate: float = 0.0,
+        vol_token_drop_rate: float = 0.0,
     ):
         super().__init__()
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
+        self.vol_token_drop_rate = vol_token_drop_rate
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
         self.rff_num_features = rff_num_features
@@ -409,6 +434,11 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        # Linear stochastic-depth schedule: layer 0 is never dropped, layer n_layers-1 is
+        # dropped at drop_path_rate.  For a single-layer model the rate is 0.
+        _dp_rates = [
+            drop_path_rate * i / max(1, n_layers - 1) for i in range(n_layers)
+        ]
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -417,6 +447,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            drop_path_rates=_dp_rates,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -482,18 +513,32 @@ class SurfaceTransolver(nn.Module):
             )
             masks.append(surface_mask)
 
+        vol_token_drop_frac: float | None = None
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    volume_x,
-                    rff=self.volume_rff,
-                    string_sep=self.volume_string_sep,
-                    project_features=self.project_volume_features,
-                    bias=self.volume_bias,
-                    placeholder=self.volume_placeholder,
-                )
+            vol_encoded = self._encode_group(
+                volume_x,
+                rff=self.volume_rff,
+                string_sep=self.volume_string_sep,
+                project_features=self.project_volume_features,
+                bias=self.volume_bias,
+                placeholder=self.volume_placeholder,
             )
+            # Volume-token dropout: per-token Bernoulli mask scaled by 1/(1-rate)
+            # for unbiased forward, AND'd into the pad mask so dropped tokens are
+            # excluded from slice attention (matches PatchDropout, 2208.07220).
+            if self.vol_token_drop_rate > 0.0 and self.training:
+                keep_prob = 1.0 - self.vol_token_drop_rate
+                tok_keep = vol_encoded.new_empty(
+                    vol_encoded.shape[0], vol_encoded.shape[1]
+                ).bernoulli_(keep_prob)
+                vol_encoded = vol_encoded * (tok_keep / keep_prob).unsqueeze(-1)
+                valid_mask_f = volume_mask.to(dtype=tok_keep.dtype)
+                n_valid = valid_mask_f.sum().clamp(min=1.0)
+                n_dropped = ((1.0 - tok_keep) * valid_mask_f).sum()
+                vol_token_drop_frac = float((n_dropped / n_valid).item())
+                volume_mask = volume_mask * tok_keep.to(dtype=volume_mask.dtype)
+            tokens.append(vol_encoded)
             masks.append(volume_mask)
 
         attn_mask = torch.cat(masks, dim=1)
@@ -525,4 +570,5 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "vol_token_drop_frac": vol_token_drop_frac,
         }

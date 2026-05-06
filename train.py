@@ -137,6 +137,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    drop_path_rate: float = 0.0
+    vol_token_drop_rate: float = 0.0
     debug: bool = False
 
 
@@ -297,6 +299,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        drop_path_rate=config.drop_path_rate,
+        vol_token_drop_rate=config.vol_token_drop_rate,
     )
 
 
@@ -335,13 +339,16 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if out.get("vol_token_drop_frac") is not None:
+        metrics["vol_token_drop_frac"] = float(out["vol_token_drop_frac"])
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -861,6 +868,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/drop_path_rate"] = config.drop_path_rate
+            wandb.summary["model/vol_token_drop_rate"] = config.vol_token_drop_rate
+            # Log per-layer drop-path schedule
+            n_layers = config.model_layers
+            per_layer_dp = [
+                config.drop_path_rate * i / max(1, n_layers - 1) for i in range(n_layers)
+            ]
+            wandb.summary["model/drop_path_per_layer"] = per_layer_dp
+            if state.is_main and config.drop_path_rate > 0.0:
+                print(
+                    f"Stochastic depth: drop_path_rate={config.drop_path_rate}, "
+                    f"per-layer schedule={[round(r, 4) for r in per_layer_dp]}"
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1046,6 +1066,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/vol_token_drop_rate": config.vol_token_drop_rate,
+                            "train/drop_path_rate": config.drop_path_rate,
+                            **({"train/vol_token_drop_actual_frac": batch_loss_metrics["vol_token_drop_frac"]}
+                               if "vol_token_drop_frac" in batch_loss_metrics else {}),
                         }
                     )
                 if gradnorm_metrics:
