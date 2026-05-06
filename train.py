@@ -848,6 +848,120 @@ class Transformer(nn.Module):
         return x
 
 
+class MultigridVolumeBlock(nn.Module):
+    """Hierarchical multigrid attention for the volume branch (PR #725).
+
+    Coarse-to-fine V-cycle: pick K = ratio * N coarse anchor points, run
+    self-attention on the coarse subset for global mixing (full K x K), then
+    cross-attend from all N volume features (queries) to the coarse tokens
+    (keys/values). The result is added as a zero-initialized residual to the
+    volume features, keeping the block as a no-op at step 0 and letting the
+    network learn to use it gradually.
+    """
+
+    def __init__(
+        self,
+        *,
+        hidden_dim: int,
+        num_heads: int,
+        coarse_ratio: float,
+        coarse_attn_layers: int,
+        cross_heads: int,
+        mlp_ratio: int = 4,
+    ):
+        super().__init__()
+        if hidden_dim % cross_heads != 0:
+            raise ValueError("hidden_dim must be divisible by cross_heads")
+        self.hidden_dim = hidden_dim
+        self.coarse_ratio = float(coarse_ratio)
+        self.coarse_attn_layers_n = int(coarse_attn_layers)
+        self.cross_heads = int(cross_heads)
+        self.cross_head_dim = hidden_dim // cross_heads
+
+        self.coarse_attn_layers = nn.ModuleList(
+            [
+                nn.TransformerEncoderLayer(
+                    d_model=hidden_dim,
+                    nhead=num_heads,
+                    dim_feedforward=mlp_ratio * hidden_dim,
+                    dropout=0.0,
+                    activation="gelu",
+                    batch_first=True,
+                    norm_first=True,
+                )
+                for _ in range(coarse_attn_layers)
+            ]
+        )
+
+        self.cross_norm_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.cross_norm_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.cross_q_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.cross_k_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.cross_v_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.cross_out_proj = nn.Linear(hidden_dim, hidden_dim, bias=True)
+
+        nn.init.trunc_normal_(self.cross_q_proj.weight, std=0.02)
+        nn.init.trunc_normal_(self.cross_k_proj.weight, std=0.02)
+        nn.init.trunc_normal_(self.cross_v_proj.weight, std=0.02)
+        nn.init.zeros_(self.cross_out_proj.weight)
+        nn.init.zeros_(self.cross_out_proj.bias)
+
+    def select_coarse_indices(
+        self, num_points: int, device: torch.device
+    ) -> torch.Tensor:
+        K = max(64, int(num_points * self.coarse_ratio))
+        K = min(K, num_points)
+        if self.training:
+            return torch.randperm(num_points, device=device)[:K]
+        return torch.linspace(0, num_points - 1, K, device=device).long()
+
+    def forward(
+        self,
+        volume_features: torch.Tensor,
+        volume_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if self.coarse_ratio <= 0.0:
+            return volume_features
+
+        B, N, D = volume_features.shape
+        idx = self.select_coarse_indices(N, volume_features.device)
+        coarse = volume_features.index_select(1, idx)
+
+        coarse_kp_mask: torch.Tensor | None = None
+        if volume_mask is not None:
+            coarse_mask = volume_mask.index_select(1, idx)
+            coarse_kp_mask = ~coarse_mask.bool()
+            if coarse_kp_mask.all():
+                return volume_features
+
+        for layer in self.coarse_attn_layers:
+            coarse = layer(coarse, src_key_padding_mask=coarse_kp_mask)
+
+        q = self.cross_q_proj(self.cross_norm_q(volume_features))
+        kv = self.cross_norm_kv(coarse)
+        k = self.cross_k_proj(kv)
+        v = self.cross_v_proj(kv)
+
+        K = coarse.shape[1]
+        H, hd = self.cross_heads, self.cross_head_dim
+        q = q.view(B, N, H, hd).transpose(1, 2)
+        k = k.view(B, K, H, hd).transpose(1, 2)
+        v = v.view(B, K, H, hd).transpose(1, 2)
+
+        attn_mask: torch.Tensor | None = None
+        if coarse_kp_mask is not None:
+            attn_mask = torch.zeros(B, 1, 1, K, device=q.device, dtype=q.dtype)
+            attn_mask = attn_mask.masked_fill(
+                coarse_kp_mask[:, None, None, :], float("-inf")
+            )
+
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        out = out.transpose(1, 2).contiguous().view(B, N, D)
+        out = self.cross_out_proj(out)
+
+        return volume_features + out
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -871,6 +985,9 @@ class SurfaceTransolver(nn.Module):
         pos_max_wavelength: int = 1000,
         learnable_pe: bool = False,
         beta_nll: bool = False,
+        volume_multigrid_coarse_ratio: float = 0.0,
+        volume_multigrid_attn_layers: int = 2,
+        volume_multigrid_cross_heads: int = 8,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -918,6 +1035,18 @@ class SurfaceTransolver(nn.Module):
             film_geom_dim=film_encoder_dim if use_film else 0,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        self.volume_multigrid_coarse_ratio = float(volume_multigrid_coarse_ratio)
+        if self.volume_multigrid_coarse_ratio > 0.0:
+            self.volume_multigrid = MultigridVolumeBlock(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                coarse_ratio=volume_multigrid_coarse_ratio,
+                coarse_attn_layers=volume_multigrid_attn_layers,
+                cross_heads=volume_multigrid_cross_heads,
+                mlp_ratio=mlp_ratio,
+            )
+        else:
+            self.volume_multigrid = None
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
         if self.beta_nll:
@@ -1010,6 +1139,8 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
+            if self.volume_multigrid is not None:
+                volume_hidden = self.volume_multigrid(volume_hidden, volume_mask)
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
@@ -1251,6 +1382,9 @@ class Config:
     correction_mode: bool = False
     correction_mlp_hidden: int = 64
     ensemble_checkpoints: str = ""
+    volume_multigrid_coarse_ratio: float = 0.0
+    volume_multigrid_attn_layers: int = 2
+    volume_multigrid_cross_heads: int = 8
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -1458,6 +1592,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         learnable_pe=config.learnable_pe,
         surface_input_dim=surface_input_dim,
         beta_nll=config.beta_nll_beta >= 0.0,
+        volume_multigrid_coarse_ratio=config.volume_multigrid_coarse_ratio,
+        volume_multigrid_attn_layers=config.volume_multigrid_attn_layers,
+        volume_multigrid_cross_heads=config.volume_multigrid_cross_heads,
     )
 
 
@@ -3102,7 +3239,24 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        # Allow newly-added zero-init blocks (e.g. multigrid for PR #725) to be
+        # missing from the checkpoint while keeping unexpected-key checks strict.
+        load_strict = config.volume_multigrid_coarse_ratio <= 0.0
+        if load_strict:
+            model.load_state_dict(ckpt["model"], strict=True)
+        else:
+            missing, unexpected = model.load_state_dict(ckpt["model"], strict=False)
+            allowed_missing_prefix = ("volume_multigrid.",)
+            stray_missing = [k for k in missing if not k.startswith(allowed_missing_prefix)]
+            if stray_missing or unexpected:
+                raise RuntimeError(
+                    f"Resume state_dict mismatch: missing={stray_missing} unexpected={unexpected}"
+                )
+            if is_main:
+                print(
+                    f"Resumed with non-strict load: {len(missing)} multigrid keys "
+                    "initialized fresh (zero-init residual)"
+                )
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
