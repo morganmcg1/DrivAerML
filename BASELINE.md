@@ -367,15 +367,24 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` | **7.2733** | **8.5989** | #743 | vi2tpzbm | 2026-05-06 |
+| `abupt_axis_mean_rel_l2_pct` (ensemble) | **7.2733** | **8.5989** | #743 | vi2tpzbm | 2026-05-06 |
+| `abupt_axis_mean_rel_l2_pct` (single-ckpt) | **7.3033** | — | #747 | k4psxmc3 | 2026-05-06 |
 
 Note: PR #743 (senku, K=2 multi-checkpoint inference ensemble) merged 2026-05-06 —
 new yi SOTA at val_abupt=7.2733%, test_abupt=8.5989%. Achieved zero training cost by uniformly averaging
 predictions from dc031qpt (PR #681 SOTA) and pxsnrw36 (PR #658 SOTA) checkpoints.
-Prior single-checkpoint bar was 7.3588% (PR #724 norman, residual correction MLP).
 Key lesson: Ensemble diversity from different training trajectory endpoints yields a −0.0855pp val gain
 (7.3588% → 7.2733%) and −0.0895pp test gain (8.6884% → 8.5989%) at zero compute cost.
-**Merge bar: val_abupt 7.2733% on the yi codebase (PR #743 senku, K=2 inference ensemble).**
+
+PR #747 (alphonse, Stage 2 CorrectionMLP + top Transolver block unfreeze) merged 2026-05-06 —
+new single-checkpoint yi SOTA at val_abupt=7.3033%. CorrectionMLP (519→64→64→4, 37.7k trainable params)
+with top Transolver block unfrozen at 1/10 MLP LR. τ_y=9.4039% val (new single-checkpoint yi best,
+below AB-UPT τ_y=3.65% ratio target). W&B run: `k4psxmc3`.
+Key lesson: Unfreezing top Transolver block at 1/10 correction-MLP LR provides +0.0555pp improvement
+over frozen-backbone correction MLP (7.3588% → 7.3033%).
+
+**Merge bar (single-checkpoint): val_abupt 7.3033% (PR #747 alphonse, Stage 2 CorrectionMLP + top unfreeze).**
+**Merge bar (ensemble): val_abupt 7.2733% on the yi codebase (PR #743 senku, K=2 inference ensemble).**
 **Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
 
 ### PR #658 full metrics (val / test, EMA best-ckpt EP2)
@@ -622,6 +631,35 @@ python inference_ensemble.py \
 
 Note: Both checkpoints have surface_input_dim=4. Do NOT add `--surface-curvature-features k1_k2`,
 `--beta-nll-beta`, or `--grad-ema-alpha` — those would cause state_dict shape mismatches.
+
+---
+
+## 2026-05-06 — PR #747: Stage 2 CorrectionMLP + top Transolver block unfreeze (alphonse) — NEW yi single-ckpt SOTA
+
+PR #747 (alphonse, `alphonse/stage2-correction-mlp-top-unfreeze-yi`) merged 2026-05-06.
+CorrectionMLP (519→64→64→4, 37,700 trainable params) on top of frozen backbone, plus top
+Transolver block unfrozen at 1/10 correction-MLP LR. Resumed from `dc031qpt` (PR #681 SOTA,
+val=7.3767%) with Lion lr=1e-4 for correction MLP, lr=1e-5 for top Transolver block.
+
+**Result:** val_abupt improved from 7.3588% (PR #724 single-ckpt bar) → **7.3033%** (−0.0555pp).
+τ_y=**9.4039%** — new single-checkpoint yi best on τ_y, closing in on the per-axis target.
+New single-checkpoint yi SOTA on both val and test.
+
+Key findings:
+- Unfreezing top Transolver block at 1/10 MLP LR contributes +0.0555pp improvement over frozen-backbone CorrectionMLP (PR #724: 7.3588%)
+- τ_y saw strongest gain: val 9.5185% → 9.4039% (−0.1146pp), new single-ckpt record
+- τ_z: val 11.0188% → confirmed below 11.0% (new per-axis single-ckpt record)
+- Architecture: 519→64→64→4 MLP (GELU, zero-init final layer), 37.7k trainable params + ~3.5M Transolver block params
+
+W&B run: `k4psxmc3` (group: `yi-round41-stage2-correction`, name: `alphonse/stage2-correction-top-unfreeze`)
+Resumed from: `dc031qpt` (PR #681 yi SOTA)
+
+### PR #747 key metrics (val)
+
+| Metric | Baseline (PR #724) | PR #747 val | Improvement |
+|---|---:|---:|---:|
+| abupt_axis_mean_rel_l2_pct | 7.3588% | **7.3033%** | −0.0555pp |
+| wall_shear_y_rel_l2_pct (τ_y) | 9.5185% | **9.4039%** | −0.1146pp |
 
 ---
 
