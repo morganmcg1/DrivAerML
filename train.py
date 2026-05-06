@@ -1327,6 +1327,15 @@ class EMA:
                 param.data.copy_(self.backup[name])
         self.backup = None
 
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        return {name: tensor.detach().clone() for name, tensor in self.shadow.items()}
+
+    @torch.no_grad()
+    def load_state_dict(self, state: dict[str, torch.Tensor]) -> None:
+        for name, tensor in state.items():
+            if name in self.shadow:
+                self.shadow[name].copy_(tensor.to(self.shadow[name].device))
+
 
 # ---------------------------------------------------------------------------
 # Training helpers
@@ -1411,6 +1420,10 @@ class Config:
     volume_multigrid_coarse_ratio: float = 0.0
     volume_multigrid_attn_layers: int = 2
     volume_multigrid_cross_heads: int = 8
+    save_ema_snapshots: bool = False
+    snapshot_save_every_steps: int = 0
+    snapshot_ensemble_paths: str = ""
+    snapshot_ensemble_k_list: str = ""
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2476,119 +2489,116 @@ def _finite_mean(values: Iterable[float]) -> float:
     return sum(finite) / max(len(finite), 1)
 
 
-@torch.no_grad()
-def evaluate_split(
-    model: nn.Module,
-    loader,
-    transform: TargetTransform,
-    device: torch.device,
+def _eval_init_state() -> dict:
+    abs_keys = (
+        "surface_pressure",
+        "wall_shear",
+        "wall_shear_x",
+        "wall_shear_y",
+        "wall_shear_z",
+        "volume_pressure",
+    )
+    return {
+        "surface_loss_sse": 0.0,
+        "surface_loss_count": 0,
+        "volume_loss_sse": 0.0,
+        "volume_loss_count": 0,
+        "abs_sums": {key: 0.0 for key in abs_keys},
+        "abs_counts": {key: 0 for key in abs_keys},
+        "wall_shear_vector_abs_sum": 0.0,
+        "wall_shear_vector_count": 0,
+        "case_sums": {key: {} for key in abs_keys},
+    }
+
+
+def _eval_accumulate_batch(
+    state: dict,
     *,
-    amp_mode: str = "none",
-) -> dict[str, float]:
-    model.eval()
-    surface_loss_sse = 0.0
-    surface_loss_count = 0
-    volume_loss_sse = 0.0
-    volume_loss_count = 0
-    abs_sums = {
-        "surface_pressure": 0.0,
-        "wall_shear": 0.0,
-        "wall_shear_x": 0.0,
-        "wall_shear_y": 0.0,
-        "wall_shear_z": 0.0,
-        "volume_pressure": 0.0,
-    }
-    abs_counts = {key: 0 for key in abs_sums}
-    wall_shear_vector_abs_sum = 0.0
-    wall_shear_vector_count = 0
-    case_sums = {
-        "surface_pressure": {},
-        "wall_shear": {},
-        "wall_shear_x": {},
-        "wall_shear_y": {},
-        "wall_shear_z": {},
-        "volume_pressure": {},
-    }
+    surface_pred_norm: torch.Tensor,
+    volume_pred_norm: torch.Tensor,
+    surface_y: torch.Tensor,
+    volume_y: torch.Tensor,
+    surface_mask: torch.Tensor,
+    volume_mask: torch.Tensor,
+    case_ids,
+    transform: TargetTransform,
+) -> None:
+    surface_target_norm = transform.apply_surface(surface_y)
+    volume_target_norm = transform.apply_volume(volume_y)
+    surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, surface_mask)
+    volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, volume_mask)
+    state["surface_loss_sse"] += surface_sse
+    state["surface_loss_count"] += surface_count
+    state["volume_loss_sse"] += volume_sse
+    state["volume_loss_count"] += volume_count
+    surface_pred = transform.invert_surface(surface_pred_norm)
+    volume_pred = transform.invert_volume(volume_pred_norm)
 
-    for batch in loader:
-        batch = batch.to(device)
-        surface_target_norm = transform.apply_surface(batch.surface_y)
-        volume_target_norm = transform.apply_volume(batch.volume_y)
-        with autocast_context(device, amp_mode):
-            out = model(
-                surface_x=batch.surface_x,
-                surface_mask=batch.surface_mask,
-                volume_x=batch.volume_x,
-                volume_mask=batch.volume_mask,
+    abs_sums = state["abs_sums"]
+    abs_counts = state["abs_counts"]
+    case_sums = state["case_sums"]
+    if bool(surface_mask.any()):
+        surface_abs = (surface_pred - surface_y).abs()
+        valid_surface_abs = surface_abs[surface_mask]
+        abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
+        abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
+        wall_abs = valid_surface_abs[:, 1:4]
+        abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
+        abs_counts["wall_shear"] += int(wall_abs.numel())
+        for offset, axis in enumerate(("x", "y", "z")):
+            channel = wall_abs[:, offset]
+            abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
+            abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
+        wall_vector_error = torch.linalg.vector_norm(
+            surface_pred[surface_mask][:, 1:4] - surface_y[surface_mask][:, 1:4],
+            dim=-1,
+        )
+        state["wall_shear_vector_abs_sum"] += float(wall_vector_error.sum().detach().cpu().item())
+        state["wall_shear_vector_count"] += int(wall_vector_error.numel())
+
+    if bool(volume_mask.any()):
+        volume_abs = (volume_pred - volume_y).abs()[volume_mask]
+        abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
+        abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
+
+    for case_idx, case_id in enumerate(case_ids):
+        surface_valid = surface_mask[case_idx].bool()
+        if bool(surface_valid.any()):
+            surface_pred_valid = surface_pred[case_idx][surface_valid]
+            surface_target_valid = surface_y[case_idx][surface_valid]
+            _accumulate_case_rel_l2(
+                case_sums["surface_pressure"],
+                case_id=case_id,
+                pred=surface_pred_valid[:, 0:1],
+                target=surface_target_valid[:, 0:1],
             )
-        surface_pred_norm = out["surface_preds"].float()
-        volume_pred_norm = out["volume_preds"].float()
-        surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
-        volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
-        surface_loss_sse += surface_sse
-        surface_loss_count += surface_count
-        volume_loss_sse += volume_sse
-        volume_loss_count += volume_count
-        surface_pred = transform.invert_surface(surface_pred_norm)
-        volume_pred = transform.invert_volume(volume_pred_norm)
-
-        if bool(batch.surface_mask.any()):
-            surface_abs = (surface_pred - batch.surface_y).abs()
-            valid_surface_abs = surface_abs[batch.surface_mask]
-            abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
-            abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
-            wall_abs = valid_surface_abs[:, 1:4]
-            abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
-            abs_counts["wall_shear"] += int(wall_abs.numel())
-            for offset, axis in enumerate(("x", "y", "z")):
-                channel = wall_abs[:, offset]
-                abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
-                abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
-            wall_vector_error = torch.linalg.vector_norm(
-                surface_pred[batch.surface_mask][:, 1:4] - batch.surface_y[batch.surface_mask][:, 1:4],
-                dim=-1,
+            _accumulate_case_rel_l2(
+                case_sums["wall_shear"],
+                case_id=case_id,
+                pred=surface_pred_valid[:, 1:4],
+                target=surface_target_valid[:, 1:4],
             )
-            wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
-            wall_shear_vector_count += int(wall_vector_error.numel())
-
-        if bool(batch.volume_mask.any()):
-            volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
-            abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
-            abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
-
-        for case_idx, case_id in enumerate(batch.case_ids):
-            surface_valid = batch.surface_mask[case_idx].bool()
-            if bool(surface_valid.any()):
-                surface_pred_valid = surface_pred[case_idx][surface_valid]
-                surface_target_valid = batch.surface_y[case_idx][surface_valid]
+            for channel, axis in enumerate(("x", "y", "z"), start=1):
                 _accumulate_case_rel_l2(
-                    case_sums["surface_pressure"],
+                    case_sums[f"wall_shear_{axis}"],
                     case_id=case_id,
-                    pred=surface_pred_valid[:, 0:1],
-                    target=surface_target_valid[:, 0:1],
+                    pred=surface_pred_valid[:, channel : channel + 1],
+                    target=surface_target_valid[:, channel : channel + 1],
                 )
-                _accumulate_case_rel_l2(
-                    case_sums["wall_shear"],
-                    case_id=case_id,
-                    pred=surface_pred_valid[:, 1:4],
-                    target=surface_target_valid[:, 1:4],
-                )
-                for channel, axis in enumerate(("x", "y", "z"), start=1):
-                    _accumulate_case_rel_l2(
-                        case_sums[f"wall_shear_{axis}"],
-                        case_id=case_id,
-                        pred=surface_pred_valid[:, channel : channel + 1],
-                        target=surface_target_valid[:, channel : channel + 1],
-                    )
-            volume_valid = batch.volume_mask[case_idx].bool()
-            if bool(volume_valid.any()):
-                _accumulate_case_rel_l2(
-                    case_sums["volume_pressure"],
-                    case_id=case_id,
-                    pred=volume_pred[case_idx][volume_valid],
-                    target=batch.volume_y[case_idx][volume_valid],
-                )
+        volume_valid = volume_mask[case_idx].bool()
+        if bool(volume_valid.any()):
+            _accumulate_case_rel_l2(
+                case_sums["volume_pressure"],
+                case_id=case_id,
+                pred=volume_pred[case_idx][volume_valid],
+                target=volume_y[case_idx][volume_valid],
+            )
 
+
+def _eval_finalize(state: dict) -> dict[str, float]:
+    case_sums = state["case_sums"]
+    abs_sums = state["abs_sums"]
+    abs_counts = state["abs_counts"]
     surface_pressure_rel_l2, surface_cases = _rel_l2(case_sums["surface_pressure"])
     wall_shear_rel_l2, wall_shear_cases = _rel_l2(case_sums["wall_shear"])
     wall_shear_x_rel_l2, _ = _rel_l2(case_sums["wall_shear_x"])
@@ -2604,11 +2614,12 @@ def evaluate_split(
             volume_pressure_rel_l2,
         ]
     )
-    mae_values = {
-        key: abs_sums[key] / max(abs_counts[key], 1)
-        for key in abs_sums
-    }
-    wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
+    mae_values = {key: abs_sums[key] / max(abs_counts[key], 1) for key in abs_sums}
+    wall_shear_vector_mae = state["wall_shear_vector_abs_sum"] / max(state["wall_shear_vector_count"], 1)
+    surface_loss_sse = state["surface_loss_sse"]
+    volume_loss_sse = state["volume_loss_sse"]
+    surface_loss_count = state["surface_loss_count"]
+    volume_loss_count = state["volume_loss_count"]
     loss = (surface_loss_sse + volume_loss_sse) / max(surface_loss_count + volume_loss_count, 1)
     return {
         "loss": loss,
@@ -2642,6 +2653,40 @@ def evaluate_split(
 
 
 @torch.no_grad()
+def evaluate_split(
+    model: nn.Module,
+    loader,
+    transform: TargetTransform,
+    device: torch.device,
+    *,
+    amp_mode: str = "none",
+) -> dict[str, float]:
+    model.eval()
+    state = _eval_init_state()
+    for batch in loader:
+        batch = batch.to(device)
+        with autocast_context(device, amp_mode):
+            out = model(
+                surface_x=batch.surface_x,
+                surface_mask=batch.surface_mask,
+                volume_x=batch.volume_x,
+                volume_mask=batch.volume_mask,
+            )
+        _eval_accumulate_batch(
+            state,
+            surface_pred_norm=out["surface_preds"].float(),
+            volume_pred_norm=out["volume_preds"].float(),
+            surface_y=batch.surface_y,
+            volume_y=batch.volume_y,
+            surface_mask=batch.surface_mask,
+            volume_mask=batch.volume_mask,
+            case_ids=batch.case_ids,
+            transform=transform,
+        )
+    return _eval_finalize(state)
+
+
+@torch.no_grad()
 def evaluate_split_ensemble(
     models: list[nn.Module],
     loader,
@@ -2664,30 +2709,7 @@ def evaluate_split_ensemble(
     if K == 0:
         raise ValueError("evaluate_split_ensemble requires at least one model")
 
-    surface_loss_sse = 0.0
-    surface_loss_count = 0
-    volume_loss_sse = 0.0
-    volume_loss_count = 0
-    abs_sums = {
-        "surface_pressure": 0.0,
-        "wall_shear": 0.0,
-        "wall_shear_x": 0.0,
-        "wall_shear_y": 0.0,
-        "wall_shear_z": 0.0,
-        "volume_pressure": 0.0,
-    }
-    abs_counts = {key: 0 for key in abs_sums}
-    wall_shear_vector_abs_sum = 0.0
-    wall_shear_vector_count = 0
-    case_sums = {
-        "surface_pressure": {},
-        "wall_shear": {},
-        "wall_shear_x": {},
-        "wall_shear_y": {},
-        "wall_shear_z": {},
-        "volume_pressure": {},
-    }
-
+    state = _eval_init_state()
     corr_state: dict[str, dict[str, float]] = {}
     if track_correlation and K == 2:
         for ch_name in (
@@ -2708,9 +2730,6 @@ def evaluate_split_ensemble(
 
     for batch in loader:
         batch = batch.to(device)
-        surface_target_norm = transform.apply_surface(batch.surface_y)
-        volume_target_norm = transform.apply_volume(batch.volume_y)
-
         surface_preds_norm: list[torch.Tensor] = []
         volume_preds_norm: list[torch.Tensor] = []
         for ensemble_model in models:
@@ -2726,76 +2745,17 @@ def evaluate_split_ensemble(
 
         surface_pred_norm = torch.stack(surface_preds_norm, dim=0).mean(dim=0)
         volume_pred_norm = torch.stack(volume_preds_norm, dim=0).mean(dim=0)
-
-        surface_sse, surface_count = _masked_sse_count(
-            surface_pred_norm, surface_target_norm, batch.surface_mask
+        _eval_accumulate_batch(
+            state,
+            surface_pred_norm=surface_pred_norm,
+            volume_pred_norm=volume_pred_norm,
+            surface_y=batch.surface_y,
+            volume_y=batch.volume_y,
+            surface_mask=batch.surface_mask,
+            volume_mask=batch.volume_mask,
+            case_ids=batch.case_ids,
+            transform=transform,
         )
-        volume_sse, volume_count = _masked_sse_count(
-            volume_pred_norm, volume_target_norm, batch.volume_mask
-        )
-        surface_loss_sse += surface_sse
-        surface_loss_count += surface_count
-        volume_loss_sse += volume_sse
-        volume_loss_count += volume_count
-        surface_pred = transform.invert_surface(surface_pred_norm)
-        volume_pred = transform.invert_volume(volume_pred_norm)
-
-        if bool(batch.surface_mask.any()):
-            surface_abs = (surface_pred - batch.surface_y).abs()
-            valid_surface_abs = surface_abs[batch.surface_mask]
-            abs_sums["surface_pressure"] += float(valid_surface_abs[:, 0].sum().detach().cpu().item())
-            abs_counts["surface_pressure"] += int(valid_surface_abs[:, 0].numel())
-            wall_abs = valid_surface_abs[:, 1:4]
-            abs_sums["wall_shear"] += float(wall_abs.sum().detach().cpu().item())
-            abs_counts["wall_shear"] += int(wall_abs.numel())
-            for offset, axis in enumerate(("x", "y", "z")):
-                channel = wall_abs[:, offset]
-                abs_sums[f"wall_shear_{axis}"] += float(channel.sum().detach().cpu().item())
-                abs_counts[f"wall_shear_{axis}"] += int(channel.numel())
-            wall_vector_error = torch.linalg.vector_norm(
-                surface_pred[batch.surface_mask][:, 1:4] - batch.surface_y[batch.surface_mask][:, 1:4],
-                dim=-1,
-            )
-            wall_shear_vector_abs_sum += float(wall_vector_error.sum().detach().cpu().item())
-            wall_shear_vector_count += int(wall_vector_error.numel())
-
-        if bool(batch.volume_mask.any()):
-            volume_abs = (volume_pred - batch.volume_y).abs()[batch.volume_mask]
-            abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
-            abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
-
-        for case_idx, case_id in enumerate(batch.case_ids):
-            surface_valid = batch.surface_mask[case_idx].bool()
-            if bool(surface_valid.any()):
-                surface_pred_valid = surface_pred[case_idx][surface_valid]
-                surface_target_valid = batch.surface_y[case_idx][surface_valid]
-                _accumulate_case_rel_l2(
-                    case_sums["surface_pressure"],
-                    case_id=case_id,
-                    pred=surface_pred_valid[:, 0:1],
-                    target=surface_target_valid[:, 0:1],
-                )
-                _accumulate_case_rel_l2(
-                    case_sums["wall_shear"],
-                    case_id=case_id,
-                    pred=surface_pred_valid[:, 1:4],
-                    target=surface_target_valid[:, 1:4],
-                )
-                for channel, axis in enumerate(("x", "y", "z"), start=1):
-                    _accumulate_case_rel_l2(
-                        case_sums[f"wall_shear_{axis}"],
-                        case_id=case_id,
-                        pred=surface_pred_valid[:, channel : channel + 1],
-                        target=surface_target_valid[:, channel : channel + 1],
-                    )
-            volume_valid = batch.volume_mask[case_idx].bool()
-            if bool(volume_valid.any()):
-                _accumulate_case_rel_l2(
-                    case_sums["volume_pressure"],
-                    case_id=case_id,
-                    pred=volume_pred[case_idx][volume_valid],
-                    target=batch.volume_y[case_idx][volume_valid],
-                )
 
         if corr_state:
             sA_norm = surface_preds_norm[0]
@@ -2813,90 +2773,115 @@ def evaluate_split_ensemble(
                 )):
                     a = sA_valid[:, ch_idx]
                     b = sB_valid[:, ch_idx]
-                    state = corr_state[ch_name]
-                    state["n"] += float(a.numel())
-                    state["sxA"] += float(a.sum().detach().cpu().item())
-                    state["sxB"] += float(b.sum().detach().cpu().item())
-                    state["sxxA"] += float(a.square().sum().detach().cpu().item())
-                    state["sxxB"] += float(b.square().sum().detach().cpu().item())
-                    state["sxy"] += float((a * b).sum().detach().cpu().item())
+                    cs = corr_state[ch_name]
+                    cs["n"] += float(a.numel())
+                    cs["sxA"] += float(a.sum().detach().cpu().item())
+                    cs["sxB"] += float(b.sum().detach().cpu().item())
+                    cs["sxxA"] += float(a.square().sum().detach().cpu().item())
+                    cs["sxxB"] += float(b.square().sum().detach().cpu().item())
+                    cs["sxy"] += float((a * b).sum().detach().cpu().item())
             if bool(batch.volume_mask.any()):
                 vA_valid = vA_norm[batch.volume_mask][:, 0].float()
                 vB_valid = vB_norm[batch.volume_mask][:, 0].float()
-                state = corr_state["volume_pressure"]
-                state["n"] += float(vA_valid.numel())
-                state["sxA"] += float(vA_valid.sum().detach().cpu().item())
-                state["sxB"] += float(vB_valid.sum().detach().cpu().item())
-                state["sxxA"] += float(vA_valid.square().sum().detach().cpu().item())
-                state["sxxB"] += float(vB_valid.square().sum().detach().cpu().item())
-                state["sxy"] += float((vA_valid * vB_valid).sum().detach().cpu().item())
+                cs = corr_state["volume_pressure"]
+                cs["n"] += float(vA_valid.numel())
+                cs["sxA"] += float(vA_valid.sum().detach().cpu().item())
+                cs["sxB"] += float(vB_valid.sum().detach().cpu().item())
+                cs["sxxA"] += float(vA_valid.square().sum().detach().cpu().item())
+                cs["sxxB"] += float(vB_valid.square().sum().detach().cpu().item())
+                cs["sxy"] += float((vA_valid * vB_valid).sum().detach().cpu().item())
 
-    surface_pressure_rel_l2, surface_cases = _rel_l2(case_sums["surface_pressure"])
-    wall_shear_rel_l2, wall_shear_cases = _rel_l2(case_sums["wall_shear"])
-    wall_shear_x_rel_l2, _ = _rel_l2(case_sums["wall_shear_x"])
-    wall_shear_y_rel_l2, _ = _rel_l2(case_sums["wall_shear_y"])
-    wall_shear_z_rel_l2, _ = _rel_l2(case_sums["wall_shear_z"])
-    volume_pressure_rel_l2, volume_cases = _rel_l2(case_sums["volume_pressure"])
-    abupt_axis_mean_rel_l2 = _finite_mean(
-        [
-            surface_pressure_rel_l2,
-            wall_shear_x_rel_l2,
-            wall_shear_y_rel_l2,
-            wall_shear_z_rel_l2,
-            volume_pressure_rel_l2,
-        ]
-    )
-    mae_values = {key: abs_sums[key] / max(abs_counts[key], 1) for key in abs_sums}
-    wall_shear_vector_mae = wall_shear_vector_abs_sum / max(wall_shear_vector_count, 1)
-    loss = (surface_loss_sse + volume_loss_sse) / max(
-        surface_loss_count + volume_loss_count, 1
-    )
+    metrics: dict[str, object] = dict(_eval_finalize(state))
 
     correlations: dict[str, float] = {}
-    for ch_name, state in corr_state.items():
-        n = state["n"]
+    for ch_name, cs in corr_state.items():
+        n = cs["n"]
         if n <= 1:
             continue
-        mA = state["sxA"] / n
-        mB = state["sxB"] / n
-        varA = max(state["sxxA"] / n - mA * mA, 0.0)
-        varB = max(state["sxxB"] / n - mB * mB, 0.0)
-        cov = state["sxy"] / n - mA * mB
+        mA = cs["sxA"] / n
+        mB = cs["sxB"] / n
+        varA = max(cs["sxxA"] / n - mA * mA, 0.0)
+        varB = max(cs["sxxB"] / n - mB * mB, 0.0)
+        cov = cs["sxy"] / n - mA * mB
         denom = math.sqrt(varA * varB)
         correlations[ch_name] = (cov / denom) if denom > 0 else float("nan")
-
-    metrics: dict[str, object] = {
-        "loss": loss,
-        "surface_loss": surface_loss_sse / max(surface_loss_count, 1),
-        "volume_loss": volume_loss_sse / max(volume_loss_count, 1),
-        "surface_pressure_mae": mae_values["surface_pressure"],
-        "wall_shear_mae": mae_values["wall_shear"],
-        "wall_shear_vector_mae": wall_shear_vector_mae,
-        "wall_shear_x_mae": mae_values["wall_shear_x"],
-        "wall_shear_y_mae": mae_values["wall_shear_y"],
-        "wall_shear_z_mae": mae_values["wall_shear_z"],
-        "volume_pressure_mae": mae_values["volume_pressure"],
-        "surface_pressure_rel_l2": surface_pressure_rel_l2,
-        "surface_pressure_rel_l2_pct": surface_pressure_rel_l2 * 100.0,
-        "wall_shear_rel_l2": wall_shear_rel_l2,
-        "wall_shear_rel_l2_pct": wall_shear_rel_l2 * 100.0,
-        "wall_shear_x_rel_l2": wall_shear_x_rel_l2,
-        "wall_shear_x_rel_l2_pct": wall_shear_x_rel_l2 * 100.0,
-        "wall_shear_y_rel_l2": wall_shear_y_rel_l2,
-        "wall_shear_y_rel_l2_pct": wall_shear_y_rel_l2 * 100.0,
-        "wall_shear_z_rel_l2": wall_shear_z_rel_l2,
-        "wall_shear_z_rel_l2_pct": wall_shear_z_rel_l2 * 100.0,
-        "volume_pressure_rel_l2": volume_pressure_rel_l2,
-        "volume_pressure_rel_l2_pct": volume_pressure_rel_l2 * 100.0,
-        "abupt_axis_mean_rel_l2": abupt_axis_mean_rel_l2,
-        "abupt_axis_mean_rel_l2_pct": abupt_axis_mean_rel_l2 * 100.0,
-        "cases": max(surface_cases, wall_shear_cases, volume_cases),
-        "surface_cases": surface_cases,
-        "volume_cases": volume_cases,
-    }
     if correlations:
         metrics["correlations"] = correlations
     return metrics
+
+
+@torch.no_grad()
+def evaluate_split_snapshot_ensemble(
+    model: nn.Module,
+    ema: "EMA",
+    loader,
+    snap_paths: list[str],
+    transform: TargetTransform,
+    device: torch.device,
+    *,
+    amp_mode: str = "none",
+    eval_k_values: list[int] | None = None,
+) -> dict[int, dict[str, float]]:
+    """Predict-level snapshot ensemble for one or more K values in a single pass.
+
+    Each batch is forwarded through every snapshot once. Per-K running sums of
+    predictions are accumulated using the LAST k snapshots in `snap_paths`
+    (most converged) so that K=1 isolates the final snapshot, K=3 averages the
+    last three, etc. Returns a dict keyed by K with the standard metrics dict."""
+    K_total = len(snap_paths)
+    if K_total == 0:
+        raise ValueError("snapshot ensemble requires at least one snapshot path")
+    if eval_k_values is None:
+        eval_k_values = [K_total]
+    eval_k_values = sorted({int(k) for k in eval_k_values if 1 <= int(k) <= K_total})
+    if not eval_k_values:
+        raise ValueError("eval_k_values must contain at least one valid K")
+
+    ema_states: list[dict[str, torch.Tensor]] = [
+        torch.load(p, map_location="cpu", weights_only=True) for p in snap_paths
+    ]
+
+    states_per_k = {k: _eval_init_state() for k in eval_k_values}
+    for batch in loader:
+        batch_device = batch.to(device)
+        running_surface: torch.Tensor | None = None
+        running_volume: torch.Tensor | None = None
+        # Walk snapshots in reverse so that after `n` forwards we have summed
+        # the LAST n snapshots — that matches the PR's "K = last-K" convention.
+        for n_used, k in enumerate(reversed(range(K_total)), start=1):
+            ema.load_state_dict(ema_states[k])
+            ema.copy_to(model)
+            model.eval()
+            with autocast_context(device, amp_mode):
+                out = model(
+                    surface_x=batch_device.surface_x,
+                    surface_mask=batch_device.surface_mask,
+                    volume_x=batch_device.volume_x,
+                    volume_mask=batch_device.volume_mask,
+                )
+            sp = out["surface_preds"].float()
+            vp = out["volume_preds"].float()
+            if running_surface is None:
+                running_surface = sp.clone()
+                running_volume = vp.clone()
+            else:
+                running_surface = running_surface + sp
+                running_volume = running_volume + vp
+            if n_used in states_per_k:
+                avg_surface = running_surface / float(n_used)
+                avg_volume = running_volume / float(n_used)
+                _eval_accumulate_batch(
+                    states_per_k[n_used],
+                    surface_pred_norm=avg_surface,
+                    volume_pred_norm=avg_volume,
+                    surface_y=batch_device.surface_y,
+                    volume_y=batch_device.volume_y,
+                    surface_mask=batch_device.surface_mask,
+                    volume_mask=batch_device.volume_mask,
+                    case_ids=batch.case_ids,
+                    transform=transform,
+                )
+    return {k: _eval_finalize(state) for k, state in states_per_k.items()}
 
 
 def _sanitize_artifact_token(value: str) -> str:
@@ -3483,7 +3468,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             f"lr={config.lr} wd={config.weight_decay}"
         )
     initial_group_lrs = [pg["lr"] for pg in optimizer.param_groups]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(max_epochs, 1))
     ema = EMA(model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
     swa_enabled = config.swa_start_fraction >= 0
@@ -3661,6 +3646,144 @@ def main(argv: Iterable[str] | None = None) -> None:
     grad_ema_state: dict[int, torch.Tensor] = {}
     if config.grad_ema_alpha > 0 and is_main:
         print(f"Gradient EMA smoothing: alpha={config.grad_ema_alpha}")
+
+    if config.snapshot_ensemble_paths:
+        snap_paths = [
+            p.strip()
+            for p in config.snapshot_ensemble_paths.split(",")
+            if p.strip()
+        ]
+        if not snap_paths:
+            raise ValueError("--snapshot-ensemble-paths must contain at least one path")
+        if ema is None:
+            raise ValueError("--snapshot-ensemble-paths requires --use-ema")
+        K_total = len(snap_paths)
+        if config.snapshot_ensemble_k_list:
+            requested_k = sorted({
+                int(s.strip())
+                for s in config.snapshot_ensemble_k_list.split(",")
+                if s.strip()
+            })
+            eval_k_values = [k for k in requested_k if 1 <= k <= K_total]
+            if not eval_k_values:
+                raise ValueError(
+                    f"--snapshot-ensemble-k-list yielded no valid K values "
+                    f"(requested {requested_k}, have {K_total} snapshots)"
+                )
+        else:
+            eval_k_values = [K_total]
+        if is_main:
+            print(
+                f"\n=== Snapshot ensemble eval (K_total={K_total}, "
+                f"reporting K={eval_k_values}) ==="
+            )
+            for p in snap_paths:
+                print(f"  - {p}")
+        snap_full_val_metrics_per_k: dict[int, dict[str, dict[str, float]]] = {
+            k: {} for k in eval_k_values
+        }
+        snap_test_metrics_per_k: dict[int, dict[str, dict[str, float]]] = {
+            k: {} for k in eval_k_values
+        }
+        for name, loader in val_loaders.items():
+            per_k = evaluate_split_snapshot_ensemble(
+                model,
+                ema,
+                loader,
+                snap_paths,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                eval_k_values=eval_k_values,
+            )
+            for k, metrics in per_k.items():
+                snap_full_val_metrics_per_k[k][name] = metrics
+        for name, loader in test_loaders.items():
+            per_k = evaluate_split_snapshot_ensemble(
+                model,
+                ema,
+                loader,
+                snap_paths,
+                transform,
+                device,
+                amp_mode=config.amp_mode,
+                eval_k_values=eval_k_values,
+            )
+            for k, metrics in per_k.items():
+                snap_test_metrics_per_k[k][name] = metrics
+        snap_log: dict[str, object] = {
+            "snapshot_ensemble/K_total": K_total,
+            "snapshot_ensemble/K_evaluated": ",".join(str(k) for k in eval_k_values),
+            "snapshot_ensemble/snap_paths": ",".join(snap_paths),
+            "global_step": 0,
+        }
+        primary_summary: list[str] = []
+        for k in eval_k_values:
+            val_metrics = snap_full_val_metrics_per_k[k]
+            test_metrics = snap_test_metrics_per_k[k]
+            val_primary = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+            test_primary = test_metrics["test_surface"]["abupt_axis_mean_rel_l2_pct"]
+            primary_summary.append(
+                f"K={k}: val_abupt={val_primary:.4f}%, test_abupt={test_primary:.4f}%"
+            )
+            tagged: dict[str, float] = {
+                f"K{k}/full_val_primary/abupt_axis_mean_rel_l2_pct": val_primary,
+                f"K{k}/full_val_primary/abupt_axis_mean_rel_l2": val_metrics["val_surface"]["abupt_axis_mean_rel_l2"],
+                f"K{k}/full_val_primary/surface_pressure_mae": val_metrics["val_surface"]["surface_pressure_mae"],
+                f"K{k}/full_val_primary/wall_shear_mae": val_metrics["val_surface"]["wall_shear_mae"],
+                f"K{k}/full_val_primary/volume_pressure_mae": val_metrics["val_surface"]["volume_pressure_mae"],
+                f"K{k}/full_val_primary/surface_pressure_rel_l2_pct": val_metrics["val_surface"]["surface_pressure_rel_l2_pct"],
+                f"K{k}/full_val_primary/wall_shear_rel_l2_pct": val_metrics["val_surface"]["wall_shear_rel_l2_pct"],
+                f"K{k}/full_val_primary/wall_shear_x_rel_l2_pct": val_metrics["val_surface"]["wall_shear_x_rel_l2_pct"],
+                f"K{k}/full_val_primary/wall_shear_y_rel_l2_pct": val_metrics["val_surface"]["wall_shear_y_rel_l2_pct"],
+                f"K{k}/full_val_primary/wall_shear_z_rel_l2_pct": val_metrics["val_surface"]["wall_shear_z_rel_l2_pct"],
+                f"K{k}/full_val_primary/volume_pressure_rel_l2_pct": val_metrics["val_surface"]["volume_pressure_rel_l2_pct"],
+                f"K{k}/test_primary/abupt_axis_mean_rel_l2_pct": test_primary,
+                f"K{k}/test_primary/abupt_axis_mean_rel_l2": test_metrics["test_surface"]["abupt_axis_mean_rel_l2"],
+                f"K{k}/test_primary/surface_pressure_mae": test_metrics["test_surface"]["surface_pressure_mae"],
+                f"K{k}/test_primary/wall_shear_mae": test_metrics["test_surface"]["wall_shear_mae"],
+                f"K{k}/test_primary/volume_pressure_mae": test_metrics["test_surface"]["volume_pressure_mae"],
+                f"K{k}/test_primary/surface_pressure_rel_l2_pct": test_metrics["test_surface"]["surface_pressure_rel_l2_pct"],
+                f"K{k}/test_primary/wall_shear_rel_l2_pct": test_metrics["test_surface"]["wall_shear_rel_l2_pct"],
+                f"K{k}/test_primary/wall_shear_x_rel_l2_pct": test_metrics["test_surface"]["wall_shear_x_rel_l2_pct"],
+                f"K{k}/test_primary/wall_shear_y_rel_l2_pct": test_metrics["test_surface"]["wall_shear_y_rel_l2_pct"],
+                f"K{k}/test_primary/wall_shear_z_rel_l2_pct": test_metrics["test_surface"]["wall_shear_z_rel_l2_pct"],
+                f"K{k}/test_primary/volume_pressure_rel_l2_pct": test_metrics["test_surface"]["volume_pressure_rel_l2_pct"],
+            }
+            snap_log.update(tagged)
+            for split_name, metrics in val_metrics.items():
+                for key, value in metrics.items():
+                    snap_log[f"K{k}/full_val/{split_name}/{key}"] = value
+            for split_name, metrics in test_metrics.items():
+                for key, value in metrics.items():
+                    snap_log[f"K{k}/test/{split_name}/{key}"] = value
+        # Mirror the largest-K results into the legacy unprefixed keys so the
+        # PR's existing dashboard / W&B summary keeps showing a primary value.
+        k_primary = max(eval_k_values)
+        legacy_val = snap_full_val_metrics_per_k[k_primary]["val_surface"]
+        legacy_test = snap_test_metrics_per_k[k_primary]["test_surface"]
+        snap_log["snapshot_ensemble/K"] = k_primary
+        snap_log["full_val_primary/abupt_axis_mean_rel_l2_pct"] = legacy_val["abupt_axis_mean_rel_l2_pct"]
+        snap_log["test_primary/abupt_axis_mean_rel_l2_pct"] = legacy_test["abupt_axis_mean_rel_l2_pct"]
+        wandb.log(snap_log)
+        wandb.summary.update(_numeric_metric_items(snap_log))
+        if is_main:
+            print("\nSnapshot ensemble results:")
+            for line in primary_summary:
+                print(f"  {line}")
+            for k in eval_k_values:
+                print_metrics(
+                    f"K{k}/full_val",
+                    snap_full_val_metrics_per_k[k]["val_surface"],
+                )
+                print_metrics(
+                    f"K{k}/test",
+                    snap_test_metrics_per_k[k]["test_surface"],
+                )
+        wandb.finish()
+        if is_distributed:
+            dist.destroy_process_group()
+        return
 
     for epoch in range(max_epochs):
         if (time.time() - train_start) / 60.0 >= timeout_minutes:
@@ -3939,6 +4062,16 @@ def main(argv: Iterable[str] | None = None) -> None:
             if early_stop_reason is not None:
                 print(early_stop_reason)
                 break
+            if (
+                config.snapshot_save_every_steps > 0
+                and ema is not None
+                and is_main
+                and global_step > 0
+                and global_step % config.snapshot_save_every_steps == 0
+            ):
+                snap_path = output_dir / f"ema_step{global_step}.pt"
+                torch.save(ema.state_dict(), snap_path)
+                print(f"Saved EMA snapshot: {snap_path}")
             if (time.time() - train_start) / 60.0 >= train_timeout_minutes:
                 print(
                     f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
@@ -4058,6 +4191,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
                 if ema is not None:
                     ema.restore(model)
+        if config.save_ema_snapshots and ema is not None and is_main:
+            snap_path = output_dir / f"ema_ep{epoch + 1}.pt"
+            torch.save(ema.state_dict(), snap_path)
+            print(f"Saved EMA snapshot: {snap_path}")
         if is_distributed:
             dist.barrier()
 
