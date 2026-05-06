@@ -320,6 +320,37 @@ class Transformer(nn.Module):
         return x
 
 
+class VolGeomFilm(nn.Module):
+    """FiLM modulation for volume tokens conditioned on a global surface latent.
+
+    Applies ``vol' = gamma(g) * vol + beta(g)`` where ``g`` is a B x D global
+    surface geometry embedding. Initialised to identity (gamma=1, beta=0) so
+    that the first-step output equals the input and the model can recover the
+    baseline at any time during optimisation.
+
+    Reference: Perez et al. 2018, "FiLM: Visual Reasoning with a General
+    Conditioning Layer" (https://arxiv.org/abs/1709.07871).
+    """
+
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.gamma_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.beta_proj = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.zeros_(self.gamma_proj.weight)
+        nn.init.ones_(self.gamma_proj.bias)
+        nn.init.zeros_(self.beta_proj.weight)
+        nn.init.zeros_(self.beta_proj.bias)
+
+    def forward(
+        self, vol_tokens: torch.Tensor, g: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        gamma = self.gamma_proj(g).unsqueeze(1)
+        beta = self.beta_proj(g).unsqueeze(1)
+        out = gamma * vol_tokens + beta
+        return out, gamma.squeeze(1), beta.squeeze(1)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +373,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        vol_geom_film: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +453,9 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.n_hidden = n_hidden
+        self.vol_geom_film_enabled = vol_geom_film
+        self.vol_geom_film = VolGeomFilm(n_hidden) if vol_geom_film else None
 
     def _encode_group(
         self,
@@ -455,6 +490,7 @@ class SurfaceTransolver(nn.Module):
         surface_mask: torch.Tensor | None = None,
         volume_x: torch.Tensor | None = None,
         volume_mask: torch.Tensor | None = None,
+        g_override: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if surface_x is None and volume_x is None:
             raise ValueError("SurfaceTransolver requires surface_x or volume_x")
@@ -507,6 +543,57 @@ class SurfaceTransolver(nn.Module):
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
+        diagnostics: dict[str, torch.Tensor] = {}
+        surface_g_out: torch.Tensor | None = None
+        # Always run FiLM when volume tokens are present so that gamma/beta
+        # parameters are exercised on every iteration (DDP requires this with
+        # find_unused_parameters=False; without an unconditional path the
+        # FiLM proj weights become stale on volume-only batches).
+        if (
+            self.vol_geom_film is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            # Resolution order: live surface latent (with grads back to surface
+            # encoder) -> cached g_override (no grads) -> zero fallback (cold
+            # start). Zero g preserves identity (gamma=1, beta=0) since the
+            # FiLM projections are zero-initialised on the weight matrix.
+            g_source = "zeros"
+            if surface_x is not None and surface_tokens > 0:
+                mask_f = surface_mask.unsqueeze(-1).to(dtype=surface_hidden.dtype)
+                masked_sum = (surface_hidden * mask_f).sum(dim=1)
+                masked_count = mask_f.sum(dim=1).clamp(min=1.0)
+                g = masked_sum / masked_count
+                surface_g_out = g.detach()
+                g_source = "live"
+            elif g_override is not None:
+                g = g_override.to(device=volume_hidden.device, dtype=volume_hidden.dtype)
+                g_source = "override"
+            else:
+                g = volume_hidden.new_zeros(volume_hidden.shape[0], self.n_hidden)
+            volume_hidden, gamma, beta = self.vol_geom_film(volume_hidden, g)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+            with torch.no_grad():
+                g32 = g.detach().float()
+                gamma32 = gamma.detach().float()
+                beta32 = beta.detach().float()
+                diagnostics["vol_geom_film/g_mean"] = g32.mean()
+                diagnostics["vol_geom_film/g_mean_abs"] = g32.abs().mean()
+                diagnostics["vol_geom_film/g_norm_mean"] = g32.norm(dim=-1).mean()
+                if g32.shape[0] > 1:
+                    diagnostics["vol_geom_film/g_std"] = g32.std(dim=0, unbiased=False).mean()
+                diagnostics["vol_geom_film/gamma_dev_from_one_mean_abs"] = (gamma32 - 1.0).abs().mean()
+                diagnostics["vol_geom_film/gamma_dev_from_one_max_abs"] = (gamma32 - 1.0).abs().max()
+                diagnostics["vol_geom_film/beta_mean_abs"] = beta32.abs().mean()
+                diagnostics["vol_geom_film/beta_max_abs"] = beta32.abs().max()
+                diagnostics["vol_geom_film/g_is_live"] = torch.tensor(1.0 if g_source == "live" else 0.0)
+                diagnostics["vol_geom_film/g_is_override"] = torch.tensor(1.0 if g_source == "override" else 0.0)
+                diagnostics["vol_geom_film/g_is_zeros"] = torch.tensor(1.0 if g_source == "zeros" else 0.0)
+                if surface_tokens > 0:
+                    surface_token_norm = surface_hidden.detach().float().norm(dim=-1)
+                    if surface_token_norm.numel() > 0:
+                        diagnostics["vol_geom_film/surface_hidden_token_norm_max"] = surface_token_norm.max()
+
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
@@ -525,4 +612,6 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "diagnostics": diagnostics,
+            "surface_g": surface_g_out,
         }
