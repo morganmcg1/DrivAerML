@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-01 08:35 UTC (Round 12 closeout — PR #737 nezuko + #756 thorfinn closed negative; PR #763 + #764 assigned)
+- **Date:** 2026-05-06 11:20 UTC (Round 13 mid-flight — 8 PRs WIP, 0 review-ready, 0 idle)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -87,26 +87,29 @@ Regularization (stochastic depth + volume-token dropout) made val_volume_pressur
 
 ---
 
-## Active Fleet Status (2026-05-01 08:35 — post nezuko/thorfinn reassignment)
+## Active Fleet Status (2026-05-06 11:20 UTC — Round 13 in flight)
 
 All 8 students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 (Issue #618 follow-up) | WIP, Arm A `1gv5s938` ~EP3 |
-| askeladd | **#752** | x-slab wake stratified vol sampling (Exp 1C P4) | WIP, Arm B `jc2t6sxa` EP1 due ~09:01 UTC |
-| edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, EP1 pending |
-| fern | **#753** | Signed-log1p target transform for volume_pressure (scale=25) | WIP, EP3 PASS — vol_p slope > abupt slope (1.25×) |
-| frieren | **#761** | Dedicated 2-layer volume head (capacity-additive) | WIP, EP1 ~85 min projected |
-| nezuko | **#763** | **Upstream-region supervised attention (w_upstream ∈ {1.5,2.0,3.0})** | **JUST ASSIGNED** (post-#737 closure) |
-| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7 | WIP, EP1 done (29.24%) |
-| thorfinn | **#764** | **STRING spectral budget expansion (8-octave, rff-features=24)** — Issue #618 | **JUST ASSIGNED** (post-#756 closure) |
+| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 | WIP, Arm A `1gv5s938` near EP4 end; best val_abupt=7.40% (does NOT beat 6.5985% baseline). Stale 3+ hr; status nudge sent. Arm B halt requested. |
+| askeladd | **#752** | x-slab wake stratified vol sampling (Issue #717) | WIP, Arm B `jc2t6sxa` near EP3 (step 30192/32594, ~93%); EP3 gate ETA ~11:35 UTC. Arm A closed neg test_vol_p=12.49%. Arm B EP2=8.79% (Δ −0.23pp vs Arm A) — slightly ahead. |
+| edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, mid-EP2 (step 19212/21729). EP1 val_abupt=30.32% (in band). EP1=83 min (vs 80-min gate, accepted within stated 10-15% overhead). |
+| fern | **#765** | No-slice Anchor-STRING transformer (Issue #618 Exp 3) | WIP, Run 1 (`klw97qgk`) crashed at EP1=54.89% (per-layer anchor resampling bug + train/eval anchor mismatch). Student diagnosed, fixed (commit 772ae1c), 3-epoch corrected Run 1b approved. |
+| frieren | **#761** | Dedicated 2-layer volume head (capacity-additive) | WIP, mid-EP3 (step 25743). EP2 val_abupt=8.088% (+0.15pp vs SOTA EP2 7.940%); EP3 gate <8% is tight but plausible. |
+| nezuko | **#763** | Upstream-region supervised attention (w_upstream=1.5) | WIP, ~EP2 boundary (step 21591/21729). EP1 val_abupt=27.57%; per-region: upstream 92.42% pts at 15.59% rel_l2, near 7.34% at 39.84%, far 0.23% at 203.41%. |
+| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | WIP, Arm A COMPLETE val_abupt=7.0798%, **test_vol_p=12.38% (worse than SOTA 11.93%)** — hypothesis NOT confirmed (tau_z is laggard, not vol_p). Arm B (`1bmbfu30`, α=2.0, floor=0.7) launched 11:11 UTC, mid-EP1 (step 1210). |
+| thorfinn | **#764** | STRING spectral budget expansion (8-octave, 24 RFF features) — Issue #618 | WIP, just past EP2 gate (step 21970), val_abupt=**8.477% (passes <9% gate)**. EP1=27.564% beat 7-sigma SOTA-stack. Awaiting student EP2 comment. |
 
 **Zero idle students. Zero idle GPUs.**
 
-**Round 12 closures (this cycle, post-#737/#756):**
-- **#737 nezuko** CLOSED NEG w/ KEY DIAGNOSTIC: near-wake upweighting can't move aggregate — upstream owns 92% of vol_p L2 mass. Reassigned to upstream-region attack (#763).
-- **#756 thorfinn** CLOSED NEG: cosine-anneal EMA worse at every epoch; train cap clipped schedule before high-decay regime. Reassigned to STRING spectral expansion (#764).
+**Open advisor actions (this cycle):**
+- alphonse #760: nudged for Arm A final + halt Arm B (vol_w=3.0 unwarranted given Arm A neg).
+- fern #765: approved corrected Run 1b (3 epochs, single-anchor-resample fix).
+- All other PRs: gate-watching at EP2/EP3 thresholds; passive.
+
+**Issue #717 status:** No arm has yet beaten the weak win gate `test_vol_p < 11.374%`. Tanjiro Arm A (12.38%) and askeladd Arm A (12.49%) both regress. The remaining six in-flight arms are the live attempt set.
 
 **Upcoming gate actions for active runs:**
 - EP1 time-gate: kill if epoch_time > 80 min (4800s).
