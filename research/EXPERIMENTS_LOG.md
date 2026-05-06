@@ -6,6 +6,55 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 21:00 UTC — PR #774 fern Anchor-STRING RoPE v2 — CLOSED (strong trajectory, budget-limited)
+
+- Branch: `fern/anchor-string-stabilized-exp3redux`
+- Issue: #618 Exp 3 Redux — True coord Q/K rotation on volume tokens via uniform-stride K=512 anchor sub-sample
+- W&B run: `dajkq7m8` | group `fern-anchor-string-rope-v2` | runtime 286 min, EP4 (budget-capped)
+- Hypothesis: K=512 uniform-stride anchors carry raw [x,y,z] coordinates into Q/K via learnable per-axis RoPE rotation; zero-init `out_proj` for safe residual start; 0.1× LR for `log_freqs` only.
+
+| Metric | This run (best EP4) | SOTA #592 (EP4) | Gap |
+|---|---:|---:|---:|
+| val_primary/abupt | **6.9088%** | 6.5985% | +0.31pp / +4.7% worse |
+| val_primary/volume_pressure | 4.276% | 3.946% | +0.33pp |
+| val_primary/surface_pressure | 4.549% | 4.332% | +0.22pp |
+| val_primary/wall_shear | 7.754% | 7.595% | +0.16pp |
+| test_primary/abupt | 8.249% | 7.992% | +0.26pp |
+
+**Trajectory (gap to SOTA narrowing each epoch):**
+
+| Epoch | val_abupt | SOTA | Gap | Ratio |
+|---|---:|---:|---:|---:|
+| EP1 | 32.38% | 27.95% | +4.42pp | 1.16× |
+| EP2 | 9.16% | 7.94% | +1.22pp | 1.15× |
+| EP3 | 7.49% | 6.96% | +0.53pp | 1.08× |
+| EP4 | 6.91% | 6.60% | +0.31pp | 1.05× |
+
+**Key diagnostics:**
+- `out_proj.weight` rms grew from 0 → 0.034 → 0.042 — residual branch fully active
+- Per-axis log_freqs drifted: axis_1 (lateral/y) most active (mean +0.035), axes 0/2 minimal — encoding physically meaningful anisotropy
+- EP2→EP3 drop (-1.67pp) sharper than SOTA (-0.98pp) over same window — RoPE branch genuinely helping
+
+**Verdict: CLOSED as budget-limited, not architecture-failed.** The cluster slowdown (76 min/epoch vs 21 min baseline) capped this at 4 of 13 design epochs. Architecture is sound. Closing because 6.91% does not beat the 6.60% gate.
+
+**Lessons & follow-up (PR #783 assigned):**
+1. LR cosine schedule must match actual training horizon: use `--epochs 5 --lr-cosine-t-max 5` not 13
+2. `out_proj` zero-init wastes EP1 (1/4 of budget) on bootstrap → use Xavier × 0.01
+3. K=1024 anchors (vs K=512) for faster spatial coverage and early learning signal
+
+---
+
+## 2026-05-06 21:00 UTC — PR #783 fern Anchor-STRING RoPE v3: budget-tuned — ASSIGNED
+
+- Branch: `fern/anchor-string-rope-v3-budget-tuned`
+- Issue: #618 Exp 3 v3 — budget-tuned follow-up to PR #774
+- Hypothesis: Same AnchorStringRoPE architecture as #774, with three targeted adjustments for 4-epoch budget reality: (1) `--lr-cosine-t-max 5` so cosine decay completes in achievable window; (2) `out_proj.weight` Xavier × 0.01 init for immediate residual signal; (3) K=1024 anchors (from 512) for denser spatial coverage.
+- Expected: If #774 reached 1.05× SOTA ratio at EP4 with wasted EP1 + undertuned schedule, v3 should start tighter (EP1 ≤1.10×) and may cross SOTA by EP4.
+- Kill gates: EP1 < 35%, EP2 < 12%, EP3 < 8.0%, EP5 < 7.5%
+- Status: WIP — assigned 2026-05-06 21:00 UTC
+
+---
+
 ## 2026-05-06 14:10 — PR #772 nezuko surface-anchored residual vol_pressure decoder (Issue #717) — ASSIGNED
 
 - Branch: `nezuko/surface-anchor-residual-vol-pressure`

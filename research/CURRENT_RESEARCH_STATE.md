@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 15:35 UTC (Round 13 cycle — PR #769/#768 closed, PR #774 assigned to fern, 8 PRs WIP, 0 idle)
+- **Date:** 2026-05-06 21:10 UTC (PR #774 fern CLOSED, PR #783 assigned, askeladd #781 sent back for kill-threshold fix, 7 PRs WIP + 1 relaunch pending, 0 idle)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -10,7 +10,7 @@
 
 **Issue #717 (DrivAerML Single-Model Volume Pressure Plan, 2026-05-05).** Active. The chronic ~3x volume_pressure test-vs-val gap (val~3.6%, test~11.5%) is the primary systematic problem. Ensembles banned for the volume push; only single-model artifacts at inference. Phase 1 = short probes (3-6h) of dual-tower / outlier-sampling / geometry-conditioning / single-model-KD; Phase 2 = combinations of mechanisms that moved single-model test volume; Phase 3 = long verification. All PRs in this wave must use the 9-column reporting table and compare against the three frozen anchors `sogus8sx` (#599), `4k25s25e` (#592), `dc031qpt` (#681).
 
-**Issue #618 (STRING/RoPE follow-ups, 2026-05-04).** Directive: "assign at least 2 students" to STRING/RoPE when free slots open. ACTIVE — fern #774 (Anchor-STRING RoPE v2, Exp 3 Redux: true coord Q/K rotation) and thorfinn #764 (STRING spectral 8-octave, Exp 2) are both active. PR #769 (slice-centroid) was KILLED at EP2 (26.59%, 3× SOTA, zero improvement) — root cause: slice centroids are abstract features not spatial coords; architecture unsound.
+**Issue #618 (STRING/RoPE follow-ups, 2026-05-04).** Directive: "assign at least 2 students" to STRING/RoPE when free slots open. ACTIVE — fern #783 (Anchor-STRING RoPE v3: budget-tuned K=1024/t_max=5/warm-init) and thorfinn #779 (STRING σ_max sweep {4.0, 8.0, 16.0}) are both active. PR #774 (fern #774 v2) closed: strong 1.05× ratio at EP4, budget-limited not architecture-failed.
 
 ---
 
@@ -49,26 +49,25 @@
 - Gap is geometry-OOD specific, NOT addressable by point-density or loss-mass manipulation
 - Volume branch is **capacity-limited**, not feature-overfit (PR #755 regularization → made vol_p worse)
 
-**In-flight geometry-conditioning approaches (correct frontier):**
-- **PR #771 (askeladd)** — Global scalar surface-latent offset per case (minimal geometry conditioning, 513 params)
-- **PR #770 (frieren)** — FiLM block-wise conditioning on surface geometry latent (full per-block modulation)
-- **PR #766 (alphonse)** — Offline k-NN vol_pressure grad-consistency aux loss (physics-motivated ∇p consistency)
-- **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points
-- **PR #772 (nezuko) NEW** — Per-point surface-anchored residual decoder (`vol_p_pred = surf_p_anchor(nearest_surf_pt) + Δ`)
-
-**Other in-flight:**
-- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep (vol_p not primary target)
+**In-flight geometry-conditioning approaches (correct frontier — this round):**
+- **PR #777 (alphonse)** — gc-loss delayed EP3: compressed curriculum + start_epoch=3. EP1 PASS (27.33%). gc_loss fires at EP3 step ~32,592. ~87 min into run.
+- **PR #781 (askeladd)** — VolDecoderSDFGate: 8-stat SDF→affine correction on vol_pred. SENT BACK — kill threshold was inverted (`<2.0` instead of `>2.0`), run self-terminated at step 2376. Relaunch imminent.
+- **PR #782 (edward)** — SDF-FiLM: compressed schedule `0:32768:1:49152:2:65536`. FiLM activates from EP1+ (49k from EP1). Launched ~20:40 UTC. EP1 gate imminent.
+- **PR #778 (frieren)** — VolGeomFilm bounded tanh, start_epoch=3. Run `3oy6zh9s` launched 19:36 UTC, at step 10,154 (EP0.93), EP1 gate imminent.
+- **PR #775 (nezuko)** — LearnableScaleAnchor (alpha×vol_pred + beta), surface pressure anchor. Run `8wft0el2` at step 30,780 (EP2.83), EP3 gate (32,592) imminent. Alpha at EP2 = 0.010 (shrinking from 0.044 at EP1 — concerning signal).
+- **PR #776 (tanjiro)** — vol-loss-weight sweep {1.5, 2.0, 2.5}. Arm A (vol-w=1.5) at step 35,804 (EP3.3), EP3 val=7.46% PASS. Arms B+C chained.
+- **PR #779 (thorfinn)** — STRING σ_max sweep {4.0, 8.0, 16.0}. Arm A (σ_max=4.0) `m2ed1pj6` at step 18,255 (EP1.68), EP1 PASS (27.03%). Arms B+C launch after A completes.
 
 ### 2. STRING/RoPE hypothesis (Issue #618)
 
 **Directive active — 2 students assigned:**
-- **PR #774 (fern)** — Anchor-STRING RoPE v2 (Exp 3 Redux): true RoPE on actual 3D point coordinates (K=512 anchor sub-sample), not slice centroids. Differential LR 0.1× for log_freqs, log-spaced init 0.1-10.0 Hz, zero-init output proj for safe residual start. NEWLY ASSIGNED (15:35 UTC).
-- **PR #764 (thorfinn)** — STRING spectral budget expansion (8-octave, 24 RFF features, Exp 2). EP1 PASS, Arm B 27.33%, currently in EP2.
+- **PR #783 (fern)** — Anchor-STRING RoPE v3: budget-tuned. K=1024 anchors, `--epochs 5 --lr-cosine-t-max 5`, `out_proj.weight` Xavier×0.01. Follow-up to PR #774 (closed: 6.91%, gap 1.05× to SOTA at EP4, architecture confirmed sound but budget-limited).
+- **PR #779 (thorfinn)** — STRING σ_max sweep {4.0, 8.0, 16.0}. Arm A at EP1.68, passing all gates.
 
-**Key lessons from closed experiments:**
-1. **PR #769 (slice-centroid, KILLED EP2):** Transolver slice centroids are abstract learned features not spatial positions. RoPE on them desensitized (log_freq 0.0 → -0.0738). Stuck at 26.59% EP1→EP2, zero improvement. Architecture fundamentally unsound.
-2. **PR #765 (anchor-STRING v1):** K=1024 too sparse (0.78% of points), bimodal loss. 0.1× LR froze RoPE. Correct fix: K=512 with uniform stride + 0.1× LR for log_freqs ONLY (not full RoPE params).
-3. **Current approach (PR #774):** K=512 uniform stride anchors, zero-init output_proj, log-spaced init 0.1-10.0, LR 0.1× for log_freqs.
+**Key lessons from closed STRING/RoPE experiments:**
+1. **PR #769 (slice-centroid, KILLED EP2):** Transolver slice centroids are abstract features not spatial positions. Fundamental architecture failure.
+2. **PR #765 (anchor-STRING v1):** K=1024 random sparse anchors (0.78%) bimodal loss. 0.1× LR froze RoPE entirely. Correct fix: uniform-stride selection + 0.1× for log_freqs ONLY.
+3. **PR #774 (anchor-STRING v2):** K=512 uniform stride, zero-init output_proj, 0.1× LR for log_freqs. Strong trajectory (1.16× → 1.05× over 4 epochs), but 4-epoch cluster-slowdown budget means `--lr-cosine-t-max 13` never decays → wasted. Fix: `t_max=5`, `out_proj` Xavier×0.01, K=1024 for v3.
 
 ### 3. Established architectural decisions (do NOT re-litigate)
 
@@ -81,20 +80,20 @@
 
 ---
 
-## Active Fleet Status (2026-05-06 15:35 UTC)
+## Active Fleet Status (2026-05-06 21:10 UTC)
 
-8 students active, 0 idle:
+8 students, 0 idle:
 
-| Student | PR | Hypothesis | Theme | Status |
+| Student | PR | Hypothesis | Theme | Status (as of 21:10 UTC) |
 |---|---|---|---|---|
-| alphonse | **#766** | Offline k-NN vol_pressure grad-consistency aux loss | Issue #717 geometry-OOD | EP1 PASS (28.21%, 78min/ep) |
-| askeladd | **#771** | Surface-latent global scalar residual offset per case | Issue #717 geometry-OOD | Launched 14:47 UTC |
-| edward | **#773** | Surface curvature H,K offline precompute (fixes v1 timeout) | Issue #717 curvature features | Live, 5ms/step confirmed |
-| fern | **#774** | Anchor-STRING RoPE v2: true coord Q/K rotation (Exp 3 Redux) | Issue #618 STRING/RoPE | Just assigned |
-| frieren | **#770** | FiLM block-wise conditioning on surface geometry latent | Issue #717 geometry-OOD | Launched 14:47 UTC |
-| nezuko | **#772** | Per-point surface-anchored residual vol_p decoder | Issue #717 geometry-OOD | Launched 14:47 UTC |
-| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | GradNorm tuning | EP3 PASS (7.63%), in EP4 |
-| thorfinn | **#764** | STRING spectral budget expansion (8-octave, RFF=24) | Issue #618 STRING/RoPE | EP1 PASS, Arm B 27.33% ahead |
+| alphonse | **#777** | gc-loss delayed EP3 (compressed curriculum) | Issue #717 geometry-OOD | EP1 PASS (27.33%), step 12,159, EP1.12 |
+| askeladd | **#781** | VolDecoderSDFGate SDF-affine correction | Issue #717 geometry-OOD | SENT BACK — kill-threshold typo; relaunch imminent |
+| edward | **#782** | SDF-FiLM compressed schedule (FiLM active EP1+) | Issue #717 geometry-OOD | Launched ~20:40 UTC; EP1 gate imminent |
+| fern | **#783** | Anchor-STRING RoPE v3: budget-tuned K=1024/t_max=5 | Issue #618 STRING/RoPE | Assigned 21:00 UTC; awaiting run launch |
+| frieren | **#778** | VolGeomFilm bounded tanh, start_epoch=3 | Issue #717 geometry-OOD | Step 10,154 (EP0.93); EP1 gate ~2 min away |
+| nezuko | **#775** | LearnableScaleAnchor surface-vol_p anchor | Issue #717 geometry-OOD | Step 30,780 (EP2.83); EP3 gate ~10 min away |
+| tanjiro | **#776** | vol-loss-weight sweep {1.5,2.0,2.5} | Issue #717 | Arm A at step 35,804, EP3 PASS (7.46%) |
+| thorfinn | **#779** | STRING σ_max sweep {4.0, 8.0, 16.0} | Issue #618 STRING/RoPE | Arm A at step 18,255 (EP1.68), PASS |
 
 ### dl24 Long-Run Track (significant results, not yet complete)
 
