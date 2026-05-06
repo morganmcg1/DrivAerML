@@ -891,6 +891,11 @@ EVAL_KEYS = (
     "volume_pressure",
 )
 
+# Test-split cases identified by PR #767 as the 4 geometry-OOD outliers
+# accounting for ~92% of the squared test_vol_p deviation. Used to bucket
+# per-case offset diagnostics.
+OOD_TEST_CASE_IDS = frozenset({"run_133", "run_158", "run_203", "run_226"})
+
 
 @dataclass
 class EvalAccumulator:
@@ -905,6 +910,7 @@ class EvalAccumulator:
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
+    case_offsets: dict[str, list[float]] = field(default_factory=dict)
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -1002,6 +1008,13 @@ def accumulate_eval_batch(
         accumulator.abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
         accumulator.abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
 
+    if "surf_latent_offset" in out:
+        offsets_cpu = out["surf_latent_offset"].detach().float().cpu()
+        for case_idx, case_id in enumerate(batch.case_ids):
+            accumulator.case_offsets.setdefault(case_id, []).append(
+                float(offsets_cpu[case_idx, 0].item())
+            )
+
     for case_idx, case_id in enumerate(batch.case_ids):
         surface_valid = batch.surface_mask[case_idx].bool()
         if bool(surface_valid.any()):
@@ -1052,6 +1065,8 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
                 state = merged.case_sums[key].setdefault(case_id, [0.0, 0.0])
                 state[0] += values[0]
                 state[1] += values[1]
+        for case_id, values in accumulator.case_offsets.items():
+            merged.case_offsets.setdefault(case_id, []).extend(values)
     return merged
 
 
@@ -1081,7 +1096,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
         accumulator.surface_loss_count + accumulator.volume_loss_count, 1
     )
-    return {
+    metrics: dict[str, float] = {
         "loss": loss,
         "surface_loss": accumulator.surface_loss_sse / max(accumulator.surface_loss_count, 1),
         "volume_loss": accumulator.volume_loss_sse / max(accumulator.volume_loss_count, 1),
@@ -1110,6 +1125,44 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
     }
+
+    if accumulator.case_offsets:
+        per_case_offsets: dict[str, float] = {}
+        for case_id, values in accumulator.case_offsets.items():
+            if not values:
+                continue
+            per_case_offsets[case_id] = sum(values) / len(values)
+            metrics[f"offset_per_case/{case_id}"] = per_case_offsets[case_id]
+
+        all_offsets = list(per_case_offsets.values())
+        if all_offsets:
+            mean_all = sum(all_offsets) / len(all_offsets)
+            metrics["offset/mean_all"] = mean_all
+            metrics["offset/abs_mean_all"] = sum(abs(v) for v in all_offsets) / len(all_offsets)
+            if len(all_offsets) > 1:
+                var = sum((v - mean_all) ** 2 for v in all_offsets) / (len(all_offsets) - 1)
+                metrics["offset/std_all"] = math.sqrt(max(var, 0.0))
+            else:
+                metrics["offset/std_all"] = 0.0
+            metrics["offset/min_all"] = min(all_offsets)
+            metrics["offset/max_all"] = max(all_offsets)
+
+            ood_vals = [v for cid, v in per_case_offsets.items() if cid in OOD_TEST_CASE_IDS]
+            normal_vals = [v for cid, v in per_case_offsets.items() if cid not in OOD_TEST_CASE_IDS]
+            if ood_vals:
+                metrics["offset/mean_ood"] = sum(ood_vals) / len(ood_vals)
+                metrics["offset/abs_mean_ood"] = sum(abs(v) for v in ood_vals) / len(ood_vals)
+                metrics["offset/n_ood"] = float(len(ood_vals))
+            if normal_vals:
+                metrics["offset/mean_normal"] = sum(normal_vals) / len(normal_vals)
+                metrics["offset/abs_mean_normal"] = sum(abs(v) for v in normal_vals) / len(normal_vals)
+                metrics["offset/n_normal"] = float(len(normal_vals))
+            if ood_vals and normal_vals:
+                metrics["offset/diff_ood_minus_normal"] = (
+                    metrics["offset/mean_ood"] - metrics["offset/mean_normal"]
+                )
+
+    return metrics
 
 
 @torch.no_grad()

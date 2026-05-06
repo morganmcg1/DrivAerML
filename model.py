@@ -320,6 +320,29 @@ class Transformer(nn.Module):
         return x
 
 
+class SurfLatentVolOffset(nn.Module):
+    """Surface-latent global residual offset for the volume pressure head.
+
+    Reads a global per-case geometry latent ``g = mean_pool(surface_hidden)``
+    (B x D) and projects it to a single scalar ``offset = Linear(D -> 1)(g)``.
+    The offset is added to every volume pressure prediction for that case.
+
+    The projection is zero-initialised so the model starts identical to the
+    baseline (offset == 0); gradients can still flow through ``g`` because
+    the surface encoder path is non-zero at initialisation (ReZero-style;
+    Bachlechner et al. 2020, https://arxiv.org/abs/2003.04887).
+    """
+
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.offset_proj = nn.Linear(hidden_dim, 1)
+        nn.init.zeros_(self.offset_proj.weight)
+        nn.init.zeros_(self.offset_proj.bias)
+
+    def forward(self, g: torch.Tensor) -> torch.Tensor:
+        return self.offset_proj(g)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +365,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        vol_surf_latent_offset: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +445,12 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        self.vol_surf_latent_offset = vol_surf_latent_offset
+        if vol_surf_latent_offset:
+            self.surf_latent_offset = SurfLatentVolOffset(n_hidden)
+        else:
+            self.surf_latent_offset = None
 
     def _encode_group(
         self,
@@ -519,10 +549,25 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+
+        if self.surf_latent_offset is not None and surface_x is not None:
+            mask_f = surface_mask.unsqueeze(-1).to(dtype=surface_hidden.dtype)
+            sum_h = (surface_hidden * mask_f).sum(dim=1)
+            count = surface_mask.sum(dim=1, keepdim=True).clamp(min=1.0).to(
+                dtype=surface_hidden.dtype
+            )
+            g = sum_h / count
+            offset = self.surf_latent_offset(g)
+            if volume_x is not None:
+                volume_preds = volume_preds + offset.unsqueeze(1) * volume_mask.unsqueeze(-1)
+                out["volume_preds"] = volume_preds
+            out["surf_latent_offset"] = offset
+
+        return out

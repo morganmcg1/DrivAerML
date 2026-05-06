@@ -102,6 +102,7 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    vol_surf_latent_offset: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -297,7 +298,26 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_surf_latent_offset=config.vol_surf_latent_offset,
     )
+
+
+def _offset_metrics(out: dict[str, torch.Tensor]) -> dict[str, float]:
+    if "surf_latent_offset" not in out:
+        return {}
+    offset = out["surf_latent_offset"].detach().float().reshape(-1)
+    if offset.numel() == 0:
+        return {}
+    metrics = {
+        "offset_mean": float(offset.mean().cpu().item()),
+        "offset_abs_mean": float(offset.abs().mean().cpu().item()),
+        "offset_max_abs": float(offset.abs().max().cpu().item()),
+    }
+    if offset.numel() > 1:
+        metrics["offset_std"] = float(offset.std().cpu().item())
+    else:
+        metrics["offset_std"] = 0.0
+    return metrics
 
 
 def train_loss(
@@ -335,13 +355,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(_offset_metrics(out))
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1048,6 +1070,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for offset_key in ("offset_mean", "offset_std", "offset_abs_mean", "offset_max_abs"):
+                        if offset_key in batch_loss_metrics:
+                            train_log[f"train/{offset_key}"] = batch_loss_metrics[offset_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
