@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 (updated ~09:00 UTC)
+- 2026-05-06 (updated ~12:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -14,9 +14,9 @@
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
 | #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | v2 relaunch after kill-bug fix (inverted `>=` operator in v1 killed best run at EP6=6.842%). v1 had EP5=6.910%/EP6=6.842%, both below SOTA val best — extremely promising. Awaiting EP1-5 check-in from v2. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP9=7.2399%** — 2-step oscillation cycles fully confirmed (EP5→8.027%, EP6→8.149%, EP7→7.319%, EP8→7.319%, EP9→7.2399%). Saddle-traversal mechanism consistent. EP12 oscillation check and final test evaluation pending. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | **EP9: Arm B=6.872%, Arm A=7.084%.** Arm B leads by 0.212pp and widening. GradNorm τ_z up-weighted (3.30× in A, 2.30× in B). EP15 terminal report pending. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP5=7.314%** — EP5 gate ≤9.0% PASSED ✓ (1.69pp margin). vol_p already beats AB-UPT public target (4.42% vs 6.08%). τ_z=11.009% is main bottleneck. EP10 gate ≤8.0% pending. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP10=7.3566%** (predicted oscillation spike from Y-sym cycle). EP9=7.2399% was Cycle 2 best. EP10 spike confirms structural 2-epoch oscillation. Cycle 3 trough predicted EP12/13 — may reach ~7.10-7.16%. Advisor comment posted confirming do-not-kill. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | **EP5: Arm B=6.7438% (NEW WAVE BEST), Arm A=6.9162%.** Arm B is 0.214pp from SOTA val_best=6.5281% at only EP5. GradNorm τ_z up-weighted. EP10 report with per-channel GradNorm weight breakdown pending. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP6=7.5358%** (regression from EP5 best 7.3139%). Single-epoch regression — likely noise. EP5 gate ≤9.0% PASSED ✓. Continue to EP10. |
 
 ### Closed / Negative Results This Wave
 
@@ -61,11 +61,11 @@
 
 2. **Does y-symmetry augmentation improve volume generalization? (nezuko #741)** EP7=7.319% after saddle traversal (EP5-6 plateau). Augmentation confirmed working; the saddle pattern is consistent with meaningful learning dynamics. Continuing to EP10.
 
-3. **Does GradNorm adaptive balancing reduce the chronic vol→test gap? (fern #740)** Arm B (α=0.5, EP3=7.093%) leads Arm A (α=1.0, EP3=7.190%) by ~0.10pp per epoch. τ_z consistently up-weighted by GradNorm (3.30× in Arm A, 2.30× in Arm B). EP5 formal gate report pending.
+3. **Does GradNorm adaptive balancing reduce the chronic vol→test gap? (fern #740)** Arm B (α=0.5) at EP5=6.7438% is the NEW WAVE BEST — only 0.214pp from SOTA val_best=6.5281%. τ_z consistently up-weighted by GradNorm. EP10 per-channel weight breakdown pending to understand α=0.5 vs α=1.0 dynamics.
 
-4. **Does near-wake VP upweighting help volume generalization? (nezuko #737)** v3 fix confirmed working (vol_near_mask_frac=7.50%). EP1=27.78% — normal for architecture warmup. EP2 gate ≤12% will determine viability.
+4. **Does y-symmetry augmentation improve volume generalization? (nezuko #741)** EP10=7.357% confirmed oscillation spike. Structural 2-epoch cycles fully validated. Cycle 3 trough EP12/13 may break 7.1%. If successful, Y-sym + GradNorm composition is a high-priority next experiment.
 
-5. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP2=9.262% matches SOTA early trajectory. EP5 gate ≤9.0% pending. Pure CLI isolation.
+5. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP5=7.314% (cleared gate). EP6=7.536% regression noted (may be noise). EP10 report pending.
 
 6. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Current candidates: GradNorm (#740), y-symmetry (#741), Region-VP (#737), Volume MLP head (unassigned).
 

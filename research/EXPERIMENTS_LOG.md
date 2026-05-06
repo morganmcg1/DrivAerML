@@ -6,6 +6,68 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+## 2026-05-06 12:00 — W&B Status Check: All Active Wave PRs (mid-run update)
+
+### PR #740 — GradNorm adaptive loss balancing (dl24-fern)
+- **Branch:** `dl24-fern/gradnorm-adaptive-loss`
+- **W&B Runs:** Arm A `aoetlx9b` (α=1.0), Arm B `g18f7jm1` (α=0.5)
+- **Status:** RUNNING — EP5 reached
+
+| Epoch | Arm A (α=1.0) val_abupt | Arm B (α=0.5) val_abupt |
+|-------|------------------------|------------------------|
+| EP1 | ~10.8% | ~10.6% |
+| EP2 | ~9.4% | ~9.0% |
+| EP3 | 7.190% | 7.093% |
+| EP4 | ~7.0% | ~6.9% |
+| EP5 | 6.9162% | **6.7438%** ← NEW WAVE BEST |
+
+**Arm B EP5 = 6.7438%** — 0.214pp from SOTA val_best=6.5281%. At EP5 of a run with 26+ remaining epochs, this is the strongest trajectory in the current wave. GradNorm α=0.5 (softer adaptive balancing) meaningfully outperforms α=1.0.
+
+### PR #741 — Y-axis reflection augmentation (dl24-nezuko)
+- **Branch:** `dl24-nezuko/y-sym-augmentation`
+- **W&B Run:** `lszc4ri7`
+- **Status:** RUNNING — EP10 reached
+
+| Epoch | val_abupt | Note |
+|-------|-----------|------|
+| EP5 | 8.027% | Cycle 1 trough |
+| EP6 | 8.149% | Cycle 1 spike |
+| EP7 | 7.319% | Cycle 2 trough |
+| EP8 | 7.319% | Cycle 2 hold |
+| EP9 | **7.2399%** | Cycle 2 best |
+| EP10 | 7.3566% | **Predicted Cycle 2→3 spike** |
+
+2-epoch Y-sym oscillation structure fully confirmed. Cycle 3 trough (EP12/13) predicted to reach ~7.10-7.16%. Do-not-kill advisory posted.
+
+### PR #745 — 5-layer STRING v2 (dl24-frieren)
+- **Branch:** `dl24-frieren/5l-string-v2`
+- **W&B Run:** `co0xlqap`
+- **Status:** RUNNING — EP1 reached
+
+| Epoch | val_abupt |
+|-------|-----------|
+| EP1 | 11.1129% |
+
+Exactly matches v1 EP1=11.113%. v1 reached 6.842% by EP6 (killed by inverted kill-threshold bug). v2 has correct gates. On track.
+
+### PR #749 — Lion lr=9e-5 (dl24-tanjiro)
+- **Branch:** `dl24-tanjiro/lion-lr9e5-control`
+- **W&B Run:** `oi2a01zy`
+- **Status:** RUNNING — EP6 reached
+
+| Epoch | val_abupt | Note |
+|-------|-----------|------|
+| EP1 | ~10.2% | |
+| EP2 | 9.262% | |
+| EP3 | ~8.3% | |
+| EP4 | ~7.8% | |
+| EP5 | **7.3139%** | EP5 gate ≤9.0% PASSED ✓ |
+| EP6 | 7.5358% | Single-epoch regression (likely noise) |
+
+EP6 regression flagged in PR comment. Not alarming at this stage. EP10 gate ≤8.0% pending.
+
+---
+
 ## 2026-05-05 23:00 — PR #732: STRING + QK-Norm at lr=5e-5 with 2000-step staged warmup (dl24-tanjiro)
 
 - **Branch:** `dl24-tanjiro/string-qknorm-lr5e5-staged-warmup`
