@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-07 (PR #738 tanjiro closed null; PR #758 tanjiro assigned gradnorm-alpha sweep)
+- **Date:** 2026-05-07 (PR #755 frieren closed — stochastic depth hypothesis falsified; PRs #761 + #762 assigned to frieren/edward)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -35,19 +35,20 @@
 
 ### 1. Volume_pressure test-transfer (Issue #717) — primary focus
 
-**In flight (2 PRs):**
-- **PR #729 (alphonse)** — Exp 1D: single-model knowledge distillation from K=7 ensemble, soft-target loss on volume.
-- **PR #728 (frieren)** — Exp 1B: volume anomaly/outlier-aware sampling (per-point residual EMA + geometric distance arms).
+**In flight (8 PRs):**
+- **PR #752 (askeladd)** — Exp 1C P4: x-slab wake stratified vol sampling.
+- **PR #753 (fern)** — Signed-log1p target transform for volume_pressure.
+- **PR #756 (thorfinn)** — Cosine-annealed EMA decay schedule.
+- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7.
+- **PR #760 (alphonse)** — Issue #618 follow-up: volume-loss-weight reweight ablation (vol_w=2.0 vs 3.0).
+- **PR #737 (nezuko)** — Region-weighted volume loss: near-wake emphasis.
+- **PR #761 (frieren)** — JUST ASSIGNED: dedicated 2-layer volume head on shared encoder (capacity-additive, addresses regularization-hurt-val finding from #755).
+- **PR #762 (edward)** — JUST ASSIGNED: surface curvature (H, K) from local PCA propagated to volume points (geometry-conditioning, addresses geometric-envelope-shift hypothesis).
 
-**Just assigned (5 PRs, 2026-05-05):**
-- **PR #734 (askeladd)** — Exp 1C P3: soft distance-to-surface scalar feature (4-channel kernel encoding via cdist) concatenated to volume input.
-- **PR #735 (edward)** — TTA: Y-mirror + 5mm coord jitter, 6-pass averaging at inference. Two arms: existing-checkpoint TTA + train-with-mirror-aug + TTA.
-- **PR #736 (fern)** — Inter-sample mixup on volume coords + volume_pressure targets only (alpha=0.2 / 0.4).
-- **PR #737 (nezuko)** — Region-weighted volume loss: near-wake band emphasis (1<x_rel<3, |z_rel|<1.5) at 3 weight ratios.
-- **PR #738 (tanjiro)** — Train-time Gaussian noise on volume coordinates (sigma 5mm/20mm/anneal).
-
-**Issue #618 STRING/RoPE re-attempt (1 PR, 2026-05-05):**
-- **PR #742 (thorfinn)** — Exp 3 Redux: Anchor-STRING stabilized. Fixes PR #647's EP1=48.27% divergence with (1) differential LR 0.1× for RoPE freq params, (2) RoPE-path grad-clip=1.0 (separate from global 0.5), (3) conservative log-spaced freq init in [0.1, 10.0]. Targets vol_pressure val→test gap compression toward PR #626's 2.07× (vs SOTA 3.17×).
+**KEY DIAGNOSTIC FROM PR #755 (frieren, just closed):**
+Regularization (stochastic depth + volume-token dropout) made val_volume_pressure WORSE (12.48% → 14.14%) while every non-volume metric improved. This FALSIFIES the "memorize-and-fail-OOD" framing of the val/test gap. The volume branch is **capacity-limited**, not feature-overfit. Updated diagnosis: test cases differ in operating regime (wake intensity, geometry envelope) — not in memorized feature compositions. Consequence: 
+- Abandon regularization-based OOD levers for the volume branch.
+- Push toward capacity-additive (PR #761 vol head, item 6) and geometry-conditioning (PR #762 curvature, item 4) approaches.
 
 ### 2. Closed dead ends from prior round (Issue #717-aligned closures)
 
@@ -72,19 +73,19 @@
 
 ---
 
-## Active Fleet Status (2026-05-06 — post edward reassignment)
+## Active Fleet Status (2026-05-07 — post frieren/edward reassignment)
 
 All 8 students running:
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| alphonse | **#750** | Backbone freeze + geometry-branch diff-LR (Issue #618 Exp B) | EP1/4 frozen, EP4 unfreeze ~pending. Geometry LR 2× confirmed. |
+| alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 (Issue #618 follow-up) | WIP |
 | askeladd | **#752** | x-slab wake stratified vol sampling (Exp 1C P4) | WIP |
-| edward | **#757** | k-NN ∇p gradient-consistency vol_pressure loss (3 λ arms: 0.25/1.0/2.0) | Just assigned |
+| edward | **#762** | Surface curvature (H, K) propagated to volume points | JUST ASSIGNED |
 | fern | **#753** | Signed-log1p target transform for volume_pressure | WIP |
-| frieren | **#755** | Stochastic depth + volume-token dropout for OOD generalization | WIP |
-| nezuko | **#737** | Region-weighted volume loss: near-wake emphasis (Arm B running, C pending) | Arm A complete (val win, test regression). Arm B at EP1. |
-| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7 | Just assigned (PR #738 closed null — SDF precomputed contract precludes xyz noise) |
+| frieren | **#761** | Dedicated 2-layer volume head on shared encoder (capacity-additive) | JUST ASSIGNED |
+| nezuko | **#737** | Region-weighted volume loss: near-wake emphasis | WIP |
+| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7 | WIP |
 | thorfinn | **#756** | Cosine-annealed EMA decay schedule | WIP |
 
 **Zero idle students. Zero idle GPUs.**

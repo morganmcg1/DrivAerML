@@ -6,6 +6,29 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-07 — PR #755 frieren stochastic depth + volume-token dropout — CLOSED NEGATIVE (hypothesis falsified)
+
+- Branch: `frieren/stochastic-depth-vol-reg`
+- W&B run: `6zrfsj5i` (group `frieren-stochdepth`, name `frieren/stochdepth-mild`)
+- Hypothesis: Stochastic depth (drop_path_rate=0.1, DeiT linear per-layer schedule) + volume-token dropout (rate=0.05) would push volume branch toward distribution-invariant representations, reducing the 3× val/test volume_pressure gap.
+
+| Metric | EP1 | EP2 | EP3 (best, kill) | SOTA #592 | Verdict |
+|---|---:|---:|---:|---:|---|
+| val_abupt | 27.85% | 10.94% | **10.58%** | 6.5985% | ❌ failed EP3 gate (<9%) |
+| val_vol_p | 18.35% | 12.48% | **14.14%** | 3.9456% | ❌ REGRESSING on target |
+| val_surface_p | 20.62% | 6.47% | 5.90% | — | ✓ improving |
+| val_wall_shear | 30.23% | 10.84% | 9.98% | — | ✓ improving |
+
+**Key diagnostic:** val_volume_pressure REGRESSED 12.48% → 14.14% (+1.66pp) while every other metric improved. Drop_path + token_drop selectively hurts the volume branch. Implementation verified correct (`train/vol_token_drop_actual_frac` ≈ 0.0498, per-layer schedule [0.0, 0.025, 0.05, 0.075, 0.1]). The hypothesis is the failure, not the code.
+
+**Analysis:** (1) DeiT's 0.1 rate is calibrated for 12-block models; on a 5-block model the same headline rate produces ~2.4× more aggregate drop-path noise per residual stream pass — depth-mismatched recipe. (2) Volume token dropout on sparse 3D field measurements is not analogous to image patch dropout (where redundancy is high) — it hurts a capacity-limited branch. (3) **Most importantly: regularization made val WORSE, which falsifies the "memorize-and-fail-OOD" framing of the val/test gap.** The gap is more likely operating-regime / distribution-shift on test cases, not fragile feature memorization.
+
+**Research update:** This failure redirects toward capacity-additive (dedicated volume head, PR #761) and geometry-conditioning (curvature features, PR #762) approaches rather than regularization.
+
+- Arms B/C: NOT launched per protocol (Arm A failed EP3 gate). Correct decision.
+
+---
+
 ## 2026-05-07 — PR #738 tanjiro volume-coordinate Gaussian noise injection — CLOSED NULL/NEGATIVE
 
 - Branch: `tanjiro/volume-coord-noise`
