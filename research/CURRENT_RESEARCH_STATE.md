@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 09:20 UTC
+- 2026-05-05 (latest: EP26 nezuko SOTA break 6.5108%, EP18 frieren 6.5472%, EP8 fern 6.6034%, EP27 tanjiro 6.8479%; tanjiro clarified to continue to EP50)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -13,10 +13,10 @@
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP24=6.5405% (wave leader)**. C7 trough confirmed at EP24. wsz=9.9925% (sub-10% achieved). vp=3.7977% run best. Within 0.012pp of SOTA val_best 6.5281%. LR ~5.98e-5 at 40% decay. Run continuing toward EP30-35. DO NOT KILL. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP15=6.5913% (best)** — smoothest monotonic descent in wave, zero oscillation. Rate accelerated EP14→EP15: -0.0216pp/ep (vs -0.0111pp prior). vp=3.8533% excellent. wsz=10.1822% (first sub-10.2%). 0.0124pp behind nezuko wave-best; projected to overtake by EP16. EP20 projection ~6.483–6.511% (would beat SOTA val_best 6.5281%). |
-| #740 Arm B | dl24-fern | GradNorm adaptive loss balancing (α=0.5 solo — Arm A killed EP5) | `5x8wofzm` | **EP6=6.6648%** — earliest sub-10% wsz in wave (9.8962% at EP6). Arm A killed EP5 (gap 0.1724pp ≥ threshold). Arm B solo to EP31. GradNorm correctly upweights tau_z. Next EP10 gate report pending. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP21=6.8907% (best)** — clean descent resumed after EP17/18 vp-spike. wsz=10.492% slope decelerating to -0.011pp/ep (concern). Running to EP50 terminal auto test eval. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP26=6.5108% (wave leader, BEATS pre-wave SOTA val 6.5281% by 0.0173pp)**. Steps_per_ep=5489. Confirmed descending. Next mandatory check-in EP28. DO NOT KILL. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP18=6.5472% (new best)** — monotonic descent every epoch, zero oscillation. 0.0364pp behind nezuko wave-best. Steps_per_ep=5494. EP20 mandatory check-in. Still descending. |
+| #740 Arm B | dl24-fern | GradNorm adaptive loss balancing (α=0.5 solo — Arm A killed EP5) | `5x8wofzm` | **EP8=6.6034% (new best)** — EP7 spike (6.9470%) confirmed transient, EP8 recovered below EP6 best (6.6648%). Steps_per_ep=10987. GradNorm healthy. EP10 mandatory check-in. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP27=6.8479% (best, new)** — very slow descent (EP22=6.8841%→EP27=6.8479%, +0.036pp over 5 epochs). 0.337pp behind nezuko EP26 wave-best. Plateau pattern. CONFIRMED to continue to EP50 (Option A — auto test eval at terminal). Control baseline only. |
 
 ### Closed / Negative Results This Wave
 
@@ -58,13 +58,13 @@
 
 ## Research Themes and Open Questions
 
-1. **Does y-symmetry augmentation push below SOTA? (nezuko #741)** EP24=6.5405% — wave leader, only 0.012pp above SOTA val_best 6.5281%. C7 trough confirmed. wsz=9.9925% (sub-10% achieved). vp=3.7977%. Run continuing toward EP30-35. Y-sym is a powerful regularizer on DrivAerML. DO NOT KILL. Test eval + review submit after terminal. Next C8 trough ~EP27-28 may clear SOTA val_best.
+1. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES.** EP26=6.5108% beats pre-wave SOTA val 6.5281% by 0.0173pp. In-wave val target updated to 6.5108%. Run still descending; C8 trough expected EP27-28. Next check EP28. Test eval + review submit after terminal (EP50 auto). DO NOT KILL.
 
-2. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** EP15=6.5913% — smoothest monotonic descent in wave, zero oscillation. Rate accelerating: -0.0216pp/ep at EP14→EP15 vs -0.0111pp prior. 0.0124pp behind nezuko wave-best; projected to overtake by EP16. EP20 projection ~6.483–6.511% — would beat SOTA val_best 6.5281%. Strongest trajectory candidate for terminal test merge.
+2. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** EP18=6.5472% — monotonic descent, zero oscillation. 0.0364pp behind nezuko wave-best. If descent continues at -0.022pp/ep, EP20 may approach 6.50% and potentially beat nezuko. Strongest long-run trajectory candidate after nezuko. EP20 mandatory check-in.
 
-3. **Does GradNorm α=0.5 recover after Arm A kill? (fern #740)** Arm A killed EP5 (gap=0.1724pp ≥ threshold). Arm B solo EP5=6.7438%, wsz already sub-10% (9.97%). EP10 gate pending. GradNorm correctly upweights tau_z (structural bottleneck) as intended.
+3. **Does GradNorm α=0.5 stabilize and deliver persistent gain? (fern #740)** EP7 spike (6.9470%) confirmed transient. EP8=6.6034% recovered, new best. GradNorm mechanism is working. Gap to nezuko is 0.093pp — this could close if descent accelerates. EP10 gate with per-component breakdown requested.
 
-4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP21=6.8907% — clean monotonic descent. EP17/18 vp-spike resolved. Steady descent continues. wsz plateau signal at this LR. Test eval at EP50 automatic via `run_final_evaluation`. Confirms wsz as structural ceiling at lr=9e-5.
+4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — Trending no.** EP26=6.8571%, only 0.027pp over 4 epochs. 0.346pp behind nezuko. Plateau behavior confirmed. Value is as control baseline only. Terminal at EP50.
 
 5. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
 
@@ -82,4 +82,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-06 09:20 UTC_
+_Last updated: 2026-05-05 (advisor survey: tanjiro Option A confirmed, all 4 students actively training, 0 idle)_
