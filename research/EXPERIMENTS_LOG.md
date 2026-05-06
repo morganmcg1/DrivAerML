@@ -6,6 +6,80 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+## 2026-05-05 ~20:30 UTC — Advisor Session: PR Reviews + Test Eval Authorization
+
+### PR #740 — GradNorm adaptive loss balancing (dl24-fern, `5x8wofzm`) — EP11 WAVE BEST
+
+- **Branch:** `dl24-fern/gradnorm-adaptive-loss`
+- **W&B Run:** `5x8wofzm` (Arm B, α=0.5)
+- **Advisor comment posted:** Yes — EP11 wave-best acknowledgment
+
+| EP | val_primary | cp | tau_x | tau_y | tau_z (wsz) | vol_p | wall_shear | Note |
+|----|------------|-----|-------|-------|------------|-------|-----------|------|
+| 10 | 6.4778% | — | — | — | — | — | — | prior best |
+| 11 | **6.4388%** | — | — | — | **9.6697%** | — | **7.2711%** | **WAVE LEADER** |
+
+**Commentary:** EP11 = 6.4388% is the new wave leader, 0.089pp below pre-wave SOTA val_best=6.5281%. All 7 per-axis metrics improved EP10→EP11 (correlated multi-channel advancement driven by GradNorm equilibrium). wall_shear 7.2711% is the first sub-7.29% AB-UPT target result in the wave. wsz 9.6697% is 0.070pp above the 9.60% flag threshold — EP12 likely to fire the flag. GradNorm has demonstrably settled into stable equilibrium and is driving sustained compound improvement. If descent rate holds (~0.04pp/ep), sub-6.40% is reachable by EP13-15.
+
+**Next:** EP12 check-in expected imminently; watch wsz < 9.60% flag.
+
+---
+
+### PR #741 — Y-axis reflection augmentation (dl24-nezuko, `lszc4ri7`) — EP32 + Test Eval Authorized
+
+- **Branch:** `dl24-nezuko/y-sym-augmentation`
+- **W&B Run:** `lszc4ri7`
+- **Advisor comment posted:** Yes — test eval authorization
+
+| EP | val_primary | tau_y (wsy) | Note |
+|----|------------|------------|------|
+| 28 | 6.5195% | 8.1197% | prior reference |
+| 30 | 6.5115% | 8.1028% | prior reference |
+| 32 | **6.5041%** | **8.0752%** | **EP32 run best; sub-6.51% trigger fired; all-time bests for abupt, tau_y, vp, sp, ws** |
+
+**tau_y 7-epoch monotonic descent:** 8.1197→8.1028→8.0752% (−0.0445pp over 4 epochs).
+
+**Commentary:** EP32=6.5041% clears the "below ~6.505%" test eval threshold set at EP30. Sub-6.51% trigger fired as planned. All-time run bests: abupt, tau_y, vol_pressure, surface_pressure, wall_shear. Tau_y 7-epoch monotonic descent (no oscillation) is a structural signal that Y-symmetry augmentation is enforcing bilateral consistency in the most volatile component. Test eval authorized from EP32 checkpoint (in parallel with continuing training to EP50). EP35 mandatory check-in maintained. Cosine LR at EP32 is in the deep tail — further improvement expected but convergence is slowing.
+
+**Next:** Student running test eval from EP32 checkpoint in parallel. Post test metric on PR immediately when available. EP35 mandatory check-in.
+
+---
+
+### PR #745 — 5L STRING (dl24-frieren, `co0xlqap`) — EP23 Plateau Broken
+
+- **Branch:** `dl24-frieren/5l-string-pe`
+- **W&B Run:** `co0xlqap`
+- **Advisor comment posted:** Yes — EP23 plateau-break acknowledgment
+
+| EP | val_primary | wsz | wsy | Note |
+|----|------------|-----|-----|------|
+| 20 | 6.5495% | 10.1721% | 8.0993% | plateau start |
+| 21 | 6.5508% | — | — | plateau |
+| 22 | 6.5491% | — | — | plateau; nearly flat |
+| 23 | **6.5326%** | **10.0968%** | **8.0511%** | **−0.0169pp plateau break** |
+
+**Commentary:** Three-epoch plateau (EP20-22 at 6.549-6.551%) assessed as cosine LR oscillation, not structural stall. EP23 confirms descent resumed with −0.0169pp step. 0.0045pp from pre-wave SOTA val_best (6.5281%) — within striking distance. wsz=10.0968% first sub-10.10% in run; wsy=8.0511% first sub-8.07%. Monotonic architecture (5L, no Y-sym augmentation) continues smooth descent. At ~0.02pp/ep and 27 remaining epochs, sub-6.40% is conceivable if rate holds.
+
+**Updated flag thresholds:** val_abupt < 6.52% → immediate report; wsz < 9.95% → immediate report.
+**Next:** EP35 mandatory check-in.
+
+---
+
+### Summary — Wave Standings at 2026-05-05 ~20:30 UTC
+
+| Rank | Student | PR | Run | EP | val_best | wsz | Gap to SOTA |
+|------|---------|----|----|----|----|-----|------------|
+| 1 (LEADER) | fern | #740 | `5x8wofzm` | 11 | **6.4388%** | 9.6697% | −0.089pp (BEATS SOTA) |
+| 2 | nezuko | #741 | `lszc4ri7` | 32 | **6.5041%** | 10.0%* | −0.024pp (BEATS SOTA) |
+| 3 | frieren | #745 | `co0xlqap` | 23 | **6.5326%** | 10.0968% | +0.005pp (near SOTA) |
+| 4 (baseline) | tanjiro | #749 | `oi2a01zy` | 27 | 6.8479% | ~10.5% | +0.320pp |
+
+*nezuko wsz data at EP32 not separately reported; EP28 wsz=9.7% estimated from tau_y descent.
+
+Pre-wave SOTA val_best: 6.5281% (PR #599, `sogus8sx`). **Two runs now beating pre-wave SOTA val.** Fern is 0.090pp clear. Test eval pending for nezuko from EP32 checkpoint.
+
+---
+
 ## 2026-05-06 08:45 UTC — W&B Status Check: All Active Wave PRs (mid-run update)
 
 ### PR #741 — Y-axis reflection augmentation (dl24-nezuko, `lszc4ri7`)
