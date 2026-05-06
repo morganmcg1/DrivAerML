@@ -137,6 +137,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_loss_w_upstream: float = 1.0
+    vol_loss_w_rest: float = 1.0
+    vol_loss_upstream_x_hi: float = 0.5
     debug: bool = False
 
 
@@ -219,6 +222,28 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_loss_w_upstream": (
+            "Per-point loss weight applied to volume points in the "
+            "upstream zone (x_rel <= --vol-loss-upstream-x-hi). The "
+            "upstream zone has 92%% of points and dominates the "
+            "test_volume_p L2 contribution; upweighting concentrates "
+            "training signal on the structural-error-dominant region. "
+            "Default 1.0 = no reweighting (uniform per-point loss)."
+        ),
+        "vol_loss_w_rest": (
+            "Per-point loss weight applied to volume points outside the "
+            "upstream zone (x_rel > --vol-loss-upstream-x-hi). Default "
+            "1.0 = uniform; setting < 1.0 down-weights wake regions."
+        ),
+        "vol_loss_upstream_x_hi": (
+            "Upper bound on x_rel for the upstream mask. Default 0.5 "
+            "captures everything from inflow to mid-vehicle (car body "
+            "spans x_rel in [-0.5, +0.5] with cx as midpoint). On "
+            "DrivAerML this covers ~92%% of volume points. Coordinates "
+            "use the dataset-mean reference frame (cx=1.5046, "
+            "s_ref=4.6720) so that view-only volumes without surface "
+            "data still classify correctly."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +325,103 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+# DrivAerML dataset-mean surface bbox stats over 50 train cases:
+#   cx=1.5046+/-0.0805, cz=0.3942+/-0.0286, s_ref=4.6720+/-0.1369.
+# View-splitting in train_random mode produces volume-only views (no surface)
+# at small train_volume_points. Use the dataset-mean reference frame for those
+# elements rather than collapsing the region mask to zero.
+DRIVAERML_FALLBACK_CX = 1.5046
+DRIVAERML_FALLBACK_CZ = 0.3942
+DRIVAERML_FALLBACK_S_REF = 4.6720
+
+
+def compute_volume_upstream_weights(
+    volume_x: torch.Tensor,
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    *,
+    upstream_x_hi: float,
+    w_upstream: float,
+    w_rest: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-point loss weights upweighting the upstream zone (x_rel <= upstream_x_hi).
+
+    Returns (weights, upstream_mask_float) of shape ``[B, N_volume]``.
+    Coordinates are normalized as ``x_rel = (vx - cx) / s_ref``, with
+    ``(cx, s_ref)`` taken from the per-element surface bbox when available
+    and falling back to dataset-mean stats otherwise (volume-only views or
+    masked-out surface).
+    """
+    batch_size, num_volume_points = volume_x.shape[0], volume_x.shape[1]
+    device = volume_x.device
+    if num_volume_points == 0:
+        empty_w = torch.full(
+            (batch_size, num_volume_points),
+            float(w_rest),
+            device=device,
+            dtype=torch.float32,
+        )
+        empty_m = torch.zeros_like(empty_w)
+        return empty_w, empty_m
+
+    fallback_cx = torch.full(
+        (batch_size, 1), DRIVAERML_FALLBACK_CX, device=device, dtype=torch.float32
+    )
+    fallback_s_ref = torch.full(
+        (batch_size, 1), DRIVAERML_FALLBACK_S_REF, device=device, dtype=torch.float32
+    )
+
+    if surface_x.shape[1] == 0:
+        cx, s_ref = fallback_cx, fallback_s_ref
+    else:
+        valid = surface_mask.bool()
+        has_surface = valid.any(dim=1, keepdim=True)
+        surface_xyz = surface_x[..., :3].float()
+        big = torch.finfo(surface_xyz.dtype).max
+        surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
+        surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
+        surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
+        surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
+        per_elem_cx = 0.5 * (surf_x_min + surf_x_max)
+        per_elem_s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+        cx = torch.where(has_surface, per_elem_cx, fallback_cx)
+        s_ref = torch.where(has_surface, per_elem_s_ref, fallback_s_ref)
+
+    volume_xyz = volume_x[..., :3].float()
+    x_rel = (volume_xyz[..., 0] - cx) / s_ref
+    upstream_mask_bool = x_rel <= float(upstream_x_hi)
+    upstream_mask = upstream_mask_bool.float()
+    weights = upstream_mask * (float(w_upstream) - float(w_rest)) + float(w_rest)
+    return weights, upstream_mask
+
+
+def weighted_masked_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    point_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Per-point weighted masked MSE.
+
+    pred / target: [B, N, C]; mask: [B, N]; point_weights: [B, N].
+    Returns the weighted mean of the squared error over (valid points x channels)
+    where each point's squared error is multiplied by ``point_weights``. Mean
+    is computed over the unweighted valid count to keep gradient magnitude
+    comparable to ``masked_mse`` for the reference w=1 case.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    mask_dev = mask.to(device=pred.device, dtype=pred.dtype)
+    point_w = point_weights.to(device=pred.device, dtype=pred.dtype)
+    sq_err = (pred - target).square().sum(dim=-1)  # [B, N]
+    weighted = sq_err * point_w * mask_dev
+    valid_points = mask_dev.sum()
+    denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
+    if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denominator
+    return pred.sum() * 0.0
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,10 +432,17 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_loss_w_upstream: float = 1.0,
+    vol_loss_w_rest: float = 1.0,
+    vol_loss_upstream_x_hi: float = 0.5,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    use_vol_weights = bool(
+        (vol_loss_w_upstream != 1.0) or (vol_loss_w_rest != 1.0)
+    )
+    upstream_mask_frac = float("nan")
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -330,7 +459,33 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if use_vol_weights:
+            volume_point_weights, upstream_mask = compute_volume_upstream_weights(
+                batch.volume_x,
+                batch.surface_x,
+                batch.surface_mask,
+                upstream_x_hi=vol_loss_upstream_x_hi,
+                w_upstream=vol_loss_w_upstream,
+                w_rest=vol_loss_w_rest,
+            )
+            volume_loss = weighted_masked_mse(
+                out["volume_preds"], volume_target, batch.volume_mask, volume_point_weights
+            )
+            mask_dev = batch.volume_mask.to(
+                device=upstream_mask.device, dtype=upstream_mask.dtype
+            )
+            valid_count = mask_dev.sum()
+            if bool(valid_count.detach().cpu().item() > 0):
+                upstream_mask_frac = float(
+                    ((upstream_mask * mask_dev).sum() / valid_count.clamp_min(1.0))
+                    .detach()
+                    .cpu()
+                    .item()
+                )
+            else:
+                upstream_mask_frac = 0.0
+        else:
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -341,6 +496,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "vol_upstream_mask_frac": upstream_mask_frac,
     }
 
 
@@ -747,6 +903,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+        use_vol_upstream_weights = bool(
+            (config.vol_loss_w_upstream != 1.0) or (config.vol_loss_w_rest != 1.0)
+        )
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -829,6 +988,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                )
+            if use_vol_upstream_weights:
+                print(
+                    f"Volume upstream loss weights: w_upstream="
+                    f"{config.vol_loss_w_upstream} w_rest={config.vol_loss_w_rest} "
+                    f"upstream_x_hi={config.vol_loss_upstream_x_hi}"
                 )
 
         run = init_wandb_run(
@@ -1008,6 +1173,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_loss_w_upstream=config.vol_loss_w_upstream,
+                        vol_loss_w_rest=config.vol_loss_w_rest,
+                        vol_loss_upstream_x_hi=config.vol_loss_upstream_x_hi,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1216,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if (
+                        use_vol_upstream_weights
+                        and "vol_upstream_mask_frac" in batch_loss_metrics
+                        and math.isfinite(batch_loss_metrics["vol_upstream_mask_frac"])
+                    ):
+                        train_log["train/vol_upstream_mask_frac"] = batch_loss_metrics[
+                            "vol_upstream_mask_frac"
+                        ]
+                        train_log["train/vol_loss_w_upstream"] = config.vol_loss_w_upstream
+                        train_log["train/vol_loss_w_rest"] = config.vol_loss_w_rest
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

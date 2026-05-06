@@ -892,6 +892,98 @@ EVAL_KEYS = (
 )
 
 
+# Volume eval-time region partition (matches PR #737 / PR #763 spec).
+# upstream: x_rel <= VOLUME_REGION_X_LO  (~92% of points)
+# near:     VOLUME_REGION_X_LO < x_rel < VOLUME_REGION_X_HI AND |z_rel| < VOLUME_REGION_Z_ABS
+# far:      x_rel >= VOLUME_REGION_X_HI
+# These are mutually exclusive and cover every volume point. The boundary at
+# 0.5 captures everything from the inflow up through mid-vehicle (cars span
+# x_rel in [-0.5, +0.5] with cx as midpoint).
+VOLUME_REGION_KEYS = ("upstream", "near", "far")
+VOLUME_REGION_X_LO = 0.5
+VOLUME_REGION_X_HI = 3.0
+VOLUME_REGION_Z_ABS = 1.5
+# Dataset-mean fallback (matches DRIVAERML_FALLBACK_* in train.py); needed for
+# views from the multi-view sampler that have no valid surface points.
+VOLUME_REGION_FALLBACK_CX = 1.5046
+VOLUME_REGION_FALLBACK_CZ = 0.3942
+VOLUME_REGION_FALLBACK_S_REF = 4.6720
+
+
+def _volume_region_masks(
+    volume_x: torch.Tensor,
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Classify volume points into (near, far, upstream) regions.
+
+    Inputs are batched tensors:
+      volume_x:     [B, N_volume, >=3]
+      surface_x:    [B, N_surface, >=3]
+      surface_mask: [B, N_surface]   (True = valid)
+
+    Returns three [B, N_volume] bool tensors. The classification is based on
+    a per-batch surface bbox (cx, cz, s_ref), with dataset-mean fallback for
+    elements that lack any valid surface points.
+    """
+    batch_size, num_volume_points = volume_x.shape[0], volume_x.shape[1]
+    device = volume_x.device
+    empty_bool = torch.zeros(
+        (batch_size, num_volume_points), device=device, dtype=torch.bool
+    )
+    if num_volume_points == 0:
+        return empty_bool, empty_bool, empty_bool
+
+    fallback_cx = torch.full(
+        (batch_size, 1), VOLUME_REGION_FALLBACK_CX, device=device, dtype=torch.float32
+    )
+    fallback_cz = torch.full(
+        (batch_size, 1), VOLUME_REGION_FALLBACK_CZ, device=device, dtype=torch.float32
+    )
+    fallback_s_ref = torch.full(
+        (batch_size, 1), VOLUME_REGION_FALLBACK_S_REF, device=device, dtype=torch.float32
+    )
+
+    if surface_x.shape[1] == 0:
+        cx, cz, s_ref = fallback_cx, fallback_cz, fallback_s_ref
+    else:
+        valid = surface_mask.bool()
+        has_surface = valid.any(dim=1, keepdim=True)
+        surface_xyz = surface_x[..., :3].float()
+        big = torch.finfo(surface_xyz.dtype).max
+        surf_x_for_min = surface_xyz[..., 0].masked_fill(~valid, big)
+        surf_x_for_max = surface_xyz[..., 0].masked_fill(~valid, -big)
+        surf_z_for_min = surface_xyz[..., 2].masked_fill(~valid, big)
+        surf_z_for_max = surface_xyz[..., 2].masked_fill(~valid, -big)
+        surf_x_min = surf_x_for_min.min(dim=1, keepdim=True).values
+        surf_x_max = surf_x_for_max.max(dim=1, keepdim=True).values
+        surf_z_min = surf_z_for_min.min(dim=1, keepdim=True).values
+        surf_z_max = surf_z_for_max.max(dim=1, keepdim=True).values
+        per_elem_cx = 0.5 * (surf_x_min + surf_x_max)
+        per_elem_cz = 0.5 * (surf_z_min + surf_z_max)
+        per_elem_s_ref = (surf_x_max - surf_x_min).clamp_min(1e-6)
+        cx = torch.where(has_surface, per_elem_cx, fallback_cx)
+        cz = torch.where(has_surface, per_elem_cz, fallback_cz)
+        s_ref = torch.where(has_surface, per_elem_s_ref, fallback_s_ref)
+
+    volume_xyz = volume_x[..., :3].float()
+    x_rel = (volume_xyz[..., 0] - cx) / s_ref
+    z_rel = (volume_xyz[..., 2] - cz) / s_ref
+    near = (
+        (x_rel > VOLUME_REGION_X_LO)
+        & (x_rel < VOLUME_REGION_X_HI)
+        & (z_rel > -VOLUME_REGION_Z_ABS)
+        & (z_rel < VOLUME_REGION_Z_ABS)
+    )
+    far = x_rel >= VOLUME_REGION_X_HI
+    upstream = x_rel <= VOLUME_REGION_X_LO
+    return near, far, upstream
+
+
+def _volume_region_keyed_keys() -> tuple[str, ...]:
+    return tuple(f"volume_pressure_{region}" for region in VOLUME_REGION_KEYS)
+
+
 @dataclass
 class EvalAccumulator:
     surface_loss_sse: float = 0.0
@@ -905,6 +997,13 @@ class EvalAccumulator:
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
+    volume_region_case_sums: dict[str, dict[str, list[float]]] = field(
+        default_factory=lambda: {region: {} for region in VOLUME_REGION_KEYS}
+    )
+    volume_region_point_counts: dict[str, int] = field(
+        default_factory=lambda: {region: 0 for region in VOLUME_REGION_KEYS}
+    )
+    volume_region_total_points: int = 0
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -1002,6 +1101,15 @@ def accumulate_eval_batch(
         accumulator.abs_sums["volume_pressure"] += float(volume_abs[:, 0].sum().detach().cpu().item())
         accumulator.abs_counts["volume_pressure"] += int(volume_abs[:, 0].numel())
 
+    near_mask, far_mask, upstream_mask = _volume_region_masks(
+        batch.volume_x, batch.surface_x, batch.surface_mask
+    )
+    region_masks = {
+        "upstream": upstream_mask,
+        "near": near_mask,
+        "far": far_mask,
+    }
+
     for case_idx, case_id in enumerate(batch.case_ids):
         surface_valid = batch.surface_mask[case_idx].bool()
         if bool(surface_valid.any()):
@@ -1034,6 +1142,20 @@ def accumulate_eval_batch(
                 pred=volume_pred[case_idx][volume_valid],
                 target=batch.volume_y[case_idx][volume_valid],
             )
+            valid_count = int(volume_valid.sum().detach().cpu().item())
+            accumulator.volume_region_total_points += valid_count
+            for region_name, region_mask in region_masks.items():
+                region_valid = region_mask[case_idx].bool() & volume_valid
+                region_count = int(region_valid.sum().detach().cpu().item())
+                accumulator.volume_region_point_counts[region_name] += region_count
+                if region_count == 0:
+                    continue
+                _accumulate_case_rel_l2(
+                    accumulator.volume_region_case_sums[region_name],
+                    case_id=case_id,
+                    pred=volume_pred[case_idx][region_valid],
+                    target=batch.volume_y[case_idx][region_valid],
+                )
 
 
 def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccumulator:
@@ -1050,6 +1172,15 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
             merged.abs_counts[key] += accumulator.abs_counts[key]
             for case_id, values in accumulator.case_sums[key].items():
                 state = merged.case_sums[key].setdefault(case_id, [0.0, 0.0])
+                state[0] += values[0]
+                state[1] += values[1]
+        merged.volume_region_total_points += accumulator.volume_region_total_points
+        for region in VOLUME_REGION_KEYS:
+            merged.volume_region_point_counts[region] += (
+                accumulator.volume_region_point_counts[region]
+            )
+            for case_id, values in accumulator.volume_region_case_sums[region].items():
+                state = merged.volume_region_case_sums[region].setdefault(case_id, [0.0, 0.0])
                 state[0] += values[0]
                 state[1] += values[1]
     return merged
@@ -1081,7 +1212,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
         accumulator.surface_loss_count + accumulator.volume_loss_count, 1
     )
-    return {
+    out = {
         "loss": loss,
         "surface_loss": accumulator.surface_loss_sse / max(accumulator.surface_loss_count, 1),
         "volume_loss": accumulator.volume_loss_sse / max(accumulator.volume_loss_count, 1),
@@ -1110,6 +1241,20 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
     }
+    total_volume_points = max(accumulator.volume_region_total_points, 1)
+    for region in VOLUME_REGION_KEYS:
+        region_rel_l2, region_cases = _rel_l2(
+            accumulator.volume_region_case_sums[region]
+        )
+        out[f"volume_pressure_{region}_rel_l2"] = region_rel_l2
+        out[f"volume_pressure_{region}_rel_l2_pct"] = region_rel_l2 * 100.0
+        out[f"volume_pressure_{region}_cases"] = region_cases
+        point_count = accumulator.volume_region_point_counts[region]
+        out[f"volume_pressure_{region}_point_count"] = float(point_count)
+        out[f"volume_pressure_{region}_point_frac"] = (
+            point_count / total_volume_points
+        )
+    return out
 
 
 @torch.no_grad()
