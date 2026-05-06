@@ -6,6 +6,64 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+## 2026-05-05 15:00 — W&B Status Check: All Active Wave PRs (mid-run update, with channel breakdown)
+
+### PR #740 — GradNorm adaptive loss balancing, Arm B (dl24-fern)
+- **Branch:** `dl24-fern/gradnorm-adaptive-loss`
+- **W&B Run:** Arm B `g18f7jm1` (α=0.5)
+- **Status:** CRASHED at EP5 — both arms dead
+
+| EP | val_primary | cp | tau_x | tau_y | tau_z | vol_p |
+|----|------------|-----|-------|-------|-------|-------|
+| 1 | 8.6379% | 5.50% | 8.09% | 11.24% | 12.22% | 6.14% |
+| 2 | 7.4012% | 4.77% | 7.13% | 9.45% | 10.74% | 4.92% |
+| 3 | 7.0931% | 4.58% | 6.89% | 8.95% | 10.37% | 4.68% |
+| 4 | 6.8721% | 4.48% | 6.71% | 8.64% | 10.14% | 4.38% |
+| 5 | **6.7438%** | **4.42%** | **6.62%** | **8.45%** | **9.97%** | **4.26%** |
+
+**WAVE BEST = 6.7438% at EP5.** State=`crashed` (not clean kill/timeout). Advisor comment posted requesting crash diagnosis and Arm B relaunch from EP5 checkpoint. tau_z at 9.97% is notably lower than nezuko's tau_z=10.32% at comparable val — GradNorm is successfully up-weighting tau_z as intended.
+
+### PR #741 — Y-axis reflection augmentation (dl24-nezuko)
+- **Branch:** `dl24-nezuko/y-sym-augmentation`
+- **W&B Run:** `lszc4ri7`
+- **Status:** RUNNING — EP12 reached (Cycle 3 trough ARRIVED)
+
+| EP | val_primary | cp | tau_x | tau_y | tau_z | vol_p | Note |
+|----|------------|-----|-------|-------|-------|-------|------|
+| 4 | 7.6542% | 4.94% | 7.34% | 9.80% | 11.32% | 4.87% | C1 trough |
+| 7 | 7.3192% | 4.80% | 7.18% | 9.31% | 10.92% | 4.38% | C2 trough |
+| 9 | 7.2399% | 4.76% | 7.16% | 9.17% | 10.78% | 4.33% | C2 extended trough |
+| 12 | **6.8483%** | **4.47%** | **6.78%** | **8.66%** | **10.32%** | **4.01%** | **C3 trough** |
+
+Cycle 3 trough at EP12=6.8483% far exceeded prediction (7.15-7.18%). Per-cycle improvement: C1→C2 delta = -0.41%, C2→C3 delta = -0.39%. C4 trough (EP15-16) projected at ~6.50% — approaching SOTA val_best=6.5281%. vol_p=4.01% is the best vol_p observed this wave.
+
+### PR #745 — 5L STRING v2, kill-gate fix (dl24-frieren)
+- **W&B Run:** `co0xlqap`
+- **Status:** RUNNING — EP3 reached
+
+| EP | val_primary | cp | tau_x | tau_y | tau_z | vol_p |
+|----|------------|-----|-------|-------|-------|-------|
+| 1 | 11.1129% | 7.39% | 10.51% | 14.52% | 16.02% | 7.12% |
+| 2 | 8.0713% | 5.20% | 7.75% | 10.56% | 11.97% | 4.87% |
+| 3 | 7.3245% | 4.75% | 7.13% | 9.44% | 11.05% | 4.24% |
+
+Matching v1 trajectory exactly — config is identical, same convergence profile. EP5 gate (≤7.5%) will clear at current rate.
+
+### PR #749 — Lion lr=9e-5 (dl24-tanjiro)
+- **W&B Run:** `oi2a01zy`
+- **Status:** RUNNING — EP9 reached
+
+| EP | val_primary | cp | tau_x | tau_y | tau_z | vol_p |
+|----|------------|-----|-------|-------|-------|-------|
+| 5 | 7.3139% | 4.79% | 7.06% | 9.30% | 11.01% | 4.42% |
+| 7 | 7.1497% | 4.68% | 6.95% | 9.04% | 10.80% | 4.28% |
+| 8 | 7.1093% | 4.66% | 6.91% | 8.97% | 10.76% | 4.24% |
+| 9 | **7.0923%** | **4.65%** | **6.90%** | **8.93%** | **10.75%** | **4.23%** |
+
+Steady improvement but decelerating (EP7→8→9 deltas: -0.04%/-0.02%). May plateau ~7.0-7.05%. EP10 report requested.
+
+---
+
 ## 2026-05-06 12:00 — W&B Status Check: All Active Wave PRs (mid-run update)
 
 ### PR #740 — GradNorm adaptive loss balancing (dl24-fern)

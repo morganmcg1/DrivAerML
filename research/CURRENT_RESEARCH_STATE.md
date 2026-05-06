@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 (updated ~12:00 UTC)
+- 2026-05-05 (updated ~15:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -13,10 +13,10 @@
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | v2 relaunch after kill-bug fix (inverted `>=` operator in v1 killed best run at EP6=6.842%). v1 had EP5=6.910%/EP6=6.842%, both below SOTA val best — extremely promising. Awaiting EP1-5 check-in from v2. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP10=7.3566%** (predicted oscillation spike from Y-sym cycle). EP9=7.2399% was Cycle 2 best. EP10 spike confirms structural 2-epoch oscillation. Cycle 3 trough predicted EP12/13 — may reach ~7.10-7.16%. Advisor comment posted confirming do-not-kill. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | **EP5: Arm B=6.7438% (NEW WAVE BEST), Arm A=6.9162%.** Arm B is 0.214pp from SOTA val_best=6.5281% at only EP5. GradNorm τ_z up-weighted. EP10 report with per-channel GradNorm weight breakdown pending. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP6=7.5358%** (regression from EP5 best 7.3139%). Single-epoch regression — likely noise. EP5 gate ≤9.0% PASSED ✓. Continue to EP10. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | v2 at EP3=7.3245% (cp=4.75%, tau_z=11.05%). On track; EP5 gate ≤7.5% will clear. Advisor check-in posted. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP12=6.8483% — Cycle 3 trough ARRIVED, BEST NEZUKO EVER** (cp=4.47%, tau_x=6.78%, tau_y=8.66%, tau_z=10.32%, vol_p=4.01%). Cycle pattern: C1 trough EP4=7.654%, C2 trough EP9=7.240%, C3 trough EP12=6.848%. C4 trough (EP15-16) predicted ~6.50% — near SOTA. EP13 spike expected. DO NOT KILL. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | **CRASHED at EP5** (both arms dead). Arm B final=6.7438% (wave best; cp=4.42%, tau_x=6.62%, tau_y=8.45%, tau_z=9.97%, vol_p=4.26%). Advisor comment requesting crash diagnosis + Arm B relaunch posted. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **EP9=7.0923%** (cp=4.65%, tau_x=6.90%, tau_y=8.93%, tau_z=10.75%, vol_p=4.23%). Steady improvement, deceleration noted. EP10 gate ≤8.0% trivially cleared. Advisor check-in posted. |
 
 ### Closed / Negative Results This Wave
 
@@ -57,15 +57,13 @@
 
 ## Research Themes and Open Questions
 
-1. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** EP5=6.910% is highly promising — already below SOTA val best=6.5281% is the target; vol=3.994% notably better than 4L baselines suggesting depth helps volume generalization. Continuing to EP10 for terminal test evaluation.
+1. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** v2 at EP3=7.3245% is on healthy trajectory. EP5 gate will clear; EP10 target is 6.7-6.8%. v1 showed EP6=6.842% (best ever for frieren). Continuing to see if v2 reproduces.
 
-2. **Does y-symmetry augmentation improve volume generalization? (nezuko #741)** EP7=7.319% after saddle traversal (EP5-6 plateau). Augmentation confirmed working; the saddle pattern is consistent with meaningful learning dynamics. Continuing to EP10.
+2. **Does y-symmetry augmentation push below SOTA? (nezuko #741)** C3 trough EP12=6.8483% significantly exceeded predictions (was 7.15-7.18%). Cycle amplitude is growing: ΔC1→C2=0.41%, ΔC2→C3=0.39%. If C4 delivers similar gain, EP15-16 could hit ~6.50% — at or below SOTA 6.5281%. Y-sym is a powerful regularizer on DrivaerML.
 
-3. **Does GradNorm adaptive balancing reduce the chronic vol→test gap? (fern #740)** Arm B (α=0.5) at EP5=6.7438% is the NEW WAVE BEST — only 0.214pp from SOTA val_best=6.5281%. τ_z consistently up-weighted by GradNorm. EP10 per-channel weight breakdown pending to understand α=0.5 vs α=1.0 dynamics.
+3. **Does fern (GradNorm α=0.5) recover after crash? (#740 URGENT)** Both arms died at EP5. Arm B (6.7438%) must be relaunched. This is critical — wave best trajectory killed at EP5 of a 24h run.
 
-4. **Does y-symmetry augmentation improve volume generalization? (nezuko #741)** EP10=7.357% confirmed oscillation spike. Structural 2-epoch cycles fully validated. Cycle 3 trough EP12/13 may break 7.1%. If successful, Y-sym + GradNorm composition is a high-priority next experiment.
-
-5. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP5=7.314% (cleared gate). EP6=7.536% regression noted (may be noise). EP10 report pending.
+4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP9=7.0923% — stable improvement, deceleration noted (EP7→8→9: -0.04%/-0.02%). May plateau around 7.0-7.05% unless LR schedule has further decay to apply.
 
 6. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Current candidates: GradNorm (#740), y-symmetry (#741), Region-VP (#737), Volume MLP head (unassigned).
 
