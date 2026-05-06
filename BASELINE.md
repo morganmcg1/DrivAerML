@@ -51,15 +51,15 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.5108%** (PR #741 nezuko, EP26, run `lszc4ri7`) — first in-wave run to beat pre-wave SOTA val 6.5281%
+In-wave val target: **6.4161%** (PR #740 fern, EP15, run `5x8wofzm`) — updated wave leader; beats pre-wave SOTA val 6.5281% by 0.1120pp
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #741 | `lszc4ri7` | nezuko | EP26 (best) | **6.5108%** | Y-axis symmetry aug; EP26=6.5108% wave leader; beats pre-wave SOTA val 6.5281% by 0.0173pp; steps_per_epoch=5489; still descending |
-| #745 | `co0xlqap` | frieren | EP18 (best) | **6.5472%** | 5L STRING PE; EP18=6.5472%; steps_per_epoch=5494; 0.0364pp behind nezuko wave-best; monotonic descent, still improving |
-| #740 Arm B | `5x8wofzm` | fern | EP8 (best) | **6.6034%** | GradNorm α=0.5; steps_per_epoch=10987; EP7 spike (6.9470%) confirmed transient; EP8=6.6034% recovered below EP6 best (6.6648%); healthy descent |
-| #749 | `oi2a01zy` | tanjiro | EP26 (best) | **6.8571%** | Lion lr=9e-5 control; EP26=6.8571%; steps_per_epoch=5494; very flat curve (EP22=6.8841%→EP26=6.8571%); 0.346pp above nezuko wave-best |
+| #740 Arm B | `5x8wofzm` | fern | EP15 (best) | **6.4161%** | GradNorm α=0.5; steps_per_epoch=10987; EP15=6.4161% **WAVE LEADER** (−0.112pp below pre-wave SOTA val 6.5281%); EP16 regression vol-dominated (vp: 3.91%→4.42%); GradNorm self-correcting; EP17 recovery expected |
+| #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; EP33=6.4984%; steps_per_epoch=5489; C9 spike at EP39=6.8352%, EP40 partial recovery to 6.5532%; EP41-43 recovery window |
+| #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; EP30=6.5097%; steps_per_epoch=5494; EP32=6.5229% uniform drift at LR floor; wsz bottleneck at 10.06% |
+| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; EP27=6.8479%; steps_per_epoch=5494; complete plateau EP35-44 within 6.8479-6.8659%; ~6 epochs to EP50 auto-test-eval |
 
-_Last updated: 2026-05-05 (epoch-boundary W&B scan, EP26 nezuko SOTA break)_
+_Last updated: 2026-05-05 (epoch-boundary W&B scan, EP40 nezuko / EP32 frieren / EP44 tanjiro / EP16.24 fern)_
