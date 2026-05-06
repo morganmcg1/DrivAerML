@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 ~17:30Z (latest: fern ~EP32 val=6.4161% wave best, wsz=9.6877%, GradNorm τz weight=1.804 growing, W&B obs posted; nezuko EP40 val=6.5532% C9 spike partial recovery, EP33 best=6.4984% holds, test=7.8232% SOTA-beating, EP45 mandatory next; frieren ~EP32 val=6.5229% minor regression from EP30 best=6.5097%, W&B obs posted; tanjiro ~EP42 val=6.8557% plateau, running to EP50 auto test eval)
+- 2026-05-06 ~20:50Z (latest: fern EP20=6.3670% WAVE BEST (spe=10987), EP21=6.3703%, ~EP21.5 running; nezuko EP50 complete (step=274,450), best EP33=6.4984%, test=7.8232%, no SENPAI-RESULT posted — advisor posted EP50 terminal prompt; frieren EP41=6.5242%, plateau from EP30=6.5097%, ~8 epochs to terminal; tanjiro (#780) running unauthorized multi-arm screening, no PR communication — advisor posted first comment requesting status)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,14 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-06 ~15:15Z)
+### Active Experiments (as of 2026-05-06 ~20:50Z)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5 solo — Arm A killed EP5) | `5x8wofzm` | **~EP32 val=6.4161% — WAVE LEADER**, −0.1120pp below SOTA val 6.5281%. W&B obs posted ~17:25Z (student unresponsive since EP14). GradNorm weights: w_cp=0.5643, w_tau_x=0.6584, w_tau_y=1.2790, w_tau_z=1.8039, w_vol_p=0.6943. wsz=9.6877% approaching 9.60% flag. best_checkpoint/updated=1. EP35 mandatory. Flag: val < 6.39% → milestone; wsz < 9.60% → flag. DO NOT KILL. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP33=6.4984% val — second in wave. test_primary=7.8232% (W&B `1tal40wr`) BEATS SOTA TEST (7.9303%) by 0.107pp — FIRST WAVE RUN TO CLEAR SOTA TEST.** EP40=6.5532% partial recovery from C9 spike (EP39=6.8352%), EP33 best holds. Advisor responded EP40 ~17:25Z. EP45 mandatory. Flags: val < 6.48% → 2nd test eval; wsz < 9.90% → flag. ~EP42 next ~4h to EP50 auto test eval. DO NOT KILL. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **EP30=6.5097% run-best — BEATS SOTA val 6.5281% by 0.0184pp.** ~EP32 val=6.5229% (minor regression from EP30 best). W&B obs posted ~17:25Z. wsz=10.0791% (slight regression from EP30=10.0603%). EP35 mandatory. Triggers: val ≤6.500% → post immediately; wsz <10.050% → post immediately. EP50 projected 6.43–6.45%. DO NOT KILL. |
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | **~EP42-44 running, val=6.8557% (plateau, no new best since EP27)** — 0.35pp+ behind wave leader. Last student check-in EP24 (09:37Z). ~1-2h to EP50 natural completion; auto test eval fires automatically. Control baseline only, no intervention needed. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5) | `5x8wofzm` | **EP20=6.3670% — WAVE BEST** (spe=10987). EP21=6.3703%, ~EP21.5 running. Two GradNorm oscillations (EP7, EP16) both self-corrected. Best=EP20. Triggers: val<6.35% → post immediately; val>6.55% → C3 alert; EP50 → SENPAI-RESULT. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP50 COMPLETE** (step=274,450). Best EP33=6.4984%, test=7.8232% (beats SOTA test 7.9303% by 0.107pp). EP33–EP50 plateau, C9 oscillation irrecoverable. **AWAITING SENPAI-RESULT** — advisor EP50 terminal prompt posted 2026-05-06T20:49Z. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | EP41=6.5242%, step=233,374. Best EP30=6.5097% (beats SOTA val 6.5281% by 0.0184pp). Plateau EP30–EP41 (11 epochs). ~8 epochs to terminal. Triggers: val≤6.500% → post immediately; EP50 → SENPAI-RESULT. |
+| #780 | dl24-tanjiro | GradNorm α=0.25 sweep — testing more conservative equalization | multiple | **ABNORMAL**: Student has run unauthorized multi-arm screening (GradNorm α=2.0, α=3.0, noise sweeps, vol-w=1.5) all 13-epoch format without any PR communication. Original 50-epoch α=0.25 run NEVER STARTED. Advisor posted first-ever comment 2026-05-06T20:49Z requesting status and clarification. Awaiting student response. |
 ### Closed / Negative Results This Wave
 
 | PR | Student | Hypothesis | Outcome |
@@ -32,6 +32,7 @@
 | #623 | dl24-tanjiro | EMA-proxy GradNorm α=0.5 | Infrastructure kill required (ignored kill orders). Best val=12.4377%. |
 | #659 | norman | Width-over-Depth 4L/768d/12h cold-start | Closed: test=11.2020%. OOM forced slices=64; undertrained. |
 | #677 | dl24-nezuko | Tau×1.2/1.3 + volume×2.0 combination | Admin-only merge (scaffolding). No experiment ran. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base | COMPLETED TERMINAL: EP50 best=6.8557% (EP27 plateau), 0.38pp+ behind wave leader. Test eval fired automatically at EP50. No improvement vs SOTA. Value as control baseline only. |
 
 ### Critical Config Constraints
 
@@ -57,7 +58,7 @@
 
 ## Research Themes and Open Questions
 
-1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** ~EP32 val=6.4161%, wave leader, 0.1120pp below pre-wave SOTA val 6.5281%. GradNorm τz weight grown to 1.804 (was 1.661 at EP14 — continuing to upweight bottleneck correctly). wsz=9.6877% approaching 9.60% flag. W&B obs posted ~17:25Z (student unresponsive since EP14). EP35 mandatory.
+1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP15 val=6.4161% (spe=10987 corrected), wave leader, 0.1120pp below pre-wave SOTA val 6.5281%. GradNorm weights: w_tau_z=1.635 at EP15 (upweighting bottleneck). EP16 regression is volume-oscillation, NOT weight-shift (w_vol_p barely changed 0.788→0.786 at EP16). GradNorm self-correcting: w_vol_p dropped to 0.743 at EP16.24. EP17 recovery expected. wsz=9.688% at EP15 best. EP17 mandatory check-in posted.
 
 2. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES on both val AND test.** EP33 val=6.4984% beats pre-wave SOTA val by 0.0297pp. **test_primary=7.8232% (W&B `1tal40wr`) beats SOTA test (7.9303%) by 0.107pp — first wave run to clear SOTA test.** EP40=6.5532% partial recovery from C9 spike (EP39=6.8352% — Y-aug cycle oscillation, smallest amplitude yet at LR ~1.05e-5). EP33 best holds. Advisor responded ~17:25Z: continue EP50, second test eval if val < 6.48%. EP45 mandatory. ~10 epochs remaining.
 
@@ -81,4 +82,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-06 ~17:30Z (fern #740 ~EP32 val=6.4161% wave leader W&B obs posted student unresponsive since EP14; nezuko #741 EP40 val=6.5532% C9 spike recovery EP33 best=6.4984% test=7.8232% holds advisor responded EP45 next; frieren #745 ~EP32 val=6.5229% minor regression EP30 best=6.5097% W&B obs posted; tanjiro #749 ~EP42-44 plateau running to EP50; 0 idle students)_
+_Last updated: 2026-05-06 ~20:50Z (fern #740 EP20=6.3670% WAVE BEST, EP21=6.3703% running ~EP21.5; nezuko #741 EP50 complete best=6.4984% test=7.8232% SENPAI-RESULT awaited advisor prompt posted; frieren #745 EP41=6.5242% plateau ~8 epochs to terminal; tanjiro #780 ABNORMAL multi-arm unauthorized runs advisor first comment posted; 0 idle students — all 4 GPU slots active)_
