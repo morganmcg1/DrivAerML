@@ -3239,7 +3239,24 @@ def main(argv: Iterable[str] | None = None) -> None:
     resume_info: dict[str, float | str | int] = {}
     if config.resume_from:
         ckpt = torch.load(config.resume_from, map_location=device, weights_only=True)
-        model.load_state_dict(ckpt["model"], strict=True)
+        # Allow newly-added zero-init blocks (e.g. multigrid for PR #725) to be
+        # missing from the checkpoint while keeping unexpected-key checks strict.
+        load_strict = config.volume_multigrid_coarse_ratio <= 0.0
+        if load_strict:
+            model.load_state_dict(ckpt["model"], strict=True)
+        else:
+            missing, unexpected = model.load_state_dict(ckpt["model"], strict=False)
+            allowed_missing_prefix = ("volume_multigrid.",)
+            stray_missing = [k for k in missing if not k.startswith(allowed_missing_prefix)]
+            if stray_missing or unexpected:
+                raise RuntimeError(
+                    f"Resume state_dict mismatch: missing={stray_missing} unexpected={unexpected}"
+                )
+            if is_main:
+                print(
+                    f"Resumed with non-strict load: {len(missing)} multigrid keys "
+                    "initialized fresh (zero-init residual)"
+                )
         prev_epoch = ckpt.get("epoch", -1)
         prev_val_metrics = ckpt.get("val_metrics", {}) or {}
         prev_primary_val = float(
