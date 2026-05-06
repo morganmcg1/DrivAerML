@@ -33,7 +33,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import DrivAerMLSurfaceDataset
-from model import SurfaceTransolver
+from model import LearnableCoordinateRoPE, SurfaceTransolver
 from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
@@ -102,6 +102,10 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    slice_string_rope: bool = False
+    slice_string_rope_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
+    slice_string_rope_after_qk_norm: bool = True
+    slice_string_rope_lr_mult: float = 0.5
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -233,20 +237,44 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def collect_slice_rope_param_ids(model: nn.Module) -> set[int]:
+    """IDs of params under :class:`LearnableCoordinateRoPE` modules.
+
+    Used to build a separate optimizer param group with a reduced LR for the
+    new slice-centroid RoPE module (PR #769). PR #765 froze new modules at
+    0.1x and the RoPE never trained — 0.5x is the chosen default here.
+    """
+
+    seen: set[int] = set()
+    for _, module in model.named_modules():
+        if isinstance(module, LearnableCoordinateRoPE):
+            for p in module.parameters(recurse=True):
+                seen.add(id(p))
+    return seen
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    new_param_ids = (
+        collect_slice_rope_param_ids(model) if config.slice_string_rope else set()
+    )
+    if new_param_ids:
+        new_params = [p for p in model.parameters() if id(p) in new_param_ids]
+        base_params = [p for p in model.parameters() if id(p) not in new_param_ids]
+        new_lr = config.lr * config.slice_string_rope_lr_mult
+        param_groups = [
+            {"params": base_params, "lr": config.lr, "name": "base"},
+            {"params": new_params, "lr": new_lr, "name": "slice_string_rope"},
+        ]
+    else:
+        param_groups = [{"params": list(model.parameters()), "lr": config.lr, "name": "base"}]
     if optimizer_name == "adamw":
-        return torch.optim.AdamW(
-            model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay,
-        )
+        return torch.optim.AdamW(param_groups, weight_decay=config.weight_decay)
     if optimizer_name == "lion":
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
-            lr=config.lr,
+            param_groups,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
@@ -284,6 +312,70 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_slice_string_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-block log_freq and phase diagnostics for slice-centroid RoPE.
+
+    Issue #618 / PR #769. PR #765's RoPE froze under 0.1x LR (log_freq norm
+    barely moved). The aggregate `all/log_freq_*` keys plus per-axis
+    `axis_*_mean` keys make it cheap to verify the module is actually
+    differentiating per-axis frequencies during training.
+    """
+
+    metrics: dict[str, float] = {}
+    blocks = getattr(getattr(model, "backbone", None), "blocks", None)
+    if blocks is None:
+        return metrics
+    all_log_freqs: list[torch.Tensor] = []
+    all_phases: list[torch.Tensor] = []
+    rope_modules: list[tuple[int, LearnableCoordinateRoPE]] = []
+    for block_idx, block in enumerate(blocks):
+        attention = getattr(block, "attention", None)
+        if attention is None:
+            continue
+        rope = getattr(attention, "slice_string_rope", None)
+        if rope is None:
+            continue
+        rope_modules.append((block_idx, rope))
+    for block_idx, rope in rope_modules:
+        log_freq = rope.log_freq.detach().float()
+        phase = rope.phase.detach().float()
+        prefix = f"slice_string_rope/block_{block_idx}"
+        metrics[f"{prefix}/log_freq_mean"] = float(log_freq.mean().item())
+        metrics[f"{prefix}/log_freq_std"] = float(log_freq.std().item())
+        metrics[f"{prefix}/log_freq_min"] = float(log_freq.min().item())
+        metrics[f"{prefix}/log_freq_max"] = float(log_freq.max().item())
+        metrics[f"{prefix}/phase_abs_mean"] = float(phase.abs().mean().item())
+        for axis in range(log_freq.shape[0]):
+            pairs = rope.pairs_per_axis[axis]
+            axis_log_freq = log_freq[axis, :pairs]
+            metrics[f"{prefix}/log_freq_axis_{axis}_mean"] = float(axis_log_freq.mean().item())
+            metrics[f"{prefix}/log_freq_axis_{axis}_max"] = float(axis_log_freq.max().item())
+        all_log_freqs.append(log_freq.flatten())
+        all_phases.append(phase.flatten())
+        if rope.log_freq.grad is not None:
+            param_norm = rope.log_freq.detach().float().norm().clamp_min(1e-12)
+            grad_norm = rope.log_freq.grad.detach().float().norm()
+            metrics[f"{prefix}/log_freq_grad_to_param"] = float(
+                (grad_norm / param_norm).item()
+            )
+        if rope.phase.grad is not None:
+            param_norm = rope.phase.detach().float().norm().clamp_min(1e-12)
+            grad_norm = rope.phase.grad.detach().float().norm()
+            metrics[f"{prefix}/phase_grad_to_param"] = float(
+                (grad_norm / param_norm).item()
+            )
+    if all_log_freqs:
+        cat = torch.cat(all_log_freqs)
+        metrics["slice_string_rope/all/log_freq_mean"] = float(cat.mean().item())
+        metrics["slice_string_rope/all/log_freq_std"] = float(cat.std().item())
+        metrics["slice_string_rope/all/log_freq_min"] = float(cat.min().item())
+        metrics["slice_string_rope/all/log_freq_max"] = float(cat.max().item())
+        metrics["slice_string_rope/all/freq_max"] = float(cat.exp().max().item())
+        ph = torch.cat(all_phases)
+        metrics["slice_string_rope/all/phase_abs_mean"] = float(ph.abs().mean().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,7 +389,24 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        slice_string_rope=config.slice_string_rope,
+        slice_string_rope_init_sigmas=parse_slice_string_rope_init_sigmas(
+            config.slice_string_rope_init_sigmas
+        ),
+        slice_string_rope_after_qk_norm=config.slice_string_rope_after_qk_norm,
     )
+
+
+def parse_slice_string_rope_init_sigmas(spec: str) -> tuple[float, ...]:
+    spec = (spec or "").strip()
+    if not spec:
+        return (0.25, 0.5, 1.0, 2.0, 4.0)
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        return (0.25, 0.5, 1.0, 2.0, 4.0)
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--slice-string-rope-init-sigmas must be positive: {spec!r}")
+    return tuple(sigmas)
 
 
 def train_loss(
@@ -759,6 +868,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
         optimizer = build_optimizer(base_model, config)
+        if state.is_main:
+            for group in optimizer.param_groups:
+                group_name = group.get("name", "default")
+                group_params = group.get("params", [])
+                group_n = sum(p.numel() for p in group_params)
+                group_lr = group.get("lr", 0.0)
+                print(
+                    f"Optimizer group '{group_name}': "
+                    f"{len(group_params)} tensors, {group_n:,d} params, lr={group_lr:.2e}"
+                )
+            if config.slice_string_rope:
+                print(
+                    f"Slice-centroid STRING-RoPE enabled: after_qk_norm="
+                    f"{config.slice_string_rope_after_qk_norm}, "
+                    f"init_sigmas={config.slice_string_rope_init_sigmas}, "
+                    f"lr_mult={config.slice_string_rope_lr_mult}"
+                )
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
@@ -861,6 +987,25 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            for group in optimizer.param_groups:
+                group_name = group.get("name", "default")
+                group_params = group.get("params", [])
+                wandb.summary[f"optimizer/group_{group_name}/num_params"] = sum(
+                    p.numel() for p in group_params
+                )
+                wandb.summary[f"optimizer/group_{group_name}/num_tensors"] = len(group_params)
+                wandb.summary[f"optimizer/group_{group_name}/lr"] = group.get("lr", 0.0)
+            if config.slice_string_rope:
+                wandb.summary["model/slice_string_rope"] = True
+                wandb.summary["model/slice_string_rope_after_qk_norm"] = (
+                    config.slice_string_rope_after_qk_norm
+                )
+                wandb.summary["model/slice_string_rope_init_sigmas"] = (
+                    config.slice_string_rope_init_sigmas
+                )
+                wandb.summary["model/slice_string_rope_lr_mult"] = (
+                    config.slice_string_rope_lr_mult
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1240,6 +1385,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_slice_string_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

@@ -188,6 +188,81 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class LearnableCoordinateRoPE(nn.Module):
+    """Learnable per-axis rotary position encoding for 3D continuous coords.
+
+    Issue #618 / PR #769. Splits ``head_dim // 2`` rotation pairs across
+    ``ndim`` axes; the first ``(head_dim // 2) % ndim`` axes get one extra
+    pair so the full ``head_dim`` is consumed. ``log_freq`` is initialised
+    round-robin from ``init_sigmas`` (matching :class:`StringSeparableEncoding`'s
+    multi-sigma pattern). ``phase`` initialises to zero. Both are learnable
+    so the network can specialise per-axis frequency content during training.
+    The angle formula matches the input-level STRING-separable encoding:
+    ``theta = 2*pi * coord * exp(log_freq) + phase``.
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        ndim: int = 3,
+        init_sigmas: tuple[float, ...] | list[float] = (0.25, 0.5, 1.0, 2.0, 4.0),
+    ):
+        super().__init__()
+        if head_dim % 2 != 0:
+            raise ValueError(f"head_dim must be even; got {head_dim}")
+        self.head_dim = head_dim
+        self.ndim = ndim
+        total_pairs = head_dim // 2
+        base = total_pairs // ndim
+        extra = total_pairs % ndim
+        self.pairs_per_axis: list[int] = [base + (1 if a < extra else 0) for a in range(ndim)]
+        self.rot_dim = 2 * sum(self.pairs_per_axis)
+        max_pairs = max(self.pairs_per_axis)
+
+        log_freq_init = torch.zeros(ndim, max_pairs)
+        for axis in range(ndim):
+            for f in range(self.pairs_per_axis[axis]):
+                log_freq_init[axis, f] = math.log(init_sigmas[f % len(init_sigmas)])
+        self.log_freq = nn.Parameter(log_freq_init)
+        self.phase = nn.Parameter(torch.zeros(ndim, max_pairs))
+
+    def angles(self, coords: torch.Tensor) -> torch.Tensor:
+        # coords: [..., ndim] -> theta: [..., total_pairs]
+        # Matches StringSeparableEncoding: theta = 2*pi * coord * exp(log_freq) + phase
+        parts: list[torch.Tensor] = []
+        for axis in range(self.ndim):
+            pairs = self.pairs_per_axis[axis]
+            f = self.log_freq[axis, :pairs].exp().to(dtype=coords.dtype)
+            p = self.phase[axis, :pairs].to(dtype=coords.dtype)
+            theta = 2.0 * math.pi * coords[..., axis : axis + 1] * f + p
+            parts.append(theta)
+        return torch.cat(parts, dim=-1)
+
+    def rotate(self, qk: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+        # qk: [B, H, S, head_dim], theta: [B, H, S, total_pairs]
+        rot_dim = self.rot_dim
+        if rot_dim == 0:
+            return qk
+        cos = theta.cos().to(dtype=qk.dtype)
+        sin = theta.sin().to(dtype=qk.dtype)
+        rotated = qk[..., :rot_dim]
+        passthrough = qk[..., rot_dim:]
+        rotated = rotated.view(*rotated.shape[:-1], -1, 2)
+        x_a = rotated[..., 0]
+        x_b = rotated[..., 1]
+        out_a = x_a * cos - x_b * sin
+        out_b = x_a * sin + x_b * cos
+        out = torch.stack([out_a, out_b], dim=-1)
+        out = out.flatten(start_dim=-2)
+        if passthrough.shape[-1] > 0:
+            out = torch.cat([out, passthrough], dim=-1)
+        return out
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor, coords: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        theta = self.angles(coords)
+        return self.rotate(q, theta), self.rotate(k, theta)
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -196,6 +271,10 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        slice_string_rope: bool = False,
+        slice_string_rope_init_sigmas: tuple[float, ...] | list[float] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        slice_string_rope_after_qk_norm: bool = True,
+        ndim: int = 3,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -206,6 +285,8 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.slice_string_rope_after_qk_norm = slice_string_rope_after_qk_norm
+        self.ndim = ndim
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -220,6 +301,14 @@ class TransolverAttention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
+        if slice_string_rope:
+            self.slice_string_rope = LearnableCoordinateRoPE(
+                head_dim=self.dim_head,
+                ndim=ndim,
+                init_sigmas=tuple(slice_string_rope_init_sigmas),
+            )
+        else:
+            self.slice_string_rope = None
 
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
@@ -236,13 +325,30 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
+        # If RoPE is enabled and we want pre-QK-norm rotation, apply it here.
+        if self.slice_string_rope is not None and not self.slice_string_rope_after_qk_norm:
+            if point_coords is None:
+                raise ValueError("point_coords required when slice_string_rope is enabled")
+            centroids = self._slice_centroids(slice_weights, point_coords)
+            q, k = self.slice_string_rope(q, k, centroids)
         if self.q_norm is not None:
             q = self.q_norm(q)
             k = self.k_norm(k)
+        # Default ordering (Arm B): RoPE after QK-norm so RoPE rotates already-normalised Q/K.
+        if self.slice_string_rope is not None and self.slice_string_rope_after_qk_norm:
+            if point_coords is None:
+                raise ValueError("point_coords required when slice_string_rope is enabled")
+            centroids = self._slice_centroids(slice_weights, point_coords)
+            q, k = self.slice_string_rope(q, k, centroids)
         out_slice = F.scaled_dot_product_attention(
             q,
             k,
@@ -255,6 +361,16 @@ class TransolverAttention(nn.Module):
         out_x = self.proj_dropout(self.proj(out_x))
         return _apply_token_mask(out_x, attn_mask)
 
+    @staticmethod
+    def _slice_centroids(slice_weights: torch.Tensor, point_coords: torch.Tensor) -> torch.Tensor:
+        # slice_weights: [B, H, N, S]; point_coords: [B, N, ndim]
+        # centroids: [B, H, S, ndim]
+        sw = slice_weights.float()
+        coords = point_coords.float()
+        weighted = torch.einsum("bhns,bnd->bhsd", sw, coords)
+        denom = sw.sum(dim=2).unsqueeze(-1).clamp_min(1e-8)
+        return weighted / denom
+
 
 class TransformerBlock(nn.Module):
     def __init__(
@@ -265,6 +381,9 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        slice_string_rope: bool = False,
+        slice_string_rope_init_sigmas: tuple[float, ...] | list[float] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        slice_string_rope_after_qk_norm: bool = True,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -275,13 +394,21 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            slice_string_rope=slice_string_rope,
+            slice_string_rope_init_sigmas=slice_string_rope_init_sigmas,
+            slice_string_rope_after_qk_norm=slice_string_rope_after_qk_norm,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, point_coords=point_coords)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -298,6 +425,9 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        slice_string_rope: bool = False,
+        slice_string_rope_init_sigmas: tuple[float, ...] | list[float] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        slice_string_rope_after_qk_norm: bool = True,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -309,14 +439,22 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    slice_string_rope=slice_string_rope,
+                    slice_string_rope_init_sigmas=slice_string_rope_init_sigmas,
+                    slice_string_rope_after_qk_norm=slice_string_rope_after_qk_norm,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        point_coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, point_coords=point_coords)
         return x
 
 
@@ -342,6 +480,9 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        slice_string_rope: bool = False,
+        slice_string_rope_init_sigmas: tuple[float, ...] | list[float] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        slice_string_rope_after_qk_norm: bool = True,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +495,7 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.slice_string_rope_enabled = slice_string_rope
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -417,6 +559,9 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            slice_string_rope=slice_string_rope,
+            slice_string_rope_init_sigmas=slice_string_rope_init_sigmas,
+            slice_string_rope_after_qk_norm=slice_string_rope_after_qk_norm,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -465,6 +610,7 @@ class SurfaceTransolver(nn.Module):
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
+        coords_list: list[torch.Tensor] = []
         surface_tokens = 0
         volume_tokens = 0
 
@@ -481,6 +627,7 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(surface_mask)
+            coords_list.append(surface_x[:, :, : self.space_dim])
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
@@ -495,10 +642,14 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(volume_mask)
+            coords_list.append(volume_x[:, :, : self.space_dim])
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        point_coords = (
+            torch.cat(coords_list, dim=1) if self.slice_string_rope_enabled else None
+        )
+        hidden = self.backbone(hidden, attn_mask=attn_mask, point_coords=point_coords)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
