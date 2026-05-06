@@ -137,6 +137,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    backbone_freeze_fraction: float = 0.0
+    geometry_lr_multiplier: float = 1.0
+    volume_loss_weight_warmup: float = -1.0
     debug: bool = False
 
 
@@ -219,6 +222,34 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "backbone_freeze_fraction": (
+            "Fraction of training epochs during which the shared backbone "
+            "(``model.backbone``) is frozen via requires_grad=False. The "
+            "geometry/volume and surface branches keep training under their "
+            "own gradient signal so the under-trained volume branch can warm "
+            "up before joint optimisation. After ``freeze_epochs = "
+            "int(fraction * epochs)`` epochs the backbone is unfrozen and "
+            "the optimizer + LR scheduler are rebuilt (scheduler is "
+            "fast-forwarded by ``freeze_epochs`` step() calls so the cosine "
+            "phase is preserved). Default 0.0 disables the schedule."
+        ),
+        "geometry_lr_multiplier": (
+            "Per-group learning-rate multiplier applied to the volume / "
+            "geometry-branch parameters (``volume_bias``, "
+            "``volume_string_sep``, ``project_volume_features``, "
+            "``volume_placeholder``, ``volume_out``). When != 1.0 the "
+            "optimiser is built with two param groups: a base group at "
+            "``lr`` and a geometry group at ``lr * multiplier``. CosineLR "
+            "scales each group's base_lr independently so the multiplier "
+            "is preserved across the schedule. Default 1.0."
+        ),
+        "volume_loss_weight_warmup": (
+            "Volume-pressure loss weight used during the first "
+            "``lr_warmup_epochs`` epochs (the aux warmup window); the regular "
+            "``--volume-loss-weight`` is restored afterwards. Negative value "
+            "(default -1.0) disables the warmup override and the "
+            "``--volume-loss-weight`` value is used throughout."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -233,11 +264,81 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+GEOMETRY_PARAM_PREFIXES: tuple[str, ...] = (
+    "volume_bias.",
+    "volume_string_sep.",
+    "project_volume_features.",
+    "volume_out.",
+)
+
+
+def _is_geometry_param(name: str) -> bool:
+    """Return True for parameters belonging to the volume / geometry branch.
+
+    Matches the AB-UPT-style "geometry encoder" partition: per-axis volume
+    positional encoder, projection, branch bias MLP, placeholder embedding,
+    and output head. Backbone, surface branch, and shared head all stay in
+    the base group.
+    """
+
+    if name == "volume_placeholder":
+        return True
+    return any(name.startswith(prefix) for prefix in GEOMETRY_PARAM_PREFIXES)
+
+
+def _split_named_params(model: nn.Module) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
+    base_params: list[nn.Parameter] = []
+    geometry_params: list[nn.Parameter] = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if _is_geometry_param(name):
+            geometry_params.append(param)
+        else:
+            base_params.append(param)
+    return base_params, geometry_params
+
+
+def _build_param_groups(model: nn.Module, config: Config) -> list[dict]:
+    """Build optimizer param groups, applying differential LR if requested.
+
+    When ``config.geometry_lr_multiplier == 1.0`` we use a single group that
+    contains every trainable parameter. When the multiplier differs from 1.0
+    we partition trainable parameters into a base group at ``config.lr`` and
+    a geometry group at ``config.lr * multiplier``. Frozen parameters
+    (``requires_grad=False``) are excluded from every group so Lion/AdamW
+    optimiser state never accumulates on them.
+    """
+
+    if config.geometry_lr_multiplier == 1.0:
+        return [
+            {
+                "params": [p for p in model.parameters() if p.requires_grad],
+                "lr": config.lr,
+                "name": "all",
+            }
+        ]
+    base_params, geometry_params = _split_named_params(model)
+    groups: list[dict] = []
+    if base_params:
+        groups.append({"params": base_params, "lr": config.lr, "name": "base"})
+    if geometry_params:
+        groups.append(
+            {
+                "params": geometry_params,
+                "lr": config.lr * config.geometry_lr_multiplier,
+                "name": "geometry",
+            }
+        )
+    return groups
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
+    groups = _build_param_groups(model, config)
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
-            model.parameters(),
+            groups,
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
@@ -245,7 +346,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
+            groups,
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
@@ -749,18 +850,44 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
         if config.compile_model:
             model = torch.compile(model)
+        freeze_epochs = max(0, int(config.backbone_freeze_fraction * max_epochs))
         if state.enabled:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if freeze_epochs > 0:
+                # Backbone freeze toggles requires_grad on a subset of params after
+                # DDP construction; find_unused_parameters=True lets the reducer
+                # skip the unfired hooks during freeze without raising.
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
+        # Build EMA before freezing so every parameter has a shadow entry; the
+        # update loop checks requires_grad each step so frozen entries simply
+        # stay at their init values until unfreeze.
+        ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+        backbone_frozen = False
+        if freeze_epochs > 0:
+            for p in base_model.backbone.parameters():
+                p.requires_grad_(False)
+            backbone_frozen = True
+            if state.is_main:
+                print(
+                    f"Backbone frozen for first {freeze_epochs}/{max_epochs} epochs "
+                    f"(fraction={config.backbone_freeze_fraction:.2f})"
+                )
+        if state.is_main and config.geometry_lr_multiplier != 1.0:
+            print(
+                f"Geometry-branch LR multiplier: {config.geometry_lr_multiplier:.3f}x base lr "
+                f"({config.lr:.2e} -> {config.lr * config.geometry_lr_multiplier:.2e})"
+            )
+
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
-        ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
@@ -871,6 +998,23 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_start = time.time()
 
         for epoch in range(max_epochs):
+            if backbone_frozen and epoch >= freeze_epochs:
+                for p in base_model.backbone.parameters():
+                    p.requires_grad_(True)
+                backbone_frozen = False
+                if state.is_main:
+                    print(
+                        f"Epoch {epoch + 1}: unfreezing backbone, rebuilding optimizer "
+                        f"and LR scheduler (fast-forward {freeze_epochs} step()s)"
+                    )
+                optimizer = build_optimizer(base_model, config)
+                scheduler = build_lr_scheduler(optimizer, config, max_epochs)
+                for _ in range(freeze_epochs):
+                    scheduler.step()
+            if config.volume_loss_weight_warmup > 0.0 and epoch < config.lr_warmup_epochs:
+                effective_vol_weight = config.volume_loss_weight_warmup
+            else:
+                effective_vol_weight = config.volume_loss_weight
             if vol_points_schedule:
                 desired_vol_points = vol_points_for_epoch(
                     vol_points_schedule, epoch, config.train_volume_points
@@ -1006,7 +1150,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         config.amp_mode,
                         surface_loss_weight=config.surface_loss_weight,
-                        volume_loss_weight=config.volume_loss_weight,
+                        volume_loss_weight=effective_vol_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
                     )
                 optimizer.zero_grad(set_to_none=True)
@@ -1032,9 +1176,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/lr": current_lr,
                     "lr": current_lr,
                     "train/vol_points": float(current_train_vol_points),
+                    "train/vol_w_effective": float(effective_vol_weight),
+                    "train/backbone_frozen": 1.0 if backbone_frozen else 0.0,
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
+                last_lrs = scheduler.get_last_lr()
+                for idx, group in enumerate(optimizer.param_groups):
+                    group_name = group.get("name", f"group{idx}")
+                    if idx < len(last_lrs):
+                        train_log[f"train/lr_{group_name}"] = float(last_lrs[idx])
                 if not loss_is_nonfinite:
                     train_log.update(
                         {
@@ -1153,13 +1304,33 @@ def main(argv: Iterable[str] | None = None) -> None:
                 or (timeout_hit and n_batches > 0)
             )
 
+            num_trainable_params = sum(
+                p.numel() for p in base_model.parameters() if p.requires_grad
+            )
             log_metrics: dict[str, object] = {
                 "train/epoch_loss": epoch_train_loss,
                 "train/lr": scheduler.get_last_lr()[0],
                 "lr": scheduler.get_last_lr()[0],
                 "epoch_time_s": dt,
                 "global_step": global_step,
+                "train/num_trainable_params": float(num_trainable_params),
+                "train/backbone_frozen_epoch": 1.0 if backbone_frozen else 0.0,
+                "train/vol_w_effective_epoch": float(effective_vol_weight),
+                "train/freeze_epochs": float(freeze_epochs),
             }
+            for idx, group in enumerate(optimizer.param_groups):
+                group_name = group.get("name", f"group{idx}")
+                if idx < len(scheduler.get_last_lr()):
+                    log_metrics[f"train/lr_{group_name}_epoch"] = float(
+                        scheduler.get_last_lr()[idx]
+                    )
+            if state.is_main:
+                print(
+                    f"  freeze: backbone_frozen={backbone_frozen} "
+                    f"trainable_params={num_trainable_params/1e6:.2f}M "
+                    f"vol_w={effective_vol_weight:.2f} "
+                    f"lrs={[f'{lr:.2e}' for lr in scheduler.get_last_lr()]}"
+                )
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
