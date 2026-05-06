@@ -1163,6 +1163,7 @@ class Config:
     swa_lr: float = 5e-6
     swa_anneal_epochs: int = 1
     swa_update_every_steps: int = 500
+    sam_rho: float = 0.0
 
 
 NONFINITE_SKIP_ABORT = 200
@@ -2023,6 +2024,43 @@ def project_tangential(vec: torch.Tensor, normals: torch.Tensor) -> torch.Tensor
     return (vec_f - dot * n_hat).to(vec.dtype)
 
 
+@torch.no_grad()
+def sam_perturb_weights(
+    model: nn.Module, rho: float
+) -> tuple[list[tuple[torch.Tensor, torch.Tensor]], float]:
+    """Vanilla SAM ascent step: perturb weights toward worst-case loss direction.
+
+    Computes the global L2 norm of all parameter gradients, then adds
+    ``e_w = (rho / ||g||_2) * g`` to each parameter in place. Returns the list of
+    (param, e_w) pairs so the caller can subtract them later, plus the gradient
+    L2 norm (in float32) for logging.
+    """
+    grad_norm_sq = torch.zeros((), dtype=torch.float32, device=next(model.parameters()).device)
+    for p in model.parameters():
+        if p.grad is None:
+            continue
+        grad_norm_sq = grad_norm_sq + p.grad.detach().float().pow(2).sum()
+    grad_norm = torch.sqrt(grad_norm_sq)
+    scale = rho / (grad_norm + 1e-12)
+    perturbations: list[tuple[torch.Tensor, torch.Tensor]] = []
+    for p in model.parameters():
+        if p.grad is None:
+            continue
+        e_w = (p.grad.detach() * scale).to(p.dtype)
+        p.data.add_(e_w)
+        perturbations.append((p, e_w))
+    return perturbations, float(grad_norm.item())
+
+
+@torch.no_grad()
+def sam_restore_weights(
+    perturbations: list[tuple[torch.Tensor, torch.Tensor]],
+) -> None:
+    """Undo the in-place perturbation applied by :func:`sam_perturb_weights`."""
+    for p, e_w in perturbations:
+        p.data.sub_(e_w)
+
+
 def train_loss(
     model: nn.Module,
     batch: SurfaceBatch,
@@ -2729,6 +2767,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     wandb.define_metric("train/grad_norm_raw", step_metric="global_step")
     wandb.define_metric("train/grad_norm_smoothed", step_metric="global_step")
     wandb.define_metric("train/grad_noise_ratio", step_metric="global_step")
+    wandb.define_metric("train/sam_rho", step_metric="global_step")
+    wandb.define_metric("train/sam_first_grad_norm", step_metric="global_step")
     wandb.define_metric("train/grad_module/*", step_metric="global_step")
     wandb.define_metric("train/grad_param/*", step_metric="global_step")
     wandb.define_metric("train/grad_type/*", step_metric="global_step")
@@ -2820,246 +2860,303 @@ def main(argv: Iterable[str] | None = None) -> None:
                 train_loader, desc=f"Epoch {epoch + 1}/{max_epochs}", leave=False
             )
         for batch in train_iter:
-            loss, batch_loss_metrics = train_loss(
-                train_model,
-                batch,
-                transform,
-                device,
-                config.amp_mode,
-                surface_loss_weight=config.surface_loss_weight,
-                volume_loss_weight=config.volume_loss_weight,
-                aux_rel_l2_weight=config.aux_rel_l2_weight,
-                use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
-                wallshear_y_weight=config.wallshear_y_weight,
-                wallshear_z_weight=config.wallshear_z_weight,
-                wallshear_huber_delta=config.wallshear_huber_delta,
-                beta_nll_beta=config.beta_nll_beta,
-            )
-            optimizer.zero_grad(set_to_none=True)
-            loss_is_finite = bool(torch.isfinite(loss).item())
-            if not loss_is_finite:
-                nonfinite_skip_count += 1
-                wandb.log(
-                    {
-                        "train/nonfinite_skip_count": nonfinite_skip_count,
-                        "train/nonfinite_skip_kind": 1,
-                        "global_step": global_step,
-                    }
-                )
-                if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
-                    raise RuntimeError(
-                        f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
-                        f"loss/grad steps; training is structurally broken."
+            sam_perturbations: list[tuple[torch.Tensor, torch.Tensor]] | None = None
+            sam_first_grad_norm: float = float("nan")
+            try:
+                if config.sam_rho > 0:
+                    sync_ctx = (
+                        train_model.no_sync() if is_distributed else nullcontext()
                     )
-                global_step += 1
-                continue
-            loss.backward()
-            should_log_gradients = (
-                config.gradient_log_every > 0
-                and (global_step + 1) % config.gradient_log_every == 0
-            )
-            should_log_weights = (
-                config.weight_log_every > 0
-                and (global_step + 1) % config.weight_log_every == 0
-            )
-            gradient_metrics = (
-                collect_gradient_metrics(
-                    model,
-                    log_histograms=config.log_gradient_histograms,
+                    with sync_ctx:
+                        loss_ascent, _ = train_loss(
+                            train_model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            aux_rel_l2_weight=config.aux_rel_l2_weight,
+                            use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                            wallshear_y_weight=config.wallshear_y_weight,
+                            wallshear_z_weight=config.wallshear_z_weight,
+                            wallshear_huber_delta=config.wallshear_huber_delta,
+                            beta_nll_beta=config.beta_nll_beta,
+                        )
+                        ascent_finite = bool(torch.isfinite(loss_ascent).item())
+                        if ascent_finite:
+                            optimizer.zero_grad(set_to_none=True)
+                            loss_ascent.backward()
+                    if not ascent_finite:
+                        nonfinite_skip_count += 1
+                        wandb.log(
+                            {
+                                "train/nonfinite_skip_count": nonfinite_skip_count,
+                                "train/nonfinite_skip_kind": 3,
+                                "global_step": global_step,
+                            }
+                        )
+                        if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                            raise RuntimeError(
+                                f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                                f"loss/grad steps; training is structurally broken."
+                            )
+                        global_step += 1
+                        continue
+                    sam_perturbations, sam_first_grad_norm = sam_perturb_weights(
+                        model, config.sam_rho
+                    )
+                    optimizer.zero_grad(set_to_none=True)
+
+                loss, batch_loss_metrics = train_loss(
+                    train_model,
+                    batch,
+                    transform,
+                    device,
+                    config.amp_mode,
+                    surface_loss_weight=config.surface_loss_weight,
+                    volume_loss_weight=config.volume_loss_weight,
+                    aux_rel_l2_weight=config.aux_rel_l2_weight,
+                    use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                    wallshear_y_weight=config.wallshear_y_weight,
+                    wallshear_z_weight=config.wallshear_z_weight,
+                    wallshear_huber_delta=config.wallshear_huber_delta,
+                    beta_nll_beta=config.beta_nll_beta,
                 )
-                if should_log_gradients
-                else {}
-            )
-            grad_ema_metrics: dict[str, float] = {}
-            if config.grad_ema_alpha > 0:
-                raw_sq = torch.zeros((), device=device)
-                smooth_sq = torch.zeros((), device=device)
-                diff_sq = torch.zeros((), device=device)
-                grads_finite_local = True
-                with torch.no_grad():
-                    for p in model.parameters():
-                        if p.grad is None:
-                            continue
-                        g = p.grad
-                        raw_sq = raw_sq + g.float().pow(2).sum()
-                        if not torch.isfinite(g).all():
-                            grads_finite_local = False
-                            break
-                    if grads_finite_local:
-                        for p in model.parameters():
-                            if p.grad is None:
-                                continue
-                            pid = id(p)
-                            if pid not in grad_ema_state:
-                                grad_ema_state[pid] = p.grad.detach().clone()
-                                smooth_sq = smooth_sq + grad_ema_state[pid].float().pow(2).sum()
-                            else:
-                                grad_ema_state[pid].mul_(config.grad_ema_alpha).add_(
-                                    p.grad.data, alpha=1.0 - config.grad_ema_alpha
-                                )
-                                smooth_sq = smooth_sq + grad_ema_state[pid].float().pow(2).sum()
-                                diff_sq = diff_sq + (
-                                    p.grad - grad_ema_state[pid]
-                                ).float().pow(2).sum()
-                                p.grad.data.copy_(grad_ema_state[pid])
-                if grads_finite_local:
-                    raw_norm = float(torch.sqrt(raw_sq).item())
-                    smooth_norm = float(torch.sqrt(smooth_sq).item())
-                    diff_norm = float(torch.sqrt(diff_sq).item())
-                    grad_ema_metrics = {
-                        "train/grad_ema_alpha": config.grad_ema_alpha,
-                        "train/grad_norm_raw": raw_norm,
-                        "train/grad_norm_smoothed": smooth_norm,
-                        "train/grad_noise_ratio": diff_norm / max(smooth_norm, 1e-12),
-                    }
-                else:
-                    grad_ema_metrics = {
-                        "train/grad_ema_alpha": config.grad_ema_alpha,
-                        "train/grad_norm_raw": float("nan"),
-                        "train/grad_norm_smoothed": float("nan"),
-                        "train/grad_noise_ratio": float("nan"),
-                    }
-            grad_is_finite = True
-            if config.clip_grad_norm > 0:
-                pre_clip_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), max_norm=config.clip_grad_norm
-                )
-                grad_is_finite = bool(torch.isfinite(pre_clip_norm).item())
-                if should_log_gradients:
-                    gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
-                    gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
-            if not grad_is_finite:
                 optimizer.zero_grad(set_to_none=True)
-                nonfinite_skip_count += 1
-                wandb.log(
-                    {
-                        "train/nonfinite_skip_count": nonfinite_skip_count,
-                        "train/nonfinite_skip_kind": 2,
-                        "global_step": global_step,
-                    }
-                )
-                if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
-                    raise RuntimeError(
-                        f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
-                        f"loss/grad steps; training is structurally broken."
-                    )
-                global_step += 1
-                continue
-            if effective_warmup_steps > 0:
-                if global_step < effective_warmup_steps:
-                    progress = global_step / effective_warmup_steps
-                    start_ratio = (
-                        config.lr_warmup_start_lr / max(config.lr, 1e-12)
-                    )
-                    warmup_ratio = start_ratio + (1.0 - start_ratio) * progress
-                    for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
-                        pg["lr"] = base_lr * warmup_ratio
-                elif global_step == effective_warmup_steps:
-                    for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
-                        pg["lr"] = base_lr
-            optimizer.step()
-            ema_decay_now: float | None = None
-            if ema is not None:
-                if config.ema_decay_start > 0.0:
-                    progress = min(global_step / max(total_estimated_steps, 1), 1.0)
-                    cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
-                    ema_decay_now = config.ema_decay_start + cos_val * (
-                        config.ema_decay_end - config.ema_decay_start
-                    )
-                    ema.set_decay(ema_decay_now)
-                ema.update(model)
-            if (
-                swa_enabled
-                and swa_active
-                and swa_model is not None
-                and global_step > 0
-                and global_step % max(1, config.swa_update_every_steps) == 0
-            ):
-                swa_model.update_parameters(model)
-                swa_n_updates += 1
-                if is_main:
+                loss_is_finite = bool(torch.isfinite(loss).item())
+                if not loss_is_finite:
+                    nonfinite_skip_count += 1
                     wandb.log(
                         {
-                            "swa/active": 1,
-                            "swa/n_updates": swa_n_updates,
-                            "swa/snapshot_step": global_step,
-                            "swa/snapshot_lr": float(optimizer.param_groups[0]["lr"]),
+                            "train/nonfinite_skip_count": nonfinite_skip_count,
+                            "train/nonfinite_skip_kind": 1,
                             "global_step": global_step,
                         }
                     )
-            weight_metrics = (
-                collect_weight_metrics(
-                    model,
-                    log_histograms=config.log_weight_histograms,
+                    if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                        raise RuntimeError(
+                            f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                            f"loss/grad steps; training is structurally broken."
+                        )
+                    global_step += 1
+                    continue
+                loss.backward()
+                should_log_gradients = (
+                    config.gradient_log_every > 0
+                    and (global_step + 1) % config.gradient_log_every == 0
                 )
-                if should_log_weights
-                else {}
-            )
-            train_loss_sum += float(loss.detach().cpu().item())
-            n_batches += 1
-            global_step += 1
-            train_log: dict[str, object] = {
-                "train/loss": float(loss.detach().cpu().item()),
-                "train/surface_loss": batch_loss_metrics["surface_loss"],
-                "train/volume_loss": batch_loss_metrics["volume_loss"],
-                "train/loss_cp": batch_loss_metrics["loss_cp"],
-                "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
-                "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
-                "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
-                "train/lr": float(optimizer.param_groups[0]["lr"]),
-                "train/nonfinite_skip_count": nonfinite_skip_count,
-                "global_step": global_step,
-                **gradient_metrics,
-                **grad_ema_metrics,
-                **weight_metrics,
-            }
-            if "wallshear_pred_normal_rms" in batch_loss_metrics:
-                train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
-                    "wallshear_pred_normal_rms"
-                ]
-            if "aux_rel_l2_loss" in batch_loss_metrics:
-                train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
-                    "aux_rel_l2_loss"
-                ]
-            for log_var_key in (
-                "log_var_surface_pressure",
-                "log_var_wall_shear_x",
-                "log_var_wall_shear_y",
-                "log_var_wall_shear_z",
-                "log_var_volume_pressure",
-            ):
-                if log_var_key in batch_loss_metrics:
-                    train_log[f"train/{log_var_key}"] = batch_loss_metrics[log_var_key]
-            if ema_decay_now is not None:
-                train_log["train/ema_decay"] = ema_decay_now
-            for key, value in batch_loss_metrics.items():
-                if key.startswith("film/"):
-                    train_log[f"train/{key}"] = value
-            train_log.update(
-                train_slope_tracker.update(
+                should_log_weights = (
+                    config.weight_log_every > 0
+                    and (global_step + 1) % config.weight_log_every == 0
+                )
+                gradient_metrics = (
+                    collect_gradient_metrics(
+                        model,
+                        log_histograms=config.log_gradient_histograms,
+                    )
+                    if should_log_gradients
+                    else {}
+                )
+                grad_ema_metrics: dict[str, float] = {}
+                if config.grad_ema_alpha > 0:
+                    raw_sq = torch.zeros((), device=device)
+                    smooth_sq = torch.zeros((), device=device)
+                    diff_sq = torch.zeros((), device=device)
+                    grads_finite_local = True
+                    with torch.no_grad():
+                        for p in model.parameters():
+                            if p.grad is None:
+                                continue
+                            g = p.grad
+                            raw_sq = raw_sq + g.float().pow(2).sum()
+                            if not torch.isfinite(g).all():
+                                grads_finite_local = False
+                                break
+                        if grads_finite_local:
+                            for p in model.parameters():
+                                if p.grad is None:
+                                    continue
+                                pid = id(p)
+                                if pid not in grad_ema_state:
+                                    grad_ema_state[pid] = p.grad.detach().clone()
+                                    smooth_sq = smooth_sq + grad_ema_state[pid].float().pow(2).sum()
+                                else:
+                                    grad_ema_state[pid].mul_(config.grad_ema_alpha).add_(
+                                        p.grad.data, alpha=1.0 - config.grad_ema_alpha
+                                    )
+                                    smooth_sq = smooth_sq + grad_ema_state[pid].float().pow(2).sum()
+                                    diff_sq = diff_sq + (
+                                        p.grad - grad_ema_state[pid]
+                                    ).float().pow(2).sum()
+                                    p.grad.data.copy_(grad_ema_state[pid])
+                    if grads_finite_local:
+                        raw_norm = float(torch.sqrt(raw_sq).item())
+                        smooth_norm = float(torch.sqrt(smooth_sq).item())
+                        diff_norm = float(torch.sqrt(diff_sq).item())
+                        grad_ema_metrics = {
+                            "train/grad_ema_alpha": config.grad_ema_alpha,
+                            "train/grad_norm_raw": raw_norm,
+                            "train/grad_norm_smoothed": smooth_norm,
+                            "train/grad_noise_ratio": diff_norm / max(smooth_norm, 1e-12),
+                        }
+                    else:
+                        grad_ema_metrics = {
+                            "train/grad_ema_alpha": config.grad_ema_alpha,
+                            "train/grad_norm_raw": float("nan"),
+                            "train/grad_norm_smoothed": float("nan"),
+                            "train/grad_noise_ratio": float("nan"),
+                        }
+                grad_is_finite = True
+                if config.clip_grad_norm > 0:
+                    pre_clip_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), max_norm=config.clip_grad_norm
+                    )
+                    grad_is_finite = bool(torch.isfinite(pre_clip_norm).item())
+                    if should_log_gradients:
+                        gradient_metrics["train/grad/pre_clip_norm"] = float(pre_clip_norm)
+                        gradient_metrics["train/grad/clip_threshold"] = config.clip_grad_norm
+                if not grad_is_finite:
+                    optimizer.zero_grad(set_to_none=True)
+                    nonfinite_skip_count += 1
+                    wandb.log(
+                        {
+                            "train/nonfinite_skip_count": nonfinite_skip_count,
+                            "train/nonfinite_skip_kind": 2,
+                            "global_step": global_step,
+                        }
+                    )
+                    if nonfinite_skip_count > NONFINITE_SKIP_ABORT:
+                        raise RuntimeError(
+                            f"Aborting: more than {NONFINITE_SKIP_ABORT} non-finite "
+                            f"loss/grad steps; training is structurally broken."
+                        )
+                    global_step += 1
+                    continue
+                if effective_warmup_steps > 0:
+                    if global_step < effective_warmup_steps:
+                        progress = global_step / effective_warmup_steps
+                        start_ratio = (
+                            config.lr_warmup_start_lr / max(config.lr, 1e-12)
+                        )
+                        warmup_ratio = start_ratio + (1.0 - start_ratio) * progress
+                        for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
+                            pg["lr"] = base_lr * warmup_ratio
+                    elif global_step == effective_warmup_steps:
+                        for pg, base_lr in zip(optimizer.param_groups, initial_group_lrs):
+                            pg["lr"] = base_lr
+                if sam_perturbations is not None:
+                    sam_restore_weights(sam_perturbations)
+                    sam_perturbations = None
+                optimizer.step()
+                ema_decay_now: float | None = None
+                if ema is not None:
+                    if config.ema_decay_start > 0.0:
+                        progress = min(global_step / max(total_estimated_steps, 1), 1.0)
+                        cos_val = (1.0 - math.cos(math.pi * progress)) / 2.0
+                        ema_decay_now = config.ema_decay_start + cos_val * (
+                            config.ema_decay_end - config.ema_decay_start
+                        )
+                        ema.set_decay(ema_decay_now)
+                    ema.update(model)
+                if (
+                    swa_enabled
+                    and swa_active
+                    and swa_model is not None
+                    and global_step > 0
+                    and global_step % max(1, config.swa_update_every_steps) == 0
+                ):
+                    swa_model.update_parameters(model)
+                    swa_n_updates += 1
+                    if is_main:
+                        wandb.log(
+                            {
+                                "swa/active": 1,
+                                "swa/n_updates": swa_n_updates,
+                                "swa/snapshot_step": global_step,
+                                "swa/snapshot_lr": float(optimizer.param_groups[0]["lr"]),
+                                "global_step": global_step,
+                            }
+                        )
+                weight_metrics = (
+                    collect_weight_metrics(
+                        model,
+                        log_histograms=config.log_weight_histograms,
+                    )
+                    if should_log_weights
+                    else {}
+                )
+                train_loss_sum += float(loss.detach().cpu().item())
+                n_batches += 1
+                global_step += 1
+                train_log: dict[str, object] = {
+                    "train/loss": float(loss.detach().cpu().item()),
+                    "train/surface_loss": batch_loss_metrics["surface_loss"],
+                    "train/volume_loss": batch_loss_metrics["volume_loss"],
+                    "train/loss_cp": batch_loss_metrics["loss_cp"],
+                    "train/loss_tau_x": batch_loss_metrics["loss_tau_x"],
+                    "train/loss_tau_y": batch_loss_metrics["loss_tau_y"],
+                    "train/loss_tau_z": batch_loss_metrics["loss_tau_z"],
+                    "train/lr": float(optimizer.param_groups[0]["lr"]),
+                    "train/nonfinite_skip_count": nonfinite_skip_count,
+                    "global_step": global_step,
+                    **gradient_metrics,
+                    **grad_ema_metrics,
+                    **weight_metrics,
+                }
+                if config.sam_rho > 0:
+                    train_log["train/sam_rho"] = config.sam_rho
+                    train_log["train/sam_first_grad_norm"] = sam_first_grad_norm
+                if "wallshear_pred_normal_rms" in batch_loss_metrics:
+                    train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
+                        "wallshear_pred_normal_rms"
+                    ]
+                if "aux_rel_l2_loss" in batch_loss_metrics:
+                    train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
+                        "aux_rel_l2_loss"
+                    ]
+                for log_var_key in (
+                    "log_var_surface_pressure",
+                    "log_var_wall_shear_x",
+                    "log_var_wall_shear_y",
+                    "log_var_wall_shear_z",
+                    "log_var_volume_pressure",
+                ):
+                    if log_var_key in batch_loss_metrics:
+                        train_log[f"train/{log_var_key}"] = batch_loss_metrics[log_var_key]
+                if ema_decay_now is not None:
+                    train_log["train/ema_decay"] = ema_decay_now
+                for key, value in batch_loss_metrics.items():
+                    if key.startswith("film/"):
+                        train_log[f"train/{key}"] = value
+                train_log.update(
+                    train_slope_tracker.update(
+                        global_step=global_step,
+                        metrics=train_log,
+                        namespace="train",
+                    )
+                )
+                early_stop_reason = check_kill_thresholds(
                     global_step=global_step,
                     metrics=train_log,
-                    namespace="train",
+                    thresholds=kill_thresholds,
                 )
-            )
-            early_stop_reason = check_kill_thresholds(
-                global_step=global_step,
-                metrics=train_log,
-                thresholds=kill_thresholds,
-            )
-            if early_stop_reason is not None:
-                train_log["early_stop/triggered"] = 1.0
-            wandb.log(train_log)
-            if early_stop_reason is not None:
-                print(early_stop_reason)
-                break
-            if (time.time() - train_start) / 60.0 >= train_timeout_minutes:
-                print(
-                    f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
-                    f"at step {global_step}. Forcing validation and stopping."
-                )
-                timeout_hit = True
-                break
+                if early_stop_reason is not None:
+                    train_log["early_stop/triggered"] = 1.0
+                wandb.log(train_log)
+                if early_stop_reason is not None:
+                    print(early_stop_reason)
+                    break
+                if (time.time() - train_start) / 60.0 >= train_timeout_minutes:
+                    print(
+                        f"Train timeout ({train_timeout_minutes:.1f} min) mid-epoch "
+                        f"at step {global_step}. Forcing validation and stopping."
+                    )
+                    timeout_hit = True
+                    break
+            finally:
+                if sam_perturbations is not None:
+                    sam_restore_weights(sam_perturbations)
 
         if not (swa_enabled and swa_active):
             scheduler.step()
