@@ -44,6 +44,8 @@ from trainer_runtime import (
     cleanup_distributed,
     collect_gradient_metrics,
     collect_weight_metrics,
+    compute_cp_space_target_stats,
+    compute_per_case_q_k,
     distributed_any,
     distributed_barrier,
     evaluate_split,
@@ -62,6 +64,7 @@ from trainer_runtime import (
     print_metrics,
     run_final_evaluation,
     should_update_best_checkpoint,
+    summarize_q_k_distribution,
     timeout_budget_minutes,
     unwrap_model,
 )
@@ -137,6 +140,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    target_cp_normalization: str = "none"
+    cp_norm_eps: float = 1e-3
     debug: bool = False
 
 
@@ -218,6 +223,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "target_cp_normalization": (
+            "Per-case pressure-coefficient (Cp) target normalization for "
+            "surface_pressure (channel 0) and volume_pressure. With "
+            "'per_case_surface_max', q_k = max(|surface_cp|) is computed "
+            "once per case at startup over the FULL on-disk array; targets "
+            "are then divided by q_k before standardization, predictions "
+            "are multiplied back at evaluation so reported "
+            "rel_l2 stays comparable to Pa-space. wall_shear is NOT "
+            "rescaled. Default 'none' preserves the legacy pipeline. "
+            "Modes: {none, per_case_surface_max}."
+        ),
+        "cp_norm_eps": (
+            "Numerical floor for q_k to avoid div-by-zero on degenerate "
+            "cases. Each per-case q_k is clamped to max(q_k, eps) before "
+            "scaling. Default 1e-3."
         ),
     }
     for field in fields(Config):
@@ -312,8 +333,8 @@ def train_loss(
     surface_channel_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
-    surface_target = transform.apply_surface(batch.surface_y)
-    volume_target = transform.apply_volume(batch.volume_y)
+    surface_target = transform.apply_surface(batch.surface_y, batch.case_ids)
+    volume_target = transform.apply_volume(batch.volume_y, batch.case_ids)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -363,8 +384,8 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
-    surface_target = transform.apply_surface(batch.surface_y)
-    volume_target = transform.apply_volume(batch.volume_y)
+    surface_target = transform.apply_surface(batch.surface_y, batch.case_ids)
+    volume_target = transform.apply_volume(batch.volume_y, batch.case_ids)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -694,6 +715,95 @@ def rebuild_train_loader_with_vol_points(
     )
 
 
+def _log_q_k_artifacts(
+    *,
+    store,
+    q_k_by_case: dict[str, float],
+    case_ids_by_split: dict[str, list[str]],
+    output_dir: Path,
+) -> None:
+    """Write a per-case q_k CSV and log distribution histograms to W&B."""
+
+    import numpy as np
+    from data.loader import _resolve_artifact_path
+
+    csv_path = output_dir / "q_k_per_case.csv"
+    case_to_split: dict[str, str] = {}
+    for split_name, ids in case_ids_by_split.items():
+        for cid in ids:
+            case_to_split[cid] = split_name
+    rows = [
+        (cid, case_to_split.get(cid, "unknown"), float(q_k_by_case[cid]))
+        for cid in sorted(q_k_by_case.keys())
+    ]
+    with csv_path.open("w") as f:
+        f.write("case_id,split,q_k\n")
+        for cid, split_name, q_k in rows:
+            f.write(f"{cid},{split_name},{q_k:.6f}\n")
+    wandb.save(str(csv_path), policy="now")
+
+    table = wandb.Table(columns=["case_id", "split", "q_k"])
+    for cid, split_name, q_k in rows:
+        table.add_data(cid, split_name, q_k)
+
+    log_payload: dict[str, object] = {
+        "global_step": 0,
+        "cp_norm/q_k_per_case_table": table,
+    }
+    for split_name, ids in case_ids_by_split.items():
+        values = np.asarray(
+            [float(q_k_by_case[cid]) for cid in ids if cid in q_k_by_case],
+            dtype=np.float32,
+        )
+        if values.size == 0:
+            continue
+        log_payload[f"cp_norm/q_k_hist/{split_name}"] = wandb.Histogram(values)
+
+    train_ids = case_ids_by_split.get("train", [])
+    if train_ids:
+        # Sample ~24 train cases, draw up to 50k points each, log scaled-target histograms.
+        stride = max(1, len(train_ids) // 24)
+        sample_cases = train_ids[::stride][:24]
+        sp_samples: list[np.ndarray] = []
+        vp_samples: list[np.ndarray] = []
+        rng = np.random.default_rng(0)
+        for cid in sample_cases:
+            q_k = float(q_k_by_case[cid])
+            try:
+                cp_path = _resolve_artifact_path(store.root / cid / "surface_cp.npy")
+                cp = np.load(cp_path, mmap_mode="r")
+                cp_arr = np.asarray(cp, dtype=np.float32).reshape(-1) / q_k
+                if cp_arr.size > 50_000:
+                    cp_arr = rng.choice(cp_arr, 50_000, replace=False)
+                sp_samples.append(cp_arr)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                vp_path = _resolve_artifact_path(store.root / cid / "volume_pressure.npy")
+                vp = np.load(vp_path, mmap_mode="r")
+                vp_arr = np.asarray(vp, dtype=np.float32).reshape(-1) / q_k
+                if vp_arr.size > 50_000:
+                    vp_arr = rng.choice(vp_arr, 50_000, replace=False)
+                vp_samples.append(vp_arr)
+            except Exception:  # noqa: BLE001
+                pass
+        if sp_samples:
+            sp_concat = np.concatenate(sp_samples)
+            log_payload["cp_norm/scaled_surface_p_hist_train"] = wandb.Histogram(sp_concat)
+            log_payload["cp_norm/scaled_surface_p_min"] = float(sp_concat.min())
+            log_payload["cp_norm/scaled_surface_p_max"] = float(sp_concat.max())
+            log_payload["cp_norm/scaled_surface_p_mean"] = float(sp_concat.mean())
+            log_payload["cp_norm/scaled_surface_p_std"] = float(sp_concat.std())
+        if vp_samples:
+            vp_concat = np.concatenate(vp_samples)
+            log_payload["cp_norm/scaled_volume_p_hist_train"] = wandb.Histogram(vp_concat)
+            log_payload["cp_norm/scaled_volume_p_min"] = float(vp_concat.min())
+            log_payload["cp_norm/scaled_volume_p_max"] = float(vp_concat.max())
+            log_payload["cp_norm/scaled_volume_p_mean"] = float(vp_concat.mean())
+            log_payload["cp_norm/scaled_volume_p_std"] = float(vp_concat.std())
+    wandb.log(log_payload)
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     state = init_distributed()
     run = None
@@ -728,11 +838,96 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+
+        cp_norm_active = config.target_cp_normalization != "none"
+        q_k_by_case: dict[str, float] = {}
+        case_ids_by_split: dict[str, list[str]] = {}
+        cp_norm_logs: dict[str, object] = {}
+        surface_y_mean = stats["surface_y_mean"].clone()
+        surface_y_std = stats["surface_y_std"].clone()
+        volume_y_mean = stats["volume_y_mean"].clone()
+        volume_y_std = stats["volume_y_std"].clone()
+        if cp_norm_active:
+            store = train_loader.dataset.store
+            train_case_ids = list(train_loader.dataset.case_ids)
+            val_case_ids = sorted({
+                cid for ds in val_loaders.values() for cid in ds.dataset.case_ids
+            })
+            test_case_ids = sorted({
+                cid for ds in test_loaders.values() for cid in ds.dataset.case_ids
+            })
+            case_ids_by_split = {
+                "train": train_case_ids,
+                "val": val_case_ids,
+                "test": test_case_ids,
+            }
+            if state.is_main:
+                print(
+                    f"Cp normalization mode={config.target_cp_normalization!r}; "
+                    f"computing q_k for {sum(len(v) for v in case_ids_by_split.values())} cases..."
+                )
+            q_k_by_case = compute_per_case_q_k(
+                store,
+                case_ids_by_split,
+                mode=config.target_cp_normalization,
+                eps=config.cp_norm_eps,
+                progress_print=state.is_main,
+            )
+            if state.is_main:
+                print("Cp normalization: computing Cp-space mean/std on train set...")
+            cp_stats = compute_cp_space_target_stats(
+                store,
+                train_case_ids,
+                q_k_by_case,
+                progress_print=state.is_main,
+            )
+            surface_y_mean[0] = cp_stats["cp_surface_pressure_mean"][0]
+            surface_y_std[0] = cp_stats["cp_surface_pressure_std"][0]
+            volume_y_mean[0] = cp_stats["cp_volume_pressure_mean"][0]
+            volume_y_std[0] = cp_stats["cp_volume_pressure_std"][0]
+            q_k_summary = summarize_q_k_distribution(q_k_by_case, case_ids_by_split)
+            if state.is_main:
+                for split_name, summary in q_k_summary.items():
+                    print(
+                        f"  q_k[{split_name}]: count={int(summary['count'])} "
+                        f"mean={summary['mean']:.4f} std={summary['std']:.4f} "
+                        f"min={summary['min']:.4f} median={summary['median']:.4f} "
+                        f"max={summary['max']:.4f}"
+                    )
+                print(
+                    "  Cp-space surface_pressure stats: "
+                    f"mean={float(cp_stats['cp_surface_pressure_mean'][0]):.6f} "
+                    f"std={float(cp_stats['cp_surface_pressure_std'][0]):.6f}"
+                )
+                print(
+                    "  Cp-space volume_pressure stats: "
+                    f"mean={float(cp_stats['cp_volume_pressure_mean'][0]):.6f} "
+                    f"std={float(cp_stats['cp_volume_pressure_std'][0]):.6f}"
+                )
+            for split_name, summary in q_k_summary.items():
+                for stat_name, value in summary.items():
+                    cp_norm_logs[f"cp_norm/q_k_{split_name}_{stat_name}"] = float(value)
+            cp_norm_logs["cp_norm/cp_surface_pressure_mean"] = float(
+                cp_stats["cp_surface_pressure_mean"][0]
+            )
+            cp_norm_logs["cp_norm/cp_surface_pressure_std"] = float(
+                cp_stats["cp_surface_pressure_std"][0]
+            )
+            cp_norm_logs["cp_norm/cp_volume_pressure_mean"] = float(
+                cp_stats["cp_volume_pressure_mean"][0]
+            )
+            cp_norm_logs["cp_norm/cp_volume_pressure_std"] = float(
+                cp_stats["cp_volume_pressure_std"][0]
+            )
+
         transform = TargetTransform(
-            surface_y_mean=stats["surface_y_mean"].to(device),
-            surface_y_std=stats["surface_y_std"].to(device),
-            volume_y_mean=stats["volume_y_mean"].to(device),
-            volume_y_std=stats["volume_y_std"].to(device),
+            surface_y_mean=surface_y_mean.to(device),
+            surface_y_std=surface_y_std.to(device),
+            volume_y_mean=volume_y_mean.to(device),
+            volume_y_std=volume_y_std.to(device),
+            cp_norm_mode=config.target_cp_normalization,
+            q_k_by_case=q_k_by_case,
+            cp_norm_eps=config.cp_norm_eps,
         )
 
         model: nn.Module = build_model(config).to(device)
@@ -861,6 +1056,17 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if cp_norm_active:
+                wandb.summary["cp_norm/mode"] = config.target_cp_normalization
+                wandb.summary["cp_norm/eps"] = config.cp_norm_eps
+                wandb.summary.update(cp_norm_logs)
+                wandb.log({"global_step": 0, **cp_norm_logs})
+                _log_q_k_artifacts(
+                    store=train_loader.dataset.store,
+                    q_k_by_case=q_k_by_case,
+                    case_ids_by_split=case_ids_by_split,
+                    output_dir=output_dir,
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}

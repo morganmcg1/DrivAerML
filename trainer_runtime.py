@@ -170,6 +170,9 @@ class TargetTransform:
         volume_y_std: torch.Tensor | None = None,
         y_mean: torch.Tensor | None = None,
         y_std: torch.Tensor | None = None,
+        cp_norm_mode: str = "none",
+        q_k_by_case: dict[str, float] | None = None,
+        cp_norm_eps: float = 1e-3,
     ):
         if surface_y_mean is None:
             if y_mean is None:
@@ -187,6 +190,24 @@ class TargetTransform:
         self.surface_y_std = surface_y_std.clamp(min=1e-6)
         self.volume_y_mean = volume_y_mean
         self.volume_y_std = volume_y_std.clamp(min=1e-6)
+        self.cp_norm_mode = cp_norm_mode
+        self.cp_norm_eps = float(cp_norm_eps)
+        self.q_k_by_case = dict(q_k_by_case) if q_k_by_case is not None else {}
+        if self.cp_norm_mode != "none" and not self.q_k_by_case:
+            raise ValueError(
+                "TargetTransform: cp_norm_mode is enabled but q_k_by_case is empty"
+            )
+
+    @property
+    def cp_normalization_active(self) -> bool:
+        return self.cp_norm_mode != "none"
+
+    def _q_k_tensor(self, case_ids: list[str], device: torch.device) -> torch.Tensor:
+        values = [
+            max(float(self.q_k_by_case.get(cid, 1.0)), self.cp_norm_eps)
+            for cid in case_ids
+        ]
+        return torch.tensor(values, dtype=torch.float32, device=device)
 
     def apply(self, y: torch.Tensor) -> torch.Tensor:
         return self.apply_surface(y)
@@ -194,17 +215,65 @@ class TargetTransform:
     def invert(self, y: torch.Tensor) -> torch.Tensor:
         return self.invert_surface(y)
 
-    def apply_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
+    def apply_surface(
+        self, y: torch.Tensor, case_ids: list[str] | None = None
+    ) -> torch.Tensor:
+        scaled = y
+        if self.cp_normalization_active:
+            if case_ids is None:
+                raise ValueError(
+                    "TargetTransform.apply_surface requires case_ids when "
+                    "cp_norm_mode != 'none'"
+                )
+            q_k = self._q_k_tensor(case_ids, y.device).view(-1, 1, 1)
+            scaled = y.clone()
+            scaled[..., 0:1] = scaled[..., 0:1] / q_k
+        return (scaled - self.surface_y_mean.to(y.device)) / self.surface_y_std.to(y.device)
 
-    def invert_surface(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+    def invert_surface(
+        self, y: torch.Tensor, case_ids: list[str] | None = None
+    ) -> torch.Tensor:
+        unscaled = y * self.surface_y_std.to(y.device) + self.surface_y_mean.to(y.device)
+        if self.cp_normalization_active:
+            if case_ids is None:
+                raise ValueError(
+                    "TargetTransform.invert_surface requires case_ids when "
+                    "cp_norm_mode != 'none'"
+                )
+            q_k = self._q_k_tensor(case_ids, y.device).view(-1, 1, 1)
+            unscaled = unscaled.clone()
+            unscaled[..., 0:1] = unscaled[..., 0:1] * q_k
+        return unscaled
 
-    def apply_volume(self, y: torch.Tensor) -> torch.Tensor:
-        return (y - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
+    def apply_volume(
+        self, y: torch.Tensor, case_ids: list[str] | None = None
+    ) -> torch.Tensor:
+        scaled = y
+        if self.cp_normalization_active:
+            if case_ids is None:
+                raise ValueError(
+                    "TargetTransform.apply_volume requires case_ids when "
+                    "cp_norm_mode != 'none'"
+                )
+            q_k = self._q_k_tensor(case_ids, y.device).view(-1, 1, 1)
+            scaled = y.clone()
+            scaled[..., 0:1] = scaled[..., 0:1] / q_k
+        return (scaled - self.volume_y_mean.to(y.device)) / self.volume_y_std.to(y.device)
 
-    def invert_volume(self, y: torch.Tensor) -> torch.Tensor:
-        return y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+    def invert_volume(
+        self, y: torch.Tensor, case_ids: list[str] | None = None
+    ) -> torch.Tensor:
+        unscaled = y * self.volume_y_std.to(y.device) + self.volume_y_mean.to(y.device)
+        if self.cp_normalization_active:
+            if case_ids is None:
+                raise ValueError(
+                    "TargetTransform.invert_volume requires case_ids when "
+                    "cp_norm_mode != 'none'"
+                )
+            q_k = self._q_k_tensor(case_ids, y.device).view(-1, 1, 1)
+            unscaled = unscaled.clone()
+            unscaled[..., 0:1] = unscaled[..., 0:1] * q_k
+        return unscaled
 
 
 def autocast_context(device: torch.device, amp_mode: str):
@@ -267,6 +336,145 @@ def full_eval_loaders_from(
         name: eval_loader_for_dataset(loader.dataset, config, distributed_state=None)
         for name, loader in loaders.items()
     }
+
+
+def compute_per_case_q_k(
+    store,
+    case_ids_by_split: Mapping[str, Iterable[str]],
+    *,
+    mode: str = "per_case_surface_max",
+    eps: float = 1e-3,
+    progress_print: bool = False,
+) -> dict[str, float]:
+    """Walk each case once and compute the per-case scaling factor q_k.
+
+    For mode='per_case_surface_max', q_k = max(|surface_cp|) using the FULL
+    on-disk surface pressure array (not a sub-sampled view). This single
+    init-time pass per rank is cached after the first read because the
+    underlying loader's `_resolve_artifact_path` uses functools.lru_cache.
+    """
+
+    if mode != "per_case_surface_max":
+        raise ValueError(
+            f"compute_per_case_q_k: unsupported mode {mode!r}; "
+            "expected 'per_case_surface_max'"
+        )
+    import numpy as np
+    from data.loader import _resolve_artifact_path
+
+    q_k: dict[str, float] = {}
+    seen: set[str] = set()
+    all_case_ids = []
+    for split_name, ids in case_ids_by_split.items():
+        for cid in ids:
+            if cid in seen:
+                continue
+            seen.add(cid)
+            all_case_ids.append(cid)
+
+    for i, case_id in enumerate(all_case_ids):
+        cp_path = store.root / case_id / "surface_cp.npy"
+        resolved = _resolve_artifact_path(cp_path)
+        cp = np.load(resolved, mmap_mode="r")
+        abs_max = float(np.abs(np.asarray(cp, dtype=np.float64)).max())
+        q_k[case_id] = max(abs_max, eps)
+        if progress_print and (i + 1) % 100 == 0:
+            print(
+                f"  Cp normalization: q_k computed for {i + 1}/{len(all_case_ids)} cases",
+                flush=True,
+            )
+    return q_k
+
+
+def compute_cp_space_target_stats(
+    store,
+    train_case_ids: Iterable[str],
+    q_k_by_case: Mapping[str, float],
+    *,
+    progress_print: bool = False,
+) -> dict[str, torch.Tensor]:
+    """Compute mean/std of (surface_cp / q_k) and (volume_pressure / q_k) over train.
+
+    Used as the standardization stats for the channels that are Cp-scaled.
+    Returns a dict with `cp_surface_pressure_mean`, `cp_surface_pressure_std`,
+    `cp_volume_pressure_mean`, `cp_volume_pressure_std`, each a 1D tensor of
+    length 1.
+    """
+
+    import numpy as np
+    from data.loader import _resolve_artifact_path
+
+    surface_n = 0
+    surface_sum = 0.0
+    surface_sum_sq = 0.0
+    volume_n = 0
+    volume_sum = 0.0
+    volume_sum_sq = 0.0
+
+    train_ids = list(train_case_ids)
+    for i, case_id in enumerate(train_ids):
+        q_k = max(float(q_k_by_case.get(case_id, 1.0)), 1e-12)
+
+        cp_path = store.root / case_id / "surface_cp.npy"
+        cp = np.load(_resolve_artifact_path(cp_path), mmap_mode="r")
+        cp_arr = np.asarray(cp, dtype=np.float64).reshape(-1) / q_k
+        surface_n += int(cp_arr.size)
+        surface_sum += float(cp_arr.sum())
+        surface_sum_sq += float(np.square(cp_arr).sum())
+
+        vp_path = store.root / case_id / "volume_pressure.npy"
+        vp = np.load(_resolve_artifact_path(vp_path), mmap_mode="r")
+        vp_arr = np.asarray(vp, dtype=np.float64).reshape(-1) / q_k
+        volume_n += int(vp_arr.size)
+        volume_sum += float(vp_arr.sum())
+        volume_sum_sq += float(np.square(vp_arr).sum())
+
+        if progress_print and (i + 1) % 50 == 0:
+            print(
+                f"  Cp normalization: stats accumulated for {i + 1}/{len(train_ids)} train cases",
+                flush=True,
+            )
+
+    surface_mean = surface_sum / max(surface_n, 1)
+    surface_var = max(surface_sum_sq / max(surface_n, 1) - surface_mean ** 2, 0.0)
+    surface_std = math.sqrt(surface_var) if surface_var > 0 else 1.0
+
+    volume_mean = volume_sum / max(volume_n, 1)
+    volume_var = max(volume_sum_sq / max(volume_n, 1) - volume_mean ** 2, 0.0)
+    volume_std = math.sqrt(volume_var) if volume_var > 0 else 1.0
+
+    return {
+        "cp_surface_pressure_mean": torch.tensor([surface_mean], dtype=torch.float32),
+        "cp_surface_pressure_std": torch.tensor([max(surface_std, 1e-6)], dtype=torch.float32),
+        "cp_volume_pressure_mean": torch.tensor([volume_mean], dtype=torch.float32),
+        "cp_volume_pressure_std": torch.tensor([max(volume_std, 1e-6)], dtype=torch.float32),
+    }
+
+
+def summarize_q_k_distribution(
+    q_k_by_case: Mapping[str, float],
+    case_ids_by_split: Mapping[str, Iterable[str]],
+) -> dict[str, dict[str, float]]:
+    """Compute summary stats (mean/std/min/max/median) per split."""
+    summary: dict[str, dict[str, float]] = {}
+    for split_name, ids in case_ids_by_split.items():
+        values = [float(q_k_by_case[cid]) for cid in ids if cid in q_k_by_case]
+        if not values:
+            continue
+        sorted_v = sorted(values)
+        n = len(sorted_v)
+        median = sorted_v[n // 2] if n % 2 == 1 else 0.5 * (sorted_v[n // 2 - 1] + sorted_v[n // 2])
+        mean = sum(sorted_v) / n
+        var = sum((v - mean) ** 2 for v in sorted_v) / n
+        summary[split_name] = {
+            "count": float(n),
+            "mean": mean,
+            "std": math.sqrt(var),
+            "min": sorted_v[0],
+            "max": sorted_v[-1],
+            "median": median,
+        }
+    return summary
 
 
 def make_loaders(
@@ -957,8 +1165,8 @@ def accumulate_eval_batch(
     amp_mode: str,
 ) -> None:
     batch = batch.to(device)
-    surface_target_norm = transform.apply_surface(batch.surface_y)
-    volume_target_norm = transform.apply_volume(batch.volume_y)
+    surface_target_norm = transform.apply_surface(batch.surface_y, batch.case_ids)
+    volume_target_norm = transform.apply_volume(batch.volume_y, batch.case_ids)
     eval_module = unwrap_model(model)
     with autocast_context(device, amp_mode):
         out = eval_module(
@@ -975,8 +1183,8 @@ def accumulate_eval_batch(
     accumulator.surface_loss_count += surface_count
     accumulator.volume_loss_sse += volume_sse
     accumulator.volume_loss_count += volume_count
-    surface_pred = transform.invert_surface(surface_pred_norm)
-    volume_pred = transform.invert_volume(volume_pred_norm)
+    surface_pred = transform.invert_surface(surface_pred_norm, batch.case_ids)
+    volume_pred = transform.invert_volume(volume_pred_norm, batch.case_ids)
 
     if bool(batch.surface_mask.any()):
         surface_abs = (surface_pred - batch.surface_y).abs()
@@ -1140,6 +1348,52 @@ def evaluate_split(
             return {}
         accumulator = merge_eval_accumulators(acc for acc in gathered if acc is not None)
     return finalize_eval_accumulator(accumulator)
+
+
+def per_case_rel_l2_pct(accumulator: EvalAccumulator) -> dict[str, dict[str, float]]:
+    """Return per-case rel_l2 percent for each EVAL_KEY metric.
+
+    Output: {case_id: {metric_name: rel_l2_pct, ...}, ...}
+    """
+    per_case: dict[str, dict[str, float]] = {}
+    for key in EVAL_KEYS:
+        for case_id, (error_sq, target_sq) in accumulator.case_sums[key].items():
+            if target_sq <= 0.0:
+                continue
+            rel_l2_pct = math.sqrt(error_sq / target_sq) * 100.0
+            per_case.setdefault(case_id, {})[key] = rel_l2_pct
+    return per_case
+
+
+@torch.no_grad()
+def evaluate_split_with_accumulator(
+    model: nn.Module,
+    loader,
+    transform: TargetTransform,
+    device: torch.device,
+    *,
+    amp_mode: str = "none",
+    distributed_state: DistributedState | None = None,
+) -> tuple[dict[str, float], EvalAccumulator]:
+    """Like evaluate_split but also returns the merged accumulator."""
+    model.eval()
+    accumulator = EvalAccumulator()
+    for batch in loader:
+        accumulate_eval_batch(
+            accumulator,
+            model=model,
+            batch=batch,
+            transform=transform,
+            device=device,
+            amp_mode=amp_mode,
+        )
+    if distributed_state is not None and distributed_state.enabled:
+        gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
+        dist.all_gather_object(gathered, accumulator)
+        if not distributed_state.is_main:
+            return {}, EvalAccumulator()
+        accumulator = merge_eval_accumulators(acc for acc in gathered if acc is not None)
+    return finalize_eval_accumulator(accumulator), accumulator
 
 
 def _sanitize_artifact_token(value: str) -> str:
@@ -1485,10 +1739,14 @@ def run_final_evaluation(
     wandb.summary.update(numeric_metric_items(full_val_log))
     print_metrics("full_val", full_val_metrics["val_surface"])
 
-    test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
-        for name, loader in final_test_loaders.items()
-    }
+    test_metrics: dict[str, dict[str, float]] = {}
+    test_per_case: dict[str, dict[str, dict[str, float]]] = {}
+    for name, loader in final_test_loaders.items():
+        metrics, accumulator = evaluate_split_with_accumulator(
+            model, loader, transform, device, amp_mode=config.amp_mode
+        )
+        test_metrics[name] = metrics
+        test_per_case[name] = per_case_rel_l2_pct(accumulator)
     test_log: dict[str, object] = {
         "global_step": global_step,
         **primary_metric_log("test_primary", test_metrics["test_surface"]),
@@ -1505,6 +1763,8 @@ def run_final_evaluation(
     wandb.summary.update(numeric_metric_items(test_log))
     print_metrics("test_surface", test_metrics["test_surface"])
 
+    _log_per_case_test_table(test_per_case, global_step=global_step)
+
     log_model_artifact(
         run=run,
         model_path=model_path,
@@ -1514,3 +1774,54 @@ def run_final_evaluation(
         test_metrics=test_metrics,
         n_params=n_params,
     )
+
+
+def _log_per_case_test_table(
+    per_case_metrics: dict[str, dict[str, dict[str, float]]],
+    *,
+    global_step: int,
+) -> None:
+    """Log per-case test rel_l2 percentages as a W&B table."""
+    columns = [
+        "case_id",
+        "split_name",
+        "surface_pressure_rel_l2_pct",
+        "wall_shear_rel_l2_pct",
+        "wall_shear_x_rel_l2_pct",
+        "wall_shear_y_rel_l2_pct",
+        "wall_shear_z_rel_l2_pct",
+        "volume_pressure_rel_l2_pct",
+    ]
+    table = wandb.Table(columns=columns)
+    outliers_of_interest = {"run_226", "run_133", "run_203", "run_158"}
+    outlier_log: dict[str, float] = {}
+    for split_name, cases in per_case_metrics.items():
+        for case_id in sorted(cases.keys()):
+            entry = cases[case_id]
+            row = [case_id, split_name]
+            for key in (
+                "surface_pressure",
+                "wall_shear",
+                "wall_shear_x",
+                "wall_shear_y",
+                "wall_shear_z",
+                "volume_pressure",
+            ):
+                value = entry.get(key, float("nan"))
+                row.append(float(value))
+            table.add_data(*row)
+            if case_id in outliers_of_interest:
+                outlier_log[
+                    f"test_outliers/{case_id}/volume_pressure_rel_l2_pct"
+                ] = float(entry.get("volume_pressure", float("nan")))
+                outlier_log[
+                    f"test_outliers/{case_id}/surface_pressure_rel_l2_pct"
+                ] = float(entry.get("surface_pressure", float("nan")))
+    log_payload: dict[str, object] = {
+        "global_step": global_step,
+        "test/per_case_rel_l2_pct": table,
+    }
+    if outlier_log:
+        log_payload.update(outlier_log)
+        wandb.summary.update(outlier_log)
+    wandb.log(log_payload)
