@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 11:42 UTC (Round 13 mid-flight — 8 PRs WIP, 0 review-ready, 0 idle)
+- **Date:** 2026-05-06 11:55 UTC (Round 13 mid-flight — 7 PRs WIP + 1 new assignment, 0 review-ready, 0 idle)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -37,13 +37,14 @@
 
 **In flight (8 PRs):**
 - **PR #752 (askeladd)** — Exp 1C P4: x-slab wake stratified vol sampling. Arm A (far-wake) closed neg test_vol_p=12.49%; Arm B (near-wake [1m,4m), factor=3.0) launched 07:45 UTC, run `jc2t6sxa`, EP1 due ~09:01 UTC.
-- **PR #753 (fern)** — Signed-log1p target transform for volume_pressure (scale=25). EP3 PASS ✅; vol_p slope > abupt slope (1.25× ratio) — hypothesis signal positive.
-- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7. EP1 done (29.24%); EP1 also showed tau_z is the actual laggard (not vol_p) — diagnostically valuable regardless.
-- **PR #760 (alphonse)** — Issue #618 follow-up: volume-loss-weight reweight ablation (vol_w=2.0 vs 3.0). Arm A run `1gv5s938` ~EP3 in flight; duplicate killed cleanly.
-- **PR #761 (frieren)** — Dedicated 2-layer volume head on shared encoder (capacity-additive). EP1 ~85 min projected (10.7% overhead) — within expected band.
-- **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points. Newly started, EP1 pending.
-- **PR #763 (nezuko)** — **NEW**: upstream-region supervised attention (x_rel ≤ 0.5, w_upstream ∈ {1.5, 2.0, 3.0} sweep). Direct follow-up to #737's diagnostic that upstream owns 92% of vol points × ~12% rel_l2 = 4× more L2 mass than near-wake.
-- **PR #764 (thorfinn)** — **NEW**: STRING spectral budget expansion (sigmas to 8-octave; rff-num-features 16→24). Issue #618. Builds on #488 multi-sigma volume_p win.
+- **PR #758 (tanjiro)** — GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7. Arm A COMPLETE val_abupt=7.0798%, test_vol_p=12.38% (worse than SOTA). Arm B (`1bmbfu30`, α=2.0, floor=0.7) launched.
+- **PR #760 (alphonse)** — CLOSED NEGATIVE. vol_w=2.0 regression across all metrics (val_abupt=6.9810%). Vol-loss reweighting ruled out as a lever.
+- **PR #761 (frieren)** — Dedicated 2-layer volume head on shared encoder (capacity-additive). EP2 val_abupt=8.088%; EP3 in flight.
+- **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points. EP2 val_abupt=8.58%, mid-EP3.
+- **PR #763 (nezuko)** — Upstream-region supervised attention (x_rel ≤ 0.5, w_upstream ∈ {1.5, 2.0, 3.0} sweep). ~EP2 boundary.
+- **PR #764 (thorfinn)** — STRING spectral budget expansion (sigmas to 8-octave; rff-num-features 16→24). EP2 val_abupt=8.477% passes gate.
+- **PR #765 (fern)** — No-slice Anchor-STRING transformer (AB-UPT-lite, stabilized). Run 1b (corrected) in flight after anchor mismatch bug fix.
+- **PR #766 (alphonse) NEW** — Offline k-NN vol_pressure gradient-consistency aux loss. Revives PR #757 (edward, killed ~2.9× epoch overhead) with offline precomputed k-NN graph to achieve ~1.1–1.3× overhead. Physics-motivated: supervises ∇p field consistency, not just point-wise MSE. Applies only at epoch ≥ 9 (V=65k) to avoid k-NN remapping. λ sweep 0.05 (Arm A) / 0.01 (Arm B, if needed).
 
 **KEY DIAGNOSTIC FROM PR #737 (nezuko, just closed 2026-05-01):**
 
@@ -87,9 +88,9 @@ Regularization (stochastic depth + volume-token dropout) made val_volume_pressur
 
 ---
 
-## Active Fleet Status (2026-05-06 11:20 UTC — Round 13 in flight)
+## Active Fleet Status (2026-05-06 11:55 UTC — Round 13 in flight)
 
-All 8 students running:
+All 8 students assigned (alphonse reassigned from #760→#766 this cycle):
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
@@ -105,12 +106,12 @@ All 8 students running:
 **Zero idle students. Zero idle GPUs.**
 
 **Open advisor actions (this cycle):**
-- alphonse #760: Arm B halted by student; awaiting Arm A final EP-end + 9-col test table.
-- edward #762: Advisor nudge posted at 11:42 UTC demanding retrospective EP1/EP2 reports + EP3 status (silent since 09:06; W&B shows EP2 passed cleanly at val_abupt=8.58%).
+- alphonse #766: New assignment — offline k-NN grad-consistency. Student must implement precompute_vol_knn.py + new CLI flags.
+- edward #762: Advisor nudge posted at 11:42 UTC demanding retrospective EP1/EP2 reports + EP3 status.
 - fern #765: approved corrected Run 1b (3 epochs, single-anchor-resample fix); EP1 ETA ~12:43 UTC.
 - All other PRs: gate-watching at EP2/EP3 thresholds; passive.
 
-**Issue #717 status:** No arm has yet beaten the weak win gate `test_vol_p < 11.374%`. Tanjiro Arm A (12.38%) and askeladd Arm A (12.49%) both regress. The remaining six in-flight arms are the live attempt set.
+**Issue #717 status:** No arm has yet beaten the weak win gate `test_vol_p < 11.374%`. Tanjiro Arm A (12.38%), askeladd Arm A (12.49%), and alphonse #760 (12.20%) all regress. The remaining six in-flight arms plus new #766 are the live attempt set.
 
 **Upcoming gate actions for active runs:**
 - EP1 time-gate: kill if epoch_time > 80 min (4800s).

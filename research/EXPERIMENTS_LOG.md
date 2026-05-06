@@ -6,6 +6,30 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 11:48 — PR #760 alphonse vol-loss-weight reweight ablation (vol_w=2.0) — CLOSED NEGATIVE
+
+- Branch: `alphonse/vol-loss-weight-reweight`
+- W&B run: `1gv5s938` (group `issue-618-vol-weight-ablation`, name `alphonse/vol-weight-2.0`)
+- Hypothesis: Increasing `--volume-loss-weight` from 1.0 → 2.0 would narrow the val→test vol_pressure gap by increasing the gradient pressure on the volume branch.
+
+| Metric | Ours (vol_w=2.0) | SOTA #592 (vol_w=1.0) | Δ |
+|---|---:|---:|---:|
+| val_abupt (best EP4) | 6.9810% | 6.5985% | **+0.382pp** |
+| val_vol_p | 4.0961% | 3.9456% | +0.151pp |
+| val_surf_p | 4.4924% | 4.3322% | +0.160pp |
+| val_wall_shear | 7.8029% | 7.4737% | +0.329pp |
+| test_vol_p | 12.20%* | 11.933% | +0.27pp |
+| Runtime | 270.78 min (hit cap) | ~270 min | — |
+
+*test approximated from student report; all val channels regressed.
+
+- **Arm B (vol_w=3.0)**: correctly killed by student before launch — Arm A negative result made Arm B unneeded.
+- **Mechanistic insight (from student, endorsed by advisor)**: loss-weight ≠ gradient contribution. At vol_w=surf_w=2.0, raw surface MSE is still ~5× larger than volume MSE, so the gradient ratio shifts only modestly. More importantly, **the val=3.9% / test=11.9% gap is a generalization problem, not a loss-balance problem** — reweighting the in-distribution loss cannot fix OOD geometry mismatch.
+- **Conclusion**: vol_w reweighting is definitively ruled out as a lever for the vol_pressure val→test gap. Future work must target generalization mechanisms directly.
+- alphonse reassigned to PR #766 (offline k-NN vol grad-consistency).
+
+---
+
 ## 2026-05-01 08:30 — PR #756 thorfinn cosine-annealed EMA decay 0.99→0.9999 — CLOSED NEGATIVE
 
 - Branch: `thorfinn/ema-decay-cosine-anneal`
