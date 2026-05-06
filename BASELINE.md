@@ -51,15 +51,15 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.5789%** (PR #741 nezuko, EP22, run `lszc4ri7`)
+In-wave val target: **6.5405%** (PR #741 nezuko, EP24, run `lszc4ri7`)
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #741 | `lszc4ri7` | nezuko | EP22 (best) | **6.5789%** | Y-axis symmetry aug; EP22=6.5789% wave leader; C6 trough confirmed; wsz=10.0085%; oscillation dampening; LR at ~40% decay; run continuing toward EP30-35 |
+| #741 | `lszc4ri7` | nezuko | EP24 (best) | **6.5405%** | Y-axis symmetry aug; EP24=6.5405% wave leader; C7 trough confirmed; wsz=9.9925% (sub-10% achieved); vp=3.7977%; within 0.012pp of SOTA val_best 6.5281%; run continuing toward EP30-35 |
 | #745 | `co0xlqap` | frieren | EP15 (best) | **6.5913%** | 5L STRING PE; EP15=6.5913% clean monotonic descent, rate accelerating (-0.0216pp/ep); wsz=10.1822%; 0.0124pp behind nezuko wave-best; projected to overtake by EP16; EP20 forecast ~6.483–6.511% |
 | #740 Arm B | `5x8wofzm` | fern | EP6 (best) | **6.6648%** | GradNorm α=0.5; Arm A killed EP5; EP6=6.6648% sub-10% wsz=9.8962% (earliest in wave); continuing solo to EP31 |
 | #749 | `oi2a01zy` | tanjiro | EP21 (best) | **6.8907%** | Lion lr=9e-5 control; EP21=6.8907% clean descent; wsz=10.492% slope decelerating; running to EP50 terminal auto-eval |
 
-_Last updated: 2026-05-06 09:05Z_
+_Last updated: 2026-05-06 09:20Z_
