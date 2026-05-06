@@ -53,9 +53,10 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #664 | `a8emaoxm` | fern | EP36 | **6.6916%** | per-axis output scaling; new in-wave val best (updated EP36) |
-| #669 | `er8wmo8d` | frieren | EP27 | 6.7633% | per-channel tau weighting (tau_y=1.2, tau_z=1.5); EP35 gate ≤6.70% |
-| #678 | `sbzspuf2` | nezuko | EP20 | 6.8946% (best EP18=6.8820%) | extended cosine T_max=60; EP25 gate ≤6.82% |
-| #696 | `dzochl0q` | tanjiro | EP13 | 7.5933% | QK-Norm + STRING PE; **CLOSED** — gate fail + compliance violations |
+| #745 | `txkcd167` | frieren | EP5 | **6.910%** | 5L STRING; EP5 gate ≤8.5% PASSED ✓; τ_z=10.522%; vol=3.994% |
+| #741 | `lszc4ri7` | nezuko | EP7 | **7.319%** | Y-axis symmetry aug; saddle traversal EP5-6; new best at EP7 |
+| #740 Arm B | `g18f7jm1` | fern | EP3 | 7.093% | GradNorm α=0.5; leads Arm A by ~0.10pp/ep |
+| #740 Arm A | `aoetlx9b` | fern | EP3 | 7.190% | GradNorm α=1.0 |
+| #749 | `oi2a01zy` | tanjiro | EP2 | 9.262% | lr=9e-5 control; EP5 gate ≤9.0% pending |
 
-_Last updated: 2026-05-05_
+_Last updated: 2026-05-06_
