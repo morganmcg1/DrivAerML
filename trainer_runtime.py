@@ -23,14 +23,19 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Sampler
 from torch.utils.data.distributed import DistributedSampler
 
+import numpy as np
+
 from data import (
     SURFACE_TARGET_NAMES,
     SurfaceBatch,
     VOLUME_TARGET_NAMES,
     VOLUME_Y_DIM,
+    DrivAerMLCase,
+    DrivAerMLSurfaceDataset,
     load_data,
     pad_collate,
 )
+from data.loader import _resolve_artifact_path
 
 
 class EMA:
@@ -269,22 +274,453 @@ def full_eval_loaders_from(
     }
 
 
-def make_loaders(
-    config,
-    distributed_state: DistributedState | None = None,
-) -> tuple[DataLoader, dict[str, DataLoader], dict[str, DataLoader], dict[str, torch.Tensor]]:
-    train_ds, val_splits, test_splits, stats = load_data(
-        manifest_path=config.manifest,
-        root=config.data_root or None,
-        train_surface_points=config.train_surface_points,
-        eval_surface_points=config.eval_surface_points,
-        train_volume_points=config.train_volume_points,
-        eval_volume_points=config.eval_volume_points,
-        debug=config.debug,
+class DrivAerMLEmphasisDataset(DrivAerMLSurfaceDataset):
+    """Train dataset variant with stratified volume-point sampling.
+
+    Replaces the uniform volume-point draw with a near/far split based on
+    each volume point's signed distance from the body surface (|sdf|), as
+    used by ``--vol-point-emphasis geometric_distance``. Only the volume
+    sampling is modified; surface sampling, view layout, and eval paths
+    fall back to the parent ``DrivAerMLSurfaceDataset`` behaviour.
+
+    Strata indices for each case are precomputed lazily on first access
+    by reading ``volume_sdf.npy`` once and held in a per-instance LRU
+    cache (``cache_size`` cases). With DataLoader ``num_workers > 0`` each
+    worker maintains its own cache; the OS page cache amortises the
+    ``volume_sdf.npy`` reads across workers.
+    """
+
+    def __init__(
+        self,
+        *args,
+        geo_threshold: float = 0.3,
+        near_count: int = 1,
+        far_count: int = 3,
+        cache_size: int = 32,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if geo_threshold <= 0.0:
+            raise ValueError(f"geo_threshold must be > 0; got {geo_threshold}")
+        if near_count < 0 or far_count < 0:
+            raise ValueError(
+                f"near_count={near_count}, far_count={far_count} must both be >= 0"
+            )
+        if near_count + far_count <= 0:
+            raise ValueError("near_count + far_count must be > 0")
+        self.geo_threshold = float(geo_threshold)
+        self.near_count = int(near_count)
+        self.far_count = int(far_count)
+        self.cache_size = int(cache_size)
+        self._strata_cache: "dict[str, tuple[np.ndarray, np.ndarray]]" = {}
+        self._strata_order: list[str] = []
+
+    def _load_strata(self, case_id: str) -> tuple[np.ndarray, np.ndarray]:
+        cached = self._strata_cache.get(case_id)
+        if cached is not None:
+            if self._strata_order[-1] != case_id:
+                self._strata_order.remove(case_id)
+                self._strata_order.append(case_id)
+            return cached
+        sdf_path = self.store.root / case_id / "volume_sdf.npy"
+        sdf_resolved = _resolve_artifact_path(sdf_path)
+        sdf = np.load(sdf_resolved, mmap_mode="r")
+        sdf_abs = np.abs(np.asarray(sdf, dtype=np.float32).reshape(-1))
+        near_mask = sdf_abs <= self.geo_threshold
+        near_idx = np.flatnonzero(near_mask).astype(np.int64)
+        far_idx = np.flatnonzero(~near_mask).astype(np.int64)
+        entry = (near_idx, far_idx)
+        if self.cache_size > 0:
+            while len(self._strata_order) >= self.cache_size:
+                evict = self._strata_order.pop(0)
+                self._strata_cache.pop(evict, None)
+            self._strata_cache[case_id] = entry
+            self._strata_order.append(case_id)
+        return entry
+
+    def _stratified_volume_indices(
+        self,
+        *,
+        case_id: str,
+        total: int,
+        count: int,
+        view,
+    ) -> torch.Tensor | None:
+        if view.view_index >= view.volume_view_count:
+            return torch.empty(0, dtype=torch.long)
+        if count <= 0 or total <= count:
+            return None if view.view_index == 0 else torch.empty(0, dtype=torch.long)
+        if view.sampling_mode != "train_random":
+            return self._indices(
+                total, count, view, group_view_count=view.volume_view_count
+            )
+
+        near_idx, far_idx = self._load_strata(case_id)
+        ratio_total = self.near_count + self.far_count
+        n_near_target = (count * self.near_count) // ratio_total
+        n_far_target = count - n_near_target
+
+        n_near = min(n_near_target, len(near_idx))
+        n_far = min(n_far_target, len(far_idx))
+        remaining = count - n_near - n_far
+        if remaining > 0:
+            far_slack = len(far_idx) - n_far
+            near_slack = len(near_idx) - n_near
+            if far_slack > 0 and (n_near < n_near_target or near_slack <= 0):
+                take = min(remaining, far_slack)
+                n_far += take
+                remaining -= take
+            if remaining > 0 and near_slack > 0:
+                take = min(remaining, near_slack)
+                n_near += take
+                remaining -= take
+        # Edge case: both strata exhausted of unique points; sample with
+        # replacement from whichever is non-empty to keep the contract that
+        # we always return ``count`` indices when total > count.
+        parts: list[np.ndarray] = []
+        if n_near > 0 and len(near_idx) > 0:
+            sel = torch.randint(len(near_idx), (n_near,), dtype=torch.long).numpy()
+            parts.append(near_idx[sel])
+        if n_far > 0 and len(far_idx) > 0:
+            sel = torch.randint(len(far_idx), (n_far,), dtype=torch.long).numpy()
+            parts.append(far_idx[sel])
+        if remaining > 0:
+            pool = far_idx if len(far_idx) >= len(near_idx) else near_idx
+            if len(pool) == 0:
+                pool = far_idx if len(far_idx) > 0 else near_idx
+            if len(pool) > 0:
+                sel = torch.randint(len(pool), (remaining,), dtype=torch.long).numpy()
+                parts.append(pool[sel])
+        if not parts:
+            return torch.empty(0, dtype=torch.long)
+        result = np.concatenate(parts)
+        result.sort()
+        return torch.from_numpy(result)
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        if view.sampling_mode != "train_random":
+            return super().__getitem__(idx)
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        volume_idx = self._stratified_volume_indices(
+            case_id=view.case_id,
+            total=counts["n_volume"],
+            count=self.max_volume_points,
+            view=view,
+        )
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode + "_geo_strat"
+        metadata["joint_view_count"] = int(view.view_count)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
+class DistributedWeightedSampler(Sampler[int]):
+    """DDP-aware weighted random sampler with replacement.
+
+    Each rank seeds the same generator with ``base_seed + epoch`` and
+    draws an identical multinomial sequence of length
+    ``num_samples`` (rounded down to a multiple of ``num_replicas`` for
+    drop-last semantics). Each rank then takes its strided slice. Weights
+    can be refreshed between epochs via ``update_weights`` and the epoch
+    seed advanced via ``set_epoch``.
+    """
+
+    def __init__(
+        self,
+        weights,
+        *,
+        num_replicas: int,
+        rank: int,
+        num_samples: int | None = None,
+        seed: int = 0,
+    ) -> None:
+        if num_replicas < 1:
+            raise ValueError(f"num_replicas must be >= 1; got {num_replicas}")
+        if rank < 0 or rank >= num_replicas:
+            raise ValueError(
+                f"rank must be in [0, {num_replicas}); got {rank}"
+            )
+        self._set_weights(weights)
+        self.num_replicas = int(num_replicas)
+        self.rank = int(rank)
+        self.seed = int(seed)
+        self.epoch = 0
+        if num_samples is None:
+            num_samples = int(self.weights.shape[0])
+        self.total_samples = (int(num_samples) // self.num_replicas) * self.num_replicas
+        if self.total_samples <= 0:
+            raise ValueError(
+                f"DistributedWeightedSampler total_samples is 0 "
+                f"(num_samples={num_samples}, num_replicas={num_replicas})"
+            )
+        self.per_rank = self.total_samples // self.num_replicas
+
+    def _set_weights(self, weights) -> None:
+        tensor = torch.as_tensor(weights, dtype=torch.float64)
+        if tensor.ndim != 1:
+            raise ValueError(
+                f"DistributedWeightedSampler weights must be 1-D; got shape {tensor.shape}"
+            )
+        positive = (tensor > 0).any()
+        if not bool(positive.item()):
+            raise ValueError(
+                "DistributedWeightedSampler requires at least one positive weight"
+            )
+        self.weights = tensor
+
+    def update_weights(self, weights) -> None:
+        new_w = torch.as_tensor(weights, dtype=torch.float64)
+        if new_w.shape != self.weights.shape:
+            raise ValueError(
+                f"Weight shape {tuple(new_w.shape)} != existing {tuple(self.weights.shape)}"
+            )
+        self._set_weights(new_w)
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self):
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + self.epoch)
+        all_idx = torch.multinomial(
+            self.weights,
+            self.total_samples,
+            replacement=True,
+            generator=generator,
+        )
+        idx = all_idx[self.rank :: self.num_replicas]
+        return iter(int(i) for i in idx.tolist())
+
+    def __len__(self) -> int:
+        return self.per_rank
+
+
+class CaseImportanceTracker:
+    """Per-case EMA of volume-pressure |residual| for emphasis sampling.
+
+    Holds ``importance[c] = beta * importance[c] + (1-beta) * mean |residual_c|``
+    for every training case, where the residual is computed in the
+    transform's normalised volume space (matches the training loss). Only
+    cases that appeared in the most recent global step are updated.
+    Across DDP ranks, per-case sums and counts are all-reduced before the
+    EMA step so every rank holds the same buffer.
+    """
+
+    def __init__(
+        self,
+        case_ids: Iterable[str],
+        *,
+        ema_beta: float,
+        temperature: float,
+        device: torch.device,
+    ) -> None:
+        if not (0.0 <= ema_beta < 1.0):
+            raise ValueError(f"ema_beta must be in [0, 1); got {ema_beta}")
+        if temperature <= 0.0:
+            raise ValueError(f"temperature must be > 0; got {temperature}")
+        self.case_ids: list[str] = list(case_ids)
+        if not self.case_ids:
+            raise ValueError("CaseImportanceTracker requires at least one case_id")
+        self.case_id_to_idx: dict[str, int] = {
+            cid: i for i, cid in enumerate(self.case_ids)
+        }
+        self.ema_beta = float(ema_beta)
+        self.temperature = float(temperature)
+        self.device = device
+        self.importance = torch.ones(len(self.case_ids), device=device, dtype=torch.float32)
+        self.update_count = 0
+        # Diagnostics for logging.
+        self.last_appeared = 0
+        self.last_avg_residual = 0.0
+
+    @torch.no_grad()
+    def collect_batch(
+        self,
+        *,
+        volume_pred_norm: torch.Tensor,
+        volume_target_norm: torch.Tensor,
+        volume_mask: torch.Tensor,
+        case_ids: list[str],
+        distributed_state: DistributedState | None = None,
+    ) -> None:
+        """Update the EMA buffer with the current batch's per-case residuals.
+
+        ``volume_pred_norm`` and ``volume_target_norm`` are expected in the
+        normalised volume-pressure space used by the training loss
+        (``transform.apply_volume`` output).
+        """
+
+        residual = (volume_pred_norm.detach() - volume_target_norm.detach()).abs().float()
+        # Pad mask along channel dim if needed.
+        mask = volume_mask
+        while mask.ndim < residual.ndim:
+            mask = mask.unsqueeze(-1)
+        mask_f = mask.to(dtype=residual.dtype)
+        weighted = residual * mask_f
+        sum_resid = weighted.flatten(1).sum(dim=1)  # [B]
+        count = mask_f.flatten(1).sum(dim=1).clamp(min=1.0)  # [B]
+        per_case_resid = (sum_resid / count).to(self.device)
+
+        n_cases = self.importance.shape[0]
+        sum_buf = torch.zeros(n_cases, device=self.device, dtype=torch.float32)
+        cnt_buf = torch.zeros(n_cases, device=self.device, dtype=torch.float32)
+        for i, cid in enumerate(case_ids):
+            idx = self.case_id_to_idx.get(cid)
+            if idx is None:
+                continue
+            sum_buf[idx] = sum_buf[idx] + per_case_resid[i]
+            cnt_buf[idx] = cnt_buf[idx] + 1.0
+
+        if distributed_state is not None and distributed_state.enabled:
+            dist.all_reduce(sum_buf, op=dist.ReduceOp.SUM)
+            dist.all_reduce(cnt_buf, op=dist.ReduceOp.SUM)
+
+        appeared = cnt_buf > 0
+        avg_resid = sum_buf / cnt_buf.clamp(min=1.0)
+        new_importance = (
+            self.ema_beta * self.importance + (1.0 - self.ema_beta) * avg_resid
+        )
+        self.importance = torch.where(appeared, new_importance, self.importance)
+        self.update_count += 1
+        self.last_appeared = int(appeared.sum().item())
+        if self.last_appeared > 0:
+            self.last_avg_residual = float(avg_resid[appeared].mean().item())
+
+    def case_probabilities(self) -> torch.Tensor:
+        x = self.importance / self.temperature
+        x = x - x.max()
+        w = x.exp()
+        return (w / w.sum().clamp(min=1e-12)).cpu()
+
+    def case_view_weights(self, dataset) -> torch.Tensor:
+        """Build a per-view weight tensor for ``DistributedWeightedSampler``.
+
+        Within a case, weight is split evenly across the case's joint
+        views so that the marginal probability of selecting any view from
+        that case equals ``case_probabilities()[c]``.
+        """
+
+        probs = self.case_probabilities().tolist()
+        weights = torch.empty(len(dataset.views), dtype=torch.float64)
+        for i, view in enumerate(dataset.views):
+            cidx = self.case_id_to_idx.get(view.case_id)
+            if cidx is None:
+                weights[i] = 0.0
+                continue
+            weights[i] = probs[cidx] / float(max(view.view_count, 1))
+        return weights
+
+    @torch.no_grad()
+    def diagnostic_metrics(self) -> dict[str, float]:
+        if self.importance.numel() == 0:
+            return {}
+        probs = self.case_probabilities()
+        imp = self.importance.float().detach().cpu()
+        # Effective number of active cases via Shannon entropy.
+        log_p = torch.log(probs.clamp(min=1e-12))
+        entropy = float(-(probs * log_p).sum().item())
+        max_p = float(probs.max().item())
+        min_p = float(probs.min().item())
+        n = len(self.case_ids)
+        return {
+            "vol_emphasis/importance/mean": float(imp.mean().item()),
+            "vol_emphasis/importance/std": float(imp.std().item()),
+            "vol_emphasis/importance/min": float(imp.min().item()),
+            "vol_emphasis/importance/max": float(imp.max().item()),
+            "vol_emphasis/probability/min": min_p,
+            "vol_emphasis/probability/max": max_p,
+            "vol_emphasis/probability/max_to_uniform_ratio": max_p * n,
+            "vol_emphasis/probability/effective_cases_exp_entropy": math.exp(entropy),
+            "vol_emphasis/update_count": float(self.update_count),
+            "vol_emphasis/last_appeared_cases": float(self.last_appeared),
+            "vol_emphasis/last_avg_residual": float(self.last_avg_residual),
+        }
+
+
+def _build_train_dataset(config, case_ids, store, max_volume_points, sampling_mode):
+    """Construct the training dataset, swapping in the emphasis variant when needed."""
+
+    if config.vol_point_emphasis == "geometric_distance":
+        return DrivAerMLEmphasisDataset(
+            case_ids,
+            store=store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=max_volume_points,
+            sampling_mode=sampling_mode,
+            geo_threshold=config.vol_emphasis_geo_threshold,
+            near_count=config.vol_emphasis_geo_near_count,
+            far_count=config.vol_emphasis_geo_far_count,
+            cache_size=config.vol_emphasis_strata_cache_size,
+        )
+    return DrivAerMLSurfaceDataset(
+        case_ids,
+        store=store,
+        max_surface_points=config.train_surface_points,
+        max_volume_points=max_volume_points,
+        sampling_mode=sampling_mode,
     )
-    train_sampler = None
+
+
+def make_train_loader(
+    config,
+    train_ds,
+    distributed_state: DistributedState | None,
+    *,
+    case_ids: Iterable[str] | None = None,
+    weighted_sampler: "DistributedWeightedSampler | None" = None,
+) -> tuple[DataLoader, "DistributedSampler | DistributedWeightedSampler | None"]:
+    """Wrap the train dataset in the right sampler for the chosen emphasis mode.
+
+    Returns the loader and the sampler so callers can call ``set_epoch`` /
+    ``update_weights`` between epochs.
+    """
+
+    train_sampler: DistributedSampler | DistributedWeightedSampler | None = None
     train_shuffle = True
-    if distributed_state is not None and distributed_state.enabled:
+    use_weighted = config.vol_point_emphasis == "ema_residual"
+    if use_weighted:
+        if distributed_state is None or not distributed_state.enabled:
+            num_replicas, rank = 1, 0
+        else:
+            num_replicas, rank = distributed_state.world_size, distributed_state.rank
+        if weighted_sampler is None:
+            uniform = torch.ones(len(train_ds), dtype=torch.float64)
+            weighted_sampler = DistributedWeightedSampler(
+                uniform,
+                num_replicas=num_replicas,
+                rank=rank,
+                num_samples=len(train_ds),
+            )
+        train_sampler = weighted_sampler
+        train_shuffle = False
+    elif distributed_state is not None and distributed_state.enabled:
         train_sampler = DistributedSampler(
             train_ds,
             num_replicas=distributed_state.world_size,
@@ -300,6 +736,41 @@ def make_loaders(
         sampler=train_sampler,
         drop_last=True,
         **loader_kwargs(config),
+    )
+    return train_loader, train_sampler
+
+
+def make_loaders(
+    config,
+    distributed_state: DistributedState | None = None,
+) -> tuple[DataLoader, dict[str, DataLoader], dict[str, DataLoader], dict[str, torch.Tensor]]:
+    train_ds, val_splits, test_splits, stats = load_data(
+        manifest_path=config.manifest,
+        root=config.data_root or None,
+        train_surface_points=config.train_surface_points,
+        eval_surface_points=config.eval_surface_points,
+        train_volume_points=config.train_volume_points,
+        eval_volume_points=config.eval_volume_points,
+        debug=config.debug,
+    )
+    if config.vol_point_emphasis == "geometric_distance":
+        # Swap in the stratified-volume variant; reuse the loaded store so
+        # cached point counts and artifact-path resolutions survive.
+        train_ds = DrivAerMLEmphasisDataset(
+            train_ds.case_ids,
+            store=train_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=config.train_volume_points,
+            sampling_mode=train_ds.sampling_mode,
+            geo_threshold=config.vol_emphasis_geo_threshold,
+            near_count=config.vol_emphasis_geo_near_count,
+            far_count=config.vol_emphasis_geo_far_count,
+            cache_size=config.vol_emphasis_strata_cache_size,
+        )
+    train_loader, _ = make_train_loader(
+        config,
+        train_ds,
+        distributed_state,
     )
     val_loaders = {
         name: eval_loader_for_dataset(ds, config, distributed_state=distributed_state)

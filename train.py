@@ -36,6 +36,9 @@ from data import DrivAerMLSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
+    CaseImportanceTracker,
+    DistributedWeightedSampler,
+    DrivAerMLEmphasisDataset,
     MetricSlopeTracker,
     TargetTransform,
     autocast_context,
@@ -54,6 +57,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    make_train_loader,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -137,6 +141,14 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_point_emphasis: str = "none"
+    vol_emphasis_ema_beta: float = 0.9
+    vol_emphasis_temperature: float = 0.5
+    vol_emphasis_geo_threshold: float = 0.3
+    vol_emphasis_geo_near_count: int = 1
+    vol_emphasis_geo_far_count: int = 3
+    vol_emphasis_warmup_epochs: int = 1
+    vol_emphasis_strata_cache_size: int = 32
     debug: bool = False
 
 
@@ -219,6 +231,70 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_point_emphasis": (
+            "Volume-point hard-example sampling mode. 'none' (default) uses "
+            "the existing uniform within-case + uniform across-cases "
+            "behaviour. 'ema_residual' (Arm A) maintains an EMA of mean "
+            "|residual| per training case on volume pressure (beta="
+            "--vol-emphasis-ema-beta) and at each epoch start builds a "
+            "DistributedWeightedSampler with case probability = softmax("
+            "importance / --vol-emphasis-temperature). Within each case, "
+            "volume points are still drawn uniformly. 'geometric_distance' "
+            "(Arm B) precomputes near/far strata from |volume_sdf| with "
+            "boundary --vol-emphasis-geo-threshold (metres) and samples "
+            "volume points with a fixed near:far count ratio of "
+            "--vol-emphasis-geo-near-count : --vol-emphasis-geo-far-count "
+            "(defaults 1:3) per case per step."
+        ),
+        "vol_emphasis_ema_beta": (
+            "EMA decay for the per-case volume-residual importance buffer "
+            "in --vol-point-emphasis ema_residual: importance[c] = beta * "
+            "importance[c] + (1-beta) * mean_abs_residual[c]. Default 0.9. "
+            "Only applies when --vol-point-emphasis=ema_residual."
+        ),
+        "vol_emphasis_temperature": (
+            "Softmax temperature for converting per-case importance into "
+            "case sampling probabilities in --vol-point-emphasis "
+            "ema_residual. Lower T concentrates more probability on "
+            "high-residual cases. Default 0.5. Only applies when "
+            "--vol-point-emphasis=ema_residual."
+        ),
+        "vol_emphasis_geo_threshold": (
+            "Distance threshold (metres) used by --vol-point-emphasis "
+            "geometric_distance to split volume points into near (|sdf| <= "
+            "threshold) and far (|sdf| > threshold) strata. Default 0.3. "
+            "Strata are precomputed from each case's volume_sdf.npy on "
+            "first access and cached per worker."
+        ),
+        "vol_emphasis_geo_near_count": (
+            "Near-stratum target count for stratified volume sampling in "
+            "--vol-point-emphasis geometric_distance. Combined with "
+            "--vol-emphasis-geo-far-count to define the near:far ratio. "
+            "With default 1:3 and --train-volume-points N, each case-step "
+            "draws floor(N/4) near points and 3*floor(N/4) far points. "
+            "Falls back gracefully when a stratum is empty or short."
+        ),
+        "vol_emphasis_geo_far_count": (
+            "Far-stratum target count for stratified volume sampling in "
+            "--vol-point-emphasis geometric_distance. See "
+            "--vol-emphasis-geo-near-count. Default 3 (=> 1:3 near:far)."
+        ),
+        "vol_emphasis_warmup_epochs": (
+            "Number of warmup epochs at the start of training during which "
+            "--vol-point-emphasis ema_residual still uses uniform case "
+            "sampling. Importance EMA is collected from epoch 0 but only "
+            "used to bias the sampler from epoch >= warmup_epochs. Default "
+            "1 (uniform for epoch 0, weighted from epoch 1 onwards). Set "
+            "to 0 to bias from the very first epoch."
+        ),
+        "vol_emphasis_strata_cache_size": (
+            "Per-worker LRU cache size (in cases) for the precomputed "
+            "near/far strata used by --vol-point-emphasis "
+            "geometric_distance. Each cached entry uses ~10MB (far) + "
+            "~50MB (near) of int64 indices. Default 32. Lower this if RAM "
+            "is constrained; raise it (or set to 0 for unbounded) if disk "
+            "I/O is the bottleneck."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -230,7 +306,53 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    config = Config(**vars(namespace))
+    valid_emphasis = ("none", "ema_residual", "geometric_distance")
+    if config.vol_point_emphasis not in valid_emphasis:
+        raise ValueError(
+            f"--vol-point-emphasis must be one of {valid_emphasis}; "
+            f"got {config.vol_point_emphasis!r}"
+        )
+    if config.vol_emphasis_ema_beta < 0.0 or config.vol_emphasis_ema_beta >= 1.0:
+        raise ValueError(
+            f"--vol-emphasis-ema-beta must be in [0.0, 1.0); "
+            f"got {config.vol_emphasis_ema_beta}"
+        )
+    if config.vol_emphasis_temperature <= 0.0:
+        raise ValueError(
+            f"--vol-emphasis-temperature must be > 0; "
+            f"got {config.vol_emphasis_temperature}"
+        )
+    if config.vol_emphasis_geo_threshold <= 0.0:
+        raise ValueError(
+            f"--vol-emphasis-geo-threshold must be > 0; "
+            f"got {config.vol_emphasis_geo_threshold}"
+        )
+    if config.vol_emphasis_geo_near_count < 0 or config.vol_emphasis_geo_far_count < 0:
+        raise ValueError(
+            "--vol-emphasis-geo-near-count and --vol-emphasis-geo-far-count must be >= 0"
+        )
+    if config.vol_emphasis_geo_near_count + config.vol_emphasis_geo_far_count <= 0:
+        raise ValueError(
+            "Sum of --vol-emphasis-geo-near-count and --vol-emphasis-geo-far-count must be > 0"
+        )
+    if config.vol_emphasis_warmup_epochs < 0:
+        raise ValueError(
+            f"--vol-emphasis-warmup-epochs must be >= 0; "
+            f"got {config.vol_emphasis_warmup_epochs}"
+        )
+    if config.vol_emphasis_strata_cache_size < 0:
+        raise ValueError(
+            f"--vol-emphasis-strata-cache-size must be >= 0; "
+            f"got {config.vol_emphasis_strata_cache_size}"
+        )
+    if config.vol_point_emphasis == "ema_residual" and config.use_gradnorm:
+        raise ValueError(
+            "--vol-point-emphasis ema_residual is not supported alongside "
+            "--use-gradnorm. The gradnorm path computes per-task losses but "
+            "does not surface volume predictions for the residual EMA hook."
+        )
+    return config
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -310,6 +432,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    importance_tracker: CaseImportanceTracker | None = None,
+    distributed_state=None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -335,6 +459,14 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+    if importance_tracker is not None:
+        importance_tracker.collect_batch(
+            volume_pred_norm=out["volume_preds"],
+            volume_target_norm=volume_target,
+            volume_mask=batch.volume_mask,
+            case_ids=batch.case_ids,
+            distributed_state=distributed_state,
+        )
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
@@ -653,45 +785,43 @@ def rebuild_train_loader_with_vol_points(
     old_train_loader: DataLoader,
     n_points: int,
     distributed_state,
-) -> DataLoader:
+) -> tuple[DataLoader, "DistributedSampler | DistributedWeightedSampler | None"]:
     """Rebuild the training DataLoader with a new max_volume_points value.
 
     Reuses the existing ``DrivAerMLCaseStore`` so cached point counts and
     artifact-path resolutions survive the swap. The view list is recomputed
     because ``max_volume_points`` changes the per-case view count, which in
     turn changes the dataset length that the distributed sampler must see.
+
+    Returns the loader and its sampler so the caller can ``set_epoch`` and
+    refresh weighted-sampler weights between epochs.
     """
 
     old_ds = old_train_loader.dataset
     sampling_mode = (
         "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
     )
-    train_ds = DrivAerMLSurfaceDataset(
-        old_ds.case_ids,
-        store=old_ds.store,
-        max_surface_points=config.train_surface_points,
-        max_volume_points=n_points,
-        sampling_mode=sampling_mode,
-    )
-    train_sampler = None
-    train_shuffle = True
-    if distributed_state is not None and distributed_state.enabled:
-        train_sampler = DistributedSampler(
-            train_ds,
-            num_replicas=distributed_state.world_size,
-            rank=distributed_state.rank,
-            shuffle=True,
-            drop_last=True,
+    if config.vol_point_emphasis == "geometric_distance":
+        train_ds = DrivAerMLEmphasisDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+            geo_threshold=config.vol_emphasis_geo_threshold,
+            near_count=config.vol_emphasis_geo_near_count,
+            far_count=config.vol_emphasis_geo_far_count,
+            cache_size=config.vol_emphasis_strata_cache_size,
         )
-        train_shuffle = False
-    return DataLoader(
-        train_ds,
-        batch_size=config.batch_size,
-        shuffle=train_shuffle,
-        sampler=train_sampler,
-        drop_last=True,
-        **loader_kwargs(config),
-    )
+    else:
+        train_ds = DrivAerMLSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+        )
+    return make_train_loader(config, train_ds, distributed_state)
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -728,6 +858,31 @@ def main(argv: Iterable[str] | None = None) -> None:
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+        importance_tracker: CaseImportanceTracker | None = None
+        if config.vol_point_emphasis == "ema_residual":
+            importance_tracker = CaseImportanceTracker(
+                train_loader.dataset.case_ids,
+                ema_beta=config.vol_emphasis_ema_beta,
+                temperature=config.vol_emphasis_temperature,
+                device=device,
+            )
+            if state.is_main:
+                print(
+                    f"Volume-point emphasis: ema_residual "
+                    f"(beta={config.vol_emphasis_ema_beta}, "
+                    f"T={config.vol_emphasis_temperature}, "
+                    f"warmup_epochs={config.vol_emphasis_warmup_epochs}, "
+                    f"n_train_cases={len(importance_tracker.case_ids)})"
+                )
+        elif config.vol_point_emphasis == "geometric_distance":
+            if state.is_main:
+                print(
+                    f"Volume-point emphasis: geometric_distance "
+                    f"(threshold={config.vol_emphasis_geo_threshold}m, "
+                    f"near:far ratio={config.vol_emphasis_geo_near_count}:"
+                    f"{config.vol_emphasis_geo_far_count}, "
+                    f"strata cache_size={config.vol_emphasis_strata_cache_size} cases/worker)"
+                )
         transform = TargetTransform(
             surface_y_mean=stats["surface_y_mean"].to(device),
             surface_y_std=stats["surface_y_std"].to(device),
@@ -885,11 +1040,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                             f"(was {current_train_vol_points})"
                         )
                     config.train_volume_points = desired_vol_points
-                    train_loader = rebuild_train_loader_with_vol_points(
+                    train_loader, _ = rebuild_train_loader_with_vol_points(
                         config, train_loader, desired_vol_points, state
                     )
                     current_train_vol_points = desired_vol_points
-            if isinstance(train_loader.sampler, DistributedSampler):
+            if importance_tracker is not None and isinstance(
+                train_loader.sampler, DistributedWeightedSampler
+            ):
+                use_weighted = epoch >= config.vol_emphasis_warmup_epochs
+                if use_weighted:
+                    weights = importance_tracker.case_view_weights(train_loader.dataset)
+                else:
+                    weights = torch.ones(len(train_loader.dataset), dtype=torch.float64)
+                train_loader.sampler.update_weights(weights)
+                train_loader.sampler.set_epoch(epoch)
+            elif isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
                 state,
@@ -1008,6 +1173,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        importance_tracker=importance_tracker,
+                        distributed_state=state,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1160,6 +1327,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if importance_tracker is not None and state.is_main:
+                tracker_metrics = importance_tracker.diagnostic_metrics()
+                tracker_metrics["vol_emphasis/sampler_weighted_active"] = (
+                    1.0 if epoch >= config.vol_emphasis_warmup_epochs else 0.0
+                )
+                log_metrics.update(tracker_metrics)
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
