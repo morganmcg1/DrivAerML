@@ -137,6 +137,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_pressure_target_transform: str = "none"
+    vol_pressure_log_scale: float = 25.0
     debug: bool = False
 
 
@@ -219,6 +221,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_pressure_target_transform": (
+            "Target transform mode for volume_pressure only. 'none' "
+            "(default) keeps the existing standardised-MSE loss. "
+            "'signed_log1p' applies y' = sign(y) * log1p(|y|/scale) to "
+            "both target (in Pa) and prediction (after inverse-normalising "
+            "to Pa), then computes MSE in that transformed space. "
+            "Compresses the heavy-tailed |p| distribution so high-magnitude "
+            "wake samples are not drowned out by the low-magnitude bulk. "
+            "Surface targets and wall_shear are untouched."
+        ),
+        "vol_pressure_log_scale": (
+            "Pa scale used inside the signed_log1p transform: "
+            "y' = sign(y) * log1p(|y|/scale). Only consulted when "
+            "--vol-pressure-target-transform=signed_log1p. Typical Pa range "
+            "for DrivAerML volume pressure is roughly [-300, +200]; "
+            "suggested scales 10/25/50. Default 25.0."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -300,6 +319,43 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+VOL_PRESSURE_TARGET_TRANSFORMS = ("none", "signed_log1p")
+
+
+def signed_log1p(y: torch.Tensor, scale: float) -> torch.Tensor:
+    return torch.sign(y) * torch.log1p(y.abs() / scale)
+
+
+def signed_expm1(y: torch.Tensor, scale: float) -> torch.Tensor:
+    return torch.sign(y) * scale * torch.expm1(y.abs())
+
+
+def _volume_pressure_loss(
+    *,
+    volume_pred_norm: torch.Tensor,
+    batch,
+    transform: TargetTransform,
+    target_transform: str,
+    log_scale: float,
+) -> torch.Tensor:
+    """Volume-pressure MSE in either normalised or signed-log1p Pa space."""
+    if target_transform == "none":
+        volume_target = transform.apply_volume(batch.volume_y)
+        return masked_mse(volume_pred_norm, volume_target, batch.volume_mask)
+    if target_transform == "signed_log1p":
+        # Operate on Pa-space target and Pa-space prediction (after inverting
+        # the standard mean/std normalisation that the model head produces).
+        volume_pred_pa = transform.invert_volume(volume_pred_norm)
+        volume_target_pa = batch.volume_y
+        y_t = signed_log1p(volume_target_pa, log_scale)
+        y_p = signed_log1p(volume_pred_pa, log_scale)
+        return masked_mse(y_p, y_t, batch.volume_mask)
+    raise ValueError(
+        f"Unknown vol_pressure_target_transform={target_transform!r}; "
+        f"expected one of {VOL_PRESSURE_TARGET_TRANSFORMS}"
+    )
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,10 +366,12 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_pressure_target_transform: str = "none",
+    vol_pressure_log_scale: float = 25.0,
+    log_per_component_grad_norms: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
-    volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -330,18 +388,50 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        volume_loss = _volume_pressure_loss(
+            volume_pred_norm=out["volume_preds"],
+            batch=batch,
+            transform=transform,
+            target_transform=vol_pressure_target_transform,
+            log_scale=vol_pressure_log_scale,
+        )
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if log_per_component_grad_norms:
+        # Per-component gradient norms at the model output tensors. Computed
+        # only when explicitly requested (signed_log1p instrumentation):
+        # ∂volume_loss/∂volume_preds and ∂surface_loss/∂surface_preds.
+        # retain_graph=True keeps the graph alive for the main loss.backward().
+        try:
+            vp_out_grad = torch.autograd.grad(
+                volume_loss, out["volume_preds"],
+                retain_graph=True, create_graph=False, only_inputs=True,
+            )[0]
+            sp_out_grad = torch.autograd.grad(
+                surface_loss, out["surface_preds"],
+                retain_graph=True, create_graph=False, only_inputs=True,
+            )[0]
+            metrics["vol_p_grad_norm"] = float(
+                vp_out_grad.detach().float().pow(2).sum().sqrt().item()
+            )
+            metrics["surface_p_grad_norm"] = float(
+                sp_out_grad.detach().float().pow(2).sum().sqrt().item()
+            )
+        except RuntimeError as exc:
+            metrics["vol_p_grad_norm"] = float("nan")
+            metrics["surface_p_grad_norm"] = float("nan")
+            metrics["per_component_grad_norm_error"] = str(exc)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -353,6 +443,9 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    vol_pressure_target_transform: str = "none",
+    vol_pressure_log_scale: float = 25.0,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -364,7 +457,6 @@ def per_task_train_losses(
 
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
-    volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -377,7 +469,13 @@ def per_task_train_losses(
         taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
         tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
         tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
-        vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        vp_loss = _volume_pressure_loss(
+            volume_pred_norm=out["volume_preds"],
+            batch=batch,
+            transform=transform,
+            target_transform=vol_pressure_target_transform,
+            log_scale=vol_pressure_log_scale,
+        )
     return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
 
 
@@ -699,6 +797,20 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        if config.vol_pressure_target_transform not in VOL_PRESSURE_TARGET_TRANSFORMS:
+            raise ValueError(
+                f"--vol-pressure-target-transform must be one of "
+                f"{VOL_PRESSURE_TARGET_TRANSFORMS}; got "
+                f"{config.vol_pressure_target_transform!r}"
+            )
+        if (
+            config.vol_pressure_target_transform != "none"
+            and config.vol_pressure_log_scale <= 0.0
+        ):
+            raise ValueError(
+                "--vol-pressure-log-scale must be > 0 when "
+                "--vol-pressure-target-transform != 'none'"
+            )
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
         requested_epochs = config.epochs
@@ -861,6 +973,49 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/vol_pressure_target_transform"] = config.vol_pressure_target_transform
+            wandb.summary["loss/vol_pressure_log_scale"] = config.vol_pressure_log_scale
+
+        if config.vol_pressure_target_transform != "none" and state.is_main:
+            print(
+                f"Volume-pressure target transform: "
+                f"{config.vol_pressure_target_transform} "
+                f"(scale={config.vol_pressure_log_scale} Pa)"
+            )
+            try:
+                sanity_iter = iter(train_loader)
+                sanity_batch = next(sanity_iter).to(device)
+                with torch.no_grad():
+                    raw_pa = sanity_batch.volume_y[sanity_batch.volume_mask].detach().float().cpu()
+                    transformed = signed_log1p(raw_pa, config.vol_pressure_log_scale).detach().cpu()
+                print(
+                    f"Sanity (volume_y): n={raw_pa.numel():d} "
+                    f"raw_pa min={raw_pa.min().item():.2f} max={raw_pa.max().item():.2f} "
+                    f"mean={raw_pa.mean().item():.2f} std={raw_pa.std().item():.2f} "
+                    f"abs_p99={raw_pa.abs().quantile(0.99).item():.2f}"
+                )
+                print(
+                    f"Sanity (signed_log1p): "
+                    f"min={transformed.min().item():.4f} max={transformed.max().item():.4f} "
+                    f"mean={transformed.mean().item():.4f} std={transformed.std().item():.4f} "
+                    f"abs_p99={transformed.abs().quantile(0.99).item():.4f}"
+                )
+                wandb.log(
+                    {
+                        "sanity/vol_p_raw_pa_hist": wandb.Histogram(raw_pa.numpy()),
+                        "sanity/vol_p_transformed_hist": wandb.Histogram(transformed.numpy()),
+                        "sanity/vol_p_raw_pa_min": float(raw_pa.min().item()),
+                        "sanity/vol_p_raw_pa_max": float(raw_pa.max().item()),
+                        "sanity/vol_p_raw_pa_abs_p99": float(raw_pa.abs().quantile(0.99).item()),
+                        "sanity/vol_p_transformed_min": float(transformed.min().item()),
+                        "sanity/vol_p_transformed_max": float(transformed.max().item()),
+                        "sanity/vol_p_transformed_abs_p99": float(transformed.abs().quantile(0.99).item()),
+                        "global_step": 0,
+                    }
+                )
+                del sanity_batch, sanity_iter, raw_pa, transformed
+            except Exception as exc:  # noqa: BLE001
+                print(f"Warning: failed to log signed_log1p sanity histograms: {exc}")
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -917,7 +1072,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        vol_pressure_target_transform=config.vol_pressure_target_transform,
+                        vol_pressure_log_scale=config.vol_pressure_log_scale,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1008,6 +1169,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_pressure_target_transform=config.vol_pressure_target_transform,
+                        vol_pressure_log_scale=config.vol_pressure_log_scale,
+                        log_per_component_grad_norms=(
+                            config.vol_pressure_target_transform != "none"
+                        ),
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1048,6 +1214,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "vol_p_grad_norm" in batch_loss_metrics:
+                        train_log["train/vol_p_grad_norm"] = batch_loss_metrics["vol_p_grad_norm"]
+                        train_log["train/surface_p_grad_norm"] = batch_loss_metrics["surface_p_grad_norm"]
+                        sp_norm = batch_loss_metrics["surface_p_grad_norm"]
+                        if math.isfinite(sp_norm) and sp_norm > 0.0:
+                            train_log["train/vol_to_surface_grad_ratio"] = (
+                                batch_loss_metrics["vol_p_grad_norm"] / sp_norm
+                            )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
