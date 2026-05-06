@@ -58,8 +58,8 @@ In-wave val target: **6.5789%** (PR #741 nezuko, EP22, run `lszc4ri7`)
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
 | #741 | `lszc4ri7` | nezuko | EP22 (best) | **6.5789%** | Y-axis symmetry aug; EP22=6.5789% wave leader; C6 trough confirmed; wsz=10.0085%; oscillation dampening; LR at ~40% decay; run continuing toward EP30-35 |
-| #745 | `co0xlqap` | frieren | EP14 (best) | **6.6128%** | 5L STRING PE; EP14=6.6128% clean monotonic descent; vp=3.8533% excellent; wsz=10.2301% slope -0.0169pp/ep; EP22 forecast ~6.524% if slope holds |
+| #745 | `co0xlqap` | frieren | EP15 (best) | **6.5913%** | 5L STRING PE; EP15=6.5913% clean monotonic descent, rate accelerating (-0.0216pp/ep); wsz=10.1822%; 0.0124pp behind nezuko wave-best; projected to overtake by EP16; EP20 forecast ~6.483–6.511% |
 | #740 Arm B | `5x8wofzm` | fern | EP6 (best) | **6.6648%** | GradNorm α=0.5; Arm A killed EP5; EP6=6.6648% sub-10% wsz=9.8962% (earliest in wave); continuing solo to EP31 |
 | #749 | `oi2a01zy` | tanjiro | EP21 (best) | **6.8907%** | Lion lr=9e-5 control; EP21=6.8907% clean descent; wsz=10.492% slope decelerating; running to EP50 terminal auto-eval |
 
-_Last updated: 2026-05-06 08:45Z_
+_Last updated: 2026-05-06 09:05Z_
