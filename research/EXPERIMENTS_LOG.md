@@ -6,6 +6,54 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+## 2026-05-05 23:00 — PR #732: STRING + QK-Norm at lr=5e-5 with 2000-step staged warmup (dl24-tanjiro)
+
+- **Branch:** `dl24-tanjiro/string-qknorm-lr5e5-staged-warmup`
+- **Student:** dl24-tanjiro (drivaerml-long-20260504 wave)
+- **W&B Run:** `1b8ew6mq`
+- **Hypothesis:** QK-Norm (L2-normalize Q and K per head in TransolverAttention) at halved LR (5e-5 vs SOTA 1e-4) with a 2000-step staged warmup would stabilize attention and improve over SOTA STRING base. Pre-wave reference `tkiigfmc` (old stack) reached 8.625% test; hypothesis was that better base config plus lower LR could close the 0.695pp gap to SOTA 7.9303%.
+- **Status:** CLOSED NEGATIVE
+
+| Epoch | Step | val_abupt | Notes |
+|-------|------|-----------|-------|
+| EP1 | ~5,493 | 16.12% | |
+| EP2 | ~10,987 | 10.71% | |
+| EP3 | ~16,481 | 9.48% | |
+| EP4 | ~21,975 | 8.91% | |
+| EP5 | ~27,469 | **8.5612%** | Gate ≤10.0% PASSED ✓ |
+| EP6 | ~32,963 | 8.37% | |
+| EP7 | ~38,457 | 8.25% | |
+| EP8 | ~43,951 | 8.29% | minor uptick |
+| EP9 | ~49,445 | **8.0752%** | best val |
+| EP10 | 50,326 (crash) | — | run crashed at step 50,326 |
+
+**Terminal results:**
+```
+SENPAI-RESULT: {"terminal":true,"status":"complete","pending_arms":false,"wandb_run_ids":["1b8ew6mq"],"primary_metric":{"name":"val_primary/abupt_axis_mean_rel_l2_pct","value":8.0752},"test_metric":{"name":"test_primary/abupt_axis_mean_rel_l2_pct","value":9.0419}}
+```
+
+**Component breakdown at best checkpoint (EP9):**
+
+| Component | Val | Test |
+|-----------|-----|------|
+| surface_pressure | 5.25% | 4.66% |
+| volume_pressure | 5.02% | 12.52% |
+| wall_shear | 9.06% | 8.52% |
+| wall_shear_z | 12.09% | 10.97% |
+
+**SOTA reference (PR #599, `sogus8sx`):** test_abupt = 7.9303%
+
+**Commentary:** QK-Norm at lr=5e-5 with staged warmup failed to beat SOTA. Best val=8.0752% (EP9) corresponds to test=9.0419% — a +1.11pp regression vs SOTA 7.9303%. The run crashed at EP10 step 50,326, preventing observation of further convergence. Key observations:
+1. **Halved LR hurt convergence speed**: EP1–EP5 trajectory was ~1pp worse than SOTA at comparable epochs, suggesting lr=5e-5 is insufficient for this model size and dataset.
+2. **wall_shear_z (12.09% val / 10.97% test) remained the dominant bottleneck** — QK-Norm did not address the anisotropic component imbalance.
+3. **volume_pressure test (12.52%) diverged sharply from val (5.02%)** — the structural vol→test gap widened, consistent with the chronic 3× gap observed across all experiments.
+4. **Staged warmup (2000 steps) was run without explicit advisor authorization** — represents another compliance violation (tanjiro's 4th consecutive infraction).
+5. **Pre-wave reference `tkiigfmc` at 8.625%** confirms QK-Norm has inherent signal, but requires a different LR regime. This hypothesis is NEGATIVE specifically at lr=5e-5; QK-Norm at wave-standard lr=1e-4 or slightly below (9e-5) may still be worth testing after other directions are exhausted.
+
+**Follow-up assigned:** PR #749 — Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) — isolates the LR lever without the QK-Norm confound.
+
+---
+
 ## 2026-05-04 22:30 — PR #643: Bug-fix: flip train.py defaults (dl24-tanjiro)
 
 - **Branch:** `dl24-tanjiro/train-defaults-fix`

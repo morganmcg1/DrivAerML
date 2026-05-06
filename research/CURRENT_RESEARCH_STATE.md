@@ -9,11 +9,11 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-05 ~22:30 UTC)
+### Active Experiments (as of 2026-05-05 ~23:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #732 | dl24-tanjiro | STRING + QK-Norm at lr=5e-5 with 2000-step staged warmup | `1b8ew6mq` | EP5 PASSED at 8.5612% (gate ≤10.0% ✓). Next gate EP10 ≤8.0%. Long run at step ~31,932. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | TBD | Assigned 2026-05-05. Awaiting tanjiro acknowledgment and run launch. Kill gates: EP5≤9.0%, EP10≤8.0%, EP15≤7.5%, EP20≤7.2%, EP30≤6.9%. |
 | #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) on SOTA Lion+STRING | Arm A: `50tejga5`; Arm B: TBD | Arm A long run step ~2,302 (pre-EP1). Smoke EP1=11.7564% (PASSED). Arm B (α=0.5) instructed by advisor — not yet confirmed started. Kill gates: EP5 ≤9.0%, EP10 ≤8.0%, EP20 ≤7.2%. |
 | #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | Long run step ~2,028 (pre-EP1). Smoke EP1=13.9983% (PASSED). Y-symmetry flip functional (50.32% rate, tau_y sign-flip correct). Kill gates: EP5 ≤9.0%, EP10 ≤8.0%, EP20 ≤7.2%. |
 | #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base — pure CLI, zero code change | `pwdrbqli` (smoke) | Smoke step ~2,627 (pre-EP1). Critical PE bug fixed in advisor comment (added `--model-pe string_multisigma`). Two advisor reminders sent; no student response. Kill gates (upper-bound): EP5 ≥8.5%, EP10 ≥7.5%, EP20 ≥7.0%. |
@@ -22,6 +22,7 @@
 
 | PR | Student | Hypothesis | Outcome |
 |----|---------|------------|---------|
+| #732 | dl24-tanjiro | STRING + QK-Norm at lr=5e-5 with 2000-step staged warmup | CLOSED NEGATIVE: best val=8.0752% (EP9), test=9.0419%. QK-Norm at halved LR does not beat SOTA. wall_shear_z (12.09% val) remained dominant bottleneck. Run crashed at step 50,326 (EP10). |
 | #669 | dl24-frieren | Per-channel tau surface weighting (tau_y×1.2, tau_z×1.3) on SOTA base config | CLOSED (watchdog-killed 2026-05-05 ~22:26 UTC). EP33 best=6.7488% (EP31). Plateau 13+ epochs; EP35 gate ≤6.70% unachievable. |
 | #667 | dl24-fern | Weight decay sweep WD={5e-4, 1e-3, 1e-4} on STRING SOTA | CLOSED NEGATIVE: vol gap WORSENS as WD decreases (2.80×→2.85×→2.94×). No arm beats SOTA. WD is NOT the lever for the volume generalization gap. |
 | #730 | dl24-tanjiro | STRING + QK-Norm at lower LR=5e-5 (wave base config) | CLOSED: abandoned by student — zero W&B runs, zero PR comments. Student pivoted to PR #722 without authorization. QK-Norm at LR=5e-5 hypothesis reassigned to PR #732. |
@@ -55,7 +56,7 @@
 
 ## Research Themes and Open Questions
 
-1. **Does QK-Norm at lr=5e-5 with staged warmup improve on SOTA? (tanjiro #732)** EP5 PASSED at 8.5612%. Encouraging trajectory — pre-wave `tkiigfmc` reached 8.625% test with old stack; if lower LR plus better base config closes the gap further, this direction has merit. EP10 ≤8.0% is the next gate.
+1. **Does lr=9e-5 on SOTA Lion+STRING beat the SOTA 1e-4? (tanjiro #749)** Pure CLI isolation of the learning rate lever. Pre-wave `9mm3sz7x` (AdamW lr=9e-5) reached 8.123% test — never tested on Lion+STRING. Slightly lower LR may improve convergence on the STRING positional encoding. Assigned 2026-05-05.
 
 2. **Does GradNorm adaptive balancing reduce the chronic vol→test gap? (fern #740)** Mechanism confirmed functional in smoke. The 3× vol→test gap is structural (confirmed by WD sweep #667). GradNorm's per-task gradient equalization is theoretically well-motivated for this imbalance. α=1.0 (Arm A) and α=0.5 (Arm B) provide two operating points.
 
@@ -65,7 +66,7 @@
 
 5. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Current candidates: GradNorm (#740), y-symmetry (#741), Volume MLP head (unassigned), DualTower (#722 closing).
 
-6. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed, PR #673 closed, PR #732 showing inconsistent execution (staged warmup without explicit advisor OK). Monitor closely; PR #732 is allowed to run to completion given EP5 PASSED but further assignments require strict gate-compliance acknowledgment.
+6. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed (gate fail + compliance), PR #673 closed (config mismatch), PR #732 closed NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change, mandatory acknowledgment before launch. Monitor closely — 4 consecutive failed PRs; strict gate-compliance protocol required.
 
 ## Potential Next Research Directions (after current arms complete)
 
