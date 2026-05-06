@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-06 (updated ~00:30 UTC)
+- 2026-05-06 (updated ~02:00 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,15 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-06 ~00:30 UTC)
+### Active Experiments (as of 2026-05-06 ~02:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | EP1=12.108%, EP2=9.262%. Trajectory matches SOTA early. EP5 gate (≤9.0%) pending. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — running 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | EP3 both arms healthy. **Arm B (α=0.5) leading by ~0.10pp every epoch.** EP3: A=7.1901%, B=7.0931%. GradNorm weights: τ_z up-weighted (3.30× cp in A, 2.30× in B). EP5 formal gate report pending. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP7 = 7.3192% — NEW BEST.** Trajectory: EP4=7.654 (best) → EP5=8.027 → EP6=8.149 (saddle) → EP7=7.319 (recovery). Saddle-traversal confirmed; augmentation working. Continue to EP10. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `txkcd167` | EP4=7.085%. EP5 gate (≤8.5%) cleared early. ~+0.40pp/epoch slope. Continue to EP10. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `txkcd167` | **EP5=6.910%** — EP5 gate ≤8.5% PASSED ✓ (1.59pp margin). Sub-metrics: surface=4.509%, vol=3.994%, τ_z=10.522%. Continue to EP10. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP7=7.319%** — saddle traversal confirmed (EP5=8.027%, EP6=8.149%, EP7 breakthrough). Continue to EP10; gate ≤7.5%. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — running 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | EP3 both arms healthy. **Arm B (α=0.5) leading by ~0.10pp every epoch.** EP3: A=7.190%, B=7.093%. GradNorm weights: τ_z up-weighted. EP5 formal gate report pending. |
+| #737 | dl24-nezuko | Region-weighted VP loss: near-wake volume upweighting (w_near=1.5) | `r1eddah6` | EP1=27.78% (expected — large EP1→EP2 drop normal). v3 fix confirmed (vol_near_mask_frac=7.50%). EP2 gate ≤12% pending at step ~21,729. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | EP1=12.108%, EP2=9.262%. Trajectory matches SOTA early. EP5 gate (≤9.0%) pending. Strict compliance protocol in effect. |
 
 ### Closed / Negative Results This Wave
 
@@ -56,17 +57,19 @@
 
 ## Research Themes and Open Questions
 
-1. **Does lr=9e-5 on SOTA Lion+STRING beat the SOTA 1e-4? (tanjiro #749)** Pure CLI isolation of the learning rate lever. Pre-wave `9mm3sz7x` (AdamW lr=9e-5) reached 8.123% test — never tested on Lion+STRING. Slightly lower LR may improve convergence on the STRING positional encoding. Assigned 2026-05-05.
+1. **Does 5L STRING add a meaningful gain over 4L STRING? (frieren #745)** EP5=6.910% is highly promising — already below SOTA val best=6.5281% is the target; vol=3.994% notably better than 4L baselines suggesting depth helps volume generalization. Continuing to EP10 for terminal test evaluation.
 
-2. **Does GradNorm adaptive balancing reduce the chronic vol→test gap? (fern #740)** Mechanism confirmed functional in smoke. The 3× vol→test gap is structural (confirmed by WD sweep #667). GradNorm's per-task gradient equalization is theoretically well-motivated for this imbalance. α=1.0 (Arm A) and α=0.5 (Arm B) provide two operating points.
+2. **Does y-symmetry augmentation improve volume generalization? (nezuko #741)** EP7=7.319% after saddle traversal (EP5-6 plateau). Augmentation confirmed working; the saddle pattern is consistent with meaningful learning dynamics. Continuing to EP10.
 
-3. **Does y-symmetry augmentation improve volume generalization? (nezuko #741)** Physics-valid 2× effective training set. tau_y sign-flip confirmed correct. Expected to help on volume (most under-represented) rather than surface. Smoke functional; long run pre-EP1.
+3. **Does GradNorm adaptive balancing reduce the chronic vol→test gap? (fern #740)** Arm B (α=0.5, EP3=7.093%) leads Arm A (α=1.0, EP3=7.190%) by ~0.10pp per epoch. τ_z consistently up-weighted by GradNorm (3.30× in Arm A, 2.30× in Arm B). EP5 formal gate report pending.
 
-4. **Does 5L STRING add the same gain as 4L STRING did? (frieren #745)** Pre-wave `70lnb3dt` test=8.769%. 3→4L was +0.549pp. 4→5L pure CLI, zero code. Model grows ~12.93M→~16M params. Smoke running; critical PE flag bug fixed before launch.
+4. **Does near-wake VP upweighting help volume generalization? (nezuko #737)** v3 fix confirmed working (vol_near_mask_frac=7.50%). EP1=27.78% — normal for architecture warmup. EP2 gate ≤12% will determine viability.
 
-5. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Current candidates: GradNorm (#740), y-symmetry (#741), Volume MLP head (unassigned), DualTower (#722 closing).
+5. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749)** EP2=9.262% matches SOTA early trajectory. EP5 gate ≤9.0% pending. Pure CLI isolation.
 
-6. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed (gate fail + compliance), PR #673 closed (config mismatch), PR #732 closed NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change, mandatory acknowledgment before launch. Monitor closely — 4 consecutive failed PRs; strict gate-compliance protocol required.
+6. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Current candidates: GradNorm (#740), y-symmetry (#741), Region-VP (#737), Volume MLP head (unassigned).
+
+7. **Tanjiro compliance track:** PR #730 abandoned, PR #696 closed (gate fail + compliance), PR #673 closed (config mismatch), PR #732 CLOSED NEGATIVE (val=8.0752%, test=9.0419%; crashed EP10; staged warmup without explicit advisor OK). PR #749 assigned: pure CLI, zero-code change, mandatory acknowledgment before launch. Monitor closely — 4 consecutive failed PRs; strict gate-compliance protocol required.
 
 ## Potential Next Research Directions (after current arms complete)
 
