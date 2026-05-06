@@ -96,6 +96,7 @@ class Config:
     model_pe: str = "sincos"
     pe_num_features: int = 16
     pe_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
+    model_qk_norm: bool = False
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
@@ -195,6 +196,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        qk_norm=config.model_qk_norm,
     )
 
 
