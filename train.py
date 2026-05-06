@@ -1112,6 +1112,7 @@ class Config:
     volume_loss_weight: float = 1.0
     aux_rel_l2_weight: float = 0.0
     use_tangential_wallshear_loss: bool = False
+    wallshear_normal_penalty_weight: float = 0.0
     wallshear_y_weight: float = 1.0
     wallshear_z_weight: float = 1.0
     wallshear_huber_delta: float = 0.0
@@ -2034,6 +2035,7 @@ def train_loss(
     volume_loss_weight: float = 1.0,
     aux_rel_l2_weight: float = 0.0,
     use_tangential_wallshear_loss: bool = False,
+    wallshear_normal_penalty_weight: float = 0.0,
     wallshear_y_weight: float = 1.0,
     wallshear_z_weight: float = 1.0,
     wallshear_huber_delta: float = 0.0,
@@ -2111,6 +2113,21 @@ def train_loss(
             )
             volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         loss = surface_loss_weight * surface_loss + volume_loss_weight * volume_loss
+        normal_penalty_value: float | None = None
+        if wallshear_normal_penalty_weight > 0.0:
+            normals = batch.surface_x[..., 3:6]
+            n_hat = F.normalize(normals.float(), dim=-1, eps=1e-8)
+            ws_std = transform.surface_y_std[1:4].to(surface_pred_norm.device)
+            ws_mean = transform.surface_y_mean[1:4].to(surface_pred_norm.device)
+            ws_pred_phys = surface_pred_norm[..., 1:4].float() * ws_std + ws_mean
+            normal_component = (ws_pred_phys * n_hat).sum(dim=-1)
+            mask_f = batch.surface_mask.float()
+            penalty_num = (normal_component.pow(2) * mask_f).sum()
+            penalty_den = mask_f.sum().clamp_min(1.0)
+            normal_penalty = penalty_num / penalty_den
+            loss = loss + wallshear_normal_penalty_weight * normal_penalty.to(loss.dtype)
+            normal_penalty_value = float(normal_penalty.detach().cpu().item())
+            normal_rms = math.sqrt(max(normal_penalty_value, 0.0))
         aux_rel_l2_value: float | None = None
         if aux_rel_l2_weight > 0.0:
             surf_pred_f = surface_pred_norm.float()
@@ -2133,6 +2150,9 @@ def train_loss(
         metrics["aux_rel_l2_loss"] = aux_rel_l2_value
     if use_tangential_wallshear_loss and not use_beta_nll:
         metrics["wallshear_pred_normal_rms"] = normal_rms
+    if wallshear_normal_penalty_weight > 0.0 and normal_penalty_value is not None:
+        metrics["wallshear_pred_normal_rms"] = normal_rms
+        metrics["wallshear_pred_normal_penalty"] = normal_penalty_value
     if use_beta_nll and per_axis_log_var is not None:
         metrics["log_var_surface_pressure"] = per_axis_log_var[0]
         metrics["log_var_wall_shear_x"] = per_axis_log_var[1]
@@ -2830,6 +2850,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 volume_loss_weight=config.volume_loss_weight,
                 aux_rel_l2_weight=config.aux_rel_l2_weight,
                 use_tangential_wallshear_loss=config.use_tangential_wallshear_loss,
+                wallshear_normal_penalty_weight=config.wallshear_normal_penalty_weight,
                 wallshear_y_weight=config.wallshear_y_weight,
                 wallshear_z_weight=config.wallshear_z_weight,
                 wallshear_huber_delta=config.wallshear_huber_delta,
@@ -3016,6 +3037,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             if "wallshear_pred_normal_rms" in batch_loss_metrics:
                 train_log["train/wallshear_pred_normal_rms"] = batch_loss_metrics[
                     "wallshear_pred_normal_rms"
+                ]
+            if "wallshear_pred_normal_penalty" in batch_loss_metrics:
+                train_log["train/wallshear_pred_normal_penalty"] = batch_loss_metrics[
+                    "wallshear_pred_normal_penalty"
                 ]
             if "aux_rel_l2_loss" in batch_loss_metrics:
                 train_log["train/aux_rel_l2_loss"] = batch_loss_metrics[
