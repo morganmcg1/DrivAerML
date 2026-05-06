@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 (edward reassigned to PR #757 grad-consistency; PR #735 TTA closed negative; PR #737 Arm A diagnostic complete)
+- **Date:** 2026-05-07 (PR #738 tanjiro closed null; PR #758 tanjiro assigned gradnorm-alpha sweep)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -84,7 +84,7 @@ All 8 students running:
 | fern | **#753** | Signed-log1p target transform for volume_pressure | WIP |
 | frieren | **#755** | Stochastic depth + volume-token dropout for OOD generalization | WIP |
 | nezuko | **#737** | Region-weighted volume loss: near-wake emphasis (Arm B running, C pending) | Arm A complete (val win, test regression). Arm B at EP1. |
-| tanjiro | **#738** | Train-time volume coord-noise injection | WIP |
+| tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep + min_weight=0.7 | Just assigned (PR #738 closed null — SDF precomputed contract precludes xyz noise) |
 | thorfinn | **#756** | Cosine-annealed EMA decay schedule | WIP |
 
 **Zero idle students. Zero idle GPUs.**

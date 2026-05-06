@@ -6,6 +6,34 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-07 — PR #738 tanjiro volume-coordinate Gaussian noise injection — CLOSED NULL/NEGATIVE
+
+- Branch: `tanjiro/volume-coord-noise`
+- W&B group: `tanjiro-vol-coord-noise`
+- Hypothesis: Train-time isotropic Gaussian noise on volume xyz coordinates (σ=0.005m, σ=0.020m) as geometric robustness regularizer (Bishop 1995 ↔ Tikhonov regularization on Jacobian norm). Targeting val→test volume_pressure transfer gap.
+
+| Run | W&B ID | Best Epoch | val_abupt% | val_vol_p% | test_vol_p% | test_abupt% | Notes |
+|---|---|---:|---:|---:|---:|---:|---|
+| Baseline #592 (4k25s25e) | 4k25s25e | — | 6.5985 | — | 11.933 | 7.9915 | SOTA gate |
+| Arm A σ=0.005 | jzybrknz | EP4 | 7.9998 | 9.7217 | **17.0464** | 9.2023 | timeout-killed mid-EP4 |
+| Arm B σ=0.020 | fj728edc | EP3 | 10.5977 | 22.8560 | — | — | killed EP3 gate (abupt>8%) |
+| Arm C (annealed) | — | — | — | — | — | — | CANCELLED |
+
+**Root cause (confirmed):** `volume_x[..., 3]` is precomputed SDF from `volume_sdf.npy`, not recomputable per-step. Noising `volume_x[..., :3]` (xyz) without updating SDF creates `(xyz_noisy, sdf(xyz_clean))` contradictory pairs at train vs `(xyz_clean, sdf(xyz_clean))` at eval. Regression energy scales as σ² — confirmed by Arm B (+13.1pp on val vs Arm A). Arm C cancelled (Arm B failed EP3 gate decisively at 10.60% vs required 8.0%).
+
+**Conclusion:** Pure xyz-only coordinate noise is dead-on-arrival under the precomputed-SDF data contract. Reassigned tanjiro to PR #758 (GradNorm alpha sweep).
+
+---
+
+## 2026-05-07 — PR #758 tanjiro GradNorm alpha=3.0/2.0 sweep — ASSIGNED
+
+- Branch: `tanjiro/gradnorm-alpha-sweep`
+- Hypothesis: GradNorm `ema_proxy` mode with high restoring-force alpha (α=3.0 Arm A; α=2.0 Arm B) + min_weight=0.7 floor. PR #649 tested α=1.5 (default paper value) with floor sweep; best was floor=0.7/α=1.5 at EP3 val_abupt=7.41%, val_vol_p=4.68%. No experiment has tested α above the paper's recommended 2.0 ceiling. At α=3.0, the `r_i^α` weighting would apply strong "restoring force" to vol_pressure (chronically r_i >> 1 since it lags surface_pressure). Testing whether α=3.0 can close the gradient-signal deficit.
+- Reference: PR #649 (edward, floor=0.7, α=1.5, ema_proxy): EP3 val_abupt=7.41%, val_vol_p=4.68% — did not beat SOTA. This experiment steps α to 3.0 (Arm A) and 2.0 (Arm B) with the same floor=0.7.
+- **Status:** WIP — assigned 2026-05-07
+
+---
+
 ## 2026-05-06 09:15 UTC — PR #735 edward TTA Y-mirror + coord-jitter — CLOSED NEGATIVE
 
 - Branch: `edward/tta-y-mirror-jitter`
