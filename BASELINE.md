@@ -367,8 +367,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --nproc_per_node=4 train.py \
 
 | Metric | Best (val) | Best (test) | PR | W&B run | Date |
 |---|---:|---:|---|---|---|
-| `abupt_axis_mean_rel_l2_pct` (ensemble) | **7.2733** | **8.5989** | #743 | vi2tpzbm | 2026-05-06 |
-| `abupt_axis_mean_rel_l2_pct` (single-ckpt) | **7.3033** | — | #747 | k4psxmc3 | 2026-05-06 |
+| `abupt_axis_mean_rel_l2_pct` (ensemble — multi-ckpt) | **7.2733** | **8.5989** | #743 | vi2tpzbm | 2026-05-06 |
+| `abupt_axis_mean_rel_l2_pct` (ensemble — snapshot K=5) | **7.3022** | **8.6257** | #731 | qboxdu5e | 2026-05-06 |
+| `abupt_axis_mean_rel_l2_pct` (single-ckpt) | **7.3022** | **8.6257** | #731 | qboxdu5e | 2026-05-06 |
 
 Note: PR #743 (senku, K=2 multi-checkpoint inference ensemble) merged 2026-05-06 —
 new yi SOTA at val_abupt=7.2733%, test_abupt=8.5989%. Achieved zero training cost by uniformly averaging
@@ -383,8 +384,15 @@ below AB-UPT τ_y=3.65% ratio target). W&B run: `k4psxmc3`.
 Key lesson: Unfreezing top Transolver block at 1/10 correction-MLP LR provides +0.0555pp improvement
 over frozen-backbone correction MLP (7.3588% → 7.3033%).
 
-**Merge bar (single-checkpoint): val_abupt 7.3033% (PR #747 alphonse, Stage 2 CorrectionMLP + top unfreeze).**
-**Merge bar (ensemble): val_abupt 7.2733% on the yi codebase (PR #743 senku, K=2 inference ensemble).**
+PR #731 (alphonse, EMA snapshot ensemble K=5) merged 2026-05-06 — new single-checkpoint yi SOTA
+at val_abupt=7.3022%, test_abupt=8.6257%, beating PR #747's 7.3033% by 0.0011pp. Uses 5 EMA
+snapshots saved every 2000 steps during 2-epoch continuation at lr=1e-7 from `dc031qpt`, uniformly
+averaged at inference. Variance-reduction mechanism confirmed: τ_y/τ_z benefit ~2.5× more than
+sp/vp from snapshot averaging. W&B runs: training `y2xnzk6w`, eval `qboxdu5e`.
+
+**Merge bar (single-checkpoint): val_abupt 7.3022% (PR #731 alphonse, EMA snapshot ensemble K=5).**
+**Merge bar (ensemble — snapshot): val_abupt 7.3022% (PR #731 alphonse, K=5 EMA snapshot ensemble).**
+**Merge bar (ensemble — multi-ckpt): val_abupt 7.2733% on the yi codebase (PR #743 senku, K=2 inference ensemble).**
 **Aspirational target: val_abupt ~7.0% (tay SOTA PR #511, `5o7jc7wi`).**
 
 ### PR #658 full metrics (val / test, EMA best-ckpt EP2)
