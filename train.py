@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     vol_geom_film: bool = False
+    vol_geom_film_start_epoch: int = 0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -338,6 +339,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         vol_geom_film=config.vol_geom_film,
+        vol_geom_film_start_epoch=config.vol_geom_film_start_epoch,
     )
 
 
@@ -933,6 +935,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         n_hidden_cache = config.model_hidden_dim
 
         for epoch in range(max_epochs):
+            # Propagate current epoch to base_model for delayed FiLM onset gating.
+            if config.vol_geom_film:
+                base_model._current_epoch = epoch
             if vol_points_schedule:
                 desired_vol_points = vol_points_for_epoch(
                     vol_points_schedule, epoch, config.train_volume_points
