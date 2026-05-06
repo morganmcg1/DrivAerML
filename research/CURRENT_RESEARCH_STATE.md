@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (updated ~22:30 UTC)
+- 2026-05-06 (updated ~00:30 UTC)
 - Most recent research direction from human researcher team: None (no open GitHub issues)
 
 ## Current Research Focus and Themes
@@ -9,14 +9,14 @@
 
 **Wave SOTA:** PR #599 (frieren, `sogus8sx`), test `abupt_axis_mean_rel_l2_pct` = **7.9303%**, val best = 6.5281%.
 
-### Active Experiments (as of 2026-05-05 ~23:00 UTC)
+### Active Experiments (as of 2026-05-06 ~00:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | TBD | Assigned 2026-05-05. Awaiting tanjiro acknowledgment and run launch. Kill gates: EP5≤9.0%, EP10≤8.0%, EP15≤7.5%, EP20≤7.2%, EP30≤6.9%. |
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) on SOTA Lion+STRING | Arm A: `50tejga5`; Arm B: TBD | Arm A long run step ~2,302 (pre-EP1). Smoke EP1=11.7564% (PASSED). Arm B (α=0.5) instructed by advisor — not yet confirmed started. Kill gates: EP5 ≤9.0%, EP10 ≤8.0%, EP20 ≤7.2%. |
-| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | Long run step ~2,028 (pre-EP1). Smoke EP1=13.9983% (PASSED). Y-symmetry flip functional (50.32% rate, tau_y sign-flip correct). Kill gates: EP5 ≤9.0%, EP10 ≤8.0%, EP20 ≤7.2%. |
-| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base — pure CLI, zero code change | `pwdrbqli` (smoke) | Smoke step ~2,627 (pre-EP1). Critical PE bug fixed in advisor comment (added `--model-pe string_multisigma`). Two advisor reminders sent; no student response. Kill gates (upper-bound): EP5 ≥8.5%, EP10 ≥7.5%, EP20 ≥7.0%. |
+| #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base (pure CLI, zero code change) | `oi2a01zy` | EP1=12.108%, EP2=9.262%. Trajectory matches SOTA early. EP5 gate (≤9.0%) pending. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=1.0 Arm A, α=0.5 Arm B) — running 4 GPUs each | Arm A: `aoetlx9b`; Arm B: `g18f7jm1` | EP3 both arms healthy. **Arm B (α=0.5) leading by ~0.10pp every epoch.** EP3: A=7.1901%, B=7.0931%. GradNorm weights: τ_z up-weighted (3.30× cp in A, 2.30× in B). EP5 formal gate report pending. |
+| #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7` | **EP7 = 7.3192% — NEW BEST.** Trajectory: EP4=7.654 (best) → EP5=8.027 → EP6=8.149 (saddle) → EP7=7.319 (recovery). Saddle-traversal confirmed; augmentation working. Continue to EP10. |
+| #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `txkcd167` | EP4=7.085%. EP5 gate (≤8.5%) cleared early. ~+0.40pp/epoch slope. Continue to EP10. |
 
 ### Closed / Negative Results This Wave
 
