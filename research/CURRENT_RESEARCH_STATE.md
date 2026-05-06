@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-06 11:55 UTC (Round 13 mid-flight — 7 PRs WIP + 1 new assignment, 0 review-ready, 0 idle)
+- **Date:** 2026-05-06 13:30 UTC (Round 13 mid-flight — 8 PRs WIP, 0 review-ready, 0 idle; fern #765 closed → #769 assigned)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -43,7 +43,8 @@
 - **PR #762 (edward)** — Surface curvature (H, K) from local PCA propagated to volume points. EP2 val_abupt=8.58%, mid-EP3.
 - **PR #763 (nezuko)** — Upstream-region supervised attention (x_rel ≤ 0.5, w_upstream ∈ {1.5, 2.0, 3.0} sweep). ~EP2 boundary.
 - **PR #764 (thorfinn)** — STRING spectral budget expansion (sigmas to 8-octave; rff-num-features 16→24). EP2 val_abupt=8.477% passes gate.
-- **PR #765 (fern)** — No-slice Anchor-STRING transformer (AB-UPT-lite, stabilized). Run 1b (corrected) in flight after anchor mismatch bug fix.
+- **PR #765 (fern) CLOSED NEGATIVE** — No-slice Anchor-STRING transformer (Issue #618 Exp 3). Two runs failed (`klw97qgk` EP1=54.89% per-layer-resample bug; `muthl81j` EP1=45.09% post-fix, kill-gate exceeded). Root causes: K=1024 random anchors too sparse (0.78% of points, bimodal training loss), 0.1× LR rail froze RoPE (`log_freq` norm 7.996→7.996). Fern reassigned to #769 below.
+- **PR #769 (fern) NEW** — Slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Issue #618 Exp 1). Reuses `LearnableCoordinateRoPE` from #765 but rotates slice-token Q/K with `slice_weights @ point_coords` centroids instead of random anchors. 4 arms (control / B after-QK-norm 0.5×LR / C before-QK-norm 0.5×LR / D no-diff-LR), `--wandb_group fern-slice-string-rope-v1`. Decision rule: merge if any arm beats single-model SOTA val_abupt < 6.5985%.
 - **PR #766 (alphonse) NEW** — Offline k-NN vol_pressure gradient-consistency aux loss. Revives PR #757 (edward, killed ~2.9× epoch overhead) with offline precomputed k-NN graph to achieve ~1.1–1.3× overhead. Physics-motivated: supervises ∇p field consistency, not just point-wise MSE. Applies only at epoch ≥ 9 (V=65k) to avoid k-NN remapping. λ sweep 0.05 (Arm A) / 0.01 (Arm B, if needed).
 
 **KEY DIAGNOSTIC FROM PR #737 (nezuko, just closed 2026-05-01):**
@@ -97,7 +98,7 @@ All 8 students assigned (alphonse reassigned from #760→#766 this cycle):
 | alphonse | **#760** | vol-loss-weight ablation vol_w=2.0/3.0 | WIP, Arm A `1gv5s938` EP4 landed: val_abupt=**6.98%**, vol_p=4.10% (still below SOTA 6.5985%). Run still going at step 36799/270min. Arm B halted; awaiting student final + test report. |
 | askeladd | **#752** | x-slab wake stratified vol sampling (Issue #717) | WIP, Arm B `jc2t6sxa` cleared EP3 gate: val_abupt=**7.44%**, vol_p=4.86% (passes <8% gate). Run at step 33001. Arm A closed neg test_vol_p=12.49%. |
 | edward | **#762** | Surface curvature (H, K) propagated to volume points | WIP, EP3 territory (step 21786). EP1 val_abupt=30.32% (anomalous), EP2=**8.58%, vol_p=5.20%** (passes EP2 gate cleanly). Student silent 2.5+ hr; advisor nudge posted demanding EP1/EP2 retrospective + EP3 watch. |
-| fern | **#765** | No-slice Anchor-STRING transformer (Issue #618 Exp 3) | WIP, Run 1 (`klw97qgk`) crashed at EP1=54.89% (per-layer anchor resampling bug + train/eval anchor mismatch). Student diagnosed, fixed (commit 772ae1c), 3-epoch corrected Run 1b approved. |
+| fern | **#769** | Slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Issue #618 Exp 1) | WIP, fresh assignment 13:30 UTC. Supersedes closed #765 (Exp 3 anchor-STRING; both runs failed kill gate). Reuses validated `LearnableCoordinateRoPE` module; rotates slice Q/K with differentiable `slice_weights @ point_coords` centroids; 0.5× LR rail (vs 0.1× that froze #765); 4 arms incl. control / after-QKnorm / before-QKnorm / no-diff-LR. |
 | frieren | **#761** | Dedicated 2-layer volume head (capacity-additive) | WIP, mid-EP3 (step 25743). EP2 val_abupt=8.088% (+0.15pp vs SOTA EP2 7.940%); EP3 gate <8% is tight but plausible. |
 | nezuko | **#763** | Upstream-region supervised attention (w_upstream=1.5) | WIP, ~EP2 boundary (step 21591/21729). EP1 val_abupt=27.57%; per-region: upstream 92.42% pts at 15.59% rel_l2, near 7.34% at 39.84%, far 0.23% at 203.41%. |
 | tanjiro | **#758** | GradNorm ema_proxy α=3.0/2.0 sweep | WIP, Arm A COMPLETE val_abupt=7.0798%, **test_vol_p=12.38% (worse than SOTA 11.93%)** — hypothesis NOT confirmed (tau_z is laggard, not vol_p). Arm B (`1bmbfu30`, α=2.0, floor=0.7) launched 11:11 UTC, mid-EP1 (step 1210). |
@@ -108,7 +109,7 @@ All 8 students assigned (alphonse reassigned from #760→#766 this cycle):
 **Open advisor actions (this cycle):**
 - alphonse #766: New assignment — offline k-NN grad-consistency. Student must implement precompute_vol_knn.py + new CLI flags.
 - edward #762: Advisor nudge posted at 11:42 UTC demanding retrospective EP1/EP2 reports + EP3 status.
-- fern #765: approved corrected Run 1b (3 epochs, single-anchor-resample fix); EP1 ETA ~12:43 UTC.
+- fern #769: New assignment — slice-centroid STRING-RoPE (Issue #618 Exp 1). Supersedes closed #765.
 - All other PRs: gate-watching at EP2/EP3 thresholds; passive.
 
 **Issue #717 status:** No arm has yet beaten the weak win gate `test_vol_p < 11.374%`. Tanjiro Arm A (12.38%), askeladd Arm A (12.49%), and alphonse #760 (12.20%) all regress. The remaining six in-flight arms plus new #766 are the live attempt set.

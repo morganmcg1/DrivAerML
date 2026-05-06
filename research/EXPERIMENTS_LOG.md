@@ -6,6 +6,35 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 13:30 — PR #769 fern slice-centroid Learnable-STRING-RoPE on Transolver Q/K (Issue #618 Exp 1) — ASSIGNED
+
+- Branch: `fern/slice-centroid-string-rope`
+- Issue: #618 Experiment 1
+- Hypothesis: Inject true coordinate-dependent group action at the only place attention is computed inside Transolver — slice-token Q/K — by rotating with `LearnableCoordinateRoPE` indexed by differentiable slice centroids (`slice_weights @ point_coords`). Keeps the SOTA Transolver slice mechanism intact, multi-sigma init `0.25,0.5,1.0,2.0,4.0`, learnable per-axis log_freq + phase. Supersedes the closed Exp 3 (PR #765 anchor-STRING).
+- Run plan: Arm A control / Arm B `--slice-string-rope` after-QK-norm @ 0.5× LR / Arm C before-QK-norm @ 0.5× LR / Arm D after-QK-norm at 1.0× LR (no diff-LR); `--wandb_group fern-slice-string-rope-v1`.
+- Rails: 0.5× LR multiplier on the new RoPE module (NOT 0.1× — that froze #765); grad-clip 0.5; kill gates EP1>35% / EP2>12% / EP3>8%.
+- Decision rule: merge if any arm beats single-model SOTA val_abupt < 6.5985%; promising if matched control beaten by ≥0.15pp or vol_pressure val improves ≥0.2pp without aggregate damage.
+- Status: WIP — assigned 2026-05-06 UTC
+
+---
+
+## 2026-05-06 13:25 — PR #765 fern AnchorSTRING / AB-UPT-lite (Issue #618 Exp 3) — CLOSED NEGATIVE
+
+- Branch: `fern/anchor-string`
+- Issue: #618 Experiment 3
+- Hypothesis: Replace Transolver slice bottleneck with K=1024 coordinate-bearing anchor tokens + `LearnableCoordinateRoPE` on Q/K.
+- Runs:
+  - `klw97qgk` — EP1 val_abupt=54.89% (architectural bug: per-layer anchor resampling, train/eval randperm-vs-stride mismatch)
+  - `muthl81j` — EP1 val_abupt=45.09% → killed (>35% kill gate). Architectural fix landed (anchor_idx sampled once per forward, randperm both train+eval) but result still failed.
+- Root causes:
+  1. Anchor sparsity — K=1024 random anchors = 0.78% of ~131k points; bimodal train loss (37.5% steps <0.15 lucky draws, 56.6% steps ≥0.3 unlucky), persisted after consistency fix. Per-step random-anchor variance washed out gradient signal — fundamentally wrong primitive vs AB-UPT's UNet-style multi-scale supernode pooling.
+  2. 0.1× LR rail froze RoPE — `log_freq` norm barely moved from init (7.996→7.996), grad_to_param_norm ~6.4e-4. RoPE never differentiated per-axis frequencies.
+- Stability: nonfinite_count=0 throughout, grad norms ~7.9, no NaN/Inf — gradients were healthy, the LR rail was over-conservative.
+- Conclusion: Architecture+rails both wrong. Module (`LearnableCoordinateRoPE`) is sound and reusable.
+- Next: Issue #618 Exp 1 (slice-centroid STRING-RoPE) — assigned as PR #769 with 0.5× LR rail and dense slice centroids replacing random anchors.
+
+---
+
 ## 2026-05-06 12:45 — PR #752 askeladd x-slab wake stratified vol sampling (Exp 1C P4) — CLOSED NEGATIVE
 
 - Branch: `askeladd/wake-x-stratified-sampling`
