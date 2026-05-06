@@ -51,15 +51,15 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.5405%** (PR #741 nezuko, EP24, run `lszc4ri7`)
+In-wave val target: **6.5386%** (PR #741 nezuko, EP25, run `lszc4ri7`)
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #741 | `lszc4ri7` | nezuko | EP24 (best) | **6.5405%** | Y-axis symmetry aug; EP24=6.5405% wave leader; C7 trough confirmed; wsz=9.9925% (sub-10% achieved); vp=3.7977%; within 0.012pp of SOTA val_best 6.5281%; run continuing toward EP30-35 |
-| #745 | `co0xlqap` | frieren | EP15 (best) | **6.5913%** | 5L STRING PE; EP15=6.5913% clean monotonic descent, rate accelerating (-0.0216pp/ep); wsz=10.1822%; 0.0124pp behind nezuko wave-best; projected to overtake by EP16; EP20 forecast ~6.483–6.511% |
-| #740 Arm B | `5x8wofzm` | fern | EP6 (best) | **6.6648%** | GradNorm α=0.5; Arm A killed EP5; EP6=6.6648% sub-10% wsz=9.8962% (earliest in wave); continuing solo to EP31 |
-| #749 | `oi2a01zy` | tanjiro | EP21 (best) | **6.8907%** | Lion lr=9e-5 control; EP21=6.8907% clean descent; wsz=10.492% slope decelerating; running to EP50 terminal auto-eval |
+| #741 | `lszc4ri7` | nezuko | EP25 (best) | **6.5386%** | Y-axis symmetry aug; EP25=6.5386% wave leader; steps_per_epoch=5489; still descending; 0.038pp above SOTA val_best 6.5281%; run continuing |
+| #745 | `co0xlqap` | frieren | EP17 (best) | **6.5694%** | 5L STRING PE; EP17=6.5694%; steps_per_epoch=5494; 0.031pp behind nezuko wave-best; still descending |
+| #740 Arm B | `5x8wofzm` | fern | EP6 (best) | **6.6648%** | GradNorm α=0.5; steps_per_epoch=10987; EP7 regressed to 6.9470% (major +0.2822pp spike — possible cosine LR oscillation); monitoring EP8 |
+| #749 | `oi2a01zy` | tanjiro | EP25 (best) | **6.8718%** | Lion lr=9e-5 control; EP25=6.8718%; steps_per_epoch=5494; very flat improvement curve since EP15 (EP15=6.9475%→EP25=6.8718%); slow convergence, 0.37pp above SOTA |
 
-_Last updated: 2026-05-06 09:20Z_
+_Last updated: 2026-05-05 (epoch-boundary W&B scan)_
