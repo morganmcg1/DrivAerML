@@ -320,6 +320,64 @@ class Transformer(nn.Module):
         return x
 
 
+class LearnableScaleAnchor(nn.Module):
+    """Learnable affine surface->volume anchor for ``volume_pressure``.
+
+    For each volume query point, finds the nearest unmasked surface point via
+    chunked ``cdist``, gathers that surface point's predicted pressure, and
+    returns ``alpha * surf_p_norm + beta`` as a correction added to the
+    normalized volume pressure prediction.
+
+    ``alpha`` and ``beta`` are initialised to zero so the network starts
+    identical to the no-anchor baseline (PR #775; analogous to ReZero /
+    LayerScale zero-init). The expected steady-state value of ``alpha`` in
+    normalized space is ~rho/2 V**2 * std_cp / std_volp ≈ 1.23 for DrivAerML
+    (V_inf=38 m/s, rho=1.225, std_cp≈0.356, std_volp≈255.9 Pa).
+
+    Padded surface points (mask=False) are excluded from the nearest-neighbor
+    search; padded volume points have their anchor forced to zero so they
+    contribute nothing to the masked loss.
+    """
+
+    def __init__(self, chunk_size: int = 4096):
+        super().__init__()
+        self.alpha = nn.Parameter(torch.zeros(1))
+        self.beta = nn.Parameter(torch.zeros(1))
+        self.chunk_size = int(chunk_size)
+
+    def forward(
+        self,
+        vol_xyz: torch.Tensor,        # (B, Nv, 3)
+        surf_xyz: torch.Tensor,       # (B, Ns, 3)
+        surf_p_norm: torch.Tensor,    # (B, Ns, 1) — normalized predicted Cp
+        surf_mask: torch.Tensor,      # (B, Ns) bool
+        vol_mask: torch.Tensor,       # (B, Nv) bool
+    ) -> torch.Tensor:                # (B, Nv, 1)
+        B, Nv, _ = vol_xyz.shape
+        Ns = surf_xyz.shape[1]
+        out = surf_p_norm.new_zeros(B, Nv, surf_p_norm.shape[-1])
+        if Ns == 0 or Nv == 0:
+            return self.alpha * out + self.beta * vol_mask.unsqueeze(-1).to(out.dtype)
+        for b in range(B):
+            sm_b = surf_mask[b]
+            if not bool(sm_b.any()):
+                continue
+            sp_b = surf_xyz[b]
+            sc_b = surf_p_norm[b]
+            vp_b = vol_xyz[b]
+            for start in range(0, Nv, self.chunk_size):
+                end = min(start + self.chunk_size, Nv)
+                vp_chunk = vp_b[start:end]
+                with torch.no_grad():
+                    d = torch.cdist(vp_chunk.unsqueeze(0), sp_b.unsqueeze(0))[0]
+                    d = d.masked_fill(~sm_b.unsqueeze(0), float("inf"))
+                    idx = d.argmin(dim=1)
+                out[b, start:end] = sc_b[idx]
+        anchor = self.alpha * out + self.beta
+        anchor = anchor * vol_mask.unsqueeze(-1).to(anchor.dtype)
+        return anchor
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +400,8 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_surface_anchor: bool = False,
+        surface_anchor_chunk_size: int = 4096,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +481,16 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.use_surface_anchor = use_surface_anchor
+        self.surface_anchor_chunk_size = surface_anchor_chunk_size
+        if use_surface_anchor:
+            if self.volume_output_dim != 1:
+                raise ValueError(
+                    "LearnableScaleAnchor expects volume_output_dim=1 (volume_pressure)"
+                )
+            self.surface_anchor = LearnableScaleAnchor(chunk_size=surface_anchor_chunk_size)
+        else:
+            self.surface_anchor = None
 
     def _encode_group(
         self,
@@ -518,6 +588,23 @@ class SurfaceTransolver(nn.Module):
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+
+        if (
+            self.surface_anchor is not None
+            and volume_x is not None
+            and surface_x is not None
+        ):
+            vol_xyz = volume_x[..., : self.space_dim].to(volume_preds.dtype)
+            surf_xyz = surface_x[..., : self.space_dim].to(volume_preds.dtype)
+            surf_p_pred_norm = surface_preds[..., 0:1]
+            anchor = self.surface_anchor(
+                vol_xyz=vol_xyz,
+                surf_xyz=surf_xyz,
+                surf_p_norm=surf_p_pred_norm,
+                surf_mask=surface_mask,
+                vol_mask=volume_mask,
+            )
+            volume_preds = (volume_preds + anchor) * volume_mask.unsqueeze(-1)
 
         return {
             "surface_preds": surface_preds,

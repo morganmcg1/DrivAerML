@@ -102,6 +102,8 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_surface_anchor: bool = False
+    surface_anchor_chunk_size: int = 4096
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -266,6 +268,16 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_surface_anchor_metrics(model: nn.Module) -> dict[str, float]:
+    anchor = getattr(model, "surface_anchor", None)
+    if anchor is None:
+        return {}
+    return {
+        "anchor/alpha": float(anchor.alpha.detach().float().item()),
+        "anchor/beta": float(anchor.beta.detach().float().item()),
+    }
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -297,6 +309,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_surface_anchor=config.use_surface_anchor,
+        surface_anchor_chunk_size=config.surface_anchor_chunk_size,
     )
 
 
@@ -1104,6 +1118,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        train_log.update(collect_surface_anchor_metrics(base_model))
 
                 train_log.update(
                     train_slope_tracker.update(
@@ -1240,6 +1255,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_surface_anchor_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
