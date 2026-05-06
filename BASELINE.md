@@ -51,15 +51,15 @@ PR #599 (`sogus8sx`), test_primary/abupt_axis_mean_rel_l2_pct = **7.9303%** (fri
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.5386%** (PR #741 nezuko, EP25, run `lszc4ri7`)
+In-wave val target: **6.5108%** (PR #741 nezuko, EP26, run `lszc4ri7`) — first in-wave run to beat pre-wave SOTA val 6.5281%
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #741 | `lszc4ri7` | nezuko | EP25 (best) | **6.5386%** | Y-axis symmetry aug; EP25=6.5386% wave leader; steps_per_epoch=5489; still descending; 0.038pp above SOTA val_best 6.5281%; run continuing |
-| #745 | `co0xlqap` | frieren | EP17 (best) | **6.5694%** | 5L STRING PE; EP17=6.5694%; steps_per_epoch=5494; 0.031pp behind nezuko wave-best; still descending |
-| #740 Arm B | `5x8wofzm` | fern | EP6 (best) | **6.6648%** | GradNorm α=0.5; steps_per_epoch=10987; EP7 regressed to 6.9470% (major +0.2822pp spike — possible cosine LR oscillation); monitoring EP8 |
-| #749 | `oi2a01zy` | tanjiro | EP25 (best) | **6.8718%** | Lion lr=9e-5 control; EP25=6.8718%; steps_per_epoch=5494; very flat improvement curve since EP15 (EP15=6.9475%→EP25=6.8718%); slow convergence, 0.37pp above SOTA |
+| #741 | `lszc4ri7` | nezuko | EP26 (best) | **6.5108%** | Y-axis symmetry aug; EP26=6.5108% wave leader; beats pre-wave SOTA val 6.5281% by 0.0173pp; steps_per_epoch=5489; still descending |
+| #745 | `co0xlqap` | frieren | EP18 (best) | **6.5472%** | 5L STRING PE; EP18=6.5472%; steps_per_epoch=5494; 0.0364pp behind nezuko wave-best; monotonic descent, still improving |
+| #740 Arm B | `5x8wofzm` | fern | EP8 (best) | **6.6034%** | GradNorm α=0.5; steps_per_epoch=10987; EP7 spike (6.9470%) confirmed transient; EP8=6.6034% recovered below EP6 best (6.6648%); healthy descent |
+| #749 | `oi2a01zy` | tanjiro | EP26 (best) | **6.8571%** | Lion lr=9e-5 control; EP26=6.8571%; steps_per_epoch=5494; very flat curve (EP22=6.8841%→EP26=6.8571%); 0.346pp above nezuko wave-best |
 
-_Last updated: 2026-05-05 (epoch-boundary W&B scan)_
+_Last updated: 2026-05-05 (epoch-boundary W&B scan, EP26 nezuko SOTA break)_
