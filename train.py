@@ -364,6 +364,11 @@ def collect_anchor_rope_metrics(model: nn.Module) -> dict[str, float]:
     for axis in range(log_freqs.shape[0]):
         metrics[f"{prefix}/log_freqs_axis_{axis}_mean"] = float(log_freqs[axis].mean().item())
         metrics[f"{prefix}/log_freqs_axis_{axis}_max"] = float(log_freqs[axis].max().item())
+    # PR #786 v3: track residual branch activation speed. v2 zero-init had
+    # rms=0 at EP1; Xavier×0.01 init should start ~0.01 and grow.
+    out_proj_w = module.out_proj.weight.detach().float()
+    metrics[f"{prefix}/out_proj_weight_rms"] = float(out_proj_w.pow(2).mean().sqrt().item())
+    metrics[f"{prefix}/out_proj_weight_max_abs"] = float(out_proj_w.abs().max().item())
     return metrics
 
 
