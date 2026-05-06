@@ -102,6 +102,7 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    vol_geom_film: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -284,6 +285,45 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def _build_g_override_from_cache(
+    case_ids: list[str],
+    g_cache: dict[str, torch.Tensor],
+    n_hidden: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Assemble a B x D g_override tensor from the per-case g cache.
+
+    Cache misses (cold start) become zero rows, which yields the FiLM
+    identity (gamma=1, beta=0) thanks to the zero-init weight matrix.
+    """
+    rows: list[torch.Tensor] = []
+    for case_id in case_ids:
+        cached = g_cache.get(case_id)
+        if cached is None:
+            rows.append(torch.zeros(n_hidden, dtype=torch.float32))
+        else:
+            rows.append(cached.to(dtype=torch.float32))
+    return torch.stack(rows, dim=0).to(device=device, dtype=torch.float32)
+
+
+def _update_g_cache_from_out(
+    out: dict[str, object],
+    batch,
+    g_cache: dict[str, torch.Tensor],
+) -> None:
+    """Refresh per-case g cache when a surface-present batch produced a live g."""
+    surface_g = out.get("surface_g") if isinstance(out, dict) else None
+    if surface_g is None:
+        return
+    if not torch.is_tensor(surface_g):
+        return
+    sg = surface_g.detach().to(device="cpu", dtype=torch.float32)
+    surface_mask = batch.surface_mask
+    for i, case_id in enumerate(batch.case_ids):
+        if bool(surface_mask[i].any()):
+            g_cache[case_id] = sg[i].clone()
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +337,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_geom_film=config.vol_geom_film,
     )
 
 
@@ -310,7 +351,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    g_override: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, float], dict[str, object]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -320,6 +362,7 @@ def train_loss(
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            g_override=g_override,
         )
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
@@ -335,13 +378,16 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    for key, value in out.get("diagnostics", {}).items():
+        metrics[key] = float(value.detach().cpu().item()) if torch.is_tensor(value) else float(value)
+    return loss, metrics, out
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -353,13 +399,14 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-) -> list[torch.Tensor]:
+    *,
+    g_override: torch.Tensor | None = None,
+) -> tuple[list[torch.Tensor], dict[str, object]]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
-    Returns scalar tensors in order: [sp, tau_x, tau_y, tau_z, vp].
-    All five share the same forward graph so the GradNorm balancer can
-    extract per-task gradient norms via ``torch.autograd.grad`` with
-    ``retain_graph=True``.
+    Returns the per-task losses [sp, tau_x, tau_y, tau_z, vp] and the
+    forward output dict (so the caller can pull out e.g. ``surface_g`` for
+    the FiLM g-cache).
     """
 
     batch = batch.to(device)
@@ -371,6 +418,7 @@ def per_task_train_losses(
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            g_override=g_override,
         )
         surface_pred = out["surface_preds"]
         sp_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
@@ -378,7 +426,7 @@ def per_task_train_losses(
         tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
         tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
         vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
+    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss], out
 
 
 GRADNORM_MODES = ("full", "ema_proxy")
@@ -753,6 +801,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if config.vol_geom_film:
+                # Volume-only training views skip the live surface encoder path,
+                # so the FiLM projections are always exercised but only depend on
+                # g_override (no surface_hidden grad path) — keep DDP happy by
+                # tolerating the changing autograd graph shape.
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
@@ -870,6 +924,14 @@ def main(argv: Iterable[str] | None = None) -> None:
         timeout_hit = False
         train_start = time.time()
 
+        # Per-case g cache for FiLM volume conditioning. Populated on the fly
+        # by surface-present training batches (rare in DrivAerML — ~2.4% of
+        # train views — so most batches consult the cache as g_override).
+        # Each rank maintains its own cache; values stay on CPU to avoid
+        # GPU-RAM bloat at 400 train cases x n_hidden floats.
+        train_g_cache: dict[str, torch.Tensor] = {}
+        n_hidden_cache = config.model_hidden_dim
+
         for epoch in range(max_epochs):
             if vol_points_schedule:
                 desired_vol_points = vol_points_for_epoch(
@@ -915,9 +977,23 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                if config.vol_geom_film:
+                    g_override = _build_g_override_from_cache(
+                        batch.case_ids,
+                        train_g_cache,
+                        n_hidden_cache,
+                        device,
+                    )
+                else:
+                    g_override = None
                 if balancer is not None:
-                    per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                    per_task_losses, last_out = per_task_train_losses(
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        g_override=g_override,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -999,7 +1075,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
-                    loss, batch_loss_metrics = train_loss(
+                    loss, batch_loss_metrics, last_out = train_loss(
                         model,
                         batch,
                         transform,
@@ -1008,7 +1084,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        g_override=g_override,
                     )
+                if config.vol_geom_film:
+                    _update_g_cache_from_out(last_out, batch, train_g_cache)
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1048,6 +1127,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key, value in batch_loss_metrics.items():
+                        if "/" in key:
+                            train_log[key] = value
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
