@@ -102,6 +102,8 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_anchor_string_rope: bool = False
+    anchor_string_rope_n_anchors: int = 1024
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -233,9 +235,45 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def _split_anchor_rope_freq_params(
+    model: nn.Module,
+) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
+    """Return (main_params, rope_freq_params) where the second group is
+    the per-axis log-frequency tensor for AnchorStringRoPE. The frequency
+    parameter rotates Q/K phase across all heads at once, so it gets a
+    smaller LR (PR #774 differential-LR fix from PR #769 divergence)."""
+    rope_freq_params: list[nn.Parameter] = []
+    main_params: list[nn.Parameter] = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if name.endswith("anchor_rope_vol.log_freqs"):
+            rope_freq_params.append(param)
+        else:
+            main_params.append(param)
+    return main_params, rope_freq_params
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    main_params, rope_freq_params = _split_anchor_rope_freq_params(model)
+    use_param_groups = bool(rope_freq_params)
     if optimizer_name == "adamw":
+        if use_param_groups:
+            return torch.optim.AdamW(
+                [
+                    {
+                        "params": main_params,
+                        "lr": config.lr,
+                        "weight_decay": config.weight_decay,
+                    },
+                    {
+                        "params": rope_freq_params,
+                        "lr": config.lr * 0.1,
+                        "weight_decay": 0.0,
+                    },
+                ],
+            )
         return torch.optim.AdamW(
             model.parameters(),
             lr=config.lr,
@@ -244,6 +282,23 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     if optimizer_name == "lion":
         from lion_pytorch import Lion
 
+        if use_param_groups:
+            return Lion(
+                [
+                    {
+                        "params": main_params,
+                        "lr": config.lr,
+                        "weight_decay": config.weight_decay,
+                    },
+                    {
+                        "params": rope_freq_params,
+                        "lr": config.lr * 0.1,
+                        "weight_decay": 0.0,
+                    },
+                ],
+                betas=(config.lion_beta1, config.lion_beta2),
+                use_triton=False,
+            )
         return Lion(
             model.parameters(),
             lr=config.lr,
@@ -284,6 +339,34 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_anchor_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-axis log-frequency diagnostics for AnchorStringRoPE.
+
+    PR #774 EP1 kill-gate watches `anchor_rope/log_freqs_mean` and
+    `anchor_rope/log_freqs_max_hz` to detect runaway/freezing of the
+    learnable frequency parameters (the failure mode of PR #769)."""
+
+    module = getattr(model, "anchor_rope_vol", None)
+    if module is None:
+        return {}
+    log_freqs = module.log_freqs.detach().float()
+    freqs_hz = log_freqs.exp()
+    prefix = "anchor_rope"
+    metrics: dict[str, float] = {
+        f"{prefix}/log_freqs_mean": float(log_freqs.mean().item()),
+        f"{prefix}/log_freqs_std": float(log_freqs.std().item()),
+        f"{prefix}/log_freqs_min": float(log_freqs.min().item()),
+        f"{prefix}/log_freqs_max": float(log_freqs.max().item()),
+        f"{prefix}/freqs_hz_min": float(freqs_hz.min().item()),
+        f"{prefix}/freqs_hz_max": float(freqs_hz.max().item()),
+        f"{prefix}/freqs_hz_mean": float(freqs_hz.mean().item()),
+    }
+    for axis in range(log_freqs.shape[0]):
+        metrics[f"{prefix}/log_freqs_axis_{axis}_mean"] = float(log_freqs[axis].mean().item())
+        metrics[f"{prefix}/log_freqs_axis_{axis}_max"] = float(log_freqs[axis].max().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +380,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_anchor_string_rope=config.use_anchor_string_rope,
+        anchor_string_rope_n_anchors=config.anchor_string_rope_n_anchors,
     )
 
 
@@ -1240,6 +1325,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_anchor_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
