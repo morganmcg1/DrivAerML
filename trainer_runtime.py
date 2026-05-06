@@ -823,14 +823,17 @@ def apply_wake_oversample(
     *,
     x_low: float = 1.0,
     x_high: float = 4.0,
+    mode: str = "far",
 ) -> SurfaceBatch:
     """Spatially stratify volume points by x-coordinate (wake oversampling).
 
     Splits each case's volume points into 3 x-slabs using ``volume_x[..., 0]``
-    (raw metres):
-        - front:  x < x_low      -> weight 1.0
-        - cabin:  x_low <= x < x_high -> weight 1.0
-        - wake:   x >= x_high    -> weight ``factor``
+    (raw metres) and oversamples one slab by ``factor`` per ``mode``:
+        - mode="far"  (default): wake = x >= x_high gets weight ``factor``;
+          everything else weight 1.0. Targets the far-downstream slab.
+        - mode="near": near-wake = x_low <= x < x_high gets weight ``factor``;
+          everything else weight 1.0. Targets the immediate wake corridor
+          behind the body where turbulent separation dominates.
     Resamples ``N`` points per case with replacement using a fully batched
     ``torch.multinomial`` over those weights, then reassembles the batch.
     Padding tokens (``volume_mask=False``) get weight 0 so they are never
@@ -845,6 +848,8 @@ def apply_wake_oversample(
 
     if not (factor > 0.0) or abs(factor - 1.0) < 1e-12:
         return batch
+    if mode not in ("far", "near"):
+        raise ValueError(f"apply_wake_oversample: unknown mode={mode!r} (expected 'far' or 'near')")
     volume_x = batch.volume_x
     if volume_x.numel() == 0 or volume_x.shape[1] == 0:
         return batch
@@ -855,7 +860,11 @@ def apply_wake_oversample(
     x_coord = volume_x[..., 0]
     factor_t = torch.as_tensor(float(factor), device=volume_x.device, dtype=torch.float32)
     one_t = torch.as_tensor(1.0, device=volume_x.device, dtype=torch.float32)
-    weights = torch.where(x_coord >= x_high, factor_t, one_t)
+    if mode == "far":
+        oversample_region = x_coord >= x_high
+    else:
+        oversample_region = (x_coord >= x_low) & (x_coord < x_high)
+    weights = torch.where(oversample_region, factor_t, one_t)
     valid = volume_mask.to(torch.float32)
     weights = weights * valid
 
