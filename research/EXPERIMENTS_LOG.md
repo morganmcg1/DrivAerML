@@ -6,6 +6,83 @@ This log is appended in reverse-chronological order as PRs are reviewed. Each en
 
 The wave's evidence contract: test metrics from `test_primary/*` only; validation is for steering and checkpoint selection.
 
+## 2026-05-05 ~14:30 UTC — W&B Status Check: All Active Wave PRs (mid-run update)
+
+### PR #741 — Y-axis reflection augmentation (dl24-nezuko, `lszc4ri7`)
+- **Branch:** `dl24-nezuko/y-sym-augmentation`
+- **W&B Run:** `lszc4ri7`
+- **Status:** RUNNING — EP19 reached; **WAVE LEADER, new in-wave val best**
+
+| EP | val_primary | Note |
+|----|------------|------|
+| 13 | 7.2610% | C4 spike |
+| 14 | 6.8035% | C4 trough |
+| 15 | 7.2701% | C5 pre-spike |
+| 16 | 6.6890% | C5 inner trough |
+| 17 | 7.2835% | C5 spike |
+| 18 | 6.6596% | C5 trough |
+| 19 | **6.6231%** | **C5 extended trough — new in-wave val best and wave leader** |
+
+Oscillation pattern persists: odd epochs = spike, even epochs = trough/descent. The C5 trough has extended across two consecutive epochs (EP18→EP19), each improving vs prior best. This matches GD descent through a noisy augmentation landscape; EMA checkpoint preserved at best=6.6231%. C6 spike expected at EP21; C6 trough projected EP22 at ~6.56–6.58% — potential new all-time in-wave best. DO NOT KILL. Test eval + review submit after terminal EP50. Y-symmetry augmentation is a powerful regularizer on DrivAerML (effective dataset doubling).
+
+---
+
+### PR #745 — 5L STRING PE (dl24-frieren, `co0xlqap`)
+- **Branch:** `dl24-frieren/5l-string-pe`
+- **W&B Run:** `co0xlqap`
+- **Status:** RUNNING — EP10 reached; smoothest monotonic descent in current wave
+
+| EP | val_primary | cp | tau_x | tau_y | tau_z | vol_p |
+|----|------------|-----|-------|-------|-------|-------|
+| 4  | 7.0212%    | 4.57% | 6.81% | 8.99% | 10.73% | 4.35% |
+| 5  | 6.9507%    | 4.53% | 6.75% | 8.89% | 10.60% | 4.30% |
+| 6  | 6.8932%    | 4.50% | 6.72% | 8.82% | 10.50% | 4.24% |
+| 7  | 6.8211%    | 4.47% | 6.68% | 8.73% | 10.40% | 4.18% |
+| 8  | 6.7813%    | 4.45% | 6.65% | 8.67% | 10.34% | 4.14% |
+| 9  | 6.7203%    | 4.43% | 6.62% | 8.53% | 10.30% | 4.10% |
+| 10 | **6.6727%** | **4.42%** | **6.60%** | **8.41%** | **10.264%** | **3.99%** |
+
+Clean monotonic descent from EP1→EP10 with no oscillation spikes (5L architecture does not exhibit y-sym augmentation periodic pattern). 0.050pp behind wave leader nezuko EP19=6.6231%. `tau_z=10.264%` remains the structural bottleneck. `vol_p=3.99%` is outstanding — best volume performance this wave. EP12 check-in requested (full per-channel breakdown). Advisor projection: EP15~6.55%, EP20~6.50% — potential new merged SOTA. Strongest monotonic trajectory candidate for terminal test merge.
+
+---
+
+### PR #740 — GradNorm adaptive loss balancing v2 (dl24-fern, Arm A `em8bnk1a`, Arm B `5x8wofzm`)
+- **Branch:** `dl24-fern/gradnorm-adaptive-loss`
+- **W&B Runs:** Arm A (α=1.0): `em8bnk1a`; Arm B (α=0.5): `5x8wofzm`
+- **Status:** RUNNING — v2 restart; both arms at EP4; Arm B leads
+
+**Context:** v1 runs (`aoetlx9b` Arm A, `g18f7jm1` Arm B) both crashed. v2 restart confirmed identical config; perfect 4 d.p. reproducibility across runs.
+
+| Run | α | EP | val_primary | tau_z upweight | Note |
+|-----|---|----|------------|----------------|------|
+| `em8bnk1a` | 1.0 | 4 | 7.0836% | 2.94× | Arm A |
+| `5x8wofzm` | 0.5 | 4 | **6.8721%** | 2.11× | **Arm B — leading** |
+
+Gap at EP4: Arm B leads Arm A by **0.211pp** (widening from 0.097pp at EP3). GradNorm correctly upweights `tau_z` (structural bottleneck) as intended for both α values. Higher α=1.0 (more aggressive rebalancing) appears to over-correct and destabilize training vs softer α=0.5. EP5 decision gate pending: if Arm B gap ≥0.15pp, Arm A kill recommended to concentrate 8 GPUs on Arm B. At EP4 gap already exceeds threshold; Arm A kill expected at EP5 gate.
+
+---
+
+### PR #749 — Lion lr=9e-5 control (dl24-tanjiro, `oi2a01zy`)
+- **Branch:** `dl24-tanjiro/lion-lr-9e-5`
+- **W&B Run:** `oi2a01zy`
+- **Status:** RUNNING — EP18 reached; gate ≤7.5% PASSED by 0.55pp
+
+| EP | val_primary | Note |
+|----|------------|------|
+| 10 | 7.0518%    | |
+| 11 | 7.0215%    | |
+| 12 | 7.0009%    | |
+| 13 | 6.9877%    | |
+| 14 | 6.9812%    | |
+| 15 | 6.9748%    | |
+| 16 | 6.9641%    | |
+| 17 | 6.9573%    | |
+| 18 | **6.9511%** | **best** — monotonic descent EP7→EP18 at ~0.01-0.02pp/epoch |
+
+Steady monotonic descent with decelerating slope (~0.01pp/epoch from EP14 onward). `wsz=10.75%` plateau signal — structural ceiling at this LR. 0.4230pp above SOTA val_best. Likely plateau at ~6.85-6.90% by EP20. Clarification resolved: `run_final_evaluation` in `trainer_runtime.py:1384` executes automatically at EP50 terminal — no `--eval-only` flag needed. Run continues to EP50 for auto test eval.
+
+---
+
 ## 2026-05-05 15:00 — W&B Status Check: All Active Wave PRs (mid-run update, with channel breakdown)
 
 ### PR #740 — GradNorm adaptive loss balancing, Arm B (dl24-fern)
