@@ -102,6 +102,11 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    backbone_kind: str = "transolver"
+    anchor_tokens: int = 1024
+    anchor_selection: str = "stride"
+    anchor_string_init_sigmas: str = ""
+    anchor_string_coord_scale: str = "35.0,18.0,12.0"
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -284,6 +289,106 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def parse_anchor_string_init_sigmas(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        return None
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--anchor-string-init-sigmas must be positive: {spec!r}")
+    return sigmas
+
+
+def parse_anchor_string_coord_scale(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    scales = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not scales:
+        return None
+    if len(scales) != 3:
+        raise ValueError(
+            f"--anchor-string-coord-scale needs 3 comma-separated values "
+            f"(x,y,z), got {len(scales)}: {spec!r}"
+        )
+    if any(s <= 0.0 for s in scales):
+        raise ValueError(f"--anchor-string-coord-scale entries must be positive: {spec!r}")
+    return scales
+
+
+def _get_rope_params(model: nn.Module) -> list[nn.Parameter]:
+    """Return the StringRoPE parameters of an AnchorString backbone, if present."""
+    rope_params: list[nn.Parameter] = []
+    base = getattr(model, "module", model)
+    backbone = getattr(base, "backbone", None)
+    if backbone is None:
+        return rope_params
+    string_rope = getattr(backbone, "string_rope", None)
+    if string_rope is None:
+        return rope_params
+    rope_params.extend(string_rope.parameters())
+    return rope_params
+
+
+def collect_anchor_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Collect per-axis RoPE freq / phase diagnostics and anchor coord spread.
+
+    Logged once per epoch under keys:
+      rope/log_freq_axis_{0,1,2}_{mean,std,min,max}
+      rope/phase_axis_{0,1,2}_{mean,std}
+      rope/log_freq_{global_mean,global_min,global_max,mean,std}
+      anchor/coord_spread_{x,y,z}, anchor/coord_min_{x,y,z}, anchor/coord_max_{x,y,z}
+      anchor/coord_spread_xyz, anchor/num_anchors
+    The coord_* metrics depend on the most recent eval-time forward pass.
+    """
+    metrics: dict[str, float] = {}
+    base = getattr(model, "module", model)
+    backbone = getattr(base, "backbone", None)
+    if backbone is None:
+        return metrics
+    string_rope = getattr(backbone, "string_rope", None)
+    if string_rope is None:
+        return metrics
+
+    log_freq = string_rope.log_freq.detach().float()  # [num_axes, F]
+    phase = string_rope.phase.detach().float()         # [num_axes, F]
+    num_axes = log_freq.shape[0]
+    axis_names = ["x", "y", "z"]
+    for axis in range(min(num_axes, 3)):
+        ax_lf = log_freq[axis]
+        ax_ph = phase[axis]
+        metrics[f"rope/log_freq_axis_{axis}_mean"] = float(ax_lf.mean().item())
+        metrics[f"rope/log_freq_axis_{axis}_std"] = float(ax_lf.std().item())
+        metrics[f"rope/log_freq_axis_{axis}_min"] = float(ax_lf.min().item())
+        metrics[f"rope/log_freq_axis_{axis}_max"] = float(ax_lf.max().item())
+        metrics[f"rope/phase_axis_{axis}_mean"] = float(ax_ph.mean().item())
+        metrics[f"rope/phase_axis_{axis}_std"] = float(ax_ph.std().item())
+    metrics["rope/log_freq_mean"] = float(log_freq.mean().item())
+    metrics["rope/log_freq_std"] = float(log_freq.std().item())
+    metrics["rope/log_freq_global_mean"] = float(log_freq.mean().item())
+    metrics["rope/log_freq_global_min"] = float(log_freq.min().item())
+    metrics["rope/log_freq_global_max"] = float(log_freq.max().item())
+    last_anchor_coords = getattr(backbone, "_last_anchor_coords", None)
+    if last_anchor_coords is not None and last_anchor_coords.numel() > 0:
+        coords_f = last_anchor_coords.float()  # [B, K, 3]
+        per_axis_std: list[float] = []
+        for axis in range(min(coords_f.shape[-1], 3)):
+            ax = axis_names[axis] if axis < len(axis_names) else str(axis)
+            std_val = float(coords_f[..., axis].reshape(-1).std().item())
+            min_val = float(coords_f[..., axis].reshape(-1).min().item())
+            max_val = float(coords_f[..., axis].reshape(-1).max().item())
+            metrics[f"anchor/coord_spread_{ax}"] = std_val
+            metrics[f"anchor/coord_min_{ax}"] = min_val
+            metrics[f"anchor/coord_max_{ax}"] = max_val
+            per_axis_std.append(std_val)
+        if per_axis_std:
+            metrics["anchor/coord_spread_xyz"] = float(sum(per_axis_std) / len(per_axis_std))
+        metrics["anchor/num_anchors"] = float(coords_f.shape[1])
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +402,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        backbone_kind=config.backbone_kind,
+        anchor_tokens=config.anchor_tokens,
+        anchor_selection=config.anchor_selection,
+        anchor_string_init_sigmas=parse_anchor_string_init_sigmas(config.anchor_string_init_sigmas),
+        anchor_string_coord_scale=parse_anchor_string_coord_scale(config.anchor_string_coord_scale),
     )
 
 
@@ -861,6 +971,29 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if config.backbone_kind == "anchor_string":
+                backbone_mod = getattr(base_model, "backbone", None)
+                if backbone_mod is not None:
+                    coord_scale = getattr(backbone_mod, "coord_scale", None)
+                    if coord_scale is not None:
+                        cs = coord_scale.detach().float().cpu().tolist()
+                        for axis_idx, axis_name in enumerate(("x", "y", "z")):
+                            if axis_idx < len(cs):
+                                wandb.summary[f"rope/coord_scale_{axis_name}"] = cs[axis_idx]
+                    string_rope = getattr(backbone_mod, "string_rope", None)
+                    if string_rope is not None and hasattr(string_rope, "log_freq"):
+                        lf = string_rope.log_freq.detach().float()
+                        wandb.summary["rope/init_log_freq_min"] = float(lf.min().item())
+                        wandb.summary["rope/init_log_freq_max"] = float(lf.max().item())
+                        wandb.summary["rope/init_log_freq_mean"] = float(lf.mean().item())
+                        wandb.summary["rope/init_log_freq_std"] = float(lf.std().item())
+                        wandb.summary["rope/use_qk_norm"] = bool(config.use_qk_norm)
+                        anchor_init_sigmas = parse_anchor_string_init_sigmas(
+                            config.anchor_string_init_sigmas
+                        )
+                        if anchor_init_sigmas:
+                            wandb.summary["rope/init_sigmas"] = list(anchor_init_sigmas)
+                    wandb.summary["rope/anchor_tokens"] = int(config.anchor_tokens)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1055,6 +1188,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
+                    if config.backbone_kind == "anchor_string":
+                        rope_params_diag = _get_rope_params(base_model)
+                        if rope_params_diag:
+                            rope_grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
+                                rope_params_diag,
+                                max_norm=float("inf"),
+                            )
+                            train_log["rope/grad_norm"] = float(
+                                rope_grad_norm_tensor.detach().cpu().item()
+                            )
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
@@ -1240,6 +1383,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_anchor_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
