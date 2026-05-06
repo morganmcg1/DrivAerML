@@ -125,6 +125,10 @@ class Config:
     nonfinite_skip_abort: int = 200
     compile_model: bool = False
     debug: bool = False
+    use_y_symmetry_aug: bool = False
+    y_symmetry_aug_prob: float = 0.5
+    eval_only: bool = False
+    eval_checkpoint: str = ""
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -221,6 +225,33 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     )
 
 
+def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
+    """Reflect a random subset of batch items through the y=0 plane.
+
+    DrivAerML car geometry is bilaterally symmetric about y=0. Under y-reflection
+    (x, y, z) -> (x, -y, z) the surface point coordinate y, the surface normal
+    component n_y, the wall-shear y-component tau_y, and the volume point
+    coordinate y all negate. cp, surface area, sdf, tau_x, tau_z, and volume
+    pressure are invariant. This in-place transform is applied per-sample with
+    probability `prob`. Returns the boolean mask used (for diagnostic logging).
+
+    Channel layout (verified):
+    - surface_x: [x, y, z, nx, ny, nz, area]  -> negate idx 1 and idx 4
+    - surface_y: [cp, tau_x, tau_y, tau_z]    -> negate idx 2
+    - volume_x:  [x, y, z, sdf]               -> negate idx 1
+    - volume_y:  [pressure]                   -> invariant
+    """
+    B = batch.surface_x.shape[0]
+    flip_mask = torch.rand(B, device=batch.surface_x.device) < prob
+    if flip_mask.any():
+        idx = flip_mask.nonzero(as_tuple=True)[0]
+        batch.surface_x[idx, :, 1] = -batch.surface_x[idx, :, 1]
+        batch.surface_x[idx, :, 4] = -batch.surface_x[idx, :, 4]
+        batch.surface_y[idx, :, 2] = -batch.surface_y[idx, :, 2]
+        batch.volume_x[idx, :, 1] = -batch.volume_x[idx, :, 1]
+    return flip_mask
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -230,8 +261,16 @@ def train_loss(
     *,
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
+    use_y_symmetry_aug: bool = False,
+    y_symmetry_aug_prob: float = 0.5,
+    aug_log: dict | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    if use_y_symmetry_aug:
+        flip_mask = apply_y_symmetry_aug(batch, y_symmetry_aug_prob)
+        if aug_log is not None:
+            aug_log["n_flipped"] = int(flip_mask.sum().item())
+            aug_log["batch_size"] = int(flip_mask.shape[0])
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -256,11 +295,97 @@ def train_loss(
     }
 
 
+def run_eval_only(config: Config, state) -> None:
+    """Load a saved checkpoint and run full val + test evaluation."""
+    if config.seed >= 0:
+        seed_everything(config.seed)
+    device = state.device
+    if state.is_main:
+        ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
+        print(f"[eval-only] Device: {device}{ddp_suffix}")
+        print(f"[eval-only] Checkpoint: {config.eval_checkpoint}")
+
+    train_loader, val_loaders, test_loaders, stats = make_loaders(
+        config, distributed_state=state
+    )
+    final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
+    final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+    transform = TargetTransform(
+        surface_y_mean=stats["surface_y_mean"].to(device),
+        surface_y_std=stats["surface_y_std"].to(device),
+        volume_y_mean=stats["volume_y_mean"].to(device),
+        volume_y_std=stats["volume_y_std"].to(device),
+    )
+
+    model: nn.Module = build_model(config).to(device)
+    n_params = sum(param.numel() for param in model.parameters())
+    if state.enabled:
+        ddp_kwargs = {}
+        if device.type == "cuda":
+            ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+        model = DistributedDataParallel(model, **ddp_kwargs)
+    base_model = unwrap_model(model)
+
+    run = init_wandb_run(
+        config=config,
+        state=state,
+        n_params=n_params,
+        train_loader=train_loader,
+        val_loaders=val_loaders,
+        test_loaders=test_loaders,
+        total_estimated_steps=1,
+        max_epochs=0,
+        train_timeout_minutes=0.0,
+        val_budget_minutes=0.0,
+    )
+
+    distributed_barrier(state)
+    if not state.is_main:
+        wandb.finish()
+        return
+
+    ckpt_path = Path(config.eval_checkpoint)
+    checkpoint = torch.load(ckpt_path, map_location=device, weights_only=True)
+    val_metrics = checkpoint["val_metrics"]["val_surface"]
+    best_metrics = {
+        "epoch": float(checkpoint["epoch"]),
+        "abupt_axis_mean_rel_l2_pct": val_metrics["abupt_axis_mean_rel_l2_pct"],
+        "surface_pressure_mae": val_metrics["surface_pressure_mae"],
+        "wall_shear_mae": val_metrics["wall_shear_mae"],
+        "volume_pressure_mae": val_metrics["volume_pressure_mae"],
+    }
+    config_path = ckpt_path.parent / "config.yaml"
+    if not config_path.exists():
+        with config_path.open("w") as f:
+            yaml.safe_dump(asdict(config), f)
+
+    run_final_evaluation(
+        run=run,
+        model=base_model,
+        model_path=ckpt_path,
+        config_path=config_path,
+        config=config,
+        transform=transform,
+        device=device,
+        final_val_loaders=final_val_loaders,
+        final_test_loaders=final_test_loaders,
+        best_metrics=best_metrics,
+        best_checkpoint_source=checkpoint.get("checkpoint_source", "eval-only"),
+        n_params=n_params,
+        global_step=int(checkpoint["epoch"]),
+        total_minutes=0.0,
+    )
+    wandb.finish()
+
+
 def main(argv: Iterable[str] | None = None) -> None:
     state = init_distributed()
     run = None
     try:
         config = parse_args(argv)
+        if config.eval_only:
+            run_eval_only(config, state)
+            return
         if config.seed >= 0:
             seed_everything(config.seed)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
@@ -378,6 +503,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                aug_log: dict[str, int] = {}
                 loss, batch_loss_metrics = train_loss(
                     model,
                     batch,
@@ -386,7 +512,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                     config.amp_mode,
                     surface_loss_weight=config.surface_loss_weight,
                     volume_loss_weight=config.volume_loss_weight,
+                    use_y_symmetry_aug=config.use_y_symmetry_aug,
+                    y_symmetry_aug_prob=config.y_symmetry_aug_prob,
+                    aug_log=aug_log,
                 )
+                if (
+                    config.use_y_symmetry_aug
+                    and state.is_main
+                    and epoch == 0
+                    and global_step == 0
+                ):
+                    print(
+                        f"[aug debug] EP0 step0 (rank0): "
+                        f"{aug_log.get('n_flipped', 0)}/{aug_log.get('batch_size', 0)} "
+                        f"samples y-flipped"
+                    )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 scheduled_lr = scheduler.get_last_lr()[0]
@@ -425,6 +565,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
+                    )
+                if config.use_y_symmetry_aug and aug_log:
+                    bs = max(1, aug_log.get("batch_size", 0))
+                    train_log["train/aug/y_symmetry_flip_rate"] = (
+                        aug_log.get("n_flipped", 0) / bs
+                    )
+                    train_log["train/aug/y_symmetry_n_flipped"] = aug_log.get(
+                        "n_flipped", 0
+                    )
+                    train_log["train/aug/y_symmetry_batch_size"] = aug_log.get(
+                        "batch_size", 0
                     )
 
                 if skip_step:
