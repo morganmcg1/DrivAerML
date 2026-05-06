@@ -6,6 +6,26 @@ Targets to beat (lower is better, AB-UPT public reference):
 
 ---
 
+## 2026-05-06 12:45 — PR #752 askeladd x-slab wake stratified vol sampling (Exp 1C P4) — CLOSED NEGATIVE
+
+- Branch: `askeladd/wake-x-stratified-sampling`
+- Arm A W&B run: `m7oa9gnu` (far-wake x≥4m, factor 3.0, group `askeladd-wake-strat`)
+- Arm B W&B run: `jc2t6sxa` (near-wake [1m,4m), factor 3.0, group `askeladd-wake-strat`)
+- Hypothesis: Oversampling x-slab wake region during training narrows the val→test vol_pressure gap by increasing supervision density on the high-error wake band.
+
+| Arm | val_abupt EP4 | val_vol_p EP4 | test_abupt | **test_vol_p** | Verdict |
+|---|---:|---:|---:|---:|---|
+| A (far x>=4m) | 7.0447% | 4.5447% | 8.3115% | **12.4879%** | FAIL (+1.11pp over weak gate 11.374%) |
+| B (near [1m,4m)) | 7.0472% | 4.6646% | 8.2644% | **12.4086%** | FAIL (+1.03pp over weak gate) |
+
+- Arm A and Arm B converge to within 0.08pp on test_vol_p despite very different sampling distributions.
+- Arm B EP1 was 33.86% vs Arm A 30.30% (warmup tax from non-uniform sampling cold-start) — recovered by EP2.
+- Combined with PR #728 (frieren SDF-stratified, also flatlined) and PR #763 (nezuko upstream-weighting w=1.5, EP3 4.33% missed gate), **three convergent negatives on supervision-density / loss-mass interventions for test_vol_p**.
+- Strong directional evidence the test_vol_p gap is a generalization (geometry-OOD) problem, not a supervision-density problem. Issue #717 H1 supported, H3-via-loss-scaling not supported.
+- Followup: askeladd reassigned to PR #767 — Phase 0 per-case + per-region test_vol_p decomposition for SOTA checkpoints (dc031qpt, 4k25s25e) to confirm the geometry-OOD hypothesis directly.
+
+---
+
 ## 2026-05-06 11:48 — PR #760 alphonse vol-loss-weight reweight ablation (vol_w=2.0) — CLOSED NEGATIVE
 
 - Branch: `alphonse/vol-loss-weight-reweight`
