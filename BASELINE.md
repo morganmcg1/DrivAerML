@@ -52,17 +52,17 @@ PR #741 (`lszc4ri7` / `1tal40wr`), test_primary/abupt_axis_mean_rel_l2_pct = **7
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.3551%** (PR #740 fern, EP24, run `5x8wofzm`) — wave leader updated from EP18 (6.3828%) to EP24 (6.3551%); beats pre-wave SOTA val 6.5281% by 0.2730pp
+In-wave val target: **6.3521%** (PR #740 fern, EP26, run `5x8wofzm`) — wave leader updated from EP24 (6.3551%) to EP26 (6.3521%); beats pre-wave SOTA val 6.5281% by 0.1760pp
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #740 Arm B | `5x8wofzm` | fern | EP24 (new wave best) | **6.3551%** | GradNorm α=0.5; steps_per_epoch=10987; EP24=6.3551% **WAVE LEADER** (−0.2730pp below pre-wave SOTA val 6.5281%); EP18 prev best 6.3828%; slow but consistent descent continuing; EP50 terminal ~8 hours away |
-| #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; EP33=6.4984%; steps_per_epoch=5489; C9 spike at EP39=6.8352%, EP40 partial recovery to 6.5532%; EP41-43 recovery window |
-| #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; EP30=6.5097%; steps_per_epoch=5494; EP47=6.5298% (plateau); no new best since EP30; EP50 terminal ~00:09 UTC |
-| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 within 6.8479-6.8700% |
-| #780 | `20n1fvwn` | dl24-tanjiro | EP5 | 7.4265% | GradNorm α=0.25; EP1=12.68%→EP5=7.43%; steps_per_epoch=5494; descent healthy; EP5 gate PASS |
-| #784 | `sd59a9dq` | dl24-nezuko | EP3 | 10.0218% | QK-Norm + Y-axis aug; EP1=15.56%→EP3=10.02%; steps_per_epoch=5489; steep descent |
+| #740 Arm B | `5x8wofzm` | fern | EP26 (best) | **6.3521%** | GradNorm α=0.5; steps_per_epoch=10987; EP26=6.3521% **WAVE LEADER**; EP26 beats EP24=6.3551% by 0.003pp; EP30 check-in pending |
+| #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; MERGED PR #741; test=7.8232% |
+| #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; TERMINAL EP50 complete; test=7.845%; did NOT beat merged best (7.8232%); val beats pre-wave SOTA 6.5281% by 0.018pp |
+| #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 |
+| #780 | `20n1fvwn` | dl24-tanjiro | EP9 | 7.2681% | GradNorm α=0.25; EP9=7.27%, EP10 gate (≤8.0%) imminent; trivially on track |
+| #784 | `sd59a9dq` | dl24-nezuko | EP7 | 8.1962% | QK-Norm + Y-axis aug; EP7=8.20% descending; EP10 gate ~1h away |
 
-_Last updated: 2026-05-06 (PR #780 tanjiro EP5=7.43% gate PASS; PR #784 nezuko EP3=10.02% in descent; frieren EP47=6.53% plateau continuing; fern EP24=6.3551% new low)_
+_Last updated: 2026-05-07 (fern EP26=6.3521% NEW WAVE LEADER; frieren TERMINAL test=7.845% does not beat merged best 7.8232%; tanjiro EP9=7.27% EP10 gate imminent; nezuko EP7=8.20% descending)_
