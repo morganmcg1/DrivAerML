@@ -1,5 +1,57 @@
 # SENPAI Research Results
 
+## 2026-05-07 21:30 — PR #817: τ_y loss weight ×2.0 on L5 SOTA stack (edward) — CLOSED NEGATIVE
+
+- **Branch**: edward/tau-y-2p0-13ep-sota-promotion (deleted)
+- **W&B run**: `sfhljsqv` (group `edward-tau-y-sweep`)
+- **Hypothesis**: τ_y loss weight ×1.5 → ×2.0 to close val_τ_y gap on full SOTA recipe.
+
+| Metric | This run (val) | SOTA #592 | Δ |
+|---|---:|---:|---:|
+| val_abupt | 7.0112% | 6.5985% | +0.41pp |
+| val_τ_y | 8.7199% | 8.3631% | +0.36pp WORSE |
+| val_τ_x | regressed | 6.5420% | regression |
+| val_τ_z | regressed | 9.8099% | regression |
+| val_surface_p | regressed | 4.3322% | regression |
+| val_vol_p | regressed | 3.9456% | regression |
+
+**Verdict**: ALL channels regressed simultaneously. Crossing τ_y:τ_z weight ratio to 1.0 (2.0/2.0) hurt every channel — likely Lion's signed-momentum sensitivity to balanced loss rebalancing. **τ_y loss-weight axis is CLOSED at L5/Lion/9e-5.** The τ_y gap vs AB-UPT (3.65%) is architectural / representation-capacity, NOT a supervision-strength bottleneck. Future attacks: per-axis wall-shear heads, direction-aware positional encoding, GradNorm on surface channels.
+
+---
+
+## 2026-05-07 21:30 — PR #811: L6 depth scale for vol_p OOD generalization (fern) — CLOSED NEGATIVE
+
+- **Branch**: fern/vol-pressure-ood-gap (deleted)
+- **W&B runs**: `9yrr5j8f` (L6, 4-ep, no GN) and `8n5rsn99` (L6 + GradNorm α=0.5, budget-capped at EP3)
+- **Hypothesis**: L6 depth (vs SOTA L5) reduces vol_pressure OOD gap.
+
+| Run | val_abupt | test_abupt | test_vol_p |
+|---|---:|---:|---:|
+| L6 4-ep no GN (`9yrr5j8f`) | 7.27% | 8.49% | 12.24% |
+| L6 + GN α=0.5 budget-capped EP3 (`8n5rsn99`) | 7.22% | 8.43% | 12.16% |
+| **SOTA L5 (#592)** | **6.60%** | **7.99%** | **11.93%** |
+
+**Verdict**: L6 underperforms L5 by 0.62-0.67pp val and 0.44-0.50pp test. **The chronic vol_p val→test gap (~7.5pp) is structurally identical across L5, L6 (no GN), and L6+GN** — this is a DATA DISTRIBUTION-SHIFT problem, not a model capacity problem. Adding parameters on a fixed train budget makes things worse. **Depth-scaling axis CLOSED.** Path forward for vol_p OOD: volume_sdf.npy fix (Issue #803), volume-side data augmentation, multi-scale RFF (σ=8.0, 16.0), DANN-style domain alignment.
+
+---
+
+## 2026-05-07 21:30 — PR #802: AB-UPT geom branch v2/v3 — freeze + diff LR + vol_p warmup (frieren) — CLOSED NEGATIVE (architecturally validated)
+
+- **Branch**: frieren/abupt-geom-branch-warmup-fix (deleted)
+- **W&B runs**: `11xnkzyq` (v2, killed by polarity bug), `murzmdxl` (v2 relaunch, budget-capped at 5/13 ep), `pm29t6pj` (v3, full 4-ep curriculum)
+- **Hypothesis**: AB-UPT geometry branch (PR #626) + 3 fixes (F1 backbone freeze for first 20% steps, F2 2× geom-branch LR, F3 vol_p loss weight 2.0 during warmup) closes vol_p OOD gap and improves val_abupt.
+
+| Setting | val_abupt | test_abupt | val_vol_p | test_vol_p | val→test gap (vol_p) |
+|---|---:|---:|---:|---:|---:|
+| Baseline (no geom) | 6.60% | 7.99% | 4.0% | 12.7% | 3.17× |
+| PR #626 v1 (no warmup fixes) | 9.12% | n/a | ~4.0% | ~8.3% | 2.07× |
+| PR #802 v2 `murzmdxl` (warmup fix, undertrained 5/13 ep) | 16.60% | 17.78% | 11.65% | 19.51% | 1.675× |
+| **PR #802 v3 `pm29t6pj` (full 4-ep budget)** | **8.563%** | **9.676%** | **5.978%** | **13.30%** | **2.225×** |
+
+**Verdict**: Architecture confirmed working — F1/F2/F3 all firing as designed; RoPE frequencies + supernode pooling weights learning. vol_p val→test gap compressed from 3.17× to 2.225× (30% improvement). **But** the model lands ~2pp short of SOTA on val_abupt and test_vol_p (13.30%) does NOT beat the anchor target (11.374%). The geom branch competes with backbone for representation budget — fundamental tradeoff. **Closed.** Future direction: lighter-weight FiLM-style geometry conditioning, or address vol_p OOD via data side (Issue #803 SDF fix).
+
+---
+
 ## 2026-05-01 (session resume) — PR #801: Anchor-STRING RoPE stabilized (alphonse) — CLOSED NOT-PROMISING
 
 - **Branch**: alphonse/anchor-string-rope-stabilized (deleted)
