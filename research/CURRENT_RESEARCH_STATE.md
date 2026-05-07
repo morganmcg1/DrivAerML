@@ -1,14 +1,18 @@
 # SENPAI Research State
-- **Date:** 2026-05-07 ~02:30 UTC (Round 13 ongoing — 8 active student PRs)
+- **Date:** 2026-05-07 ~04:30 UTC (Round 13 mid-flight — 8 active student PRs after PR #788/#786 close + #795/#796 assign)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
+
+## Schedule-confound finding (2026-05-07)
+
+**The 13-epoch budget is now structurally untestable at 270-min train cap.** Two consecutive PRs (#786 fern Anchor-RoPE, #788 nezuko surface-curvature) ran `--lr-cosine-t-max 13 --epochs 13` but only fit 4 effective epochs before wall-time. LR never cooled. Both produced budget-cut "best" checkpoints at EP4-partial that beat within-cluster controls on test but missed val SOTA bar by 0.18–0.32pp. Going forward: **all new architectural-comparison experiments must use `--epochs 4 --lr-cosine-t-max 4` with 4-ep vol-points curriculum `0:16384:1:32768:2:49152:3:65536` and rescaled kill thresholds.** PR #795 (nezuko) and PR #796 (fern) are the first two budget-aligned re-runs.
 
 ---
 
 ## Latest Human Researcher Directives
 
 - **Issue #717** (vol_pressure gap): Phase 0 diagnostic COMPLETE (PR #767 askeladd). The chronic 3× vol_pressure val→test gap is confirmed as **case-dominated**: 4 geometrically-OOD test cases (run_133, run_226, run_203, run_158) account for 92% of squared test_vol_p deviation. Phase 1 now pivots from supervision-density/loss-mass interventions to **geometry conditioning on the volume decoder path**.
-- **Issue #618** (STRING/RoPE): Fern now running full 13-epoch Anchor-STRING RoPE v3 (#786) after human merged v3 code fixes into `tay` (PR #783). Thorfinn #779 running σ_max sweep.
+- **Issue #618** (STRING/RoPE): PR #786 fern Anchor-STRING RoPE v3 13-ep CLOSED INCONCLUSIVE (schedule confound, val=6.92%); fern reassigned PR #796 same v3 architecture at 4-ep budget-aligned schedule. Thorfinn #779 running σ_max sweep.
 - **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
 - No new directives pending.
 
@@ -42,13 +46,15 @@
 | frieren | #792 | FiLM v3: compressed vol-points schedule 0→65k by EP3; film-start=EP2 (EP1 pending, dormant ✅) | WIP |
 | askeladd | #789 | Vol-decoder SDF-gate v3: lower cap 0.15 + gate 2-epoch LR warmup + gate WD 5e-3 | WIP (EP1 PASS 29.98% ✅) |
 | alphonse | #790 | τ_z loss weight sweep Arm A (tau-z=3.0) — confirmed training laggard on L=5 | WIP (EP1 PASS 25.38% ✅) |
-| fern | #786 | Anchor-STRING RoPE v3: full 13-epoch, Xavier init, EP2 PASS 8.66% — EP3 pending | WIP (mid-EP3, step ~25k) |
+| fern | #796 | Anchor-STRING RoPE v3 4-ep budget-aligned (`--epochs 4 --lr-cosine-t-max 4`); follow-up to closed #786 | WIP (just assigned) |
 | thorfinn | #779 | STRING σ_max sweep Arm B (σ=8.0) — EP2 PASS 8.37% (−0.25pp vs Arm A) — EP3 pending | WIP (mid-EP3, step ~24k) |
-| nezuko | #788 | Surface curvature H,K on surface path only — EP2 PASS 8.06% — EP3 pending | WIP (mid-EP3, step ~25k) |
+| nezuko | #795 | Surface curvature H,K on surface path 4-ep budget-aligned; follow-up to closed #788 (val 6.78%, test_surf_p −0.14pp vs ctrl, test_wall_shear −0.28pp vs ctrl) | WIP (just assigned) |
 | edward | #782 | SDF-FiLM: volume SDF stats → affine conditioning on vol tokens (FiLM dormant until EP4~04:23Z) | WIP (EP1 PASS 27.68% ✅, mid-EP2) |
 | tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping test_vol_p OOD win | WIP (new, assigned 02:30Z) |
 
 **Recently closed PRs:**
+- **PR #788** (nezuko, surface curvature H,K on surface path): CLOSED INCONCLUSIVE (budget-limited) — best EMA EP4-partial val_abupt 6.7767% (+0.18pp vs SOTA), test_abupt 8.139% (−0.18pp vs within-cluster control), test_surf_p 4.168% (−0.14pp), test_wall_shear 7.4189% (−0.28pp). Hypothesis-discriminating signals supported on test. Schedule confound. Follow-up PR #795 assigned (4-ep budget-aligned).
+- **PR #786** (fern, Anchor-STRING RoPE v3 13-ep): CLOSED INCONCLUSIVE — best EMA EP4-partial val_abupt 6.9197% (+0.32pp vs SOTA), test_abupt 8.1946% (−0.13pp vs control). Schedule confound. v3 architecture diagnostics healthy. Follow-up PR #796 assigned (4-ep budget-aligned).
 - **PR #776** (tanjiro, vol-loss-weight sweep {1.5, 2.0}): CLOSED PARTIAL POSITIVE — Arm B (vol-w=2.0) beats SOTA test_vol_p by −0.37pp and shrinks val→test vol_p OOD gap by 0.67pp, but val_abupt regresses 0.62pp. Not merged. Wall-shear regression is the blocker. Follow-up PR #793 assigned.
 - **PR #785** (askeladd, SDF-gate v2): CLOSED NEGATIVE (design) — bounded-tanh insufficient; 20× LR jump drove gate to full negative saturation. v3 follow-up assigned as PR #789.
 - **PR #777** (alphonse, gc-loss-delayed-EP3): CLOSED NEGATIVE — test_vol_p=12.749% (worse than SOTA 11.933% and anchor 11.374%).

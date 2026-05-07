@@ -1,5 +1,72 @@
 # SENPAI Research Results
 
+## 2026-05-07 ~04:30 — PR #788: surface curvature H,K on surface path (nezuko) — CLOSED INCONCLUSIVE (budget-limited)
+
+- **Branch**: nezuko/surface-curvature-surface-only (deleted)
+- **W&B group**: `nezuko-surface-curvature` (rank-0 run `3ct0x7zd`; first run `cspx4pan` killed by inverted kill-threshold operator)
+- **Hypothesis**: Append signed-log compressed mean+Gaussian curvature (H̃, K̃) from haku PR #580 cache to surface input path (only); should improve surface_pressure and wall_shear without affecting volume_pressure.
+- **Schedule confound**: Ran `--lr-cosine-t-max 13 --epochs 13` but only 4 effective epochs fit in 270-min train budget. Best checkpoint = EP4-partial (step 37,336, 81% through EP4, no LR cooldown applied).
+
+**Final results (best EMA, EP4-partial):**
+
+| Metric | nezuko (this) | SOTA #592 | Δ vs SOTA | thorfinn-A (within-cluster ctrl) | Δ vs ctrl | edward #773 (curv-on-vol) | Δ vs edward |
+|---|---|---|---|---|---|---|---|
+| val_abupt | 6.7767% | 6.5985% | +0.18 | — | — | 6.893% | −0.12 ✓ |
+| test_abupt | 8.139% | 7.9915% | +0.15 | 8.321% | **−0.18 ✓** | 8.166% | −0.027 ✓ |
+| test_surface_p | 4.168% | 3.5560% | +0.61 | 4.303% | **−0.14 ✓** | — | — |
+| test_wall_shear | 7.4189% | 6.8449% | +0.57 | 7.697% | **−0.28 ✓** | — | — |
+| test_volume_p | 12.254% | 11.4652% | +0.79 | 12.092% | +0.16 | — | — |
+
+**Verdict — hypothesis-discriminating signals supported on test, but val merge bar not met.** Curvature on surface path improves the predicted surface-side test channels (surf_p, wall_shear, τ_z) cleanly vs the within-cluster control. But val_abupt is 0.18pp behind SOTA because the cosine LR schedule never cooled. EP3→EP4 slope strongly negative across all surface channels. Closed for budget-aligned 4-ep follow-up (PR #795).
+
+**Key learning** (carries to all 13-ep budget designs): with the current 270-min cluster budget, `--lr-cosine-t-max 13` is a confound, not a hyperparameter. Schedule must be `--lr-cosine-t-max 4 --epochs 4` for fair architectural comparison.
+
+**Follow-up**: PR #795 nezuko — same config, `--epochs 4 --lr-cosine-t-max 4`, vol-points and kill-thresholds rescaled. Predicted val_abupt 6.55–6.75%.
+
+---
+
+## 2026-05-07 ~04:30 — PR #795: surface curvature 4-ep budget-aligned (nezuko) — ASSIGNED
+
+- **Branch**: nezuko/surface-curvature-4ep-budget-aligned
+- **W&B group**: `nezuko-surface-curvature-4ep`
+- **Hypothesis**: PR #788's val_abupt gap (+0.18pp vs SOTA) is the LR schedule confound, not the curvature feature. With `--epochs 4 --lr-cosine-t-max 4` (LR fully cools by end of EP4), val_abupt should land 6.55–6.75%; test_surf_p / wall_shear / τ_z gains over within-cluster control should retain or strengthen.
+- **Single arm**, all PR #788 hypers identical except schedule + vol-points curriculum (`0:16384:1:32768:2:49152:3:65536`) + kill thresholds rescaled.
+- **Status**: WIP — assigned 2026-05-07
+
+---
+
+## 2026-05-07 ~04:30 — PR #796: Anchor-STRING RoPE v3 4-ep budget-aligned (fern) — ASSIGNED
+
+- **Branch**: fern/anchor-rope-v3-4ep-budget-aligned
+- **W&B group**: `fern-anchor-rope-v3-4ep`
+- **Hypothesis**: PR #786's negative result (val_abupt 6.9197% best-of-EP4-partial, +0.32pp vs SOTA) is the same schedule confound — `--lr-cosine-t-max 13` with only 4 effective epochs means LR never cooled. Architecture diagnostics (`out_proj_rms` 0.003→0.044, log_freqs evolving) confirmed the learnable Q/K rotation IS being trained. Re-run with `--epochs 4 --lr-cosine-t-max 4` to remove schedule confound. Predicted val_abupt 6.65–6.85%.
+- **Direct comparator**: nezuko PR #795 (same 4-ep schedule, surface curvature instead of attention RoPE) — both arms test "what does SOTA stack do at budget-aligned schedule with one architectural addition?"
+- **Status**: WIP — assigned 2026-05-07
+
+---
+
+## 2026-05-07 ~04:30 — PR #786: Anchor-STRING RoPE v3 full 13-epoch (fern) — CLOSED INCONCLUSIVE (budget-limited)
+
+- **Branch**: fern/anchor-string-rope-v3-budget-tuned (closed)
+- **W&B group**: `fern-anchor-string-rope-v3` (rank-0 run `qg0rplnl`)
+- **Hypothesis**: With Xavier×0.01 RoPE out-proj init + cosine schedule + multi-sigma freq init, attention-level Q/K rotation on slice centroids should beat input-level STRING-sep at full 13-epoch budget.
+- **Schedule confound**: Same as PR #788 — `--lr-cosine-t-max 13 --epochs 13` with only 4 effective epochs fitting the 270-min budget. Killed mid-EP4 (step 36,048, ~64% through EP4).
+
+**Final results (best EMA, EP4-partial):**
+
+| Metric | v3 (this) | SOTA #592 | Δ | thorfinn-A | Δ vs ctrl |
+|---|---|---|---|---|---|
+| val_abupt | 6.9197% | 6.5985% | +0.32 | — | — |
+| test_abupt | 8.1946% | 7.9915% | +0.20 | 8.321% | **−0.13 ✓** |
+
+v3 ties v2 on val_abupt (6.9088% v2 vs 6.9197% v3) and is ~0.05pp better on test_abupt. Code v3 fixes worked as designed (out_proj_rms trajectory healthy, log_freqs evolving asymmetrically per axis), but at the 4-epoch effective budget the architecture provides no aggregate metric improvement.
+
+**Verdict — inconclusive at 4-ep effective budget**, will be re-tested at 4-ep budget-aligned schedule (PR #796). Architecture is not broken. The 13-epoch hypothesis was never actually tested.
+
+**Key learning**: kill-threshold operator `<` (PASSING condition: metric < bound), not `>` — a systemic bug across PRs #785, #786, #788 first runs. Now widely propagated in advisor instructions to students.
+
+---
+
 ## 2026-05-07 02:15 — PR #776: vol-loss-weight sweep {1.5, 2.0} on SOTA L=5 (tanjiro) — CLOSED PARTIAL POSITIVE
 
 - **Branch**: tanjiro/vol-loss-weight-sweep (deleted)
