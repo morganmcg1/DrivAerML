@@ -1,5 +1,44 @@
 # SENPAI Research Results
 
+## 2026-05-07 02:15 — PR #776: vol-loss-weight sweep {1.5, 2.0} on SOTA L=5 (tanjiro) — CLOSED PARTIAL POSITIVE
+
+- **Branch**: tanjiro/vol-loss-weight-sweep (deleted)
+- **W&B group**: `vol-loss-weight-sweep-tay`
+- **Hypothesis**: Manual `--volume-loss-weight` sweep increases vol_p representational pressure → reduces val→test vol_p OOD gap (SOTA gap = 7.99pp). GradNorm ruled out (PRs #649 + #758, 6 configs).
+- **Arms**: A (vol-w=1.5, run `hw2e3vsu`), B (vol-w=2.0, run `qscw0225`). Arm C (vol-w=2.5) cancelled at EP2 per decision tree.
+
+**Final test_primary comparison (best-EMA EP4, 50 cases):**
+
+| Metric | SOTA (vol-w 1.0) | Arm A (1.5) | Arm B (2.0) |
+|---|---:|---:|---:|
+| `test_primary/abupt_axis_mean_rel_l2_pct` | **7.9915** | 8.4181 (+0.43) | 8.3466 (+0.36) |
+| `test_primary/volume_pressure_rel_l2_pct` | 11.9335 | 12.1257 (+0.19) | **11.5596 (−0.37)** |
+| `test_primary/surface_pressure_rel_l2_pct` | **4.0683** | 4.3816 (+0.31) | 4.3820 (+0.31) |
+| `test_primary/wall_shear_rel_l2_pct` | **7.3338** | 7.8366 (+0.50) | 7.9073 (+0.57) |
+| val→test vol_p OOD gap | 7.99 | 7.94 (−0.05) | **7.32 (−0.67)** |
+
+**Verdict: Partial positive on test_vol_p only. NOT MERGED.** Arm B beats SOTA on `test_primary/volume_pressure_rel_l2_pct` by −0.37pp and shrinks val→test vol_p OOD gap by 0.67pp. But val_abupt regresses 0.62pp (7.22% vs 6.60% SOTA), and every other test target regresses 0.31–0.68pp. Cannot merge without hiding regressions.
+
+**Key insight**: val_abupt regression is wall-shear dominated (ws_x +0.51, ws_y +0.65, ws_z +0.68 on test). EP1 is a poor proxy for terminal test_vol_p — Arm B's EP1 was weaker than Arm A's but Arm B beat A by terminal.
+
+**Advisor post-mortem**: Cancelled Arm C too aggressively based on EP1. Future kill-gate calibration: don't gate loss-weight sweeps on EP1 alone.
+
+**Follow-up**: PR #793 assigned to tanjiro — vol-w=2.0 + tau-y=2.5 + tau-z=3.0 combined arm to recover val_abupt while keeping test_vol_p win.
+
+---
+
+## 2026-05-07 — PR #793: vol-w=2.0 + wall-shear tau bump (tanjiro) — ASSIGNED
+
+- **Branch**: tanjiro/vol-w-2.0-wallshear-rebalance
+- **Hypothesis**: PR #776 Arm B's val_abupt regression is wall-shear dominated. Bumping `--tau-y-loss-weight 2.5 --tau-z-loss-weight 3.0` (from 1.5/2.0) should rebalance the loss budget back toward wall-shear while retaining vol_p gradient pressure at vol-w=2.0. Goal: val_abupt ≤ 6.87% AND test_vol_p ≤ 11.93%.
+- **W&B group**: `vol-w-wallshear-rebalance-tay`
+- **Single arm**: `--volume-loss-weight 2.0 --tau-y-loss-weight 2.5 --tau-z-loss-weight 3.0`
+- **Kill gates**: EP1 <32%, EP2 <12%, EP3 <8.5%
+- **Win conditions**: val_abupt ≤ 6.8701% AND test_vol_p ≤ 11.9335%
+- **Status**: WIP — assigned 2026-05-07
+
+---
+
 ## 2026-05-07 — PR #790: τ_z loss upweight sweep {3.0, 4.0} (alphonse) — ASSIGNED
 
 - **Branch**: alphonse/tau-z-upweight-sweep
