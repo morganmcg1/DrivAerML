@@ -8,6 +8,71 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-05 09:00 UTC — W&B Status Check: All 4 Active WIP Runs (EP8–EP24)
+
+### PR #780 — GradNorm α=0.25 (dl24-tanjiro, `20n1fvwn`) — EP24 WAVE VAL LEADER
+
+| Step | Approx EP | val_primary | Note |
+|------|-----------|-------------|------|
+| 82409 | EP15 | 6.9399% | |
+| 87903 | EP16 | 6.9220% | |
+| 93397 | EP17 | 6.9037% | prior best |
+| 98891 | EP18 | 7.0198% | transient spike |
+| 104385 | EP19 | 6.9144% | recovery |
+| 109879 | EP20 | 6.9330% | EP20 gate CLEARED |
+| 115373 | EP21 | 6.8601% | new wave val best |
+| 120867 | EP22 | 6.8565% | new wave val best |
+| 126361 | EP23 | 6.8585% | hover ~noise |
+| **131855** | **EP24** | **6.8515%** | **NEW WAVE VAL BEST** |
+
+**Commentary:** tanjiro's α=0.25 run is delivering the wave's best val metric at EP24=6.8515%. Oscillation spike at EP18 (7.0198%) resolved cleanly. The run shows a clear late-training trend below 6.87% across EP21-24. This is now the wave leader. Training continues to EP50.
+
+---
+
+### PR #794 — GradNorm α=0.25 + Y-sym (dl24-fern, `em7eupj5`) — EP8 Strong Trajectory
+
+| Step | Approx EP | val_primary | Note |
+|------|-----------|-------------|------|
+| 5493 | EP1 | 12.3285% | |
+| 10987 | EP2 | 8.5766% | |
+| 16481 | EP3 | 7.7128% | |
+| 21975 | EP4 | 7.3520% | |
+| 27469 | EP5 | 7.1519% | EP5 gate CLEARED |
+| 32963 | EP6 | 7.1398% | |
+| 38457 | EP7 | 6.9907% | first sub-7% |
+| **43951** | **EP8** | **6.9228%** | **New best** |
+
+**Commentary:** fern's α=0.25 + Y-sym composition shows the steepest early convergence of the 4 runs. Sub-7% achieved at EP7, EP8 extending the trend. The combination of Y-symmetry (effective data doubling) and conservative GradNorm (α=0.25) appears synergistic. EP10 gate (~step 54,940) expected to pass comfortably. Projecting strong EP20+ trajectory.
+
+---
+
+### PR #791 — GradNorm α=0.5 + Y-sym (dl24-frieren, `g0um26ek`) — EP12 Slowing
+
+| Step | Approx EP | val_primary | Note |
+|------|-----------|-------------|------|
+| 27469 | EP5 | 7.3537% | |
+| 32963 | EP6 | 7.2028% | |
+| 38457 | EP7 | 7.2275% | hover |
+| 43951 | EP8 | 7.1701% | |
+| 49445 | EP9 | 7.0804% | |
+| 54939 | EP10 | 7.0408% | EP10 gate CLEARED |
+| 60433 | EP11 | 7.0372% | |
+| **65927** | **EP12** | **7.0131%** | **New best, but rate slowing** |
+
+**Commentary:** frieren's α=0.5 + Y-sym run cleared the EP10 gate comfortably and continues improving. However, improvement rate has slowed: from -0.04pp/ep (EP5-EP10) to ~-0.013pp/ep (EP10-EP12). This is behind fern's α=0.25+Y-sym which reached 6.9228% at EP8 vs frieren's 7.0131% at EP12. Counter-intuitive: more conservative α=0.25 appears to compose better with Y-sym than α=0.5. Training continues; convergence plateau possible around 6.95-7.0%.
+
+---
+
+### PR #800 — 5L STRING + GradNorm α=0.5 (dl24-nezuko) — EP0 Just Started
+
+| Run IDs | State |
+|---------|-------|
+| `3i104cb8`, `7o1uxn7l`, `7u96u4v8`, `gszo93wp`, `guqqt3ka`, `hmhfnedy`, `luo67e4r`, `w1ylcm4o` | All 8 DDP ranks RUNNING |
+
+**Commentary:** Nezuko's new 5L STRING + GradNorm α=0.5 composition run is fully underway (all 8 DDP ranks confirmed). No validation metrics yet — EP1 (~step 5,500) not reached. The 5L model has more parameters, so first epoch will be slower. Both mechanisms independently confirmed: 5L STRING (#745 val=6.5097%@EP30) and GradNorm α=0.5 (#740 test=7.5195% WAVE BEST). Composition is untested; high projected gain (~7.2-7.4% test if gains transfer 50%).
+
+---
+
 ## 2026-05-07 ~18:00 UTC — PR #784 TERMINATE: QK-Norm + Y-symmetry (dl24-nezuko, `sd59a9dq`)
 
 - **Branch:** `dl24-nezuko/qk-norm-y-sym`
