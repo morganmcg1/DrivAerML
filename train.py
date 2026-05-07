@@ -129,6 +129,9 @@ class Config:
     y_symmetry_aug_prob: float = 0.5
     eval_only: bool = False
     eval_checkpoint: str = ""
+    use_gradnorm: bool = False
+    gradnorm_alpha: float = 1.0
+    gradnorm_lr: float = 1e-3
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -186,6 +189,39 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
         return None
     sigmas = [float(s) for s in spec.split(",") if s.strip()]
     return sigmas or None
+
+
+class GradNormWeights(nn.Module):
+    """Learnable per-task GradNorm weights (Chen et al. 2018, arXiv:1711.02257).
+
+    Stores log-weights so the multiplicative weight ``w = exp(log_w)`` is
+    always positive. Weights are renormalised externally to satisfy
+    ``sum(w) = n_tasks``.
+    """
+
+    def __init__(self, n_tasks: int):
+        super().__init__()
+        self.n_tasks = n_tasks
+        self.log_weights = nn.Parameter(torch.zeros(n_tasks))
+
+    @property
+    def weights(self) -> torch.Tensor:
+        return torch.exp(self.log_weights)
+
+
+def per_channel_masked_mse(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """Per-channel masked MSE. Returns a [C] tensor (one scalar per output channel).
+
+    The denominator is the spatial mask count, so summing the per-channel MSEs
+    and dividing by ``C`` recovers the full ``masked_mse`` value.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    diff_sq = (pred - target).square()  # [B, N, C]
+    weighted = diff_sq * mask_f  # broadcast [B, N, C]
+    denom = mask_f.sum().clamp_min(1.0)
+    return weighted.sum(dim=(0, 1)) / denom  # [C]
 
 
 def build_model(config: Config) -> SurfaceTransolver:
@@ -264,7 +300,8 @@ def train_loss(
     use_y_symmetry_aug: bool = False,
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    gradnorm_weights: GradNormWeights | None = None,
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     batch = batch.to(device)
     if use_y_symmetry_aug:
         flip_mask = apply_y_symmetry_aug(batch, y_symmetry_aug_prob)
@@ -282,9 +319,23 @@ def train_loss(
         )
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        if gradnorm_weights is not None:
+            surface_per_ch = per_channel_masked_mse(
+                out["surface_preds"], surface_target, batch.surface_mask
+            )  # [4]: cp, tau_x, tau_y, tau_z
+            volume_per_ch = per_channel_masked_mse(
+                out["volume_preds"], volume_target, batch.volume_mask
+            )  # [1]: vol_p
+            task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
+            w_detached = gradnorm_weights.weights.detach()
+            loss = (w_detached * task_losses).sum()
+            weighted_surface_loss = (w_detached[:4] * surface_per_ch).sum()
+            weighted_volume_loss = w_detached[4] * volume_per_ch[0]
+        else:
+            task_losses = None
+            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_volume_loss = volume_loss_weight * volume_loss
+            loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
@@ -292,7 +343,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
-    }
+    }, task_losses
 
 
 def run_eval_only(config: Config, state) -> None:
@@ -425,6 +476,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+        gradnorm_weights: GradNormWeights | None = None
+        gradnorm_opt: torch.optim.Optimizer | None = None
+        gradnorm_L0: torch.Tensor | None = None
+        gradnorm_n_tasks = 5  # cp, tau_x, tau_y, tau_z, vol_p
+        gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p")
+        if config.use_gradnorm:
+            gradnorm_weights = GradNormWeights(n_tasks=gradnorm_n_tasks).to(device)
+            gradnorm_opt = torch.optim.Adam(
+                gradnorm_weights.parameters(), lr=config.gradnorm_lr
+            )
+            if state.is_main:
+                print(
+                    f"GradNorm enabled: alpha={config.gradnorm_alpha}, "
+                    f"n_tasks={gradnorm_n_tasks}, lr={config.gradnorm_lr}"
+                )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -504,7 +571,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 aug_log: dict[str, int] = {}
-                loss, batch_loss_metrics = train_loss(
+                loss, batch_loss_metrics, task_losses = train_loss(
                     model,
                     batch,
                     transform,
@@ -515,6 +582,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     use_y_symmetry_aug=config.use_y_symmetry_aug,
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
+                    gradnorm_weights=gradnorm_weights,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -581,6 +649,98 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
+                    gradnorm_log: dict[str, float] = {}
+                    if (
+                        gradnorm_weights is not None
+                        and gradnorm_opt is not None
+                        and task_losses is not None
+                    ):
+                        task_losses_finite = bool(
+                            torch.isfinite(task_losses.detach()).all().item()
+                        )
+                        if task_losses_finite:
+                            if gradnorm_L0 is None:
+                                gradnorm_L0 = task_losses.detach().clone()
+                            shared_param = base_model.norm.weight
+                            c_per_task: list[torch.Tensor] = []
+                            for i in range(gradnorm_n_tasks):
+                                g_i = torch.autograd.grad(
+                                    task_losses[i],
+                                    shared_param,
+                                    retain_graph=True,
+                                    allow_unused=True,
+                                )[0]
+                                if g_i is None:
+                                    c_per_task.append(
+                                        torch.zeros((), device=device, dtype=torch.float32)
+                                    )
+                                else:
+                                    c_per_task.append(g_i.detach().float().norm(2))
+                            c_tensor = torch.stack(c_per_task)  # [n_tasks]
+                            with torch.no_grad():
+                                w_now = gradnorm_weights.weights
+                                G_per_task = w_now * c_tensor  # [n_tasks]
+                                G_bar = G_per_task.mean()
+                                L_ratio = (
+                                    task_losses.detach().float()
+                                    / gradnorm_L0.float().clamp_min(1e-12)
+                                )
+                                r = L_ratio / L_ratio.mean().clamp_min(1e-12)
+                                target = G_bar * r.pow(config.gradnorm_alpha)
+                                diff = G_per_task - target
+                                # d L_grad / d log_w_i = sign(diff_i) * G_per_task_i
+                                log_w_grad = torch.sign(diff) * G_per_task
+                                # safety: zero out non-finite components
+                                log_w_grad = torch.where(
+                                    torch.isfinite(log_w_grad),
+                                    log_w_grad,
+                                    torch.zeros_like(log_w_grad),
+                                )
+                            gradnorm_opt.zero_grad(set_to_none=True)
+                            gradnorm_weights.log_weights.grad = log_w_grad
+                            gradnorm_opt.step()
+                            with torch.no_grad():
+                                # renormalise so weights sum to n_tasks
+                                lw = gradnorm_weights.log_weights.data
+                                lw_norm = lw - torch.logsumexp(lw, dim=0) + math.log(
+                                    float(gradnorm_n_tasks)
+                                )
+                                gradnorm_weights.log_weights.data.copy_(lw_norm)
+                                # DDP: average log_weights across ranks for sync
+                                if state.enabled:
+                                    torch.distributed.all_reduce(
+                                        gradnorm_weights.log_weights.data,
+                                        op=torch.distributed.ReduceOp.SUM,
+                                    )
+                                    gradnorm_weights.log_weights.data.div_(
+                                        state.world_size
+                                    )
+                                w_post = gradnorm_weights.weights.detach().cpu()
+                                c_cpu = c_tensor.detach().cpu()
+                                G_cpu = G_per_task.detach().cpu()
+                                tl_cpu = task_losses.detach().float().cpu()
+                                r_cpu = r.detach().cpu()
+                                for ti, name in enumerate(gradnorm_task_names):
+                                    gradnorm_log[f"gradnorm/w_{name}"] = float(
+                                        w_post[ti].item()
+                                    )
+                                    gradnorm_log[f"gradnorm/grad_norm_{name}"] = float(
+                                        c_cpu[ti].item()
+                                    )
+                                    gradnorm_log[f"gradnorm/G_{name}"] = float(
+                                        G_cpu[ti].item()
+                                    )
+                                    gradnorm_log[f"gradnorm/task_loss_{name}"] = float(
+                                        tl_cpu[ti].item()
+                                    )
+                                    gradnorm_log[f"gradnorm/r_{name}"] = float(
+                                        r_cpu[ti].item()
+                                    )
+                                gradnorm_log["gradnorm/G_bar"] = float(
+                                    G_bar.detach().cpu().item()
+                                )
+                    if gradnorm_log:
+                        train_log.update(gradnorm_log)
                     loss.backward()
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
