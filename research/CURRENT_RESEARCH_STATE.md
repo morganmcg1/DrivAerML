@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-01 (current session). **ROUND STATUS:** PRs #812 (askeladd LoRA dead-end) and #813 (tanjiro vol-w2 13-ep budget-mismatch) both closed. New assignments: askeladd #820 (2-layer GELU MLP vol decoder 512→256→1) and tanjiro #821 (vol-w2 5-ep budget-matched cosine). 6 WIP runs active (alphonse #819, edward #817, nezuko #816, thorfinn #815, fern #811, frieren #802). **ARCHITECTURE NOTE:** Transolver is slice-attention (not cross-attention) — no separate surface↔volume cross-attention path. All tokens jointly processed in one sequence. Vol head LoRA is architecturally neutralized for scalar VOLUME_Y_DIM=1 outputs.
+- **Date:** 2026-05-01 (updated). **ROUND STATUS:** Full 8-student fleet WIP. PRs #812 (askeladd LoRA DESIGN-NEGATIVE: VOLUME_Y_DIM=1 forces rank(ΔW)≤1) and #813 (tanjiro vol-w2 13-ep budget-mismatch: ~4.4 ep reached in 270min) closed. Active assignments: askeladd #820 (2-layer GELU MLP vol decoder), tanjiro #821 (vol-w=2.0 5-ep budget-matched), alphonse #819 (STRING σ-shift), edward #817 (τ_y×2.0 13-ep), nezuko #816 (cross-case contrastive loss), thorfinn #815 (τ_z×3.0 13-ep), fern #811 (L6 depth scale), frieren #802 (AB-UPT geom branch v2). **ARCHITECTURE NOTE:** Transolver is slice-attention (not cross-attention) — no separate surface↔volume cross-attention path. All tokens jointly processed in one sequence. Vol head LoRA is architecturally neutralized for scalar VOLUME_Y_DIM=1 outputs.
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -42,14 +42,14 @@
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| askeladd | #812 | Additive LoRA on vol output head: r=4 (Arm A) | **EP3 PASSED** — `6m7vw0tw` step 33,758 abupt=**7.342%** (round leader). Will hit timeout ~step 38k. |
-| alphonse | #814 | STRING 6-octave extended spectrum (add σ=8.0), 4-ep curriculum | **EP3 PASSED** — `3efn3v5u` step 20,955 abupt=**8.362%** < 9.0% gate. |
-| tanjiro | #813 | vol-w=2.0 13-ep schedule | **EP3 PASSED** — `4o9wamsr` step 32,478 abupt=**8.783%** < 9.5% gate. |
-| thorfinn | #815 | τ_z×3.0 promotion to 13-ep | LIKELY EP2 KILL — `y862359i` step 17,177 abupt=26.5% (gate at 21,728 needs <12%). Gap is enormous. |
-| fern | #811 | L6 depth scale | WIP — `8n5rsn99` step 2,459, just launched. Tracking EP1 gate. |
-| frieren | #802 | AB-UPT geometry branch v2 | TIMED OUT — `murzmdxl` finished gracefully at train_timeout=270min, step 38,503 / EP5, abupt=16.6%. SENT BACK with relaunch instructions to use 4-ep curriculum (timeout policy not user-tunable). Agent silent across 4+ escalations. |
-| nezuko | #816 | Cross-case contrastive loss, Option A anchor injection | CRASHED — `9776t8g6` Option A FIX VERIFIED firing correctly (6 valid triplets/step, pos=0.015 vs neg=0.239) but crashed at step 32 with grad_norm=33.49. SENT BACK with relaunch options (warmup λ, tighter clip, lower λ). |
-| edward | #817 | τ_y×2.0 on L5 SOTA stack, 13-ep | DRAFT, no run started yet. Spec is complete. |
+| askeladd | #820 | 2-layer GELU MLP vol decoder (512→256→GELU→1) | WIP — `askeladd/vol-mlp-decoder-2layer-gelu`. Awaiting launch. |
+| alphonse | #819 | STRING PE σ-shift: drop σ=0.25, add σ=8.0 (5-octave constant capacity) | WIP — `alphonse/string-pe-sigma-shift`. Awaiting launch. |
+| tanjiro | #821 | vol-loss-weight=2.0 budget-matched 5-ep cosine | WIP — `tanjiro/vol-w2-5ep-budget-matched`. Awaiting launch. |
+| thorfinn | #815 | τ_z×3.0 promotion to 13-ep full SOTA schedule | WIP — `thorfinn/tau-z-3p0-13ep-sota-promotion`. In progress. |
+| fern | #811 | L6 depth scale — vol_p OOD generalization | WIP — `fern/vol-pressure-ood-gap`. In progress. |
+| frieren | #802 | AB-UPT geom branch v2 — freeze + diff LR + vol_p warmup weight | WIP — `frieren/abupt-geom-branch-warmup-fix`. In progress. |
+| nezuko | #816 | Cross-case contrastive loss on vol_p embeddings (4 OOD cases) | WIP — `nezuko/cross-case-contrastive-vol-p`. In progress. |
+| edward | #817 | τ_y×2.0 on L5 SOTA stack, 13-ep | WIP — `edward/tau-y-2p0-13ep-sota-promotion`. In progress. |
 
 ---
 
@@ -58,9 +58,9 @@
 Two parallel themes:
 
 ### Theme 1: Geometry Conditioning on Volume Decoder (Issue #717)
-- **Additive vol-head LoRA r=4/r=8** (askeladd, #812 retry): Replaces tanh-cap SDF-gate line (v2/v3/v4 all saturated). Additive rank-r correction on `volume_out`, zero-init B, no saturation risk. SDF info already in volume_hidden (VOLUME_X_DIM=4). Arm A r=4, Arm B r=8.
+- **2-layer GELU MLP vol decoder** (askeladd, #820): Replaces linear `volume_out` (512→1) with 512→256→GELU→1 MLP. Zero-init final layer for stable start. Adds non-linearity at decoding boundary without touching backbone. ~131k extra params. PR #812 LoRA track was architecturally neutralized (VOLUME_Y_DIM=1 forces rank(ΔW)≤1 regardless of r).
 - **AB-UPT geometry branch v2 relaunch** (frieren, #802): v1 was killed by wrong-polarity kill gate, but EP4 before kill showed val_vol_p=10.896% (below anchor 11.374%). v2 relaunch with corrected `<` polarity gates. Budget concern: ~6h timeout may only reach EP5-6 from scratch.
-- **FiLM** and **tanh-cap SDF-gate** tracks both closed as design-negative.
+- **FiLM**, **tanh-cap SDF-gate**, and **additive LoRA** tracks all closed as design-negative.
 
 ### Theme 2: Positional Encoding / Architecture (Issue #618)
 - **Anchor-STRING RoPE stabilized** (alphonse, #801): Full 13-epoch run with diff LR (0.1× on rope params), per-module grad clip 1.0, freq init 0.1-10.0. EP1 passed (29.6%). Log-freq diagnostics: barely moved from init (std=1.406≈init).
@@ -108,7 +108,7 @@ Two parallel themes:
 
 ### Geometry conditioning (highest priority)
 
-1. **Vol-head LoRA r=4/r=8** (#812 askeladd retry): In flight
+1. **2-layer GELU MLP vol decoder** (#820 askeladd): In flight — replaces linear vol head with 512→256→GELU→1, zero-init final layer
 2. **AB-UPT geometry branch v3** (if v2 #802 relaunch shows gap compression holds at convergence, compose with best SOTA config + 13-ep full run)
 3. **Cross-case contrastive loss** (#816 nezuko): Force model to distinguish 4 OOD test cases at training time — triplet margin loss on vol_p embeddings, λ=0.05, 4-ep diagnostic
 4. **Surface feature → volume cross-attention**: Direct attention from volume queries to surface keys
