@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (latest W&B refresh): tanjiro #780 EP25=**6.8334%** new run best (step=142843, run=`20n1fvwn`, plateau slope -0.0045pp/ep, EP50 proj≈6.73%); fern #794 EP8=**6.8943% WAVE VAL LEADER** (run=`em7eupj5`, EP20 gate pre-cleared, slope -0.048pp/ep at EP6-8); frieren #791 EP12=**6.9635%** (run=`g0um26ek`, EP20 gate pre-cleared, slope -0.026pp/ep); nezuko #800 EP1=**10.6420%** smoke gate cleared (rank0 run=`hmhfnedy`, group=`5l-gradnorm-alpha05-compose`, EP5 gate ≤9.0% is critical kill gate)
+- 2026-05-07 (latest status): tanjiro #780 EP25=**6.8334% WAVE VAL LEADER** (run=`20n1fvwn`, rebase clean, plateau slope -0.0045pp/ep, EP50 proj≈6.73%); fern #794 EP10=**6.8631%** (run=`em7eupj5`, all gates pre-cleared, fastest convergence in wave); frieren #791 EP13=**6.9635%** (run=`g0um26ek`, rebase clean 422da71, EP15 in progress); nezuko #800 EP1=**10.6420%** smoke gate cleared (rank0 run=`hmhfnedy`, group=`5l-gradnorm-alpha05-compose`, EP5 gate ≤9.0% is critical kill gate)
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -8,15 +8,15 @@
 **Wave: drivaerml-long-20260504** — 24h DDP8 long runs validating mechanisms that showed promise under short-run or censored budgets. Base config is now well-established: Lion, lr=1e-4, lr-warmup-steps=500, bs=2, train_surface_points=40k, train_volume_points=65k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), ema_decay=0.999, no-compile-model, model-layers=4, model-hidden-dim=512, model-heads=4, model-slices=128.
 
 **Wave SOTA (merged test):** PR #740 (fern, `5x8wofzm`), test `abupt_axis_mean_rel_l2_pct` = **7.5195%**, surface=3.8810%, volume=10.7580%, wall=7.0610%. Improved from PR #741 (7.8232%) by 0.3037pp.
-**Wave val leader (WIP):** PR #794 (dl24-fern, `em7eupj5`) EP8 val=**6.8943% WAVE VAL LEADER** — steepest descent slope of all 4 active runs (-0.048pp/ep at EP6-8), EP20 gate pre-cleared. GradNorm α=0.25 + Y-sym synergy confirmed as most efficient composition. Tanjiro #780 EP25=6.8334% is run best but in plateau regime; fern is 17 epochs behind yet beats frieren #791 EP12=6.9635% by 0.069pp at matched depth.
+**Wave val leader (WIP):** PR #780 (dl24-tanjiro, `20n1fvwn`) EP25 val=**6.8334% WAVE VAL LEADER** — plateau regime, slope -0.0045pp/ep, proj EP50≈6.73%. Fern #794 (α=0.25 + Y-sym, `em7eupj5`) EP10=6.8631% is fastest-converging run (all gates pre-cleared by EP5). Frieren #791 (α=0.5 + Y-sym) EP13=6.9635% (rebase clean 422da71, EP15 in progress). Both tanjiro and fern now ahead of frieren.
 
 ### Active Experiments (as of 2026-05-07)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #780 | dl24-tanjiro | GradNorm α=0.25 — more conservative gradient equalization | `20n1fvwn` | **EP25=6.8334% run best** — EP10 PASS (7.0386%). EP20 gate cleared. Plateau regime: slope -0.0045pp/ep, EP50 proj≈6.73%. Training to EP50 terminal. |
-| #791 | dl24-frieren | GradNorm α=0.5 + Y-axis symmetry composition (orthogonal mechanisms) | `g0um26ek` | **EP12=6.9635% best** — EP10 gate CLEARED (7.0408%). EP20 gate pre-cleared. Slope -0.026pp/ep at EP8-12; proj EP30≈6.50%. Behind fern despite more epochs. |
-| #794 | dl24-fern | GradNorm α=0.25 + Y-axis symmetry augmentation (novel composition) | `em7eupj5` | **EP8=6.8943% WAVE VAL LEADER** — EP5 gate CLEARED. EP20 gate pre-cleared. Slope -0.048pp/ep at EP6-8; sub-7% at EP7, extending. α=0.25 + Y-sym synergy confirmed as most efficient composition. |
+| #780 | dl24-tanjiro | GradNorm α=0.25 — more conservative gradient equalization | `20n1fvwn` | **EP25=6.8334% WAVE VAL LEADER** — rebase clean (zero diff). EP20 gate cleared. Plateau regime: slope -0.0045pp/ep, EP50 proj≈6.73%. Training to EP50 terminal. |
+| #791 | dl24-frieren | GradNorm α=0.5 + Y-axis symmetry composition (orthogonal mechanisms) | `g0um26ek` | **EP13=6.9635% run best** — rebase clean 422da71, EP15 in progress. EP10 gate CLEARED (7.0408%). EP20 gate pre-cleared. Behind fern despite more epochs. |
+| #794 | dl24-fern | GradNorm α=0.25 + Y-axis symmetry augmentation (novel composition) | `em7eupj5` | **EP10=6.8631%** — all gates pre-cleared by EP5 (fastest in wave). α=0.25 + Y-sym confirmed most efficient composition. EP20 proj≈6.31%. Training to EP50 terminal. |
 | #800 | dl24-nezuko | 5L STRING + GradNorm α=0.5 compose on SOTA base config | `hmhfnedy` (rank0) | **EP1=10.6420% smoke gate cleared** — W&B group `5l-gradnorm-alpha05-compose`, all 8 DDP ranks running. EP5 gate ≤9.0% is critical kill gate. |
 
 ### Merged Results This Wave
@@ -78,22 +78,22 @@
 
 4b. **Does 5L STRING + GradNorm α=0.5 compose? (nezuko #800) — EP1 SMOKE GATE CLEARED.** EP1=10.6420% (rank0=`hmhfnedy`, group=`5l-gradnorm-alpha05-compose`). Both mechanisms independently confirmed: 5L STRING (#745 val=6.5097%@EP30) and GradNorm α=0.5 (#740 test=7.5195% WAVE BEST). EP5 gate ≤9.0% is the critical kill gate — watch for EP5 per-channel breakdown with GradNorm task weights.
 
-5. **Does GradNorm α=0.5 + Y-symmetry compose orthogonally? (frieren #791) — MID-RUN, IMPROVING BUT BEHIND.** EP12=6.9635% best (corrected from stale 7.0131%), run `g0um26ek`. EP10 gate CLEARED (7.0408%). EP20 gate pre-cleared. Improvement rate -0.026pp/ep at EP8-12; proj EP30≈6.50%. However, α=0.25 + Y-sym (fern) converges faster: fern at EP8 already beats frieren EP12 by 0.069pp — strong evidence α=0.25 is better for composition than α=0.5.
+5. **Does GradNorm α=0.5 + Y-symmetry compose orthogonally? (frieren #791) — MID-RUN, IMPROVING BUT BEHIND.** EP13=6.9635% run best, run `g0um26ek`. Rebase clean (422da71, zero diff), EP15 in progress. EP10 gate CLEARED (7.0408%). EP20 gate pre-cleared. Improvement rate -0.026pp/ep; proj EP30≈6.50%. α=0.25 + Y-sym (fern) converges faster: fern EP10=6.8631% beats frieren EP13=6.9635% by 0.100pp — strong evidence α=0.25 is better for composition than α=0.5.
 
-6. **Does GradNorm α=0.25 + Y-symmetry compose beat other combinations? (fern #794) — WAVE VAL LEADER.** EP8=6.8943% WAVE VAL LEADER (corrected from stale 6.9228%), run `em7eupj5`. EP5 gate cleared. EP20 gate pre-cleared. Steepest late slope at -0.048pp/ep (EP6-8). If sustained: proj EP20≈6.33%, EP30≈5.85% (likely to slow). α=0.25 + Y-sym confirmed most efficient composition this wave — beats frieren EP12 by 0.069pp despite being 4 epochs behind.
+6. **Does GradNorm α=0.25 + Y-symmetry compose beat other combinations? (fern #794) — FASTEST CONVERGENCE.** EP10=6.8631%, run `em7eupj5`. All gates pre-cleared by EP5 (EP5 gate cleared at EP2=8.58%, EP10 gate at EP3=7.71%, EP20 gate at EP5=7.15%). α=0.25 + Y-sym confirmed most efficient composition this wave. EP20 proj≈6.31%. Training to EP50 terminal.
 
 7. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) reduces gap via effective dataset doubling. GradNorm (#740) reduces vol error to 10.758% from 11.335%. No direct architectural fix yet tested. Vol still 2.77× surface gap.
 
 8. **5L STRING confirmed valid but short of beating merged best (PR #745).** test=7.845% vs merged best 7.8232% — 0.023pp short. Val EP30=6.5097%. Compose 5L STRING + GradNorm or 5L STRING + Y-sym remains viable next hypothesis.
 
-9. **Tanjiro compliance note:** PR #780 had unauthorized multi-arm screening; formal reprimand issued. Run `20n1fvwn` on authorized arm performing well at EP15=6.9399%.
+9. **Tanjiro compliance note:** PR #780 had unauthorized multi-arm screening; formal reprimand issued. Run `20n1fvwn` on authorized arm performing well; EP25=6.8334% wave val leader. Rebase clean, training to EP50 terminal.
 
 ## Potential Next Research Directions (after current arms complete)
 
 **Currently in-flight (4 WIP PRs; all students occupied):**
-- Tanjiro #780: GradNorm α=0.25 + baseline STRING — EP25=6.8334% run best, plateau slope -0.0045pp/ep, EP50 proj≈6.73%
-- Frieren #791: GradNorm α=0.5 + Y-symmetry — EP12=6.9635%, rate -0.026pp/ep, EP30 proj≈6.50%, EP20 gate pre-cleared
-- Fern #794: GradNorm α=0.25 + Y-symmetry — EP8=6.8943% WAVE VAL LEADER, slope -0.048pp/ep, EP20 gate pre-cleared
+- Tanjiro #780: GradNorm α=0.25 + baseline STRING — EP25=6.8334% WAVE VAL LEADER, plateau slope -0.0045pp/ep, EP50 proj≈6.73%, rebase clean
+- Frieren #791: GradNorm α=0.5 + Y-symmetry — EP13=6.9635%, rebase clean 422da71, EP15 in progress, EP20 gate pre-cleared, proj EP30≈6.50%
+- Fern #794: GradNorm α=0.25 + Y-symmetry — EP10=6.8631%, all gates pre-cleared, fastest convergence in wave, EP20 proj≈6.31%
 - Nezuko #800: 5L STRING + GradNorm α=0.5 compose — EP1=10.6420% smoke gate cleared (run=`hmhfnedy`), EP5 gate ≤9.0% critical
 
 **High-priority candidates after current wave completes:**
@@ -112,4 +112,4 @@
 - 7-sigma STRING PE (PR #673): config mismatch + regression.
 - lr=9e-5 control (PR #749): no improvement vs lr=1e-4.
 
-_Last updated: 2026-05-05 (W&B refresh: tanjiro #780 EP25=6.8334% run best (step=142843, plateau slope -0.0045pp/ep); fern #794 EP8=6.8943% WAVE VAL LEADER (step=46699, slope -0.048pp/ep at EP6-8, EP20 gate pre-cleared); frieren #791 EP12=6.9635% (step=69276, slope -0.026pp/ep, EP20 gate pre-cleared); nezuko #800 EP1=10.6420% smoke cleared (rank0=`hmhfnedy`, group=`5l-gradnorm-alpha05-compose`, EP5 gate ≤9.0% critical))_
+_Last updated: 2026-05-07 (tanjiro #780 EP25=6.8334% WAVE VAL LEADER (corrected from stale 6.8511%), rebase clean; fern #794 EP10=6.8631% fastest convergence (corrected from stale EP9=6.8943%), all gates pre-cleared; frieren #791 EP13=6.9635% rebase clean 422da71, EP15 in progress; nezuko #800 EP1=10.6420% smoke cleared (rank0=`hmhfnedy`), EP5 gate ≤9.0% critical)_

@@ -53,7 +53,7 @@ PR #740 (`5x8wofzm`), test_primary/abupt_axis_mean_rel_l2_pct = **7.5195%** (fer
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.8511%** (PR #780 dl24-tanjiro, EP25, run `20n1fvwn`) — wave val leader; EP25=6.8511% best logged; training to EP50 terminal
+In-wave val target: **6.8334%** (PR #780 dl24-tanjiro, EP25, run `20n1fvwn`) — wave val leader; EP25=6.8334% best logged (corrected from stale 6.8511%); training to EP50 terminal
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
@@ -62,10 +62,10 @@ In-wave val target: **6.8511%** (PR #780 dl24-tanjiro, EP25, run `20n1fvwn`) —
 | #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; MERGED PR #741; test=7.8232% |
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; TERMINAL EP50 complete; test=7.845%; did NOT beat merged best (7.8232%); val beats pre-wave SOTA 6.5281% by 0.018pp |
 | #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 |
-| #780 | `20n1fvwn` | dl24-tanjiro | EP25 (best/latest) | **6.8511%** | GradNorm α=0.25; EP25=6.8511% WAVE VAL BEST (EP22=6.8565%, EP20=6.9330%); EP20 gate cleared; training to EP50 terminal |
+| #780 | `20n1fvwn` | dl24-tanjiro | EP25 (best/latest) | **6.8334%** | GradNorm α=0.25; EP25=6.8334% WAVE VAL BEST (EP22=6.8565%, EP20=6.9330%); EP20 gate cleared; rebase clean (zero diff); training to EP50 terminal |
 | #784 | `sd59a9dq` | dl24-nezuko | EP18 (terminal) | **7.5605%** | QK-Norm + Y-axis aug; TERMINATED — EP20 gate (≤7.2%) MISSED. PR CLOSED. dl24-nezuko IDLE. |
-| #791 | `g0um26ek` | dl24-frieren | EP13 (best/latest) | **6.9635%** | GradNorm α=0.5 + Y-axis symmetry composition; EP13=6.9635% (cp=4.5765%, vol=4.4188%, τx=6.8010%, τy=8.4882%, τz=10.5332%); w_τz=1.4509; EP20 gate (≤7.2%) already cleared; projecting EP20-EP25 in 6.6-6.7% range |
-| #794 | `em7eupj5` | dl24-fern | EP9 (best/latest) | **6.8943%** | GradNorm α=0.25 + Y-axis symmetry composition; EP9=6.8943% (cp=4.4498%, vol=4.2616%, τx=6.7612%, τy=8.6091%, τz=10.3899%); w_τz=1.363; EP10 gate cleared; α=0.25+Y-sym fastest convergence in wave; projecting EP20-25 in 6.5-6.7% |
+| #791 | `g0um26ek` | dl24-frieren | EP15 (latest) | **6.9635%** | GradNorm α=0.5 + Y-axis symmetry composition; EP13 best=6.9635% (cp=4.5765%, vol=4.4188%, τx=6.8010%, τy=8.4882%, τz=10.5332%); w_τz=1.4509; rebase clean (zero diff, 422da71); EP15 in progress; projecting EP20-EP25 in 6.6-6.7% |
+| #794 | `em7eupj5` | dl24-fern | EP10 (best/latest) | **6.8631%** | GradNorm α=0.25 + Y-axis symmetry composition; EP10=6.8631% (cp=4.4221%, vol=4.2189%, τx=6.7372%, τy=8.5650%); all gates cleared early; fastest convergence in wave; projecting EP20≈6.31% |
 | #800 | `hmhfnedy` | dl24-nezuko | EP1 (best/latest) | **10.6420%** | 5L STRING + GradNorm α=0.5, no Y-sym; EP1=10.6420% CLEARED smoke gate (≤16%); stronger EP1 than frieren/fern composition runs; next gate EP5 ≤9.0% |
 
-_Last updated: 2026-05-07 (PR #740 MERGED wave best test=7.5195%; tanjiro #780 EP25=6.8511% WAVE VAL BEST, training to EP50; frieren #791 EP13=6.9635% run best g0um26ek; fern #794 EP9=6.8943% run best em7eupj5, EP10 gate cleared, α=0.25+Y-sym fastest convergence in wave; nezuko #800 EP1=10.6420% smoke gate cleared hmhfnedy, awaiting EP5 gate ≤9.0%)_
+_Last updated: 2026-05-07 (PR #740 MERGED wave best test=7.5195%; tanjiro #780 EP25=6.8334% WAVE VAL BEST (corrected from 6.8511%), rebase clean; frieren #791 EP13=6.9635% run best, rebase clean 422da71, EP15 in progress; fern #794 EP10=6.8631% run best em7eupj5, fastest convergence in wave; nezuko #800 EP1=10.6420% smoke gate cleared hmhfnedy, awaiting EP5 gate ≤9.0%)_
