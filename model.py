@@ -605,8 +605,14 @@ class SurfaceTransolver(nn.Module):
                     diagnostics["vol_geom_film/g_std"] = g32.std(dim=0, unbiased=False).mean()
                 diagnostics["vol_geom_film/gamma_dev_from_one_mean_abs"] = (gamma32 - 1.0).abs().mean()
                 diagnostics["vol_geom_film/gamma_dev_from_one_max_abs"] = (gamma32 - 1.0).abs().max()
+                # sat_frac: fraction of γ entries within 0.1 of saturation (γ<0.1 or γ>1.9).
+                gamma_sat = ((gamma32 < 0.1) | (gamma32 > 1.9)).to(dtype=torch.float32)
+                diagnostics["vol_geom_film/gamma_sat_frac"] = gamma_sat.mean()
                 diagnostics["vol_geom_film/beta_mean_abs"] = beta32.abs().mean()
                 diagnostics["vol_geom_film/beta_max_abs"] = beta32.abs().max()
+                # beta_sat_frac: fraction of β entries within 0.1 of saturation (|β|>0.9).
+                beta_sat = (beta32.abs() > 0.9).to(dtype=torch.float32)
+                diagnostics["vol_geom_film/beta_sat_frac"] = beta_sat.mean()
                 diagnostics["vol_geom_film/g_is_live"] = torch.tensor(1.0 if g_source == "live" else 0.0)
                 diagnostics["vol_geom_film/g_is_override"] = torch.tensor(1.0 if g_source == "override" else 0.0)
                 diagnostics["vol_geom_film/g_is_zeros"] = torch.tensor(1.0 if g_source == "zeros" else 0.0)
