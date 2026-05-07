@@ -44,26 +44,26 @@ When a wave PR merges with terminal `SENPAI-RESULT` and lower `test_primary/abup
 | PR | Run | Mechanism | Test aggregate | Surface | Volume | Wall | tau_x / tau_y / tau_z |
 |---|---|---|---:|---:|---:|---:|---:|
 | #599 | `sogus8sx` | multi-sigma STRING PE (`pe_init_sigmas=[0.25,0.5,1.0,2.0,4.0]`) | 7.9303 | — | — | — | — |
-| #741 | `lszc4ri7` / `1tal40wr` | Y-axis symmetry augmentation (bilateral car geometry) | **7.8232** | 3.9821 | 11.3345 | 7.3076 | 6.5304 / 7.9248 / 9.3444 |
+| #741 | `lszc4ri7` / `1tal40wr` | Y-axis symmetry augmentation (bilateral car geometry) | 7.8232 | 3.9821 | 11.3345 | 7.3076 | 6.5304 / 7.9248 / 9.3444 |
+| #740 | `5x8wofzm` | GradNorm α=0.5 adaptive loss balancing | **7.5195** | 3.8810 | 10.7580 | 7.0610 | 6.3490 / 7.5600 / 9.0480 |
 
 ### Current single-model best on `drivaerml-long-20260504`
 
-PR #741 (`lszc4ri7` / `1tal40wr`), test_primary/abupt_axis_mean_rel_l2_pct = **7.8232%** (nezuko, Y-axis symmetry augmentation) — improved from 7.9303% (+0.107pp)
+PR #740 (`5x8wofzm`), test_primary/abupt_axis_mean_rel_l2_pct = **7.5195%** (fern, GradNorm α=0.5 adaptive loss balancing) — improved from 7.8232% (+0.3037pp)
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.3430%** (PR #740 fern, EP27, run `5x8wofzm`) — wave leader at EP27 (6.3430%); beats pre-wave SOTA val 6.5281% by 0.1851pp; EP30 gate imminent (step≥329,610, currently at step=312,848)
+In-wave val target: **6.9399%** (PR #780 dl24-tanjiro, EP15, run `20n1fvwn`) — current wave leader after #740 merge; beats pre-wave SOTA; EP20 gate (≤7.2%) next at step≥109,880
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #740 Arm B | `5x8wofzm` | fern | EP27 (best) | **6.3430%** | GradNorm α=0.5; steps_per_epoch=10987; EP27=6.3430% **WAVE LEADER** (beat EP26=6.3521% by 0.009pp); EP28=6.3567% (regression from best, normal noise); step=312,848 (EP28.47); **EP30 gate IMMINENT at step≥329,610** (~16,762 steps away); if EP30>EP27 best, terminal from EP27 checkpoint |
 | #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; MERGED PR #741; test=7.8232% |
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; TERMINAL EP50 complete; test=7.845%; did NOT beat merged best (7.8232%); val beats pre-wave SOTA 6.5281% by 0.018pp |
 | #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 |
-| #780 | `20n1fvwn` | dl24-tanjiro | EP13 (best) | **7.0247%** | GradNorm α=0.25; EP10 PASS confirmed (step=54,930, val=7.0386%); EP13=7.0247% (best); step=76,586 (EP13.9); oscillating 7.02–7.16% EP9–EP13; EP20 gate (≤7.2%) next at step≥109,880; well on track |
-| #784 | `sd59a9dq` | dl24-nezuko | EP11 (best) | **7.8407%** | QK-Norm + Y-axis aug; EP10 PASS confirmed (step=49,392, val=7.9883%); EP11=7.8407% (NEW BEST improved from 7.9447%); step=61,118 (EP11.1); steadily descending; EP20 gate (≤7.2%) next at step≥109,780 |
+| #780 | `20n1fvwn` | dl24-tanjiro | EP15 (best) | **6.9399%** | GradNorm α=0.25; EP10 PASS (val=7.0386%); EP15=6.9399% (first <7.0%); EP20 gate (≤7.2%) next at step≥109,880; well on track |
+| #784 | `sd59a9dq` | dl24-nezuko | EP12 (best) | **7.7737%** | QK-Norm + Y-axis aug; EP10 PASS confirmed; EP12=7.7737% (reaccelerated descent); EP20 gate (≤7.2%) next at step≥109,780 |
 | #791 | `t4b59kbu` | dl24-frieren | EP1 (passed) | **11.6929%** | GradNorm α=0.5 + Y-axis symmetry composition; EP1 PASS confirmed (val=11.6929% < 16%); step=9,545 (EP~1.7); EP10 gate (≤8.0%) next at step≥54,940 |
 
-_Last updated: 2026-05-05 (fern #740 EP28.47/step=312,848, best=6.3430% @ EP27/step=296,648, **EP30 gate IMMINENT** at step≥329,610 (~16,762 steps); tanjiro #780 EP13.9/step=76,586 best=7.0247% @ EP13, oscillating 7.02–7.16%, EP20 gate on track; nezuko #784 EP11.1/step=61,118 NEW BEST=7.8407% @ EP11 (improved from 7.9447%), EP20 gate tracking; frieren #791 step=9,545 EP1 PASS val=11.6929%, EP10 gate at step≥54,940)_
+_Last updated: 2026-05-05 (PR #740 MERGED — new in-wave best test=7.5195%; tanjiro #780 EP15 best=6.9399% (first <7.0%!), EP20 gate on track; nezuko #784 EP12 best=7.7737% (descending), EP20 gate tracking; frieren #791 step=9,545 EP1 PASS val=11.6929%, EP10 gate at step≥54,940)_
