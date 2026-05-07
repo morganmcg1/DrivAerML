@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-07 ~15:20 UTC (nezuko #816 cross-case contrastive vol_p loss ASSIGNED. All 8 students active. PR #807 thorfinn τ_z×3.0 4-ep CLOSED — hypothesis confirmed; spawned #815 13-ep promotion. New 13-ep promotion PRs in flight: #813 tanjiro vol-w=2.0, #814 alphonse STRING 6-octave, #815 thorfinn τ_z×3.0. frieren #802 agent communication failure — `murzmdxl` healthy at step 30,781 (EP3.2) but no posts since 12:03Z.)
+- **Date:** 2026-05-07 ~16:45 UTC. **CRITICAL FINDING: 13-ep flat schedule is INFEASIBLE in 270-min budget.** All 13-ep runs project ~1000 min for full schedule but must terminate at 270. Frieren `murzmdxl` confirmed timed out at step 38,503 / EP5 (not killed, hit train_timeout_minutes=270 wall clock). The "13-ep" runs are functionally EP3-EP5 in practice — gate at step 32,592 (EP3 in flat) is the de facto result signal. Mid-round status: alphonse `3efn3v5u` PASSED EP3 gate (8.36% < 9.0%); askeladd `6m7vw0tw` PASSED EP3 gate (7.34% < 9.0%, leading the round); tanjiro `4o9wamsr` PASSED EP3 gate (8.78% < 9.5%); thorfinn `y862359i` at EP1=26.5% — likely EP2 fail at 21,728. fern `8n5rsn99` just launched (L6). edward #817 draft, no run started. nezuko `9776t8g6` Option A anchor-injection fix VERIFIED working (contrastive fires every step, 6 valid triplets, pos≈0.015 vs neg≈0.239) but CRASHED at step 32 with grad_norm=33.49.
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -42,14 +42,14 @@
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| askeladd | #812 | Additive LoRA on vol output head: r=4 (Arm A), r=8 (Arm B) — retry of #809 | WIP — Arm A `6m7vw0tw` EP1=26.60% (passed), EP2 in progress |
-| alphonse | #814 | STRING 6-octave extended spectrum (add σ=8.0) — full 13-ep run | WIP — `3efn3v5u` launched 13:49Z, EP1 in progress |
-| frieren | #802 | AB-UPT geometry branch v2: backbone freeze 20% warmup + 2× geom LR + vol_p aux weight 2.0 | WIP — v2 relaunch `murzmdxl` ALIVE at step 30,781 (EP3.2), val_abupt 53.44% with −3.17%/1k slope; **AGENT COMMUNICATION FAILURE — silent since 12:03Z despite escalations** |
-| fern | #811 | L6 depth scale: does adding a 6th transformer layer reduce OOD vol_p gap? | WIP — `9yrr5j8f` launched 11:52Z, EP1=25.61% (passed), EP2 in progress |
-| thorfinn | #815 | τ_z×3.0 promotion to 13-ep full SOTA schedule | WIP — relaunch `y862359i` with relaxed gates (~14:39Z) |
-| nezuko | #816 | Cross-case contrastive loss on vol_p embeddings — triplet margin on 4 OOD cases (run_133, run_226, run_203, run_158), λ=0.05, 4-ep diagnostic | WIP — assigned 2026-05-07 |
-| edward | #810 | GradNorm α=2.0 4-ep run (dynamic loss weighting) | WIP — `6kv9hzuh` EP1=27.48%, EP2=12.26%; EP3/EP4 pending |
-| tanjiro | #813 | vol-w=2.0 full 13-ep schedule-aligned (SOTA gate) | WIP — `4o9wamsr` launched 12:50Z, EP1=29.61% (val_vol_p **better** −1.51pp) |
+| askeladd | #812 | Additive LoRA on vol output head: r=4 (Arm A) | **EP3 PASSED** — `6m7vw0tw` step 33,758 abupt=**7.342%** (round leader). Will hit timeout ~step 38k. |
+| alphonse | #814 | STRING 6-octave extended spectrum (add σ=8.0), 4-ep curriculum | **EP3 PASSED** — `3efn3v5u` step 20,955 abupt=**8.362%** < 9.0% gate. |
+| tanjiro | #813 | vol-w=2.0 13-ep schedule | **EP3 PASSED** — `4o9wamsr` step 32,478 abupt=**8.783%** < 9.5% gate. |
+| thorfinn | #815 | τ_z×3.0 promotion to 13-ep | LIKELY EP2 KILL — `y862359i` step 17,177 abupt=26.5% (gate at 21,728 needs <12%). Gap is enormous. |
+| fern | #811 | L6 depth scale | WIP — `8n5rsn99` step 2,459, just launched. Tracking EP1 gate. |
+| frieren | #802 | AB-UPT geometry branch v2 | TIMED OUT — `murzmdxl` finished gracefully at train_timeout=270min, step 38,503 / EP5, abupt=16.6%. SENT BACK with relaunch instructions to use 4-ep curriculum (timeout policy not user-tunable). Agent silent across 4+ escalations. |
+| nezuko | #816 | Cross-case contrastive loss, Option A anchor injection | CRASHED — `9776t8g6` Option A FIX VERIFIED firing correctly (6 valid triplets/step, pos=0.015 vs neg=0.239) but crashed at step 32 with grad_norm=33.49. SENT BACK with relaunch options (warmup λ, tighter clip, lower λ). |
+| edward | #817 | τ_y×2.0 on L5 SOTA stack, 13-ep | DRAFT, no run started yet. Spec is complete. |
 
 ---
 
