@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import math
 import os
 import time
@@ -22,6 +23,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -32,7 +34,17 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import (
+    SURFACE_X_DIM,
+    SURFACE_Y_DIM,
+    VOLUME_X_DIM,
+    VOLUME_Y_DIM,
+    DrivAerMLCase,
+    DrivAerMLCaseStore,
+    DrivAerMLSurfaceDataset,
+    SurfaceBatch,
+)
+from data.loader import _resolve_artifact_path
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -137,6 +149,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_surface_curvature_feature: bool = False
+    curvature_cache_dir: str = "/mnt/new-pvc/Processed/curvatures_haku_v1"
+    curvature_k: int = 8
+    curvature_force_recompute: bool = False
     debug: bool = False
 
 
@@ -219,6 +235,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_surface_curvature_feature": (
+            "Append per-surface-point (H, K) curvature channels to surface_x "
+            "(SURFACE_X_DIM 7 -> 9). Each channel is signed-log transformed "
+            "(sign(x) * log1p(|x|)) at cache-build time and z-score "
+            "normalized using train-split mean/std at load time. PR #788 "
+            "follow-up to PR #773 (volume-only curvature regressed): the "
+            "surface decoder is where local geometry directly informs "
+            "p_s and tau predictions. Curvature is computed via local "
+            "quadric-fit (k=8 NN tangent-plane LS) once per case and "
+            "cached to --curvature-cache-dir. Cache "
+            "/mnt/new-pvc/Processed/curvatures_haku_v1 (484/484 cases) "
+            "is reused from haku PR #580."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -284,7 +313,617 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+# ---------------------------------------------------------------------------
+# Surface-curvature feature: per-surface-point H,K appended to surface_x.
+#
+# Cache layout (per case): <cache_dir>/<case_id>.npy of shape (N_surface, 2)
+# storing the signed-log-transformed (H_tilde, K_tilde) computed via local
+# quadric fit on k-NN tangent planes (haku PR #580 pipeline). The default
+# cache /mnt/new-pvc/Processed/curvatures_haku_v1 is already populated for
+# all 484 cases. We z-score normalize using train-split mean/std at load
+# time so the model receives unit-scale curvature inputs.
+#
+# Note (vs PR #788 instructions): PR #788 specified hard-coded H/10 and
+# K/1000 normalization assuming raw geometric units. The cached values are
+# already signed-log compressed (mean ~0, std ~0.32), so train-set z-score
+# is the correct unit-scale normalization for these features and matches
+# the validated haku #580 pipeline.
+# ---------------------------------------------------------------------------
+
+CURVATURE_FEATURE_DIM = 2  # [H_tilde, K_tilde]
+
+
+def _curvature_cache_path(cache_dir: Path, case_id: str) -> Path:
+    return cache_dir / f"{case_id}.npy"
+
+
+def _curvature_stats_path(cache_dir: Path) -> Path:
+    return cache_dir / "stats.json"
+
+
+def _compute_case_curvature(
+    xyz: np.ndarray,
+    normals: np.ndarray,
+    *,
+    k: int = 8,
+) -> np.ndarray:
+    """Compute per-vertex (H_tilde, K_tilde) via local quadric fit (haku #580).
+
+    Tangent-plane quadric fit ``w = a*u^2 + b*u*v + c*v^2`` over k-NN. Mean
+    curvature ``H = a + c``; Gaussian curvature ``K = 4ac - b^2``. Both pass
+    through a signed-log transform ``sign(x) * log1p(|x|)`` to compress the
+    heavy-tailed dynamic range while preserving sign.
+    """
+
+    from scipy.spatial import cKDTree
+
+    xyz = np.ascontiguousarray(xyz, dtype=np.float32)
+    normals = np.ascontiguousarray(normals, dtype=np.float32)
+    nn_norm = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = normals / np.maximum(nn_norm, 1e-8)
+
+    tree = cKDTree(xyz)
+    _, nn_idx = tree.query(xyz, k=k + 1, workers=-1)
+    nn_idx = nn_idx[:, 1:]
+    neighbors = xyz[nn_idx] - xyz[:, None, :]
+    proj_dot = np.einsum("bkj,bj->bk", neighbors, normals, optimize=True)
+    proj = neighbors - proj_dot[..., None] * normals[:, None, :]
+    axes = np.eye(3, dtype=np.float32)
+    abs_dot = np.abs(normals @ axes.T)
+    ax_idx = abs_dot.argmin(axis=1)
+    ref = axes[ax_idx]
+    u = np.cross(normals, ref)
+    u = u / np.maximum(np.linalg.norm(u, axis=1, keepdims=True), 1e-8)
+    v = np.cross(normals, u)
+    uu = np.einsum("bkj,bj->bk", proj, u, optimize=True)
+    vv = np.einsum("bkj,bj->bk", proj, v, optimize=True)
+    h = proj_dot
+    A = np.stack([uu * uu, uu * vv, vv * vv], axis=-1)
+    At = A.transpose(0, 2, 1)
+    AtA = At @ A
+    Ath = At @ h[..., None]
+    ridge = (np.eye(3, dtype=np.float32) * 1e-8)[None, :, :]
+    coeffs = np.linalg.solve(AtA + ridge, Ath).squeeze(-1)
+    a, b, c = coeffs[:, 0], coeffs[:, 1], coeffs[:, 2]
+    H = (a + c).astype(np.float32)
+    K = (4.0 * a * c - b * b).astype(np.float32)
+    H = np.where(np.isfinite(H), H, 0.0)
+    K = np.where(np.isfinite(K), K, 0.0)
+    H_tilde = (np.sign(H) * np.log1p(np.abs(H))).astype(np.float32)
+    K_tilde = (np.sign(K) * np.log1p(np.abs(K))).astype(np.float32)
+    return np.stack([H_tilde, K_tilde], axis=1)
+
+
+def _atomic_write_npy(target_path: Path, array: np.ndarray) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = target_path.with_name(f"{target_path.stem}.tmp.{os.getpid()}.npy")
+    np.save(tmp_path, array)
+    os.replace(tmp_path, target_path)
+
+
+def precompute_surface_curvature_cache(
+    case_ids: list[str],
+    store: DrivAerMLCaseStore,
+    cache_dir: Path,
+    *,
+    k: int,
+    state,
+    force_recompute: bool = False,
+) -> None:
+    """Build the per-case surface curvature cache, distributed across DDP ranks.
+
+    Uses the same per-case file format as haku #580 (npy of shape (N_surface, 2)).
+    The default cache directory is already populated; this function is a fallback
+    for missing cases or --curvature-force-recompute.
+    """
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    rank = state.rank if state.enabled else 0
+    world_size = state.world_size if state.enabled else 1
+    assigned = [
+        case_id
+        for i, case_id in enumerate(case_ids)
+        if i % world_size == rank
+    ]
+    n_total_missing = sum(
+        1
+        for case_id in case_ids
+        if force_recompute or not _curvature_cache_path(cache_dir, case_id).exists()
+    )
+    if state.is_main:
+        print(
+            f"[surface_curvature] cache check: {len(case_ids)} cases total, "
+            f"{n_total_missing} need (re)compute, k={k}, dir={cache_dir}"
+        )
+    t0 = time.time()
+    n_built = 0
+    for case_id in assigned:
+        path = _curvature_cache_path(cache_dir, case_id)
+        if path.exists() and not force_recompute:
+            continue
+        try:
+            case_dir = store.root / case_id
+            xyz_path = _resolve_artifact_path(case_dir / "surface_xyz.npy")
+            nor_path = _resolve_artifact_path(case_dir / "surface_normals.npy")
+            xyz = np.load(xyz_path)
+            normals = np.load(nor_path)
+            HK = _compute_case_curvature(xyz, normals, k=k)
+            _atomic_write_npy(path, HK)
+            n_built += 1
+            if rank == 0 and n_built % 8 == 0:
+                elapsed = time.time() - t0
+                print(
+                    f"  [rank0] built {n_built} cases in {elapsed:.0f}s"
+                )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[rank{rank}] curvature failed for {case_id}: {exc}")
+            raise
+    if state.enabled:
+        dist.barrier()
+    if state.is_main:
+        elapsed = time.time() - t0
+        n_after = sum(
+            1
+            for case_id in case_ids
+            if _curvature_cache_path(cache_dir, case_id).exists()
+        )
+        print(
+            f"[surface_curvature] cache ready: {n_after}/{len(case_ids)} cases "
+            f"({n_built} built by rank0 in {elapsed:.0f}s)"
+        )
+        if n_after < len(case_ids):
+            missing = [
+                cid
+                for cid in case_ids
+                if not _curvature_cache_path(cache_dir, cid).exists()
+            ]
+            raise RuntimeError(
+                f"Surface curvature cache incomplete: missing {len(missing)} cases, "
+                f"first 5: {missing[:5]}"
+            )
+
+
+def compute_or_load_surface_curvature_stats(
+    train_case_ids: list[str],
+    cache_dir: Path,
+    *,
+    state,
+    sample_per_case: int = 100_000,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute (or load) per-channel mean/std over training cases.
+
+    Stratified-samples ``sample_per_case`` rows per case to keep memory bounded
+    while drawing from every train case. Caches stats to <cache_dir>/stats.json.
+    """
+
+    stats_path = _curvature_stats_path(cache_dir)
+    mean: np.ndarray | None = None
+    std: np.ndarray | None = None
+    if state.is_main:
+        if stats_path.exists():
+            with stats_path.open("r") as f:
+                stats = json.load(f)
+            mean = np.asarray(stats["mean"], dtype=np.float32)
+            std = np.asarray(stats["std"], dtype=np.float32)
+            print(
+                f"[surface_curvature] stats loaded from cache: "
+                f"mean={mean.tolist()} std={std.tolist()}"
+            )
+        else:
+            rng = np.random.default_rng(seed)
+            ch0_chunks: list[np.ndarray] = []
+            ch1_chunks: list[np.ndarray] = []
+            for cid in train_case_ids:
+                arr = np.load(_curvature_cache_path(cache_dir, cid), mmap_mode="r")
+                N = arr.shape[0]
+                if N <= sample_per_case:
+                    sample = np.asarray(arr)
+                else:
+                    idx = rng.choice(N, size=sample_per_case, replace=False)
+                    idx.sort()
+                    sample = np.asarray(arr[idx])
+                ch0_chunks.append(sample[:, 0])
+                ch1_chunks.append(sample[:, 1])
+            ch0_all = np.concatenate(ch0_chunks)
+            ch1_all = np.concatenate(ch1_chunks)
+            mean = np.array(
+                [float(ch0_all.mean()), float(ch1_all.mean())], dtype=np.float32
+            )
+            std = np.array(
+                [
+                    float(max(ch0_all.std(), 1e-6)),
+                    float(max(ch1_all.std(), 1e-6)),
+                ],
+                dtype=np.float32,
+            )
+            with stats_path.open("w") as f:
+                json.dump(
+                    {
+                        "mean": mean.tolist(),
+                        "std": std.tolist(),
+                        "n_train_cases": len(train_case_ids),
+                        "sample_per_case": sample_per_case,
+                    },
+                    f,
+                )
+            print(
+                f"[surface_curvature] stats computed: mean={mean.tolist()} "
+                f"std={std.tolist()} from {len(train_case_ids)} train cases"
+            )
+    if state.enabled:
+        dist.barrier()
+    if not state.is_main:
+        with stats_path.open("r") as f:
+            stats = json.load(f)
+        mean = np.asarray(stats["mean"], dtype=np.float32)
+        std = np.asarray(stats["std"], dtype=np.float32)
+    return mean, std
+
+
+def pad_collate_dynamic(samples: list[DrivAerMLCase]) -> SurfaceBatch:
+    """Like data.pad_collate but reads surface_x/volume_x widths from samples,
+    so it works with any extra channels appended by wrappers (e.g. curvature).
+    """
+
+    if not samples:
+        raise ValueError("pad_collate_dynamic received an empty batch")
+    surface_x_dim = int(samples[0].surface_x.shape[-1])
+    volume_x_dim = int(samples[0].volume_x.shape[-1])
+    max_surface_n = max(sample.surface_x.shape[0] for sample in samples)
+    max_volume_n = max(sample.volume_x.shape[0] for sample in samples)
+    batch_size = len(samples)
+    surface_x = torch.zeros(
+        batch_size, max_surface_n, surface_x_dim, dtype=samples[0].surface_x.dtype
+    )
+    surface_y = torch.zeros(
+        batch_size, max_surface_n, SURFACE_Y_DIM, dtype=samples[0].surface_y.dtype
+    )
+    surface_mask = torch.zeros(batch_size, max_surface_n, dtype=torch.bool)
+    volume_x = torch.zeros(
+        batch_size, max_volume_n, volume_x_dim, dtype=samples[0].volume_x.dtype
+    )
+    volume_y = torch.zeros(
+        batch_size, max_volume_n, VOLUME_Y_DIM, dtype=samples[0].volume_y.dtype
+    )
+    volume_mask = torch.zeros(batch_size, max_volume_n, dtype=torch.bool)
+    for i, sample in enumerate(samples):
+        surface_n = sample.surface_x.shape[0]
+        volume_n = sample.volume_x.shape[0]
+        surface_x[i, :surface_n] = sample.surface_x
+        surface_y[i, :surface_n] = sample.surface_y
+        surface_mask[i, :surface_n] = True
+        volume_x[i, :volume_n] = sample.volume_x
+        volume_y[i, :volume_n] = sample.volume_y
+        volume_mask[i, :volume_n] = True
+    return SurfaceBatch(
+        case_ids=[sample.case_id for sample in samples],
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=surface_mask,
+        volume_x=volume_x,
+        volume_y=volume_y,
+        volume_mask=volume_mask,
+        metadata=[dict(sample.metadata) for sample in samples],
+    )
+
+
+class DrivAerMLSurfaceDatasetWithSurfaceCurvature(DrivAerMLSurfaceDataset):
+    """DrivAerMLSurfaceDataset that appends per-point (H_tilde, K_tilde) channels.
+
+    Mirrors the parent's view-based index draw, then loads the matching rows
+    from <cache_dir>/<case_id>.npy and concatenates them to surface_x after
+    z-score standardization with the training-set mean/std.
+    """
+
+    def __init__(
+        self,
+        case_ids: list[str],
+        *,
+        store: DrivAerMLCaseStore | None = None,
+        manifest_path=None,
+        root=None,
+        max_points: int | None = None,
+        max_surface_points: int = 0,
+        max_volume_points: int = 0,
+        sampling_mode: str = "full",
+        curvature_cache_dir: Path,
+        curvature_mean: np.ndarray,
+        curvature_std: np.ndarray,
+    ):
+        kwargs = dict(
+            store=store,
+            max_points=max_points,
+            max_surface_points=max_surface_points,
+            max_volume_points=max_volume_points,
+            sampling_mode=sampling_mode,
+        )
+        if manifest_path is not None:
+            kwargs["manifest_path"] = manifest_path
+        if root is not None:
+            kwargs["root"] = root
+        super().__init__(case_ids, **{k: v for k, v in kwargs.items() if v is not None})
+        self.curvature_cache_dir = Path(curvature_cache_dir)
+        self.curvature_mean = curvature_mean.astype(np.float32).reshape(1, 2)
+        self.curvature_std = curvature_std.astype(np.float32).reshape(1, 2)
+        self._curv_inv_std = (1.0 / np.maximum(self.curvature_std, 1e-6)).astype(
+            np.float32
+        )
+
+    def _load_curvature_rows(
+        self, case_id: str, rows: np.ndarray | None
+    ) -> np.ndarray:
+        path = _curvature_cache_path(self.curvature_cache_dir, case_id)
+        if rows is None:
+            arr = np.asarray(np.load(path), dtype=np.float32)
+        elif len(rows) == 0:
+            return np.zeros((0, CURVATURE_FEATURE_DIM), dtype=np.float32)
+        else:
+            mapped = np.load(path, mmap_mode="r")
+            arr = np.asarray(mapped[rows], dtype=np.float32)
+        return (arr - self.curvature_mean) * self._curv_inv_std
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        volume_idx = self._indices(
+            counts["n_volume"],
+            self.max_volume_points,
+            view,
+            group_view_count=view.volume_view_count,
+        )
+        surface_rows_np = None if surface_idx is None else surface_idx.numpy()
+        volume_rows_np = None if volume_idx is None else volume_idx.numpy()
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=surface_rows_np,
+            volume_rows=volume_rows_np,
+        )
+        curvature_arr = self._load_curvature_rows(view.case_id, surface_rows_np)
+        if curvature_arr.shape[0] != case.surface_x.shape[0]:
+            raise RuntimeError(
+                f"Curvature row mismatch for {view.case_id}: "
+                f"{curvature_arr.shape[0]} vs {case.surface_x.shape[0]}"
+            )
+        if curvature_arr.size == 0:
+            curvature_t = case.surface_x.new_zeros(0, CURVATURE_FEATURE_DIM)
+        else:
+            curvature_t = torch.from_numpy(curvature_arr).to(
+                dtype=case.surface_x.dtype
+            )
+        surface_x_aug = torch.cat([case.surface_x, curvature_t], dim=-1)
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = view.sampling_mode
+        metadata["joint_view_count"] = int(view.view_count)
+        metadata["surface_curvature_features"] = "h_k"
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=surface_x_aug,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
+def make_loaders_with_surface_curvature(
+    config: Config,
+    *,
+    distributed_state,
+    cache_dir: Path,
+    curvature_mean: np.ndarray,
+    curvature_std: np.ndarray,
+):
+    """Construct train/val/test loaders that emit (SURFACE_X_DIM+2)-channel surface_x.
+
+    Mirrors trainer_runtime.make_loaders but uses
+    DrivAerMLSurfaceDatasetWithSurfaceCurvature and pad_collate_dynamic.
+    """
+
+    from trainer_runtime import StridedDistributedSampler
+    from trainer_runtime import loader_kwargs as base_loader_kwargs
+    from data.loader import target_stats_from_normalizers
+
+    store = DrivAerMLCaseStore(
+        manifest_path=config.manifest, root=config.data_root or None
+    )
+    train_ids = store.case_ids("train")
+    val_ids = store.case_ids("val")
+    test_ids = store.case_ids("test")
+    train_surface_points = config.train_surface_points
+    eval_surface_points = config.eval_surface_points
+    train_volume_points = config.train_volume_points
+    eval_volume_points = config.eval_volume_points
+    if config.debug:
+        train_ids = train_ids[:4]
+        val_ids = val_ids[:2]
+        test_ids = test_ids[:2]
+        train_surface_points = min(train_surface_points, 8_192)
+        eval_surface_points = min(eval_surface_points, 8_192)
+        train_volume_points = min(train_volume_points, 8_192)
+        eval_volume_points = min(eval_volume_points, 8_192)
+    train_sampling = (
+        "train_random"
+        if (train_surface_points > 0 or train_volume_points > 0)
+        else "full"
+    )
+    eval_sampling = (
+        "eval_chunk"
+        if (eval_surface_points > 0 or eval_volume_points > 0)
+        else "full"
+    )
+
+    def _make_ds(case_ids, *, max_s, max_v, sampling):
+        return DrivAerMLSurfaceDatasetWithSurfaceCurvature(
+            case_ids,
+            store=store,
+            max_surface_points=max_s,
+            max_volume_points=max_v,
+            sampling_mode=sampling,
+            curvature_cache_dir=cache_dir,
+            curvature_mean=curvature_mean,
+            curvature_std=curvature_std,
+        )
+
+    train_ds = _make_ds(
+        train_ids,
+        max_s=train_surface_points,
+        max_v=train_volume_points,
+        sampling=train_sampling,
+    )
+    val_ds = _make_ds(
+        val_ids,
+        max_s=eval_surface_points,
+        max_v=eval_volume_points,
+        sampling=eval_sampling,
+    )
+    test_ds = _make_ds(
+        test_ids,
+        max_s=eval_surface_points,
+        max_v=eval_volume_points,
+        sampling=eval_sampling,
+    )
+
+    base_kwargs = base_loader_kwargs(config)
+    base_kwargs["collate_fn"] = pad_collate_dynamic
+
+    train_sampler = None
+    train_shuffle = True
+    if distributed_state is not None and distributed_state.enabled:
+        train_sampler = DistributedSampler(
+            train_ds,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+            shuffle=True,
+            drop_last=True,
+        )
+        train_shuffle = False
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=config.batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        drop_last=True,
+        **base_kwargs,
+    )
+
+    def _eval_loader(ds):
+        sampler = None
+        if distributed_state is not None and distributed_state.enabled:
+            sampler = StridedDistributedSampler(
+                ds,
+                num_replicas=distributed_state.world_size,
+                rank=distributed_state.rank,
+            )
+        return DataLoader(
+            ds,
+            batch_size=config.batch_size,
+            shuffle=False,
+            sampler=sampler,
+            **base_kwargs,
+        )
+
+    val_loaders = {"val_surface": _eval_loader(val_ds)}
+    test_loaders = {"test_surface": _eval_loader(test_ds)}
+    stats = target_stats_from_normalizers(store)
+    print(
+        f"DrivAerML+surface_curvature: train={len(train_ds)} views/{len(train_ids)} cases, "
+        f"val={len(val_ds)} views/{len(val_ids)} cases, "
+        f"test={len(test_ds)} views/{len(test_ids)} cases"
+    )
+    return train_loader, val_loaders, test_loaders, stats
+
+
+def full_eval_loaders_with_surface_curvature(
+    loaders: dict[str, DataLoader],
+    config: Config,
+) -> dict[str, DataLoader]:
+    """Rank-0 single-process eval loaders that use pad_collate_dynamic."""
+
+    from trainer_runtime import loader_kwargs as base_loader_kwargs
+
+    base_kwargs = base_loader_kwargs(config)
+    base_kwargs["collate_fn"] = pad_collate_dynamic
+    out: dict[str, DataLoader] = {}
+    for name, loader in loaders.items():
+        out[name] = DataLoader(
+            loader.dataset,
+            batch_size=config.batch_size,
+            shuffle=False,
+            sampler=None,
+            **base_kwargs,
+        )
+    return out
+
+
+def rebuild_train_loader_with_surface_curvature_vol_points(
+    config: Config,
+    old_train_loader: DataLoader,
+    n_points: int,
+    distributed_state,
+) -> DataLoader:
+    """Curvature-aware sibling of rebuild_train_loader_with_vol_points."""
+
+    from trainer_runtime import loader_kwargs as base_loader_kwargs
+
+    old_ds = old_train_loader.dataset
+    sampling_mode = (
+        "train_random"
+        if (config.train_surface_points > 0 or n_points > 0)
+        else "full"
+    )
+    train_ds = DrivAerMLSurfaceDatasetWithSurfaceCurvature(
+        old_ds.case_ids,
+        store=old_ds.store,
+        max_surface_points=config.train_surface_points,
+        max_volume_points=n_points,
+        sampling_mode=sampling_mode,
+        curvature_cache_dir=old_ds.curvature_cache_dir,
+        curvature_mean=old_ds.curvature_mean.reshape(-1),
+        curvature_std=old_ds.curvature_std.reshape(-1),
+    )
+    train_sampler = None
+    train_shuffle = True
+    if distributed_state is not None and distributed_state.enabled:
+        train_sampler = DistributedSampler(
+            train_ds,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+            shuffle=True,
+            drop_last=True,
+        )
+        train_shuffle = False
+    base_kwargs = base_loader_kwargs(config)
+    base_kwargs["collate_fn"] = pad_collate_dynamic
+    return DataLoader(
+        train_ds,
+        batch_size=config.batch_size,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        drop_last=True,
+        **base_kwargs,
+    )
+
+
 def build_model(config: Config) -> SurfaceTransolver:
+    surface_input_dim = SURFACE_X_DIM
+    if config.use_surface_curvature_feature:
+        surface_input_dim = SURFACE_X_DIM + CURVATURE_FEATURE_DIM
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -297,6 +936,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        surface_input_dim=surface_input_dim,
     )
 
 
@@ -725,9 +1365,64 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
         current_train_vol_points = config.train_volume_points
 
-        train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
-        final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
-        final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+        curvature_cache_dir: Path | None = None
+        curvature_mean: np.ndarray | None = None
+        curvature_std: np.ndarray | None = None
+        if config.use_surface_curvature_feature:
+            curvature_cache_dir = Path(config.curvature_cache_dir)
+            store = DrivAerMLCaseStore(
+                manifest_path=config.manifest, root=config.data_root or None
+            )
+            train_ids_for_cache = store.case_ids("train")
+            val_ids_for_cache = store.case_ids("val")
+            test_ids_for_cache = store.case_ids("test")
+            if config.debug:
+                train_ids_for_cache = train_ids_for_cache[:4]
+                val_ids_for_cache = val_ids_for_cache[:2]
+                test_ids_for_cache = test_ids_for_cache[:2]
+            all_ids = (
+                train_ids_for_cache + val_ids_for_cache + test_ids_for_cache
+            )
+            precompute_surface_curvature_cache(
+                all_ids,
+                store,
+                curvature_cache_dir,
+                k=config.curvature_k,
+                state=state,
+                force_recompute=config.curvature_force_recompute,
+            )
+            curvature_mean, curvature_std = compute_or_load_surface_curvature_stats(
+                train_ids_for_cache, curvature_cache_dir, state=state
+            )
+            train_loader, val_loaders, test_loaders, stats = (
+                make_loaders_with_surface_curvature(
+                    config,
+                    distributed_state=state,
+                    cache_dir=curvature_cache_dir,
+                    curvature_mean=curvature_mean,
+                    curvature_std=curvature_std,
+                )
+            )
+            final_val_loaders = (
+                full_eval_loaders_with_surface_curvature(val_loaders, config)
+                if state.is_main
+                else {}
+            )
+            final_test_loaders = (
+                full_eval_loaders_with_surface_curvature(test_loaders, config)
+                if state.is_main
+                else {}
+            )
+        else:
+            train_loader, val_loaders, test_loaders, stats = make_loaders(
+                config, distributed_state=state
+            )
+            final_val_loaders = (
+                full_eval_loaders_from(val_loaders, config) if state.is_main else {}
+            )
+            final_test_loaders = (
+                full_eval_loaders_from(test_loaders, config) if state.is_main else {}
+            )
         transform = TargetTransform(
             surface_y_mean=stats["surface_y_mean"].to(device),
             surface_y_std=stats["surface_y_std"].to(device),
@@ -861,6 +1556,24 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/use_surface_curvature_feature"] = float(
+                config.use_surface_curvature_feature
+            )
+            wandb.summary["model/surface_input_dim_effective"] = float(
+                SURFACE_X_DIM
+                + (CURVATURE_FEATURE_DIM if config.use_surface_curvature_feature else 0)
+            )
+            if (
+                config.use_surface_curvature_feature
+                and curvature_mean is not None
+                and curvature_std is not None
+            ):
+                wandb.summary["surface_curvature/cache_dir"] = str(curvature_cache_dir)
+                wandb.summary["surface_curvature/k"] = float(config.curvature_k)
+                wandb.summary["surface_curvature/H_train_mean"] = float(curvature_mean[0])
+                wandb.summary["surface_curvature/H_train_std"] = float(curvature_std[0])
+                wandb.summary["surface_curvature/K_train_mean"] = float(curvature_mean[1])
+                wandb.summary["surface_curvature/K_train_std"] = float(curvature_std[1])
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -885,9 +1598,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             f"(was {current_train_vol_points})"
                         )
                     config.train_volume_points = desired_vol_points
-                    train_loader = rebuild_train_loader_with_vol_points(
-                        config, train_loader, desired_vol_points, state
-                    )
+                    if config.use_surface_curvature_feature:
+                        train_loader = (
+                            rebuild_train_loader_with_surface_curvature_vol_points(
+                                config, train_loader, desired_vol_points, state
+                            )
+                        )
+                    else:
+                        train_loader = rebuild_train_loader_with_vol_points(
+                            config, train_loader, desired_vol_points, state
+                        )
                     current_train_vol_points = desired_vol_points
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
