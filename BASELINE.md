@@ -52,17 +52,18 @@ PR #741 (`lszc4ri7` / `1tal40wr`), test_primary/abupt_axis_mean_rel_l2_pct = **7
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.3521%** (PR #740 fern, EP26, run `5x8wofzm`) — wave leader updated from EP24 (6.3551%) to EP26 (6.3521%); beats pre-wave SOTA val 6.5281% by 0.1760pp
+In-wave val target: **6.3430%** (PR #740 fern, EP27, run `5x8wofzm`) — wave leader updated from EP26 (6.3521%) to EP27 (6.3430%); beats pre-wave SOTA val 6.5281% by 0.1851pp
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
 | PR | Run | Student | Epoch | val_abupt | Notes |
 |---|---|---|---:|---:|---|
-| #740 Arm B | `5x8wofzm` | fern | EP26 (best) | **6.3521%** | GradNorm α=0.5; steps_per_epoch=10987; EP26=6.3521% **WAVE LEADER**; EP26 beats EP24=6.3551% by 0.003pp; EP30 check-in pending |
+| #740 Arm B | `5x8wofzm` | fern | EP27 (best) | **6.3430%** | GradNorm α=0.5; steps_per_epoch=10987; EP27=6.3430% **WAVE LEADER** (beat EP26=6.3521% by 0.009pp); plateau range 6.343–6.352%; EP30 check-in pending at step≥329,610 |
 | #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; MERGED PR #741; test=7.8232% |
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; TERMINAL EP50 complete; test=7.845%; did NOT beat merged best (7.8232%); val beats pre-wave SOTA 6.5281% by 0.018pp |
 | #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 |
-| #780 | `20n1fvwn` | dl24-tanjiro | EP9 | 7.2681% | GradNorm α=0.25; EP9=7.27%, EP10 gate (≤8.0%) imminent; trivially on track |
-| #784 | `sd59a9dq` | dl24-nezuko | EP7 | 8.1962% | QK-Norm + Y-axis aug; EP7=8.20% descending; EP10 gate ~1h away |
+| #780 | `20n1fvwn` | dl24-tanjiro | EP11.0 | **7.0386%** | GradNorm α=0.25; EP10 FORMALLY PASSED step=54,939 val=7.0386% (≤8.0% ✓); EP11.0/step=60,423 latest=7.1604% (regression from best — normal noise); projected EP20≈6.31%; EP20 gate (≤7.2%) next at step≥109,880 |
+| #784 | `sd59a9dq` | dl24-nezuko | EP8.0 | 8.0433% | QK-Norm + Y-axis aug; EP8.0/step=43,904 val=8.0433%; EP10 gate PASS expected at step≥54,940 (threshold≤8.0%, projected≈7.934%) |
+| #791 | TBD | dl24-frieren | — | — | GradNorm α=0.5 + Y-axis symmetry composition; training in progress |
 
-_Last updated: 2026-05-07 (fern EP26=6.3521% NEW WAVE LEADER; frieren TERMINAL test=7.845% does not beat merged best 7.8232%; tanjiro EP9=7.27% EP10 gate imminent; nezuko EP7=8.20% descending)_
+_Last updated: 2026-05-09 (fern EP27=6.3430% NEW WAVE LEADER beat EP26=6.3521% by 0.009pp; plateau range 6.343–6.352%; EP30 pending step≥329,610; tanjiro #780 EP11.0/step=60,423 latest=7.1604% regression from best 7.0386% — normal noise; EP20 gate ≤7.2% at step≥109,880; nezuko #784 EP8.0/step=43,904 val=8.0433%; EP10 gate PASS expected at step≥54,940; frieren #791 GradNorm α=0.5 + Y-sym composition — training in progress)_
