@@ -8,6 +8,73 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-07 ~10:30 UTC — Wave Status Update: EP18–EP34 Progress Across All 4 Active Runs
+
+### Wave val leader board
+
+| PR | Student | Run ID | Config | Best val (EMA) | Epoch | Status |
+|----|---------|--------|--------|----------------|-------|--------|
+| #794 | fern | `em7eupj5` | 4L STRING + GradNorm α=0.25 + Y-sym | **6.7320%** | EP18 | EP19 in progress |
+| #780 | tanjiro | `20n1fvwn` | 4L STRING + GradNorm α=0.25 | 6.7970% | EP33 | EP35 in progress (EP34 outlier) |
+| #800 | nezuko | `hmhfnedy` | 5L STRING + GradNorm α=0.5 | 7.0322% | EP5 | EP5+ in progress |
+| #806 | frieren | `gui4ceed` | 5L STRING + GradNorm α=0.25 + Y-sym | 7.8887% | EP2 | EP5 gate expected ~10:31Z |
+
+### PR #794 (fern) — EP10→EP18 trajectory
+
+| Epoch | val_primary | Δ | Note |
+|-------|-------------|---|------|
+| EP10 | 6.8631% | — | |
+| EP11 | 6.8315% | −0.032 | beat tanjiro EP25 to take wave val lead |
+| EP12 | 6.8132% | −0.018 | |
+| EP13 | 6.7834% | −0.030 | |
+| EP14 | 6.8195% | +0.036 | transient uptick (noise) |
+| EP15 | 6.7750% | −0.045 | new best, uptick resolved |
+| EP16 | 6.7435% | −0.032 | new best |
+| EP17 | 6.7346% | −0.009 | new best, slope flattening |
+| EP18 | **6.7320%** | −0.003 | **wave val leader, slope ~−0.003pp/ep entering plateau** |
+
+Per-channel at EP16: cp=4.335%, vol_p=4.081%, τx=6.656%, τy=8.379%, τz=10.267%. GradNorm weights near EP15: w_τz≈1.35, w_vol≈1.0 (balanced routing, Y-sym relieving volume pressure). Projecting EP20≈6.64%, EP30≈6.37%, EP50≈6.1–6.3%.
+
+### PR #780 (tanjiro) — EP25→EP34 trajectory
+
+| Epoch | val_primary | Δ | Note |
+|-------|-------------|---|------|
+| EP25 | 6.8511% | — | |
+| EP26 | 6.8334% | −0.018 | |
+| EP27 | 6.8301% | −0.003 | |
+| EP28 | 6.8216% | −0.009 | |
+| EP29 | 6.8264% | +0.005 | noise tick |
+| EP30 | 6.8154% | −0.011 | |
+| EP31 | 6.8047% | −0.011 | |
+| EP32 | 6.7986% | −0.006 | |
+| EP33 | **6.7970%** | −0.002 | **run best** |
+| EP34 | 7.3507% | +0.553 | **outlier-batch anomaly — NOT divergence** |
+
+GradNorm at EP30: w_vol=2.351 (strongly elevated), w_τz=0.493, w_τy=0.253 — volume routing dominant without Y-sym. EP34 regression diagnosis: uniform per-channel jump (all 5 channels affected proportionally), LR in cosine tail at 2.4e−5, grad norm 0.087 (normal), spike density not elevated near EP34 boundary. Advisor confirmed outlier-batch noise, EMA run best remains EP33=6.7970%. EP35 is the decisive confirmation epoch; recovery ≤6.85% confirms noise hypothesis.
+
+### PR #800 (nezuko) — EP1→EP5
+
+| Epoch | val_primary | Note |
+|-------|-------------|------|
+| EP1 | 10.6420% | |
+| EP2 | 7.8901% | |
+| EP3 | 7.5330% | |
+| EP4 | 7.1180% | |
+| EP5 | **7.0322%** | all 3 kill gates cleared |
+
+Per-channel at EP5: cp=4.615%, vol_p=4.567%, τx=6.825%, τy=8.689%, τz=10.465%. GradNorm w_τz trajectory: 1.37→1.46→1.54→1.59→1.49 (mild pullback at EP5 as τz gap narrows). α=0.5 aggressively routing to τz without Y-sym — different GradNorm signature from fern. EP5 gate PASS with 1.97pp margin; all gates cleared. Projecting EP50≈6.4–6.6%.
+
+### PR #806 (frieren) — EP1→EP2 (triple compose)
+
+| Epoch | val_primary | Note |
+|-------|-------------|------|
+| EP1 | 11.1953% | 1.13pp ahead of fern 4L at EP1 |
+| EP2 | **7.8887%** | tied with nezuko #800 at EP2; all EP5+EP10+EP20 gates pre-cleared |
+
+GradNorm weights at EP2: near-uniform (w range 0.88–1.13), α=0.25 slow differentiation as expected. Y-sym + GradNorm + 5L starting well. EP5 report expected ~10:31Z. Fastest gate-clearing trajectory in wave at EP2.
+
+---
+
 ## 2026-05-07 08:15 UTC — PR #806: 5L STRING + GradNorm α=0.25 + Y-sym Triple Compose (dl24-frieren, `gui4ceed`)
 
 ### Context
