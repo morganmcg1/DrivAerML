@@ -905,6 +905,9 @@ class EvalAccumulator:
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
+    # Per-case SDF-gate diagnostics (only populated when the gate is enabled).
+    gate_a_values: list[float] = field(default_factory=list)
+    gate_b_values: list[float] = field(default_factory=list)
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -967,6 +970,10 @@ def accumulate_eval_batch(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+    gate = getattr(eval_module, "vol_decoder_gate", None)
+    if gate is not None and gate._last_a is not None:
+        accumulator.gate_a_values.extend(gate._last_a.float().reshape(-1).cpu().tolist())
+        accumulator.gate_b_values.extend(gate._last_b.float().reshape(-1).cpu().tolist())
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
@@ -1052,6 +1059,8 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
                 state = merged.case_sums[key].setdefault(case_id, [0.0, 0.0])
                 state[0] += values[0]
                 state[1] += values[1]
+        merged.gate_a_values.extend(accumulator.gate_a_values)
+        merged.gate_b_values.extend(accumulator.gate_b_values)
     return merged
 
 
@@ -1081,7 +1090,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
         accumulator.surface_loss_count + accumulator.volume_loss_count, 1
     )
-    return {
+    result = {
         "loss": loss,
         "surface_loss": accumulator.surface_loss_sse / max(accumulator.surface_loss_count, 1),
         "volume_loss": accumulator.volume_loss_sse / max(accumulator.volume_loss_count, 1),
@@ -1110,6 +1119,29 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
     }
+    if accumulator.gate_a_values:
+        a_tensor = torch.tensor(accumulator.gate_a_values, dtype=torch.float32)
+        b_tensor = torch.tensor(accumulator.gate_b_values, dtype=torch.float32)
+        a_std = float(a_tensor.std(unbiased=False).item()) if a_tensor.numel() > 1 else 0.0
+        a_min = float(a_tensor.min().item())
+        a_max = float(a_tensor.max().item())
+        sat_thresh = 0.9 * 0.15  # v3 tanh cap = 0.15
+        result.update(
+            {
+                "gate_scale_mean": float(a_tensor.mean().item()),
+                "gate_scale_std": a_std,
+                "gate_scale_min": a_min,
+                "gate_scale_max": a_max,
+                "gate_scale_max_abs": float(a_tensor.abs().max().item()),
+                "gate_scale_range": a_max - a_min,
+                "gate_scale_sat_frac": float(
+                    (a_tensor.abs() > sat_thresh).to(dtype=torch.float32).mean().item()
+                ),
+                "gate_bias_mean": float(b_tensor.mean().item()),
+                "gate_bias_max_abs": float(b_tensor.abs().max().item()),
+            }
+        )
+    return result
 
 
 @torch.no_grad()

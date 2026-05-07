@@ -102,6 +102,9 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    vol_decoder_sdf_gating: bool = False
+    gate_weight_decay: float = 5e-3
+    gate_warmup_epochs: int = 2
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -235,9 +238,33 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    # When the SDF gate is enabled, split the gate MLP params into their own
+    # group so we can apply v3's stronger weight decay and an independent
+    # per-step LR warmup (see gate-LR override in main()).
+    gate_module = getattr(unwrap_model(model), "vol_decoder_gate", None)
+    if config.vol_decoder_sdf_gating and gate_module is not None:
+        gate_params = list(gate_module.mlp.parameters())
+        gate_param_ids = {id(p) for p in gate_params}
+        backbone_params = [
+            p for p in model.parameters() if id(p) not in gate_param_ids and p.requires_grad
+        ]
+    else:
+        gate_params = []
+        backbone_params = [p for p in model.parameters() if p.requires_grad]
+
+    def _build_param_groups(backbone_wd: float, gate_wd: float) -> list[dict]:
+        groups = [
+            {"params": backbone_params, "lr": config.lr, "weight_decay": backbone_wd},
+        ]
+        if gate_params:
+            groups.append(
+                {"params": gate_params, "lr": config.lr, "weight_decay": gate_wd}
+            )
+        return groups
+
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
-            model.parameters(),
+            _build_param_groups(config.weight_decay, config.gate_weight_decay),
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
@@ -245,7 +272,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
+            _build_param_groups(config.weight_decay, config.gate_weight_decay),
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
@@ -297,7 +324,41 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_decoder_sdf_gating=config.vol_decoder_sdf_gating,
     )
+
+
+def collect_gate_metrics(model: nn.Module, prefix: str) -> dict[str, float]:
+    """Per-step gate health metrics from the most recent forward pass.
+
+    Returns scale_{mean,std,min,max,max_abs}, scale_range, sat_frac (fraction
+    of cases with |scale| > 0.9 * tanh_cap), and bias_max_abs. Empty dict if
+    the gate is disabled or hasn't been called yet.
+    """
+
+    gate = getattr(unwrap_model(model), "vol_decoder_gate", None)
+    if gate is None or gate._last_a is None:
+        return {}
+    a = gate._last_a.float().reshape(-1)
+    b = gate._last_b.float().reshape(-1)
+    a_std = float(a.std(unbiased=False).cpu().item()) if a.numel() > 1 else 0.0
+    a_min = float(a.min().cpu().item())
+    a_max = float(a.max().cpu().item())
+    # tanh cap on the multiplier is 0.15 in v3; saturated = |a| > 0.9 * 0.15 = 0.135.
+    sat_thresh = 0.9 * 0.15
+    return {
+        f"{prefix}/scale_mean": float(a.mean().cpu().item()),
+        f"{prefix}/scale_std": a_std,
+        f"{prefix}/scale_min": a_min,
+        f"{prefix}/scale_max": a_max,
+        f"{prefix}/scale_max_abs": float(a.abs().max().cpu().item()),
+        f"{prefix}/scale_range": a_max - a_min,
+        f"{prefix}/sat_frac": float(
+            (a.abs() > sat_thresh).to(dtype=torch.float32).mean().cpu().item()
+        ),
+        f"{prefix}/bias_mean": float(b.mean().cpu().item()),
+        f"{prefix}/bias_max_abs": float(b.abs().max().cpu().item()),
+    }
 
 
 def train_loss(
@@ -762,6 +823,30 @@ def main(argv: Iterable[str] | None = None) -> None:
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
+        # Gate-specific independent LR warmup (v3): the gate MLP param group
+        # gets its own per-step linear warmup over `gate_warmup_epochs` epochs,
+        # using `len(train_loader)` at construction time as the steps/epoch
+        # estimate. This is intentionally smoother than the per-epoch backbone
+        # SequentialLR warmup so the EP1->EP2 LR jump cannot saturate the gate.
+        gate_param_group_idx: int | None = None
+        gate_warmup_steps: int = 0
+        if config.vol_decoder_sdf_gating and len(optimizer.param_groups) > 1:
+            gate_param_group_idx = 1
+            gate_warmup_steps = max(
+                1, config.gate_warmup_epochs * max(len(train_loader), 1)
+            )
+            if state.is_main:
+                gate_param_count = sum(
+                    p.numel() for p in optimizer.param_groups[gate_param_group_idx]["params"]
+                )
+                print(
+                    f"VolDecoderSDFGate v3 enabled: tanh_cap=0.15 bias_cap=0.03 "
+                    f"gate_params={gate_param_count} "
+                    f"gate_warmup_epochs={config.gate_warmup_epochs} "
+                    f"gate_warmup_steps={gate_warmup_steps} "
+                    f"gate_weight_decay={config.gate_weight_decay}"
+                )
+
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
         if config.use_gradnorm:
@@ -1012,6 +1097,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
+                # v3: gate MLP gets its own per-step linear warmup, scaling
+                # the scheduler-set LR by global_step / gate_warmup_steps for
+                # the first gate_warmup_epochs epochs. Backbone is unaffected.
+                gate_lr_log = current_lr
+                if gate_param_group_idx is not None and global_step <= gate_warmup_steps:
+                    scheduled_gate_lr = scheduler.get_last_lr()[gate_param_group_idx]
+                    gate_factor = global_step / float(gate_warmup_steps)
+                    gate_lr = scheduled_gate_lr * gate_factor
+                    optimizer.param_groups[gate_param_group_idx]["lr"] = gate_lr
+                    gate_lr_log = gate_lr
+                elif gate_param_group_idx is not None:
+                    gate_lr_log = optimizer.param_groups[gate_param_group_idx]["lr"]
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
                 skip_step = distributed_any(state, loss_is_nonfinite, device)
                 should_log_model_telemetry = (
@@ -1050,6 +1147,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if config.vol_decoder_sdf_gating:
+                    train_log.update(collect_gate_metrics(model, prefix="train/gate"))
+                    if gate_param_group_idx is not None:
+                        train_log["train/gate/lr"] = gate_lr_log
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
@@ -1240,6 +1341,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                if config.vol_decoder_sdf_gating:
+                    primary_val_surface = val_metrics.get("val_surface", {})
+                    for key in (
+                        "gate_scale_mean",
+                        "gate_scale_std",
+                        "gate_scale_min",
+                        "gate_scale_max",
+                        "gate_scale_max_abs",
+                        "gate_scale_range",
+                        "gate_scale_sat_frac",
+                        "gate_bias_mean",
+                        "gate_bias_max_abs",
+                    ):
+                        if key in primary_val_surface:
+                            log_metrics[f"val/gate/{key[len('gate_'):]}"] = primary_val_surface[key]
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
