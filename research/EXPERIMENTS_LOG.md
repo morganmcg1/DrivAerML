@@ -56,6 +56,78 @@ alphonse reassigned to PR #814 (STRING 6-octave extended spectrum — pure CLI).
 
 ---
 
+## 2026-05-01 (this session) — PR #821: vol-loss-weight=2.0 budget-matched 5-ep cosine (tanjiro) — ASSIGNED
+
+- **Branch**: tanjiro/vol-w2-5ep-budget-matched
+- **W&B group**: `tanjiro-vol-w2-5ep`
+- **Hypothesis**: PR #813 missed the SOTA gate because the 270-min budget only covered ~26.5% of the 13-ep cosine schedule. With `--epochs 5 --lr-cosine-t-max 5`, the LR fully decays within budget. `--volume-loss-weight 2.0` confirmed net-positive at 4-ep paired controls (PR #805: −5.0% rel test_vol_p). Budget-matched 5-ep cosine is the correct test.
+- **Gate**: val_abupt < 6.5985% (single-model SOTA #592)
+- **Status**: ASSIGNED 2026-05-01
+
+---
+
+## 2026-05-01 (this session) — PR #820: 2-layer GELU MLP vol decoder 512→256→1 (askeladd) — ASSIGNED
+
+- **Branch**: askeladd/vol-mlp-decoder-2layer
+- **W&B group**: `askeladd-vol-mlp-decoder`
+- **Hypothesis**: Current `volume_out = LinearProjection(512→1)` is a single linear layer. A 2-layer GELU MLP (512→256→1) with zero-init final layer adds non-linearity at the decoding boundary — where the shared surface+volume backbone representation is decoded into scalar volume pressure. The rank-1 LoRA ceiling (PR #812 dead-end) motivates adding depth rather than rank.
+- **Implementation**: New `--vol-decoder-mlp` flag. `vol_hidden_dim = n_hidden//2 = 256`. Final layer zero-init for stable training start.
+- **Gate**: val_abupt < 6.5985% (single-model SOTA #592) / secondary: test_vol_p < 11.4652%
+- **Status**: ASSIGNED 2026-05-01
+
+---
+
+## 2026-05-01 (this session) — PR #812: Additive LoRA on volume output head r=4/r=8 (askeladd retry) — CLOSED DEAD END
+
+- **Branch**: askeladd/vol-head-lora-r4r8-retry (deleted)
+- **W&B runs**: `6m7vw0tw` (Arm A r=4), `kmh2etht` (Arm B r=8, killed at 5 min)
+- **Hypothesis**: Additive rank-r LoRA correction on `volume_out` head to address vol_p test gap.
+
+**Results (Arm A, r=4, run `6m7vw0tw`, EP4 best):**
+
+| Metric | This run | SOTA #592 | Δ |
+|---|---:|---:|---:|
+| val_abupt (EP4 best) | 6.9117% | 6.5985% | +0.313pp |
+| test_abupt | 8.1983% | 7.9915% | +0.208pp |
+| test_vol_p | 12.1930% | 11.933% | +0.260pp |
+
+**Architectural dead-end diagnosis**: `VOLUME_Y_DIM=1` in `data/loader.py:41` → output head is 512→1 → `rank(ΔW) ≤ min(r, 1, 512) = 1` for ANY r. LoRA rank diagnostic:
+```
+vol_lora_B: shape=(1,4), ||B||_F = 1.18e-04  (effectively zero)
+||delta_W||_F / ||W||_F = 2.48e-04
+stable rank = 1.0000 / 4
+```
+LoRA did not engage. Val→test gap (2.8×) unchanged from baseline.
+
+**Verdict — CLOSED DEAD END**: Architecturally neutralized. No regression, no merge. Pivoting to 2-layer MLP decoder (PR #820) which adds non-linearity without rank constraints.
+
+---
+
+## 2026-05-01 (this session) — PR #813: vol-loss-weight=2.0 full 13-ep schedule (tanjiro) — CLOSED (budget mismatch)
+
+- **Branch**: tanjiro/vol-w2-13ep-schedule-aligned (deleted)
+- **W&B run**: `4o9wamsr`
+- **Hypothesis**: `--volume-loss-weight 2.0` on full 13-epoch SOTA budget beats val_abupt < 6.5985%
+
+**Per-epoch trajectory:**
+
+| EP | val_abupt | val_vol_p | Notes |
+|---|---|---|---|
+| 1 | 29.6107% | 15.0817% | Warmup |
+| 2 | 8.7828% | 4.9858% | Gate passed |
+| 3 | 7.4558% | 4.3499% | Gate passed |
+| **4 (best/timeout)** | **7.0403%** | **4.1548%** | Budget expired |
+
+Test metrics (EP4): test_abupt=8.2481%, test_vol_p=11.7146%, test_surface_p=4.2952%, test_wall_shear=7.7498%
+
+**Root cause**: 270-min budget covers only ~4.4 of 13 epochs (26.5% of cosine schedule). LR still near peak at termination — model under-converged. SOTA gate MISS by 0.44pp.
+
+**Signal preserved**: vol_w=2.0 is net-positive on vol channels vs paired 4-ep control (#805: −5.0% rel test_vol_p). Budget-matched 5-ep cosine (PR #821) is the correct follow-up.
+
+**Verdict — CLOSED (budget mismatch)**: Negative on gate framing, real vol_p signal. Hypothesis redesigned as PR #821 with `--epochs 5 --lr-cosine-t-max 5`.
+
+---
+
 ## 2026-05-01 08:30 — PR #809: Additive LoRA on volume output head, r=4 and r=8 (askeladd) — ASSIGNED
 
 - **Branch**: askeladd/vol-head-lora-additive
