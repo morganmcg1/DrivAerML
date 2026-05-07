@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-07 06:38 UTC (Round 13 mid-flight — PR #797 merged diagnostic, PR #804 assigned to edward)
+- **Date:** 2026-05-07 06:58 UTC (Round 13 mid-flight — all 8 students active, EP gates resolving across thorfinn/tanjiro/askeladd/fern/edward/nezuko/alphonse, frieren #802 launching)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -56,14 +56,14 @@
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| frieren | #802 | AB-UPT geom-branch warmup-fix: geom-conditioning with fixed LR warmup | WIP (just assigned) |
-| askeladd | #789 | Vol-decoder SDF-gate v4: decoupled gate LR=5e-5 fixed from backbone cosine | WIP (v4 run `ccnssij7` launched 06:06Z, EP1 gate ~07:12Z) |
-| alphonse | #801 | Anchor-STRING + RoPE stabilized: composing SOTA STRING PE with anchor-RoPE | WIP (just assigned) |
-| fern | #799 | SOTA 4-ep schedule-aligned control: full SOTA stack `--epochs 4 --lr-cosine-t-max 4` | WIP (just assigned) |
-| thorfinn | #779 | STRING σ_max sweep: Arms A(σ=4.0)✅ B(σ=8.0)✅ C(σ=16.0, run `seuw5fsc`) RUNNING | WIP (Arm C EP1 PASS 26.78%, EP2 gate ~07:30Z) |
-| nezuko | #798 | Surface curvature 4-ep aligned: H,K features on surface path with 4-ep budget | WIP (run `fphcg7b6` launched 06:19Z, EP1 gate ~07:35Z) |
-| edward | #804 | GradNorm α=0.5 4-ep budget-aligned: pure CLI, ports dl24 winner (6.4170%) to short-track | WIP (just assigned 06:38Z) |
-| tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping vol_p OOD win | WIP (EP3 7.81% ✅ continue band, awaiting EP4) |
+| frieren | #802 | AB-UPT geom-branch warmup-fix: geom-conditioning with fixed LR warmup | WIP (assignment picked up 06:23Z, run launching) |
+| askeladd | #789 | Vol-decoder SDF-gate v4: decoupled gate LR=5e-5 fixed from backbone cosine | WIP (v4 run `ccnssij7` step 7,351 / EP1 gate ~07:18Z, ~67% to EP1) |
+| alphonse | #801 | Anchor-STRING + RoPE stabilized: composing SOTA STRING PE with anchor-RoPE | WIP (run `zcbkv6vx` step 1,356 / 600s _runtime, early warmup) |
+| fern | #799 | SOTA 4-ep schedule-aligned control: full SOTA stack `--epochs 4 --lr-cosine-t-max 4` | WIP (run `ddwymxzc` step 6,720, EP1 imminent at step 10,864) |
+| thorfinn | #779 | STRING σ_max sweep: Arms A(σ=4.0)✅ B(σ=8.0)✅ C(σ=16.0, run `seuw5fsc`) RUNNING | WIP (Arm C EP2 PASS 8.539% — between A and B; non-monotonic σ_max signal flagged; EP3 gate <9.0% imminent) |
+| nezuko | #798 | Surface curvature 4-ep aligned: H,K features on surface path with 4-ep budget | WIP (run `fphcg7b6` step 5,478 / EP1 gate ~07:30Z) |
+| edward | #804 | GradNorm α=0.5 4-ep budget-aligned: pure CLI, ports dl24 winner (6.4170%) to short-track | WIP (run `1bkzxf38` launched 06:57Z, step 105 — just past warmup) |
+| tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping vol_p OOD win | WIP (EP3 7.81% ✅ continue band, run `ss5v4vdx` step 37,356 / 86% to EP4 — slope projects EP4≈5.81% if held) |
 
 **Recently closed PRs:**
 - **PR #788** (nezuko, surface curvature H,K on surface path): CLOSED INCONCLUSIVE (budget-limited) — best EMA EP4-partial val_abupt 6.7767% (+0.18pp vs SOTA), test_abupt 8.139% (−0.18pp vs within-cluster control), test_surf_p 4.168% (−0.14pp), test_wall_shear 7.4189% (−0.28pp). Hypothesis-discriminating signals supported on test. Schedule confound. Follow-up PR #795 assigned (4-ep budget-aligned).
