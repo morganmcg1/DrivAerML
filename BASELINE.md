@@ -53,7 +53,7 @@ PR #740 (`5x8wofzm`), test_primary/abupt_axis_mean_rel_l2_pct = **7.5195%** (fer
 
 ### In-wave val target (to beat before merging)
 
-In-wave val target: **6.8334%** (PR #780 dl24-tanjiro, EP25, run `20n1fvwn`) — wave val leader; EP25=6.8334% best logged (corrected from stale 6.8511%); training to EP50 terminal
+In-wave val target: **6.8315%** (PR #794 dl24-fern, EP11, run `em7eupj5`) — wave val leader as of 2026-05-07T07:59Z; crossed tanjiro #780 EP25=6.8334% by 0.0019pp at 14 fewer epochs; training to EP50 terminal
 
 ### In-wave validation tracking (not yet merged; val metrics are mid-run, not terminal test)
 
@@ -62,10 +62,10 @@ In-wave val target: **6.8334%** (PR #780 dl24-tanjiro, EP25, run `20n1fvwn`) —
 | #741 | `lszc4ri7` | nezuko | EP33 (best) | **6.4984%** | Y-axis symmetry aug; MERGED PR #741; test=7.8232% |
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; TERMINAL EP50 complete; test=7.845%; did NOT beat merged best (7.8232%); val beats pre-wave SOTA 6.5281% by 0.018pp |
 | #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 |
-| #780 | `20n1fvwn` | dl24-tanjiro | EP25 (best/latest) | **6.8334%** | GradNorm α=0.25; EP25=6.8334% WAVE VAL BEST (EP22=6.8565%, EP20=6.9330%); EP20 gate cleared; rebase clean (zero diff); training to EP50 terminal |
+| #780 | `20n1fvwn` | dl24-tanjiro | EP25 (best/latest) | **6.8334%** | GradNorm α=0.25; EP25=6.8334% (EP22=6.8565%, EP20=6.9330%); EP20 gate cleared; rebase clean (zero diff); w_cp=0.923, w_τx=0.969, w_τy=0.246, w_τz=0.498, w_vol=2.364 (α=0.25 no Y-sym routes heavily to volume); plateau slope -0.0045pp/ep, proj EP50≈6.73%; training to EP50 terminal |
 | #784 | `sd59a9dq` | dl24-nezuko | EP18 (terminal) | **7.5605%** | QK-Norm + Y-axis aug; TERMINATED — EP20 gate (≤7.2%) MISSED. PR CLOSED. dl24-nezuko IDLE. |
-| #791 | `g0um26ek` | dl24-frieren | EP15 (latest) | **6.9635%** | GradNorm α=0.5 + Y-axis symmetry composition; EP13 best=6.9635% (cp=4.5765%, vol=4.4188%, τx=6.8010%, τy=8.4882%, τz=10.5332%); w_τz=1.4509; rebase clean (zero diff, 422da71); EP15 in progress; projecting EP20-EP25 in 6.6-6.7% |
-| #794 | `em7eupj5` | dl24-fern | EP10 (best/latest) | **6.8631%** | GradNorm α=0.25 + Y-axis symmetry composition; EP10=6.8631% (cp=4.4221%, vol=4.2189%, τx=6.7372%, τy=8.5650%); all gates cleared early; fastest convergence in wave; projecting EP20≈6.31% |
+| #791 | `g0um26ek` | dl24-frieren | EP13 (best) / EP15 (latest) | **6.9635%** | GradNorm α=0.5 + Y-axis symmetry composition; EP13 best=6.9635% (cp=4.5765%, vol=4.4188%, τx=6.8010%, τy=8.4882%, τz=10.5332%); w_cp=0.762, w_τx=0.908, w_τy=1.052, w_τz=1.451, w_vol=0.827 (α=0.5 + Y-sym routes to τz, Y-sym relieves volume pressure); rebase clean (zero diff, 422da712); EP15 in progress; projecting EP20-EP25 in 6.6-6.7% |
+| #794 | `em7eupj5` | dl24-fern | EP11 (best/latest) | **6.8315% ← WAVE VAL LEADER** | GradNorm α=0.25 + Y-axis symmetry composition; EP11=6.8315% (crossed tanjiro #780 EP25=6.8334% at 07:59:21Z); all gates cleared early; fastest convergence in wave; w_vol=1.058, w_τz=1.274 at EP11; projecting EP20≈6.31% |
 | #800 | `hmhfnedy` | dl24-nezuko | EP2 (best/latest) | **7.8901%** | 5L STRING + GradNorm α=0.5, no Y-sym; EP1=10.6420% smoke cleared; EP2=7.8901% (cp=5.1011%, vol=5.3921%, τx=7.4969%, τy=10.0399%, τz=11.4203%) Δ=-2.75pp in one epoch; EP2 already 1.11pp below EP5 gate (≤9.0%); w_τz=1.4581 at EP2 (climbing); very sharp early convergence |
 
-_Last updated: 2026-05-07 (PR #740 MERGED wave best test=7.5195%; tanjiro #780 EP25=6.8334% WAVE VAL BEST, rebase clean; frieren #791 EP13=6.9635% rebase clean 422da71, EP15 in progress; fern #794 EP10=6.8631% fastest convergence in wave; nezuko #800 EP2=7.8901% SHARP CONVERGENCE — already 1.11pp below EP5 gate, EP5 expected ~09:10 UTC)_
+_Last updated: 2026-05-07T07:59Z (fern #794 EP11=6.8315% NEW WAVE VAL LEADER — crossed tanjiro #780 EP25=6.8334% by 0.0019pp at 07:59:21Z, 14 epochs fewer; GradNorm weight profiles confirmed: α=0.25 no Y-sym routes to w_vol=2.364 (tanjiro), α=0.5 + Y-sym routes to w_τz=1.451 (frieren), α=0.25 + Y-sym intermediate w_vol=1.058/w_τz=1.274 (fern); nezuko #800 EP2=7.8901% SHARP CONVERGENCE, EP5 ~09:10 UTC)_
