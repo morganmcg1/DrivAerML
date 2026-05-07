@@ -1,5 +1,42 @@
 # SENPAI Research Results
 
+## 2026-05-01 08:30 — PR #809: Additive LoRA on volume output head, r=4 and r=8 (askeladd) — ASSIGNED
+
+- **Branch**: askeladd/vol-head-lora-additive
+- **W&B group**: `vol-head-lora`
+- **Hypothesis**: Additive rank-r LoRA correction on the `volume_out` projection: `volume_preds += vol_lora_B(vol_lora_A(volume_hidden))` with B zero-initialized (initial correction = 0), no saturation risk. Replaces the failed tanh-cap SDF-gate design (v2/v3/v4 all saturated). SDF info already in `volume_hidden` (SDF is channel 4 of VOLUME_X_DIM=4). Arm A: r=4, Arm B: r=8. Same SOTA backbone stack (L=5, Lion lr=9e-5, tau_y×1.5 tau_z×2.0, surface_w=2.0, ema=0.999, grad-clip=0.5, STRING 5-octave, 13-ep cosine).
+- **Gate**: val_abupt < 6.5985% (single-model SOTA #592) / secondary: reduce test vol_pressure below 11.5% (SOTA 11.933%)
+- **Status**: ASSIGNED — waiting for askeladd to pick up
+
+---
+
+## 2026-05-01 08:00 — PR #789: SDF-gate v4 — vol-decoder tanh-cap gate (askeladd) — CLOSED DESIGN-NEGATIVE
+
+- **Branch**: askeladd/vol-decoder-sdf-gate-v3 (deleted)
+- **W&B runs**: `qazswyke` (v3), `ccnssij7` (v4)
+- **v4 hypothesis**: Decouple gate LR from backbone cosine (fixed gate_lr=5e-5 from step 0). Addresses the LR coupling identified in v3 review that cost ~half-epoch of gate training. Keep tanh-cap=0.15, gate-WD=5e-3.
+
+**v4 final results (W&B run `ccnssij7`, EP3):**
+
+| Metric | v4 (this) | v3 best (6.840%) | Arm A control | SOTA #592 |
+|---|---:|---:|---:|---:|
+| val_abupt (EP3) | 7.447% | 6.840% | 7.0077% | 6.5985% |
+
+**Gate saturation timeline:**
+
+| step | sat_frac | scale_max_abs | scale_range |
+|---|---|---|---|
+| 7,635 | 0.00 | 0.1309 | 0.0068 |
+| 8,163 | **1.00** | 0.1426 | 0.0059 |
+| 8,501 | 1.00 | 0.1445 | **0.0000** |
+| ≥10k | 1.00 | 0.1504 (cap) | 0.0000 |
+
+Gate fully saturated by step 8,501 — before EP1 (step 10,864). LR fix confirmed working (constant 5e-05), but saturation occurred even faster than v3. EP3 val=7.447% is WORSE than the Arm A control (7.0077%) — the saturated gate imposes a fixed degrading scale on volume predictions.
+
+**Verdict — CLOSED DESIGN-NEGATIVE**: All three tanh-cap gate versions (v2/v3/v4) failed via saturation. The architecture pushes scale outputs onto the tanh cap regardless of LR scheduling. WD=5e-3 provides insufficient diversity pressure on a bounded output. Closing and replacing with additive LoRA (PR #809).
+
+---
+
 ## 2026-05-07 06:38 — PR #797: SDF train-set coverage diagnostic for 4 OOD vol_p test cases (edward) — MERGED (diagnostic, no metric)
 
 - **Branch**: edward/sdf-coverage-diagnostic (deleted)
