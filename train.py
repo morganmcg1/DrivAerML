@@ -137,6 +137,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_out_lora_rank: int = 0
     debug: bool = False
 
 
@@ -219,6 +220,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_out_lora_rank": (
+            "Rank r of an additive LoRA correction applied to the volume "
+            "output head: volume_preds = volume_out(h) + B(A(h)), with "
+            "A in R^(n_hidden x r), B in R^(r x volume_output_dim), B "
+            "zero-initialised so the initial perturbation is exactly 0. "
+            "Adds r*(n_hidden + volume_output_dim) parameters and is "
+            "trained jointly in the default optimizer param group. "
+            "Default 0 disables LoRA."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -297,6 +307,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_out_lora_rank=config.vol_out_lora_rank,
     )
 
 

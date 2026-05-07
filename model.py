@@ -342,6 +342,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        vol_out_lora_rank: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +422,19 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        # Additive rank-r LoRA correction on the volume output head
+        # (Hu et al., 2021). y = volume_out(h) + B(A(h)). B is zero-initialised
+        # so the initial perturbation is exactly 0; training starts from the
+        # base model and learns a residual geometry-sensitive correction.
+        self.vol_out_lora_rank = int(vol_out_lora_rank)
+        if self.vol_out_lora_rank > 0:
+            self.vol_lora_A = nn.Linear(n_hidden, self.vol_out_lora_rank, bias=False)
+            self.vol_lora_B = nn.Linear(self.vol_out_lora_rank, self.volume_output_dim, bias=False)
+            nn.init.kaiming_uniform_(self.vol_lora_A.weight, a=math.sqrt(5))
+            nn.init.zeros_(self.vol_lora_B.weight)
+        else:
+            self.vol_lora_A = None
+            self.vol_lora_B = None
 
     def _encode_group(
         self,
@@ -515,6 +529,10 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            if self.vol_out_lora_rank > 0:
+                volume_preds = volume_preds + self.vol_lora_B(
+                    self.vol_lora_A(volume_hidden)
+                ) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
