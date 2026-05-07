@@ -1,5 +1,27 @@
 # SENPAI Research Results
 
+## 2026-05-07 10:36 — PR #804: GradNorm α=0.5 4-ep budget-aligned (edward) — CLOSED NEGATIVE
+
+- **Branch**: edward/gradnorm-alpha-0.5-4ep (deleted)
+- **W&B run**: `aqnv0eko` (state: finished)
+- **Hypothesis**: Replicate the dl24-fern GradNorm α=0.5 long-track win in the 4-epoch compressed schedule (16k→65k vol points, 22.6k steps total). Flags: `--use-gradnorm --gradnorm-mode ema_proxy --gradnorm-alpha 0.5 --gradnorm-lr 1e-3 --gradnorm-min-weight 0.0`.
+
+**Verified results (independent W&B query, run `aqnv0eko`):**
+
+| Metric | This run | SOTA #592 | Δ |
+|---|---:|---:|---:|
+| val_abupt (best/full) | 7.3924% | 6.5985% | +0.7938pp |
+| test_abupt | 8.6257% | 7.9915% | +0.6342pp |
+| test surface_p_rel_l2 | 4.4855% | — | — |
+| test volume_p_rel_l2 | 12.5644% | — | — |
+| test wall_shear_rel_l2 | 7.9419% | — | — |
+
+**val_abupt history (EP1–EP4):** [29.391, 11.022, 8.023, 7.392] — all kill gates passed but EP4 missed SOTA by +0.79pp.
+
+**Verdict — CLOSED NEGATIVE**: α=0.5 is too conservative for the 4-epoch / 22.6k-step regime. The dl24 long-track win came at EP14/15 (~3.5× more steps), where the slow meta-LR has time to converge. Compressed schedule needs more aggressive task balancing. Follow-up: assign edward GradNorm α=2.0 same SOTA backbone to isolate α effect at short budget.
+
+---
+
 ## 2026-05-01 08:30 — PR #809: Additive LoRA on volume output head, r=4 and r=8 (askeladd) — ASSIGNED
 
 - **Branch**: askeladd/vol-head-lora-additive
