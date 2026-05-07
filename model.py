@@ -320,6 +320,91 @@ class Transformer(nn.Module):
         return x
 
 
+class VolDecoderSDFGate(nn.Module):
+    """Bounded affine gate on the volume-decoder output, conditioned on per-case SDF stats.
+
+    8-channel descriptor → 8→16→2 MLP → tanh-bounded (a, b) → ``vol_pred * (1 + a) + b``.
+
+    The tanh bound caps the multiplier at [0.7, 1.3] and the bias at +/-0.05, eliminating
+    the unbounded blow-up failure mode of the v1 design (PR #781). Last-layer zero init
+    means the gate is identity at step 0.
+    """
+
+    DESCRIPTOR_DIM = 8
+
+    def __init__(self, descriptor_dim: int = 8, hidden: int = 16):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(descriptor_dim, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, 2),
+        )
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
+        # Hard-coded input normalization for the 8-channel SDF descriptor:
+        # length-scale stats (mean, std, min, max, median) divided by [3, 3, 3, 6, 3];
+        # frac channels (frac<0.05, frac<0.20, frac<0.50) left at 1.0.
+        norm = torch.tensor([3.0, 3.0, 3.0, 6.0, 1.0, 1.0, 1.0, 3.0], dtype=torch.float32)
+        self.register_buffer("input_norm", norm)
+        self._last_a: torch.Tensor | None = None
+        self._last_b: torch.Tensor | None = None
+        self._last_ab_raw: torch.Tensor | None = None
+        self._last_g_sdf: torch.Tensor | None = None
+
+    def forward(self, vol_pred: torch.Tensor, g_sdf: torch.Tensor) -> torch.Tensor:
+        # vol_pred: (B, N, C); g_sdf: (B, 8)
+        g_sdf_norm = g_sdf / self.input_norm.to(dtype=g_sdf.dtype, device=g_sdf.device)
+        ab = self.mlp(g_sdf_norm)  # (B, 2)
+        a = 0.3 * torch.tanh(ab[:, 0:1])  # (B, 1) multiplier in [-0.3, 0.3] => 1+a in [0.7, 1.3]
+        b = 0.05 * torch.tanh(ab[:, 1:2])  # (B, 1) small additive bias in [-0.05, 0.05]
+        self._last_a = a.detach()
+        self._last_b = b.detach()
+        self._last_ab_raw = ab.detach()
+        self._last_g_sdf = g_sdf.detach()
+        return vol_pred * (1.0 + a.unsqueeze(1)) + b.unsqueeze(1)
+
+
+def _compute_sdf_descriptor(
+    sdf: torch.Tensor, mask: torch.Tensor | None
+) -> torch.Tensor:
+    """Compute the 8-channel per-case SDF descriptor used by ``VolDecoderSDFGate``.
+
+    Channels: [mean, std, min, max, frac<0.05, frac<0.20, frac<0.50, median] of |sdf|
+    over each case's valid points (mask=True). Returns ``(B, 8)``.
+    """
+
+    abs_sdf = sdf.abs()
+    if mask is None:
+        valid = torch.ones_like(abs_sdf, dtype=torch.bool)
+    else:
+        valid = mask.to(dtype=torch.bool)
+    valid_f = valid.to(dtype=abs_sdf.dtype)
+    valid_count = valid_f.sum(dim=1).clamp(min=1.0)  # (B,)
+
+    masked_vals = abs_sdf * valid_f
+    mean = masked_vals.sum(dim=1) / valid_count
+    sq_dev = ((abs_sdf - mean.unsqueeze(1)) ** 2) * valid_f
+    std = (sq_dev.sum(dim=1) / valid_count).clamp(min=0.0).sqrt()
+
+    inf_filled = torch.where(valid, abs_sdf, torch.full_like(abs_sdf, float("inf")))
+    sdf_min = inf_filled.amin(dim=1)
+    neg_inf_filled = torch.where(valid, abs_sdf, torch.full_like(abs_sdf, float("-inf")))
+    sdf_max = neg_inf_filled.amax(dim=1)
+
+    frac_005 = ((abs_sdf < 0.05) & valid).to(dtype=abs_sdf.dtype).sum(dim=1) / valid_count
+    frac_020 = ((abs_sdf < 0.20) & valid).to(dtype=abs_sdf.dtype).sum(dim=1) / valid_count
+    frac_050 = ((abs_sdf < 0.50) & valid).to(dtype=abs_sdf.dtype).sum(dim=1) / valid_count
+
+    sorted_vals, _ = inf_filled.sort(dim=1)  # (B, N), invalid -> +inf at the end
+    valid_count_long = valid.to(dtype=torch.long).sum(dim=1).clamp(min=1)
+    mid_idx = ((valid_count_long - 1) // 2).unsqueeze(1)  # (B, 1)
+    median = sorted_vals.gather(1, mid_idx).squeeze(1)
+
+    return torch.stack(
+        [mean, std, sdf_min, sdf_max, frac_005, frac_020, frac_050, median], dim=-1
+    )
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +427,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        vol_decoder_sdf_gating: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +507,15 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.vol_decoder_sdf_gating = vol_decoder_sdf_gating
+        if vol_decoder_sdf_gating:
+            if self.volume_input_dim < 4:
+                raise ValueError(
+                    "vol_decoder_sdf_gating requires volume_input_dim >= 4 (xyz + sdf channel)"
+                )
+            self.vol_decoder_gate = VolDecoderSDFGate()
+        else:
+            self.vol_decoder_gate = None
 
     def _encode_group(
         self,
@@ -513,8 +608,19 @@ class SurfaceTransolver(nn.Module):
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
+        gate_a: torch.Tensor | None = None
+        gate_b: torch.Tensor | None = None
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            volume_preds = self.volume_out(volume_hidden)
+            if self.vol_decoder_gate is not None:
+                # SDF is the 4th input channel (index 3) per data.VOLUME_X_DIM = 4 layout.
+                g_sdf = _compute_sdf_descriptor(
+                    volume_x[:, :, 3], volume_mask
+                )
+                volume_preds = self.vol_decoder_gate(volume_preds, g_sdf)
+                gate_a = self.vol_decoder_gate._last_a
+                gate_b = self.vol_decoder_gate._last_b
+            volume_preds = volume_preds * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
@@ -525,4 +631,6 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "gate_a": gate_a,
+            "gate_b": gate_b,
         }

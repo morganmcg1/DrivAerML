@@ -102,6 +102,7 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    vol_decoder_sdf_gating: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -297,7 +298,43 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        vol_decoder_sdf_gating=config.vol_decoder_sdf_gating,
     )
+
+
+def collect_gate_metrics(model: nn.Module, prefix: str) -> dict[str, float]:
+    """Compute per-step gate stats from the SDF gate's stored tensors.
+
+    Returns a dict keyed under ``{prefix}/scale_*`` and ``{prefix}/bias_*``,
+    plus ``{prefix}/scale_sat_frac`` (fraction of batch items where
+    the raw pre-tanh multiplier output exceeds 0.9 in absolute value).
+    Empty dict if gating is disabled or the gate has not been called yet.
+    """
+
+    gate = getattr(unwrap_model(model), "vol_decoder_gate", None)
+    if gate is None or gate._last_a is None:
+        return {}
+    a = gate._last_a.float().reshape(-1)
+    b = gate._last_b.float().reshape(-1)
+    ab_raw = gate._last_ab_raw.float()  # (B, 2)
+    a_std = float(a.std(unbiased=False).cpu().item()) if a.numel() > 1 else 0.0
+    b_std = float(b.std(unbiased=False).cpu().item()) if b.numel() > 1 else 0.0
+    metrics = {
+        f"{prefix}/scale_mean": float(a.mean().cpu().item()),
+        f"{prefix}/scale_std": a_std,
+        f"{prefix}/scale_min": float(a.min().cpu().item()),
+        f"{prefix}/scale_max": float(a.max().cpu().item()),
+        f"{prefix}/scale_max_abs": float(a.abs().max().cpu().item()),
+        f"{prefix}/bias_mean": float(b.mean().cpu().item()),
+        f"{prefix}/bias_std": b_std,
+        f"{prefix}/bias_min": float(b.min().cpu().item()),
+        f"{prefix}/bias_max": float(b.max().cpu().item()),
+        f"{prefix}/bias_max_abs": float(b.abs().max().cpu().item()),
+        f"{prefix}/scale_sat_frac": float(
+            (ab_raw[:, 0].abs() > 0.9).to(dtype=torch.float32).mean().cpu().item()
+        ),
+    }
+    return metrics
 
 
 def train_loss(
@@ -1050,6 +1087,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if config.vol_decoder_sdf_gating:
+                    train_log.update(collect_gate_metrics(model, prefix="train/gate"))
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
@@ -1240,6 +1279,23 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                if config.vol_decoder_sdf_gating:
+                    primary_val_surface = val_metrics.get("val_surface", {})
+                    for key in (
+                        "gate_scale_mean",
+                        "gate_scale_std",
+                        "gate_scale_min",
+                        "gate_scale_max",
+                        "gate_scale_max_abs",
+                        "gate_bias_mean",
+                        "gate_bias_std",
+                        "gate_bias_min",
+                        "gate_bias_max",
+                        "gate_bias_max_abs",
+                        "gate_scale_sat_frac",
+                    ):
+                        if key in primary_val_surface:
+                            log_metrics[f"val/gate/{key[len('gate_'):]}"] = primary_val_surface[key]
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
