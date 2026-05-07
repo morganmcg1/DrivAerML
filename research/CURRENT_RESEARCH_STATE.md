@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-07 (latest: fern EP26/val=6.3521% WAVE LEADER (improved from EP24=6.3551%); frieren #745 TERMINAL EP50 complete test=7.845% NOT MERGED (7.845% > merged best 7.8232%); tanjiro #780 EP9.15/val=7.1155% EP10 gate PASS imminent; nezuko #784 EP6.80/val=8.1962% EP10 gate ~1h away)
+- 2026-05-05 (latest: fern #740 EP28.47/step=312,848, best=6.3430% @ EP27 WAVE LEADER, EP30 gate IMMINENT at step≥329,610; tanjiro #780 EP13.9/step=76,586, best=7.0247% @ EP13, oscillating 7.02–7.16%; nezuko #784 EP11.1/step=61,118, NEW BEST=7.8407% @ EP11 improved from 7.9447%; frieren #791 step=9,545 EP1 PASS val=11.6929%)
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -8,17 +8,18 @@
 **Wave: drivaerml-long-20260504** — 24h DDP8 long runs validating mechanisms that showed promise under short-run or censored budgets. Base config is now well-established: Lion, lr=1e-4, lr-warmup-steps=500, bs=2, train_surface_points=40k, train_volume_points=65k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), ema_decay=0.999, no-compile-model, model-layers=4, model-hidden-dim=512, model-heads=4, model-slices=128.
 
 **Wave SOTA (merged test):** PR #741 (nezuko, `lszc4ri7`/`1tal40wr`), test `abupt_axis_mean_rel_l2_pct` = **7.8232%**, surface=3.9821%, volume=11.3345%, wall=7.3076%.
-**Wave leader (val, not yet terminal):** PR #740 (fern, `5x8wofzm`) EP26 val=**6.3521%** (−0.1760pp vs pre-wave SOTA val 6.5281%).
+**Wave leader (val, not yet terminal):** PR #740 (fern, `5x8wofzm`) EP27 val=**6.3430%** (−0.1851pp vs pre-wave SOTA val 6.5281%). EP30 gate IMMINENT at step≥329,610 (currently step=312,848).
 
-### Active Experiments (as of 2026-05-07)
+### Active Experiments (as of 2026-05-05)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5) | `5x8wofzm` | **EP26/val=6.3521% — WAVE LEADER** (improved from EP24=6.3551%). steps_per_epoch=10987. Descending. Triggers: val<6.30% → post immediately; EP30 → mandatory check-in; EP50 → SENPAI-RESULT. |
+| #740 | dl24-fern | GradNorm adaptive loss balancing (α=0.5) | `5x8wofzm` | **EP27/val=6.3430% — WAVE LEADER** (improved from EP26=6.3521% by 0.009pp). steps_per_epoch=10987. EP28=6.3567% (regression, normal noise). step=312,848 (EP28.47). **EP30 gate IMMINENT at step≥329,610** (~16,762 steps). If EP30>6.3430%, trigger terminal from EP27 checkpoint. |
 | #741 | dl24-nezuko | Y-axis reflection augmentation on SOTA Lion+STRING config | `lszc4ri7`/`1tal40wr` | **MERGED PR #741** — test=7.8232% (7.3076% wall, 3.9821% surface, 11.3345% vol). New wave best test result. |
 | #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | `co0xlqap` | **TERMINAL** — EP50 complete, test=7.845%. Does NOT beat merged best (7.8232%). Best val EP30=6.5097% (beats pre-wave SOTA val by 0.018pp). Student SENPAI-RESULT marker requested for formal closure. Scientific value: 5L STRING confirmed valid direction. |
-| #780 | dl24-tanjiro | GradNorm α=0.25 sweep — testing more conservative equalization | `20n1fvwn` | **EP9.15/val=7.1155%** — strong descent (EP1=12.68%→EP9=7.12%). EP10 gate (≤8.0%) PASS imminent (step ~54,940). steps_per_epoch=5494. Advisor gate approach comment posted. |
-| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | `sd59a9dq` | **EP6.80/val=8.1962%** — descending (EP1=15.56%→EP7=8.20%). EP10 gate (≤8.0%) ~1h away. steps_per_epoch=5489. Advisor comment posted EP7 gate imminent. |
+| #780 | dl24-tanjiro | GradNorm α=0.25 sweep — testing more conservative equalization | `20n1fvwn` | **EP13/val=7.0247% (best)** — oscillating EP9–13 in 7.02–7.16% band. step=76,586 (EP13.9). EP10 PASS confirmed. **EP20 gate (≤7.2%) next at step≥109,880** — well on track. steps_per_epoch=5494. |
+| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | `sd59a9dq` | **EP11/val=7.8407% (NEW BEST)** — steadily descending (EP1=15.56%→EP11=7.84%). step=61,118 (EP11.1). EP10 PASS confirmed. **EP20 gate (≤7.2%) next at step≥109,780** — descending well. steps_per_epoch=5489. |
+| #791 | dl24-frieren | GradNorm α=0.5 + Y-axis symmetry composition | `t4b59kbu` | **EP1 PASS** — val=11.6929% (< 16% threshold). step=9,545 (EP~1.7). **EP10 gate (≤8.0%) next at step≥54,940**. steps_per_epoch=5494. Early stage. |
 
 ### Closed / Negative Results This Wave
 
@@ -61,7 +62,7 @@
 
 ## Research Themes and Open Questions
 
-1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP26/val=6.3521% — WAVE LEADER (−0.1760pp below pre-wave SOTA val 6.5281%). steps_per_epoch=10987, still descending. EP24=6.3551% → EP26=6.3521% improvement continuing. EP30 mandatory check-in pending.
+1. **Does GradNorm α=0.5 beat pre-wave SOTA? (fern #740) — CONFIRMED YES.** EP27/val=6.3430% — WAVE LEADER (−0.1851pp below pre-wave SOTA val 6.5281%). steps_per_epoch=10987. EP26=6.3521% → EP27=6.3430% improvement confirmed. EP28=6.3567% (regression, normal noise). **EP30 gate IMMINENT at step≥329,610** (~16,762 steps from step=312,848).
 
 2. **Does y-symmetry augmentation push below SOTA? (nezuko #741) — CONFIRMED YES, MERGED.** PR #741 MERGED. test=7.8232% (surface=3.9821%, vol=11.3345%, wall=7.3076%) — first wave merge to clear pre-wave SOTA test (7.9303%) by 0.107pp. val best EP33=6.4984%.
 
@@ -69,9 +70,11 @@
 
 4. **Does lr=9e-5 on SOTA Lion+STRING beat lr=1e-4? (tanjiro #749) — NO (CLOSED).** test eval auto-ran at EP50, best val=6.8557% (EP27). Closed terminal — no improvement vs SOTA. Control baseline confirmed.
 
-5. **Does GradNorm α=0.25 (more conservative) improve over α=0.5? (tanjiro #780) — IN PROGRESS.** EP9.15/val=7.1155%, EP10 gate PASS imminent. Comparison with α=0.5 (fern #740) will be interesting once both are terminal.
+5. **Does GradNorm α=0.25 (more conservative) improve over α=0.5? (tanjiro #780) — IN PROGRESS.** EP13/val=7.0247% (best), oscillating 7.02–7.16% EP9–13. EP10 gate PASS confirmed. EP20 gate (≤7.2%) at step≥109,880 — already below threshold, pass expected.
 
-6. **Does QK-Norm + Y-symmetry compose improve? (nezuko #784) — IN PROGRESS.** EP6.80/val=8.1962%, EP10 gate ~1h away. Prior QK-Norm at lr=5e-5 was negative (#732, test=9.0419%); this arm uses wave-standard lr=1e-4 with Y-sym augmentation which may compensate.
+6. **Does QK-Norm + Y-symmetry compose improve? (nezuko #784) — IN PROGRESS.** EP11/val=7.8407% (NEW BEST, improved from 7.9447%), steadily descending. EP10 PASS confirmed. EP20 gate (≤7.2%) at step≥109,780; currently at 7.84% — needs ~0.64pp drop over ~9 epochs.
+
+7. **GradNorm α=0.5 + Y-symmetry composition (frieren #791) — VERY EARLY STAGE.** EP1 PASS val=11.6929%. step=9,545 (EP~1.7). EP10 gate (≤8.0%) at step≥54,940. This tests the orthogonal composition of our two best confirmed gains.
 
 7. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) may help via effective dataset doubling. GradNorm (#740) addresses anisotropic gradient imbalance. No direct architectural fix yet tested.
 
@@ -89,4 +92,4 @@
 - **Weight decay exhausted**: PR #667 definitively closed. WD={5e-4, 1e-3, 1e-4} all worse than default. Do not re-test WD variations.
 - **QK-Norm at wave-standard lr=1e-4**: CLOSED at lr=5e-5 (PR #732 negative). Pre-wave `tkiigfmc` (8.625%) showed inherent signal; QK-Norm on current STRING SOTA at lr=1e-4 is lower priority until other directions exhaust.
 
-_Last updated: 2026-05-07 (fern #740 EP26 val=6.3521% WAVE LEADER updated from EP24=6.3551%; frieren #745 TERMINAL test=7.845% NOT MERGED (0.023pp short of 7.8232% merged best); tanjiro #780 EP9.15 val=7.1155% EP10 gate PASS imminent; nezuko #784 EP6.80 val=8.1962% EP10 gate ~1h away)_
+_Last updated: 2026-05-05 (fern #740 EP28.47/step=312,848, best=6.3430% @ EP27 WAVE LEADER, EP30 gate IMMINENT at step≥329,610; tanjiro #780 EP13.9/step=76,586 best=7.0247% @ EP13 oscillating, EP20 gate on track; nezuko #784 EP11.1/step=61,118 NEW BEST=7.8407% @ EP11 improved from 7.9447%, EP20 gate tracking; frieren #791 step=9,545 EP1 PASS val=11.6929%, EP10 gate at step≥54,940)_
