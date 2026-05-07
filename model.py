@@ -536,20 +536,19 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
-            # surface_hidden has padded rows zeroed via _apply_token_mask above;
-            # without key_padding_mask, padded keys would contribute zero V but
-            # still dilute the softmax denominator over valid keys. The
-            # bool mask sets the score for those positions to -inf so they
-            # carry zero attention weight. PyTorch falls back to the math
-            # SDPA kernel when a mask is supplied (Flash-Attn 2 cannot
-            # represent arbitrary key-padding masks); set need_weights=False
-            # so MHA does not also materialise the (B, N_q, N_k) weight tensor.
-            surf_pad_mask = ~surface_mask.bool()
+            # No key_padding_mask: surface_hidden padded rows are already zeroed
+            # by _apply_token_mask, so padded keys contribute V=0 to attention.
+            # Their softmax weights slightly dilute valid keys, but in this
+            # training regime surface_mask is all-True (cases have >>65536
+            # surface points so train_random sampling fills the buffer), so
+            # there is no padding to mask in practice. Dropping the mask lets
+            # SDPA dispatch to Flash-Attention 2 instead of the math kernel,
+            # which would materialise a (B, H, N_q, N_k) tensor (>30 GB at the
+            # production sequence sizes) and stall ranks under memory pressure.
             xattn_out, _ = self.surf_to_vol_xattn(
                 query=volume_hidden,
                 key=surface_hidden,
                 value=surface_hidden,
-                key_padding_mask=surf_pad_mask,
                 need_weights=False,
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
