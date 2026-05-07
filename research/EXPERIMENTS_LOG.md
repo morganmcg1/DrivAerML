@@ -1,5 +1,39 @@
 # SENPAI Research Results
 
+## 2026-05-01 (session resume) — PR #801: Anchor-STRING RoPE stabilized (alphonse) — CLOSED NOT-PROMISING
+
+- **Branch**: alphonse/anchor-string-rope-stabilized (deleted)
+- **W&B run**: `yp1g27qv` (group `anchor-string-rope-stabilized`, name `alphonse/anchor-rope-stabilized-v3-rank0`)
+- **Hypothesis**: Fix Anchor-STRING RoPE instabilities from PR #786 with three targeted changes: (1) differential LR 0.1× on rope log_freq/phase params via `--anchor-rope-lr-scale 0.1`; (2) per-module grad clip `--anchor-rope-grad-clip 1.0`; (3) conservative freq init `--anchor-rope-init-max-freq 10.0`.
+
+**Verified results (independent W&B query, run `yp1g27qv`, EP4):**
+
+| Metric | This run | SOTA #592 | Δ |
+|---|---:|---:|---:|
+| val_abupt (best EP4) | 7.6737% | 6.5985% | +1.075pp |
+| val_abupt (EMA EP4) | 6.9737% | 6.5985% | +0.3752pp |
+| test_abupt | 8.3123% | 7.9915% | +0.3208pp |
+| test_vol_p | 12.61% | 11.933% | +0.677pp |
+| val_vol_p | 4.58% | 3.9456% | +0.634pp |
+
+**Student analysis**: All three stabilization fixes were ineffective — problems didn't exist. Architecture did not exceed SOTA. Vol_p shows same 3× test/val gap (4.58% val vs 12.61% test) consistent with Issue #803 SDF artefact.
+
+**Verdict — CLOSED NOT-PROMISING**: After 4 original STRING/RoPE PRs (all closed negative, Issue #618) and 2 redux PRs (#786 fern, #801 alphonse), the 1024-anchor parameterization is a confirmed dead end for single-model improvement. The test/val volume_pressure gap is not architecture-addressable until Issue #803 SDF regeneration lands.
+
+alphonse reassigned to PR #814 (STRING 6-octave extended spectrum — pure CLI).
+
+---
+
+## 2026-05-01 (session resume) — PR #814: STRING 6-octave extended spectrum (alphonse) — ASSIGNED
+
+- **Branch**: alphonse/string-6octave-extended-spectrum
+- **W&B group**: `alphonse-string-6octave`
+- **Hypothesis**: Add σ=8.0 as a 6th octave to the STRING-separable RFF encoding (`--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0,8.0"`), preserving all existing 5 octaves while adding a high-frequency band. Motivated by thorfinn PR #779 σ_max=8 signal (val=6.8792%, best in sweep) and the GradNorm finding that wall_shear_z is the confirmed training laggard (r_i=0.01123). Pure CLI, no code change.
+- **Gate**: val_abupt < 6.5985% (single-model SOTA #592)
+- **Status**: ASSIGNED — waiting for alphonse to pick up
+
+---
+
 ## 2026-05-07 10:36 — PR #804: GradNorm α=0.5 4-ep budget-aligned (edward) — CLOSED NEGATIVE
 
 - **Branch**: edward/gradnorm-alpha-0.5-4ep (deleted)

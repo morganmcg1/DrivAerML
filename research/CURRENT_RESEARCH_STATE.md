@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-01 08:30 UTC (PR #789 SDF-gate v4 CLOSED DESIGN-NEGATIVE; askeladd reassigned PR #809 additive LoRA on volume output head r=4/r=8)
+- **Date:** 2026-05-01 (session resume) UTC (PR #801 alphonse Anchor-STRING RoPE stabilized CLOSED NOT-PROMISING val=6.9737%; alphonse reassigned PR #814 STRING 6-octave extended spectrum)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -58,7 +58,7 @@
 |---|---|---|---|
 | frieren | #802 | AB-UPT geom-branch warmup-fix: geom-conditioning with fixed LR warmup | WIP (assignment picked up 06:23Z, run launching) |
 | askeladd | #809 | Additive LoRA on volume output head: r=4 (Arm A), r=8 (Arm B) — zero-init B, no saturation risk | WIP (new) |
-| alphonse | #801 | Anchor-STRING + RoPE stabilized: composing SOTA STRING PE with anchor-RoPE | WIP (run `zcbkv6vx` step 1,356 / 600s _runtime, early warmup) |
+| alphonse | #814 | STRING 6-octave extended spectrum: add σ=8.0 as 6th RFF octave (4-ep schedule) | WIP (new, assigned session-resume) |
 | fern | #799 | SOTA 4-ep schedule-aligned control: full SOTA stack `--epochs 4 --lr-cosine-t-max 4` | WIP (run `ddwymxzc` step 6,720, EP1 imminent at step 10,864) |
 | thorfinn | #779 | STRING σ_max sweep: Arms A(σ=4.0)✅ B(σ=8.0)✅ C(σ=16.0, run `seuw5fsc`) RUNNING | WIP (Arm C EP2 PASS 8.539% — between A and B; non-monotonic σ_max signal flagged; EP3 gate <9.0% imminent) |
 | nezuko | #798 | Surface curvature 4-ep aligned: H,K features on surface path with 4-ep budget | WIP (run `fphcg7b6` step 5,478 / EP1 gate ~07:30Z) |
@@ -66,6 +66,7 @@
 | tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping vol_p OOD win | WIP (EP3 7.81% ✅ continue band, run `ss5v4vdx` step 37,356 / 86% to EP4 — slope projects EP4≈5.81% if held) |
 
 **Recently closed PRs:**
+- **PR #801** (alphonse, Anchor-STRING RoPE stabilized): CLOSED NOT-PROMISING. EP4 val_abupt=6.9737% (+0.38pp vs SOTA). Three stabilization fixes (diff LR 0.1×, grad clip, conservative init) had no measurable effect. 1024-anchor approach is a confirmed dead end after 6 total STRING/RoPE PRs. Alphonse reassigned to PR #814 (STRING 6-octave).
 - **PR #789** (askeladd, SDF-gate v4 tanh-cap): CLOSED DESIGN-NEGATIVE. Run `ccnssij7` — gate sat_frac=1.00 / scale_range=0.0000 by step 8,501 (pre-EP1). EP3 val_abupt=7.447% (worse than Arm A control 7.0077% and v3 best 6.840%). All three tanh-cap gate versions (v2/v3/v4) failed; the optimization landscape pushes scale outputs onto the cap regardless of LR scheduling. Replaced by additive LoRA approach (PR #809).
 - **PR #788** (nezuko, surface curvature H,K on surface path): CLOSED INCONCLUSIVE (budget-limited) — best EMA EP4-partial val_abupt 6.7767% (+0.18pp vs SOTA), test_abupt 8.139% (−0.18pp vs within-cluster control), test_surf_p 4.168% (−0.14pp), test_wall_shear 7.4189% (−0.28pp). Hypothesis-discriminating signals supported on test. Schedule confound. Follow-up PR #795 assigned (4-ep budget-aligned).
 - **PR #786** (fern, Anchor-STRING RoPE v3 13-ep): CLOSED INCONCLUSIVE — best EMA EP4-partial val_abupt 6.9197% (+0.32pp vs SOTA), test_abupt 8.1946% (−0.13pp vs control). Schedule confound. v3 architecture diagnostics healthy. Follow-up PR #796 assigned (4-ep budget-aligned).
