@@ -1,5 +1,44 @@
 # SENPAI Research Results
 
+## 2026-05-07 06:38 — PR #797: SDF train-set coverage diagnostic for 4 OOD vol_p test cases (edward) — MERGED (diagnostic, no metric)
+
+- **Branch**: edward/sdf-coverage-diagnostic (deleted)
+- **W&B run**: `8u4zhzpx` (group `edward-sdf-coverage`) — single-CPU diagnostic, no model
+- **Hypothesis**: The 4 OOD test cases (run_133, 158, 203, 226) that account for ~92% of squared test_vol_p deviation are EXTRAPOLATIVE w.r.t. the train-set SDF stat manifold — if true, geometry conditioning is untractable on these cases.
+- **Result (DECISIVE)**: All 4 cases are extrapolative by 32-bin histogram chi² (z=2.49–4.05σ) but NOT by 4D-scalar Mahalanobis (z<2σ). The OOD is a **distribution-shape** difference, not a moment shift.
+
+| OOD case | knn_4d_mahal | z_vs_other_test | knn_hist_chi² | z_chi² | extrapolative |
+|----------|-------------:|----------------:|---------------:|---------:|:--------------|
+| run_133 | 1.166 | +1.05 | 1.45e-4 | +3.66 | YES |
+| run_158 | 0.734 | +0.41 | 1.18e-4 | +2.49 | YES |
+| run_203 | 0.441 | -0.03 | 1.22e-4 | +2.67 | YES |
+| run_226 | 0.880 | +0.62 | 1.54e-4 | +4.05 | YES |
+
+**Smoking gun**: bulk train (n=394): `sdf_min` ∈ [-0.45, -0.27], `sdf_negative_frac` ∈ [1.2e-4, 2.1e-4]; OOD-4: `sdf_min` ∈ [-0.0148, -0.0009], `sdf_negative_frac` ∈ [1.2e-5, 1.7e-5] (~10× lower). The OOD-4 have essentially NO points sampled inside the body.
+
+**Root cause**: The 10 cases with `sdf_min > -0.05` are exactly `REQUIRED_RESTORED_CASE_IDS` in `target/data/loader.py` (6 train + 4 test). Their `volume_sdf.npy` was regenerated through a different pipeline lacking inside-body samples. All 5-NN train neighbours of each OOD test case are 100% restored cases.
+
+**Implications**:
+- FiLM/SDF-gate/AdaLN-zero conditioning on SDF stats extracts a bimodal pipeline indicator (with vs without inside-body samples), not a physical geometry signal.
+- In-flight conditioning PRs (#789 askeladd SDF-gate v4, #802 frieren geom-branch) can continue — they are not invalidated — but ROI on OOD-4 test cases is bounded until data-side fix lands.
+- Human issue #803 opened requesting regeneration of `volume_sdf.npy` for the 10 restored cases using standard inside-body sampling.
+
+**Artefacts merged to tay**: `target/sdf_coverage_diagnostic.py`, `target/analysis/sdf_per_case_stats.csv`, `target/analysis/sdf_per_case_hists.npz`, `target/analysis/SDF_COVERAGE_REPORT.md`, `target/analysis/sdf_pca.png` (PC1=90.8%, PC2=7.0%).
+
+---
+
+## 2026-05-07 06:38 — PR #804: GradNorm α=0.5 4-epoch budget-aligned (edward) — ASSIGNED
+
+- **Branch**: edward/gradnorm-alpha-0.5-4ep
+- **W&B group**: `edward-gradnorm-alpha-0.5-4ep`
+- **Hypothesis**: dl24-fern PR #740 (50-epoch long-track) reached val_abupt=6.4170% at EP14/15 with GradNorm α=0.5 — beating the single-model SOTA (6.5985%) by −0.1815pp. GradNorm α=0.5 has never been tested in the 4-epoch budget-aligned short-track. If the effect survives the compressed cosine schedule, this is a free +0.18pp improvement that composes orthogonally with all in-flight architectural changes.
+- **Config**: full SOTA stack (L=5, Lion lr=9e-5, tau_y×1.5 tau_z×2.0 surf_w×2.0, STRING 5-octave σ_max=4.0) + `--epochs 4 --lr-cosine-t-max 4` + compressed vol-points `0:16384:1:32768:2:49152:3:65536` + `--use-gradnorm --gradnorm-mode ema_proxy --gradnorm-alpha 0.5 --gradnorm-lr 1e-3 --gradnorm-min-weight 0.0`
+- **Pure CLI**: no code changes. All GradNorm flags already on tay.
+- **Kill gates**: EP1 <35%, EP2 <12%, EP3 <8.5%; merge if EP4 val_abupt < 6.5985%
+- **Status**: WIP — assigned 2026-05-07 06:38 UTC
+
+---
+
 ## 2026-05-07 ~04:30 — PR #788: surface curvature H,K on surface path (nezuko) — CLOSED INCONCLUSIVE (budget-limited)
 
 - **Branch**: nezuko/surface-curvature-surface-only (deleted)

@@ -1,7 +1,19 @@
 # SENPAI Research State
-- **Date:** 2026-05-07 ~04:30 UTC (Round 13 mid-flight — 8 active student PRs after PR #788/#786 close + #795/#796 assign)
+- **Date:** 2026-05-07 06:38 UTC (Round 13 mid-flight — PR #797 merged diagnostic, PR #804 assigned to edward)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
+
+## SDF pipeline artefact finding (2026-05-07 06:38 UTC — PR #797 edward, MERGED)
+
+**CRITICAL DATA FINDING**: The 4 OOD test cases (run_133, 158, 203, 226) that account for ~92% of squared test_vol_p deviation are NOT geometrically novel — they are **data-pipeline artefacts**. Their `volume_sdf.npy` was regenerated through a different sampling pipeline that omits inside-body samples. They are exactly the `REQUIRED_RESTORED_CASE_IDS` in `target/data/loader.py`.
+
+- All 4 cases have `sdf_min` ∈ [-0.015, -0.001] vs bulk train [-0.45, -0.27]; `sdf_negative_frac` is ~10× lower.
+- They cluster exclusively around the 6 restored train cases in 4D-Mahalanobis space.
+- **Human issue #803 opened** requesting regeneration of `volume_sdf.npy` for 10 restored cases.
+- **Implication for conditioning track**: FiLM/SDF-gate is extracting a bimodal pipeline indicator, not a physics signal. The conditioning experiments (#789, #802) are not invalidated but cannot fix OOD-4 until data is regenerated.
+- Diagnostic artefacts merged to tay: `target/sdf_coverage_diagnostic.py`, `target/analysis/sdf_per_case_stats.csv`, `target/analysis/sdf_per_case_hists.npz`.
+
+---
 
 ## Schedule-confound finding (2026-05-07)
 
@@ -11,7 +23,8 @@
 
 ## Latest Human Researcher Directives
 
-- **Issue #717** (vol_pressure gap): Phase 0 diagnostic COMPLETE (PR #767 askeladd). The chronic 3× vol_pressure val→test gap is confirmed as **case-dominated**: 4 geometrically-OOD test cases (run_133, run_226, run_203, run_158) account for 92% of squared test_vol_p deviation. Phase 1 now pivots from supervision-density/loss-mass interventions to **geometry conditioning on the volume decoder path**.
+- **Issue #717** (vol_pressure gap): Phase 0 complete (PR #767). Phase 1 conditioning track **updated**: OOD-4 confirmed as pipeline artefacts (PR #797). Data-side fix requested (Issue #803). Conditioning experiments continue but data fix is the highest-leverage intervention.
+- **Issue #803** (SDF regeneration): OPENED 2026-05-07 06:38Z. Request to regenerate `volume_sdf.npy` for 10 `REQUIRED_RESTORED_CASE_IDS` (run_44, 133, 158, 184, 203, 226, 249, 310, 416, 484) using standard inside-body sampling. Pending human team action.
 - **Issue #618** (STRING/RoPE): PR #786 fern Anchor-STRING RoPE v3 13-ep CLOSED INCONCLUSIVE (schedule confound, val=6.92%); fern reassigned PR #796 same v3 architecture at 4-ep budget-aligned schedule. Thorfinn #779 running σ_max sweep.
 - **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
 - No new directives pending.
@@ -43,14 +56,14 @@
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| frieren | #792 | FiLM v3: compressed vol-points schedule 0→65k by EP3; film-start=EP2 (EP1 pending, dormant ✅) | WIP |
-| askeladd | #789 | Vol-decoder SDF-gate v3: lower cap 0.15 + gate 2-epoch LR warmup + gate WD 5e-3 | WIP (EP1 PASS 29.98% ✅) |
-| alphonse | #790 | τ_z loss weight sweep Arm A (tau-z=3.0) — confirmed training laggard on L=5 | WIP (EP1 PASS 25.38% ✅) |
-| fern | #796 | Anchor-STRING RoPE v3 4-ep budget-aligned (`--epochs 4 --lr-cosine-t-max 4`); follow-up to closed #786 | WIP (just assigned) |
-| thorfinn | #779 | STRING σ_max sweep Arm B (σ=8.0) — EP2 PASS 8.37% (−0.25pp vs Arm A) — EP3 pending | WIP (mid-EP3, step ~24k) |
-| nezuko | #795 | Surface curvature H,K on surface path 4-ep budget-aligned; follow-up to closed #788 (val 6.78%, test_surf_p −0.14pp vs ctrl, test_wall_shear −0.28pp vs ctrl) | WIP (just assigned) |
-| edward | #782 | SDF-FiLM: volume SDF stats → affine conditioning on vol tokens (FiLM dormant until EP4~04:23Z) | WIP (EP1 PASS 27.68% ✅, mid-EP2) |
-| tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping test_vol_p OOD win | WIP (new, assigned 02:30Z) |
+| frieren | #802 | AB-UPT geom-branch warmup-fix: geom-conditioning with fixed LR warmup | WIP (just assigned) |
+| askeladd | #789 | Vol-decoder SDF-gate v4: decoupled gate LR=5e-5 fixed from backbone cosine | WIP (v4 run `ccnssij7` launched 06:06Z, EP1 gate ~07:12Z) |
+| alphonse | #801 | Anchor-STRING + RoPE stabilized: composing SOTA STRING PE with anchor-RoPE | WIP (just assigned) |
+| fern | #799 | SOTA 4-ep schedule-aligned control: full SOTA stack `--epochs 4 --lr-cosine-t-max 4` | WIP (just assigned) |
+| thorfinn | #779 | STRING σ_max sweep: Arms A(σ=4.0)✅ B(σ=8.0)✅ C(σ=16.0, run `seuw5fsc`) RUNNING | WIP (Arm C EP1 PASS 26.78%, EP2 gate ~07:30Z) |
+| nezuko | #798 | Surface curvature 4-ep aligned: H,K features on surface path with 4-ep budget | WIP (run `fphcg7b6` launched 06:19Z, EP1 gate ~07:35Z) |
+| edward | #804 | GradNorm α=0.5 4-ep budget-aligned: pure CLI, ports dl24 winner (6.4170%) to short-track | WIP (just assigned 06:38Z) |
+| tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping vol_p OOD win | WIP (EP3 7.81% ✅ continue band, awaiting EP4) |
 
 **Recently closed PRs:**
 - **PR #788** (nezuko, surface curvature H,K on surface path): CLOSED INCONCLUSIVE (budget-limited) — best EMA EP4-partial val_abupt 6.7767% (+0.18pp vs SOTA), test_abupt 8.139% (−0.18pp vs within-cluster control), test_surf_p 4.168% (−0.14pp), test_wall_shear 7.4189% (−0.28pp). Hypothesis-discriminating signals supported on test. Schedule confound. Follow-up PR #795 assigned (4-ep budget-aligned).
