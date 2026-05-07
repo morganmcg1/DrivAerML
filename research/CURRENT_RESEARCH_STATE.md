@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-07 ~11:00 UTC (Round 13 ongoing — 8 active student PRs, 2 newly assigned)
+- **Date:** 2026-05-07 ~02:30 UTC (Round 13 ongoing — 8 active student PRs)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -39,20 +39,21 @@
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| frieren | #778 | FiLM v2: bounded tanh γ∈(0,2) + delayed EP6 onset (fixes PR #770 blow-up) | WIP |
-| askeladd | #789 | Vol-decoder SDF-gate v3: lower cap 0.15 + gate-specific 2-epoch LR warmup + gate WD 5e-3 | WIP (new) |
-| alphonse | #790 | τ_z loss weight sweep {3.0, 4.0} — targets confirmed training laggard on L=5 SOTA stack | WIP (new) |
-| fern | #786 | Anchor-STRING RoPE v3: full 13-epoch run with cosine-matched schedule + Xavier init | WIP |
-| thorfinn | #779 | STRING σ_max sweep: isolate high-freq ceiling {4.0, 8.0, 16.0} | WIP |
-| nezuko | #788 | Surface curvature H,K on surface path only — follow-up to PR #773 closed negative | WIP |
-| edward | #782 | SDF-FiLM: volume SDF stats → affine conditioning on vol tokens | WIP |
-| tanjiro | #776 | Manual vol-loss-weight sweep {1.5, 2.0, 2.5} on SOTA L=5 | WIP |
+| frieren | #792 | FiLM v3: compressed vol-points schedule 0→65k by EP3; film-start=EP2 (EP1 pending, dormant ✅) | WIP |
+| askeladd | #789 | Vol-decoder SDF-gate v3: lower cap 0.15 + gate 2-epoch LR warmup + gate WD 5e-3 | WIP (EP1 PASS 29.98% ✅) |
+| alphonse | #790 | τ_z loss weight sweep Arm A (tau-z=3.0) — confirmed training laggard on L=5 | WIP (EP1 PASS 25.38% ✅) |
+| fern | #786 | Anchor-STRING RoPE v3: full 13-epoch, Xavier init, EP2 PASS 8.66% — EP3 pending | WIP (mid-EP3, step ~25k) |
+| thorfinn | #779 | STRING σ_max sweep Arm B (σ=8.0) — EP2 PASS 8.37% (−0.25pp vs Arm A) — EP3 pending | WIP (mid-EP3, step ~24k) |
+| nezuko | #788 | Surface curvature H,K on surface path only — EP2 PASS 8.06% — EP3 pending | WIP (mid-EP3, step ~25k) |
+| edward | #782 | SDF-FiLM: volume SDF stats → affine conditioning on vol tokens (FiLM dormant until EP4~04:23Z) | WIP (EP1 PASS 27.68% ✅, mid-EP2) |
+| tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping test_vol_p OOD win | WIP (new, assigned 02:30Z) |
 
 **Recently closed PRs:**
-- **PR #785** (askeladd, SDF-gate v2): CLOSED NEGATIVE (design) — bounded-tanh insufficient to prevent monotone saturation; 20× LR jump at EP1→EP2 boundary drove gate to full negative saturation (scale=-0.301, sat_frac=1.0). v3 follow-up assigned as PR #789.
-- **PR #777** (alphonse, gc-loss-delayed-EP3): CLOSED NEGATIVE — test_vol_p=12.749% (worse than SOTA 11.933% and anchor 11.374%). gc_loss onset perturbation at EP3 caused +37% val_vol_p_mae spike; temporal gating hypothesis falsified for this configuration.
-- **PR #781** (askeladd unbounded SDF-gate): CLOSED NEGATIVE (design) — unbounded blow-up; hypothesis not falsified; PR #785/789 are bounded follow-ups.
-- **PR #775** (nezuko learnable affine anchor): CLOSED NEGATIVE — alpha collapsed toward zero; global scalar anchor insufficient.
+- **PR #776** (tanjiro, vol-loss-weight sweep {1.5, 2.0}): CLOSED PARTIAL POSITIVE — Arm B (vol-w=2.0) beats SOTA test_vol_p by −0.37pp and shrinks val→test vol_p OOD gap by 0.67pp, but val_abupt regresses 0.62pp. Not merged. Wall-shear regression is the blocker. Follow-up PR #793 assigned.
+- **PR #785** (askeladd, SDF-gate v2): CLOSED NEGATIVE (design) — bounded-tanh insufficient; 20× LR jump drove gate to full negative saturation. v3 follow-up assigned as PR #789.
+- **PR #777** (alphonse, gc-loss-delayed-EP3): CLOSED NEGATIVE — test_vol_p=12.749% (worse than SOTA 11.933% and anchor 11.374%).
+- **PR #781** (askeladd unbounded SDF-gate): CLOSED NEGATIVE (design) — unbounded blow-up; hypothesis intact; PR #785/789 are bounded follow-ups.
+- **PR #775** (nezuko learnable affine anchor): CLOSED NEGATIVE — alpha collapsed toward zero.
 - **PR #787** (stark τ_z sweep): CLOSED — 'stark' not in student pool; re-assigned to alphonse as PR #790.
 
 ### Long-run dl24 track results (2026-05-06 15:22 UTC)
