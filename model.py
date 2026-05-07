@@ -342,6 +342,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_surf_to_vol_xattn: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +355,7 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -421,6 +423,26 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # Surface->volume cross-attention (PR #823): single MHA sublayer where
+        # volume hidden states (Q) attend to surface hidden states (K/V).
+        # Bridges geometry-aware surface features into the volume decoder
+        # to address the OOD volume_pressure gap. Zero-init out_proj weight
+        # AND bias so the sublayer is identity at init (preserves baseline
+        # behavior at epoch 0). See PR #823 hypothesis.
+        if use_surf_to_vol_xattn:
+            self.surf_to_vol_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
+            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
+        else:
+            self.surf_to_vol_xattn = None
+            self.surf_to_vol_xattn_norm = None
 
     def _encode_group(
         self,
@@ -506,6 +528,33 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.surf_to_vol_xattn is not None
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            # surface_hidden has padded rows zeroed via _apply_token_mask above;
+            # without key_padding_mask, padded keys would contribute zero V but
+            # still dilute the softmax denominator over valid keys. The
+            # bool mask sets the score for those positions to -inf so they
+            # carry zero attention weight. PyTorch falls back to the math
+            # SDPA kernel when a mask is supplied (Flash-Attn 2 cannot
+            # represent arbitrary key-padding masks); set need_weights=False
+            # so MHA does not also materialise the (B, N_q, N_k) weight tensor.
+            surf_pad_mask = ~surface_mask.bool()
+            xattn_out, _ = self.surf_to_vol_xattn(
+                query=volume_hidden,
+                key=surface_hidden,
+                value=surface_hidden,
+                key_padding_mask=surf_pad_mask,
+                need_weights=False,
+            )
+            xattn_out = _apply_token_mask(xattn_out, volume_mask)
+            volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)

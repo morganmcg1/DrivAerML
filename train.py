@@ -102,6 +102,7 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -219,6 +220,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_surf_to_vol_xattn": (
+            "Enable surface->volume cross-attention (PR #823). After the "
+            "shared Transolver backbone, a single nn.MultiheadAttention "
+            "block lets volume hidden states (Q) attend to surface hidden "
+            "states (K/V) before the volume output head. The out_proj "
+            "weight and bias are zero-initialised so the layer is identity "
+            "at init (preserves baseline at epoch 0). embed_dim follows "
+            "--model-hidden-dim and num_heads follows --model-heads."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -297,6 +307,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
     )
 
 
