@@ -342,6 +342,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_vol_decoder_mlp: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +355,7 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_vol_decoder_mlp = use_vol_decoder_mlp
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -420,7 +422,18 @@ class SurfaceTransolver(nn.Module):
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        if use_vol_decoder_mlp:
+            vol_hidden_dim = n_hidden // 2
+            self.volume_out = nn.Sequential(
+                nn.Linear(n_hidden, vol_hidden_dim, bias=True),
+                nn.GELU(),
+                nn.Linear(vol_hidden_dim, self.volume_output_dim, bias=True),
+            )
+            _init_linear(self.volume_out[0])
+            nn.init.zeros_(self.volume_out[-1].weight)
+            nn.init.zeros_(self.volume_out[-1].bias)
+        else:
+            self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
         self,
