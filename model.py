@@ -136,6 +136,138 @@ class StringSeparableEncoding(nn.Module):
         return enc.flatten(start_dim=-2)
 
 
+class AnchorStringRoPE(nn.Module):
+    """Learnable per-axis rotary encoding on actual 3D point coordinates.
+
+    Performs a sub-sampled cross-attention pass: queries come from all N
+    points, keys/values come from K=n_anchors uniformly strided anchors.
+    Per-axis log-frequencies rotate Q and K with their own coordinates,
+    yielding spatial relative-position dependence on (coord_q - coord_k).
+
+    Originally landed as PR #774 v2 (zero-init out_proj) and PR #786 v3
+    (Xavier x 0.01 out_proj init). PR #801 adds an `init_max_freq` knob to
+    let the caller tighten the log-spaced frequency init range.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        n_heads: int,
+        n_anchors: int = 1024,
+        ndim: int = 3,
+        init_max_freq: float = 10.0,
+        init_min_freq: float = 0.1,
+    ):
+        super().__init__()
+        if hidden_dim % n_heads != 0:
+            raise ValueError("hidden_dim must be divisible by n_heads")
+        if init_max_freq <= init_min_freq:
+            raise ValueError(
+                f"init_max_freq={init_max_freq} must be > init_min_freq={init_min_freq}"
+            )
+        self.hidden_dim = hidden_dim
+        self.n_heads = n_heads
+        self.n_anchors = n_anchors
+        self.ndim = ndim
+        self.head_dim = hidden_dim // n_heads
+        self.init_max_freq = init_max_freq
+        self.init_min_freq = init_min_freq
+        self.freqs_per_axis = self.head_dim // (2 * ndim)
+        if self.freqs_per_axis <= 0:
+            raise ValueError(
+                f"head_dim={self.head_dim} too small for ndim={ndim} (need head_dim>=2*ndim)"
+            )
+        self.rope_dim_per_head = self.freqs_per_axis * 2 * ndim
+
+        log_freqs_init = torch.linspace(
+            math.log(init_min_freq), math.log(init_max_freq), self.freqs_per_axis
+        )
+        self.log_freqs = nn.Parameter(
+            log_freqs_init.unsqueeze(0).expand(ndim, -1).clone()
+        )
+
+        self.qkv = nn.Linear(hidden_dim, 3 * hidden_dim, bias=False)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        nn.init.trunc_normal_(self.qkv.weight, std=0.02)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+        with torch.no_grad():
+            self.out_proj.weight.mul_(0.01)
+        self.phase: nn.Parameter | None = None
+
+    def _apply_rope_to_qk(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        coords_q: torch.Tensor,
+        coords_k: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        freqs = self.log_freqs.exp()
+        fpa = self.freqs_per_axis
+        D_head = q.shape[-1]
+
+        def rotate_single(tensor: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
+            parts: list[torch.Tensor] = []
+            coords_f = coords.to(dtype=tensor.dtype)
+            for ax in range(self.ndim):
+                c = coords_f[:, :, ax]
+                f = freqs[ax].to(dtype=tensor.dtype)
+                angles = c.unsqueeze(-1) * f.unsqueeze(0).unsqueeze(0)
+                cos_a = angles.cos().unsqueeze(1)
+                sin_a = angles.sin().unsqueeze(1)
+                start = ax * 2 * fpa
+                sl = tensor[..., start:start + 2 * fpa]
+                sl_l, sl_r = sl[..., :fpa], sl[..., fpa:]
+                rot = torch.cat(
+                    [sl_l * cos_a - sl_r * sin_a, sl_r * cos_a + sl_l * sin_a],
+                    dim=-1,
+                )
+                parts.append(rot)
+            if self.rope_dim_per_head < D_head:
+                parts.append(tensor[..., self.rope_dim_per_head:])
+            return torch.cat(parts, dim=-1)
+
+        return rotate_single(q, coords_q), rotate_single(k, coords_k)
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        coords: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, D = features.shape
+        H, hd = self.n_heads, self.head_dim
+        K = min(self.n_anchors, N)
+
+        stride = max(1, N // K)
+        anchor_idx = torch.arange(0, N, stride, device=features.device)[:K]
+        anchor_feats = features.index_select(1, anchor_idx)
+        anchor_coords = coords.index_select(1, anchor_idx)
+
+        qkv_all = self.qkv(features)
+        qkv_anc = self.qkv(anchor_feats)
+        q = qkv_all[:, :, :D]
+        k = qkv_anc[:, :, D:2 * D]
+        v = qkv_anc[:, :, 2 * D:]
+
+        q = q.view(B, N, H, hd).transpose(1, 2)
+        k = k.view(B, K, H, hd).transpose(1, 2)
+        v = v.view(B, K, H, hd).transpose(1, 2)
+
+        q_rot, k_rot = self._apply_rope_to_qk(q, k, coords, anchor_coords)
+
+        attn_mask = None
+        if mask is not None:
+            anchor_mask = mask.index_select(1, anchor_idx)
+            attn_mask = anchor_mask.bool().view(B, 1, 1, K)
+
+        out = F.scaled_dot_product_attention(q_rot, k_rot, v, attn_mask=attn_mask)
+        out = out.transpose(1, 2).reshape(B, N, D)
+        out = self.out_proj(out)
+        if mask is not None:
+            out = out * mask.unsqueeze(-1).to(dtype=out.dtype)
+        return out
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -342,6 +474,10 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_anchor_string_rope: bool = False,
+        anchor_string_rope_n_anchors: int = 1024,
+        anchor_rope_init_max_freq: float = 10.0,
+        anchor_rope_init_min_freq: float = 0.1,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +490,10 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_anchor_string_rope = use_anchor_string_rope
+        self.anchor_string_rope_n_anchors = anchor_string_rope_n_anchors
+        self.anchor_rope_init_max_freq = anchor_rope_init_max_freq
+        self.anchor_rope_init_min_freq = anchor_rope_init_min_freq
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -409,6 +549,17 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        if use_anchor_string_rope:
+            self.anchor_rope_vol = AnchorStringRoPE(
+                hidden_dim=n_hidden,
+                n_heads=n_head,
+                n_anchors=anchor_string_rope_n_anchors,
+                ndim=space_dim,
+                init_max_freq=anchor_rope_init_max_freq,
+                init_min_freq=anchor_rope_init_min_freq,
+            )
+        else:
+            self.anchor_rope_vol = None
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -506,6 +657,13 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if self.anchor_rope_vol is not None and volume_x is not None:
+            vol_coords_xyz = volume_x[:, :, : self.space_dim]
+            rope_delta = self.anchor_rope_vol(
+                volume_hidden, vol_coords_xyz, mask=volume_mask
+            )
+            volume_hidden = volume_hidden + rope_delta
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)

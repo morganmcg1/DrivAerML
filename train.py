@@ -102,6 +102,11 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_anchor_string_rope: bool = False
+    anchor_string_rope_n_anchors: int = 1024
+    anchor_rope_lr_scale: float = 1.0
+    anchor_rope_grad_clip: float = 0.0
+    anchor_rope_init_max_freq: float = 10.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -233,11 +238,39 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def _build_param_groups(model: nn.Module, config: Config) -> list[dict]:
+    """Split parameters so anchor-rope log_freqs/phase get a separate LR group.
+
+    The anchor-rope log_freqs/phase live on a more curved (periodic) loss
+    surface than the rest of the network. When ``--anchor-rope-lr-scale != 1``
+    they receive their own optimizer group at ``lr * anchor_rope_lr_scale`` to
+    prevent premature frequency lock-in. With ``anchor_rope_lr_scale == 1`` we
+    keep a single group so the optimizer is byte-identical to the legacy path.
+    """
+    rope_params: list[nn.Parameter] = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if "anchor_rope" in name and ("log_freqs" in name or "phase" in name):
+            rope_params.append(p)
+    if not rope_params or config.anchor_rope_lr_scale == 1.0:
+        return [{"params": [p for p in model.parameters() if p.requires_grad], "lr": config.lr}]
+    rope_param_ids = {id(p) for p in rope_params}
+    other_params = [
+        p for p in model.parameters() if p.requires_grad and id(p) not in rope_param_ids
+    ]
+    return [
+        {"params": other_params, "lr": config.lr},
+        {"params": rope_params, "lr": config.lr * config.anchor_rope_lr_scale},
+    ]
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    param_groups = _build_param_groups(model, config)
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
-            model.parameters(),
+            param_groups,
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
@@ -245,7 +278,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
+            param_groups,
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
@@ -284,6 +317,80 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_anchor_rope_metrics(
+    model: nn.Module, *, rope_param_lr: float | None = None
+) -> dict[str, float]:
+    """Gather per-validation anchor-rope frequency / out_proj diagnostics."""
+    module = getattr(model, "anchor_rope_vol", None)
+    if module is None:
+        return {}
+    metrics: dict[str, float] = {}
+    log_freqs = module.log_freqs.detach().float()
+    metrics["anchor_rope/log_freqs_mean"] = float(log_freqs.mean().item())
+    metrics["anchor_rope/log_freqs_std"] = float(log_freqs.std().item())
+    metrics["anchor_rope/log_freqs_min"] = float(log_freqs.min().item())
+    metrics["anchor_rope/log_freqs_max"] = float(log_freqs.max().item())
+    freqs_hz = log_freqs.exp()
+    metrics["anchor_rope/freqs_hz_min"] = float(freqs_hz.min().item())
+    metrics["anchor_rope/freqs_hz_max"] = float(freqs_hz.max().item())
+    metrics["anchor_rope/freqs_hz_mean"] = float(freqs_hz.mean().item())
+    for axis in range(log_freqs.shape[0]):
+        metrics[f"anchor_rope/log_freqs_axis_{axis}_mean"] = float(log_freqs[axis].mean().item())
+        metrics[f"anchor_rope/log_freqs_axis_{axis}_max"] = float(log_freqs[axis].max().item())
+    out_w = module.out_proj.weight.detach().float()
+    metrics["anchor_rope/out_proj_weight_rms"] = float(out_w.pow(2).mean().sqrt().item())
+    metrics["anchor_rope/out_proj_weight_max_abs"] = float(out_w.abs().max().item())
+    if module.phase is not None:
+        phase = module.phase.detach().float()
+        metrics["anchor_rope/phase_mean"] = float(phase.mean().item())
+        metrics["anchor_rope/phase_std"] = float(phase.std().item())
+        metrics["anchor_rope/phase_max_abs"] = float(phase.abs().max().item())
+    if rope_param_lr is not None:
+        metrics["anchor_rope/rope_param_lr"] = float(rope_param_lr)
+    return metrics
+
+
+def anchor_rope_named_params(model: nn.Module) -> list[tuple[str, nn.Parameter]]:
+    """All anchor-rope parameters (qkv, out_proj, log_freqs, phase, etc.)."""
+    return [
+        (name, p)
+        for name, p in model.named_parameters()
+        if "anchor_rope" in name and p.requires_grad
+    ]
+
+
+def anchor_rope_grad_norm(
+    named_params: list[tuple[str, nn.Parameter]], device: torch.device
+) -> torch.Tensor:
+    total = torch.zeros((), device=device, dtype=torch.float32)
+    for _, p in named_params:
+        if p.grad is None:
+            continue
+        total = total + p.grad.detach().float().square().sum()
+    return total.sqrt()
+
+
+def current_rope_lr(
+    optimizer: torch.optim.Optimizer,
+    anchor_rope_params: list[tuple[str, nn.Parameter]],
+) -> float:
+    """Find the live LR of the optimizer group that owns the first rope param."""
+    if not anchor_rope_params:
+        return float("nan")
+    # log_freqs/phase live in the rope group when --anchor-rope-lr-scale != 1.0;
+    # otherwise they share the only group with the rest of the model.
+    rope_lr_param_ids = {
+        id(p)
+        for name, p in anchor_rope_params
+        if "log_freqs" in name or "phase" in name
+    }
+    target_ids = rope_lr_param_ids or {id(p) for _, p in anchor_rope_params}
+    for group in optimizer.param_groups:
+        if any(id(p) in target_ids for p in group["params"]):
+            return float(group["lr"])
+    return float(optimizer.param_groups[0]["lr"])
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -297,6 +404,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_anchor_string_rope=config.use_anchor_string_rope,
+        anchor_string_rope_n_anchors=config.anchor_string_rope_n_anchors,
+        anchor_rope_init_max_freq=config.anchor_rope_init_max_freq,
     )
 
 
@@ -761,6 +871,17 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        anchor_rope_params = anchor_rope_named_params(base_model)
+        rope_param_lr_base = config.lr * config.anchor_rope_lr_scale
+        if anchor_rope_params and state.is_main:
+            print(
+                f"AnchorStringRoPE active: "
+                f"params={sum(p.numel() for _, p in anchor_rope_params):,d}, "
+                f"lr_scale={config.anchor_rope_lr_scale}, "
+                f"grad_clip={config.anchor_rope_grad_clip}, "
+                f"init_max_freq={config.anchor_rope_init_max_freq}, "
+                f"n_anchors={config.anchor_string_rope_n_anchors}"
+            )
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
@@ -861,6 +982,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            ar_module = getattr(base_model, "anchor_rope_vol", None)
+            if ar_module is not None:
+                wandb.summary["anchor_rope/init_sigmas"] = ar_module.init_sigmas()
+                wandb.summary["anchor_rope/init_max_freq"] = config.anchor_rope_init_max_freq
+                wandb.summary["anchor_rope/n_anchors"] = config.anchor_string_rope_n_anchors
+                wandb.summary["anchor_rope/lr_scale"] = config.anchor_rope_lr_scale
+                wandb.summary["anchor_rope/grad_clip"] = config.anchor_rope_grad_clip
+                wandb.summary["anchor_rope/rope_param_lr_base"] = rope_param_lr_base
+                wandb.summary["model/use_anchor_string_rope"] = 1.0
+                wandb.summary["model/anchor_string_rope_n_anchors"] = (
+                    config.anchor_string_rope_n_anchors
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1027,6 +1160,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     and config.weight_log_every > 0
                     and global_step % config.weight_log_every == 0
                 )
+                should_log_anchor_rope_grad = (
+                    should_log_gradients and bool(anchor_rope_params)
+                )
                 train_log: dict[str, object] = {
                     "global_step": global_step,
                     "train/lr": current_lr,
@@ -1078,6 +1214,39 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/step_skipped": 1.0 if skip_step else 0.0,
                         }
                     )
+                    if (
+                        not skip_step
+                        and anchor_rope_params
+                        and config.anchor_rope_grad_clip > 0.0
+                    ):
+                        if should_log_anchor_rope_grad:
+                            ar_norm_before = float(
+                                anchor_rope_grad_norm(anchor_rope_params, device).detach().cpu().item()
+                            )
+                            train_log["anchor_rope/grad_norm_before_clip"] = ar_norm_before
+                        torch.nn.utils.clip_grad_norm_(
+                            [p for _, p in anchor_rope_params],
+                            max_norm=config.anchor_rope_grad_clip,
+                        )
+                        if should_log_anchor_rope_grad:
+                            ar_norm_after = float(
+                                anchor_rope_grad_norm(anchor_rope_params, device).detach().cpu().item()
+                            )
+                            train_log["anchor_rope/grad_norm_after_clip"] = ar_norm_after
+                            train_log["anchor_rope/grad_clip_active"] = (
+                                1.0 if ar_norm_before > config.anchor_rope_grad_clip else 0.0
+                            )
+                    elif (
+                        not skip_step
+                        and anchor_rope_params
+                        and should_log_anchor_rope_grad
+                    ):
+                        ar_norm_before = float(
+                            anchor_rope_grad_norm(anchor_rope_params, device).detach().cpu().item()
+                        )
+                        train_log["anchor_rope/grad_norm_before_clip"] = ar_norm_before
+                        train_log["anchor_rope/grad_norm_after_clip"] = ar_norm_before
+                        train_log["anchor_rope/grad_clip_active"] = 0.0
                     gradient_metrics = (
                         collect_gradient_metrics(
                             model,
@@ -1240,6 +1409,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                if anchor_rope_params:
+                    log_metrics.update(
+                        collect_anchor_rope_metrics(
+                            base_model,
+                            rope_param_lr=current_rope_lr(optimizer, anchor_rope_params),
+                        )
+                    )
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
