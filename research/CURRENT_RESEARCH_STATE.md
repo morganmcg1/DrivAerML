@@ -1,35 +1,7 @@
 # SENPAI Research State
-- **Date:** 2026-05-01 (session resume) UTC (PR #801 alphonse Anchor-STRING RoPE stabilized CLOSED NOT-PROMISING val=6.9737%; alphonse reassigned PR #814 STRING 6-octave extended spectrum)
+- **Date:** 2026-05-07 ~15:20 UTC (nezuko #816 cross-case contrastive vol_p loss ASSIGNED. All 8 students active. PR #807 thorfinn τ_z×3.0 4-ep CLOSED — hypothesis confirmed; spawned #815 13-ep promotion. New 13-ep promotion PRs in flight: #813 tanjiro vol-w=2.0, #814 alphonse STRING 6-octave, #815 thorfinn τ_z×3.0. frieren #802 agent communication failure — `murzmdxl` healthy at step 30,781 (EP3.2) but no posts since 12:03Z.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
-
-## SDF pipeline artefact finding (2026-05-07 06:38 UTC — PR #797 edward, MERGED)
-
-**CRITICAL DATA FINDING**: The 4 OOD test cases (run_133, 158, 203, 226) that account for ~92% of squared test_vol_p deviation are NOT geometrically novel — they are **data-pipeline artefacts**. Their `volume_sdf.npy` was regenerated through a different sampling pipeline that omits inside-body samples. They are exactly the `REQUIRED_RESTORED_CASE_IDS` in `target/data/loader.py`.
-
-- All 4 cases have `sdf_min` ∈ [-0.015, -0.001] vs bulk train [-0.45, -0.27]; `sdf_negative_frac` is ~10× lower.
-- They cluster exclusively around the 6 restored train cases in 4D-Mahalanobis space.
-- **Human issue #803 opened** requesting regeneration of `volume_sdf.npy` for 10 restored cases.
-- **Implication for conditioning track**: FiLM/SDF-gate is extracting a bimodal pipeline indicator, not a physics signal. The conditioning experiments (#789, #802) are not invalidated but cannot fix OOD-4 until data is regenerated.
-- Diagnostic artefacts merged to tay: `target/sdf_coverage_diagnostic.py`, `target/analysis/sdf_per_case_stats.csv`, `target/analysis/sdf_per_case_hists.npz`.
-
----
-
-## Schedule-confound finding (2026-05-07)
-
-**The 13-epoch budget is now structurally untestable at 270-min train cap.** Two consecutive PRs (#786 fern Anchor-RoPE, #788 nezuko surface-curvature) ran `--lr-cosine-t-max 13 --epochs 13` but only fit 4 effective epochs before wall-time. LR never cooled. Both produced budget-cut "best" checkpoints at EP4-partial that beat within-cluster controls on test but missed val SOTA bar by 0.18–0.32pp. Going forward: **all new architectural-comparison experiments must use `--epochs 4 --lr-cosine-t-max 4` with 4-ep vol-points curriculum `0:16384:1:32768:2:49152:3:65536` and rescaled kill thresholds.** PR #795 (nezuko) and PR #796 (fern) are the first two budget-aligned re-runs.
-
----
-
-## Latest Human Researcher Directives
-
-- **Issue #717** (vol_pressure gap): Phase 0 complete (PR #767). Phase 1 conditioning track **updated**: OOD-4 confirmed as pipeline artefacts (PR #797). Data-side fix requested (Issue #803). Conditioning experiments continue but data fix is the highest-leverage intervention.
-- **Issue #803** (SDF regeneration): OPENED 2026-05-07 06:38Z. Request to regenerate `volume_sdf.npy` for 10 `REQUIRED_RESTORED_CASE_IDS` (run_44, 133, 158, 184, 203, 226, 249, 310, 416, 484) using standard inside-body sampling. Pending human team action.
-- **Issue #618** (STRING/RoPE): PR #786 fern Anchor-STRING RoPE v3 13-ep CLOSED INCONCLUSIVE (schedule confound, val=6.92%); fern reassigned PR #796 same v3 architecture at 4-ep budget-aligned schedule. Thorfinn #779 running σ_max sweep.
-- **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
-- No new directives pending.
-
----
 
 ## Current Baselines
 
@@ -39,116 +11,80 @@
 | **Single-model SOTA** | **6.5985%** | **7.9915%** | 11.933% | #592 (alphonse) | depth-L5, EP4, run `4k25s25e` |
 | **Vol-pressure best anchor** | — | — | 11.374% | #681 (dc031qpt) | Issue #717 reference |
 
-**Key finding from #767:** Excluding the 4 OOD cases, test_vol_p = 3.9-4.2% (already below AB-UPT 6.08%). The entire vol_pressure gap is caused by 4 geometrically-OOD test cases. Geometry conditioning of the volume decoder is the highest-priority next intervention.
+**Key finding from #767:** 4 OOD test cases (run_133, run_226, run_203, run_158) account for 92% of squared test_vol_p deviation. Excluding them, test_vol_p = 3.9-4.2% (below AB-UPT 6.08%). Geometry conditioning of the volume decoder is the highest-priority intervention.
 
 **Vol-pressure promotion ladder (test_vol_pressure target):**
 - Weak: ≤11.0% | Solid: ≤10.0% | Major: ≤8.5% | Target: ≤6.08% (AB-UPT reference)
 
 ---
 
-## Current Research Focus: Phase 1 Wave 2 — Volume Decoder Geometry Conditioning + Positional Encoding
+## Latest Human Researcher Directives
 
-8 students running Round 13 PRs. Two themes: (1) geometry conditioning on the volume path (Issue #717), (2) STRING/RoPE follow-ups (Issue #618). τ_z loss upweight experiment queued for next available student.
+- **Issue #618** (STRING/RoPE): All four experiments must run. Iterate on the two most recoverable STRING/RoPE directions with at least 2 students. Exps 3 (Anchor-STRING stabilized) and 4 (AB-UPT geometry branch v2 warmup fix) are now assigned.
+- **Issue #717** (vol_pressure gap): Phase 0 diagnostic COMPLETE (PR #767). Phase 1 continues — geometry conditioning on volume decoder path. SDF-gate v3 (PR #789) closed DESIGN-NEGATIVE; additive LoRA approach now in flight.
+- **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
+- No new directives pending.
 
-**Note on student pool:** STUDENT_NAMES = alphonse, askeladd, edward, fern, frieren, nezuko, tanjiro, thorfinn (8 students). All 8 are now active with WIP PRs.
+---
 
-### Active PRs
+## Latest Closeouts
+
+- **PR #808 (nezuko, surface-curvature 4-ep orig-schedule)**: CLOSED DEAD END. 3rd consecutive curvature run (PRs #788, #798, #808) all in 6.78–7.35% range — 0.20–0.21pp above SOTA gate. Only signal: test_vol_p marginally better (~11.81% vs 11.933%). Surface curvature as standalone L=5 augment is exhausted.
+- **PR #807 (thorfinn, τ_z×3.0 schedule-aligned 4-ep)**: CLOSED — hypothesis confirmed. τ_z×3.0 beats τ_z×2.0 (bare-SOTA control) at equal 4-ep compute on every channel. Did not beat 13-ep SOTA gate (val_abupt=6.824% > 6.5985%). Spawned PR #815 for 13-ep promotion.
+- **PR #809 (askeladd, vol-head LoRA r=4/r=8)**: CLOSED — student idle 90+ minutes. Reassigned as PR #812.
+- **PR #793 (tanjiro, vol-w=2.0+tau-y=2.5+tau-z=3.0)**: CLOSED NEGATIVE. Multiple simultaneous channel up-weights degraded all channels.
+- **PR #792 (frieren, FiLM v3)**: CLOSED DESIGN-NEGATIVE. γ_max saturates at tanh bound 100% from EP4. FiLM γ∈(0,2) capacity is the bottleneck.
+- **PR #790 (alphonse, τ_z upweight sweep)**: Previously CLOSED.
+
+---
+
+## Active PRs (8 WIP)
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| frieren | #802 | AB-UPT geom-branch warmup-fix: geom-conditioning with fixed LR warmup | WIP (assignment picked up 06:23Z, run launching) |
-| askeladd | #809 | Additive LoRA on volume output head: r=4 (Arm A), r=8 (Arm B) — zero-init B, no saturation risk | WIP (new) |
-| alphonse | #814 | STRING 6-octave extended spectrum: add σ=8.0 as 6th RFF octave (4-ep schedule) | WIP (new, assigned session-resume) |
-| fern | #799 | SOTA 4-ep schedule-aligned control: full SOTA stack `--epochs 4 --lr-cosine-t-max 4` | WIP (run `ddwymxzc` step 6,720, EP1 imminent at step 10,864) |
-| thorfinn | #779 | STRING σ_max sweep: Arms A(σ=4.0)✅ B(σ=8.0)✅ C(σ=16.0, run `seuw5fsc`) RUNNING | WIP (Arm C EP2 PASS 8.539% — between A and B; non-monotonic σ_max signal flagged; EP3 gate <9.0% imminent) |
-| nezuko | #798 | Surface curvature 4-ep aligned: H,K features on surface path with 4-ep budget | WIP (run `fphcg7b6` step 5,478 / EP1 gate ~07:30Z) |
-| edward | #804 | GradNorm α=0.5 4-ep budget-aligned: pure CLI, ports dl24 winner (6.4170%) to short-track | WIP (run `1bkzxf38` launched 06:57Z, step 105 — just past warmup) |
-| tanjiro | #793 | vol-w=2.0 + tau-y=2.5 + tau-z=3.0 — rebalance to recover val_abupt while keeping vol_p OOD win | WIP (EP3 7.81% ✅ continue band, run `ss5v4vdx` step 37,356 / 86% to EP4 — slope projects EP4≈5.81% if held) |
-
-**Recently closed PRs:**
-- **PR #801** (alphonse, Anchor-STRING RoPE stabilized): CLOSED NOT-PROMISING. EP4 val_abupt=6.9737% (+0.38pp vs SOTA). Three stabilization fixes (diff LR 0.1×, grad clip, conservative init) had no measurable effect. 1024-anchor approach is a confirmed dead end after 6 total STRING/RoPE PRs. Alphonse reassigned to PR #814 (STRING 6-octave).
-- **PR #789** (askeladd, SDF-gate v4 tanh-cap): CLOSED DESIGN-NEGATIVE. Run `ccnssij7` — gate sat_frac=1.00 / scale_range=0.0000 by step 8,501 (pre-EP1). EP3 val_abupt=7.447% (worse than Arm A control 7.0077% and v3 best 6.840%). All three tanh-cap gate versions (v2/v3/v4) failed; the optimization landscape pushes scale outputs onto the cap regardless of LR scheduling. Replaced by additive LoRA approach (PR #809).
-- **PR #788** (nezuko, surface curvature H,K on surface path): CLOSED INCONCLUSIVE (budget-limited) — best EMA EP4-partial val_abupt 6.7767% (+0.18pp vs SOTA), test_abupt 8.139% (−0.18pp vs within-cluster control), test_surf_p 4.168% (−0.14pp), test_wall_shear 7.4189% (−0.28pp). Hypothesis-discriminating signals supported on test. Schedule confound. Follow-up PR #795 assigned (4-ep budget-aligned).
-- **PR #786** (fern, Anchor-STRING RoPE v3 13-ep): CLOSED INCONCLUSIVE — best EMA EP4-partial val_abupt 6.9197% (+0.32pp vs SOTA), test_abupt 8.1946% (−0.13pp vs control). Schedule confound. v3 architecture diagnostics healthy. Follow-up PR #796 assigned (4-ep budget-aligned).
-- **PR #776** (tanjiro, vol-loss-weight sweep {1.5, 2.0}): CLOSED PARTIAL POSITIVE — Arm B (vol-w=2.0) beats SOTA test_vol_p by −0.37pp and shrinks val→test vol_p OOD gap by 0.67pp, but val_abupt regresses 0.62pp. Not merged. Wall-shear regression is the blocker. Follow-up PR #793 assigned.
-- **PR #785** (askeladd, SDF-gate v2): CLOSED NEGATIVE (design) — bounded-tanh insufficient; 20× LR jump drove gate to full negative saturation. v3 follow-up assigned as PR #789.
-- **PR #777** (alphonse, gc-loss-delayed-EP3): CLOSED NEGATIVE — test_vol_p=12.749% (worse than SOTA 11.933% and anchor 11.374%).
-- **PR #781** (askeladd unbounded SDF-gate): CLOSED NEGATIVE (design) — unbounded blow-up; hypothesis intact; PR #785/789 are bounded follow-ups.
-- **PR #775** (nezuko learnable affine anchor): CLOSED NEGATIVE — alpha collapsed toward zero.
-- **PR #787** (stark τ_z sweep): CLOSED — 'stark' not in student pool; re-assigned to alphonse as PR #790.
-
-### Long-run dl24 track results (2026-05-06 15:22 UTC)
-
-**Three of four dl24 long runs are beating the current single-model SOTA (6.5985%):**
-
-| Student | PR | Hypothesis | Epoch | val_abupt | vs SOTA |
-|---|---|---|---|---|---|
-| **dl24-fern** | **#740** | **GradNorm α=0.5 adaptive loss balancing** | **EP14/15** | **6.4170%** | **−0.1815pp BEATS SOTA** |
-| dl24-nezuko | #741 | Y-axis symmetry augmentation | EP19.5 | 6.5052% | −0.0933pp BEATS SOTA |
-| dl24-frieren | #745 | 5L STRING (model-layers 5 on SOTA base) | EP15.4 | 6.5097% | −0.0888pp BEATS SOTA |
-| dl24-tanjiro | #749 | Lion lr=9e-5 control (pure CLI) | EP21 | 6.8557% | +0.2572pp worse |
-
-> All three winners are mid-training (50-epoch budget). Need to complete and report final best-val checkpoint for BASELINE update.
-
-### Key Diagnostic Findings
-
-**GradNorm diagnostic (PR #758 tanjiro):**
-- **wall_shear_z is the actual training laggard** (r_i=0.01123, weight=1.699, highest among all tasks)
-- **vol_pressure is NOT undertrained** (r_i=0.00450, weight near floor) — second-fastest learner
-- The vol_pressure val→test gap is a **geometry-OOD generalization problem**, not an undertrained-task problem
-
-**Phase 0 diagnostic (PR #767 askeladd) — DECISIVE:**
-- Same 4 test cases (run_133, run_226, run_203, run_158) account for **92%** of squared test_vol_p deviation
-- Excluding them: test_vol_p = **3.9-4.2%** (below AB-UPT 6.08% for 46/50 cases)
-- Surface encoder generalises fine; volume decoder specifically fails on these geometries
-
-**Unbounded affine blow-up (PRs #770, #781):**
-- Both FiLM v1 (frieren) and SDF-gate v1 (askeladd) failed via the same mechanism: outlier training case drives unbounded MLP into extreme regime (~1000× spike in 1 step)
-- Root cause: unnormalized inputs spanning different orders of magnitude + no output clamping
-- Solution (PRs #778, #785): bounded tanh + input normalization
+| askeladd | #812 | Additive LoRA on vol output head: r=4 (Arm A), r=8 (Arm B) — retry of #809 | WIP — Arm A `6m7vw0tw` EP1=26.60% (passed), EP2 in progress |
+| alphonse | #814 | STRING 6-octave extended spectrum (add σ=8.0) — full 13-ep run | WIP — `3efn3v5u` launched 13:49Z, EP1 in progress |
+| frieren | #802 | AB-UPT geometry branch v2: backbone freeze 20% warmup + 2× geom LR + vol_p aux weight 2.0 | WIP — v2 relaunch `murzmdxl` ALIVE at step 30,781 (EP3.2), val_abupt 53.44% with −3.17%/1k slope; **AGENT COMMUNICATION FAILURE — silent since 12:03Z despite escalations** |
+| fern | #811 | L6 depth scale: does adding a 6th transformer layer reduce OOD vol_p gap? | WIP — `9yrr5j8f` launched 11:52Z, EP1=25.61% (passed), EP2 in progress |
+| thorfinn | #815 | τ_z×3.0 promotion to 13-ep full SOTA schedule | WIP — relaunch `y862359i` with relaxed gates (~14:39Z) |
+| nezuko | #816 | Cross-case contrastive loss on vol_p embeddings — triplet margin on 4 OOD cases (run_133, run_226, run_203, run_158), λ=0.05, 4-ep diagnostic | WIP — assigned 2026-05-07 |
+| edward | #810 | GradNorm α=2.0 4-ep run (dynamic loss weighting) | WIP — `6kv9hzuh` EP1=27.48%, EP2=12.26%; EP3/EP4 pending |
+| tanjiro | #813 | vol-w=2.0 full 13-ep schedule-aligned (SOTA gate) | WIP — `4o9wamsr` launched 12:50Z, EP1=29.61% (val_vol_p **better** −1.51pp) |
 
 ---
 
-## Completed Experiments This Round
+## Current Research Focus
 
-- **PR #781** (askeladd): Unbounded SDF-gate — killed before EP1, unbounded blow-up on rank-7 outlier. CLOSED NEGATIVE (design). Hypothesis intact.
-- **PR #783** (fern): Anchor-STRING RoPE v3 branch merged by human into `tay`; v3 code fixes (cosine schedule + Xavier init) now in base; no run completed. Full run assigned as PR #786.
-- **PR #773** (edward): Surface curvature v2 (offline) — CLOSED NEGATIVE. H,K features degraded every test channel by 0.1-0.3pp. Hypothesis: SDF+coordinates already encode local geometry sufficiently; curvature is noise.
+Two parallel themes:
+
+### Theme 1: Geometry Conditioning on Volume Decoder (Issue #717)
+- **Additive vol-head LoRA r=4/r=8** (askeladd, #812 retry): Replaces tanh-cap SDF-gate line (v2/v3/v4 all saturated). Additive rank-r correction on `volume_out`, zero-init B, no saturation risk. SDF info already in volume_hidden (VOLUME_X_DIM=4). Arm A r=4, Arm B r=8.
+- **AB-UPT geometry branch v2 relaunch** (frieren, #802): v1 was killed by wrong-polarity kill gate, but EP4 before kill showed val_vol_p=10.896% (below anchor 11.374%). v2 relaunch with corrected `<` polarity gates. Budget concern: ~6h timeout may only reach EP5-6 from scratch.
+- **FiLM** and **tanh-cap SDF-gate** tracks both closed as design-negative.
+
+### Theme 2: Positional Encoding / Architecture (Issue #618)
+- **Anchor-STRING RoPE stabilized** (alphonse, #801): Full 13-epoch run with diff LR (0.1× on rope params), per-module grad clip 1.0, freq init 0.1-10.0. EP1 passed (29.6%). Log-freq diagnostics: barely moved from init (std=1.406≈init).
+- **L6 depth scale** (fern, #811): Does L6 continue the L4→L5 trend (−1.90% relative val_abupt)? No launch confirmation yet.
+- **Schedule alignment baseline** (fern, #799): Clean 4-ep SOTA control with `--epochs 4 --lr-cosine-t-max 4`.
+
+### Theme 3: Loss / Supervision (secondary)
+- **τ_z×3.0 → 13-ep promotion** (thorfinn, #815): In flight. Confirmed 4-ep hypothesis (PR #807) — now testing full 13-ep SOTA schedule. Will it beat single-model gate 6.5985%?
+- **GradNorm α=2.0** (edward, #810): Dynamic per-task gradient normalization with α=2.0. Pure diagnostic run to test whether adaptive loss weighting can close the tau_z lag.
+- **Vol-w=2.0 13-ep promotion** (tanjiro, #813): Vol-w=2.0 single-variable isolation confirmed at 4-ep (#805, EP3=7.47%). Now testing full 13-ep SOTA schedule. EP1=29.61% (val_vol_p better −1.51pp).
+- **Surface curvature (L=5)**: EXHAUSTED after PRs #788, #798, #808. All landed 6.78–7.35%, 0.20–0.21pp above gate. Not pursuing further at this architecture depth.
 
 ---
 
-## Potential Next Research Directions
+## Key Diagnostic Findings Established
 
-### Geometry conditioning — immediate priority (multiple in flight)
-
-1. **FiLM v2 bounded+delayed** (#778 frieren): Bounded tanh γ∈(0,2) + EP6 onset. Sister to #785.
-2. **SDF-gate v2 bounded** (#785 askeladd): Bounded tanh + input normalization. Same insert point as #781 but structurally stable.
-3. **gc-loss delayed EP6** (#777 alphonse): Fire ∇p supervision only at V≥49k (EP6+). Temporal gating approach.
-4. **SDF-FiLM on vol tokens** (#782 edward): SDF stats condition vol *tokens* (not vol_pred output). Different insertion point from #785.
-5. **Learnable affine anchor** (#775 nezuko): Per-case global scalar correction from surface_cp lookup.
-
-**If any geometry conditioning works:** compose with the best architecture (FiLM + SDF-gate, or with vol-head-2L from PR #761's truncated promising result).
-
-### Architecture & positional encoding (in flight)
-
-6. **Anchor-STRING RoPE v3 full run** (#786 fern): Definitive test at full budget with code fixes.
-7. **STRING σ_max sweep** (#779 thorfinn): {4.0, 8.0, 16.0} — higher frequency ceiling.
-
-### Loss weighting (in flight)
-
-8. **τ_z targeted upweight** (#790 alphonse): {3.0, 4.0} — directly targets confirmed training laggard. Pure CLI, no code changes.
-9. **Vol-loss-weight sweep** (#776 tanjiro): {1.5, 2.0, 2.5} — orthogonal to GradNorm.
-
-### After geometry conditioning confirmed
-
-10. **Compose best vol conditioning with best architecture**: Compound FiLM + 8-octave STRING + curvature features.
-11. **Ensemble refresh**: After new single-model candidates emerge, re-run greedy pool selection (pool-25+).
-
-### Other directions not yet tried
-
-12. **Cross-case contrastive loss**: Force model to distinguish the 4 OOD test cases from normal cases at training time.
-13. **Surface-only curvature features**: Edward's suggestion — append H,K to surface input dim (not volume). Current infrastructure on disk (`/mnt/new-pvc/Processed/drivaerml_curvature_v2_edward/`).
-14. **Surface feature → volume cross-attention**: Direct attention from volume queries to surface keys.
+- **Wall shear z is confirmed training laggard** (PR #758): r_i=0.01123, weight=1.699, highest among all tasks. Vol_pressure is NOT undertrained — gap is OOD generalization.
+- **4 OOD test cases dominate vol_pressure** (PR #767): 92% of squared deviation. Excluding them, test_vol_p = 3.9-4.2% (below AB-UPT). Geometry conditioning is the right lever.
+- **FiLM mechanism works but γ∈(0,2) is a capacity bottleneck** (PR #792): γ_max saturates 100% from EP4. More FiLM-active steps ≠ better metrics in current parameterization.
+- **AB-UPT geometry branch compresses OOD gap 3.17×→2.07×** (PR #626): Architecture has real signal for generalization even when aggregate accuracy regresses. Warmup fix + v2 relaunch should resolve training efficiency.
+- **EP4 geom-branch v2 val_vol_p=10.896%** (PR #802 frieren, before wrong-polarity kill): Below anchor 11.374%. Warmup architecture is producing the predicted geometry-conditioning benefit.
+- **Anchor-STRING RoPE architecture converging at EP4 budget cutoff** (PR #786): val_abupt=6.92% at cutoff with monotone descent. Stabilization fixes (diff LR, grad clip, freq init) are the next lever for full 13-epoch run.
+- **Schedule alignment is a confounder** (PR #805 tanjiro, EP3 evidence): vol-w=2.0 regression collapses from +1.79pp at EP1 to +0.035pp at EP3 under 4-ep aligned schedule. High-LR cutoff in 13-ep runs explains most of the apparent regression in prior paired tests.
+- **τ_z upweight paradox at EP2** (PR #807 thorfinn): τ_z×3.0 val_tau_z=11.866% vs bare-SOTA 10.96% (+0.91pp) — the upweight isn't helping tau_z at EP2. Need EP3/EP4 to see if effect emerges at lower LR.
 
 ---
 
@@ -161,10 +97,35 @@
 - **QK-norm:** enabled
 - **Loss weights:** tau_y×1.5, tau_z×2.0, surface×2.0, volume×1.0
 - **EMA:** 0.999
-- **Training budget:** ~270 min (SENPAI_TIMEOUT_MINUTES=360 with 90 min val reserve)
+- **Training budget:** ~270 min (SENPAI_TIMEOUT_MINUTES=270)
 - **Vol-points curriculum:** `0:16384:3:32768:6:49152:9:65536` (16k→65k across epochs 0/3/6/9)
 - **VOLUME_X_DIM=4:** (x, y, z, sdf) where channel 4 is precomputed SDF
 - **Heads constraint:** heads MUST be power-of-2 for SDPA/Triton fast paths
-- **Key finding:** GradNorm shows wall_shear_z is actual training laggard; vol_pressure gap is generalization/distribution-shift, not undertrained-task
-- **Key finding (#767):** Val→test gap in vol_pressure is 100% case-dominated: 4 OOD geometries (run_133/226/203/158) account for 92% of squared deviation; excluding them, test_vol_p = 3.9-4.2% (below AB-UPT)
-- **Key finding (#781, #770):** Unbounded affine geometry conditioning always fails via single-case outlier blow-up; bounded tanh + input normalization is required for stable training
+
+---
+
+## Potential Next Research Directions
+
+### Geometry conditioning (highest priority)
+
+1. **Vol-head LoRA r=4/r=8** (#812 askeladd retry): In flight
+2. **AB-UPT geometry branch v3** (if v2 #802 relaunch shows gap compression holds at convergence, compose with best SOTA config + 13-ep full run)
+3. **Cross-case contrastive loss** (#816 nezuko): Force model to distinguish 4 OOD test cases at training time — triplet margin loss on vol_p embeddings, λ=0.05, 4-ep diagnostic
+4. **Surface feature → volume cross-attention**: Direct attention from volume queries to surface keys
+
+### Architecture / positional encoding
+
+5. **L6 depth scale** (#811 fern): In flight — does depth trend continue?
+6. **Anchor-STRING stabilized full run** (#801 alphonse): In flight — 13-epoch convergence expected
+7. **AB-UPT geometry branch v2 relaunch** (#802 frieren): In flight
+
+### Loss weighting / training dynamics
+
+8. **τ_z targeted upweight escalation to 4.0**: If thorfinn #807 shows positive signal at EP3/EP4, escalate. If paradox persists, close and investigate GradNorm path.
+9. **GradNorm α sweep** (edward #810 + follow-up): α=2.0 in flight. If positive, extend to α=1.0 (weaker), α=4.0 (stronger).
+10. **Cross-case contrastive loss** (#816 nezuko, ASSIGNED): Triplet margin loss on vol_p embeddings from 4 OOD cases (run_133, run_226, run_203, run_158), λ=0.05, 4-ep diagnostic. No architecture changes (SDF freeze compliant).
+11. ~~Surface curvature compose~~: **EXHAUSTED** — 3 runs (PRs #788, #798, #808), all above gate. Closed.
+
+### Ensemble refresh
+
+11. **Ensemble pool-25**: After new single-model candidates emerge from current round, re-run greedy pool selection
