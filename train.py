@@ -137,6 +137,13 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_abupt_geom_branch: bool = False
+    geom_branch_n_anchors: int = 1024
+    geom_branch_n_layers: int = 3
+    geom_branch_pool_k: int = 32
+    geom_branch_warmup_fraction: float = 0.0
+    geom_branch_lr_scale: float = 1.0
+    geom_branch_warmup_vol_weight: float = 1.0
     debug: bool = False
 
 
@@ -219,6 +226,51 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_abupt_geom_branch": (
+            "Add an AB-UPT-style geometry branch in parallel to the "
+            "Transolver backbone. Two independent branches (surface and "
+            "volume) each compute supernode pooling -> anchor self-attention "
+            "(with learnable coordinate RoPE) -> anchor->point cross-attention "
+            "and produce an additive residual fused into the per-point hidden "
+            "before the output heads. Output projection is zero-initialised so "
+            "the residual starts as identity. Used together with "
+            "--geom-branch-warmup-fraction / --geom-branch-lr-scale / "
+            "--geom-branch-warmup-vol-weight to give the branch a dedicated "
+            "training schedule on top of the warm Transolver path."
+        ),
+        "geom_branch_n_anchors": (
+            "Number of anchor tokens K per branch when "
+            "--use-abupt-geom-branch is enabled. Stride sampling within each "
+            "sample's valid points ensures anchors land on real positions."
+        ),
+        "geom_branch_n_layers": (
+            "Number of anchor self-attention blocks per geometry branch."
+        ),
+        "geom_branch_pool_k": (
+            "kNN neighbour count used by SupernodePoolingDense to form each "
+            "anchor's input feature."
+        ),
+        "geom_branch_warmup_fraction": (
+            "Fraction of total optimizer steps to run with the Transolver "
+            "backbone frozen (only the geometry branch params train). 0.0 "
+            "disables the warmup phase; 0.2 freezes the backbone for the "
+            "first 20%% of steps. After warmup, the backbone is unfrozen and "
+            "all params train jointly."
+        ),
+        "geom_branch_lr_scale": (
+            "Multiplier applied to the geometry-branch learning rate relative "
+            "to the global LR. The two parameter groups (backbone vs geometry "
+            "branch) share the cosine schedule so the ratio is preserved at "
+            "every step. Default 1.0 = same LR; 2.0 lets the geometry branch "
+            "catch up to the warm backbone."
+        ),
+        "geom_branch_warmup_vol_weight": (
+            "Volume-pressure loss weight applied during the warmup phase "
+            "(while backbone is frozen). After warmup, "
+            "--volume-loss-weight is restored. Used to orient the geometry "
+            "branch toward closing the volume_pressure val->test gap during "
+            "its dedicated training window."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -233,8 +285,62 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+def _is_geom_branch_param_name(name: str) -> bool:
+    """Identify parameters belonging to the parallel AB-UPT geometry branch.
+
+    Used to split the model into two optimizer parameter groups so the
+    geometry branch can use a different LR (--geom-branch-lr-scale) than
+    the Transolver backbone.
+    """
+    return "geom_branch" in name
+
+
+def _split_param_groups(
+    model: nn.Module, config: Config
+) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
+    """Return (backbone_params, geom_branch_params).
+
+    The backbone group keeps frozen params registered in the optimizer so
+    that the warmup-end unfreeze does not need to re-register them.
+    """
+    geom_params: list[nn.Parameter] = []
+    backbone_params: list[nn.Parameter] = []
+    for name, p in model.named_parameters():
+        if _is_geom_branch_param_name(name):
+            geom_params.append(p)
+        else:
+            backbone_params.append(p)
+    return backbone_params, geom_params
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    use_geom_groups = bool(
+        config.use_abupt_geom_branch
+        and (config.geom_branch_lr_scale != 1.0 or config.geom_branch_warmup_fraction > 0.0)
+    )
+    if use_geom_groups:
+        backbone_params, geom_params = _split_param_groups(model, config)
+        param_groups: list[dict] = [
+            {"params": backbone_params, "lr": config.lr, "name": "backbone"},
+            {
+                "params": geom_params,
+                "lr": config.lr * config.geom_branch_lr_scale,
+                "name": "geom_branch",
+            },
+        ]
+        if optimizer_name == "adamw":
+            return torch.optim.AdamW(param_groups, weight_decay=config.weight_decay)
+        if optimizer_name == "lion":
+            from lion_pytorch import Lion
+
+            return Lion(
+                param_groups,
+                weight_decay=config.weight_decay,
+                betas=(config.lion_beta1, config.lion_beta2),
+                use_triton=False,
+            )
+        raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
             model.parameters(),
@@ -264,6 +370,70 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     if any(s <= 0.0 for s in sigmas):
         raise ValueError(f"--rff-init-sigmas must be positive: {spec!r}")
     return sigmas
+
+
+def collect_geom_branch_subset_grad_norms(model: nn.Module) -> dict[str, float]:
+    """Return grad-norm telemetry for the parallel AB-UPT geometry branch.
+
+    Walks ``named_parameters`` once and accumulates the L2 norm of three
+    disjoint subsets:
+      - geom_branch_surface (the surface-side branch)
+      - geom_branch_volume  (the volume-side branch)
+      - backbone (everything else; should be ~0 during the warmup freeze)
+    """
+    parts: dict[str, float] = {
+        "surface_sq": 0.0,
+        "volume_sq": 0.0,
+        "backbone_sq": 0.0,
+    }
+    for name, p in model.named_parameters():
+        if p.grad is None:
+            continue
+        grad = p.grad.detach()
+        sq = float(grad.float().square().sum().item())
+        if "geom_branch_surface" in name:
+            parts["surface_sq"] += sq
+        elif "geom_branch_volume" in name:
+            parts["volume_sq"] += sq
+        else:
+            parts["backbone_sq"] += sq
+    return {
+        "geom_branch/grad_norm_surface": math.sqrt(parts["surface_sq"]),
+        "geom_branch/grad_norm_volume": math.sqrt(parts["volume_sq"]),
+        "geom_branch/grad_norm_backbone": math.sqrt(parts["backbone_sq"]),
+    }
+
+
+def collect_geom_branch_static_metrics(model: nn.Module) -> dict[str, float]:
+    """Return per-validation static diagnostics about the geom branch state.
+
+    Tracks the supernode pooling output projection RMS to gauge whether
+    the pool is learning meaningful aggregation weights.
+    """
+    metrics: dict[str, float] = {}
+    for branch in ("geom_branch_surface", "geom_branch_volume"):
+        module = getattr(model, branch, None)
+        if module is None:
+            continue
+        pool_proj = getattr(module.supernode_pool, "proj", None)
+        if pool_proj is None:
+            continue
+        w = pool_proj.weight.detach().float()
+        metrics[f"geom_branch/{branch}/supernode_weight_rms"] = float(
+            w.pow(2).mean().sqrt().item()
+        )
+        out_proj = getattr(module, "out_proj", None)
+        if out_proj is not None:
+            w = out_proj.weight.detach().float()
+            metrics[f"geom_branch/{branch}/out_proj_weight_rms"] = float(
+                w.pow(2).mean().sqrt().item()
+            )
+        rope_log_freq = getattr(module.rope, "log_freq", None)
+        if rope_log_freq is not None:
+            lf = rope_log_freq.detach().float()
+            metrics[f"geom_branch/{branch}/rope_log_freq_mean"] = float(lf.mean().item())
+            metrics[f"geom_branch/{branch}/rope_log_freq_std"] = float(lf.std().item())
+    return metrics
 
 
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
@@ -297,6 +467,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_abupt_geom_branch=config.use_abupt_geom_branch,
+        geom_branch_n_anchors=config.geom_branch_n_anchors,
+        geom_branch_n_layers=config.geom_branch_n_layers,
+        geom_branch_pool_k=config.geom_branch_pool_k,
     )
 
 
@@ -753,6 +927,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if config.use_abupt_geom_branch and config.geom_branch_warmup_fraction > 0.0:
+                # Backbone params have requires_grad=False during warmup; DDP needs
+                # find_unused_parameters=True so the autograd graph reduction
+                # tolerates the temporarily-unused params.
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
@@ -815,6 +994,34 @@ def main(argv: Iterable[str] | None = None) -> None:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
         train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
         val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+
+        geom_warmup_steps = 0
+        backbone_currently_frozen = False
+        if config.use_abupt_geom_branch and config.geom_branch_warmup_fraction > 0.0:
+            geom_warmup_steps = int(
+                round(total_estimated_steps * config.geom_branch_warmup_fraction)
+            )
+            geom_warmup_steps = max(1, geom_warmup_steps)
+            for name, p in base_model.named_parameters():
+                if not _is_geom_branch_param_name(name):
+                    p.requires_grad_(False)
+            backbone_currently_frozen = True
+            if state.is_main:
+                trainable_now = sum(
+                    p.numel() for p in base_model.parameters() if p.requires_grad
+                )
+                frozen_now = sum(
+                    p.numel() for p in base_model.parameters() if not p.requires_grad
+                )
+                print(
+                    f"Geom-branch warmup: freezing backbone for first "
+                    f"{geom_warmup_steps}/{total_estimated_steps} steps "
+                    f"({config.geom_branch_warmup_fraction*100:.1f}%); "
+                    f"trainable={trainable_now/1e6:.2f}M frozen={frozen_now/1e6:.2f}M; "
+                    f"vol_weight {config.geom_branch_warmup_vol_weight} during warmup, "
+                    f"{config.volume_loss_weight} after; "
+                    f"geom_branch lr_scale={config.geom_branch_lr_scale}"
+                )
 
         # Log multi-sigma RFF init layout for verification.
         if state.is_main:
@@ -914,6 +1121,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                is_geom_warmup_phase = (
+                    config.use_abupt_geom_branch
+                    and geom_warmup_steps > 0
+                    and global_step < geom_warmup_steps
+                )
+                if backbone_currently_frozen and not is_geom_warmup_phase:
+                    for p in base_model.parameters():
+                        p.requires_grad_(True)
+                    backbone_currently_frozen = False
+                    if state.is_main:
+                        print(
+                            f"Geom-branch warmup ended at global_step={global_step}; "
+                            f"unfreezing backbone"
+                        )
+                current_vol_weight = (
+                    config.geom_branch_warmup_vol_weight
+                    if is_geom_warmup_phase
+                    else config.volume_loss_weight
+                )
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1006,7 +1232,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         config.amp_mode,
                         surface_loss_weight=config.surface_loss_weight,
-                        volume_loss_weight=config.volume_loss_weight,
+                        volume_loss_weight=current_vol_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
                     )
                 optimizer.zero_grad(set_to_none=True)
@@ -1035,6 +1261,33 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
+                if config.use_abupt_geom_branch:
+                    geom_lr = next(
+                        (
+                            float(g["lr"])
+                            for g in optimizer.param_groups
+                            if g.get("name") == "geom_branch"
+                        ),
+                        float(current_lr),
+                    )
+                    backbone_lr = next(
+                        (
+                            float(g["lr"])
+                            for g in optimizer.param_groups
+                            if g.get("name") == "backbone"
+                        ),
+                        float(current_lr),
+                    )
+                    train_log.update(
+                        {
+                            "geom_branch/is_warmup_phase": 1.0 if is_geom_warmup_phase else 0.0,
+                            "geom_branch/backbone_frozen": 1.0 if backbone_currently_frozen else 0.0,
+                            "geom_branch/active_vol_weight": float(current_vol_weight),
+                            "geom_branch/lr": geom_lr,
+                            "geom_branch/backbone_lr": backbone_lr,
+                            "geom_branch/warmup_steps": float(geom_warmup_steps),
+                        }
+                    )
                 if not loss_is_nonfinite:
                     train_log.update(
                         {
@@ -1055,6 +1308,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
+                    if config.use_abupt_geom_branch:
+                        train_log.update(
+                            collect_geom_branch_subset_grad_norms(base_model)
+                        )
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
@@ -1240,6 +1497,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                if config.use_abupt_geom_branch:
+                    log_metrics.update(collect_geom_branch_static_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

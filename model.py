@@ -188,6 +188,463 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class SwiGLU(nn.Module):
+    """SwiGLU feed-forward block (Shazeer 2020)."""
+
+    def __init__(self, dim: int, hidden_dim: int):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w2 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w3 = nn.Linear(hidden_dim, dim, bias=False)
+        for layer in (self.w1, self.w2, self.w3):
+            _init_linear(layer)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
+
+
+class LearnableCoordinateRoPE(nn.Module):
+    """Learnable per-axis coordinate-conditioned RoPE for 3D points.
+
+    Combines RoPE (Su et al., 2021) with learnable per-axis spectral
+    parameters (matching ``StringSeparableEncoding``). For each axis the
+    rotation angle is ``2*pi*coord_axis * exp(log_freq) + phase`` where
+    ``log_freq`` and ``phase`` are learnable. Pairs of head dims are
+    rotated by the resulting angle, with axes split round-robin so each
+    axis controls a contiguous slice of the head dim.
+
+    Multi-sigma init places the initial frequencies across an octave
+    spread (sigmas) so the model starts with broad spectral coverage.
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        ndim: int = 3,
+        init_sigmas: list[float] | tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0),
+    ):
+        super().__init__()
+        if head_dim < 2:
+            raise ValueError("LearnableCoordinateRoPE requires head_dim >= 2")
+        self.head_dim = head_dim
+        self.ndim = ndim
+        self.total_pairs = head_dim // 2
+        base, extra = divmod(self.total_pairs, ndim)
+        self.pairs_per_axis = [base + (a < extra) for a in range(ndim)]
+        max_pairs = max(self.pairs_per_axis) if self.pairs_per_axis else 0
+        log_freq_init = torch.zeros(ndim, max_pairs)
+        for axis in range(ndim):
+            for i in range(self.pairs_per_axis[axis]):
+                log_freq_init[axis, i] = math.log(init_sigmas[i % len(init_sigmas)])
+        self.log_freq = nn.Parameter(log_freq_init)
+        self.phase = nn.Parameter(torch.zeros(ndim, max_pairs))
+        self.init_sigmas = tuple(init_sigmas)
+
+    def angles(self, coords: torch.Tensor) -> torch.Tensor:
+        parts = []
+        for axis, n_pairs in enumerate(self.pairs_per_axis):
+            if n_pairs == 0:
+                continue
+            freq = self.log_freq[axis, :n_pairs].exp().to(coords.dtype)
+            phase = self.phase[axis, :n_pairs].to(coords.dtype)
+            angle = 2.0 * math.pi * coords[..., axis : axis + 1] * freq + phase
+            parts.append(angle)
+        return torch.cat(parts, dim=-1) if parts else coords.new_zeros(*coords.shape[:-1], 0)
+
+    @staticmethod
+    def _rotate_pairs(x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+        total_pairs = theta.shape[-1]
+        rot_dim = total_pairs * 2
+        if rot_dim == 0:
+            return x
+        x_rot = x[..., :rot_dim].float().reshape(*x.shape[:-1], total_pairs, 2)
+        cos = theta.float().cos().unsqueeze(-1)
+        sin = theta.float().sin().unsqueeze(-1)
+        x0 = x_rot[..., 0:1]
+        x1 = x_rot[..., 1:2]
+        rot = torch.cat([x0 * cos - x1 * sin, x0 * sin + x1 * cos], dim=-1)
+        rot = rot.flatten(-2)
+        if rot_dim < x.shape[-1]:
+            return torch.cat([rot.to(x.dtype), x[..., rot_dim:]], dim=-1)
+        return rot.to(x.dtype)
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        q_coords: torch.Tensor,
+        k_coords: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if k_coords is None:
+            k_coords = q_coords
+        theta_q = self.angles(q_coords).unsqueeze(1)
+        theta_k = self.angles(k_coords).unsqueeze(1)
+        return self._rotate_pairs(q, theta_q), self._rotate_pairs(k, theta_k)
+
+
+class SupernodePoolingDense(nn.Module):
+    """Dense, positions-only supernode pooling (AB-UPT-style).
+
+    Given a batched dense point cloud and a set of pre-selected anchor
+    indices (supernodes), build per-anchor features by:
+      1. anchor-centric kNN to gather the ``k`` nearest input points,
+      2. embed the relative position (with magnitude) via
+         ``ContinuousSincosEmbed``,
+      3. apply a small MLP and mean-aggregate per anchor,
+      4. concat with the absolute pos-embed of the anchor and project.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        ndim: int = 3,
+        k: int = 32,
+        knn_chunk_size: int = 128,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.ndim = ndim
+        self.k = k
+        self.knn_chunk_size = knn_chunk_size
+        self.rel_pos_embed = ContinuousSincosEmbed(hidden_dim=hidden_dim, input_dim=ndim + 1)
+        self.abs_pos_embed = ContinuousSincosEmbed(hidden_dim=hidden_dim, input_dim=ndim)
+        self.message = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.proj = nn.Linear(2 * hidden_dim, hidden_dim)
+        for layer in self.message:
+            if isinstance(layer, nn.Linear):
+                _init_linear(layer)
+        _init_linear(self.proj)
+
+    def _anchor_knn(
+        self,
+        pos: torch.Tensor,
+        anchor_pos: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        K = anchor_pos.shape[1]
+        knn_indices = torch.empty(
+            pos.shape[0], K, self.k, device=pos.device, dtype=torch.long
+        )
+        chunk = self.knn_chunk_size
+        with torch.no_grad():
+            pos_float = pos.detach().float()
+            anchor_float = anchor_pos.detach().float()
+            invalid = ~mask.bool() if mask is not None else None
+            for start in range(0, K, chunk):
+                end = min(start + chunk, K)
+                dist = torch.cdist(anchor_float[:, start:end], pos_float)
+                if invalid is not None:
+                    dist = dist.masked_fill(invalid.unsqueeze(1), float("inf"))
+                _, idx = dist.topk(k=self.k, largest=False, dim=-1)
+                knn_indices[:, start:end] = idx
+        return knn_indices
+
+    def forward(
+        self,
+        pos: torch.Tensor,
+        anchor_pos: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, _ = pos.shape
+        K = anchor_pos.shape[1]
+        knn_idx = self._anchor_knn(pos, anchor_pos, mask=mask)
+        gather_index = knn_idx.unsqueeze(-1).expand(-1, -1, -1, self.ndim)
+        nb_pos = torch.gather(
+            pos.unsqueeze(1).expand(-1, K, -1, -1),
+            dim=2,
+            index=gather_index,
+        )
+        rel_pos = anchor_pos.unsqueeze(2) - nb_pos
+        rel_mag = rel_pos.norm(dim=-1, keepdim=True)
+        rel_input = torch.cat([rel_pos, rel_mag], dim=-1)
+        rel_emb = self.rel_pos_embed(rel_input)
+        msg = self.message(rel_emb)
+        anchor_feat = msg.mean(dim=2)
+        abs_emb = self.abs_pos_embed(anchor_pos)
+        combined = torch.cat([anchor_feat, abs_emb], dim=-1)
+        return self.proj(combined)
+
+
+def _select_anchor_indices(
+    valid_counts: torch.Tensor,
+    K: int,
+    N: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Per-sample stride selection of ``K`` anchor indices from valid points."""
+    B = int(valid_counts.shape[0])
+    indices = torch.empty(B, K, device=device, dtype=torch.long)
+    for b in range(B):
+        v = max(1, int(valid_counts[b].item()))
+        if v >= K:
+            stride = max(1, v // K)
+            base = torch.arange(0, K * stride, stride, device=device)[:K]
+            base = base.clamp(max=v - 1)
+            indices[b] = base
+        else:
+            base = torch.arange(0, K, device=device).clamp(max=v - 1)
+            indices[b] = base
+    return indices
+
+
+class ABUPTAnchorBlock(nn.Module):
+    """AB-UPT-style anchor self-attention block with learnable coordinate RoPE."""
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        rope: LearnableCoordinateRoPE,
+        mlp_hidden_dim: int | None = None,
+        qk_norm: bool = True,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.rope = rope
+        self.qk_norm = qk_norm
+        self.dropout = dropout
+
+        self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.qkv = nn.Linear(hidden_dim, 3 * hidden_dim, bias=False)
+        self.proj = nn.Linear(hidden_dim, hidden_dim)
+        if qk_norm:
+            self.q_norm = nn.RMSNorm(self.head_dim, elementwise_affine=True)
+            self.k_norm = nn.RMSNorm(self.head_dim, elementwise_affine=True)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+        if mlp_hidden_dim is None:
+            mlp_hidden_dim = int(round(hidden_dim * 8 / 3))
+        self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.mlp = SwiGLU(hidden_dim, mlp_hidden_dim)
+        _init_linear(self.qkv)
+        _init_linear(self.proj)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, K, _ = x.shape
+        h = self.norm1(x)
+        qkv = self.qkv(h)
+        q, k, v = qkv.chunk(3, dim=-1)
+        q = q.reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        k = k.reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        v = v.reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        if self.q_norm is not None:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+        q, k = self.rope(q, k, coords)
+        sdpa_kwargs = dict(dropout_p=self.dropout if self.training else 0.0)
+        if attn_mask is not None:
+            valid = attn_mask.bool()
+            am = torch.zeros(B, 1, 1, K, device=x.device, dtype=q.dtype)
+            am = am.masked_fill(~valid[:, None, None, :], float("-inf"))
+            sdpa_kwargs["attn_mask"] = am
+        out = F.scaled_dot_product_attention(q, k, v, **sdpa_kwargs)
+        out = out.transpose(1, 2).reshape(B, K, self.hidden_dim)
+        x = x + self.proj(out)
+        x = x + self.mlp(self.norm2(x))
+        if attn_mask is not None:
+            x = _apply_token_mask(x, attn_mask)
+        return x
+
+
+class ABUPTAnchorToPointBlock(nn.Module):
+    """Cross-attention from points (queries) to anchors (keys/values)."""
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        rope: LearnableCoordinateRoPE,
+        mlp_hidden_dim: int | None = None,
+        qk_norm: bool = True,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.rope = rope
+        self.qk_norm = qk_norm
+        self.dropout = dropout
+
+        self.q_norm_in = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.kv_norm_in = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.kv_proj = nn.Linear(hidden_dim, 2 * hidden_dim, bias=False)
+        self.proj = nn.Linear(hidden_dim, hidden_dim)
+        if qk_norm:
+            self.q_norm = nn.RMSNorm(self.head_dim, elementwise_affine=True)
+            self.k_norm = nn.RMSNorm(self.head_dim, elementwise_affine=True)
+        else:
+            self.q_norm = None
+            self.k_norm = None
+        if mlp_hidden_dim is None:
+            mlp_hidden_dim = int(round(hidden_dim * 8 / 3))
+        self.mlp_norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.mlp = SwiGLU(hidden_dim, mlp_hidden_dim)
+        _init_linear(self.q_proj)
+        _init_linear(self.kv_proj)
+        _init_linear(self.proj)
+
+    def forward(
+        self,
+        point_x: torch.Tensor,
+        point_coords: torch.Tensor,
+        anchor_x: torch.Tensor,
+        anchor_coords: torch.Tensor,
+        point_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, _ = point_x.shape
+        K = anchor_x.shape[1]
+        q_in = self.q_norm_in(point_x)
+        kv_in = self.kv_norm_in(anchor_x)
+        q = self.q_proj(q_in)
+        kv = self.kv_proj(kv_in)
+        k, v = kv.chunk(2, dim=-1)
+        q = q.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        k = k.reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        v = v.reshape(B, K, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
+        if self.q_norm is not None:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+        q, k = self.rope(q, k, point_coords, anchor_coords)
+        out = F.scaled_dot_product_attention(
+            q, k, v, dropout_p=self.dropout if self.training else 0.0
+        )
+        out = out.transpose(1, 2).reshape(B, N, self.hidden_dim)
+        x = point_x + self.proj(out)
+        x = x + self.mlp(self.mlp_norm(x))
+        if point_mask is not None:
+            x = _apply_token_mask(x, point_mask)
+        return x
+
+
+class ABUPTGeomBranch(nn.Module):
+    """Parallel AB-UPT-style geometry branch producing an additive residual.
+
+    Given raw point coordinates and post-backbone point features, this branch:
+      1. Selects K anchor indices per sample (stride sampling within valid points).
+      2. Pools input points to anchor features via ``SupernodePoolingDense``.
+      3. Runs ``n_layers`` anchor self-attention blocks with shared
+         ``LearnableCoordinateRoPE``.
+      4. Anchor->point cross-attention broadcasts back to per-point features.
+      5. Final output projection (zero-init) so the branch starts as identity
+         residual at training step 0.
+
+    The branch contributes a learned correction on top of the existing
+    Transolver backbone via additive residual at the post-norm, pre-head stage.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        n_anchors: int = 1024,
+        n_layers: int = 3,
+        ndim: int = 3,
+        rope_init_sigmas: list[float] | tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        qk_norm: bool = True,
+        dropout: float = 0.0,
+        pool_k: int = 32,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.n_anchors = int(n_anchors)
+        self.n_layers = int(n_layers)
+        self.ndim = ndim
+
+        self.rope = LearnableCoordinateRoPE(
+            head_dim=self.head_dim, ndim=ndim, init_sigmas=rope_init_sigmas,
+        )
+        self.supernode_pool = SupernodePoolingDense(
+            hidden_dim=hidden_dim, ndim=ndim, k=pool_k,
+        )
+        self.anchor_blocks = nn.ModuleList(
+            [
+                ABUPTAnchorBlock(
+                    hidden_dim=hidden_dim,
+                    num_heads=num_heads,
+                    rope=self.rope,
+                    qk_norm=qk_norm,
+                    dropout=dropout,
+                )
+                for _ in range(self.n_layers)
+            ]
+        )
+        self.cross = ABUPTAnchorToPointBlock(
+            hidden_dim=hidden_dim,
+            num_heads=num_heads,
+            rope=self.rope,
+            qk_norm=qk_norm,
+            dropout=dropout,
+        )
+        # Zero-init so the branch starts as the identity residual.
+        self.out_norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.zeros_(self.out_proj.weight)
+        if self.out_proj.bias is not None:
+            nn.init.zeros_(self.out_proj.bias)
+
+    def forward(
+        self,
+        coords: torch.Tensor,
+        point_features: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """
+        coords: ``[B, N, 3]`` raw point coordinates
+        point_features: ``[B, N, D]`` per-point features (post-backbone)
+        mask: ``[B, N]`` valid-point mask (True for valid)
+        Returns: ``[B, N, D]`` residual to add to point_features
+        """
+        B, N, _ = coords.shape
+        K = self.n_anchors
+        if mask is not None:
+            valid_counts = mask.sum(dim=-1).long()
+        else:
+            valid_counts = torch.full(
+                (B,), N, dtype=torch.long, device=coords.device
+            )
+        anchor_idx = _select_anchor_indices(valid_counts, K, N, coords.device)
+        gather_idx = anchor_idx.unsqueeze(-1).expand(-1, -1, self.ndim)
+        anchor_coords = torch.gather(coords, dim=1, index=gather_idx)
+        anchor_features = self.supernode_pool(coords, anchor_coords, mask=mask)
+        for block in self.anchor_blocks:
+            anchor_features = block(anchor_features, anchor_coords)
+        out = self.cross(
+            point_x=point_features,
+            point_coords=coords,
+            anchor_x=anchor_features,
+            anchor_coords=anchor_coords,
+            point_mask=mask,
+        )
+        out = self.out_norm(out)
+        residual = self.out_proj(out)
+        if mask is not None:
+            residual = _apply_token_mask(residual, mask)
+        return residual
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -342,6 +799,11 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_abupt_geom_branch: bool = False,
+        geom_branch_n_anchors: int = 1024,
+        geom_branch_n_layers: int = 3,
+        geom_branch_pool_k: int = 32,
+        geom_branch_rope_init_sigmas: list[float] | tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0),
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +816,11 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_abupt_geom_branch = bool(use_abupt_geom_branch)
+        self.geom_branch_n_anchors = int(geom_branch_n_anchors)
+        self.geom_branch_n_layers = int(geom_branch_n_layers)
+        self.geom_branch_pool_k = int(geom_branch_pool_k)
+        self.geom_branch_rope_init_sigmas = tuple(geom_branch_rope_init_sigmas)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -419,6 +886,32 @@ class SurfaceTransolver(nn.Module):
             use_qk_norm=use_qk_norm,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        if self.use_abupt_geom_branch:
+            self.geom_branch_surface = ABUPTGeomBranch(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                n_anchors=self.geom_branch_n_anchors,
+                n_layers=self.geom_branch_n_layers,
+                ndim=space_dim,
+                rope_init_sigmas=self.geom_branch_rope_init_sigmas,
+                qk_norm=use_qk_norm,
+                dropout=dropout,
+                pool_k=self.geom_branch_pool_k,
+            )
+            self.geom_branch_volume = ABUPTGeomBranch(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                n_anchors=self.geom_branch_n_anchors,
+                n_layers=self.geom_branch_n_layers,
+                ndim=space_dim,
+                rope_init_sigmas=self.geom_branch_rope_init_sigmas,
+                qk_norm=use_qk_norm,
+                dropout=dropout,
+                pool_k=self.geom_branch_pool_k,
+            )
+        else:
+            self.geom_branch_surface = None
+            self.geom_branch_volume = None
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -506,6 +999,20 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if self.use_abupt_geom_branch:
+            if surface_x is not None and surface_tokens > 0:
+                surf_coords = surface_x[..., : self.space_dim]
+                surf_residual = self.geom_branch_surface(
+                    surf_coords, surface_hidden, surface_mask,
+                )
+                surface_hidden = surface_hidden + surf_residual
+            if volume_x is not None and volume_tokens > 0:
+                vol_coords = volume_x[..., : self.space_dim]
+                vol_residual = self.geom_branch_volume(
+                    vol_coords, volume_hidden, volume_mask,
+                )
+                volume_hidden = volume_hidden + vol_residual
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
