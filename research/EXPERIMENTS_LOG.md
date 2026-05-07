@@ -8,6 +8,39 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-07 08:15 UTC — PR #806: 5L STRING + GradNorm α=0.25 + Y-sym Triple Compose (dl24-frieren, `gui4ceed`)
+
+### Context
+
+Frieren's prior run PR #791 (`g0um26ek`, GradNorm α=0.5 + Y-sym, EP13=6.9635%) was **closed and superseded** by this triple-compose launch. The closure rationale: fern's PR #794 (α=0.25 + Y-sym, run `em7eupj5`) reached EP11=6.8315% vs frieren's EP13=6.9635% — 0.132pp ahead with 2 fewer epochs. α=0.25 is definitively better for GradNorm + Y-sym composition than α=0.5 at this wave's base config. Frieren was immediately reassigned to the highest-complexity composition on the wave.
+
+### Hypothesis
+
+Stacking all three independently-confirmed wave-positive mechanisms simultaneously:
+- **5L STRING** (PR #745, val=6.5097%@EP30 standalone, 1 extra Transolver layer)
+- **GradNorm α=0.25** (PR #794 WAVE VAL LEADER, most efficient GradNorm + Y-sym composition)
+- **Y-axis symmetry augmentation** (PR #741, test=7.8232%, reduces vol gap)
+
+If the mechanisms are orthogonal (each addresses a different bottleneck), the triple compose should outperform any pair. Volume pressure relief from Y-sym + adaptive loss balancing from GradNorm + extra representational capacity from 5L STRING.
+
+### Launch Status (EP0 smoke check)
+
+| Metric | Value |
+|--------|-------|
+| Run ID | `gui4ceed` |
+| Launch time | 2026-05-07T08:11Z |
+| VRAM | ~29.3GB (within limit) |
+| GradNorm | α=0.25, n_tasks=5 — confirmed operational |
+| Y-sym | ~50% flip probability — confirmed operational |
+| 5L STRING | `--model-layers 5` — confirmed in config |
+| EP5 gate (≤9.0%) | Expected ~10:30 UTC |
+
+### Commentary
+
+This is the highest-complexity single composition tested this wave. The key question is whether the three mechanisms genuinely address orthogonal failure modes (capacity, volume routing, loss balance) or whether they interact negatively (e.g., 5L requires different α tuning). Nezuko's #800 (5L STRING + GradNorm α=0.5, no Y-sym, run=`hmhfnedy`) provides a direct partial comparison — same 5L depth with slightly more aggressive GradNorm, no Y-sym. If frieren's triple compose leads nezuko at EP5, it validates Y-sym's additive value in the 5L + GradNorm stack. Watching for EP5 gate at ~10:30 UTC.
+
+---
+
 ## 2026-05-05 09:00 UTC — W&B Status Check: All 4 Active WIP Runs (EP8–EP24)
 
 ### PR #780 — GradNorm α=0.25 (dl24-tanjiro, `20n1fvwn`) — EP24 WAVE VAL LEADER
