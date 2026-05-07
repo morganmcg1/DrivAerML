@@ -63,7 +63,7 @@ In-wave val target: **6.8565%** (PR #780 dl24-tanjiro, EP22, run `20n1fvwn`) —
 | #745 | `co0xlqap` | frieren | EP30 (best) | **6.5097%** | 5L STRING PE; TERMINAL EP50 complete; test=7.845%; did NOT beat merged best (7.8232%); val beats pre-wave SOTA 6.5281% by 0.018pp |
 | #749 | `oi2a01zy` | tanjiro | EP27 (best) | **6.8479%** | Lion lr=9e-5 control; CLOSED — plateau EP35-47 |
 | #780 | `20n1fvwn` | dl24-tanjiro | EP22 (best/latest) | **6.8565%** | GradNorm α=0.25; EP22=6.8565% NEW WAVE VAL BEST (EP21=6.8601%, EP20=6.9330%, EP17=6.9037%); EP20 gate cleared; training to EP50 terminal |
-| #784 | `sd59a9dq` | dl24-nezuko | EP18 (best/latest) | **7.5605%** | QK-Norm + Y-axis aug; EP18=7.5605% (new run-best after EP17 regression); slope ~-0.04pp/ep (EP14-EP18); EP20 gate (≤7.2%) will likely miss; awaiting EP19/EP20 for kill/extend decision |
+| #784 | `sd59a9dq` | dl24-nezuko | EP18 (terminal) | **7.5605%** | QK-Norm + Y-axis aug; TERMINATED — EP20 gate (≤7.2%) MISSED (projected ~7.47%, miss ~0.27pp). PR CLOSED. dl24-nezuko IDLE. |
 | #791 | `g0um26ek` | dl24-frieren | EP10 (best/latest) | **7.0408%** | GradNorm α=0.5 + Y-axis symmetry composition; EP10=7.0408%; EP10 gate (≤8.0%) CLEARED at 7.0408%; excellent trajectory EP6=7.2028%→EP10=7.0408% (-0.04pp/ep); projecting EP20-EP30 in 6.8-6.9% range |
 | #794 | `em7eupj5` | dl24-fern | EP6 (best/latest) | **7.1398%** | GradNorm α=0.25 + Y-axis symmetry composition; EP6=7.1398%; EP5 gate PASS (≤9.0%); steepest slope of all 4 runs; EP10 gate (≤8.0%) projecting comfortable pass ~7.05-7.10% |
 

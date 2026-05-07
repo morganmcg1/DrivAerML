@@ -8,6 +8,30 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-07 ~18:00 UTC — PR #784 TERMINATE: QK-Norm + Y-symmetry (dl24-nezuko, `sd59a9dq`)
+
+- **Branch:** `dl24-nezuko/qk-norm-y-sym`
+- **W&B Run:** `sd59a9dq`
+- **Hypothesis:** QK-Norm (query-key normalization) composes with Y-axis symmetry augmentation to reduce τz bottleneck on SOTA STRING base config
+- **Outcome:** TERMINATED — EP20 gate MISS; PR CLOSED
+
+| EP (checkpoint index) | Actual Epoch | Step | val_primary | Note |
+|---|---|---|---|---|
+| EP14 | 7.0 | ~76,909 | 7.6200% (approx) | Early gate ref |
+| EP15 | 7.5 | — | 7.5920% (approx) | |
+| EP16 | 8.0 | — | 7.5811% (approx) | |
+| EP17 | 8.5 | — | 7.5761% (approx) | prior run-best |
+| EP18 | 9.0 | ~98,k | **7.5605%** | **Run-best — slope ~-0.04pp/ep (EP14-18)** |
+| EP19/EP20 | 9.5/10.0 | — | ~7.52% projected | EP20 gate (≤7.2%) missed |
+
+**Gate status:** EP20 gate threshold = ≤7.2%. Projected EP20 value ~7.47% based on slope ~-0.04pp/ep from EP14-18. Gate MISSED by ~0.27pp. Lenient custom gate ≤7.35% also missed. TERMINATE instruction posted on PR; PR closed.
+
+**Commentary:** QK-Norm does not compose well with Y-symmetry augmentation at the SOTA base config LR=1e-4 Lion. The combination produces a run-best of 7.5605% — significantly below the wave's EP5-equivalent performance of other successful runs (frieren #791 was already at 7.0408% by EP5.0). QK-Norm appears to interfere with the effective learning dynamics introduced by Y-sym augmentation, likely due to attention normalization disrupting the bilateral symmetry signal. This is the second negative result for QK-Norm: #732 (standalone at lr=5e-5) and now #784 (compose with Y-sym). QK-Norm at wave-standard lr=1e-4 standalone remains untested but is low priority given two negative compositions.
+
+**Conclusion:** Dead end. QK-Norm + Y-sym composition REJECTED. dl24-nezuko GPU freed for new assignment.
+
+---
+
 ## 2026-05-06 ~15:10 UTC — Live W&B Monitoring Session (EP14–EP39 developments)
 
 ### PR #740 — GradNorm adaptive loss (fern, `5x8wofzm`) — EP12–14 WAVE BEST

@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-07 (latest: PR #740 MERGED test=7.5195% WAVE BEST; tanjiro #780 EP22=6.8565% NEW WAVE VAL BEST (was EP17=6.9037%); nezuko #784 EP18=7.5605% run-best (slope ~-0.04pp/ep, EP20 gate likely miss, kill decision imminent); frieren #791 EP10=7.0408% best (run=g0um26ek, EP10 gate CLEARED at 7.0408%, excellent -0.04pp/ep slope); fern #794 EP6=7.1398% best (run=em7eupj5, steepest slope of wave, EP10 gate on track))
+- 2026-05-07 (latest: PR #740 MERGED test=7.5195% WAVE BEST; tanjiro #780 EP22=6.8565% NEW WAVE VAL BEST (actual ep 11.0), training to EP50; nezuko #784 TERMINATED (EP20 gate miss, best val EP18=7.5605%, PR closed — dl24-nezuko now IDLE awaiting new assignment); frieren #791 EP10=7.0408% best (run=g0um26ek, actual ep 5.0, EP10 gate CLEARED); fern #794 EP6=7.1398% best (run=em7eupj5, actual ep 3.0, steepest slope of wave))
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -15,7 +15,7 @@
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
 | #780 | dl24-tanjiro | GradNorm α=0.25 — more conservative gradient equalization | `20n1fvwn` | **EP22=6.8565% NEW WAVE VAL BEST** — EP10 PASS (7.0386%). EP20 gate cleared. Best improving steadily. Training to EP50. |
-| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | `sd59a9dq` | **EP18=7.5605% run-best** — slope ~-0.04pp/ep (EP14-EP18). EP20 gate (≤7.2%) likely MISS (projected ~7.47%). EP19/EP20 pending; kill decision imminent. |
+| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | `sd59a9dq` | **TERMINATED** — EP18=7.5605% run-best. EP20 gate (≤7.2%) MISSED (projected ~7.47%, miss by ~0.27pp). PR CLOSED. dl24-nezuko is now **IDLE** — awaiting new assignment. |
 | #791 | dl24-frieren | GradNorm α=0.5 + Y-axis symmetry composition (orthogonal mechanisms) | `g0um26ek` | **EP10=7.0408% best** — EP5 PASS (7.354%). EP10 gate CLEARED (7.0408%, well below ≤8.0%). Excellent trajectory: EP6=7.2028%→EP10=7.0408%. Strong EP20-EP30 projection. |
 | #794 | dl24-fern | GradNorm α=0.25 + Y-axis symmetry augmentation (novel composition) | `em7eupj5` | **EP6=7.1398% best** — EP5 gate CLEARED (7.1519%). Steepest slope of all 4 runs. EP10 gate (≤8.0%) comfortable pass projecting ~7.05-7.10%. |
 
@@ -33,6 +33,7 @@
 |----|---------|------------|---------|
 | #745 | dl24-frieren | 5L STRING: add one Transolver layer (`--model-layers 5`) on SOTA base | TERMINAL NOT MERGED: EP50 test=7.845% — does not beat merged best (7.8232%) by 0.023pp. Val best EP30=6.5097%. Scientific value: 5L STRING valid direction; compose with GradNorm or Y-sym remains candidate. |
 | #749 | dl24-tanjiro | Lion lr=9e-5 control on SOTA STRING base | COMPLETED TERMINAL: EP50 best=6.8557% (EP27 plateau), 0.38pp+ behind wave leader. Test eval fired automatically at EP50. No improvement vs SOTA. Control baseline only. |
+| #784 | dl24-nezuko | QK-Norm + Y-symmetry augmentation on SOTA STRING base | TERMINATED: EP20 gate miss (best val EP18=7.5605%, gate required ≤7.2%, missed by ~0.27pp). QK-Norm + Y-sym composition REJECTED. Second negative QK-Norm result this wave. |
 | #737 | dl24-nezuko | Region-weighted VP loss: near-wake upweighting (w_near=1.5) | CLOSED: PR closed, no terminal result posted. Region weighting approach abandoned. |
 | #732 | dl24-tanjiro | STRING + QK-Norm at lr=5e-5 with 2000-step staged warmup | CLOSED NEGATIVE: best val=8.0752% (EP9), test=9.0419%. QK-Norm at halved LR does not beat SOTA. wall_shear_z bottleneck. Run crashed at EP10. |
 | #696 | dl24-tanjiro | STRING + QK-Norm on SOTA Transolver base | CLOSED: EP15 gate failure. 7 compliance warnings, zero student response. |
@@ -73,7 +74,7 @@
 
 3. **Does GradNorm α=0.25 (more conservative) beat α=0.5? (tanjiro #780) — MID-RUN.** EP22=6.8565% NEW WAVE VAL BEST (surpassed prior best EP17=6.9037%). EP20 gate cleared, training to EP50. α=0.25 producing new wave val best — may match or beat α=0.5 at terminal.
 
-4. **Does QK-Norm + Y-symmetry compose? (nezuko #784) — KILL DECISION IMMINENT.** EP18=7.5605% run-best, slope ~-0.04pp/ep (EP14-EP18). EP20 gate (≤7.2%) likely MISS (projected ~7.47%); custom lenient gate ≤7.35% also likely MISS. EP19/EP20 pending. Termination likely after EP20 posts.
+4. **Does QK-Norm + Y-symmetry compose? (nezuko #784) — TERMINATED.** EP18=7.5605% run-best (actual ep 9.0), slope ~-0.04pp/ep (EP14-EP18). EP20 gate (≤7.2%) MISSED (projected ~7.47%; gate miss by ~0.27pp; lenient gate ≤7.35% also missed). PR CLOSED. Second negative QK-Norm result on this wave — QK-Norm remains problematic at wave-standard LR=1e-4 when composed with Y-symmetry. dl24-nezuko GPU freed.
 
 5. **Does GradNorm α=0.5 + Y-symmetry compose orthogonally? (frieren #791) — STRONG TRAJECTORY.** EP10=7.0408% best, run `g0um26ek`. EP10 gate (≤8.0%) CLEARED at 7.0408% (well below threshold). Trajectory EP6=7.2028%→EP10=7.0408% = -0.04pp/ep excellent. Most optimistic composition in the wave. Projecting EP20-EP30 in 6.8-6.9% range.
 
@@ -87,11 +88,11 @@
 
 ## Potential Next Research Directions (after current arms complete)
 
-**Currently in-flight (4 WIP PRs, all students occupied):**
-- Tanjiro #780: GradNorm α=0.25 + baseline STRING — EP22=6.8565% NEW WAVE VAL BEST, EP20 gate cleared, training to EP50
-- Nezuko #784: QK-Norm + Y-symmetry — EP18=7.5605% run-best, EP20 gate likely miss (~7.47%), kill decision imminent after EP19/EP20
-- Frieren #791: GradNorm α=0.5 + Y-symmetry (orthogonal composition) — EP10=7.0408%, EP10 gate cleared (7.0408%), strong -0.04pp/ep trajectory, projecting EP20-EP30 in 6.8-6.9%
-- Fern #794: GradNorm α=0.25 + Y-symmetry — EP6=7.1398%, EP5 gate cleared, steepest slope of wave, EP10 gate comfortable pass projected ~7.05-7.10%
+**Currently in-flight (3 WIP PRs; dl24-nezuko IDLE — needs new assignment):**
+- Tanjiro #780: GradNorm α=0.25 + baseline STRING — EP22=6.8565% NEW WAVE VAL BEST (actual ep 11.0), EP20 gate cleared, training to EP50
+- Frieren #791: GradNorm α=0.5 + Y-symmetry (orthogonal composition) — EP10=7.0408% (actual ep 5.0), EP10 gate cleared (7.0408%), strong -0.04pp/ep trajectory, projecting EP20-EP30 in 6.8-6.9%
+- Fern #794: GradNorm α=0.25 + Y-symmetry — EP6=7.1398% (actual ep 3.0), EP5 gate cleared, steepest slope of wave, EP10 gate comfortable pass projected ~7.05-7.10%
+- **Nezuko: IDLE — best next assignment: 5L STRING + GradNorm α=0.5 compose (both mechanisms independently confirmed, composition untested)**
 
 **High-priority candidates after current wave completes:**
 1. **5L STRING + GradNorm α=0.5 compose**: #745 val=6.5097% + #740 test=7.5195% — independent confirmation of both mechanisms; composition is the natural next step. High expected gain.
@@ -109,4 +110,4 @@
 - 7-sigma STRING PE (PR #673): config mismatch + regression.
 - lr=9e-5 control (PR #749): no improvement vs lr=1e-4.
 
-_Last updated: 2026-05-07 (PR #740 MERGED wave best test=7.5195%; tanjiro #780 EP22=6.8565% NEW WAVE VAL BEST; nezuko #784 EP18=7.5605% run-best, kill decision imminent (EP19/EP20 pending); frieren #791 EP10=7.0408% run=g0um26ek, EP10 gate CLEARED, strong trajectory; fern #794 EP6=7.1398% run=em7eupj5, steepest slope of wave, EP10 comfortable pass projected ~7.05-7.10%)_
+_Last updated: 2026-05-07 (PR #740 MERGED wave best test=7.5195%; tanjiro #780 EP22=6.8565% NEW WAVE VAL BEST (actual ep 11.0), training to EP50; nezuko #784 TERMINATED (EP20 gate miss, PR closed), dl24-nezuko IDLE awaiting 5L STRING + GradNorm α=0.5 assignment; frieren #791 EP10=7.0408% run=g0um26ek (actual ep 5.0), EP10 gate CLEARED, strong trajectory; fern #794 EP6=7.1398% run=em7eupj5 (actual ep 3.0), steepest slope of wave)_
