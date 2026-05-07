@@ -764,6 +764,17 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            # The surface->volume cross-attention sublayer (PR #823) gates on
+            # `surface_tokens > 0`, but DrivAerML's loader returns
+            # max(surface_views, volume_views) views per case, so views with
+            # view_index >= surface_views have N_S=0 (and the gate skips the
+            # layer). Different ranks hit different sub-graphs in a single
+            # batch, so DDP's default find_unused_parameters=False deadlocks
+            # at the gradient bucket allreduce. Enabling find_unused_parameters
+            # whenever the cross-attention is on lets DDP synchronize unused
+            # params across ranks, at a small per-step overhead.
+            if config.use_surf_to_vol_xattn:
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
