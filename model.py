@@ -194,6 +194,13 @@ class AnchorStringRoPE(nn.Module):
             self.out_proj.weight.mul_(0.01)
         self.phase: nn.Parameter | None = None
 
+    def init_sigmas(self) -> list[float]:
+        return torch.logspace(
+            math.log10(self.init_min_freq),
+            math.log10(self.init_max_freq),
+            self.freqs_per_axis,
+        ).tolist()
+
     def _apply_rope_to_qk(
         self,
         q: torch.Tensor,
