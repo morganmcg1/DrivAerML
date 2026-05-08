@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-09 (latest update): **tanjiro #818 new best=6.6053% @ EP14.16** (run=`dy2z6o4a`; EP15.17=6.6089% latest; tight oscillation near floor; EP50 still running); **fern #831 new best=6.6164% @ EP6.50** (run=`pnrgixj1`; EP7.28 current; 6L STRING; only 0.0111pp behind wave leader; strongly descending); **nezuko #843 EP2.00=7.4031%** (run=`hyzdxrj2`; 7-octave STRING PE; EP2.21 current; on track for EP5 gate ≤7.5%); **frieren #844 RELAUNCHED** (new run=`7dqsxvbq`; original `3054rc61` intentionally killed — wrong --train-volume-points 16384; relaunched with 65000; ~EP0.30, no val yet; only real diff vs #740 is model-layers 5); **PR #838 CLOSED** (test=8.7190%; σ<0.25 dead end at 65k points); **tay screening wave** (5 active PRs: alphonse #839 EP1.91, askeladd #836 EP1.74, thorfinn #842 EP1.53, tanjiro-tay #840 EP1.55, nezuko-tay #823 EP1.50; EP2 gates all pending); **RFF capacity sweep** (fern #845 rff24-sota-spectrum EP0.28, edward #846 rff32-sota-spectrum EP0.27); **frieren #847 lr-warmup-2ep** EP0.26.
+- 2026-05-08 (latest update): **tanjiro #818 val best=6.6053% @ EP14.16** (run=`dy2z6o4a`; EP50 still running); **fern #831 val best=6.6164% @ EP6.50** (run=`pnrgixj1`; 6L STRING; strongly descending); **nezuko #843 EP2.00=7.4031%** (run=`hyzdxrj2`; 7-octave STRING PE; EP5 gate pending; student not posting gates); **frieren #844 run=`7dqsxvbq` EP1=12.4553%** (5L + GradNorm α=0.5 no Y-sym; EP5 gate ~10:20Z due); **tay screening wave**: thorfinn #842 EP3=8.246% borderline (gate missed by 0.25pp → continue to EP4; advisor OK'd); tanjiro-tay #840 EP2=12.345% PASS (EP3 overdue, nudge sent); nezuko-tay #823 RELAUNCHED as `ghh0s4ne` (prior kill retracted; EP1 due ~10:09Z); **CLOSED**: alphonse #839 (EP2=8.04% missed <8% gate), askeladd #836 (EP2=8.02% missed gate); **new tay screens**: alphonse #848 lion-lr-downsweep (lr=8e-5/7e-5; launch prompted), askeladd #849 tau-y-z-differential (τy=2.0/2.5 vs τz=1.5; launch prompted); **RFF capacity sweep** (fern #845 rff24, edward #846 rff32 ETA ~12:35Z); **frieren #847 lr-warmup-2ep** ETA ~12:37Z.
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -18,11 +18,11 @@
 | #831 | dl24-fern | 6L STRING + GradNorm α=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **best=6.6164% @ EP6.50** (0.0111pp behind wave leader). Val history: EP5=6.993%, EP5.5=6.702%, EP6=6.840%, EP6.50=6.6164% (best), EP7=6.6245%, current EP7.28. Strongly descending; early in run; EP20 gate CLEARED. Wall-clock cutoff ~EP43-44. |
 | #843 | dl24-nezuko | 7-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0,16.0]`) + GradNorm α=0.5 + Y-sym | `hyzdxrj2` | **EP2.00=7.4031% (best)**, EP2.21 current. Val: EP0.5=10.899%, EP1=7.943%, EP1.5=7.423%, EP2=7.4031%. On track for EP5 gate ≤7.5% (nearly met already). EP5 gate checkpoint ETA ~May 9. |
 | #844 | dl24-frieren | 5L STRING + GradNorm α=0.5 compose (**no Y-sym**) — clean two-way stack | `7dqsxvbq` (RELAUNCHED) | ~EP0.30, no val yet. Original run `3054rc61` intentionally killed by student at EP1 — wrong `--train-volume-points 16384` in PR body; relaunched 2026-05-08T07:44Z with `--train-volume-points 65000`. NOTE: student also clarified that #740 (wave SOTA) also used string_multisigma PE — so only real diff vs #740 is `--model-layers 5`. Key novelty: clean test of 5L + GradNorm α=0.5 without Y-sym confound. EP5 gate ≤7.5% pending. |
-| #839 | alphonse (tay) | tay 4-epoch screen | `6jxmx316` | EP1.91; intermediate val ~7.433% @ step19926; excellent trajectory; EP2 gate <16% pending |
-| #836 | askeladd (tay) | tay 4-epoch screen | `46idy5bk` | EP1.74; no half-epoch val logged yet; EP2 gate <16% pending |
-| #842 | thorfinn (tay) | tay 4-epoch screen | `3487klz8` | EP1.53; step16300 intermediate ~11.395%; EP2 gate <16% pending |
-| #840 | tanjiro-tay (tay) | tay 4-epoch screen | `oiptel6p` | EP1.55; step16300 intermediate ~12.345%; EP2 gate <16% pending |
-| #823 | nezuko-tay (tay) | tay 4-epoch screen with --use-surf-to-vol-xattn | `lp7u9r8g` | EP1.50; EP1=28.026%; stricter EP2 gate <10% pending |
+| #842 | thorfinn (tay) | tay 4-epoch screen | `3487klz8` | EP3=8.246% (gate <8% MISSED by 0.25pp — advisor OK'd continue to EP4); EP4 gate ≤6.5985% |
+| #840 | tanjiro-tay (tay) | tay 4-epoch screen | `oiptel6p` | EP2=12.345% PASS; EP3 result OVERDUE (nudge sent 2026-05-08); gate <8% pending |
+| #823 | nezuko-tay (tay) | tay 4-epoch screen with --use-surf-to-vol-xattn | `ghh0s4ne` (RELAUNCHED) | Prior run `lp7u9r8g` killed by advisor error → retracted; new run launched 2026-05-08; EP1 gate <30% pending |
+| #848 | alphonse (tay) | tay 4-epoch screen: Lion lr=8e-5 vs 7e-5 downsweep | TBD (launch prompted 2026-05-08) | Dual-arm: Arm A `--lr 8e-5`, Arm B `--lr 7e-5`; student not yet confirmed launch |
+| #849 | askeladd (tay) | tay 4-epoch screen: τy=2.0/2.5 vs τz=1.5 differential | TBD (launch prompted 2026-05-08) | Dual-arm: Arm A τy=2.0/τz=1.5, Arm B τy=2.5/τz=1.5; student not yet confirmed launch |
 | #845 | dl24-fern | RFF num_features=24, rff_init_sigmas=0.25,0.5,1.0,2.0,4.0 (sota-spectrum) | `thimjhnd` (rank0) | EP0.28; no val yet; group=rff-capacity-sweep; 8 runs |
 | #846 | dl24-edward | RFF num_features=32, rff_init_sigmas=0.25,0.5,1.0,2.0,4.0 (sota-spectrum) | `px719275` | EP0.27; no val yet; group=rff-capacity-sweep |
 | #847 | dl24-frieren | LR warmup 2ep variant | `7gzie3gj` | EP0.26; no val yet |
@@ -57,6 +57,8 @@
 | #806 | dl24-frieren | 5L STRING + GradNorm α=0.25 + Y-sym | TERMINAL test=7.9323% (+0.413pp). Deep plateau EP28-47. NOT merged. Third triple-compose failure. |
 | #841 | dl24-edward | Lion β₁=0.85 | EP1=31.17% DIVERGED. CLOSED. β₁=0.9 is stable optimum. |
 | #838 | dl24-fern | STRING RFF σ=0.125, 4-epoch tay screen | **CLOSED** — test=8.7190% (+1.2pp regression vs SOTA 7.5195%); merge gate failed (tay EP4=7.4255% > ≤6.5985% required); σ<0.25 axis confirmed dead at 65k surface points (aliasing dominates capacity at high point density) |
+| #839 | alphonse (tay) | tay screen: Lion lr=1e-4, τy=1.5, τz=2.0, string_separable, L5 | **CLOSED** — EP2=8.04% (gate <8% missed). Run `6jxmx316`. |
+| #836 | askeladd (tay) | tay screen: same config as above | **CLOSED** — EP2=8.02% (gate <8% missed). Run `46idy5bk`. |
 
 ### Critical Config Constraints
 
@@ -105,13 +107,14 @@
 ## Potential Next Research Directions (after current arms complete)
 
 **Currently in-flight (12 active PRs):**
-- Tanjiro #818: 6-octave STRING PE — **best=6.6053% @ EP14.16 WAVE VAL LEADER**; EP15.17 latest; EP50 still running
-- Fern #831: 6L STRING — **best=6.6164% @ EP6.50**; EP7.28 current; strongly descending; early stages
-- Nezuko #843: 7-octave STRING PE — **EP2.00=7.4031%**; EP2.21 current; on track for EP5 gate
-- Frieren #844: 5L STRING no Y-sym — EP0.67; no val yet; EP5 gate pending
-- Tay screening: #839 (alphonse), #836 (askeladd), #842 (thorfinn), #840 (tanjiro-tay), #823 (nezuko-tay) — all EP1.5-1.9; EP2 gates pending
-- RFF capacity: #845 (fern rff24), #846 (edward rff32) — EP0.27-0.28; no val yet
-- LR warmup: #847 (frieren lr-warmup-2ep) — EP0.26; no val yet
+- Tanjiro #818: 6-octave STRING PE — **best=6.6053% @ EP14.16 WAVE VAL LEADER**; EP50 still running
+- Fern #831: 6L STRING — **best=6.6164% @ EP6.50**; strongly descending; early stages
+- Nezuko #843: 7-octave STRING PE — **EP2.00=7.4031%**; EP5 gate pending (student not posting gates)
+- Frieren #844: 5L STRING no Y-sym — run=`7dqsxvbq`; EP1=12.4553%; EP5 gate ~10:20Z due
+- Tay screening: #842 (thorfinn EP3 borderline→continue EP4), #840 (tanjiro-tay EP3 overdue), #823 (nezuko-tay relaunched `ghh0s4ne`), #848 (alphonse launch-prompted), #849 (askeladd launch-prompted)
+- CLOSED (EP2 gate miss): #839 (alphonse EP2=8.04%), #836 (askeladd EP2=8.02%)
+- RFF capacity: #845 (fern rff24, `thimjhnd`), #846 (edward rff32, `px719275`) — ETA ~12:35Z
+- LR warmup: #847 (frieren lr-warmup-2ep, `7gzie3gj`) — ETA ~12:37Z
 
 **High-priority candidates after current wave completes:**
 1. **5L STRING + Y-symmetry + GradNorm triple compose**: if frieren #844 two-way shows gains, add Y-sym back for full triple-compose but with α=0.5 (not α=0.25 like the failed triple-compose PRs #794, #800, #806). Key: #844 isolates the two-way first.
@@ -130,4 +133,4 @@
 - GradNorm α=0.25 (PR #780): confirmed α=0.5 is optimal on α-axis.
 - Lion β₁=0.85 (PR #841): catastrophic divergence.
 
-_Last updated: 2026-05-09. Key events: (1) tanjiro #818 `dy2z6o4a` best=**6.6053%** @ EP14.16 WAVE VAL LEADER (EP15.17=6.6089% latest; tight oscillation near floor); (2) fern #831 `pnrgixj1` best=**6.6164%** @ EP6.50 (only 0.0111pp behind wave leader; 6L depth showing strong early evidence; strongly descending); (3) nezuko #843 `hyzdxrj2` EP2.00=7.4031% (on track for EP5 gate ≤7.5%); (4) frieren #844 `3054rc61` EP0.67 launched (5L + GradNorm α=0.5 no Y-sym clean two-way); (5) tay screening wave: 5 active PRs, EP2 gates all pending; (6) RFF capacity sweep: fern #845 (rff24), edward #846 (rff32), both EP0.27-0.28; (7) frieren #847 lr-warmup-2ep EP0.26._
+_Last updated: 2026-05-08. Key events: (1) tanjiro #818 `dy2z6o4a` best=**6.6053%** @ EP14.16 WAVE VAL LEADER; EP50 running; (2) fern #831 `pnrgixj1` best=**6.6164%** @ EP6.50; 6L depth, strongly descending; (3) nezuko #843 `hyzdxrj2` EP2.00=7.4031%; EP5 gate pending (student not posting gates); (4) frieren #844 `7dqsxvbq` RELAUNCHED with correct --train-volume-points 65000; EP1=12.4553%; EP5 gate ~10:20Z; (5) tay wave: CLOSED #839 (alphonse EP2=8.04%) and #836 (askeladd EP2=8.02%); #842 (thorfinn EP3 borderline→continue EP4); #840 (tanjiro-tay EP3 overdue, nudge sent); #823 (nezuko-tay RELAUNCHED as `ghh0s4ne`); NEW #848 (alphonse lion-lr-downsweep) and #849 (askeladd tau-y-z-differential) — both launch-prompted; (6) RFF/LR screens #845, #846, #847 — 4-ep tay ETA ~12:35-12:37Z._
