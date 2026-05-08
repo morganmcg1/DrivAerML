@@ -797,7 +797,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
-            if config.use_abupt_geom_branch and config.geom_branch_warmup_fraction > 0.0:
+            if config.use_abupt_geom_branch:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
