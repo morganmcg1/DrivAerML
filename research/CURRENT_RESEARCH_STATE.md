@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-07 (updated)
+- **Date:** 2026-05-01 (Round 13 open, 9 WIP PRs — PRs #822/#824/#826 closed negative; PRs #832/#833/#834 newly assigned)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -34,36 +34,47 @@
 
 ---
 
-## Active PRs (6 WIP)
+## Active PRs (9 WIP — Round 13)
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| askeladd | #820 | 2-layer GELU MLP vol decoder (512→256→GELU→1) | WIP |
-| tanjiro | #821 | vol-loss-weight=2.0 budget-matched 5-ep cosine | WIP |
+| askeladd | #828 | 2-layer GELU MLP vol decoder (512→256→GELU→1) | WIP |
+| tanjiro | #830 | vol-loss-weight=2.0 budget-matched 4-ep | WIP |
 | nezuko | #823 | Surface→volume cross-attention for geometry-aware vol_p | WIP |
-| thorfinn | #822 | τ_z×3.0 4-ep relaunch (corrected kill gates) | WIP — relaunching |
-| edward | #824 | GradNorm α=0.5 on L5 SOTA 4-ep curriculum | **NEWLY ASSIGNED** |
-| fern | #825 | Lion β₂=0.999 on L5 SOTA 4-ep curriculum | **NEWLY ASSIGNED** |
-| alphonse | #826 | Lion wd=3e-4 on L5 SOTA 4-ep curriculum | **NEWLY ASSIGNED** |
+| frieren | #827 | Cosine LR warm restarts on L5 SOTA 4-ep | WIP |
+| fern | #829 | STRING 6-octave RFF sigma range (0.125–4.0) | WIP |
+| alphonse | #832 | Lion wd=7e-4 on L5 SOTA 4-ep (wd up-sweep) | **NEWLY ASSIGNED** |
+| thorfinn | #833 | τ_z×2.5 on L5 SOTA 4-ep (loss weight bisection) | **NEWLY ASSIGNED** |
+| edward | #834 | GradNorm α=0.5 uniform init, no static weights, 4-ep | **NEWLY ASSIGNED** |
+
+### Closed this cycle (PRs #822, #824, #826)
+- **PR #822 (thorfinn, τ_z×3.0 4-ep)**: CLOSED NEGATIVE — val_abupt=7.4767%. Budget too tight for τ_z×3.0. Replaced by τ_z×2.5 bisection #833.
+- **PR #824 (edward, GradNorm α=0.5 + static)**: CLOSED NEGATIVE — val_abupt=7.5170%. GradNorm + static weights = anti-synergy. Replaced by pure-GradNorm no-static #834.
+- **PR #826 (alphonse, wd=3e-4)**: CLOSED NEGATIVE — val_abupt=7.4628%. wd=5e-4 is Lion sweet spot. Testing up-side via #832 (wd=7e-4).
 
 ---
 
 ## Current Research Focus
 
-### Theme 1: Optimizer Axis Exploration
-After τ_y and depth-scale experiments closed negative, the research focus shifts to optimizer hyperparameters — the one axis that has NOT been explored at the L5 SOTA stack.
+### Theme 1: Optimizer Axis Exploration (continued)
+Down-sweep of Lion wd (PR #826) confirmed wd=5e-4 is near-optimal from below. GradNorm stacked on static weights (PR #824) confirmed anti-synergy. Current active experiments:
 
-- **Lion β₂=0.999** (fern, #825): Higher momentum EMA β₂ (0.99→0.999) to smooth signed-update noise on hard τ_y/τ_z channels. The PR #817 failure showed Lion signed-momentum is sensitive to gradient landscape changes — smoother β₂ may stabilize wall-shear channels.
-- **Lion wd=3e-4** (alphonse, #826): Reduce L2 penalty on output-projection weights for τ_y/τ_z channels that may be penalized away by aggressive regularization. Clean single-variable test — wd=5e-4 has been constant since SOTA was established.
-- **GradNorm α=0.5 on L5 SOTA** (edward, #824): Dynamic per-task loss reweighting on the correct base (L5 SOTA + 4-ep curriculum). Prior GradNorm runs showed correct weight adaptation (τ_y/τz upweighted, vol_p downweighted). Composition with SOTA recipe not yet tested.
+- **Lion wd=7e-4** (alphonse, #832): Up-sweep of wd axis. Conservative 40% increase. Tests other side of wd optimum before closing axis.
+- **GradNorm α=0.5, no static weights** (edward, #834): Drops all static loss weights; GradNorm alone owns the schedule from uniform init (all=1.0). Replicates PR #740 conditions but on full L5 SOTA backbone. If this beats SOTA, confirms GradNorm is a genuine lever when not stacked.
 
-### Theme 2: Wall-Shear τ_z Recovery
-- **τ_z×3.0 4-ep relaunch** (thorfinn, #822): In-flight relaunch after kill-gate bug. Prior runs `y862359i` and `imvj1s1p` both confirmed τ_z×3.0 upweights τ_z channel appropriately. The full 4-ep budget comparison vs SOTA is pending.
+### Theme 2: Wall-Shear τ_z Recovery (bisection probe)
+- **τ_z×2.5** (thorfinn, #833): Bisection probe between proven SOTA (×2.0) and failed ×3.0. τ_z is the worst-performing channel. ×2.5 moderate amplification should fit within the 4-ep budget that ×3.0 couldn't.
 
-### Theme 3: Volume Architecture
-- **2-layer GELU MLP vol decoder** (askeladd, #820): Replaces linear `volume_out` (512→1) with 512→256→GELU→1 MLP. Clean non-linearity test at vol decoding stage.
-- **Surface→volume cross-attention** (nezuko, #823): Geometry-aware vol_p decoding via surface→volume attention.
-- **vol-loss-weight=2.0 budget-matched** (tanjiro, #821): vol_p weighting with correct 5-ep budget.
+### Theme 3: Volume Architecture (geometry conditioning — Issue #717)
+- **2-layer GELU MLP vol decoder** (askeladd, #828): Non-linear vol decoding capacity.
+- **Surface→volume cross-attention** (nezuko, #823): Geometry-aware vol_p decoding.
+- **vol-loss-weight=2.0 budget-matched** (tanjiro, #830): vol_p weighting at correct budget.
+
+### Theme 4: Positional Encoding Variants (fern)
+- **STRING 6-octave low-frequency probe** (fern, #829): σ range 0.125–4.0 (adds low-frequency σ=0.125, drops high-frequency σ=4.0). Different from closed high-frequency probes.
+
+### Theme 5: Learning Rate Schedule (frieren)
+- **Cosine LR warm restarts** (frieren, #827): SGDR-style warm restarts on L5 SOTA 4-ep. Hypothesis: vol_p OOD gap may be a local minimum that periodic LR resets can escape.
 
 ---
 
@@ -82,19 +93,26 @@ After τ_y and depth-scale experiments closed negative, the research focus shift
 
 ## Potential Next Research Directions
 
-### Optimizer / Regularization (current focus)
-1. If wd=3e-4 (alphonse #826) wins → try wd=1e-4 sweep
-2. If β₂=0.999 (fern #825) wins → try β₁=0.95 (higher momentum) compose
-3. If GradNorm α=0.5 (edward #824) wins → try α=1.0, α=0.25 sweep
+### Optimizer / Regularization
+1. If wd=7e-4 (alphonse #832) is positive → try wd=1e-3 to extend curve
+2. If wd=7e-4 negative → close wd axis; wd=5e-4 confirmed optimal
+3. If GradNorm no-static (edward #834) is positive → try α=1.0, α=0.25 sweep; also test α=0.5 with warmup delay (let static weights run EP1, then enable GradNorm)
+4. If Lion β₂=0.999 (fern #825 in-flight) shows improvement → try β₂=0.9999 for further smoothing
+5. **Lion lr sweep**: lr=1e-4 vs current 9e-5 (has not been formally swept at L5/4-ep budget)
 
-### Data-side vol_p OOD fix (highest priority, pending Issue #803)
-4. Once Issue #803 SDF regeneration lands: test geometry-conditioning with correct SDF inputs for 10 REQUIRED_RESTORED_CASE_IDs
-5. Volume-side coordinate noise augmentation: add Gaussian noise to vol query coordinates during training
-6. Test-time augmentation (TTA) on vol coordinates: average predictions across ±ε perturbations
+### Wall-shear τ_z
+6. If τ_z×2.5 (thorfinn #833) positive → try τ_z×3.0 at longer budget (5-ep or 6-ep); or compose τ_z×2.5 + β₂=0.999
+7. If τ_z×2.5 negative → τ_z loss-weight axis exhausted; pivot to per-channel decoder head for τ_z
+
+### Volume architecture (geometry conditioning — Issue #717, highest EV)
+8. If MLP decoder (askeladd #828) positive → escalate to 3-layer MLP with skip connection
+9. If surface→vol cross-attention (nezuko #823) positive → try separate surface→vol attention module per channel
+10. **Per-channel output projection**: separate decoder head per physical quantity (sp, τx, τy, τz, vp) — different spatial statistics warrant different inductive biases
+11. **Warm-start from SOTA checkpoint**: init new runs from SOTA `4k25s25e` weights, apply architectural modification, fine-tune 2–4ep at lr=1e-5
 
 ### Ensemble refresh
-7. After new single-model candidates emerge from current round, re-run greedy pool-25 selection (nezuko)
+12. After new single-model candidates emerge, re-run greedy pool-25 selection (nezuko)
 
-### Architecture (lower priority)
-8. FiLM modulation (lightweight γ/β from surface pooling) — lower overhead than full geom branch
-9. Per-channel output projection (separate vol head per channel — sp/τx/τy/τz/vp have different spatial statistics)
+### Architecture
+13. FiLM modulation (lightweight γ/β from surface pooling) — confirmed working at yi but FiLM γ-saturation issue; worth retrying with γ bounded at (0, 5) instead of (0, 100)
+14. **Attention kernel alternatives**: Flash attention with ALiBi bias; positional bias in attention (cheaper than STRING-sep update)

@@ -1,5 +1,64 @@
 # SENPAI Research Results
 
+## 2026-05-01 — PR #824: GradNorm α=0.5 on L5 SOTA 4-ep curriculum (edward) — CLOSED NEGATIVE
+
+- **Branch**: edward/gradnorm-a05-l5-sota-4ep (deleted)
+- **W&B run**: `e0brbohf` (rank-0, group `edward-gradnorm-l5-sota`, project `senpai-v1-drivaerml-ddp8`)
+- **Hypothesis**: GradNorm α=0.5 dynamic per-task loss reweighting stacked on the full L5 SOTA stack (alphonse PR #592 recipe with static surface=2.0, τ_y=1.5, τ_z=2.0) at 4-ep budget-matched curriculum would match/beat SOTA by adaptively upweighting laggard τ_y/τ_z channels.
+
+| Metric | PR #824 (GradNorm α=0.5 + SOTA static) | PR #740 (GradNorm α=0.5, no static) | SOTA #592 | Gate |
+|---|---|---|---|---|
+| val_abupt | 7.5170% | — | **6.5985%** | < 6.5985% ❌ |
+| test_abupt | 8.6960% | 7.5195% (wave-test SOTA) | 7.9915% | — |
+| val surface_pressure | 4.83% | — | 4.33% | — |
+| val tau_x | 7.13% | — | 6.54% | — |
+| val tau_y | 9.33% | — | 8.36% | — |
+| val tau_z | 10.95% | — | 9.81% | — |
+| val vol_pressure | 5.35% | — | 3.95% | — |
+
+**Final GradNorm weights:** sp=0.75, τx=0.96, τy=1.20, τz=1.24, vp=0.85. Directionally matched PR #740 except vp downweighted.
+
+**Results commentary:** All five channels strictly regressed (+0.50 to +1.40pp), not a tradeoff. test_abupt is +1.18pp WORSE than PR #740's GradNorm wave-test SOTA — the difference is that PR #740 ran without the SOTA static weights, while this run stacked GradNorm on top of them. GradNorm overrides static weights based on gradient norms alone (not val-loss progress), so the runtime weight schedule (sp 2.0×0.75=1.5, τy 1.5×1.20=1.8, τz 2.0×1.24=2.5, vp 1.0×0.85=0.85) is less-well-tuned than the static SOTA empirical optimum. The two mechanisms are not stacking-compatible at this budget.
+
+**Verdict (NEGATIVE):** Closed. GradNorm + static-weighted SOTA = anti-synergy. To get a GradNorm signal one would need to drop the static weights entirely (revert tau-y-loss-weight, tau-z-loss-weight, surface-loss-weight to 1.0) and let GradNorm own the schedule. Assigned PR #834 (edward, GradNorm α=0.5 uniform init, no static weights).
+
+## 2026-05-01 — PR #826: Lion weight-decay 5e-4 -> 3e-4 (alphonse) — CLOSED NEGATIVE
+
+- **Branch**: alphonse/weight-decay-3e-4-l5-sota-4ep (deleted)
+- **W&B run**: `ahw1rdj7` (group `alphonse-wd-sweep`, project `senpai-v1-drivaerml-ddp8`)
+- **Hypothesis**: Halving Lion weight-decay from 5e-4 to 3e-4 would relax the L2 pull on tau_y/tau_z output-projection weights and lift the worst channels without harming surface_pressure or vol_pressure.
+
+| Metric | PR #826 (wd=3e-4) | SOTA #592 (wd=5e-4) | Gate |
+|---|---|---|---|
+| val_abupt | 7.4628% | **6.5985%** | < 6.5985% ❌ |
+| test_abupt | 8.7253% | 7.9915% | — |
+| val surface_pressure | 4.88% | 4.33% | — |
+| val tau_x | 7.31% | 6.54% | — |
+| val tau_y | 9.42% | 8.36% | — |
+| val tau_z | 10.85% | 9.81% | — |
+| val vol_pressure | 4.86% | 3.95% | — |
+
+**Results commentary:** All channels degraded uniformly (+0.6 to +1.0pp). Lion's update is `sign(momentum) * lr + lr * wd * theta` — halving wd shrinks the explicit parameter-pull term and starves convergence across the whole network, not selectively at decoder heads. Confirms wd=5e-4 is at/near the Lion sweet spot for this recipe; tau_y/tau_z headroom is structural, not regulatory.
+
+**Verdict (NEGATIVE):** Closed. Down-sweep of Lion wd is dead. Assigned PR #832 (alphonse, wd=7e-4 up-sweep) to probe the other side of the axis.
+
+## 2026-05-01 — PR #822: τ_z loss weight ×3.0 on 4-ep budget-matched curriculum (thorfinn) — CLOSED NEGATIVE
+
+- **Branch**: thorfinn/tau-z-3p0-4ep-relaunch (deleted)
+- **W&B run**: `qtzoy6rp` (group `thorfinn-tau-z-sweep`, project `senpai-v1-drivaerml-ddp8`); first attempt `imvj1s1p` killed by misconfigured EP1 kill threshold.
+- **Hypothesis**: Stacking τ_z×3.0 on the full SOTA recipe at 4-ep budget-matched curriculum would extend the +0.44pp τ_z signal observed in PR #807 isolation and lift val_abupt below SOTA.
+
+| Metric | PR #822 (τ_z×3.0, 4-ep) | PR #807 (τ_z×3.0 isolation) | SOTA #592 | Gate |
+|---|---|---|---|---|
+| val_abupt | 7.4767% | — | **6.5985%** | < 6.5985% ❌ |
+| test_abupt | 8.6647% | — | 7.9915% | — |
+| val tau_z | 10.6947% | bare-SOTA −0.44pp | 9.8099% | — |
+| EP1 / EP2 / EP3 / EP4 val_abupt | 26.18 / 11.37 / 8.17 / 7.48 | — | — | — |
+
+**Results commentary:** All channels still descending at EP4 — training did not converge. The 4-ep budget-matched curriculum delivers ~22,640 total steps (10864 + 5435 + 3625 + ~2716, non-uniform due to varying volume-point-count epochs), substantially fewer than the 13-ep baseline's ~43k steps. τ_z×3.0 amplifies the slowest-converging channel's gradient, which demands MORE budget, not less, to integrate. Stacking it onto a budget-starved schedule is anti-synergistic. Confirms the signal is real but not landable in the 4-ep envelope at ×3.0 magnitude.
+
+**Verdict (NEGATIVE):** Closed. 4-ep + full-SOTA + τ_z×3.0 is over-stacked. Assigned PR #833 (thorfinn, τ_z×2.5 bisection probe).
+
 ## 2026-05-07 21:30 — PR #817: τ_y loss weight ×2.0 on L5 SOTA stack (edward) — CLOSED NEGATIVE
 
 - **Branch**: edward/tau-y-2p0-13ep-sota-promotion (deleted)
