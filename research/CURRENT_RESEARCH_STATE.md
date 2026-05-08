@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-08 (Round 17 CLOSED — all 8 PRs resolved. Round 18 active: PR #823 nezuko cross-attention BEATING SOTA, PR #863 alphonse SGDR in flight. 6 students idle — new assignments pending.)
+- **Date:** 2026-05-08 (Round 17 CLOSED — all 8 PRs resolved. Round 18 active: 7 PRs in flight. frieren BLOCKED — Y-sym flags absent from train.py.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -47,14 +47,19 @@
 
 ---
 
-## Active PRs (Round 18 — 2 WIP)
+## Active PRs (Round 18 — 7 WIP)
 
 | PR | Student | Hypothesis | W&B run | Status |
 |---|---|---|---|---|
 | #823 | nezuko | Surface→vol cross-attention (geometry conditioning, 4-ep→13-ep full run) | `ghh0s4ne` | **EP7=6.5335% BEATS SOTA** (-0.065pp). EP8 in progress. LEADING experiment. |
-| #863 | alphonse | SGDR warm restarts within 4-ep budget | `7gnqa6l1` | EP1 in progress. Kill gate: <30% at EP1. |
+| #863 | alphonse | SGDR warm restarts within 4-ep budget | `7gnqa6l1` | EP1 in progress. Kill gate: EP1 <30%. |
+| #867 | thorfinn | slices=256 (only untested arm from Round 17 #859 Arm B) | — | Assigned. Group: `slices-sweep-r18`. |
+| #868 | askeladd | Spectral normalization on attention projection layers | — | Assigned. Group: `spectral-norm-r18`. |
+| #869 | edward | Stochastic depth / layer drop (drop_path={0.05, 0.10}, two arms) | — | Assigned. Group: `stochastic-depth-r18`. |
+| #870 | fern | FFT auxiliary loss on τ_y/τ_z surface fields (λ=0.1) | — | Assigned. Group: `fft-loss-r18`. |
+| #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Assigned. Group: `pcgrad-r18`. |
 
-**6 idle students** (thorfinn, askeladd, edward, fern, tanjiro, frieren) awaiting Round 18 assignment.
+**1 idle student:** frieren — **BLOCKED**. Y-sym augmentation flags (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`) absent from `train.py`. Re-implementation required before assignment. Target: Y-sym p=1.0 (escalation from Round 17 #855 p=0.5 which was confounded by wrong LR flag).
 
 ---
 
@@ -125,26 +130,33 @@
 
 ---
 
-## Potential Next Research Directions (Round 18 — 6 idle students)
+## Potential Next Research Directions (post Round 18)
 
-### High priority
-1. **slices=256** (thorfinn): Only untested arm from Round 17 (#859 Arm B). Direct comparison to SOTA 128.
-2. **Stochastic depth / layer drop** (edward): Drop random transformer layers during training. Never tested at L5.
-3. **Frequency-domain loss** (fern): FFT-based loss term on surface fields targeting τ_y/τ_z high-freq patterns.
-4. **SGDR follow-up** (alphonse, depends on #863 EP1): If gate passed, continue; else assign new direction.
+### Currently in flight (Round 18 — do not re-assign)
+- **slices=256** → thorfinn #867
+- **Stochastic depth** → edward #869
+- **FFT frequency-domain loss** → fern #870
+- **SGDR warm restarts** → alphonse #863
+- **Spectral normalization on attention** → askeladd #868
+- **PCGrad gradient projection** → tanjiro #871
+- **Surface→vol cross-attention (13-ep full run)** → nezuko #823
 
-### Medium priority
-5. **Spectral normalization on attention** (askeladd): Stability regularization orthogonal to QK-norm.
-6. **PCGrad gradient projection** (tanjiro): Gradient conflict resolution between τ_y/τ_z loss components.
-7. **Layer-wise LR decay (LLRD)**: Larger lr on later transformer layers.
-8. **Huber loss vs MSE**: Robustness to OOD test geometry outliers.
+### Round 18 remainder / next assignments
+1. **Y-sym augmentation p=1.0** (frieren — BLOCKED): Re-implement `--use-y-symmetry-aug` / `--y-symmetry-aug-prob` in `train.py`, then assign. Escalation from Round 17 #855 (confounded by wrong LR flag).
+2. **Ensemble pool-25 refresh**: After nezuko #823 full 13-ep completes — add to greedy ensemble and re-run greedy selection.
+
+### Medium priority (Round 19+)
+3. **Layer-wise LR decay (LLRD)**: Larger lr on later transformer layers. Never tested.
+4. **Huber loss vs MSE**: Robustness to OOD test geometry outliers (4 cases dominate 92% of vol_p deviation).
+5. **AdamW vs Lion direct comparison**: At optimal Lion configs, never directly compared at same configuration.
+6. **Per-channel output projection**: Separate decoder heads per physical field. Never tested.
+7. **AdaLN-zero FiLM at block level**: Different from saturating channel-level FiLM (#792). Conditioning on surface latents.
 
 ### Bold / plateau-protocol ideas
-9. **AdamW vs Lion direct comparison**: At optimal Lion configs, never directly compared at same configuration.
-10. **Per-channel output projection**: Separate decoder heads per physical field.
-11. **AdaLN-zero FiLM at block level**: Different from saturating channel-level FiLM (#792). Conditioning on surface latents.
-12. **Ensemble pool-25 refresh**: After nezuko #823 full 13-ep completes — add to greedy ensemble.
+8. **Geometry hash-encoding input**: Replace STRING with instant-NGP style multi-resolution hash grid encoding.
+9. **Test-time ensembling via dropout**: MC-dropout at inference for uncertainty-weighted ensemble.
+10. **Cross-geometry pretraining then fine-tune**: Initialize from a broader geometry distribution to reduce OOD sensitivity.
 
 ### Blocked (awaiting Issue #803 — human team)
-13. **SDF skip-connect vol decoder** (#837 tanjiro): Valid architecture — needs `volume_sdf.npy` regeneration.
-14. **Y-symmetry augmentation re-attempt**: Flags (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`) absent from current `train.py`. Requires re-implementation.
+11. **SDF skip-connect vol decoder** (#837 tanjiro): Valid architecture — needs `volume_sdf.npy` regeneration.
+12. **Y-symmetry augmentation re-attempt**: Flags (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`) absent from current `train.py`. Requires re-implementation.
