@@ -102,6 +102,7 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_spectral_norm_attn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -219,6 +220,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "use_spectral_norm_attn": (
+            "Apply spectral normalization (Miyato et al., ICLR 2018, "
+            "arXiv:1802.05957) to the attention Q/K/V (`qkv`) and "
+            "out-projection (`proj`) Linear weights in every TransolverAttention "
+            "block. Uses the new parametrizations API "
+            "(`torch.nn.utils.parametrizations.spectral_norm`). Constrains "
+            "the Lipschitz constant of attention projections to <=1 to "
+            "improve OOD generalization on out-of-distribution geometries "
+            "(Issue #717 vol_pressure test gap). Stacks with QK-norm: QK-norm "
+            "normalizes Q/K output vectors, spectral norm constrains "
+            "projection weight matrices — different operators in the graph."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -298,6 +311,39 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
     )
+
+
+def apply_spectral_norm_to_attention(model: nn.Module) -> list[str]:
+    """Apply spectral norm to qkv (Q/K/V) and proj (out) Linear layers in each
+    TransolverAttention block.
+
+    The model's TransolverAttention wraps each projection in `LinearProjection`
+    which exposes a `.project` `nn.Linear`. So the attention Q/K/V combined
+    matrix lives at `<...>.attention.qkv.project` and the out projection at
+    `<...>.attention.proj.project`. Slice/feature projections
+    (`in_project_x`, `in_project_fx`, `in_project_slice`) are intentionally
+    skipped — those compute slice tokens, not attention Q/K/V/out_proj.
+
+    Uses the parametrizations API. At registration `weight_orig` is set to the
+    original weight W; in forward, the effective weight becomes
+    `W / sigma_hat(W)` so that the spectral norm is constrained to <=1. For
+    well-initialized weights sigma(W) is close to 1 (Xavier/Kaiming), so the
+    initial output magnitude shifts only slightly.
+
+    Returns the list of layer paths that were spectral-normalized.
+    """
+    from torch.nn.utils.parametrizations import spectral_norm
+
+    targeted: list[str] = []
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+        if name.endswith("attention.qkv.project") or name.endswith(
+            "attention.proj.project"
+        ):
+            spectral_norm(module)
+            targeted.append(name)
+    return targeted
 
 
 def train_loss(
@@ -736,6 +782,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
 
         model: nn.Module = build_model(config).to(device)
+        if config.use_spectral_norm_attn:
+            spectral_norm_targets = apply_spectral_norm_to_attention(model)
+            if state.is_main:
+                print(
+                    f"Spectral norm applied to {len(spectral_norm_targets)} "
+                    "attention projection layers (qkv + proj per block):"
+                )
+                for layer_name in spectral_norm_targets:
+                    print(f"  - {layer_name}")
         n_params = sum(param.numel() for param in model.parameters())
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
