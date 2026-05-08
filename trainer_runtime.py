@@ -1285,6 +1285,27 @@ def build_lr_scheduler(
     config,
     max_epochs: int,
 ) -> torch.optim.lr_scheduler.LRScheduler:
+    if getattr(config, "lr_sgdr_t0", 0) > 0:
+        t_mult = getattr(config, "lr_sgdr_t_mult", 2)
+        sgdr_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=max(1, config.lr_sgdr_t0),
+            T_mult=max(1, t_mult),
+            eta_min=config.lr_min,
+        )
+        if config.lr_warmup_epochs <= 0:
+            return sgdr_scheduler
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=0.05,
+            end_factor=1.0,
+            total_iters=max(1, config.lr_warmup_epochs),
+        )
+        return torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, sgdr_scheduler],
+            milestones=[config.lr_warmup_epochs],
+        )
     t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
