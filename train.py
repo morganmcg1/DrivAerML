@@ -114,6 +114,11 @@ class Config:
     ema_decay: float = 0.999
     ema_start_step: int = 50
     eval_raw_vs_ema: bool = False
+    knn_smooth_loss_weight: float = 0.0
+    knn_smooth_k: int = 8
+    knn_smooth_anchors: int = 2048
+    knn_smooth_chunk: int = 256
+    knn_smooth_mode: str = "match"
     lr_warmup_epochs: int = 0
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
@@ -229,6 +234,44 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "knn_smooth_loss_weight": (
+            "Weight lambda on the k-NN local-roughness auxiliary loss for "
+            "the tau_y and tau_z surface channels (PR #870 pivot from FFT). "
+            "For randomly subsampled anchors per sample, the k=8 nearest "
+            "spatial neighbors are found by Euclidean XYZ distance on "
+            "detached batch.surface_x[..., :3], and a roughness term is "
+            "computed per anchor neighborhood. The selected mode controls "
+            "which term is used (see --knn-smooth-mode). Default 0.0 "
+            "disables the auxiliary term."
+        ),
+        "knn_smooth_k": (
+            "Number of nearest neighbors per anchor for the k-NN smoothness "
+            "loss (default 8). Self is excluded from the neighborhood; the "
+            "variance is taken over k neighbors only."
+        ),
+        "knn_smooth_anchors": (
+            "Number of anchor points per sample for the k-NN smoothness "
+            "loss (default 2048). Anchors are randomly subsampled each "
+            "step from the [N_surface] points to keep the pairwise "
+            "distance computation tractable."
+        ),
+        "knn_smooth_chunk": (
+            "Anchor-chunk size used to bound peak memory of the [B, "
+            "anchor_chunk, N] pairwise distance tensor. Default 256 "
+            "(B=4, N=65536 -> ~268 MB chunk-peak). Smaller saves memory "
+            "at the cost of more topk launches."
+        ),
+        "knn_smooth_mode": (
+            "k-NN smoothness loss mode. 'var' = mean(var_knn(pred)) -- a "
+            "pure local-smoothness regularizer (graph-Laplacian-like); "
+            "biases predictions toward locally-uniform values regardless "
+            "of target roughness. 'match' = mean((var_knn(pred) - "
+            "var_knn(target))^2) -- a roughness-matching term that "
+            "penalizes mismatch between prediction and target local "
+            "variance (analog of Gram-matrix matching from style transfer). "
+            "Default 'match'. Both modes log var_pred / var_target / "
+            "var_err diagnostics every step."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +354,136 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+KNN_SMOOTH_MODES = ("var", "match")
+
+
+def knn_roughness_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    coords: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    *,
+    k: int = 8,
+    n_anchors: int = 2048,
+    chunk_size: int = 256,
+    mode: str = "match",
+    weight: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """k-NN local-roughness loss on a point-cloud field prediction.
+
+    For ``M = min(n_anchors, N)`` randomly subsampled anchor points per
+    batch sample, the k Euclidean-nearest neighbors are found on detached
+    XYZ ``coords`` (``coords.shape == [B, N, 3]``) and a roughness term is
+    computed per anchor neighborhood over ``pred`` and ``target`` field
+    values (``[B, N, C]``).
+
+    Modes:
+
+    - ``mode='var'``: ``L = mean( var_knn(pred) )``. A pure local-smoothness
+      regularizer (graph-Laplacian-like). Biases the prediction toward
+      locally-uniform values; will damp genuine high-frequency target
+      structure as well as prediction noise.
+    - ``mode='match'``: ``L = mean( (var_knn(pred) - var_knn(target))**2 )``.
+      Roughness-matching. Penalizes mismatch between prediction and target
+      local roughness; bias-free w.r.t. the target's true local variance.
+
+    KNN is computed on ``coords.detach()`` so no gradient flows through
+    neighbor selection. Self is excluded by setting the self-distance to
+    +inf before topk; padded points are excluded from the neighbor pool by
+    setting their column distance to +inf and from the loss reduction by
+    masking anchors. The empty-batch corner case (``N == 0`` from the
+    volume-curriculum) returns a zero loss connected to the graph (mirrors
+    the masked_* helpers).
+
+    Returns ``(weighted_loss, diags)`` where ``diags`` contains the
+    per-step mean of ``var_knn(pred)``, ``var_knn(target)``, and
+    ``var_knn(pred-target)`` for run-time direction-of-effect diagnosis.
+    """
+    if mode not in KNN_SMOOTH_MODES:
+        raise ValueError(f"unknown knn_smooth_mode: {mode}; want one of {KNN_SMOOTH_MODES}")
+
+    if pred.shape[1] == 0:
+        zero = pred.sum() * 0.0
+        return zero, {"knn_var_pred": zero.detach(), "knn_var_target": zero.detach(), "knn_var_err": zero.detach()}
+
+    B, N, C = pred.shape
+    device = pred.device
+    coords_d = coords.detach()
+
+    if mask is not None:
+        valid = mask.bool()
+    else:
+        valid = torch.ones(B, N, dtype=torch.bool, device=device)
+
+    M = min(n_anchors, N)
+    anchor_idx = torch.randperm(N, device=device)[:M]               # [M]
+    anchor_idx_b = anchor_idx.unsqueeze(0).expand(B, M).contiguous()  # [B, M]
+
+    invalid_full = (~valid).unsqueeze(1)  # [B, 1, N]
+
+    sum_loss = pred.new_zeros(())
+    sum_var_pred = pred.new_zeros(())
+    sum_var_target = pred.new_zeros(())
+    sum_var_err = pred.new_zeros(())
+    sum_count = pred.new_zeros(())  # number of valid (anchor, channel) tuples
+
+    for s in range(0, M, chunk_size):
+        e = min(s + chunk_size, M)
+        L = e - s
+        chunk_idx = anchor_idx_b[:, s:e]  # [B, L]
+
+        # KNN selection runs without grad to avoid materializing the
+        # [B, L, N, 3] diff tensor in the autograd graph.
+        with torch.no_grad():
+            chunk_idx_xyz = chunk_idx.unsqueeze(-1).expand(B, L, 3)
+            anchor_coords = torch.gather(coords_d, 1, chunk_idx_xyz)  # [B, L, 3]
+            a_sq = (anchor_coords * anchor_coords).sum(-1, keepdim=True)  # [B, L, 1]
+            b_sq = (coords_d * coords_d).sum(-1).unsqueeze(1)             # [B, 1, N]
+            ab = torch.bmm(anchor_coords, coords_d.transpose(1, 2))       # [B, L, N]
+            dist2 = (a_sq + b_sq - 2.0 * ab).clamp_min_(0.0)              # [B, L, N]
+            dist2.masked_fill_(invalid_full, float("inf"))
+
+            # Exclude self (anchor's own row in the full set).
+            b_arange = torch.arange(B, device=device).unsqueeze(1).expand(B, L)
+            i_arange = torch.arange(L, device=device).unsqueeze(0).expand(B, L)
+            dist2[b_arange, i_arange, chunk_idx] = float("inf")
+
+            k_eff = min(k, max(N - 1, 1))
+            _, knn_idx = torch.topk(dist2, k_eff, dim=-1, largest=False)  # [B, L, k]
+            del dist2, ab, a_sq, b_sq, anchor_coords
+
+        knn_idx_flat = knn_idx.reshape(B, L * k_eff).unsqueeze(-1).expand(B, L * k_eff, C)
+        knn_pred = torch.gather(pred, 1, knn_idx_flat).reshape(B, L, k_eff, C)
+        knn_target = torch.gather(target, 1, knn_idx_flat).reshape(B, L, k_eff, C)
+
+        var_pred = knn_pred.var(dim=2, unbiased=False)            # [B, L, C]
+        var_target = knn_target.var(dim=2, unbiased=False)        # [B, L, C]
+        var_err = (knn_pred - knn_target).var(dim=2, unbiased=False)  # [B, L, C]
+
+        anchor_valid_chunk = torch.gather(valid, 1, chunk_idx)  # [B, L]
+        valid_w = anchor_valid_chunk.unsqueeze(-1).to(pred.dtype).expand(B, L, C)
+
+        sum_var_pred = sum_var_pred + (var_pred.detach() * valid_w).sum()
+        sum_var_target = sum_var_target + (var_target.detach() * valid_w).sum()
+        sum_var_err = sum_var_err + (var_err.detach() * valid_w).sum()
+        sum_count = sum_count + valid_w.sum()
+
+        if mode == "var":
+            term = var_pred * valid_w
+        else:  # match
+            term = (var_pred - var_target).pow(2) * valid_w
+        sum_loss = sum_loss + term.sum()
+
+    denom = sum_count.clamp_min(1.0)
+    loss = sum_loss / denom
+    diags = {
+        "knn_var_pred": (sum_var_pred / denom).detach(),
+        "knn_var_target": (sum_var_target / denom).detach(),
+        "knn_var_err": (sum_var_err / denom).detach(),
+    }
+    return weight * loss, diags
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,6 +494,11 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    knn_smooth_loss_weight: float = 0.0,
+    knn_smooth_k: int = 8,
+    knn_smooth_anchors: int = 2048,
+    knn_smooth_chunk: int = 256,
+    knn_smooth_mode: str = "match",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,27 +510,72 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_pred = out["surface_preds"]
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_pred,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        knn_terms: dict[str, torch.Tensor] = {}
+        knn_diags: dict[str, dict[str, torch.Tensor]] = {}
+        if knn_smooth_loss_weight > 0.0:
+            coords = batch.surface_x[..., :3]  # [B, N, 3] XYZ
+            tau_y_pred = surface_pred[..., 2:3]
+            tau_y_target = surface_target[..., 2:3]
+            tau_z_pred = surface_pred[..., 3:4]
+            tau_z_target = surface_target[..., 3:4]
+            knn_loss_tau_y, diag_y = knn_roughness_loss(
+                tau_y_pred,
+                tau_y_target,
+                coords,
+                mask=batch.surface_mask,
+                k=knn_smooth_k,
+                n_anchors=knn_smooth_anchors,
+                chunk_size=knn_smooth_chunk,
+                mode=knn_smooth_mode,
+                weight=knn_smooth_loss_weight,
+            )
+            knn_loss_tau_z, diag_z = knn_roughness_loss(
+                tau_z_pred,
+                tau_z_target,
+                coords,
+                mask=batch.surface_mask,
+                k=knn_smooth_k,
+                n_anchors=knn_smooth_anchors,
+                chunk_size=knn_smooth_chunk,
+                mode=knn_smooth_mode,
+                weight=knn_smooth_loss_weight,
+            )
+            knn_terms["knn_smooth_loss_tau_y"] = knn_loss_tau_y
+            knn_terms["knn_smooth_loss_tau_z"] = knn_loss_tau_z
+            knn_diags["tau_y"] = diag_y
+            knn_diags["tau_z"] = diag_z
+            loss = loss + knn_loss_tau_y + knn_loss_tau_z
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if knn_terms:
+        metrics["knn_smooth_loss_tau_y"] = float(knn_terms["knn_smooth_loss_tau_y"].detach().cpu().item())
+        metrics["knn_smooth_loss_tau_z"] = float(knn_terms["knn_smooth_loss_tau_z"].detach().cpu().item())
+        metrics["knn_smooth_loss_total"] = metrics["knn_smooth_loss_tau_y"] + metrics["knn_smooth_loss_tau_z"]
+        for ch_name, ch_diag in knn_diags.items():
+            metrics[f"knn_smooth_var_pred_{ch_name}"] = float(ch_diag["knn_var_pred"].cpu().item())
+            metrics[f"knn_smooth_var_target_{ch_name}"] = float(ch_diag["knn_var_target"].cpu().item())
+            metrics[f"knn_smooth_var_err_{ch_name}"] = float(ch_diag["knn_var_err"].cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +1075,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.knn_smooth_loss_weight > 0.0:
+                print(
+                    f"k-NN smoothness aux loss enabled on tau_y/tau_z: "
+                    f"lambda={config.knn_smooth_loss_weight} "
+                    f"mode={config.knn_smooth_mode} "
+                    f"k={config.knn_smooth_k} "
+                    f"anchors={config.knn_smooth_anchors} "
+                    f"chunk={config.knn_smooth_chunk}"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +1115,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/knn_smooth_loss_weight"] = config.knn_smooth_loss_weight
+            wandb.summary["loss/knn_smooth_mode"] = config.knn_smooth_mode
+            wandb.summary["loss/knn_smooth_k"] = config.knn_smooth_k
+            wandb.summary["loss/knn_smooth_anchors"] = config.knn_smooth_anchors
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1266,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        knn_smooth_loss_weight=config.knn_smooth_loss_weight,
+                        knn_smooth_k=config.knn_smooth_k,
+                        knn_smooth_anchors=config.knn_smooth_anchors,
+                        knn_smooth_chunk=config.knn_smooth_chunk,
+                        knn_smooth_mode=config.knn_smooth_mode,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1311,26 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "knn_smooth_loss_tau_y" in batch_loss_metrics:
+                        train_log["train/knn_smooth_loss_tau_y"] = batch_loss_metrics["knn_smooth_loss_tau_y"]
+                        train_log["train/knn_smooth_loss_tau_z"] = batch_loss_metrics["knn_smooth_loss_tau_z"]
+                        train_log["train/knn_smooth_loss_total"] = batch_loss_metrics["knn_smooth_loss_total"]
+                        train_log["train/knn_smooth_loss_weight"] = config.knn_smooth_loss_weight
+                        for ch_name in ("tau_y", "tau_z"):
+                            train_log[f"train/knn_smooth_var_pred_{ch_name}"] = batch_loss_metrics[
+                                f"knn_smooth_var_pred_{ch_name}"
+                            ]
+                            train_log[f"train/knn_smooth_var_target_{ch_name}"] = batch_loss_metrics[
+                                f"knn_smooth_var_target_{ch_name}"
+                            ]
+                            train_log[f"train/knn_smooth_var_err_{ch_name}"] = batch_loss_metrics[
+                                f"knn_smooth_var_err_{ch_name}"
+                            ]
+                        surface_loss_weighted_val = batch_loss_metrics["surface_loss_weighted"]
+                        if surface_loss_weighted_val > 0:
+                            train_log["train/knn_smooth_loss_total_to_surface_ratio"] = (
+                                batch_loss_metrics["knn_smooth_loss_total"] / surface_loss_weighted_val
+                            )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
