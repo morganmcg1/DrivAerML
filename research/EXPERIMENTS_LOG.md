@@ -8,6 +8,37 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-08 ~07:00 UTC — PR #806 CLOSED: 5L STRING + GradNorm α=0.25 + Y-sym triple compose (dl24-frieren, `gui4ceed`)
+
+- **Branch:** `dl24-frieren/5l-string-gradnorm-alpha025-ysym`
+- **W&B Run:** `gui4ceed`
+- **Hypothesis:** Triple-compose 5L STRING + GradNorm α=0.25 + Y-sym on the wave's validated backbone; test whether composition of the three best-known enhancements additively beats wave SOTA 7.5195%.
+
+### Terminal Results (EP50)
+
+| Metric | Val (EP28 best) | Test | val→test ratio |
+|--------|-----------------|------|----------------|
+| `abupt_axis_mean_rel_l2_pct` (PRIMARY) | **6.6573%** | **7.9323%** | 1.192× |
+| `surface_pressure_rel_l2_pct` | 4.4073% | 3.9536% | 0.90× ✓ beats AB-UPT (3.82) |
+| `volume_pressure_rel_l2_pct` | 4.0735% | 12.0332% | **2.95× ← gap driver** |
+| `wall_shear_rel_l2_pct` | 7.4590% | 7.2543% | 0.97× ✓ beats AB-UPT (7.29) |
+| `wall_shear_x_rel_l2_pct` | 6.4885% | 6.4608% | 1.00× |
+| `wall_shear_y_rel_l2_pct` | 8.0815% | 7.8120% | 0.97× |
+| `wall_shear_z_rel_l2_pct` | 10.2354% | 9.4018% | 0.92× |
+
+**GradNorm final weights (EP50):** w_cp=0.867, w_vol_p=1.154 (↑ from 0.88 at EP28), w_τx=0.921, w_τy=0.905, w_τz=1.153
+
+**Wave merged best:** PR #740 test=7.5195%
+**Result:** DOES NOT BEAT BASELINE (+0.413pp regression). PR CLOSED.
+
+### Analysis
+
+Three triple-compose experiments now closed without beating SOTA: fern #794 (4L, α=0.25, Y-sym: 7.9011%), nezuko #800 (5L STRING, α=0.5, Y-sym: 7.8981%), frieren #806 (5L STRING, α=0.25, Y-sym: 7.9323%). All show vol_p val→test gap ~2.7–3.0×. The only merged SOTA (#740, α=0.5 only, no 5L/Y-sym) has 1.104× overall ratio.
+
+Root cause: GradNorm α=0.25 + late cosine tail combined to produce a w_vol_p surge (0.88→1.15 post-EP28) precisely when LR was annealing — baking in vol overfit with high precision. Surface (3.9536%) and wall shear (7.2543%) both beat AB-UPT targets, confirming the architecture is sound but vol_p generalization requires structural fix (Issue #803 SDF regeneration, or excluding vol_p from GradNorm adaptive weighting entirely).
+
+---
+
 ## 2026-05-08 ~09:00 UTC — PR #838 CLOSED: STRING rff24 + σ=0.125 capacity vs aliasing test (tay screen, fern, `84skr4yq`)
 
 - **Branch:** `fern/string-rff24-sigma0125`

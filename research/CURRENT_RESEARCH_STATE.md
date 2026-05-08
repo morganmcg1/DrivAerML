@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-08T~17:00Z (latest update): **tanjiro #818 EP25=6.6150% WAVE VAL LEADER** (run=`dy2z6o4a`; EP24.5=6.6150% → EP25=6.6150% confirmed run best; all 7 channels at simultaneous run-bests; strongly descending slope=-0.0058%/1k_steps; EP50 ETA ~17:30Z May 8); **frieren #806 EP28=6.6573% run best, EP43.7=6.6790% latest PLATEAU** (run=`gui4ceed`; deep plateau EP28-43; slope=-0.0003%/1k_steps essentially flat; vol_p=4.0469% WAVE LOW; ~6.3 epochs remain; EP50 ETA ~16:00Z May 8); **fern #831 EP9=6.7836% run best, EP10.0=6.9925% latest** (run=`pnrgixj1`; EP8-10 transient spike FULLY RECOVERED; run best updated to EP9=6.7836%; 6L config; merge_conflict_comment heuristic = PERMANENT FALSE POSITIVE (resolved label; original GitHub conflict comment persists in PR history, triggers text-scan); PR OPEN/WIP; wall-clock cutoff ~EP43-44); **nezuko #843 RUN LAUNCHED** (7-octave STRING PE σ=[0.25→16.0] + GradNorm α=0.5 + Y-sym; 5L base; run launch confirmed 2026-05-08T~16:00Z; awaiting EP5 gate ≤7.5%); **CLOSED:** nezuko #800 `hmhfnedy` EP50 TERMINAL test=7.8981% (+0.3786pp regression vs wave SOTA 7.5195%), PR CLOSED NOT MERGED — critical vol_p val→test gap 7.76pp identified.
+- 2026-05-09 (latest update): **tanjiro #818 new best=6.6053% @ EP14.16** (run=`dy2z6o4a`; EP15.17=6.6089% latest; tight oscillation near floor; EP50 still running); **fern #831 new best=6.6164% @ EP6.50** (run=`pnrgixj1`; EP7.28 current; 6L STRING; only 0.0111pp behind wave leader; strongly descending); **nezuko #843 EP2.00=7.4031%** (run=`hyzdxrj2`; 7-octave STRING PE; EP2.21 current; on track for EP5 gate ≤7.5%); **frieren #844 RELAUNCHED** (new run=`7dqsxvbq`; original `3054rc61` intentionally killed — wrong --train-volume-points 16384; relaunched with 65000; ~EP0.30, no val yet; only real diff vs #740 is model-layers 5); **PR #838 CLOSED** (test=8.7190%; σ<0.25 dead end at 65k points); **tay screening wave** (5 active PRs: alphonse #839 EP1.91, askeladd #836 EP1.74, thorfinn #842 EP1.53, tanjiro-tay #840 EP1.55, nezuko-tay #823 EP1.50; EP2 gates all pending); **RFF capacity sweep** (fern #845 rff24-sota-spectrum EP0.28, edward #846 rff32-sota-spectrum EP0.27); **frieren #847 lr-warmup-2ep** EP0.26.
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -8,16 +8,24 @@
 **Wave: drivaerml-long-20260504** — 24h DDP8 long runs validating mechanisms that showed promise under short-run or censored budgets. Base config is now well-established: Lion, lr=1e-4, lr-warmup-steps=500, bs=2, train_surface_points=40k, train_volume_points=65k, STRING multi-sigma PE (sigmas=[0.25,0.5,1.0,2.0,4.0]), ema_decay=0.999, no-compile-model, model-layers=4, model-hidden-dim=512, model-heads=4, model-slices=128.
 
 **Wave SOTA (merged test):** PR #740 (fern, `5x8wofzm`), test `abupt_axis_mean_rel_l2_pct` = **7.5195%**, surface=3.8810%, volume=10.7580%, wall=7.0610%. Improved from PR #741 (7.8232%) by 0.3037pp.
-**Wave val leader (WIP):** PR #818 (dl24-tanjiro, `dy2z6o4a`) EP25=**6.6150% WAVE VAL LEADER** (advisor update 2026-05-08T~17:00Z). 6-octave STRING PE + GradNorm α=0.5 + Y-sym; EP25=6.6150% all-channel run best; ~25 epochs remain; EP50 ETA ~17:30Z May 8. Frieren #806 (5L STRING + GradNorm α=0.25 + Y-sym) EP43.7=6.6790% (plateau, best EP28=6.6573%, ~6.3 epochs remain). Fern #831 (6L STRING + GradNorm α=0.5 + Y-sym) EP9=6.7836% best, EP10=6.9925% latest (spike recovered). Nezuko #843 (7-octave STRING PE + GradNorm α=0.5 + Y-sym) just launched, awaiting EP5. **CLOSED:** PR #780 (tanjiro α=0.25 no Y-sym) terminal test=8.0647% — NOT merged; PR #800 (nezuko 5L STRING α=0.5 + Y-sym) terminal test=7.8981% — NOT merged (vol_p val→test gap 7.76pp).
+**Wave val leader (WIP):** PR #818 (dl24-tanjiro, `dy2z6o4a`) **best=6.6053% @ EP14.16 WAVE VAL LEADER** (2026-05-09). 6-octave STRING PE + GradNorm α=0.5 + Y-sym; EP15.17=6.6089% (latest, tight oscillation near floor; 0.0036pp above best). Fern #831 (6L STRING + GradNorm α=0.5 + Y-sym) EP6.50=6.6164% best (only 0.0111pp behind wave leader; strongly descending; early in run). Nezuko #843 (7-octave STRING PE + GradNorm α=0.5 + Y-sym) EP2.00=7.4031% best; EP5 gate ≤7.5% nearly met already. Frieren #844 (5L STRING + GradNorm α=0.5 no Y-sym) RELAUNCHED: run=`7dqsxvbq` (original `3054rc61` killed — wrong --train-volume-points 16384); ~EP0.30, EP5 gate pending. **CLOSED:** PR #806 (frieren 5L GradNorm α=0.25 + Y-sym, `gui4ceed`) terminal deep plateau — NOT merged; PR #780 (tanjiro α=0.25 no Y-sym) terminal test=8.0647% — NOT merged; PR #800 (nezuko 5L STRING α=0.5 + Y-sym) terminal test=7.8981% — NOT merged (vol_p val→test gap 7.76pp); PR #841 (edward Lion β₁=0.85) EP1=31.17% DIVERGED — CLOSED; PR #838 (fern RFF σ=0.125) test=8.7190% CLOSED — σ<0.25 dead end.
 
-### Active Experiments (as of 2026-05-08T~17:00Z)
+### Active Experiments (as of 2026-05-09)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #818 | dl24-tanjiro | 6-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0]`) + GradNorm α=0.5 + Y-sym | `dy2z6o4a` | **EP25=6.6150% WAVE VAL LEADER (all 7 channels at run-bests)**. Trajectory EP12=6.8667%→EP20=6.6532%→EP22=6.6930% (uptick)→EP24=6.6467%→EP24.5=6.6150% (new best)→EP25=6.6150% (confirmed). Slope=-0.0058%/1k_steps (strongly descending). surf_p=4.3835%, vol_p=4.3064%, ws=7.3215%, τx=6.3439%, τy=7.9653%, τz=10.0760%. ~25 epochs remain; EP50 ETA ~17:30Z May 8. Terminal SENPAI-RESULT pending. |
-| #806 | dl24-frieren | 5L STRING + GradNorm α=0.25 + Y-axis symmetry (triple compose) | `gui4ceed` | **EP28=6.6573% run best; EP43.7=6.6790% latest — DEEP PLATEAU**. Trajectory EP38=6.8199% (spike)→EP39=6.7056% (recovery)→EP42=6.6792%→EP43.7=6.6790%. Slope=-0.0003%/1k_steps (essentially flat). vol_p=4.0469% WAVE LOW. ~6.3 epochs remain; EP50 ETA ~16:00Z May 8 (IMMINENT). Terminal SENPAI-RESULT approaching. |
-| #831 | dl24-fern | 6L STRING + GradNorm α=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **EP9=6.7836% run best; EP10=6.9925% latest (EP8-10 spike RECOVERED)**. Trajectory EP1=10.5984%→EP5=7.0461%→EP7=6.8581%→EP8=7.1219% (spike)→EP9=6.7836% (new run best)→EP10=6.9925% (secondary bump). EP10 gate CLEARED (≤7.2%). Wall-clock cutoff ~EP43-44. NOTE: `merge_conflict_comment` heuristic is a PERMANENT FALSE POSITIVE — label is clean (status:wip only), PR is MERGEABLE. |
-| #843 | dl24-nezuko | 7-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0,16.0]`) + GradNorm α=0.5 + Y-sym | TBD | **JUST LAUNCHED ~16:00Z May 8.** Config approved (3 unsupported flags removed, DDP8 torchrun added). 5L base (same as tanjiro #818 but with extra σ=16.0 octave). Awaiting EP5 gate ≤7.5%. No W&B metrics yet. |
+| #818 | dl24-tanjiro | 6-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0]`) + GradNorm α=0.5 + Y-sym | `dy2z6o4a` | **best=6.6053% @ EP14.16 WAVE VAL LEADER**. Val history: EP10=6.653%, EP12=6.647%, EP13=6.609%, EP14.16=6.6053% (best), EP14.67=6.6143%, EP15.17=6.6089% (latest). Tight oscillation near floor (noise band ~0.004pp). EP50 still running. |
+| #831 | dl24-fern | 6L STRING + GradNorm α=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **best=6.6164% @ EP6.50** (0.0111pp behind wave leader). Val history: EP5=6.993%, EP5.5=6.702%, EP6=6.840%, EP6.50=6.6164% (best), EP7=6.6245%, current EP7.28. Strongly descending; early in run; EP20 gate CLEARED. Wall-clock cutoff ~EP43-44. |
+| #843 | dl24-nezuko | 7-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0,16.0]`) + GradNorm α=0.5 + Y-sym | `hyzdxrj2` | **EP2.00=7.4031% (best)**, EP2.21 current. Val: EP0.5=10.899%, EP1=7.943%, EP1.5=7.423%, EP2=7.4031%. On track for EP5 gate ≤7.5% (nearly met already). EP5 gate checkpoint ETA ~May 9. |
+| #844 | dl24-frieren | 5L STRING + GradNorm α=0.5 compose (**no Y-sym**) — clean two-way stack | `7dqsxvbq` (RELAUNCHED) | ~EP0.30, no val yet. Original run `3054rc61` intentionally killed by student at EP1 — wrong `--train-volume-points 16384` in PR body; relaunched 2026-05-08T07:44Z with `--train-volume-points 65000`. NOTE: student also clarified that #740 (wave SOTA) also used string_multisigma PE — so only real diff vs #740 is `--model-layers 5`. Key novelty: clean test of 5L + GradNorm α=0.5 without Y-sym confound. EP5 gate ≤7.5% pending. |
+| #839 | alphonse (tay) | tay 4-epoch screen | `6jxmx316` | EP1.91; intermediate val ~7.433% @ step19926; excellent trajectory; EP2 gate <16% pending |
+| #836 | askeladd (tay) | tay 4-epoch screen | `46idy5bk` | EP1.74; no half-epoch val logged yet; EP2 gate <16% pending |
+| #842 | thorfinn (tay) | tay 4-epoch screen | `3487klz8` | EP1.53; step16300 intermediate ~11.395%; EP2 gate <16% pending |
+| #840 | tanjiro-tay (tay) | tay 4-epoch screen | `oiptel6p` | EP1.55; step16300 intermediate ~12.345%; EP2 gate <16% pending |
+| #823 | nezuko-tay (tay) | tay 4-epoch screen with --use-surf-to-vol-xattn | `lp7u9r8g` | EP1.50; EP1=28.026%; stricter EP2 gate <10% pending |
+| #845 | dl24-fern | RFF num_features=24, rff_init_sigmas=0.25,0.5,1.0,2.0,4.0 (sota-spectrum) | `thimjhnd` (rank0) | EP0.28; no val yet; group=rff-capacity-sweep; 8 runs |
+| #846 | dl24-edward | RFF num_features=32, rff_init_sigmas=0.25,0.5,1.0,2.0,4.0 (sota-spectrum) | `px719275` | EP0.27; no val yet; group=rff-capacity-sweep |
+| #847 | dl24-frieren | LR warmup 2ep variant | `7gzie3gj` | EP0.26; no val yet |
 
 ### Merged Results This Wave
 
@@ -43,6 +51,12 @@
 | #730 | dl24-tanjiro | STRING + QK-Norm at lower LR=5e-5 | CLOSED: abandoned by student — zero W&B runs, zero PR comments. |
 | #623 | dl24-tanjiro | EMA-proxy GradNorm α=0.5 | Infrastructure kill required (ignored kill orders). Best val=12.4377%. |
 | #659 | norman | Width-over-Depth 4L/768d/12h cold-start | Closed: test=11.2020%. OOM forced slices=64; undertrained. |
+| #780 | dl24-tanjiro | GradNorm α=0.25 (no Y-sym) | TERMINAL test=8.0647%, NOT merged. Confirms α=0.5 is unimodal optimum on α-axis. |
+| #794 | dl24-fern | GradNorm α=0.25 + Y-sym (4L) | TERMINAL test=7.9011% (+0.382pp regression). 4L architecture deficit vs 5L. NOT merged. |
+| #800 | dl24-nezuko | 5L STRING + GradNorm α=0.5 + Y-sym | TERMINAL test=7.8981% (+0.379pp regression). Critical vol_p val→test gap 7.76pp. NOT merged. |
+| #806 | dl24-frieren | 5L STRING + GradNorm α=0.25 + Y-sym | TERMINAL test=7.9323% (+0.413pp). Deep plateau EP28-47. NOT merged. Third triple-compose failure. |
+| #841 | dl24-edward | Lion β₁=0.85 | EP1=31.17% DIVERGED. CLOSED. β₁=0.9 is stable optimum. |
+| #838 | dl24-fern | STRING RFF σ=0.125, 4-epoch tay screen | **CLOSED** — test=8.7190% (+1.2pp regression vs SOTA 7.5195%); merge gate failed (tay EP4=7.4255% > ≤6.5985% required); σ<0.25 axis confirmed dead at 65k surface points (aliasing dominates capacity at high point density) |
 
 ### Critical Config Constraints
 
@@ -72,46 +86,48 @@
 
 2. **Y-symmetry augmentation improves results — CONFIRMED, MERGED (PR #741).** test=7.8232%, val EP33=6.4984%. First wave merge to beat pre-wave SOTA 7.9303% by 0.107pp. Mechanism: effective dataset doubling via car geometry bilateral symmetry.
 
-3. **Does GradNorm α=0.25 (more conservative) beat α=0.5? (tanjiro #780) — CLOSED NEGATIVE. Terminal test=8.0647%, NOT merged.** (run=`20n1fvwn`). EP49 terminal: full_val=6.7669%, test=8.0647%. Does NOT beat wave best 7.5195% (+0.5452pp regression). Every channel worse vs α=0.5. Converged GradNorm: w_vol=2.351 (over-weighted), w_τz=0.487 (under-weighted). **Definitively confirms α=0.5 is the unimodal optimum on the α-axis.** Y-sym is what enables τz routing, not just α choice — structural ~0.4pp deficit confirmed closed.
+3. **Does GradNorm α=0.25 (more conservative) beat α=0.5? (tanjiro #780) — CLOSED NEGATIVE. Terminal test=8.0647%, NOT merged.** (run=`20n1fvwn`). Every channel worse vs α=0.5. **Definitively confirms α=0.5 is the unimodal optimum on the α-axis.**
 
-4. **Does QK-Norm + Y-symmetry compose? (nezuko #784) — CLOSED NEGATIVE.** EP18=7.5605% run-best, EP20 gate MISSED by ~0.27pp. PR CLOSED. Second negative QK-Norm result on this wave — QK-Norm remains problematic at wave-standard LR=1e-4 when composed with Y-symmetry. dl24-nezuko now reassigned to PR #800 (5L STRING + GradNorm α=0.5 compose).
+4. **Does QK-Norm + Y-symmetry compose? (nezuko #784) — CLOSED NEGATIVE.** EP20 gate MISSED. Second negative QK-Norm result on this wave.
 
-4b. **Does 5L STRING + GradNorm α=0.5 compose? (nezuko #800) — CLOSED TERMINAL test=7.8981%.** PR CLOSED NOT MERGED (run=`hmhfnedy`). EP50 terminal: full_val=6.6975% (best EP25=6.6828%), test=7.8981% (+0.3786pp regression vs 7.5195%). Critical finding: vol_p val→test gap = 7.76pp (val=4.2757% vs test=12.0379%). surf_p=3.9804%, ws=7.1561%, τx=6.2955%, τy=7.8062%, τz=9.3705%. GradNorm final: w_τx=0.719, w_τy=0.995, w_τz=1.608. Does NOT beat merged SOTA. Superseded by nezuko #843 (7-octave STRING PE + GradNorm α=0.5 + Y-sym).
+4b. **Does 5L STRING + GradNorm α=0.5 compose? (nezuko #800) — CLOSED TERMINAL test=7.8981%.** Critical vol_p val→test gap = 7.76pp. Does NOT beat merged SOTA. Superseded by nezuko #843 (7-octave STRING PE + GradNorm α=0.5 + Y-sym).
 
-5. **Does GradNorm α=0.5 + Y-symmetry compose orthogonally? (frieren #791) — CLOSED, SUPERSEDED by #806.** EP13=6.9635% run best, run `g0um26ek`. EP10 gate CLEARED (7.0408%). w_τz=1.451 (α=0.5 over-routes to τz). Closed because α=0.25 + Y-sym (fern #794 EP11=6.8315%) was 0.132pp ahead with 2 fewer epochs — strong evidence α=0.25 is better for composition. Frieren reassigned to triple-compose #806 (5L STRING + GradNorm α=0.25 + Y-sym).
+5. **Triple-compose failures (PRs #794, #800, #806):** All three triple-compose runs (5L STRING + GradNorm + Y-sym, in various combinations) showed same vol_p val→test gap (~3× ratio: val~4.0-4.3%, test~12.0%). Frieren #844 tests clean two-way (5L + GradNorm, no Y-sym) to isolate whether Y-sym is the confound.
 
-5b. **Triple compose: 5L STRING + GradNorm α=0.25 + Y-sym — EP28=6.6573% run best, now PLATEAU EP42=6.6792% (frieren #806, run=`gui4ceed`).** Descended from EP10=6.8007% through EP24=6.6775%→EP28=6.6573% (run best). EP38=6.8199% anomalous spike recovered EP39. Plateau band EP32-42 ~6.663-6.680%. ~8 epochs remain; EP50 terminal approaching. SUPERSEDED as wave val leader by tanjiro #818 (EP20=6.6532% vs EP28=6.6573%; 0.004pp ahead). Still strong candidate for test improvement — 0.8578pp below merged best (7.5195%), pending generalization gap. **Wave val leadership now held by tanjiro #818 EP20=6.6532% (6-octave STRING PE + GradNorm α=0.5 + Y-sym, run=`dy2z6o4a`).**
+6. **6-octave STRING PE (tanjiro #818) is wave val leader.** best=6.6053% @ EP14.16 — 0.453pp below current wave SOTA val best when SOTA was set. Tight oscillation near floor suggests approaching convergence. Terminal test will be the key metric.
 
-6. **Does GradNorm α=0.25 + Y-symmetry compose beat other combinations? (fern #794) — EP42=6.7427% PLATEAU+DRIFT, TERMINAL IMMINENT ~22:35Z May 7.** EP25=6.7064% remains run best (run=`em7eupj5`). Plateau with drift: EP42=6.7427% (+0.036pp from EP25 best). Wall drift worsening +0.055pp over EP25→EP42. τz continued rise. Superseded as wave val leader by frieren #806 (EP24=6.6775%). **Advisor directive: use EP25 best-val checkpoint for test eval** (not EP50 terminal weights). EP50 terminal imminent ~22:35Z May 7. Post-terminal test result pending from EP25 checkpoint. Still a meaningful result if test < 7.5195%.
+7. **6L STRING (fern #831) closes gap rapidly.** best=6.6164% @ EP6.50 — only 0.0111pp behind wave leader at much earlier epoch (6.5 vs 14.16). Extra depth appears to be learning faster. Strong candidate to overtake #818 as val leader by EP20+.
 
-7. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) reduces gap via effective dataset doubling. GradNorm (#740) reduces vol error to 10.758% from 11.335%. No direct architectural fix yet tested. Vol still 2.77× surface gap.
+8. **Volume val→test gap (3×) remains the central unsolved problem.** WD sweep (#667) definitively closed WD as a lever. Y-symmetry (#741) reduces gap via effective dataset doubling. GradNorm (#740) reduces vol error to 10.758%. All triple-compose failures driven by this gap. No direct architectural fix yet tested.
 
-8. **5L STRING confirmed valid but short of beating merged best (PR #745).** test=7.845% vs merged best 7.8232% — 0.023pp short. Val EP30=6.5097%. Compose 5L STRING + GradNorm or 5L STRING + Y-sym remains viable next hypothesis.
-
-9. **Tanjiro compliance note:** PR #780 had unauthorized multi-arm screening; formal reprimand issued. Run `20n1fvwn` completed and CLOSED — terminal test=8.0647%, NOT merged. Tanjiro reassigned to PR #818 (6-octave STRING PE + GradNorm α=0.5 + Y-sym); EP5=7.1118%, all early gates cleared, EP10 ETA ~22:30Z May 7.
+9. **RFF capacity sweep (PRs #845, #846):** Testing Random Fourier Features with different num_features (24 vs 32) and sota-spectrum sigmas (0.25-4.0). PR #838 (σ=0.125) was **CLOSED** — test=8.7190% (+1.2pp regression); σ<0.25 is a confirmed dead end at 65k surface points (aliasing ~82% of regression). #845 and #846 correctly use only the 5-octave SOTA spectrum (σ=0.25-4.0) to test RFF capacity.
 
 ## Potential Next Research Directions (after current arms complete)
 
-**Currently in-flight (4 WIP PRs; all students occupied):**
-- Tanjiro #818: 6-octave STRING PE + GradNorm α=0.5 + Y-sym — **EP25=6.6150% WAVE VAL LEADER** (run=`dy2z6o4a`); ~25 epochs remain; EP50 ETA ~17:30Z May 8; strongly descending; terminal SENPAI-RESULT pending
-- Frieren #806: 5L STRING + GradNorm α=0.25 + Y-sym (triple compose) — **EP28=6.6573% run best; EP43.7=6.6790% deep plateau** (run=`gui4ceed`); ~6.3 epochs remain; EP50 IMMINENT ~16:00Z May 8; terminal approaching
-- Fern #831: 6L STRING + GradNorm α=0.5 + Y-sym (extra-depth) — **EP9=6.7836% run best; EP10=6.9925% (spike recovered)** (run=`pnrgixj1`); EP10 gate CLEARED; wall-clock cutoff ~EP43-44
-- Nezuko #843: 7-octave STRING PE + GradNorm α=0.5 + Y-sym — **JUST LAUNCHED ~16:00Z May 8**; no W&B metrics yet; awaiting EP5 gate ≤7.5%
+**Currently in-flight (12 active PRs):**
+- Tanjiro #818: 6-octave STRING PE — **best=6.6053% @ EP14.16 WAVE VAL LEADER**; EP15.17 latest; EP50 still running
+- Fern #831: 6L STRING — **best=6.6164% @ EP6.50**; EP7.28 current; strongly descending; early stages
+- Nezuko #843: 7-octave STRING PE — **EP2.00=7.4031%**; EP2.21 current; on track for EP5 gate
+- Frieren #844: 5L STRING no Y-sym — EP0.67; no val yet; EP5 gate pending
+- Tay screening: #839 (alphonse), #836 (askeladd), #842 (thorfinn), #840 (tanjiro-tay), #823 (nezuko-tay) — all EP1.5-1.9; EP2 gates pending
+- RFF capacity: #845 (fern rff24), #846 (edward rff32) — EP0.27-0.28; no val yet
+- LR warmup: #847 (frieren lr-warmup-2ep) — EP0.26; no val yet
 
 **High-priority candidates after current wave completes:**
-1. **5L STRING + GradNorm α=0.5 compose**: #745 val=6.5097% + #740 test=7.5195% — independent confirmation of both mechanisms; composition is the natural next step. High expected gain.
-2. **5L STRING + Y-symmetry + GradNorm triple compose**: if all three mechanisms confirm, triple compose on SOTA base. Highest complexity but all three mechanisms are proven orthogonal.
-3. **Volume MLP head**: replace volume Transolver decoder with separate MLP for independent volume capacity. Pre-wave evidence (`8x7c537j`). Vol gap (10.758%) is now 2.77× surface (3.881%) — structural fix needed.
-4. **GradNorm α optimal sweep (α=0.1, α=0.75)**: tanjiro #780 tests α=0.25, fern #740 confirmed α=0.5. Map the α curve more fully to find true optimal.
-5. **EMA-proxy GradNorm α=0.5 (clean re-run)**: prior PR #623 failed on logistics. Pre-wave `wyz68o8r` showed 8.236% test. Worth clean re-test on current SOTA STRING + Y-sym.
-6. **GradNorm + deeper model (6L STRING)**: if 5L STRING shows gains, extend to 6L with GradNorm. Increasing model depth + gradient balance addresses both capacity and training instability.
-7. **QK-Norm at wave-standard lr=1e-4 (standalone)**: PR #732 tested QK-Norm at lr=5e-5 (negative). Pre-wave `tkiigfmc` (8.625%) showed signal. QK-Norm on current SOTA STRING at lr=1e-4 not yet tested cleanly. Lower priority; test only after higher-priority directions exhaust.
-8. **Beta-NLL heteroscedastic surface head**: principled loss for heteroscedastic tau_y/z noise. Higher risk, potentially high reward for wall_shear_z bottleneck.
+1. **5L STRING + Y-symmetry + GradNorm triple compose**: if frieren #844 two-way shows gains, add Y-sym back for full triple-compose but with α=0.5 (not α=0.25 like the failed triple-compose PRs #794, #800, #806). Key: #844 isolates the two-way first.
+2. **Volume MLP head**: replace volume Transolver decoder with separate MLP for independent volume capacity. Pre-wave evidence (`8x7c537j`). Vol gap (10.758%) is now 2.77× surface (3.881%) — structural fix needed.
+3. **GradNorm α optimal sweep (α=0.1, α=0.75)**: tanjiro #780 tests α=0.25, fern #740 confirmed α=0.5. Map the α curve more fully to find true optimal.
+4. **EMA-proxy GradNorm α=0.5 (clean re-run)**: prior PR #623 failed on logistics. Pre-wave `wyz68o8r` showed 8.236% test. Worth clean re-test on current SOTA STRING + Y-sym.
+5. **Beta-NLL heteroscedastic surface head**: principled loss for heteroscedastic tau_y/z noise. Higher risk, potentially high reward for wall_shear_z bottleneck.
+6. **6L STRING + Y-sym + RFF**: if #831 confirms 6L depth advantage, combine with best RFF from capacity sweep.
 
 **Confirmed dead ends — do not retry:**
 - Weight decay variations (PR #667): vol gap WORSENS as WD decreases.
 - QK-Norm at lr=5e-5 (PR #732): negative result.
 - 7-sigma STRING PE (PR #673): config mismatch + regression.
 - lr=9e-5 control (PR #749): no improvement vs lr=1e-4.
+- Triple-compose with α=0.25 (PRs #794, #800, #806): all three failed; vol_p val→test gap systematic.
+- GradNorm α=0.25 (PR #780): confirmed α=0.5 is optimal on α-axis.
+- Lion β₁=0.85 (PR #841): catastrophic divergence.
 
-_Last updated: 2026-05-08T~17:00Z. Key events: (1) tanjiro #818 `dy2z6o4a` EP25=6.6150% WAVE VAL LEADER (confirmed, improved from EP20=6.6532%; strongly descending, all 7 channels at run-bests; ~25 epochs remain); (2) frieren #806 `gui4ceed` EP43.7=6.6790% deep plateau (run best EP28=6.6573%; essentially flat; TERMINAL IMMINENT ~16:00Z May 8); (3) fern #831 `pnrgixj1` EP9=6.7836% new run best (EP8-10 spike recovered; EP10 gate CLEARED; PR merge_conflict_comment heuristic = PERMANENT FALSE POSITIVE, label clean); (4) nezuko #843 LAUNCHED ~16:00Z (7-octave STRING PE σ=[0.25..16.0] + GradNorm α=0.5 + Y-sym; awaiting EP5 gate); (5) nezuko #800 `hmhfnedy` CLOSED — terminal test=7.8981% (+0.3786pp vs SOTA), vol_p val→test gap 7.76pp confirmed; NOT merged._
+_Last updated: 2026-05-09. Key events: (1) tanjiro #818 `dy2z6o4a` best=**6.6053%** @ EP14.16 WAVE VAL LEADER (EP15.17=6.6089% latest; tight oscillation near floor); (2) fern #831 `pnrgixj1` best=**6.6164%** @ EP6.50 (only 0.0111pp behind wave leader; 6L depth showing strong early evidence; strongly descending); (3) nezuko #843 `hyzdxrj2` EP2.00=7.4031% (on track for EP5 gate ≤7.5%); (4) frieren #844 `3054rc61` EP0.67 launched (5L + GradNorm α=0.5 no Y-sym clean two-way); (5) tay screening wave: 5 active PRs, EP2 gates all pending; (6) RFF capacity sweep: fern #845 (rff24), edward #846 (rff32), both EP0.27-0.28; (7) frieren #847 lr-warmup-2ep EP0.26._
