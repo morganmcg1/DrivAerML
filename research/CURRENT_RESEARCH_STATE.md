@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 (latest update: post-assignment bookkeeping)
+- 2026-05-09 (latest update: frieren wave leader + tanjiro/nezuko EP1 acknowledgment)
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -9,18 +9,18 @@
 
 **Wave SOTA (merged test):** PR #740 (fern, `5x8wofzm`), test `abupt_axis_mean_rel_l2_pct` = **7.5195%**, surface=3.8810%, volume=10.7580%, wall=7.0610%. Improved from PR #741 (7.8232%) by 0.3037pp.
 
-**Wave val leader (WIP):** PR #831 (dl24-fern, `pnrgixj1`) **best=6.5477% @ EP29 WAVE VAL LEADER** (live W&B 2026-05-05). 6L STRING + GradNorm α=0.5 + Y-sym. EP34.95 (step 191,956), EP34=6.5555% latest. **Below SOTA-advancement val threshold 6.5985% — pending terminal SENPAI-RESULT for merge consideration.** 5-epoch plateau EP29-34. Frieren #844 (5L STRING + GradNorm α=0.5 no Y-sym) **run best=6.5631% @ EP23** — ALSO below 6.5985% threshold; EP24=6.5647% (+1.6bp single-epoch fluctuation); vp=4.1082% declining; 2nd wave val leader. Nezuko #843 (7-octave STRING PE + GradNorm α=0.5 + Y-sym) EP28 **new best=6.6340%**; vol_p PERSISTENT instability (4.4287% EP28, oscillating 4.43–4.66% range — NEVER below 4.30% gate threshold).
+**Wave val leader (WIP):** PR #844 (dl24-frieren, `7dqsxvbq`) **best=6.5379% @ EP27 — WAVE VAL LEADER** (live W&B 2026-05-09). 5L STRING + GradNorm α=0.5 (no Y-sym). **Below SOTA-advancement val threshold 6.5985%**; vol_p=4.0793% (stable, declining — positive signal); overtook fern #831 as wave leader 2026-05-09. Fern #831 (`pnrgixj1`) EP38=6.5866% — **ACTIVE COSINE TAIL DIVERGENCE** (39bp above EP29 best 6.5477%); EP40 is hard decision point for early termination. 6L STRING + GradNorm α=0.5 + Y-sym.
 
 **Y-sym physical signal CONFIRMED (PR #855, CLOSED):** Y-sym p=0.5 standalone (no GradNorm, no 6L) isolates τ_y < τ_z channel ordering at val EP3, EP4, AND test. Cleanest physical signal isolation to date. Gate miss (val EP4=8.0813%, test=9.2221%) due to no other optimizations; signal confirmed.
 
-### Active Experiments (as of 2026-05-05, post-assignment update)
+### Active Experiments (as of 2026-05-09, post-frieren wave leader update)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #831 | dl24-fern | 6L STRING + GradNorm a=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **WAVE VAL LEADER: best=6.5477% @ EP29** — BELOW 6.5985% SOTA-advancement threshold. EP34.95 (step 191,956) latest; EP34=6.5555%. vp=4.1071% stable (slow monotonic descent — positive signal). **5-epoch plateau EP29-34 (no new best).** Late cosine annealing tail may yield improvement EP40-45. Advisor requested EP37 milestone report; heartbeat posted 2026-05-05T20:17Z. |
-| #844 | dl24-frieren | 5L STRING + GradNorm a=0.5 (**no Y-sym**) — clean two-way stack | `7dqsxvbq` | EP24 (step 131,855). Run best=**6.5631% @ EP23** (SOTA-BEATING, below 6.5985%). EP24=6.5647% (+1.6bp regression — single-epoch fluctuation, NOT alarming). vp=4.1082% (new low, still declining — underlying optimization healthy). 2nd wave val leader. 26 epochs remain; advisor requested EP27 milestone report; heartbeat posted 2026-05-05T20:03Z. |
-| #873 | dl24-tanjiro | **7L STRING + GradNorm a=0.5 + Y-sym** — depth axis extension beyond confirmed 6L wave leader | TBD | **NEWLY ASSIGNED.** Tests whether 4L->5L->6L monotonic depth improvement extends to 7L on the wave-leader stack. Expected gain ~0.1pp (reaching ~6.44% if trend holds). Identical to fern #831 except `--model-layers 7`. Kill gates: EP5<=7.5%, EP10<=7.2%, EP20<=6.9%, EP30<=6.6%. |
-| #874 | dl24-nezuko | **6L STRING + GradNorm a=0.75 + Y-sym** — GradNorm a upper-half midpoint on wave-leader stack | TBD | **NEWLY ASSIGNED.** a-axis: a=0.25 (worse), a=0.5 (SOTA), a=0.75 (THIS — untested on 6L long-run), a=1.0 (worse short-run). Tests whether a optimum shifts with deeper models. Identical to fern #831 except `--gradnorm-alpha 0.75`. Kill gates: EP5<=7.5%, EP10<=7.2%, EP20<=6.9%, EP30<=6.6005%. |
+| #844 | dl24-frieren | 5L STRING + GradNorm a=0.5 (**no Y-sym**) — clean two-way stack | `7dqsxvbq` | **WAVE VAL LEADER: best=6.5379% @ EP27** — BELOW 6.5985% SOTA-advancement threshold. vp=4.0793% (stable, declining — positive signal). Overtook fern #831 as wave leader 2026-05-09. Continue to EP50. |
+| #831 | dl24-fern | 6L STRING + GradNorm a=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **ACTIVE COSINE TAIL DIVERGENCE.** EP38=6.5866% — 39bp ABOVE EP29 best 6.5477%. Ascending trend EP29→EP38. EP40 is hard decision point: if no new best by EP40, consider early termination. Advisor posted EP37/EP38 milestone comment 2026-05-09. |
+| #873 | dl24-tanjiro | **7L STRING + GradNorm a=0.5 + Y-sym** — depth axis extension beyond confirmed 6L wave leader | `59bcgz40` | EP1=10.5371% CONFIRMED HEALTHY 2026-05-09. 7L depth ablation: 4L(SOTA) → 5L(frieren#844) → 6L(fern#831) → 7L(THIS). Expected best ~6.44% if monotonic trend holds. Kill gates: EP5<=7.5%, EP10<=7.2%, EP20<=6.9%, EP30<=6.6%. EP5 milestone requested. |
+| #874 | dl24-nezuko | **6L STRING + GradNorm a=0.75 + Y-sym** — GradNorm a upper-half midpoint on wave-leader stack | `rm6u10ro` | EP1 IN PROGRESS (rank-0 confirmed launched, step ~1344 at acknowledgment 2026-05-09). a-axis: a=0.25 (worse), a=0.5 (SOTA), a=0.75 (THIS — untested on 6L long-run), a=1.0 (worse short-run). Kill gates: EP5<=7.5%, EP10<=7.2%, EP20<=6.9%, EP30<=6.6005%. EP1 milestone requested. |
 
 **Tay-screen wave (closed/killed 2026-05-09):**
 - PR #857 (askeladd σ-ladder Arm B `o7odqtqq`): NO DATA logged (run finished without metrics — likely crashed early). CLOSED.
@@ -104,7 +104,7 @@
 
 3. **GradNorm α=0.5 is unimodal optimum — CONFIRMED.** α=0.25 (PR #780) terminal test=8.0647%. α-axis is closed.
 
-4. **6L STRING (fern #831) is WAVE VAL LEADER at 6.5477% @ EP29 (EP33=6.5625% latest).** 5L frieren #844 has broken threshold too at 6.5687% @ EP22 (no Y-sym control). Both below SOTA-advancement threshold 6.5985%. Extra depth + Y-sym (fern) yields ~0.021pp additional gain vs frieren two-way stack. Wall-clock cutoff ~EP43-44 for fern. Test eval critical for both.
+4. **Depth axis: 4L→5L→6L confirmed monotonic improvement; 7L under test.** Frieren #844 (5L, no Y-sym, `7dqsxvbq`) is **WAVE VAL LEADER at 6.5379% @ EP27** — vol_p=4.0793% declining (positive signal). Fern #831 (6L + Y-sym, `pnrgixj1`) in active cosine tail divergence — EP38=6.5866% (39bp above EP29 best 6.5477%). Tanjiro #873 (7L, `59bcgz40`) EP1=10.5371% confirmed healthy — testing whether monotonic trend extends to 7L. If yes, expected best ~6.44%.
 
 5. **Y-sym physical signal CONFIRMED ISOLATED (PR #855, CLOSED).** τ_y < τ_z channel ordering confirmed at val EP3, val EP4, AND test even in standalone Y-sym-only config. Physical basis for the augmentation is now well-established.
 
@@ -118,11 +118,11 @@
 
 ## Potential Next Research Directions
 
-**Currently in-flight (as of 2026-05-05, post-assignment update):**
-- Fern #831: 6L STRING — **WAVE VAL LEADER: best=6.5477% @ EP29**; EP34.95 (step 191,956), EP34=6.5555%; 5-epoch plateau EP29-34; vp=4.1071% (new low, slow descent — positive); wall-clock cutoff ~EP43-44; EP37 milestone requested 2026-05-05T20:17Z
-- Frieren #844: 5L STRING no Y-sym — **EP23 best=6.5631% SOTA-BEATING** (below 6.5985%); EP24=6.5647% (+1.6bp minor regression); vp=4.1082% still declining; 26 epochs remain; EP27 milestone requested 2026-05-05T20:03Z
-- Tanjiro #873: **7L STRING + GradNorm a=0.5 + Y-sym** — NEWLY ASSIGNED. Depth axis extension beyond confirmed 6L wave leader. Kill gates: EP5<=7.5%, EP10<=7.2%, EP20<=6.9%, EP30<=6.6%. Expected best ~6.44% if 4L->5L->6L monotonic trend holds.
-- Nezuko #874: **6L STRING + GradNorm a=0.75 + Y-sym** — NEWLY ASSIGNED. GradNorm a upper-half midpoint on wave-leader stack; a-axis: a=0.25 (worse), a=0.5 (SOTA), a=0.75 (THIS), a=1.0 (worse short-run). Kill gates: EP5<=7.5%, EP10<=7.2%, EP20<=6.9%, EP30<=6.6005%.
+**Currently in-flight (as of 2026-05-09, frieren wave leader update):**
+- Frieren #844: 5L STRING no Y-sym — **WAVE VAL LEADER: best=6.5379% @ EP27** (run `7dqsxvbq`); vol_p=4.0793% stable and declining; overtook fern #831 2026-05-09; continue to EP50.
+- Fern #831: 6L STRING + Y-sym — **ACTIVE COSINE TAIL DIVERGENCE** (run `pnrgixj1`); EP38=6.5866% (39bp above EP29 best 6.5477%); ascending trend; EP40 hard decision point for early termination.
+- Tanjiro #873: 7L STRING + GradNorm a=0.5 + Y-sym — (run `59bcgz40`); EP1=10.5371% confirmed healthy 2026-05-09; depth ablation: 4L→5L→6L→7L; EP5 milestone requested; kill gates active.
+- Nezuko #874: 6L STRING + GradNorm a=0.75 + Y-sym — (run `rm6u10ro`); EP1 in progress as of 2026-05-09; GradNorm α upper-half midpoint; EP1 milestone requested; kill gates active.
 
 **High-priority candidates after current wave completes:**
 1. **5L STRING + Y-sym + GradNorm triple compose with α=0.5**: if frieren #844 two-way shows gains, add Y-sym back for full triple-compose (α=0.5 not α=0.25). Key: #844 isolates two-way first.
@@ -143,4 +143,4 @@
 - RFF capacity above 16 features (PRs #845, #846): both EP4 gate failures. Axis closed.
 - LR warmup 2 epochs (PR #847): definitively worse than 1-ep warmup. Axis closed.
 
-_Last updated: 2026-05-05 (post-assignment bookkeeping). Key events: (1) fern #831 `pnrgixj1` WAVE VAL LEADER best=**6.5477%** @ EP29; EP34.95 (step 191,956) latest, EP34=6.5555%; 5-epoch plateau EP29-34; vp=4.1071% (new low, slow descent — positive micro-signal); EP37 milestone pending; (2) frieren #844 `7dqsxvbq` EP24 (step 131,855); **NEW BEST 6.5631% @ EP23** — SOTA-BEATING (below 6.5985%); EP24=6.5647% +1.6bp single-epoch fluctuation, not alarming; vp=4.1082% still declining; EP27 milestone pending; (3) nezuko #843 CLOSED — EP30 dual kill gate NOT MET (vol_p NEVER below 4.30%; primary=6.6340% above 6.6005% threshold); sigma=16.0 destabilization confirmed; (4) tanjiro #866 CLOSED — EP4 gate definitively failed; Y-sym p=1.0 falsified; p=0.5 confirmed optimal; (5) tanjiro NEWLY ASSIGNED #873 (7L STRING + GradNorm a=0.5 + Y-sym — depth axis extension); (6) nezuko NEWLY ASSIGNED #874 (6L STRING + GradNorm a=0.75 + Y-sym — GradNorm a upper-half); all 4 students occupied, 0 idle._
+_Last updated: 2026-05-09 (frieren wave leader update + tanjiro/nezuko EP1 acknowledgment). Key events: (1) **frieren #844 `7dqsxvbq` IS NEW WAVE VAL LEADER** — EP27 confirmed best=**6.5379%** (98bp below fern EP29 best); vol_p=4.0793% stable and declining; overtook fern #831; (2) **fern #831 `pnrgixj1` ACTIVE COSINE TAIL DIVERGENCE** — EP38=6.5866% (39bp above EP29 best 6.5477%); ascending trend EP29→EP38; EP40 hard decision point; (3) **tanjiro #873 `59bcgz40` EP1=10.5371% CONFIRMED HEALTHY** — 7L depth ablation running; EP5 milestone pending; (4) **nezuko #874 `rm6u10ro` EP1 IN PROGRESS** — 6L + GradNorm α=0.75; config confirmed clean; EP1 milestone pending. All 4 students occupied, 0 idle._
