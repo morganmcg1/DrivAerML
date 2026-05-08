@@ -1,5 +1,42 @@
 # SENPAI Research Results
 
+## 2026-05-01 17:00 — PR #854: GradNorm α=0.1 (edward) — CLOSED NEGATIVE
+
+- **Branch**: edward/gradnorm-alpha-0.1 (deleted)
+- **W&B run**: `f1l3m752` (rank-0, group `edward-gradnorm-l5-sota`)
+- **Hypothesis**: Test GradNorm with α=0.1 (softer task balancing) — the softest end of the α spectrum — as re-test after STRING + Lion stack convergence. Prior GradNorm failures (α=0.25, 0.5, 0.75, 1.0) may have been stack-interaction artifacts rather than GradNorm-fundamental.
+
+| Metric | PR #854 (GradNorm α=0.1) | SOTA #592 | Gate |
+|---|---:|---:|---:|
+| val_abupt (EP4) | NEGATIVE (gate miss) | 6.5985% | <6.5985% ❌ |
+
+**Results commentary:** GradNorm α=0.1 failed kill gates. This is the 5th consecutive GradNorm failure: α=0.1, 0.25, 0.5, 0.75 all failed gate; α=1.0 crashed. The full spectrum has been exhausted. GradNorm dynamic task balancing is conclusively anti-synergistic with the L5/Lion/STRING stack regardless of α or initialization. Edward assigned to PR #861 (QK-norm ablation).
+
+**Verdict (CONCLUSIVELY CLOSED):** GradNorm axis closed permanently. All 5 α values exhausted. Do not revisit under any configuration.
+
+---
+
+## 2026-05-01 17:30 — PR #850: Lion β₂ sweep 13-ep (tanjiro) — CLOSED INCONCLUSIVE/BUDGET
+
+- **Branch**: tanjiro/lion-beta2-sweep (deleted)
+- **W&B run**: `dxole713` (rank-0, group `tanjiro-lion-beta2-sweep`, Arm A β₂=0.95)
+- **Hypothesis**: Lion β₂ controls the EMA timescale of the squared-gradient term. β₂=0.99 is SOTA (never ablated). β₂=0.95 (more reactive) and β₂=0.999 (smoother). Both arms on 13-ep long schedule.
+
+| Step | Epoch boundary | val_abupt |
+|---:|---|---:|
+| 10,864 | EP1 (13-ep) | 25.4899% |
+| 21,729 | EP2 (13-ep) | 8.2497% |
+| 32,594 | EP3 (13-ep) | 7.3084% |
+| 37,368 | timeout (mid-EP4) | **6.9165%** (best) |
+
+**Test metrics (terminal checkpoint):** abupt=8.0651%, vol_p=11.8169%, wall_shear=7.4366%
+
+**Results commentary:** Arm A (β₂=0.95) best val=6.9165% FAILS gate (<6.5985%), but the trajectory was still descending (25.49→8.25→7.31→6.92) at SENPAI_TIMEOUT_MINUTES=270 cutoff at step 37,370. The EP4 boundary is ~43,459 steps — the 13-ep schedule cannot complete within the 270-min budget. Arm B (β₂=0.999) was never launched. Inconclusive result: β₂=0.95 may still beat SOTA if given the full 4-ep run. **Root cause: wrong schedule chosen (13-ep vs 4-ep tay screen).**
+
+**Verdict (CLOSED/BUDGET DESIGN ERROR):** Re-assigned as PR #862 on 4-ep tay screen. β₂ axis remains open pending PR #862 results.
+
+---
+
 ## 2026-05-08 02:10 — PR #827: Cosine LR warm restarts on L5 SOTA 4-ep (frieren) — CLOSED INFORMATIVE
 
 - **Branch**: frieren/cosine-lr-warm-restarts (deleted)
