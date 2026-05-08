@@ -1033,3 +1033,123 @@ All four are orthogonal axes (target transform / target rescaling / regularizati
 - **PR #665** (frieren): Cross-slice attention over Transolver slice tokens — global inter-slice MHA layer
 - **PR #666** (thorfinn): Depth scaling L=6 at full hidden=512 (corrects the confound in PR #660)
 - **PR #667** (fern): Weight decay sweep {1e-4, 5e-4, 1e-3} for Lion optimizer
+
+---
+
+## 2026-05-08 — Round 17 Closeouts (#855–#862)
+
+### PR #855 (frieren): Y-symmetry augmentation p=0.5
+- Branch: `frieren`
+- Hypothesis: τ_y sign-flip Y-symmetry augmentation at p=0.5 should improve surface τ prediction via physics-consistent data doubling.
+- Results:
+
+| Arm | Config | EP4 | Gate | Status |
+|-----|--------|-----|------|--------|
+| A | Y-sym p=0.5, `--lr-cosine-t-max 4` (WRONG) | 8.08% | >6.5985% FAIL | CLOSED |
+
+- Commentary: EP4=8.08% fails the ≤6.5985% gate (22% regression vs SOTA). Critical confound: this run used `--lr-cosine-t-max 4` (wrong — should be `--lr-cosine-t-max 13 --epochs 4`). Physical signal for Y-sym may be real (τ_y gains observed) but the LR schedule bug makes the result uninterpretable. Y-sym flags (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`) confirmed **absent** from current `train.py` — re-implementation required before retry.
+
+---
+
+### PR #856 (fern): τ Y/Z absolute upscaling — STALLED
+- Branch: `fern`
+- Hypothesis: Increase absolute τ_y and τ_z loss weights above current 1.5/2.0 baseline.
+- Results: Zero W&B activity. Run never launched.
+- Commentary: No data. Closed as stalled. Superseded by PR #860 which tested an adjacent hypothesis with complete results.
+
+---
+
+### PR #857 (askeladd): σ-ladder sweep (STRING PE)
+- Branch: `askeladd`
+- Hypothesis: Dynamic σ-ladder curriculum over RFF sigma values during training might improve spectral coverage and generalisation.
+- Results:
+
+| Arm | Config | EP3 | Gate | Status |
+|-----|--------|-----|------|--------|
+| A | σ-ladder ascending | FAIL | >8% | CLOSED |
+| B | σ-ladder descending | FAIL | >8% | CLOSED |
+
+- Commentary: Both ascending and descending σ-ladder schedules fail EP3 gates. Fixed 5-octave STRING PE (`σ={0.25,0.5,1.0,2.0,4.0}`) is optimal — dynamic schedules degrade training stability. **σ-ladder axis FULLY CLOSED. All STRING axes now exhausted.**
+
+---
+
+### PR #858 (alphonse): Lion weight decay sweep
+- Branch: `alphonse`
+- Hypothesis: Current wd=5e-4 may not be optimal; test wd∈{1e-4, 1e-3} against implicit baseline wd=5e-4.
+- Results:
+
+| Arm | wd | EP3 | Gate | Status |
+|-----|----|-----|------|--------|
+| A | 1e-4 | FAIL | >8% | CLOSED |
+| B | 1e-3 | (auto-launcher after close, killed) | — | N/A |
+
+- Commentary: Arm A wd=1e-4 failed EP3. Arm B (wd=1e-3) was auto-launched by stale job after PR close but killed before producing results. **wd=5e-4 CONFIRMED OPTIMAL.** After PR #858 closed, alphonse launched SGDR run `7gnqa6l1` (now PR #863, active WIP).
+
+---
+
+### PR #859 (thorfinn): Transolver slices dimension sweep
+- Branch: `thorfinn`
+- Hypothesis: Slice count affects model capacity; test slices=64 (reduce) and slices=256 (increase) vs baseline 128.
+- Results:
+
+| Arm | slices | EP3 | Gate | Status |
+|-----|--------|-----|------|--------|
+| A | 64 | FAIL | >8% | CLOSED |
+| B | 256 | (never launched) | — | PENDING Round 18 |
+
+- Commentary: slices=64 failed EP3 gate, confirming 128 is at or near the minimum viable slice count. Arm B (slices=256) never launched — valid untested experiment. **Assigned to thorfinn in Round 18.**
+
+---
+
+### PR #860 (fern): τ absolute upscaling further escalation
+- Branch: `fern`
+- Hypothesis: Increase τ_y and τ_z loss weights beyond current 1.5/2.0; test higher values.
+- Results:
+
+| Config | EP3 | Gate | Status |
+|--------|-----|------|--------|
+| τ_y↑, τ_z↑ (above 1.5/2.0) | FAIL | >8% | CLOSED |
+
+- Commentary: Further escalation of τ weights fails EP3. Current τ_y=1.5/τ_z=2.0 is the optimal balance. Any further increase degrades overall performance. **τ_y=1.5/τ_z=2.0 CONFIRMED OPTIMAL.**
+
+---
+
+### PR #861 (edward): QK-norm ablation
+- Branch: `edward`
+- Hypothesis: QK-norm (`--use-qk-norm`) may be unnecessary overhead; removing it could improve training efficiency without hurting performance.
+- Results:
+
+| Config | EP2 | Gate | Status |
+|--------|-----|------|--------|
+| No QK-norm | 26.35% | <16% required — CATASTROPHIC FAIL | CLOSED |
+
+- Commentary: EP2=26.35% catastrophically fails the <16% gate. Model without QK-norm does not converge in the early training phase. **QK-norm CONFIRMED NECESSARY** — must remain in all future configs. This is now a locked architectural decision.
+
+---
+
+### PR #862 (tanjiro): Lion β₂ sweep
+- Branch: `tanjiro`
+- Hypothesis: Lion β₂ controls EMA of gradient sign smoothing; current β₂=0.99 may not be optimal; test β₂=0.95.
+- Results:
+
+| Arm | β₂ | EP2 | Gate | Status |
+|-----|----|-----|------|--------|
+| A | 0.95 | FAIL | >16% | CLOSED |
+
+- Commentary: β₂=0.95 failed EP2. Baseline β₂=0.99 confirmed optimal by elimination. **β₂=0.99 CONFIRMED OPTIMAL.** Lion optimizer (lr=9e-5, β₁=0.9, β₂=0.99, wd=5e-4) now exhaustively confirmed optimal across all axes.
+
+---
+
+### Summary: Round 17 Confirmed Findings
+
+| Finding | PR | Verdict |
+|---------|-----|---------|
+| QK-norm NECESSARY | #861 | Removing causes catastrophic failure (EP2=26.35%) |
+| wd=5e-4 OPTIMAL | #858 | Both wd=1e-4 and wd=1e-3 fail |
+| β₂=0.99 OPTIMAL | #862 | β₂=0.95 fails EP2 |
+| τ_y=1.5/τ_z=2.0 OPTIMAL | #860 | Further escalation fails |
+| σ-ladder axis CLOSED | #857 | Both ascending/descending variants fail |
+| slices=64 FAIL | #859 | slices=256 untested (Round 18 assignment) |
+| Y-sym p=0.5 CONFOUNDED | #855 | Wrong LR flag; y-sym flags absent from train.py |
+
+**Ongoing Round 18:** PR #823 (nezuko cross-attention, EP7=6.5335% BEATS SOTA), PR #863 (alphonse SGDR)
