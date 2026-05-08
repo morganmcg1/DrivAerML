@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-01 (Round 18 ACTIVE — 7 PRs; #863/#867 CLOSED. Round 19 open: alphonse #875 (AdamW benchmark), thorfinn #876 (Huber loss). frieren BLOCKED — Y-sym flags absent from train.py.)
+- **Date:** 2026-05-08 (Round 19 ACTIVE — 9 WIP PRs. nezuko #823 leading at EP11=6.4521% (BEATS SOTA -2.07%). All earlier crashes recovered: askeladd #868 (EP2=11.79%), frieren #872 (EP1=27.62%). fern #870 pivoted FFT→KNN smoothness.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -56,26 +56,28 @@
 
 ---
 
-## Active PRs (Round 18 Continuing + Round 19)
+## Active PRs (Round 19, all RUNNING)
 
 | PR | Student | Hypothesis | W&B run | Status |
 |---|---|---|---|---|
-| #823 | nezuko | Surface→vol cross-attention (geometry conditioning, 4-ep→13-ep full run) | `ghh0s4ne` | **EP7=6.5335% BEATS SOTA** (-0.065pp). EP8+ in progress. LEADING experiment. |
-| #868 | askeladd | Spectral normalization on attention projection layers | — | Assigned. Group: `spectral-norm-r18`. |
-| #869 | edward | Stochastic depth / layer drop (drop_path={0.05, 0.10}, two arms) | — | Assigned. Group: `stochastic-depth-r18`. |
-| #870 | fern | FFT auxiliary loss on τ_y/τ_z surface fields (λ=0.1) | — | Assigned. Group: `fft-loss-r18`. |
-| #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Assigned. Group: `pcgrad-r18`. |
-| **#875** | **alphonse** | **AdamW vs Lion direct comparison at SOTA config** | — | **Round 19 — Assigned.** Group: `adamw-benchmark-r19`. lr=9e-4, wd=0.01. |
-| **#876** | **thorfinn** | **Huber loss δ=0.5 and δ=1.0 (two-arm OOD robustness)** | — | **Round 19 — Assigned.** Group: `huber-loss-r19`. Student adds `--huber-delta` flag. |
+| #823 | nezuko | Surface→vol cross-attention (13-ep full run) | `ghh0s4ne` | **EP11=6.4521% BEATS SOTA (-2.07%)**. Trajectory: EP6=6.590 → EP11=6.452 still improving. Expect sub-6.4 by EP13. |
+| #868 | askeladd | Spectral normalization on attention projection layers | `0kjl4rnh` (relaunch) | EP1=25.97% [OK], EP2=11.79% [OK]. Healthy progression. EP3 ~24% complete. |
+| #869 | edward | Stochastic depth (drop_path={0.05, 0.10}) | — | EP1=29.245% [OK]. Awaiting EP2 (gate ≤16.0). |
+| #870 | fern | KNN smoothness penalty on τ_y/τ_z (pivoted from FFT, λ=0.1, k=8) | `d0echeyh` | EP1=30.32% borderline (gate 30.0 — barely missed). Watch EP2 closely. |
+| #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Pre-EP1 @ step=6155. |
+| #872 | frieren | hidden_dim=640 width scaling | `gr1n58zo` (v2) | EP1=27.62% [OK]. VRAM 63.2 / 97.9 GB safe. |
+| #873 | dl24-tanjiro | 7L STRING + GradNorm α=0.5 + Y-sym (long-track) | — | Pre-EP1 @ step=4610. |
+| #875 | alphonse | AdamW vs Lion direct comparison at SOTA config | — | Pre-EP1 @ step=4708. |
+| #876 | thorfinn | Huber loss δ=0.5 and δ=1.0 (two-arm) | — | Pre-EP1 @ step=3660. |
 
-**1 idle student:** frieren — **BLOCKED**. Y-sym augmentation flags (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`) absent from `train.py`. Re-implementation required before assignment. Target: Y-sym p=1.0 (escalation from Round 17 #855 p=0.5 which was confounded by wrong LR flag).
+**Long-track WIP (DDP8):** #831 dl24-fern, #843 dl24-nezuko, #844 dl24-frieren.
 
 ---
 
 ## Current Research Focus
 
 ### Theme 1: Cross-Attention Geometry Conditioning (CRITICAL — Issue #717)
-- **Surface→vol cross-attention** (nezuko #823, ACTIVE): EP7=6.5335%, BEATS SOTA 6.5985% by -0.065pp. Run `ghh0s4ne`. Full 13-ep run in progress. **Highest-priority active experiment.** Cross-attn learning confirmed (out_proj.weight 0.0→4.99). OOD geometry compression confirmed.
+- **Surface→vol cross-attention** (nezuko #823, ACTIVE): EP11=6.4521% — BEATS SOTA 6.5985% by -0.146pp (-2.07%). Run `ghh0s4ne`. Trajectory still descending (EP6→EP11 = -0.138pp). **Highest-priority active experiment; expected new single-model SOTA at EP13.** Cross-attn learning confirmed (out_proj.weight 0.0→4.99). OOD geometry compression confirmed.
 - **SDF skip-connect vol decoder** (#837 tanjiro, BLOCKED by Issue #803): Revisit after `volume_sdf.npy` regeneration.
 
 ### Theme 2: Optimizer Exploration (post-Lion-confirmation)
@@ -87,14 +89,16 @@
 ### Theme 3: Architecture Exploration (post-STRING-exhaustion)
 - All STRING axes CLOSED. All positional encoding variants CLOSED.
 - **slices axis FULLY CLOSED**: slices=64 FAIL (Round 17 #859 Arm A), slices=128 OPTIMAL (SOTA), slices=256 FAIL (#867 EP3=8.1599%). No more slices experiments.
-- **Spectral normalization on attention layers** (askeladd #868, ACTIVE): Stability regularization orthogonal to QK-norm; targets high-curvature geometry.
-- **Stochastic depth / layer drop** (edward #869, ACTIVE): Drop random transformer layers during training; implicit ensembling at inference.
+- **Spectral normalization on attention layers** (askeladd #868, ACTIVE): EP1=25.97%, EP2=11.79% — healthy. Stability regularization orthogonal to QK-norm.
+- **Stochastic depth / layer drop** (edward #869, ACTIVE): Drop random transformer layers during training; implicit ensembling at inference. EP1=29.245% [OK].
+- **hidden_dim=640 width scaling** (frieren #872, ACTIVE): EP1=27.62% [OK]. Run `gr1n58zo` (v2). VRAM 63.2/97.9 GB safe.
 - **Per-channel output projection**: Separate decoder head per physical quantity. Never tested.
 
 ### Theme 4: Loss Reformulation
 - τ_y=1.5/τ_z=2.0 OPTIMAL, surface×2.0, volume×1.0 CONFIRMED.
-- **Frequency-domain loss component** (fern #870, ACTIVE): FFT-based loss on surface fields for high-frequency τ_y/τ_z. λ=0.1.
-- **Huber loss vs MSE** (thorfinn #876, ACTIVE, Round 19): Student adds `--huber-delta` flag; testing δ=0.5 and δ=1.0. Directly targets 4 OOD cases driving 92% of vol_p squared error. Track test_vol_p as primary OOD diagnostic.
+- **KNN smoothness penalty** (fern #870, ACTIVE, pivoted from FFT): k=8 neighbors, var-mode, λ=0.1. EP1=30.32% borderline (just above 30.0 gate). Run `d0echeyh`.
+- **PCGrad gradient surgery** (tanjiro #871, ACTIVE): Gradient conflict resolution across 4 task groups. Pre-EP1.
+- **Huber loss vs MSE** (thorfinn #876, ACTIVE, Round 19): δ=0.5 and δ=1.0. Directly targets 4 OOD cases driving 92% of vol_p squared error.
 
 ---
 
@@ -144,17 +148,21 @@
 ## Potential Next Research Directions (post Round 18)
 
 ### Currently in flight (do not re-assign)
-- **Surface→vol cross-attention (13-ep full run)** → nezuko #823 (LEADING, EP7=6.5335%)
-- **Spectral normalization on attention** → askeladd #868
-- **Stochastic depth** → edward #869
-- **FFT frequency-domain loss** → fern #870
-- **PCGrad gradient projection** → tanjiro #871
-- **AdamW benchmark** → alphonse #875 (Round 19)
-- **Huber loss δ=0.5/1.0** → thorfinn #876 (Round 19)
+- **Surface→vol cross-attention (13-ep full run)** → nezuko #823 (LEADING, EP11=6.4521%)
+- **Spectral normalization on attention** → askeladd #868 (EP2=11.79%, healthy)
+- **Stochastic depth** → edward #869 (EP1=29.245%)
+- **KNN smoothness penalty** → fern #870 (EP1=30.32% borderline)
+- **PCGrad gradient projection** → tanjiro #871 (pre-EP1)
+- **hidden_dim=640 width scaling** → frieren #872 (EP1=27.62%)
+- **AdamW benchmark** → alphonse #875 (pre-EP1)
+- **Huber loss δ=0.5/1.0** → thorfinn #876 (pre-EP1)
+- **dl24-tanjiro 7L STRING + GradNorm + Y-sym** → #873 (long-track, pre-EP1)
 
 ### Next assignments (when students become idle)
-1. **Y-sym augmentation p=1.0** (frieren — BLOCKED): Re-implement `--use-y-symmetry-aug` / `--y-symmetry-aug-prob` in `train.py`, then assign. Escalation from Round 17 #855 (confounded by wrong LR flag).
-2. **Ensemble pool-25 refresh**: After nezuko #823 full 13-ep completes — add to greedy ensemble and re-run greedy selection.
+1. **Merge nezuko #823** when EP13 finishes — will become new single-model SOTA.
+2. **Cross-attention follow-ups**: Variations on #823 (different attention configs, larger context windows, multi-head conditioning).
+3. **Compose cross-attention with other improvements** (PCGrad/drop-path/Huber): Once primary approaches confirmed.
+4. **Ensemble pool-25 refresh**: After nezuko #823 full 13-ep completes — add to greedy ensemble and re-run greedy selection.
 
 ### Medium priority (Round 20+)
 3. **Layer-wise LR decay (LLRD)**: Larger lr on later transformer layers. Never tested. Next after #875 AdamW resolves.
