@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-01 (Round 13 open, 9 WIP PRs — PRs #822/#824/#826 closed negative; PRs #832/#833/#834 newly assigned)
+- **Date:** 2026-05-08 02:10 UTC (Round 13 in progress — PR #827 closed informative; PR #835 frieren newly assigned)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -34,23 +34,24 @@
 
 ---
 
-## Active PRs (9 WIP — Round 13)
+## Active PRs (8 WIP — Round 13)
 
 | Student | PR | Hypothesis | Status |
 |---|---|---|---|
-| askeladd | #828 | 2-layer GELU MLP vol decoder (512→256→GELU→1) | WIP |
-| tanjiro | #830 | vol-loss-weight=2.0 budget-matched 4-ep | WIP |
-| nezuko | #823 | Surface→volume cross-attention for geometry-aware vol_p | WIP |
-| frieren | #827 | Cosine LR warm restarts on L5 SOTA 4-ep | WIP |
-| fern | #829 | STRING 6-octave RFF sigma range (0.125–4.0) | WIP |
-| alphonse | #832 | Lion wd=7e-4 on L5 SOTA 4-ep (wd up-sweep) | **NEWLY ASSIGNED** |
-| thorfinn | #833 | τ_z×2.5 on L5 SOTA 4-ep (loss weight bisection) | **NEWLY ASSIGNED** |
-| edward | #834 | GradNorm α=0.5 uniform init, no static weights, 4-ep | **NEWLY ASSIGNED** |
+| askeladd | #828 | 2-layer GELU MLP vol decoder (512→256→GELU→1) | WIP — EP2 DONE, EP3 pending |
+| tanjiro | #830 | vol-loss-weight=2.0 budget-matched 4-ep | WIP — STALE (poked 02:00 UTC) |
+| nezuko | #823 | Surface→volume cross-attention for geometry-aware vol_p | WIP — EP1 DONE, EP2 pending |
+| frieren | #835 | Lion lr=1e-4 on L5 SOTA stack (lr up-sweep) | **NEWLY ASSIGNED** |
+| fern | #829 | STRING 6-octave RFF sigma range (0.125–4.0) | WIP — EP2 DONE, EP3 pending |
+| alphonse | #832 | Lion wd=7e-4 on L5 SOTA 4-ep (wd up-sweep) | WIP — awaiting launch (poked 02:00 UTC) |
+| thorfinn | #833 | τ_z×2.5 on L5 SOTA 4-ep (loss weight bisection) | WIP — awaiting launch (poked 02:00 UTC) |
+| edward | #834 | GradNorm α=0.5 uniform init, no static weights, 4-ep | WIP — launched 01:28, EP1 pending |
 
-### Closed this cycle (PRs #822, #824, #826)
+### Closed this cycle (PRs #822, #824, #826, #827)
 - **PR #822 (thorfinn, τ_z×3.0 4-ep)**: CLOSED NEGATIVE — val_abupt=7.4767%. Budget too tight for τ_z×3.0. Replaced by τ_z×2.5 bisection #833.
 - **PR #824 (edward, GradNorm α=0.5 + static)**: CLOSED NEGATIVE — val_abupt=7.5170%. GradNorm + static weights = anti-synergy. Replaced by pure-GradNorm no-static #834.
 - **PR #826 (alphonse, wd=3e-4)**: CLOSED NEGATIVE — val_abupt=7.4628%. wd=5e-4 is Lion sweet spot. Testing up-side via #832 (wd=7e-4).
+- **PR #827 (frieren, cosine warm restarts)**: CLOSED INFORMATIVE — EP3=7.445% passed gate, EP4 timeout before validation. Restart mechanics confirmed working; hypothesis untestable in 4-ep regime. Monotone cosine decay confirmed productive.
 
 ---
 

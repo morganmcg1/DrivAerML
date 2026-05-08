@@ -1,5 +1,35 @@
 # SENPAI Research Results
 
+## 2026-05-08 02:10 — PR #827: Cosine LR warm restarts on L5 SOTA 4-ep (frieren) — CLOSED INFORMATIVE
+
+- **Branch**: frieren/cosine-lr-warm-restarts (deleted)
+- **W&B run**: `1ne1qdfl` (rank-0, group `frieren-cosine-warm-restarts`, project `senpai-v1-drivaerml-ddp8`)
+- **Hypothesis**: CosineAnnealingWarmRestarts (T_0=2 epochs) would allow the optimizer to escape local minima by resetting LR to 9e-5 peak at EP4 boundary, targeting the chronic vol_p gap.
+
+| Metric | EP1 | EP2 (LR=9e-5 peak) | EP3 (LR=4.55e-5 mid-decay) | SOTA EP4 |
+|---|---:|---:|---:|---:|
+| val_abupt | 25.9347% | 8.7973% | **7.4450%** | **6.5985%** |
+| val surface_pressure | — | 5.858% | 4.947% | 4.332% |
+| val volume_pressure | — | 5.492% | 4.419% | 3.946% |
+| val wall_shear | — | 9.896% | 8.462% | 8.238% |
+| val tau_x | — | 8.671% | 7.466% | 6.542% |
+| val tau_y | — | 11.386% | 9.494% | 8.363% |
+| val tau_z | — | 12.580% | 10.900% | 9.810% |
+
+**EP3 gate (<8%) PASSED**. Restart-1 confirmed firing exactly at step 32593. LR reset to 9e-5 peak for EP4. EP4 validation never fired (timeout at ~52% / step 38,200/43,456 = ~39 min remaining when LR reset). Best checkpoint locked at EP3's 7.445%.
+
+**Results commentary:** EP4 timeout prevented direct evaluation of the restart hypothesis. Cycle-1's descent EP2→EP3 (-1.35pp) confirms the T_max=13 monotone cosine does productive work in its decay phase — this is evidence against disrupting the existing schedule. At EP3 (75% of baseline steps), frieren is 0.85pp above the merge gate, a gap not attributable to "wrong schedule" (EP3 at equivalent fractional training with the same LR phase would not be expected to match EP4 SOTA). Restart mechanics work correctly; we simply cannot confirm whether restart-1 helps in this 4-ep regime without a dedicated longer test.
+
+**Take-aways:**
+1. CosineAnnealingWarmRestarts mechanics confirmed working (LR trajectory matches design).
+2. Cycle-1 decay EP2→EP3 (-1.35pp) confirms the current T_max=13 cosine is productive in late phases.
+3. Weak prior that restart helps; the conservative approach is not to disturb the current monotone cosine.
+4. If revisiting: test in 13-ep regime where multiple complete cycles can be compared against monotone baseline.
+
+**Verdict (INFORMATIVE, not NEGATIVE):** Restart mechanics work. Cannot test the hypothesis directly in 4-ep budget. Closed — not worth extending given evidence that monotone cosine is already doing productive work in decay phase.
+
+---
+
 ## 2026-05-01 — PR #824: GradNorm α=0.5 on L5 SOTA 4-ep curriculum (edward) — CLOSED NEGATIVE
 
 - **Branch**: edward/gradnorm-a05-l5-sota-4ep (deleted)
