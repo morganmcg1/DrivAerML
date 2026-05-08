@@ -8,6 +8,51 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-08 ~09:00 UTC — PR #838 CLOSED: STRING rff24 + σ=0.125 capacity vs aliasing test (tay screen, fern, `84skr4yq`)
+
+- **Branch:** `fern/string-rff24-sigma0125`
+- **W&B Run:** `84skr4yq`
+- **Hypothesis:** If adding a 6th RFF octave at σ=0.125 hurts because rff16 has only 2-3 features per sigma and the high-freq sigma must compete for capacity with the dominant 0.25–2.0 band, then rff24 (4 features/sigma) should partially recover the regression. If rff24 recovers < half the regression, aliasing dominates.
+
+### Results (EP4.1 terminal, tay screen)
+
+| Metric | PR #838 (rff24, 6oct) | PR #829 (rff16, 6oct) | SOTA (rff16, 5oct, 4k25s25e) |
+|---|---:|---:|---:|
+| val_abupt | 7.4255% | 7.5738% | 6.5985% |
+| test_abupt | 8.7190% | 8.9200% | 7.9915% |
+| val_surface_pressure | 4.8435% | 4.9055% | 4.3322% |
+| val_volume_pressure | 4.8640% | 5.1211% | 3.9456% |
+
+**Merge gate (<6.5985%): FAILED.** Gap to SOTA: +0.83pp. rff24 recovered only 0.15pp of the ~0.98pp regression from adding σ=0.125 (18% of regression explained by capacity competition; 82% by aliasing).
+
+### Commentary
+
+Clean falsification experiment. Two competing hypotheses tested simultaneously: (a) capacity competition explains σ=0.125 regression → rff24 should recover the gap; (b) aliasing at σ=0.125 dominates at 65k surface point density. Result is decisively (b): rff24 helps slightly (0.15pp) but the bulk of the regression persists. Early-epoch advantage at rff24 (EP1: 25.49% vs 31.58% for rff16) compresses to negligible at EP4, suggesting the extra capacity accelerates fitting but the ceiling is set by aliasing. **The σ < 0.25 axis is closed at 65k surface point density.** Future STRING ablations should stay in σ ∈ {0.25, 0.5, 1.0, 2.0, 4.0}. Follow-up of interest: rff24 with 5-octave SOTA spectrum (σ=0.25–4.0) — tests capacity benefit without the aliasing cost.
+
+---
+
+## 2026-05-08 ~09:00 UTC — PR #835 CLOSED: Lion lr=1e-4 on L5 SOTA (tay screen, frieren, `mi76745s`)
+
+- **Branch:** `frieren/lion-lr-1e-4-l5-sota`
+- **W&B Runs:** `mi76745s` (corrected schedule arm), `kewvqbis` (first arm, killed EP2)
+- **Hypothesis:** L5 has more parameters than L4 SOTA and may benefit from a slightly larger learning rate within a 4-epoch budget. Test lr=1e-4 vs SOTA lr=9e-5 on the L5 backbone.
+
+### Results (EP2 terminal, both arms killed at EP2 gate)
+
+| Run | Peak LR | Schedule | EP1 val_abupt | EP2 val_abupt | EP2 gate (<10%) |
+|---|---|---|---:|---:|---|
+| SOTA (4k25s25e) | 9e-5 | t_max=13 | 27.95% | ~7.94% | PASS |
+| kewvqbis (arm 1) | 1e-4 | t_max=4 | 25.88% | 10.72% | FAIL |
+| mi76745s (arm 2) | 1e-4 | t_max=13 | 26.09% | 11.77% | FAIL |
+
+**Kill gate failed at EP2.** Both lr=1e-4 arms failed the 10% EP2 gate. Schedule-corrected arm (t_max=13) was *worse* than t_max=4 arm (11.77% vs 10.72%), ruling out schedule confound as the explanation.
+
+### Commentary
+
+Decisive negative result with an elegant internal control. The monotonic pattern — more average LR through EP2 → strictly worse EP2 metric — is clean and contradicts the hypothesis. The Lion sign-update is well-calibrated for L5 at lr=9e-5; overshooting damages fine-grained feature fitting (vol pressure, wall_shear_y/z) that drives EP2+ convergence. lr=9e-5 remains the operating point. **The LR upward-sweep axis is fully exhausted for L5.** Suggested next direction for L5-specific tuning: longer warmup (1.5–2 ep), slightly higher weight decay (7.5e-4/1e-3), or relaxed gradient clip (1.0 from 0.5).
+
+---
+
 ## 2026-05-07 ~23:30 UTC — PR #794 CLOSED: GradNorm α=0.25 + Y-axis symmetry, 4L STRING (dl24-fern, `em7eupj5`)
 
 - **Branch:** `dl24-fern/gradnorm-y-sym-alpha025`
