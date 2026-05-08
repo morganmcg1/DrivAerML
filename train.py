@@ -137,6 +137,12 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_abupt_geom_branch: bool = False
+    geom_branch_n_anchors: int = 1024
+    geom_branch_rff_num_features: int = 16
+    geom_branch_warmup_fraction: float = 0.0
+    geom_branch_lr_scale: float = 1.0
+    geom_branch_warmup_vol_weight: float = 0.0
     debug: bool = False
 
 
@@ -235,9 +241,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
+    if config.use_abupt_geom_branch and config.geom_branch_lr_scale != 1.0:
+        backbone_params, geom_branch_params, _, _ = split_param_groups(model)
+        param_groups = [
+            {"params": backbone_params, "lr": config.lr},
+            {
+                "params": geom_branch_params,
+                "lr": config.lr * config.geom_branch_lr_scale,
+            },
+        ]
+        opt_param_input = param_groups
+    else:
+        opt_param_input = list(model.parameters())
     if optimizer_name == "adamw":
         return torch.optim.AdamW(
-            model.parameters(),
+            opt_param_input,
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
@@ -245,7 +263,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
+            opt_param_input,
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
@@ -297,7 +315,33 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_geom_branch=config.use_abupt_geom_branch,
+        geom_branch_n_anchors=config.geom_branch_n_anchors,
+        geom_branch_rff_num_features=config.geom_branch_rff_num_features,
     )
+
+
+GEOM_BRANCH_PARAM_NAME_TOKENS = ("geom_branch",)
+
+
+def is_geom_branch_param_name(name: str) -> bool:
+    return any(token in name for token in GEOM_BRANCH_PARAM_NAME_TOKENS)
+
+
+def split_param_groups(model: nn.Module) -> tuple[list[nn.Parameter], list[nn.Parameter], list[str], list[str]]:
+    """Split model parameters into (backbone, geom_branch) groups by name."""
+    backbone_params: list[nn.Parameter] = []
+    geom_branch_params: list[nn.Parameter] = []
+    backbone_names: list[str] = []
+    geom_branch_names: list[str] = []
+    for name, param in model.named_parameters():
+        if is_geom_branch_param_name(name):
+            geom_branch_params.append(param)
+            geom_branch_names.append(name)
+        else:
+            backbone_params.append(param)
+            backbone_names.append(name)
+    return backbone_params, geom_branch_params, backbone_names, geom_branch_names
 
 
 def train_loss(
@@ -753,6 +797,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            if config.use_abupt_geom_branch and config.geom_branch_warmup_fraction > 0.0:
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
@@ -815,6 +861,34 @@ def main(argv: Iterable[str] | None = None) -> None:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
         train_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
         val_slope_tracker = MetricSlopeTracker(total_estimated_steps, config.slope_log_fraction)
+
+        geom_branch_active = config.use_abupt_geom_branch
+        geom_warmup_steps = 0
+        backbone_param_list: list[nn.Parameter] = []
+        geom_branch_param_list: list[nn.Parameter] = []
+        backbone_currently_frozen = False
+        if geom_branch_active:
+            backbone_param_list, geom_branch_param_list, _, geom_branch_names = split_param_groups(base_model)
+            geom_warmup_steps = int(
+                round(total_estimated_steps * max(0.0, config.geom_branch_warmup_fraction))
+            )
+            geom_warmup_steps = min(geom_warmup_steps, total_estimated_steps)
+            if state.is_main:
+                geom_param_count = sum(p.numel() for p in geom_branch_param_list)
+                backbone_param_count = sum(p.numel() for p in backbone_param_list)
+                print(
+                    f"AB-UPT geom branch enabled: anchors={config.geom_branch_n_anchors} "
+                    f"rff_features={config.geom_branch_rff_num_features} "
+                    f"warmup_steps={geom_warmup_steps}/{total_estimated_steps} "
+                    f"(fraction={config.geom_branch_warmup_fraction}) "
+                    f"lr_scale={config.geom_branch_lr_scale} "
+                    f"warmup_vol_weight={config.geom_branch_warmup_vol_weight} "
+                    f"params={geom_param_count:,d} (geom) + {backbone_param_count:,d} (backbone)"
+                )
+            if geom_warmup_steps > 0:
+                for p in backbone_param_list:
+                    p.requires_grad_(False)
+                backbone_currently_frozen = True
 
         # Log multi-sigma RFF init layout for verification.
         if state.is_main:
@@ -999,6 +1073,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    geom_active_vol_weight = config.volume_loss_weight
+                    if geom_branch_active and global_step < geom_warmup_steps:
+                        geom_active_vol_weight = config.geom_branch_warmup_vol_weight
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1006,11 +1083,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         config.amp_mode,
                         surface_loss_weight=config.surface_loss_weight,
-                        volume_loss_weight=config.volume_loss_weight,
+                        volume_loss_weight=geom_active_vol_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
+                if geom_branch_active:
+                    geom_in_warmup = global_step <= geom_warmup_steps
+                    if backbone_currently_frozen and not geom_in_warmup:
+                        for p in backbone_param_list:
+                            p.requires_grad_(True)
+                        backbone_currently_frozen = False
+                        if state.is_main:
+                            print(
+                                f"[geom_branch] step {global_step}: backbone unfrozen "
+                                f"(warmup_steps={geom_warmup_steps})"
+                            )
                 current_lr = scheduler.get_last_lr()[0]
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
                 skip_step = distributed_any(state, loss_is_nonfinite, device)
@@ -1050,6 +1138,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if geom_branch_active:
+                    is_warmup = global_step <= geom_warmup_steps
+                    train_log.update(
+                        {
+                            "geom_branch/is_warmup_phase": 1.0 if is_warmup else 0.0,
+                            "geom_branch/backbone_frozen": 1.0 if backbone_currently_frozen else 0.0,
+                            "geom_branch/lr": optimizer.param_groups[-1]["lr"]
+                            if config.geom_branch_lr_scale != 1.0
+                            else current_lr,
+                            "geom_branch/backbone_lr": optimizer.param_groups[0]["lr"],
+                            "geom_branch/active_vol_weight": geom_active_vol_weight,
+                            "geom_branch/warmup_steps": float(geom_warmup_steps),
+                        }
+                    )
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
@@ -1078,6 +1180,27 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/step_skipped": 1.0 if skip_step else 0.0,
                         }
                     )
+                    if (
+                        geom_branch_active
+                        and should_log_gradients
+                        and not skip_step
+                        and (backbone_param_list or geom_branch_param_list)
+                    ):
+                        with torch.no_grad():
+                            bb_norm_sq = torch.zeros((), device=device, dtype=torch.float32)
+                            gb_norm_sq = torch.zeros((), device=device, dtype=torch.float32)
+                            for p in backbone_param_list:
+                                if p.grad is not None:
+                                    bb_norm_sq = bb_norm_sq + p.grad.detach().float().pow(2).sum()
+                            for p in geom_branch_param_list:
+                                if p.grad is not None:
+                                    gb_norm_sq = gb_norm_sq + p.grad.detach().float().pow(2).sum()
+                            train_log["geom_branch/grad_norm_backbone"] = float(
+                                bb_norm_sq.sqrt().cpu().item()
+                            )
+                            train_log["geom_branch/grad_norm_geom"] = float(
+                                gb_norm_sq.sqrt().cpu().item()
+                            )
                     gradient_metrics = (
                         collect_gradient_metrics(
                             model,

@@ -320,6 +320,210 @@ class Transformer(nn.Module):
         return x
 
 
+class GeometryBranch(nn.Module):
+    """AB-UPT-style geometry branch: supernode pooling + anchor-to-point cross-attention.
+
+    Implements the v3 design from PR #836 / based on PR #802 (v2): K=1024 supernode
+    anchors are sampled from the volume mesh; a cross-attention pools per-point
+    features into anchor latents (Step 1, "supernode pooling"); a second
+    cross-attention broadcasts anchor features back to all points (Step 2,
+    "anchor->point xattn"). Both attentions use STRING-separable additive
+    positional bias on Q/K with the same sigma init as the backbone, matching
+    the PR's "STRING-separable RoPE on Q/K (sigma={0.25,0.5,1.0,2.0,4.0},
+    rff_num_features=16)" instruction (additive PE form, consistent with how
+    StringSeparableEncoding is used in the input encoder).
+
+    Output is a per-point geometry-aware feature tensor [B, N_total, H] that is
+    added residually to the backbone hidden states before the surface/volume
+    output heads.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        space_dim: int = 3,
+        n_anchors: int = 1024,
+        rff_num_features: int = 16,
+        rff_init_sigmas: list[float] | None = None,
+        use_qk_norm: bool = True,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("GeometryBranch hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.space_dim = space_dim
+        self.n_anchors = n_anchors
+        self.use_qk_norm = use_qk_norm
+
+        self.string_sep = StringSeparableEncoding(
+            in_dim=space_dim,
+            num_features=rff_num_features,
+            sigma=1.0,
+            init_sigmas=rff_init_sigmas,
+        )
+        string_dim = self.string_sep.output_dim
+        self.pool_pos_q = LinearProjection(string_dim, hidden_dim)
+        self.pool_pos_k = LinearProjection(string_dim, hidden_dim)
+        self.xattn_pos_q = LinearProjection(string_dim, hidden_dim)
+        self.xattn_pos_k = LinearProjection(string_dim, hidden_dim)
+
+        self.anchor_pos_embed = ContinuousSincosEmbed(hidden_dim=hidden_dim, input_dim=space_dim)
+        self.anchor_init_proj = LinearProjection(string_dim, hidden_dim)
+        self.anchor_placeholder = nn.Parameter(torch.rand(1, 1, hidden_dim) / hidden_dim)
+
+        self.pool_norm_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.pool_norm_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.pool_q = LinearProjection(hidden_dim, hidden_dim)
+        self.pool_k = LinearProjection(hidden_dim, hidden_dim)
+        self.pool_v = LinearProjection(hidden_dim, hidden_dim)
+        self.pool_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.pool_dropout = nn.Dropout(dropout)
+        if use_qk_norm:
+            self.pool_q_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+            self.pool_k_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+        else:
+            self.pool_q_norm = None
+            self.pool_k_norm = None
+
+        self.xattn_norm_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.xattn_norm_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.xattn_q = LinearProjection(hidden_dim, hidden_dim)
+        self.xattn_k = LinearProjection(hidden_dim, hidden_dim)
+        self.xattn_v = LinearProjection(hidden_dim, hidden_dim)
+        self.xattn_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.xattn_dropout = nn.Dropout(dropout)
+        if use_qk_norm:
+            self.xattn_q_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+            self.xattn_k_norm = nn.RMSNorm(self.dim_head, elementwise_affine=True)
+        else:
+            self.xattn_q_norm = None
+            self.xattn_k_norm = None
+
+    def _split_heads(self, t: torch.Tensor) -> torch.Tensor:
+        b, n, _ = t.shape
+        return t.view(b, n, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
+
+    def _merge_heads(self, t: torch.Tensor) -> torch.Tensor:
+        b, _, n, _ = t.shape
+        return t.permute(0, 2, 1, 3).contiguous().view(b, n, self.hidden_dim)
+
+    @staticmethod
+    def _sample_anchors(
+        coords: torch.Tensor,
+        mask: torch.Tensor,
+        n_anchors: int,
+    ) -> torch.Tensor:
+        """Random uniform sampling of K anchors from masked points (per-batch).
+
+        Returns coords [B, n_anchors, 3]. Falls back to repeating valid points
+        when a sample has fewer valid points than n_anchors (rare in practice).
+        """
+        b, n, dim = coords.shape
+        device = coords.device
+        anchors = coords.new_zeros(b, n_anchors, dim)
+        for i in range(b):
+            valid = mask[i] > 0
+            n_valid = int(valid.sum().item())
+            if n_valid <= 0:
+                continue
+            valid_coords = coords[i][valid]
+            if n_valid >= n_anchors:
+                idx = torch.randperm(n_valid, device=device)[:n_anchors]
+                anchors[i] = valid_coords[idx]
+            else:
+                idx = torch.randint(0, n_valid, (n_anchors,), device=device)
+                anchors[i] = valid_coords[idx]
+        return anchors
+
+    def forward(
+        self,
+        point_features: torch.Tensor,
+        point_coords: torch.Tensor,
+        point_mask: torch.Tensor,
+        anchor_source_coords: torch.Tensor,
+        anchor_source_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Run the geometry branch.
+
+        point_features: [B, N_total, H] backbone hidden states for all points
+        point_coords:   [B, N_total, 3] coords matching point_features
+        point_mask:     [B, N_total] padding mask for points (1=valid, 0=pad)
+        anchor_source_coords: [B, N_vol, 3] coords to sample anchors from (volume mesh)
+        anchor_source_mask:   [B, N_vol] padding mask for anchor source
+
+        Returns (point_geom_features, diagnostics).
+        """
+
+        b, n_total, _ = point_features.shape
+        device = point_features.device
+
+        with torch.no_grad():
+            anchor_coords = self._sample_anchors(
+                anchor_source_coords, anchor_source_mask, self.n_anchors
+            )
+
+        anchor_string = self.string_sep(anchor_coords)
+        anchor_pos_h = self.anchor_pos_embed(anchor_coords)
+        anchor_features = anchor_pos_h + self.anchor_init_proj(anchor_string) + self.anchor_placeholder
+
+        point_string = self.string_sep(point_coords)
+
+        point_mask_ftype = point_mask.to(dtype=point_features.dtype)
+
+        q_anchor_pos = self.pool_pos_q(anchor_string)
+        k_point_pos = self.pool_pos_k(point_string)
+
+        q_in = self.pool_norm_q(anchor_features) + q_anchor_pos
+        kv_in = (
+            self.pool_norm_kv(point_features) * point_mask_ftype.unsqueeze(-1)
+            + k_point_pos
+        )
+        q = self._split_heads(self.pool_q(q_in))
+        k = self._split_heads(self.pool_k(kv_in))
+        v = self._split_heads(self.pool_v(kv_in) * point_mask_ftype.unsqueeze(-1))
+        if self.pool_q_norm is not None:
+            q = self.pool_q_norm(q)
+            k = self.pool_k_norm(k)
+        kv_attn_mask = point_mask.to(device=device).unsqueeze(1).unsqueeze(1).bool()
+        pool_out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=kv_attn_mask.expand(-1, self.num_heads, self.n_anchors, -1),
+            dropout_p=0.0,
+        )
+        anchor_features = anchor_features + self.pool_dropout(self.pool_proj(self._merge_heads(pool_out)))
+
+        q_point_pos = self.xattn_pos_q(point_string)
+        k_anchor_pos = self.xattn_pos_k(anchor_string)
+
+        q_in2 = (
+            self.xattn_norm_q(point_features) * point_mask_ftype.unsqueeze(-1)
+            + q_point_pos
+        )
+        kv_in2 = self.xattn_norm_kv(anchor_features) + k_anchor_pos
+        q2 = self._split_heads(self.xattn_q(q_in2))
+        k2 = self._split_heads(self.xattn_k(kv_in2))
+        v2 = self._split_heads(self.xattn_v(kv_in2))
+        if self.xattn_q_norm is not None:
+            q2 = self.xattn_q_norm(q2)
+            k2 = self.xattn_k_norm(k2)
+        xattn_out = F.scaled_dot_product_attention(q2, k2, v2, dropout_p=0.0)
+        point_geom_features = self.xattn_proj(self._merge_heads(xattn_out))
+        point_geom_features = self.xattn_dropout(point_geom_features)
+        point_geom_features = point_geom_features * point_mask_ftype.unsqueeze(-1)
+
+        diagnostics = {
+            "anchor_features_rms": anchor_features.detach().float().pow(2).mean().sqrt(),
+            "point_geom_features_rms": point_geom_features.detach().float().pow(2).mean().sqrt(),
+        }
+        return point_geom_features, diagnostics
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -342,6 +546,9 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_geom_branch: bool = False,
+        geom_branch_n_anchors: int = 1024,
+        geom_branch_rff_num_features: int = 16,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -421,6 +628,40 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        self.use_geom_branch = use_geom_branch
+        self.geom_branch_n_anchors = geom_branch_n_anchors
+        if use_geom_branch:
+            geom_init_sigmas = (
+                list(rff_init_sigmas) if rff_init_sigmas else None
+            )
+            self.geom_branch = GeometryBranch(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                space_dim=space_dim,
+                n_anchors=geom_branch_n_anchors,
+                rff_num_features=geom_branch_rff_num_features,
+                rff_init_sigmas=geom_init_sigmas,
+                use_qk_norm=use_qk_norm,
+                dropout=dropout,
+            )
+            geom_hidden = n_hidden // 2
+            self.geom_branch_surface_head = nn.Sequential(
+                nn.LayerNorm(n_hidden, eps=1e-6),
+                LinearProjection(n_hidden, geom_hidden),
+                nn.GELU(),
+                LinearProjection(geom_hidden, self.surface_output_dim),
+            )
+            self.geom_branch_volume_head = nn.Sequential(
+                nn.LayerNorm(n_hidden, eps=1e-6),
+                LinearProjection(n_hidden, geom_hidden),
+                nn.GELU(),
+                LinearProjection(geom_hidden, self.volume_output_dim),
+            )
+        else:
+            self.geom_branch = None
+            self.geom_branch_surface_head = None
+            self.geom_branch_volume_head = None
 
     def _encode_group(
         self,
@@ -507,22 +748,64 @@ class SurfaceTransolver(nn.Module):
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
-        if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
-        else:
-            batch_size = volume_x.shape[0]
-            surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+        geom_diagnostics: dict[str, torch.Tensor] = {}
+        if self.use_geom_branch and self.geom_branch is not None:
+            point_coord_parts: list[torch.Tensor] = []
+            if surface_x is not None:
+                point_coord_parts.append(surface_x[:, :, : self.space_dim])
+            if volume_x is not None:
+                point_coord_parts.append(volume_x[:, :, : self.space_dim])
+            point_coords = torch.cat(point_coord_parts, dim=1)
 
-        if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
-        else:
-            batch_size = surface_x.shape[0]
-            volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+            if volume_x is not None:
+                anchor_source_coords = volume_x[:, :, : self.space_dim]
+                anchor_source_mask = volume_mask
+            else:
+                anchor_source_coords = surface_x[:, :, : self.space_dim]
+                anchor_source_mask = surface_mask
 
-        return {
+            geom_features, geom_diagnostics = self.geom_branch(
+                point_features=hidden_norm,
+                point_coords=point_coords,
+                point_mask=attn_mask,
+                anchor_source_coords=anchor_source_coords,
+                anchor_source_mask=anchor_source_mask,
+            )
+            combined = hidden_norm + geom_features
+            combined_surface = combined[:, :surface_tokens]
+            combined_volume = combined[:, surface_tokens : surface_tokens + volume_tokens]
+
+            if surface_x is not None:
+                surface_preds = self.geom_branch_surface_head(combined_surface) * surface_mask.unsqueeze(-1)
+            else:
+                batch_size = volume_x.shape[0]
+                surface_preds = combined.new_zeros(batch_size, 0, self.surface_output_dim)
+
+            if volume_x is not None:
+                volume_preds = self.geom_branch_volume_head(combined_volume) * volume_mask.unsqueeze(-1)
+            else:
+                batch_size = surface_x.shape[0]
+                volume_preds = combined.new_zeros(batch_size, 0, self.volume_output_dim)
+        else:
+            if surface_x is not None:
+                surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            else:
+                batch_size = volume_x.shape[0]
+                surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+
+            if volume_x is not None:
+                volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            else:
+                batch_size = surface_x.shape[0]
+                volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+
+        out = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        for name, tensor in geom_diagnostics.items():
+            out[f"geom_branch/{name}"] = tensor
+        return out
