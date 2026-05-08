@@ -17,6 +17,7 @@ import argparse
 import gc
 import math
 import os
+import random
 import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -138,6 +139,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_pcgrad: bool = False
+    pcgrad_seed: int = 0
     debug: bool = False
 
 
@@ -228,6 +231,27 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_pcgrad": (
+            "Enable PCGrad gradient surgery (Yu et al., NeurIPS 2020, "
+            "https://arxiv.org/abs/2001.06782). Computes 4 per-task gradients "
+            "(surface=sp+tau_x, tau_y, tau_z, vp), projects each conflicting "
+            "task gradient onto the orthogonal plane of the conflicting peer "
+            "(when cosine similarity < 0), then sums the projected gradients "
+            "for the optimizer step. Per-task losses are weighted by the "
+            "existing surface_loss_weight, volume_loss_weight, "
+            "tau_y_loss_weight, tau_z_loss_weight scalars. Cost: ~4x backward "
+            "(autograd.grad with retain_graph) + ~256MB extra VRAM for K "
+            "gradient copies. Incompatible with --compile-model and "
+            "--use-gradnorm."
+        ),
+        "pcgrad_seed": (
+            "Random seed for the PCGrad task-projection ordering. The "
+            "PCGrad paper randomly permutes the projection order across "
+            "tasks each step to avoid the asymmetric bias of fixed "
+            "ordering; the per-step seed is "
+            "(pcgrad_seed + global_step + rank) so every rank sees the "
+            "same shuffle for deterministic DDP behaviour. Default 0."
         ),
     }
     for field in fields(Config):
@@ -605,6 +629,184 @@ def synced_per_task_tensor(
     return stacked
 
 
+# PCGrad task names (Yu et al., 2020 — gradient surgery for multi-task learning).
+# 4 task groups isolate the confirmed conflict between surface pressure / wall
+# shear x (the fast-converging surface channels) and tau_y / tau_z (the slow
+# laggard channels confirmed by Round 17 r_i diagnostics), with volume
+# pressure as the fourth backbone-shared task.
+PCGRAD_TASK_NAMES = ("surface", "tau_y", "tau_z", "vp")
+
+
+def pcgrad_combine(
+    task_losses: list[torch.Tensor],
+    params: list[nn.Parameter],
+    *,
+    rng_seed: int,
+) -> tuple[list[torch.Tensor], dict[str, torch.Tensor]]:
+    """Compute the PCGrad-projected combined gradient for the given task losses.
+
+    Implements Yu et al. (2020) "Gradient Surgery for Multi-Task Learning":
+    each task gradient is projected onto the normal plane of any conflicting
+    peer (cosine similarity < 0), and the projected gradients are summed for
+    the optimizer step. The combination is sum (not mean) so that — when no
+    conflicts fire — the result is identical to the standard
+    ``backward(sum(task_losses))`` gradient and matches the existing weighted
+    multi-task baseline.
+
+    Implementation notes:
+      * Uses ``torch.autograd.grad`` with ``retain_graph=True`` so per-task
+        gradients can be extracted without firing DDP all-reduce hooks.
+      * Operates on a single global flat tensor per task (not per-parameter);
+        official TF/PyTorch references project on the concatenated 1D
+        gradient because conflict is a property of the full direction.
+      * Conflict detection uses ``torch.where`` (no host-device sync per
+        pair); the projection correction is computed unconditionally and
+        masked, which trades a small amount of FLOPs for one fewer sync per
+        inner iteration (K*(K-1) iterations otherwise).
+      * Random ordering of the inner projection loop is required for the
+        symmetry guarantee in the paper. The seed is supplied by the caller
+        and must be identical across DDP ranks so every rank applies the
+        same permutation; otherwise different ranks would project in
+        different orders and produce divergent gradients.
+
+    Args:
+        task_losses: list of K scalar tensors (already weighted) sharing one
+            forward graph.
+        params: list of trainable parameters to compute gradients against.
+        rng_seed: integer seed for the per-step inner permutation. Pass the
+            same value on every DDP rank.
+
+    Returns:
+        combined_grads: list of tensors matching ``params`` shapes; ready to
+            be assigned to ``param.grad``. Still local to the rank — caller
+            must run ``dist.all_reduce`` (or rely on a manual reduce) before
+            ``optimizer.step()``.
+        metrics: dict of GPU scalar tensors capturing PCGrad health (conflict
+            count, total pairs, pre/post per-task gradient norms, combined
+            gradient norm). Caller should detach + ``.item()`` once before
+            logging to W&B to fold the host-sync cost into a single transfer.
+    """
+
+    K = len(task_losses)
+    device = params[0].device
+
+    # 1) Per-task gradients via autograd.grad — does NOT trigger DDP hooks.
+    task_grads: list[list[torch.Tensor]] = []
+    for i, L_i in enumerate(task_losses):
+        retain = True  # last task may still be needed by callers; safe to retain
+        grads = torch.autograd.grad(
+            L_i,
+            params,
+            retain_graph=retain,
+            allow_unused=True,
+        )
+        task_grads.append(
+            [
+                torch.zeros_like(p) if g is None else g.float()
+                for g, p in zip(grads, params)
+            ]
+        )
+
+    # 2) Flatten globally per task — projection is on the concatenated 1D
+    #    gradient direction, not per-parameter.
+    flat_grads = [
+        torch.cat([g.reshape(-1) for g in tg]) for tg in task_grads
+    ]
+    norms_sq = [g.dot(g).clamp_min(1e-12) for g in flat_grads]
+
+    # 3) PCGrad surgery: project each task's gradient against conflicting peers
+    #    in random order. Conflict detection is masked (no host-device sync
+    #    per pair); the projection correction is computed unconditionally.
+    pc_grads = [g.clone() for g in flat_grads]
+    conflict_count = torch.zeros((), device=device, dtype=torch.float32)
+    total_pairs = 0
+    rng = random.Random(rng_seed)
+    for i in range(K):
+        peers = [j for j in range(K) if j != i]
+        rng.shuffle(peers)
+        for j in peers:
+            total_pairs += 1
+            dot = torch.dot(pc_grads[i], flat_grads[j])
+            mask = (dot < 0).to(dot.dtype)
+            correction = (dot / norms_sq[j]) * flat_grads[j]
+            pc_grads[i] = pc_grads[i] - mask * correction
+            conflict_count = conflict_count + mask
+
+    # 4) Sum projected gradients — matches sum(task_losses) when no conflicts.
+    combined_flat = torch.stack(pc_grads).sum(dim=0)
+
+    # 5) Unflatten back to per-parameter shapes.
+    combined_grads: list[torch.Tensor] = []
+    offset = 0
+    for p in params:
+        n = p.numel()
+        combined_grads.append(
+            combined_flat[offset:offset + n].view_as(p).contiguous()
+        )
+        offset += n
+
+    pre_norms = torch.stack([g.norm() for g in flat_grads])
+    post_norms = torch.stack([g.norm() for g in pc_grads])
+    combined_norm = combined_flat.norm()
+
+    metrics: dict[str, torch.Tensor] = {
+        "pcgrad/conflict_count": conflict_count,
+        "pcgrad/total_pairs": torch.tensor(float(total_pairs), device=device),
+        "pcgrad/combined_grad_norm": combined_norm,
+        "pcgrad/grad_norm_pre": pre_norms,
+        "pcgrad/grad_norm_post": post_norms,
+    }
+    return combined_grads, metrics
+
+
+SURFACE_NUM_CHANNELS = 4  # cp, tau_x, tau_y, tau_z
+
+
+def pcgrad_task_losses(
+    per_task_losses: list[torch.Tensor],
+    *,
+    surface_loss_weight: float,
+    volume_loss_weight: float,
+    tau_y_loss_weight: float,
+    tau_z_loss_weight: float,
+) -> list[torch.Tensor]:
+    """Build the 4 weighted PCGrad task groups from the 5 per-channel losses.
+
+    The per-channel losses arrive in [sp, tau_x, tau_y, tau_z, vp] order from
+    ``per_task_train_losses``. PCGrad treats sp+tau_x as a single "surface
+    non-conflicting" task because the PR hypothesis isolates the gradient
+    conflict to (cp, tau_y, tau_z, vp); tau_x is empirically aligned with cp
+    and is grouped with it so the model still receives gradient signal for it.
+
+    The baseline ``train_loss`` uses ``weighted_channel_mse`` which divides
+    the channel-weighted SSE by ``valid_points * num_channels`` (4 surface
+    channels). The per-channel ``masked_mse`` calls inside
+    ``per_task_train_losses`` only divide by ``valid_points``, so a naive sum
+    of weighted per-channel losses would be 4x the baseline magnitude. We
+    divide the surface task weights by ``SURFACE_NUM_CHANNELS`` to preserve
+    the baseline gradient magnitude under the no-conflict identity:
+
+        L_surface = (surface_loss_weight / 4) * (sp_loss + tau_x_loss)
+        L_tau_y   = (surface_loss_weight * tau_y_loss_weight / 4) * tau_y_loss
+        L_tau_z   = (surface_loss_weight * tau_z_loss_weight / 4) * tau_z_loss
+        L_vp      = volume_loss_weight * vp_loss
+
+    so ``sum(L_i)`` reproduces the existing weighted_channel_mse baseline
+    exactly, and PCGrad reduces to the standard sum-of-tasks training when
+    no conflicts fire. With surface_loss_weight=2.0 and tau_y/tau_z
+    weights=1.5/2.0 the effective coefficients are (sp=0.5, tau_x=0.5,
+    tau_y=0.75, tau_z=1.0, vp=1.0) — matching the SOTA stack.
+    """
+
+    sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss = per_task_losses
+    surface_scale = surface_loss_weight / float(SURFACE_NUM_CHANNELS)
+    surface_task = surface_scale * (sp_loss + taux_loss)
+    tauy_task = surface_scale * tau_y_loss_weight * tauy_loss
+    tauz_task = surface_scale * tau_z_loss_weight * tauz_loss
+    vp_task = volume_loss_weight * vp_loss
+    return [surface_task, tauy_task, tauz_task, vp_task]
+
+
 def parse_vol_points_schedule(text: str) -> list[tuple[int, int]]:
     if not text:
         return []
@@ -784,6 +986,18 @@ def main(argv: Iterable[str] | None = None) -> None:
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
+        if config.use_pcgrad:
+            if config.use_gradnorm:
+                raise ValueError(
+                    "--use-pcgrad and --use-gradnorm are mutually exclusive."
+                )
+            if config.compile_model:
+                raise ValueError(
+                    "--use-pcgrad requires --no-compile-model "
+                    "(autograd.grad with retain_graph is not supported through "
+                    "torch.compile)."
+                )
+
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
         if config.use_gradnorm:
@@ -851,6 +1065,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                )
+            if config.use_pcgrad:
+                surface_scale = config.surface_loss_weight / float(SURFACE_NUM_CHANNELS)
+                print(
+                    f"PCGrad enabled: tasks={PCGRAD_TASK_NAMES}; "
+                    f"effective coeffs sp/taux={surface_scale:.3f} "
+                    f"tau_y={surface_scale * config.tau_y_loss_weight:.3f} "
+                    f"tau_z={surface_scale * config.tau_z_loss_weight:.3f} "
+                    f"vp={config.volume_loss_weight:.3f}; pcgrad_seed={config.pcgrad_seed}; "
+                    f"projection ordering randomized per step (seeded for DDP determinism)"
                 )
 
         run = init_wandb_run(
@@ -937,6 +1161,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                pc_task_losses: list[torch.Tensor] | None = None
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
                         model, batch, transform, device, config.amp_mode
@@ -1020,6 +1245,42 @@ def main(argv: Iterable[str] | None = None) -> None:
                         )
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
+                elif config.use_pcgrad:
+                    per_task_losses = per_task_train_losses(
+                        model, batch, transform, device, config.amp_mode
+                    )
+                    pc_task_losses = pcgrad_task_losses(
+                        per_task_losses,
+                        surface_loss_weight=config.surface_loss_weight,
+                        volume_loss_weight=config.volume_loss_weight,
+                        tau_y_loss_weight=config.tau_y_loss_weight,
+                        tau_z_loss_weight=config.tau_z_loss_weight,
+                    )
+                    # Sum of weighted PCGrad task losses == standard
+                    # weighted_channel_mse baseline. Used for the finite-loss
+                    # check, train/loss logging, and as an apples-to-apples
+                    # diagnostic against pre-PCGrad runs.
+                    loss = pc_task_losses[0]
+                    for term in pc_task_losses[1:]:
+                        loss = loss + term
+                    surface_unweighted = (
+                        per_task_losses[0]
+                        + per_task_losses[1]
+                        + per_task_losses[2]
+                        + per_task_losses[3]
+                    )
+                    base_mse_total = surface_unweighted + per_task_losses[4]
+                    weighted_surface_for_log = (
+                        pc_task_losses[0] + pc_task_losses[1] + pc_task_losses[2]
+                    ).detach()
+                    weighted_volume_for_log = pc_task_losses[3].detach()
+                    batch_loss_metrics = {
+                        "base_mse_loss": float(base_mse_total.detach().cpu().item()),
+                        "surface_loss": float(surface_unweighted.detach().cpu().item()),
+                        "volume_loss": float(per_task_losses[4].detach().cpu().item()),
+                        "surface_loss_weighted": float(weighted_surface_for_log.cpu().item()),
+                        "volume_loss_weighted": float(weighted_volume_for_log.cpu().item()),
+                    }
                 else:
                     loss, batch_loss_metrics = train_loss(
                         model,
@@ -1073,10 +1334,48 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
+                pcgrad_metrics: dict[str, float] = {}
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
-                    loss.backward()
+                    if pc_task_losses is not None:
+                        trainable_params = [
+                            p for p in base_model.parameters() if p.requires_grad
+                        ]
+                        combined_grads, pcgrad_metric_tensors = pcgrad_combine(
+                            pc_task_losses,
+                            trainable_params,
+                            rng_seed=config.pcgrad_seed + global_step,
+                        )
+                        for p, g in zip(trainable_params, combined_grads):
+                            p.grad = g
+                        if state.enabled:
+                            for p in trainable_params:
+                                if p.grad is not None:
+                                    dist.all_reduce(p.grad, op=dist.ReduceOp.SUM)
+                                    p.grad.div_(state.world_size)
+                        pre_norms_cpu = pcgrad_metric_tensors["pcgrad/grad_norm_pre"].detach().cpu().tolist()
+                        post_norms_cpu = pcgrad_metric_tensors["pcgrad/grad_norm_post"].detach().cpu().tolist()
+                        pcgrad_metrics = {
+                            "pcgrad/conflict_count": float(
+                                pcgrad_metric_tensors["pcgrad/conflict_count"].detach().cpu().item()
+                            ),
+                            "pcgrad/total_pairs": float(
+                                pcgrad_metric_tensors["pcgrad/total_pairs"].detach().cpu().item()
+                            ),
+                            "pcgrad/combined_grad_norm": float(
+                                pcgrad_metric_tensors["pcgrad/combined_grad_norm"].detach().cpu().item()
+                            ),
+                        }
+                        pcgrad_metrics["pcgrad/conflict_rate"] = (
+                            pcgrad_metrics["pcgrad/conflict_count"]
+                            / max(pcgrad_metrics["pcgrad/total_pairs"], 1.0)
+                        )
+                        for i, name in enumerate(PCGRAD_TASK_NAMES):
+                            pcgrad_metrics[f"pcgrad/grad_norm_pre_{name}"] = pre_norms_cpu[i]
+                            pcgrad_metrics[f"pcgrad/grad_norm_post_{name}"] = post_norms_cpu[i]
+                    else:
+                        loss.backward()
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
@@ -1126,6 +1425,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+
+                if pcgrad_metrics:
+                    train_log.update(pcgrad_metrics)
 
                 train_log.update(
                     train_slope_tracker.update(
