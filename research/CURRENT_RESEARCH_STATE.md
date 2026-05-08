@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-08 22:25 (Round 19 ACTIVE — 8 tay-track WIP PRs after PR #868 askeladd CLOSED FALSIFIED. nezuko #823 leading at EP11=6.4521% (BEATS SOTA -2.07%). New askeladd assignment: mixup/geometric-interpolation augmentation for OOD vol_p.)
+- **Date:** 2026-05-09 (Round 19/20 ACTIVE — PR #823 nezuko MERGED as new single-model SOTA val=6.4407%. Three new PRs assigned (#878 alphonse xattn-heads, #879 frieren xattn-2layer, #880 nezuko ensemble pool-25). Rebase requests sent to #871 tanjiro PCGrad and #870 fern KNN match-mode.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -9,10 +9,11 @@
 |---|---|---|---|---|---|
 | **Ensemble SOTA** | **6.1751%** | **7.5347%** | 11.4652% | #612 (nezuko) | K=7 greedy pool-24 |
 | **Wave-test SOTA** | — | **7.5195%** | — | #740 (`5x8wofzm`) | GradNorm α=0.5 winner |
-| **Single-model SOTA** | **6.5985%** | **7.9915%** | 11.933% | #592 (alphonse) | depth-L5, EP4, run `4k25s25e` |
+| **Single-model SOTA** | **6.4407%** | **7.6992%** | 11.670% | #823 (nezuko) | surf→vol xattn, EP13, run `ghh0s4ne` |
+| **Prior Single-model SOTA** | 6.5985% | 7.9915% | 11.933% | #592 (alphonse) | depth-L5, EP4, run `4k25s25e` |
 | **Vol-pressure best anchor** | — | — | 11.374% | #681 (dc031qpt) | Issue #717 reference |
 
-**Advancement gate:** EP4 val_abupt ≤ 6.5985% on a 4-ep tay screen → advance to 13-ep full run.
+**Advancement gate:** EP4 val_abupt < 6.4407% on a 4-ep tay screen → advance to 13-ep full run.
 
 **Key finding from #767:** 4 OOD test cases (run_133, run_226, run_203, run_158) account for 92% of squared test_vol_p deviation. Excluding them, test_vol_p = 3.9–4.2% (below AB-UPT 6.08%). Geometry conditioning of the volume decoder is the highest-priority intervention.
 
@@ -56,29 +57,30 @@
 
 ---
 
-## Active PRs (Round 19, all RUNNING)
+## Active PRs (Round 19/20)
 
 | PR | Student | Hypothesis | W&B run | Status |
 |---|---|---|---|---|
-| #823 | nezuko | Surface→vol cross-attention (13-ep full run) | `ghh0s4ne` | **EP11=6.4521% BEATS SOTA (-2.07%)**. Trajectory: EP6=6.590 → EP11=6.452 still improving. Expect sub-6.4 by EP13. |
-| #868 | askeladd | Spectral normalization on attention projection layers | `0kjl4rnh` | **CLOSED FALSIFIED** EP4 val=7.6778%, test=8.9345%, test_vol_p=12.777% (OOD widened). |
-| #877 | askeladd | Y-flip augmentation (p=0.5): physically-exact x2 training data for OOD vol_p | — | **ASSIGNED 2026-05-08 22:25.** Fresh 4-ep screen. |
-| #869 | edward | Stochastic depth (drop_path={0.05, 0.10}) | — | EP1=29.245% [OK]. Awaiting EP2 (gate ≤16.0). |
-| #870 | fern | KNN smoothness penalty on τ_y/τ_z (pivoted from FFT, λ=0.1, k=8) | `d0echeyh` | EP1=30.32% borderline (gate 30.0 — barely missed). Watch EP2 closely. |
-| #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Pre-EP1 @ step=6155. |
-| #872 | frieren | hidden_dim=640 width scaling | `gr1n58zo` (v2) | EP1=27.62% [OK]. VRAM 63.2 / 97.9 GB safe. |
-| #873 | dl24-tanjiro | 7L STRING + GradNorm α=0.5 + Y-sym (long-track) | — | Pre-EP1 @ step=4610. |
-| #875 | alphonse | AdamW vs Lion direct comparison at SOTA config | — | Pre-EP1 @ step=4708. |
-| #876 | thorfinn | Huber loss δ=0.5 and δ=1.0 (two-arm) | — | Pre-EP1 @ step=3660. |
+| #823 | nezuko | Surface→vol cross-attention (13-ep full run) | `ghh0s4ne` | **MERGED — NEW SINGLE-MODEL SOTA val=6.4407%** |
+| #877 | askeladd | Y-flip augmentation (p=0.5): physically-exact x2 training data for OOD vol_p | — | WIP, 4-ep screen |
+| #869 | edward | Stochastic depth (drop_path={0.05, 0.10}) | — | WIP |
+| #870 | fern | KNN smoothness penalty on τ_y/τ_z (match-mode pivot) | — | **REBASE REQUESTED** — var-mode FAILED (EP4=8.68%), match-mode command queued |
+| #871 | tanjiro | PCGrad gradient surgery across 4 task groups | `o73mnz13` (bs=2 restart) | **REBASE REQUESTED** — bs=4 OOM at EP2; bs=2 ongoing |
+| #876 | thorfinn | Huber loss δ=0.5 and δ=1.0 (two-arm) | — | WIP |
+| #878 | alphonse | Surf→vol xattn heads sweep: 8 vs 16 heads | — | **ASSIGNED 2026-05-09** |
+| #879 | frieren | Two-layer surf→vol xattn: mid-backbone + post-backbone | — | **ASSIGNED 2026-05-09** |
+| #880 | nezuko | Ensemble pool-25 refresh: add ghh0s4ne to greedy pool | — | **ASSIGNED 2026-05-09** |
 
-**Long-track WIP (DDP8):** #831 dl24-fern, #843 dl24-nezuko, #844 dl24-frieren.
+**Long-track WIP (DDP8):** #831 dl24-fern, #843 dl24-nezuko, #844 dl24-frieren, #873 dl24-tanjiro (7L STRING+GradNorm+Y-sym).
 
 ---
 
 ## Current Research Focus
 
 ### Theme 1: Cross-Attention Geometry Conditioning (CRITICAL — Issue #717)
-- **Surface→vol cross-attention** (nezuko #823, ACTIVE): EP11=6.4521% — BEATS SOTA 6.5985% by -0.146pp (-2.07%). Run `ghh0s4ne`. Trajectory still descending (EP6→EP11 = -0.138pp). **Highest-priority active experiment; expected new single-model SOTA at EP13.** Cross-attn learning confirmed (out_proj.weight 0.0→4.99). OOD geometry compression confirmed.
+- **Surface→vol cross-attention** (nezuko #823, MERGED ✓): **NEW SINGLE-MODEL SOTA val=6.4407%** (EP13, run `ghh0s4ne`). test_abupt=7.6992%, test_vol_p=11.670%. Broad-based improvement; OOD test/val ratio preserved (3.027×).
+- **Xattn heads sweep** (alphonse #878, ACTIVE): Try xattn num_heads=8 vs 16 (baseline uses 4). More attention heads → finer cross-modal specialization.
+- **Two-layer xattn** (frieren #879, ACTIVE): Second xattn injection mid-backbone (after layer 2 of 5) + post-backbone. Early geometry conditioning throughout processing.
 - **SDF skip-connect vol decoder** (#837 tanjiro, BLOCKED by Issue #803): Revisit after `volume_sdf.npy` regeneration.
 
 ### Theme 2: Optimizer Exploration (post-Lion-confirmation)
@@ -161,10 +163,12 @@
 - **dl24-tanjiro 7L STRING + GradNorm + Y-sym** → #873 (long-track, pre-EP1)
 
 ### Next assignments (when students become idle)
-1. **Merge nezuko #823** when EP13 finishes — will become new single-model SOTA.
-2. **Cross-attention follow-ups**: Variations on #823 (different attention configs, larger context windows, multi-head conditioning).
-3. **Compose cross-attention with other improvements** (PCGrad/drop-path/Huber): Once primary approaches confirmed.
-4. **Ensemble pool-25 refresh**: After nezuko #823 full 13-ep completes — add to greedy ensemble and re-run greedy selection.
+1. **PR #878 alphonse** xattn heads sweep (8 vs 16 heads) — ASSIGNED 2026-05-09
+2. **PR #879 frieren** two-layer xattn (mid-backbone + post-backbone) — ASSIGNED 2026-05-09
+3. **PR #880 nezuko** ensemble pool-25 refresh — ASSIGNED 2026-05-09
+4. **Layer-wise LR decay (LLRD)**: Higher LR on later transformer layers. Never tested. Strong prior in BERT/ViT fine-tuning literature. Next after current round resolves.
+5. **Per-channel output projection heads**: Separate final projection per physical field (cp, vp, tau_x, tau_y, tau_z) from shared latents. Never tested.
+6. **Xattn + Huber compose**: If both PR #876 (Huber) and PR #823 (xattn) win, compose them — targeting OOD vol_p jointly from loss side + architecture side.
 
 ### Medium priority (Round 20+)
 3. **Layer-wise LR decay (LLRD)**: Larger lr on later transformer layers. Never tested. Next after #875 AdamW resolves.
