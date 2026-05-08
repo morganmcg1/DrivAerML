@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-08 02:10 UTC (Round 13 in progress — PR #827 closed informative; PR #835 frieren newly assigned)
+- **Date:** 2026-05-08 11:55 UTC (Round in progress — 8 WIP PRs on `tay` advisor branch)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -8,74 +8,58 @@
 | Tier | val_abupt | test_abupt | test_vol_pressure | PR | Notes |
 |---|---|---|---|---|---|
 | **Ensemble SOTA** | **6.1751%** | **7.5347%** | 11.4652% | #612 (nezuko) | K=7 greedy pool-24 |
+| **Wave-test SOTA** | — | **7.5195%** | — | #740 (`5x8wofzm`) | GradNorm α=0.5 winner |
 | **Single-model SOTA** | **6.5985%** | **7.9915%** | 11.933% | #592 (alphonse) | depth-L5, EP4, run `4k25s25e` |
 | **Vol-pressure best anchor** | — | — | 11.374% | #681 (dc031qpt) | Issue #717 reference |
+
+**Advancement gate:** EP4 val_abupt ≤ 6.5985% on a 4-ep tay screen → advance to 13-ep full run.
 
 ---
 
 ## Latest Human Researcher Directives
 
 - **Issue #618** (STRING/RoPE): Architecture experiments concluded. All RoPE/Anchor variants closed negative. Direction exhausted at single-model level.
-- **Issue #717** (vol_pressure gap): vol_p OOD gap is a data distribution-shift problem (confirmed by L6 depth scale PR #811 and geom-branch PR #802). The gap (val≈4%, test≈12%, ~3×) is structurally identical across L5/L6/GradNorm/geom-branch. Primary lever: Issue #803 SDF regeneration for 10 REQUIRED_RESTORED_CASE_IDs (blocking — human team). Secondary: data-side augmentation.
-- **Issue #803** (volume_sdf.npy): Awaiting human team delivery of regenerated SDF for 10 REQUIRED_RESTORED_CASE_IDs. BLOCKING for geometry-conditioning experiments.
-- **Issue #759** (Bengio backlog): Reserved.
+- **Issue #717** (vol_pressure gap): vol_p OOD gap is a data distribution-shift problem. Primary lever: Issue #803 SDF regeneration (blocking — human team). Secondary: data-side augmentation.
+- **Issue #803** (volume_sdf.npy): Awaiting human team delivery of regenerated SDF. BLOCKING for geometry-conditioning experiments.
 
 ---
 
-## Round Summary (Just Closed)
+## Active PRs (8 WIP — current round)
 
-### Negative results this round
-- **PR #817 (edward, τ_y×2.0)**: CLOSED NEGATIVE — τ_y loss-weight axis CLOSED at L5/Lion/9e-5. Manual rebalancing broke τ_y:τ_z ratio, all channels regressed. τ_y gap is architectural, not supervision-strength.
-- **PR #811 (fern, L6 depth scale)**: CLOSED NEGATIVE — vol_p OOD gap structurally identical across L5/L6/GradNorm (~7.5pp). Depth-scaling axis CLOSED. Data distribution-shift is the root cause.
-- **PR #802 (frieren, AB-UPT geom branch v3)**: CLOSED — architecturally validated (F1/F2/F3 all working; vol_p gap compressed 3.17×→2.225×) but NOT competitive on val_abupt (8.563% vs SOTA 6.598%). Geometry branch competes with backbone for representation budget. FiLM-style geometry conditioning may be lighter-weight alternative.
-
-### PR returned for relaunch
-- **PR #822 (thorfinn, τ_z×3.0 4-ep)**: SENT BACK — advisor kill-gate configuration bug caused false EP1 kill (EP1 val=26.61%, gate was `<12` instead of `<30`). Corrected gates: EP1<30%, EP2<10%, EP3<8%. Relaunch in progress.
-
----
-
-## Active PRs (8 WIP — Round 13)
-
-| Student | PR | Hypothesis | Status |
-|---|---|---|---|
-| askeladd | #828 | 2-layer GELU MLP vol decoder (512→256→GELU→1) | WIP — EP2 DONE, EP3 pending |
-| tanjiro | #830 | vol-loss-weight=2.0 budget-matched 4-ep | WIP — STALE (poked 02:00 UTC) |
-| nezuko | #823 | Surface→volume cross-attention for geometry-aware vol_p | WIP — EP1 DONE, EP2 pending |
-| frieren | #835 | Lion lr=1e-4 on L5 SOTA stack (lr up-sweep) | **NEWLY ASSIGNED** |
-| fern | #829 | STRING 6-octave RFF sigma range (0.125–4.0) | WIP — EP2 DONE, EP3 pending |
-| alphonse | #832 | Lion wd=7e-4 on L5 SOTA 4-ep (wd up-sweep) | WIP — awaiting launch (poked 02:00 UTC) |
-| thorfinn | #833 | τ_z×2.5 on L5 SOTA 4-ep (loss weight bisection) | WIP — awaiting launch (poked 02:00 UTC) |
-| edward | #834 | GradNorm α=0.5 uniform init, no static weights, 4-ep | WIP — launched 01:28, EP1 pending |
-
-### Closed this cycle (PRs #822, #824, #826, #827)
-- **PR #822 (thorfinn, τ_z×3.0 4-ep)**: CLOSED NEGATIVE — val_abupt=7.4767%. Budget too tight for τ_z×3.0. Replaced by τ_z×2.5 bisection #833.
-- **PR #824 (edward, GradNorm α=0.5 + static)**: CLOSED NEGATIVE — val_abupt=7.5170%. GradNorm + static weights = anti-synergy. Replaced by pure-GradNorm no-static #834.
-- **PR #826 (alphonse, wd=3e-4)**: CLOSED NEGATIVE — val_abupt=7.4628%. wd=5e-4 is Lion sweet spot. Testing up-side via #832 (wd=7e-4).
-- **PR #827 (frieren, cosine warm restarts)**: CLOSED INFORMATIVE — EP3=7.445% passed gate, EP4 timeout before validation. Restart mechanics confirmed working; hypothesis untestable in 4-ep regime. Monotone cosine decay confirmed productive.
+| PR | Student | Hypothesis | W&B run | Status |
+|---|---|---|---|---|
+| #823 | nezuko | Surface→volume cross-attention (13-ep confirm) | `ghh0s4ne` | EP2 PASS 8.148% (vs SOTA 7.94% +0.21pp) — EP3 in progress |
+| #848 | alphonse | Lion lr down-sweep (8e-5 / 7e-5) | Arm A `hauwt4fv` | Arm A killed at EP3=8.36% (gate miss); Arm B (lr=7e-5) launching |
+| #849 | askeladd | Differential τy/τz (2.0/1.5; 2.5/1.5) | Arm A `cww5o53v` | Arm A EP3=8.29% (gate miss by 0.29%); EP4 imminent |
+| #850 | tanjiro | Lion β₂ sweep (0.95 vs 0.999) | Arm A `dxole713` | EP1 PASS 25.49%; EP2 imminent (~step 21729) |
+| #852 | fern | GradNorm α=0.75 on L5 SOTA tay screen | — | **CONFLICTING** — sent back for rebase onto origin/tay |
+| #853 | thorfinn | Model dropout sweep (0.05 / 0.10) | Arm A `baxqh2ok` | Arm A launched ~11:16Z; EP1 ETA ~12:33Z |
+| #854 | edward | GradNorm α=0.1 on L5 SOTA tay screen | `f1l3m752` | Launched; ~24% through EP1 |
+| #855 | frieren | Y-symmetry augmentation standalone | — | y-sym ported from drivaerml-long-20260504; launched |
 
 ---
 
 ## Current Research Focus
 
-### Theme 1: Optimizer Axis Exploration (continued)
-Down-sweep of Lion wd (PR #826) confirmed wd=5e-4 is near-optimal from below. GradNorm stacked on static weights (PR #824) confirmed anti-synergy. Current active experiments:
+### Theme 1: Optimizer Axis Exploration
+- **Lion lr down-sweep** (alphonse #848): lr=8e-5 missed EP3 gate (8.36%); falling back to lr=7e-5 in Arm B.
+- **Lion β₂** (tanjiro #850): β₂=0.95 vs 0.999 — momentum smoothing axis. EP1 clean.
 
-- **Lion wd=7e-4** (alphonse, #832): Up-sweep of wd axis. Conservative 40% increase. Tests other side of wd optimum before closing axis.
-- **GradNorm α=0.5, no static weights** (edward, #834): Drops all static loss weights; GradNorm alone owns the schedule from uniform init (all=1.0). Replicates PR #740 conditions but on full L5 SOTA backbone. If this beats SOTA, confirms GradNorm is a genuine lever when not stacked.
+### Theme 2: GradNorm α Sweep
+- **α=0.1** (edward #854): aggressive gradient balancing extreme.
+- **α=0.75** (fern #852): conservative tuning around α=0.5 SOTA. **Currently blocked on rebase.**
+- α=1.0 already known to crash; α=0.25 worse than α=0.5.
 
-### Theme 2: Wall-Shear τ_z Recovery (bisection probe)
-- **τ_z×2.5** (thorfinn, #833): Bisection probe between proven SOTA (×2.0) and failed ×3.0. τ_z is the worst-performing channel. ×2.5 moderate amplification should fit within the 4-ep budget that ×3.0 couldn't.
+### Theme 3: Wall-Shear τ Reweighting
+- **τy=2.0 / τz=1.5** (askeladd #849 Arm A): differential reweight; EP3 close to gate, EP4 will tell.
+- **τy=2.5 / τz=1.5** (askeladd #849 Arm B): queued.
 
-### Theme 3: Volume Architecture (geometry conditioning — Issue #717)
-- **2-layer GELU MLP vol decoder** (askeladd, #828): Non-linear vol decoding capacity.
-- **Surface→volume cross-attention** (nezuko, #823): Geometry-aware vol_p decoding.
-- **vol-loss-weight=2.0 budget-matched** (tanjiro, #830): vol_p weighting at correct budget.
+### Theme 4: Volume / Geometry
+- **Surface→volume cross-attention 13-ep** (nezuko #823): on-pace, +0.21pp behind SOTA at EP2.
 
-### Theme 4: Positional Encoding Variants (fern)
-- **STRING 6-octave low-frequency probe** (fern, #829): σ range 0.125–4.0 (adds low-frequency σ=0.125, drops high-frequency σ=4.0). Different from closed high-frequency probes.
-
-### Theme 5: Learning Rate Schedule (frieren)
-- **Cosine LR warm restarts** (frieren, #827): SGDR-style warm restarts on L5 SOTA 4-ep. Hypothesis: vol_p OOD gap may be a local minimum that periodic LR resets can escape.
+### Theme 5: Regularization
+- **Model dropout sweep** (thorfinn #853): 0.05 / 0.10 — capacity-vs-overfit lever, untested at L5 SOTA.
+- **Y-symmetry augmentation** (frieren #855): bilateral symmetry prior; previously baked into long runs only, now standalone.
 
 ---
 
@@ -83,37 +67,42 @@ Down-sweep of Lion wd (PR #826) confirmed wd=5e-4 is near-optimal from below. Gr
 
 - **SOTA config (PR #592):** L=5, hidden=512, heads=4, slices=128, Lion lr=9e-5, wd=5e-4, β₁=0.9, β₂=0.99, EMA=0.999, STRING-sep RFF σ∈{0.25,0.5,1.0,2.0,4.0}
 - **Correct training unit:** 4-epoch curriculum `--vol-points-schedule "0:16384:1:32768:2:49152:3:65536"` — 13-ep schedule CANNOT fit in 270-min budget
-- **Kill gate polarity:** `<X` means "must stay below X, kill if not" — NOT `>X`
-- **vol_p OOD gap:** ~7.5pp val→test gap is DATA DISTRIBUTION-SHIFT, not model capacity (confirmed L5/L6/GradNorm all identical)
-- **τ_y gap:** architectural/representation issue, NOT supervision-strength (τ_y loss-weight axis CLOSED)
-- **RFF spectrum {0.25,0.5,1.0,2.0,4.0}:** optimal at 4-ep budget — σ=8.0 additions hurt consistently (PRs #814, #819)
-- **L6 depth:** worse than L5 at 4-ep budget (under-convergence)
-- **Geometry branch:** works architecturally but competes with backbone — val 8.56% vs SOTA 6.60%, too costly for composition
+- **Kill gates:** EP1 <30%, EP2 <16%, EP3 <8%, EP4 ≤6.5985%
+- **Tay-stack flags** (only on `tay`, not `drivaerml-long-20260504`): `--pos-encoding-mode string_separable`, `--use-qk-norm`, `--rff-num-features`, `--rff-init-sigmas`, `--tau-y-loss-weight`, `--tau-z-loss-weight`, `--vol-points-schedule`, `--gradnorm-mode ema_proxy`, `--gradnorm-min-weight`
+- **Y-symmetry flags** (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`): originally on `drivaerml-long-20260504` only; ported to `tay` on commit `87a178e` (frieren PR #855).
+- **vol_p OOD gap:** ~7.5pp val→test gap is DATA DISTRIBUTION-SHIFT, not model capacity
+- **τ_y gap:** architectural, NOT supervision-strength
+- **GradNorm:** α=0.5 SOTA (PR #740 wave test 7.5195%); α=0.25 worse; α=1.0 crashes
 
 ---
 
 ## Potential Next Research Directions
 
-### Optimizer / Regularization
-1. If wd=7e-4 (alphonse #832) is positive → try wd=1e-3 to extend curve
-2. If wd=7e-4 negative → close wd axis; wd=5e-4 confirmed optimal
-3. If GradNorm no-static (edward #834) is positive → try α=1.0, α=0.25 sweep; also test α=0.5 with warmup delay (let static weights run EP1, then enable GradNorm)
-4. If Lion β₂=0.999 (fern #825 in-flight) shows improvement → try β₂=0.9999 for further smoothing
-5. **Lion lr sweep**: lr=1e-4 vs current 9e-5 (has not been formally swept at L5/4-ep budget)
+### Optimizer
+1. If lr=7e-5 (alphonse #848 Arm B) passes → close lr down-sweep and push lr=1e-4 / 1.2e-4 up-sweep
+2. If β₂=0.95 (tanjiro #850) wins → try β₂=0.9; if loses → β₂=0.99 confirmed optimal
+3. Lion β₂=0.999 still pending revisit at L5 SOTA stack
 
-### Wall-shear τ_z
-6. If τ_z×2.5 (thorfinn #833) positive → try τ_z×3.0 at longer budget (5-ep or 6-ep); or compose τ_z×2.5 + β₂=0.999
-7. If τ_z×2.5 negative → τ_z loss-weight axis exhausted; pivot to per-channel decoder head for τ_z
+### GradNorm α
+4. α=0.1 + α=0.75 combined with current α=0.5 SOTA give a 4-point parabola — fit and propose optimum
+5. GradNorm warmup: static for EP1, GradNorm from EP2 onward
 
-### Volume architecture (geometry conditioning — Issue #717, highest EV)
-8. If MLP decoder (askeladd #828) positive → escalate to 3-layer MLP with skip connection
-9. If surface→vol cross-attention (nezuko #823) positive → try separate surface→vol attention module per channel
-10. **Per-channel output projection**: separate decoder head per physical quantity (sp, τx, τy, τz, vp) — different spatial statistics warrant different inductive biases
-11. **Warm-start from SOTA checkpoint**: init new runs from SOTA `4k25s25e` weights, apply architectural modification, fine-tune 2–4ep at lr=1e-5
+### Wall-shear τ
+6. If τy=2.0/τz=1.5 (askeladd) marginal → try Arm B τy=2.5/τz=1.5
+7. If both fail → close differential τ axis, escalate to per-channel decoder head
 
-### Ensemble refresh
-12. After new single-model candidates emerge, re-run greedy pool-25 selection (nezuko)
+### Volume / Geometry (Issue #717, highest EV)
+8. Pending Issue #803 SDF regeneration → resume geometry-branch + FiLM modulation experiments
+9. If nezuko xattn 13-ep beats SOTA → escalate to per-channel xattn module
+10. Per-channel output projection: separate decoder head per physical quantity
 
-### Architecture
-13. FiLM modulation (lightweight γ/β from surface pooling) — confirmed working at yi but FiLM γ-saturation issue; worth retrying with γ bounded at (0, 5) instead of (0, 100)
-14. **Attention kernel alternatives**: Flash attention with ALiBi bias; positional bias in attention (cheaper than STRING-sep update)
+### Data augmentation
+11. If frieren y-sym standalone wins → composite with rotation, jitter, noise
+12. ShapeNet-style point dropout / occlusion augmentation
+
+### Regularization
+13. If thorfinn dropout wins → DropPath scheduling; stochastic depth
+14. Layer-wise lr decay (LLRD): higher lr on later layers
+
+### Plateau watch
+- 5+ consecutive negative results would trigger plateau protocol — current round still has live arms.
