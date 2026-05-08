@@ -137,6 +137,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_y_symmetry_aug: bool = False
+    y_symmetry_aug_prob: float = 0.5
     debug: bool = False
 
 
@@ -300,6 +302,33 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
+    """Reflect a random subset of batch items through the y=0 plane.
+
+    DrivAerML car geometry is bilaterally symmetric about y=0. Under y-reflection
+    (x, y, z) -> (x, -y, z) the surface point coordinate y, the surface normal
+    component n_y, the wall-shear y-component tau_y, and the volume point
+    coordinate y all negate. cp, surface area, sdf, tau_x, tau_z, and volume
+    pressure are invariant. This in-place transform is applied per-sample with
+    probability `prob`. Returns the boolean mask used (for diagnostic logging).
+
+    Channel layout (verified against data/loader.py):
+    - surface_x: [x, y, z, nx, ny, nz, area]  -> negate idx 1 and idx 4
+    - surface_y: [cp, tau_x, tau_y, tau_z]    -> negate idx 2
+    - volume_x:  [x, y, z, sdf]               -> negate idx 1
+    - volume_y:  [pressure]                   -> invariant
+    """
+    B = batch.surface_x.shape[0]
+    flip_mask = torch.rand(B, device=batch.surface_x.device) < prob
+    if flip_mask.any():
+        idx = flip_mask.nonzero(as_tuple=True)[0]
+        batch.surface_x[idx, :, 1] = -batch.surface_x[idx, :, 1]
+        batch.surface_x[idx, :, 4] = -batch.surface_x[idx, :, 4]
+        batch.surface_y[idx, :, 2] = -batch.surface_y[idx, :, 2]
+        batch.volume_x[idx, :, 1] = -batch.volume_x[idx, :, 1]
+    return flip_mask
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -310,8 +339,16 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_y_symmetry_aug: bool = False,
+    y_symmetry_aug_prob: float = 0.5,
+    aug_log: dict | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    if use_y_symmetry_aug:
+        flip_mask = apply_y_symmetry_aug(batch, y_symmetry_aug_prob)
+        if aug_log is not None:
+            aug_log["n_flipped"] = int(flip_mask.sum().item())
+            aug_log["batch_size"] = int(flip_mask.shape[0])
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -861,6 +898,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["aug/use_y_symmetry_aug"] = bool(config.use_y_symmetry_aug)
+            wandb.summary["aug/y_symmetry_aug_prob"] = float(config.y_symmetry_aug_prob)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -999,6 +1038,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    aug_log: dict[str, int] = {}
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1008,7 +1048,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_y_symmetry_aug=config.use_y_symmetry_aug,
+                        y_symmetry_aug_prob=config.y_symmetry_aug_prob,
+                        aug_log=aug_log,
                     )
+                    if (
+                        config.use_y_symmetry_aug
+                        and state.is_main
+                        and epoch == 0
+                        and global_step == 0
+                    ):
+                        print(
+                            f"[aug debug] EP0 step0 (rank0): "
+                            f"{aug_log.get('n_flipped', 0)}/{aug_log.get('batch_size', 0)} "
+                            f"samples y-flipped"
+                        )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1050,6 +1104,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if config.use_y_symmetry_aug and balancer is None and aug_log:
+                    bs = max(1, aug_log.get("batch_size", 0))
+                    train_log["train/aug/y_symmetry_flip_rate"] = (
+                        aug_log.get("n_flipped", 0) / bs
+                    )
+                    train_log["train/aug/y_symmetry_n_flipped"] = aug_log.get(
+                        "n_flipped", 0
+                    )
+                    train_log["train/aug/y_symmetry_batch_size"] = aug_log.get(
+                        "batch_size", 0
+                    )
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
