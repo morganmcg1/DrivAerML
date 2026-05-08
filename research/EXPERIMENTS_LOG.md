@@ -1,5 +1,27 @@
 # SENPAI Research Results
 
+## 2026-05-08 22:25 — PR #868: Spectral norm on attention projections (askeladd) — CLOSED FALSIFIED
+
+- **Branch**: askeladd/spectral-norm-attention (deleted)
+- **W&B run**: `0kjl4rnh`, group `spectral-norm-r18`
+- **Hypothesis**: Apply `torch.nn.utils.parametrizations.spectral_norm` to attention Q/K/V/out projections (10 layers total: blocks.{0..4}.attention.qkv.project + blocks.{0..4}.attention.proj.project). Constraining σ_max(W) ≤ 1 via power iteration enforces a per-layer Lipschitz bound on attention; Miyato 2018 / Yoshida 2017 motivate as OOD-generalization regularizer. Targeted at Issue #717 vol_pressure OOD gap (4 outlier test cases drive 92% squared error).
+
+| Metric | PR #868 | SOTA #592 | Gate / Δ |
+|---|---:|---:|---:|
+| val_abupt (EP4) | 7.6778% | 6.5985% | +1.08pp WORSE |
+| test_abupt | 8.9345% | 7.9915% | +0.94pp WORSE |
+| test_vol_pressure | 12.777% | 11.933% | +0.84pp WORSE (OOD widened) |
+| EP3 gate | 8.353% | <8% | FAILED by 0.35pp |
+| EP4 gate | 7.678% | <=6.5985% | FAILED by 1.08pp |
+
+**Pre-training σ_hat(W)**: ~0.60 on qkv, ~0.88 on proj — already below 1 at init. Forcing σ≤1 is a one-sided regularizer that purely costs capacity at our scale.
+
+**Analysis**: Spectral norm on attention does NOT address OOD vol_pressure. The val→test vol_pressure gap actually widened from ~5.9pp baseline to 7.7pp under SN. The OOD failure mode is geometry extrapolation (4 specific outlier shapes), not a smoothness/Lipschitz problem. SN clamps the gain the network needs to fit at L=5/4-ep budget. Student's follow-up suggestions (SN with γ≥1 scaler, SN on slice-token MLPs, SN on out_proj only) de-prioritized — wrong tool for OOD geometry extrapolation.
+
+**Verdict (FALSIFIED)**: SN-on-attention axis closed. Reassigning askeladd to mixup/geometric-interpolation augmentation (direct attack on OOD generalization, orthogonal to in-flight Huber/FFT/SpectralNorm OOD work).
+
+---
+
 ## 2026-05-01 17:00 — PR #854: GradNorm α=0.1 (edward) — CLOSED NEGATIVE
 
 - **Branch**: edward/gradnorm-alpha-0.1 (deleted)

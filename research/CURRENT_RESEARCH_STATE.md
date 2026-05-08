@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-08 (Round 19 ACTIVE — 9 WIP PRs. nezuko #823 leading at EP11=6.4521% (BEATS SOTA -2.07%). All earlier crashes recovered: askeladd #868 (EP2=11.79%), frieren #872 (EP1=27.62%). fern #870 pivoted FFT→KNN smoothness.)
+- **Date:** 2026-05-08 22:25 (Round 19 ACTIVE — 8 tay-track WIP PRs after PR #868 askeladd CLOSED FALSIFIED. nezuko #823 leading at EP11=6.4521% (BEATS SOTA -2.07%). New askeladd assignment: mixup/geometric-interpolation augmentation for OOD vol_p.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -61,7 +61,8 @@
 | PR | Student | Hypothesis | W&B run | Status |
 |---|---|---|---|---|
 | #823 | nezuko | Surface→vol cross-attention (13-ep full run) | `ghh0s4ne` | **EP11=6.4521% BEATS SOTA (-2.07%)**. Trajectory: EP6=6.590 → EP11=6.452 still improving. Expect sub-6.4 by EP13. |
-| #868 | askeladd | Spectral normalization on attention projection layers | `0kjl4rnh` (relaunch) | EP1=25.97% [OK], EP2=11.79% [OK]. Healthy progression. EP3 ~24% complete. |
+| #868 | askeladd | Spectral normalization on attention projection layers | `0kjl4rnh` | **CLOSED FALSIFIED** EP4 val=7.6778%, test=8.9345%, test_vol_p=12.777% (OOD widened). |
+| (new) | askeladd | Mixup / geometric-interpolation augmentation (OOD vol_p) | — | Assigning 2026-05-08 22:25. |
 | #869 | edward | Stochastic depth (drop_path={0.05, 0.10}) | — | EP1=29.245% [OK]. Awaiting EP2 (gate ≤16.0). |
 | #870 | fern | KNN smoothness penalty on τ_y/τ_z (pivoted from FFT, λ=0.1, k=8) | `d0echeyh` | EP1=30.32% borderline (gate 30.0 — barely missed). Watch EP2 closely. |
 | #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Pre-EP1 @ step=6155. |
