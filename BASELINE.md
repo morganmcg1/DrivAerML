@@ -88,7 +88,64 @@ uv run python ensemble_eval.py \
 
 ---
 
-## SINGLE-MODEL SOTA: alphonse PR #592 depth-L5 (model-layers=5) — 2026-05-04
+## SINGLE-MODEL SOTA: nezuko PR #823 surface→volume cross-attention — 2026-05-08
+
+**val_abupt=6.4407%** / **test_abupt=7.6992%** — −0.158pp val (−2.4% relative) vs prior single-model SOTA (PR #592, 6.5985%); −0.292pp test (−3.6% relative).
+
+One `nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)` after the post-backbone LayerNorm split. Q=vol_hidden, K=V=surf_hidden. Zero-init out_proj (identity-at-init); post-norm residual. `find_unused_parameters=True` gated on `--use-surf-to-vol-xattn` (DDP requirement). Improvement is broad-based (all channels, both splits); test-side margin (~−0.29pp) consistently larger than val-side (~−0.16pp). OOD test/val ratio preserved (3.027× vs 3.025×) — xattn is a general capacity boost, not a targeted OOD fix.
+
+**W&B run:** `ghh0s4ne` (group `nezuko-surf-vol-xattn`, name `nezuko/surf-vol-xattn-13ep`)
+**PR:** #823
+**Params:** 16,987,225 (+1.05M / +6.6% vs prior SOTA 15,935,577)
+**Training time:** 833.1 min (~13.9h) on 8×H100s
+**Peak memory:** 75.9 GB / 97 GB (val phase, vol_pts=65536)
+
+**Val metrics (EP13 best checkpoint):** val_abupt=6.4407%, surface_pressure=4.1836%, volume_pressure=3.8557%, wall_shear=7.3448%, tau_x=5.7782%, tau_y=7.5977%, tau_z=9.0116%
+**Test metrics:** test_abupt=7.6992%, surface_pressure=3.8451%, volume_pressure=11.6704%, wall_shear=7.0429%, tau_x=6.2773%, tau_y=7.6657%, tau_z=9.0375%
+
+**EP-by-EP val_abupt trajectory:**
+| EP | step | val_abupt | train vol_pts |
+|---|---|---|---|
+| EP1 | 10864 | 28.6344% | 16384 |
+| EP2 | 21729 | 8.1482% | 16384 |
+| EP3 | 32594 | 7.1195% | 16384 |
+| EP4 | 38030 | 6.8087% | 32768 |
+| EP5 | 43466 | 6.6713% | 32768 |
+| EP6 | 48902 | **6.5897%** ← first SOTA crossover | 32768 |
+| EP7 | 52528 | 6.5335% | 49152 |
+| EP8 | 56154 | 6.5017% | 49152 |
+| EP9 | 59780 | 6.4868% | 49152 |
+| EP10 | 62501 | 6.4639% | 65536 |
+| EP11 | 65222 | 6.4521% | 65536 |
+| EP12 | 67943 | 6.4432% | 65536 |
+| **EP13** | **70664** | **6.4407%** ⭐ | 65536 |
+
+**Single-model training gate:** val_abupt < **6.4407%** (previously 6.5985% from PR #592)
+
+### Reproduce (L=5 + surf→vol xattn, Lion lr=9e-5, 13ep, vol-curriculum)
+
+```bash
+cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
+  --agent nezuko --optimizer lion --lr 9e-5 --weight-decay 5e-4 \
+  --tau-y-loss-weight 1.5 --tau-z-loss-weight 2.0 --surface-loss-weight 2.0 \
+  --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1 \
+  --pos-encoding-mode string_separable --use-qk-norm \
+  --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --lr-cosine-t-max 13 --epochs 13 \
+  --vol-points-schedule "0:16384:3:32768:6:49152:9:65536" \
+  --no-compile-model \
+  --model-layers 5 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --batch-size 4 --validation-every 1 \
+  --train-surface-points 65536 --eval-surface-points 65536 \
+  --train-volume-points 65536 --eval-volume-points 65536 \
+  --use-surf-to-vol-xattn \
+  --wandb-group nezuko-surf-vol-xattn \
+  --wandb-name nezuko/surf-vol-xattn-13ep
+```
+
+---
+
+## Prior Single-Model SOTA: alphonse PR #592 depth-L5 (model-layers=5) — 2026-05-04
 
 **W&B run:** `4k25s25e` (alphonse DDP8, rank-0) — group `model-depth-sweep`, name `alphonse/depth-L5`, best val **6.5985%** (EP4, step 43,459)
 **PR:** #592
