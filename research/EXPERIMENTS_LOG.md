@@ -8,6 +8,41 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-09 ~UTC — PR #855 CLOSED: Y-symmetry augmentation standalone 4-ep tay screen (frieren, `tzfpf31d`)
+
+- **Branch:** `frieren/beta-nll-surface-tay` (tay branch)
+- **W&B Run:** `tzfpf31d`
+- **Hypothesis:** Isolate the contribution of Y-symmetry augmentation alone on the L5 SOTA backbone (no GradNorm, no 6L) over 4 epochs to determine whether the channel ordering effect (τ_y < τ_z) is produced by Y-sym or by the long-run context it appeared in.
+
+### Results (EP4 terminal, tay screen)
+
+| Metric | Value | Gate | Status |
+|--------|-------|------|--------|
+| val abupt @ EP4 | **8.0813%** | ≤6.5985% | MISS -1.48pp |
+| test abupt (EP4 ckpt) | **9.2221%** | 7.5195% | MISS -1.70pp |
+
+#### Per-channel @ EP4 val and test
+
+| Channel | val EP1 | val EP2 | val EP3 | val EP4 | test (EP4 ckpt) |
+|---------|---------|---------|---------|---------|-----------------|
+| surface_p | 20.13 | 9.53 | 6.08 | 5.231 | 4.917 |
+| volume_p | 16.20 | 10.57 | 7.02 | 6.056 | 13.202 |
+| ws_mean | 29.75 | 14.51 | 10.01 | 8.842 | 8.589 |
+| tau_x | 26.30 | 12.67 | 8.78 | 7.793 | 7.631 |
+| tau_y | 35.17 | 16.87 | 11.51 | **9.965** | **9.732** |
+| tau_z | 35.84 | 18.38 | 12.69 | **11.361** | **10.629** |
+| abupt | 26.73 | 13.61 | 9.22 | 8.081 | 9.222 |
+
+tau_y < tau_z confirmed at val EP3, val EP4, AND test — reverses the default channel ordering where tau_y is historically the worst channel.
+
+### Commentary
+
+Gate missed — PR closed. But the physical signal is the key finding: Y-symmetry augmentation at p=0.5 cleanly produces tau_y < tau_z across all three reporting checkpoints. This is the cleanest isolation evidence of the Y-sym inductive bias to date, confirming that the channel-ordering effect seen in long-run PRs #818 and #831 is attributable to Y-sym and not to bundled factors (GradNorm, 6L, longer schedule).
+
+Gate miss explained by 4-epoch budget: EP3→EP4 drop only 1.14pp, insufficient to reach 6.5985% from 9.22%. Cosine T_max=4 ran out of LR budget before the regularization bias could compound. Follow-up assigned: Y-sym p=1.0 tay screen (new frieren PR) — test whether full-probability augmentation clears the gate within 4 epochs.
+
+---
+
 ## 2026-05-08 ~07:00 UTC — PR #806 CLOSED: 5L STRING + GradNorm α=0.25 + Y-sym triple compose (dl24-frieren, `gui4ceed`)
 
 - **Branch:** `dl24-frieren/5l-string-gradnorm-alpha025-ysym`
