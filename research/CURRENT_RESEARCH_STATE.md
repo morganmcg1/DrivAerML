@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-05 ~UTC (latest update)
+- 2026-05-08 ~18:00 UTC (latest update)
 - Most recent research direction from human researcher team: Issue #717 (tay branch) — comprehensive volume improvement plan: Phase 0 diagnostics, Phase 1-3 probes (dual-tower, anomaly sampling, geometry conditioning, single-model KD). Hard no-ensemble constraint. Separate advisor branch. Issue #759 (tay): optional Bengio draft PRs as menu for tay repurposing — light suggestion only.
 
 ## Current Research Focus and Themes
@@ -13,14 +13,14 @@
 
 **Y-sym physical signal CONFIRMED (PR #855, CLOSED):** Y-sym p=0.5 standalone (no GradNorm, no 6L) isolates τ_y < τ_z channel ordering at val EP3, EP4, AND test. Cleanest physical signal isolation to date. Gate miss (val EP4=8.0813%, test=9.2221%) due to no other optimizations; signal confirmed.
 
-### Active Experiments (as of 2026-05-09 ~21:00Z)
+### Active Experiments (as of 2026-05-08 ~18:00Z)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #831 | dl24-fern | 6L STRING + GradNorm α=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **WAVE VAL LEADER: best=6.5477% @ EP29, EP31=6.5688% latest** — BELOW 6.5985% SOTA-advancement threshold. vp=4.12% stable. All gates passing. |
-| #843 | dl24-nezuko | 7-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0,16.0]`) + GradNorm α=0.5 + Y-sym | `hyzdxrj2` | EP24=6.6646% best, EP25=6.7042%. **PERSISTENT vol_p instability** (4.47-4.95% oscillating). Above 6.5985% threshold. Monitoring EP25-27 for stabilization. |
-| #844 | dl24-frieren | 5L STRING + GradNorm α=0.5 (**no Y-sym**) — clean two-way stack | `7dqsxvbq` | **EP20=6.5758% — NEW BEST FOR FRIEREN.** ALSO BELOW 6.5985% threshold. vp=4.16% stable. 2nd wave val leader. |
-| #866 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + **Y-sym p=1.0** dose-response | `gb73kgzz` | **LAUNCHED 17:19 UTC 2026-05-08.** EP1 ~20% complete at 17:26 UTC. SurfaceTransolver 18.84M params. GradNorm α=0.5 active. EP5 gate (≤7.5%) pending. |
+| #831 | dl24-fern | 6L STRING + GradNorm α=0.5 + Y-sym (extra-depth variant) | `pnrgixj1` | **WAVE VAL LEADER: best=6.5477% @ EP29, EP32=6.5772% latest** — BELOW 6.5985% SOTA-advancement threshold. vp=4.1194% stable. step=179115 (~18.16h runtime). Advisor requested EP35 report 2026-05-08T17:31Z. |
+| #843 | dl24-nezuko | 7-octave STRING PE (`sigmas=[0.25,0.5,1.0,2.0,4.0,8.0,16.0]`) + GradNorm α=0.5 + Y-sym | `hyzdxrj2` | EP25 best=**6.6588%**. **PERSISTENT vol_p instability** (4.4557%, oscillating 4.45–4.95% range vs 4.12% for fern/frieren). **EP30 convergence gate: run best must improve beyond 6.6588% by EP30 or kill.** 0.099pp above fern wave leader. |
+| #844 | dl24-frieren | 5L STRING + GradNorm α=0.5 (**no Y-sym**) — clean two-way stack | `7dqsxvbq` | **EP21 best=6.5747% — SOTA-BEATING (below 6.5985%).** vp=4.1128% (stable, declining). step=115696. 2nd wave val leader. Trajectory toward 6.54–6.55% by EP30-32. |
+| #866 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + **Y-sym p=1.0** dose-response | `gb73kgzz` | EP1=**13.6449%**, vol_p=10.7627%, surf_p=10.1875%, wss=14.0790%. step~5588. **EP5 gate ≤7.5% pending** (needs −6.14pp drop by EP5, step 27469). |
 
 **Tay-screen wave (closed/killed 2026-05-09):**
 - PR #857 (askeladd σ-ladder Arm B `o7odqtqq`): NO DATA logged (run finished without metrics — likely crashed early). CLOSED.
@@ -102,11 +102,11 @@
 
 3. **GradNorm α=0.5 is unimodal optimum — CONFIRMED.** α=0.25 (PR #780) terminal test=8.0647%. α-axis is closed.
 
-4. **6L STRING (fern #831) is WAVE VAL LEADER at 6.5477% @ EP29.** 5L frieren #844 has broken threshold too at 6.5758% @ EP20 (no Y-sym control). Both below SOTA-advancement threshold. Extra depth + Y-sym yields ~0.03pp additional gain. Wall-clock cutoff ~EP43-44 for fern. Test eval critical for both.
+4. **6L STRING (fern #831) is WAVE VAL LEADER at 6.5477% @ EP29 (EP32=6.5772% latest).** 5L frieren #844 has broken threshold too at 6.5747% @ EP21 (no Y-sym control). Both below SOTA-advancement threshold 6.5985%. Extra depth + Y-sym (fern) yields ~0.027pp additional gain vs frieren two-way stack. Wall-clock cutoff ~EP43-44 for fern. Test eval critical for both.
 
 5. **Y-sym physical signal CONFIRMED ISOLATED (PR #855, CLOSED).** τ_y < τ_z channel ordering confirmed at val EP3, val EP4, AND test even in standalone Y-sym-only config. Physical basis for the augmentation is now well-established.
 
-6. **Triple-compose failures (PRs #800, #806) — vol_p val→test gap systematic (~3× ratio: val~4.0-4.3%, test~12.0%).** Frieren #844 (5L + GradNorm, no Y-sym) EP20=6.5758% with vp=4.16% (STABLE) — clean two-way stack is working. This confirms that STRING + GradNorm alone can cross the SOTA threshold; Y-sym adds ~0.03pp. Whether Y-sym is the source of triple-compose vol_p gap is still open — 7-octave nezuko #843 shows GradNorm can still cause vol_p instability without Y-sym being the confound.
+6. **Triple-compose failures (PRs #800, #806) — vol_p val→test gap systematic (~3× ratio: val~4.0-4.3%, test~12.0%).** Frieren #844 (5L + GradNorm, no Y-sym) EP21=6.5747% with vp=4.1128% (STABLE, declining) — clean two-way stack is working. This confirms that STRING + GradNorm alone can cross the SOTA threshold; Y-sym adds ~0.027pp (fern #831 EP29=6.5477%). Whether Y-sym is the source of triple-compose vol_p gap is still open — 7-octave nezuko #843 shows GradNorm can still cause vol_p instability (oscillating 4.45–4.95%) even without being a confound with Y-sym.
 
 7. **RFF capacity axis CLOSED.** Both rff24 (#845) and rff32 (#846) failed the EP4 gate. RFF capacity increase (beyond SOTA 16 features) does not improve within 4-ep screen. RFF axis is closed.
 
@@ -116,11 +116,11 @@
 
 ## Potential Next Research Directions
 
-**Currently in-flight (as of 2026-05-05):**
-- Fern #831: 6L STRING — **WAVE VAL LEADER: 6.5477% @ EP29, EP31=6.5688% latest**; awaiting EP35 report; wall-clock cutoff ~EP43-44
-- Frieren #844: 5L STRING no Y-sym — **EP20=6.5758% (new best)**, below SOTA threshold; awaiting EP25 report
-- Nezuko #843: 7-octave STRING PE — best=6.6646% @ EP24, but EP25=6.7042% (vol_p 4.66% spiking again); PERSISTENT instability, critical monitoring window EP25-27
-- Tanjiro #866: 6L STRING + Y-sym p=1.0 — NO ACTIVITY, nudge posted 2026-05-05
+**Currently in-flight (as of 2026-05-08 ~18:00 UTC):**
+- Fern #831: 6L STRING — **WAVE VAL LEADER: 6.5477% @ EP29, EP32=6.5772% latest**; advisor requested EP35 report 2026-05-08T17:31Z; wall-clock cutoff ~EP43-44; vp=4.1194% stable
+- Frieren #844: 5L STRING no Y-sym — **EP21=6.5747% SOTA-BEATING**, below 6.5985% threshold; trajectory toward 6.54–6.55% by EP30-32; vp=4.1128% stable declining
+- Nezuko #843: 7-octave STRING PE — **EP25 best=6.6588%**; PERSISTENT vol_p instability oscillating 4.45–4.95%; **EP30 kill gate if no improvement beyond 6.6588%**
+- Tanjiro #866: 6L STRING + Y-sym p=1.0 — EP1=13.6449%, step~5588; **EP5 gate ≤7.5% pending** at step 27469
 
 **High-priority candidates after current wave completes:**
 1. **5L STRING + Y-sym + GradNorm triple compose with α=0.5**: if frieren #844 two-way shows gains, add Y-sym back for full triple-compose (α=0.5 not α=0.25). Key: #844 isolates two-way first.
@@ -141,4 +141,4 @@
 - RFF capacity above 16 features (PRs #845, #846): both EP4 gate failures. Axis closed.
 - LR warmup 2 epochs (PR #847): definitively worse than 1-ep warmup. Axis closed.
 
-_Last updated: 2026-05-08 17:30 UTC. Key events: (1) fern #831 `pnrgixj1` WAVE VAL LEADER best=**6.5477%** @ EP29; EP31=6.5688% latest; EP35 milestone pending — advisor comment posted 2026-05-08 17:29 UTC with cosine-tail vol_p watch; (2) frieren #844 `7dqsxvbq` EP20=**6.5758%** — ALSO BELOW SOTA threshold (6.5985%); clean two-way stack (STRING+GradNorm, no Y-sym) CONFIRMED working; EP25 milestone pending — advisor comment posted 2026-05-08 17:29 UTC; (3) nezuko #843 `hyzdxrj2` persistent vol_p instability (4.47-4.95% oscillating vs 4.12% for fern/frieren); 7-octave PE may be the cause; EP25 data urgently requested — advisor comment posted 2026-05-08 17:29 UTC; (4) tanjiro #866 `gb73kgzz` LAUNCHED 17:19 UTC 2026-05-08, SurfaceTransolver 18.84M params, EP1 ~20% complete; EP5 gate pending — advisor comment posted 2026-05-08 17:29 UTC; (5) all 4 students occupied, 0 idle._
+_Last updated: 2026-05-08 ~18:00 UTC. Key events: (1) fern #831 `pnrgixj1` WAVE VAL LEADER best=**6.5477%** @ EP29; EP32=6.5772% latest; step=179115; vp=4.1194% stable; EP35 milestone pending — advisor comment posted 2026-05-08 17:29 UTC; (2) frieren #844 `7dqsxvbq` EP21=**6.5747%** — SOTA-BEATING (BELOW 6.5985% threshold); clean two-way stack (STRING+GradNorm, no Y-sym) CONFIRMED; vp=4.1128% stable declining; step=115696; EP25+ milestone pending; (3) nezuko #843 `hyzdxrj2` EP25 best=**6.6588%**; PERSISTENT vol_p instability (4.4557% latest, oscillating 4.45–4.95%); EP30 convergence kill gate if no improvement beyond 6.6588% — advisor comment posted 2026-05-08 17:29 UTC; (4) tanjiro #866 `gb73kgzz` EP1=13.6449%; step~5588; vol_p=10.7627%; EP5 gate ≤7.5% pending — advisor comment posted 2026-05-08 17:29 UTC; (5) all 4 students occupied, 0 idle._
