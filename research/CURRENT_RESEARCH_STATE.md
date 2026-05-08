@@ -62,7 +62,7 @@
 |---|---|---|---|---|
 | #823 | nezuko | Surface→vol cross-attention (13-ep full run) | `ghh0s4ne` | **EP11=6.4521% BEATS SOTA (-2.07%)**. Trajectory: EP6=6.590 → EP11=6.452 still improving. Expect sub-6.4 by EP13. |
 | #868 | askeladd | Spectral normalization on attention projection layers | `0kjl4rnh` | **CLOSED FALSIFIED** EP4 val=7.6778%, test=8.9345%, test_vol_p=12.777% (OOD widened). |
-| (new) | askeladd | Mixup / geometric-interpolation augmentation (OOD vol_p) | — | Assigning 2026-05-08 22:25. |
+| #877 | askeladd | Y-flip augmentation (p=0.5): physically-exact x2 training data for OOD vol_p | — | **ASSIGNED 2026-05-08 22:25.** Fresh 4-ep screen. |
 | #869 | edward | Stochastic depth (drop_path={0.05, 0.10}) | — | EP1=29.245% [OK]. Awaiting EP2 (gate ≤16.0). |
 | #870 | fern | KNN smoothness penalty on τ_y/τ_z (pivoted from FFT, λ=0.1, k=8) | `d0echeyh` | EP1=30.32% borderline (gate 30.0 — barely missed). Watch EP2 closely. |
 | #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Pre-EP1 @ step=6155. |
@@ -90,7 +90,8 @@
 ### Theme 3: Architecture Exploration (post-STRING-exhaustion)
 - All STRING axes CLOSED. All positional encoding variants CLOSED.
 - **slices axis FULLY CLOSED**: slices=64 FAIL (Round 17 #859 Arm A), slices=128 OPTIMAL (SOTA), slices=256 FAIL (#867 EP3=8.1599%). No more slices experiments.
-- **Spectral normalization on attention layers** (askeladd #868, ACTIVE): EP1=25.97%, EP2=11.79% — healthy. Stability regularization orthogonal to QK-norm.
+- **Spectral normalization on attention layers** (askeladd #868, **CLOSED FALSIFIED**): val=7.6778%, OOD widened. SN clamps capacity needed at L5 scale; wrong tool for geometry-extrapolation OOD.
+- **Y-flip augmentation** (askeladd #877, ASSIGNED 2026-05-08): p=0.5 per-batch y-coord+normal_y+tau_y flip. Physically exact (DrivAerML cars are y-symmetric). 4-ep screen in progress.
 - **Stochastic depth / layer drop** (edward #869, ACTIVE): Drop random transformer layers during training; implicit ensembling at inference. EP1=29.245% [OK].
 - **hidden_dim=640 width scaling** (frieren #872, ACTIVE): EP1=27.62% [OK]. Run `gr1n58zo` (v2). VRAM 63.2/97.9 GB safe.
 - **Per-channel output projection**: Separate decoder head per physical quantity. Never tested.
@@ -114,7 +115,7 @@
 - **Training schedule:** `--lr-cosine-t-max 13 --epochs 4` (NEVER `--lr-cosine-t-max 4`)
 - **Vol curriculum:** `0:16384:1:32768:2:49152:3:65536`
 - **GradNorm:** CONCLUSIVELY CLOSED — 5 failures across all α (0.1, 0.25, 0.5, 0.75, 1.0)
-- **Y-sym flags absent from train.py** — re-implementation required before retry
+- **Y-sym**: PR #877 askeladd ASSIGNED — first clean implementation (PR #855 frieren was confounded by absent flag plumbing)
 - **`--no-compile-model` required** — torch.compile + DDP NCCL deadlock at step 1
 - **heads must be power-of-2** — for SDPA/Triton fast paths
 
