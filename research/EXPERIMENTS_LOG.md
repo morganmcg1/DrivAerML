@@ -8,6 +8,43 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-07 ~23:30 UTC — PR #794 CLOSED: GradNorm α=0.25 + Y-axis symmetry, 4L STRING (dl24-fern, `em7eupj5`)
+
+- **Branch:** `dl24-fern/gradnorm-y-sym-alpha025`
+- **W&B Run:** `em7eupj5`
+- **Hypothesis:** Compose GradNorm α=0.25 + Y-axis symmetry augmentation on 4L (baseline) architecture; test whether conservative GradNorm + Y-sym compose additively vs GradNorm-only (#740, α=0.5 wave best)
+
+### Terminal Results
+
+| Metric | Val (EP25 best) | Test |
+|--------|-----------------|------|
+| `abupt_axis_mean_rel_l2_pct` | **6.7064%** | **7.9011%** |
+| `surface_pressure_rel_l2_pct` | — | 4.0540% |
+| `volume_pressure_rel_l2_pct` | — | 11.5420% |
+| `wall_shear_rel_l2_pct` | — | 7.4030% |
+| `wall_shear_x_rel_l2_pct` | — | 6.5520% |
+| `wall_shear_y_rel_l2_pct` | — | 7.9730% |
+| `wall_shear_z_rel_l2_pct` | — | 9.9290% |
+
+**Wave merged best:** PR #740 test=7.5195%
+**Result:** DOES NOT BEAT BASELINE (+0.382pp regression). PR CLOSED.
+
+### Val Trajectory Summary
+
+- EP5: 7.1519% (gate cleared), EP8: 6.9228% (fast early descent), EP11: 6.8315% (wave val lead briefly), EP16: 6.7435%, EP18: 6.7320%, EP25: **6.7064%** (run best), EP45: 6.7542% (plateau + drift above best)
+- Plateau onset: EP26+. Cosine tail reengagement did NOT materialize. Plateau and slow drift worsening through EP45.
+
+### Commentary
+
+Strong val trajectory through EP25 (6.7064%) but test generalization regressed significantly (+0.382pp vs baseline). Key factors:
+1. **4L architecture** — the 5L STRING backbone (as in frieren #806 and nezuko #800) has consistently outperformed 4L in this wave; this experiment used 4L, limiting capacity.
+2. **α=0.25 on 4L** — the confirmed wave-winning config is α=0.5 on 5L STRING (#740); α=0.25 was also tested standalone (#780, test=8.0647%) and regressed. GradNorm α=0.25 does not outperform α=0.5 in this architecture family.
+3. **Val→test generalization gap** — competitive val (6.7064%) but poor test (7.9011%) suggests the 4L + α=0.25 + Y-sym config is overfit or miscalibrated on this distribution.
+
+**Conclusion:** The 4L baseline architecture is the bottleneck. 5L STRING + GradNorm α=0.5 + Y-sym triple compose (frieren #806, currently wave val leader at EP28=6.6573%) is the right direction. fern is now idle and will be reassigned to a fresh orthogonal hypothesis.
+
+---
+
 ## 2026-05-07 ~10:30 UTC — Wave Status Update: EP18–EP34 Progress Across All 4 Active Runs
 
 ### Wave val leader board
