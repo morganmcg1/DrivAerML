@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-08 (Round 17 CLOSED — all 8 PRs resolved. Round 18 active: 7 PRs in flight. frieren BLOCKED — Y-sym flags absent from train.py.)
+- **Date:** 2026-05-01 (Round 18 ACTIVE — 7 PRs; #863/#867 CLOSED. Round 19 open: alphonse #875 (AdamW benchmark), thorfinn #876 (Huber loss). frieren BLOCKED — Y-sym flags absent from train.py.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -47,17 +47,26 @@
 
 ---
 
-## Active PRs (Round 18 — 7 WIP)
+## Round 18 Closeouts (Partial)
+
+| PR | Student | Hypothesis | Result | Verdict |
+|----|---------|-----------|--------|---------|
+| #863 | alphonse | SGDR warm restarts within 4-ep budget | EP4=7.6208% | FAILED — LR peaks at epoch boundaries, not troughs. SGDR axis CLOSED. |
+| #867 | thorfinn | slices=256 (only untested arm from Round 17 #859 Arm B) | EP3=8.1599% | FAILED — fewer points per slice degrades long-range spatial context. slices axis CLOSED (64/128/256 all tested). |
+
+---
+
+## Active PRs (Round 18 Continuing + Round 19)
 
 | PR | Student | Hypothesis | W&B run | Status |
 |---|---|---|---|---|
-| #823 | nezuko | Surface→vol cross-attention (geometry conditioning, 4-ep→13-ep full run) | `ghh0s4ne` | **EP7=6.5335% BEATS SOTA** (-0.065pp). EP8 in progress. LEADING experiment. |
-| #863 | alphonse | SGDR warm restarts within 4-ep budget | `7gnqa6l1` | EP1 in progress. Kill gate: EP1 <30%. |
-| #867 | thorfinn | slices=256 (only untested arm from Round 17 #859 Arm B) | — | Assigned. Group: `slices-sweep-r18`. |
+| #823 | nezuko | Surface→vol cross-attention (geometry conditioning, 4-ep→13-ep full run) | `ghh0s4ne` | **EP7=6.5335% BEATS SOTA** (-0.065pp). EP8+ in progress. LEADING experiment. |
 | #868 | askeladd | Spectral normalization on attention projection layers | — | Assigned. Group: `spectral-norm-r18`. |
 | #869 | edward | Stochastic depth / layer drop (drop_path={0.05, 0.10}, two arms) | — | Assigned. Group: `stochastic-depth-r18`. |
 | #870 | fern | FFT auxiliary loss on τ_y/τ_z surface fields (λ=0.1) | — | Assigned. Group: `fft-loss-r18`. |
 | #871 | tanjiro | PCGrad gradient surgery across 4 task groups | — | Assigned. Group: `pcgrad-r18`. |
+| **#875** | **alphonse** | **AdamW vs Lion direct comparison at SOTA config** | — | **Round 19 — Assigned.** Group: `adamw-benchmark-r19`. lr=9e-4, wd=0.01. |
+| **#876** | **thorfinn** | **Huber loss δ=0.5 and δ=1.0 (two-arm OOD robustness)** | — | **Round 19 — Assigned.** Group: `huber-loss-r19`. Student adds `--huber-delta` flag. |
 
 **1 idle student:** frieren — **BLOCKED**. Y-sym augmentation flags (`--use-y-symmetry-aug`, `--y-symmetry-aug-prob`) absent from `train.py`. Re-implementation required before assignment. Target: Y-sym p=1.0 (escalation from Round 17 #855 p=0.5 which was confounded by wrong LR flag).
 
@@ -71,21 +80,21 @@
 
 ### Theme 2: Optimizer Exploration (post-Lion-confirmation)
 - All Lion axes now exhaustively confirmed (β₁=0.9, β₂=0.99, wd=5e-4, lr=9e-5). **No more Lion tuning.**
-- **SGDR warm restarts** (alphonse #863, ACTIVE): First test of cosine restarts within 4-ep budget.
-- Bold: **AdamW vs Lion comparison**: Lion was selected early; direct comparison at optimal configs never run.
-- **Layer-wise LR decay (LLRD)**: Higher lr on later transformer layers. Never tested.
+- **SGDR warm restarts CLOSED** (#863, EP4=7.6208%): LR at epoch boundaries coincides with cycle peaks. SGDR axis closed.
+- **AdamW vs Lion comparison** (alphonse #875, ACTIVE, Round 19): Lion selected early; direct comparison at optimal configs never run. lr=9e-4 (10× translation), wd=0.01. EP4 gate ≤6.5985%.
+- **Layer-wise LR decay (LLRD)**: Higher lr on later transformer layers. Never tested. Next after #875 resolves.
 
 ### Theme 3: Architecture Exploration (post-STRING-exhaustion)
 - All STRING axes CLOSED. All positional encoding variants CLOSED.
-- **slices=256** (thorfinn Round 18 — pending assignment): The only untested arm from Round 17.
-- **Spectral normalization on attention layers**: Stability regularization orthogonal to QK-norm; targets high-curvature geometry.
-- **Stochastic depth / layer drop** (edward, next assignment candidate): Drop random transformer layers during training; implicit ensembling at inference. Never tested at L5.
+- **slices axis FULLY CLOSED**: slices=64 FAIL (Round 17 #859 Arm A), slices=128 OPTIMAL (SOTA), slices=256 FAIL (#867 EP3=8.1599%). No more slices experiments.
+- **Spectral normalization on attention layers** (askeladd #868, ACTIVE): Stability regularization orthogonal to QK-norm; targets high-curvature geometry.
+- **Stochastic depth / layer drop** (edward #869, ACTIVE): Drop random transformer layers during training; implicit ensembling at inference.
 - **Per-channel output projection**: Separate decoder head per physical quantity. Never tested.
 
 ### Theme 4: Loss Reformulation
 - τ_y=1.5/τ_z=2.0 OPTIMAL, surface×2.0, volume×1.0 CONFIRMED.
-- **Frequency-domain loss component**: FFT-based loss on surface fields for high-frequency τ_y/τ_z.
-- **Huber loss vs MSE**: Robustness to outliers in OOD test geometries.
+- **Frequency-domain loss component** (fern #870, ACTIVE): FFT-based loss on surface fields for high-frequency τ_y/τ_z. λ=0.1.
+- **Huber loss vs MSE** (thorfinn #876, ACTIVE, Round 19): Student adds `--huber-delta` flag; testing δ=0.5 and δ=1.0. Directly targets 4 OOD cases driving 92% of vol_p squared error. Track test_vol_p as primary OOD diagnostic.
 
 ---
 
@@ -127,30 +136,30 @@
 - **Schedule alignment is a confounder** (#805): vol-w=2.0 regression collapses from +1.79pp at EP1 to +0.035pp at EP3.
 - **STRING σ<0.25 definitively closed** (#829, #838): σ=0.125 aliases at 65k surface density.
 - **4-ep schedule confound**: Use `--lr-cosine-t-max 13 --epochs 4`. NEVER `--lr-cosine-t-max 4`.
+- **SGDR incompatible with 4-ep budget** (#863): LR at epoch boundaries coincides with cycle peaks, not cosine troughs. EP4=7.6208%. SGDR axis CLOSED.
+- **slices=256 FAIL** (#867): EP3=8.1599%. Fewer points per slice degrades long-range spatial context. All slices tested (64/128/256): 128 OPTIMAL. Axis fully CLOSED.
 
 ---
 
 ## Potential Next Research Directions (post Round 18)
 
-### Currently in flight (Round 18 — do not re-assign)
-- **slices=256** → thorfinn #867
+### Currently in flight (do not re-assign)
+- **Surface→vol cross-attention (13-ep full run)** → nezuko #823 (LEADING, EP7=6.5335%)
+- **Spectral normalization on attention** → askeladd #868
 - **Stochastic depth** → edward #869
 - **FFT frequency-domain loss** → fern #870
-- **SGDR warm restarts** → alphonse #863
-- **Spectral normalization on attention** → askeladd #868
 - **PCGrad gradient projection** → tanjiro #871
-- **Surface→vol cross-attention (13-ep full run)** → nezuko #823
+- **AdamW benchmark** → alphonse #875 (Round 19)
+- **Huber loss δ=0.5/1.0** → thorfinn #876 (Round 19)
 
-### Round 18 remainder / next assignments
+### Next assignments (when students become idle)
 1. **Y-sym augmentation p=1.0** (frieren — BLOCKED): Re-implement `--use-y-symmetry-aug` / `--y-symmetry-aug-prob` in `train.py`, then assign. Escalation from Round 17 #855 (confounded by wrong LR flag).
 2. **Ensemble pool-25 refresh**: After nezuko #823 full 13-ep completes — add to greedy ensemble and re-run greedy selection.
 
-### Medium priority (Round 19+)
-3. **Layer-wise LR decay (LLRD)**: Larger lr on later transformer layers. Never tested.
-4. **Huber loss vs MSE**: Robustness to OOD test geometry outliers (4 cases dominate 92% of vol_p deviation).
-5. **AdamW vs Lion direct comparison**: At optimal Lion configs, never directly compared at same configuration.
-6. **Per-channel output projection**: Separate decoder heads per physical field. Never tested.
-7. **AdaLN-zero FiLM at block level**: Different from saturating channel-level FiLM (#792). Conditioning on surface latents.
+### Medium priority (Round 20+)
+3. **Layer-wise LR decay (LLRD)**: Larger lr on later transformer layers. Never tested. Next after #875 AdamW resolves.
+4. **Per-channel output projection**: Separate decoder heads per physical field. Never tested.
+5. **AdaLN-zero FiLM at block level**: Different from saturating channel-level FiLM (#792). Conditioning on surface latents.
 
 ### Bold / plateau-protocol ideas
 8. **Geometry hash-encoding input**: Replace STRING with instant-NGP style multi-resolution hash grid encoding.
