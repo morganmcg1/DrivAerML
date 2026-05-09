@@ -1,5 +1,60 @@
 # SENPAI Research Results
 
+## 2026-05-09 19:30 — PR #906: Post-xattn vol-self-attn block (edward) — CLOSED (NEGATIVE)
+
+- **Branch**: `edward/vol-self-attn-post-xattn` (closed)
+- **W&B run**: `nmvw5t2d`
+- **Hypothesis**: A vol→vol self-attention block inserted AFTER the surf→vol xattn (decoder-style refinement) gives the volume branch capacity to propagate cross-attended surface signal across volume tokens before regression, closing the val/test gap on `volume_pressure_rel_l2_pct`.
+- **Implementation**: Pre-norm self-attn + FFN block, zero-init out_proj and final FFN linear (identity-at-init); inserted after surf→vol xattn residual update, before vol regression head. `find_unused_parameters=True` for DDP.
+
+| Epoch | val_abupt | vol_p | surf_p | wsh | Gate | Baseline |
+|---|---:|---:|---:|---:|---|---:|
+| EP3 | 8.2271% | — | — | — | ≤8.0% **FAIL** | 7.1195% |
+| EP4 step 282 | — | — | — | — | external SIGTERM | — |
+
+**Analysis:** Run was killed by external pod/harness signal at 18:59:16 UTC (~252 min runtime, well under SENPAI_TIMEOUT_MINUTES=360). Termination is moot since EP3 had already failed the gate. No per-channel evidence that vol-self-attn after surf→vol xattn helps the val/test gap.
+
+**Pattern: post-xattn capacity additions are now 0-for-3 on this benchmark:**
+- PR #884/#890: two-layer xattn — failed
+- PR #891: post-xattn FFN — failed
+- PR #906: post-xattn vol-self-attn — failed
+
+**Conclusion:** Adding capacity to the volume branch *after* surf→vol xattn does not move the val/test gap. Future volume-branch experiments should target either (a) capacity placed BEFORE surf→vol xattn, (b) the geometry/positional encoding pathway, or (c) data-augmentation / regularization approaches targeting OOD generalization rather than capacity.
+
+---
+
+## 2026-05-09 19:30 — PR #918: Vol-specific RFF init sigmas (tanjiro) — REQUESTED CHANGES
+
+- **Branch**: `tanjiro/vol-rff-positional-encoding`
+- **W&B run Arm A**: 5× lower-frequency vol sigmas `0.05,0.1,0.25,0.5,1.0` vs surface `0.25,0.5,1.0,2.0,5.0`
+- **Hypothesis**: Volume and surface fields occupy different spatial frequency regimes; volume needs lower-frequency RFF init to match its smoother field structure.
+
+| Epoch | val_abupt | Gate | Baseline EP1 |
+|---|---:|---|---:|
+| EP1 | 32.66% | ≤30% **FAIL** | ~25–28% |
+
+**Analysis:** Aggressive 5× shift starves the surf→vol xattn coupling of fine-spatial detail — volume tokens carry less high-frequency content than the surface K/V expects, degrading the cross-attention. All per-channel metrics regressed.
+
+**Decision:** Hypothesis itself (separate spectral regimes) not yet falsified — only the aggressive instantiation is. Requesting **Arm C** with a moderate 2× shift `0.1,0.25,0.5,1.0,2.0`. If Arm C also fails the screen, close the PR and mark vol-specific sigma init as a falsified direction across the moderate-to-aggressive range.
+
+---
+
+## 2026-05-09 19:30 — PR #901: Train-time y-axis mirror aug (fern) — REQUESTED CHANGES (truncated)
+
+- **Branch**: `fern/train-mirror-aug-y`
+- **Hypothesis**: DrivAerML has near-perfect y-axis symmetry; a stochastic p=0.5 train-time mirror (negate y, ny, tau_y) is a free 2× data prior that should reduce val/test gap on volume_pressure.
+
+**Arm B run**: 13-ep at SOTA stack — **truncated at EP5/13** (~18% complete) due to SENPAI_TIMEOUT_MINUTES=360 → 270 min train budget. Advisor planning error: a 13-ep run at 65k vol points needs ~680 min. Acknowledged in PR comment.
+
+**Encouraging mid-run signals:**
+- val→test ratio on volume_pressure improved from baseline 3.03× to 2.50× even at EP5
+- tau_y trajectory clean — no sign-flip pathology, aug is consistent with model's symmetry prior
+- Loss curve healthy, no divergence
+
+**Decision:** Hypothesis still alive but inconclusive — requesting rerun at the 4-ep screen with `--lr-cosine-t-max 4 --epochs 4` so the cosine fully decays inside the 270 min budget. Win criterion: EP4 val_abupt < 6.9% AND val→test vol_p ratio sustained ≤2.7×. If clean signal, find a way to fit the 13-ep follow-up (potentially drop terminal vol_points to 49k).
+
+---
+
 ## 2026-05-09 16:30 — PR #902: Vol loss upweighting curriculum (nezuko) — CLOSED (NEGATIVE)
 
 - **Branch**: `nezuko/vol-pressure-ood-curriculum` (closed)
