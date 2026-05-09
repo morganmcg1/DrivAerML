@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_pre_xattn_vol_self_attn: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_pre_xattn_vol_self_attn = use_pre_xattn_vol_self_attn
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +446,25 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Pre-xattn vol self-attention (PR #929): single MHA sublayer where
+        # volume hidden states attend to themselves (Q=K=V=vol_hidden) BEFORE
+        # the surf->vol cross-attention. T5-decoder ordering: refine the query
+        # stream internally before reaching across to surface keys/values.
+        # Zero-init out_proj so the layer is identity at init.
+        if use_pre_xattn_vol_self_attn:
+            self.pre_xattn_vol_self_attn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.pre_xattn_vol_self_attn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.pre_xattn_vol_self_attn.out_proj.weight)
+            nn.init.zeros_(self.pre_xattn_vol_self_attn.out_proj.bias)
+        else:
+            self.pre_xattn_vol_self_attn = None
+            self.pre_xattn_vol_self_attn_norm = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -528,6 +549,25 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.pre_xattn_vol_self_attn is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            pre_xattn_out, _ = self.pre_xattn_vol_self_attn(
+                query=volume_hidden,
+                key=volume_hidden,
+                value=volume_hidden,
+                key_padding_mask=~volume_mask,
+                need_weights=False,
+            )
+            # Guard against NaN from fully-masked rows (a sample with zero valid
+            # volume tokens has key_padding_mask all True -> softmax NaN).
+            pre_xattn_out = pre_xattn_out.nan_to_num(nan=0.0)
+            pre_xattn_out = _apply_token_mask(pre_xattn_out, volume_mask)
+            volume_hidden = self.pre_xattn_vol_self_attn_norm(volume_hidden + pre_xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if (
             self.surf_to_vol_xattn is not None
