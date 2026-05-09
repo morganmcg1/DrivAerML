@@ -138,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    y_flip_prob: float = 0.0
     debug: bool = False
 
 
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "y_flip_prob": (
+            "Probability [0,1] of flipping each training sample about Y=0 "
+            "(X-Z symmetry plane). DrivAerML cars are symmetric about Y=0, "
+            "so this is a physically-exact data augmentation that doubles "
+            "effective training signal. Per-channel sign rules: flip y, "
+            "normal_y, and tau_y; cp / tau_x / tau_z / vol_p / sdf are "
+            "y-reflection invariant. Applied only on the training path; "
+            "validation/test never flips. 0.0 = disabled (default). "
+            "Recommended: 0.5."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +322,26 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_y_flip(batch, prob: float, device: torch.device) -> None:
+    """Apply per-sample Y=0 mirror augmentation in-place to the batch.
+
+    DrivAerML cars are symmetric about the Y=0 (X-Z) plane. Per-channel
+    sign rules under y-reflection:
+      surface_x[..., 1] (y), surface_x[..., 4] (normal_y) -> flipped
+      surface_y[..., 2] (wall_shear_y / tau_y) -> flipped (vector y-component)
+      volume_x[..., 1] (y) -> flipped
+      cp / tau_x / tau_z / vol_pressure / sdf -> invariant
+    """
+
+    if prob <= 0.0:
+        return
+    flip_mask = torch.rand(batch.surface_x.shape[0], device=device) < prob
+    batch.surface_x[flip_mask, :, 1] *= -1.0
+    batch.surface_x[flip_mask, :, 4] *= -1.0
+    batch.surface_y[flip_mask, :, 2] *= -1.0
+    batch.volume_x[flip_mask, :, 1] *= -1.0
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,8 +352,10 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    y_flip_prob: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    apply_y_flip(batch, y_flip_prob, device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -364,6 +397,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    y_flip_prob: float = 0.0,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -374,6 +409,7 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
+    apply_y_flip(batch, y_flip_prob, device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -939,7 +975,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model, batch, transform, device, config.amp_mode,
+                        y_flip_prob=config.y_flip_prob,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,6 +1067,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        y_flip_prob=config.y_flip_prob,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
