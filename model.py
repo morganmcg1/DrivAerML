@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_num_heads: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -431,9 +432,15 @@ class SurfaceTransolver(nn.Module):
         # AND bias so the sublayer is identity at init (preserves baseline
         # behavior at epoch 0). See PR #823 hypothesis.
         if use_surf_to_vol_xattn:
+            effective_xattn_heads = xattn_num_heads if xattn_num_heads > 0 else n_head
+            if n_hidden % effective_xattn_heads != 0:
+                raise ValueError(
+                    f"xattn_num_heads={effective_xattn_heads} must divide n_hidden={n_hidden}"
+                )
+            self.xattn_num_heads = effective_xattn_heads
             self.surf_to_vol_xattn = nn.MultiheadAttention(
                 embed_dim=n_hidden,
-                num_heads=n_head,
+                num_heads=effective_xattn_heads,
                 batch_first=True,
                 dropout=dropout,
             )
@@ -441,6 +448,7 @@ class SurfaceTransolver(nn.Module):
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
         else:
+            self.xattn_num_heads = 0
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
