@@ -138,6 +138,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    ood_neighbor_ids: str = ""
+    ood_loss_multiplier: float = 1.0
     debug: bool = False
 
 
@@ -229,6 +231,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "ood_neighbor_ids": (
+            "Comma-separated train-set geometry IDs whose per-sample "
+            "loss contribution is multiplied by --ood-loss-multiplier "
+            "during training. Intended for upweighting train cases "
+            "geometrically nearest to OOD test cases (PR #888). When "
+            "empty (default) the loss is unchanged."
+        ),
+        "ood_loss_multiplier": (
+            "Multiplicative upweight applied to the squared-error "
+            "contribution of each --ood-neighbor-ids sample, applied to "
+            "both the surface and volume MSE before reduction. Default "
+            "1.0 is identical to baseline."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +326,61 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def per_sample_weighted_masked_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    sample_weights: torch.Tensor,
+) -> torch.Tensor:
+    """``masked_mse`` with each sample's squared error scaled by ``sample_weights[b]``.
+
+    Identical to ``masked_mse`` when ``sample_weights`` is all ones: the denominator
+    is the unweighted valid-point count, so ``w == 1`` everywhere reproduces the
+    baseline reduction exactly.
+    """
+    expanded_mask = mask
+    while expanded_mask.ndim < pred.ndim:
+        expanded_mask = expanded_mask.unsqueeze(-1)
+    expanded_mask = expanded_mask.to(device=pred.device, dtype=pred.dtype)
+    w = sample_weights.to(device=pred.device, dtype=pred.dtype)
+    while w.ndim < pred.ndim:
+        w = w.unsqueeze(-1)
+    sq_err = (pred - target).square()
+    weighted = sq_err * expanded_mask * w
+    denominator = expanded_mask.expand_as(sq_err).sum()
+    if bool(denominator.detach().cpu().item() > 0):
+        return weighted.sum() / denominator.clamp_min(1.0)
+    return sq_err.sum() * 0.0
+
+
+def per_sample_weighted_channel_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    channel_weights: torch.Tensor,
+    sample_weights: torch.Tensor,
+) -> torch.Tensor:
+    """``weighted_channel_mse`` with per-sample upweighting; identity at ``w == 1``."""
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    chan_w = channel_weights.to(device=pred.device, dtype=pred.dtype)
+    if chan_w.shape[-1] != pred.shape[-1]:
+        raise ValueError(
+            f"channel_weights last-dim {chan_w.shape[-1]} must equal pred last-dim {pred.shape[-1]}"
+        )
+    samp_w = sample_weights.to(device=pred.device, dtype=pred.dtype)
+    while samp_w.ndim < pred.ndim:
+        samp_w = samp_w.unsqueeze(-1)
+    sq_err = (pred - target).square()
+    mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    weighted = sq_err * chan_w * mask_dev * samp_w
+    valid_points = mask_dev.sum()
+    denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
+    if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denominator
+    return pred.sum() * 0.0
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,6 +391,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    sample_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -333,15 +404,40 @@ def train_loss(
             volume_mask=batch.volume_mask,
         )
         if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
-                batch.surface_mask,
-                surface_channel_weights,
+            if sample_weights is not None:
+                surface_loss = per_sample_weighted_channel_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                    sample_weights,
+                )
+            else:
+                surface_loss = weighted_channel_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+        else:
+            if sample_weights is not None:
+                surface_loss = per_sample_weighted_masked_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    sample_weights,
+                )
+            else:
+                surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        if sample_weights is not None:
+            volume_loss = per_sample_weighted_masked_mse(
+                out["volume_preds"],
+                volume_target,
+                batch.volume_mask,
+                sample_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -353,6 +449,34 @@ def train_loss(
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+
+
+def parse_ood_neighbor_ids(spec: str) -> set[str]:
+    spec = (spec or "").strip()
+    if not spec:
+        return set()
+    return {token.strip() for token in spec.split(",") if token.strip()}
+
+
+def compute_sample_weights(
+    case_ids: list[str],
+    ood_set: set[str],
+    multiplier: float,
+    device: torch.device,
+) -> tuple[torch.Tensor, int]:
+    """Return ``([B] float32 weights, n_ood_in_batch)``.
+
+    Returns ``ones`` when no OOD neighbors are flagged in the batch so the
+    downstream computation matches the unweighted reduction exactly.
+    """
+    n_ood = sum(1 for cid in case_ids if cid in ood_set)
+    weights = torch.ones(len(case_ids), device=device, dtype=torch.float32)
+    if n_ood == 0 or multiplier == 1.0:
+        return weights, n_ood
+    for i, cid in enumerate(case_ids):
+        if cid in ood_set:
+            weights[i] = multiplier
+    return weights, n_ood
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -758,6 +882,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+        ood_neighbor_set = parse_ood_neighbor_ids(config.ood_neighbor_ids)
+        use_ood_weighting = bool(ood_neighbor_set) and config.ood_loss_multiplier != 1.0
+        if state.is_main and use_ood_weighting:
+            print(
+                f"OOD per-sample loss weighting: multiplier={config.ood_loss_multiplier} "
+                f"on {len(ood_neighbor_set)} train cases: {sorted(ood_neighbor_set)}"
+            )
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -883,6 +1014,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/ood_neighbor_ids"] = sorted(ood_neighbor_set)
+            wandb.summary["loss/ood_neighbor_count"] = len(ood_neighbor_set)
+            wandb.summary["loss/ood_loss_multiplier"] = config.ood_loss_multiplier
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -937,6 +1071,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                ood_batch_metrics: dict[str, float] = {}
+                if use_ood_weighting:
+                    sample_weights, n_ood_in_batch = compute_sample_weights(
+                        batch.case_ids,
+                        ood_neighbor_set,
+                        config.ood_loss_multiplier,
+                        device,
+                    )
+                    ood_batch_metrics = {
+                        "train/ood/samples_in_batch": float(n_ood_in_batch),
+                        "train/ood/multiplier": float(config.ood_loss_multiplier),
+                    }
+                else:
+                    sample_weights = None
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
                         model, batch, transform, device, config.amp_mode
@@ -1030,6 +1178,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        sample_weights=sample_weights,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1072,6 +1221,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if ood_batch_metrics:
+                    train_log.update(ood_batch_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
