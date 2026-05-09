@@ -64,6 +64,39 @@ from trainer_runtime import (
 
 
 # ---------------------------------------------------------------------------
+# Data loader patch: fix surface/volume gradient starvation in train_random mode
+# ---------------------------------------------------------------------------
+# The default DrivAerMLSurfaceDataset._indices returns torch.empty(0) when
+# view.view_index >= group_view_count for a given modality. This is correct
+# for eval_chunk (deterministic strided coverage), but in train_random mode
+# it causes the smaller-view modality to receive *no* gradient signal on
+# views beyond its group_view_count -- the well-documented "30.9% empty
+# volume views at 96k" bug from PR #912 (and the symmetric "empty surface
+# views" issue when surface points is the smaller-view modality).
+#
+# In train_random mode, every call samples `count` points uniformly with
+# replacement from [0, total) -- there is no per-view dependence, so we can
+# (and should) keep sampling for all view_index values. This patch keeps the
+# eval_chunk semantics unchanged.
+def _patch_dataset_train_random_indices() -> None:
+    from data import loader as _loader_module
+
+    _orig = _loader_module.DrivAerMLSurfaceDataset._indices
+
+    def _indices(self, total, count, view, *, group_view_count):
+        if view.sampling_mode == "train_random":
+            if count <= 0 or total <= count:
+                return None if view.view_index == 0 else torch.empty(0, dtype=torch.long)
+            return torch.randint(total, (count,), dtype=torch.long).sort().values
+        return _orig(self, total, count, view, group_view_count=group_view_count)
+
+    _loader_module.DrivAerMLSurfaceDataset._indices = _indices
+
+
+_patch_dataset_train_random_indices()
+
+
+# ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
 
