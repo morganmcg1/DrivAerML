@@ -176,6 +176,35 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class DropPath(nn.Module):
+    """Stochastic depth per-sample (Huang et al., 2016, https://arxiv.org/abs/1603.09382).
+
+    During training, drops the entire residual branch with probability ``drop_prob``
+    on a per-sample basis. Surviving samples are scaled by ``1 / (1 - drop_prob)`` so
+    the residual contribution is unbiased in expectation. At eval time this is a
+    no-op (full residual passes through), which gives the implicit-ensemble effect
+    described by Huang et al.
+    """
+
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        if drop_prob < 0.0 or drop_prob >= 1.0:
+            raise ValueError(f"drop_prob must be in [0, 1); got {drop_prob}")
+        self.drop_prob = float(drop_prob)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.drop_prob == 0.0 or not self.training:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        random_tensor = torch.rand(shape, dtype=x.dtype, device=x.device)
+        random_tensor = torch.floor(random_tensor + keep_prob)
+        return x.div(keep_prob) * random_tensor
+
+    def extra_repr(self) -> str:
+        return f"drop_prob={self.drop_prob:.4f}"
+
+
 class UpActDownMlp(nn.Module):
     def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
         super().__init__()
@@ -265,6 +294,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        drop_path_rate: float = 0.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -278,12 +308,14 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.drop_path_rate = float(drop_path_rate)
+        self.drop_path = DropPath(drop_prob=drop_path_rate)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.drop_path(self.attention(self.norm1(x), attn_mask=attn_mask))
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -298,8 +330,18 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        drop_path_rate: float = 0.0,
     ):
         super().__init__()
+        self.depth = depth
+        self.drop_path_rate = float(drop_path_rate)
+        # Linear schedule (Huang et al. 2016 / DeiT): block 0 never drops, block
+        # depth-1 drops at full rate. With depth=1 the schedule degenerates to 0.
+        if depth > 1:
+            block_rates = [drop_path_rate * i / (depth - 1) for i in range(depth)]
+        else:
+            block_rates = [0.0]
+        self.drop_path_per_layer = block_rates
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -309,8 +351,9 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    drop_path_rate=block_rates[i],
                 )
-                for _ in range(depth)
+                for i in range(depth)
             ]
         )
 
@@ -342,6 +385,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        drop_path_rate: float = 0.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +398,7 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.drop_path_rate = float(drop_path_rate)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -417,6 +462,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            drop_path_rate=drop_path_rate,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)

@@ -97,6 +97,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    drop_path_rate: float = 0.0
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     rff_init_sigmas: str = ""
@@ -284,11 +285,35 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def resolve_drop_path_rate(config: Config) -> float:
+    """Per PR #869: ``--model-dropout`` doubles as a proxy for ``--drop-path-rate``.
+
+    Explicit ``--drop-path-rate`` wins if set; otherwise ``--model-dropout``
+    flows into stochastic depth (and standard attention dropout is forced to 0).
+    Standard dropout still works when ``--drop-path-rate`` is set explicitly to
+    something different from ``--model-dropout``.
+    """
+    if config.drop_path_rate > 0.0:
+        return config.drop_path_rate
+    return config.model_dropout
+
+
+def resolve_attn_dropout(config: Config) -> float:
+    """When ``--model-dropout`` is being used as a drop-path proxy, suppress the
+    legacy attention dropout so the residual-path stochastic depth is the sole
+    regularizer (per PR #869 "implement as stochastic depth on residual
+    connections, NOT standard dropout").
+    """
+    if config.drop_path_rate > 0.0:
+        return config.model_dropout
+    return 0.0
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
-        dropout=config.model_dropout,
+        dropout=resolve_attn_dropout(config),
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
@@ -297,6 +322,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        drop_path_rate=resolve_drop_path_rate(config),
     )
 
 
@@ -861,6 +887,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            backbone = getattr(base_model, "backbone", None)
+            if backbone is not None:
+                resolved_dp_rate = float(getattr(backbone, "drop_path_rate", 0.0))
+                resolved_dp_per_layer = list(getattr(backbone, "drop_path_per_layer", []))
+                wandb.summary["model/drop_path_rate"] = resolved_dp_rate
+                wandb.summary["model/drop_path_per_layer"] = resolved_dp_per_layer
+                wandb.summary["model/attn_dropout"] = resolve_attn_dropout(config)
+                if resolved_dp_rate > 0.0:
+                    print(
+                        f"DropPath (stochastic depth) ENABLED: rate={resolved_dp_rate:.4f} "
+                        f"per_layer={['%.4f' % r for r in resolved_dp_per_layer]} "
+                        f"attn_dropout={resolve_attn_dropout(config):.4f}"
+                    )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
