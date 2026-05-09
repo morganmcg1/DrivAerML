@@ -424,12 +424,14 @@ class SurfaceTransolver(nn.Module):
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
-        # Surface->volume cross-attention (PR #823): single MHA sublayer where
-        # volume hidden states (Q) attend to surface hidden states (K/V).
-        # Bridges geometry-aware surface features into the volume decoder
-        # to address the OOD volume_pressure gap. Zero-init out_proj weight
-        # AND bias so the sublayer is identity at init (preserves baseline
-        # behavior at epoch 0). See PR #823 hypothesis.
+        # Surface->volume cross-attention. Two sequential MHA sublayers where
+        # volume hidden states (Q) attend to the same surface hidden states
+        # (K/V). Layer 1 (PR #823) gives a coarse alignment of volume features
+        # with surface geometry; layer 2 (PR #884) does residual refinement
+        # using the updated volume hidden as Q while K/V stays fixed at the
+        # encoder surface output. Both layers zero-init out_proj weight AND
+        # bias so the depth-2 stack is identity at init (preserves the
+        # no-xattn baseline at epoch 0).
         if use_surf_to_vol_xattn:
             self.surf_to_vol_xattn = nn.MultiheadAttention(
                 embed_dim=n_hidden,
@@ -440,9 +442,21 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
+
+            self.surf_to_vol_xattn_2 = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.surf_to_vol_xattn_norm_2 = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.surf_to_vol_xattn_2.out_proj.weight)
+            nn.init.zeros_(self.surf_to_vol_xattn_2.out_proj.bias)
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+            self.surf_to_vol_xattn_2 = None
+            self.surf_to_vol_xattn_norm_2 = None
 
     def _encode_group(
         self,
@@ -544,6 +558,17 @@ class SurfaceTransolver(nn.Module):
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+            # Layer 2 (PR #884): same surface_hidden K/V; updated volume_hidden Q.
+            xattn_out2, _ = self.surf_to_vol_xattn_2(
+                query=volume_hidden,
+                key=surface_hidden,
+                value=surface_hidden,
+                need_weights=False,
+            )
+            xattn_out2 = _apply_token_mask(xattn_out2, volume_mask)
+            volume_hidden = self.surf_to_vol_xattn_norm_2(volume_hidden + xattn_out2)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
