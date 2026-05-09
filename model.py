@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_surf_subsample_n: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.xattn_surf_subsample_n = int(xattn_surf_subsample_n)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -536,10 +538,25 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            # Optional surface K/V subsampling (PR #887): force the xattn to
+            # distill geometry from a sparse anchor set instead of all 65k
+            # surface tokens. Random subsampling is applied at both train and
+            # eval for consistent representation. Padded surface rows have zero
+            # K/V (already mask-zeroed) so any padded picks contribute zero.
+            if (
+                self.xattn_surf_subsample_n > 0
+                and self.xattn_surf_subsample_n < surface_hidden.size(1)
+            ):
+                idx = torch.randperm(
+                    surface_hidden.size(1), device=surface_hidden.device
+                )[: self.xattn_surf_subsample_n]
+                surface_kv = surface_hidden.index_select(1, idx)
+            else:
+                surface_kv = surface_hidden
             xattn_out, _ = self.surf_to_vol_xattn(
                 query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
+                key=surface_kv,
+                value=surface_kv,
                 need_weights=False,
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)

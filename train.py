@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_surf_subsample_n: int = 0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_surf_subsample_n": (
+            "Optional uniform-random K/V subsample size for the surf->vol "
+            "cross-attention (PR #887). When > 0 and < N_surf, the xattn "
+            "module attends to a random sample of N anchor surface tokens "
+            "per forward pass instead of all 65k tokens, forcing the "
+            "geometry signal through a sparser representation. Applied at "
+            "both train and eval (for consistency). Default 0 disables "
+            "subsampling and uses all surface tokens (PR #823 behavior)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_surf_subsample_n=config.xattn_surf_subsample_n,
     )
 
 
