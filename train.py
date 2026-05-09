@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_mid_backbone_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_mid_backbone_xattn": (
+            "Enable mid-backbone surf->vol cross-attention injection "
+            "after backbone block index 2 (i.e. after the 3rd of 5 layers; "
+            "PR #917). A separate nn.MultiheadAttention with its own "
+            "LayerNorm lets volume hidden states (Q) attend to surface "
+            "hidden states (K/V) mid-backbone, so subsequent blocks 3 and "
+            "4 can compound the geometry-conditioned volume tokens. "
+            "out_proj weight/bias zero-initialised. Composes with "
+            "--use-surf-to-vol-xattn (Arm B) or runs standalone (Arm A)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_mid_backbone_xattn=config.use_mid_backbone_xattn,
     )
 
 
@@ -773,7 +785,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_mid_backbone_xattn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

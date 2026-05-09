@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_mid_backbone_xattn: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_mid_backbone_xattn = use_mid_backbone_xattn
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +446,25 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        if use_mid_backbone_xattn:
+            # Option B (PR #917 advisor approval, 2026-05-09): no post-LN on
+            # the mid-injection. LN(vol + 0) != vol because vol_mid is the
+            # raw post-block-2 residual (no prior LN), so a post-LN would
+            # break identity-at-init and replicate PR #892's EP1 failure.
+            # Strict identity holds with vol_mid = vol_mid + xattn_out and
+            # zero-init out_proj; the next backbone block's pre-norm handles
+            # the LN naturally.
+            self.mid_backbone_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            nn.init.zeros_(self.mid_backbone_xattn.out_proj.weight)
+            nn.init.zeros_(self.mid_backbone_xattn.out_proj.bias)
+        else:
+            self.mid_backbone_xattn = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -520,7 +541,44 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        if self.mid_backbone_xattn is not None:
+            split_idx = 3
+            for block in self.backbone.blocks[:split_idx]:
+                hidden = block(hidden, attn_mask=attn_mask)
+            hidden = _apply_token_mask(hidden, attn_mask)
+            if (
+                surface_x is not None
+                and volume_x is not None
+                and surface_tokens > 0
+                and volume_tokens > 0
+            ):
+                surf_mid = hidden[:, :surface_tokens]
+                vol_mid = hidden[:, surface_tokens : surface_tokens + volume_tokens]
+                xattn_mid_out, _ = self.mid_backbone_xattn(
+                    query=vol_mid,
+                    key=surf_mid,
+                    value=surf_mid,
+                    need_weights=False,
+                )
+                xattn_mid_out = _apply_token_mask(xattn_mid_out, volume_mask)
+                # Option B: residual-only (no post-LN). Strict identity at
+                # init with zero-init out_proj; pre-norm in backbone.blocks[3]
+                # handles normalization downstream.
+                vol_mid = vol_mid + xattn_mid_out
+                vol_mid = _apply_token_mask(vol_mid, volume_mask)
+                hidden = torch.cat(
+                    [
+                        surf_mid,
+                        vol_mid,
+                        hidden[:, surface_tokens + volume_tokens :],
+                    ],
+                    dim=1,
+                )
+            for block in self.backbone.blocks[split_idx:]:
+                hidden = block(hidden, attn_mask=attn_mask)
+        else:
+            hidden = self.backbone(hidden, attn_mask=attn_mask)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
