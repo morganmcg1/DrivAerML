@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_mid_layer: int = -1,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -444,6 +445,91 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Mid-backbone surf->vol xattn (PR #892): inject a second xattn AFTER
+        # backbone block index `xattn_mid_layer` so the geometry-conditioned
+        # volume features are then refined by the remaining backbone blocks.
+        # Updates only the volume slice of the shared sequence; surface tokens
+        # pass through unchanged (avoids the gradient-backflow failure mode of
+        # PR #884's stacked-at-final variant). Zero-init out_proj => identity
+        # at init, preserves baseline behavior at epoch 0.
+        if use_surf_to_vol_xattn and xattn_mid_layer >= 0:
+            if xattn_mid_layer >= n_layers - 1:
+                raise ValueError(
+                    f"xattn_mid_layer={xattn_mid_layer} must be < n_layers-1={n_layers - 1} "
+                    f"so that at least one backbone block follows the mid-injection."
+                )
+            self.surf_to_vol_xattn_mid = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.surf_to_vol_xattn_mid_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.surf_to_vol_xattn_mid.out_proj.weight)
+            nn.init.zeros_(self.surf_to_vol_xattn_mid.out_proj.bias)
+            self.xattn_mid_layer = xattn_mid_layer
+        else:
+            self.surf_to_vol_xattn_mid = None
+            self.surf_to_vol_xattn_mid_norm = None
+            self.xattn_mid_layer = -1
+
+        # Diagnostic flag: when True, the surf->vol xattn forwards run with
+        # need_weights=True and accumulate per-head attention entropy into
+        # `_xattn_entropy_buf`. Off by default to keep the train forward fast;
+        # the val loop turns it on around evaluate_split (see train.py).
+        self.compute_xattn_entropy = False
+        self._xattn_entropy_buf: dict[str, list[float]] = {"mid": [], "final": []}
+
+    @staticmethod
+    def _run_xattn(
+        mha: nn.MultiheadAttention,
+        *,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        need_weights: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if need_weights:
+            out, weights = mha(
+                query=query,
+                key=key,
+                value=value,
+                need_weights=True,
+                average_attn_weights=False,
+            )
+            return out, weights
+        out, _ = mha(query=query, key=key, value=value, need_weights=False)
+        return out, None
+
+    def _record_attn_entropy(self, slot: str, weights: torch.Tensor) -> None:
+        # weights: [B, num_heads, L_q, L_kv] -> per-head mean entropy this batch
+        # ([H]). The val loop averages across batches and reports both the
+        # mean across heads and the std across heads (per-head spread is a
+        # stronger collapse/diversification signal than the mean alone).
+        eps = 1e-12
+        w = weights.detach().float().clamp_min(eps)
+        entropy = -(w * w.log()).sum(dim=-1)
+        per_head = entropy.mean(dim=(0, 2))
+        self._xattn_entropy_buf.setdefault(slot, []).append(per_head.cpu())
+
+    def reset_xattn_entropy_log(self) -> None:
+        self._xattn_entropy_buf = {"mid": [], "final": []}
+
+    def consume_xattn_entropy_metrics(self, prefix: str = "xattn") -> dict[str, float]:
+        metrics: dict[str, float] = {}
+        for slot, batch_values in self._xattn_entropy_buf.items():
+            if not batch_values:
+                continue
+            stacked = torch.stack(batch_values, dim=0)
+            per_head_avg = stacked.mean(dim=0)
+            metrics[f"{prefix}/{slot}_attn_entropy"] = float(per_head_avg.mean().item())
+            if per_head_avg.numel() > 1:
+                metrics[f"{prefix}/{slot}_attn_entropy_head_std"] = float(
+                    per_head_avg.std(unbiased=False).item()
+                )
+        self.reset_xattn_entropy_log()
+        return metrics
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -520,8 +606,38 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
-        hidden = _apply_token_mask(hidden, attn_mask)
+
+        run_mid_xattn = (
+            self.surf_to_vol_xattn_mid is not None
+            and self.xattn_mid_layer >= 0
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        )
+        if run_mid_xattn:
+            for i, block in enumerate(self.backbone.blocks):
+                hidden = block(hidden, attn_mask=attn_mask)
+                if i == self.xattn_mid_layer:
+                    surf_h = hidden[:, :surface_tokens]
+                    vol_h = hidden[:, surface_tokens : surface_tokens + volume_tokens]
+                    mid_out, mid_w = self._run_xattn(
+                        self.surf_to_vol_xattn_mid,
+                        query=vol_h,
+                        key=surf_h,
+                        value=surf_h,
+                        need_weights=self.compute_xattn_entropy,
+                    )
+                    if mid_w is not None:
+                        self._record_attn_entropy("mid", mid_w)
+                    mid_out = _apply_token_mask(mid_out, volume_mask)
+                    vol_h = self.surf_to_vol_xattn_mid_norm(vol_h + mid_out)
+                    vol_h = _apply_token_mask(vol_h, volume_mask)
+                    hidden = torch.cat([surf_h, vol_h], dim=1)
+            hidden = _apply_token_mask(hidden, attn_mask)
+        else:
+            hidden = self.backbone(hidden, attn_mask=attn_mask)
+            hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
         cursor = 0
@@ -536,12 +652,15 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
-            xattn_out, _ = self.surf_to_vol_xattn(
+            xattn_out, final_w = self._run_xattn(
+                self.surf_to_vol_xattn,
                 query=volume_hidden,
                 key=surface_hidden,
                 value=surface_hidden,
-                need_weights=False,
+                need_weights=self.compute_xattn_entropy,
             )
+            if final_w is not None:
+                self._record_attn_entropy("final", final_w)
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)

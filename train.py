@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_mid_layer: int = -1
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_mid_layer": (
+            "Mid-backbone surf->vol cross-attention injection (PR #892). When "
+            ">=0 (and --use-surf-to-vol-xattn is set), insert an additional "
+            "MHA module after backbone block index `xattn_mid_layer` (0-indexed) "
+            "so the volume slice is enriched with surface K/V mid-backbone, "
+            "then refined by the remaining blocks. Surface tokens are not "
+            "modified. Zero-init out_proj => identity at init. -1 disables "
+            "(default; PR #823 single-final-xattn behavior)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_mid_layer=config.xattn_mid_layer,
     )
 
 
@@ -1239,6 +1250,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema is not None:
                 ema.store(base_model)
                 ema.copy_to(base_model)
+            xattn_diag_enabled = config.use_surf_to_vol_xattn and (
+                base_model.surf_to_vol_xattn is not None
+                or base_model.surf_to_vol_xattn_mid is not None
+            )
+            if xattn_diag_enabled:
+                base_model.compute_xattn_entropy = True
+                base_model.reset_xattn_entropy_log()
             val_metrics = {
                 name: evaluate_split(
                     model,
@@ -1250,6 +1268,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
                 for name, loader in val_loaders.items()
             }
+            xattn_entropy_metrics: dict[str, float] = {}
+            if xattn_diag_enabled:
+                xattn_entropy_metrics = base_model.consume_xattn_entropy_metrics(prefix="xattn")
+                base_model.compute_xattn_entropy = False
 
             if state.is_main:
                 if raw_val_metrics is not None:
@@ -1262,6 +1284,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                if xattn_entropy_metrics:
+                    log_metrics.update(xattn_entropy_metrics)
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
