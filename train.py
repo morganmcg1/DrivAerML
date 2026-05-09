@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_post_ffn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_post_ffn": (
+            "Enable a 2-layer MLP (FFN) residual on the volume path "
+            "immediately after the surf->vol xattn block (PR #891). "
+            "Pre-norm Linear(d, 4d) -> GELU -> Linear(4d, d) with the second "
+            "linear zero-initialised so the block is identity at init "
+            "(preserves the PR #823 SOTA optimum at step 0). Adds capacity "
+            "to redistribute the surface conditioning signal before the "
+            "volume head. Requires --use-surf-to-vol-xattn; ignored "
+            "otherwise."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_post_ffn=config.xattn_post_ffn,
     )
 
 
