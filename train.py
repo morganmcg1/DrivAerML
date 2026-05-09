@@ -94,7 +94,7 @@ class Config:
     model_layers: int = 3
     model_hidden_dim: int = 192
     model_heads: int = 3
-    model_mlp_ratio: int = 4
+    model_mlp_ratio: float = 4.0
     model_slices: int = 96
     model_dropout: float = 0.0
     rff_num_features: int = 0
@@ -130,6 +130,9 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    use_vol_swa: bool = False
+    vol_swa_start_epoch: int = 9
+    vol_swa_freq_steps: int = 0
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -228,6 +231,33 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_vol_swa": (
+            "Enable Stochastic Weight Averaging (Izmailov et al. 2018, "
+            "https://arxiv.org/abs/1803.05407) restricted to the volume "
+            "head + surface->volume cross-attention modules "
+            "(volume_out + surf_to_vol_xattn + surf_to_vol_xattn_norm). "
+            "Maintains a running uniform average of the live training "
+            "weights for these tracked modules, starting at "
+            "--vol-swa-start-epoch. At each validation event, also evaluates "
+            "the EMA-backbone + SWA-vol-head model and selects the best "
+            "checkpoint between EMA and SWA. Backbone parameters are not "
+            "averaged. Cheap (~1M extra parameters held on each rank, "
+            "no extra training-time compute)."
+        ),
+        "vol_swa_start_epoch": (
+            "1-indexed epoch at which volume-head SWA averaging begins. "
+            "On the boundary at the END of every epoch where "
+            "(epoch_index + 1) >= vol_swa_start_epoch, the live training "
+            "weights for the tracked vol-head modules are folded into the "
+            "running uniform average. With a 13-epoch schedule, "
+            "vol_swa_start_epoch=9 produces 5 update points (epochs 9..13)."
+        ),
+        "vol_swa_freq_steps": (
+            "Optional per-step SWA averaging frequency. If > 0, SWA is "
+            "updated every N optimizer steps once vol_swa_start_epoch is "
+            "reached, instead of only at epoch boundaries. Default 0 = "
+            "epoch-boundary updates only."
         ),
     }
     for field in fields(Config):
@@ -605,6 +635,85 @@ def synced_per_task_tensor(
     return stacked
 
 
+class VolHeadSWA:
+    """Running uniform average of vol-head + surface->volume cross-attention weights.
+
+    Implements Stochastic Weight Averaging (Izmailov et al. 2018,
+    https://arxiv.org/abs/1803.05407) restricted to the modules that
+    differentiate volume from surface predictions. Tracks `volume_out`,
+    `surf_to_vol_xattn`, and `surf_to_vol_xattn_norm` parameters of the
+    base SurfaceTransolver. Backbone, surface output head, and positional
+    encodings are intentionally excluded so surface predictions remain
+    unchanged when the SWA average is applied.
+
+    Mirrors the EMA helper's store/copy_to/restore swap protocol so that
+    SWA-swapped evaluation can compose cleanly with EMA-swapped evaluation.
+    """
+
+    PREFIXES: tuple[str, ...] = (
+        "volume_out.",
+        "surf_to_vol_xattn.",
+        "surf_to_vol_xattn_norm.",
+    )
+
+    def __init__(self, model: nn.Module):
+        self.shadow: dict[str, torch.Tensor] = {
+            name: param.detach().clone()
+            for name, param in model.named_parameters()
+            if param.requires_grad and self._tracks(name)
+        }
+        self.n_avg: int = 0
+        self.backup: dict[str, torch.Tensor] | None = None
+
+    @classmethod
+    def _tracks(cls, name: str) -> bool:
+        return any(name.startswith(prefix) for prefix in cls.PREFIXES)
+
+    @classmethod
+    def count_tracked_params(cls, model: nn.Module) -> int:
+        return sum(
+            p.numel()
+            for n, p in model.named_parameters()
+            if p.requires_grad and cls._tracks(n)
+        )
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        self.n_avg += 1
+        weight_new = 1.0 / self.n_avg
+        weight_old = 1.0 - weight_new
+        for name, param in model.named_parameters():
+            shadow = self.shadow.get(name)
+            if shadow is None:
+                continue
+            shadow.mul_(weight_old).add_(param.detach(), alpha=weight_new)
+
+    @torch.no_grad()
+    def store(self, model: nn.Module) -> None:
+        self.backup = {
+            name: param.detach().clone()
+            for name, param in model.named_parameters()
+            if name in self.shadow
+        }
+
+    @torch.no_grad()
+    def copy_to(self, model: nn.Module) -> None:
+        for name, param in model.named_parameters():
+            shadow = self.shadow.get(name)
+            if shadow is not None:
+                param.data.copy_(shadow)
+
+    @torch.no_grad()
+    def restore(self, model: nn.Module) -> None:
+        if self.backup is None:
+            return
+        for name, param in model.named_parameters():
+            backup = self.backup.get(name)
+            if backup is not None:
+                param.data.copy_(backup)
+        self.backup = None
+
+
 def parse_vol_points_schedule(text: str) -> list[tuple[int, int]]:
     if not text:
         return []
@@ -783,6 +892,25 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+
+        vol_swa: VolHeadSWA | None = None
+        if config.use_vol_swa:
+            if not config.use_surf_to_vol_xattn:
+                if state.is_main:
+                    print(
+                        "WARNING: --use-vol-swa is enabled but "
+                        "--use-surf-to-vol-xattn is not; SWA will only "
+                        "average the vol_head (volume_out) parameters."
+                    )
+            vol_swa = VolHeadSWA(base_model)
+            n_swa_params = VolHeadSWA.count_tracked_params(base_model)
+            if state.is_main:
+                print(
+                    "Vol-head SWA enabled: tracking "
+                    f"{n_swa_params:,d} params across {VolHeadSWA.PREFIXES}; "
+                    f"start_epoch={config.vol_swa_start_epoch} "
+                    f"freq_steps={config.vol_swa_freq_steps}"
+                )
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
@@ -1114,6 +1242,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                         optimizer.step()
                         if ema is not None:
                             ema.update(base_model)
+                        if (
+                            vol_swa is not None
+                            and config.vol_swa_freq_steps > 0
+                            and (epoch + 1) >= config.vol_swa_start_epoch
+                            and global_step % config.vol_swa_freq_steps == 0
+                        ):
+                            vol_swa.update(base_model)
                         weight_metrics = (
                             collect_weight_metrics(
                                 model,
@@ -1165,6 +1300,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     break
 
             scheduler.step()
+            if (
+                vol_swa is not None
+                and config.vol_swa_freq_steps == 0
+                and (epoch + 1) >= config.vol_swa_start_epoch
+                and n_batches > 0
+            ):
+                vol_swa.update(base_model)
             epoch_train_loss = train_loss_sum / max(n_batches, 1)
             dt = time.time() - t0
             peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
@@ -1251,15 +1393,65 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for name, loader in val_loaders.items()
             }
 
+            # SWA-swapped evaluation: keep the EMA backbone but swap the SWA
+            # running-average vol-head + xattn weights into the model. Run on
+            # ALL ranks because evaluate_split is collective. After eval, the
+            # EMA-only state is restored on every rank so subsequent code sees
+            # the same model state as before.
+            val_metrics_swa: dict[str, dict[str, float]] | None = None
+            swa_active = vol_swa is not None and vol_swa.n_avg > 0
+            if swa_active:
+                vol_swa.store(base_model)
+                vol_swa.copy_to(base_model)
+                val_metrics_swa = {
+                    name: evaluate_split(
+                        model,
+                        loader,
+                        transform,
+                        device,
+                        amp_mode=config.amp_mode,
+                        distributed_state=state,
+                    )
+                    for name, loader in val_loaders.items()
+                }
+                vol_swa.restore(base_model)
+
             if state.is_main:
                 if raw_val_metrics is not None:
                     raw_surface = raw_val_metrics["val_surface"]
                     log_metrics.update(primary_metric_log("val_raw_primary", raw_surface))
                     for split_name, metrics in raw_val_metrics.items():
                         log_metrics.update(metric_namespace("val_raw", split_name, metrics))
-                primary_val = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
-                log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
+                primary_val_ema = val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                log_metrics.update(primary_metric_log("val_ema_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
+                    log_metrics.update(metric_namespace("val_ema", split_name, metrics))
+
+                primary_val_swa: float | None = None
+                if val_metrics_swa is not None:
+                    primary_val_swa = val_metrics_swa["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                    log_metrics.update(primary_metric_log("val_swa_primary", val_metrics_swa["val_surface"]))
+                    for split_name, metrics in val_metrics_swa.items():
+                        log_metrics.update(metric_namespace("val_swa", split_name, metrics))
+                if vol_swa is not None:
+                    log_metrics["swa/n_avg"] = float(vol_swa.n_avg)
+                    log_metrics["swa/active"] = 1.0 if swa_active else 0.0
+
+                swa_better = bool(
+                    primary_val_swa is not None
+                    and is_valid_primary_metric(primary_val_swa)
+                    and primary_val_swa < primary_val_ema
+                )
+                primary_val = primary_val_swa if swa_better else primary_val_ema
+                chosen_val_metrics = val_metrics_swa if swa_better else val_metrics
+                log_metrics["val/best_source_swa"] = 1.0 if swa_better else 0.0
+
+                # val_primary/* and val/* mirror the chosen branch so the
+                # checkpoint-selection metric (and any kill thresholds keyed
+                # on val_primary/*) automatically follow the SWA winner once
+                # SWA is active and outperforms EMA.
+                log_metrics.update(primary_metric_log("val_primary", chosen_val_metrics["val_surface"]))
+                for split_name, metrics in chosen_val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
                 log_metrics.update(
@@ -1282,28 +1474,52 @@ def main(argv: Iterable[str] | None = None) -> None:
                 improved = should_update_best_checkpoint(primary_val, best_val)
                 if improved:
                     best_val = primary_val
-                    best_metrics = {"epoch": float(epoch + 1), **val_metrics["val_surface"]}
+                    best_metrics = {"epoch": float(epoch + 1), **chosen_val_metrics["val_surface"]}
+                    checkpoint_source_for_save = (
+                        "swa+ema_backbone" if swa_better else best_checkpoint_source
+                    )
+                    # When SWA is the winner, we need the SWA-swapped state
+                    # in base_model when state_dict() is captured. Currently
+                    # base_model is in pure EMA state (restored above), so
+                    # swap SWA back in for the save and then restore.
+                    if swa_better and vol_swa is not None:
+                        vol_swa.store(base_model)
+                        vol_swa.copy_to(base_model)
                     torch.save(
                         {
                             "model": base_model.state_dict(),
                             "config": asdict(config),
                             "epoch": epoch + 1,
-                            "val_metrics": val_metrics,
-                            "checkpoint_source": best_checkpoint_source,
+                            "val_metrics": chosen_val_metrics,
+                            "val_metrics_ema": val_metrics,
+                            "val_metrics_swa": val_metrics_swa,
+                            "checkpoint_source": checkpoint_source_for_save,
                             "selection_metric": "val_primary/abupt_axis_mean_rel_l2_pct",
+                            "swa_n_avg": int(vol_swa.n_avg) if vol_swa is not None else 0,
                         },
                         model_path,
                     )
+                    if swa_better and vol_swa is not None:
+                        vol_swa.restore(base_model)
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
                 wandb.log(log_metrics)
                 tag = " *" if improved else ""
-                print(
-                    f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
-                    f"train_loss={epoch_train_loss:.5f} "
-                    f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
-                )
-                print_metrics("val_surface", val_metrics["val_surface"])
+                source_tag = " [SWA]" if swa_better else (" [EMA]" if swa_active else "")
+                if swa_active:
+                    print(
+                        f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                        f"train_loss={epoch_train_loss:.5f} "
+                        f"val_ema={primary_val_ema:.4f} val_swa={primary_val_swa:.4f}"
+                        f" -> val={primary_val:.4f}{source_tag}{tag}"
+                    )
+                else:
+                    print(
+                        f"Epoch {epoch + 1:3d} ({dt:.0f}s) [{peak_gb:.1f}GB] "
+                        f"train_loss={epoch_train_loss:.5f} "
+                        f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
+                    )
+                print_metrics("val_surface", chosen_val_metrics["val_surface"])
             else:
                 wandb.log(log_metrics)
             if ema is not None:
