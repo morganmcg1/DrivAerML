@@ -288,6 +288,127 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class VolumeKNNAttention(nn.Module):
+    """k-NN graph attention on volume tokens post-surf-xattn (PR #916).
+
+    Each vol token (Q) attends to its ``k`` spatial nearest neighbours (K/V)
+    in raw xyz space. ``out_proj`` is zero-initialised so the residual update
+    is identity at init, preserving the upstream xattn baseline at epoch 0.
+
+    Implementation notes:
+    - kNN distances are computed in float32 with ``no_grad`` and chunked along
+      the query axis, avoiding the ``(B, N, N)`` materialisation that
+      ``torch.cdist`` would create. Padded positions (``vol_mask=False``) are
+      pushed to a large distance so they never enter any token's k-nearest
+      set; padded queries are zeroed at the output.
+    - Attention is implemented manually because ``nn.MultiheadAttention`` /
+      SDPA fails with the very large batch dim (``B*N`` ~ 65k) we get when
+      flattening per-token kNN sets under bf16 autocast. Since each query
+      attends to only ``k`` keys, manual matmuls are both correct and cheap.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int = 4,
+        k: int = 8,
+        chunk_size: int = 2048,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.k = k
+        self.chunk_size = chunk_size
+        self.dropout_p = dropout
+        self.q_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.k_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.v_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.out_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        # Identity-at-init: zero-init the output projection so the residual
+        # update is exactly zero at step 0.
+        nn.init.zeros_(self.out_proj.project.weight)
+        nn.init.zeros_(self.out_proj.project.bias)
+
+    def _knn_indices(
+        self,
+        vol_coords: torch.Tensor,
+        vol_mask: torch.Tensor,
+        k: int,
+    ) -> torch.Tensor:
+        B, N, _ = vol_coords.shape
+        device = vol_coords.device
+        # Force float32 distances regardless of any active autocast: bf16
+        # rounding can otherwise produce ties / wrong neighbour indices.
+        coords = vol_coords.detach().float()
+        # Push padded positions to "infinity" so they are never selected as
+        # neighbours of any valid query token. (B, 1, N) broadcast.
+        invalid = (~vol_mask).unsqueeze(1).to(coords.dtype) * 1.0e8
+        knn_idx = torch.zeros(B, N, k, dtype=torch.long, device=device)
+        chunk = max(1, self.chunk_size)
+        for start in range(0, N, chunk):
+            end = min(start + chunk, N)
+            diff = coords[:, start:end, :].unsqueeze(2) - coords.unsqueeze(1)
+            dist2 = (diff * diff).sum(-1)  # (B, C, N), float32
+            dist2 = dist2 + invalid  # broadcasts (B, 1, N) -> (B, C, N)
+            self_idx = torch.arange(start, end, device=device)
+            local_idx = torch.arange(end - start, device=device)
+            dist2[:, local_idx, self_idx] = 1.0e9
+            knn_idx[:, start:end, :] = dist2.topk(k, dim=-1, largest=False).indices
+        return knn_idx
+
+    def forward(
+        self,
+        vol_hidden: torch.Tensor,
+        vol_coords: torch.Tensor,
+        vol_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        B, N, D = vol_hidden.shape
+        H = self.num_heads
+        d = self.head_dim
+        k = min(self.k, N)
+        if N == 0 or k == 0:
+            return vol_hidden
+
+        with torch.no_grad():
+            knn_idx = self._knn_indices(vol_coords, vol_mask, k)  # (B, N, k)
+
+        # Project Q, K, V once for all tokens, then gather neighbours.
+        q = self.q_proj(vol_hidden).reshape(B, N, H, d)
+        k_proj = self.k_proj(vol_hidden).reshape(B, N, H, d)
+        v_proj = self.v_proj(vol_hidden).reshape(B, N, H, d)
+
+        # Flat indexing into the (B*N, H, d) buffer with batch offsets so we
+        # never materialise (B, N, N, *) anywhere.
+        b_offset = torch.arange(B, device=vol_hidden.device).view(B, 1, 1) * N
+        flat_idx = (knn_idx + b_offset).reshape(B * N * k)
+        k_flat = k_proj.reshape(B * N, H, d)
+        v_flat = v_proj.reshape(B * N, H, d)
+        # k_n / v_n: (B, N, k, H, d) -> (B, N, H, k, d)
+        k_n = k_flat[flat_idx].reshape(B, N, k, H, d).permute(0, 1, 3, 2, 4)
+        v_n = v_flat[flat_idx].reshape(B, N, k, H, d).permute(0, 1, 3, 2, 4)
+
+        # Manual scaled dot-product attention with seq_len_q=1, seq_len_k=k.
+        # q_h: (B, N, H, 1, d); attn_logits: (B, N, H, 1, k).
+        scale = 1.0 / math.sqrt(d)
+        q_h = q.unsqueeze(-2)
+        attn_logits = torch.matmul(q_h, k_n.transpose(-2, -1)) * scale
+        attn_weights = attn_logits.softmax(dim=-1)
+        attn_weights = self.attn_dropout(attn_weights)
+        attn_out = torch.matmul(attn_weights, v_n).squeeze(-2)  # (B, N, H, d)
+        attn_out = attn_out.reshape(B, N, D)
+
+        attn_out = self.out_proj(attn_out)
+        attn_out = _apply_token_mask(attn_out, vol_mask)
+        out = self.norm(vol_hidden + attn_out)
+        return _apply_token_mask(out, vol_mask)
+
+
 class Transformer(nn.Module):
     def __init__(
         self,
@@ -343,6 +464,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_knn_attn: bool = False,
+        use_vol_knn_attn_k: int = 8,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +479,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_knn_attn = use_vol_knn_attn
+        self.use_vol_knn_attn_k = use_vol_knn_attn_k
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +568,20 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # k-NN graph attention on volume tokens (PR #916). Inserted after the
+        # surf->vol xattn residual update so each vol token can mix with its
+        # spatial nearest neighbours. out_proj zero-initialised => identity at
+        # init, preserving the upstream baseline.
+        if use_vol_knn_attn:
+            self.vol_knn_attn = VolumeKNNAttention(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                k=use_vol_knn_attn_k,
+                dropout=dropout,
+            )
+        else:
+            self.vol_knn_attn = None
 
     def _encode_group(
         self,
@@ -545,6 +684,18 @@ class SurfaceTransolver(nn.Module):
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        if (
+            self.vol_knn_attn is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            vol_coords = volume_x[:, :, : self.space_dim]
+            volume_hidden = self.vol_knn_attn(
+                vol_hidden=volume_hidden,
+                vol_coords=vol_coords,
+                vol_mask=volume_mask,
+            )
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)

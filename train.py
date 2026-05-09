@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_vol_knn_attn: bool = False
+    use_vol_knn_attn_k: int = 8
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_vol_knn_attn": (
+            "Enable k-NN graph attention on vol tokens post-xattn "
+            "(PR #916). Each vol token attends to its k spatial nearest "
+            "neighbours (raw xyz). out_proj zero-initialised so the block "
+            "is identity at init. Recommended with --use-surf-to-vol-xattn."
+        ),
+        "use_vol_knn_attn_k": (
+            "Number of nearest neighbours for vol-kNN-attn (PR #916). "
+            "Default 8 (~wake-structure scale at N_vol=65536, ~1m^3 "
+            "domain). k=16 doubles compute but increases neighbourhood "
+            "reach."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +322,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_vol_knn_attn=config.use_vol_knn_attn,
+        use_vol_knn_attn_k=config.use_vol_knn_attn_k,
     )
 
 
@@ -773,7 +789,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_vol_knn_attn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
