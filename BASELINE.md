@@ -4,22 +4,30 @@
 
 ---
 
-## ENSEMBLE SOTA: nezuko PR #612 greedy forward ensemble selection K=7 (pool 23→24, Caruana 2004) — 2026-05-01
+## ENSEMBLE SOTA: nezuko PR #880 greedy ensemble pool-32 refresh K=6 (Caruana 2004) — 2026-05-01
 
-**val_abupt=6.1751%** / **test_abupt=7.5347%** — −0.0311pp val (−0.50% relative) vs prior K=7 (#602); test within noise (+0.0183pp)
+**val_abupt=6.0289%** / **test_abupt=7.3693%** — −0.1462pp val (−2.37% relative) vs prior K=7 (#612, 6.1751%); −0.1654pp test (−2.19% relative)
 
-Pool expanded from 23→24 by adding PR #594 run `d777epep` (askeladd rff32, val=6.7258%). Greedy forward selection re-run; `d777epep` selected as seed. `nh2ke150` dropped from prior K=7; remaining 6 members retained. K=7 pool 24 is the new ensemble SOTA.
+Pool expanded from 24→32 by adding PR #823 surf→vol cross-attn run `ghh0s4ne` (val=6.4407%, new single-model SOTA) and other recent single-model runs. Greedy forward selection re-run from scratch; `ghh0s4ne` selected as seed (best single-model). Greedy stopped at K=6 (next delta <0.005pp threshold). Significant improvement on both val and test vs prior K=7 pool-24 ensemble.
 
-**W&B run:** `5veexq8r` (group `nezuko-ensemble-greedy-v3`)
-**PR:** #612
-**K=7 members:** d777epep, nh96x7m4, 5o7jc7wi, wyz68o8r, 9mm3sz7x, 49aimdiz, 19qf6di1
+**W&B run:** `zst3y2mp` (group `nezuko-ensemble-greedy-pool32`)
+**PR:** #880
+**K=6 members:** ghh0s4ne, 4k25s25e, d777epep, 5o7jc7wi, 3s9di6sg, bubrguoh
 
-**Val per-channel (K=7):** surface_pressure=3.5868%, volume_pressure=3.6128%, wall_shear=6.2832%, tau_x=5.3712%, tau_y=7.7921%, tau_z=9.2984%
-**Test per-channel (K=7):** surface_pressure=3.5560%, volume_pressure=11.4652%, wall_shear=6.8449%, tau_x=5.4834%, tau_y=8.6249%, tau_z=9.6523%
+**Val per-channel (K=6):** surface_pressure=3.8550%, volume_pressure=3.5678%, wall_shear=6.8719%
+**Test per-channel (K=6):** surface_pressure=3.6007%, volume_pressure=11.3478%, wall_shear=6.6939%
 
-**Key finding:** Ensemble val SOTA 6.1751%. Volume_pressure test-vs-val gap remains chronic (val≈3.6%, test≈11.5%, ~3×) — primary systematic issue to investigate in pool 25.
+**Greedy selection path:**
+- Step 0: val=6.4408% (seed: ghh0s4ne, PR #823 surf→vol xattn)
+- Step 1: val=6.1177% (delta=0.3231pp)
+- Step 2: val=6.0681% (delta=0.0496pp)
+- Step 3: val=6.0516% (delta=0.0165pp)
+- Step 4: val=6.0373% (delta=0.0143pp)
+- Step 5: val=6.0289% (delta=0.0085pp — stopped at K=6, next delta <0.005pp threshold)
 
-**Ensemble gate:** val_abupt < **6.1751%**
+**Key finding:** Pool-32 with PR #823 surf-xattn run as seed delivers +2.37% val / +2.19% test improvement over pool-24 K=7. Volume_pressure test-vs-val gap persists (val≈3.6%, test≈11.3%, ~3.2×) — primary systematic issue.
+
+**Ensemble gate:** val_abupt < **6.0289%**
 
 ---
 
