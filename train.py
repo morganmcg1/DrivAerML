@@ -130,6 +130,7 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    use_train_mirror_aug: bool = False
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_train_mirror_aug": (
+            "Enable training-time stochastic y-axis mirror augmentation "
+            "(PR #901). For each sample in a training batch, with "
+            "probability 0.5 reflect the geometry across y=0 by negating "
+            "surface_x[y@1, ny@4], surface_y[tau_y@2], and volume_x[y@1]. "
+            "Volume_y (scalar pressure) and *_mask are invariant; padded "
+            "rows are zero so the mask invariant is preserved. Strictly "
+            "training-only; never applied during val/test eval."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +321,33 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_y_mirror_aug(batch) -> None:
+    """Stochastic per-sample y-axis mirror, applied in place on a training batch.
+
+    DrivAerML cars are approximately symmetric about y=0; reflecting the
+    geometry across that plane yields a physically valid sample. Per-sample
+    flip decisions (p=0.5) negate:
+      - ``surface_x[..., 1]`` (y-coord) and ``surface_x[..., 4]`` (ny normal)
+      - ``surface_y[..., 2]`` (tau_y wall-shear-y component)
+      - ``volume_x[..., 1]`` (y-coord)
+    ``volume_y`` (scalar pressure), ``surface_mask``, and ``volume_mask`` are
+    invariant; padded rows are zero so the mask invariant is preserved
+    automatically. ``torch.rand`` is per-rank under DDP, which is the correct
+    behavior for stochastic augmentation on locally-scattered batch slices.
+    """
+    batch_size = batch.surface_x.shape[0]
+    device = batch.surface_x.device
+    flip_mask = torch.rand(batch_size, device=device) < 0.5  # [B] bool
+    sign = torch.where(flip_mask, -1.0, 1.0).view(batch_size, 1)
+    sx_sign = sign.to(batch.surface_x.dtype)
+    sy_sign = sign.to(batch.surface_y.dtype)
+    vx_sign = sign.to(batch.volume_x.dtype)
+    batch.surface_x[..., 1].mul_(sx_sign)
+    batch.surface_x[..., 4].mul_(sx_sign)
+    batch.surface_y[..., 2].mul_(sy_sign)
+    batch.volume_x[..., 1].mul_(vx_sign)
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,8 +358,11 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_mirror_aug: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    if use_mirror_aug:
+        apply_y_mirror_aug(batch)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -364,6 +404,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    use_mirror_aug: bool = False,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -374,6 +416,8 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
+    if use_mirror_aug:
+        apply_y_mirror_aug(batch)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -852,6 +896,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.use_train_mirror_aug:
+                print(
+                    "Train-time y-mirror aug: ENABLED (p=0.5 per sample). "
+                    "Negating surface_x[y@1, ny@4], surface_y[tau_y@2], "
+                    "volume_x[y@1]. Volume_y and *_mask invariant."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +933,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["aug/use_train_mirror_aug"] = config.use_train_mirror_aug
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -939,7 +990,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model, batch, transform, device, config.amp_mode,
+                        use_mirror_aug=config.use_train_mirror_aug,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,6 +1082,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_mirror_aug=config.use_train_mirror_aug,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
