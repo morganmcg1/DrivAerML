@@ -340,6 +340,7 @@ class SurfaceTransolver(nn.Module):
         rff_num_features: int = 0,
         rff_sigma: float = 1.0,
         rff_init_sigmas: list[float] | None = None,
+        vol_rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
@@ -353,6 +354,9 @@ class SurfaceTransolver(nn.Module):
         self.rff_num_features = rff_num_features
         self.rff_sigma = rff_sigma
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
+        self.vol_rff_init_sigmas = (
+            list(vol_rff_init_sigmas) if vol_rff_init_sigmas else None
+        )
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
@@ -370,11 +374,19 @@ class SurfaceTransolver(nn.Module):
                 sigma=rff_sigma,
                 init_sigmas=self.rff_init_sigmas,
             )
+            # PR #918: volume branch can use its own (typically lower-frequency)
+            # init sigmas. When vol_rff_init_sigmas is None, fall back to the
+            # shared rff_init_sigmas for backwards compatibility.
+            _vol_init_sigmas = (
+                self.vol_rff_init_sigmas
+                if self.vol_rff_init_sigmas is not None
+                else self.rff_init_sigmas
+            )
             self.volume_string_sep = StringSeparableEncoding(
                 in_dim=space_dim,
                 num_features=string_sep_features,
                 sigma=rff_sigma,
-                init_sigmas=self.rff_init_sigmas,
+                init_sigmas=_vol_init_sigmas,
             )
             string_sep_out_dim = self.surface_string_sep.output_dim  # 2 * space_dim * num_features
             self.pos_embed = ContinuousSincosEmbed(hidden_dim=n_hidden, input_dim=space_dim)
