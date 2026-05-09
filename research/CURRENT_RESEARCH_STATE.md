@@ -32,23 +32,23 @@ This gap is the central unsolved problem. All current active experiments target 
 
 **Critical unanswered question:** Does weight decay actually compress the val→test vol_p gap at test time? Val vol_p is ~4.27% for tanjiro, but test has not yet been evaluated. If WD fixes val→test gap, tanjiro #900 could beat wave SOTA 7.5195%.
 
-## Active Experiments (2026-05-09 ~22:15 UTC)
+## Active Experiments (2026-05-09 ~23:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #900 | dl24-tanjiro | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | `os6v64lq` | Running EP20→EP25 | abupt=6.6617% (EP20), vol_p=4.2805%; EP19 still RUN BEST 6.6545% ⭐ | EP20 gate PASS; EP25 OFFICIALLY CLEARED; EP30 gap=0.054pp |
-| #914 | dl24-frieren | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | `wdxtdmhy` | Running EP13→EP15 | abupt=6.6624% (EP13 RUN BEST ⭐), vol_p=4.2390% (new min) | EP12 vol_p transient (4.3587%) recovered at EP13; EP15 gate pre-cleared |
-| #923 | dl24-nezuko | 6L + GradNorm α=0.5 + EMA decay=0.9999 + WD=0.005 + Y-sym | `4w5k42t5` (r0) | Running EP0→EP1 | (no val yet, step=3,740) | EP1 gate at step ~5,494 |
-| #924 | dl24-fern | 5L + balanced sampling (96k vol + 60k surface) + WD=0.01 + Y-sym | `4vex1ttf` (r0) | Running EP1→EP2 | abupt=23.25% (EP1 PASS ✅), vol_p=17.78% | EP1 gate PASSED; EP2 gate at step ~7,438 |
+| #900 | dl24-tanjiro | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | `os6v64lq` | Running EP20→EP21 | abupt=6.6617% (EP20), vol_p=4.2805%; EP19 still RUN BEST 6.6545% ⭐ | EP25 OFFICIALLY CONFIRMED ✅; EP30 gap=0.054pp |
+| #914 | dl24-frieren | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | `wdxtdmhy` | Running EP13→EP14 | abupt=6.6624% (EP13 RUN BEST ⭐), vol_p=4.2390% (new min) | At step 76,668; EP14 fires at step ~76,915 (IMMINENT); EP15 pre-cleared |
+| #923 | dl24-nezuko | 6L + GradNorm α=0.5 + EMA decay=0.9999 + WD=0.005 + Y-sym | `4w5k42t5` | Running EP1→EP2 | abupt=16.5734% (EP1 PASS ✅), vol_p=12.2446% | EP1 gate PASSED; EP2 gate at step ~10,988 |
+| #924 | dl24-fern | 5L + balanced sampling (96k vol + 60k surface) + WD=0.01 + Y-sym | `4vex1ttf` | Running EP2→EP3 | abupt=12.8020% (EP2 PASS ✅), vol_p=10.4606% | EP2 gate PASSED; EP3 gate at step ~11,157 (≤8.0%) |
 
 ## Upcoming Gate Checkpoints
 
 | PR | Student | Next Gate | Step | Threshold | Status |
 |----|---------|-----------|------|-----------|--------|
-| #900 | tanjiro | EP25 | ~137,350 | ≤6.65% | Pre-cleared by EP19=6.6545% |
-| #914 | frieren | EP15 | ~82,409 | ≤6.80% | Pre-cleared by EP13=6.6624% |
-| #923 | nezuko | EP1 | ~5,494 | ≤30% | Pending (~15-20 min) |
-| #924 | fern | EP2 | ~7,438 | ≤16% | Pending |
+| #900 | tanjiro | EP21 | ~115,373 | monitoring | Step 112,086; ~3,287 steps away |
+| #914 | frieren | EP14 | ~76,915 | ≤6.80% | IMMINENT — step 76,668, ~247 steps away |
+| #923 | nezuko | EP2 | ~10,988 | ≤16% | Step 7,264; ~3,724 steps away |
+| #924 | fern | EP3 | ~11,157 | ≤8.0% | Step 7,486; ~3,671 steps away |
 
 ## Closed This Wave
 
@@ -157,4 +157,4 @@ EP9 transient ELIMINATED (vs tanjiro +0.744pp spike). EP12 vol_p transient (4.35
 5. **Physics-informed regularization** — Poisson residual on pressure field as auxiliary loss
 6. **SWA on full backbone** — if vol-head SWA shows benefit (tay branch #909), extend to full model
 
-_Last updated: 2026-05-09 ~22:15 UTC. Key events since 20:45: (1) Tanjiro EP20=6.6617% — slight regression from EP19 best (6.6545%), EP20 gate PASS; EP30 gap still 0.054pp. (2) Frieren EP12 vol_p transient (4.3587%) recovered at EP13: abupt=6.6624%, vol_p=4.2390% — new wave vol_p minimum. Frieren now competitive with tanjiro at less than half the epochs. Advisor comments posted to PR #914. (3) Fern #924 EP1 PASS: abupt=23.25%, vol_p=17.78%. (4) Nezuko #923 run `4w5k42t5` confirmed live at step 3,740 — EP1 gate pending._
+_Last updated: 2026-05-09 ~23:30 UTC. Key events: (1) Fern #924 EP2 PASS (step 7,439): abupt=12.8020%, vol_p=10.4606% — well below ≤16% gate. Next: EP3 gate ≤8.0% at step ~11,157. (2) Tanjiro #900 EP25 officially confirmed ✅ — EP19=6.6545% (0.0045pp margin). Advisor comment posted. EP21 firing at step ~115,373. (3) Frieren #914 EP14 imminent — step 76,668, EP14 fires at ~76,915. (4) Nezuko #923 EP1 PASSED (step 5,488, abupt=16.5734%). (5) All four runs confirmed running. Frieren wave vol_p leader at EP13=4.2390% (lowest across all active runs)._
