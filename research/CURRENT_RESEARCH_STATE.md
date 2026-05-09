@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-09 ~03:30 UTC (latest update: frieren #844 TERMINAL EP41 + sent back for test eval; nezuko #874 EP12 competitive; tanjiro #873 relaunched run `2oweovb3` healthy at EP5; fern #881 EP8 vol-mlp-head trailing slightly).
+- 2026-05-09 ~04:30 UTC (latest update: nezuko #874 EP13 NEW BEST=6.5381% within 0.0091pp of frieren wave leader; fern #881 EP10 gate PASS w_vol_p settled into target band; tanjiro #873 EP6 healthy mid-EP7; frieren #844 eval-only request still pending student response).
 - Most recent research direction from human researcher team: Issue #717 (tay branch, separate research line) — comprehensive volume improvement plan. **No new directives in main human-issues queue as of 2026-05-09.** Hard constraints from launch directive: single-model only (no ensemble/soup/greedy-K), DDP8 required, test_primary metrics required for merge eligibility, val for steering only.
 
 ## Current Research Focus and Themes
@@ -11,18 +11,18 @@
 
 **Wave val leader (TERMINAL, awaiting test):** PR #844 (dl24-frieren, `7dqsxvbq`) **best=6.5290% @ EP35** — 5L STRING + GradNorm α=0.5 (no Y-sym). Run state=**FINISHED at EP41 step 225,253** (24h timeout). 0.0695pp BELOW SOTA-advancement val threshold 6.5985%. **NO test_primary metrics logged** — train.py timeout interrupted before final test eval phase. **PR sent back 2026-05-09 for `--eval-only --eval-checkpoint outputs/drivaerml/run-7dqsxvbq/checkpoint.pt`** to obtain test metrics. Merge decision pending test result.
 
-**Strongest emerging signal:** PR #874 (dl24-nezuko, `rm6u10ro`) — 6L STRING + GradNorm α=0.75 + Y-sym. EP11 best=**6.5686%** (only 0.040pp behind frieren #844 terminal best at less than 1/3 the epochs). Suggests α=0.75 is competitive on 6L long-run; the GradNorm α-axis upper half may be more productive than α=0.5 once depth scales.
+**Strongest emerging signal:** PR #874 (dl24-nezuko, `rm6u10ro`) — 6L STRING + GradNorm α=0.75 + Y-sym. **EP13 NEW RUN BEST=6.5381%** (only 0.0091pp behind frieren #844 EP35 wave leader, at EP13 vs EP35 — α=0.75 6L converging considerably faster than α=0.5 5L). Every channel run-best at EP13 (vol_p=4.2190%, surf_p=4.2929%, wsh=7.2750%, wsh_z=9.9402%). w_vol_p=0.7029 recovered from EP11 trough (0.6181 @ step 61,324) back to healthy 0.69-0.73 band. Continuing to EP20 (ETA ~07:55 UTC). Strong candidate to overtake frieren as wave val leader.
 
 **Y-sym physical signal CONFIRMED (PR #855, CLOSED):** Y-sym p=0.5 standalone (no GradNorm, no 6L) isolates τ_y < τ_z channel ordering at val EP3, EP4, AND test. Cleanest physical signal isolation to date. Gate miss due to no other optimizations; signal confirmed.
 
-### Active Experiments (as of 2026-05-09 ~03:30 UTC)
+### Active Experiments (as of 2026-05-09 ~04:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status |
 |----|---------|------------|--------|--------|
-| #844 | dl24-frieren | 5L STRING + GradNorm α=0.5 (**no Y-sym**) | `7dqsxvbq` | **TERMINAL @ EP41/step 225,253**. Run best=**6.5290% @ EP35** (vol_p=4.398%). EP36-EP41 plateau in 6.5385-6.5599% range (basin oscillation, not divergence). **No test_primary metrics — sent back for `--eval-only` test pass on EP35 checkpoint.** Merge gating on test result. |
-| #874 | dl24-nezuko | 6L STRING + GradNorm **α=0.75** + Y-sym (α-axis upper half) | `rm6u10ro` | EP12, run best=**6.5686% @ EP11** (vol_p=4.236%). EP12=6.6217% (slight oscillation). w_vol_p=0.674 healthy. Within 0.040pp of frieren wave leader at less than 1/3 the epochs — **competitive trajectory**. EP20 gate ≤6.9%, EP30 ≤6.6005%. Continue to terminal. |
-| #881 | dl24-fern | **Volume MLP head** — deeper MLP decoder on volume_hidden latents | `k59gu9o5` | EP8, run best=**6.6957% @ EP8** (vol_p=4.124%). EP5 transient regression (7.32%) recovered EP6=6.768%. **w_vol_p=1.184 elevated** — vol-mlp-head creates GradNorm imbalance favoring volume task. Trailing nezuko #874 by 0.13pp at comparable epoch. Watch whether elevated w_vol_p is overfit risk or productive specialization. |
-| #873 | dl24-tanjiro | 7L STRING + GradNorm α=0.5 + Y-sym (depth axis extension) | `2oweovb3` (active) / `59bcgz40` (killed) | EP5 confirmed=**6.9116%** (PASSES gate ≤7.5%). Original `59bcgz40` at EP5=6.9789% killed by inverted kill-threshold operator (student bug); relaunched 2026-05-08T23:39Z. vol_p=4.84%, w_vol_p=0.655. EP10 gate ≤7.2% next. |
+| #844 | dl24-frieren | 5L STRING + GradNorm α=0.5 (**no Y-sym**) | `7dqsxvbq` | **TERMINAL @ EP41/step 225,253**. Run best=**6.5290% @ EP35** (vol_p=4.398%). EP36-EP41 plateau in 6.5385-6.5599% range (basin oscillation, not divergence). **No test_primary metrics — sent back for `--eval-only` test pass on EP35 checkpoint at 03:37Z; no student response as of 04:30Z.** Merge gating on test result. |
+| #874 | dl24-nezuko | 6L STRING + GradNorm **α=0.75** + Y-sym (α-axis upper half) | `rm6u10ro` | **EP13 NEW RUN BEST=6.5381%** ⭐ (vol_p=4.2190%, surf_p=4.2929%, wsh=7.2750%, wsh_z=9.9402% — every channel run-best). EP12=6.6217% was single-epoch bounce, EP11→EP13 = -0.0305pp recovery. **Within 0.0091pp of frieren wave leader at EP13 vs EP35** — α=0.75 6L converging considerably faster than α=0.5 5L. w_vol_p=0.7029 recovered from EP11 trough (0.6181 @ step 61,324) to healthy 0.69-0.73 band. Continue to EP20 (ETA ~07:55 UTC); strong candidate to overtake frieren. |
+| #881 | dl24-fern | **Volume MLP head** — deeper MLP decoder on volume_hidden latents | `k59gu9o5` | EP10 gate PASS=**6.6867%** (+0.51pp margin under 7.20% kill); **EP9=6.6786% run best**; vol_p=4.1088% (run best, monotonic descent EP6-EP10), surf_p=4.3885%, wsh_z=10.10%; **w_vol_p settled into target [0.80-1.20] band at ~1.14** (was 1.484 at EP7) — GradNorm equilibrium reached, MLP head's early dominance resolved cleanly; r_vol_p~0.45 (well below 0.65 stability threshold). Continue to EP15/EP20/EP25/EP30 milestones; EP30 hard gate ≤6.6005% (in-wave merge threshold). |
+| #873 | dl24-tanjiro | 7L STRING + GradNorm α=0.5 + Y-sym (depth axis extension) | `2oweovb3` (active) / `59bcgz40` (killed) | **EP6=6.8467%** (latest), descending healthily; mid-EP7 (step ~34,611). EP1=10.5138%, EP2=8.2038%, EP3=7.3671%, EP4=6.9672%, EP5=6.8718% (gate cleared). vol_p=4.4760%, w_vol_p=0.6079 stabilized 0.60-0.61 band (below 0.70 watch but stable; vol_p still descending despite low weight). EP10 gate (≤7.2%) next, on track. |
 
 **Tay-screen wave (closed/killed 2026-05-09):**
 - PR #857 (askeladd σ-ladder Arm B `o7odqtqq`): NO DATA logged (run finished without metrics — likely crashed early). CLOSED.
@@ -120,11 +120,11 @@
 
 ## Potential Next Research Directions
 
-**Currently in-flight (as of 2026-05-05 ~13:30 UTC):**
-- **Frieren #844**: 5L STRING no Y-sym — **WAVE VAL LEADER: best=6.5290% @ EP35, BEATS SOTA** (run `7dqsxvbq`); EP38=6.5462% (normal oscillation); vol_p=4.0689% declining; EP39 ~0.7hr, EP40 terminal ~1.7hr; advisor posted EP40 instructions.
-- **Nezuko #874**: 6L STRING + GradNorm α=0.75 + Y-sym — (run `rm6u10ro`); EP9.19, val=6.6104%; EP10 gate (≤7.2%) ~0.8hr — expected ~6.59-6.60%, will easily pass.
-- **Tanjiro #873**: 7L STRING + GradNorm α=0.5 + Y-sym — (run `2oweovb3`, not `59bcgz40`); EP3.64, val=7.3671%; EP5 gate (≤7.5%) ~1.4hr; **w_vol_p=0.633 DECLINING — yellow/red borderline**; vol_p=5.6308% undertrained.
-- **Fern #881**: Volume MLP head — (run `k59gu9o5`); EP5.50; EP5 gate PASSED (7.3212%); EP10 gate ~4.5hr; best EP4=7.0796% already below EP10 threshold.
+**Currently in-flight (as of 2026-05-09 ~04:30 UTC):**
+- **Frieren #844**: 5L STRING no Y-sym — TERMINAL @ EP41 (run `7dqsxvbq`); val best=6.5290% @ EP35; **awaiting student eval-only test pass on EP35 checkpoint** (request sent 03:37Z, no response yet); merge gated on test_primary metrics.
+- **Nezuko #874**: 6L STRING + GradNorm α=0.75 + Y-sym — (run `rm6u10ro`); **EP13=6.5381% NEW RUN BEST** ⭐, within 0.0091pp of frieren wave leader; every channel run-best; w_vol_p recovered to 0.7029; continue to EP20 ETA ~07:55 UTC.
+- **Tanjiro #873**: 7L STRING + GradNorm α=0.5 + Y-sym — (run `2oweovb3`); EP6=6.8467% descending healthily, mid-EP7; EP10 gate (≤7.2%) on track; w_vol_p=0.6079 stabilized below watch threshold but vol_p still descending.
+- **Fern #881**: Volume MLP head — (run `k59gu9o5`); EP10 gate PASS=6.6867% (+0.51pp margin); EP9=6.6786% run best; w_vol_p settled into target [0.80-1.20] band at ~1.14 (was 1.484 EP7); GradNorm equilibrium achieved; vol_p=4.1088% monotonic; continue to EP30.
 
 **High-priority candidates after current wave completes:**
 1. **5L STRING + Y-sym + GradNorm triple compose with α=0.5**: if frieren #844 two-way shows gains, add Y-sym back for full triple-compose (α=0.5 not α=0.25). Key: #844 isolates two-way first.
@@ -145,4 +145,4 @@
 - RFF capacity above 16 features (PRs #845, #846): both EP4 gate failures. Axis closed.
 - LR warmup 2 epochs (PR #847): definitively worse than 1-ep warmup. Axis closed.
 
-_Last updated: 2026-05-05 ~13:30 UTC. Key events: (1) **frieren #844 BEATS SOTA** — EP35 best=6.5290% (vs threshold 6.5985%); EP39/EP40 approaching (0.7/1.7hr); (2) **nezuko #874 EP10 gate imminent** (~0.8hr) — EP9=6.6104%, trend strongly improving, will easily pass ≤7.2%; (3) **tanjiro #873 w_vol_p=0.633 WATCH** — EP5 gate ~1.4hr, vol_p undertrained (5.6308%); (4) **fern #881 EP5 gate PASSED** — EP10 gate ~4.5hr. All 4 students occupied, 0 idle._
+_Last updated: 2026-05-09 ~04:30 UTC. Key events: (1) **nezuko #874 EP13=6.5381% NEW RUN BEST** ⭐ — within 0.0091pp of frieren wave leader at EP13 vs EP35; α=0.75 6L converging considerably faster than α=0.5 5L; every channel run-best; continue to EP20 ETA ~07:55 UTC; (2) **fern #881 EP10 gate PASS=6.6867%** — w_vol_p settled into target [0.80-1.20] band, GradNorm equilibrium achieved; vol_p=4.1088% monotonic descent; continue to EP30; (3) **tanjiro #873 EP6=6.8467%** — descending healthily mid-EP7; (4) **frieren #844 eval-only request pending** student response (sent 03:37Z); merge gated on test pass. All 4 students occupied, 0 idle._
