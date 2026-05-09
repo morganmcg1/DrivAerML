@@ -488,18 +488,30 @@ class SurfaceTransolver(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         need_weights: bool,
+        entropy_query_budget: int = 1024,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
-        if need_weights:
-            out, weights = mha(
-                query=query,
-                key=key,
-                value=value,
-                need_weights=True,
-                average_attn_weights=False,
-            )
-            return out, weights
         out, _ = mha(query=query, key=key, value=value, need_weights=False)
-        return out, None
+        if not need_weights:
+            return out, None
+        # Diagnostic-only: a need_weights=True call materializes the full
+        # [B, H, n_q, n_kv] attention tensor and OOMs at val resolution
+        # (65536x65536 ~127 GiB). Each query has an independent softmax over
+        # keys, so we subsample queries to a small budget to get an unbiased
+        # per-head entropy estimate.
+        n_q = query.shape[1]
+        if n_q > entropy_query_budget:
+            idx = torch.randperm(n_q, device=query.device)[:entropy_query_budget]
+            sub_q = query.index_select(1, idx)
+        else:
+            sub_q = query
+        _, weights = mha(
+            query=sub_q,
+            key=key,
+            value=value,
+            need_weights=True,
+            average_attn_weights=False,
+        )
+        return out, weights
 
     def _record_attn_entropy(self, slot: str, weights: torch.Tensor) -> None:
         # weights: [B, num_heads, L_q, L_kv] -> per-head mean entropy this batch
