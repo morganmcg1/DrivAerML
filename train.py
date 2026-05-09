@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_vol_geo_features: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_vol_geo_features": (
+            "Augment each volume token with 4 cheap geometry-derived "
+            "scalar features (PR #926): d_centroid (Euclidean distance "
+            "from each vol point to the per-sample surface-point "
+            "centroid) and d_bbox_x/y/z (per-axis position inside the "
+            "surface bounding box, normalised to [-1, 1]). Computed "
+            "on-the-fly inside the model from surface_x and volume_x; "
+            "no preprocessing or loader changes required. Adds 0 "
+            "parameters and increases the volume input projection from "
+            "1 -> 5 extra channels (sdf + 4 geo)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +320,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_vol_geo_features=config.use_vol_geo_features,
     )
 
 

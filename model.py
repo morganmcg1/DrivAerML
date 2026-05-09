@@ -33,6 +33,79 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+VOL_GEO_FEATURE_DIM = 4
+
+
+def compute_vol_geo_features(
+    surface_x: torch.Tensor,
+    volume_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    volume_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Cheap geometry-derived features for each volume point.
+
+    Returns ``[B, N_v, 4]`` of ``[d_centroid, d_bbox_x_norm, d_bbox_y_norm,
+    d_bbox_z_norm]``: distance from the surface centroid (normalised by the
+    surface bbox diagonal), and per-axis position inside the surface bounding
+    box (signed, ~[-1, 1] inside the box). Computed per-sample from valid
+    surface points. Samples with N_s == 0 or no valid surface points (e.g.
+    empty surface views emitted by the loader when surface/volume view counts
+    differ) yield all-zero geo features so the projection input dim stays
+    consistent.
+    """
+
+    B = volume_x.shape[0]
+    N_v = volume_x.shape[1]
+    N_s = surface_x.shape[1]
+
+    if N_s == 0:
+        return volume_x.new_zeros(B, N_v, VOL_GEO_FEATURE_DIM)
+
+    surf_xyz = surface_x[:, :, :3]
+    vol_xyz = volume_x[:, :, :3]
+
+    surf_dtype = surf_xyz.dtype
+    mask_s_b = surface_mask.unsqueeze(-1).bool()
+    mask_s_f = mask_s_b.to(dtype=surf_dtype)
+
+    valid_count = mask_s_f.sum(dim=1)
+    has_valid_surface = (valid_count > 0).squeeze(-1)
+
+    surf_count = valid_count.clamp(min=1.0)
+    centroid = (surf_xyz * mask_s_f).sum(dim=1) / surf_count
+
+    pos_inf = torch.full_like(surf_xyz, float("inf"))
+    neg_inf = torch.full_like(surf_xyz, float("-inf"))
+    surf_for_min = torch.where(mask_s_b, surf_xyz, pos_inf)
+    surf_for_max = torch.where(mask_s_b, surf_xyz, neg_inf)
+    bbox_min = surf_for_min.min(dim=1).values
+    bbox_max = surf_for_max.max(dim=1).values
+
+    # For samples whose surface mask is entirely False, bbox_min=+inf,
+    # bbox_max=-inf -> nan downstream. Replace those with a unit bbox; the
+    # final geo features for those samples are zeroed below anyway.
+    valid_b3 = has_valid_surface.unsqueeze(-1).expand_as(bbox_min)
+    bbox_min = torch.where(valid_b3, bbox_min, torch.zeros_like(bbox_min))
+    bbox_max = torch.where(valid_b3, bbox_max, torch.ones_like(bbox_max))
+
+    bbox_center = (bbox_min + bbox_max) * 0.5
+    bbox_half = (bbox_max - bbox_min) * 0.5 + 1e-6
+    d_bbox = (vol_xyz - bbox_center.unsqueeze(1)) / bbox_half.unsqueeze(1)
+
+    # Normalise d_centroid by the surface bbox diagonal so it sits on the
+    # same O(1) scale as d_bbox. Without this, raw metres (~5m for DrivAerML)
+    # produces a ~5x scale mismatch vs the bbox features fed into the same
+    # LinearProjection (no preceding nonlinearity to rescale). Loh et al.
+    # ICML 2024 motivates global geometry features alongside SDF.
+    diff = vol_xyz - centroid.unsqueeze(1)
+    bbox_diag = (2.0 * bbox_half).norm(dim=-1, keepdim=True).clamp(min=1e-6)
+    d_centroid = diff.norm(dim=-1, keepdim=True) / bbox_diag.unsqueeze(1)
+
+    vol_geo = torch.cat([d_centroid, d_bbox], dim=-1)
+    vol_geo = vol_geo * has_valid_surface.view(B, 1, 1).to(dtype=vol_geo.dtype)
+    return vol_geo * volume_mask.unsqueeze(-1).to(dtype=vol_geo.dtype)
+
+
 class LinearProjection(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, bias: bool = True):
         super().__init__()
@@ -343,6 +416,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_geo_features: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,8 +430,10 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_geo_features = use_vol_geo_features
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
-        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+        vol_geo_extra = VOL_GEO_FEATURE_DIM if use_vol_geo_features else 0
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim) + vol_geo_extra
 
         if pos_encoding_mode == "string_separable":
             # STRING-separable: learnable per-axis log_freq + phase,
@@ -484,6 +560,17 @@ class SurfaceTransolver(nn.Module):
             raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
+
+        if self.use_vol_geo_features and volume_x is not None and volume_mask is not None:
+            if surface_x is not None and surface_mask is not None:
+                vol_geo = compute_vol_geo_features(
+                    surface_x, volume_x, surface_mask, volume_mask
+                )
+            else:
+                vol_geo = volume_x.new_zeros(
+                    volume_x.shape[0], volume_x.shape[1], VOL_GEO_FEATURE_DIM
+                )
+            volume_x = torch.cat([volume_x, vol_geo.to(dtype=volume_x.dtype)], dim=-1)
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
