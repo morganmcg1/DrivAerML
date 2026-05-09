@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        surf_pool_size: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.surf_pool_size = surf_pool_size if use_surf_to_vol_xattn else 0
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +445,20 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        if self.surf_pool_size > 0:
+            self.surf_pool_queries = nn.Parameter(
+                torch.randn(self.surf_pool_size, n_hidden) * 0.02
+            )
+            self.surf_pool_attn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+        else:
+            self.surf_pool_queries = None
+            self.surf_pool_attn = None
 
     def _encode_group(
         self,
@@ -536,10 +552,29 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            if self.surf_pool_attn is not None:
+                batch_size = surface_hidden.shape[0]
+                pool_q = self.surf_pool_queries.unsqueeze(0).expand(batch_size, -1, -1)
+                # surface_hidden is already zero on padded positions via
+                # _apply_token_mask above; rely on that rather than passing
+                # key_padding_mask (which would NaN when a per-case row is
+                # entirely padded — possible when the loader returns empty
+                # surface views for cases whose volume views still run).
+                pooled_surf, _ = self.surf_pool_attn(
+                    query=pool_q,
+                    key=surface_hidden,
+                    value=surface_hidden,
+                    need_weights=False,
+                )
+                xattn_key = pooled_surf
+                xattn_value = pooled_surf
+            else:
+                xattn_key = surface_hidden
+                xattn_value = surface_hidden
             xattn_out, _ = self.surf_to_vol_xattn(
                 query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
+                key=xattn_key,
+                value=xattn_value,
                 need_weights=False,
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)

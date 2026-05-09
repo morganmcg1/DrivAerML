@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    surf_pool_size: int = 0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "surf_pool_size": (
+            "Insert a Perceiver-style learned-query pool between the "
+            "backbone surface hidden states and the surf->vol cross-"
+            "attention K/V projection (PR #894). N learned queries (init "
+            "randn*0.02) attend over surface_hidden via nn.MultiheadAttention; "
+            "padded positions are zeroed in surface_hidden upstream via "
+            "_apply_token_mask rather than passed as key_padding_mask (avoids "
+            "NaN when a per-case row is fully padded). The resulting [B, N, "
+            "hidden] pooled tensor replaces the raw [B, N_surface, hidden] "
+            "K/V into surf_to_vol_xattn. 0 disables (default, identical "
+            "to PR #823 baseline). Requires --use-surf-to-vol-xattn."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        surf_pool_size=config.surf_pool_size,
     )
 
 
