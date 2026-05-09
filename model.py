@@ -320,6 +320,82 @@ class Transformer(nn.Module):
         return x
 
 
+class GroupedQueryXAttn(nn.Module):
+    """Grouped-Query cross-attention (Ainslie et al. 2023, arXiv:2305.13245).
+
+    Standard Llama-style GQA: ``n_q_heads`` query heads partition the embedding
+    into head_dim = embed_dim // n_q_heads. ``n_kv_heads`` key/value heads share
+    the same head_dim, so K and V projections are size ``embed_dim ->
+    n_kv_heads * head_dim``. Each KV head services ``n_q_heads // n_kv_heads``
+    query heads via ``repeat_interleave`` along the head dim before SDPA.
+
+    Zero-init out_proj weight + bias (like PR #823 baseline) so the residual
+    branch is identity at init.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        n_q_heads: int,
+        n_kv_heads: int,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        if n_q_heads % n_kv_heads != 0:
+            raise ValueError(
+                f"n_q_heads ({n_q_heads}) must be divisible by n_kv_heads ({n_kv_heads})"
+            )
+        if embed_dim % n_q_heads != 0:
+            raise ValueError(
+                f"embed_dim ({embed_dim}) must be divisible by n_q_heads ({n_q_heads})"
+            )
+        self.embed_dim = embed_dim
+        self.n_q_heads = n_q_heads
+        self.n_kv_heads = n_kv_heads
+        self.n_groups = n_q_heads // n_kv_heads
+        self.head_dim = embed_dim // n_q_heads
+        self.kv_dim = n_kv_heads * self.head_dim
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.k_proj = nn.Linear(embed_dim, self.kv_dim, bias=True)
+        self.v_proj = nn.Linear(embed_dim, self.kv_dim, bias=True)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True)
+
+        self.dropout = dropout
+
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+    def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+    ) -> torch.Tensor:
+        B, Nq, _ = query.shape
+        Nk = key.shape[1]
+
+        q = self.q_proj(query)
+        k = self.k_proj(key)
+        v = self.v_proj(value)
+
+        q = q.view(B, Nq, self.n_q_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, Nk, self.n_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, Nk, self.n_kv_heads, self.head_dim).transpose(1, 2)
+
+        if self.n_groups > 1:
+            k = k.repeat_interleave(self.n_groups, dim=1)
+            v = v.repeat_interleave(self.n_groups, dim=1)
+
+        out = F.scaled_dot_product_attention(
+            q, k, v,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+
+        out = out.transpose(1, 2).contiguous().view(B, Nq, self.embed_dim)
+        return self.out_proj(out)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +419,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_kv_heads: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +433,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.xattn_kv_heads = xattn_kv_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -424,22 +502,32 @@ class SurfaceTransolver(nn.Module):
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
-        # Surface->volume cross-attention (PR #823): single MHA sublayer where
-        # volume hidden states (Q) attend to surface hidden states (K/V).
-        # Bridges geometry-aware surface features into the volume decoder
-        # to address the OOD volume_pressure gap. Zero-init out_proj weight
-        # AND bias so the sublayer is identity at init (preserves baseline
-        # behavior at epoch 0). See PR #823 hypothesis.
+        # Surface->volume cross-attention (PR #823): single attention sublayer
+        # where volume hidden states (Q) attend to surface hidden states (K/V).
+        # When ``xattn_kv_heads`` is 0 (default), uses ``nn.MultiheadAttention``
+        # with n_head Q/KV heads (PR #823 baseline). When ``xattn_kv_heads > 0``,
+        # uses ``GroupedQueryXAttn`` with n_q_heads=n_head and the requested
+        # n_kv_heads (PR #893 GQA experiment). Zero-init out_proj weight and
+        # bias so the sublayer is identity at init (preserves baseline at
+        # epoch 0).
         if use_surf_to_vol_xattn:
-            self.surf_to_vol_xattn = nn.MultiheadAttention(
-                embed_dim=n_hidden,
-                num_heads=n_head,
-                batch_first=True,
-                dropout=dropout,
-            )
+            if xattn_kv_heads > 0 and xattn_kv_heads != n_head:
+                self.surf_to_vol_xattn = GroupedQueryXAttn(
+                    embed_dim=n_hidden,
+                    n_q_heads=n_head,
+                    n_kv_heads=xattn_kv_heads,
+                    dropout=dropout,
+                )
+            else:
+                self.surf_to_vol_xattn = nn.MultiheadAttention(
+                    embed_dim=n_hidden,
+                    num_heads=n_head,
+                    batch_first=True,
+                    dropout=dropout,
+                )
+                nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
+                nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
             self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
-            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
-            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
@@ -536,12 +624,19 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
-            xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
-                need_weights=False,
-            )
+            if isinstance(self.surf_to_vol_xattn, nn.MultiheadAttention):
+                xattn_out, _ = self.surf_to_vol_xattn(
+                    query=volume_hidden,
+                    key=surface_hidden,
+                    value=surface_hidden,
+                    need_weights=False,
+                )
+            else:
+                xattn_out = self.surf_to_vol_xattn(
+                    query=volume_hidden,
+                    key=surface_hidden,
+                    value=surface_hidden,
+                )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
