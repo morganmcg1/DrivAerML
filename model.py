@@ -33,6 +33,28 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+class _GradScale(torch.autograd.Function):
+    """Identity in forward, scales gradient by `alpha` in backward.
+
+    Mirrors the Gradient Reversal Layer pattern (Ganin & Lempitsky 2015) but
+    with a positive scale. Used to damp K/V backflow into the surface encoder
+    on the surf->vol cross-attention sublayer (PR #896).
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        ctx.alpha = float(alpha)
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return grad_output * ctx.alpha, None
+
+
+def _scale_grad(x: torch.Tensor, alpha: float) -> torch.Tensor:
+    return _GradScale.apply(x, alpha)
+
+
 class LinearProjection(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, bias: bool = True):
         super().__init__()
@@ -343,6 +365,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_kv_grad_scale: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +379,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.xattn_kv_grad_scale = float(xattn_kv_grad_scale)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -536,10 +560,18 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            # PR #896: scale K/V backward gradient by alpha (forward identity).
+            # Damps surface-encoder co-adaptation through cross-attn without
+            # killing it (PR #890 detach NEGATIVE arm). Surface-output-head
+            # path through `surface_hidden` stays unscaled.
+            if self.xattn_kv_grad_scale != 1.0:
+                surf_kv = _scale_grad(surface_hidden, self.xattn_kv_grad_scale)
+            else:
+                surf_kv = surface_hidden
             xattn_out, _ = self.surf_to_vol_xattn(
                 query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
+                key=surf_kv,
+                value=surf_kv,
                 need_weights=False,
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)

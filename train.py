@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_kv_grad_scale: float = 1.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_kv_grad_scale": (
+            "Multiplicative scale (alpha) applied to the K/V backward "
+            "gradient on the surface->volume cross-attention only "
+            "(PR #896). Forward is identity. alpha=1.0 (default) "
+            "preserves PR #823 behaviour; alpha=0.0 detaches (matches "
+            "PR #890 NEGATIVE arm). Targets the regime where surface "
+            "encoder co-adaptation through xattn K/V is damped without "
+            "being killed. Only active when --use-surf-to-vol-xattn is "
+            "set and value is < 1.0."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_kv_grad_scale=config.xattn_kv_grad_scale,
     )
 
 
