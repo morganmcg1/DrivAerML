@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 (Round 19/20 ACTIVE — PR #823 nezuko MERGED as new single-model SOTA val=6.4407%. Three new PRs assigned (#878 alphonse xattn-heads, #879 frieren xattn-2layer, #880 nezuko ensemble pool-25). Rebase requests sent to #871 tanjiro PCGrad and #870 fern KNN match-mode.)
+- **Date:** 2026-05-09 01:10 UTC (Round 20 ACTIVE — PR #823 MERGED as new single-model SOTA val=6.4407%. Round 20 closures: PR #871 tanjiro PCGrad CLOSED (hypothesis falsified, 3.69% conflict rate), PR #879 frieren xattn-2layer CLOSED (pod wedged, no run launched). Reassigned tanjiro to PR #883 — geometry-aware positional bias on surf→vol xattn queries.)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -65,11 +65,12 @@
 | #877 | askeladd | Y-flip augmentation (p=0.5): physically-exact x2 training data for OOD vol_p | — | WIP, 4-ep screen |
 | #869 | edward | Stochastic depth (drop_path={0.05, 0.10}) | — | WIP |
 | #870 | fern | KNN smoothness penalty on τ_y/τ_z (match-mode pivot) | — | **REBASE REQUESTED** — var-mode FAILED (EP4=8.68%), match-mode command queued |
-| #871 | tanjiro | PCGrad gradient surgery across 4 task groups | `o73mnz13` (bs=2 restart) | **REBASE REQUESTED** — bs=4 OOM at EP2; bs=2 ongoing |
-| #876 | thorfinn | Huber loss δ=0.5 and δ=1.0 (two-arm) | — | WIP |
-| #878 | alphonse | Surf→vol xattn heads sweep: 8 vs 16 heads | — | **ASSIGNED 2026-05-09** |
-| #879 | frieren | Two-layer surf→vol xattn: mid-backbone + post-backbone | — | **ASSIGNED 2026-05-09** |
-| #880 | nezuko | Ensemble pool-25 refresh: add ghh0s4ne to greedy pool | — | **ASSIGNED 2026-05-09** |
+| #871 | tanjiro | PCGrad gradient surgery | `o73mnz13` | **CLOSED 2026-05-09** — hypothesis falsified: only 3.69% of steps show gradient conflict (86.6% zero conflict); PCGrad reduces to standard sum on ~87% of steps. Budget-bound at bs=2. |
+| #876 | thorfinn | Huber loss δ=0.5 and δ=1.0 (two-arm) | `9ubq2zmi` (Arm B) | WIP — Arm A (δ=0.5) FAILED EP4=7.66%; Arm B (δ=1.0) running |
+| #878 | alphonse | Surf→vol xattn heads sweep: 8 vs 16 heads | `c4e3gurg` (Arm A) | WIP — Arm A (heads=8) past EP1=27.83%; Arm B queued |
+| #879 | frieren | Two-layer surf→vol xattn | — | **CLOSED 2026-05-09** — pod wedged at iteration 840 since 23:15 UTC; no run launched. Hypothesis remains valuable, will reassign once frieren pod recovers. |
+| #880 | nezuko | Ensemble pool-25 refresh: add ghh0s4ne to greedy pool | — | WIP — pod actively iterating on ensemble_eval.py modifications (light GPU usage 723MB) |
+| #883 | tanjiro | **Geometry-aware positional bias on surf→vol xattn queries** | — | **ASSIGNED 2026-05-09** — STRING-RFF positional encoding on Q/K/V inputs to xattn block; orthogonal to #878 heads and (closed) #879 depth. Zero-init pos_proj = baseline parity at init. |
 
 **Long-track WIP (DDP8):** #831 dl24-fern, #843 dl24-nezuko, #844 dl24-frieren, #873 dl24-tanjiro (7L STRING+GradNorm+Y-sym).
 
@@ -79,8 +80,9 @@
 
 ### Theme 1: Cross-Attention Geometry Conditioning (CRITICAL — Issue #717)
 - **Surface→vol cross-attention** (nezuko #823, MERGED ✓): **NEW SINGLE-MODEL SOTA val=6.4407%** (EP13, run `ghh0s4ne`). test_abupt=7.6992%, test_vol_p=11.670%. Broad-based improvement; OOD test/val ratio preserved (3.027×).
-- **Xattn heads sweep** (alphonse #878, ACTIVE): Try xattn num_heads=8 vs 16 (baseline uses 4). More attention heads → finer cross-modal specialization.
-- **Two-layer xattn** (frieren #879, ACTIVE): Second xattn injection mid-backbone (after layer 2 of 5) + post-backbone. Early geometry conditioning throughout processing.
+- **Xattn heads sweep** (alphonse #878, ACTIVE): xattn num_heads=8 vs 16 (baseline uses 4). Capacity ablation. Arm A `c4e3gurg` past EP1=27.83%.
+- **Two-layer xattn** (frieren #879, **CLOSED 2026-05-09**): Pod wedged before run launched; will reassign after pod recovery. Hypothesis remains in queue — depth ablation of xattn module.
+- **Geometry-aware xattn queries** (tanjiro #883, ASSIGNED 2026-05-09): STRING-RFF positional encoding added to volume Q and surface K/V inputs of xattn block. Input-conditioning ablation. Orthogonal to #878 (capacity) and #879 (depth) — three-axis ablation of the SOTA architecture.
 - **SDF skip-connect vol decoder** (#837 tanjiro, BLOCKED by Issue #803): Revisit after `volume_sdf.npy` regeneration.
 
 ### Theme 2: Optimizer Exploration (post-Lion-confirmation)
@@ -101,7 +103,7 @@
 ### Theme 4: Loss Reformulation
 - τ_y=1.5/τ_z=2.0 OPTIMAL, surface×2.0, volume×1.0 CONFIRMED.
 - **KNN smoothness penalty** (fern #870, ACTIVE, pivoted from FFT): k=8 neighbors, var-mode, λ=0.1. EP1=30.32% borderline (just above 30.0 gate). Run `d0echeyh`.
-- **PCGrad gradient surgery** (tanjiro #871, ACTIVE): Gradient conflict resolution across 4 task groups. Pre-EP1.
+- **PCGrad gradient surgery** (tanjiro #871, **CLOSED 2026-05-09 — FALSIFIED**): Diagnostic showed only 3.69% of steps had gradient conflict across 12 task pairs (86.6% zero conflict rate); PCGrad reduces to standard gradient sum on ~87% of steps. Combined with bs=2 budget constraint (max 1.5 epochs), EP4 kill gate unreachable. Multi-task gradient conflict resolution axis CLOSED for this codebase.
 - **Huber loss vs MSE** (thorfinn #876, ACTIVE, Round 19): δ=0.5 and δ=1.0. Directly targets 4 OOD cases driving 92% of vol_p squared error.
 
 ---
