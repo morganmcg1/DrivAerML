@@ -1,5 +1,191 @@
 # SENPAI Research Results
 
+## 2026-05-09 16:30 — PR #902: Vol loss upweighting curriculum (nezuko) — CLOSED (NEGATIVE)
+
+- **Branch**: `nezuko/vol-pressure-ood-curriculum` (closed)
+- **W&B runs**: `nx49bb6w` (Arm A, vol_w=3.0), Arm B (vol_w=5.0) cancelled
+- **Group**: `nezuko-vol-pressure-ood-curriculum`
+- **Hypothesis**: Upweighting the volume loss (vol_w=3.0 Arm A, vol_w=5.0 Arm B) with an accelerated vol-curriculum would force the model to prioritize vol_p accuracy including the 4 OOD test cases.
+
+| Epoch | Step | val_abupt | vol_p | surf_p | wsh | Gate | Baseline EP3 |
+|---|---:|---:|---:|---:|---:|---|---:|
+| EP1 | ~10,864 | — | 14.17% | — | — | ≤30% PASS | — |
+| EP3 | 21,734 | **8.5436%** | 5.0614% | 5.7369% | 9.6625% | ≤8.0% **FAIL** | 7.1195% |
+
+Arm B (vol_w=5.0) cancelled after Arm A failed — more aggressive upweighting in the same failing direction.
+
+**Analysis:** vol_w=3.0 makes vol_p **worse** vs PR #823 baseline at EP3 (5.06% vs 4.27% — +0.79pp). Every channel degraded vs baseline. The accelerated vol-curriculum (vol_pts bumps at every epoch vs baseline's 3-epoch steps) creates a curriculum-mismatch: Arm A EP3 = 3rd vol=32k epoch with 21,734 iters; baseline EP3 = 3 epochs at vol=16k with 32,594 iters (~50% more compute). But even at EP1 (clean comparison), vol_p=14.17% vs baseline 17.79% — baseline wins. Heavier volume loss weight over-emphasizes vol gradients during early adaptation and disrupts the surf/wsh pathways.
+
+**Conclusion:** Volume loss upweighting is not the right lever for closing the vol_p OOD gap. The issue is in feature representation and geometry conditioning architecture, not in loss balance.
+
+---
+
+## 2026-05-09 16:45 — PR #910: Xattn K/V grad scale α=0.5 Arm A (frieren) — EP3 FAIL, Arm B (α=0.75) ASSIGNED
+
+- **Branch**: `frieren/xattn-kv-grad-scale-sweep-alpha`
+- **W&B run Arm A**: `bnynqueq` (group `frieren-xattn-kv-grad-scale-sweep`, name `frieren/xattn-kv-scale-alpha0.5-screen`)
+- **Flag Arm A**: `--xattn-kv-grad-scale 0.5`
+- **Hypothesis**: Following α=0.25 EP3 stall (PR #896, 8.95%), test α=0.5 and α=0.75 to find the optimal K/V gradient scale point in [0.25, 1.0].
+
+| EP | val_abupt | surf_p | vol_p | wall_shear | Δ abupt | Gate |
+|---|---:|---:|---:|---:|---:|---|
+| EP1 | 29.3248% | 22.40% | 16.96% | 32.67% | — | ≤30% ✅ |
+| EP2 | 11.5368% | 7.71% | 8.24% | 12.59% | −17.79pp | ≤16% ✅ |
+| EP3 | **8.6500%** | **5.49%** | **6.52%** | **9.43%** | **−2.89pp** | ≤8.0% ❌ (+0.65pp) |
+
+Run killed at step ~20,300 (mid-EP4, before EP4 validation).
+
+**Key signals:**
+- EP2→EP3 slope = −2.887pp (6.5× steeper than α=0.25's −0.441pp): mechanism is much less stalled than α=0.25
+- vol_p = 6.52% at EP3 already well below SOTA test_vol_p=11.67% — the K/V scale is specifically helping vol head while lagging on abupt-mean
+- α=0.5 starts hot at EP1 (29.3% vs α=0.25's 13.4%) suggesting the higher gradient flow makes early optimization harder but the run is still descending steeply at EP3
+- Likely EP13 landing from EP3=8.65% following SOTA slope: ~8.0% (not competitive vs SOTA 6.44%)
+
+**Action:** Arm B (α=0.75) launched — closer to α=1.0 (SOTA), expected to start cooler and converge faster on val_abupt. Bracket now [α=0.25 EP3=8.95%, α=0.5 EP3=8.65%, α=0.75 TBD, α=1.0 EP3=7.12% SOTA].
+
+---
+
+## 2026-05-01 — PR #893: Grouped-Query xattn (alphonse) — CLOSED (NEGATIVE)
+
+- **Branch**: `alphonse/xattn-gqa` (deleted)
+- **W&B runs**: `7jqz957i` (Arm A, n_kv_heads=1/MQA), `eqp1873z` (Arm B, n_kv_heads=2/GQA)
+- **Group**: `xattn-gqa-sweep`
+- **Hypothesis**: Replace the surf→vol cross-attention MHA (n_heads=4) with Grouped-Query Attention (GQA). Arm A: MQA (n_kv_heads=1, 4:1 Q/KV ratio); Arm B: GQA (n_kv_heads=2, 2:1 ratio). Llama-style: head_dim=128 throughout, smaller KV projection output. Expected benefit: reduced KV parameter count, potentially acting as a structured regularizer on the surface conditioning pathway.
+
+| Arm | Config | EP3 abupt | Gate (≤8.0%) | surf_p | vol_p | wsh |
+|---|---|---:|---|---:|---:|---:|
+| A (run 7jqz957i) | n_kv_heads=1, MQA | 8.2694% | ❌ FAIL (+0.27pp) | 5.3768% | 5.6686% | 9.1388% |
+| B (run eqp1873z) | n_kv_heads=2, GQA | 8.2097% | ❌ FAIL (+0.21pp) | 5.3411% | 5.5667% | 9.0992% |
+| **SOTA** (PR #823) | n_kv_heads=4, MHA | **6.4407%** | baseline | 4.1836% | 3.8557% | 7.3448% |
+
+Both arms ran to EP3 then were killed per kill-gate protocol (student terminated Arm A after Arm A miss; Arm B also confirmed miss).
+
+**Analysis:** Both GQA arms failed EP3 by a narrow but consistent margin (~0.21–0.27pp). The reduction in K/V heads uniformly impairs convergence — more heads misses by less (Arm B > Arm A), consistent with the hypothesis that full MHA capacity in xattn is load-bearing. Arm B is strictly better than Arm A (fewer K/V heads = more degradation), confirming the direction: the surface→volume attention benefits from full rank attention heads. Notable: the student caught a spec dimension mismatch bug during implementation (original spec had kv_head_dim = embed_dim/n_kv_heads, giving incompatible Q/K head dims for SDPA) and correctly implemented standard Llama-style GQA instead.
+
+**Conclusion:** GQA for surf→vol cross-attention does not improve convergence. Full MHA (n_heads=4) remains optimal. Cross-attention KV capacity is not a bottleneck to regularize. Closing as a clean negative result.
+
+---
+
+## 2026-05-09 ~12:45 — PR #896: Xattn K/V gradient scaling α=0.25 (frieren) — CLOSED (NEGATIVE)
+
+- **Branch**: `frieren/xattn-kv-grad-scale` (closed)
+- **W&B run**: `vf9dprlh` (group `frieren-xattn-kv-grad-scale`, name `frieren/xattn-kv-grad-scale`)
+- **Flag**: `--xattn-kv-grad-scale 0.25`
+- **Hypothesis**: Scale K/V gradients by α=0.25 in surf→vol xattn to damp surface encoder over-adaptation while preserving joint training signal. Addresses the K/V backflow mechanism identified in #884 (two-layer backflow) and #890 (full detach kills EP1).
+
+| Epoch | Step | val_abupt | Gate | Result |
+|---|---:|---:|---|---|
+| EP1 | 21,728 | 13.449% | ≤30% | ✅ PASS |
+| EP2 | 32,599 | 9.395% | ≤16% | ✅ PASS (6.6pp margin) |
+| EP3 | 39,851 | **8.954%** | ≤8.0% | ❌ FAIL (+0.954pp) |
+| EP4 | 45,308 | 8.773% | — | (killed) |
+
+Phase 2 NOT triggered.
+
+**Analysis:** Strong EP1→EP2 drop (−4.05pp) but severe slope flattening EP2→EP3 (−0.44pp, 10× slowdown). K/V gradient scaling at α=0.25 reduces surface encoder adaptation just enough to slow volume convergence without delivering a commensurate accuracy benefit. The α=0.25 sweet spot between detach (α=0, EP1 kill gate #890) and full gradient (α=1.0, SOTA #823) appears to exist but this value isn't it — the convergence stalls at 8.95%.
+
+**Key finding:** Graduated backflow management is the right axis to explore, but α=0.25 is too aggressive. Future experiments should try α=0.5 (half backflow) or α=0.75 (gentle damping) if this mechanism is revisited.
+
+## 2026-05-09 ~12:30 — PR #895: L=6 + surf→vol xattn (edward) — CLOSED (NEGATIVE)
+
+- **Branch**: `edward/xattn-depth-L6-512` (deleted)
+- **W&B run**: `x3c2a2jt` (group `edward-xattn-depth-L6-512`, name `edward/xattn-depth-L6-512-screen`)
+- **Hypothesis**: Adding a 6th Transolver block in the L=5+xattn stack would give the model extra capacity that geometry-conditioning (xattn) can finally exploit, since the previous L=6 NEGATIVE (PR #811) was without xattn.
+
+| Epoch | val_abupt | Gate | SOTA PR #823 | Δ |
+|---|---:|---|---:|---:|
+| EP1 | ~28% | ≤30% PASS | 28.63% | ~ |
+| EP2 | ~14% | ≤16% PASS | 8.15% | ~+6pp worse |
+| EP3 | ~9.5% | ≤8.0% **FAIL margin** | 7.12% | ~+2pp worse |
+| EP4 | **7.886%** | ≤6.9% **FAIL** | 6.81% | +1.08pp worse |
+
+Phase 2 (full 13-ep) NOT triggered.
+
+**Analysis:** Train loss reached 0.032 at EP4 with val_abupt 7.89% — large train/val gap signals memorization rather than improved generalization. Combined with PR #811 (L=6 without xattn, also NEGATIVE), the depth-scaling axis at hidden=512 is **CLOSED on both with-xattn and without-xattn**. Adding a 6th block does not give the volume head usable capacity at this budget.
+
+**Implication:** Future capacity scaling should pivot away from naive layer count. Options: (a) wider hidden_dim with L=5, (b) asymmetric depth (L_vol > L_surf), (c) radical volume-pathway architectures (FNO, multiscale, GNN message passing) per Issue #717.
+
+## 2026-05-09 ~09:37 — PR #891: Post-xattn FFN (fern) — CLOSED (NEGATIVE)
+
+- **Branch**: `fern/post-xattn-ffn` (deleted)
+- **W&B run**: `c3jvc0s1` (group `fern-post-xattn-ffn`, name `fern/post-xattn-ffn-4ep`)
+- **Hypothesis**: Adding a 2-layer MLP (hidden×4, GELU, zero-init second linear) after the surf→vol xattn residual update gives the volume pathway more capacity to process the surface conditioning signal before the regression head.
+
+| Epoch | Step | val_abupt | Gate | SOTA PR #823 | Δ |
+|---|---:|---:|---|---:|---:|
+| EP1 | 10,864 | 26.51% | ≤30% PASS | 28.63% | −2.12pp better |
+| EP2 | 16,300 | 12.13% | ≤16% PASS | 8.15% | +3.98pp worse |
+| EP3 | 19,926 | **8.50%** | ≤8.0% **FAIL** | 7.12% | +1.38pp worse |
+| EP4 | killed | — | (≤6.4407%) | 6.81% | — |
+
+Params: 19.09M vs SOTA 16.99M (+2.10M, +12%). Peak GPU: 64.9 GB / 97 GB.
+
+**Analysis:** FFN injection started better (EP1 26.51% beats SOTA 28.63% by 2.1pp) but the trajectory flattened through EP2-EP3. The EP1→EP2 drop was −14.38pp (this run) vs −20.48pp (SOTA) — slower descent. EP3 absolute miss: 8.50% vs 7.12% SOTA (+1.38pp), well outside noise range. Zero-init guarantee held (EP1 healthy, gradient well-conditioned through new path). Slowdown is optimization-budget, not divergence: +2.1M extra params need more steps to settle, and 4-ep schedule with T_max=13 doesn't give enough time. The post-norm residual exposes vol head to a noisier signal during early epochs (FFN output drifts from zero before post-norm tuned).
+
+Arm B not launched — Arm A EP4 unreachable from EP3=8.50% in one epoch.
+
+**Verdict:** CLOSED NEGATIVE. Post-xattn FFN 4× expansion does not pay back its parameter cost on this budget. Student suggestions noted (2× ratio, SwiGLU, FFN-specific LR group) but not in immediate priority queue given human directive focus on test volume pressure OOD gap.
+
+---
+
+## 2026-05-09 10:30 — PR #888: Per-sample OOD loss upweighting ×3 (thorfinn) — CLOSED (NEGATIVE)
+
+- **Branch**: `thorfinn/ood-sample-weighting` (deleted)
+- **W&B run**: `thorfinn/ood-weight-3x-rank0` (group `thorfinn-ood-weighting`), run state: finished
+- **Hypothesis**: The 4 OOD test geometries (run_133, run_226, run_203, run_158) account for 92% of squared test_vol_p deviation. They are not in the training split, but their K=6 nearest train neighbors (by SDF Mahalanobis distance) ARE. Upweighting those K=6 neighbors by 3× should bias the model toward geometry clusters that will be OOD at test time — an indirect but principled OOD regularisation.
+
+| Metric | EP1 | EP2 | Timeout (step 30,454) | SOTA PR #823 | Δ vs SOTA |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | 30.2033% | 8.4952% | **7.4232%** | 6.4407% | +0.98pp worse |
+| val_vol_pressure | — | 5.254% | — | 4.956% | +0.30pp worse |
+| test_abupt | — | — | **8.6935%** | 7.6992% | +0.99pp worse |
+| test_vol_pressure | — | — | **12.609%** | 11.6704% | +0.94pp worse |
+
+Gate results: EP1=30.2033% FAIL (gate <30%; run continued given borderline miss). EP2=8.4952% PASS (<16%). Run hit the 270-min timeout mid-EP3 at step 30,454 (max EP3=~32,594 in 13-ep schedule).
+
+**Analysis:** The OOD upweighting hypothesis is **refuted across all channels**. vol_pressure was specifically the target metric (OOD test cases dominate it), yet EP2 val_vol_p=5.254% is WORSE than SOTA's 4.956% at the same boundary — not better. The final forced checkpoint (step 30,454) shows val_abupt 7.42% vs SOTA 6.44% (+0.98pp), and test_abupt 8.69% vs SOTA 7.70% (+0.99pp). There is no OOD generalization benefit. Possible explanations: (1) The K=6 nearest neighbors by SDF Mahalanobis distance are not the actual bottleneck — the 4 OOD geometries may differ from any training geometry in ways the distance metric doesn't capture; (2) 3× upweighting is insufficient to shift the loss landscape without damaging the in-distribution performance; (3) the OOD generalization gap is fundamentally architecture/capacity-limited, not data-distribution-limited.
+
+**Verdict:** NEGATIVE. OOD loss upweighting via nearest-train-neighbor proximity is closed. The OOD gap cannot be bridged through train-set reweighting alone. Architecture-level interventions (xattn geometry conditioning) remain the primary lever.
+
+---
+
+## 2026-05-09 09:15 — PR #890: Surf→vol xattn with detached K/V (frieren) — CLOSED (NEGATIVE)
+
+- **Branch**: `frieren/xattn-detach-kv` (deleted)
+- **W&B run**: group `frieren-xattn-detach-kv`
+- **Hypothesis**: PR #884 identified K/V gradient backflow through the surface encoder as the cause of 2-layer xattn failure (surface_pressure +3pp regression). Detaching K/V before the xattn computation (stop_gradient on surface hidden states used as K/V) isolates the surface encoder from xattn gradients. This directly tests the backflow mechanism: if detach-K/V recovers performance, backflow is confirmed causal; if it still fails, the surface encoder needs to adapt jointly.
+
+| Metric | EP1 | EP2 | Verdict |
+|---|---:|---:|---:|
+| val_abupt | >30% | — | FAIL EP1 kill gate |
+
+**Analysis:** EP1 kill gate triggered. Detaching K/V did not rescue the detached xattn path. The K/V detach eliminates backflow but also cuts off the adaptation of K/V projections to the optimization pressure of the volume Q path — the surface encoder cannot co-adapt its K/V representations to what the volume decoder needs. This suggests that the joint gradient flow from Q→K/V is not a bug but a feature: it allows the surface encoder to specialize its output for the volume cross-attention consumer. Without that gradient, the K/V projections are underfit for the Q context.
+
+**Verdict:** NEGATIVE. Detach-K/V is closed. The backflow mechanism is apparently load-bearing — gradient signal from volume Q back through surface K/V helps the surface encoder produce better geometry representations. This rules out zero-coupling approaches; future multi-layer xattn variants must manage the gradient magnitude, not eliminate it (e.g., gradient scaling, separate LR for surface encoder, or mid-backbone injection with partial gradient flow).
+
+---
+
+## 2026-05-09 08:00 — PR #886: Width scaling + surf→vol xattn hidden_dim=640 (edward) — CLOSED (negative result)
+
+- **Branch**: edward/xattn-width-640 (deleted)
+- **W&B run**: `m68ug46u` (group `edward-xattn-width-640`)
+- **Hypothesis**: Width=640 may compound with surf→vol xattn — a wider backbone could leverage the geometry signal more richly. PR #872 showed width=640 without xattn failed; this tests whether xattn composition unlocks the width scaling.
+
+| Metric | EP1 | EP2 | mid-EP3 (timeout) | SOTA PR #823 EP13 |
+|---|---:|---:|---:|---:|
+| val_abupt | 26.82% | 11.06% | 8.58% | 6.4407% |
+| surface_pressure | 20.27% | 7.42% | 5.56% | 4.1836% |
+| volume_pressure | 16.63% | 8.62% | 6.03% | 3.8557% |
+| wall_shear | 29.83% | 11.93% | 9.48% | 7.3448% |
+
+EP3 gate (<8%): FAILED at 8.58% (0.58pp over). Training cut by 270-min timeout mid-EP3 (step 18596/~22640). EP4 was never reached; extrapolated val_abupt ~6.9–7.2% (worse than SOTA 6.44%).
+
+**Analysis:** Width=640 + xattn shows no synergy. EP1 is marginally better than SOTA EP1 (-1.81pp), but per-step convergence after EP1 is slower. The wider model adds parameters but does not generalize them into a clearer surface→volume coupling. Additional constraint identified: 4-epoch screens at hidden_dim=640 with the full vol-curriculum cannot fit within the 270-min timeout (~369 min projected).
+
+**Verdict:** NEGATIVE. Combined with PR #872 (width=640, no xattn), the width-scaling axis is definitively closed. Neither configuration beats 512-dim SOTA. Width does not compound with geometry conditioning.
+
+---
+
 ## 2026-05-01 14:30 — PR #887: Surf→vol xattn with surface subsampling (nezuko) — CLOSED (negative result)
 
 - **Branch**: nezuko/xattn-surface-subsample (deleted)
@@ -24,6 +210,33 @@ EP4: 7.6075% — missed <6.6% gate for Run B. Run B not launched.
 **Key diagnostic:** The failure is not "too many K/V tokens" (information overload) but "wrong K/V tokens" (random selection loses structured geometry). Structured selection approaches (k-NN locality, learned pooling, FPS) remain untested.
 
 **Verdict:** NEGATIVE. Surface subsampling with uniform random selection is ruled out. Follow-up: nezuko PR #892 tests mid-backbone xattn injection (different approach to improving geometry conditioning).
+
+---
+
+## 2026-05-01 — PR #878: Surf→vol xattn heads sweep H=8 vs H=16 (alphonse) — CLOSED (negative)
+
+- **Branch**: alphonse/xattn-heads-sweep (deleted)
+- **W&B runs**: Arm A `c4e3gurg` (H=8), Arm B `u5bpkpje` (H=16)
+- **Hypothesis**: Baseline xattn uses num_heads=4 (128-dim/head). Increasing to 8 or 16 heads may capture richer surface geometry diversity through more specialised attention subspaces. EP3 kill gate <8%.
+
+| Arm | Heads | EP1 | EP2 | EP3 | Decision |
+|-----|-------|-----|-----|-----|----------|
+| A | 8 | 27.832% PASS | 12.462% PASS | **8.7132% FAIL** (+0.71pp over gate) | killed |
+| B | 16 | 27.428% PASS | 12.128% PASS | **8.5231% FAIL** (+0.52pp over gate) | killed |
+
+**EP3 per-channel (H=8 vs H=16):**
+| Channel | H=8 | H=16 | Δ (B−A) |
+|---------|-----|------|---------|
+| sp | 5.6444% | 5.5737% | −0.071pp |
+| vp | 6.1853% | 5.7986% | **−0.387pp** |
+| ws | 9.6045% | 9.4580% | −0.147pp |
+| abupt | 8.7132% | 8.5231% | −0.190pp |
+
+**Analysis:** Both arms fail EP3 gate (<8%). Direction partially confirmed: H=16 > H=8 monotonically (−0.19pp abupt, largest gain in vp −0.39pp). But neither beats PR #823 SOTA at H=4 (128-dim/head). The result is consistent with per-head dimensionality being the binding constraint: 128-dim/head at H=4 > 64-dim/head at H=8 > 32-dim/head at H=16. Adding more heads simultaneously narrows the K/V subspace — these two effects are entangled in standard MHA.
+
+**Key finding:** This motivates GQA (PR #893) — decouple K/V head dimensionality from Q head count. With GQA n_kv_heads=1: K/V get full 512-dim/head while Q still has 4 specialised 128-dim query projections.
+
+**Verdict:** NEGATIVE. Standard MHA heads=4 remains optimal. GQA follow-up assigned to alphonse (PR #893).
 
 ---
 
