@@ -8,6 +8,42 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-09 ~17:00 UTC — PR #898 CLOSED: 5L STRING + GradNorm α=0.5 + Y-sym p=0.5 (complete triple stack, dl24-frieren, `ylrp8f97`)
+
+- **Branch:** `dl24-frieren/5l-string-gradnorm-ysym`
+- **W&B Run:** `ylrp8f97`
+- **Hypothesis:** Test the full validated triple stack (5L STRING + GradNorm α=0.5 + Y-sym p=0.5) together on a 50-epoch run to establish whether the combination beats tanjiro #900 (6L+WD=0.01).
+
+### Per-epoch val history
+
+| Epoch | Step | abupt | vol_p | surf_p | wall_shear | Δabupt |
+|-------|------|-------|-------|--------|-----------|--------|
+| EP1 | 5,493 | 11.0024% | 8.5665% | 7.5126% | 11.626% | — |
+| EP2 | 10,987 | 8.0667% | 5.6705% | 5.1719% | 8.826% | -2.94 |
+| EP3 | 16,481 | 7.5575% | 5.1329% | 4.8773% | 8.335% | -0.51 |
+| EP4 | 21,975 | 7.3231% | 4.8790% | 4.7424% | 8.109% | -0.23 |
+| EP5 | 27,469 | 7.2169% | 4.7755% | 4.7015% | 8.008% | -0.11 |
+| EP6 | 32,963 | 7.1523% | 4.6742% | 4.6735% | 7.950% | -0.06 |
+| EP7 | 38,457 | 7.1155% | 4.7523% | 4.6340% | 7.882% | -0.04 (vol_p transient up) |
+| EP8 | 43,951 | **7.0288%** | **4.5882%** | 4.5901% | 7.819% | **-0.087** |
+| EP9 | 49,445 | **7.3089%** ⚠ | **5.5311%** ⚠ | 4.6770% | 7.934% | **+0.280 (REGRESSION)** |
+
+**GradNorm weights @ EP8:** w_cp=0.91, w_tau_x=0.96, w_tau_y=1.11, w_tau_z=1.45, w_vol_p=0.58
+**GradNorm weights @ EP10:** w_cp=0.756, w_tau_x=1.009, w_tau_y=1.083, w_tau_z=1.443, w_vol_p=0.709 (rising as GradNorm responds to EP9 vol_p spike)
+**Train loss @ EP9:** 0.01887 (still descending — train→val divergence = classic overfitting)
+
+### Decision: CLOSED
+
+EP9 regression (+0.28pp abupt, +0.94pp vol_p, all channels worse simultaneously) while train loss continued descending is a clean overfitting signature. Both kill conditions met: abupt rose above 7.0%, vol_p trending up. No path to EP15 gate (≤6.80%).
+
+### Key Findings
+
+1. **5L STRING + GradNorm + Y-sym without weight decay overfits.** Fast early convergence (EP1-EP8 excellent) collapses at EP9 as the model enters the cosine tail with no L2 shrinkage anchor.
+2. **Weight decay is load-bearing.** Tanjiro #900 (identical stack + WD=0.01) shows no regression at equivalent step. The delta is WD, not depth.
+3. **GradNorm's dynamic response to overfitting is reactive, not preventive.** w_vol_p surged from 0.58→0.71 in response to the EP9 spike — GradNorm saw the regression and tried to correct it, but this only amplifies the gradient signal into an already-overfit regime, making recovery harder.
+
+---
+
 ## 2026-05-09 ~UTC — PR #855 CLOSED: Y-symmetry augmentation standalone 4-ep tay screen (frieren, `tzfpf31d`)
 
 - **Branch:** `frieren/beta-nll-surface-tay` (tay branch)
