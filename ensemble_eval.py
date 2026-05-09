@@ -112,6 +112,7 @@ def build_model_from_config(config: dict) -> SurfaceTransolver:
         pos_encoding_mode=str(config.get("pos_encoding_mode", "sincos")),
         use_qk_norm=bool(config.get("use_qk_norm", False)),
         use_surf_to_vol_xattn=bool(config.get("use_surf_to_vol_xattn", False)),
+        use_vol_self_attn_block=bool(config.get("use_vol_self_attn_block", False)),
     )
 
 

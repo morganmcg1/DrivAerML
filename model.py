@@ -256,6 +256,53 @@ class TransolverAttention(nn.Module):
         return _apply_token_mask(out_x, attn_mask)
 
 
+class VolSelfAttnBlock(nn.Module):
+    """Pre-norm vol-only self-attention + FFN, inserted after surf->vol xattn (PR #906).
+
+    Standard Vaswani 2017 decoder pattern: cross-attention conditions vol tokens
+    on surface geometry (PR #823); this block lets the conditioned vol tokens
+    spatially communicate to form a coherent volume pressure field. Output
+    projections (self_attn.out_proj, ffn[-1]) are zero-initialised so the block
+    is identity at init and preserves the PR #823 baseline at epoch 0.
+
+    Matches the PR #906 spec exactly: no key_padding_mask (so the SDPA fast path
+    stays available on bf16). Padding pollution is bounded because the input is
+    pre-masked by ``_apply_token_mask`` upstream and the final ``volume_out``
+    output is masked again, leaving only constant-offset bias terms to be
+    absorbed by the model.
+    """
+
+    def __init__(self, hidden_dim: int, num_heads: int, mlp_ratio: float = 4.0, dropout: float = 0.0):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+        )
+        self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
+        mlp_hidden = int(hidden_dim * mlp_ratio)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, mlp_hidden),
+            nn.GELU(),
+            nn.Linear(mlp_hidden, hidden_dim),
+        )
+        nn.init.zeros_(self.self_attn.out_proj.weight)
+        nn.init.zeros_(self.self_attn.out_proj.bias)
+        nn.init.zeros_(self.ffn[-1].weight)
+        nn.init.zeros_(self.ffn[-1].bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        x_norm = self.norm1(x)
+        attn_out, _ = self.self_attn(x_norm, x_norm, x_norm, need_weights=False)
+        x = residual + attn_out
+        residual = x
+        x = residual + self.ffn(self.norm2(x))
+        return x
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -343,6 +390,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_self_attn_block: bool = False,
+        vol_self_attn_mlp_ratio: float | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +405,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_self_attn_block = use_vol_self_attn_block
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +493,26 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # Vol-only self-attention + FFN block (PR #906): standard Vaswani 2017
+        # decoder pattern applied to volume tokens after surf->vol xattn. Lets
+        # the surface-conditioned vol tokens spatially communicate before the
+        # volume regression head. Identity-at-init via zero-init out_proj on
+        # both the attention sublayer and the FFN's second linear.
+        if use_vol_self_attn_block:
+            mlp_ratio_effective = (
+                float(vol_self_attn_mlp_ratio)
+                if vol_self_attn_mlp_ratio is not None
+                else float(mlp_ratio)
+            )
+            self.vol_self_attn_block = VolSelfAttnBlock(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                mlp_ratio=mlp_ratio_effective,
+                dropout=dropout,
+            )
+        else:
+            self.vol_self_attn_block = None
 
     def _encode_group(
         self,
@@ -544,6 +614,14 @@ class SurfaceTransolver(nn.Module):
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        if (
+            self.vol_self_attn_block is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            volume_hidden = self.vol_self_attn_block(volume_hidden)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
