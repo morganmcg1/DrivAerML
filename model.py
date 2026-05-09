@@ -343,6 +343,9 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_query_pos: str = "none",
+        xattn_rff_features: int = 16,
+        xattn_rff_sigma_ladder: list[float] | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +359,13 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.xattn_query_pos = xattn_query_pos
+        self.xattn_rff_features = xattn_rff_features
+        self.xattn_rff_sigma_ladder = (
+            list(xattn_rff_sigma_ladder)
+            if xattn_rff_sigma_ladder
+            else [0.25, 0.5, 1.0, 2.0, 4.0]
+        )
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -440,9 +450,37 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
+
+            # Optional STRING-style RFF positional bias on the xattn Q/K/V
+            # inputs (PR #883). Frequencies are sampled once at construction
+            # time from a fixed sigma ladder (panel-scale .. body-scale) and
+            # registered as a buffer so DDP broadcasts rank-0 values to all
+            # ranks. The projection is zero-initialised so the xattn block
+            # is exactly identity at init (preserves SOTA parity at EP0).
+            if xattn_query_pos == "rff":
+                if xattn_rff_features <= 0:
+                    raise ValueError(
+                        "xattn_rff_features must be positive when xattn_query_pos='rff'"
+                    )
+                ladder = torch.tensor(self.xattn_rff_sigma_ladder, dtype=torch.float32)
+                idx = torch.randint(len(ladder), (xattn_rff_features,))
+                sigmas = ladder[idx].unsqueeze(-1)  # (xattn_rff_features, 1)
+                B = torch.randn(xattn_rff_features, space_dim) * sigmas
+                self.register_buffer("xattn_rff_B", B)
+                self.xattn_pos_proj = nn.Linear(
+                    2 * xattn_rff_features, n_hidden, bias=False
+                )
+                nn.init.zeros_(self.xattn_pos_proj.weight)
+            elif xattn_query_pos == "none":
+                self.xattn_pos_proj = None
+            else:
+                raise ValueError(
+                    f"Unknown xattn_query_pos '{xattn_query_pos}'. Supported: 'none', 'rff'."
+                )
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+            self.xattn_pos_proj = None
 
     def _encode_group(
         self,
@@ -536,10 +574,31 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            if self.xattn_pos_proj is not None:
+                # STRING-style RFF positional bias on Q (vol) and K/V (surf)
+                # before the xattn. Zero-init projection => identity at EP0.
+                B_proj = self.xattn_rff_B.to(dtype=volume_x.dtype)
+                vol_pos = volume_x[..., : self.space_dim]
+                surf_pos = surface_x[..., : self.space_dim]
+                vol_phi = 2.0 * math.pi * (vol_pos @ B_proj.T)
+                surf_phi = 2.0 * math.pi * (surf_pos @ B_proj.T)
+                vol_pe = self.xattn_pos_proj(
+                    torch.cat([vol_phi.sin(), vol_phi.cos()], dim=-1)
+                )
+                surf_pe = self.xattn_pos_proj(
+                    torch.cat([surf_phi.sin(), surf_phi.cos()], dim=-1)
+                )
+                vol_pe = _apply_token_mask(vol_pe, volume_mask)
+                surf_pe = _apply_token_mask(surf_pe, surface_mask)
+                q_in = volume_hidden + vol_pe
+                kv_in = surface_hidden + surf_pe
+            else:
+                q_in = volume_hidden
+                kv_in = surface_hidden
             xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
+                query=q_in,
+                key=kv_in,
+                value=kv_in,
                 need_weights=False,
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)

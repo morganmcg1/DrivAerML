@@ -103,6 +103,9 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_query_pos: str = "none"
+    xattn_rff_features: int = 16
+    xattn_rff_sigma_ladder: str = "0.25,0.5,1.0,2.0,4.0"
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +232,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_query_pos": (
+            "Geometry-aware positional bias on the surf->vol cross-attention "
+            "Q/K/V inputs (PR #883). 'none' (default) preserves the PR #823 "
+            "behavior. 'rff' adds STRING-style random Fourier features of the "
+            "raw 3D coordinates, projected to --model-hidden-dim by a "
+            "zero-initialised linear layer (so the xattn block is exactly "
+            "identity at init and any deviation is the new geometric channel "
+            "speaking). Frequencies are sampled once at construction from the "
+            "ladder set by --xattn-rff-sigma-ladder."
+        ),
+        "xattn_rff_features": (
+            "Number of RFF features for --xattn-query-pos rff. Default 16 "
+            "matches the existing STRING backbone encoding."
+        ),
+        "xattn_rff_sigma_ladder": (
+            "Comma-separated sigma ladder for the xattn RFF positional bias "
+            "(PR #883). Each feature samples one sigma uniformly; the buffer "
+            "B = randn(features, 3) * sigmas. Default '0.25,0.5,1.0,2.0,4.0' "
+            "matches the STRING ladder used elsewhere in this codebase."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +299,18 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def parse_xattn_rff_sigma_ladder(spec: str) -> list[float] | None:
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    sigmas = [float(token.strip()) for token in spec.split(",") if token.strip()]
+    if not sigmas:
+        return None
+    if any(s <= 0.0 for s in sigmas):
+        raise ValueError(f"--xattn-rff-sigma-ladder must be positive: {spec!r}")
+    return sigmas
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +343,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_query_pos=config.xattn_query_pos,
+        xattn_rff_features=config.xattn_rff_features,
+        xattn_rff_sigma_ladder=parse_xattn_rff_sigma_ladder(config.xattn_rff_sigma_ladder),
     )
 
 
