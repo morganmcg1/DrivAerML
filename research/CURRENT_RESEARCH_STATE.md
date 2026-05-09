@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 03:50 UTC (Round 20/21 active. PR #884 frieren CLOSED (EP1=31.77% kill gate; K/V gradient backflow mechanism identified). Frieren reassigned PR #890: xattn-detach-kv. Thorfinn #888 OOD neighbor-upweighting derived K=4 nearest train neighbors (run_184/249/310/416/44/484) — all in the 6-case "restored" pocket — Arm A (3×) launched. Alphonse #878 heads=8 Arm A FAILED EP3 (8.71%); heads=16 Arm B in flight. Tanjiro #883 EP1=26.77% PASS (better than baseline EP1=28.63%). Askeladd #885, edward #886, fern #889 all in flight EP1 pending. Nezuko #887 escalated (no status comment 85min))
+- **Date:** 2026-05-01 (Round 21 active. PR #887 nezuko surface-subsample CLOSED (negative result); reassigned nezuko PR #892 mid-backbone xattn. Active WIP: frieren #890 detach-kv, nezuko #892 xattn-mid-backbone, alphonse #878 heads-sweep, askeladd #885 y-flip-xattn, thorfinn #888 ood-sample-weighting, tanjiro #883 xattn-pos-encoding, edward #886 xattn-width-640, fern #891 post-xattn-ffn)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -36,16 +36,16 @@
 
 | Student | PR | Hypothesis | Branch |
 |---|---|---|---|
-| nezuko | #887 | Surf→vol xattn with surface subsampling (N_kv=4096/8192): sharper geometry signal | `nezuko/xattn-surface-subsample` |
+| nezuko | #892 | Mid-backbone surf→vol xattn injection at L=3 + final-layer xattn: geometry conditioning compounds through L4+L5 | `nezuko/xattn-mid-backbone` |
 | frieren | #890 | Surf→vol xattn with detached K/V: isolate surface encoder from xattn gradient backflow | `frieren/xattn-detach-kv` |
 | alphonse | #878 | Surf→vol xattn heads sweep: 8 vs 16 heads (baseline uses 4) | `alphonse/xattn-heads-sweep` |
 | askeladd | #885 | Y-flip augmentation (p=0.5) + surf→vol xattn: ×2 training data for OOD vol_p | `askeladd/y-flip-xattn-composition` |
 | thorfinn | #888 | Nearest-train-neighbor loss upweighting (3×, 5×): upweight K=4 nearest train neighbors per OOD test case by SDF Mahalanobis distance | `thorfinn/ood-sample-weighting` |
 | tanjiro | #883 | Geometry-aware positional bias on surf→vol xattn queries (RFF on coords) | `tanjiro/xattn-pos-encoding` |
-| fern | #889 | Learnable scalar/channel gate on surf→vol xattn residual (zero-init) | `fern/xattn-learned-gate` |
+| fern | #891 | Post-xattn FFN: 2-layer MLP after surf→vol xattn for volume capacity | `fern/post-xattn-ffn` |
 | edward | #886 | Width scaling + surf→vol xattn: hidden_dim=640 with geometry conditioning | `edward/xattn-width-640` |
 
-**Closed this round:** PR #877 (askeladd Y-flip standalone — merge conflict), PR #879 (frieren two-layer xattn — wedged pod), PR #884 (frieren two-layer xattn R2 — EP1 kill gate 31.77%; K/V gradient backflow mechanism identified), PR #871 (tanjiro PCGrad — falsified), PR #869 (edward stochastic depth), PR #880 (nezuko ensemble pool-32 — MERGED as ensemble SOTA), PR #876 (thorfinn Huber loss — both arms failed, val 7.63–7.66%), PR #870 (fern FFT auxiliary loss — closed).
+**Closed this round:** PR #887 (nezuko surface-subsample — negative, EP4=7.6075% misses SOTA by 1.17pp, uniform random subsampling hurts all channels), PR #877 (askeladd Y-flip standalone — merge conflict), PR #879 (frieren two-layer xattn — wedged pod), PR #884 (frieren two-layer xattn R2 — EP1 kill gate 31.77%; K/V gradient backflow mechanism identified), PR #871 (tanjiro PCGrad — falsified), PR #869 (edward stochastic depth), PR #880 (nezuko ensemble pool-32 — MERGED as ensemble SOTA), PR #876 (thorfinn Huber loss — both arms failed, val 7.63–7.66%), PR #870 (fern FFT auxiliary loss — closed).
 
 ---
 
@@ -68,9 +68,10 @@ Direct attacks on the OOD vol_pressure gap remain critical since xattn didn't cl
 - ~~**FFT auxiliary loss** (#870 fern, CLOSED)~~.
 
 ### Theme 3: Xattn Architecture Variants
-- **Learnable gate on xattn residual** (#889 fern, IN FLIGHT): Scalar and channel-wise zero-init gate on `xattn_out` residual. Zero-init ensures training starts at the pre-xattn optimum; gate value learned during training.
+- **Post-xattn FFN** (#891 fern, IN FLIGHT): 2-layer MLP (hidden×4, GELU, zero-init out) inserted after the surf→vol xattn residual update. Adds volume-side processing capacity. #889 (learnable gate) was closed — gate offers no extra capacity.
 - **Xattn heads sweep** (#878 alphonse, IN FLIGHT): 8 vs 16 heads testing richer geometry attention.
 - **Pos-encoding bias** (#883 tanjiro, IN FLIGHT): RFF-based geometry-aware positional bias on vol queries.
+- **Mid-backbone xattn injection** (#892 nezuko, IN FLIGHT): Insert a second surf→vol xattn after backbone block L=3 (0-indexed), plus retain the final-layer xattn. Geometry conditioning from mid-backbone injection then compounds through L4 and L5 blocks. Zero-init both xattn modules. Directly motivated by PR #887 failure: the fix for single late-injection is more backbone computation over the geometry-conditioned representation, not subsampling. Ruled out: uniform surface subsampling (#887 NEGATIVE).
 
 ---
 

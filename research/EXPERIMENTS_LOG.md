@@ -1,5 +1,32 @@
 # SENPAI Research Results
 
+## 2026-05-01 14:30 — PR #887: Surf→vol xattn with surface subsampling (nezuko) — CLOSED (negative result)
+
+- **Branch**: nezuko/xattn-surface-subsample (deleted)
+- **W&B run**: `0ud2go3r` (group `nezuko-xattn-surface-subsample`)
+- **Hypothesis**: The current surf→vol xattn (PR #823 SOTA) passes all 65,536 surface points as K/V. Uniform random subsampling (~4096 anchor points, N_kv=4096) before the K/V projection may sharpen the geometry signal by forcing compact surface structure representation and reduce memory pressure. Run B (N_kv=8192) was gated on EP4 val_abupt < 6.6%.
+
+| Metric | Run A (N_kv=4096) | SOTA PR #823 | Δ |
+|---|---:|---:|---:|
+| val_abupt EP4 | 7.6075% | 6.4407% | +1.17pp (worse) |
+| surface_pressure EP4 | 4.9802% | 4.1836% | +0.80pp |
+| volume_pressure EP4 | 5.0467% | 3.8557% | +1.19pp |
+| wall_shear EP4 | 8.4545% | 7.3448% | +1.11pp |
+| tau_x | 7.3503% | 5.7782% | +1.57pp |
+| tau_y | 9.6493% | 7.5977% | +2.05pp |
+| tau_z | 11.0111% | 9.0116% | +2.00pp |
+
+EP3: 8.2896% (missed <8% gate by 0.29pp — advisory miss, continued to EP4)
+EP4: 7.6075% — missed <6.6% gate for Run B. Run B not launched.
+
+**Analysis:** Uniform random subsampling hurt EVERY channel uniformly by 0.8–2.0pp. Vol_p regressed by 1.19pp even though it is the channel most directly downstream of surf→vol xattn. The model requires full 65k surface point coverage to accurately condition volume pressure. Random subsampling destroys the spatial coverage and structural information that the full set provides. EP3→EP4 drop was only 0.68pp (vs ~3.55pp EP2→EP3) — model was already stagnating.
+
+**Key diagnostic:** The failure is not "too many K/V tokens" (information overload) but "wrong K/V tokens" (random selection loses structured geometry). Structured selection approaches (k-NN locality, learned pooling, FPS) remain untested.
+
+**Verdict:** NEGATIVE. Surface subsampling with uniform random selection is ruled out. Follow-up: nezuko PR #892 tests mid-backbone xattn injection (different approach to improving geometry conditioning).
+
+---
+
 ## 2026-05-09 03:50 — PR #884: Two-layer surf→vol xattn (frieren) — CLOSED (kill gate EP1)
 
 - **Branch**: frieren/xattn-two-layer (deleted)
