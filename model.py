@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_gate_type: str = "none",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,11 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        if xattn_gate_type not in ("none", "scalar", "channel"):
+            raise ValueError(
+                f"xattn_gate_type must be one of 'none', 'scalar', 'channel'; got {xattn_gate_type!r}"
+            )
+        self.xattn_gate_type = xattn_gate_type
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -427,9 +433,13 @@ class SurfaceTransolver(nn.Module):
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
         # Bridges geometry-aware surface features into the volume decoder
-        # to address the OOD volume_pressure gap. Zero-init out_proj weight
-        # AND bias so the sublayer is identity at init (preserves baseline
-        # behavior at epoch 0). See PR #823 hypothesis.
+        # to address the OOD volume_pressure gap.
+        #
+        # Identity-at-init is provided either by zero-initialising the MHA
+        # out_proj (gate_type='none', PR #823) or by a learnable gate
+        # (gate_type='scalar' or 'channel', PR #889). When the gate is
+        # active we MUST use standard init for out_proj — otherwise both
+        # the gate and out_proj are zero, killing the gradient signal.
         if use_surf_to_vol_xattn:
             self.surf_to_vol_xattn = nn.MultiheadAttention(
                 embed_dim=n_hidden,
@@ -437,12 +447,21 @@ class SurfaceTransolver(nn.Module):
                 batch_first=True,
                 dropout=dropout,
             )
-            self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
-            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
-            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
+            if self.xattn_gate_type == "none":
+                self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+                nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
+                nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
+                self.xattn_gate = None
+            elif self.xattn_gate_type == "scalar":
+                self.surf_to_vol_xattn_norm = None
+                self.xattn_gate = nn.Parameter(torch.zeros(1))
+            else:  # 'channel'
+                self.surf_to_vol_xattn_norm = None
+                self.xattn_gate = nn.Parameter(torch.zeros(n_hidden))
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+            self.xattn_gate = None
 
     def _encode_group(
         self,
@@ -543,7 +562,10 @@ class SurfaceTransolver(nn.Module):
                 need_weights=False,
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
-            volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            if self.xattn_gate_type == "none":
+                volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            else:
+                volume_hidden = volume_hidden + self.xattn_gate * xattn_out
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:

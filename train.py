@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_gate_type: str = "none"
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_gate_type": (
+            "Residual injection style for the surf->vol cross-attention "
+            "(PR #889). 'none' (default) keeps the post-add LayerNorm wrap "
+            "and zero-init out_proj from PR #823. 'scalar' replaces it with "
+            "a single learnable gate alpha (init 0): "
+            "vol_hidden = vol_hidden + alpha * xattn_out. 'channel' uses a "
+            "per-channel diagonal gate alpha of size --model-hidden-dim "
+            "(LayerScale-style, init 0). When the gate is active, out_proj "
+            "uses standard init so dL/dalpha != 0 from step 1."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +287,25 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_xattn_gate_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-epoch summary of the surf->vol xattn gate (PR #889)."""
+    metrics: dict[str, float] = {}
+    gate = getattr(model, "xattn_gate", None)
+    gate_type = getattr(model, "xattn_gate_type", "none")
+    if gate is None or gate_type == "none":
+        return metrics
+    g = gate.detach().float()
+    metrics["xattn_gate/type"] = 1.0 if gate_type == "scalar" else 2.0
+    metrics["xattn_gate/numel"] = float(g.numel())
+    metrics["xattn_gate_mean"] = float(g.mean().item())
+    metrics["xattn_gate/abs_mean"] = float(g.abs().mean().item())
+    metrics["xattn_gate/abs_max"] = float(g.abs().max().item())
+    metrics["xattn_gate/std"] = float(g.std().item()) if g.numel() > 1 else 0.0
+    metrics["xattn_gate/min"] = float(g.min().item())
+    metrics["xattn_gate/max"] = float(g.max().item())
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +338,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_gate_type=config.xattn_gate_type,
     )
 
 
@@ -1262,6 +1293,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_xattn_gate_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
