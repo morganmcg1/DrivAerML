@@ -326,6 +326,12 @@ def train_loss(
             volume_per_ch = per_channel_masked_mse(
                 out["volume_preds"], volume_target, batch.volume_mask
             )  # [1]: vol_p
+            # Apply static base-scale weights BEFORE GradNorm sees the per-task
+            # losses. This lets users bias GradNorm's view of a task (e.g.
+            # --volume-loss-weight 2.0 doubles vol_p's gradient norm so GradNorm
+            # balances around an upweighted reference).
+            surface_per_ch = surface_loss_weight * surface_per_ch
+            volume_per_ch = volume_loss_weight * volume_per_ch
             task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
             w_detached = gradnorm_weights.weights.detach()
             loss = (w_detached * task_losses).sum()
