@@ -27,14 +27,14 @@
 
 **Vol-loss-weighting direction CLOSED:** Both PR #911 (GradNorm+static weight=no-op) and PR #936 (no-GradNorm+static weight=harmful) failed. The val→test gap is NOT a training-time loss signal problem.
 
-## Active Experiments (2026-05-09 ~14:30 UTC)
+## Active Experiments (2026-05-09 ~16:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP12 complete | abupt=**6.6361%** (EP12) | EP5 PASS (6.9188%), EP10 PASS (6.7028% ≤7.2% ✅). EP15 gate ≤6.80% @ step ~82,395. Currently 0.1639pp below threshold. HIGH CONFIDENCE PASS. |
-| #946 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **extended cosine T_max=60** (50-epoch run) + Lion lr=1e-4 | `qgkhoapw` | **Running** — EP6 complete | abupt=**7.1198%** (EP6) | EP5 PASS (7.1795% ≤7.5% ✅). EP10 gate ≤7.2% IMMINENT (~step 54,760). At EP6=7.1198%, already below EP10 threshold — HIGH CONFIDENCE PASS. Hypothesis: longer cosine annealing keeps LR higher in tail, discourages val-distribution memorization. |
-| #951 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **proportional sampling** (96k vol + 60k surf, 1.6:1) | `wd5kgp2n` | **Running** — EP3 complete | abupt=**7.7830%** (EP3) | 🟡 WATCH — kill gate at step ~27,380 (~EP7.4) ≤7.5%. EP3=7.7830%, needs to drop 0.28pp in ~4.4 epochs. Proportional sampling: 3,719 steps/epoch. Merge conflict STILL DIRTY — fern reminded twice to rebase. |
-| #954 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **EMA decay=0.999** (corrected from 0.9999) + **eval-raw-vs-ema** | TBD | **Assigned** — ADVISOR comment posted; tanjiro pod deployed, waiting for run launch | — | Corrects #944 which used wrong EMA decay=0.9999 (100× too slow). PR #944 CLOSED (UNTESTED — wrong config, NOT a hypothesis rejection). EMA warm-start fix committed to branch. Kill gates based on raw model metrics. |
+| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP13 complete | abupt=**6.6310%** (EP13) | EP5 PASS (6.9188%), EP10 PASS (6.7028% ≤7.2% ✅), EP15 gate HIGH CONFIDENCE PASS. EP13→EP12 delta = −0.0050pp — PLATEAU CONFIRMED. Minimal further improvement expected; run completing passively. |
+| #946 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **extended cosine T_max=60** (50-epoch run) + Lion lr=1e-4 | `qgkhoapw` | **Running** — EP7 complete | abupt=**7.3272%** (EP7) ⚠️ | EP5 PASS (7.1795% ≤7.5% ✅). EP7 REGRESSION: 7.3272% vs EP6=7.1198% (+0.2074pp). EP10 gate ≤7.2% AT RISK (currently 0.1272pp above). Probable cause: T_max=60 keeps LR ~30% higher at EP7 vs default cosine → oscillation. Regression flagged on PR. Monitoring EP8 @ step ~43,944. |
+| #951 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **proportional sampling** (96k vol + 60k surf, 1.6:1) | `wd5kgp2n` | **Running** — EP4 complete | abupt=**7.6533%** (EP4) | EP4=7.6533% (improved from EP3=7.7830%, −0.1297pp). Kill gate @ step ~27,380 (~EP7.4) ≤7.5%. Needs 0.1533pp more drop in ~3.4 fern-epochs. WATCH status. Note: vol_p jumped EP3→EP4 (5.69%→6.12%) — surface-volume trade-off. Merge conflict STILL DIRTY — fern reminded twice to rebase. |
+| #954 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **EMA decay=0.999** (corrected from 0.9999) + **eval-raw-vs-ema** | `l1yfmjdj` | **Running** — Pre-EP1 (step 3291) | — (EP1 not complete) | Run confirmed active in group `ema-corrected-decay-axis`. EP1 boundary @ step ~5,493. No val metrics yet. |
 
 ## Closed This Wave (Recent)
 
@@ -122,10 +122,10 @@
 
 ## Pending Actions / Monitor Checklist
 
-1. **Frieren #946** (`qgkhoapw`): EP10 gate ≤7.2% @ step ~54,760 IMMINENT. Post gate check when EP10 data arrives. HIGH CONFIDENCE PASS (EP6=7.1198% already below threshold).
-2. **Nezuko #939** (`yfitnqia`): EP15 gate ≤6.80% @ step ~82,395. Currently EP12=6.6361%. HIGH CONFIDENCE PASS.
-3. **Fern #951** (`wd5kgp2n`): EP7.4 kill gate ≤7.5% @ step ~27,380. 🟡 WATCH — EP3=7.7830%; needs 0.28pp drop in ~4.4 fern-epochs. Also: MERGE CONFLICT STILL UNRESOLVED (reminded twice).
-4. **Tanjiro #954**: Waiting for run launch confirmation and W&B run ID. Pod deployed and ready.
+1. **Frieren #946** (`qgkhoapw`): ⚠️ EP7 REGRESSION — EP10 gate ≤7.2% AT RISK. Monitor EP8 @ step ~43,944. If EP8 ABUPT > 7.3%, consider early termination. If EP8 < 7.2%, gate probably recoverable. Regression flag posted on PR.
+2. **Nezuko #939** (`yfitnqia`): EP15 gate ≤6.80% @ step ~82,395. Currently EP13=6.6310%. HIGH CONFIDENCE PASS. Plateau confirmed (EP12→EP13 delta = −0.005pp).
+3. **Fern #951** (`wd5kgp2n`): EP7.4 kill gate ≤7.5% @ step ~27,380. 🟡 WATCH — EP4=7.6533%; needs 0.1533pp drop in ~3.4 fern-epochs. Also: MERGE CONFLICT STILL UNRESOLVED (reminded twice). Watch vol_p oscillation (EP3→EP4 +0.43pp).
+4. **Tanjiro #954** (`l1yfmjdj`): Run confirmed active, step 3291, EP1 @ step ~5,493. Monitor EP1 for both `val_primary/` (EMA) and `val_raw_primary/` (raw). EP5 gate @ step ~27,465 ≤7.5% (raw model metrics used for gate).
 
 ## Potential Next Directions (Not Yet Assigned)
 
@@ -141,4 +141,4 @@
 8. **LR schedule ablation within extended cosine** — If #946 (T_max=60) succeeds, try T_max=40/80 to find sweet spot.
 9. **Lookahead optimizer** — Wraps Lion, adds slow-weight buffer; known to improve generalization on OOD sets. May directly target val→test gap.
 
-_Last updated: 2026-05-09 ~14:30 UTC. Key events since last update: (1) PR #944 (tanjiro EMA decay=0.9999) CLOSED — wrong config, NOT hypothesis rejection. (2) PR #954 (tanjiro EMA corrected decay=0.999 + eval-raw-vs-ema) CREATED AND ASSIGNED — pod deployed, waiting for run launch. (3) Frieren #946 EP6=7.1198% (EP5 ✅ PASS, EP10 HIGH CONFIDENCE PASS). (4) Nezuko #939 EP12=6.6361% (EP10 ✅ PASS confirmed 6.7028%, EP15 high confidence PASS). (5) Fern #951 run_id=`wd5kgp2n` EP3=7.7830% (🟡 WATCH for EP7.4 gate). ADVISOR gate-check comments posted on all 4 PRs._
+_Last updated: 2026-05-09 ~16:00 UTC. Key events since last update: (1) Nezuko #939 EP13=6.6310% — plateau confirmed (−0.005pp delta), EP15 still HIGH CONFIDENCE PASS. (2) Frieren #946 EP7=7.3272% — REGRESSION flagged (+0.2074pp vs EP6=7.1198%), EP10 gate AT RISK; regression flag comment posted on PR, monitoring EP8. (3) Fern #951 EP4=7.6533% (improved from EP3=7.7830%), but vol_p oscillation noted; kill gate @ EP7.4 still WATCH. Merge conflict STILL DIRTY. (4) Tanjiro #954 run confirmed as `l1yfmjdj` in group `ema-corrected-decay-axis`, step 3291, EP1 pending._
