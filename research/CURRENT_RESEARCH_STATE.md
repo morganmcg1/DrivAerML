@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-10 — Round 27 active. All 8 students running. Round 26 PRs #935 (tanjiro), #949 (thorfinn), #956 (askeladd) closed/superseded. New assignments: #953 (thorfinn), #959 (tanjiro), #960 (askeladd).
+- **Date:** 2026-05-10 — Round 27 active. All 8 students running. Round 26 PRs #935 (tanjiro), #949 (thorfinn), #956 (askeladd) closed/superseded. New assignments: #953 (thorfinn), #959 (tanjiro), #960 (askeladd), #961 (fern geom-q-bias replaces #952 Manifold Mixup CLOSED NEGATIVE).
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -41,7 +41,7 @@
 | frieren | #957 | Y-flip augmentation for vol_p OOD: y→−y with p=0.5 (negates y coord, ny normal, tau_y; SDF/cp/tau_x/tau_z invariant). Doubles effective training geometries. Arm A: flip only (p=0.5); Arm B: flip + `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0% AND val_vol_p ≤4.2%. `--wandb-group frieren-yflip-vol-ood` | `frieren/yflip-augmentation-vol-ood` | WIP — running |
 | nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Zero-init final layer. Arm A: `--volume-loss-weight 1.0`; Arm B: `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0%. `--wandb-group nezuko-vol-aux-decoder-head` | `nezuko/vol-pressure-aux-decoder-head` | WIP — running |
 | thorfinn | #953 | SDF-zone stochastic vol token masking: randomly zero vol tokens in SDF zone [-0.3, 0.05]m with annealed dropout probability p_max. Forces model to learn robust far-field representations. History: p_max=0.30 had unstable EP1 (28.89% and 32.84%, 4.21pp variance across 2 runs — backbone globally destabilized, not just vol_p). **Current: p_max=0.15 single arm running** (instruction: EP1 ≤30% to continue, else abort). `--wandb-group thorfinn-sdf-zone-vol-token-masking` | `thorfinn/sdf-zone-vol-token-masking` | WIP — p_max=0.15 arm running, awaiting EP1 |
-| fern | #952 | Manifold Mixup hidden-state regularization: Beta(α=0.2,0.2) convex interpolation of two samples' backbone transformer hidden states at random layer k∈[0,L-1], p_mix=0.5. Targets val→test generalization gap (vol_p 3.86%→11.67%, 3×). Flags: `--use-manifold-mixup`, `--manifold-mixup-alpha`, `--manifold-mixup-prob`. 4-ep screen first. | `fern/manifold-mixup-backbone` | WIP — running |
+| fern | #961 | Geometry-conditioned Q-bias: mean-pool surf hidden state → MLP(512→256→512) zero-init final layer → additive bias on vol Q-projections immediately before surf→vol xattn. ~394K params. New flag `--use-geom-q-bias`. 4-ep screen first; EP4 ≤6.9% gate before 13-ep confirm. `--wandb-group fern-geom-q-bias` | `fern/geom-q-bias` | WIP — assigned |
 | edward | #941 | SDF data fix: regenerate volume_sdf.npy for 10 corrupted REQUIRED_RESTORED cases (run_44, 133, 158, 184, 203, 226, 249, 310, 416, 484). Full SOTA retrain with fixed data running (W&B: `wtxiaqk0`, group: edward-sdf-fix). EP1 kill gate: val_abupt < 30% at step 10,864. | `edward/sdf-data-fix-regenerate-corrupted-sdfs` | WIP — SOTA retrain running (W&B: `wtxiaqk0`) |
 | tanjiro | #959 | Coordinate-conditioned volume output MLP head: `CoordVolHead` takes [hidden(512) ∥ xyz(3)] → 256 → 64 → 1 (SiLU, zero-init final layer). Hypothesis: vol_p is spatially structured (stagnation nose, suction roof, wake); explicit spatial prior frees backbone capacity. W&B: `ivyxtt02`. **EP1 PASSED (28.39%, ≤30% gate)**. EP2 gate: val_vol_p ≤16% AND val_abupt ≤16%. `--wandb-group tanjiro-coord-vol-head` | `tanjiro/coord-vol-output-head` | WIP — EP1 passed, EP2 in progress (run `ivyxtt02`) |
 
@@ -57,7 +57,7 @@
 | alphonse | #955 | STRING RoPE slice-centroid — CARRIED OVER to Round 27 (still WIP) |
 | frieren | #957 | Y-flip augmentation — CARRIED OVER to Round 27 (still WIP) |
 | nezuko | #958 | Dedicated vol_p aux decoder head — CARRIED OVER to Round 27 (still WIP) |
-| fern | #952 | Manifold Mixup — CARRIED OVER to Round 27 (still WIP) |
+| fern | #952 | Manifold Mixup — CLOSED NEGATIVE (Round 27); reassigned #961 geom-q-bias |
 | edward | #941 | SDF data fix — CARRIED OVER to Round 27 (retrain running) |
 
 ## Round 25 Outcomes (Closed)
@@ -95,8 +95,8 @@ Independent 3-layer MLP branch for vol_p prediction, separate from the shared 4-
 ### Theme 6: SDF-Zone Vol Token Masking (thorfinn #953)
 Annealed dropout of vol tokens in the near-surface SDF zone [-0.3, 0.05]m. p_max=0.30 showed high run-to-run variance at EP1 (±4.2pp), destabilizing the whole backbone globally (not just vol_p). Reduced to p_max=0.15; current arm awaiting EP1. If p_max=0.15 also fails EP1, the approach is too destabilizing at any useful masking rate.
 
-### Theme 7: Manifold Mixup (fern #952)
-Hidden-state interpolation between paired training samples at a randomly selected backbone layer. Targets the val→test vol_p generalization gap (3.86% → 11.67%, 3×). With only 400 training cars, hidden-space augmentation should produce smoother interpolations than input-space augmentation.
+### Theme 7: Geometry-Conditioned Q-Bias (fern #961)
+Mean-pool surf hidden state to a global geometry descriptor (512-dim), pass through tiny MLP (512→256→512, zero-init final layer), add as bias to vol Q-projections immediately before surf→vol xattn. ~394K params. Targets the OOD vol_p failure mode (run_133/226/203/158 contribute 92% of squared test deviation): two cars with very different geometries currently produce identical Q distributions from a given vol point. Replaces fern's Manifold Mixup #952 (CLOSED NEGATIVE).
 
 ---
 
