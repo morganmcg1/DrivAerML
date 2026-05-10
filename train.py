@@ -103,6 +103,9 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    slice_string_rope: bool = False
+    slice_string_rope_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
+    slice_string_rope_after_qk_norm: bool = True
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +232,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "slice_string_rope": (
+            "Enable learnable per-axis rotary positional encoding "
+            "(LearnableCoordinateRoPE) on slice-token Q/K inside "
+            "TransolverAttention (PR #932). Slice centroids are computed "
+            "as `slice_weights @ point_coords` (differentiable) and used "
+            "to rotate Q/K before scaled_dot_product_attention. The "
+            "input-level STRING-separable encoding is preserved unchanged."
+        ),
+        "slice_string_rope_init_sigmas": (
+            "Comma-separated multi-sigma init for the rotary log_freq "
+            "parameters (round-robin per axis, matching "
+            "StringSeparableEncoding). Default '0.25,0.5,1.0,2.0,4.0'."
+        ),
+        "slice_string_rope_after_qk_norm": (
+            "If True (default, Arm B), apply slice-string-RoPE after "
+            "QK-norm — matches modern LLM ordering (Llama-3, Qwen-3). "
+            "If False (Arm C), apply before QK-norm."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,7 +315,77 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_slice_string_rope_metrics(model: nn.Module) -> dict[str, float]:
+    """Aggregate slice-string-rope diagnostics across backbone blocks.
+
+    Reads the latest centroid_spread / centroid_collapse buffers captured by
+    each ``TransolverAttention.forward()``, and the per-axis ``log_freq``
+    statistics from each ``LearnableCoordinateRoPE``. Per-block detail is
+    logged alongside an across-block aggregate for triage.
+    """
+    backbone = getattr(model, "backbone", None)
+    if backbone is None or not hasattr(backbone, "blocks"):
+        return {}
+    metrics: dict[str, float] = {}
+    spreads: list[float] = []
+    collapses: list[float] = []
+    log_freq_axis_means: list[list[float]] = [[] for _ in range(3)]
+    log_freq_axis_stds: list[list[float]] = [[] for _ in range(3)]
+    any_active = False
+    for i, block in enumerate(backbone.blocks):
+        attn = getattr(block, "attention", None)
+        if attn is None:
+            continue
+        rope = getattr(attn, "slice_string_rope", None)
+        if rope is None:
+            continue
+        any_active = True
+        spread = getattr(attn, "_last_centroid_spread", None)
+        collapse = getattr(attn, "_last_centroid_collapse", None)
+        if spread is not None:
+            spread_val = float(spread.detach().cpu().item())
+            spreads.append(spread_val)
+            metrics[f"slice_string_rope/block_{i}/centroid_spread"] = spread_val
+        if collapse is not None:
+            collapse_val = float(collapse.detach().cpu().item())
+            collapses.append(collapse_val)
+            metrics[f"slice_string_rope/block_{i}/centroid_collapse_ratio"] = collapse_val
+        log_freq = rope.log_freq.detach().float()
+        prefix = f"slice_string_rope/block_{i}"
+        metrics[f"{prefix}/log_freq_mean"] = float(log_freq.mean().item())
+        metrics[f"{prefix}/log_freq_std"] = float(log_freq.std().item())
+        for axis in range(min(log_freq.shape[0], 3)):
+            ax_vals = log_freq[axis]
+            mean_val = float(ax_vals.mean().item())
+            std_val = float(ax_vals.std().item())
+            metrics[f"{prefix}/log_freq_axis_{axis}_mean"] = mean_val
+            metrics[f"{prefix}/log_freq_axis_{axis}_std"] = std_val
+            log_freq_axis_means[axis].append(mean_val)
+            log_freq_axis_stds[axis].append(std_val)
+    if not any_active:
+        return {}
+    if spreads:
+        metrics["slice_string_rope/centroid_spread_mean"] = sum(spreads) / len(spreads)
+    if collapses:
+        metrics["slice_string_rope/centroid_collapse_ratio_mean"] = sum(collapses) / len(
+            collapses
+        )
+    for axis in range(3):
+        if log_freq_axis_means[axis]:
+            metrics[f"slice_string_rope/log_freq_axis_{axis}_mean"] = sum(
+                log_freq_axis_means[axis]
+            ) / len(log_freq_axis_means[axis])
+        if log_freq_axis_stds[axis]:
+            metrics[f"slice_string_rope/log_freq_axis_{axis}_std"] = sum(
+                log_freq_axis_stds[axis]
+            ) / len(log_freq_axis_stds[axis])
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
+    slice_string_rope_init_sigmas = parse_rff_init_sigmas(
+        config.slice_string_rope_init_sigmas
+    ) or (0.25, 0.5, 1.0, 2.0, 4.0)
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -308,6 +399,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        slice_string_rope=config.slice_string_rope,
+        slice_string_rope_init_sigmas=tuple(slice_string_rope_init_sigmas),
+        slice_string_rope_after_qk_norm=config.slice_string_rope_after_qk_norm,
     )
 
 
@@ -1262,6 +1356,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_slice_string_rope_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
