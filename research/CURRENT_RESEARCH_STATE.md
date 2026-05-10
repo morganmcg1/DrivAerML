@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-10 — Round 25 active. All 8 students running. PR #942 fern (GradNorm full-mode α=1.5) closed NEGATIVE. New assignment: PR #952 fern (Manifold Mixup hidden-state regularization). Active WIP: #947 askeladd, #948 frieren, #949 thorfinn, #950 alphonse, #941 edward, #935 tanjiro, #930 nezuko, #952 fern.
+- **Date:** 2026-05-09 — Round 26 active. All 8 students running. Prior Round 25 PRs #947 askeladd, #948 frieren, #950 alphonse, #930 nezuko replaced by new Round 26 assignments. Active WIP: #955 alphonse, #956 askeladd, #957 frieren, #958 nezuko, #941 edward, #935 tanjiro, #949 thorfinn, #952 fern.
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -22,7 +22,7 @@
 
 ## Latest Human Researcher Directives
 
-- **Issue #618** (STRING/RoPE): **FULLY CLOSED AXIS.** All STRING axes exhausted. σ=0.25 load-bearing. **No further STRING experiments planned.**
+- **Issue #618** (STRING/RoPE): **Reopened for targeted exploration.** Prior STRING axes (sigma shifts, global ladder variants) closed. New dimension: (a) slice-centroid local RoPE coordinates (alphonse #955) and (b) sigma-ladder octave range sweep — 7-octave fine/coarse and all-fine 5-octave (askeladd #956). σ=0.25 still assumed load-bearing; hypothesis is that adding sub-panel or super-car scale octaves can reduce vol_p OOD gap.
 - **Issue #717** (vol_pressure gap): Phase 2 active — building on xattn win from #823. Post-xattn capacity axis fully closed (0-for-3: #891 FFN, #893 k-NN graph, #906 vol-self-attn). Now exploring loss stratification (#930), geometry-conditioned queries (#950), surface loss annealing (#947), vol-pressure aux head (#948), surface-points curriculum (#949), SDF-modulated vol PE (#935).
 - **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
 - **Issue #803** (SDF fix): Edward (#941) actively regenerating corrupted volume_sdf.npy for 10 REQUIRED_RESTORED cases; full retrain with fixed SDF data underway (W&B: wtxiaqk0). No new SDF/geometry-conditioning assignments until edward's results are known.
@@ -30,29 +30,42 @@
 
 ---
 
-## Active PRs (Round 25)
+## Active PRs (Round 26)
 
 ### tay-track (8 WIP, fully occupied)
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
-| alphonse | #950 | Learned geometry Q-bias: mean-pool surf_hidden → [B,1,512] global descriptor → zero-init Linear(512,512) → add as bias to ALL vol_hidden before xattn Q-projection. ~394K params, zero-init. Flag: `--use-geom-q-bias`. EP3 gate: val_abupt ≤8.0% AND val_vol_p ≤3.86%. | `alphonse/learned-geometry-q-bias` | Assigned, awaiting implementation |
-| thorfinn | #949 | Surface-points curriculum: ramp surface tokens from 16K→65K over training (mirror of vol-points-schedule). Flag: `--surface-points-schedule`. Arm A symmetric (0:16384:3:32778), Arm B gentler (0:32778:3:65536). EP4 gate: val_abupt ≤6.44%. | `thorfinn/surface-points-curriculum` | Assigned, awaiting implementation |
-| frieren | #948 | Vol-pressure dedicated aux decoder head: `nn.Sequential(Linear(512,256), GELU, Linear(256,1))` with zero-init final layer. Flags: `--vol-pressure-aux-head`, `--vol-pressure-aux-weight`. Arms: weight=1.0 and weight=2.0. EP4 gate: val_abupt ≤6.44%. | `frieren/vol-pressure-aux-head` | Assigned, awaiting implementation |
-| askeladd | #947 | Adaptive surface loss annealing: cosine decay from high start weight to low end weight over training. Flags: `--surface-loss-weight` (start) and `--surface-loss-weight-final`. Arm A: 3.0→0.5, Arm B: 2.5→1.0. EP4 gate: val_abupt ≤6.44%. | `askeladd/adaptive-surface-loss-weighting` | Assigned, awaiting implementation |
+| alphonse | #955 | STRING RoPE: slice-centroid local coords as RoPE anchor. Compute per-slice centroids via soft assignment weights; encode (x−cx, y−cy, z−cz) instead of global coords. Arm A: `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"` (global scale); Arm B: `--rff-init-sigmas "0.05,0.1,0.25,0.5,1.0"` (local scale). EP3 gate: val_abupt ≤8.0%. `--wandb-group alphonse-string-slice-centroid-rope` | `alphonse/string-rope-slice-centroid-learnable` | Assigned — awaiting implementation |
+| askeladd | #956 | STRING σ-ladder geometry sweep: test unexplored octave ranges. Arm A (7-oct fine): `0.03,0.06,0.125,0.25,0.5,1.0,2.0`; Arm B (7-oct coarse): `0.25,0.5,1.0,2.0,4.0,8.0,16.0`; Arm C (5-oct all-fine): `0.03,0.06,0.125,0.25,0.5`. Kill any arm at EP3 if val_abupt > 7.5%. `--wandb-group askeladd-string-sigma-sweep` | `askeladd/string-sigma-ladder-geometry-sweep` | Assigned — awaiting implementation |
+| frieren | #957 | Y-flip augmentation for vol_p OOD: y→−y with p=0.5 (negates y coord, ny normal, tau_y; SDF/cp/tau_x/tau_z invariant). Doubles effective training geometries. Arm A: flip only (p=0.5); Arm B: flip + `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0% AND val_vol_p ≤4.2%. `--wandb-group frieren-yflip-vol-ood` | `frieren/yflip-augmentation-vol-ood` | Assigned — awaiting implementation |
+| nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Zero-init final layer. Arm A: `--volume-loss-weight 1.0`; Arm B: `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0%. `--wandb-group nezuko-vol-aux-decoder-head` | `nezuko/vol-pressure-aux-decoder-head` | Assigned — awaiting implementation |
+| thorfinn | #949 | Surface-points curriculum: ramp surface tokens from 16K→65K over training (mirror of vol-points-schedule). Flag: `--surface-points-schedule`. Arm A symmetric (0:16384:3:32778), Arm B gentler (0:32778:3:65536). EP4 gate: val_abupt ≤6.44%. | `thorfinn/surface-points-curriculum` | Assigned — awaiting implementation |
 | fern | #952 | Manifold Mixup hidden-state regularization: Beta(α=0.2,0.2) convex interpolation of two samples' backbone transformer hidden states at random layer k∈[0,L-1], p_mix=0.5. Targets val→test generalization gap (vol_p 3.86%→11.67%, 3×). Flags: `--use-manifold-mixup`, `--manifold-mixup-alpha`, `--manifold-mixup-prob`. 4-ep screen first. | `fern/manifold-mixup-backbone` | Assigned — awaiting implementation |
 | edward | #941 | SDF data fix: regenerate volume_sdf.npy for 10 corrupted REQUIRED_RESTORED cases (run_44, 133, 158, 184, 203, 226, 249, 310, 416, 484). Synthesis script in `synthesize_inside_body.py`. Full SOTA retrain with fixed data now running (W&B: `wtxiaqk0`, group: edward-sdf-fix). EP1 kill gate: val_abupt < 30% at step 10,864. | `edward/sdf-data-fix-regenerate-corrupted-sdfs` | In progress — SOTA retrain running |
-| tanjiro | #935 | SDF-modulated vol PE (per-octave scaler, ~61 params). Identity-init retry: final Linear bias=+4.0 → sigmoid output starts 0.982 (near-transparent at init). Prior run had half-strength PE init (bias=0), causing EP1 regression. Now running with `--epochs 41` (T_max=41) to avoid premature LR decay before budget timeout. W&B: `ixrg3mg1`, group: tanjiro-sdf-vol-pe-identity-init. EP1 ETA ~07:42 UTC. | `tanjiro/sdf-modulated-vol-pe` | In progress — EP1 running |
-| nezuko | #930 | SDF-stratified vol loss: weight vol cells by exp(-SDF/λ), λ controls near-surface emphasis. Arm A (λ=0.10) FAIL EP3: abupt=7.34% (pass) but vol_p=4.564% (fail ≤3.86%); far-field under-fit. Arm B (λ=0.30) launched at 04:09 UTC, EP3 gate ETA ~05:41 UTC. Two-consecutive-failure kill rule: if Arm B also fails, close PR. | `nezuko/volume-ood-domain-adapter` | In progress — Arm B EP3 pending |
+| tanjiro | #935 | SDF-modulated vol PE (per-octave scaler, ~61 params). Identity-init retry: final Linear bias=+4.0 → sigmoid output starts 0.982 (near-transparent at init). Prior run had half-strength PE init (bias=0), causing EP1 regression. Now running with `--epochs 41` (T_max=41). W&B: `ixrg3mg1`, group: tanjiro-sdf-vol-pe-identity-init. | `tanjiro/sdf-modulated-vol-pe` | In progress — EP1 running |
 
 ---
+
+## Round 25 Outcomes (Closed / Superseded)
+
+| Student | PR | Result |
+|---|---|---|
+| alphonse | #950 | Learned geometry Q-bias — SUPERSEDED by Round 26 assignment (#955) |
+| askeladd | #947 | Adaptive surface loss annealing — SUPERSEDED by Round 26 assignment (#956) |
+| frieren | #948 | Vol-pressure aux decoder head (v1) — SUPERSEDED by Round 26 assignment (#957; different direction: Y-flip aug) |
+| nezuko | #930 | SDF-stratified vol loss — SUPERSEDED by Round 26 assignment (#958); Arm B EP3 result unknown, PR closed |
+| thorfinn | #949 | Surface-points curriculum — CARRIED OVER to Round 26 (still WIP) |
+| fern | #952 | Manifold Mixup — CARRIED OVER to Round 26 (still WIP) |
+| edward | #941 | SDF data fix — CARRIED OVER to Round 26 (retrain running) |
+| tanjiro | #935 | SDF-modulated vol PE — CARRIED OVER to Round 26 (EP1 running) |
 
 ## Round 24 Outcomes (Closed)
 
 | Student | PR | Result |
 |---|---|---|
-| edward | #929 | Pre-xattn vol self-attn — CLOSED NEGATIVE (0-for-3 pattern holds for pre-xattn too; Round 25 PRs assigned) |
-| nezuko | #928 | TTA y-mirror — CLOSED (merged or closed based on results; see experiments log) |
+| edward | #929 | Pre-xattn vol self-attn — CLOSED NEGATIVE |
+| nezuko | #928 | TTA y-mirror — CLOSED (see experiments log) |
 | alphonse | #937 | Mild yaw-only rotation aug — CLOSED (see experiments log) |
 | askeladd | #926 | Vol geo features centroid+bbox — CLOSED (see experiments log) |
 | frieren | #927 | Surface cp Laplacian aux loss — CLOSED (see experiments log) |
@@ -62,36 +75,43 @@
 
 ---
 
-## Current Research Focus
+## Current Research Focus (Round 26)
 
 **Primary mandate (Issue #717):** Reduce test_vol_pressure below 11.0% → 10.0% → 8.5% → 6.08% (AB-UPT). All channels must not degrade.
 
 ### Theme 1: SDF Data Quality (edward #941)
-The 10 REQUIRED_RESTORED cases have corrupted volume_sdf.npy (inside-body cells with SDF=0 or negative). Edward has synthesized correct SDF values using a point-in-mesh check + nearest-boundary interpolation. Full SOTA retrain now running. This is the highest-priority upstream fix — if corrupted SDF data degrades model performance, fixing it may materially improve vol_pressure especially on the OOD test cases (run_133, run_226, run_203, run_158 are in the REQUIRED_RESTORED set).
+The 10 REQUIRED_RESTORED cases have corrupted volume_sdf.npy (inside-body cells with SDF=0 or negative). Edward has synthesized correct SDF values using a point-in-mesh check + nearest-boundary interpolation. Full SOTA retrain now running (W&B: `wtxiaqk0`). Highest-priority upstream fix — run_133, 226, 203, 158 (OOD outliers) are in this set. No new SDF/geometry-conditioning assignments until edward's results are known (Issue #803 blocker).
 
-### Theme 2: Geometry-Conditioned Xattn Queries (alphonse #950)
-Hypothesis: providing vol tokens with a global car-geometry descriptor before forming xattn queries allows the model to condition its surface-lookup on car shape. Zero-init ensures identical-to-baseline at epoch 0. Most promising pre-xattn intervention.
+### Theme 2: STRING Positional Encoding (alphonse #955, askeladd #956)
+Two new STRING RoPE directions re-opened per Issue #618 mandate:
+- **Slice-centroid local RoPE** (#955 alphonse): replace global (x,y,z) anchor with per-slice centroid; tests whether local slice-relative coordinates improve feature encoding
+- **Sigma-ladder octave sweep** (#956 askeladd): test 7-octave fine (down to σ=0.03) and 7-octave coarse (up to σ=16.0) vs. SOTA 5-octave; critical test of whether sub-panel or super-car frequencies help
 
-### Theme 3: Loss Formulation (askeladd #947, frieren #948, nezuko #930)
-Three parallel loss experiments:
-- **Surface loss annealing** (#947): start with high surface weight (strong early supervision) then decay to normal — prevents surface-overfitting while maintaining surface quality
-- **Vol-pressure aux head** (#948): dedicated capacity for vol_p prediction; the shared head must simultaneously decode sp, tau, and vp from the same hidden state
-- **SDF-stratified vol loss** (#930): emphasize near-surface vol cells where OOD cases differ most from training distribution
+### Theme 3: Data Augmentation for OOD (frieren #957)
+Y-flip augmentation: y→−y with p=0.5, negating y coord, ny normal, tau_y while leaving SDF/cp/tau_x/tau_z invariant. Doubles effective training geometries for OOD generalization. Arm B also tests with vol_loss_weight=2.0 for combined augmentation+loss emphasis.
 
-### Theme 4: Curriculum Learning (thorfinn #949)
-Surface-points curriculum mirrors the successful vol-points-schedule: start with fewer surface tokens, ramp up. Allows earlier-epoch training to capture coarser surface structure before refinement.
+### Theme 4: Dedicated Vol Pressure Decoder (nezuko #958)
+Independent 3-layer MLP branch for vol_p prediction, separate from the shared 4-output surface head. Hypothesis: the shared decoder must encode too many competing signals; a dedicated path lets it specialize on vol_p geometry.
 
 ### Theme 5: Vol PE Quality (tanjiro #935)
-SDF-modulated vol PE: learn per-octave attention scaling based on distance-from-surface. Near-surface vol cells need panel-scale encoding; far-field cells need domain-scale. The identity-init (bias=+4.0) ensures the scaler starts transparent and learns to selectively attenuate.
+SDF-modulated vol PE: per-octave scaler learned from distance-from-surface. Identity-init (bias=+4.0) ensures transparent start. Rerun with `--epochs 41` to avoid premature LR decay.
 
-### Theme 6: Manifold Mixup (fern #952)
-Hidden-state interpolation between paired training samples at a randomly selected Transolver backbone layer. Targets the val→test vol_p generalization gap (3.86% → 11.67%, 3×). With only 400 training cars, augmenting in hidden space rather than input space should produce smoother interpolations — and is orthogonal to all current experiments. GradNorm full-mode (PR #942) closed NEGATIVE: EP2 metrics were ~15.7% abupt, but vp weight went DOWN at EP1 (not up), confirming vol_p is not gradient-starved under Lion optimizer. GradNorm axis fully closed.
+### Theme 6: Curriculum Learning (thorfinn #949)
+Surface-points curriculum mirrors the successful vol-points-schedule: start with fewer surface tokens, ramp up. Allows earlier-epoch training to capture coarser structure before refinement.
+
+### Theme 7: Manifold Mixup (fern #952)
+Hidden-state interpolation between paired training samples at a randomly selected backbone layer. Targets the val→test vol_p generalization gap (3.86% → 11.67%, 3×). With only 400 training cars, hidden-space augmentation should produce smoother interpolations than input-space augmentation.
 
 ---
 
-## Potential Next Research Directions (post-Round 25)
+## Potential Next Research Directions (post-Round 26)
 
-### If geometry-conditioning wins (#950 alphonse, #935 tanjiro)
+### If STRING positional encoding wins (#955 alphonse, #956 askeladd)
+1. **Compose slice-centroid RoPE + winning sigma-ladder**: orthogonal within STRING framework — can stack if both win
+2. **Learned sigma values via gradient descent**: if fixed ladder wins, allow sigmas to be learned parameters (constrained positive)
+3. **Per-axis sigmas**: different sigma ladders for x, y, z axes (z=height may need finer encoding)
+
+### If geometry-conditioning wins (#935 tanjiro)
 1. **SDF-conditioned Q-bias composition**: combine geom-Q-bias (#950) + SDF-modulated PE (#935) — orthogonal geometry signals
 2. **Per-case geometry embedding**: learn a geometry code per training car via message passing, use as xattn conditioning
 3. **Point Transformer V3 vol head**: replace Transolver vol attention with PTv3 (Hilbert-curve serialized attention)
@@ -149,7 +169,8 @@ See "Closed Axes" section below.
 - **TTA y-mirror**: #928 nezuko CLOSED (Round 24)
 - **Mild yaw-only rotation aug**: #937 alphonse CLOSED (Round 24)
 - **GradNorm full-mode α=1.5** (#942 fern): CLOSED NEGATIVE — vp weight decreased at EP1 (not increased), all 5 weights converge to 0.91–1.11 band; vol_p is not gradient-starved under Lion; 5× backward overhead consumed budget before EP6 gate
-- **STRING, GradNorm ema_proxy, EMA, LoRA, FiLM, 2-layer MLP decoder, Huber loss, Lion β2 sweep, BC-type embedding, dual-tower xattn, spectral-norm attn, stochastic depth, PCGrad, surface curvature features**: ALL CLOSED
+- **GradNorm ema_proxy, EMA, LoRA, FiLM, 2-layer MLP decoder, Huber loss, Lion β2 sweep, BC-type embedding, dual-tower xattn, spectral-norm attn, stochastic depth, PCGrad, surface curvature features**: ALL CLOSED
+- **Prior STRING axes**: sigma shift, all-fine/all-coarse ladder variants, vol-specific RFF (#918) — CLOSED. New targeted STRING axes (#955, #956) are live in Round 26.
 
 ---
 
