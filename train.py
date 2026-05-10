@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_sdf_vol_input_feature: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_vol_input_feature": (
+            "Append the train-set normalized signed-distance-field (SDF) "
+            "scalar to every volume point's input feature vector before "
+            "tokenisation (PR #966). The SDF column already lives at "
+            "volume_x[..., 3] in raw distance units; with this flag enabled "
+            "a (sdf - mean) / std standardised copy is concatenated into "
+            "the volume input projection so the backbone sees a clean, "
+            "well-scaled geometry signal in addition to the existing raw "
+            "channel. Adds +1 input dimension to the volume input "
+            "projection only; the surface pipeline is unchanged. "
+            "Mean/std are precomputed train-set stats stored as buffers."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_sdf_vol_input_feature=config.use_sdf_vol_input_feature,
     )
 
 
