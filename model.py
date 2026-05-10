@@ -46,6 +46,44 @@ class LinearProjection(nn.Module):
         return self.project(x)
 
 
+class CoordVolHead(nn.Module):
+    """Volume output MLP conditioned on backbone hidden state and raw xyz coords.
+
+    Volume pressure has strong spatial structure (stagnation at the nose, suction
+    at the roof, wake behind the car). The reference linear head forces the
+    backbone to encode that spatial structure implicitly. This head receives
+    ``[hidden(n_hidden) || coords(coord_dim)]`` and lets the MLP learn an
+    explicit spatial prior. Final layer is zero-init so the model emits zero
+    on the first step (preserves the baseline output at init when used after a
+    zeroed xattn block; otherwise yields a stable warm-start identical to a
+    randomly initialised volume head with weight 0).
+    """
+
+    def __init__(self, n_hidden: int = 512, coord_dim: int = 3):
+        super().__init__()
+        self.n_hidden = n_hidden
+        self.coord_dim = coord_dim
+        self.mlp = nn.Sequential(
+            nn.Linear(n_hidden + coord_dim, 256),
+            nn.SiLU(),
+            nn.Linear(256, 64),
+            nn.SiLU(),
+            nn.Linear(64, 1),
+        )
+        # Initialise the two interior layers with the standard truncated normal
+        # used elsewhere in the model so gradient flow is well-conditioned.
+        _init_linear(self.mlp[0])
+        _init_linear(self.mlp[2])
+        # Zero-init the final layer so the head outputs 0 at init - matches
+        # baseline output for stable training from step 0.
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
+
+    def forward(self, hidden: torch.Tensor, coords: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([hidden, coords.to(dtype=hidden.dtype)], dim=-1)
+        return self.mlp(x)
+
+
 class RFFEncoding(nn.Module):
     """Gaussian random Fourier feature coordinate encoding (Tancik et al. 2020).
 
@@ -343,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_coord_vol_head: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +395,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_coord_vol_head = use_coord_vol_head
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +483,19 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # Coordinate-conditioned volume head (PR #959). When enabled, the volume
+        # MLP receives ``[hidden || xyz]`` instead of just ``hidden``, giving the
+        # decoder explicit access to spatial position. ``self.volume_out`` is
+        # always built so its parameters remain visible to W&B telemetry; only
+        # the forward pass routing differs.
+        if use_coord_vol_head:
+            self.coord_vol_head = CoordVolHead(
+                n_hidden=n_hidden,
+                coord_dim=space_dim,
+            )
+        else:
+            self.coord_vol_head = None
 
     def _encode_group(
         self,
@@ -553,7 +606,12 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            if self.coord_vol_head is not None:
+                vol_coords = volume_x[:, :, : self.space_dim]
+                volume_preds = self.coord_vol_head(volume_hidden, vol_coords)
+                volume_preds = volume_preds * volume_mask.unsqueeze(-1)
+            else:
+                volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
