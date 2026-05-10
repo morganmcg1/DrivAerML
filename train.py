@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_sdf_vol_pe: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_vol_pe": (
+            "Enable SDF-modulated volume positional encoding (PR #935). "
+            "A tiny MLP (SdfVolPEScaler, ~61 params) maps the per-token SDF "
+            "scalar from the volume input [x,y,z,sdf] to per-octave "
+            "multiplicative weights applied to the StringSeparableEncoding "
+            "output for volume tokens only. Only active when "
+            "--pos-encoding-mode string_separable is also set. "
+            "Output-layer weights are zero-initialised (identity at init)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,6 +304,46 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_sdf_vol_pe_metrics(model: nn.Module) -> dict[str, float]:
+    """Log SdfVolPEScaler param stats and probe its octave outputs at sample SDFs.
+
+    Probe is detached and runs on CPU at fixed SDF anchors covering interior
+    (sdf>0), boundary (sdf~0), and exterior (sdf<0) regions so we can detect
+    mode collapse / dead-gate failure modes without hooking into forward pass.
+    """
+    scaler = getattr(model, "sdf_vol_pe_scaler", None)
+    if scaler is None:
+        return {}
+    metrics: dict[str, float] = {}
+    prefix = "sdf_vol_pe"
+    # Final-layer parameter stats (detect saturation / collapse)
+    final_w = scaler.net[2].weight.detach().float()
+    final_b = scaler.net[2].bias.detach().float()
+    metrics[f"{prefix}/final_w_norm"] = float(final_w.norm().item())
+    metrics[f"{prefix}/final_w_max_abs"] = float(final_w.abs().max().item())
+    metrics[f"{prefix}/final_b_max_abs"] = float(final_b.abs().max().item())
+    # Probe at canonical SDF values to see how octave scales drift over training.
+    with torch.no_grad():
+        device = final_w.device
+        anchors = torch.tensor(
+            [[-0.5], [-0.1], [0.0], [0.1], [0.5]],
+            dtype=torch.float32,
+            device=device,
+        ).unsqueeze(0)  # [1, 5, 1]
+        scales = scaler(anchors).squeeze(0).cpu()  # [5, num_octaves]
+        labels = ["sdf_neg_0p5", "sdf_neg_0p1", "sdf_0", "sdf_pos_0p1", "sdf_pos_0p5"]
+        for r, label in enumerate(labels):
+            for o in range(scales.shape[1]):
+                metrics[f"{prefix}/scale_{label}/oct{o}"] = float(scales[r, o].item())
+        # Cross-anchor std per octave -> detects mode collapse (std~0 means
+        # the scaler ignores SDF and outputs a constant per-octave scale).
+        across_anchor_std = scales.std(dim=0)  # [num_octaves]
+        for o in range(across_anchor_std.shape[0]):
+            metrics[f"{prefix}/scale_anchor_std/oct{o}"] = float(across_anchor_std[o].item())
+        metrics[f"{prefix}/scale_anchor_std/mean"] = float(across_anchor_std.mean().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -308,6 +358,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_sdf_vol_pe=config.use_sdf_vol_pe,
     )
 
 
@@ -1262,6 +1313,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_sdf_vol_pe_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

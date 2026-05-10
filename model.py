@@ -136,6 +136,44 @@ class StringSeparableEncoding(nn.Module):
         return enc.flatten(start_dim=-2)
 
 
+class SdfVolPEScaler(nn.Module):
+    """Tiny MLP that maps per-token SDF scalars to per-octave PE scale weights.
+
+    Architecture: Linear(1→8) → GELU → Linear(8→num_octaves) → Sigmoid
+
+    For a StringSeparableEncoding with ``num_features`` features and ``in_dim``
+    spatial axes the output has shape ``[..., 2 * in_dim * num_features]``.
+    Consecutive features round-robin across octaves: octave index for output
+    dim ``d`` is ``((d % (2 * num_features)) % num_features) % num_octaves``.
+
+    The scaler produces ``num_octaves`` multiplicative weights in (0, 1] from
+    the per-token SDF value.  At init, Linear(8→5) bias=0 and weight~0 so all
+    sigmoid outputs start near 0.5, giving mild suppression that the optimiser
+    can quickly lift.  The sigmoid ceiling of 1.0 prevents amplification;
+    interior tokens (positive SDF) and exterior tokens (negative SDF) learn
+    different scaling profiles automatically.
+    """
+
+    def __init__(self, num_octaves: int = 5):
+        super().__init__()
+        self.num_octaves = num_octaves
+        self.net = nn.Sequential(
+            nn.Linear(1, 8),
+            nn.GELU(),
+            nn.Linear(8, num_octaves),
+            nn.Sigmoid(),
+        )
+        # Initialise so all outputs start near 0.5 (mild attenuation at init)
+        nn.init.trunc_normal_(self.net[0].weight, std=0.02)
+        nn.init.zeros_(self.net[0].bias)
+        nn.init.zeros_(self.net[2].weight)
+        nn.init.zeros_(self.net[2].bias)
+
+    def forward(self, sdf: torch.Tensor) -> torch.Tensor:
+        # sdf: [B, N, 1]
+        return self.net(sdf)  # [B, N, num_octaves]
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -343,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_sdf_vol_pe: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +395,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_sdf_vol_pe = use_sdf_vol_pe
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -397,6 +437,26 @@ class SurfaceTransolver(nn.Module):
                 self.surface_rff = None
                 self.volume_rff = None
                 rff_out_dim = 0
+
+        # SDF-modulated volume PE (PR #935): tiny MLP that reads per-token SDF
+        # and outputs per-octave multiplicative scale weights applied to the
+        # StringSeparable PE output before feature projection.
+        # Only active when use_sdf_vol_pe=True AND pos_encoding_mode="string_separable".
+        if use_sdf_vol_pe and pos_encoding_mode == "string_separable":
+            _num_octaves = 5
+            self.sdf_vol_pe_scaler = SdfVolPEScaler(num_octaves=_num_octaves)
+            # Pre-compute octave assignment for each of the string_sep output dims.
+            # For output dim d: octave = ((d % (2 * num_features)) % num_features) % num_octaves
+            _nf = string_sep_features
+            _out_dim = 2 * space_dim * _nf  # = surface_string_sep.output_dim
+            _octave_idx = torch.tensor(
+                [((d % (2 * _nf)) % _nf) % _num_octaves for d in range(_out_dim)],
+                dtype=torch.long,
+            )
+            self.register_buffer("_octave_idx", _octave_idx)
+        else:
+            self.sdf_vol_pe_scaler = None
+            self.register_buffer("_octave_idx", None)
 
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -453,6 +513,7 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        is_volume: bool = False,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
@@ -460,7 +521,17 @@ class SurfaceTransolver(nn.Module):
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
         if string_sep is not None:
-            feature_parts.append(string_sep(pos))
+            pe = string_sep(pos)  # [B, N, 2 * space_dim * num_features]
+            # Apply SDF-modulated per-octave scaling for the volume group only
+            if is_volume and self.sdf_vol_pe_scaler is not None and x.shape[-1] > self.space_dim:
+                # SDF is the first (and only) extra feature for the volume group
+                sdf = x[:, :, self.space_dim : self.space_dim + 1]  # [B, N, 1]
+                octave_weights = self.sdf_vol_pe_scaler(sdf)  # [B, N, num_octaves]
+                # Gather per-dim weights via octave assignment buffer
+                # _octave_idx: [out_dim] — maps each PE dim to an octave index
+                per_dim_weights = octave_weights[:, :, self._octave_idx]  # [B, N, out_dim]
+                pe = pe * per_dim_weights
+            feature_parts.append(pe)
         elif rff is not None:
             feature_parts.append(rff(pos))
         if project_features is not None and feature_parts:
@@ -514,6 +585,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
+                    is_volume=True,
                 )
             )
             masks.append(volume_mask)
