@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import random
 import re
 import subprocess
 from contextlib import nullcontext
@@ -1514,3 +1515,128 @@ def run_final_evaluation(
         test_metrics=test_metrics,
         n_params=n_params,
     )
+
+
+def sample_manifold_mixup(
+    *,
+    alpha: float,
+    num_layers: int,
+    batch_size: int,
+    device: torch.device,
+) -> tuple[float, int, torch.Tensor]:
+    """Sample (lam, layer_index, perm) for one Manifold Mixup step.
+
+    lam is reflected to [0.5, 1.0] for stable mixing per the original paper.
+    Layer index is uniform over [0, num_layers - 1]. Perm is a random batch
+    permutation on the given device.
+    """
+    lam_raw = random.betavariate(alpha, alpha)
+    lam = max(lam_raw, 1.0 - lam_raw)
+    layer_index = random.randint(0, max(num_layers - 1, 0))
+    perm = torch.randperm(batch_size, device=device)
+    return lam, layer_index, perm
+
+
+def manifold_mixup_train_loss(
+    model: nn.Module,
+    batch,
+    transform,
+    device: torch.device,
+    amp_mode: str,
+    *,
+    surface_loss_weight: float,
+    volume_loss_weight: float,
+    surface_channel_weights: torch.Tensor | None,
+    alpha: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Forward+loss with Manifold Mixup applied at a random backbone block.
+
+    Registers a forward hook on ``base_model.backbone.blocks[k]`` that mixes
+    the block's output across a random batch permutation:
+    ``output_mixed = lam * output + (1 - lam) * output[perm]``.
+
+    The remaining backbone blocks, the optional surface->volume xattn, and
+    the output heads then process the mixed hidden state. Loss is the
+    standard manifold mixup form
+    ``lam * L(pred, y) + (1 - lam) * L(pred, y[perm])`` for both surface
+    and volume targets, with sample-i's mask used as the validity mask in
+    both terms.
+
+    Each rank samples ``lam``, ``perm``, and the layer index ``k`` independently;
+    DDP gradient sync remains correct because every rank still uses every
+    parameter on every step (the hook only modifies the value flowing
+    through layer k).
+    """
+    batch = batch.to(device)
+    surface_target = transform.apply_surface(batch.surface_y)
+    volume_target = transform.apply_volume(batch.volume_y)
+
+    base = unwrap_model(model)
+    blocks = base.backbone.blocks
+    num_layers = len(blocks)
+    batch_size = (
+        batch.surface_x.shape[0] if batch.surface_x is not None else batch.volume_x.shape[0]
+    )
+    lam, layer_index, perm = sample_manifold_mixup(
+        alpha=alpha,
+        num_layers=num_layers,
+        batch_size=batch_size,
+        device=device,
+    )
+
+    def hook_fn(module, inputs, output):
+        return lam * output + (1.0 - lam) * output[perm]
+
+    handle = blocks[layer_index].register_forward_hook(hook_fn)
+    try:
+        with autocast_context(device, amp_mode):
+            out = model(
+                surface_x=batch.surface_x,
+                surface_mask=batch.surface_mask,
+                volume_x=batch.volume_x,
+                volume_mask=batch.volume_mask,
+            )
+            surface_pred = out["surface_preds"]
+            volume_pred = out["volume_preds"]
+
+            surface_target_perm = surface_target[perm]
+            volume_target_perm = volume_target[perm]
+            if surface_channel_weights is not None:
+                sl_a = weighted_channel_mse(
+                    surface_pred,
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+                sl_b = weighted_channel_mse(
+                    surface_pred,
+                    surface_target_perm,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+            else:
+                sl_a = masked_mse(surface_pred, surface_target, batch.surface_mask)
+                sl_b = masked_mse(surface_pred, surface_target_perm, batch.surface_mask)
+            surface_loss = lam * sl_a + (1.0 - lam) * sl_b
+
+            vl_a = masked_mse(volume_pred, volume_target, batch.volume_mask)
+            vl_b = masked_mse(volume_pred, volume_target_perm, batch.volume_mask)
+            volume_loss = lam * vl_a + (1.0 - lam) * vl_b
+
+            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_volume_loss = volume_loss_weight * volume_loss
+            loss = weighted_surface_loss + weighted_volume_loss
+            base_mse_loss = surface_loss + volume_loss
+    finally:
+        handle.remove()
+
+    return loss, {
+        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
+        "surface_loss": float(surface_loss.detach().cpu().item()),
+        "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
+        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "manifold_mixup/lam": float(lam),
+        "manifold_mixup/layer_k": float(layer_index),
+        "manifold_mixup/applied": 1.0,
+    }

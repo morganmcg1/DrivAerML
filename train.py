@@ -17,6 +17,7 @@ import argparse
 import gc
 import math
 import os
+import random
 import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -54,6 +55,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    manifold_mixup_train_loss,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -138,6 +140,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_manifold_mixup: bool = False
+    manifold_mixup_alpha: float = 0.2
+    manifold_mixup_prob: float = 0.5
     debug: bool = False
 
 
@@ -228,6 +233,32 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_manifold_mixup": (
+            "Enable Manifold Mixup (Verma et al., ICML 2019, "
+            "https://arxiv.org/abs/1806.05236) on the Transolver backbone. "
+            "Per training step, with probability --manifold-mixup-prob, "
+            "register a forward hook on a uniformly random backbone block "
+            "k in [0, n_layers-1] that replaces the block's output with "
+            "lam * h + (1-lam) * h[perm], where lam ~ Beta(alpha, alpha) "
+            "(reflected so lam>=0.5) and perm is a random batch permutation. "
+            "The remaining blocks plus the surface->volume cross-attention "
+            "and output heads see the mixed hidden state; the loss is "
+            "lam * MSE(pred, y) + (1-lam) * MSE(pred, y[perm]) for both "
+            "surface and volume targets. The hook is removed before the "
+            "next batch. Eval and EMA copies always run unmixed."
+        ),
+        "manifold_mixup_alpha": (
+            "Beta-distribution alpha for Manifold Mixup mixing coefficient "
+            "lam ~ Beta(alpha, alpha). Lower values concentrate mass near "
+            "0 and 1 (mild mixing), higher values near 0.5 (strong mixing). "
+            "Reflected so the effective lam>=0.5. Default 0.2 (Verma et al. "
+            "best on small-dataset image classification)."
+        ),
+        "manifold_mixup_prob": (
+            "Probability per batch that Manifold Mixup is applied. With "
+            "(1 - prob) the batch is processed normally, giving the model "
+            "clean supervision. Default 0.5."
         ),
     }
     for field in fields(Config):
@@ -1021,16 +1052,38 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
-                    loss, batch_loss_metrics = train_loss(
-                        model,
-                        batch,
-                        transform,
-                        device,
-                        config.amp_mode,
-                        surface_loss_weight=config.surface_loss_weight,
-                        volume_loss_weight=config.volume_loss_weight,
-                        surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                    apply_mixup = (
+                        config.use_manifold_mixup
+                        and random.random() < config.manifold_mixup_prob
                     )
+                    if apply_mixup:
+                        loss, batch_loss_metrics = manifold_mixup_train_loss(
+                            model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                            alpha=config.manifold_mixup_alpha,
+                        )
+                    else:
+                        loss, batch_loss_metrics = train_loss(
+                            model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        )
+                        if config.use_manifold_mixup:
+                            batch_loss_metrics = {
+                                **batch_loss_metrics,
+                                "manifold_mixup/applied": 0.0,
+                            }
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1070,6 +1123,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for mixup_key in ("manifold_mixup/lam", "manifold_mixup/layer_k", "manifold_mixup/applied"):
+                        if mixup_key in batch_loss_metrics:
+                            train_log[f"train/{mixup_key}"] = batch_loss_metrics[mixup_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
