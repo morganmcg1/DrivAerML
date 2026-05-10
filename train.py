@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    yflip_prob: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "yflip_prob": (
+            "Per-batch probability of Y-axis flip augmentation (PR #957). "
+            "DrivAerML cars are right-hand drive and share lateral mirror "
+            "symmetry; reflecting across the XZ plane (y -> -y) is an "
+            "approximate symmetry of the CFD solution. With probability p "
+            "each training batch is reflected: y coord and ny normal of "
+            "surface_x negate, y coord of volume_x negates, tau_y of "
+            "surface_y negates; area, sdf, cp, tau_x, tau_z, vol_p are "
+            "invariant. Eval/test never flipped. Default 0.0 disables. "
+            "Recommended 0.5."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -309,6 +321,39 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
     )
+
+
+def apply_yflip_to_batch(batch, yflip_prob: float) -> tuple[object, bool]:
+    """Reflect a training batch across the XZ plane (y -> -y) with probability `yflip_prob`.
+
+    DrivAerML cars share a right-hand-drive lateral mirror symmetry; the CFD
+    physics is symmetric under this reflection so the augmented sample is
+    physically valid. Channels that flip:
+      surface_x[..., 1]  (y coord)
+      surface_x[..., 4]  (ny normal)
+      volume_x [..., 1]  (y coord)
+      surface_y[..., 2]  (tau_y)
+    Invariant: x, z, nx, nz, area, sdf, cp, tau_x, tau_z, vol_p.
+
+    Returns the (possibly flipped) batch and a bool indicating whether the
+    flip was applied to this batch. Each rank decides independently — DDP
+    averages gradients across ranks for whatever batch each rank actually saw.
+    """
+
+    if yflip_prob <= 0.0:
+        return batch, False
+    if torch.rand(1).item() >= yflip_prob:
+        return batch, False
+
+    # Clone before mutating so we never write into worker-shared storage.
+    batch.surface_x = batch.surface_x.clone()
+    batch.surface_x[..., 1] = -batch.surface_x[..., 1]
+    batch.surface_x[..., 4] = -batch.surface_x[..., 4]
+    batch.volume_x = batch.volume_x.clone()
+    batch.volume_x[..., 1] = -batch.volume_x[..., 1]
+    batch.surface_y = batch.surface_y.clone()
+    batch.surface_y[..., 2] = -batch.surface_y[..., 2]
+    return batch, True
 
 
 def train_loss(
@@ -936,6 +981,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                batch, yflip_applied = apply_yflip_to_batch(batch, config.yflip_prob)
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1056,6 +1102,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/yflip_prob": float(config.yflip_prob),
+                    "train/yflip_applied": 1.0 if yflip_applied else 0.0,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
