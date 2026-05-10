@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-10 ~11:00 UTC
+- 2026-05-09 ~14:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -19,7 +19,7 @@
 | vol_p | 10.7580% |
 | wall_shear | 7.0610% |
 
-**Val wave leader:** nezuko #939 EP8 abupt=**6.7385%**, vol_p=4.4703% (val only — test not yet run)
+**Val wave leader:** nezuko #939 EP12 abupt=**6.6361%**, vol_p≈4.2% (val only — test not yet run)
 
 **Central unsolved problem:** val vol_p ≈ 4.0–4.5%, test vol_p ≈ 11% — systematic +7pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
 
@@ -27,29 +27,29 @@
 
 **Vol-loss-weighting direction CLOSED:** Both PR #911 (GradNorm+static weight=no-op) and PR #936 (no-GradNorm+static weight=harmful) failed. The val→test gap is NOT a training-time loss signal problem.
 
-## Active Experiments (2026-05-10 ~11:00 UTC)
+## Active Experiments (2026-05-09 ~14:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP8 complete | abupt=**6.7385%** (EP8); EP10 gate ≤7.2% IMMINENT (~step 54,940) | EP1 PASS (10.6323%), EP5 PASS (6.9188%), EP8=6.7385%. Strong convergence. |
-| #944 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **EMA warm-start fix** | `234rrtoo` | **Running** — EP2 complete | abupt=10.4125% (EP2) | EP1 PASS (11.4876%). EP5 gate ≤8.0% @ step ~27,380. EMA warm-start bug fixed; run relaunched. Convergence slower than nezuko. |
-| #946 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **extended cosine T_max=60** (50-epoch run) + Lion lr=1e-4 | `qgkhoapw` | **Running** — EP3 complete | abupt=7.4654% (EP3) | EP1 PASS (11.0573%), EP2=8.0188%, EP3=7.4654%. Very fast convergence. EP5 gate ≤7.5% @ step ~27,465; **VERY LIKELY PASS** (EP3 already below threshold). Hypothesis: longer cosine annealing keeps LR higher in tail, discourages val-distribution memorization. |
-| #951 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **proportional sampling** (96k vol + 60k surf, 1.6:1) | TBD | **Just assigned** — fern instructed to kill `6wkvxmo3` and launch new run | — | Corrected `<` kill threshold operator (vs `>` bug in #945). Uses lr=1e-4 (standard), NOT lr=5e-5. Prior failure (#945) was 5L backbone too slow + operator bug, not LR. Using 6L backbone now. |
+| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP12 complete | abupt=**6.6361%** (EP12) | EP5 PASS (6.9188%), EP10 PASS (6.7028% ≤7.2% ✅). EP15 gate ≤6.80% @ step ~82,395. Currently 0.1639pp below threshold. HIGH CONFIDENCE PASS. |
+| #946 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **extended cosine T_max=60** (50-epoch run) + Lion lr=1e-4 | `qgkhoapw` | **Running** — EP6 complete | abupt=**7.1198%** (EP6) | EP5 PASS (7.1795% ≤7.5% ✅). EP10 gate ≤7.2% IMMINENT (~step 54,760). At EP6=7.1198%, already below EP10 threshold — HIGH CONFIDENCE PASS. Hypothesis: longer cosine annealing keeps LR higher in tail, discourages val-distribution memorization. |
+| #951 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **proportional sampling** (96k vol + 60k surf, 1.6:1) | `wd5kgp2n` | **Running** — EP3 complete | abupt=**7.7830%** (EP3) | 🟡 WATCH — kill gate at step ~27,380 (~EP7.4) ≤7.5%. EP3=7.7830%, needs to drop 0.28pp in ~4.4 epochs. Proportional sampling: 3,719 steps/epoch. Merge conflict STILL DIRTY — fern reminded twice to rebase. |
+| #954 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **EMA decay=0.999** (corrected from 0.9999) + **eval-raw-vs-ema** | TBD | **Assigned** — ADVISOR comment posted; tanjiro pod deployed, waiting for run launch | — | Corrects #944 which used wrong EMA decay=0.9999 (100× too slow). PR #944 CLOSED (UNTESTED — wrong config, NOT a hypothesis rejection). EMA warm-start fix committed to branch. Kill gates based on raw model metrics. |
 
-## Key Closed/Falsified Hypotheses This Wave
+## Closed This Wave (Recent)
 
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
-| #945 | 5L + proportional 96k vol + 60k surf + **wrong kill operator** (`>` instead of `<`) | **EP5 FAIL abupt=9.29%** — CLOSED | Kill threshold operator bug (`>` instead of `<`) meant gates never fired correctly. Also 5L backbone too slow for proportional sampling regime. Moved to 6L as #951. |
-| #940 | Balanced 96k vol + 60k surf + lr=5e-5 + warmup=1000 (diagnostic for #938 LR hypothesis) | **CLOSED** — superseded by #945/#951 with 6L + corrected operator | Diagnostic run closed in favour of #951 direct 6L test. |
-| #938 | 5L + balanced 96k vol + 60k surf + lr=1e-4 (default) | **KILLED EP5=15.22%** (gate ≤7.5%). EP1 train_loss=1.567 (3.7× frieren's 0.427) | Balanced sampling at default lr catastrophically diverges with GradNorm+Lion on 5L |
-| #914 | 5L + GradNorm α=0.5 + **WD=0.005** + Y-sym | **CLOSED** — val=6.5290% EP41 terminal, test not run | WD=0.005 matched WD=0.01 val curve; terminal val is a wave leader but WD axis closed; test not evaluated (run was terminal) |
-| #900 | 6L + GradNorm α=0.5 + **WD=0.01** + Y-sym | EP27 best=6.6065%, EP30 gate MISS (6.6135% > 6.60%); **test eval run** confirmed vol_p gap persists | WD=0.01 does not close val→test gap. WD axis exhausted. |
-| #936 | vol-loss-weight=2.0 NO GradNorm | EP5 FAIL abupt=9.010% (+1.51pp), vol_p=5.691% WORSE than frieren | Static vol upweight without GradNorm actively harms; direction fully closed |
-| #911 | vol-loss-weight=2.0 WITH GradNorm | EP3 FAIL (GradNorm self-cancels static weight) | Static vol upweight + GradNorm is a no-op; must choose one |
+| #944 | EMA decay=0.9999 + WD=0.005 6L | **CLOSED** — wrong EMA config (decay=0.9999 = ~100× too slow, lookback ≈ 10,000 steps). NOT a hypothesis rejection. | EMA must use decay=0.999 (1,000-step lookback) for meaningful weight averaging. Corrected as #954. |
+| #945 | 5L + proportional 96k vol + 60k surf + **wrong kill operator** (`>` instead of `<`) | **EP5 FAIL abupt=9.29%** — CLOSED | Kill threshold operator bug + 5L backbone too slow. Moved to 6L as #951. |
+| #940 | Balanced 96k vol + 60k surf + lr=5e-5 (diagnostic) | **CLOSED** — superseded by #951 | Diagnostic run closed in favour of #951 direct 6L test. |
+| #938 | 5L + balanced 96k vol + 60k surf + lr=1e-4 | **KILLED EP5=15.22%** | Balanced sampling at default lr catastrophically diverges with GradNorm+Lion on 5L |
+| #914 | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | **CLOSED** — val=6.5290% EP41 terminal, test not run | WD=0.005 matched WD=0.01 val curve; WD axis closed |
+| #900 | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | EP27 best=6.6065%, EP30 gate MISS; test confirmed vol_p gap persists | WD=0.01 does not close val→test gap. WD axis exhausted. |
+| #936 | vol-loss-weight=2.0 NO GradNorm | EP5 FAIL abupt=9.010% (+1.51pp) | Static vol upweight without GradNorm actively harms |
+| #911 | vol-loss-weight=2.0 WITH GradNorm | EP3 FAIL (GradNorm self-cancels static weight) | Static vol upweight + GradNorm is a no-op |
 | #912 | 96k vol pts alone | EP3=11.8122% SEVERE FAIL (surf_p +3.65pp) | Vol/surface sampling must be proportional; 1.6:1 ratio needed |
 | #923 | 6L + EMA decay=0.9999 + WD=0.005 | CLOSED — never started (3 escalations) | Student unresponsive |
-| #924 | Balanced 96k vol + 60k surface + WD=0.01 | CLOSED — never started | Revived as #938 |
 | #919 | EMA+WD=0.01 6L | CLOSED — never started | Student unresponsive |
 | #898 | 5L+GradNorm+Y-sym (no WD) | EP9 regression — OVERFITTING | WD is necessary, not optional |
 | #873 | 7L depth | Catastrophic bounce EP12→EP15 | 7L too deep for this architecture |
@@ -65,9 +65,9 @@
 
 3. **Vol-loss-weighting direction FULLY EXHAUSTED.** PR #911 (with GradNorm = no-op) + PR #936 (without GradNorm = actively harmful). Static upweighting of vol_p loss does not close the val→test gap.
 
-4. **96k vol + 60k surf (1.6:1) proportional sampling is the right approach** for volume point scaling. Pure 96k vol (#912) caused gradient starvation. Proportional sampling being tested on 6L (#951).
+4. **96k vol + 60k surf (1.6:1) proportional sampling is the right approach** for volume point scaling. Pure 96k vol (#912) caused gradient starvation. Proportional sampling being tested on 6L (#951). Steps/epoch = 3,719 vs standard 5,493.
 
-5. **EMA warm-start fix is critical.** Tanjiro #944 relaunched with corrected EMA implementation. Original PR #923/#919 never launched; this is the first actual EMA test.
+5. **EMA warm-start fix is critical.** Tanjiro #954 has corrected EMA config (decay=0.999, 1,000-step lookback). PR #944 used wrong decay=0.9999. PR #954 also evaluates both raw and EMA weights at each checkpoint via `--eval-raw-vs-ema` flag.
 
 6. **Extended cosine annealing T_max=60** (frieren #946) is a novel hypothesis: keeping LR higher during the tail epochs (EP40-50) may prevent the model from memorizing the val distribution, targeting the vol_p gap directly.
 
@@ -77,16 +77,16 @@
 
 ## Gate Schedule
 
-| Gate | Threshold |
-|------|-----------|
-| EP5  | ≤7.5% |
-| EP10 | ≤7.2% |
-| EP15 | ≤6.80% |
-| EP20 | ≤6.70% |
-| EP25 | ≤6.65% |
-| EP30 | ≤6.60% |
-| EP35 | ≤6.58% |
-| EP40 | ≤6.55% |
+| Gate | Standard Threshold | Steps (std 5493/ep) | Fern Steps (3719/ep) |
+|------|--------------------|---------------------|----------------------|
+| EP5  | ≤7.5% | ~27,465 | EP7.4 @ ~27,380 |
+| EP10 | ≤7.2% | ~54,930 | EP14.8 @ ~54,760 |
+| EP15 | ≤6.80% | ~82,395 | — |
+| EP20 | ≤6.70% | ~109,860 | — |
+| EP25 | ≤6.65% | ~137,325 | — |
+| EP30 | ≤6.60% | ~164,790 | — |
+| EP35 | ≤6.58% | ~192,255 | — |
+| EP40 | ≤6.55% | ~219,720 | — |
 
 ## Critical Config Constraints
 
@@ -100,6 +100,7 @@
 8. **96k vol points data loader bug**: `_indices()` produced 30.9% empty volume views at 96k. Fixed in nezuko #912 relaunch — must verify fix is present in any new 96k run.
 9. **Proportional sampling (96k vol + 60k surf) uses STANDARD lr=1e-4**: The prior `lr=5e-5` recommendation was for 5L runs. 6L backbone (#951) uses default lr=1e-4.
 10. **Kill threshold operator is `<`**: NOT `>`. PR #945 had operator bug causing inverted logic.
+11. **EMA decay=0.999 (NOT 0.9999)**: 0.9999 gives ~10,000-step lookback (too slow); 0.999 gives ~1,000-step lookback (appropriate for 50-epoch run at 5,493 steps/epoch).
 
 ## Confirmed Dead Ends (Do Not Retry)
 
@@ -119,12 +120,12 @@
 - GradNorm α=0.25 (multiple PRs): terminal test regression
 - GradNorm α=0.75 (PR #874): catastrophic instability at EP16
 
-## Pending Decisions / Awaiting Student Actions
+## Pending Actions / Monitor Checklist
 
-1. **Nezuko #939** (`yfitnqia`): EP10 gate ≤7.2% IMMINENT (~step 54,940). EP8=6.7385% — strong PASS expected. Post gate check comment when step crosses ~54,940.
-2. **Tanjiro #944** (`234rrtoo`): EP5 gate ≤8.0% @ step ~27,380. EP2=10.4125%; convergence slower than nezuko. Uncertain outcome.
-3. **Frieren #946** (`qgkhoapw`): EP5 gate ≤7.5% @ step ~27,465. EP3=7.4654% already below threshold; PASS very likely.
-4. **Fern #951**: No run ID yet. Fern instructed to kill `6wkvxmo3` and launch 6L proportional sampling run. Follow up if no launch confirmation by ~12:00 UTC.
+1. **Frieren #946** (`qgkhoapw`): EP10 gate ≤7.2% @ step ~54,760 IMMINENT. Post gate check when EP10 data arrives. HIGH CONFIDENCE PASS (EP6=7.1198% already below threshold).
+2. **Nezuko #939** (`yfitnqia`): EP15 gate ≤6.80% @ step ~82,395. Currently EP12=6.6361%. HIGH CONFIDENCE PASS.
+3. **Fern #951** (`wd5kgp2n`): EP7.4 kill gate ≤7.5% @ step ~27,380. 🟡 WATCH — EP3=7.7830%; needs 0.28pp drop in ~4.4 fern-epochs. Also: MERGE CONFLICT STILL UNRESOLVED (reminded twice).
+4. **Tanjiro #954**: Waiting for run launch confirmation and W&B run ID. Pod deployed and ready.
 
 ## Potential Next Directions (Not Yet Assigned)
 
@@ -140,4 +141,4 @@
 8. **LR schedule ablation within extended cosine** — If #946 (T_max=60) succeeds, try T_max=40/80 to find sweet spot.
 9. **Lookahead optimizer** — Wraps Lion, adds slow-weight buffer; known to improve generalization on OOD sets. May directly target val→test gap.
 
-_Last updated: 2026-05-10 ~11:00 UTC. Key events since last update: (1) PR #900 (tanjiro WD=0.01) CLOSED — terminal test confirmed vol_p gap persists; WD axis fully exhausted. (2) PR #914 (frieren WD=0.005 5L) CLOSED — terminal val=6.5290% EP41; test not run; direction closed. (3) PR #940 (fern diagnostic 5L balanced sampling) CLOSED — superseded by #951. (4) PR #945 (fern 5L proportional sampling) CLOSED — EP5=9.29% FAIL due to 5L backbone + kill operator bug. (5) PR #944 (tanjiro EMA fix) ACTIVE — EP2=10.4125%, EP5 gate pending. (6) PR #946 (frieren extended cosine T_max=60) ACTIVE — EP3=7.4654%, EP5 gate IMMINENT PASS. (7) PR #951 (fern 6L proportional sampling) ASSIGNED — corrected `<` operator, 6L backbone, no run ID yet. (8) Nezuko #939 EP8=6.7385%, EP10 gate IMMINENT._
+_Last updated: 2026-05-09 ~14:30 UTC. Key events since last update: (1) PR #944 (tanjiro EMA decay=0.9999) CLOSED — wrong config, NOT hypothesis rejection. (2) PR #954 (tanjiro EMA corrected decay=0.999 + eval-raw-vs-ema) CREATED AND ASSIGNED — pod deployed, waiting for run launch. (3) Frieren #946 EP6=7.1198% (EP5 ✅ PASS, EP10 HIGH CONFIDENCE PASS). (4) Nezuko #939 EP12=6.6361% (EP10 ✅ PASS confirmed 6.7028%, EP15 high confidence PASS). (5) Fern #951 run_id=`wd5kgp2n` EP3=7.7830% (🟡 WATCH for EP7.4 gate). ADVISOR gate-check comments posted on all 4 PRs._
