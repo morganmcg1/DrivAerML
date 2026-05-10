@@ -1,0 +1,1 @@
+Askeladd STRING sigma bracket sweep experiment\nArm A: sigma=0.125,0.25,0.5,1.0,2.0 (fine-shift)\nArm B: sigma=0.5,1.0,2.0,4.0,8.0 (coarse-shift)\n
