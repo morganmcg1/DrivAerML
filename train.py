@@ -138,6 +138,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    geometric_mixup_alpha: float = 0.0
+    geometric_mixup_p: float = 0.5
     debug: bool = False
 
 
@@ -229,6 +231,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "geometric_mixup_alpha": (
+            "Geometric mixup augmentation strength (PR #921). When > 0, "
+            "for each training batch element with probability "
+            "--geometric-mixup-p, a second batch element is sampled and "
+            "lambda ~ Beta(alpha, alpha) is drawn (with lambda = "
+            "max(lambda, 1-lambda) so the primary geometry dominates). "
+            "Surface coords/normals/area, volume coords/sdf, and ALL "
+            "targets (cp, wall_shear xyz, volume_pressure) are linearly "
+            "interpolated index-wise. Surface normals are renormalised "
+            "post-mix. Mixing applies only at training; eval/test "
+            "untouched. 0.0 disables (default)."
+        ),
+        "geometric_mixup_p": (
+            "Per-element Bernoulli probability of applying geometric "
+            "mixup (PR #921). Only used when --geometric-mixup-alpha > 0. "
+            "Default 0.5 = each batch element has 50% chance of being "
+            "mixed with a partner."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -241,6 +261,104 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+def apply_geometric_mixup(batch, alpha: float, p: float = 0.5) -> tuple[object, dict[str, float]]:
+    """Geometric mixup augmentation for SurfaceBatch (PR #921).
+
+    For each batch element, with probability ``p``, a partner element is
+    chosen from the same batch (always different from self when B>=2) and
+    ``lambda ~ Beta(alpha, alpha)`` is drawn (then ``lambda = max(lambda,
+    1 - lambda)`` so the primary geometry dominates). Surface coords +
+    normals + area, volume coords + sdf, and ALL targets are linearly
+    interpolated index-wise; surface normals are renormalised post-mix.
+    The output mask is the primary's mask, with effective lambda = 1
+    at positions where the partner has padding (so the primary is
+    preserved unmodified there).
+    """
+    from data.loader import SurfaceBatch
+
+    metrics = {
+        "train/geometric_mixup/alpha": float(alpha),
+        "train/geometric_mixup/fraction_mixed": 0.0,
+        "train/geometric_mixup/lambda_mean": 1.0,
+    }
+    if alpha <= 0.0:
+        return batch, metrics
+    B = batch.surface_x.shape[0]
+    if B < 2:
+        return batch, metrics
+
+    device = batch.surface_x.device
+    dtype = batch.surface_x.dtype
+
+    do_mix = torch.rand(B, device=device) < float(p)
+
+    perm = torch.randperm(B, device=device)
+    self_idx = torch.arange(B, device=device)
+    same = perm == self_idx
+    if bool(same.any().item()):
+        perm = torch.where(same, (perm + 1) % B, perm)
+
+    lam = torch.distributions.Beta(float(alpha), float(alpha)).sample((B,)).to(device=device)
+    lam = torch.maximum(lam, 1.0 - lam)
+    lam = torch.where(do_mix, lam, torch.ones_like(lam))
+
+    pa_surface_x = batch.surface_x[perm]
+    pa_surface_y = batch.surface_y[perm]
+    pa_volume_x = batch.volume_x[perm]
+    pa_volume_y = batch.volume_y[perm]
+    pa_surface_mask = batch.surface_mask[perm]
+    pa_volume_mask = batch.volume_mask[perm]
+
+    surface_pos_mix = batch.surface_mask & pa_surface_mask  # only mix where both valid
+    volume_pos_mix = batch.volume_mask & pa_volume_mask
+
+    surface_eff_lam = torch.where(
+        surface_pos_mix,
+        lam.view(B, 1).expand_as(surface_pos_mix).to(dtype),
+        torch.ones_like(surface_pos_mix, dtype=dtype),
+    ).unsqueeze(-1)
+    volume_eff_lam = torch.where(
+        volume_pos_mix,
+        lam.view(B, 1).expand_as(volume_pos_mix).to(dtype),
+        torch.ones_like(volume_pos_mix, dtype=dtype),
+    ).unsqueeze(-1)
+
+    surface_x_mix = surface_eff_lam * batch.surface_x + (1.0 - surface_eff_lam) * pa_surface_x
+    surface_y_mix = surface_eff_lam * batch.surface_y + (1.0 - surface_eff_lam) * pa_surface_y
+    volume_x_mix = volume_eff_lam * batch.volume_x + (1.0 - volume_eff_lam) * pa_volume_x
+    volume_y_mix = volume_eff_lam * batch.volume_y + (1.0 - volume_eff_lam) * pa_volume_y
+
+    # Renormalise surface normals (channels 3:6) — lerp of unit vectors is non-unit.
+    normals_mix = surface_x_mix[..., 3:6]
+    normal_norm = torch.linalg.norm(normals_mix, dim=-1, keepdim=True).clamp(min=1e-6)
+    surface_x_mix = torch.cat(
+        [
+            surface_x_mix[..., 0:3],
+            normals_mix / normal_norm,
+            surface_x_mix[..., 6:7],
+        ],
+        dim=-1,
+    )
+
+    n_mixed = float(do_mix.sum().item())
+    metrics["train/geometric_mixup/fraction_mixed"] = n_mixed / float(B)
+    metrics["train/geometric_mixup/lambda_mean"] = (
+        float(lam[do_mix].mean().item()) if n_mixed > 0 else 1.0
+    )
+
+    mixed = SurfaceBatch(
+        case_ids=list(batch.case_ids),
+        surface_x=surface_x_mix,
+        surface_y=surface_y_mix,
+        surface_mask=batch.surface_mask,
+        volume_x=volume_x_mix,
+        volume_y=volume_y_mix,
+        volume_mask=batch.volume_mask,
+        metadata=list(batch.metadata),
+    )
+    return mixed, metrics
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -936,6 +1054,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                mixup_metrics: dict[str, float] = {}
+                if config.geometric_mixup_alpha > 0.0:
+                    batch = batch.to(device)
+                    batch, mixup_metrics = apply_geometric_mixup(
+                        batch,
+                        alpha=config.geometric_mixup_alpha,
+                        p=config.geometric_mixup_p,
+                    )
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1072,6 +1198,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if mixup_metrics:
+                    train_log.update(mixup_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
