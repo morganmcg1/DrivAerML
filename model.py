@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_slice_centroid_string: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,12 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_slice_centroid_string = use_slice_centroid_string
+        if use_slice_centroid_string and pos_encoding_mode != "string_separable":
+            raise ValueError(
+                "use_slice_centroid_string requires --pos-encoding-mode string_separable"
+            )
+        self.slice_num = slice_num
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -397,6 +404,26 @@ class SurfaceTransolver(nn.Module):
                 self.surface_rff = None
                 self.volume_rff = None
                 rff_out_dim = 0
+
+        # Slice-centroid local-coordinate STRING (PR #955). A small input-level
+        # slice router maps the absolute coord embedding to soft slice
+        # assignments; the per-slice centroid is the weighted mean of absolute
+        # coords; each point's centroid is the soft mixture of slice centroids
+        # weighted by the point's slice-assignment probability. STRING-sep is
+        # then evaluated on (coord - centroid_per_point) instead of the raw
+        # coord. The router weight is zero-initialised so at step 0 all
+        # softmax outputs are uniform, every point's centroid equals the
+        # per-batch global mean, and STRING sees a constant translation of
+        # the absolute coord (which is just a learnable phase shift in the
+        # STRING sin/cos basis -- effectively identity at init).
+        if use_slice_centroid_string:
+            self.surface_slice_router = nn.Linear(n_hidden, slice_num, bias=False)
+            self.volume_slice_router = nn.Linear(n_hidden, slice_num, bias=False)
+            nn.init.zeros_(self.surface_slice_router.weight)
+            nn.init.zeros_(self.volume_slice_router.weight)
+        else:
+            self.surface_slice_router = None
+            self.volume_slice_router = None
 
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
@@ -450,17 +477,41 @@ class SurfaceTransolver(nn.Module):
         *,
         rff: nn.Module | None,
         string_sep: nn.Module | None,
+        slice_router: nn.Module | None,
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
+        if string_sep is not None and slice_router is not None:
+            # Use the absolute coord embedding to predict soft slice
+            # assignments, derive a per-point centroid, and feed
+            # (coord - centroid) into STRING-sep instead of the raw coord.
+            slice_logits = slice_router(hidden)  # [B, N, S]
+            slice_weights = F.softmax(slice_logits, dim=-1)  # softmax over slices
+            if mask is not None:
+                slice_weights = slice_weights * mask.unsqueeze(-1).to(
+                    device=slice_weights.device, dtype=slice_weights.dtype
+                )
+            # Per-slice centroid = weighted mean of pos within each slice
+            # (only valid points contribute when masked).
+            slice_norm = slice_weights.sum(dim=1).unsqueeze(-1)  # [B, S, 1]
+            centroids = torch.einsum("bns,bnd->bsd", slice_weights, pos) / (
+                slice_norm + 1e-6
+            )  # [B, S, 3]
+            # Per-point centroid = soft mixture of slice centroids
+            # weighted by the point's slice-assignment probability.
+            centroid_per_point = torch.einsum("bns,bsd->bnd", slice_weights, centroids)  # [B, N, 3]
+            string_input = pos - centroid_per_point
+        else:
+            string_input = pos
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
         if string_sep is not None:
-            feature_parts.append(string_sep(pos))
+            feature_parts.append(string_sep(string_input))
         elif rff is not None:
             feature_parts.append(rff(pos))
         if project_features is not None and feature_parts:
@@ -497,9 +548,11 @@ class SurfaceTransolver(nn.Module):
                     surface_x,
                     rff=self.surface_rff,
                     string_sep=self.surface_string_sep,
+                    slice_router=self.surface_slice_router,
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
+                    mask=surface_mask,
                 )
             )
             masks.append(surface_mask)
@@ -511,9 +564,11 @@ class SurfaceTransolver(nn.Module):
                     volume_x,
                     rff=self.volume_rff,
                     string_sep=self.volume_string_sep,
+                    slice_router=self.volume_slice_router,
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
+                    mask=volume_mask,
                 )
             )
             masks.append(volume_mask)

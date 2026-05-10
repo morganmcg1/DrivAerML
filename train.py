@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_slice_centroid_string: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_slice_centroid_string": (
+            "Enable slice-centroid local-coordinate STRING-sep encoding "
+            "(PR #955). An input-level slice router predicts soft slice "
+            "assignments from the absolute coord embedding; per-slice "
+            "centroids are weighted means of the absolute coords; per-point "
+            "centroids are soft mixtures of slice centroids. STRING-sep is "
+            "then evaluated on (coord - centroid_per_point) instead of the "
+            "raw coord. The router weight is zero-initialised so at step 0 "
+            "centroids equal the per-batch global mean and the encoding is "
+            "an identity-equivalent translation of the absolute coord. "
+            "Requires --pos-encoding-mode string_separable."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_slice_centroid_string=config.use_slice_centroid_string,
     )
 
 
