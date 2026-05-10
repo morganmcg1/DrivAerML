@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-10 ~03:00 UTC
+- 2026-05-10 ~06:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -19,25 +19,26 @@
 | vol_p | 10.7580% |
 | wall_shear | 7.0610% |
 
-**Val wave leader:** frieren #914 EP24 abupt=**6.5958%**, vol_p=4.1761% (val only — test not yet run)
+**Val wave leader:** frieren #914 EP26 abupt=**6.5932%**, vol_p=4.2099% (val only — test not yet run)
 
 **Central unsolved problem:** val vol_p ≈ 4.0–4.3%, test vol_p ≈ 11% — systematic +7pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
 
 **Vol-loss-weighting direction CLOSED:** Both PR #911 (GradNorm+static weight=no-op) and PR #936 (no-GradNorm+static weight=harmful) failed. The val→test gap is NOT a training-time loss signal problem. It is almost certainly a covariate shift / data distribution problem.
 
-## Active Experiments (2026-05-10 ~03:00 UTC)
+## Active Experiments (2026-05-10 ~06:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #900 | dl24-tanjiro | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | `os6v64lq` | Running, EP29 complete, EP30 imminent | abupt=6.6065% (EP27 best); EP28=6.6231%, EP29=6.6252% regression | EP30 gate ≤6.60% NOT expected; test eval on EP27 checkpoint pending |
-| #914 | dl24-frieren | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | `wdxtdmhy` | Running EP24+; step=133,638 | abupt=**6.5958%** (EP24, val wave leader ⭐), vol_p=4.1761% | EP21-EP23 oscillation was transient; EP24 broke through cleanly; EP25 gate imminent |
-| #938 | dl24-fern | 5L + balanced 96k vol + 60k surface + WD=0.005 + GradNorm α=0.5 + Y-sym | `md3vhhd8` | Running, EP1=36.43% (normal early training); step=4,751 | EP5 gate ≤7.5% expected ~03:00Z | Watch surf_p — gradient starvation risk; PR #912 warning: surf_p +3.65pp without proportional surface |
-| #939 | dl24-nezuko | 6L + GradNorm α=0.5 + WD=0.005 + Y-sym (6L×WD cross) | TBD | Assigned, not yet started | — | Cross-product of tanjiro #900 (6L) and frieren #914 (WD=0.005); untested quadrant |
+| #900 | dl24-tanjiro | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | `os6v64lq` | **EP30 GATE MISS** (abupt=6.6135% > 6.60%); test eval on EP27 checkpoint PENDING | abupt=6.6065% (EP27 best); EP28-29-30 regression | Gate miss comment posted. Tanjiro directed to run test eval on EP27 checkpoint (step 148,337: abupt=6.6065%, vol_p=4.2423%, surf_p=4.3094%, wall=7.3713%) AND EP19 backup. |
+| #914 | dl24-frieren | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | `wdxtdmhy` | Running EP26+; wave val leader | abupt=**6.5932%** (EP26, wave val leader ⭐), vol_p=4.2099% | EP35 gate (≤6.58%) imminent; need −0.0132pp more from EP27+ |
+| #939 | dl24-nezuko | 6L + GradNorm α=0.5 + WD=0.005 + Y-sym (6L×WD cross) | `yfitnqia` | Running; step=3,874 (~EP0.7), EP1 sanity pending | No val yet (pre-EP1) | EP1 gate ≤30%; config: 6L STRING, GradNorm, WD=0.005, Y-sym, 40k surf/65k vol |
+| #940 | dl24-fern | Balanced 96k vol + 60k surf + lr=5e-5 + warmup=1000 (diagnostic for #938 failure) | TBD | Just assigned; not yet started | — | If EP5 clears ≤7.5%: LR scaling is root cause of #938 failure. If EP5 fails again: balanced sampling is fundamentally broken. EP1 train_loss diagnostic: should be < 1.0 if LR fix works (vs 1.567 in #938). |
 
 ## Key Closed/Falsified Hypotheses This Wave
 
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
+| #938 | 5L + balanced 96k vol + 60k surf + lr=1e-4 (default) | **KILLED EP5=15.22%** (gate ≤7.5%). EP1 train_loss=1.567 (3.7× frieren's 0.427) | Balanced sampling puts GradNorm+Lion in different gradient regime at default lr; must halve lr to 5e-5 |
 | #936 | vol-loss-weight=2.0 NO GradNorm | EP5 FAIL abupt=9.010% (+1.51pp), vol_p=5.691% WORSE than frieren | Static vol upweight without GradNorm actively harms; direction fully closed |
 | #911 | vol-loss-weight=2.0 WITH GradNorm | EP3 FAIL (GradNorm self-cancels static weight) | Static vol upweight + GradNorm is a no-op; must choose one |
 | #912 | 96k vol pts alone | EP3=11.8122% SEVERE FAIL (surf_p +3.65pp) | Vol/surface sampling must be proportional; 1.6:1 ratio needed |
@@ -58,11 +59,13 @@
 
 3. **Vol-loss-weighting direction FULLY EXHAUSTED.** PR #911 (with GradNorm = no-op) + PR #936 (without GradNorm = actively harmful). Static upweighting of vol_p loss does not close the val→test gap. The gap is a covariate shift / data distribution problem, NOT a loss signal problem.
 
-4. **96k vol points: vol_p benefit is real but requires proportional surface scaling.** PR #912 confirmed vol_p −0.35pp at EP3, but surf_p/wall regressed +3.65pp/+5.53pp due to gradient starvation. Fix is 96k vol + 60k surface (1.6:1 ratio) — now being tested in PR #938.
+4. **96k vol points: vol_p benefit is real but requires proportional surface scaling.** PR #912 confirmed vol_p −0.35pp at EP3, but surf_p/wall regressed +3.65pp/+5.53pp due to gradient starvation. Fix is 96k vol + 60k surface (1.6:1 ratio) — now being tested in PR #940 with corrected LR.
 
-5. **EP9 transient spike:** WD=0.01 (tanjiro) had +0.744pp spike; WD=0.005 (frieren) had zero spike. The spike origin is likely an LR schedule inflection point interacting with weight decay magnitude.
+5. **Balanced sampling requires reduced lr.** PR #938 trained at 1e-4 (default): EP1 train_loss=1.567 (3.7× frieren's 0.427); EP5=15.22% >> 7.5% gate. Root cause: more diverse/harder vol points in 96k set puts GradNorm in a higher-loss regime, making the standard LR too aggressive for the Lion optimizer. Diagnostic PR #940 uses lr=5e-5 + warmup=1000 steps to compensate.
 
-6. **Frieren EP24 oscillation resolved.** EP21-EP23 showed a +0.015pp micro-uptick before EP24 broke through to new run best 6.5958%. Transient oscillations do NOT indicate plateau.
+6. **EP9 transient spike:** WD=0.01 (tanjiro) had +0.744pp spike; WD=0.005 (frieren) had zero spike. The spike origin is likely an LR schedule inflection point interacting with weight decay magnitude.
+
+7. **Tanjiro EP30 gate miss:** EP27=6.6065% was the best checkpoint; EP28-EP30 showed regression. EP30 abupt=6.6135% > 6.60% gate. Training should not be extended. Test eval on EP27 checkpoint (step 148,337) + EP19 backup will provide the first WD=0.01 test data point for vol_p gap analysis.
 
 ## Gate Schedule
 
@@ -86,6 +89,7 @@
 5. **`--volume-loss-weight` BUG**: When `--use-gradnorm` is active, `--volume-loss-weight` is a no-op. Must use either: (a) disable GradNorm and use static weight, OR (b) apply fix from #911 branch.
 6. **`--model-pe string_multisigma` REQUIRED when using STRING PE**: omitting causes `--pe-init-sigmas` to be silently ignored.
 7. **96k vol points data loader bug**: `_indices()` produced 30.9% empty volume views at 96k. Fixed in nezuko #912 relaunch — must verify fix is present in any new 96k run.
+8. **Balanced 96k+60k sampling requires lr=5e-5 (not default 1e-4)**: Default LR causes EP1 train_loss ~1.5 (3.7× normal), catastrophic divergence. Always use `--lr 5e-5 --lr-warmup-steps 1000` with balanced sampling configs.
 
 ## Confirmed Dead Ends (Do Not Retry)
 
@@ -95,12 +99,20 @@
 - vol-loss-weight=2.0 WITH GradNorm: self-cancelling (PR #911)
 - vol-loss-weight=2.0 WITHOUT GradNorm: actively harmful, EP5=9.010% (PR #936)
 - 96k vol points without proportional surface increase: gradient starvation (PR #912)
+- 96k+60k balanced sampling with default lr=1e-4: catastrophic divergence EP5=15.22% (PR #938)
 - QK-Norm: consistent failures (multiple PRs)
 - Y-sym p=1.0: over-augmentation (PR #866)
 - 7-octave STRING PE (PR #843): σ=16.0 destabilization
 - 6-octave STRING PE (PR #818): does not beat 5-octave
 - GradNorm α=0.25 (multiple PRs): terminal test regression
 - GradNorm α=0.75 (PR #874): catastrophic instability at EP16
+
+## Pending Decisions / Awaiting Student Actions
+
+1. **Tanjiro #900**: Test eval on EP27 (step 148,337) + EP19 checkpoint — must produce terminal SENPAI-RESULT. This is the first WD=0.01 test data point for the vol_p gap analysis (Issue #882 directive).
+2. **Frieren #914**: EP35 gate (≤6.58%) — currently at EP26=6.5932%, needs −0.0132pp more. Monitor for student comments.
+3. **Nezuko #939**: EP1 sanity check (≤30%) then standard gate progression. Run `yfitnqia`.
+4. **Fern #940**: EP1 train_loss diagnostic (should be < 1.0 to confirm LR fix) then EP5 gate (≤7.5%).
 
 ## Potential Next Directions (After Current Wave Completes)
 
@@ -115,4 +127,4 @@
 8. **3D volumetric attention** — replace volume MLP head with spatially-aware attention (radical architecture change)
 9. **LR schedule ablation** — cosine vs linear decay: does cosine annealing favor val at expense of test generalization?
 
-_Last updated: 2026-05-10 ~03:00 UTC. Key events since last update: (1) PR #936 (nezuko vol-loss-weight=2.0 no-GradNorm) FALSIFIED — EP5=9.010% gate miss, vol_p=5.691% WORSE than baseline, auto-killed and CLOSED. (2) Vol-loss-weighting direction now FULLY CLOSED (both #911 and #936 failed). (3) PR #914 (frieren) new run best EP24=6.5958% — beats EP19 by 0.0098pp, wave val leader confirmed. (4) PR #900 (tanjiro) EP27=6.6065% best, EP28-29 regression; EP30 imminent, unlikely to gate at ≤6.60%. (5) PR #938 (fern) launched, run md3vhhd8, EP1=36.4%, EP5 expected ~03:00Z. (6) PR #939 (nezuko) assigned: 6L + WD=0.005 + GradNorm α=0.5 + Y-sym — untested cross-product of tanjiro's 6L depth and frieren's WD=0.005 regularization._
+_Last updated: 2026-05-10 ~06:00 UTC. Key events since last update: (1) PR #900 (tanjiro) EP30 GATE MISS — abupt=6.6135% > 6.60%; gate miss comment posted; tanjiro directed to run test eval on EP27 best checkpoint (step 148,337: 6.6065%). (2) PR #914 (frieren) EP26 new run best abupt=6.5932%, wave val leader; EP35 gate imminent. (3) PR #938 (fern) KILLED EP5=15.22% — catastrophic divergence; root cause: default lr=1e-4 too aggressive for balanced 96k+60k sampling regime. (4) PR #940 (fern) NEWLY ASSIGNED — same balanced 96k+60k config but lr=5e-5 + warmup=1000 + 6L model; diagnostic to confirm whether LR scaling fixes convergence. (5) PR #939 (nezuko) run yfitnqia, step=3,874 at last check (~EP0.7), EP1 val pending._
