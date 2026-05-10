@@ -103,6 +103,10 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_sdf_film_vol_conditioning: bool = False
+    sdf_film_mean: float = 0.228
+    sdf_film_std: float = 1.634
+    sdf_film_mlp_hidden: int = 64
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +233,32 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_film_vol_conditioning": (
+            "Enable SDF-FiLM vol-token conditioning (PR #967, Perez et al. "
+            "2018). A shared 2-layer MLP "
+            "(Linear(1, sdf_film_mlp_hidden) -> SiLU -> "
+            "Linear(sdf_film_mlp_hidden, 2 * model_hidden_dim)) maps the "
+            "normalised SDF scalar to per-point (gamma, beta) and "
+            "modulates volume token hidden states after each backbone "
+            "block via the residual form h_vol <- (1 + gamma) * h_vol + "
+            "beta. Surface tokens are unchanged. The MLP final linear is "
+            "zero-initialised (weight and bias) so the layer is identity "
+            "at step 0 (preserves the well-tuned baseline at epoch 0)."
+        ),
+        "sdf_film_mean": (
+            "Empirical SDF mean used to normalise the FiLM input "
+            "(sdf_norm = (sdf - mean) / std). Default 0.228 was "
+            "estimated from 30 random train cases (1.5M points)."
+        ),
+        "sdf_film_std": (
+            "Empirical SDF std used to normalise the FiLM input "
+            "(sdf_norm = (sdf - mean) / std). Default 1.634 was "
+            "estimated from 30 random train cases (1.5M points)."
+        ),
+        "sdf_film_mlp_hidden": (
+            "Hidden width of the FiLM MLP (Linear(1, H) -> SiLU -> "
+            "Linear(H, 2 * model_hidden_dim)). Default 64."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +338,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_sdf_film_vol_conditioning=config.use_sdf_film_vol_conditioning,
+        sdf_film_mean=config.sdf_film_mean,
+        sdf_film_std=config.sdf_film_std,
+        sdf_film_mlp_hidden=config.sdf_film_mlp_hidden,
     )
 
 
@@ -852,6 +886,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.use_sdf_film_vol_conditioning:
+                print(
+                    f"SDF-FiLM vol conditioning: ENABLED "
+                    f"mean={config.sdf_film_mean} std={config.sdf_film_std} "
+                    f"mlp_hidden={config.sdf_film_mlp_hidden} "
+                    f"shared MLP across all {config.model_layers} backbone layers, "
+                    f"residual form h <- (1+gamma)*h + beta, last linear zero-init"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +925,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["sdf_film/enabled"] = bool(config.use_sdf_film_vol_conditioning)
+            if config.use_sdf_film_vol_conditioning:
+                wandb.summary["sdf_film/mean"] = config.sdf_film_mean
+                wandb.summary["sdf_film/std"] = config.sdf_film_std
+                wandb.summary["sdf_film/mlp_hidden"] = config.sdf_film_mlp_hidden
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1070,6 +1117,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                if config.use_sdf_film_vol_conditioning:
+                    gamma_stat = getattr(base_model, "_last_film_gamma_abs_mean", None)
+                    beta_stat = getattr(base_model, "_last_film_beta_abs_mean", None)
+                    if gamma_stat is not None:
+                        train_log["train/sdf_film/gamma_abs_mean"] = float(
+                            gamma_stat.detach().cpu().item()
+                        )
+                    if beta_stat is not None:
+                        train_log["train/sdf_film/beta_abs_mean"] = float(
+                            beta_stat.detach().cpu().item()
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

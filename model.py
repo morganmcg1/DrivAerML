@@ -320,6 +320,35 @@ class Transformer(nn.Module):
         return x
 
 
+class SDFFilm(nn.Module):
+    """SDF-conditioned FiLM (Perez et al. 2018) for vol-token modulation.
+
+    Computes per-point ``(gamma, beta)`` from a normalised SDF scalar via a
+    2-layer MLP. Applied as a residual gate ``h <- (1 + gamma) * h + beta``,
+    so the layer is identity when ``gamma=0, beta=0``. The final linear is
+    zero-initialised (weight and bias) so the conditioning is identity at
+    step 0 and grows in only as gradient signal supports it (a safe init
+    that preserves the well-tuned baseline behaviour at epoch 0).
+    """
+
+    def __init__(self, hidden_dim: int, mlp_hidden: int = 64):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.linear1 = nn.Linear(1, mlp_hidden)
+        self.act = nn.SiLU()
+        self.linear2 = nn.Linear(mlp_hidden, 2 * hidden_dim)
+        nn.init.trunc_normal_(self.linear1.weight, std=0.02)
+        nn.init.zeros_(self.linear1.bias)
+        nn.init.zeros_(self.linear2.weight)
+        nn.init.zeros_(self.linear2.bias)
+
+    def forward(self, sdf_norm: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # sdf_norm: [B, N_vol] (broadcasted to [B, N_vol, 1] internally).
+        film = self.linear2(self.act(self.linear1(sdf_norm.unsqueeze(-1))))
+        gamma, beta = film.chunk(2, dim=-1)
+        return gamma, beta
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +372,10 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_sdf_film_vol_conditioning: bool = False,
+        sdf_film_mean: float = 0.228,
+        sdf_film_std: float = 1.634,
+        sdf_film_mlp_hidden: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +389,9 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_sdf_film_vol_conditioning = bool(use_sdf_film_vol_conditioning)
+        self.sdf_film_mean = float(sdf_film_mean)
+        self.sdf_film_std = float(sdf_film_std)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +480,16 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # SDF-FiLM vol-token conditioning (PR #967): a single shared MLP
+        # computes per-point (gamma, beta) from the normalised SDF and
+        # modulates vol-token hidden states after each backbone block via
+        # the residual form ``h <- (1 + gamma) * h + beta``. Zero-init last
+        # linear keeps the model identical to the baseline at step 0.
+        if self.use_sdf_film_vol_conditioning:
+            self.sdf_film = SDFFilm(hidden_dim=n_hidden, mlp_hidden=int(sdf_film_mlp_hidden))
+        else:
+            self.sdf_film = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -520,7 +566,56 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        film_active = (
+            self.use_sdf_film_vol_conditioning
+            and self.sdf_film is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        )
+        if film_active:
+            # Precompute the normalised SDF used for FiLM conditioning. SDF
+            # column lives at index 3 of volume_x (xyz, sdf). Normalise to
+            # zero-mean / unit-var using empirical train statistics so the
+            # conditioning input has a well-scaled distribution regardless
+            # of dataset-specific units.
+            vol_sdf = volume_x[:, :, 3].to(dtype=hidden.dtype)
+            sdf_norm = (vol_sdf - self.sdf_film_mean) / self.sdf_film_std
+            vol_start = surface_tokens
+            vol_end = surface_tokens + volume_tokens
+            vol_mask = attn_mask[:, vol_start:vol_end]
+            film_gamma_abs_means: list[torch.Tensor] = []
+            film_beta_abs_means: list[torch.Tensor] = []
+            for block in self.backbone.blocks:
+                hidden = block(hidden, attn_mask=attn_mask)
+                h_vol = hidden[:, vol_start:vol_end]
+                gamma, beta = self.sdf_film(sdf_norm)
+                h_vol_modulated = (1.0 + gamma) * h_vol + beta
+                h_vol_modulated = _apply_token_mask(h_vol_modulated, vol_mask)
+                if surface_tokens > 0:
+                    hidden = torch.cat([hidden[:, :vol_start], h_vol_modulated], dim=1)
+                else:
+                    hidden = h_vol_modulated
+                if self.training:
+                    with torch.no_grad():
+                        m = vol_mask.unsqueeze(-1).to(dtype=gamma.dtype)
+                        denom = m.sum().clamp_min(1.0) * gamma.shape[-1]
+                        film_gamma_abs_means.append((gamma.abs() * m).sum() / denom)
+                        film_beta_abs_means.append((beta.abs() * m).sum() / denom)
+            self._last_film_gamma_abs_mean = (
+                torch.stack(film_gamma_abs_means).mean()
+                if film_gamma_abs_means
+                else None
+            )
+            self._last_film_beta_abs_mean = (
+                torch.stack(film_beta_abs_means).mean()
+                if film_beta_abs_means
+                else None
+            )
+        else:
+            hidden = self.backbone(hidden, attn_mask=attn_mask)
+            self._last_film_gamma_abs_mean = None
+            self._last_film_beta_abs_mean = None
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
