@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 23:50 — Round 24 close-out. PR #925 alphonse rotation-aug NEGATIVE (EP3=9.1064%). Assigning alphonse milder rotation aug follow-up. 7→8 active students.
+- **Date:** 2026-05-10 00:05 — Round 24 close-out. PR #925 alphonse rotation-aug NEGATIVE (EP3=9.1064%). PR #937 alphonse mild yaw-only-rotation-aug ASSIGNED. All 8 students active.
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -38,7 +38,7 @@
 |---|---|---|---|---|
 | edward | #929 | **NEW:** Pre-xattn vol self-attention — single MHA block on vol tokens immediately BEFORE surf→vol xattn. Allows vol tokens to build spatial-neighborhood context before forming xattn queries. Symmetric counter to closed post-xattn 0-for-3 pattern. 4-ep screen with `--lr-cosine-t-max 4`. | `edward/pre-xattn-vol-self-attn` | Assigned |
 | nezuko | #928 | TTA y-mirror inference ensemble on SOTA checkpoint `ghh0s4ne`. Pure inference-side intervention — negate y-coord + n_y + un-mirror tau_y, average predictions. No training required. Key signal: val→test vol_p ratio change vs 3.027× baseline. | `nezuko/tta-y-mirror-sota` | Assigned |
-| alphonse | **#930** | **NEW:** Mild yaw-only rotation aug — yaw±3°, pitch=0°, p=0.3. Follow-up to #925 (yaw±5°/pitch±3°/p=0.5 failed EP3 gate at 9.11%). Yaw-only removes wall_shear vector-rotation complexity; p=0.3 reduces entropy cost. 4-ep screen. | `alphonse/mild-yaw-only-rotation-aug` | Assigning |
+| alphonse | **#937** | **NEW:** Mild yaw-only rotation aug — yaw±3°, pitch=0°, p=0.3. Follow-up to #925 (yaw±5°/pitch±3°/p=0.5 failed EP3 gate at 9.11%). Yaw-only removes wall_shear vector-rotation complexity; p=0.3 reduces entropy cost. 4-ep screen. | `alphonse/mild-yaw-only-rotation-aug` | Assigned |
 | askeladd | #926 | Vol geo features: centroid+bbox dist scalar features appended to vol_x. Gives vol tokens car-level geometry context (global bounding box distance). 4-ep screen. | `askeladd/vol-geo-features-centroid-bbox` | Assigned |
 | frieren | #927 | Surface cp k-NN Laplacian smoothness aux loss (λ=0.05, k=8): penalise spatially abrupt cp predictions between surface neighbors. Physical constraint: cp must be continuous. | `frieren/surface-cp-laplacian-aux-loss` | Assigned |
 | thorfinn | #921 | Geometric mixup: interpolate between training car geometries (weighted avg of surface + vol point clouds + targets) at train time. Arm A α_param=0.5, Arm B α_param=0.3 on 4 GPUs each. | `thorfinn/geometric-mixup-aug` | Assigned |
@@ -79,7 +79,7 @@ Building on the finding that the 4 OOD test cases account for 92% of squared vol
 
 - **Y-mirror aug** (#901 fern, Arm C running): 50% stochastic y-flip. EP1 PASS 27.43%. Best EP1 of any mirror-aug arm. Physical symmetry prior.
 - **Rotation aug aggressive (#925, CLOSED NEGATIVE)**: yaw±5°/pitch±3°/p=0.5 — EP3=9.11%, wsh=10.14% drag. Too aggressive for 4-ep budget.
-- **Mild yaw-only rotation aug** (#930 alphonse, ASSIGNING): yaw±3°/pitch=0/p=0.3. Targeted follow-up: removes wall_shear rotation complexity, lower entropy cost.
+- **Mild yaw-only rotation aug** (#937 alphonse, ASSIGNED): yaw±3°/pitch=0/p=0.3. Targeted follow-up: removes wall_shear rotation complexity, lower entropy cost.
 - **Geometric mixup** (#921 thorfinn, ASSIGNED): interpolate between training car geometries. Creates virtual training examples between training distribution and OOD region.
 - **TTA y-mirror** (#928 nezuko, ASSIGNED): inference-only, no retraining. Upper bound on what train-time aug can achieve.
 
