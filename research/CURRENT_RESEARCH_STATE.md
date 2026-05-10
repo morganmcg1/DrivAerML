@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-09 ~14:30 UTC
+- 2026-05-09 ~18:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -19,59 +19,51 @@
 | vol_p | 10.7580% |
 | wall_shear | 7.0610% |
 
-**Val wave leader:** nezuko #939 EP12 abupt=**6.6361%**, vol_p≈4.2% (val only — test not yet run)
+**Val wave leader:** nezuko #939 EP20 abupt=**6.5829%**, vol_p≈4.3% (val only — test not yet run)
 
-**Central unsolved problem:** val vol_p ≈ 4.0–4.5%, test vol_p ≈ 11% — systematic +7pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
+**Central unsolved problem:** val vol_p ≈ 4.0–4.5%, test vol_p ≈ 10.7–11% — systematic +7pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
 
-**Weight decay axis FULLY EXPLORED AND CLOSED:** Both WD=0.01 (#900 tanjiro, test_vol_p=~11%) and WD=0.005 (#914 frieren, test not run but val convergence matched WD=0.01 curve) failed to close the val→test gap. WD is a necessary regularizer (no WD = EP9 overfit) but does not solve the distribution gap problem.
+**Weight decay axis FULLY EXPLORED AND CLOSED:** Both WD=0.01 (#900 tanjiro) and WD=0.005 (#914 frieren) failed to close the val→test gap.
 
-**Vol-loss-weighting direction CLOSED:** Both PR #911 (GradNorm+static weight=no-op) and PR #936 (no-GradNorm+static weight=harmful) failed. The val→test gap is NOT a training-time loss signal problem.
+**Vol-loss-weighting direction PREVIOUSLY CLOSED (static weight):** PR #911 (GradNorm+static weight=no-op) + PR #936 (no-GradNorm+static weight=harmful). However, PR #964 is now testing vol_loss_weight=3.0 WITHOUT GradNorm as a fresh baseline — the prior run (#936) used weight=2.0. This is a genuinely different operating point.
 
-## Active Experiments (2026-05-09 ~16:00 UTC)
+**EMA AXIS CLOSED:** PR #954 (EMA decay=0.999 + eval-raw-vs-ema) showed test_vol_p=11.28% and test_abupt=7.55% — confirming EMA weight averaging does not reduce the val→test gap. CLOSED.
+
+## Active Experiments (2026-05-09 ~18:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP13 complete | abupt=**6.6310%** (EP13) | EP5 PASS (6.9188%), EP10 PASS (6.7028% ≤7.2% ✅), EP15 gate HIGH CONFIDENCE PASS. EP13→EP12 delta = −0.0050pp — PLATEAU CONFIRMED. Minimal further improvement expected; run completing passively. |
-| #946 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **extended cosine T_max=60** (50-epoch run) + Lion lr=1e-4 | `qgkhoapw` | **Running** — EP7 complete | abupt=**7.3272%** (EP7) ⚠️ | EP5 PASS (7.1795% ≤7.5% ✅). EP7 REGRESSION: 7.3272% vs EP6=7.1198% (+0.2074pp). EP10 gate ≤7.2% AT RISK (currently 0.1272pp above). Probable cause: T_max=60 keeps LR ~30% higher at EP7 vs default cosine → oscillation. Regression flagged on PR. Monitoring EP8 @ step ~43,944. |
-| #951 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **proportional sampling** (96k vol + 60k surf, 1.6:1) | `wd5kgp2n` | **Running** — EP4 complete | abupt=**7.6533%** (EP4) | EP4=7.6533% (improved from EP3=7.7830%, −0.1297pp). Kill gate @ step ~27,380 (~EP7.4) ≤7.5%. Needs 0.1533pp more drop in ~3.4 fern-epochs. WATCH status. Note: vol_p jumped EP3→EP4 (5.69%→6.12%) — surface-volume trade-off. Merge conflict STILL DIRTY — fern reminded twice to rebase. |
-| #954 | dl24-tanjiro | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **EMA decay=0.999** (corrected from 0.9999) + **eval-raw-vs-ema** | `l1yfmjdj` | **Running** — Pre-EP1 (step 3291) | — (EP1 not complete) | Run confirmed active in group `ema-corrected-decay-axis`. EP1 boundary @ step ~5,493. No val metrics yet. |
+| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP20 complete | abupt=**6.5829%** (EP20 PASS ≤6.70% ✓) | Plateau confirmed since ~EP17 (6.59–6.58% range). EP25 gate ≤6.65% HIGH CONFIDENCE PASS. EP30 gate ≤6.60% VERY TIGHT (only 0.003pp headroom at EP16). |
+| #951 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **proportional sampling** (96k vol + 60k surf, 1.6:1) | `wd5kgp2n` | **Running** — EP11 complete | abupt=**6.9149%** (EP11 regression) | EP10 PASS (6.8634% ≤7.20% ✓). EP11=6.9149% (+0.0515pp regression). EP15 gate ≤6.80% AT RISK. Merge conflict RESOLVED by advisor rebase (2026-05-10T14:58Z). vol_p oscillation pattern present. |
+| #964 | dl24-frieren | 6L STRING + WD=0.005 + Y-sym + **vol_loss_weight=3.0 + NO GradNorm** | `gybtgqus` | **Running** — launched ~16:03 UTC 2026-05-10 | — (EP1 pending) | Fresh test of static vol weight=3.0 without GradNorm (previously only tested weight=2.0). EP5 gate ≤7.5% first checkpoint. |
+| #965 | dl24-tanjiro | 6L→**8L** STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | TBD | **Draft** — newly assigned 2026-05-09 | — (not yet started) | Clean single-variable ablation: only `--model-layers 8` differs from confirmed PR #939 6L config. 7L failed (#873) but without WD=0.005; 8L+full regularization stack untested. EP5 gate ≤7.5%. Kill on catastrophic bounce (≥0.3pp over 2+ epochs). |
 
 ## Closed This Wave (Recent)
 
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
-| #944 | EMA decay=0.9999 + WD=0.005 6L | **CLOSED** — wrong EMA config (decay=0.9999 = ~100× too slow, lookback ≈ 10,000 steps). NOT a hypothesis rejection. | EMA must use decay=0.999 (1,000-step lookback) for meaningful weight averaging. Corrected as #954. |
-| #945 | 5L + proportional 96k vol + 60k surf + **wrong kill operator** (`>` instead of `<`) | **EP5 FAIL abupt=9.29%** — CLOSED | Kill threshold operator bug + 5L backbone too slow. Moved to 6L as #951. |
-| #940 | Balanced 96k vol + 60k surf + lr=5e-5 (diagnostic) | **CLOSED** — superseded by #951 | Diagnostic run closed in favour of #951 direct 6L test. |
-| #938 | 5L + balanced 96k vol + 60k surf + lr=1e-4 | **KILLED EP5=15.22%** | Balanced sampling at default lr catastrophically diverges with GradNorm+Lion on 5L |
+| #954 | EMA decay=0.999 + eval-raw-vs-ema 6L | **CLOSED** — test_abupt=7.5476%, test_vol_p=11.2803%; EMA does NOT close val→test gap. | EMA weight averaging is not the mechanism behind the structural distribution gap. EMA axis FULLY REJECTED. |
+| #946 | Extended cosine T_max=60 (frieren) | **CLOSED** — EP7 regression +0.21pp; T_max=60 destabilizes training in the tail. | Extended cosine schedule keeps LR too high at EP7, causing vol_p oscillation. Default T_max=50 confirmed optimal. |
+| #944 | EMA decay=0.9999 + WD=0.005 6L | **CLOSED** — wrong EMA config (decay=0.9999 ≈ 10,000-step lookback). NOT a hypothesis rejection. | EMA must use decay=0.999. Corrected as #954 which was then also rejected. |
 | #914 | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | **CLOSED** — val=6.5290% EP41 terminal, test not run | WD=0.005 matched WD=0.01 val curve; WD axis closed |
-| #900 | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | EP27 best=6.6065%, EP30 gate MISS; test confirmed vol_p gap persists | WD=0.01 does not close val→test gap. WD axis exhausted. |
-| #936 | vol-loss-weight=2.0 NO GradNorm | EP5 FAIL abupt=9.010% (+1.51pp) | Static vol upweight without GradNorm actively harms |
-| #911 | vol-loss-weight=2.0 WITH GradNorm | EP3 FAIL (GradNorm self-cancels static weight) | Static vol upweight + GradNorm is a no-op |
-| #912 | 96k vol pts alone | EP3=11.8122% SEVERE FAIL (surf_p +3.65pp) | Vol/surface sampling must be proportional; 1.6:1 ratio needed |
-| #923 | 6L + EMA decay=0.9999 + WD=0.005 | CLOSED — never started (3 escalations) | Student unresponsive |
-| #919 | EMA+WD=0.01 6L | CLOSED — never started | Student unresponsive |
-| #898 | 5L+GradNorm+Y-sym (no WD) | EP9 regression — OVERFITTING | WD is necessary, not optional |
-| #873 | 7L depth | Catastrophic bounce EP12→EP15 | 7L too deep for this architecture |
-| #899 | Dropout=0.1 | −0.15pp at EP5 | Dropout incompatible with this architecture |
-| #866 | Y-sym p=1.0 | Over-augmentation confirmed | p=0.5 is optimal |
-| #874 | GradNorm α=0.75 | Catastrophic instability EP16 | α=0.5 is the ceiling |
+| #900 | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | EP27 best=6.6065%, EP30 gate MISS; test confirmed vol_p gap persists | WD=0.01 does not close val→test gap |
+| #873 | 7L depth (without WD=0.005) | Catastrophic bounce EP12→EP15 | 7L too deep WITHOUT full regularization stack. 8L WITH WD+GradNorm still untested. |
 
 ## Key Insights
 
-1. **Weight decay is load-bearing.** PR #898 (no WD) overfits at EP9; WD is a necessary ingredient. However, the WD axis is **fully exhausted**: WD=0.01 (#900) and WD=0.005 (#914) both achieve similar val curves and neither closes the val→test vol_p gap.
+1. **Weight decay is load-bearing.** PR #898 (no WD) overfits at EP9. WD is necessary but the WD axis (0.01 and 0.005) is fully exhausted — neither closes the val→test vol_p gap.
 
-2. **The val→test vol_p gap is structural and unsolved.** Val vol_p ≈ 4–4.5%, test vol_p ≈ 10.7–11%. Gap persists across all WD values tested. Loss-weighting has also been eliminated. The gap is almost certainly covariate shift between training and test aerodynamic configurations.
+2. **The val→test vol_p gap is structural and unsolved.** Val vol_p ≈ 4–4.5%, test vol_p ≈ 10.7–11%. Gap persists across all WD values, EMA, loss-weighting, architecture-depth changes tried so far. Almost certainly covariate shift between training and test aerodynamic configurations.
 
-3. **Vol-loss-weighting direction FULLY EXHAUSTED.** PR #911 (with GradNorm = no-op) + PR #936 (without GradNorm = actively harmful). Static upweighting of vol_p loss does not close the val→test gap.
+3. **Vol-loss-weighting (static, weight=2.0):** PR #911 (with GradNorm = no-op) + PR #936 (without GradNorm = actively harmful). Static upweighting of vol_p loss does NOT close the val→test gap. However, weight=3.0 is now being tested in #964.
 
-4. **96k vol + 60k surf (1.6:1) proportional sampling is the right approach** for volume point scaling. Pure 96k vol (#912) caused gradient starvation. Proportional sampling being tested on 6L (#951). Steps/epoch = 3,719 vs standard 5,493.
+4. **EMA weight averaging rejected:** PR #954 (decay=0.999, corrected from #944's 0.9999) confirmed test_vol_p=11.28% — same gap as baseline. EMA axis fully closed.
 
-5. **EMA warm-start fix is critical.** Tanjiro #954 has corrected EMA config (decay=0.999, 1,000-step lookback). PR #944 used wrong decay=0.9999. PR #954 also evaluates both raw and EMA weights at each checkpoint via `--eval-raw-vs-ema` flag.
+5. **Extended cosine T_max=60 destabilizing:** #946 showed EP7 regression (+0.21pp), consistent with LR staying too high during the training tail. Default T_max=50 is confirmed optimal.
 
-6. **Extended cosine annealing T_max=60** (frieren #946) is a novel hypothesis: keeping LR higher during the tail epochs (EP40-50) may prevent the model from memorizing the val distribution, targeting the vol_p gap directly.
+6. **Proportional sampling (60k surf + 96k vol):** Fern #951 showing slower convergence than standard 40k/65k per-epoch (EP10=6.86% vs nezuko 6.70% at EP10). vol_p oscillation pattern present. EP15 gate ≤6.80% AT RISK.
 
-7. **String multisigma PE (5-octave) is confirmed best.** σ=[0.25, 0.5, 1.0, 2.0, 4.0] must be comma-separated (`--pe-init-sigmas 0.25,0.5,1.0,2.0,4.0`), not space-separated.
+7. **String multisigma PE (5-octave) is confirmed best.** σ=[0.25, 0.5, 1.0, 2.0, 4.0].
 
 8. **GradNorm α=0.5 is optimal.** α=0.25 causes test regression; α=0.75 causes catastrophic instability at EP16.
 
@@ -79,9 +71,9 @@
 
 | Gate | Standard Threshold | Steps (std 5493/ep) | Fern Steps (3719/ep) |
 |------|--------------------|---------------------|----------------------|
-| EP5  | ≤7.5% | ~27,465 | EP7.4 @ ~27,380 |
-| EP10 | ≤7.2% | ~54,930 | EP14.8 @ ~54,760 |
-| EP15 | ≤6.80% | ~82,395 | — |
+| EP5  | ≤7.5% | ~27,465 | EP5 @ ~18,595 |
+| EP10 | ≤7.2% | ~54,930 | EP10 @ ~37,190 |
+| EP15 | ≤6.80% | ~82,395 | EP15 @ ~55,785 |
 | EP20 | ≤6.70% | ~109,860 | — |
 | EP25 | ≤6.65% | ~137,325 | — |
 | EP30 | ≤6.60% | ~164,790 | — |
@@ -98,34 +90,30 @@
 6. **`--model-pe string_multisigma` REQUIRED when using STRING PE**: omitting causes `--pe-init-sigmas` to be silently ignored.
 7. **`--pe-init-sigmas` must be COMMA-separated**: `0.25,0.5,1.0,2.0,4.0` NOT space-separated.
 8. **96k vol points data loader bug**: `_indices()` produced 30.9% empty volume views at 96k. Fixed in nezuko #912 relaunch — must verify fix is present in any new 96k run.
-9. **Proportional sampling (96k vol + 60k surf) uses STANDARD lr=1e-4**: The prior `lr=5e-5` recommendation was for 5L runs. 6L backbone (#951) uses default lr=1e-4.
+9. **Proportional sampling (96k vol + 60k surf) uses STANDARD lr=1e-4**: prior `lr=5e-5` was for 5L runs.
 10. **Kill threshold operator is `<`**: NOT `>`. PR #945 had operator bug causing inverted logic.
-11. **EMA decay=0.999 (NOT 0.9999)**: 0.9999 gives ~10,000-step lookback (too slow); 0.999 gives ~1,000-step lookback (appropriate for 50-epoch run at 5,493 steps/epoch).
+11. **EMA decay=0.999 (NOT 0.9999)**: 0.9999 gives ~10,000-step lookback (too slow); 0.999 gives ~1,000-step lookback. Note: EMA does not close val→test gap regardless.
 
 ## Confirmed Dead Ends (Do Not Retry)
 
 - No weight decay: overfits at EP9 (PR #898)
-- 7L depth: catastrophic bounce (PR #873)
+- 7L depth without full regularization: catastrophic bounce (PR #873)
+- 8L with full regularization: UNTESTED — now assigned as PR #965
 - Dropout=0.1: consistent degradation (PR #899)
 - vol-loss-weight=2.0 WITH GradNorm: self-cancelling (PR #911)
 - vol-loss-weight=2.0 WITHOUT GradNorm: actively harmful, EP5=9.010% (PR #936)
 - 96k vol points without proportional surface increase: gradient starvation (PR #912)
 - 96k+60k balanced sampling on 5L at default lr=1e-4: catastrophic divergence EP5=15.22% (PR #938)
-- WD=0.01: does not close val→test vol_p gap (PR #900 confirmed)
-- WD=0.005: val matches WD=0.01; test gap persists (PR #914 closed terminal)
+- WD=0.01: does not close val→test vol_p gap (PR #900)
+- WD=0.005: val matches WD=0.01; test gap persists (PR #914)
 - QK-Norm: consistent failures (multiple PRs)
 - Y-sym p=1.0: over-augmentation (PR #866)
 - 7-octave STRING PE (PR #843): σ=16.0 destabilization
 - 6-octave STRING PE (PR #818): does not beat 5-octave
 - GradNorm α=0.25 (multiple PRs): terminal test regression
 - GradNorm α=0.75 (PR #874): catastrophic instability at EP16
-
-## Pending Actions / Monitor Checklist
-
-1. **Frieren #946** (`qgkhoapw`): ⚠️ EP7 REGRESSION — EP10 gate ≤7.2% AT RISK. Monitor EP8 @ step ~43,944. If EP8 ABUPT > 7.3%, consider early termination. If EP8 < 7.2%, gate probably recoverable. Regression flag posted on PR.
-2. **Nezuko #939** (`yfitnqia`): EP15 gate ≤6.80% @ step ~82,395. Currently EP13=6.6310%. HIGH CONFIDENCE PASS. Plateau confirmed (EP12→EP13 delta = −0.005pp).
-3. **Fern #951** (`wd5kgp2n`): EP7.4 kill gate ≤7.5% @ step ~27,380. 🟡 WATCH — EP4=7.6533%; needs 0.1533pp drop in ~3.4 fern-epochs. Also: MERGE CONFLICT STILL UNRESOLVED (reminded twice). Watch vol_p oscillation (EP3→EP4 +0.43pp).
-4. **Tanjiro #954** (`l1yfmjdj`): Run confirmed active, step 3291, EP1 @ step ~5,493. Monitor EP1 for both `val_primary/` (EMA) and `val_raw_primary/` (raw). EP5 gate @ step ~27,465 ≤7.5% (raw model metrics used for gate).
+- Extended cosine T_max=60 (PR #946): destabilizing in training tail
+- EMA decay=0.999 (PR #954): does not close val→test vol_p gap (test_vol_p=11.28%)
 
 ## Potential Next Directions (Not Yet Assigned)
 
@@ -137,8 +125,8 @@
 4. **Physics-informed regularization** — Poisson residual on pressure field as auxiliary loss; direct physics constraint for vol_p generalization.
 5. **Domain adaptation** — If we can identify what makes the test split OOD, train a domain discriminator and use adversarial training to make backbone features distribution-agnostic.
 6. **Ensemble / checkpoint averaging** — Average the top-3 val checkpoints instead of best single checkpoint; known to reduce overfit to val noise.
-7. **Larger backbone (8L)** — Not tried since 7L failed catastrophically, but 7L was tested without GradNorm+WD. With current stack (GradNorm α=0.5 + WD=0.005 + Y-sym), 8L might be stable.
-8. **LR schedule ablation within extended cosine** — If #946 (T_max=60) succeeds, try T_max=40/80 to find sweet spot.
-9. **Lookahead optimizer** — Wraps Lion, adds slow-weight buffer; known to improve generalization on OOD sets. May directly target val→test gap.
+7. **Larger backbone (8L) — IN PROGRESS as #965** — Untested with full WD+GradNorm stack.
+8. **vol_loss_weight=3.0 NO GradNorm — IN PROGRESS as #964** — Prior run only tested weight=2.0.
+9. **Lookahead optimizer** — Wraps Lion, adds slow-weight buffer; known to improve generalization on OOD sets. May directly target val→test gap. Requires code change.
 
-_Last updated: 2026-05-09 ~16:00 UTC. Key events since last update: (1) Nezuko #939 EP13=6.6310% — plateau confirmed (−0.005pp delta), EP15 still HIGH CONFIDENCE PASS. (2) Frieren #946 EP7=7.3272% — REGRESSION flagged (+0.2074pp vs EP6=7.1198%), EP10 gate AT RISK; regression flag comment posted on PR, monitoring EP8. (3) Fern #951 EP4=7.6533% (improved from EP3=7.7830%), but vol_p oscillation noted; kill gate @ EP7.4 still WATCH. Merge conflict STILL DIRTY. (4) Tanjiro #954 run confirmed as `l1yfmjdj` in group `ema-corrected-decay-axis`, step 3291, EP1 pending._
+_Last updated: 2026-05-09 ~18:00 UTC. Key events: (1) PR #954 CLOSED — EMA axis fully rejected (test_vol_p=11.28%, no gap closure). (2) PR #965 assigned to dl24-tanjiro — 8L backbone + full GradNorm α=0.5 + WD=0.005 stack. (3) PR #964 launched by frieren (run `gybtgqus`) — vol_loss_weight=3.0 + NO GradNorm. (4) Nezuko #939 EP20 PASS (6.5829%), plateau 6.58–6.59% range. (5) Fern #951 EP11 regression (6.9149%), EP15 gate ≤6.80% AT RISK; merge conflict resolved by advisor._
