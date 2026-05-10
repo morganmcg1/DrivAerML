@@ -33,13 +33,13 @@
 
 ## Active PRs (Round 27)
 
-### tay-track (8 WIP, fully occupied)
+### tay-track (8 WIP, fully occupied — frieren re-assigned #971)
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
 | alphonse | #970 | STRING-sep frozen-freq ablation: register `log_freq` as non-trainable buffer (frozen at SOTA octave init {0.25,0.5,1.0,2.0,4.0}); keep only `phase` as `nn.Parameter`. Tests whether gradient-based freq adaptation helps or the octave init is doing all the work. Flag: `--rff-freeze-freqs`. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%. `--wandb-group alphonse-string-frozen-freq-ablation` | `alphonse/string-frozen-freq-ablation` | WIP — assigned |
 | askeladd | #960 | STRING σ-bracket sweep: fine-shift σ=0.125,0.25,0.5,1.0,2.0 (Arm A) vs coarse-shift σ=0.5,1.0,2.0,4.0,8.0 (Arm B). Tests whether the 5-sigma SOTA window is optimally placed or should shift ±1 octave. Arm A (fine-shift) running (W&B: `zhnlo5k5`); EP1 expected ~14:28 UTC. Arm B launches after Arm A EP1. EP4 gate: val_abupt ≤7.5%. `--wandb-group askeladd-string-sigma-bracket` | `askeladd/string-sigma-bracket-sweep` | WIP — Arm A EP1 in progress (run `zhnlo5k5`) |
-| frieren | #962 | Curriculum y-flip augmentation for vol_p OOD — **CLOSED NEGATIVE**: EP3 vol_p gate FAIL. vol_p=5.9499% at EP2 step 21,729; slope −0.0011%/step; projected ~5.924% at EP3 gate — cannot reach ≤5.0%. Curriculum ramp slows vol_p convergence. W&B: `k1bqpcrz`. | `frieren/curriculum-yflip-vol-ood` | **CLOSED NEGATIVE** — frieren now idle |
+| frieren | #971 | Learned distance RPB on surf→vol cross-attention: add per-pair (vol_i, surf_j) Euclidean distance bias to xattn logits: `A_ij = (Q_i·K_j)/√d + f(dist_ij)`. MLP: `Linear(1→16)→SiLU→Linear(16→1)`, ~49 params, zero-init output layer. Flag: `--use-xattn-distance-rpe`. 4-ep screen; EP3 gate ≤8.0% AND vol_p ≤5.0%, EP4 ≤7.5%. `--wandb-group frieren-xattn-distance-rpe` | `frieren/xattn-distance-rpe` | WIP — assigned |
 | nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Zero-init final layer. Arm A: `--volume-loss-weight 1.0`; Arm B: `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0%. `--wandb-group nezuko-vol-aux-decoder-head` | `nezuko/vol-pressure-aux-decoder-head` | WIP — running |
 | thorfinn | #967 | SDF-FiLM vol conditioning: lightweight shared MLP (`sdf_norm → Linear(1,64) → SiLU → Linear(64, 2×hidden_dim)`) computes per-point (γ, β); applied after each TransolverBlock as `h_vol ← (1+γ)·h_vol + β`. Residual FiLM form, identity-init (bias: γ_init=1, β_init=0). Shared weights across all L=5 layers. 4-ep screen; EP4 ≤6.9% gate. `--wandb-group thorfinn-sdf-film-vol-conditioning` | `thorfinn/sdf-film-vol-conditioning` | WIP — assigned |
 | fern | #968 | SDF-modulated vol PE: per-octave spectral scaling of STRING-sep RFF features conditioned on per-token SDF distance. Tiny MLP (Linear(1→16)→SiLU→Linear(16→5)→Softplus, ~112 params, identity-init) reads SDF value and outputs 5 octave weight scalars. Each STRING-sep sigma group scaled per-token. Flag: `--use-sdf-pe-scaling`. EP4 ≤6.9% gate. `--wandb-group fern-sdf-pe-octave-scaling` | `fern/sdf-pe-octave-scaling` | WIP — assigned |
@@ -89,7 +89,10 @@ Two STRING directions live:
 Both y-flip augmentation approaches have been tested and failed:
 - **PR #957** (fixed p=0.5 from EP0): CLOSED NEGATIVE — no val improvement at EP1, higher vol_p
 - **PR #962** (curriculum ramp 0→0.5 over 3ep): CLOSED NEGATIVE — EP3 vol_p gate FAIL (5.9499% → projected ~5.924% vs ≤5.0% gate). Curriculum ramp slows vol_p convergence; insufficient headroom to pass gate.
-y-flip augmentation axis is FULLY CLOSED. frieren is idle and needs a new assignment.
+y-flip augmentation axis is FULLY CLOSED.
+
+### Theme 8: Learned Relative Position Bias on surf→vol xattn (frieren #971)
+Per-pair (vol_i, surf_j) distance-based additive bias to cross-attention logits: `A_ij = (Q_i·K_j)/√d + f(dist_ij)`. Tiny MLP (`Linear(1→16)→SiLU→Linear(16→1)`, ~49 params) learns distance-to-bias mapping; zero-init output layer preserves baseline convergence at step 0. Geometric analogue of ALiBi (Press et al., ICLR 2022). Key distinction from all closed experiments: operates on logits per-pair (not global Q-bias like #961, not static PE offset like #883). Inductive prior: closer surface points should dominate; model currently learns locality from data alone. 4-ep screen, standard gates.
 
 ### Theme 4: Dedicated Vol Pressure Decoder (nezuko #958)
 Independent 3-layer MLP branch for vol_p prediction, separate from the shared 4-output surface head. Hypothesis: the shared decoder must encode too many competing signals; a dedicated path lets it specialize on vol_p geometry.
@@ -169,7 +172,7 @@ See "Closed Axes" section below.
 - **Train-time y-mirror aug**: #901 fern CLOSED (Round 24 Arm C)
 - **TTA y-mirror**: #928 nezuko CLOSED (Round 24)
 - **Y-flip augmentation fixed p=0.5**: #957 frieren CLOSED NEGATIVE (no EP1 improvement)
-- **Y-flip augmentation curriculum ramp 0→0.5**: #962 frieren CLOSED NEGATIVE (EP3 vol_p gate: 5.9499% projected 5.924% vs ≤5.0%)
+- **Y-flip augmentation curriculum ramp 0→0.5**: #962 frieren CLOSED NEGATIVE (EP3 vol_p gate: 5.9499% projected 5.924% vs ≤5.0%). frieren re-assigned #971 xattn-distance-rpe.
 - **Mild yaw-only rotation aug**: #937 alphonse CLOSED (Round 24)
 - **GradNorm full-mode α=1.5** (#942 fern): CLOSED NEGATIVE — vp weight decreased at EP1, all weights converge to 0.91–1.11 band; vol_p is not gradient-starved under Lion; 5× backward overhead consumed budget before EP6 gate
 - **GradNorm ema_proxy, EMA, LoRA, FiLM, 2-layer MLP decoder, Huber loss, Lion β2 sweep, BC-type embedding, dual-tower xattn, spectral-norm attn, stochastic depth, PCGrad, surface curvature features**: ALL CLOSED
