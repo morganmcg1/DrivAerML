@@ -1,5 +1,25 @@
 # SENPAI Research Results
 
+## 2026-05-09 — PR #961: Geometry-conditioned Q-bias via mean-pool surf→vol xattn (fern) — CLOSED (NEGATIVE)
+
+- **Branch**: `fern/geometry-conditioned-q-bias` (closed)
+- **W&B runs**: `fc4je8my` (killed EP1 — train/loss<5 misfire), `5alw5lxo` (EP1 terminal)
+- **Hypothesis**: The vol→surf cross-attention Q-projections are geometry-agnostic — all vol tokens query the same K/V regardless of their geometric context. Adding a geometry-conditioned bias (mean-pool of surf hidden states → small MLP → additive offset on vol Q-projections) should allow vol tokens to selectively attend to the most relevant surface regions based on global shape, improving the OOD vol_p gap.
+- **Implementation**: `mean_surf_hidden` → `MLP(512→256, SiLU→256→512, zero-init final linear)` → additive bias on vol Q before xattn. ~393K new parameters.
+
+| Run | EP1 val_abupt | kill_gate (≤30%) | status |
+|---|---:|---|---|
+| `fc4je8my` | 27.45% | PASS | killed by train/loss<5 gate misfire |
+| `5alw5lxo` | 30.197% | 0.197pp over gate → FAIL | NEGATIVE |
+
+**Results commentary:**
+- Run `fc4je8my`: EP1=27.45% passes the EP1 gate, but was killed by the `train_loss<5` threshold — a misfire inherited from prior experiments. The kill threshold is irrelevant for this experiment (train loss <5 is normal). This run was therefore abandoned and re-run without the misfire threshold.
+- Run `5alw5lxo`: EP1=30.197% — 0.197pp above the 30% kill gate. The margin is within the noise floor observed across multiple EP1 snapshots (±2.75pp variance seen in PR #961 analysis). The vol_p per-channel signal was consistent across both runs in direction, but insufficient EP1 separation from noise to confirm the signal as genuine.
+- **Noise floor observation**: The 0.197pp over-gate is comparable to natural EP1 variance (±2.75pp), making it impossible to distinguish a genuine regression from statistical noise at EP1 alone. A third run could easily have passed, but the expected value of continuing this axis is low given the architectural simplicity of the additive Q-bias.
+- **Conclusion**: Geometry-conditioned Q-bias (mean-pool surf → MLP → vol Q additive bias) does not produce a detectable EP1 improvement over baseline. The hypothesis is plausible but the implementation (global mean-pool surf → additive Q offset) lacks the spatial specificity needed to close the OOD vol_p gap. CLOSED NEGATIVE — do not revisit this exact formulation.
+
+---
+
 ## 2026-05-10 — PR #942: GradNorm full-mode α=1.5 (fern) — CLOSED (NEGATIVE)
 
 - **Branch**: `fern/gradnorm-full-mode-alpha15` (closed)
