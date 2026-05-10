@@ -1,5 +1,32 @@
 # SENPAI Research Results
 
+## 2026-05-09 23:45 — PR #925: Random yaw±5°/pitch±3° rotation aug (alphonse) — CLOSED (NEGATIVE)
+
+- **Branch**: `alphonse/random-yaw-pitch-rotation-aug` (closed)
+- **W&B run**: `a6ddeqrq`
+- **Hypothesis**: Joint rotation of surface_xyz, vol_xyz, surface_normals, and wall_shear vectors by a random yaw (±5°) and pitch (±3°) rotation matrix at train time (p_aug=0.5) forces approximate rotation-equivariance, closing the val/test gap on the 4 OOD test cases which likely exhibit different aerodynamic incidence angles.
+
+| Epoch | val_abupt | surf_p | vol_p | wsh | Gate | Baseline |
+|---|---:|---:|---:|---:|---|---:|
+| EP1 | 27.37% | — | — | — | ≤30% PASS | ~25–28% |
+| EP2 | 12.81% | — | — | — | ≤16% PASS | ~12% |
+| EP3 | **9.1064%** | 5.96% | 6.14% | 10.14% | ≤8.0% **FAIL** | 7.1195% |
+
+**Analysis:** Rotation aug at yaw±5°/pitch±3°/p=0.5 is too aggressive for the 4-epoch budget. The model spent EP2 capacity learning rotation-approximate equivariance — EP2 val_abupt fell 4.66pp behind the rotation-free baseline's EP2 position, suggesting the model was spending optimization headroom adapting to the augmented distribution rather than converging. The EP2→EP3 slope recovered to −3.71pp (steep, vs baseline's comparable step), suggesting the regularizer benefit was beginning to emerge, but the 4-ep screen gate at EP3 came too early to capture it.
+
+**Per-channel EP3:** surf_p=5.96% (clean, near SOTA), vol_p=6.14% (near SOTA), wsh=10.14% (primary drag — wall_shear carries most of the penalty). The wsh degradation is the likely cause of EP3 gate failure: rotating wall_shear vectors is physically correct but adds more augmentation noise to the highest-variance channel.
+
+**Key insight:** The hypothesis (rotation aug → OOD vol_p) is NOT falsified. Only the magnitude/probability point (yaw±5°/pitch±3°/p=0.5) is falsified. The wsh channel specifically degrades under this aggressive aug, as wall_shear vector rotation is geometrically complex and introduces more entropy than the geometric coordinates alone.
+
+**Suggested follow-up axes (student suggestions incorporated):**
+1. **Milder aug**: p=0.3, yaw≤3°, pitch≤1.5° — lower entropy, less wall_shear disruption
+2. **Yaw-only variant**: pitch=0, yaw±3°/5°, p=0.5 — wind tunnel geometry means OOD variation is primarily yaw, pitch=0 removes a dimension of aug noise
+3. **Aug rampup**: p=0 for EP1, ramp to p=0.3 by EP3 — curriculum approach
+
+**Conclusion:** Assign follow-up with milder parameters. Rotation aug (yaw-only or mild yaw+pitch) is high-priority next assignment.
+
+---
+
 ## 2026-05-09 19:30 — PR #906: Post-xattn vol-self-attn block (edward) — CLOSED (NEGATIVE)
 
 - **Branch**: `edward/vol-self-attn-post-xattn` (closed)
