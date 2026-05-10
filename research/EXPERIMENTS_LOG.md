@@ -1,5 +1,24 @@
 # SENPAI Research Results
 
+## 2026-05-10 — PR #942: GradNorm full-mode α=1.5 (fern) — CLOSED (NEGATIVE)
+
+- **Branch**: `fern/gradnorm-full-mode-alpha15` (closed)
+- **W&B run**: to be retrieved from PR comments (run truncated mid-EP2 due to 360-min budget with 5× backward overhead)
+- **Hypothesis**: Paper-faithful GradNorm (Chen et al. 2018) across 5 loss tasks (surf_p, tau_x, tau_y, tau_z, vol_p), α=1.5. Hypothesis: vol_p task is gradient-starved under equal-weight training; GradNorm should upweight vol_p relative to other tasks by monitoring per-task gradient norms vs reference. Expected: vol_p loss weight rises materially above 1.0, reducing vol_p error.
+
+| Epoch | val_abupt | vol_p weight | Weight range | Gate | Status |
+|---|---:|---:|---:|---|---|
+| EP1 | 28.86% | ↓ (decreased) | 0.91–1.11 | ≤30% PASS | continuing |
+| EP2 | truncated (budget ~360 min, 5× overhead) | — | — | run aborted | CLOSED |
+
+**Results commentary:**
+- The key EP1 finding contradicts the hypothesis: vol_p GradNorm weight went DOWN (not up). This is because vol_p loss decreases the fastest at initialization, which causes GradNorm to reduce its relative weight to compensate.
+- All 5 task weights converge to a tight band (0.91–1.11) by EP1, indicating GradNorm is functionally near-identical to static equal weights at these hyperparameters.
+- The 5× backward overhead (one backward pass per task) consumed the 360-min training budget before EP6 could be reached — the experiment could not reach the decisive EP3 gate (≤8.0%) or EP4 gate (≤6.9%).
+- **Conclusion**: vol_p is NOT gradient-starved under Lion optimizer with current loss weights. The OOD vol_p gap is a representational/generalization problem, not a gradient-balancing problem. GradNorm axis fully CLOSED — do not revisit.
+
+---
+
 ## 2026-05-09 23:45 — PR #925: Random yaw±5°/pitch±3° rotation aug (alphonse) — CLOSED (NEGATIVE)
 
 - **Branch**: `alphonse/random-yaw-pitch-rotation-aug` (closed)
