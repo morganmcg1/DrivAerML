@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_geom_q_bias: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_geom_q_bias = use_geom_q_bias
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +445,27 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # Geometry-conditioned Q-bias for the surf->vol cross-attention (PR #961):
+        # global geometry descriptor = masked mean over surface_hidden -> tiny MLP
+        # -> additive bias on the query-side input of surf->vol xattn ONLY (K/V
+        # and the residual stream are unchanged). Zero-init the final Linear so
+        # the bias starts at 0 and the module is identity at init.
+        if use_geom_q_bias:
+            if not use_surf_to_vol_xattn:
+                raise ValueError(
+                    "--use-geom-q-bias requires --use-surf-to-vol-xattn (the "
+                    "Q-bias attaches to the Q-projection of surf->vol xattn)."
+                )
+            self.geom_q_mlp = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden // 2),
+                nn.GELU(),
+                nn.Linear(n_hidden // 2, n_hidden),
+            )
+            nn.init.zeros_(self.geom_q_mlp[-1].weight)
+            nn.init.zeros_(self.geom_q_mlp[-1].bias)
+        else:
+            self.geom_q_mlp = None
 
     def _encode_group(
         self,
@@ -536,8 +559,19 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            if self.geom_q_mlp is not None:
+                # Masked mean over surface tokens (padded positions are already
+                # zeroed by _apply_token_mask above, so we just divide by the
+                # number of valid tokens per sample).
+                surf_mask_f = surface_mask.to(surface_hidden.dtype)
+                n_valid = surf_mask_f.sum(dim=1).clamp(min=1.0).unsqueeze(-1)
+                geom_desc = surface_hidden.sum(dim=1) / n_valid  # [B, D]
+                q_bias = self.geom_q_mlp(geom_desc).unsqueeze(1)  # [B, 1, D]
+                vol_h_for_q = volume_hidden + q_bias
+            else:
+                vol_h_for_q = volume_hidden
             xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
+                query=vol_h_for_q,
                 key=surface_hidden,
                 value=surface_hidden,
                 need_weights=False,

@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_geom_q_bias: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_geom_q_bias": (
+            "Enable geometry-conditioned Q-bias for the surf->vol "
+            "cross-attention (PR #961). Computes a global geometry "
+            "descriptor as the masked mean over surface_hidden, passes it "
+            "through a tiny MLP (D -> D/2 -> D, GELU), and adds the result "
+            "as a per-sample bias to the volume input of the Q-projection "
+            "ONLY. K/V and the residual stream are left untouched. Final "
+            "Linear is zero-initialised so the layer is identity at init. "
+            "Requires --use-surf-to-vol-xattn."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_geom_q_bias=config.use_geom_q_bias,
     )
 
 
