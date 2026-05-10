@@ -138,6 +138,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_random_rotation_aug: bool = False
+    rotation_aug_yaw_deg: float = 5.0
+    rotation_aug_pitch_deg: float = 3.0
+    rotation_aug_p: float = 0.5
     debug: bool = False
 
 
@@ -229,6 +233,35 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_random_rotation_aug": (
+            "Enable train-time random small-angle rotation augmentation "
+            "(PR #925): each sample gets, with probability "
+            "--rotation-aug-p, an independent yaw (about z) sampled "
+            "uniformly in [-yaw_deg, yaw_deg] composed with a pitch "
+            "(about y) sampled uniformly in [-pitch_deg, pitch_deg]. The "
+            "rotation R is applied jointly to surface xyz and normals "
+            "(channels 0:3 and 3:6 of surface_x; normals re-normalised), "
+            "volume xyz (channels 0:3 of volume_x), and the wall-shear "
+            "vector targets (channels 1:4 of surface_y). Scalar fields "
+            "(cp, panel area, SDF, volume pressure) are untouched. Padded "
+            "rows (zeros) remain zero. Applied in train_loss / "
+            "per_task_train_losses only; eval/test paths are unaffected."
+        ),
+        "rotation_aug_yaw_deg": (
+            "Half-range (degrees) for the uniform yaw distribution about "
+            "the z-axis. Angles drawn in [-yaw_deg, yaw_deg]. Default 5.0. "
+            "Used only when --use-random-rotation-aug is set."
+        ),
+        "rotation_aug_pitch_deg": (
+            "Half-range (degrees) for the uniform pitch distribution "
+            "about the y-axis. Angles drawn in [-pitch_deg, pitch_deg]. "
+            "Default 3.0. Used only when --use-random-rotation-aug is set."
+        ),
+        "rotation_aug_p": (
+            "Per-sample probability of applying a non-trivial rotation. "
+            "Samples that fail the Bernoulli draw use angle=0 (identity). "
+            "Default 0.5."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +344,97 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_random_rotation_aug(
+    batch,
+    *,
+    yaw_deg: float,
+    pitch_deg: float,
+    p_aug: float,
+) -> dict[str, float]:
+    """Apply per-sample random small-angle rotation to surface + volume tensors.
+
+    Rotation is composed from a yaw (about z) and a pitch (about y) drawn
+    uniformly in [-yaw_deg, yaw_deg] and [-pitch_deg, pitch_deg] respectively.
+    Each sample is rotated with probability ``p_aug``; samples that miss the
+    Bernoulli draw get angle=0 (identity, no-op).
+
+    Modifies ``batch`` in-place. Padded points (mask=False) are zero rows in
+    surface_x / volume_x / surface_y, so rotating them produces zeros — the
+    invariant is preserved without explicit masking.
+
+    Returns a small telemetry dict with the realised rotation distribution.
+    """
+    device = batch.surface_x.device
+    B = batch.surface_x.shape[0]
+
+    yaw_rad_max = math.radians(yaw_deg)
+    pitch_rad_max = math.radians(pitch_deg)
+
+    do_aug = torch.rand(B, device=device) < p_aug
+    yaw = (torch.rand(B, device=device) * 2 - 1) * yaw_rad_max
+    pitch = (torch.rand(B, device=device) * 2 - 1) * pitch_rad_max
+    do_aug_f = do_aug.to(yaw.dtype)
+    yaw = yaw * do_aug_f
+    pitch = pitch * do_aug_f
+
+    cy, sy = yaw.cos(), yaw.sin()
+    cp_, sp_ = pitch.cos(), pitch.sin()
+    zero = torch.zeros_like(yaw)
+    one = torch.ones_like(yaw)
+
+    Rz = torch.stack([
+        torch.stack([cy, -sy, zero], dim=-1),
+        torch.stack([sy, cy, zero], dim=-1),
+        torch.stack([zero, zero, one], dim=-1),
+    ], dim=1)
+    Ry = torch.stack([
+        torch.stack([cp_, zero, sp_], dim=-1),
+        torch.stack([zero, one, zero], dim=-1),
+        torch.stack([-sp_, zero, cp_], dim=-1),
+    ], dim=1)
+    R = torch.bmm(Ry, Rz)
+
+    surf_dtype = batch.surface_x.dtype
+    vol_dtype = batch.volume_x.dtype
+    surf_y_dtype = batch.surface_y.dtype
+
+    R_surf = R.to(surf_dtype)
+    R_vol = R.to(vol_dtype)
+    R_surf_y = R.to(surf_y_dtype)
+
+    surf_xyz = batch.surface_x[..., 0:3]
+    surf_nrm = batch.surface_x[..., 3:6]
+    rotated_xyz = torch.bmm(surf_xyz, R_surf.transpose(1, 2))
+    rotated_nrm = torch.bmm(surf_nrm, R_surf.transpose(1, 2))
+    nrm_norm = rotated_nrm.float().norm(dim=-1, keepdim=True).clamp(min=1e-8)
+    rotated_nrm = (rotated_nrm.float() / nrm_norm).to(surf_dtype)
+    batch.surface_x = torch.cat(
+        [rotated_xyz, rotated_nrm, batch.surface_x[..., 6:]], dim=-1
+    )
+
+    vol_xyz = batch.volume_x[..., 0:3]
+    rotated_vol_xyz = torch.bmm(vol_xyz, R_vol.transpose(1, 2))
+    batch.volume_x = torch.cat(
+        [rotated_vol_xyz, batch.volume_x[..., 3:]], dim=-1
+    )
+
+    tau = batch.surface_y[..., 1:4]
+    rotated_tau = torch.bmm(tau, R_surf_y.transpose(1, 2))
+    batch.surface_y = torch.cat(
+        [batch.surface_y[..., 0:1], rotated_tau], dim=-1
+    )
+
+    yaw_deg_realised = (yaw * 180.0 / math.pi).abs()
+    pitch_deg_realised = (pitch * 180.0 / math.pi).abs()
+    return {
+        "rotation_aug/fraction_rotated": float(do_aug_f.mean().item()),
+        "rotation_aug/mean_abs_yaw_deg": float(yaw_deg_realised.mean().item()),
+        "rotation_aug/mean_abs_pitch_deg": float(pitch_deg_realised.mean().item()),
+        "rotation_aug/max_abs_yaw_deg": float(yaw_deg_realised.max().item()),
+        "rotation_aug/max_abs_pitch_deg": float(pitch_deg_realised.max().item()),
+    }
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,8 +445,17 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    rotation_aug: dict | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    rotation_aug_metrics: dict[str, float] = {}
+    if rotation_aug is not None:
+        rotation_aug_metrics = apply_random_rotation_aug(
+            batch,
+            yaw_deg=rotation_aug["yaw_deg"],
+            pitch_deg=rotation_aug["pitch_deg"],
+            p_aug=rotation_aug["p_aug"],
+        )
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -346,13 +479,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(rotation_aug_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -364,16 +499,28 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-) -> list[torch.Tensor]:
+    *,
+    rotation_aug: dict | None = None,
+) -> tuple[list[torch.Tensor], dict[str, float]]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
-    Returns scalar tensors in order: [sp, tau_x, tau_y, tau_z, vp].
-    All five share the same forward graph so the GradNorm balancer can
-    extract per-task gradient norms via ``torch.autograd.grad`` with
+    Returns ``(losses, aug_metrics)`` where ``losses`` is a list of scalar
+    tensors in order ``[sp, tau_x, tau_y, tau_z, vp]`` and ``aug_metrics``
+    is the (possibly empty) rotation-augmentation telemetry from this batch.
+    All five losses share the same forward graph so the GradNorm balancer
+    can extract per-task gradient norms via ``torch.autograd.grad`` with
     ``retain_graph=True``.
     """
 
     batch = batch.to(device)
+    aug_metrics: dict[str, float] = {}
+    if rotation_aug is not None:
+        aug_metrics = apply_random_rotation_aug(
+            batch,
+            yaw_deg=rotation_aug["yaw_deg"],
+            pitch_deg=rotation_aug["pitch_deg"],
+            p_aug=rotation_aug["p_aug"],
+        )
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -389,7 +536,7 @@ def per_task_train_losses(
         tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
         tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
         vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
+    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss], aug_metrics
 
 
 GRADNORM_MODES = ("full", "ema_proxy")
@@ -852,6 +999,27 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.use_random_rotation_aug:
+                print(
+                    "Random rotation aug ON: yaw=±"
+                    f"{config.rotation_aug_yaw_deg}° (z-axis), pitch=±"
+                    f"{config.rotation_aug_pitch_deg}° (y-axis), p_aug="
+                    f"{config.rotation_aug_p}; applied to surface_xyz, "
+                    "surface_normals (re-normalised), volume_xyz, and "
+                    "wall-shear vector targets."
+                )
+            else:
+                print("Random rotation aug OFF.")
+
+        rotation_aug_kwargs: dict | None = (
+            {
+                "yaw_deg": config.rotation_aug_yaw_deg,
+                "pitch_deg": config.rotation_aug_pitch_deg,
+                "p_aug": config.rotation_aug_p,
+            }
+            if config.use_random_rotation_aug
+            else None
+        )
 
         run = init_wandb_run(
             config=config,
@@ -937,9 +1105,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                rotation_aug_metrics: dict[str, float] = {}
                 if balancer is not None:
-                    per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                    per_task_losses, rotation_aug_metrics = per_task_train_losses(
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        rotation_aug=rotation_aug_kwargs,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,7 +1204,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        rotation_aug=rotation_aug_kwargs,
                     )
+                    rotation_aug_metrics = {
+                        k: v
+                        for k, v in batch_loss_metrics.items()
+                        if k.startswith("rotation_aug/")
+                    }
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1072,6 +1252,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if rotation_aug_metrics:
+                    train_log.update(rotation_aug_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
