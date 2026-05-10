@@ -85,6 +85,7 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    vol_sdf_loss_weight_lambda: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -229,6 +230,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "vol_sdf_loss_weight_lambda": (
+            "If >0, weight each volume-point MSE by exp(-sdf/lambda) (PR "
+            "#930). sdf is taken from volume_x[..., 3] (raw, in metres). "
+            "SDF is clamped to [0, 5*lambda] before the exponential to "
+            "bound the weight ratio at exp(5) approx 148; the weight is "
+            "then renormalised so its mean over valid points is 1. "
+            "0 = disabled (baseline masked_mse)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +320,42 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def sdf_weighted_volume_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    volume_x: torch.Tensor,
+    lam: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """SDF-stratified per-point volume MSE (PR #930).
+
+    Weight per point by exp(-sdf/lam), with sdf = volume_x[..., 3] clamped to
+    [0, 5*lam] (so weight ratio is bounded by exp(5) ~ 148). Renormalises the
+    weight so its mean over valid points is 1, preserving overall loss scale.
+    """
+    sdf = volume_x[..., 3].detach().to(dtype=pred.dtype)
+    sdf = sdf.clamp(min=0.0, max=5.0 * lam)
+    raw_w = torch.exp(-sdf / lam)
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype)
+    valid_count = mask_f.sum().clamp_min(1.0)
+    mean_w = (raw_w * mask_f).sum() / valid_count
+    w = raw_w / mean_w.clamp_min(1e-12)
+    sq_err = (pred - target).square()
+    while w.ndim < sq_err.ndim:
+        w = w.unsqueeze(-1)
+    weighted_sq = sq_err * w
+    while mask_f.ndim < weighted_sq.ndim:
+        mask_f = mask_f.unsqueeze(-1)
+    denom = mask_f.expand_as(weighted_sq).sum().clamp_min(1.0)
+    loss = (weighted_sq * mask_f).sum() / denom
+    diag = {
+        "vol_sdf_w_min": float(raw_w[mask.bool()].min().detach().item()) if bool(mask.any()) else 0.0,
+        "vol_sdf_w_max": float(raw_w[mask.bool()].max().detach().item()) if bool(mask.any()) else 0.0,
+        "vol_sdf_w_mean_raw": float(mean_w.detach().item()),
+    }
+    return loss, diag
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,10 +366,12 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_sdf_loss_weight_lambda: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    sdf_diag: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -341,18 +388,29 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if vol_sdf_loss_weight_lambda > 0.0:
+            volume_loss, sdf_diag = sdf_weighted_volume_mse(
+                out["volume_preds"],
+                volume_target,
+                batch.volume_mask,
+                batch.volume_x,
+                vol_sdf_loss_weight_lambda,
+            )
+        else:
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(sdf_diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1030,6 +1088,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_sdf_loss_weight_lambda=config.vol_sdf_loss_weight_lambda,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1129,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "vol_sdf_w_min" in batch_loss_metrics:
+                        train_log["train/vol_sdf/w_min"] = batch_loss_metrics["vol_sdf_w_min"]
+                        train_log["train/vol_sdf/w_max"] = batch_loss_metrics["vol_sdf_w_max"]
+                        train_log["train/vol_sdf/w_mean_raw"] = batch_loss_metrics["vol_sdf_w_mean_raw"]
+                        train_log["train/vol_sdf/lambda"] = config.vol_sdf_loss_weight_lambda
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
