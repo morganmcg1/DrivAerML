@@ -8,6 +8,38 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-10 ~01:32 UTC — PR #934 CLOSED: Balanced Points 96k+60k surf+vol (dl24-fern, `f335lerf`)
+
+- **Branch:** `dl24-fern/balanced-pts-96k60k`
+- **W&B Run:** `f335lerf`
+- **Hypothesis:** Increasing surf+vol points per view from 40k+65k to 96k+60k brings the vol/surf ratio from 2.4:1 down to 1.6:1, reducing per-view volume point starvation that may be causing val vol_p underfitting and test vol_p gap.
+
+### Per-epoch val history
+
+| Epoch | Step | abupt | vol_p |
+|-------|------|-------|-------|
+| EP1 | ~5,493 | 26.8991% | — |
+| EP2 | ~10,987 | 13.5456% | — |
+| EP3 | ~16,481 | 10.8003% | — |
+| EP4 | ~21,975 | 9.7313% | — |
+| EP5 | ~27,469 | 9.2203% | 6.95% |
+
+**EP5 gate: ≤7.5% — MISS by 1.72pp. Run killed mid-EP6.**
+
+### Root Cause
+
+Larger per-view point budgets reduce total training views: `view_count = ceil(total_points / points_per_view)`. The 96k+60k configuration yielded ~59,500 total views vs ~87,888 for the 40k+65k baseline — a **32% view count reduction**. Fewer views per epoch slowed convergence dramatically at every step count checkpoint. vol_p at EP5=6.95% was also worse than tanjiro EP5 5.33%, confirming no compensating benefit to vol_p fidelity.
+
+### Decision: CLOSED — hypothesis FALSIFIED
+
+### Key Findings
+
+1. **Larger per-view point budgets reduce total training signal.** More points/view → fewer views → slower convergence. The hypothesis incorrectly assumed increased vol points per view would improve vol_p without accounting for the view-count effect.
+2. **Balanced-points hypothesis definitively falsified.** The convergence deficit is entirely explained by the 32% view reduction, not by any vol/surf ratio benefit.
+3. **40k+65k remains the reference baseline point configuration.** Do not experiment with increasing points per view without simultaneously accounting for the view count reduction and its convergence cost.
+
+---
+
 ## 2026-05-09 ~17:00 UTC — PR #898 CLOSED: 5L STRING + GradNorm α=0.5 + Y-sym p=0.5 (complete triple stack, dl24-frieren, `ylrp8f97`)
 
 - **Branch:** `dl24-frieren/5l-string-gradnorm-ysym`
