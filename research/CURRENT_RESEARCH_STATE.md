@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 — Round 27 active (8 WIP). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning), fern #969 (SDF-PE octave scaling H2).
+- **Date:** 2026-05-09 — Round 27 active (7 WIP). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning), fern #969 (SDF-PE octave scaling H2). PR #962 (frieren curriculum-yflip) CLOSED NEGATIVE — EP3 vol_p gate FAIL: vol_p=5.9499% at EP2 with slope −0.0011%/step; projected landing ~5.924% at EP3 gate, cannot reach ≤5.0%. Curriculum ramp slows vol_p convergence — augmentation approach on this axis is closed. frieren now IDLE — new assignment needed.
 - **CRITICAL UPDATE (2026-05-09):** Nezuko PR #958 run `29nohj67` (vol aux decoder head) has reached **EP7 val_abupt=6.3885%**, beating single-model SOTA of 6.4407% (delta −0.052pp). Currently in EP8 (step 54,610). Trajectory healthy: EP5=6.45%→EP6=6.45%→EP7=6.39%. If EP8–12 continue improving, this will be a clear merge winner. **Monitoring closely.**
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -37,9 +37,9 @@
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
-| alphonse | #955 | STRING RoPE: slice-centroid local coords as RoPE anchor. Compute per-slice centroids via soft assignment weights; encode (x−cx, y−cy, z−cz) instead of global coords. Arm A: `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"` (global scale); Arm B: `--rff-init-sigmas "0.05,0.1,0.25,0.5,1.0"` (local scale). EP3 gate: val_abupt ≤8.0%. `--wandb-group alphonse-string-slice-centroid-rope` | `alphonse/string-rope-slice-centroid-learnable` | WIP — running |
+| alphonse | #970 | STRING-sep frozen-freq ablation: register `log_freq` as non-trainable buffer (frozen at SOTA octave init {0.25,0.5,1.0,2.0,4.0}); keep only `phase` as `nn.Parameter`. Tests whether gradient-based freq adaptation helps or the octave init is doing all the work. Flag: `--rff-freeze-freqs`. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%. `--wandb-group alphonse-string-frozen-freq-ablation` | `alphonse/string-frozen-freq-ablation` | WIP — assigned |
 | askeladd | #960 | STRING σ-bracket sweep: fine-shift σ=0.125,0.25,0.5,1.0,2.0 (Arm A) vs coarse-shift σ=0.5,1.0,2.0,4.0,8.0 (Arm B). Tests whether the 5-sigma SOTA window is optimally placed or should shift ±1 octave. Arm A (fine-shift) running (W&B: `zhnlo5k5`); EP1 expected ~14:28 UTC. Arm B launches after Arm A EP1. EP4 gate: val_abupt ≤7.5%. `--wandb-group askeladd-string-sigma-bracket` | `askeladd/string-sigma-bracket-sweep` | WIP — Arm A EP1 in progress (run `zhnlo5k5`) |
-| frieren | #962 | Curriculum y-flip augmentation for vol_p OOD: linearly ramp yflip probability 0→0.5 over first 3 epochs (`--yflip-prob 0.5 --yflip-warmup-epochs 3`). Avoids early-training instability from immediate 50% flip rate. Kill threshold relaxed: `"2000:val_primary/abupt_axis_mean_rel_l2_pct<30"` (no loss gate — yflip does not cause loss spike). EP3 gate: val_abupt ≤8.0% AND val_vol_p ≤5.0%. EP13 target: ≤6.44%. `--wandb-group frieren-curriculum-yflip` | `frieren/curriculum-yflip-vol-ood` | WIP — assigned |
+| frieren | #962 | Curriculum y-flip augmentation for vol_p OOD — **CLOSED NEGATIVE**: EP3 vol_p gate FAIL. vol_p=5.9499% at EP2 step 21,729; slope −0.0011%/step; projected ~5.924% at EP3 gate — cannot reach ≤5.0%. Curriculum ramp slows vol_p convergence. W&B: `k1bqpcrz`. | `frieren/curriculum-yflip-vol-ood` | **CLOSED NEGATIVE** — frieren now idle |
 | nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Zero-init final layer. Arm A: `--volume-loss-weight 1.0`; Arm B: `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0%. `--wandb-group nezuko-vol-aux-decoder-head` | `nezuko/vol-pressure-aux-decoder-head` | WIP — running |
 | thorfinn | #967 | SDF-FiLM vol conditioning: lightweight shared MLP (`sdf_norm → Linear(1,64) → SiLU → Linear(64, 2×hidden_dim)`) computes per-point (γ, β); applied after each TransolverBlock as `h_vol ← (1+γ)·h_vol + β`. Residual FiLM form, identity-init (bias: γ_init=1, β_init=0). Shared weights across all L=5 layers. 4-ep screen; EP4 ≤6.9% gate. `--wandb-group thorfinn-sdf-film-vol-conditioning` | `thorfinn/sdf-film-vol-conditioning` | WIP — assigned |
 | fern | #968 | SDF-modulated vol PE: per-octave spectral scaling of STRING-sep RFF features conditioned on per-token SDF distance. Tiny MLP (Linear(1→16)→SiLU→Linear(16→5)→Softplus, ~112 params, identity-init) reads SDF value and outputs 5 octave weight scalars. Each STRING-sep sigma group scaled per-token. Flag: `--use-sdf-pe-scaling`. EP4 ≤6.9% gate. `--wandb-group fern-sdf-pe-octave-scaling` | `fern/sdf-pe-octave-scaling` | WIP — assigned |
@@ -55,7 +55,7 @@
 | askeladd | #956 | STRING σ-ladder geometry sweep (7-octave fine/coarse/all-fine) — CLOSED NEGATIVE. Arm A (7-oct fine, 0.03–2.0) failed EP1 at 30.27%; too wide a range degrades early convergence. Superseded by bracket sweep #960 |
 | thorfinn | #949 | Surface-points curriculum — CLOSED. Results ambiguous; superseded by SDF-zone masking #953 |
 | tanjiro | #935 | SDF-modulated vol PE (per-octave scaler, identity-init retry) — CLOSED. Superseded by coordinate-conditioned vol output head #959 |
-| alphonse | #955 | STRING RoPE slice-centroid — CARRIED OVER to Round 27 (still WIP) |
+| alphonse | #955 | STRING RoPE slice-centroid — CLOSED NEGATIVE. EP3 gate failed: val_abupt=8.1833% (gate ≤8.0%), vol_p=5.9055% (gate ≤5.0%). Local centroid coords did not improve over global. New assignment: #970 frozen-freq ablation. |
 | frieren | #957 | Y-flip augmentation (fixed p=0.5) — CLOSED NEGATIVE. No improvement at EP1; curriculum ramp version assigned as #962. |
 | nezuko | #958 | Dedicated vol_p aux decoder head — CARRIED OVER to Round 27 (still WIP) |
 | thorfinn | #953 | SDF-zone vol masking p_max=0.15 — CLOSED (false-kill; `train/loss<5` threshold fired on transient augmentation spike, not genuine divergence). Relaunched as #963 with relaxed `<10` threshold. |
@@ -80,13 +80,16 @@
 ### Theme 1: SDF Data Quality (edward #941)
 The 10 REQUIRED_RESTORED cases have corrupted volume_sdf.npy (inside-body cells with SDF=0 or negative). Edward has synthesized correct SDF values using STL rejection sampling + pyvista `compute_implicit_distance`. Full SOTA retrain running (W&B: `2ub8dmy7`, group: `edward-sdf-fix`). **EP4 gate PASSED: val_abupt=6.8533% (gate ≤7.5%).** Trajectory EP1→EP4: 27.47% → 8.37% → 7.32% → 6.85% — healthy convergence. Per-case EP3 diagnostic confirmed OOD-4 still at ~102% mean vol_p (expected — 16,384 vol_points yields ~2–3 inside-body samples/batch; SDF fix won't express until EP9+ at 65,536 vol_points). Next gate: EP7 val_abupt ≤6.9%. Key test: EP10 val_vol_p ≤8.0%. No new SDF/geometry-conditioning assignments until edward's EP13 results are known (Issue #803 blocker).
 
-### Theme 2: STRING Positional Encoding (alphonse #955, askeladd #960)
+### Theme 2: STRING Positional Encoding (alphonse #970, askeladd #960)
 Two STRING directions live:
-- **Slice-centroid local RoPE** (#955 alphonse): replace global (x,y,z) anchor with per-slice centroid; tests whether local slice-relative coordinates improve feature encoding
+- **Frozen-freq ablation** (#970 alphonse): freeze `log_freq` as non-trainable buffer (octave init), keep only `phase` as `nn.Parameter`. Tests whether gradient-based frequency adaptation is necessary or the multi-sigma init is sufficient. #955 CLOSED NEGATIVE — slice-centroid local RoPE failed EP3 gate (abupt=8.1833%, vol_p=5.9055%).
 - **Sigma-bracket sweep** (#960 askeladd): test fine-shift (0.125–2.0) and coarse-shift (0.5–8.0) bracketing the SOTA window (0.25–4.0); Arm A running (W&B: `zhnlo5k5`). Prior 7-octave mega-sweep (#956) failed EP1 — bracket approach is more conservative.
 
-### Theme 3: Data Augmentation for OOD (frieren #962)
-Curriculum y-flip augmentation: ramp yflip probability from 0→0.5 over first 3 epochs (`--yflip-prob 0.5 --yflip-warmup-epochs 3`). Negates y coord, ny normal, tau_y while leaving SDF/cp/tau_x/tau_z invariant. Doubles effective training geometries for OOD generalization. Prior PR #957 (fixed p=0.5 from epoch 0) CLOSED NEGATIVE — no val_abupt/vol_p improvement at EP1. Curriculum version avoids early-training disruption from immediate 50% flip rate. Kill threshold uses only the ABUPT EP2 gate (no loss threshold) since yflip does not cause loss spikes.
+### Theme 3: Data Augmentation for OOD — FULLY CLOSED
+Both y-flip augmentation approaches have been tested and failed:
+- **PR #957** (fixed p=0.5 from EP0): CLOSED NEGATIVE — no val improvement at EP1, higher vol_p
+- **PR #962** (curriculum ramp 0→0.5 over 3ep): CLOSED NEGATIVE — EP3 vol_p gate FAIL (5.9499% → projected ~5.924% vs ≤5.0% gate). Curriculum ramp slows vol_p convergence; insufficient headroom to pass gate.
+y-flip augmentation axis is FULLY CLOSED. frieren is idle and needs a new assignment.
 
 ### Theme 4: Dedicated Vol Pressure Decoder (nezuko #958)
 Independent 3-layer MLP branch for vol_p prediction, separate from the shared 4-output surface head. Hypothesis: the shared decoder must encode too many competing signals; a dedicated path lets it specialize on vol_p geometry.
@@ -142,6 +145,7 @@ See "Closed Axes" section below.
 
 ### STRING axes closed
 - PR #956 askeladd: 7-octave mega-sweep (0.0625–8.0) — CLOSED NEGATIVE (EP1=30.27%)
+- PR #955 alphonse: slice-centroid local RoPE — CLOSED NEGATIVE (EP3 gate: abupt=8.1833%, vol_p=5.9055%)
 - Prior STRING axes: sigma shift, all-fine/all-coarse ladder variants, vol-specific RFF (#918) — ALL CLOSED
 - σ=0.25 confirmed load-bearing (#819); σ-shift/ladder failed
 
@@ -164,6 +168,8 @@ See "Closed Axes" section below.
 - **Vol-specific RFF sigmas (Arm A/B/C)**: #918 tanjiro CLOSED
 - **Train-time y-mirror aug**: #901 fern CLOSED (Round 24 Arm C)
 - **TTA y-mirror**: #928 nezuko CLOSED (Round 24)
+- **Y-flip augmentation fixed p=0.5**: #957 frieren CLOSED NEGATIVE (no EP1 improvement)
+- **Y-flip augmentation curriculum ramp 0→0.5**: #962 frieren CLOSED NEGATIVE (EP3 vol_p gate: 5.9499% projected 5.924% vs ≤5.0%)
 - **Mild yaw-only rotation aug**: #937 alphonse CLOSED (Round 24)
 - **GradNorm full-mode α=1.5** (#942 fern): CLOSED NEGATIVE — vp weight decreased at EP1, all weights converge to 0.91–1.11 band; vol_p is not gradient-starved under Lion; 5× backward overhead consumed budget before EP6 gate
 - **GradNorm ema_proxy, EMA, LoRA, FiLM, 2-layer MLP decoder, Huber loss, Lion β2 sweep, BC-type embedding, dual-tower xattn, spectral-norm attn, stochastic depth, PCGrad, surface curvature features**: ALL CLOSED

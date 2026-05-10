@@ -1,5 +1,31 @@
 # SENPAI Research Results
 
+## 2026-05-09 22:30 — PR #962: Curriculum y-flip augmentation for vol_p OOD (frieren) — CLOSED (NEGATIVE)
+
+- **Branch**: `frieren/curriculum-yflip-vol-ood` (closed)
+- **W&B run**: `k1bqpcrz`
+- **Hypothesis**: y-flip augmentation (negate y-coord, ny normal, tau_y) doubles effective training geometries and should improve OOD generalization. A curriculum ramp (0→0.5 probability over EP1–EP3) avoids early-training disruption vs fixed p=0.5 from step 0 (which failed as PR #957).
+
+| Epoch | Step | val_abupt | vol_p | Gate | Status |
+|---|---:|---:|---:|---|---|
+| EP1 | 10,864 | 28.48% | 17.91% | ≤30% PASS | continuing |
+| EP2 | 21,729 | 8.7659% | 5.9499% | pre-EP3 snapshot | monitoring |
+| EP3 (projected) | 32,594 | — | ~5.924% | ≤5.0% gate | FAIL |
+
+**EP3 gate failure analysis:**
+- vol_p slope at EP2: (17.91% − 5.9499%) / 10,865 steps = −0.0011%/step
+- Steps remaining to EP3 gate: 32,594 − 29,775 = 2,819 steps
+- Projected vol_p drop: 2,819 × 0.0011 = 0.031pp → landing at ~5.924%
+- Gate requirement: ≤5.0%  |  Gap: 0.924pp — insurmountable in 2,819 steps
+
+**Results commentary:**
+- The curriculum ramp did avoid the EP1 instability seen in PR #957 (fixed p=0.5: higher vol_p at EP1). abupt=28.48% is clean at EP1.
+- However, the curriculum ramp itself is the problem: by delaying flip augmentation until EP3, the model never experiences the OOD regime during the critical vol_p convergence phase (EP1–EP3). vol_p converges to 5.95% before the augmentation has full effect, and the slope is too shallow to close the 0.92pp gap.
+- Root cause: y-flip augmentation creates a geometry mismatch that disrupts vol_p convergence — both immediate (PR #957) and gradual (this PR). The augmentation approach is fundamentally at odds with vol_p optimization in the 4-ep screen budget.
+- **Conclusion**: Y-flip augmentation axis is FULLY CLOSED (#957 + #962). Do not revisit without a fundamentally different formulation (e.g., augmentation only after EP5 in a 13-ep run, or separate augmented pre-training).
+
+---
+
 ## 2026-05-09 — PR #961: Geometry-conditioned Q-bias via mean-pool surf→vol xattn (fern) — CLOSED (NEGATIVE)
 
 - **Branch**: `fern/geometry-conditioned-q-bias` (closed)
