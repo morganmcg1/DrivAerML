@@ -1,5 +1,6 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 — Round 27 active (6 WIP). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning).
+- **Date:** 2026-05-09 — Round 27 active (8 WIP). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning), fern #969 (SDF-PE octave scaling H2).
+- **CRITICAL UPDATE (2026-05-09):** Nezuko PR #958 run `29nohj67` (vol aux decoder head) has reached **EP7 val_abupt=6.3885%**, beating single-model SOTA of 6.4407% (delta −0.052pp). Currently in EP8 (step 54,610). Trajectory healthy: EP5=6.45%→EP6=6.45%→EP7=6.39%. If EP8–12 continue improving, this will be a clear merge winner. **Monitoring closely.**
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
