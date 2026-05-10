@@ -31,6 +31,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+from data import DrivAerMLCase, DrivAerMLSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -132,6 +133,9 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_stochastic_volume_sampling: bool = False
+    use_coord_noise: bool = False
+    coord_noise_sigma: float = 0.02
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -189,6 +193,78 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
         return None
     sigmas = [float(s) for s in spec.split(",") if s.strip()]
     return sigmas or None
+
+
+class StochasticVolumeTrainDataset(DrivAerMLSurfaceDataset):
+    """Train dataset that draws volume indices with a fresh OS-seeded RNG per call.
+
+    The parent's ``train_random`` mode uses ``torch.randint`` against the global
+    torch RNG; with DDP each rank starts the same global seed and DataLoader
+    workers seed as ``base_seed + worker_id``, so worker ``w`` on every rank
+    yields the same index sequence. The model can therefore see a small number
+    of correlated volume-point loci across ranks and epochs. Using
+    ``np.random.default_rng()`` with no seed pulls fresh OS entropy on every
+    call, fully decorrelating volume sampling across ranks, workers, and
+    successive ``__getitem__`` invocations. Surface sampling is unchanged.
+    """
+
+    def _stochastic_volume_indices(
+        self,
+        total: int,
+        count: int,
+        view,
+        *,
+        group_view_count: int,
+    ) -> torch.Tensor | None:
+        if view.view_index >= group_view_count:
+            return torch.empty(0, dtype=torch.long)
+        if count <= 0 or total <= count:
+            return None if view.view_index == 0 else torch.empty(0, dtype=torch.long)
+        rng = np.random.default_rng()
+        idx = rng.integers(0, total, size=count, dtype=np.int64)
+        idx.sort()
+        return torch.from_numpy(idx)
+
+    def __getitem__(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        volume_idx = self._stochastic_volume_indices(
+            counts["n_volume"],
+            self.max_volume_points,
+            view,
+            group_view_count=view.volume_view_count,
+        )
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=None if volume_idx is None else volume_idx.numpy(),
+        )
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = "train_stochastic_random"
+        metadata["joint_view_count"] = int(view.view_count)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
 
 
 class GradNormWeights(nn.Module):
@@ -299,6 +375,8 @@ def train_loss(
     volume_loss_weight: float = 1.0,
     use_y_symmetry_aug: bool = False,
     y_symmetry_aug_prob: float = 0.5,
+    use_coord_noise: bool = False,
+    coord_noise_sigma: float = 0.02,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
@@ -308,6 +386,17 @@ def train_loss(
         if aug_log is not None:
             aug_log["n_flipped"] = int(flip_mask.sum().item())
             aug_log["batch_size"] = int(flip_mask.shape[0])
+    if use_coord_noise and coord_noise_sigma > 0.0:
+        # Inject Gaussian noise into volume xyz channels (0:3) but NOT sdf (3).
+        # Mask out padded rows so loss/MSE computation against padding stays zero.
+        vol_xyz = batch.volume_x[..., :3]
+        noise = torch.randn_like(vol_xyz) * coord_noise_sigma
+        valid = batch.volume_mask.to(noise.dtype).unsqueeze(-1)
+        batch.volume_x = batch.volume_x.clone()
+        batch.volume_x[..., :3] = vol_xyz + noise * valid
+        if aug_log is not None:
+            aug_log["coord_noise_applied"] = 1
+            aug_log["coord_noise_sigma"] = float(coord_noise_sigma)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -438,7 +527,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             run_eval_only(config, state)
             return
         if config.seed >= 0:
-            seed_everything(config.seed)
+            # Per-rank seed offset decorrelates DataLoader-worker RNG sequences
+            # (each rank's worker_id otherwise inherits the same base seed and
+            # produces identical torch.randint streams). DDP broadcasts model
+            # weights at construction time, so divergent init seeds do not
+            # break parameter sync.
+            rank_offset = (
+                state.rank if config.use_stochastic_volume_sampling else 0
+            )
+            seed_everything(config.seed + rank_offset)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
@@ -451,6 +548,22 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_stochastic_volume_sampling:
+            # Promote the train dataset to the stochastic-volume variant. Mutating
+            # __class__ keeps all parent state (store, views, point limits) intact
+            # while routing volume index draws through np.random.default_rng().
+            base_train_ds = train_loader.dataset
+            if not isinstance(base_train_ds, DrivAerMLSurfaceDataset):
+                raise RuntimeError(
+                    "Stochastic volume sampling requires a DrivAerMLSurfaceDataset; "
+                    f"got {type(base_train_ds).__name__}"
+                )
+            base_train_ds.__class__ = StochasticVolumeTrainDataset
+            if state.is_main:
+                print(
+                    "Stochastic volume sampling enabled: each __getitem__ draws "
+                    "fresh OS-seeded volume indices (surface sampling unchanged)."
+                )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -570,7 +683,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
-                aug_log: dict[str, int] = {}
+                aug_log: dict[str, float] = {}
                 loss, batch_loss_metrics, task_losses = train_loss(
                     model,
                     batch,
@@ -581,6 +694,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     volume_loss_weight=config.volume_loss_weight,
                     use_y_symmetry_aug=config.use_y_symmetry_aug,
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
+                    use_coord_noise=config.use_coord_noise,
+                    coord_noise_sigma=config.coord_noise_sigma,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
                 )
@@ -594,6 +709,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"[aug debug] EP0 step0 (rank0): "
                         f"{aug_log.get('n_flipped', 0)}/{aug_log.get('batch_size', 0)} "
                         f"samples y-flipped"
+                    )
+                if (
+                    config.use_coord_noise
+                    and state.is_main
+                    and epoch == 0
+                    and global_step == 0
+                ):
+                    print(
+                        f"[aug debug] EP0 step0 (rank0): coord noise "
+                        f"sigma={config.coord_noise_sigma} applied to volume xyz "
+                        f"(applied={aug_log.get('coord_noise_applied', 0)})"
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -645,6 +771,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     train_log["train/aug/y_symmetry_batch_size"] = aug_log.get(
                         "batch_size", 0
                     )
+                if config.use_coord_noise:
+                    train_log["train/aug/coord_noise_sigma"] = float(
+                        config.coord_noise_sigma
+                    )
+                    train_log["train/aug/coord_noise_applied"] = float(
+                        aug_log.get("coord_noise_applied", 0)
+                    )
+                if config.use_stochastic_volume_sampling:
+                    train_log["train/aug/stochastic_volume_sampling"] = 1.0
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
