@@ -146,15 +146,18 @@ class SdfVolPEScaler(nn.Module):
     Consecutive features round-robin across octaves: octave index for output
     dim ``d`` is ``((d % (2 * num_features)) % num_features) % num_octaves``.
 
-    The scaler produces ``num_octaves`` multiplicative weights in (0, 1] from
-    the per-token SDF value.  At init, Linear(8→5) bias=0 and weight~0 so all
-    sigmoid outputs start near 0.5, giving mild suppression that the optimiser
-    can quickly lift.  The sigmoid ceiling of 1.0 prevents amplification;
-    interior tokens (positive SDF) and exterior tokens (negative SDF) learn
-    different scaling profiles automatically.
+    Identity-init (PR #935 retry): Linear(8→num_octaves) weight=0 and
+    bias=+4.0, so all sigmoid outputs start at sigmoid(4) ≈ 0.982 — near
+    full-PE passthrough at step 0.  This eliminates the EP1-EP2 burn-in seen
+    in the prior run (run jlnk973q), where bias=0 caused outputs to start at
+    sigmoid(0)=0.5 and waste 1-2 epochs learning to lift the gates back up.
+    The scaler now learns to *attenuate* PE in the regimes where it helps
+    (e.g., interior tokens far from surface) rather than starting at half
+    strength.  Sigmoid derivative at z=4 is ~0.018, sufficient for gradient
+    flow.
     """
 
-    def __init__(self, num_octaves: int = 5):
+    def __init__(self, num_octaves: int = 5, init_bias: float = 4.0):
         super().__init__()
         self.num_octaves = num_octaves
         self.net = nn.Sequential(
@@ -163,11 +166,11 @@ class SdfVolPEScaler(nn.Module):
             nn.Linear(8, num_octaves),
             nn.Sigmoid(),
         )
-        # Initialise so all outputs start near 0.5 (mild attenuation at init)
+        # Identity-init: outputs start at sigmoid(init_bias) ≈ 1.0 → full PE
         nn.init.trunc_normal_(self.net[0].weight, std=0.02)
         nn.init.zeros_(self.net[0].bias)
         nn.init.zeros_(self.net[2].weight)
-        nn.init.zeros_(self.net[2].bias)
+        nn.init.constant_(self.net[2].bias, init_bias)
 
     def forward(self, sdf: torch.Tensor) -> torch.Tensor:
         # sdf: [B, N, 1]
