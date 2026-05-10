@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-10 ~02:25 UTC
+- 2026-05-10 ~03:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -25,13 +25,14 @@
 
 **Vol-loss-weighting direction CLOSED:** Both PR #911 (GradNorm+static weight=no-op) and PR #936 (no-GradNorm+static weight=harmful) failed. The val→test gap is NOT a training-time loss signal problem. It is almost certainly a covariate shift / data distribution problem.
 
-## Active Experiments (2026-05-10 ~02:25 UTC)
+## Active Experiments (2026-05-10 ~03:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
 | #900 | dl24-tanjiro | 6L + GradNorm α=0.5 + WD=0.01 + Y-sym | `os6v64lq` | Running, EP29 complete, EP30 imminent | abupt=6.6065% (EP27 best); EP28=6.6231%, EP29=6.6252% regression | EP30 gate ≤6.60% NOT expected; test eval on EP27 checkpoint pending |
 | #914 | dl24-frieren | 5L + GradNorm α=0.5 + WD=0.005 + Y-sym | `wdxtdmhy` | Running EP24+; step=133,638 | abupt=**6.5958%** (EP24, val wave leader ⭐), vol_p=4.1761% | EP21-EP23 oscillation was transient; EP24 broke through cleanly; EP25 gate imminent |
 | #938 | dl24-fern | 5L + balanced 96k vol + 60k surface + WD=0.005 + GradNorm α=0.5 + Y-sym | `md3vhhd8` | Running, EP1=36.43% (normal early training); step=4,751 | EP5 gate ≤7.5% expected ~03:00Z | Watch surf_p — gradient starvation risk; PR #912 warning: surf_p +3.65pp without proportional surface |
+| #939 | dl24-nezuko | 6L + GradNorm α=0.5 + WD=0.005 + Y-sym (6L×WD cross) | TBD | Assigned, not yet started | — | Cross-product of tanjiro #900 (6L) and frieren #914 (WD=0.005); untested quadrant |
 
 ## Key Closed/Falsified Hypotheses This Wave
 
@@ -114,4 +115,4 @@
 8. **3D volumetric attention** — replace volume MLP head with spatially-aware attention (radical architecture change)
 9. **LR schedule ablation** — cosine vs linear decay: does cosine annealing favor val at expense of test generalization?
 
-_Last updated: 2026-05-10 ~02:25 UTC. Key events since last update: (1) PR #936 (nezuko vol-loss-weight=2.0 no-GradNorm) FALSIFIED — EP5=9.010% gate miss, vol_p=5.691% WORSE than baseline, auto-killed and CLOSED. (2) Vol-loss-weighting direction now FULLY CLOSED (both #911 and #936 failed). (3) PR #914 (frieren) new run best EP24=6.5958% — beats EP19 by 0.0098pp, wave val leader confirmed. (4) PR #900 (tanjiro) EP27=6.6065% best, EP28-29 regression; EP30 imminent, unlikely to gate at ≤6.60%. (5) PR #938 (fern) launched, run md3vhhd8, EP1=36.4%, EP5 expected ~03:00Z._
+_Last updated: 2026-05-10 ~03:00 UTC. Key events since last update: (1) PR #936 (nezuko vol-loss-weight=2.0 no-GradNorm) FALSIFIED — EP5=9.010% gate miss, vol_p=5.691% WORSE than baseline, auto-killed and CLOSED. (2) Vol-loss-weighting direction now FULLY CLOSED (both #911 and #936 failed). (3) PR #914 (frieren) new run best EP24=6.5958% — beats EP19 by 0.0098pp, wave val leader confirmed. (4) PR #900 (tanjiro) EP27=6.6065% best, EP28-29 regression; EP30 imminent, unlikely to gate at ≤6.60%. (5) PR #938 (fern) launched, run md3vhhd8, EP1=36.4%, EP5 expected ~03:00Z. (6) PR #939 (nezuko) assigned: 6L + WD=0.005 + GradNorm α=0.5 + Y-sym — untested cross-product of tanjiro's 6L depth and frieren's WD=0.005 regularization._

@@ -8,6 +8,42 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-10 ~02:10 UTC — PR #936 CLOSED: vol-loss-weight=2.0 without GradNorm (dl24-nezuko, `6gd9u34e`)
+
+- **Branch:** `dl24-nezuko/vol-loss-weight-2-no-gradnorm`
+- **W&B Run:** `6gd9u34e`
+- **Hypothesis:** Persistent 2× upweighting of volume_loss without GradNorm (which was suspected to self-cancel in PR #911) would force the model to prioritise vol_p and reduce the val→test vol_p gap (~7pp).
+
+### Per-epoch val history
+
+| Epoch | abupt | vol_p |
+|-------|-------|-------|
+| EP1 | 17.878% | — |
+| EP2 | 11.858% | — |
+| EP3 | 10.439% | — |
+| EP4 | 9.765% | — |
+| EP5 | 9.010% | 5.691% |
+
+**EP5 gate: ≤7.5% — MISS by +1.51pp. Run killed mid-EP6.**
+
+### Results vs Baseline
+
+| Metric | Frieren baseline (EP5) | Nezuko #936 (EP5) | Delta |
+|--------|----------------------|-------------------|-------|
+| abupt | ~7.5% (EP5 est.) | 9.010% | +1.51pp |
+| vol_p | 4.511% | 5.691% | +1.18pp WORSE |
+
+### Decision: CLOSED — hypothesis FALSIFIED
+
+### Key Findings
+
+1. **vol-loss-weight direction fully exhausted.** PR #911 (vol-loss-weight=2.0 WITH GradNorm α=0.5) and PR #936 (without GradNorm) both falsified. The GradNorm-vs-no-GradNorm distinction was irrelevant — neither variant helped.
+2. **vol_p at EP5=5.691% is WORSE than the frieren baseline 4.511%**, not better. Upweighting volume loss did not improve vol_p fidelity at any convergence checkpoint.
+3. **The val→test vol_p gap is NOT a training-time loss signal problem.** The gap (val vol_p ≈4%, test vol_p ≈11–12%) is a covariate shift / data distribution problem. More pressure on vol_p at train-time does not close an OOD generalization gap.
+4. **Adding vol-loss-weight to confirmed dead-ends.** Do not revisit this direction.
+
+---
+
 ## 2026-05-10 ~01:32 UTC — PR #934 CLOSED: Balanced Points 96k+60k surf+vol (dl24-fern, `f335lerf`)
 
 - **Branch:** `dl24-fern/balanced-pts-96k60k`
