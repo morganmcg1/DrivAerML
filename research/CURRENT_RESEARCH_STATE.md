@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-09 — Round 29 active (8 WIP)
+- **Date:** 2026-05-09 — Round 28 active (8 WIP; PRs #985, #986 newly assigned)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -34,35 +34,20 @@
 
 ---
 
-## Active PRs (Round 29) — 8 WIP
+## Active PRs (Round 28) — 8 WIP
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
 | nezuko | #958 | Vol aux decoder head: Arm A COMPLETE (new SOTA 6.2869%). Arm B (`--volume-loss-weight 2.0`) running EP4. | `nezuko/vol-pressure-aux-decoder-head` | WIP — Arm B run `6xja19q9`, EP4 running; gate EP7 ≤7.2% |
-| tanjiro | #994 | LR-warmup decouple from vol-schedule boundary: complete LR warmup before EP1→EP2 boundary so only vol_points jump happens at that step, eliminating the 18× LR+curriculum co-shock from PR #983. | `tanjiro/lr-warmup-decouple-from-vol-schedule` | WIP — assigned; awaiting/running |
-| askeladd | #986 | Adaptive SDF vol loss weighting: exp(-\|d_sdf\|/sigma) per-token weight; sigma sweep {0.5, 1.0, 2.0} m. | `askeladd/adaptive-sdf-vol-loss` | WIP — running |
-| frieren | #995 | Pre-xattn vol LayerNorm ablation: single LN inserted immediately before surf→vol xattn (no MHA); isolates whether EP1 gain in #988 came from normalizing vol_h vs self-attn capacity. Zero FLOP overhead. | `frieren/pre-xattn-vol-ln-only` | WIP — assigned; awaiting/running |
-| fern | #996 | Near-surface SDF-stratified vol sampling: correct-direction inverse SDF weighting `exp(-alpha×|sdf|)` concentrates vol points near car surface; Arm A alpha=1.0, Arm B alpha=2.0. | `fern/near-surface-sdf-stratified-sampling` | WIP — assigned; awaiting/running |
-| thorfinn | #991 | Per-head learnable xattn temperature: scalar per-head scale initialized to 1.0 replacing the global constant from PR #984; isolates per-head sharpening signal. | `thorfinn/per-head-learnable-xattn-temp` | WIP — assigned; awaiting/running |
-| edward | #992 | Global surface embedding: learnable aggregation (attention pooling) over all surface tokens → geometry code added to vol queries before surf→vol xattn; richer spatial context than mean-pool. | `edward/global-surface-embedding` | WIP — assigned; awaiting/running |
-| alphonse | #993 | Bbox normalization with corrected STRING PE sigmas (÷5 rescale for [-1,+1] coords): apply bbox normalization AND rescale sigmas from {0.25,0.5,1.0,2.0,4.0} → {0.05,0.1,0.2,0.4,0.8} to match normalized coordinate range. | `alphonse/bbox-norm-corrected-pe-sigmas` | WIP — assigned; awaiting/running |
+| frieren | #981 | SDF-stratified vol sampling, alpha=2.0: oversample near-boundary vol points using SDF proximity. | `frieren/sdf-stratified-vol-sampling` | WIP — restart run `xzreqhns` (`frieren/sdf-stratified-vol-ep4-alpha2-restart`) confirmed running, EP1 expected ~07:16Z |
+| fern | #982 | No-SDF-PE-scaling control: ablation to isolate whether SDF-PE spectral scaling in PR #977 was responsible for EP3 failure. | `fern/no-sdf-pe-scaling-fast-schedule-control` | WIP — run `ua1ohtjb`, EP1 pending; group `fern-no-sdf-pe-scaling-control` |
+| tanjiro | #983 | Curriculum warmup: `--vol-points-warmup-steps` to ramp vol points smoothly; tests whether 200–500 step warmup prevents EP1→EP2 divergence seen in #973. | `tanjiro/curriculum-warmup-ramp` | WIP — Arm A run `hhplwxmk` (500-step warmup), EP1→EP2 transition pending; Arm B pre-approved (200-step); group `tanjiro-curriculum-warmup` |
+| thorfinn | #984 | Constant xattn temp scale=0.5 (zero-param): hardcode Q×0.5 before surf→vol xattn; isolates global sharpening signal from PR #974's MLP that collapsed to scale_mean=0.515. | `thorfinn/constant-attn-temp-scale` | WIP — run `ojuyombs`, EP1 pending; group `thorfinn-constant-attn-temp-scale` |
+| edward | #980 | Bbox geometry scalar conditioning: per-case [L,H,W,A_front] → Linear(4,hidden_dim) zero-init additive bias on vol hidden. 10-ep schedule with GradNorm. | `edward/geo-scalar-cond` | WIP — run `nv4g1nhw`, 10-ep schedule+GradNorm; EP1 gate ≤30% |
+| alphonse | #985 | Per-case geometry embedding v2: second xattn layer (vol Q × all surf K/V, zero-init out_proj residual) to spatially condition vol queries before main surf→vol xattn; ~1.05M new params. | `alphonse/geo-embed-v2-xattn` | WIP — newly assigned; awaiting student implementation |
+| askeladd | #986 | Adaptive SDF vol loss weighting: exp(-\|d_sdf\|/sigma) per-token weight; sigma sweep {0.5, 1.0, 2.0} m. | `askeladd/adaptive-sdf-vol-loss` | WIP — newly assigned; awaiting student implementation |
 
 ### All students active (8 WIP)
-
----
-
-## Round 28–29 Closures
-
-| Student | PR | Run | Result |
-|---|---|---|---|
-| edward | #980 | `nv4g1nhw` | CLOSED NEGATIVE — geo-scalar conditioning: 4-float bbox [L,H,W,A_front] → Linear(4,hidden_dim) additive bias on vol hidden. Run timed out at step 30,609/108,640 (2.82/10 epochs). Forced EP3 val_abupt=7.4350%, test_vol_p=12.154% (+1.55pp vs baseline 10.605%). Widened OOD vol_p gap. Bundled GradNorm α=0.5 confound. |
-| frieren | #981 | `xzreqhns` | CLOSED NEGATIVE — SDF-stratified vol sampling alpha=2.0: formula `1+alpha×|sdf|` up-weights freestream tokens 8–162× (WRONG DIRECTION — far-field bias not near-surface). EP1 FAIL val_abupt=39.37%. Correct approach: inverse weighting near surface. |
-| fern | #982 | `ua1ohtjb` | CLOSED NEGATIVE — no-SDF-PE-scaling control: EP3 FAIL both gates (val_abupt=8.6996% > 8.0%, vol_p=5.9939% > 5.0%). WITHOUT SDF-PE scaling is WORSE than PR #977 with scaling (+0.44pp both metrics). Fast schedule is the bottleneck; SDF-PE scaling is NOT the root cause of PR #977 failure. |
-| thorfinn | #984 | `ojuyombs` | CLOSED NEGATIVE — constant xattn temp scale=0.5 (Q×0.5): EP4 val_abupt=7.4900%, vol_p=5.0086%. Beats MLP baseline from #974 but does NOT beat SOTA 6.2869%. |
-| alphonse | #985 | `7e3k06fj` | CLOSED NEGATIVE — stacked geo-xattn double cross-attention (+1.05M params, 18.04M total): EP3 dual gate FAIL (8.274% > 8.0%, vol_p=5.5706% > 5.0%), EP4 terminal val_abupt=8.2145% (+1.93pp vs SOTA), test_vol_p=13.0508%. Architecture trains cleanly but 4-epoch compressed schedule is insufficient for +1.05M param increase. |
-| tanjiro | #983 | `hhplwxmk` (Arm A), `xy4yhpm0` (Arm B) | CLOSED NEGATIVE — curriculum warmup ramp (200–500 step vol_points warmup): val_abupt=7.4176% (Arm B EP4), test_abupt=8.7352%. Both arms survived EP1→EP2 transition (fixed divergence from #973) but critical finding: the shock was **LR-driven not curriculum-driven** — 18× LR jump (5e-6→9e-5) completes at EP1 end same step as vol_points jump. EP2→EP3 transition was smooth (LR already in cosine decay). The fix: decouple LR warmup completion from curriculum boundary. |
-| frieren | #988 | `mdmkx495` (rank0) | CLOSED NEGATIVE — pre-xattn vol self-attention (O(N²) MHA): TIMEOUT at EP3 partial (step 17445/38030), val_abupt=10.5927%. EP1 showed −1.99pp vs baseline (promising!) but EP2+3 regressed badly. Root cause: O(N²) cost of vanilla MHA over vol_pts grows catastrophically with the vol_pts ramp (16K→32K→49K→65K), EP1 wall time 7103s vs baseline ~3500s. EP2+ too slow to complete within 270-min budget. Pre-xattn LN-only ablation assigned to frieren #995 to test if EP1 gain came from LN vs MHA. |
-| fern | #989 | `z6dcbe9g` | CLOSED NEGATIVE — SDF-modulated vol PE octave scaling (MLP: SDF→per-octave scale): EP4 val_abupt=7.4901%, test_abupt=8.7927%. 1.0–1.1pp worse than single-model SOTA. Gap closed each epoch (EP1: −0.35pp, EP2: +3.23pp, EP3: +1.11pp, EP4: +0.68pp) but never recovered baseline. MLP learned physically coherent pattern (near-surface amplification) but far-field attenuation (mean scale=0.157 at sdf=+2.0) degraded far-field vol point discrimination. SDF-modulated PE octave scaling axis CLOSED. |
 
 ---
 
@@ -75,7 +60,7 @@
 | alphonse | #976 | Per-case geometry embedding — CLOSED NEGATIVE. EP3=8.073% val_abupt + 5.301% vol_p, dual gate fail. Mean-pool surface hidden states → geometry code does not generalize OOD vol_p. |
 | frieren | #971 | Learned distance RPB on surf→vol xattn — CLOSED. SM 12.0 OOM on [B=4, H=4, N_vol=16384, N_surf=65536] attention tensor ~32 GiB bf16. |
 | edward | #941 | SDF data fix retrain — CLOSED NEGATIVE. EP13 test_vol_p=11.9618% (worse than 11.6704% baseline). SDF corruption is not the root cause. |
-| thorfinn | #974 | SDF-conditioned xattn temperature MLP — CLOSED NEGATIVE. MLP collapsed to global constant scale_mean=0.515, τ_std=0.00177. EP3: val_abupt=8.148%, vol_p=5.350% — narrowly missed dual gate. Follow-up: #991. |
+| thorfinn | #974 | SDF-conditioned xattn temperature MLP — CLOSED NEGATIVE. MLP collapsed to global constant scale_mean=0.515, τ_std=0.00177. EP3: val_abupt=8.148%, vol_p=5.350% — narrowly missed dual gate. Follow-up: #984. |
 | thorfinn | #967 | SDF-FiLM vol conditioning — CLOSED NEGATIVE. EP3 val_abupt gate FAILED. |
 | tanjiro | #973 Arm A | tanh bounded SDF encoding — KILLED. Saturation degeneracy at scale=2.0m (gradient≈1e-8), catastrophic EP2 transition loss=10.6274. |
 
@@ -95,73 +80,69 @@
 
 ---
 
-## Current Research Focus (Round 29)
+## Current Research Focus (Round 28)
 
 **Primary mandate (Issue #717):** Reduce test_vol_pressure below 11.0% → 10.0% → 8.5% → 6.08% (AB-UPT). All channels must not degrade.
 
 ### Theme 1: Dedicated Vol Pressure Decoder (nezuko #958)
 Independent 3-layer MLP branch for vol_p prediction. Arm A (vol_loss_weight=1.0): COMPLETE — new single-model SOTA val_abupt=6.2869% (run `29nohj67`, best_epoch=13). test_vol_p=12.0063% NEGATIVE. Arm B (vol_loss_weight=2.0): run `6xja19q9`, EP4 running, EP7 gate ≤7.2%.
 
-### Theme 2: Pre-xattn Vol LayerNorm Ablation (frieren #995)
-Single LN inserted immediately before surf→vol xattn (no MHA) to isolate whether the EP1 −1.99pp gain observed in #988 came from normalizing vol_h vs self-attn capacity. Zero FLOP overhead. This is a causal ablation: if LN alone recovers the EP1 gain, the benefit was normalization not attention capacity. PR #988 CLOSED due to O(N²) MHA cost explosion over 4-epoch vol_pts ramp.
+### Theme 2: SDF-Stratified Vol Sampling (frieren #981)
+Oversample near-boundary vol tokens (SDF proximity, alpha=2.0) during training. Run `xzreqhns` (`frieren/sdf-stratified-vol-ep4-alpha2-restart`) confirmed running at step ~1,358, EP1 expected ~07:16Z. Group `frieren-sdf-stratified-vol`.
 
-### Theme 3: Near-Surface SDF-Stratified Vol Sampling (fern #996)
-Correct-direction inverse SDF weighting `weight = exp(-alpha×|sdf|)` concentrates vol points near car surface during training. Two arms: Arm A alpha=1.0, Arm B alpha=2.0. Directly addresses the finding that far-field bias (frieren #981 wrong direction) catastrophically fails; correct near-surface bias has been untested until now.
+### Theme 3: No-SDF-PE-Scaling Control (fern #982)
+Ablation of SDF-PE spectral scaling to verify whether PR #977's EP3 failure (val_abupt ≤8.0% miss) was caused by SDF-PE-scaling or other changes. Run `ua1ohtjb`, group `fern-no-sdf-pe-scaling-control`. EP1 gate ≤30%.
 
-### Theme 4: LR-Warmup Decoupling from Vol-Schedule Boundary (tanjiro #994)
-Complete LR warmup before EP1→EP2 boundary so only the vol_points jump happens at that transition. PR #983 mechanistic finding: the EP1→EP2 shock was driven by an 18× LR jump (5e-6→9e-5 from `--lr-warmup-epochs=1`) completing simultaneously with the vol_points curriculum jump. EP2→EP3 was smooth (LR already in cosine decay). Decoupling should eliminate the co-shock and allow clean curriculum evaluation.
+### Theme 4: Curriculum Warmup (tanjiro #983)
+`--vol-points-warmup-steps` to smoothly ramp vol points per epoch rather than step jumps. Arm A (500-step warmup, run `hhplwxmk`): EP1→EP2 transition pending at step ~10,865 (critical window — PR #973 diverged here). Arm B (200-step warmup) pre-approved; launch after Arm A clears step 10,868 cleanly. Group `tanjiro-curriculum-warmup`.
 
-### Theme 5: Per-Head Learnable xattn Temperature (thorfinn #991)
-Per-head scalar temperature scale initialized to 1.0 for surf→vol xattn, replacing the global constant from PR #984 (Q×0.5). Follow-up to collapsed MLP (#974) and constant-scale NEGATIVE (#984). Per-head learned scale should capture head-specific sharpening patterns instead of global uniform scaling.
+### Theme 5: Constant xattn temp scale=0.5 (thorfinn #984)
+Zero-param control for PR #974's MLP collapsed to global scale=0.515. Hardcode Q×0.5 before surf→vol xattn. Run `ojuyombs`, group `thorfinn-constant-attn-temp-scale`. EP1 gate ≤30%.
 
-### Theme 6: Global Surface Embedding (edward #992)
-Learnable attention pooling over all surface hidden tokens to produce a geometry code, added to vol queries before surf→vol xattn. More expressive than failed mean-pool (#976, #980) because attention pooling preserves spatial selectivity. Zero-init residual.
+### Theme 6: Bbox Geometry Scalar Conditioning (edward #980)
+Per-case geometry embedding via scalar features [L,H,W,A_front] projected to hidden_dim and added as additive bias to vol hidden states. Zero-init Linear(4,hidden_dim) for safe warm-up. Run `nv4g1nhw`, 10-ep schedule with GradNorm. EP1 gate ≤30%.
 
-### Theme 7: Bbox Normalization + Corrected STRING PE Sigmas (alphonse #993)
-Root-cause fix for PR #978 (CLOSED NEGATIVE): bbox normalization to [-1,+1] caused ~5× STRING PE frequency mismatch. Fix: rescale STRING sigmas ÷5 from {0.25,0.5,1.0,2.0,4.0} → {0.05,0.1,0.2,0.4,0.8} to match normalized coord range. Both changes applied together.
+### Theme 7: Per-Case Geometry Embedding v2 (alphonse #985)
+Second cross-attention layer (vol Q × all surface K/V, zero-init out_proj residual) before main surf→vol xattn. Spatially conditions vol queries on all surface tokens, overcoming the mean-pool spatial specificity loss that killed #976. ~1.05M new params. Newly assigned — awaiting student implementation.
 
 ### Theme 8: Adaptive SDF Vol Loss Weighting (askeladd #986)
-Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundaries where OOD geometry differences are most pronounced. Sigma sweep {0.5, 1.0, 2.0} m. Parameter-free. Running.
+Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundaries where OOD geometry differences are most pronounced. Sigma sweep {0.5, 1.0, 2.0} m. Parameter-free. Newly assigned — awaiting student implementation.
 
 ### Closed Themes
 - **SDF data quality** (edward #941): CLOSED NEGATIVE — SDF corruption is NOT the root cause of vol_p OOD gap.
 - **STRING positional encoding** (#960, #970 etc.): FULLY EXHAUSTED — all axes closed. No new STRING experiments.
 - **Per-case geometry embedding v1** (alphonse #976): CLOSED NEGATIVE — mean-pool surface code does not generalize OOD vol_p.
 - **Surface-head-only isolation** (askeladd #975): CLOSED NEGATIVE — xattn is load-bearing for surface metrics.
-- **Geo-scalar conditioning** (edward #980): CLOSED NEGATIVE — 4-float bbox projection widens OOD vol_p gap; too low dimensional to capture case geometry.
-- **SDF-stratified sampling (far-field bias)** (frieren #981): CLOSED NEGATIVE — formula `1+alpha×|sdf|` up-weights far-field (wrong direction); EP1 catastrophic failure.
-- **Constant xattn temp scale** (thorfinn #984): CLOSED NEGATIVE — Q×0.5 beats MLP baseline but not SOTA; uniform global sharpening insufficient.
-- **Stacked geo-xattn (double cross-attention)** (alphonse #985): CLOSED NEGATIVE — +1.05M params, 4-epoch schedule too short to train.
 
 ---
 
 ## Potential Next Research Directions
 
 ### Immediate Follow-ups (high priority)
-1. **Attention temperature sweep**: If PR #991 passes EP3, try per-head scales initialized to 0.5, 0.25, 1.5 to explore sharpening spectrum
-2. **LR-warmup decouple tuning**: If PR #994 passes EP3, try warmup-epochs=0.5 and warmup-epochs=2 to explore sensitivity
-3. **Bbox normalization with corrected PE sigmas**: ASSIGNED — alphonse #993 (sigmas ÷5: {0.05,0.1,0.2,0.4,0.8})
-4. **Global surface embedding sweep**: If PR #992 passes EP3, try attention pooling with query learned from vol centroid coordinates
-5. **SDF-stratified sampling alpha tuning**: If fern #996 passes EP3, try alpha=0.5 and alpha=4.0 to map the near-surface bias sensitivity curve
+1. **Attention temperature sweep**: If PR #984 passes EP3, run scale=0.25, 0.75 to find optimal sharpening factor
+2. **Curriculum warmup tuning**: If PR #983 passes EP3, tune warmup length (100–1000 steps)
+3. **SDF alpha sweep**: If PR #981 passes EP3, sweep alpha=1.0, 1.5, 3.0 for optimal near-boundary sampling density
+4. **Bbox normalization with corrected PE sigmas**: PR #978 CLOSED NEGATIVE — coordinate rescale ~5× caused PE frequency mismatch. Follow-up: apply normalization AFTER PE (coordinates remain raw-scale for PE; normalize vol/surf coords only for Transolver slice attention). Or rescale STRING sigmas to match normalized coords: {0.05, 0.1, 0.2, 0.4, 0.8}.
 
 ### Architecture Directions
-7. **Mid-backbone xattn**: Cross-attention at intermediate backbone layer rather than final; tested several variants (PR #917 NEGATIVE), but pre-final-layer variant may differ
-8. **Adaptive vol loss weighting by SDF distance**: ASSIGNED — askeladd #986 (sigma sweep {0.5, 1.0, 2.0} m)
+5. **Per-case geometry embedding v2**: ASSIGNED — alphonse #985 (cross-attn vol × all surf tokens, zero-init residual)
+6. **Mid-backbone xattn**: Cross-attention at intermediate backbone layer rather than final; tested several variants (PR #917 NEGATIVE), but pre-final-layer variant may differ
+7. **Adaptive vol loss weighting by SDF distance**: ASSIGNED — askeladd #986 (sigma sweep {0.5, 1.0, 2.0} m)
 
 ### Data / Representation Directions
-9. **asinh bounded SDF encoding**: tanjiro #973 Arm B was in progress (asinh replaces tanh); if complete, review results
-10. **OOD-4 case upweighting**: Upweight the 4 outlier test cases (run_133, 226, 203, 158) by 2× in the vol aux head loss; direct OOD targeting
-11. **Coordinate frame augmentation**: At train time, randomly rotate/scale the canonical coordinate frame; forces the model to learn rotation-equivariant representations
+8. **asinh bounded SDF encoding**: tanjiro #973 Arm B was in progress (asinh replaces tanh); if complete, review results
+9. **OOD-4 case upweighting**: Upweight the 4 outlier test cases (run_133, 226, 203, 158) by 2× in the vol aux head loss; direct OOD targeting
+10. **Coordinate frame augmentation**: At train time, randomly rotate/scale the canonical coordinate frame; forces the model to learn rotation-equivariant representations
 
-### Bold / Escalation Directions (if plateau continues past Round 29)
-12. **GNN vol pathway**: Replace Transolver vol attention with k-NN GNN for vol-vol communication (k=8-16)
-13. **Fourier Neural Operator vol decoder**: Replace MLP vol decoder with FNO for better frequency resolution
-14. **Implicit neural representation**: Map (surface_context, vol_coord) → (tau, pressure) via coordinate MLP; natural coordinate generalization
-15. **Point Transformer V3 vol head**: Replace Transolver vol attention with PTv3 (Hilbert-curve serialized attention)
+### Bold / Escalation Directions (if plateau continues past Round 28)
+11. **GNN vol pathway**: Replace Transolver vol attention with k-NN GNN for vol-vol communication (k=8-16)
+12. **Fourier Neural Operator vol decoder**: Replace MLP vol decoder with FNO for better frequency resolution
+13. **Implicit neural representation**: Map (surface_context, vol_coord) → (tau, pressure) via coordinate MLP; natural coordinate generalization
+14. **Point Transformer V3 vol head**: Replace Transolver vol attention with PTv3 (Hilbert-curve serialized attention)
 
 ---
 
-## Closed Axes (Rounds 22–29) — Do Not Revisit
+## Closed Axes (Rounds 22–27) — Do Not Revisit
 
 ### SDF data quality: CLOSED NEGATIVE
 - **#941 edward**: SDF data fix — test_vol_p=11.9618% (worse than 11.6704% baseline). SDF corruption is NOT the root cause.
@@ -171,9 +152,8 @@ Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundari
 - PR #893 (askeladd vol k-NN graph attn): NEGATIVE
 - PR #906 (edward post-xattn vol self-attn): EP3=8.23% NEGATIVE
 
-### Pre-xattn capacity: CLOSED (0-for-2)
+### Pre-xattn capacity: CLOSED (0-for-1)
 - PR #929 (edward pre-xattn vol self-attn): CLOSED NEGATIVE
-- PR #985 (alphonse stacked geo-xattn double cross-attn): CLOSED NEGATIVE — 4-epoch schedule too short for +1.05M params
 
 ### Learned distance RPB on xattn: CLOSED (OOM)
 - PR #971 (frieren xattn-distance-rpe): CLOSED — SM 12.0 OOM; needs memory-efficient reformulation.
@@ -184,26 +164,6 @@ Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundari
 ### STRING axes: FULLY EXHAUSTED
 - PR #956, #960, #970, #955 — all CLOSED NEGATIVE. No further STRING experiments permitted.
 - σ=0.25 confirmed load-bearing; trainable `log_freq` confirmed load-bearing.
-
-### Geometry scalar/bbox conditioning: CLOSED NEGATIVE
-- **#980 edward** (bbox [L,H,W,A_front] Linear): Widened OOD vol_p gap; 4-float bbox too low-dim. CLOSED NEGATIVE.
-- **#976 alphonse** (mean-pool surface code): Mean-pool loses spatial specificity. EP3 dual gate fail. CLOSED NEGATIVE.
-- **#961** (geometry-conditioned Q-bias mean-pool): EP1=30.197%. CLOSED NEGATIVE.
-- **#926** (vol geo features centroid+bbox): CLOSED.
-
-### Attention temperature scaling: CLOSED (constant/MLP variants)
-- **#974 thorfinn** (SDF-conditioned xattn temp MLP): MLP collapsed to global constant scale=0.515. CLOSED NEGATIVE.
-- **#984 thorfinn** (constant xattn temp scale=0.5): Beats MLP baseline but not SOTA. CLOSED NEGATIVE.
-- Per-head learnable scale (#991) still in flight.
-
-### SDF-modulated vol PE octave scaling: CLOSED NEGATIVE
-- **#989 fern** (MLP: SDF→per-octave scale): EP4 val_abupt=7.4901%, test_abupt=8.7927%. 1.0–1.1pp worse than single-model SOTA. MLP learned physically coherent near-surface amplification but far-field attenuation (mean scale=0.157 at sdf=+2.0m) degraded far-field vol point discrimination. SDF-modulated PE octave scaling axis FULLY CLOSED.
-
-### Pre-xattn vol self-attention (O(N²) MHA): CLOSED (TIMEOUT)
-- **#988 frieren** (vanilla MHA over vol_pts): TIMEOUT at EP3 partial (step 17445/38030), val_abupt=10.5927%. EP1 showed −1.99pp (promising) but O(N²) cost of MHA over vol_pts ramp (16K→32K→49K→65K) — EP1 wall time 7103s vs baseline ~3500s — made EP2+ infeasible within 270-min budget. Vanilla O(N²) MHA over vol_pts is not viable. Linear/sparse alternatives remain open.
-
-### SDF-stratified sampling (far-field bias): CLOSED NEGATIVE
-- **#981 frieren** (alpha=2.0 formula `1+alpha×|sdf|`): Up-weights far-field 8–162× (wrong direction). EP1 catastrophic failure. Correct inverse weighting assigned as fern #996.
 
 ### All other closed axes (do not revisit)
 - **Depth scaling**: L=6 CLOSED (both #895 and #811 NEGATIVE)
@@ -220,16 +180,17 @@ Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundari
 - **Rotation aug (aggressive and mild)**: #925, #937 CLOSED NEGATIVE
 - **All augmentation axes** (geometric mixup, train y-mirror, TTA y-mirror, y-flip fixed, y-flip curriculum ramp): ALL CLOSED NEGATIVE
 - **Surface cp Laplacian aux loss**: #927 CLOSED
+- **Vol geo features centroid+bbox**: #926 CLOSED
 - **Vol-specific RFF sigmas**: #918 CLOSED
 - **GradNorm full-mode α=1.5**: #942 CLOSED NEGATIVE — vol weights go DOWN, all weights converge to 0.91–1.11 band
 - **GradNorm, EMA, LoRA, FiLM, 2-layer MLP decoder, Huber loss, Lion β2 sweep, BC embedding, dual-tower xattn, spectral-norm attn, stochastic depth, PCGrad, surface curvature features**: ALL CLOSED
 - **SDF-zone vol token masking (p_max=0.30 and 0.15)**: #953, #963 CLOSED — high run-to-run variance (±4.2pp), no replicable signal
 - **CoordVolHead**: #959 CLOSED NEGATIVE — EP4 val_abupt=7.428% (gate 6.9%); redundant with STRING-sep + xattn
+- **Geometry-conditioned Q-bias** (mean-pool): #961 CLOSED NEGATIVE — EP1=30.197%
 - **Raw SDF linear normalization as vol input feature**: #966 CLOSED NEGATIVE — +20,000σ outliers; closed axis
 - **tanh bounded SDF encoding**: #973 Arm A KILLED — saturation degeneracy at scale=2.0m
 - **Per-case geometry embedding (mean-pool surface code)**: #976 CLOSED NEGATIVE — EP3 dual gate fail
 - **Surface-head-only isolation**: #975 CLOSED NEGATIVE — xattn load-bearing for surface metrics
-- **Bbox coordinate normalization (without PE sigma correction)**: #978 CLOSED NEGATIVE — ~5× STRING PE frequency mismatch; fix assigned #993
 
 ---
 
@@ -266,10 +227,3 @@ Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundari
 - **Flash SDPA required for large xattn tensors**: [B=4, H=4, N_vol=16384, N_surf=65536] bf16 ~32 GiB — OOM without Flash SDPA.
 - **Mean-pool geometry embedding fails OOD vol_p** (#976 alphonse): global mean-pool surf hidden states lose spatial specificity needed for OOD geometry differentiation.
 - **xattn is load-bearing for surface metrics** (#975 askeladd): surface-head-only ablation fails — xattn contributes to surface metrics not just vol_p.
-- **Fast 4-epoch schedule is the bottleneck for SDF-PE experiments** (#982 fern control): SDF-PE scaling is NOT the root cause of PR #977 EP3 failure. Removing scaling makes results WORSE (+0.44pp both gates). The schedule itself prevents convergence of additional capacity.
-- **SDF-stratified sampling formula direction matters critically** (#981 frieren): `weight = 1+alpha×|sdf|` up-weights freestream tokens (WRONG). Correct direction = inverse near-surface weighting. Never try far-field-biased SDF sampling again.
-- **Stacked double xattn needs longer training** (#985 alphonse): +1.05M params (18.04M total) trains cleanly but 4-epoch EP schedule is insufficient. Architecture may work but requires full 13-epoch run to evaluate properly.
-- **Bbox normalization breaks STRING PE without sigma correction** (#978): normalizing to [-1,+1] gives ~5× frequency mismatch. Sigmas must be rescaled ÷5. Both changes bundled as atomic fix in #993.
-- **EP1→EP2 shock is LR-driven, not curriculum-driven** (#983 tanjiro): 18× LR jump (5e-6→9e-5 from `--lr-warmup-epochs=1`) completes at EP1 end simultaneously with vol_points curriculum jump. EP2→EP3 transition was smooth (LR already in cosine decay by then). Fix: decouple LR warmup completion from curriculum boundary (PR #994).
-- **O(N²) vanilla MHA over vol_pts is prohibitively expensive for 4-epoch schedule** (#988 frieren): EP1 wall time 7103s vs baseline ~3500s; EP2+ infeasible within 270-min budget. vol_pts ramp (16K→32K→49K→65K) makes O(N²) cost grow 16× from EP1 to EP4. Linear/sparse attention is required for vol self-attn to be viable.
-- **SDF-PE octave scaling MLP learns coherent physics but far-field attenuation hurts** (#989 fern): Near-surface amplification is physically motivated and learned correctly; however, reducing far-field PE amplitudes (mean scale=0.157 at sdf=+2.0m) degrades far-field vol point discrimination. SDF-modulated PE scaling axis CLOSED.
