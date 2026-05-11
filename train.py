@@ -93,6 +93,7 @@ class Config:
     model_mlp_ratio: int = 4
     model_slices: int = 96
     model_dropout: float = 0.0
+    model_drop_path_rate: float = 0.0
     model_pe: str = "sincos"
     pe_num_features: int = 16
     pe_init_sigmas: str = "0.25,0.5,1.0,2.0,4.0"
@@ -229,6 +230,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
+        drop_path_rate=config.model_drop_path_rate,
         n_head=config.model_heads,
         mlp_ratio=config.model_mlp_ratio,
         slice_num=config.model_slices,
