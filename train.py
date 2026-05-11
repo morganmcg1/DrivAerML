@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_pre_xattn_vol_ln_only: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_pre_xattn_vol_ln_only": (
+            "Add a single LayerNorm over vol hidden states immediately "
+            "before the surf->vol cross-attention. Ablation of PR #988 "
+            "pre-xattn vol self-attention hypothesis. ~1024 params "
+            "(gain + bias at hidden_dim), zero quadratic cost."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +315,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_pre_xattn_vol_ln_only=config.use_pre_xattn_vol_ln_only,
     )
 
 

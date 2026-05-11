@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_pre_xattn_vol_ln_only: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_pre_xattn_vol_ln_only = use_pre_xattn_vol_ln_only
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +446,16 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Pre-xattn vol LN-only ablation (PR #995): single LayerNorm over vol
+        # hidden states immediately before the surf->vol cross-attention.
+        # Isolates whether the EP1 signal from PR #988 came from the
+        # self-attention itself or from normalising vol_h before xattn.
+        # ~1024 params, zero quadratic cost.
+        if use_pre_xattn_vol_ln_only:
+            self.pre_xattn_vol_ln = nn.LayerNorm(n_hidden, eps=1e-6)
+        else:
+            self.pre_xattn_vol_ln = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -528,6 +540,14 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.pre_xattn_vol_ln is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            volume_hidden = self.pre_xattn_vol_ln(volume_hidden)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if (
             self.surf_to_vol_xattn is not None
