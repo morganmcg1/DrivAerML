@@ -343,6 +343,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_geo_scalar_conditioning: bool = False,
+        geo_scalar_dim: int = 4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +358,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_geo_scalar_conditioning = use_geo_scalar_conditioning
+        self.geo_scalar_dim = geo_scalar_dim
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +448,25 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Per-case bbox geometry scalar conditioning (PR #980): inject a small
+        # FiLM-style bias derived from per-case [L, H, W, A_front] into the
+        # volume decoder hidden state. Zero-init weight AND bias so the layer
+        # is identity at init (preserves baseline behavior at epoch 0). The
+        # case_geo_norm lookup is populated externally after construction via
+        # ``set_case_geo_norm``; forward() looks up the per-batch geometry by
+        # ``case_ids``.
+        if use_geo_scalar_conditioning:
+            self.geo_proj = nn.Linear(geo_scalar_dim, n_hidden, bias=True)
+            nn.init.zeros_(self.geo_proj.weight)
+            nn.init.zeros_(self.geo_proj.bias)
+        else:
+            self.geo_proj = None
+        self._case_geo_norm: dict[str, torch.Tensor] = {}
+
+    def set_case_geo_norm(self, mapping: dict[str, torch.Tensor]) -> None:
+        """Register per-case normalized geometry scalars (shape [geo_scalar_dim])."""
+        self._case_geo_norm = {k: v.detach().clone() for k, v in mapping.items()}
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -477,6 +500,7 @@ class SurfaceTransolver(nn.Module):
         surface_mask: torch.Tensor | None = None,
         volume_x: torch.Tensor | None = None,
         volume_mask: torch.Tensor | None = None,
+        case_ids: list[str] | None = None,
     ) -> dict[str, torch.Tensor]:
         if surface_x is None and volume_x is None:
             raise ValueError("SurfaceTransolver requires surface_x or volume_x")
@@ -545,6 +569,24 @@ class SurfaceTransolver(nn.Module):
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        if (
+            self.geo_proj is not None
+            and volume_x is not None
+            and volume_tokens > 0
+            and case_ids is not None
+            and self._case_geo_norm
+        ):
+            device = volume_hidden.device
+            dtype = volume_hidden.dtype
+            geo_rows = [self._case_geo_norm.get(cid) for cid in case_ids]
+            if all(row is not None for row in geo_rows):
+                geo_batch = torch.stack(
+                    [row.to(device=device, dtype=dtype) for row in geo_rows], dim=0
+                )
+                geo_emb = self.geo_proj(geo_batch)  # [B, hidden_dim]
+                volume_hidden = volume_hidden + geo_emb.unsqueeze(1)
+                volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)

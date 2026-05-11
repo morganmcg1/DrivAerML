@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_geo_scalar_conditioning: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_geo_scalar_conditioning": (
+            "Enable per-case bbox geometry scalar conditioning (PR #980). "
+            "At startup, computes per-case [L, H, W, A_front] scalars from "
+            "the full-surface bounding box and normalises by train-split "
+            "mean/std. During forward, a zero-initialised "
+            "nn.Linear(4, hidden_dim) projects the per-case scalars into a "
+            "FiLM-style additive bias on the volume hidden state before the "
+            "volume output head. Targets the OOD val->test volume_pressure "
+            "gap by giving the vol decoder explicit handles on car geometry."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,7 +319,69 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_geo_scalar_conditioning=config.use_geo_scalar_conditioning,
     )
+
+
+GEO_SCALAR_NAMES = ("L", "H", "W", "A_front")
+
+
+def compute_case_bbox_scalars(store, case_ids: list[str]) -> dict[str, torch.Tensor]:
+    """Compute per-case [L, H, W, A_front] from full surface_xyz.npy via mmap.
+
+    For each case, loads surface_xyz.npy in mmap mode (no full read), computes
+    the per-axis min/max over all surface points, and packs the result as a
+    1-D tensor of length 4 in the order (X-length, Z-height, Y-width,
+    H*W frontal-area-proxy). The DrivAerML world frame is X=streamwise,
+    Y=lateral, Z=vertical, so:
+        L = X_max - X_min  (length)
+        H = Z_max - Z_min  (height)
+        W = Y_max - Y_min  (width)
+        A_front = H * W    (frontal area proxy)
+    """
+
+    import numpy as np
+
+    out: dict[str, torch.Tensor] = {}
+    for case_id in case_ids:
+        path = store.root / case_id / "surface_xyz.npy"
+        from data.loader import _resolve_artifact_path  # type: ignore
+
+        resolved = _resolve_artifact_path(path)
+        arr = np.load(resolved, mmap_mode="r")
+        # arr: [N, 3], float32
+        xyz_min = np.asarray(arr.min(axis=0), dtype=np.float32)
+        xyz_max = np.asarray(arr.max(axis=0), dtype=np.float32)
+        dims = xyz_max - xyz_min  # [dX, dY, dZ]
+        L = float(dims[0])
+        W = float(dims[1])
+        H = float(dims[2])
+        A_front = H * W
+        out[case_id] = torch.tensor([L, H, W, A_front], dtype=torch.float32)
+    return out
+
+
+def build_case_geo_norm(
+    store,
+    train_case_ids: list[str],
+    extra_case_ids: list[str],
+) -> tuple[dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
+    """Compute train-statistic-normalized per-case geometry scalars.
+
+    Returns (case_geo_norm, geo_mean, geo_std). The mean/std are computed
+    from the training split only so val/test geometry magnitudes reflect
+    distribution shift in the normalized space.
+    """
+
+    all_case_ids = list(dict.fromkeys(list(train_case_ids) + list(extra_case_ids)))
+    raw = compute_case_bbox_scalars(store, all_case_ids)
+    train_stack = torch.stack([raw[cid] for cid in train_case_ids], dim=0)  # [N_train, 4]
+    geo_mean = train_stack.mean(dim=0)
+    geo_std = train_stack.std(dim=0, unbiased=False).clamp(min=1e-6)
+    case_geo_norm: dict[str, torch.Tensor] = {
+        cid: (vec - geo_mean) / geo_std for cid, vec in raw.items()
+    }
+    return case_geo_norm, geo_mean, geo_std
 
 
 def train_loss(
@@ -331,6 +404,7 @@ def train_loss(
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            case_ids=batch.case_ids,
         )
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
@@ -382,6 +456,7 @@ def per_task_train_losses(
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            case_ids=batch.case_ids,
         )
         surface_pred = out["surface_preds"]
         sp_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
@@ -758,6 +833,32 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+
+        # Per-case bbox geometry scalar conditioning (PR #980): pre-compute
+        # per-case [L, H, W, A_front] from the full-surface bbox via mmap on
+        # surface_xyz.npy, normalise by train-split mean/std, and register on
+        # the model so forward() can build a [B, 4] geo tensor by case_id.
+        geo_mean_log: list[float] = []
+        geo_std_log: list[float] = []
+        if config.use_geo_scalar_conditioning:
+            store = train_loader.dataset.store
+            train_case_ids = list(train_loader.dataset.case_ids)
+            extra_case_ids: list[str] = []
+            for loader_dict in (val_loaders, test_loaders):
+                for loader in loader_dict.values():
+                    extra_case_ids.extend(loader.dataset.case_ids)
+            case_geo_norm, geo_mean, geo_std = build_case_geo_norm(
+                store, train_case_ids, extra_case_ids
+            )
+            model.set_case_geo_norm(case_geo_norm)
+            geo_mean_log = [float(x) for x in geo_mean.tolist()]
+            geo_std_log = [float(x) for x in geo_std.tolist()]
+            if state.is_main:
+                print(
+                    f"GeoScalarCond enabled: {len(case_geo_norm)} cases; "
+                    f"train mean={dict(zip(GEO_SCALAR_NAMES, geo_mean_log))}; "
+                    f"train std={dict(zip(GEO_SCALAR_NAMES, geo_std_log))}"
+                )
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -883,6 +984,14 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if config.use_geo_scalar_conditioning:
+                for name, value in zip(GEO_SCALAR_NAMES, geo_mean_log):
+                    wandb.summary[f"geo/train_mean_{name}"] = value
+                for name, value in zip(GEO_SCALAR_NAMES, geo_std_log):
+                    wandb.summary[f"geo/train_std_{name}"] = value
+                wandb.summary["geo/num_cases"] = len(
+                    getattr(base_model, "_case_geo_norm", {})
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}

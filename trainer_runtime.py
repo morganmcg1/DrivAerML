@@ -966,6 +966,7 @@ def accumulate_eval_batch(
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
+            case_ids=batch.case_ids,
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
