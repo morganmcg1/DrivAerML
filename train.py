@@ -132,6 +132,7 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_vol_coord_bbox_norm: bool = False
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
