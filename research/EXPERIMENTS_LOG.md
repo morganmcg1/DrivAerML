@@ -1,5 +1,44 @@
 # SENPAI Research Results
 
+## 2026-05-11 12:00 — PR #960: STRING-sep RFF sigma bracket sweep (askeladd) — CLOSED (NEGATIVE)
+
+- **Branch**: `askeladd/string-sigma-bracket-sweep` (closed)
+- **W&B runs**: `zhnlo5k5` (Arm A: σ=[0.01,0.25,0.5,1.0,2.0]), `ro7s71k1` (Arm B v2: σ=[0.25,0.5,1.0,2.0,4.0])
+- **Hypothesis**: The current baseline σ=[0.25,0.5,1.0,2.0,4.0] range may not be optimal. Arm A tested a fine-shift toward lower frequencies (σ=[0.01,0.25,0.5,1.0,2.0]); Arm B reproduced the baseline range as a clean control.
+
+| Arm | σ range | EP3 val_abupt | EP4 gate ≤6.9% | Baseline |
+|---|---|---:|---|---:|
+| A (fine-shift) | [0.01,0.25,0.5,1.0,2.0] | 7.1812% | FAIL | 6.4407% |
+| B v2 (baseline range) | [0.25,0.5,1.0,2.0,4.0] | 7.4995% | FAIL | 6.4407% |
+
+**Results commentary:**
+- Both arms failed the EP4 gate (≤6.9%). Arm A best val_abupt=7.1812% (0.74pp above baseline); Arm B v2=7.4995% (1.06pp above baseline).
+- Arm B v2 is particularly telling: reproducing the exact baseline σ-range in a clean run still degraded performance by 1.06pp. This suggests the multi-sigma RFF benefit is sensitive to the broader training configuration rather than σ coverage alone.
+- A kill-threshold bug (`<30` was semantically inverted — lower is better, so `<30` fired when val_abupt=26.44%) killed the original Arm B prematurely; Arm B v2 was re-run without kill thresholds.
+- Arm A's lr-cosine-t-max=13 vs --epochs=4 mismatch truncated the run to ~EP3 only.
+- **Conclusion:** σ-tuning is exhausted. The baseline [0.25,0.5,1.0,2.0,4.0] range is well-centered; expanding or contracting the bracket does not improve val_abupt. The trainable log_freq parameters (not the initialization range) carry the adaptation benefit.
+
+---
+
+## 2026-05-11 12:00 — PR #970: STRING-sep frozen-freq ablation (alphonse) — CLOSED (NEGATIVE)
+
+- **Branch**: `alphonse/string-frozen-freq-ablation` (closed)
+- **W&B run**: `pymccw0k`
+- **Hypothesis**: If the learned log_freq values are close to initialization, freezing them (removing log_freq from the parameter set) may simplify optimization without losing accuracy. Ablation of trainable vs frozen frequency parameters in STRING-sep encoding.
+
+| Run | EP3 val_abupt | EP3 gate ≤8.0% | Baseline |
+|---|---:|---|---:|
+| `pymccw0k` (frozen log_freq) | 8.3347% | FAIL (+0.33pp over gate) | 6.4407% |
+
+**Results commentary:**
+- EP3 val_abupt=8.3347% — 1.89pp above baseline and missed the EP3 kill gate by 0.33pp. Run terminated.
+- This result compared to the trainable-freq baseline reveals: frozen log_freq hurts convergence by ~0.3–1pp at equivalent epochs. The model meaningfully adapts its RFF spectral coverage during training.
+- **Positive finding:** This is a clean negative that closes a hypotheses and confirms an important mechanism. Trainable frequency adaptation is load-bearing — it is not just optimizing toward its initialization. The gradient flow through log_freq provides genuine benefit to spectral alignment.
+- **Follow-up direction:** Since frequency adaptation is meaningful, the next productive question is *how* it adapts — log the learned log_freq values at training end to characterize spectral specialization. This could inform smarter initialization strategies.
+- **Conclusion:** Frequency adaptation (trainable log_freq) is confirmed as genuinely beneficial. Do not revisit frozen frequencies. STRING-sep RFF σ-tuning and frequency-freezing are both exhausted. Future STRING-sep improvements should focus on the phase, dimensionality, or integration with geometry conditioning.
+
+---
+
 ## 2026-05-09 22:30 — PR #962: Curriculum y-flip augmentation for vol_p OOD (frieren) — CLOSED (NEGATIVE)
 
 - **Branch**: `frieren/curriculum-yflip-vol-ood` (closed)

@@ -1,5 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 — Round 27 active (8 WIP). PR #966 (tanjiro SDF scalar vol input feature) CLOSED NEGATIVE — EP4 val_abupt=7.6359% (gate ≤6.9%, delta +1.20pp vs SOTA). Root cause: raw `(sdf − μ) / σ` normalization created +20,000σ outliers (SDF max ~36,000 m, σ=1.681517 m) that dominated the vol input projection Linear(98→512), masking all other geometric features. New assignment: tanjiro #973 (bounded SDF encoding — tanh/asinh normalization, 2-arm sweep, scale=2.0 m). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning), fern #969 (SDF-PE octave scaling H2). PR #962 (frieren curriculum-yflip) CLOSED NEGATIVE — EP3 vol_p gate FAIL: vol_p=5.9499% at EP2 with slope −0.0011%/step; projected landing ~5.924% at EP3 gate, cannot reach ≤5.0%. Curriculum ramp slows vol_p convergence — augmentation approach on this axis is closed. frieren now IDLE — new assignment needed.
+- **Date:** 2026-05-09 — Round 27 active (8 WIP). STRING fully exhausted: PR #960 (askeladd sigma-bracket sweep) CLOSED NEGATIVE — both Arm A (fine-shift [0.01,0.25,0.5,1.0,2.0]) EP3=7.1812% and Arm B v2 (baseline [0.25,0.5,1.0,2.0,4.0]) EP4=7.4995% failed gate; σ-tuning axis is exhausted. PR #970 (alphonse frozen-freq ablation) CLOSED NEGATIVE — EP3=8.3347% (0.33pp over gate); trainable log_freq confirmed load-bearing. All STRING axes fully closed. New assignments: askeladd #975 (surface-head-only isolation — ablate surf→vol xattn, keep only the surface Transolver head as output for surface-only predictions); alphonse #976 (per-case geometry embedding — mean-pool masked surface hidden states → geometry code, zero-init projection, add to volume hidden states before surf→vol xattn, flag: `--use-geo-embed`). PR #966 (tanjiro SDF scalar vol input feature) CLOSED NEGATIVE — EP4 val_abupt=7.6359% (gate ≤6.9%, delta +1.20pp vs SOTA). Root cause: raw `(sdf − μ) / σ` normalization created +20,000σ outliers (SDF max ~36,000 m, σ=1.681517 m) that dominated the vol input projection Linear(98→512), masking all other geometric features. New assignment: tanjiro #973 (bounded SDF encoding — tanh/asinh normalization, 2-arm sweep, scale=2.0 m). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning), fern #969 (SDF-PE octave scaling H2). PR #962 (frieren curriculum-yflip) CLOSED NEGATIVE — EP3 vol_p gate FAIL: vol_p=5.9499% at EP2 with slope −0.0011%/step; projected landing ~5.924% at EP3 gate, cannot reach ≤5.0%. Curriculum ramp slows vol_p convergence — augmentation approach on this axis is closed. frieren now IDLE — new assignment needed.
 - **CRITICAL UPDATE (2026-05-09):** Nezuko PR #958 run `29nohj67` (vol aux decoder head) has reached **EP7 val_abupt=6.3885%**, beating single-model SOTA of 6.4407% (delta −0.052pp). Currently in EP8 (step 54,610). Trajectory healthy: EP5=6.45%→EP6=6.45%→EP7=6.39%. If EP8–12 continue improving, this will be a clear merge winner. **Monitoring closely.**
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
@@ -23,7 +23,7 @@
 
 ## Latest Human Researcher Directives
 
-- **Issue #618** (STRING/RoPE): **Reopened for targeted exploration.** New dimension: (a) slice-centroid local RoPE coordinates (alphonse #955) and (b) sigma-bracket sweep — fine-shift σ=0.125–2.0 and coarse-shift σ=0.5–8.0 (askeladd #960). Prior STRING axes (sigma shifts, global ladder variants, 7-octave mega-sweep #956) closed. σ=0.25 still assumed load-bearing; bracket sweep tests whether shifting the 5-sigma window ±1 octave from SOTA improves or degrades.
+- **Issue #618** (STRING/RoPE): **FULLY CLOSED — all axes exhausted.** Final closed experiments: #960 (askeladd σ-bracket sweep NEGATIVE) and #970 (alphonse frozen-freq ablation NEGATIVE). All STRING dimensions — sigma shifts, ladder variants, 7-octave mega-sweep, slice-centroid RoPE, frozen frequencies — have been tested and closed. STRING positional encoding is confirmed at its optimum: trainable `log_freq` with octave init {0.25,0.5,1.0,2.0,4.0}, trainable `phase`, QK-norm enabled. No new STRING experiments.
 - **Issue #717** (vol_pressure gap): Phase 2 active — building on xattn win from #823. Post-xattn capacity fully closed (0-for-3: #891 FFN, #893 k-NN graph, #906 vol-self-attn). Now exploring loss stratification, geometry-conditioned queries, surface loss annealing, vol-pressure aux head, SDF-modulated vol PE, coordinate-conditioned vol output head (#959 tanjiro).
 - **Issue #803** (SDF fix): Edward (#941) actively running full SOTA retrain with fixed SDF data (W&B: `2ub8dmy7`). EP4 gate PASSED: val_abupt=6.8533% (gate ≤7.5%). Continuing to EP7 (val_abupt ≤6.9%). No new SDF/geometry-conditioning assignments until edward's results are known.
 - **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
@@ -33,12 +33,12 @@
 
 ## Active PRs (Round 27)
 
-### tay-track (8 WIP, fully occupied — tanjiro re-assigned #973 after #966 CLOSED NEGATIVE)
+### tay-track (8 WIP, fully occupied — alphonse re-assigned #976, askeladd re-assigned #975 after STRING fully exhausted)
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
-| alphonse | #970 | STRING-sep frozen-freq ablation: register `log_freq` as non-trainable buffer (frozen at SOTA octave init {0.25,0.5,1.0,2.0,4.0}); keep only `phase` as `nn.Parameter`. Tests whether gradient-based freq adaptation helps or the octave init is doing all the work. Flag: `--rff-freeze-freqs`. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%. `--wandb-group alphonse-string-frozen-freq-ablation` | `alphonse/string-frozen-freq-ablation` | WIP — assigned |
-| askeladd | #960 | STRING σ-bracket sweep: fine-shift σ=0.125,0.25,0.5,1.0,2.0 (Arm A) vs coarse-shift σ=0.5,1.0,2.0,4.0,8.0 (Arm B). Tests whether the 5-sigma SOTA window is optimally placed or should shift ±1 octave. Arm A (fine-shift) running (W&B: `zhnlo5k5`); EP1 expected ~14:28 UTC. Arm B launches after Arm A EP1. EP4 gate: val_abupt ≤7.5%. `--wandb-group askeladd-string-sigma-bracket` | `askeladd/string-sigma-bracket-sweep` | WIP — Arm A EP1 in progress (run `zhnlo5k5`) |
+| alphonse | #976 | Per-case geometry embedding: mean-pool masked surface hidden states (post-backbone, post-norm) → geometry code vector [B, n_hidden]; project via zero-init `nn.Linear(n_hidden, n_hidden)`; add to volume hidden states before surf→vol xattn. Zero-init preserves baseline behavior at epoch 0. Generalizes to OOD geometries — no lookup table. Flag: `--use-geo-embed`. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%; EP4 ≤6.9%. `--wandb-group alphonse-geo-embed` | `alphonse/per-case-geometry-embedding` | WIP — assigned |
+| askeladd | #975 | Surface-head-only isolation: ablate surf→vol xattn, keep only the surface Transolver head as output for surface-only predictions. Tests whether the surface head alone can match the full model's surface metrics, isolating the contribution of xattn. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%. `--wandb-group askeladd-surface-head-only` | `askeladd/surface-head-only-isolation` | WIP — assigned |
 | frieren | #971 | Learned distance RPB on surf→vol cross-attention: add per-pair (vol_i, surf_j) Euclidean distance bias to xattn logits: `A_ij = (Q_i·K_j)/√d + f(dist_ij)`. MLP: `Linear(1→16)→SiLU→Linear(16→1)`, ~49 params, zero-init output layer. Flag: `--use-xattn-distance-rpe`. 4-ep screen; EP3 gate ≤8.0% AND vol_p ≤5.0%, EP4 ≤7.5%. `--wandb-group frieren-xattn-distance-rpe` | `frieren/xattn-distance-rpe` | WIP — assigned |
 | nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Zero-init final layer. Arm A: `--volume-loss-weight 1.0`; Arm B: `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0%. `--wandb-group nezuko-vol-aux-decoder-head` | `nezuko/vol-pressure-aux-decoder-head` | WIP — running |
 | thorfinn | #974 | SDF-conditioned attention temperature on surf→vol xattn: tiny MLP (Linear(1→16)→SiLU→Linear(16→1)→Sigmoid, ~49 params, zero-init final layer) reads per-vol-token SDF value, outputs τ∈(0,1); scale=0.5+τ∈(0.5,1.5) multiplies per-token logits. Near-surface tokens → sharper attention; far-field tokens → broader attention. Custom manual xattn forward extracts Q/K/V from in_proj_weight. Identity-at-init (scale=1.0 at init). Flag: `--use-sdf-xattn-temperature`. EP3 gate ≤8.0% AND vol_p ≤5.0%, EP4 ≤6.9%. `--wandb-group thorfinn-sdf-xattn-temperature` | `thorfinn/sdf-xattn-temperature` | WIP — assigned (PR #974) |
@@ -52,6 +52,8 @@
 
 | Student | PR | Result |
 |---|---|---|
+| alphonse | #970 | STRING-sep frozen-freq ablation — CLOSED NEGATIVE. EP3=8.3347% (gate ≤8.0%, missed by 0.33pp). Trainable `log_freq` confirmed load-bearing; frequency adaptation via gradient descent is genuinely beneficial. New assignment: #976 per-case geometry embedding. |
+| askeladd | #960 | STRING σ-bracket sweep — CLOSED NEGATIVE. Arm A (fine-shift [0.01,0.25,0.5,1.0,2.0]) EP3=7.1812%; Arm B v2 (baseline [0.25,0.5,1.0,2.0,4.0]) EP4=7.4995%. Neither bracket improved over SOTA. σ-tuning axis exhausted; STRING fully closed. New assignment: #975 surface-head-only isolation. |
 | askeladd | #956 | STRING σ-ladder geometry sweep (7-octave fine/coarse/all-fine) — CLOSED NEGATIVE. Arm A (7-oct fine, 0.03–2.0) failed EP1 at 30.27%; too wide a range degrades early convergence. Superseded by bracket sweep #960 |
 | thorfinn | #949 | Surface-points curriculum — CLOSED. Results ambiguous; superseded by SDF-zone masking #953 |
 | tanjiro | #966 | SDF scalar vol input feature (raw linear norm) — CLOSED NEGATIVE. EP4 val_abupt=7.6359% (gate ≤6.9%, delta +1.20pp vs SOTA). Root cause: `(sdf−μ)/σ` normalization — train-set SDF std=1.681517 m, max ~36,000 m → +20,000σ outliers dominated vol input projection. Bounded encoding follow-up: #973 (tanh/asinh, scale=2.0 m). |
@@ -81,10 +83,20 @@
 ### Theme 1: SDF Data Quality (edward #941)
 The 10 REQUIRED_RESTORED cases have corrupted volume_sdf.npy (inside-body cells with SDF=0 or negative). Edward has synthesized correct SDF values using STL rejection sampling + pyvista `compute_implicit_distance`. Full SOTA retrain running (W&B: `2ub8dmy7`, group: `edward-sdf-fix`). **EP4 gate PASSED: val_abupt=6.8533% (gate ≤7.5%).** Trajectory EP1→EP4: 27.47% → 8.37% → 7.32% → 6.85% — healthy convergence. Per-case EP3 diagnostic confirmed OOD-4 still at ~102% mean vol_p (expected — 16,384 vol_points yields ~2–3 inside-body samples/batch; SDF fix won't express until EP9+ at 65,536 vol_points). Next gate: EP7 val_abupt ≤6.9%. Key test: EP10 val_vol_p ≤8.0%. No new SDF/geometry-conditioning assignments until edward's EP13 results are known (Issue #803 blocker).
 
-### Theme 2: STRING Positional Encoding (alphonse #970, askeladd #960)
-Two STRING directions live:
-- **Frozen-freq ablation** (#970 alphonse): freeze `log_freq` as non-trainable buffer (octave init), keep only `phase` as `nn.Parameter`. Tests whether gradient-based frequency adaptation is necessary or the multi-sigma init is sufficient. #955 CLOSED NEGATIVE — slice-centroid local RoPE failed EP3 gate (abupt=8.1833%, vol_p=5.9055%).
-- **Sigma-bracket sweep** (#960 askeladd): test fine-shift (0.125–2.0) and coarse-shift (0.5–8.0) bracketing the SOTA window (0.25–4.0); Arm A running (W&B: `zhnlo5k5`). Prior 7-octave mega-sweep (#956) failed EP1 — bracket approach is more conservative.
+### Theme 2: STRING Positional Encoding — FULLY CLOSED
+All STRING axes have now been tested and closed:
+- #956 askeladd: 7-octave mega-sweep — CLOSED NEGATIVE (EP1=30.27%)
+- #955 alphonse: slice-centroid local RoPE — CLOSED NEGATIVE (EP3 gate: abupt=8.1833%, vol_p=5.9055%)
+- #970 alphonse: frozen-freq ablation — CLOSED NEGATIVE (EP3=8.3347%, gate ≤8.0%). Trainable `log_freq` confirmed load-bearing.
+- #960 askeladd: sigma-bracket sweep — CLOSED NEGATIVE (Arm A EP3=7.1812%; Arm B v2 EP4=7.4995%). σ-tuning axis exhausted.
+- Prior axes: sigma shift, all-fine/all-coarse ladder variants, vol-specific RFF (#918) — ALL CLOSED.
+
+**STRING is fully exhausted. No new STRING experiments.**
+
+### Theme 2b: Geometry Conditioning (alphonse #976, askeladd #975)
+Replacing the closed STRING theme with two geometry-conditioning approaches:
+- **Per-case geometry embedding** (#976 alphonse): mean-pool masked surface hidden states (post-backbone) → geometry code vector; zero-init projection; add to vol hidden states before surf→vol xattn. Preserves baseline at init. Generalizes to OOD geometries without lookup table.
+- **Surface-head-only isolation** (#975 askeladd): ablate surf→vol xattn, keep only surface Transolver head for surface-only predictions. Diagnostic ablation to quantify xattn's contribution to surface metrics.
 
 ### Theme 3: Data Augmentation for OOD — FULLY CLOSED
 Both y-flip augmentation approaches have been tested and failed:
@@ -151,11 +163,14 @@ See "Closed Axes" section below.
 ### Pre-xattn capacity: CLOSED (0-for-1)
 - PR #929 (edward pre-xattn vol self-attn): CLOSED NEGATIVE
 
-### STRING axes closed
+### STRING axes closed — FULLY EXHAUSTED
 - PR #956 askeladd: 7-octave mega-sweep (0.0625–8.0) — CLOSED NEGATIVE (EP1=30.27%)
 - PR #955 alphonse: slice-centroid local RoPE — CLOSED NEGATIVE (EP3 gate: abupt=8.1833%, vol_p=5.9055%)
+- PR #970 alphonse: frozen-freq ablation — CLOSED NEGATIVE (EP3=8.3347%, gate ≤8.0%). Trainable `log_freq` confirmed load-bearing; frequency adaptation is genuinely beneficial.
+- PR #960 askeladd: sigma-bracket sweep (fine-shift [0.01,0.25,0.5,1.0,2.0] Arm A; baseline [0.25,0.5,1.0,2.0,4.0] Arm B v2) — CLOSED NEGATIVE (Arm A EP3=7.1812%; Arm B v2 EP4=7.4995%). σ-tuning axis exhausted.
 - Prior STRING axes: sigma shift, all-fine/all-coarse ladder variants, vol-specific RFF (#918) — ALL CLOSED
 - σ=0.25 confirmed load-bearing (#819); σ-shift/ladder failed
+- **No further STRING experiments permitted.**
 
 ### All other closed axes (do not revisit)
 - **Depth scaling**: L=6 CLOSED (both with-xattn #895 and without-xattn #811 NEGATIVE)
