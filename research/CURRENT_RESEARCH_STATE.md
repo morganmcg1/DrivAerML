@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- 2026-05-11 ~00:21 UTC
+- 2026-05-11 ~08:45 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -19,26 +19,22 @@
 | vol_p | 10.7580% |
 | wall_shear | 7.0610% |
 
-**Val wave leader:** nezuko #939 EP33 abupt=**6.5522%**, vol_p=4.2202% (val only — test not yet run)
-
-**Strongest early-wave signal:** fern #968 EP6=**6.3937%**, vol_p=4.1712% — stochastic vol subsampling running ~1.0pp ahead of yfitnqia at matched epoch.
+**Val wave leader (active):** fern #968 EP15 abupt=**6.2806%**, vol_p=**3.9989%** — FIRST sub-4% val_vol_p in codebase history.
 
 **Central unsolved problem:** val vol_p ≈ 4.0–4.5%, test vol_p ≈ 10.7–11% — systematic +7pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
-
-**Weight decay axis FULLY EXPLORED AND CLOSED:** Both WD=0.01 (#900 tanjiro) and WD=0.005 (#914 frieren) failed to close the val→test gap.
 
 **Vol-loss-weighting direction CLOSED:** PR #911 (GradNorm+static weight=no-op) + PR #936 (weight=2.0, no GradNorm=harmful) + PR #964 (weight=3.0, no GradNorm=WORST EVER: gap +8.12pp, test_abupt=8.0190%). Static vol loss upweighting conclusively does NOT close the val→test gap. This axis is FULLY CLOSED.
 
 **EMA AXIS CLOSED:** PR #954 (EMA decay=0.999 + eval-raw-vs-ema) showed test_vol_p=11.28% and test_abupt=7.55% — confirming EMA weight averaging does not reduce the val→test gap. CLOSED.
 
-## Active Experiments (2026-05-11 ~00:21 UTC)
+## Active Experiments (2026-05-11 ~08:20 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #939 | dl24-nezuko | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `yfitnqia` | **Running** — EP35 complete | abupt=**6.5522%** (EP33 run best), EP35=6.5657% | Deep plateau since EP23. EP35 gate PASS (6.5657% ≤6.58% ✓). EP40 gate ≤6.55% needs -0.003pp recovery from EP33 run best. ETA EP40 ~04:00Z. |
-| #965 | dl24-tanjiro | 6L→**8L** STRING + GradNorm α=0.5 + WD=0.005 + Y-sym | `pgy0xbyw` | **Running** — EP11 ⚠BOUNCE | abupt=EP10=6.5653% (run best), EP11=6.7869% (+0.222pp bounce) | EP11 bounce below 0.3pp kill threshold. EP12 is decision point (ETA ~00:50Z). If EP12 <6.65%: noise, continue. If EP12 >6.70%: KILL — same failure mode as 7L #873. |
-| #968 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **stochastic vol subsampling** (fresh random draw every batch) | `a0yoxy85` | **Running** — EP6 complete | abupt=**6.3937%** (EP6), vol_p=4.1712% | Strongest early-wave signal. ~1.0pp ahead of yfitnqia at matched epoch. Monotonic descent all metrics. EP10 ETA ~01:50Z. Gate ≤7.2% pre-cleared. |
-| #972 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **SDF-stratified importance sampling** (bias toward far-field cells) | TBD | **Starting** — pod active, no comments yet | — (training not yet started as of 00:21Z) | Agent invoked ~00:09Z; setup expected ~00:30Z; first metrics ~01:00Z. Hypothesis: reduce spatial memorization by weighting vol draws by `1 + α*|sdf|`. |
+| #968 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **stochastic vol subsampling** (fresh random draw every batch) | `a0yoxy85` | **Running** — EP16 complete, EP20 gate ~08:50Z | abupt=**6.2806%** (EP15 best), vol_p=**3.9989%** (FIRST sub-4%!) | Wave leader on val. EP20 gate pre-cleared by massive margin (6.2806% << 6.70%). GradNorm w_vol_p=0.104 (balanced). **Advisor requested eval-only test_vol_p pass on EP15 checkpoint at 08:08Z** — awaiting student execution. |
+| #972 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **SDF-stratified importance sampling** (bias toward far-field cells, α=2.0) | `56bcqp3m` | **Running** — EP6 complete | abupt=**6.3124%** (EP6 best), vol_p=**4.0055%** | Strong descending trajectory. EP6 0.08pp ahead of fern at matched epoch — frieren now leads at matched epoch. All future gates pre-cleared. **Advisor requested eval-only test_vol_p pass on EP6 checkpoint at 08:45Z** (or on EP10 ckpt if pause undesirable). GradNorm w_tau_z 1.55→1.70 (tau_z is hardest task); w_vol_p stable ~0.27. |
+| #979 | dl24-nezuko | TTA Y-symmetry A/B eval | `msmccvne` (EP4 ckpt) | **Unblocked at 08:11Z, harness picked up at 08:15Z (iter 514)** — Claude session in progress | Val EP4: abupt=7.08%, vol_p=4.92% | Run killed at EP5 gate (7.63% > 7.50%) by noise. Advisor authorized eval-only A/B on EP4 checkpoint: Arm A (no TTA) vs Arm B (TTA). GPUs still 0% at 08:39Z — student Claude session ~24 min in, eval launch imminent. |
+| #987 | dl24-tanjiro | DropPath regularization (drop_path_rate=0.1, linear depth schedule) | `rydn7aqb` (production, supersedes `m3jycncs`) | **RUNNING** — relaunched 08:20Z with wave-config dataset flags | Healthy — EP1/42% at 08:25Z, n_params=18,840,957, model_drop_path_rate=0.1, Lion β=(0.9,0.99) lr=1e-4 wd=5e-3 | All architecture/config verified from W&B. EP1 gate ~08:50Z (≤30%), EP5 gate ~10:55Z (≤7.5%). Reporting cadence requested at EP1, EP3, EP5, EP10, EP15, EP20, EP25, EP30. Test eval requested at EP15+. |
 
 ## Closed This Wave (Recent)
 
