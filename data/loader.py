@@ -328,6 +328,7 @@ class DrivAerMLCaseStore:
         self.root = _resolve_case_root(self.manifest, override_root=root)
         self.normalizers_path = self.root / "normalizers.json"
         self._point_count_cache: dict[str, dict[str, int]] = {}
+        self._surface_bbox_cache: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
 
     def case_ids(self, split: str) -> list[str]:
         return list(self.manifest["surface_splits"][split])
@@ -348,6 +349,17 @@ class DrivAerMLCaseStore:
             self._point_count_cache[case_id] = cached
         return dict(cached)
 
+    def case_surface_bbox(self, case_id: str) -> tuple[torch.Tensor, torch.Tensor]:
+        cached = self._surface_bbox_cache.get(case_id)
+        if cached is None:
+            xyz_path = _resolve_artifact_path(_case_dir(self.root, case_id) / "surface_xyz.npy")
+            arr = np.load(xyz_path, mmap_mode="r")
+            arr_min = np.asarray(arr.min(axis=0), dtype=np.float32)
+            arr_max = np.asarray(arr.max(axis=0), dtype=np.float32)
+            cached = (torch.from_numpy(arr_min), torch.from_numpy(arr_max))
+            self._surface_bbox_cache[case_id] = cached
+        return cached[0].clone(), cached[1].clone()
+
     def load_normalizers(self) -> dict:
         with self.normalizers_path.open() as f:
             return json.load(f)
@@ -367,6 +379,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        use_bbox_norm: bool = False,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +389,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.use_bbox_norm = use_bbox_norm
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -445,6 +459,24 @@ class DrivAerMLSurfaceDataset(Dataset):
             surface_rows=None if surface_idx is None else surface_idx.numpy(),
             volume_rows=None if volume_idx is None else volume_idx.numpy(),
         )
+        if self.use_bbox_norm:
+            bbox_min, bbox_max = self.store.case_surface_bbox(view.case_id)
+            bbox_center = (bbox_min + bbox_max) / 2.0
+            bbox_half_extent = ((bbox_max - bbox_min) / 2.0).clamp(min=1e-6)
+            surface_x = case.surface_x.clone()
+            if surface_x.shape[0] > 0:
+                surface_x[:, :3] = (surface_x[:, :3] - bbox_center) / bbox_half_extent
+            volume_x = case.volume_x.clone()
+            if volume_x.shape[0] > 0:
+                volume_x[:, :3] = (volume_x[:, :3] - bbox_center) / bbox_half_extent
+            case = DrivAerMLCase(
+                case_id=case.case_id,
+                surface_x=surface_x,
+                surface_y=case.surface_y,
+                volume_x=volume_x,
+                volume_y=case.volume_y,
+                metadata=case.metadata,
+            )
         metadata = dict(case.metadata)
         metadata["n_surface_full"] = int(counts["n_surface"])
         metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
@@ -544,6 +576,7 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    use_bbox_norm: bool = False,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +601,7 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        use_bbox_norm=use_bbox_norm,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(
@@ -576,6 +610,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            use_bbox_norm=use_bbox_norm,
         )
     }
     test_splits = {
@@ -585,6 +620,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            use_bbox_norm=use_bbox_norm,
         )
     }
     stats = target_stats_from_normalizers(store)

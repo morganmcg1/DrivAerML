@@ -281,6 +281,7 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        use_bbox_norm=getattr(config, "use_vol_coord_bbox_norm", False),
     )
     train_sampler = None
     train_shuffle = True

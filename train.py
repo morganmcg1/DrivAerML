@@ -138,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_vol_coord_bbox_norm: bool = False
     debug: bool = False
 
 
