@@ -421,8 +421,24 @@ class SurfaceTransolver(nn.Module):
             use_qk_norm=use_qk_norm,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        # PR #958: dedicated vol_p auxiliary decoder head.
+        # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
+        # Volume head is a deeper 3-layer MLP for the harder vol_p task —
+        # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
+        self.surface_out = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, self.surface_output_dim),
+        )
+        self.surface_out.apply(_init_linear)
+        self.volume_out = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden // 2),
+            nn.SiLU(),
+            nn.Linear(n_hidden // 2, n_hidden // 4),
+            nn.SiLU(),
+            nn.Linear(n_hidden // 4, self.volume_output_dim),
+        )
+        self.volume_out.apply(_init_linear)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
