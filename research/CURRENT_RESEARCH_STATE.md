@@ -1,6 +1,5 @@
 # SENPAI Research State
-
-- 2026-05-11 ~08:45 UTC
+- 2026-05-09 ~13:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -27,14 +26,14 @@
 
 **EMA AXIS CLOSED:** PR #954 (EMA decay=0.999 + eval-raw-vs-ema) showed test_vol_p=11.28% and test_abupt=7.55% — confirming EMA weight averaging does not reduce the val→test gap. CLOSED.
 
-## Active Experiments (2026-05-11 ~08:20 UTC)
+## Active Experiments (2026-05-09 ~13:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #968 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **stochastic vol subsampling** (fresh random draw every batch) | `a0yoxy85` | **Running** — EP16 complete, EP20 gate ~08:50Z | abupt=**6.2806%** (EP15 best), vol_p=**3.9989%** (FIRST sub-4%!) | Wave leader on val. EP20 gate pre-cleared by massive margin (6.2806% << 6.70%). GradNorm w_vol_p=0.104 (balanced). **Advisor requested eval-only test_vol_p pass on EP15 checkpoint at 08:08Z** — awaiting student execution. |
-| #972 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **SDF-stratified importance sampling** (bias toward far-field cells, α=2.0) | `56bcqp3m` | **Running** — EP6 complete | abupt=**6.3124%** (EP6 best), vol_p=**4.0055%** | Strong descending trajectory. EP6 0.08pp ahead of fern at matched epoch — frieren now leads at matched epoch. All future gates pre-cleared. **Advisor requested eval-only test_vol_p pass on EP6 checkpoint at 08:45Z** (or on EP10 ckpt if pause undesirable). GradNorm w_tau_z 1.55→1.70 (tau_z is hardest task); w_vol_p stable ~0.27. |
-| #979 | dl24-nezuko | TTA Y-symmetry A/B eval | `msmccvne` (EP4 ckpt) | **Unblocked at 08:11Z, harness picked up at 08:15Z (iter 514)** — Claude session in progress | Val EP4: abupt=7.08%, vol_p=4.92% | Run killed at EP5 gate (7.63% > 7.50%) by noise. Advisor authorized eval-only A/B on EP4 checkpoint: Arm A (no TTA) vs Arm B (TTA). GPUs still 0% at 08:39Z — student Claude session ~24 min in, eval launch imminent. |
-| #987 | dl24-tanjiro | DropPath regularization (drop_path_rate=0.1, linear depth schedule) | `rydn7aqb` (production, supersedes `m3jycncs`) | **RUNNING** — relaunched 08:20Z with wave-config dataset flags | Healthy — EP1/42% at 08:25Z, n_params=18,840,957, model_drop_path_rate=0.1, Lion β=(0.9,0.99) lr=1e-4 wd=5e-3 | All architecture/config verified from W&B. EP1 gate ~08:50Z (≤30%), EP5 gate ~10:55Z (≤7.5%). Reporting cadence requested at EP1, EP3, EP5, EP10, EP15, EP20, EP25, EP30. Test eval requested at EP15+. |
+| #968 | dl24-fern | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **stochastic vol subsampling** (fresh random draw every batch) | `a0yoxy85` | **Running** — EP20 CLEARED (6.2973%), plateau EP15–EP20, terminal sprint to EP30 ~14:15Z | abupt=**6.2806%** (EP15 best), vol_p=**3.9989%** | Plateau confirmed EP15→EP20 (6.28–6.30% band). GradNorm w_vol_p drifting down: 0.104→0.095→0.076 (vol_p naturally easy for stochastic subsampling). Test eval auto-runs at terminal EP30. |
+| #972 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **SDF-stratified importance sampling** (bias toward far-field cells, α=2.0) | `56bcqp3m` | **Running** — EP8 complete, strong monotone descent | abupt=**6.2296%** (EP8 BEST), vol_p=**3.8798%** (WAVE LEADER) | SDF hypothesis for gap-closing FALSIFIED (EP7 test: val→test vol_p gap = +8.00pp ≈ +8.12pp baseline). Run continues for val_abupt wave leadership. First ever sub-3.88% val_vol_p. ETA EP30 ~05:30Z May 10. |
+| #987 | dl24-tanjiro | **Lookahead optimizer** — Lookahead(k=5, α=0.5) wrapping Lion lr=1e-4; slow-weight buffer for OOD generalization | TBD | **WIP** — assignment posted, awaiting student pickup | — | DropPath FALSIFIED (EP5=7.885%, test_vol_p=14.278%, gap +7.91pp unchanged). New assignment: Lookahead optimizer targeting val→test vol_p gap via slow-weight averaging. |
+| #990 | dl24-nezuko | **Vol coordinate noise augmentation** (σ=0.005, inject ε~N(0,σ²) on volume query coords during training only) | `um3tuyvy` | **Running** — launched 09:52Z May 11, EP1 in progress (~10:33Z ETA), EP5 gate ~11:35Z (≤7.5%) | — | Implementation confirmed healthy: `train/aug/vol_coord_noise_rms ≈ 0.005` ✅. Only xyz dims (0..2) perturbed; SDF (dim 3) untouched; `model.training` guard prevents eval contamination. |
 
 ## Closed This Wave (Recent)
 
@@ -116,22 +115,22 @@
 - GradNorm α=0.75 (PR #874): catastrophic instability at EP16
 - Extended cosine T_max=60 (PR #946): destabilizing in training tail
 - EMA decay=0.999 (PR #954): does not close val→test vol_p gap (test_vol_p=11.28%)
+- TTA Y-symmetry (PR #979): gap +7.860pp → +7.863pp UNCHANGED (noise-level -0.012pp). AXIS CLOSED. Add `--use-tta` as free-lunch only.
+- SDF-stratified importance sampling (PR #972, EP7 test eval): val→test vol_p gap = +8.00pp — identical to +8.12pp baseline. HYPOTHESIS FALSIFIED. Gap is not addressable by sampling strategy. Axis CLOSED for sampling-based gap-closing approaches.
+- DropPath regularization (PR #987, run `rydn7aqb`): EP5=7.8846% (FAIL gate ≤7.5%); test_abupt=9.1036%, test_vol_p=14.278%, gap +7.91pp UNCHANGED. MECHANISM: DropPath adversarially interacts with GradNorm — drives w_vol_p ~0.14–0.18 lower than baseline throughout training, accelerating vol_p down-weighting when GradNorm should fight for it. FALSIFIED. Stochastic depth regularization does not help OOD vol_p generalization.
 
 ## Potential Next Directions (Not Yet Assigned)
 
 **Targeting val→test vol_p gap (primary unsolved problem):**
 
-**Active (IN PROGRESS):**
-- **Stochastic vol subsampling** — Fresh random vol point draw every batch (PR #968 / fern). Early signal EP6=6.3937%, vol_p=4.1712% — ~1.0pp ahead of yfitnqia at matched epoch. Strongest wave signal.
-- **SDF-stratified importance sampling** — Weight vol draws by `1 + α*|sdf|` to bias toward far-field cells (PR #972 / frieren). Training startup in progress.
-
-**Not yet assigned:**
-1. **Data distribution analysis** — Profile train vs test aerodynamic configurations. What makes test OOD? Build augmentations that explicitly mimic test distribution shift (Mixup of configurations, random Reynolds number perturbations, geometry morphing).
-2. **Adaptive test-time augmentation (TTA)** — At inference, average predictions across multiple random samplings of the same point cloud. If the gap is sampling variance, TTA will close it.
-3. **Feature disentanglement** — Explicit bottleneck between surface and volume prediction paths; train surface and volume heads with independent gradient flows to prevent one from dominating.
+1. **Vol coordinate noise augmentation (nezuko #990 — ACTIVE)** — Inject Gaussian noise ε~N(0, σ²) on volume query coordinates during training (σ=0.005 normalized coords) to force spatially smooth pressure field learning. NeRF-inspired spatial smoothness inductive bias. Only remaining spatial-regularization hypothesis untested. Requires `--vol-coord-noise-std` flag in train.py.
+2. **DropPath regularization** — FALSIFIED (PR #987). test_vol_p=14.278%, gap +7.91pp unchanged. Adversarial GradNorm interaction confirmed.
+3. **Data distribution analysis** — Profile train vs test aerodynamic configurations. What makes test OOD? Build augmentations that explicitly mimic test distribution shift.
 4. **Physics-informed regularization** — Poisson residual on pressure field as auxiliary loss; direct physics constraint for vol_p generalization.
-5. **Domain adaptation** — If we can identify what makes the test split OOD, train a domain discriminator and use adversarial training to make backbone features distribution-agnostic.
-6. **Ensemble / checkpoint averaging** — Average the top-3 val checkpoints instead of best single checkpoint; known to reduce overfit to val noise.
-7. **Lookahead optimizer** — Wraps Lion, adds slow-weight buffer; known to improve generalization on OOD sets. May directly target val→test gap. Requires code change.
+5. **Feature disentanglement** — Explicit bottleneck between surface and volume prediction paths; train surface and volume heads with independent gradient flows.
+6. **Domain adaptation** — If we can identify what makes the test split OOD, train a domain discriminator and use adversarial training to make backbone features distribution-agnostic.
+7. **Checkpoint averaging (top-3 val)** — Average top-3 val checkpoints instead of best single; known to reduce overfit to val noise. `--use-tta` free-lunch confirmed; checkpoint averaging is the next eval-time lever.
+8. **Lookahead optimizer (tanjiro #987 — ACTIVE)** — Wraps Lion, adds slow-weight buffer (k=5, α=0.5); known to improve generalization on OOD sets. May directly target val→test gap. Requires code change.
+9. **If tanjiro/nezuko both fail** — All training-side gap-closing hypotheses exhausted. Escalate to plateau protocol: (a) architecture changes (separate surface/volume encoder), (b) physics-based regularization (Poisson loss), (c) domain adaptation (adversarial OOD training).
 
-_Last updated: 2026-05-11 ~00:24 UTC. Key events: (1) PR #964 CLOSED — vol-loss-weighting axis fully rejected (WORST EVER: test_abupt=8.0190%, val→test gap +8.12pp; all static upweighting CLOSED). (2) PR #951 CLOSED — proportional sampling 96k+60k slower convergence than standard 65k/40k. (3) PR #968 assigned to fern — stochastic vol subsampling; strongest early-wave signal EP6=6.3937% (1.0pp ahead of yfitnqia). (4) PR #972 assigned to frieren — SDF-stratified importance sampling; training startup in progress ~00:09Z. (5) Tanjiro #965 EP11 bounce (+0.222pp): EP12 decision point ETA ~00:50Z (if >6.70%: KILL). (6) Nezuko #939 EP35 PASS (6.5657%), run best EP33=6.5522%, EP40 gate ≤6.55% ETA ~04:00Z._
+_Last updated: 2026-05-09 ~13:30 UTC. Key events: (1) DropPath FALSIFIED (PR #987): EP5=7.885% gate FAIL, test_vol_p=14.278%, gap +7.91pp UNCHANGED. Mechanism: adversarial GradNorm interaction drives w_vol_p lower than baseline. (2) tanjiro reassigned to Lookahead optimizer (k=5, α=0.5) wrapping Lion. (3) frieren #972 heading to EP15 gate, wave val leader EP8 abupt=6.2296%. (4) fern #968 plateau EP15→EP20, terminal sprint to EP30. (5) nezuko #990 EP3 complete (abupt=9.43%), EP5 gate pending with test eval on best-val checkpoint._

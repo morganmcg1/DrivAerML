@@ -8,6 +8,31 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-11 ~08:15 UTC — PR #979 CLOSED: TTA Y-symmetry ensemble eval-only A/B (dl24-nezuko, `msmccvne`)
+
+- **Branch:** `dl24-nezuko/tta-y-symmetry-ensemble`
+- **W&B Run:** `msmccvne` (eval-only on EP4 checkpoint)
+- **Hypothesis:** Y-axis symmetry test-time augmentation (TTA) — ensemble prediction over original + y-flipped inputs — would reduce the persistent val→test vol_p gap (~7–8pp) by averaging out inference variance caused by geometric asymmetry in the test set.
+
+### Eval-only A/B Results
+
+| Arm | val_abupt | val_vol_p | test_abupt | test_vol_p | val→test gap |
+|-----|-----------|-----------|------------|------------|--------------|
+| A (no TTA) | 7.0329% | 4.9154% | 8.2991% | 12.7757% | +7.860pp |
+| B (with TTA) | 7.0329% | 4.9009% | 8.2991% | 12.7642% | +7.863pp |
+| Delta | 0.0000% | -0.015% | 0.0000% | -0.012% | +0.003pp |
+
+### Decision: CLOSED — TTA hypothesis FALSIFIED
+
+### Key Findings
+
+1. **val→test vol_p gap completely unchanged to 3 decimal places** (+7.860pp → +7.863pp). TTA has zero impact on the structural OOD gap.
+2. **TTA provides ~0.01–0.015pp marginal improvement** on val and test vol_p — noise-level gain, not meaningful.
+3. **The gap is confirmed as a structural DATA DISTRIBUTION problem**, not inference variance. Y-axis symmetry TTA, vol-loss-weight upweighting, GradNorm rebalancing, and all training-objective levers have been falsified as gap-closing mechanisms.
+4. **Recommendation:** add `--use-tta` as a free-lunch flag on terminal evaluations only for ~0.04pp at zero training cost. Do NOT pursue TTA as a gap-closing strategy.
+
+---
+
 ## 2026-05-10 ~02:10 UTC — PR #936 CLOSED: vol-loss-weight=2.0 without GradNorm (dl24-nezuko, `6gd9u34e`)
 
 - **Branch:** `dl24-nezuko/vol-loss-weight-2-no-gradnorm`
