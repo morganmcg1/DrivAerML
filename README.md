@@ -59,8 +59,8 @@ Lower is better. Final reports should include the individual AB-UPT comparison c
 The processed DrivAerML arrays are expected on the PVC at one of:
 
 ```
-/mnt/pvc/Processed/drivaerml_processed
-/mnt/new-pvc/Processed/drivaerml_processed
+/mnt/pvc/Processed/drivaerml_processed_fixed_20260511
+/mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511
 ```
 
 You can also point to another copy:
@@ -89,10 +89,30 @@ Regenerate the split manifest from the PVC manifests:
 python data/generate_manifest.py
 ```
 
+The split manifest has one `case_splits` map. The same train/val/test case IDs
+are used for both surface and volume fields.
+
 Validate all case arrays and write point counts:
 
 ```
 python data/preload.py
+```
+
+Audit and repair raw `volume_i.vtu` files that are split into multiple
+Hugging Face parts without overwriting the original raw root:
+
+```
+python scripts/repair_volume_vtus.py \
+  --raw-root /mnt/new-pvc/Datasets/2_Drivearml \
+  --fixed-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511 \
+  --repair
+```
+
+Recompute target normalizers from the training case split:
+
+```
+python scripts/recompute_normalizers.py \
+  --root /mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511
 ```
 
 If the PVC is mounted somewhere other than `/mnt/pvc` or `/mnt/new-pvc`, set:
