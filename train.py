@@ -56,6 +56,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    sdf_weighted_masked_mse,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -85,6 +86,7 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    sdf_vol_loss_sigma: float = 0.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -220,6 +222,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "sdf_vol_loss_sigma": (
+            "Per-point SDF-distance-adaptive weighting for the volume loss. "
+            "When > 0, multiplies each volume point's squared error by "
+            "exp(-|sdf|/sigma), normalised so the per-batch mean weight over "
+            "valid points is 1 (so the total loss budget is preserved). "
+            "Sigma is the decay length in metres (car ~4m long); smaller "
+            "sigma focuses the volume loss more tightly near the surface. "
+            "0.0 disables the weighting and falls back to uniform masked MSE."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -321,6 +332,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    sdf_vol_loss_sigma: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -341,7 +353,17 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if sdf_vol_loss_sigma > 0.0:
+            vol_sdf = batch.volume_x[..., 3]
+            volume_loss = sdf_weighted_masked_mse(
+                out["volume_preds"],
+                volume_target,
+                batch.volume_mask,
+                vol_sdf,
+                sdf_vol_loss_sigma,
+            )
+        else:
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -852,6 +874,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.sdf_vol_loss_sigma > 0.0:
+                print(
+                    f"SDF-adaptive volume loss: sigma={config.sdf_vol_loss_sigma}m "
+                    f"(weights=exp(-|sdf|/sigma), normalised to mean=1 per batch)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -1030,6 +1057,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        sdf_vol_loss_sigma=config.sdf_vol_loss_sigma,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1068,6 +1096,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/sdf_vol_loss_sigma": config.sdf_vol_loss_sigma,
                         }
                     )
                 if gradnorm_metrics:

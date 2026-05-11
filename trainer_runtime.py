@@ -832,6 +832,40 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def sdf_weighted_masked_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    sdf: torch.Tensor,
+    sigma: float,
+) -> torch.Tensor:
+    """Per-point SDF-distance-weighted masked MSE.
+
+    Weights each point by ``exp(-|sdf|/sigma)``, normalised so the per-batch
+    mean over valid points is 1. Equivalent to ``masked_mse`` when sigma -> inf.
+
+    pred / target: [B, N, C]; mask: [B, N]; sdf: [B, N]; sigma > 0.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be > 0 for sdf weighting, got {sigma}")
+    sq_err = (pred - target).square()
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype)
+    sdf_f = sdf.to(device=pred.device, dtype=pred.dtype)
+    raw_weights = torch.exp(-sdf_f.abs() / sigma)
+    sum_w = (raw_weights * mask_f).sum(dim=-1)
+    n_valid = mask_f.sum(dim=-1).clamp_min(1.0)
+    mean_w = (sum_w / n_valid).clamp_min(1e-12)
+    sdf_weights = raw_weights / mean_w.unsqueeze(-1)
+    point_err = sq_err.mean(dim=-1)
+    weighted = point_err * sdf_weights * mask_f
+    denominator = mask_f.sum().clamp_min(1.0)
+    if bool(mask_f.sum().detach().cpu().item() > 0):
+        return weighted.sum() / denominator
+    return pred.sum() * 0.0
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
