@@ -188,6 +188,130 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class VolumeKNNPreAttn(nn.Module):
+    """Local k-NN spatial attention over volume tokens, applied before the Transolver backbone.
+
+    For each volume token, attends over its k nearest spatial neighbours in 3D.
+    Injects a geometry-invariant local inductive bias (local pressure physics
+    are the same on OOD shapes), reducing the OOD burden on the global slice
+    router.
+
+    Implementation notes:
+    - Chunked cdist (default chunk_size=512) avoids the O(N^2) distance
+      matrix at N~65k.
+    - Attention itself is computed manually (q.k / softmax / .v einsums) in
+      chunks of ``attn_chunk_size`` along the N dim. This keeps the effective
+      batch dim of every CUDA kernel below the gridDim.y ceiling of 65535,
+      which a naive ``[B*N, 1, D]`` reshape into nn.MultiheadAttention would
+      blow past at N>=16k.
+    - Mask-aware: padded candidates are pushed to +inf distance so they are
+      never selected; padded queries are zeroed via ``_apply_token_mask``
+      before the residual + LayerNorm.
+    - Zero-init ``out_proj`` => identity at init, preserving baseline
+      behaviour at epoch 0.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        k: int = 16,
+        chunk_size: int = 512,
+        attn_chunk_size: int = 4096,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.k = k
+        self.chunk_size = chunk_size
+        self.attn_chunk_size = attn_chunk_size
+        self.scale = self.head_dim ** -0.5
+        self.qkv_proj = nn.Linear(hidden_dim, 3 * hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        # Standard init for qkv; zero-init out_proj so the module is identity
+        # (modulo the post-norm) at step 0.
+        _init_linear(self.qkv_proj)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+
+    def _knn_indices(
+        self,
+        coords: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Compute k-NN indices via chunked cdist. Returns [B, N, k] indices.
+
+        Mask handling: when ``mask`` is provided, padded candidates are pushed
+        to +inf distance so they are never selected as neighbours. Padded
+        queries still produce indices; their output is zeroed downstream by
+        ``_apply_token_mask`` before the residual + LayerNorm.
+        """
+        B, N, _ = coords.shape
+        k = min(self.k, max(N - 1, 1))
+        knn_indices = torch.zeros(B, N, k, dtype=torch.long, device=coords.device)
+        coords_f = coords.float()
+        if mask is not None:
+            cand_inf = (1.0 - mask.float()) * float("inf")  # [B, N], 0 for real, inf for padded
+        else:
+            cand_inf = None
+        for start in range(0, N, self.chunk_size):
+            end = min(start + self.chunk_size, N)
+            dists = torch.cdist(coords_f[:, start:end], coords_f)  # [B, chunk, N]
+            row_idx = torch.arange(start, end, device=coords.device)
+            col_idx = torch.arange(end - start, device=coords.device)
+            dists[:, col_idx, row_idx] = float("inf")
+            if cand_inf is not None:
+                dists = dists + cand_inf[:, None, :]
+            knn_indices[:, start:end] = dists.topk(k, dim=-1, largest=False).indices
+        return knn_indices
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        coords: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, D = x.shape
+        if N == 0:
+            return x
+        k = min(self.k, max(N - 1, 1))
+        knn_indices = self._knn_indices(coords, mask)  # [B, N, k]
+
+        qkv = self.qkv_proj(x).view(B, N, 3, self.num_heads, self.head_dim)
+        q = qkv[:, :, 0]  # [B, N, H, hd]
+        k_full = qkv[:, :, 1]  # [B, N, H, hd]
+        v_full = qkv[:, :, 2]  # [B, N, H, hd]
+
+        batch_arange = torch.arange(B, device=x.device)[:, None, None]  # [B, 1, 1]
+        out = torch.empty(B, N, self.num_heads, self.head_dim, dtype=q.dtype, device=x.device)
+
+        # Chunk along N so per-chunk neighbour gather stays small. With
+        # chunk=4096, k=16, H=4, hd=128: gathered K+V ~= 4*4096*16*4*128*2
+        # = 268M elements ~= 0.5 GB in bf16. Fits comfortably alongside the
+        # rest of the model on H100 80GB.
+        chunk = self.attn_chunk_size
+        for start in range(0, N, chunk):
+            end = min(start + chunk, N)
+            knn_chunk = knn_indices[:, start:end]  # [B, chunk, k]
+            chunk_n = end - start
+            batch_idx_chunk = batch_arange.expand(B, chunk_n, k)
+            k_n = k_full[batch_idx_chunk, knn_chunk]  # [B, chunk, k, H, hd]
+            v_n = v_full[batch_idx_chunk, knn_chunk]  # [B, chunk, k, H, hd]
+            q_chunk = q[:, start:end]  # [B, chunk, H, hd]
+            scores = torch.einsum("bnhd,bnkhd->bnhk", q_chunk, k_n) * self.scale
+            attn = F.softmax(scores, dim=-1)
+            out[:, start:end] = torch.einsum("bnhk,bnkhd->bnhd", attn, v_n)
+
+        out = out.reshape(B, N, D)
+        out = self.out_proj(out)
+        out = _apply_token_mask(out, mask)
+        return self.norm(x + out)
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -343,6 +467,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_knn_preattn: bool = False,
+        vol_knn_k: int = 16,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +482,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_knn_preattn = use_vol_knn_preattn
+        self.vol_knn_k = vol_knn_k
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -440,6 +568,20 @@ class SurfaceTransolver(nn.Module):
         )
         self.volume_out.apply(_init_linear)
 
+        # Volume k-NN local spatial pre-attention (PR #1012): mixes each volume
+        # token with its k spatial neighbours BEFORE the global Transolver
+        # backbone, injecting a geometry-invariant local inductive bias to
+        # reduce the OOD burden on the global slice router. Zero-init out_proj
+        # => identity at init.
+        if use_vol_knn_preattn:
+            self.vol_knn_preattn = VolumeKNNPreAttn(
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                k=vol_knn_k,
+            )
+        else:
+            self.vol_knn_preattn = None
+
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
         # Bridges geometry-aware surface features into the volume decoder
@@ -522,16 +664,20 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    volume_x,
-                    rff=self.volume_rff,
-                    string_sep=self.volume_string_sep,
-                    project_features=self.project_volume_features,
-                    bias=self.volume_bias,
-                    placeholder=self.volume_placeholder,
-                )
+            volume_hidden_pre = self._encode_group(
+                volume_x,
+                rff=self.volume_rff,
+                string_sep=self.volume_string_sep,
+                project_features=self.project_volume_features,
+                bias=self.volume_bias,
+                placeholder=self.volume_placeholder,
             )
+            if self.vol_knn_preattn is not None and volume_tokens > 0:
+                vol_coords = volume_x[:, :, : self.space_dim]
+                volume_hidden_pre = self.vol_knn_preattn(
+                    volume_hidden_pre, vol_coords, volume_mask
+                )
+            tokens.append(volume_hidden_pre)
             masks.append(volume_mask)
 
         attn_mask = torch.cat(masks, dim=1)

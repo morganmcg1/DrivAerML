@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_vol_knn_preattn: bool = False
+    vol_knn_k: int = 16
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_vol_knn_preattn": (
+            "Enable volume k-NN local spatial pre-attention (PR #1012). "
+            "Before the shared Transolver backbone, each volume token "
+            "attends to its k=--vol-knn-k nearest 3D-space neighbours via "
+            "one nn.MultiheadAttention pass. Injects a geometry-invariant "
+            "local inductive bias to reduce the OOD burden on the global "
+            "slice router. Zero-init out_proj => identity at init. "
+            "embed_dim follows --model-hidden-dim, num_heads follows "
+            "--model-heads, chunked cdist avoids O(N^2) memory."
+        ),
+        "vol_knn_k": (
+            "Number of spatial neighbours per volume token in the k-NN "
+            "pre-attention module (PR #1012). Default 16 follows PTv3 / "
+            "Point Transformer conventions. Only used when "
+            "--use-vol-knn-preattn is set."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +326,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_vol_knn_preattn=config.use_vol_knn_preattn,
+        vol_knn_k=config.vol_knn_k,
     )
 
 
@@ -773,7 +793,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_vol_knn_preattn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
