@@ -130,6 +130,7 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    near_surface_sdf_sample_alpha: float = 0.0
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -219,6 +220,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "near_surface_sdf_sample_alpha": (
+            "If > 0, use SDF-stratified sampling for volume points during training. "
+            "Sampling weight = exp(-alpha * abs(sdf)), concentrating samples near "
+            "the car surface. 0.0 = uniform random (default, baseline behaviour). "
+            "Only affects train_random sampling mode; eval is unchanged."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -683,6 +690,7 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        near_surface_sdf_sample_alpha=config.near_surface_sdf_sample_alpha,
     )
     train_sampler = None
     train_shuffle = True

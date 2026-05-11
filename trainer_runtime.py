@@ -281,6 +281,7 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        near_surface_sdf_sample_alpha=getattr(config, "near_surface_sdf_sample_alpha", 0.0),
     )
     train_sampler = None
     train_shuffle = True

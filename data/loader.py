@@ -367,6 +367,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        near_surface_sdf_sample_alpha: float = 0.0,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +377,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.near_surface_sdf_sample_alpha = float(near_surface_sdf_sample_alpha)
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -440,6 +442,19 @@ class DrivAerMLSurfaceDataset(Dataset):
             view,
             group_view_count=view.volume_view_count,
         )
+        if (
+            self.near_surface_sdf_sample_alpha > 0.0
+            and view.sampling_mode == "train_random"
+            and volume_idx is not None
+            and volume_idx.numel() > 0
+        ):
+            case_dir = _case_dir(self.store.root, view.case_id)
+            sdf_full = _load_npy_rows(case_dir / "volume_sdf.npy", None).reshape(-1)
+            weights = torch.from_numpy(
+                np.exp(-self.near_surface_sdf_sample_alpha * np.abs(sdf_full)).astype(np.float32)
+            )
+            count = int(volume_idx.numel())
+            volume_idx = torch.multinomial(weights, count, replacement=False).sort().values
         case = self.store.load_case(
             view.case_id,
             surface_rows=None if surface_idx is None else surface_idx.numpy(),
@@ -544,6 +559,7 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    near_surface_sdf_sample_alpha: float = 0.0,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +584,7 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        near_surface_sdf_sample_alpha=near_surface_sdf_sample_alpha,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(
