@@ -1284,7 +1284,32 @@ def build_lr_scheduler(
     optimizer: torch.optim.Optimizer,
     config,
     max_epochs: int,
+    steps_per_epoch: int = 1,
 ) -> torch.optim.lr_scheduler.LRScheduler:
+    lr_warmup_steps = int(getattr(config, "lr_warmup_steps", 0))
+    if lr_warmup_steps > 0:
+        # Step-granular warmup: complete after exactly N optimizer steps and
+        # run cosine annealing in step units for the remainder of training.
+        total_steps = max(1, max_epochs * max(1, steps_per_epoch))
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=0.05,
+            end_factor=1.0,
+            total_iters=max(1, lr_warmup_steps),
+        )
+        cosine_steps = max(1, total_steps - lr_warmup_steps)
+        cosine_scheduler_steps = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=cosine_steps,
+            eta_min=config.lr_min,
+        )
+        combined = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler_steps],
+            milestones=[lr_warmup_steps],
+        )
+        combined._step_per_batch = True
+        return combined
     t_max = config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
