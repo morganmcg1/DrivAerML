@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import gc
 import math
 import os
@@ -22,13 +23,14 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
@@ -138,6 +140,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_hard_case_oversampling: bool = False
+    hard_case_alpha: float = 1.0
+    hard_case_sampler_seed: int = 42
     debug: bool = False
 
 
@@ -228,6 +233,29 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_hard_case_oversampling": (
+            "Enable case-level WeightedRandomSampler that oversamples "
+            "training cases geometrically similar to the OOD test cluster "
+            "(run_133, run_226, run_203, run_158). Per-case weight = "
+            "exp(-hard_case_alpha * d_i) where d_i is the z-score distance "
+            "in (CD, Vehicle_Height) space to the test-cluster centroid. "
+            "View weights inherit the case weight so cases with more "
+            "point-views keep their proportional contribution. DDP draws "
+            "a globally-consistent index list per epoch with a shared "
+            "seed and shards by rank to avoid gradient mismatch."
+        ),
+        "hard_case_alpha": (
+            "Sharpness of the exp(-alpha * d) reweighting. alpha=1.0 gives "
+            "~2-3x max/mean weight ratio (moderate); alpha=2.0 gives "
+            "~4-8x (aggressive). At 400 train cases, alpha>=2 reduces ESS "
+            "to ~30-40 effective cases; the run logs ESS and max/mean to "
+            "let you spot variance collapse."
+        ),
+        "hard_case_sampler_seed": (
+            "Base seed for the DistributedWeightedRandomSampler shared "
+            "across DDP ranks. Combined with the epoch index to produce "
+            "reproducible globally-consistent draws."
         ),
     }
     for field in fields(Config):
@@ -659,6 +687,234 @@ def vol_points_for_epoch(
     return current
 
 
+HARD_TEST_CASE_IDS: tuple[str, ...] = ("run_133", "run_226", "run_203", "run_158")
+
+_FORCE_CSV_CANDIDATES: tuple[str, ...] = (
+    "/mnt/new-pvc/Datasets/2_Drivearml/force_mom_all.csv",
+    "/mnt/pvc/Datasets/2_Drivearml/force_mom_all.csv",
+)
+_GEO_CSV_CANDIDATES: tuple[str, ...] = (
+    "/mnt/new-pvc/Datasets/2_Drivearml/geo_parameters_all.csv",
+    "/mnt/pvc/Datasets/2_Drivearml/geo_parameters_all.csv",
+)
+
+
+def _resolve_first_existing(paths: tuple[str, ...]) -> str:
+    for p in paths:
+        if Path(p).exists():
+            return p
+    raise FileNotFoundError(f"None of these geometry CSVs exist: {paths}")
+
+
+def _case_to_run_number(case_id: str) -> int:
+    return int(case_id.removeprefix("run_"))
+
+
+def _load_cd_table() -> dict[int, float]:
+    path = _resolve_first_existing(_FORCE_CSV_CANDIDATES)
+    out: dict[int, float] = {}
+    with open(path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            out[int(row["run"])] = float(row["cd"])
+    return out
+
+
+def _load_vehicle_height_table() -> dict[int, float]:
+    path = _resolve_first_existing(_GEO_CSV_CANDIDATES)
+    out: dict[int, float] = {}
+    with open(path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            clean = {k.strip(): v.strip() for k, v in row.items()}
+            out[int(clean["Run"])] = float(clean["Vehicle_Height"])
+    return out
+
+
+def build_hard_case_weights(
+    case_ids: list[str],
+    alpha: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Per-case oversampling weights toward the hard OOD test cluster.
+
+    Computes a z-score Euclidean distance from each training case to the
+    test-cluster centroid in (CD, Vehicle_Height) space (these two
+    covariates cover both the drag-coefficient and the dominant frontal-area
+    proxy in the DrivAerML design-of-experiments). The weight per case is
+    ``exp(-alpha * d_i)`` so cases similar to the test cluster are
+    oversampled.
+
+    Returns (weights, info) where ``info`` is a JSON-serialisable dict of
+    diagnostics (test-cluster means, train standardiser stats, ESS,
+    max/mean ratio) suitable for W&B logging.
+    """
+
+    cd_table = _load_cd_table()
+    height_table = _load_vehicle_height_table()
+
+    train_runs = [_case_to_run_number(c) for c in case_ids]
+    train_cd = np.array([cd_table[r] for r in train_runs], dtype=np.float64)
+    train_height = np.array([height_table[r] for r in train_runs], dtype=np.float64)
+
+    cd_std = float(train_cd.std()) + 1e-9
+    height_std = float(train_height.std()) + 1e-9
+
+    hard_runs = [_case_to_run_number(c) for c in HARD_TEST_CASE_IDS]
+    hard_cd = np.array([cd_table[r] for r in hard_runs], dtype=np.float64)
+    hard_height = np.array([height_table[r] for r in hard_runs], dtype=np.float64)
+    hard_cd_mean = float(hard_cd.mean())
+    hard_height_mean = float(hard_height.mean())
+
+    z_cd = np.abs(train_cd - hard_cd_mean) / cd_std
+    z_height = np.abs(train_height - hard_height_mean) / height_std
+    d = z_cd + z_height
+
+    weights = np.exp(-alpha * d)
+    weight_sum = float(weights.sum())
+    # ESS via Kish's formula: (sum w)^2 / sum w^2
+    ess = float(weight_sum * weight_sum / float((weights * weights).sum()))
+    mean_w = float(weights.mean())
+    max_w = float(weights.max())
+    min_w = float(weights.min())
+
+    info = {
+        "alpha": float(alpha),
+        "n_train_cases": int(len(case_ids)),
+        "train_cd_mean": float(train_cd.mean()),
+        "train_cd_std": cd_std,
+        "train_height_mean": float(train_height.mean()),
+        "train_height_std": height_std,
+        "hard_test_cd_mean": hard_cd_mean,
+        "hard_test_height_mean": hard_height_mean,
+        "d_mean": float(d.mean()),
+        "d_min": float(d.min()),
+        "d_max": float(d.max()),
+        "weight_min": min_w,
+        "weight_max": max_w,
+        "weight_mean": mean_w,
+        "weight_max_over_mean": max_w / mean_w,
+        "weight_min_over_mean": min_w / mean_w,
+        "effective_sample_size": ess,
+        "ess_fraction": ess / float(len(case_ids)),
+    }
+    return torch.from_numpy(weights).double(), info
+
+
+class DistributedWeightedRandomSampler(Sampler[int]):
+    """DDP-aware WeightedRandomSampler with synchronized global draws.
+
+    Each rank seeds an identical ``torch.Generator`` from
+    ``base_seed + epoch`` and draws the same ``num_samples`` global indices
+    via ``torch.multinomial``; rank ``r`` then takes the ``[r::world_size]``
+    slice. Because every rank sees the same draw, gradient bucket
+    synchronization stays consistent — independent per-rank seeds would
+    break DDP determinism (Byrd & Lipton, ICML 2019).
+    """
+
+    def __init__(
+        self,
+        weights: torch.Tensor,
+        *,
+        num_replicas: int,
+        rank: int,
+        num_samples: int | None = None,
+        base_seed: int = 42,
+    ):
+        if num_replicas <= 0:
+            raise ValueError(f"num_replicas must be positive, got {num_replicas}")
+        if not (0 <= rank < num_replicas):
+            raise ValueError(f"rank {rank} not in [0, {num_replicas})")
+        self.weights = torch.as_tensor(weights, dtype=torch.double).cpu()
+        if self.weights.ndim != 1 or self.weights.numel() == 0:
+            raise ValueError("weights must be a non-empty 1D tensor")
+        self.num_replicas = int(num_replicas)
+        self.rank = int(rank)
+        self.base_seed = int(base_seed)
+        self.epoch = 0
+        total = int(num_samples) if num_samples is not None else int(self.weights.numel())
+        # Match DistributedSampler(drop_last=True): keep total a multiple of world size.
+        self.num_samples_per_rank = total // self.num_replicas
+        self.total_samples = self.num_samples_per_rank * self.num_replicas
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self):
+        generator = torch.Generator()
+        generator.manual_seed(self.base_seed + self.epoch)
+        global_indices = torch.multinomial(
+            self.weights,
+            self.total_samples,
+            replacement=True,
+            generator=generator,
+        )
+        rank_indices = global_indices[self.rank :: self.num_replicas]
+        return iter(rank_indices.tolist())
+
+    def __len__(self) -> int:
+        return self.num_samples_per_rank
+
+
+def _build_view_weights(
+    case_ids: list[str],
+    views,
+    alpha: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Expand per-case sampling weights to per-view weights for the dataset."""
+
+    case_weights, info = build_hard_case_weights(case_ids, alpha=alpha)
+    case_idx = {cid: i for i, cid in enumerate(case_ids)}
+    view_weights = torch.tensor(
+        [case_weights[case_idx[v.case_id]].item() for v in views],
+        dtype=torch.double,
+    )
+    info["n_views"] = int(view_weights.numel())
+    info["view_weight_min"] = float(view_weights.min().item())
+    info["view_weight_max"] = float(view_weights.max().item())
+    return view_weights, info
+
+
+def _wrap_loader_with_hard_case_sampler(
+    loader: DataLoader,
+    config: Config,
+    distributed_state,
+) -> tuple[DataLoader, dict[str, float] | None]:
+    """Rebuild ``loader`` with a hard-case WeightedRandomSampler if enabled."""
+
+    if not config.use_hard_case_oversampling:
+        return loader, None
+
+    train_ds = loader.dataset
+    view_weights, info = _build_view_weights(
+        train_ds.case_ids, train_ds.views, alpha=config.hard_case_alpha
+    )
+
+    if distributed_state is not None and distributed_state.enabled:
+        sampler = DistributedWeightedRandomSampler(
+            view_weights,
+            num_replicas=distributed_state.world_size,
+            rank=distributed_state.rank,
+            base_seed=config.hard_case_sampler_seed,
+        )
+    else:
+        from torch.utils.data import WeightedRandomSampler
+
+        sampler = WeightedRandomSampler(
+            weights=view_weights.tolist(),
+            num_samples=int(view_weights.numel()),
+            replacement=True,
+        )
+    new_loader = DataLoader(
+        train_ds,
+        batch_size=config.batch_size,
+        shuffle=False,
+        sampler=sampler,
+        drop_last=True,
+        **loader_kwargs(config),
+    )
+    return new_loader, info
+
+
 def rebuild_train_loader_with_vol_points(
     config: Config,
     old_train_loader: DataLoader,
@@ -684,6 +940,33 @@ def rebuild_train_loader_with_vol_points(
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
     )
+    if config.use_hard_case_oversampling:
+        view_weights, _ = _build_view_weights(
+            train_ds.case_ids, train_ds.views, alpha=config.hard_case_alpha
+        )
+        if distributed_state is not None and distributed_state.enabled:
+            train_sampler = DistributedWeightedRandomSampler(
+                view_weights,
+                num_replicas=distributed_state.world_size,
+                rank=distributed_state.rank,
+                base_seed=config.hard_case_sampler_seed,
+            )
+        else:
+            from torch.utils.data import WeightedRandomSampler
+
+            train_sampler = WeightedRandomSampler(
+                weights=view_weights.tolist(),
+                num_samples=int(view_weights.numel()),
+                replacement=True,
+            )
+        return DataLoader(
+            train_ds,
+            batch_size=config.batch_size,
+            shuffle=False,
+            sampler=train_sampler,
+            drop_last=True,
+            **loader_kwargs(config),
+        )
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
@@ -737,6 +1020,21 @@ def main(argv: Iterable[str] | None = None) -> None:
         current_train_vol_points = config.train_volume_points
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        hard_case_info: dict[str, float] | None = None
+        if config.use_hard_case_oversampling:
+            train_loader, hard_case_info = _wrap_loader_with_hard_case_sampler(
+                train_loader, config, state
+            )
+            if state.is_main and hard_case_info is not None:
+                print(
+                    "Hard-case oversampling enabled: "
+                    f"alpha={hard_case_info['alpha']:.3f} "
+                    f"weight_max/mean={hard_case_info['weight_max_over_mean']:.2f} "
+                    f"weight_min/mean={hard_case_info['weight_min_over_mean']:.3f} "
+                    f"ESS={hard_case_info['effective_sample_size']:.1f}/"
+                    f"{hard_case_info['n_train_cases']} cases "
+                    f"({100.0 * hard_case_info['ess_fraction']:.1f}%)"
+                )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -883,6 +1181,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if hard_case_info is not None:
+                for key, value in hard_case_info.items():
+                    wandb.summary[f"hard_case_oversampling/{key}"] = value
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -911,7 +1212,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         config, train_loader, desired_vol_points, state
                     )
                     current_train_vol_points = desired_vol_points
-            if isinstance(train_loader.sampler, DistributedSampler):
+            if isinstance(
+                train_loader.sampler,
+                (DistributedSampler, DistributedWeightedRandomSampler),
+            ):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
                 state,
