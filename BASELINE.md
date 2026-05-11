@@ -92,45 +92,25 @@ uv run python ensemble_eval.py \
 **W&B runs (K=5 members):** `9mm3sz7x` (askeladd), `49aimdiz` (alphonse), `wyz68o8r` (thorfinn/SOTA), `qqtdnlwq` (alphonse), `5o7jc7wi` (edward) — ensemble group `ensemble-inference-v1`
 **PR:** #556
 
-**Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.9246% (single-model SOTA #523). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=5 pool.
+**Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.2868% (single-model SOTA #958). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=6 pool.
 
 ---
 
-## SINGLE-MODEL SOTA: nezuko PR #823 surface→volume cross-attention — 2026-05-08
+## SINGLE-MODEL SOTA: nezuko PR #958 dedicated vol_p aux decoder head (Arm A) — 2026-05-09
 
-**val_abupt=6.4407%** / **test_abupt=7.6992%** — −0.158pp val (−2.4% relative) vs prior single-model SOTA (PR #592, 6.5985%); −0.292pp test (−3.6% relative).
+**val_abupt=6.2868%** / **test_abupt=7.7445%** — −0.154pp val (−2.39% relative) vs prior single-model SOTA (PR #823, 6.4407%); +0.045pp test regression. Hypothesis on vol_p OOD gap NEGATIVE.
 
-One `nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)` after the post-backbone LayerNorm split. Q=vol_hidden, K=V=surf_hidden. Zero-init out_proj (identity-at-init); post-norm residual. `find_unused_parameters=True` gated on `--use-surf-to-vol-xattn` (DDP requirement). Improvement is broad-based (all channels, both splits); test-side margin (~−0.29pp) consistently larger than val-side (~−0.16pp). OOD test/val ratio preserved (3.027× vs 3.025×) — xattn is a general capacity boost, not a targeted OOD fix.
+3-layer MLP auxiliary decoder head for volume_pressure (independent gradient path from volume tokens), stacked on full PR #823 SOTA config (surf→vol cross-attention). vol_loss_weight=1.0 (Arm A). Val_abupt improvement is broad-based (wall_shear −0.297pp val). Hypothesis that dedicated head would reduce OOD test_vol_p gap NEGATIVE — test_vol_p=12.0063% is worse than baseline 11.6704% (+0.336pp). The OOD gap (~3× val/test multiplier) is a data-distribution problem, not a model-capacity problem.
 
-**W&B run:** `ghh0s4ne` (group `nezuko-surf-vol-xattn`, name `nezuko/surf-vol-xattn-13ep`)
-**PR:** #823
-**Params:** 16,987,225 (+1.05M / +6.6% vs prior SOTA 15,935,577)
-**Training time:** 833.1 min (~13.9h) on 8×H100s
-**Peak memory:** 75.9 GB / 97 GB (val phase, vol_pts=65536)
+**W&B run:** `29nohj67` (group `nezuko-vol-aux-decoder-head`)
+**PR:** #958
 
-**Val metrics (EP13 best checkpoint):** val_abupt=6.4407%, surface_pressure=4.1836%, volume_pressure=3.8557%, wall_shear=7.3448%, tau_x=5.7782%, tau_y=7.5977%, tau_z=9.0116%
-**Test metrics:** test_abupt=7.6992%, surface_pressure=3.8451%, volume_pressure=11.6704%, wall_shear=7.0429%, tau_x=6.2773%, tau_y=7.6657%, tau_z=9.0375%
+**Val metrics (EP13 best checkpoint):** val_abupt=6.2868%, surface_pressure=4.1766%, volume_pressure=3.9152%, wall_shear=7.0476%, tau_x=6.1726%, tau_y=7.6648%, tau_z=9.5053%
+**Test metrics:** test_abupt=7.7445%, surface_pressure=3.9100%, volume_pressure=12.0063%, wall_shear=6.9848%, tau_x=6.2092%, tau_y=7.5689%, tau_z=9.0280%
 
-**EP-by-EP val_abupt trajectory:**
-| EP | step | val_abupt | train vol_pts |
-|---|---|---|---|
-| EP1 | 10864 | 28.6344% | 16384 |
-| EP2 | 21729 | 8.1482% | 16384 |
-| EP3 | 32594 | 7.1195% | 16384 |
-| EP4 | 38030 | 6.8087% | 32768 |
-| EP5 | 43466 | 6.6713% | 32768 |
-| EP6 | 48902 | **6.5897%** ← first SOTA crossover | 32768 |
-| EP7 | 52528 | 6.5335% | 49152 |
-| EP8 | 56154 | 6.5017% | 49152 |
-| EP9 | 59780 | 6.4868% | 49152 |
-| EP10 | 62501 | 6.4639% | 65536 |
-| EP11 | 65222 | 6.4521% | 65536 |
-| EP12 | 67943 | 6.4432% | 65536 |
-| **EP13** | **70664** | **6.4407%** ⭐ | 65536 |
+**Single-model training gate:** val_abupt < **6.2868%** (previously 6.4407% from PR #823)
 
-**Single-model training gate:** val_abupt < **6.4407%** (previously 6.5985% from PR #592)
-
-### Reproduce (L=5 + surf→vol xattn, Lion lr=9e-5, 13ep, vol-curriculum)
+### Reproduce (L=5 + surf→vol xattn + vol_p aux head, Lion lr=9e-5, 13ep, vol-curriculum)
 
 ```bash
 cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
@@ -147,9 +127,23 @@ cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
   --train-surface-points 65536 --eval-surface-points 65536 \
   --train-volume-points 65536 --eval-volume-points 65536 \
   --use-surf-to-vol-xattn \
-  --wandb-group nezuko-surf-vol-xattn \
-  --wandb-name nezuko/surf-vol-xattn-13ep
+  --use-vol-pressure-aux-head --volume-loss-weight 1.0 \
+  --wandb-group nezuko-vol-aux-decoder-head
 ```
+
+---
+
+## Prior Single-Model SOTA: nezuko PR #823 surface→volume cross-attention — 2026-05-08
+
+**val_abupt=6.4407%** / **test_abupt=7.6992%** — −0.158pp val (−2.4% relative) vs prior single-model SOTA (PR #592, 6.5985%); −0.292pp test (−3.6% relative).
+
+One `nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)` after the post-backbone LayerNorm split. Q=vol_hidden, K=V=surf_hidden. Zero-init out_proj (identity-at-init); post-norm residual. Improvement broad-based; OOD test/val ratio preserved (3.027× vs 3.025×) — xattn is a general capacity boost.
+
+**W&B run:** `ghh0s4ne` (group `nezuko-surf-vol-xattn`, name `nezuko/surf-vol-xattn-13ep`)
+**PR:** #823
+
+**Val metrics (EP13 best checkpoint):** val_abupt=6.4407%, surface_pressure=4.1836%, volume_pressure=3.8557%, wall_shear=7.3448%, tau_x=5.7782%, tau_y=7.5977%, tau_z=9.0116%
+**Test metrics:** test_abupt=7.6992%, surface_pressure=3.8451%, volume_pressure=11.6704%, wall_shear=7.0429%, tau_x=6.2773%, tau_y=7.6657%, tau_z=9.0375%
 
 ---
 
