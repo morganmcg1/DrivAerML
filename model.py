@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_per_head_temp_scale: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.xattn_per_head_temp_scale = xattn_per_head_temp_scale
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -440,9 +442,21 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
             nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
+            # Per-head learnable temperature scaling (PR #991): each head gets
+            # its own scalar multiplying Q before xattn. Init=0.5 matches the
+            # constant-scale baseline from PR #984. With nn.MultiheadAttention's
+            # internal 1/sqrt(head_dim), multiplying Q by scale<1 sharpens the
+            # attention distribution per head.
+            if xattn_per_head_temp_scale:
+                self.xattn_head_temp_scale = nn.Parameter(torch.ones(n_head) * 0.5)
+            else:
+                self.xattn_head_temp_scale = None
+            self._xattn_n_head = n_head
+            self._xattn_head_dim = n_hidden // n_head
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+            self.xattn_head_temp_scale = None
 
     def _encode_group(
         self,
@@ -536,8 +550,16 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            if self.xattn_head_temp_scale is not None:
+                B, T, H = volume_hidden.shape
+                q = volume_hidden.reshape(B, T, self._xattn_n_head, self._xattn_head_dim)
+                q = q.permute(0, 2, 1, 3)
+                q = q * self.xattn_head_temp_scale[None, :, None, None]
+                volume_hidden_scaled = q.permute(0, 2, 1, 3).reshape(B, T, H)
+            else:
+                volume_hidden_scaled = volume_hidden
             xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
+                query=volume_hidden_scaled,
                 key=surface_hidden,
                 value=surface_hidden,
                 need_weights=False,

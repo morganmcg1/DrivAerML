@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    xattn_per_head_temp_scale: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "xattn_per_head_temp_scale": (
+            "Enable per-head learnable temperature scaling in surf->vol "
+            "xattn (PR #991). Adds n_head learnable scalars (init=0.5) that "
+            "multiply Q per-head before the MHA call. Sharpens attention "
+            "and lets each head discover its own optimal temperature. "
+            "Requires --use-surf-to-vol-xattn."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +284,30 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_xattn_head_temp_scale_metrics(model: nn.Module) -> dict[str, float]:
+    """Log per-head xattn temperature scales (PR #991).
+
+    Tracks per-head values, summary stats, and collapse detection
+    (range = max - min): a small range signals heads collapsed to a
+    single constant, which would indicate the global approximation
+    was sufficient and the extra params are not buying head-specific
+    sharpness.
+    """
+    metrics: dict[str, float] = {}
+    scale = getattr(model, "xattn_head_temp_scale", None)
+    if scale is None:
+        return metrics
+    scale = scale.detach().float()
+    for h in range(scale.shape[0]):
+        metrics[f"xattn_head_temp_scale/h{h}"] = float(scale[h].item())
+    metrics["xattn_head_temp_scale/mean"] = float(scale.mean().item())
+    metrics["xattn_head_temp_scale/std"] = float(scale.std().item())
+    metrics["xattn_head_temp_scale/min"] = float(scale.min().item())
+    metrics["xattn_head_temp_scale/max"] = float(scale.max().item())
+    metrics["xattn_head_temp_scale/range"] = float((scale.max() - scale.min()).item())
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +340,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        xattn_per_head_temp_scale=config.xattn_per_head_temp_scale,
     )
 
 
@@ -1262,6 +1295,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_xattn_head_temp_scale_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
