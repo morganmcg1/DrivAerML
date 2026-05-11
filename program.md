@@ -34,7 +34,7 @@ The baseline model given in `model.py` and trained by `train.py` is a plain grou
 
 ## Data
 
-Processed samples live on the PVC at `/mnt/pvc/Processed/drivaerml_processed_fixed_20260511` or `/mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511`.
+Processed samples live on the PVC at `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511` or `/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511`.
 
 Each case directory must contain:
 
@@ -50,6 +50,12 @@ volume_pressure.npy    # [N_volume] or [N_volume, 1]
 ```
 
 The loader concatenates surface features into `[x, y, z, nx, ny, nz, area]` and volume features into `[x, y, z, sdf]`.
+
+The canonical `rawcanon_20260511` processed root is raw-only: surface arrays are
+carried forward from the packaged processed root, while all volume arrays are
+regenerated from complete raw VTU files using deterministic 10% cell-center
+sampling. `volume_sdf.npy` is computed at those sampled cell centers against the
+case STL surface. No synthetic inside-body volume rows are added.
 
 Targets:
 

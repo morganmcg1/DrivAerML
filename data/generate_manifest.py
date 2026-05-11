@@ -17,12 +17,12 @@ if __package__ is None or __package__ == "":
 else:
     from data.split_utils import expand_pvc_candidates, ensure_disjoint, rewrite_under_pvc_mount, write_json
 
-DEFAULT_CASE_MANIFEST = "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511/manifest.csv"
-DEFAULT_CASE_MANIFEST_FULL = "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511/manifest_full_failed10_included.csv"
-DEFAULT_CASE_ROOT = "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511"
+DEFAULT_CASE_MANIFEST = "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest.csv"
+DEFAULT_CASE_MANIFEST_FULL = "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest_full_failed10_included.csv"
+DEFAULT_CASE_ROOT = "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511"
 DEFAULT_CASE_ROOT_CANDIDATES = [
-    "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511",
-    "/mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511",
+    "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511",
+    "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511",
 ]
 DEFAULT_OUTPUT = Path(__file__).with_name("split_manifest.json")
 
@@ -67,6 +67,7 @@ def build_manifest(
             "Case splits come directly from the packaged processed manifest.csv.",
             "The same train/val/test case IDs are used for both surface and volume fields.",
             "manifest_full_failed10_included.csv is used to verify repaired public cases are present.",
+            "Volume arrays come from the canonical raw-only preprocessing root; no synthetic inside-body rows are added.",
         ],
     }
 

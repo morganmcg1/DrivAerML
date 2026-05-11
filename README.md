@@ -59,8 +59,8 @@ Lower is better. Final reports should include the individual AB-UPT comparison c
 The processed DrivAerML arrays are expected on the PVC at one of:
 
 ```
-/mnt/pvc/Processed/drivaerml_processed_fixed_20260511
-/mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511
+/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511
+/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 
 You can also point to another copy:
@@ -108,11 +108,40 @@ python scripts/repair_volume_vtus.py \
   --repair
 ```
 
+Build the canonical raw-only processed root. This hardlinks or copies the
+surface arrays from the previous processed root, then regenerates every volume
+array from the complete fixed raw VTUs. It does not add synthetic inside-body
+samples:
+
+```
+python scripts/preprocess_drivaerml_raw.py \
+  --source-root /mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511 \
+  --raw-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511 \
+  --output-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
+```
+
+For sharded runs, write one shard manifest per worker and collect the per-case
+sidecars afterwards:
+
+```
+python scripts/collect_drivaerml_provenance.py \
+  --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
+  --source-root /mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511 \
+  --raw-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511
+```
+
 Recompute target normalizers from the training case split:
 
 ```
 python scripts/recompute_normalizers.py \
-  --root /mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511
+  --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
+```
+
+Audit SDF distributions after preprocessing:
+
+```
+python scripts/audit_sdf_distribution.py \
+  --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 
 If the PVC is mounted somewhere other than `/mnt/pvc` or `/mnt/new-pvc`, set:

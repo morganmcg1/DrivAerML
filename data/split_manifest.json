@@ -1,12 +1,12 @@
 {
   "dataset": "DrivAerML",
   "manifest_version": 2,
-  "source_case_manifest": "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511/manifest.csv",
-  "source_case_manifest_full": "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511/manifest_full_failed10_included.csv",
-  "case_root": "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511",
+  "source_case_manifest": "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest.csv",
+  "source_case_manifest_full": "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest_full_failed10_included.csv",
+  "case_root": "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511",
   "case_root_candidates": [
-    "/mnt/pvc/Processed/drivaerml_processed_fixed_20260511",
-    "/mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511"
+    "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511",
+    "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
   ],
   "case_splits": {
     "train": [
@@ -510,6 +510,7 @@
   "notes": [
     "Case splits come directly from the packaged processed manifest.csv.",
     "The same train/val/test case IDs are used for both surface and volume fields.",
-    "manifest_full_failed10_included.csv is used to verify repaired public cases are present."
+    "manifest_full_failed10_included.csv is used to verify repaired public cases are present.",
+    "Volume arrays come from the canonical raw-only preprocessing root; no synthetic inside-body rows are added."
   ]
 }
