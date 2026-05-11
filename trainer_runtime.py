@@ -921,6 +921,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    use_tta: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -935,6 +936,28 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    if use_tta:
+        # Y-symmetry TTA: run a second forward pass with Y-coordinate flipped.
+        # surface_x and volume_x coords are [B, N, 3] where dim 1 is Y.
+        surface_x_flip = batch.surface_x.clone()
+        surface_x_flip[..., 1] = -surface_x_flip[..., 1]
+        volume_x_flip = batch.volume_x.clone()
+        volume_x_flip[..., 1] = -volume_x_flip[..., 1]
+        with autocast_context(device, amp_mode):
+            out_flip = eval_module(
+                surface_x=surface_x_flip,
+                surface_mask=batch.surface_mask,
+                volume_x=volume_x_flip,
+                volume_mask=batch.volume_mask,
+            )
+        surface_pred_norm_flip = out_flip["surface_preds"].float()
+        volume_pred_norm_flip = out_flip["volume_preds"].float()
+        # ws_y (channel 2 of surface output) is antisymmetric under Y-flip —
+        # negate it to un-flip before averaging.
+        surface_pred_norm_flip[..., 2] = -surface_pred_norm_flip[..., 2]
+        # Average predictions in normalised space before inversion.
+        surface_pred_norm = (surface_pred_norm + surface_pred_norm_flip) * 0.5
+        volume_pred_norm = (volume_pred_norm + volume_pred_norm_flip) * 0.5
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
@@ -1087,6 +1110,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    use_tta: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1098,6 +1122,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            use_tta=use_tta,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1397,6 +1422,7 @@ def run_final_evaluation(
     n_params: int,
     global_step: int,
     total_minutes: float,
+    use_tta: bool = False,
 ) -> None:
     checkpoint = torch.load(model_path, map_location=device, weights_only=True)
     model.load_state_dict(checkpoint["model"])
@@ -1418,7 +1444,7 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_tta=use_tta)
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1438,7 +1464,7 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode, use_tta=use_tta)
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

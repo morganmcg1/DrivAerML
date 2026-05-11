@@ -132,6 +132,7 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_tta: bool = False
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -425,6 +426,7 @@ def run_eval_only(config: Config, state) -> None:
         n_params=n_params,
         global_step=int(checkpoint["epoch"]),
         total_minutes=0.0,
+        use_tta=config.use_tta,
     )
     wandb.finish()
 
@@ -1040,6 +1042,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             n_params=n_params,
             global_step=global_step,
             total_minutes=total_minutes,
+            use_tta=config.use_tta,
         )
         wandb.finish()
     finally:
