@@ -343,8 +343,18 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        sdf_vol_encoding: str = "none",
+        sdf_vol_scale: float = 10.0,
     ):
         super().__init__()
+        if sdf_vol_encoding not in {"none", "asinh"}:
+            raise ValueError(
+                f"sdf_vol_encoding must be 'none' or 'asinh'; got {sdf_vol_encoding!r}"
+            )
+        if sdf_vol_encoding == "asinh" and sdf_vol_scale <= 0.0:
+            raise ValueError(
+                f"sdf_vol_scale must be positive for asinh encoding; got {sdf_vol_scale}"
+            )
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
@@ -356,6 +366,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.sdf_vol_encoding = sdf_vol_encoding
+        self.sdf_vol_scale = sdf_vol_scale
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -469,12 +481,22 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        is_volume: bool = False,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
-            feature_parts.append(x[:, :, self.space_dim :])
+            extras = x[:, :, self.space_dim :]
+            if is_volume and self.sdf_vol_encoding == "asinh":
+                # SDF channel is the first extra column (volume_x = xyz + sdf).
+                # Apply asinh(sdf / scale): linear near zero (preserves near-surface
+                # fine structure) and logarithmic in the tails (compresses far-field
+                # outliers that arrive after the EP3 vol_pts curriculum step).
+                sdf = extras[:, :, 0:1]
+                sdf = torch.asinh(sdf / self.sdf_vol_scale)
+                extras = torch.cat([sdf, extras[:, :, 1:]], dim=-1)
+            feature_parts.append(extras)
         if string_sep is not None:
             feature_parts.append(string_sep(pos))
         elif rff is not None:
@@ -530,6 +552,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
+                    is_volume=True,
                 )
             )
             masks.append(volume_mask)

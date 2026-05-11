@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    sdf_vol_encoding: str = "none"
+    sdf_vol_scale: float = 10.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "sdf_vol_encoding": (
+            "Nonlinear encoding applied to the SDF feature in volume_x "
+            "(4th channel, index 3) before the linear feature projection. "
+            "'none' passes the raw signed-distance value through unchanged "
+            "(baseline behavior). 'asinh' applies asinh(sdf / sdf-vol-scale) "
+            "which is linear near zero (near-surface fine structure "
+            "preserved) and logarithmic in the tails (far-field outliers "
+            "compressed). Motivation: smooth the EP3 curriculum boundary "
+            "where vol_pts grows from 16k to 32k+ and far-field SDF values "
+            "become OOD relative to EP1-EP2."
+        ),
+        "sdf_vol_scale": (
+            "Scale parameter for the SDF asinh encoding (only used when "
+            "--sdf-vol-encoding=asinh). Controls the linear-to-logarithmic "
+            "transition point: SDF values with |sdf| << scale are nearly "
+            "unchanged, |sdf| >> scale are log-compressed. Default 10.0 "
+            "(geometric scale of the car bounding box)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -240,7 +260,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    config = Config(**vars(namespace))
+    valid_sdf_encodings = {"none", "asinh"}
+    if config.sdf_vol_encoding not in valid_sdf_encodings:
+        raise ValueError(
+            f"--sdf-vol-encoding must be one of {sorted(valid_sdf_encodings)}; "
+            f"got {config.sdf_vol_encoding!r}"
+        )
+    if config.sdf_vol_encoding == "asinh" and config.sdf_vol_scale <= 0.0:
+        raise ValueError(
+            f"--sdf-vol-scale must be positive for asinh encoding; got {config.sdf_vol_scale}"
+        )
+    return config
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -308,6 +339,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        sdf_vol_encoding=config.sdf_vol_encoding,
+        sdf_vol_scale=config.sdf_vol_scale,
     )
 
 
