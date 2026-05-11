@@ -320,6 +320,85 @@ class Transformer(nn.Module):
         return x
 
 
+class SurfToVolCrossAttnPerHeadTemp(nn.Module):
+    """Surface->volume cross-attention with per-head learnable Q temperature.
+
+    Manual MHA implementation (separate Q/K/V projections + SDPA) so that the
+    per-head temperature multiplies Q *after* W_q projection — i.e. on the
+    (B, H, N_q, head_dim) tensor where each head is independent. Scaling Q
+    before W_q (the naive route) would fold the scalar into the projection and
+    couple the heads.
+
+    The temperature is stored as ``log_temp = nn.Parameter(zeros(num_heads))``
+    so the exponentiated value starts at 1.0 (neutral, identical to baseline
+    attention) and is symmetric around 1 under gradient updates. Larger temp
+    sharpens the per-head distribution; smaller temp smooths it.
+
+    Out-projection weight and bias are zero-initialised so the whole module is
+    identity at epoch 0 (matches the existing nn.MultiheadAttention setup in
+    SurfaceTransolver).
+    """
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0):
+        super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError(
+                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.dropout = dropout
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+        # Xavier uniform on the Q/K/V weights to match nn.MultiheadAttention's
+        # default initialisation, zero on the biases.
+        for proj in (self.q_proj, self.k_proj, self.v_proj):
+            nn.init.xavier_uniform_(proj.weight)
+            nn.init.zeros_(proj.bias)
+
+        # Zero-init out_proj for identity at init.
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+        # Per-head log-temperature; exp() -> 1.0 at init -> neutral.
+        self.log_temp = nn.Parameter(torch.zeros(num_heads))
+
+    def forward(
+        self,
+        *,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        need_weights: bool = False,
+    ) -> tuple[torch.Tensor, None]:
+        # query: (B, N_q, D); key/value: (B, N_k, D); batch_first.
+        B, N_q, D = query.shape
+        N_k = key.shape[1]
+        H = self.num_heads
+        dh = self.head_dim
+
+        q = self.q_proj(query).view(B, N_q, H, dh).transpose(1, 2)  # (B, H, N_q, dh)
+        k = self.k_proj(key).view(B, N_k, H, dh).transpose(1, 2)
+        v = self.v_proj(value).view(B, N_k, H, dh).transpose(1, 2)
+
+        # Per-head temperature on Q (post-projection, truly per-head).
+        # exp() keeps temp > 0 with a symmetric loss landscape around 1.
+        temp = self.log_temp.exp().to(q.dtype).view(1, H, 1, 1)
+        q = q * temp
+
+        dropout_p = self.dropout if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p)
+        out = out.transpose(1, 2).contiguous().view(B, N_q, D)
+        out = self.out_proj(out)
+        # Match nn.MultiheadAttention signature so the calling forward stays unchanged.
+        return out, None
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +422,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_xattn_per_head_temp: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +436,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_xattn_per_head_temp = use_xattn_per_head_temp
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -447,15 +528,29 @@ class SurfaceTransolver(nn.Module):
         # AND bias so the sublayer is identity at init (preserves baseline
         # behavior at epoch 0). See PR #823 hypothesis.
         if use_surf_to_vol_xattn:
-            self.surf_to_vol_xattn = nn.MultiheadAttention(
-                embed_dim=n_hidden,
-                num_heads=n_head,
-                batch_first=True,
-                dropout=dropout,
-            )
+            if use_xattn_per_head_temp:
+                # PR #1002: replace nn.MultiheadAttention with a manual
+                # implementation that applies a learnable per-head temperature
+                # to Q *after* W_q projection. Applying the scale before
+                # MultiheadAttention (the advisor's literal instructions) folds
+                # into W_q's linear projection and so does not actually realise
+                # per-head behaviour — different heads can only see different
+                # scales when scaled in the per-head reshape (B, H, T, dh).
+                self.surf_to_vol_xattn = SurfToVolCrossAttnPerHeadTemp(
+                    embed_dim=n_hidden,
+                    num_heads=n_head,
+                    dropout=dropout,
+                )
+            else:
+                self.surf_to_vol_xattn = nn.MultiheadAttention(
+                    embed_dim=n_hidden,
+                    num_heads=n_head,
+                    batch_first=True,
+                    dropout=dropout,
+                )
+                nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
+                nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
             self.surf_to_vol_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
-            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.weight)
-            nn.init.zeros_(self.surf_to_vol_xattn.out_proj.bias)
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None

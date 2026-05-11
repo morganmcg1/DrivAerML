@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_xattn_per_head_temp: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_xattn_per_head_temp": (
+            "Enable per-head learnable Q temperature in the surf->vol "
+            "cross-attention (PR #1002). Replaces nn.MultiheadAttention with "
+            "a manual implementation that applies a per-head scalar to Q "
+            "*after* the W_q projection. Parameterised as log_temp = "
+            "nn.Parameter(zeros(num_heads)) so the exponentiated temperature "
+            "starts at 1.0 (neutral). Requires --use-surf-to-vol-xattn."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,7 +303,39 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_xattn_per_head_temp_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-head xattn temperature diagnostics (PR #1002).
+
+    Returns ``xattn_head_temp/head_{i}`` for each head's temperature
+    (= exp(log_temp)), plus the corresponding log_temp values and summary
+    statistics (mean/std/min/max) so that we can see whether the heads diverge
+    or collapse to a common value.
+    """
+    metrics: dict[str, float] = {}
+    xattn = getattr(model, "surf_to_vol_xattn", None)
+    if xattn is None:
+        return metrics
+    log_temp_param = getattr(xattn, "log_temp", None)
+    if log_temp_param is None:
+        return metrics
+    log_temp = log_temp_param.detach().float().cpu()
+    temp = log_temp.exp()
+    for h in range(log_temp.shape[0]):
+        metrics[f"xattn_head_temp/head_{h}"] = float(temp[h].item())
+        metrics[f"xattn_head_log_temp/head_{h}"] = float(log_temp[h].item())
+    metrics["xattn_head_temp/mean"] = float(temp.mean().item())
+    metrics["xattn_head_temp/std"] = float(temp.std().item()) if temp.numel() > 1 else 0.0
+    metrics["xattn_head_temp/min"] = float(temp.min().item())
+    metrics["xattn_head_temp/max"] = float(temp.max().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
+    if config.use_xattn_per_head_temp and not config.use_surf_to_vol_xattn:
+        raise ValueError(
+            "--use-xattn-per-head-temp requires --use-surf-to-vol-xattn; the "
+            "per-head temperature lives inside the surf->vol cross-attention."
+        )
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -308,6 +349,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_xattn_per_head_temp=config.use_xattn_per_head_temp,
     )
 
 
@@ -1262,6 +1304,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_xattn_per_head_temp_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
