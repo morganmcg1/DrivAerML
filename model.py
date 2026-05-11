@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        xattn_temp_scale: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.xattn_temp_scale = float(xattn_temp_scale)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -537,7 +539,7 @@ class SurfaceTransolver(nn.Module):
             and volume_tokens > 0
         ):
             xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
+                query=volume_hidden * self.xattn_temp_scale,
                 key=surface_hidden,
                 value=surface_hidden,
                 need_weights=False,
