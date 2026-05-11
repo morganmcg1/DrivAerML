@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_geo_cond_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_geo_cond_xattn": (
+            "Enable per-case geometry-conditioning cross-attention "
+            "pre-pass (PR #985). A second nn.MultiheadAttention with "
+            "Q=vol_hidden, K=V=surf_hidden runs BEFORE the existing "
+            "surf->vol xattn block, letting vol queries spatially attend "
+            "to surface tokens to extract case-specific geometry "
+            "conditioning. Zero-init out_proj gives identity-at-init. "
+            "Requires --use-surf-to-vol-xattn (no effect otherwise)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_geo_cond_xattn=config.use_geo_cond_xattn,
     )
 
 

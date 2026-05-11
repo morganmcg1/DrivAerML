@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_geo_cond_xattn: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_geo_cond_xattn = use_geo_cond_xattn and use_surf_to_vol_xattn
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +445,31 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # Per-case geometry-conditioning cross-attention pre-pass (PR #985).
+        # A second nn.MultiheadAttention with Q=vol_hidden, K=V=surf_hidden runs
+        # BEFORE the existing surf->vol xattn sublayer. The idea: instead of
+        # PR #976's mean-pool geometry bias (collapses spatial info), let
+        # vol queries spatially attend to surface tokens to extract a
+        # case-specific geometry conditioning signal, then refine with the
+        # main surf->vol xattn pass. Zero-init out_proj gives identity-at-init
+        # (recovers PR #823 behavior at epoch 0). A LayerNorm matches the
+        # post-norm pattern of the existing surf_to_vol_xattn block and is the
+        # convention in stacked-cross-attention work (Perceiver IO, GAOT,
+        # GINOT) -- it bounds the Q scale fed into the second xattn pass.
+        if self.use_geo_cond_xattn:
+            self.geo_cond_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.geo_cond_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.geo_cond_xattn.out_proj.weight)
+            nn.init.zeros_(self.geo_cond_xattn.out_proj.bias)
+        else:
+            self.geo_cond_xattn = None
+            self.geo_cond_xattn_norm = None
 
     def _encode_group(
         self,
@@ -536,6 +563,16 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            if self.geo_cond_xattn is not None:
+                geo_out, _ = self.geo_cond_xattn(
+                    query=volume_hidden,
+                    key=surface_hidden,
+                    value=surface_hidden,
+                    need_weights=False,
+                )
+                geo_out = _apply_token_mask(geo_out, volume_mask)
+                volume_hidden = self.geo_cond_xattn_norm(volume_hidden + geo_out)
+                volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
             xattn_out, _ = self.surf_to_vol_xattn(
                 query=volume_hidden,
                 key=surface_hidden,
