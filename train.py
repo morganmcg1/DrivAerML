@@ -100,6 +100,7 @@ class Config:
     rff_num_features: int = 0
     rff_sigma: float = 1.0
     rff_init_sigmas: str = ""
+    rff_freeze_freqs: bool = False
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
@@ -305,6 +306,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_num_features=config.rff_num_features,
         rff_sigma=config.rff_sigma,
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
+        rff_freeze_freqs=config.rff_freeze_freqs,
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
@@ -852,6 +854,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+
+        if config.rff_freeze_freqs and state.is_main:
+            for attr in ("surface_string_sep", "volume_string_sep"):
+                ss = getattr(base_model, attr, None)
+                if ss is None:
+                    continue
+                assert not any(
+                    name == "log_freq" for name, _ in ss.named_parameters()
+                ), f"log_freq is still a parameter in {attr} — freeze failed!"
+                buf_names = {name for name, _ in ss.named_buffers()}
+                assert "log_freq" in buf_names, f"log_freq buffer missing in {attr}"
+                print(f"FREEZE CHECK: {attr}.log_freq is a buffer (non-trainable)")
 
         run = init_wandb_run(
             config=config,
