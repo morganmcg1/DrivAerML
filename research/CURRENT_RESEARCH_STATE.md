@@ -1,6 +1,5 @@
 # SENPAI Research State
-- **Date:** 2026-05-09 — Round 27 active (8 WIP). STRING fully exhausted: PR #960 (askeladd sigma-bracket sweep) CLOSED NEGATIVE — both Arm A (fine-shift [0.01,0.25,0.5,1.0,2.0]) EP3=7.1812% and Arm B v2 (baseline [0.25,0.5,1.0,2.0,4.0]) EP4=7.4995% failed gate; σ-tuning axis is exhausted. PR #970 (alphonse frozen-freq ablation) CLOSED NEGATIVE — EP3=8.3347% (0.33pp over gate); trainable log_freq confirmed load-bearing. All STRING axes fully closed. New assignments: askeladd #975 (surface-head-only isolation — ablate surf→vol xattn, keep only the surface Transolver head as output for surface-only predictions); alphonse #976 (per-case geometry embedding — mean-pool masked surface hidden states → geometry code, zero-init projection, add to volume hidden states before surf→vol xattn, flag: `--use-geo-embed`). PR #966 (tanjiro SDF scalar vol input feature) CLOSED NEGATIVE — EP4 val_abupt=7.6359% (gate ≤6.9%, delta +1.20pp vs SOTA). Root cause: raw `(sdf − μ) / σ` normalization created +20,000σ outliers (SDF max ~36,000 m, σ=1.681517 m) that dominated the vol input projection Linear(98→512), masking all other geometric features. New assignment: tanjiro #973 (bounded SDF encoding — tanh/asinh normalization, 2-arm sweep, scale=2.0 m). PR #959 (tanjiro CoordVolHead) CLOSED NEGATIVE — failed EP4 gate (7.428% vs 6.9%); STRING-sep RoPE + surf→vol xattn already encode xyz-awareness, raw-coord injection at output head redundant. PR #963 (thorfinn sdf-zone relaunch) CLOSED ABANDONED — no replicable positive signal above variance floor (~2.26pp run-to-run). New assignments: tanjiro #966 (SDF scalar vol input feature), thorfinn #967 (SDF-FiLM vol conditioning), fern #969 (SDF-PE octave scaling H2). PR #962 (frieren curriculum-yflip) CLOSED NEGATIVE — EP3 vol_p gate FAIL: vol_p=5.9499% at EP2 with slope −0.0011%/step; projected landing ~5.924% at EP3 gate, cannot reach ≤5.0%. Curriculum ramp slows vol_p convergence — augmentation approach on this axis is closed. frieren now IDLE — new assignment needed.
-- **CRITICAL UPDATE (2026-05-09):** Nezuko PR #958 run `29nohj67` (vol aux decoder head) has reached **EP7 val_abupt=6.3885%**, beating single-model SOTA of 6.4407% (delta −0.052pp). Currently in EP8 (step 54,610). Trajectory healthy: EP5=6.45%→EP6=6.45%→EP7=6.39%. If EP8–12 continue improving, this will be a clear merge winner. **Monitoring closely.**
+- **Date:** 2026-05-09 — Round 27 active (8 WIP, 0 idle). STRING fully exhausted. SDF data fix (edward #941) CLOSED NEGATIVE — test_vol_p=11.9618% (worse than baseline 11.6704%); SDF corruption fix did not help OOD vol_p. Issue #803 blocker dissolved. frieren #971 (xattn-distance-rpe) CLOSED — SM 12.0 OOM on [B=4, H=4, N_vol=16384, N_surf=65536] attention tensor. Frieren assigned #981 (SDF-stratified vol sampling); edward assigned #980 (per-case bbox geometry conditioning). Thorfinn #974 (SDF-conditioned xattn temperature MLP) CLOSED NEGATIVE — MLP collapsed to global scale=0.515, EP3 dual gate miss. Thorfinn assigned #984 (constant xattn temp scale=0.5 zero-param control).
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -9,8 +8,11 @@
 | Tier | val_abupt | test_abupt | test_vol_pressure | PR | Notes |
 |---|---|---|---|---|---|
 | **Ensemble SOTA** | **6.0289%** | **7.3693%** | — | #880 (nezuko) | K=6 greedy pool-32 |
-| **Single-model SOTA** | **6.4407%** | **7.6992%** | 11.6704% | #823 (nezuko) | surf→vol xattn, EP13, run `ghh0s4ne` |
+| **Single-model SOTA** | **6.2869%** | — | 12.0063% (NEGATIVE) | #958 Arm A (nezuko) | vol aux decoder head, EP13, run `29nohj67`, best_epoch=13 |
+| **Prior single-model SOTA** | 6.4407% | 7.6992% | 11.6704% | #823 (nezuko) | surf→vol xattn, EP13, run `ghh0s4ne` |
 | **Vol-pressure best anchor** | — | — | 11.374% | #681 (dc031qpt) | Issue #717 reference |
+
+**Key win from #958 Arm A (nezuko):** vol aux decoder head (`--volume-loss-weight 1.0`) achieves val_abupt=6.2869% at best_epoch=13 (+0.154pp improvement over prior SOTA 6.4407%). test_vol_p=12.0063% is NEGATIVE (worse than 11.6704% baseline) — the dedicated aux head improves val_abupt generally but does NOT fix the 4 OOD test vol_p cases.
 
 **Key win from #823:** surf→vol xattn adds one `nn.MultiheadAttention` (embed_dim=512, num_heads=4) after post-backbone LayerNorm. Q=vol_hidden, K=V=surf_hidden, zero-init out_proj. Improvement is broad-based (~−2.4% relative val, −3.6% test). The OOD test/val ratio is UNCHANGED (3.027× vs 3.025×) — xattn is a general capacity boost, NOT a targeted OOD fix. The 4 outlier test cases remain the dominant vol_pressure failure mode.
 
@@ -24,8 +26,8 @@
 ## Latest Human Researcher Directives
 
 - **Issue #618** (STRING/RoPE): **FULLY CLOSED — all axes exhausted.** Final closed experiments: #960 (askeladd σ-bracket sweep NEGATIVE) and #970 (alphonse frozen-freq ablation NEGATIVE). All STRING dimensions — sigma shifts, ladder variants, 7-octave mega-sweep, slice-centroid RoPE, frozen frequencies — have been tested and closed. STRING positional encoding is confirmed at its optimum: trainable `log_freq` with octave init {0.25,0.5,1.0,2.0,4.0}, trainable `phase`, QK-norm enabled. No new STRING experiments.
-- **Issue #717** (vol_pressure gap): Phase 2 active — building on xattn win from #823. Post-xattn capacity fully closed (0-for-3: #891 FFN, #893 k-NN graph, #906 vol-self-attn). Now exploring loss stratification, geometry-conditioned queries, surface loss annealing, vol-pressure aux head, SDF-modulated vol PE, coordinate-conditioned vol output head (#959 tanjiro).
-- **Issue #803** (SDF fix): Edward (#941) actively running full SOTA retrain with fixed SDF data (W&B: `2ub8dmy7`). EP4 gate PASSED: val_abupt=6.8533% (gate ≤7.5%). Continuing to EP7 (val_abupt ≤6.9%). No new SDF/geometry-conditioning assignments until edward's results are known.
+- **Issue #717** (vol_pressure gap): Phase 2 active — building on xattn win from #823. Post-xattn capacity fully closed (0-for-3: #891 FFN, #893 k-NN graph, #906 vol-self-attn). Now exploring loss stratification, geometry-conditioned queries, surface loss annealing, vol-pressure aux head, SDF-modulated vol PE, SDF-conditioned attention temperature, bounded SDF vol input encoding, per-case geometry embedding, surface-head-only isolation.
+- **Issue #803** (SDF fix): **DISSOLVED.** Edward (#941) CLOSED NEGATIVE — full SOTA retrain with fixed SDF data (W&B: `2ub8dmy7`) completed to EP13: test_vol_p=11.9618% (worse than baseline 11.6704%). The 4 OOD outlier cases (run_133, 226, 203, 158) remain dominant failure mode even with corrected SDF values. SDF corruption is not the root cause of the vol_p OOD gap.
 - **Issue #759** (Bengio backlog): Reserved for future experiment ideas.
 - No new directives pending.
 
@@ -33,18 +35,35 @@
 
 ## Active PRs (Round 27)
 
-### tay-track (8 WIP, fully occupied — alphonse re-assigned #976, askeladd re-assigned #975 after STRING fully exhausted)
+### tay-track (8 WIP, 0 idle)
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
-| alphonse | #976 | Per-case geometry embedding: mean-pool masked surface hidden states (post-backbone, post-norm) → geometry code vector [B, n_hidden]; project via zero-init `nn.Linear(n_hidden, n_hidden)`; add to volume hidden states before surf→vol xattn. Zero-init preserves baseline behavior at epoch 0. Generalizes to OOD geometries — no lookup table. Flag: `--use-geo-embed`. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%; EP4 ≤6.9%. `--wandb-group alphonse-geo-embed` | `alphonse/per-case-geometry-embedding` | WIP — assigned |
-| askeladd | #975 | Surface-head-only isolation: ablate surf→vol xattn, keep only the surface Transolver head as output for surface-only predictions. Tests whether the surface head alone can match the full model's surface metrics, isolating the contribution of xattn. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%. `--wandb-group askeladd-surface-head-only` | `askeladd/surface-head-only-isolation` | WIP — assigned |
-| frieren | #971 | Learned distance RPB on surf→vol cross-attention: add per-pair (vol_i, surf_j) Euclidean distance bias to xattn logits: `A_ij = (Q_i·K_j)/√d + f(dist_ij)`. MLP: `Linear(1→16)→SiLU→Linear(16→1)`, ~49 params, zero-init output layer. Flag: `--use-xattn-distance-rpe`. 4-ep screen; EP3 gate ≤8.0% AND vol_p ≤5.0%, EP4 ≤7.5%. `--wandb-group frieren-xattn-distance-rpe` | `frieren/xattn-distance-rpe` | WIP — assigned |
-| nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Zero-init final layer. Arm A: `--volume-loss-weight 1.0`; Arm B: `--volume-loss-weight 2.0`. EP3 gate: val_abupt ≤8.0%. `--wandb-group nezuko-vol-aux-decoder-head` | `nezuko/vol-pressure-aux-decoder-head` | WIP — running |
-| thorfinn | #974 | SDF-conditioned attention temperature on surf→vol xattn: tiny MLP (Linear(1→16)→SiLU→Linear(16→1)→Sigmoid, ~49 params, zero-init final layer) reads per-vol-token SDF value, outputs τ∈(0,1); scale=0.5+τ∈(0.5,1.5) multiplies per-token logits. Near-surface tokens → sharper attention; far-field tokens → broader attention. Custom manual xattn forward extracts Q/K/V from in_proj_weight. Identity-at-init (scale=1.0 at init). Flag: `--use-sdf-xattn-temperature`. EP3 gate ≤8.0% AND vol_p ≤5.0%, EP4 ≤6.9%. `--wandb-group thorfinn-sdf-xattn-temperature` | `thorfinn/sdf-xattn-temperature` | WIP — assigned (PR #974) |
-| fern | #968 | SDF-modulated vol PE: per-octave spectral scaling of STRING-sep RFF features conditioned on per-token SDF distance. Tiny MLP (Linear(1→16)→SiLU→Linear(16→5)→Softplus, ~112 params, identity-init) reads SDF value and outputs 5 octave weight scalars. Each STRING-sep sigma group scaled per-token. Flag: `--use-sdf-pe-scaling`. EP4 ≤6.9% gate. `--wandb-group fern-sdf-pe-octave-scaling` | `fern/sdf-pe-octave-scaling` | WIP — assigned |
-| edward | #941 | SDF data fix: regenerate volume_sdf.npy for 10 corrupted REQUIRED_RESTORED cases (run_44, 133, 158, 184, 203, 226, 249, 310, 416, 484). Full SOTA retrain with fixed data running (W&B: `2ub8dmy7`, group: edward-sdf-fix). EP4 gate PASSED: val_abupt=6.8533% (≤7.5%). Next gate: EP7 val_abupt ≤6.9%. | `edward/sdf-data-fix-regenerate-corrupted-sdfs` | WIP — EP4 PASSED (W&B: `2ub8dmy7`), continuing to EP7 |
-| tanjiro | #973 | Bounded SDF encoding: replace raw `(sdf−μ)/σ` normalization (+20,000σ outliers) with `tanh(sdf_centered/scale)` or `asinh(sdf_centered/scale)`, scale=2.0 m. Two-arm sweep: Arm A (tanh) vs Arm B (asinh). New flags `--sdf-vol-encoding {linear,tanh,asinh}` and `--sdf-vol-scale`. Scale 2.0 m maps near-surface cells (BL, 0.01–0.1 m) to (0, 0.76) with full resolution; saturates far-field wake (1–5 m+) to ≈±1. Centers by mean (0.222682 m), does NOT divide by σ (1.681517 m) — σ-scaling is what caused outliers. Tightened EP2 gate: ≤10.0% (reference: PR #966 unhealthy hit 11.47%); EP3 ≤8.0% AND vol_p ≤5.0%; EP4 ≤6.9%. `--wandb-group tanjiro-bounded-sdf-encoding` | `tanjiro/bounded-sdf-encoding` | WIP — assigned (PR #973) |
+| alphonse | #976 | Per-case geometry embedding: mean-pool masked surface hidden states (post-backbone, post-norm) → geometry code vector [B, n_hidden]; project via zero-init `nn.Linear(n_hidden, n_hidden)`; add to volume hidden states before surf→vol xattn. Zero-init preserves baseline behavior at epoch 0. Generalizes to OOD geometries — no lookup table. Flag: `--use-geo-embed`. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%; EP4 ≤6.9%. `--wandb-group alphonse-geo-embed` | `alphonse/per-case-geometry-embedding` | WIP — run `6vzsw2ec` launched |
+| askeladd | #975 | Surface-head-only isolation: ablate surf→vol xattn, keep only the surface Transolver head as output for surface-only predictions. Tests whether the surface head alone can match the full model's surface metrics, isolating the contribution of xattn. 4-ep screen; EP3 gate val_abupt ≤8.0% AND vol_p ≤5.0%. `--wandb-group askeladd-surface-head-only` | `askeladd/surface-head-only-isolation` | WIP — run `sdjkbztj` launched |
+| nezuko | #958 | Dedicated vol_p aux decoder head: independent 3-layer MLP branch (Linear(512,256)→SiLU→Linear(256,64)→SiLU→Linear(64,1)) separate from the shared 4-output surface head. Arm A: COMPLETE — new SOTA val_abupt=6.2869%, test_vol_p NEGATIVE. Arm B: `--volume-loss-weight 2.0`, run `6xja19q9`, in progress. | `nezuko/vol-pressure-aux-decoder-head` | WIP — Arm A DONE (SOTA); Arm B running |
+| thorfinn | #984 | Constant xattn temp scale=0.5 control (zero-param): hardcode `scale=0.5` on Q (volume_hidden) before surf→vol xattn. Zero learnable params. Isolates global attention sharpening signal from per-token boundary locality hypothesis — PR #974 MLP collapsed to scale_mean=0.515 (τ_std=0.00177, 3 orders below global drift). Plain float multiply, no gradient, identity at scale=1.0. Flag: `--xattn-temp-scale 0.5`. EP3 dual gate val_abupt ≤8.0% AND vol_p ≤5.0%. | `thorfinn/constant-attn-temp-scale` | WIP — assigned, awaiting run launch |
+| fern | #982 | No-SDF-PE-scaling control (fast schedule): ablation of SDF-PE spectral scaling to verify baseline under fast curriculum `0:16384:1:32768:2:49152:3:65536`. | `fern/no-sdf-pe-scaling-control` | WIP — assigned, awaiting run launch |
+| tanjiro | #983 | Curriculum warmup-ramp: implement `--vol-points-warmup-steps` to smoothly ramp vol points per epoch rather than step jumps. | `tanjiro/curriculum-warmup-ramp` | WIP — assigned, awaiting run launch |
+| frieren | #981 | SDF-stratified vol sampling: sample vol tokens proportionally to proximity to OOD-4 surface zones rather than uniform; near-surface tokens upweighted during vol curriculum. | `frieren/sdf-stratified-vol-sampling` | WIP — assigned, awaiting run launch |
+| edward | #980 | Per-case bbox geometry conditioning: extract per-case macroscopic shape statistics (frontal area, aspect ratio, height/width statistics) from surface point cloud; concat as extra conditioning to vol decoder. | `edward/per-case-bbox-geometry-conditioning` | WIP — assigned, awaiting run launch |
+
+### IDLE students (need new assignments)
+- **frieren**: PR #971 (xattn-distance-rpe) CLOSED — SM 12.0 OOM on [B=4, H=4, N_vol=16384, N_surf=65536] attention tensor materialization (~32 GiB bf16). Needs new tay assignment.
+- **edward**: PR #941 (SDF data fix) CLOSED NEGATIVE — test_vol_p=11.9618% worse than baseline. Needs new tay assignment.
+
+---
+
+## Round 27 Closures
+
+| Student | PR | Result |
+|---|---|---|
+| frieren | #971 | Learned distance RPB on surf→vol xattn — CLOSED. SM 12.0 additive attention bias OOM: [B=4, H=4, N_vol=16384, N_surf=65536] bf16 materialization ~32 GiB. Flash SDPA avoids materialization but doesn't support custom additive bias per-pair without memory-inefficient workaround. |
+| edward | #941 | SDF data fix retrain — CLOSED NEGATIVE. EP13 test_vol_p=11.9618% (gate: ≤11.6704% baseline). Full SOTA retrain with corrected SDF (W&B: `2ub8dmy7`) failed to improve OOD vol_p. SDF corruption is not the root cause of the vol_p OOD gap; Issue #803 blocker dissolved. |
+| thorfinn | #967 | SDF-FiLM vol conditioning — CLOSED NEGATIVE. EP3 val_abupt gate FAILED. FiLM modulation (γ, β) of vol hidden states after each TransolverBlock using SDF distance did not help. Superseded by SDF-conditioned attention temperature #974. |
+| thorfinn | #974 | SDF-conditioned xattn temperature MLP — CLOSED NEGATIVE. MLP (1→16→1, 33 params) collapsed to global constant: scale_mean=0.515, τ_std=0.00177 (3 orders of magnitude below global drift). EP3: val_abupt=8.148%, vol_p=5.350% — narrowly missed dual gate (miss by 0.148pp and 0.350pp). MLP was NOT learning per-token boundary differentiation; it discovered global attention sharpening (scale≈0.5). Zero-param control #984 assigned to isolate this signal. W&B run `vcs1ymnx`. |
+| fern | #968 | SDF-PE octave scaling (original schedule) — SUPERSEDED by #977 (fast schedule). |
+| tanjiro | #973 Arm A | tanh bounded SDF encoding — KILLED. tanh saturation degeneracy: scale=2.0m → ~99% vol tokens saturate tanh≈1.0 (gradient≈1e-8). Catastrophic loss spike at 16K→32K vol curriculum transition (EP2 step 3 loss=10.6274). Arm B (asinh) continues. |
 
 ---
 
@@ -57,13 +76,13 @@
 | askeladd | #956 | STRING σ-ladder geometry sweep (7-octave fine/coarse/all-fine) — CLOSED NEGATIVE. Arm A (7-oct fine, 0.03–2.0) failed EP1 at 30.27%; too wide a range degrades early convergence. Superseded by bracket sweep #960 |
 | thorfinn | #949 | Surface-points curriculum — CLOSED. Results ambiguous; superseded by SDF-zone masking #953 |
 | tanjiro | #966 | SDF scalar vol input feature (raw linear norm) — CLOSED NEGATIVE. EP4 val_abupt=7.6359% (gate ≤6.9%, delta +1.20pp vs SOTA). Root cause: `(sdf−μ)/σ` normalization — train-set SDF std=1.681517 m, max ~36,000 m → +20,000σ outliers dominated vol input projection. Bounded encoding follow-up: #973 (tanh/asinh, scale=2.0 m). |
-| tanjiro | #935 | SDF-modulated vol PE (per-octave scaler, identity-init retry) — CLOSED. Superseded by coordinate-conditioned vol output head #959 |
+| tanjiro | #935 | SDF-modulated vol PE (per-octave scaler, identity-init retry) — CLOSED. Superseded by coordinate-conditioned vol head #959 |
 | alphonse | #955 | STRING RoPE slice-centroid — CLOSED NEGATIVE. EP3 gate failed: val_abupt=8.1833% (gate ≤8.0%), vol_p=5.9055% (gate ≤5.0%). Local centroid coords did not improve over global. New assignment: #970 frozen-freq ablation. |
 | frieren | #957 | Y-flip augmentation (fixed p=0.5) — CLOSED NEGATIVE. No improvement at EP1; curriculum ramp version assigned as #962. |
-| nezuko | #958 | Dedicated vol_p aux decoder head — CARRIED OVER to Round 27 (still WIP) |
+| nezuko | #958 | Dedicated vol_p aux decoder head — CARRIED OVER / PARTIALLY COMPLETE (Arm A DONE, new SOTA; Arm B continuing) |
 | thorfinn | #953 | SDF-zone vol masking p_max=0.15 — CLOSED (false-kill; `train/loss<5` threshold fired on transient augmentation spike, not genuine divergence). Relaunched as #963 with relaxed `<10` threshold. |
 | fern | #952 | Manifold Mixup — CLOSED NEGATIVE (Round 27); reassigned #961 geom-q-bias |
-| edward | #941 | SDF data fix — CARRIED OVER to Round 27 (retrain running) |
+| edward | #941 | SDF data fix — CLOSED NEGATIVE (see Round 27 Closures above) |
 
 ## Round 25 Outcomes (Closed)
 
@@ -80,12 +99,12 @@
 
 **Primary mandate (Issue #717):** Reduce test_vol_pressure below 11.0% → 10.0% → 8.5% → 6.08% (AB-UPT). All channels must not degrade.
 
-### Theme 1: SDF Data Quality (edward #941)
-The 10 REQUIRED_RESTORED cases have corrupted volume_sdf.npy (inside-body cells with SDF=0 or negative). Edward has synthesized correct SDF values using STL rejection sampling + pyvista `compute_implicit_distance`. Full SOTA retrain running (W&B: `2ub8dmy7`, group: `edward-sdf-fix`). **EP4 gate PASSED: val_abupt=6.8533% (gate ≤7.5%).** Trajectory EP1→EP4: 27.47% → 8.37% → 7.32% → 6.85% — healthy convergence. Per-case EP3 diagnostic confirmed OOD-4 still at ~102% mean vol_p (expected — 16,384 vol_points yields ~2–3 inside-body samples/batch; SDF fix won't express until EP9+ at 65,536 vol_points). Next gate: EP7 val_abupt ≤6.9%. Key test: EP10 val_vol_p ≤8.0%. No new SDF/geometry-conditioning assignments until edward's EP13 results are known (Issue #803 blocker).
+### Theme 1: SDF Data Quality — CLOSED NEGATIVE
+edward #941 CLOSED: test_vol_p=11.9618% worse than baseline 11.6704%. SDF corruption is NOT the root cause of the OOD vol_p gap. The 4 outlier test cases (run_133, 226, 203, 158) remain dominant failure mode regardless of SDF data quality. Issue #803 dissolved.
 
 ### Theme 2: STRING Positional Encoding — FULLY CLOSED
 All STRING axes have now been tested and closed:
-- #956 askeladd: 7-octave mega-sweep — CLOSED NEGATIVE (EP1=30.27%)
+- #956 askeladd: 7-octave mega-sweep (0.0625–8.0) — CLOSED NEGATIVE (EP1=30.27%)
 - #955 alphonse: slice-centroid local RoPE — CLOSED NEGATIVE (EP3 gate: abupt=8.1833%, vol_p=5.9055%)
 - #970 alphonse: frozen-freq ablation — CLOSED NEGATIVE (EP3=8.3347%, gate ≤8.0%). Trainable `log_freq` confirmed load-bearing.
 - #960 askeladd: sigma-bracket sweep — CLOSED NEGATIVE (Arm A EP3=7.1812%; Arm B v2 EP4=7.4995%). σ-tuning axis exhausted.
@@ -95,58 +114,58 @@ All STRING axes have now been tested and closed:
 
 ### Theme 2b: Geometry Conditioning (alphonse #976, askeladd #975)
 Replacing the closed STRING theme with two geometry-conditioning approaches:
-- **Per-case geometry embedding** (#976 alphonse): mean-pool masked surface hidden states (post-backbone) → geometry code vector; zero-init projection; add to vol hidden states before surf→vol xattn. Preserves baseline at init. Generalizes to OOD geometries without lookup table.
-- **Surface-head-only isolation** (#975 askeladd): ablate surf→vol xattn, keep only surface Transolver head for surface-only predictions. Diagnostic ablation to quantify xattn's contribution to surface metrics.
+- **Per-case geometry embedding** (#976 alphonse): mean-pool masked surface hidden states (post-backbone) → geometry code vector; zero-init projection; add to vol hidden states before surf→vol xattn. Preserves baseline at init. Generalizes to OOD geometries without lookup table. Run `6vzsw2ec` in flight.
+- **Surface-head-only isolation** (#975 askeladd): ablate surf→vol xattn, keep only surface Transolver head for surface-only predictions. Diagnostic ablation to quantify xattn's contribution to surface metrics. Run `sdjkbztj` in flight.
 
 ### Theme 3: Data Augmentation for OOD — FULLY CLOSED
 Both y-flip augmentation approaches have been tested and failed:
 - **PR #957** (fixed p=0.5 from EP0): CLOSED NEGATIVE — no val improvement at EP1, higher vol_p
-- **PR #962** (curriculum ramp 0→0.5 over 3ep): CLOSED NEGATIVE — EP3 vol_p gate FAIL (5.9499% → projected ~5.924% vs ≤5.0% gate). Curriculum ramp slows vol_p convergence; insufficient headroom to pass gate.
+- **PR #962** (curriculum ramp 0→0.5 over 3ep): CLOSED NEGATIVE — EP3 vol_p gate FAIL (5.9499% projected 5.924% vs ≤5.0%). Curriculum ramp slows vol_p convergence; insufficient headroom to pass gate.
 y-flip augmentation axis is FULLY CLOSED.
-
-### Theme 8: Learned Relative Position Bias on surf→vol xattn (frieren #971)
-Per-pair (vol_i, surf_j) distance-based additive bias to cross-attention logits: `A_ij = (Q_i·K_j)/√d + f(dist_ij)`. Tiny MLP (`Linear(1→16)→SiLU→Linear(16→1)`, ~49 params) learns distance-to-bias mapping; zero-init output layer preserves baseline convergence at step 0. Geometric analogue of ALiBi (Press et al., ICLR 2022). Key distinction from all closed experiments: operates on logits per-pair (not global Q-bias like #961, not static PE offset like #883). Inductive prior: closer surface points should dominate; model currently learns locality from data alone. 4-ep screen, standard gates.
 
 ### Theme 4: Dedicated Vol Pressure Decoder (nezuko #958)
 Independent 3-layer MLP branch for vol_p prediction, separate from the shared 4-output surface head. Hypothesis: the shared decoder must encode too many competing signals; a dedicated path lets it specialize on vol_p geometry.
+- **Arm A** (vol_loss_weight=1.0): COMPLETE — new single-model SOTA val_abupt=6.2869% (run `29nohj67`, best_epoch=13). test_vol_p=12.0063% NEGATIVE (worse than baseline). val_abupt improvement is genuine and broad-based; test_vol_p gap persists — OOD problem is not addressed by the aux head alone.
+- **Arm B** (vol_loss_weight=2.0): run `6xja19q9`, EP1 PASS (29.43%), EP2 strong, EP3 gate ETA ~04:30Z. Hypothesis: higher vol loss weight may help the OOD cases more.
 
 ### Theme 5: Bounded SDF Encoding for Vol-Token Input (tanjiro #973)
-PR #966 (raw `(sdf−μ)/σ` SDF concat) CLOSED NEGATIVE — EP4 val_abupt=7.6359% (gate ≤6.9%). Root cause diagnosis: the training-set SDF has mean=0.222682 m, std=1.681517 m, max ~36,000 m. Linear normalization created +20,000σ outliers that dominated the vol input projection Linear(98→512) throughout the early curriculum, masking all other geometric features. The direction (SDF as vol-token input feature) is retained because the mechanistic failure is well-understood and fixable.
+- **Arm A (tanh)**: KILLED — tanh saturation degeneracy at scale=2.0m (gradient≈1e-8, catastrophic EP2 step 3 loss=10.6274). Well-understood mechanistic failure.
+- **Arm B (asinh)**: run `lj2hsiui` launched 02:19Z. asinh avoids saturation via graded log compression (no hard ceiling). EP1 ETA ~03:54Z, gate ≤30%.
 
-PR #973 (bounded SDF encoding): replace linear normalization with `tanh(sdf_centered/scale)` or `asinh(sdf_centered/scale)`, scale=2.0 m. Two-arm sweep: Arm A (tanh) vs Arm B (asinh). Center by mean; do NOT divide by σ. Scale 2.0 m maps near-surface cells (BL, 0.01–0.1 m) to (0, 0.76) with full resolution; saturates far-field wake (1–5 m+) to ≈±1. Tightened EP2 gate to ≤10.0% (reference: PR #966 unhealthy hit 11.47%, healthy should be ~7.8–8.1%). New flags: `--sdf-vol-encoding {linear,tanh,asinh}` and `--sdf-vol-scale`.
+### Theme 6: SDF-Conditioned Attention Temperature (thorfinn #984)
+SDF-FiLM (#967) CLOSED NEGATIVE. SDF-conditioned xattn temperature MLP (#974) CLOSED NEGATIVE — MLP collapsed to global constant scale_mean=0.515, narrowly missed EP3 dual gate (val_abupt=8.148%, vol_p=5.350%). Key finding: MLP was not learning per-token differentiation; it was discovering that global attention sharpening (scale≈0.5) is beneficial. Follow-up: #984 (thorfinn) hardcodes `scale=0.5` with zero learnable parameters — plain float multiply on Q before `nn.MultiheadAttention`. Cleanly isolates global sharpening from per-token locality hypothesis. Flag: `--xattn-temp-scale 0.5`. Awaiting run launch.
 
-If tanh/asinh wins: next step is composing with SDF-FiLM (#967) — input-level vs. hidden-state-level SDF conditioning are orthogonal.
+### Theme 7: SDF-Modulated Vol PE via Per-Octave Spectral Scaling (fern #977)
+Supersedes #968 (original schedule) with accelerated vol-curriculum. SDF-conditioned spectral emphasis of STRING-sep RFF frequency groups. Tiny MLP (Linear(1→16)→SiLU→Linear(16→5)→Softplus). EP1 PASS (27.355%, run `q1tw64wi`). EP2 gate ≤16%, ETA ~02:50Z.
 
-### Theme 6: SDF-Conditioned Attention Temperature on surf→vol xattn (thorfinn #974)
-SDF-FiLM (#967) CLOSED NEGATIVE — EP3 val_abupt failed gate. New direction: per-vol-token scaling of surf→vol xattn logit temperature as a function of SDF distance. Near-surface tokens (small SDF) → τ→0 → scale→0.5 → sharper attention; far-field tokens (large SDF) → τ→1 → scale→1.5 → broader attention. Tiny MLP (Linear(1→16)→SiLU→Linear(16→1)→Sigmoid, ~49 params) outputs τ∈(0,1). Applied as `logits[i] = (Q_i @ K.T) * (0.5 + τ_i) / sqrt(d_head)`. Identity-at-init (sigmoid(0)=0.5 → scale=1.0). Custom manual attention forward required (nn.MultiheadAttention doesn't expose per-token temperature). Flag: `--use-sdf-xattn-temperature`. EP3 gate ≤8.0% AND vol_p ≤5.0%, EP4 ≤6.9%. Physically motivated: near-surface vol tokens encode pressure gradients for which surface-to-volume information is highly localized; far-field tokens draw from broader surface context.
-
-### Theme 7: SDF-Modulated Vol PE via Per-Octave Spectral Scaling (fern #968)
-Tiny MLP (Linear(1→16)→SiLU→Linear(16→5)→Softplus, ~112 params) reads each vol token's SDF distance value and outputs 5 scalar octave weights — one per STRING-sep sigma group (0.25, 0.5, 1.0, 2.0, 4.0). The weights are applied to the corresponding frequency group within the STRING-sep RFF encoding before vol-token projection. Identity-init via final bias ≈ 0.541 (Softplus(0.541) ≈ 1.0). Hypothesis: vol tokens near the surface (small SDF) should emphasize fine-scale (low-sigma) frequencies; far-field tokens should emphasize coarse-scale (high-sigma) frequencies. This SDF-conditioned spectral emphasis is a physically motivated prior: boundary layer dynamics are dominated by fine-scale pressure variations, while bulk flow variation is captured by coarse-scale features. Replaces fern's closed geom-Q-bias (#961 NEGATIVE).
+### Theme 8: Learned Distance RPB on surf→vol xattn — CLOSED
+frieren #971 CLOSED — SM 12.0 OOM. [B=4, H=4, N_vol=16384, N_surf=65536] bf16 attention tensor materialization ~32 GiB. Flash SDPA supports custom bias only via block-sparse masks or scaled_dot_product_attention workarounds that lose precision or add overhead. This approach requires a memory-efficient reformulation to be viable.
 
 ---
 
 ## Potential Next Research Directions (post-Round 27)
 
-### If SDF fix (#941 edward) shows vol_p improvement
-1. **Re-run ensemble with clean-SDF checkpoint**: if edward's retrain improves test_vol_p significantly, rebuild greedy ensemble
-2. **Re-run OOD aug experiments with clean SDF**: mirror aug, rotation aug may have been trained on corrupted data — retest strongest aug variant
+### If SDF bounded encoding (#973 Arm B asinh) wins
+1. **Compose asinh SDF + SDF-conditioned attn temperature**: orthogonal input-level vs. attention-level SDF conditioning
+2. **Scale sweep**: test asinh scale in {1.0, 2.0, 4.0} m to find optimal near-surface resolution tradeoff
 
-### If SDF vol input feature (#966) or SDF-FiLM (#967) wins
-3. **Compose SDF input feature + SDF-FiLM**: orthogonal conditioning mechanisms — input-level vs. hidden-state-level SDF signal
-4. **Multi-channel SDF conditioning**: use both SDF scalar and xyz coordinates as input features; test whether coordinate info adds beyond SDF alone
+### If geometry embedding (#976) wins
+3. **Deeper geometry code**: 2-layer geometry encoder (512→256→512) with residual connection
+4. **Multi-scale geometry pooling**: pool at multiple layers (early, mid, late backbone) and combine
 
-### If STRING sigma bracket (#960) wins
-5. **Compose slice-centroid RoPE (#955) + winning sigma bracket (#960)**: orthogonal within STRING framework
-6. **Learned sigma values via gradient descent**: if fixed bracket wins, allow sigmas to be learned parameters (constrained positive)
+### If SDF attn temperature (#974) wins
+5. **Compose with bounded SDF input feature**: temperature + asinh encoding are orthogonal mechanisms
+6. **Learnable temperature range**: make the 0.5 offset and 1.0 scale range learnable parameters
 
-### If geometry-conditioning wins broadly
-7. **Per-case geometry embedding**: learn a geometry code per training car via message passing, use as xattn conditioning
-8. **Point Transformer V3 vol head**: replace Transolver vol attention with PTv3 (Hilbert-curve serialized attention)
+### If nezuko Arm B (vol_loss=2.0) beats Arm A on vol_p
+7. **Vol loss weight sweep**: {1.5, 2.0, 3.0} with the aux head on top of the new SOTA checkpoint
+8. **Per-case vol loss weighting**: upweight OOD-4 cases (run_133, 226, 203, 158) by 2× in vol aux head loss
 
-### Radical escalation (if plateau continues)
+### Radical escalation (if plateau continues past Round 28)
 9. **GNN vol pathway**: replace Transolver vol attention with k-NN GNN for vol-vol communication (k=8-16)
 10. **Fourier Neural Operator vol decoder**: replace MLP vol decoder with FNO for better frequency resolution
 11. **Attention-free SSM decoder for vol**: S4/Mamba-based sequence model for vol token decoding
+12. **Point Transformer V3 vol head**: replace Transolver vol attention with PTv3 (Hilbert-curve serialized attention)
 
 ### Closed axes — do not revisit
 See "Closed Axes" section below.
@@ -155,6 +174,9 @@ See "Closed Axes" section below.
 
 ## Closed Axes (Rounds 22–27)
 
+### SDF data quality: CLOSED NEGATIVE
+- **#941 edward**: SDF data fix — test_vol_p=11.9618% (worse than 11.6704% baseline). SDF corruption is NOT the root cause.
+
 ### Post-xattn capacity: FULLY CLOSED (0-for-3)
 - PR #891 (fern post-xattn FFN): EP3=8.50% NEGATIVE
 - PR #893 (askeladd vol k-NN graph attn): NEGATIVE
@@ -162,6 +184,12 @@ See "Closed Axes" section below.
 
 ### Pre-xattn capacity: CLOSED (0-for-1)
 - PR #929 (edward pre-xattn vol self-attn): CLOSED NEGATIVE
+
+### Learned distance RPB on xattn: CLOSED (OOM)
+- PR #971 (frieren xattn-distance-rpe): CLOSED — SM 12.0 OOM on full attention tensor; needs memory-efficient reformulation.
+
+### SDF-FiLM hidden-state conditioning: CLOSED NEGATIVE
+- PR #967 (thorfinn): FiLM modulation (γ, β) of vol hidden states after each TransolverBlock — EP3 gate FAILED.
 
 ### STRING axes closed — FULLY EXHAUSTED
 - PR #956 askeladd: 7-octave mega-sweep (0.0625–8.0) — CLOSED NEGATIVE (EP1=30.27%)
@@ -202,6 +230,8 @@ See "Closed Axes" section below.
 - **CoordVolHead (raw xyz at output MLP)**: #959 tanjiro CLOSED NEGATIVE — EP4 val_abupt=7.428% (gate 6.9%); redundant with STRING-sep RoPE + surf→vol xattn backbone xyz encoding
 - **SDF-zone vol token masking (p_max=0.30 and p_max=0.15)**: #953, #963 thorfinn FULLY CLOSED — high run-to-run variance (±4.2pp at p_max=0.30), no replicable signal above variance floor at p_max=0.15; near-surface dropout disrupts backbone globally
 - **Raw SDF linear normalization as vol input feature** (#966 tanjiro): CLOSED NEGATIVE — EP4 val_abupt=7.6359% (gate ≤6.9%). `(sdf−μ)/σ` with σ=1.681517 m creates +20,000σ outliers (SDF max ~36,000 m) that dominate the vol input projection; raw linear normalization for SDF vol features is a closed axis. Bounded transforms (tanh/asinh) still live as #973.
+- **Geometry-conditioned Q-bias** (#961 fern, CLOSED NEGATIVE): mean-pool surf → MLP(512→256→512, zero-init) → additive bias on vol Q-projections before xattn. EP1=30.197% (0.197pp over 30% gate); global mean-pool surf loses spatial specificity.
+- **tanh bounded SDF encoding** (#973 tanjiro Arm A): KILLED — saturation degeneracy at scale=2.0m (~99% tokens saturate, gradient≈1e-8), catastrophic curriculum-transition loss spike.
 
 ---
 
@@ -222,15 +252,17 @@ See "Closed Axes" section below.
 
 - **4 OOD test cases dominate vol_pressure** (#767): 92% of squared deviation. Excluding them, test_vol_p = 3.9–4.2% (below AB-UPT). Geometry conditioning is the right lever.
 - **Surf→vol xattn is broad-spectrum win, not OOD fix** (#823): OOD test/val ratio unchanged (3.027×). The 4 outlier cases still drive vol_p gap.
+- **SDF data quality is NOT the root cause** (#941 edward): Full SOTA retrain with corrected SDF (fixed inside-body zero/negative SDF values) resulted in test_vol_p=11.9618% — WORSE than baseline 11.6704%. The OOD vol_p gap is a model capacity/generalization problem, not a data quality artifact.
 - **Post-xattn capacity is a dead end** (0-for-3: #891, #893, #906): all capacity added AFTER surf→vol xattn fails to improve. The bottleneck is in the xattn query quality or the K/V representation, not post-xattn processing.
 - **Pre-xattn vol self-attention also failed** (#929): symmetry does not hold; pre-xattn capacity not useful either.
 - **STRING σ=0.25 is load-bearing** (#819): σ-shift/ladder failed. Encodes panel-scale surface detail critical for L5/4-ep budget.
 - **K/V gradient backflow is load-bearing** (#890): detach-K/V failed. Two-layer xattn also killed by backflow. Full MHA gradient is necessary.
 - **Full MHA n_heads=4 is optimal** (#893): both GQA (n_kv_heads=2) and MQA (n_kv_heads=1) fail EP3 gate.
 - **GradNorm full-mode CLOSED NEGATIVE** (#942): vp weight goes DOWN (not up) because vp loss decreases fastest; all 5 weights converge to 0.91–1.11 band at EP1. GradNorm axis fully closed.
-- **SDF-zone masking at p_max=0.30 is unstable** (#953): two identical runs produced EP1 val_abupt=28.89% and 32.84% (±4.2pp). Stochastic BL masking disrupts whole backbone globally, not just vol_p channel. p_max=0.15 is being tested as a lower-risk variant.
+- **SDF-zone masking at p_max=0.30 is unstable** (#953): two identical runs produced EP1 val_abupt=28.89% and 32.84% (±4.2pp). Stochastic BL masking disrupts whole backbone globally, not just vol_p channel. p_max=0.15 also closed (no replicable signal).
 - **CoordVolHead (#959) CLOSED NEGATIVE**: Failed EP4 gate (val_abupt=7.428% vs gate 6.9%). Root cause: STRING-sep RoPE + surf→vol xattn already encode xyz-awareness throughout the backbone; raw-coord injection at the output head is redundant. Xyz conditioning at the output is a closed axis.
-- **SDF-zone masking fully CLOSED** (#953, #963): p_max=0.30 had ±4.2pp run-to-run variance; p_max=0.15 relaunch (#963) abandoned — no replicable positive signal above variance floor (~2.26pp). Near-surface token dropout is a dead end at current scale.
 - **Geometry-conditioned Q-bias** (#961 fern, CLOSED NEGATIVE): mean-pool surf → MLP(512→256→512, zero-init) → additive bias on vol Q-projections before xattn. EP1=30.197% (0.197pp over 30% gate); natural EP1 variance ±2.75pp makes this uninterpretable but expected value is low. Global mean-pool surf loses spatial specificity needed to close OOD vol_p gap.
 - **SDF-FiLM vol hidden-state conditioning** (#967 thorfinn, CLOSED NEGATIVE): FiLM modulation (γ, β) of vol hidden states after each TransolverBlock using SDF distance as conditioning signal. EP3 gate FAILED — thorfinn superseded by SDF-conditioned attention temperature #974.
-- **10 REQUIRED_RESTORED cases have corrupted SDF data** (#941): inside-body cells had SDF=0 or negative; synthesis fix applied. Run_133, 226, 203, 158 (OOD outliers) are in this set — SDF corruption may explain part of the vol_p OOD gap.
+- **tanh saturation degeneracy** (#973 tanjiro Arm A): at scale=2.0m, ~99% of vol tokens saturate tanh≈1.0 (gradient≈1e-8). Causes catastrophic loss spike at curriculum transition (16K→32K vol tokens). asinh avoids this via graded log compression.
+- **Vol aux decoder head improves val_abupt but not test_vol_p** (#958 nezuko Arm A): new single-model SOTA val_abupt=6.2869%, but test_vol_p=12.0063% is worse than baseline 11.6704%. The OOD vol_p gap requires geometry-specific conditioning beyond a dedicated decoder head.
+- **Flash SDPA required for large xattn tensors**: [B=4, H=4, N_vol=16384, N_surf=65536] bf16 materialization = ~32 GiB — OOM without Flash SDPA. Thorfinn confirmed and fixed this. Custom per-token attention bias (distance RPB, temperature) requires manual Q/K/V extraction from in_proj_weight to apply Flash SDPA per-token correctly.
