@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_surface_mlp_head: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_surface_mlp_head = use_surface_mlp_head
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -421,7 +423,19 @@ class SurfaceTransolver(nn.Module):
             use_qk_norm=use_qk_norm,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+        # Surface output head: either a 2-layer MLP (--use-surface-mlp-head) or
+        # a plain Linear projection (baseline). The MLP variant matches the
+        # surface head from PR #958 Arm A, which improved test wall-shear
+        # metrics. The volume head is always a plain Linear (isolates the
+        # surface gain from the failed 3-layer vol MLP in PR #958 Arm B).
+        if use_surface_mlp_head:
+            self.surface_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden),
+                nn.SiLU(),
+                nn.Linear(n_hidden, self.surface_output_dim),
+            )
+        else:
+            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where

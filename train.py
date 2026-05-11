@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_surface_mlp_head: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_surface_mlp_head": (
+            "Replace the plain Linear surface output head with a 2-layer MLP "
+            "(hidden_dim -> SiLU -> surface_output_dim). Matches the surface "
+            "head from PR #958 Arm A, which improved test wall-shear metrics. "
+            "The volume head is always a plain Linear when this flag is set, "
+            "isolating the surface gain from the vol decoder. Default: False."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +316,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_surface_mlp_head=config.use_surface_mlp_head,
     )
 
 
