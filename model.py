@@ -295,8 +295,109 @@ class Transformer(nn.Module):
         return x
 
 
+class VolPressureTower(nn.Module):
+    """Independent Transolver tower for volume pressure prediction.
+
+    Bypasses the shared surface/volume backbone entirely: receives raw
+    volume features (``volume_x``) directly, projects them through an
+    independent positional embedding + feature projection, runs them
+    through its own Transolver stack, and emits a single-channel volume
+    pressure prediction. The tower shares no parameters with the surface
+    backbone, so its gradient signal is fully decoupled from the surface
+    tasks (no gradient coupling through shared weights or final norm).
+
+    Hypothesis: the shared backbone's gradient coupling between surface
+    and volume tasks causes the volume head to learn surface-biased
+    representations that overfit to val-set volume geometry (val→test
+    vol_p gap +7–8pp across 20+ closed PRs). An independent tower trains
+    vol_p without surface-gradient contamination, freeing it to develop
+    orthogonal inductive biases.
+    """
+
+    def __init__(
+        self,
+        *,
+        space_dim: int = 3,
+        volume_input_dim: int = VOLUME_X_DIM,
+        volume_output_dim: int = VOLUME_Y_DIM,
+        n_layers: int = 3,
+        hidden_dim: int = 256,
+        n_heads: int = 8,
+        mlp_ratio: int | float = 2,
+        slice_num: int = 96,
+        dropout: float = 0.0,
+        pe_kind: str = "sincos",
+        pe_num_features: int = 16,
+        pe_init_sigmas: list[float] | None = None,
+    ):
+        super().__init__()
+        if hidden_dim % n_heads != 0:
+            raise ValueError("VolPressureTower hidden_dim must be divisible by n_heads")
+        self.space_dim = space_dim
+        self.volume_input_dim = volume_input_dim
+        self.volume_output_dim = volume_output_dim
+        self.hidden_dim = hidden_dim
+        self.pe_kind = pe_kind
+        self.pe_num_features = pe_num_features
+        self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
+        volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+
+        if pe_kind == "sincos":
+            self.pos_embed: nn.Module = ContinuousSincosEmbed(
+                hidden_dim=hidden_dim, input_dim=space_dim,
+            )
+        elif pe_kind == "string_multisigma":
+            self.pos_embed = MultiSigmaStringPosEmbed(
+                hidden_dim=hidden_dim,
+                input_dim=space_dim,
+                num_features=pe_num_features,
+                init_sigmas=self.pe_init_sigmas,
+            )
+        else:
+            raise ValueError(
+                f"Unknown pe_kind '{pe_kind}'. Supported: sincos, string_multisigma."
+            )
+        self.volume_bias = MLP(
+            input_dim=hidden_dim, hidden_dim=hidden_dim, output_dim=hidden_dim
+        )
+        self.project_volume_features = (
+            LinearProjection(volume_extra_dim, hidden_dim) if volume_extra_dim > 0 else None
+        )
+        self.volume_placeholder = nn.Parameter(torch.rand(1, 1, hidden_dim) / hidden_dim)
+        self.backbone = Transformer(
+            depth=n_layers,
+            hidden_dim=hidden_dim,
+            num_heads=n_heads,
+            mlp_expansion_factor=mlp_ratio,
+            num_slices=slice_num,
+            dropout=dropout,
+        )
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.volume_out = LinearProjection(hidden_dim, volume_output_dim)
+
+    def forward(
+        self, volume_x: torch.Tensor, volume_mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        pos = volume_x[:, :, : self.space_dim]
+        hidden = self.pos_embed(pos)
+        if self.project_volume_features is not None and volume_x.shape[-1] > self.space_dim:
+            hidden = hidden + self.project_volume_features(volume_x[:, :, self.space_dim :])
+        hidden = self.volume_bias(hidden) + self.volume_placeholder
+        hidden = _apply_token_mask(hidden, volume_mask)
+        hidden = self.backbone(hidden, attn_mask=volume_mask)
+        hidden = _apply_token_mask(hidden, volume_mask)
+        hidden_norm = _apply_token_mask(self.norm(hidden), volume_mask)
+        preds = self.volume_out(hidden_norm) * volume_mask.unsqueeze(-1)
+        return preds, hidden_norm
+
+
 class SurfaceTransolver(nn.Module):
-    """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
+    """Grouped Transolver for surface pressure, wall shear, and volume pressure.
+
+    With ``use_vol_tower=True`` the volume pathway is delegated to an
+    independent :class:`VolPressureTower` and the shared backbone only
+    processes surface tokens; volume_x bypasses the shared backbone entirely.
+    """
 
     def __init__(
         self,
@@ -315,6 +416,13 @@ class SurfaceTransolver(nn.Module):
         pe_kind: str = "sincos",
         pe_num_features: int = 16,
         pe_init_sigmas: list[float] | None = None,
+        use_vol_tower: bool = False,
+        vol_tower_layers: int = 3,
+        vol_tower_hidden_dim: int = 256,
+        vol_tower_heads: int = 8,
+        vol_tower_mlp_ratio: int | float = 2,
+        vol_tower_slices: int = 96,
+        vol_tower_pe_kind: str | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -325,6 +433,7 @@ class SurfaceTransolver(nn.Module):
         self.pe_kind = pe_kind
         self.pe_num_features = pe_num_features
         self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
+        self.use_vol_tower = use_vol_tower
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -344,15 +453,20 @@ class SurfaceTransolver(nn.Module):
                 f"Unknown pe_kind '{pe_kind}'. Supported: sincos, string_multisigma."
             )
         self.surface_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
-        self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
         self.project_surface_features = (
             LinearProjection(surface_extra_dim, n_hidden) if surface_extra_dim > 0 else None
         )
-        self.project_volume_features = (
-            LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
-        )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
-        self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        if use_vol_tower:
+            self.volume_bias = None
+            self.project_volume_features = None
+            self.volume_placeholder = None
+        else:
+            self.volume_bias = MLP(input_dim=n_hidden, hidden_dim=n_hidden, output_dim=n_hidden)
+            self.project_volume_features = (
+                LinearProjection(volume_extra_dim, n_hidden) if volume_extra_dim > 0 else None
+            )
+            self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -363,7 +477,25 @@ class SurfaceTransolver(nn.Module):
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        if use_vol_tower:
+            self.volume_out = None
+            self.vol_tower = VolPressureTower(
+                space_dim=space_dim,
+                volume_input_dim=volume_input_dim,
+                volume_output_dim=volume_output_dim,
+                n_layers=vol_tower_layers,
+                hidden_dim=vol_tower_hidden_dim,
+                n_heads=vol_tower_heads,
+                mlp_ratio=vol_tower_mlp_ratio,
+                slice_num=vol_tower_slices,
+                dropout=dropout,
+                pe_kind=vol_tower_pe_kind if vol_tower_pe_kind is not None else pe_kind,
+                pe_num_features=pe_num_features,
+                pe_init_sigmas=self.pe_init_sigmas,
+            )
+        else:
+            self.vol_tower = None
+            self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
         self,
@@ -393,6 +525,14 @@ class SurfaceTransolver(nn.Module):
             raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
+
+        if self.use_vol_tower:
+            return self._forward_with_tower(
+                surface_x=surface_x,
+                surface_mask=surface_mask,
+                volume_x=volume_x,
+                volume_mask=volume_mask,
+            )
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
@@ -452,4 +592,46 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+        }
+
+    def _forward_with_tower(
+        self,
+        *,
+        surface_x: torch.Tensor | None,
+        surface_mask: torch.Tensor | None,
+        volume_x: torch.Tensor | None,
+        volume_mask: torch.Tensor | None,
+    ) -> dict[str, torch.Tensor]:
+        if surface_x is not None:
+            surface_in = self._encode_group(
+                surface_x,
+                project_features=self.project_surface_features,
+                bias=self.surface_bias,
+                placeholder=self.surface_placeholder,
+            )
+            surface_in = _apply_token_mask(surface_in, surface_mask)
+            surface_hidden = self.backbone(surface_in, attn_mask=surface_mask)
+            surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
+            surface_hidden_norm = _apply_token_mask(self.norm(surface_hidden), surface_mask)
+            surface_preds = self.surface_out(surface_hidden_norm) * surface_mask.unsqueeze(-1)
+        else:
+            batch_size = volume_x.shape[0]
+            hidden_dim = self.norm.normalized_shape[0]
+            surface_hidden_norm = volume_x.new_zeros(batch_size, 0, hidden_dim)
+            surface_preds = volume_x.new_zeros(batch_size, 0, self.surface_output_dim)
+
+        if volume_x is not None:
+            volume_preds, volume_hidden_norm = self.vol_tower(volume_x, volume_mask)
+        else:
+            batch_size = surface_x.shape[0]
+            tower_hidden_dim = self.vol_tower.hidden_dim
+            volume_preds = surface_x.new_zeros(batch_size, 0, self.volume_output_dim)
+            volume_hidden_norm = surface_x.new_zeros(batch_size, 0, tower_hidden_dim)
+
+        return {
+            "surface_preds": surface_preds,
+            "volume_preds": volume_preds,
+            "hidden": surface_hidden_norm,
+            "surface_hidden": surface_hidden_norm,
+            "volume_hidden": volume_hidden_norm,
         }

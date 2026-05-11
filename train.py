@@ -132,6 +132,13 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_vol_tower: bool = False
+    vol_tower_layers: int = 3
+    vol_tower_hidden_dim: int = 256
+    vol_tower_heads: int = 8
+    vol_tower_mlp_ratio: float = 2.0
+    vol_tower_slices: int = 96
+    vol_tower_pe: str = ""
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -235,6 +242,13 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        use_vol_tower=config.use_vol_tower,
+        vol_tower_layers=config.vol_tower_layers,
+        vol_tower_hidden_dim=config.vol_tower_hidden_dim,
+        vol_tower_heads=config.vol_tower_heads,
+        vol_tower_mlp_ratio=config.vol_tower_mlp_ratio,
+        vol_tower_slices=config.vol_tower_slices,
+        vol_tower_pe_kind=(config.vol_tower_pe or None),
     )
 
 
@@ -301,6 +315,7 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    gradnorm_surface_only: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     batch = batch.to(device)
     if use_y_symmetry_aug:
@@ -326,11 +341,21 @@ def train_loss(
             volume_per_ch = per_channel_masked_mse(
                 out["volume_preds"], volume_target, batch.volume_mask
             )  # [1]: vol_p
-            task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
             w_detached = gradnorm_weights.weights.detach()
-            loss = (w_detached * task_losses).sum()
-            weighted_surface_loss = (w_detached[:4] * surface_per_ch).sum()
-            weighted_volume_loss = w_detached[4] * volume_per_ch[0]
+            if gradnorm_surface_only:
+                # Tower mode: GradNorm balances only the 4 surface tasks
+                # (they share the backbone). vol_p trains independently
+                # through the tower with a fixed weight, since the tower
+                # is fully decoupled from the shared backbone gradient.
+                task_losses = surface_per_ch  # [4]
+                weighted_surface_loss = (w_detached * surface_per_ch).sum()
+                weighted_volume_loss = volume_loss_weight * volume_loss
+                loss = weighted_surface_loss + weighted_volume_loss
+            else:
+                task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
+                loss = (w_detached * task_losses).sum()
+                weighted_surface_loss = (w_detached[:4] * surface_per_ch).sum()
+                weighted_volume_loss = w_detached[4] * volume_per_ch[0]
         else:
             task_losses = None
             weighted_surface_loss = surface_loss_weight * surface_loss
@@ -480,8 +505,16 @@ def main(argv: Iterable[str] | None = None) -> None:
         gradnorm_weights: GradNormWeights | None = None
         gradnorm_opt: torch.optim.Optimizer | None = None
         gradnorm_L0: torch.Tensor | None = None
-        gradnorm_n_tasks = 5  # cp, tau_x, tau_y, tau_z, vol_p
-        gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p")
+        gradnorm_surface_only = bool(config.use_vol_tower)
+        if gradnorm_surface_only:
+            # vol_p flows through the independent tower and therefore
+            # does NOT share gradient with the backbone — exclude it
+            # from the GradNorm balancing set.
+            gradnorm_n_tasks = 4
+            gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z")
+        else:
+            gradnorm_n_tasks = 5  # cp, tau_x, tau_y, tau_z, vol_p
+            gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p")
         if config.use_gradnorm:
             gradnorm_weights = GradNormWeights(n_tasks=gradnorm_n_tasks).to(device)
             gradnorm_opt = torch.optim.Adam(
@@ -490,7 +523,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             if state.is_main:
                 print(
                     f"GradNorm enabled: alpha={config.gradnorm_alpha}, "
-                    f"n_tasks={gradnorm_n_tasks}, lr={config.gradnorm_lr}"
+                    f"n_tasks={gradnorm_n_tasks}, lr={config.gradnorm_lr}, "
+                    f"surface_only={gradnorm_surface_only}"
                 )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
@@ -583,6 +617,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    gradnorm_surface_only=gradnorm_surface_only,
                 )
                 if (
                     config.use_y_symmetry_aug
