@@ -115,6 +115,7 @@ class Config:
     ema_start_step: int = 50
     eval_raw_vs_ema: bool = False
     lr_warmup_epochs: int = 0
+    lr_warmup_steps: int = 0
     lr_cosine_t_max: int = 0
     lr_min: float = 1e-6
     grad_clip_norm: float = 1.0
@@ -160,6 +161,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "lr_warmup_steps": (
+            "Complete LR warmup after this many optimizer steps. When >0, "
+            "the scheduler is stepped once per optimizer step (not per "
+            "epoch) and both warmup and cosine annealing run in step units. "
+            "Decouples LR warmup completion from epoch-boundary curriculum "
+            "events such as `--vol-points-schedule` jumps. 0 (default) "
+            "falls back to `--lr-warmup-epochs` (epoch-granular scheduling)."
         ),
         "use_gradnorm": (
             "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
@@ -781,7 +790,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
         optimizer = build_optimizer(base_model, config)
-        scheduler = build_lr_scheduler(optimizer, config, max_epochs)
+        initial_steps_per_epoch = max(1, len(train_loader))
+        scheduler = build_lr_scheduler(
+            optimizer, config, max_epochs, steps_per_epoch=initial_steps_per_epoch
+        )
+        scheduler_step_per_batch = bool(getattr(scheduler, "_step_per_batch", False))
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
         balancer: GradNormBalancer | None = None
@@ -1112,6 +1125,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         optimizer.zero_grad(set_to_none=True)
                     else:
                         optimizer.step()
+                        if scheduler_step_per_batch:
+                            scheduler.step()
                         if ema is not None:
                             ema.update(base_model)
                         weight_metrics = (
@@ -1164,7 +1179,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         )
                     break
 
-            scheduler.step()
+            if not scheduler_step_per_batch:
+                scheduler.step()
             epoch_train_loss = train_loss_sum / max(n_batches, 1)
             dt = time.time() - t0
             peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
