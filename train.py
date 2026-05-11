@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -32,7 +33,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import DrivAerMLCase, DrivAerMLSurfaceDataset
+from data.loader import _resolve_artifact_path  # noqa: PLC2701 — internal helper reused for PVC fallback paths
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -65,6 +67,125 @@ from trainer_runtime import (
     timeout_budget_minutes,
     unwrap_model,
 )
+
+
+# ---------------------------------------------------------------------------
+# SDF-stratified volume sampling (per-worker cache + class-level patch)
+# ---------------------------------------------------------------------------
+
+# Per-process |SDF| cache keyed by case_id. Each DataLoader worker forks from
+# the rank process so this dict is independent per worker, populated lazily on
+# the first hit of a case_id. With persistent_workers=True the cache stays
+# warm across epochs. Memory budget: ~0.5-1M points/case * 4 bytes/float32
+# ~= 2-4 MB/case; ~400 cases => ~1-1.6 GB per worker worst case (sharded
+# across DDP ranks, so each worker only sees a subset in practice).
+_SDF_ABS_CACHE: dict[str, torch.Tensor] = {}
+
+
+def _load_case_sdf_abs(root, case_id: str, expected_n: int) -> torch.Tensor:
+    """Return the absolute SDF column for a case as a 1-D float32 tensor.
+
+    Lazy-loads from `volume_sdf.npy` on first access and caches in
+    `_SDF_ABS_CACHE` for subsequent draws.
+    """
+
+    cached = _SDF_ABS_CACHE.get(case_id)
+    if cached is not None:
+        if cached.shape[0] != expected_n:
+            raise RuntimeError(
+                f"SDF cache for {case_id} has size {cached.shape[0]} but "
+                f"case_point_counts reports {expected_n}; cache poisoning?"
+            )
+        return cached
+    from pathlib import Path
+
+    sdf_path = Path(root) / case_id / "volume_sdf.npy"
+    resolved = _resolve_artifact_path(sdf_path)
+    sdf_np = np.asarray(np.load(resolved), dtype=np.float32).reshape(-1)
+    if sdf_np.shape[0] != expected_n:
+        raise RuntimeError(
+            f"volume_sdf.npy for {case_id} has {sdf_np.shape[0]} rows but "
+            f"case_point_counts reports {expected_n}"
+        )
+    tensor = torch.from_numpy(np.abs(sdf_np)).contiguous()
+    _SDF_ABS_CACHE[case_id] = tensor
+    return tensor
+
+
+# Patched __getitem__ for SDF-stratified train sampling. Falls back to the
+# original implementation when sampling_mode != "train_random" so eval splits
+# remain full-fidelity strided. The alpha value is read from a class-level
+# attribute set by `enable_sdf_stratified_sampling`.
+_orig_drivaerml_getitem = None
+
+
+def enable_sdf_stratified_sampling(alpha: float) -> None:
+    """Patch DrivAerMLSurfaceDataset.__getitem__ for SDF-stratified train sampling.
+
+    Idempotent: safe to call multiple times; the original __getitem__ is
+    captured only once and re-used as the fallback for non-train samplers
+    and for the curriculum-rebuilt train datasets.
+    """
+
+    global _orig_drivaerml_getitem
+    if _orig_drivaerml_getitem is None:
+        _orig_drivaerml_getitem = DrivAerMLSurfaceDataset.__getitem__
+    DrivAerMLSurfaceDataset._sdf_stratified_alpha = float(alpha)
+
+    def _patched_getitem(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        if view.sampling_mode != "train_random":
+            return _orig_drivaerml_getitem(self, idx)
+
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+
+        n_total = int(counts["n_volume"])
+        N_vol = int(self.max_volume_points)
+        if view.view_index >= view.volume_view_count:
+            volume_idx_np = np.empty(0, dtype=np.int64)
+        elif N_vol <= 0 or n_total <= N_vol:
+            volume_idx_np = None
+        else:
+            sdf_abs = _load_case_sdf_abs(self.store.root, view.case_id, n_total)
+            alpha = getattr(self, "_sdf_stratified_alpha", 2.0)
+            weights = 1.0 + alpha * sdf_abs
+            sampled = torch.multinomial(weights, N_vol, replacement=True)
+            volume_idx_np = sampled.sort().values.numpy()
+
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=volume_idx_np,
+        )
+
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = "sdf_stratified"
+        metadata["joint_view_count"] = int(view.view_count)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+    DrivAerMLSurfaceDataset.__getitem__ = _patched_getitem
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +259,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
     debug: bool = False
 
 
@@ -228,6 +351,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_sdf_stratified_vol_sampling": (
+            "Bias the train-time volume point sampling toward far-field "
+            "(large |SDF|) tokens. For each train view we sample "
+            "train_volume_points indices via torch.multinomial with weights "
+            "w[i] = 1 + alpha * |sdf[i]|. The per-case |SDF| array is "
+            "lazy-loaded once per worker process and cached in memory. "
+            "Eval (eval_chunk strided) views are unaffected so val/test "
+            "metrics remain full-fidelity. Targets the val_vol_p / "
+            "test_vol_p OOD generalisation gap."
+        ),
+        "sdf_stratified_alpha": (
+            "Bias strength for SDF-stratified volume sampling: "
+            "weight[i] = 1 + alpha * |sdf[i]|. alpha=0 reproduces uniform "
+            "sampling; alpha=2.0 (default) gives ~3.5x more weight to "
+            "points at |sdf|=1m vs the surface, and ~160x at |sdf|~80m. "
+            "Only used when --use-sdf-stratified-vol-sampling is set."
         ),
     }
     for field in fields(Config):
@@ -736,6 +876,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
         current_train_vol_points = config.train_volume_points
 
+        if config.use_sdf_stratified_vol_sampling:
+            enable_sdf_stratified_sampling(config.sdf_stratified_alpha)
+            if state.is_main:
+                print(
+                    "SDF-stratified vol sampling: enabled "
+                    f"alpha={config.sdf_stratified_alpha} "
+                    "(train __getitem__ uses w[i]=1+alpha*|sdf[i]|; "
+                    "eval splits unchanged)"
+                )
+
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
@@ -883,6 +1033,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["data/use_sdf_stratified_vol_sampling"] = bool(
+                config.use_sdf_stratified_vol_sampling
+            )
+            wandb.summary["data/sdf_stratified_alpha"] = float(
+                config.sdf_stratified_alpha
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
