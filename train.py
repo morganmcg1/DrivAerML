@@ -132,6 +132,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -259,6 +261,84 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     raise ValueError(
         f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion."
     )
+
+
+def _install_sdf_stratified_vol_sampling(
+    train_dataset,
+    *,
+    alpha: float,
+    n_vol: int,
+    is_main: bool,
+) -> None:
+    """Monkey-patch ``train_dataset.__getitem__`` to draw volume points with
+    importance weights ``w[i] = 1 + alpha * |sdf[i]|`` via ``torch.multinomial``.
+
+    Per-case ``|sdf|`` is cached after the first read so subsequent draws only
+    pay an mmap row-indexed read for the resampled subset.
+    """
+    import types
+
+    from data.loader import DrivAerMLCase, _load_npy_rows
+
+    sdf_cache: dict[str, torch.Tensor] = {}
+
+    def _get_abs_sdf(self, case_id: str) -> torch.Tensor:
+        cached = sdf_cache.get(case_id)
+        if cached is not None:
+            return cached
+        case_dir = self.store.root / case_id
+        sdf_arr = _load_npy_rows(case_dir / "volume_sdf.npy", rows=None)
+        weights = torch.from_numpy(sdf_arr.reshape(-1).astype(np.float32, copy=False)).abs()
+        sdf_cache[case_id] = weights
+        return weights
+
+    def _sdf_stratified_getitem(self, idx: int):
+        view = self.views[idx]
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+        abs_sdf = _get_abs_sdf(self, view.case_id)
+        n_total = abs_sdf.shape[0]
+        n_sample = min(n_vol, n_total) if n_vol > 0 else n_total
+        weights = 1.0 + alpha * abs_sdf
+        vol_idx_t = torch.multinomial(weights, n_sample, replacement=True).sort().values
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=vol_idx_t.numpy(),
+        )
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(n_total)
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = "sdf_stratified"
+        metadata["sdf_stratified_alpha"] = float(alpha)
+        metadata["joint_view_count"] = int(view.view_count)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+    train_dataset.__getitem__ = types.MethodType(_sdf_stratified_getitem, train_dataset)
+    if is_main:
+        print(
+            f"SDF-stratified volume sampling enabled: alpha={alpha}, "
+            f"n_vol={n_vol} (weights = 1 + alpha * |sdf|, with replacement)"
+        )
 
 
 def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
@@ -451,6 +531,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_sdf_stratified_vol_sampling:
+            _install_sdf_stratified_vol_sampling(
+                train_loader.dataset,
+                alpha=config.sdf_stratified_alpha,
+                n_vol=config.train_volume_points,
+                is_main=state.is_main,
+            )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
