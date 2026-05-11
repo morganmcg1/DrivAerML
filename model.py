@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_sdf_pe_scaling: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_sdf_pe_scaling = use_sdf_pe_scaling
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +446,24 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # SDF-modulated volume PE: tiny gating MLP that reads the per-point SDF
+        # scalar (vol_x[:, :, 3]) and outputs K=space_dim per-axis scale factors
+        # applied to the pre-flatten STRING-sep stack before flattening.
+        # Zero-init weights + bias=0.5413 on last linear so Softplus(0.5413)≈1.0
+        # (identity at step 0, full gradient flow thereafter).
+        if use_sdf_pe_scaling:
+            num_rff_octaves = space_dim  # K = in_dim axes in StringSeparableEncoding
+            self.sdf_pe_mlp = nn.Sequential(
+                nn.Linear(1, 16),
+                nn.SiLU(),
+                nn.Linear(16, num_rff_octaves),
+                nn.Softplus(),
+            )
+            nn.init.zeros_(self.sdf_pe_mlp[2].weight)
+            nn.init.constant_(self.sdf_pe_mlp[2].bias, 0.5413)
+        else:
+            self.sdf_pe_mlp = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -506,16 +526,49 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    volume_x,
-                    rff=self.volume_rff,
-                    string_sep=self.volume_string_sep,
-                    project_features=self.project_volume_features,
-                    bias=self.volume_bias,
-                    placeholder=self.volume_placeholder,
+            if (
+                self.use_sdf_pe_scaling
+                and self.volume_string_sep is not None
+                and self.sdf_pe_mlp is not None
+            ):
+                # SDF-modulated volume PE: reshape STRING-sep output to
+                # [B, N, K, 2*num_features], apply per-axis scales, re-flatten.
+                pos = volume_x[:, :, : self.space_dim]
+                vol_pe_flat = self.volume_string_sep(pos)  # [B, N, K*2*num_features]
+                K = self.space_dim
+                d2 = vol_pe_flat.shape[-1] // K
+                vol_pe_stack = vol_pe_flat.view(*vol_pe_flat.shape[:-1], K, d2)  # [B, N, K, 2*num_features]
+                sdf_vals = volume_x[:, :, 3:4]  # [B, N, 1]
+                axis_scales = self.sdf_pe_mlp(sdf_vals)  # [B, N, K]
+                vol_pe_stack = vol_pe_stack * axis_scales.unsqueeze(-1)  # [B, N, K, 2*num_features]
+                vol_pe_modulated = vol_pe_stack.flatten(start_dim=-2)  # [B, N, K*2*num_features]
+
+                # Build volume hidden state manually (mirrors _encode_group logic)
+                vol_hidden = self.pos_embed(pos)
+                feature_parts: list[torch.Tensor] = []
+                if volume_x.shape[-1] > self.space_dim:
+                    feature_parts.append(volume_x[:, :, self.space_dim :])
+                feature_parts.append(vol_pe_modulated)
+                if self.project_volume_features is not None and feature_parts:
+                    features = (
+                        feature_parts[0]
+                        if len(feature_parts) == 1
+                        else torch.cat(feature_parts, dim=-1)
+                    )
+                    vol_hidden = vol_hidden + self.project_volume_features(features)
+                vol_token = self.volume_bias(vol_hidden) + self.volume_placeholder
+                tokens.append(vol_token)
+            else:
+                tokens.append(
+                    self._encode_group(
+                        volume_x,
+                        rff=self.volume_rff,
+                        string_sep=self.volume_string_sep,
+                        project_features=self.project_volume_features,
+                        bias=self.volume_bias,
+                        placeholder=self.volume_placeholder,
+                    )
                 )
-            )
             masks.append(volume_mask)
 
         attn_mask = torch.cat(masks, dim=1)
