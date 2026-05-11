@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_global_surf_embed: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_global_surf_embed = use_global_surf_embed
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -443,6 +445,13 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        if use_global_surf_embed:
+            self.global_surf_proj = nn.Linear(n_hidden, n_hidden)
+            nn.init.zeros_(self.global_surf_proj.weight)
+            nn.init.zeros_(self.global_surf_proj.bias)
+        else:
+            self.global_surf_proj = None
 
     def _encode_group(
         self,
@@ -544,6 +553,18 @@ class SurfaceTransolver(nn.Module):
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        if (
+            self.global_surf_proj is not None
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            global_surf = surface_hidden.mean(dim=1, keepdim=True)
+            global_surf_proj = self.global_surf_proj(global_surf)
+            volume_hidden = volume_hidden + global_surf_proj
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
