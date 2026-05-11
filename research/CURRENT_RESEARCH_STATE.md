@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-11 — Round 29 active (8 WIP)
+- **Date:** 2026-05-11 — Round 29 active (7 WIP; PR #958 nezuko MERGED)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -38,16 +38,16 @@
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
-| nezuko | #958 | Vol aux decoder head: Arm A COMPLETE (new SOTA 6.2869%). Arm B (`--volume-loss-weight 2.0`) running EP4. | `nezuko/vol-pressure-aux-decoder-head` | WIP — Arm B run `6xja19q9`, EP4 running; gate EP7 ≤7.2% |
+| nezuko | #958 | Vol aux decoder head: **MERGED** — Arm A val_abupt=6.2868% (new single-model SOTA, run `29nohj67`, EP13). Arm B (`--volume-loss-weight 2.0`) run `6xja19q9` in progress. | `nezuko/vol-pressure-aux-decoder-head` | **MERGED** — Arm B continuing; if Arm B beats 6.2868% it becomes new SOTA |
 | tanjiro | #994 | LR-warmup decouple from vol-schedule boundary: complete LR warmup before EP1→EP2 boundary so only vol_points jump happens at that step, eliminating the 18× LR+curriculum co-shock from PR #983. | `tanjiro/lr-warmup-decouple-from-vol-schedule` | WIP — assigned; awaiting/running |
 | askeladd | #986 | Adaptive SDF vol loss weighting: exp(-\|d_sdf\|/sigma) per-token weight; sigma sweep {0.5, 1.0, 2.0} m. | `askeladd/adaptive-sdf-vol-loss` | WIP — running |
 | frieren | #995 | Pre-xattn vol LayerNorm ablation: single LN inserted immediately before surf→vol xattn (no MHA); isolates whether EP1 gain in #988 came from normalizing vol_h vs self-attn capacity. Zero FLOP overhead. | `frieren/pre-xattn-vol-ln-only` | WIP — assigned; awaiting/running |
 | fern | #996 | Near-surface SDF-stratified vol sampling: correct-direction inverse SDF weighting `exp(-alpha×|sdf|)` concentrates vol points near car surface; Arm A alpha=1.0, Arm B alpha=2.0. | `fern/near-surface-sdf-stratified-sampling` | WIP — assigned; awaiting/running |
 | thorfinn | #991 | Per-head learnable xattn temperature: scalar per-head scale initialized to 1.0 replacing the global constant from PR #984; isolates per-head sharpening signal. | `thorfinn/per-head-learnable-xattn-temp` | WIP — assigned; awaiting/running |
 | edward | #992 | Global surface embedding: learnable aggregation (attention pooling) over all surface tokens → geometry code added to vol queries before surf→vol xattn; richer spatial context than mean-pool. | `edward/global-surface-embedding` | WIP — assigned; awaiting/running |
-| alphonse | #993 | Bbox normalization with corrected STRING PE sigmas (÷5 rescale for [-1,+1] coords): apply bbox normalization AND rescale sigmas from {0.25,0.5,1.0,2.0,4.0} → {0.05,0.1,0.2,0.4,0.8} to match normalized coordinate range. | `alphonse/bbox-norm-corrected-pe-sigmas` | WIP — assigned; awaiting/running |
+| alphonse | #1000 | SDF vol asinh encoding sweep: asinh(sdf/scale) normalization for vol SDF input feature; scale sweep {10.0, 20.0} m. Follow-up to closed tanh (#973) and raw-linear (#966) axes. | `alphonse/sdf-vol-asinh-encoding` | WIP — assigned; not started |
 
-### All students active (8 WIP)
+### 7 students active WIP; nezuko #958 MERGED (Arm A new single-model SOTA 6.2868%)
 
 ---
 
@@ -99,8 +99,8 @@
 
 **Primary mandate (Issue #717):** Reduce test_vol_pressure below 11.0% → 10.0% → 8.5% → 6.08% (AB-UPT). All channels must not degrade.
 
-### Theme 1: Dedicated Vol Pressure Decoder (nezuko #958)
-Independent 3-layer MLP branch for vol_p prediction. Arm A (vol_loss_weight=1.0): COMPLETE — new single-model SOTA val_abupt=6.2869% (run `29nohj67`, best_epoch=13). test_vol_p=12.0063% NEGATIVE. Arm B (vol_loss_weight=2.0): run `6xja19q9`, EP4 running, EP7 gate ≤7.2%.
+### Theme 1: Dedicated Vol Pressure Decoder (nezuko #958) — MERGED
+Independent 3-layer MLP branch for vol_p prediction. **Arm A (vol_loss_weight=1.0): MERGED as new single-model SOTA val_abupt=6.2868%** (run `29nohj67`, best_epoch=13). test_vol_p=12.0063% NEGATIVE — dedicated head does NOT fix 4 OOD outlier cases. Arm B (vol_loss_weight=2.0): run `6xja19q9` continuing; if it beats 6.2868% it becomes the new SOTA.
 
 ### Theme 2: Pre-xattn Vol LayerNorm Ablation (frieren #995)
 Single LN inserted immediately before surf→vol xattn (no MHA) to isolate whether the EP1 −1.99pp gain observed in #988 came from normalizing vol_h vs self-attn capacity. Zero FLOP overhead. This is a causal ablation: if LN alone recovers the EP1 gain, the benefit was normalization not attention capacity. PR #988 CLOSED due to O(N²) MHA cost explosion over 4-epoch vol_pts ramp.
@@ -117,8 +117,10 @@ Per-head scalar temperature scale initialized to 1.0 for surf→vol xattn, repla
 ### Theme 6: Global Surface Embedding (edward #992)
 Learnable attention pooling over all surface hidden tokens to produce a geometry code, added to vol queries before surf→vol xattn. More expressive than failed mean-pool (#976, #980) because attention pooling preserves spatial selectivity. Zero-init residual.
 
-### Theme 7: Bbox Normalization + Corrected STRING PE Sigmas (alphonse #993)
-Root-cause fix for PR #978 (CLOSED NEGATIVE): bbox normalization to [-1,+1] caused ~5× STRING PE frequency mismatch. Fix: rescale STRING sigmas ÷5 from {0.25,0.5,1.0,2.0,4.0} → {0.05,0.1,0.2,0.4,0.8} to match normalized coord range. Both changes applied together.
+### Theme 7: SDF Vol asinh Encoding Sweep (alphonse #1000)
+asinh(sdf/scale) bounded normalization for the vol SDF input feature, replacing raw linear normalization (closed PR #966 due to +20,000σ outliers) and tanh saturation degeneracy (closed PR #973 Arm A). asinh is sub-linear for large |sdf| but has no hard saturation ceiling. Scale sweep: 10.0 m vs 20.0 m. Not yet started.
+
+*Note: Bbox normalization + corrected STRING PE sigmas (PR #993) was the prior alphonse assignment — reassigned to PR #1000 after #993 review.*
 
 ### Theme 8: Adaptive SDF Vol Loss Weighting (askeladd #986)
 Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundaries where OOD geometry differences are most pronounced. Sigma sweep {0.5, 1.0, 2.0} m. Parameter-free. Running.

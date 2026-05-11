@@ -1,5 +1,49 @@
 # SENPAI Research Results
 
+## 2026-05-11 15:11 — PR #958: Vol aux decoder head (nezuko) — MERGED (POSITIVE: new single-model SOTA)
+
+- **Branch**: `nezuko/vol-pressure-aux-decoder-head` (merged)
+- **W&B run**: `29nohj67` (group `nezuko-vol-aux-decoder-head`, Arm A `--volume-loss-weight 1.0`)
+- **Hypothesis**: Dedicated 3-layer MLP branch for vol_pressure prediction, separate from the shared decoder, with a tunable volume loss weight. The hypothesis was that a dedicated vol_p head would improve test_vol_p OOD performance by allowing more expressive vol-pressure-specific capacity.
+
+| Epoch | Step | val_abupt | vol_p | Gate | Status |
+|---|---:|---:|---:|---|---|
+| EP4 | ~43,456 | — | — | PASS | continuing to EP13 |
+| EP13 (best) | ~108,640 | **6.2868%** | 3.9152% | **NEW SOTA** | MERGED |
+
+**Val metrics (EP13 best checkpoint, run `29nohj67`):**
+
+| Metric | Value |
+|---|---:|
+| val_abupt | **6.2868%** |
+| surface_pressure | 4.1766% |
+| volume_pressure | 3.9152% |
+| wall_shear | 7.0476% |
+| tau_x | 6.1726% |
+| tau_y | 7.6648% |
+| tau_z | 9.5053% |
+
+**Test metrics (from best val checkpoint):**
+
+| Metric | Value |
+|---|---:|
+| test_abupt | 7.7445% |
+| surface_pressure | 3.9100% |
+| volume_pressure | **12.0063%** |
+| wall_shear | 6.9848% |
+| tau_x | 6.2092% |
+| tau_y | 7.5689% |
+| tau_z | 9.0280% |
+
+**Results commentary:**
+- **POSITIVE: val_abupt=6.2868%** is the new single-model SOTA, −0.154pp (−2.39% relative) vs prior SOTA PR #823 (6.4407%). Improvement is broad-based across all channels.
+- **NEGATIVE on primary hypothesis (vol_p OOD fix):** test_vol_p=12.0063% is WORSE than the baseline 11.6704% from PR #823. The dedicated aux decoder head improves general val_abupt but does NOT fix the 4 OOD outlier test cases (run_133, 226, 203, 158). Adding vol_p capacity alone is not sufficient when the failure is driven by geometry-specific OOD cases.
+- The 4 OOD test cases require geometry-conditioned interventions, not just separate decoder heads. The improvement in val_abupt comes from better capacity allocation (dedicated head can specialize for in-distribution vol_p patterns) while test_vol_p worsens because the aux head may overfit val-distribution vol_p patterns without generalizing to OOD geometries.
+- New single-model training gate: val_abupt < **6.2868%** (previously 6.4407% from PR #823).
+- Arm B (`--volume-loss-weight 2.0`, run `6xja19q9`) was still running at merge time. If it exceeds val_abupt=6.2868%, it becomes the new SOTA.
+
+---
+
 ## 2026-05-11 14:00 — PR #989: SDF-modulated per-octave positional encoding (fern) — CLOSED (NEGATIVE)
 
 - **Branch**: `fern/sdf-modulated-vol-pe` (closed)
