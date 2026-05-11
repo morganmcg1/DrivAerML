@@ -1,5 +1,68 @@
 # SENPAI Research Results
 
+## 2026-05-11 14:00 — PR #989: SDF-modulated per-octave positional encoding (fern) — CLOSED (NEGATIVE)
+
+- **Branch**: `fern/sdf-modulated-vol-pe` (closed)
+- **W&B run**: `z6dcbe9g`
+- **Hypothesis**: Weight each RFF octave by exp(−|SDF|/σ_k) so that near-surface volume points get stronger high-frequency positional signal. Different octaves get different SDF-modulated gain, effectively creating a position-dependent spectral emphasis that tracks boundary proximity.
+
+| Epoch | Step | val_abupt | vol_p | Gate | Status |
+|---|---:|---:|---:|---|---|
+| EP1 | ~10,864 | ≤30% | — | PASS | continuing |
+| EP2 | ~21,728 | ≤16% | — | PASS | continuing |
+| EP3 | ~32,592 | — | — | — | continuing |
+| EP4 | ~43,456 | 7.490% | 4.886% | FAIL (target ≤6.9%) | CLOSED |
+
+**Results commentary:**
+- EP4 val_abupt=7.490% is 1.0–1.1pp worse than baseline (6.4407%), failing the EP4 gate of ≤6.9%.
+- vol_p=4.886% actually passes the EP3 vol_p gate (≤5.0%) but abupt is the primary metric and clearly regressed.
+- test_abupt=8.793% confirms the generalization gap is real, not a val overfitting artifact.
+- The SDF-modulated weighting may interfere with the STRING-sep RFF encoding by introducing a spatially varying scale that conflicts with the learned log_freq adaptation — the SDF envelope compresses the effective frequency range in far-field regions, reducing positional specificity precisely where vol structure matters most.
+- **Conclusion:** SDF-modulated per-octave positional encoding is closed negative. The spectral compression effect in far-field regions likely explains the regression. The SDF proximity signal is better incorporated via cross-attention (existing surf→vol xattn) than via PE modulation.
+
+---
+
+## 2026-05-11 14:00 — PR #988: Pre-xattn vol self-attention (frieren) — CLOSED (INCONCLUSIVE/TIMEOUT)
+
+- **Branch**: `frieren/pre-xattn-vol-selfattn` (closed)
+- **W&B run**: `mdmkx495`
+- **Hypothesis**: Add a self-attention layer on volume tokens BEFORE the existing surf→vol cross-attention so that volume tokens can aggregate global context before querying surface features. Expected to improve coherence of predicted volume fields.
+
+| Epoch | Step | val_abupt | Status |
+|---|---:|---:|---|
+| EP1 | ~10,864 | PASS ≤30% | continuing |
+| EP2 | ~21,728 | PASS ≤16% | continuing |
+| EP3 (partial) | 17,445 | 10.5927% (best) | TIMEOUT at 270 min wall-clock |
+
+**Results commentary:**
+- Run terminated at step 17,445 (mid-EP3) due to 270-minute wall-clock limit. Best val_abupt=10.5927% at the point of termination.
+- Root cause: O(N²) full self-attention over vol_pts=49,152 points required 63.9 GB VRAM peak (near 96 GB VRAM limit) and dramatically slowed throughput, making EP3 completion infeasible within the time budget.
+- Cannot draw conclusions about hypothesis quality — the run was capacity-constrained, not performance-constrained.
+- **Implication:** Full self-attention at vol_pts=49,152 is computationally infeasible. A linearized attention (e.g., Performer, FNet, Nyströmformer) or chunked/hierarchical approach would be needed to make this hypothesis testable at full resolution.
+- **Conclusion:** Hypothesis closed as inconclusive due to O(N²) scaling constraint. The core idea (vol self-aggregation before xattn) remains untested. Future work should use linear-complexity alternatives.
+
+---
+
+## 2026-05-11 14:00 — PR #983: Curriculum LR warmup (tanjiro) — CLOSED (NEGATIVE)
+
+- **Branch**: `tanjiro/curriculum-lr-warmup` (closed)
+- **W&B runs**: Arm A (killed by student at EP3), Arm B: `xy4yhpm0`
+- **Hypothesis**: The EP1→EP2 instability spike is caused by the abrupt curriculum jump (16,384→32,768 vol_pts at the EP1 boundary). A linear warmup over the first curriculum step should smooth the transition and reduce the EP2 spike.
+
+| Arm | Description | EP4 val_abupt | EP4 test_abupt | Gate | Status |
+|---|---|---:|---:|---|---|
+| A | Warmup from EP1 start | N/A | N/A | — | Killed at EP3 by student |
+| B | Warmup from EP1/EP2 boundary | 7.4176% | 8.7352% | FAIL (target ≤6.9%) | CLOSED |
+
+**Results commentary:**
+- Arm B EP4 val_abupt=7.4176% — 1.0pp above baseline, failing the EP4 gate of ≤6.9%.
+- **Key finding (critical):** The EP1→EP2 instability is NOT caused by the curriculum vol_pts jump. It is caused by LR-shock: the LR schedule includes an 18× jump (5e-6→9e-5) at the EP1 boundary. EP2→EP3 transitions smoothly despite having the same vol_pts curriculum jump, because the LR is already in cosine decay by that point.
+- Arm A was killed by the student before ADVISOR override could redirect; Arm B had the warmup placed at the EP1/EP2 boundary (wrong location to address LR-shock, which begins earlier).
+- **Actionable implication:** To address LR-shock, the LR warmup must complete BEFORE the EP1→EP2 curriculum boundary. The warmup window should overlap with the initial low-vol_pts phase so the LR has already reached peak and begun decaying when curriculum jumps to 32,768 points.
+- **Conclusion:** Curriculum-position warmup is negative. LR schedule reform (not curriculum position adjustment) is the correct lever. Future warmup experiments must ensure warmup completion precedes the EP1→EP2 curriculum boundary.
+
+---
+
 ## 2026-05-11 12:00 — PR #960: STRING-sep RFF sigma bracket sweep (askeladd) — CLOSED (NEGATIVE)
 
 - **Branch**: `askeladd/string-sigma-bracket-sweep` (closed)
