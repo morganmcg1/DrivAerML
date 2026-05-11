@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-09 — Round 27 active (4 WIP; PR #978 closed NEGATIVE)
+- **Date:** 2026-05-09 — Round 28 active (8 WIP; PRs #985, #986 newly assigned)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -34,28 +34,30 @@
 
 ---
 
-## Active PRs (Round 27) — 5 WIP
+## Active PRs (Round 28) — 8 WIP
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
 | nezuko | #958 | Vol aux decoder head: Arm A COMPLETE (new SOTA 6.2869%). Arm B (`--volume-loss-weight 2.0`) running EP4. | `nezuko/vol-pressure-aux-decoder-head` | WIP — Arm B run `6xja19q9`, EP4 running; gate EP7 ≤7.2% |
 | frieren | #981 | SDF-stratified vol sampling, alpha=2.0: oversample near-boundary vol points using SDF proximity. | `frieren/sdf-stratified-vol-sampling` | WIP — restart run `xzreqhns` (`frieren/sdf-stratified-vol-ep4-alpha2-restart`) confirmed running, EP1 expected ~07:16Z |
-| fern | #982 | No-SDF-PE-scaling control: ablation to isolate whether SDF-PE spectral scaling in PR #977 was responsible for EP3 failure. | `fern/no-sdf-pe-scaling-fast-schedule-control` | WIP — run `fxcg25rk`, EP1 pending; group `fern-no-sdf-pe-scaling-control` |
+| fern | #982 | No-SDF-PE-scaling control: ablation to isolate whether SDF-PE spectral scaling in PR #977 was responsible for EP3 failure. | `fern/no-sdf-pe-scaling-fast-schedule-control` | WIP — run `ua1ohtjb`, EP1 pending; group `fern-no-sdf-pe-scaling-control` |
 | tanjiro | #983 | Curriculum warmup: `--vol-points-warmup-steps` to ramp vol points smoothly; tests whether 200–500 step warmup prevents EP1→EP2 divergence seen in #973. | `tanjiro/curriculum-warmup-ramp` | WIP — Arm A run `hhplwxmk` (500-step warmup), EP1→EP2 transition pending; Arm B pre-approved (200-step); group `tanjiro-curriculum-warmup` |
 | thorfinn | #984 | Constant xattn temp scale=0.5 (zero-param): hardcode Q×0.5 before surf→vol xattn; isolates global sharpening signal from PR #974's MLP that collapsed to scale_mean=0.515. | `thorfinn/constant-attn-temp-scale` | WIP — run `ojuyombs`, EP1 pending; group `thorfinn-constant-attn-temp-scale` |
+| edward | #980 | Bbox geometry scalar conditioning: per-case [L,H,W,A_front] → Linear(4,hidden_dim) zero-init additive bias on vol hidden. 10-ep schedule with GradNorm. | `edward/geo-scalar-cond` | WIP — run `nv4g1nhw`, 10-ep schedule+GradNorm; EP1 gate ≤30% |
+| alphonse | #985 | Per-case geometry embedding v2: second xattn layer (vol Q × all surf K/V, zero-init out_proj residual) to spatially condition vol queries before main surf→vol xattn; ~1.05M new params. | `alphonse/geo-embed-v2-xattn` | WIP — newly assigned; awaiting student implementation |
+| askeladd | #986 | Adaptive SDF vol loss weighting: exp(-\|d_sdf\|/sigma) per-token weight; sigma sweep {0.5, 1.0, 2.0} m. | `askeladd/adaptive-sdf-vol-loss` | WIP — newly assigned; awaiting student implementation |
 
-### Idle students (3): edward, alphonse, askeladd — ASSIGNMENTS PENDING (next loop)
+### All students active (8 WIP)
 
 ---
 
-## Round 27 Closures
+## Round 27–28 Closures
 
 | Student | PR | Result |
 |---|---|---|
 | dl24-tanjiro | #978 | Per-case bbox coordinate normalization — CLOSED NEGATIVE. EP5 val_abupt=8.4488% (gate ≤7.5%). STRING PE sigmas tuned for raw ~5m coords; bbox normalization to [-1,+1] causes ~5× frequency mismatch. Loader bug fix (empty-view guard) worth cherry-picking separately. |
 | askeladd | #975 | Surface-head-only isolation — CLOSED NEGATIVE. EP3 gate failed. Surface head alone cannot match the full model; xattn is load-bearing for surface metrics. |
 | alphonse | #976 | Per-case geometry embedding — CLOSED NEGATIVE. EP3=8.073% val_abupt + 5.301% vol_p, dual gate fail. Mean-pool surface hidden states → geometry code does not generalize OOD vol_p. |
-| edward | #980 | Bbox geometry scalar conditioning — CLOSED. No student response; no run ever launched. Student was idle; PR closed, student needs new assignment. |
 | frieren | #971 | Learned distance RPB on surf→vol xattn — CLOSED. SM 12.0 OOM on [B=4, H=4, N_vol=16384, N_surf=65536] attention tensor ~32 GiB bf16. |
 | edward | #941 | SDF data fix retrain — CLOSED NEGATIVE. EP13 test_vol_p=11.9618% (worse than 11.6704% baseline). SDF corruption is not the root cause. |
 | thorfinn | #974 | SDF-conditioned xattn temperature MLP — CLOSED NEGATIVE. MLP collapsed to global constant scale_mean=0.515, τ_std=0.00177. EP3: val_abupt=8.148%, vol_p=5.350% — narrowly missed dual gate. Follow-up: #984. |
@@ -78,7 +80,7 @@
 
 ---
 
-## Current Research Focus (Round 27)
+## Current Research Focus (Round 28)
 
 **Primary mandate (Issue #717):** Reduce test_vol_pressure below 11.0% → 10.0% → 8.5% → 6.08% (AB-UPT). All channels must not degrade.
 
@@ -89,7 +91,7 @@ Independent 3-layer MLP branch for vol_p prediction. Arm A (vol_loss_weight=1.0)
 Oversample near-boundary vol tokens (SDF proximity, alpha=2.0) during training. Run `xzreqhns` (`frieren/sdf-stratified-vol-ep4-alpha2-restart`) confirmed running at step ~1,358, EP1 expected ~07:16Z. Group `frieren-sdf-stratified-vol`.
 
 ### Theme 3: No-SDF-PE-Scaling Control (fern #982)
-Ablation of SDF-PE spectral scaling to verify whether PR #977's EP3 failure (val_abupt ≤8.0% miss) was caused by SDF-PE-scaling or other changes. Run `fxcg25rk`, group `fern-no-sdf-pe-scaling-control`. EP1 gate ≤30%.
+Ablation of SDF-PE spectral scaling to verify whether PR #977's EP3 failure (val_abupt ≤8.0% miss) was caused by SDF-PE-scaling or other changes. Run `ua1ohtjb`, group `fern-no-sdf-pe-scaling-control`. EP1 gate ≤30%.
 
 ### Theme 4: Curriculum Warmup (tanjiro #983)
 `--vol-points-warmup-steps` to smoothly ramp vol points per epoch rather than step jumps. Arm A (500-step warmup, run `hhplwxmk`): EP1→EP2 transition pending at step ~10,865 (critical window — PR #973 diverged here). Arm B (200-step warmup) pre-approved; launch after Arm A clears step 10,868 cleanly. Group `tanjiro-curriculum-warmup`.
@@ -97,12 +99,20 @@ Ablation of SDF-PE spectral scaling to verify whether PR #977's EP3 failure (val
 ### Theme 5: Constant xattn temp scale=0.5 (thorfinn #984)
 Zero-param control for PR #974's MLP collapsed to global scale=0.515. Hardcode Q×0.5 before surf→vol xattn. Run `ojuyombs`, group `thorfinn-constant-attn-temp-scale`. EP1 gate ≤30%.
 
-### Closed Themes This Round
+### Theme 6: Bbox Geometry Scalar Conditioning (edward #980)
+Per-case geometry embedding via scalar features [L,H,W,A_front] projected to hidden_dim and added as additive bias to vol hidden states. Zero-init Linear(4,hidden_dim) for safe warm-up. Run `nv4g1nhw`, 10-ep schedule with GradNorm. EP1 gate ≤30%.
+
+### Theme 7: Per-Case Geometry Embedding v2 (alphonse #985)
+Second cross-attention layer (vol Q × all surface K/V, zero-init out_proj residual) before main surf→vol xattn. Spatially conditions vol queries on all surface tokens, overcoming the mean-pool spatial specificity loss that killed #976. ~1.05M new params. Newly assigned — awaiting student implementation.
+
+### Theme 8: Adaptive SDF Vol Loss Weighting (askeladd #986)
+Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundaries where OOD geometry differences are most pronounced. Sigma sweep {0.5, 1.0, 2.0} m. Parameter-free. Newly assigned — awaiting student implementation.
+
+### Closed Themes
 - **SDF data quality** (edward #941): CLOSED NEGATIVE — SDF corruption is NOT the root cause of vol_p OOD gap.
 - **STRING positional encoding** (#960, #970 etc.): FULLY EXHAUSTED — all axes closed. No new STRING experiments.
-- **Per-case geometry embedding** (alphonse #976): CLOSED NEGATIVE — mean-pool surface code does not generalize OOD vol_p.
+- **Per-case geometry embedding v1** (alphonse #976): CLOSED NEGATIVE — mean-pool surface code does not generalize OOD vol_p.
 - **Surface-head-only isolation** (askeladd #975): CLOSED NEGATIVE — xattn is load-bearing for surface metrics.
-- **Bbox geometry conditioning** (edward #980): CLOSED — no student response.
 
 ---
 
@@ -115,9 +125,9 @@ Zero-param control for PR #974's MLP collapsed to global scale=0.515. Hardcode Q
 4. **Bbox normalization with corrected PE sigmas**: PR #978 CLOSED NEGATIVE — coordinate rescale ~5× caused PE frequency mismatch. Follow-up: apply normalization AFTER PE (coordinates remain raw-scale for PE; normalize vol/surf coords only for Transolver slice attention). Or rescale STRING sigmas to match normalized coords: {0.05, 0.1, 0.2, 0.4, 0.8}.
 
 ### Architecture Directions
-5. **Per-case geometry embedding v2**: Skip mean-pool; instead use cross-attention between vol queries and all surface tokens to create case-specific vol queries — spatial specificity rather than global mean-pool
+5. **Per-case geometry embedding v2**: ASSIGNED — alphonse #985 (cross-attn vol × all surf tokens, zero-init residual)
 6. **Mid-backbone xattn**: Cross-attention at intermediate backbone layer rather than final; tested several variants (PR #917 NEGATIVE), but pre-final-layer variant may differ
-7. **Adaptive vol loss weighting by SDF distance**: Weight vol loss per-token by exp(-d_sdf/sigma); sigma sweep {0.5, 1.0, 2.0} m
+7. **Adaptive vol loss weighting by SDF distance**: ASSIGNED — askeladd #986 (sigma sweep {0.5, 1.0, 2.0} m)
 
 ### Data / Representation Directions
 8. **asinh bounded SDF encoding**: tanjiro #973 Arm B was in progress (asinh replaces tanh); if complete, review results
