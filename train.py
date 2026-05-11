@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_pre_xattn_vol_self_attn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_pre_xattn_vol_self_attn": (
+            "Enable pre-xattn vol self-attention (PR #988). After the "
+            "post-backbone LayerNorm split and BEFORE the surf->vol "
+            "cross-attention, a single nn.MultiheadAttention block lets "
+            "volume hidden states attend to themselves (Q=K=V=vol_hidden) "
+            "with key_padding_mask=~volume_mask, so vol queries become "
+            "context-aware before extracting surface information. Pre-norm "
+            "residual `vol_h + MHA(LN(vol_h))` with zero-initialised "
+            "out_proj weight and bias (identity-at-init). embed_dim follows "
+            "--model-hidden-dim and num_heads follows --model-heads. "
+            "Requires DDP find_unused_parameters=True."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_pre_xattn_vol_self_attn=config.use_pre_xattn_vol_self_attn,
     )
 
 
@@ -773,7 +787,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_pre_xattn_vol_self_attn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
