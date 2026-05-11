@@ -51,12 +51,6 @@ volume_pressure.npy    # [N_volume] or [N_volume, 1]
 
 The loader concatenates surface features into `[x, y, z, nx, ny, nz, area]` and volume features into `[x, y, z, sdf]`.
 
-The canonical `rawcanon_20260511` processed root is raw-only: surface arrays are
-carried forward from the packaged processed root, while all volume arrays are
-regenerated from complete raw VTU files using deterministic 10% cell-center
-sampling. `volume_sdf.npy` is computed at those sampled cell centers against the
-case STL surface. No synthetic inside-body volume rows are added.
-
 Targets:
 
 | Tensor | Channels | Description |
@@ -77,7 +71,7 @@ The pinned split follows the packaged public processed DrivAerML manifest:
 | val | 34 |
 | test | 50 |
 
-`data/loader.py` validates that the case split is exactly `400 / 34 / 50`, has no overlap, and includes the restored public case IDs. The same case split is used for surface and volume fields.
+`data/loader.py` validates that the case split is exactly `400 / 34 / 50`, has no overlap, and includes the restored public case IDs.
 
 ## Point-View Sampling in the Reference train.py
 
