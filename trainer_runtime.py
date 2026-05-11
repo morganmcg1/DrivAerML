@@ -937,10 +937,13 @@ def accumulate_eval_batch(
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
     if use_tta:
-        # Y-symmetry TTA: run a second forward pass with Y-coordinate flipped.
-        # surface_x and volume_x coords are [B, N, 3] where dim 1 is Y.
+        # Y-symmetry TTA: run a second forward pass with the geometry reflected
+        # through the y=0 plane. Channel layout matches apply_y_symmetry_aug:
+        #   surface_x: [x, y, z, nx, ny, nz, area] -> negate idx 1 (y) and idx 4 (ny)
+        #   volume_x:  [x, y, z, sdf]              -> negate idx 1 (y) only
         surface_x_flip = batch.surface_x.clone()
         surface_x_flip[..., 1] = -surface_x_flip[..., 1]
+        surface_x_flip[..., 4] = -surface_x_flip[..., 4]
         volume_x_flip = batch.volume_x.clone()
         volume_x_flip[..., 1] = -volume_x_flip[..., 1]
         with autocast_context(device, amp_mode):
