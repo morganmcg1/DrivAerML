@@ -130,6 +130,7 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    vol_points_warmup_steps: int = 0
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -160,6 +161,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "vol_points_warmup_steps": (
+            "Linear ramp length (in optimizer steps) for vol_points at each "
+            "curriculum transition. When --vol-points-schedule increases the "
+            "view size at an epoch boundary, the batch's volume tensors are "
+            "truncated to a linearly interpolated value between the previous "
+            "and new view size over the first N steps of the new epoch. "
+            "Default 0 disables the ramp (original abrupt-transition behavior). "
+            "Tests the hypothesis that curriculum shock is the limiting factor "
+            "in fast-schedule approaches (see PR #973 for the shock mechanism)."
         ),
         "use_gradnorm": (
             "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
@@ -891,6 +902,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         early_stop_reason: str | None = None
         timeout_hit = False
         train_start = time.time()
+        prev_train_vol_points = current_train_vol_points
+        vol_transition_step = 0
 
         for epoch in range(max_epochs):
             if vol_points_schedule:
@@ -905,12 +918,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                             f"Volume-points curriculum: epoch {epoch} -> "
                             f"train_volume_points={desired_vol_points} "
                             f"(was {current_train_vol_points})"
+                            + (
+                                f" [ramp over {config.vol_points_warmup_steps} steps]"
+                                if config.vol_points_warmup_steps > 0
+                                and desired_vol_points > current_train_vol_points
+                                else ""
+                            )
                         )
+                    prev_train_vol_points = current_train_vol_points
                     config.train_volume_points = desired_vol_points
                     train_loader = rebuild_train_loader_with_vol_points(
                         config, train_loader, desired_vol_points, state
                     )
                     current_train_vol_points = desired_vol_points
+                    vol_transition_step = global_step
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
@@ -936,6 +957,26 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                effective_vol_points = current_train_vol_points
+                vol_warmup_alpha = 1.0
+                if (
+                    config.vol_points_warmup_steps > 0
+                    and prev_train_vol_points < current_train_vol_points
+                ):
+                    steps_since_transition = global_step - vol_transition_step
+                    if steps_since_transition < config.vol_points_warmup_steps:
+                        vol_warmup_alpha = (
+                            steps_since_transition / config.vol_points_warmup_steps
+                        )
+                        effective_vol_points = int(
+                            prev_train_vol_points
+                            + vol_warmup_alpha
+                            * (current_train_vol_points - prev_train_vol_points)
+                        )
+                        if effective_vol_points < batch.volume_x.shape[1]:
+                            batch.volume_x = batch.volume_x[:, :effective_vol_points, :]
+                            batch.volume_y = batch.volume_y[:, :effective_vol_points, :]
+                            batch.volume_mask = batch.volume_mask[:, :effective_vol_points]
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1054,6 +1095,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/lr": current_lr,
                     "lr": current_lr,
                     "train/vol_points": float(current_train_vol_points),
+                    "train/effective_vol_points": float(effective_vol_points),
+                    "train/vol_warmup_alpha": float(vol_warmup_alpha),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
