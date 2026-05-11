@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_sdf_xattn_temperature: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_xattn_temperature": (
+            "Per-vol-token SDF-conditioned attention temperature on "
+            "surf->vol xattn (PR #974). A tiny MLP "
+            "(Linear(1->16)->SiLU->Linear(16->1)->Sigmoid) reads the "
+            "normalised SDF scalar for each volume token and emits "
+            "tau in (0,1); attention logits are multiplied by "
+            "(0.5 + tau) before the standard 1/sqrt(d) scaling. "
+            "Final Linear is zero-initialised so tau=0.5 and the "
+            "effective scale starts at 1.0 (identity at init). "
+            "Requires --use-surf-to-vol-xattn."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +320,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_sdf_xattn_temperature=config.use_sdf_xattn_temperature,
     )
 
 
@@ -1126,6 +1139,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        if should_log_gradients and state.is_main:
+                            sdf_temp_stats = getattr(
+                                base_model, "_sdf_temp_last_stats", None
+                            )
+                            if sdf_temp_stats:
+                                train_log.update(
+                                    {k: float(v.item()) for k, v in sdf_temp_stats.items()}
+                                )
 
                 train_log.update(
                     train_slope_tracker.update(

@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_sdf_xattn_temperature: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_sdf_xattn_temperature = use_sdf_xattn_temperature
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +446,24 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # SDF-conditioned per-token attention temperature on surf->vol xattn
+        # (PR #974). A tiny MLP reads each volume token's normalised SDF
+        # scalar and emits tau in (0,1); attention logits are multiplied
+        # by (0.5 + tau) before the standard 1/sqrt(d) scaling. Final
+        # Linear is zero-initialised so tau starts at 0.5 and the
+        # effective scale starts at 1.0 (identity at init).
+        if use_surf_to_vol_xattn and use_sdf_xattn_temperature:
+            self.sdf_temp_mlp = nn.Sequential(
+                nn.Linear(1, 16),
+                nn.SiLU(),
+                nn.Linear(16, 1),
+                nn.Sigmoid(),
+            )
+            nn.init.zeros_(self.sdf_temp_mlp[2].weight)
+            nn.init.zeros_(self.sdf_temp_mlp[2].bias)
+        else:
+            self.sdf_temp_mlp = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -469,6 +489,84 @@ class SurfaceTransolver(nn.Module):
             )
             hidden = hidden + project_features(features)
         return bias(hidden) + placeholder
+
+    def _sdf_temp_xattn(
+        self,
+        *,
+        volume_hidden: torch.Tensor,
+        surface_hidden: torch.Tensor,
+        volume_x: torch.Tensor,
+    ) -> torch.Tensor:
+        # Per-token SDF-conditioned temperature: tau in (0,1) -> scale in (0.5, 1.5).
+        # Identity-approximate at init (tau=0.5 -> scale=1.0 matches uniform 1/sqrt(d)).
+        # SDF channel is volume_x[:, :, 3]; clip+rescale to roughly [0, 1].
+        sdf_raw = volume_x[:, :, 3:4].to(dtype=volume_hidden.dtype)
+        sdf_norm = sdf_raw.clamp(min=0.0, max=5.0) / 5.0
+        tau = self.sdf_temp_mlp(sdf_norm)
+        scale = 0.5 + tau
+
+        mha = self.surf_to_vol_xattn
+        d_model = mha.embed_dim
+        n_heads = mha.num_heads
+        d_head = d_model // n_heads
+        batch_size, n_vol, _ = volume_hidden.shape
+        n_surf = surface_hidden.shape[1]
+
+        W_q = mha.in_proj_weight[:d_model]
+        W_k = mha.in_proj_weight[d_model : 2 * d_model]
+        W_v = mha.in_proj_weight[2 * d_model :]
+        in_bias = mha.in_proj_bias
+        if in_bias is not None:
+            b_q = in_bias[:d_model]
+            b_k = in_bias[d_model : 2 * d_model]
+            b_v = in_bias[2 * d_model :]
+        else:
+            b_q = b_k = b_v = None
+
+        q = F.linear(volume_hidden, W_q, b_q)
+        k = F.linear(surface_hidden, W_k, b_k)
+        v = F.linear(surface_hidden, W_v, b_v)
+
+        q = q.view(batch_size, n_vol, n_heads, d_head).transpose(1, 2)
+        k = k.view(batch_size, n_surf, n_heads, d_head).transpose(1, 2)
+        v = v.view(batch_size, n_surf, n_heads, d_head).transpose(1, 2)
+
+        # Apply per-token scale by multiplying queries before SDPA. Math:
+        #   logits[i, j] = scale_i * (Q_i . K_j) / sqrt(d)
+        #               = ((scale_i * Q_i) . K_j) / sqrt(d)
+        # so baking scale_i into Q row i is exactly equivalent to scaling
+        # the logits row i, but lets us use the memory-efficient SDPA kernel
+        # (Flash / mem_efficient) instead of materialising a
+        # [B, H, N_vol, N_surf] logits tensor (which OOMs at production sizes).
+        scale_per_head = scale.unsqueeze(1)  # [B, 1, N_vol, 1] broadcast over H
+        q = q * scale_per_head
+
+        attn_out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=mha.dropout if self.training else 0.0,
+        )
+
+        attn_out = attn_out.transpose(1, 2).contiguous().view(batch_size, n_vol, d_model)
+        xattn_out = F.linear(attn_out, mha.out_proj.weight, mha.out_proj.bias)
+
+        # Stash latest tau / scale stats so train.py can harvest them for
+        # W&B logging at its normal logging cadence. Cheap (constant-size
+        # tensor reductions; .item() forces a sync only when consumed).
+        if self.training:
+            tau_f = tau.detach().float()
+            scale_f = scale.detach().float()
+            self._sdf_temp_last_stats = {
+                "model/sdf_temp_tau_mean": tau_f.mean(),
+                "model/sdf_temp_tau_std": tau_f.std(),
+                "model/sdf_temp_tau_min": tau_f.min(),
+                "model/sdf_temp_tau_max": tau_f.max(),
+                "model/sdf_temp_scale_mean": scale_f.mean(),
+                "model/sdf_temp_scale_std": scale_f.std(),
+            }
+
+        return xattn_out
 
     def forward(
         self,
@@ -536,12 +634,19 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
-            xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
-                need_weights=False,
-            )
+            if self.sdf_temp_mlp is not None:
+                xattn_out = self._sdf_temp_xattn(
+                    volume_hidden=volume_hidden,
+                    surface_hidden=surface_hidden,
+                    volume_x=volume_x,
+                )
+            else:
+                xattn_out, _ = self.surf_to_vol_xattn(
+                    query=volume_hidden,
+                    key=surface_hidden,
+                    value=surface_hidden,
+                    need_weights=False,
+                )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
