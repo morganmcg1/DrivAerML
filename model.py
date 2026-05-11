@@ -343,6 +343,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_geo_embed: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +357,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_geo_embed = use_geo_embed
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -444,6 +446,24 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Per-case geometry embedding (PR #976): after the backbone, mean-pool
+        # the masked surface hidden states into a single geometry code vector
+        # per sample in the batch. Project and add it to the volume hidden
+        # states before the surf->vol cross-attention (or directly before the
+        # volume output head when xattn is disabled).
+        #
+        # This gives the volume decoder a global shape-context signal that is
+        # independent of local point positions. At init the projection is
+        # zero-initialised, so the layer is identity (no change to baseline
+        # behavior at epoch 0). Unlike a learned ID lookup table, mean-pooling
+        # generalises to OOD test geometries at inference time.
+        if use_geo_embed:
+            self.geo_embed_proj = nn.Linear(n_hidden, n_hidden)
+            nn.init.zeros_(self.geo_embed_proj.weight)
+            nn.init.zeros_(self.geo_embed_proj.bias)
+        else:
+            self.geo_embed_proj = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -528,6 +548,21 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.geo_embed_proj is not None
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            # Mean-pool masked surface hidden states → global geometry code [B, n_hidden]
+            surf_mask_float = surface_mask.unsqueeze(-1).float()  # [B, S, 1]
+            geo_code = (surface_hidden * surf_mask_float).sum(dim=1) / surf_mask_float.sum(dim=1).clamp(min=1.0)
+            # Project (zero-init → identity at epoch 0) and broadcast to volume sequence
+            geo_bias = self.geo_embed_proj(geo_code).unsqueeze(1)  # [B, 1, n_hidden]
+            volume_hidden = volume_hidden + geo_bias
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if (
             self.surf_to_vol_xattn is not None

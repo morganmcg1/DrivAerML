@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_geo_embed: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_geo_embed": (
+            "Enable per-case geometry embedding (PR #976). After the shared "
+            "Transolver backbone, mean-pool the masked surface hidden states "
+            "into a global geometry code vector [B, n_hidden] per sample. "
+            "Project via a zero-init nn.Linear(n_hidden, n_hidden) and add "
+            "the result to all volume hidden states before the surf->vol "
+            "cross-attention (or before the volume head when xattn is off). "
+            "Zero-init preserves baseline behaviour at epoch 0. Because the "
+            "code is computed from surface activations rather than a lookup "
+            "table, it generalises to OOD test geometries at inference time."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +320,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_geo_embed=config.use_geo_embed,
     )
 
 
@@ -773,7 +786,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_geo_embed:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
