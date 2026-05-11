@@ -320,6 +320,151 @@ class Transformer(nn.Module):
         return x
 
 
+class LinearVolSelfAttn(nn.Module):
+    """Performer-style FAVOR+ linear self-attention over volume tokens.
+
+    Complexity O(N * m * d) vs O(N^2 * d) for vanilla MHA, where m is the
+    number of random features. PR #1010 follow-up to #988: that PR showed a
+    strong EP1 signal from vanilla self-attn over volume tokens but timed
+    out because O(N^2) was infeasible at N=65k.
+
+    Ref: Choromanski et al. ICLR 2021, "Rethinking Attention with Performers".
+    https://arxiv.org/abs/2009.14794
+
+    The kernel map uses the paper's softmax-approximation form
+    phi(x) = exp(d^{-1/4} * x.omega - ||x||^2 / (2*sqrt(d))) / sqrt(m)
+    which approximates exp(x.y / sqrt(d)) (the softmax temperature). We add
+    the per-token (query) and global (key) max-subtraction for numerical
+    stability, an eps floor on the denominator, and an eps=1e-4 jitter
+    inside the exp output to keep gradients well-defined.
+
+    The output projection is zero-initialised so the whole module is the
+    identity at init (preserves baseline behaviour at epoch 0), matching
+    the pattern used by surf_to_vol_xattn in this file.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int = 4,
+        num_features: int = 64,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.num_features = num_features
+
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.k_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.v_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+        nn.init.zeros_(self.out_proj.weight)
+        nn.init.zeros_(self.out_proj.bias)
+
+        self.register_buffer(
+            "omega",
+            self._generate_orthogonal_features(self.head_dim, num_features),
+        )
+
+    @staticmethod
+    def _generate_orthogonal_features(d: int, m: int) -> torch.Tensor:
+        """Orthogonal Gaussian random features (Yu et al. 2016).
+
+        Builds ``ceil(m / d)`` independent random orthogonal d x d blocks
+        via QR decomposition, stacks their rows, and rescales each row to
+        norm sqrt(d). Returns a [d, m] buffer so the einsum
+        ``... d, dm -> ... m`` runs without an extra transpose.
+        """
+        num_blocks = (m + d - 1) // d
+        blocks: list[torch.Tensor] = []
+        for _ in range(num_blocks):
+            g = torch.randn(d, d)
+            q, _ = torch.linalg.qr(g)
+            blocks.append(q.t())  # rows are orthonormal
+        omega = torch.cat(blocks, dim=0)[:m]  # [m, d]
+        omega = omega * math.sqrt(d)
+        return omega.t().contiguous()  # [d, m]
+
+    def _favor_plus(self, x: torch.Tensor, is_query: bool) -> torch.Tensor:
+        """Apply the FAVOR+ positive feature map.
+
+        x: [B, H, N, d] (float32) -> phi(x): [B, H, N, m] (float32).
+        Query and key shifts differ: queries use a per-token max
+        (independent attention rows), keys use a global max across
+        sequence and feature dims (preserves the shared sum_j phi(K_j)).
+        """
+        d = x.shape[-1]
+        proj_scale = d ** -0.25
+        norm_scale = d ** -0.5
+        omega = self.omega.to(dtype=x.dtype)
+        xw = torch.einsum("bhnd,dm->bhnm", x * proj_scale, omega)
+        norm_sq = (x * x).sum(dim=-1, keepdim=True) * (norm_scale * 0.5)
+        diff = xw - norm_sq
+        if is_query:
+            stabilizer = diff.amax(dim=-1, keepdim=True).detach()
+        else:
+            stabilizer = diff.amax(dim=(-2, -1), keepdim=True).detach()
+        phi = torch.exp(diff - stabilizer) + 1e-4
+        return phi * (self.num_features ** -0.5)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Pre-norm + FAVOR+ linear self-attention with residual.
+
+        x: [B, N, hidden_dim] volume hidden states.
+        mask: [B, N] (1 = valid, 0 = padding) so padded positions never
+        contribute to the K/V running sums and outputs at padded indices
+        are zeroed before the residual add.
+        """
+        residual = x
+        x_norm = self.norm(x)
+        B, N, _ = x_norm.shape
+        H, D = self.num_heads, self.head_dim
+
+        # [B, N, H*D] -> [B, H, N, D]
+        Q = self.q_proj(x_norm).view(B, N, H, D).permute(0, 2, 1, 3)
+        K = self.k_proj(x_norm).view(B, N, H, D).permute(0, 2, 1, 3)
+        V = self.v_proj(x_norm).view(B, N, H, D).permute(0, 2, 1, 3)
+
+        # Upcast for the exp/sum kernel — bf16 underflows below ~1e-2.
+        compute_dtype = torch.float32
+        Q_f = Q.to(dtype=compute_dtype)
+        K_f = K.to(dtype=compute_dtype)
+        V_f = V.to(dtype=compute_dtype)
+
+        Q_prime = self._favor_plus(Q_f, is_query=True)   # [B, H, N, m]
+        K_prime = self._favor_plus(K_f, is_query=False)  # [B, H, N, m]
+
+        if mask is not None:
+            mask_kv = mask.to(dtype=compute_dtype, device=K_prime.device).view(B, 1, N, 1)
+            K_prime = K_prime * mask_kv
+            V_f = V_f * mask_kv
+
+        # Numerator: KV = sum_j phi(K_j) V_j^T  -> [B, H, m, D]
+        KV = torch.einsum("bhnm,bhnd->bhmd", K_prime, V_f)
+        out_num = torch.einsum("bhnm,bhmd->bhnd", Q_prime, KV)  # [B, H, N, D]
+        # Denominator: phi(Q) . sum_j phi(K_j)  -> [B, H, N, 1]
+        K_sum = K_prime.sum(dim=-2)  # [B, H, m]
+        out_den = torch.einsum("bhnm,bhm->bhn", Q_prime, K_sum).unsqueeze(-1)
+        out = out_num / out_den.clamp(min=1e-6)
+
+        out = out.to(dtype=residual.dtype)
+        out = out.permute(0, 2, 1, 3).contiguous().view(B, N, self.hidden_dim)
+        out = self.out_proj(out)
+
+        if mask is not None:
+            out = out * mask.to(dtype=out.dtype, device=out.device).unsqueeze(-1)
+
+        return residual + out
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +488,9 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_linear_vol_self_attn: bool = False,
+        linear_vol_attn_features: int = 64,
+        linear_vol_attn_heads: int = 4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -460,6 +608,21 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # PR #1010: Performer-style FAVOR+ linear self-attention over volume
+        # tokens applied BEFORE the surf->vol cross-attention. PR #988 showed
+        # the direction works but vanilla O(N^2) MHA timed out at N=65k;
+        # FAVOR+ reduces compute to O(N*m). Zero-init out_proj keeps the
+        # module identity-at-init.
+        self.use_linear_vol_self_attn = use_linear_vol_self_attn
+        if use_linear_vol_self_attn:
+            self.linear_vol_self_attn = LinearVolSelfAttn(
+                hidden_dim=n_hidden,
+                num_heads=linear_vol_attn_heads,
+                num_features=linear_vol_attn_features,
+            )
+        else:
+            self.linear_vol_self_attn = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -544,6 +707,20 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        # PR #1010: pre-xattn linear (FAVOR+) self-attention over volume tokens.
+        # Gated on volume_tokens > 0 so volume-empty views (max(surface_views,
+        # volume_views) >= volume_views) skip the layer; DDP needs
+        # find_unused_parameters=True (set in train.py).
+        if (
+            self.linear_vol_self_attn is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            volume_hidden = self.linear_vol_self_attn(
+                volume_hidden, mask=volume_mask
+            )
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if (
             self.surf_to_vol_xattn is not None

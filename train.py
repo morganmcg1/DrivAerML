@@ -103,6 +103,9 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_linear_vol_self_attn: bool = False
+    linear_vol_attn_features: int = 64
+    linear_vol_attn_heads: int = 4
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +232,28 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_linear_vol_self_attn": (
+            "Enable Performer-style (FAVOR+) linear self-attention over "
+            "volume tokens applied BEFORE the surf->vol cross-attention "
+            "(PR #1010 follow-up to #988). Complexity O(N*m*d) vs O(N^2*d) "
+            "for vanilla MHA, where m = --linear-vol-attn-features and N "
+            "is the volume token count. out_proj is zero-init so the "
+            "module is identity at epoch 0. Forces "
+            "find_unused_parameters=True in the DDP wrapper because "
+            "volume-empty views skip the layer."
+        ),
+        "linear_vol_attn_features": (
+            "Number of FAVOR+ random features m for the linear vol "
+            "self-attention. Cost scales as O(N*m*d); approximation "
+            "quality improves with m. Choromanski et al. 2021 recommend "
+            "m >= d for stable approximation, m >= 2d for <5%% kernel "
+            "error; head_dim is hidden_dim/heads. Default 64 trades "
+            "approximation for speed in the 4-epoch screen."
+        ),
+        "linear_vol_attn_heads": (
+            "Number of heads for the linear vol self-attention. "
+            "hidden_dim must be divisible by this. Default 4."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +333,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_linear_vol_self_attn=config.use_linear_vol_self_attn,
+        linear_vol_attn_features=config.linear_vol_attn_features,
+        linear_vol_attn_heads=config.linear_vol_attn_heads,
     )
 
 
@@ -772,8 +800,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             # batch, so DDP's default find_unused_parameters=False deadlocks
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
-            # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # params across ranks, at a small per-step overhead. PR #1010's
+            # linear vol self-attn has the mirror issue (gated on
+            # `volume_tokens > 0`), so we union the flags.
+            if config.use_surf_to_vol_xattn or config.use_linear_vol_self_attn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
