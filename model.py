@@ -15,6 +15,14 @@ import torch.nn.functional as F
 from data import SURFACE_X_DIM, SURFACE_Y_DIM, VOLUME_X_DIM, VOLUME_Y_DIM
 
 
+# Train-set SDF statistics (aggregated over 400 train cases from
+# `analysis/sdf_per_case_stats.csv`). Used to standardize/transform the
+# per-point SDF scalar before it enters the volume input projection when
+# `use_sdf_vol_input_feature=True`.
+SDF_TRAIN_MEAN = 0.222682
+SDF_TRAIN_STD = 1.681517
+
+
 # ---------------------------------------------------------------------------
 # Model
 # ---------------------------------------------------------------------------
@@ -343,6 +351,9 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_sdf_vol_input_feature: bool = False,
+        sdf_vol_encoding: str = "linear",
+        sdf_vol_scale: float = 2.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +367,12 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_sdf_vol_input_feature = use_sdf_vol_input_feature
+        if sdf_vol_encoding not in ("linear", "tanh", "asinh"):
+            raise ValueError(
+                f"sdf_vol_encoding must be one of 'linear', 'tanh', 'asinh'; got {sdf_vol_encoding!r}"
+            )
+        self.sdf_vol_encoding = sdf_vol_encoding
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -403,6 +420,24 @@ class SurfaceTransolver(nn.Module):
 
         surface_proj_in = surface_extra_dim + rff_out_dim
         volume_proj_in = volume_extra_dim + rff_out_dim
+        if use_sdf_vol_input_feature:
+            # Append a transformed SDF scalar to the volume input projection
+            # (PR #966 + #973). Train-set mean/std are stored as buffers so
+            # they ride DDP with the model and are restored from checkpoint.
+            # `sdf_vol_scale` is the denominator for tanh/asinh encodings.
+            volume_proj_in += 1
+            self.register_buffer(
+                "sdf_input_mean",
+                torch.tensor(SDF_TRAIN_MEAN, dtype=torch.float32),
+            )
+            self.register_buffer(
+                "sdf_input_std",
+                torch.tensor(SDF_TRAIN_STD, dtype=torch.float32),
+            )
+            self.register_buffer(
+                "sdf_vol_scale",
+                torch.tensor(float(sdf_vol_scale), dtype=torch.float32),
+            )
         self.project_surface_features = (
             LinearProjection(surface_proj_in, n_hidden) if surface_proj_in > 0 else None
         )
@@ -453,12 +488,15 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        extra_feature: torch.Tensor | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
+        if extra_feature is not None:
+            feature_parts.append(extra_feature)
         if string_sep is not None:
             feature_parts.append(string_sep(pos))
         elif rff is not None:
@@ -506,6 +544,16 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
+            volume_extra: torch.Tensor | None = None
+            if self.use_sdf_vol_input_feature and volume_x.shape[-1] > self.space_dim:
+                sdf_raw = volume_x[:, :, self.space_dim : self.space_dim + 1]
+                sdf_centered = sdf_raw - self.sdf_input_mean
+                if self.sdf_vol_encoding == "tanh":
+                    volume_extra = torch.tanh(sdf_centered / self.sdf_vol_scale)
+                elif self.sdf_vol_encoding == "asinh":
+                    volume_extra = torch.asinh(sdf_centered / self.sdf_vol_scale)
+                else:  # "linear" — PR #966 behavior
+                    volume_extra = sdf_centered / self.sdf_input_std
             tokens.append(
                 self._encode_group(
                     volume_x,
@@ -514,6 +562,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_volume_features,
                     bias=self.volume_bias,
                     placeholder=self.volume_placeholder,
+                    extra_feature=volume_extra,
                 )
             )
             masks.append(volume_mask)

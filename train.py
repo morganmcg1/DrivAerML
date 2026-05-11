@@ -103,6 +103,9 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_sdf_vol_input_feature: bool = False
+    sdf_vol_encoding: str = "linear"
+    sdf_vol_scale: float = 2.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +232,36 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_vol_input_feature": (
+            "Append a transformed signed-distance-field (SDF) scalar to "
+            "every volume point's input feature vector before tokenisation "
+            "(PR #966 + #973). The SDF column already lives at "
+            "volume_x[..., 3] in raw distance units; with this flag enabled "
+            "a transformed copy is concatenated into the volume input "
+            "projection so the backbone sees a clean geometry signal in "
+            "addition to the existing raw channel. The transform is "
+            "controlled by --sdf-vol-encoding. Adds +1 input dimension to "
+            "the volume input projection only; the surface pipeline is "
+            "unchanged. Mean/std/scale are stored as buffers."
+        ),
+        "sdf_vol_encoding": (
+            "Encoding used for the SDF volume input feature when "
+            "--use-sdf-vol-input-feature is enabled. Choices: "
+            "'linear' (PR #966 behavior: (sdf - mean) / std — unbounded, "
+            "produces large outliers for freestream cells); "
+            "'tanh' (PR #973: tanh((sdf - mean) / scale) — bounded to "
+            "(-1, +1), saturates the freestream tail); "
+            "'asinh' (PR #973: asinh((sdf - mean) / scale) — never "
+            "saturates, log-compresses the tail while staying linear near "
+            "the surface)."
+        ),
+        "sdf_vol_scale": (
+            "Denominator (in meters) for the tanh/asinh SDF encoding when "
+            "--use-sdf-vol-input-feature and --sdf-vol-encoding != 'linear'. "
+            "Default 2.0 m places the transform knee near the wake region "
+            "(physical reference: car length ~4-5 m, wake ~1-5 m, boundary "
+            "layer ~0.01-0.1 m). Stored as a non-trainable buffer."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +341,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_sdf_vol_input_feature=config.use_sdf_vol_input_feature,
+        sdf_vol_encoding=config.sdf_vol_encoding,
+        sdf_vol_scale=config.sdf_vol_scale,
     )
 
 
