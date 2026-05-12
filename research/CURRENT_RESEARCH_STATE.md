@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-12 ~05:40 UTC
+- 2026-05-12 ~13:50 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -22,14 +22,14 @@
 
 **15+ model-side interventions FALSIFIED on this axis:** WD variants (0.005/0.01), GradNorm α-variants (0.25/0.75), fixed loss weights (2.0/3.0 with/without GradNorm), extended cosine T_max=60, EMA (decay=0.999/0.9999), BBox normalization, TTA Y-symmetry, DropPath, vol coord noise, stochastic vol subsampling, SDF-stratified sampling (far-field + near-surface), InstanceNorm across vol tokens, Lookahead. Gap is structurally embedded in the train/test distribution split.
 
-## Active Experiments (2026-05-12 ~21:00 UTC)
+## Active Experiments (2026-05-12 ~13:50 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 291,353 (EP26.5). SWA active, n=7 snapshots (EP20–EP26). | val_abupt=**6.188%** (EP26 best), val_vol_p=**3.935%** | EP25 gate PASSED ✓. 3.5 epochs remaining to EP30. Advisor EP26.5 status comment posted with SWA averaging instructions for EP30 terminal eval. |
-| #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — second `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights (no GradNorm feedback) | `ttnva184` (rank0) | **Running** — step 155,118 (EP14.1). EP10 gate PASSED ✓, **plateau confirmed**. | val_abupt=**6.381%** (EP14.1), val_vol_p=**3.540%** | **Best val_vol_p=3.528% at EP12** — now micro-regressing (+0.012pp over EP12→EP14). Slope ≈0. EP15 gate ≤6.80% at step ~163,245 WILL PASS (margin +0.42pp). Advisor EP14 plateau comment posted; instructed to continue to EP20 for terminal eval. |
-| #1034 | dl24-tanjiro | **Domain adversarial training (DANN)** — GRL on backbone features + discriminator to predict train-vs-test domain; forces distribution-invariant volume representations | `9q77j1wi` (rank0, group: `val-test-gap-domain-adaptation`) | **⚠ MERGE CONFLICT — 4th escalation posted** — conflict unresolved for 5+ hours, zero student response. Run at EP1.26, val_abupt=17.29% (normal for DANN early training). | val_abupt=17.29% (EP1.26, early) | domain_acc=0.50 (random guessing — discriminator not yet converged, normal). EP5 gate ≤7.5% at step ~54,415. Will close PR if rebase not done by next check. |
-| #1035 | dl24-fern | **Independent vol_p transformer tower** — separate `nn.ModuleList` of 6 transformer blocks processes ONLY volume tokens; no shared backbone parameters for vol predictions; vol-token LayerNorm included (from #1025) | `1dijs6g1` | **Running** — step ~502 (EP0.05). Implementation confirmed via commit `d8dc33d`. | — (no val metrics yet, just launched) | Tests shared-feature interference as root cause of val→test gap. Advisor launch confirmation posted. First EP5 gate at step ~54,930 (≤7.5%). |
+| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 296,357 (EP27.2). SWA active, n=8 snapshots (EP20–EP27). | val_abupt=**6.188%**, val_vol_p=**3.935%** | EP25/EP26 gates PASSED ✓. ~2.8 epochs remaining to EP30. Terminal eval with SWA averaging imminent. |
+| #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights | `ttnva184` | **Running** — step 160,514 (EP14.75). EP15 gate at ~163,245 IMMINENT (~2700 steps, ~15 min). | val_abupt=**6.381%**, val_vol_p=**3.540%** | **Best val_vol_p=3.528% at EP12** — plateau confirmed. EP15 gate ≤6.80% WILL PASS (current 6.381%). Continue to EP20 for terminal eval. |
+| #1034 | dl24-tanjiro | **Domain adversarial training (DANN)** — GRL on backbone features + discriminator to predict train-vs-test domain | `9q77j1wi` | **⚠ MERGE CONFLICT — 4th escalation at 13:37Z, 2-hour window expires ~15:37Z** — run healthy at EP1.41, val_abupt=17.29% (normal early DANN). | val_abupt=17.29% (EP1.41) | EP5 gate ≤7.5% at step ~54,415. Merge conflict on PR branch only — training unaffected. Will close PR if rebase not done by 15:37Z UTC. |
+| #1035 | dl24-fern | **Independent vol_p transformer tower** — separate 6L transformer backbone for volume tokens only | `1dijs6g1` | **Running** — step 1,075 (EP0.10). Very early, no val metrics yet. | — | EP5 gate at step ~54,930 (~4.9 epochs away). Tests shared-feature interference as root cause of val→test gap. |
 
 ## Recently Closed (since 2026-05-09)
 
