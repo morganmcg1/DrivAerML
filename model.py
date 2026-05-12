@@ -172,6 +172,278 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class SpectralConv3d(nn.Module):
+    """3D Fourier spectral convolution layer (Li et al. 2021, FNO).
+
+    Keeps the (2*modes1) x (2*modes2) x (modes3) lowest Fourier modes of the
+    real-valued input. The last spatial axis uses rfft, so only the positive
+    half (+modes3) needs to be parametrised; the other two axes need both the
+    positive (:modes) and negative (-modes:) corners. This follows the
+    canonical Zongyi Li implementation with 4 corner weight blocks.
+
+    FFT operations are performed in float32 to avoid bf16/fp16 precision
+    issues in torch.fft.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int,
+                 modes1: int, modes2: int, modes3: int):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.modes1 = modes1
+        self.modes2 = modes2
+        self.modes3 = modes3
+        scale = 1.0 / (in_channels * out_channels)
+        shape = (in_channels, out_channels, modes1, modes2, modes3)
+        self.weights1 = nn.Parameter(
+            scale * torch.randn(*shape, dtype=torch.cfloat)
+        )
+        self.weights2 = nn.Parameter(
+            scale * torch.randn(*shape, dtype=torch.cfloat)
+        )
+        self.weights3 = nn.Parameter(
+            scale * torch.randn(*shape, dtype=torch.cfloat)
+        )
+        self.weights4 = nn.Parameter(
+            scale * torch.randn(*shape, dtype=torch.cfloat)
+        )
+
+    @staticmethod
+    def _compl_mul3d(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+        return torch.einsum("bixyz,ioxyz->boxyz", x, w)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, _, H, W, D = x.shape
+        in_dtype = x.dtype
+        x_fp32 = x.float()
+        x_ft = torch.fft.rfftn(x_fp32, dim=[-3, -2, -1])
+        out_ft = torch.zeros(
+            B, self.out_channels, H, W, D // 2 + 1,
+            dtype=torch.cfloat, device=x.device,
+        )
+        m1, m2, m3 = self.modes1, self.modes2, self.modes3
+        out_ft[:, :, :m1, :m2, :m3] = self._compl_mul3d(
+            x_ft[:, :, :m1, :m2, :m3], self.weights1
+        )
+        out_ft[:, :, -m1:, :m2, :m3] = self._compl_mul3d(
+            x_ft[:, :, -m1:, :m2, :m3], self.weights2
+        )
+        out_ft[:, :, :m1, -m2:, :m3] = self._compl_mul3d(
+            x_ft[:, :, :m1, -m2:, :m3], self.weights3
+        )
+        out_ft[:, :, -m1:, -m2:, :m3] = self._compl_mul3d(
+            x_ft[:, :, -m1:, -m2:, :m3], self.weights4
+        )
+        x_out = torch.fft.irfftn(out_ft, s=(H, W, D), dim=[-3, -2, -1])
+        return x_out.to(dtype=in_dtype)
+
+
+def _normalize_to_unit_cube(
+    xyz: torch.Tensor, mask: torch.Tensor | None
+) -> torch.Tensor:
+    if mask is not None:
+        m = mask.to(dtype=torch.bool).unsqueeze(-1)
+        big = torch.full_like(xyz, float("inf"))
+        neg_big = torch.full_like(xyz, float("-inf"))
+        masked_for_min = torch.where(m, xyz, big)
+        masked_for_max = torch.where(m, xyz, neg_big)
+        mins = masked_for_min.min(dim=1, keepdim=True).values
+        maxs = masked_for_max.max(dim=1, keepdim=True).values
+    else:
+        mins = xyz.min(dim=1, keepdim=True).values
+        maxs = xyz.max(dim=1, keepdim=True).values
+    return 2.0 * (xyz - mins) / (maxs - mins + 1e-6) - 1.0
+
+
+class FNOVolDecoder(nn.Module):
+    """FNO-based vol pressure residual decoder.
+
+    Operates on a regular 3D grid interpolated from scattered volume tokens
+    via trilinear splat, applies `num_layers` FNO blocks, and queries the
+    grid back at the original point positions with trilinear interpolation.
+
+    The final projection is zero-initialised so the residual starts at zero
+    and the model trains from baseline behaviour, with the FNO learning an
+    additive correction.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        out_dim: int = 1,
+        grid_res: int = 32,
+        modes: int = 12,
+        fno_width: int = 32,
+        num_layers: int = 2,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+        self.grid_res = grid_res
+        self.modes = modes
+        self.fno_width = fno_width
+        self.num_layers = num_layers
+
+        self.lift = nn.Linear(hidden_dim, fno_width)
+        nn.init.trunc_normal_(self.lift.weight, std=0.02)
+        nn.init.zeros_(self.lift.bias)
+
+        self.spectral_convs = nn.ModuleList([
+            SpectralConv3d(fno_width, fno_width, modes, modes, modes)
+            for _ in range(num_layers)
+        ])
+        self.w_convs = nn.ModuleList([
+            nn.Conv3d(fno_width, fno_width, kernel_size=1)
+            for _ in range(num_layers)
+        ])
+        self.norms = nn.ModuleList([
+            nn.GroupNorm(num_groups=min(8, fno_width), num_channels=fno_width)
+            for _ in range(num_layers)
+        ])
+        for w in self.w_convs:
+            nn.init.trunc_normal_(w.weight, std=0.02)
+            nn.init.zeros_(w.bias)
+
+        self.proj_mid = nn.Linear(fno_width, fno_width)
+        self.proj_out = nn.Linear(fno_width, out_dim)
+        nn.init.trunc_normal_(self.proj_mid.weight, std=0.02)
+        nn.init.zeros_(self.proj_mid.bias)
+        # Zero-init proj_out so the residual starts at exactly zero. The
+        # baseline MLP head is preserved at step 0; the FNO learns from there.
+        nn.init.zeros_(self.proj_out.weight)
+        nn.init.zeros_(self.proj_out.bias)
+
+    def scatter_to_grid(
+        self,
+        h: torch.Tensor,
+        xyz_norm: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Trilinear-splat scattered point features to a regular 3D grid.
+
+        Args:
+            h: [B, N, C] point features (after lift).
+            xyz_norm: [B, N, 3] normalised coords in [-1, 1].
+            mask: [B, N] optional 0/1 mask (1 = valid point).
+
+        Returns:
+            grid: [B, C, R, R, R] normalised by accumulated trilinear weight
+                per voxel (empty voxels stay zero).
+        """
+        B, N, C = h.shape
+        R = self.grid_res
+        device, dtype = h.device, h.dtype
+
+        coords = (xyz_norm + 1.0) * 0.5 * (R - 1)
+        coords = coords.clamp(0.0, float(R - 1))
+        x0 = coords[..., 0].floor().long().clamp(0, R - 2)
+        y0 = coords[..., 1].floor().long().clamp(0, R - 2)
+        z0 = coords[..., 2].floor().long().clamp(0, R - 2)
+        x1, y1, z1 = x0 + 1, y0 + 1, z0 + 1
+
+        fx = coords[..., 0] - x0.to(coords.dtype)
+        fy = coords[..., 1] - y0.to(coords.dtype)
+        fz = coords[..., 2] - z0.to(coords.dtype)
+        one_minus = lambda t: 1.0 - t  # noqa: E731
+
+        w000 = one_minus(fx) * one_minus(fy) * one_minus(fz)
+        w001 = one_minus(fx) * one_minus(fy) * fz
+        w010 = one_minus(fx) * fy * one_minus(fz)
+        w011 = one_minus(fx) * fy * fz
+        w100 = fx * one_minus(fy) * one_minus(fz)
+        w101 = fx * one_minus(fy) * fz
+        w110 = fx * fy * one_minus(fz)
+        w111 = fx * fy * fz
+
+        if mask is not None:
+            m = mask.to(dtype=coords.dtype)
+            w000, w001, w010, w011 = w000 * m, w001 * m, w010 * m, w011 * m
+            w100, w101, w110, w111 = w100 * m, w101 * m, w110 * m, w111 * m
+
+        batch_idx = (
+            torch.arange(B, device=device).view(B, 1).expand(B, N)
+        )
+
+        def flat(xi: torch.Tensor, yi: torch.Tensor, zi: torch.Tensor) -> torch.Tensor:
+            return ((batch_idx * R + xi) * R + yi) * R + zi
+
+        grid_feat = torch.zeros(
+            B * R * R * R, C, device=device, dtype=dtype
+        )
+        grid_w = torch.zeros(B * R * R * R, device=device, dtype=dtype)
+
+        for xi, yi, zi, wi in (
+            (x0, y0, z0, w000),
+            (x0, y0, z1, w001),
+            (x0, y1, z0, w010),
+            (x0, y1, z1, w011),
+            (x1, y0, z0, w100),
+            (x1, y0, z1, w101),
+            (x1, y1, z0, w110),
+            (x1, y1, z1, w111),
+        ):
+            idx_flat = flat(xi, yi, zi).reshape(-1)
+            h_weighted = (h * wi.to(dtype=dtype).unsqueeze(-1)).reshape(-1, C)
+            grid_feat.index_add_(0, idx_flat, h_weighted)
+            grid_w.index_add_(0, idx_flat, wi.to(dtype=dtype).reshape(-1))
+
+        grid_feat = grid_feat / grid_w.unsqueeze(-1).clamp_min(1e-6)
+        return grid_feat.view(B, R, R, R, C).permute(0, 4, 1, 2, 3).contiguous()
+
+    def query_grid(
+        self, grid: torch.Tensor, xyz_norm: torch.Tensor
+    ) -> torch.Tensor:
+        """Trilinearly sample the regular 3D grid at point positions.
+
+        Args:
+            grid: [B, C, R, R, R].
+            xyz_norm: [B, N, 3] in [-1, 1].
+
+        Returns:
+            features: [B, N, C].
+        """
+        B, N, _ = xyz_norm.shape
+        # grid_sample expects input shape [B, C, D, H, W] and points as
+        # [B, D_out, H_out, W_out, 3] with last dim (x, y, z) where x maps
+        # to W axis, y to H, z to D. We treat axis order (x, y, z) on the
+        # grid the same way it was scattered: scatter used index ((b*R + x)*R + y)*R + z
+        # so axis 1 = x, axis 2 = y, axis 3 = z in [B, C, X, Y, Z]. grid_sample
+        # interprets coords as (x_W, y_H, z_D) -> samples grid[:, :, z, y, x].
+        # We need to permute coords from (x, y, z) to (z, y, x) before sampling.
+        coords = xyz_norm.flip(-1)  # (x, y, z) -> (z, y, x)
+        query = coords[:, :, None, None, :]  # [B, N, 1, 1, 3]
+        sampled = F.grid_sample(
+            grid.float(), query.float(),
+            mode="bilinear", padding_mode="border", align_corners=True,
+        )  # [B, C, N, 1, 1]
+        return sampled[:, :, :, 0, 0].permute(0, 2, 1).to(dtype=grid.dtype)
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        xyz: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Predict per-point vol-pressure residual.
+
+        Args:
+            h: [B, N, hidden_dim] volume token features.
+            xyz: [B, N, 3] raw volume point coords.
+            mask: [B, N] 0/1 mask.
+
+        Returns:
+            residual: [B, N, out_dim] additive correction.
+        """
+        xyz_norm = _normalize_to_unit_cube(xyz, mask)
+        h_lifted = self.lift(h)
+        grid = self.scatter_to_grid(h_lifted, xyz_norm, mask)
+        for sc, wc, n in zip(self.spectral_convs, self.w_convs, self.norms):
+            grid = F.gelu(n(sc(grid) + wc(grid)))
+        h_q = self.query_grid(grid, xyz_norm)
+        h_q = F.gelu(self.proj_mid(h_q))
+        return self.proj_out(h_q)
+
+
 class UpActDownMlp(nn.Module):
     def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
         super().__init__()
@@ -315,6 +587,11 @@ class SurfaceTransolver(nn.Module):
         pe_kind: str = "sincos",
         pe_num_features: int = 16,
         pe_init_sigmas: list[float] | None = None,
+        use_fno_vol_decoder: bool = False,
+        fno_grid_resolution: int = 32,
+        fno_modes: int = 12,
+        fno_width: int = 32,
+        fno_num_layers: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -325,6 +602,11 @@ class SurfaceTransolver(nn.Module):
         self.pe_kind = pe_kind
         self.pe_num_features = pe_num_features
         self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
+        self.use_fno_vol_decoder = use_fno_vol_decoder
+        self.fno_grid_resolution = fno_grid_resolution
+        self.fno_modes = fno_modes
+        self.fno_width = fno_width
+        self.fno_num_layers = fno_num_layers
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -364,6 +646,18 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.fno_vol_decoder: FNOVolDecoder | None = (
+            FNOVolDecoder(
+                hidden_dim=n_hidden,
+                out_dim=self.volume_output_dim,
+                grid_res=fno_grid_resolution,
+                modes=fno_modes,
+                fno_width=fno_width,
+                num_layers=fno_num_layers,
+            )
+            if use_fno_vol_decoder
+            else None
+        )
 
     def _encode_group(
         self,
@@ -441,7 +735,15 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            volume_preds_mlp = self.volume_out(volume_hidden)
+            if self.fno_vol_decoder is not None:
+                volume_coords = volume_x[:, :, : self.space_dim]
+                fno_residual = self.fno_vol_decoder(
+                    volume_hidden, volume_coords, mask=volume_mask
+                )
+                volume_preds = (volume_preds_mlp + fno_residual) * volume_mask.unsqueeze(-1)
+            else:
+                volume_preds = volume_preds_mlp * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)

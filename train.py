@@ -132,6 +132,11 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_fno_vol_decoder: bool = False
+    fno_grid_resolution: int = 32
+    fno_modes: int = 12
+    fno_width: int = 32
+    fno_num_layers: int = 2
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -235,6 +240,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        use_fno_vol_decoder=config.use_fno_vol_decoder,
+        fno_grid_resolution=config.fno_grid_resolution,
+        fno_modes=config.fno_modes,
+        fno_width=config.fno_width,
+        fno_num_layers=config.fno_num_layers,
     )
 
 
