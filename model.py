@@ -441,7 +441,10 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            # Soft gradient scaling: backbone receives 0.1x gradient from vol loss
+            # (PR #1011 — replaces hard detach in #1007 which blocked bootstrapping).
+            volume_hidden_for_out = volume_hidden * 0.1 + volume_hidden.detach() * 0.9
+            volume_preds = self.volume_out(volume_hidden_for_out) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
