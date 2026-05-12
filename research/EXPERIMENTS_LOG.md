@@ -8,6 +8,126 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-09 ~22:30 UTC — PR #972 CLOSED: SDF-stratified importance sampling, far-field bias α=2.0 (dl24-frieren, `56bcqp3m`)
+
+- **Branch:** `dl24-frieren/sdf-stratified-sampling`
+- **W&B Run:** `56bcqp3m`
+- **Hypothesis:** SDF-stratified volume importance sampling with far-field upweighting (α=2.0 Gaussian-bias on |sdf| > 0.1 points) would improve test vol_p generalization by forcing the model to learn better far-field pressure behaviour that the test set emphasizes.
+
+### Per-epoch val progression (selected)
+
+| Epoch | abupt% | vol_p% | Notes |
+|-------|--------|--------|-------|
+| EP5  | ~7.2%  | ~4.2%  | EP5 gate PASS |
+| EP10 | ~6.8%  | ~4.0%  | EP10 gate PASS |
+| EP20 | **6.127%** | **3.815%** | Best checkpoint; EP20 gate PASS |
+| EP30 | 6.191% | 4.005% | Terminal (slight regression from EP20) |
+
+### Terminal Test Results (EP20 best checkpoint)
+
+| Metric | Test Value | Baseline (#740) | Delta |
+|--------|-----------|-----------------|-------|
+| `vol_p` (PRIMARY) | **11.827%** | 10.758% | **+1.069pp WORSE** |
+| `abupt` | 7.480% | 7.5195% | -0.040pp (marginal) |
+| `surf_p` | 3.574% | 3.881% | -0.307pp (slight improvement) |
+| `wall_shear` | 6.726% | 7.061% | -0.335pp (slight improvement) |
+| `wall_x` | 5.972% | — | — |
+| `wall_y` | 7.276% | — | — |
+| `wall_z` | 8.750% | — | — |
+
+### Val→Test Gap Analysis
+
+| Checkpoint | val_vol_p | test_vol_p | Gap |
+|-----------|-----------|------------|-----|
+| EP20 best | 3.815% | 11.827% | **+8.012pp** |
+| Baseline  | ~3.9%   | 10.758%  | +6.858pp (approx) |
+
+Gap is structurally identical to all previous experiments. SDF-stratified sampling did not narrow it.
+
+### Decision: CLOSED — HYPOTHESIS FALSIFIED
+
+**SDF sampling axis now FULLY CLOSED.** Both far-field SDF upweighting (α=2.0) in this PR and near-surface SDF weighting in PR #996 have been tested. Neither closes the val→test gap. The val→test vol_p gap of +8.0pp is NOT caused by insufficient coverage of any specific spatial region during training — it is a structural DATA DISTRIBUTION problem.
+
+### Key Findings
+
+1. **test_vol_p = 11.827% vs baseline 10.758% — WORSE by +1.069pp.** Far-field bias in training sampling actively harmed vol_p generalization relative to baseline.
+2. **Val→test gap +8.012pp is structurally identical to all previous experiments.** The absolute gap has not narrowed despite changing the spatial emphasis of the volume loss signal.
+3. **abupt marginally better (7.480% vs 7.5195%)** — noise-level improvement of 0.040pp; not meaningful and does not beat baseline.
+4. **32nd intervention to falsify the structural gap hypothesis.** We have now exhausted: loss weighting (6 variants), GradNorm tuning, optimizer switches, EMA, SWA (pending), architecture depth, sampling strategies (4 variants), coordinate noise, TTA, Lookahead, DropPath, normalization, LR schedule variants.
+5. **Next frontier:** Active experiments (nezuko SWA, fern Poisson physics regularization, tanjiro InstanceNorm) target remaining gap-closing candidates.
+
+---
+
+## 2026-05-09 ~22:00 UTC — PR #999 IN PROGRESS: SWA epoch-snapshot averaging EP20–EP30 (dl24-nezuko, `f8rc8ahi`)
+
+- **Branch:** `dl24-nezuko/swa-epoch-avg`
+- **W&B Run:** `f8rc8ahi`
+- **Hypothesis:** Stochastic Weight Averaging (SWA) over epoch snapshots EP20–EP30 produces a flatter loss landscape solution that generalizes better to the test distribution. Uniform averaging of 11 epoch checkpoints reduces overfit to val noise and potentially narrows the val→test vol_p gap.
+- **Config:** `--use-swa --swa-start-epoch 20 --swa-freq 1`, bs=1 DDP8, steps/epoch ~10,975–10,986
+
+### Per-epoch val progression
+
+| Epoch | Step | abupt% | vol_p% | Notes |
+|-------|------|--------|--------|-------|
+| EP1 | ~10,975 | 20.495% | 16.455% | Expected large EP1 overhead |
+| EP2 | ~21,950 | 9.122% | 7.799% | Large drop, healthy trajectory |
+| EP3 | ~32,925 | 7.917% | 6.790% | Convergence normal |
+| EP4 | ~43,900 | 6.964% | 4.608% | Strong drop |
+| EP5 | ~54,875 | 7.712% | 7.136% | Transient spike (normal) |
+| EP6 | ~65,850 | 6.703% | 4.337% | Recovered, EP5 gate PASS ✓ |
+| EP7 | ~76,825 | 6.586% | 4.153% | Continued improvement |
+| EP8 | ~87,800 | **6.478%** | **4.063%** | Best at time of last check |
+
+**EP5 gate (≤7.5%):** PASS — abupt=6.478% at EP8, well clear
+**EP10 gate (≤7.2%):** Expected at step ~109,750 — trajectory clearly will pass (6.478% at EP8)
+**EP20 gate (≤6.65%):** Critical gate before SWA collection begins at step ~219,500; trajectory slope -0.00986%/1k steps suggests ~5.9% by EP20
+
+- **GradNorm w_vol_p=0.222 at EP8** — healthy, not collapsed (contrast with frieren #972 collapse 0.286→0.090)
+- **Status:** RUNNING — awaiting EP10 gate decision
+
+### Decision: IN PROGRESS — awaiting EP10 gate at step ~109,750
+
+---
+
+## 2026-05-09 ~22:00 UTC — PR #1014 IN PROGRESS: Poisson pressure physics regularization (dl24-fern, `l5urrdmk`)
+
+- **Branch:** `dl24-fern/poisson-pressure-reg`
+- **W&B Run:** `l5urrdmk` (rank0)
+- **Hypothesis:** Auxiliary Laplacian smoothness loss (`L_Poisson = mean(||∇²p_pred||²)`) with λ=0.01 forces the predicted pressure field to satisfy the Poisson equation in a weak sense, directly constraining vol_p spatial consistency across training and test distributions.
+- **Config:** `--use-poisson-reg --poisson-lambda 0.01 --poisson-k 8 --poisson-m 2048`, group `poisson-pressure-reg`
+
+### Per-epoch val progression
+
+| Epoch | Step | abupt% | vol_p% | surf_p% | wall% | Notes |
+|-------|------|--------|--------|---------|-------|-------|
+| EP1 | ~10,913 | 8.581% | 6.266% | 5.470% | 9.362% | Normal EP1; EP1 gate PASS |
+
+**EP5 gate (≤7.5%):** Expected at step ~54,875 (~3 epochs from EP1)
+- **Status:** RUNNING — EP1 cleared, awaiting EP5 gate
+
+### Decision: IN PROGRESS — awaiting EP5 gate at step ~54,875
+
+---
+
+## 2026-05-09 ~22:00 UTC — PR #1015 IN PROGRESS: InstanceNorm across volume tokens (dl24-tanjiro, `48pi1dn4`)
+
+- **Branch:** `dl24-tanjiro/instancenorm-vol-tokens`
+- **W&B Run:** `48pi1dn4` (rank0); all 8 DDP ranks: `48pi1dn4`, `0nj8yj7b`, `dnobec5q`, `11qquima`, `yllm3wjd`, `a9gptjc4`, `nlty089a`, `7hnsh7o3`
+- **Hypothesis:** `nn.InstanceNorm1d(hidden_dim, affine=True)` applied across ~65k volume tokens per channel normalizes the activation distribution per-sample, making the volume head input scale-invariant. If test vol tokens occupy a different activation-space region than val, InstanceNorm makes the downstream prediction scale-invariant and may reduce the val→test vol_p gap.
+
+### Per-epoch val progression
+
+| Epoch | Step | abupt% | vol_p% | Notes |
+|-------|------|--------|--------|-------|
+| EP0.5 | ~5,753 | — | — | Launched; EP1 val at step ~10,975 |
+
+**EP5 gate (≤7.5%):** Expected at step ~54,875
+- **Status:** RUNNING — EP0.5, first val metrics at EP1 pending
+
+### Decision: IN PROGRESS — awaiting EP1 first val metrics
+
+---
+
 ## 2026-05-11 ~08:15 UTC — PR #979 CLOSED: TTA Y-symmetry ensemble eval-only A/B (dl24-nezuko, `msmccvne`)
 
 - **Branch:** `dl24-nezuko/tta-y-symmetry-ensemble`

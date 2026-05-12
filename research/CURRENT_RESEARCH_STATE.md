@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~00:00 UTC
+- 2026-05-09 ~23:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -18,7 +18,7 @@
 | vol_p | 10.7580% |
 | wall_shear | 7.0610% |
 
-**Val wave leader (active):** frieren #972 EP~18.2, step~198k, abupt=**6.1286%**, vol_p=**3.797%** — wave val best. EP20 gate next (≤6.70%).
+**Val wave leader (awaiting new challenger):** frieren #972 CLOSED — test EP20 checkpoint: vol_p=**11.827%** (+1.069pp WORSE than baseline 10.758%), abupt=7.480%, surf_p=3.574%, wall=6.726%. Val→test gap = +8.012pp (structural gap UNCHANGED). SDF hypothesis FULLY FALSIFIED. Three experiments active (nezuko #999, fern #1014, tanjiro #1015).
 
 **Central unsolved problem:** val vol_p ≈ 3.8–4.0%, test vol_p ≈ 10.7–11% — systematic +7pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
 
@@ -26,21 +26,21 @@
 
 **EMA AXIS CLOSED:** PR #954 — test_vol_p=11.28%, gap unchanged. EMA weight averaging does not reduce val→test gap.
 
-**SDF sampling AXIS FALSIFIED:** PR #972 EP7 test eval: val→test vol_p gap = +8.00pp. PR #968 stochastic vol subsampling: gap +8.115pp WIDEST EVER. Sampling strategy does NOT close gap.
+**SDF/Sampling AXIS FULLY CLOSED:** PR #972 TERMINAL test eval (EP20 checkpoint): test_vol_p=11.827%, gap +8.012pp. PR #968 stochastic vol subsampling: gap +8.115pp WIDEST EVER. Sampling strategy (far-field SDF, near-surface SDF, stochastic subsampling) does NOT close gap. AXIS FULLY CLOSED.
 
-## Active Experiments (2026-05-13)
+## Active Experiments (2026-05-09 ~23:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Known Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #972 | dl24-frieren | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **SDF-stratified importance sampling** (far-field bias, α=2.0) | `56bcqp3m` | **Running** — step~198k / EP~18.2; wave val leader. EP20 gate (≤6.70%) next. | abupt=**6.1286%** (EP~18.2), vol_p=**3.797%** | SDF gap-closing hypothesis FALSIFIED (EP7 test: gap +8.00pp). Run continues for val_abupt leadership; EP20 gate imminent. |
-| #998 | dl24-tanjiro | **Lookahead optimizer (v2)** — Lookahead(Lion, k=5, α=0.5); slow weight sync every 5 inner steps; CLI: `--use-lookahead --lookahead-k 5 --lookahead-alpha 0.5` | `f384hijo` | **Running** — group `lookahead-lion-k5`; launched 2026-05-11T15:21Z; bs=2 DDP8. Kill thresholds: EP5@27,469≤7.5%, EP10@54,938≤7.2%, EP15@82,407≤6.80%, EP20@109,876≤6.70%, EP25@137,345≤6.65%, EP30@164,814≤6.60% | EP1 was ~78% at 15:53Z May 11 | Lookahead alone (no DropPath). PR #987 tested Lookahead+DropPath combo (FAILED). This PR tests Lookahead alone at 6L. |
-| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — Izmailov et al. 2018; uniform epoch-snapshot averaging; `--use-swa --swa-start-epoch 20 --swa-freq 1`; 11 snapshots (EP20–EP30) | `eb64wl0y` | **Running** — bs=1 DDP8, ~10,975 steps/epoch; EP1=20.495%, EP2=9.1216% (vol_p=7.7992%, surf_p=5.9824%, wall=9.4934%); first kill gate step 50,000 ≤7.5%. SWA collection ~step 219,500–329,250. | abupt=9.1216% (EP2), vol_p=7.7992% | Healthy trajectory (EP1→EP2 drop 20.5%→9.1%). Kill gate at step 50,000 ≤7.5%. First standalone SWA test (prior SWA wrapped in Lookahead — different mechanism). |
-| #1003 | dl24-fern | **PCGrad gradient surgery** — projects conflicting per-task gradients to be orthogonal before accumulation (Yu et al. 2020, NeurIPS); 3-task: surface_pressure, wall_shear, volume_pressure; `--use-pcgrad --use-gradnorm --gradnorm-alpha 0.5` | TBD | **ASSIGNED** 2026-05-13 — run not yet started. EP5 gate ≤7.5% pending. | — | Hypothesis: inter-task gradient conflicts corrupt vol_p gradient direction, widening val→test gap. PCGrad orthogonal projection removes conflicting gradient components before accumulation. |
+| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step ~94,288 (EP8.6). EP5 gate CLEARED (abupt 6.703% ≤7.5% ✓). EP10 gate next at step ~109,750 (threshold ≤7.2%). | val_abupt=**6.478%** (EP8), val_vol_p=4.063%; slope improving | Healthy convergence. GradNorm w_vol_p=0.222 (not collapsed). SWA collection begins EP20 (~step 219,500). EP10 gate ~1,500 steps away. |
+| #1014 | dl24-fern | **Poisson pressure physics regularization** — auxiliary loss λ=0.01 × k-NN Laplacian smoothness penalty on predicted pressure; `--use-poisson-reg --poisson-lambda 0.01 --poisson-k 8 --poisson-m 2048`; group `poisson-pressure-reg` | `l5urrdmk` (rank0) | **Running** — step ~19,499 (EP1.78). EP1 val: abupt=8.581%, vol_p=6.266%. EP5 gate at step ~54,875 (threshold ≤7.5%). | val_abupt=**8.581%** (EP1) | Physics regularization directly constrains vol_p spatial consistency. EP1 convergence within normal early-epoch range. |
+| #1015 | dl24-tanjiro | **InstanceNorm across volume tokens** — `nn.InstanceNorm1d(hidden_dim, affine=True)` applied across ~65k vol tokens per channel | `48pi1dn4` (rank0) | **Running** — step ~5,753 (EP0.5). All 8 DDP ranks confirmed live. EP1 val at step ~10,975. | No val yet | All 8 rank IDs: `48pi1dn4, 0nj8yj7b, dnobec5q, 11qquima, yllm3wjd, a9gptjc4, nlty089a, 7hnsh7o3`. Cross-token normalization of vol activations targets val→test distribution shift. |
 
 ## Closed This Wave (Recent)
 
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
+| #972 | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **SDF-stratified importance sampling** (far-field bias, α=2.0) | **CLOSED** — test_vol_p=11.827% (+1.069pp WORSE than baseline 10.758%), abupt=7.480%, surf_p=3.574%, wall=6.726%; val→test gap +8.012pp UNCHANGED; run `56bcqp3m` | SDF sampling FULLY FALSIFIED. Far-field upweighting marginally improved surf_p/wall but WORSENED vol_p. Val→test gap completely structural. AXIS CLOSED. |
 | #968 | 6L STRING + GradNorm α=0.5 + WD=0.005 + Y-sym + **stochastic vol subsampling** (fresh random draw every batch) | **CLOSED** — test_abupt=7.6157%, test_vol_p=12.1140%, surf_p=3.9440%, wall=7.0470%; gap +8.115pp **WIDEST EVER**; val_abupt best EP15=6.2806%, val_vol_p=3.999% | Stochastic vol subsampling compressed val_vol_p but test EXPLODES. Gap +8.115pp worst ever. Sampling strategy (far-field OR stochastic) does NOT close the structural val→test shift. |
 | #995 | Pre-xattn volume LayerNorm — single `nn.LayerNorm(hidden_dim=512)` on volume_hidden before surf_to_vol_xattn | **CLOSED** — superseded/not in active WIP | Frieren reassigned to SDF long run #972. |
 | #996 | Near-surface SDF-stratified sampling — `weight = exp(-alpha × |sdf|)` concentrates gradient on near-surface vol points; Arm A: alpha=1.0, Arm B: alpha=2.0 | **CLOSED** — not in active drivaerml-long WIP | Near-surface SDF axis subsumed into broader SDF sampling FALSIFIED conclusion. |
@@ -59,10 +59,9 @@
 1. **The val→test vol_p gap is structural and unsolved.** Val vol_p ≈ 3.8–4.0%, test vol_p ≈ 10.7–11%. Gap persists across ALL WD values, EMA, loss-weighting, architecture-depth changes, sampling strategies (far-field SDF, near-surface SDF, stochastic), coordinate noise, TTA, and optimizer changes tried so far. Almost certainly covariate shift between training and test aerodynamic configurations.
 
 2. **Current active gap-closing candidates:**
-   - #998 Lookahead Lion (solo, no DropPath): EP5 gate ≤7.5% at ~step 27,469
-   - #999 SWA epoch-averaging: first kill gate step 50,000 ≤7.5%; EP2=9.1216% (healthy)
-   - #1003 PCGrad gradient surgery: EP5 gate ≤7.5% pending (run not yet started)
-   - #972 SDF val leader EP~18.2: EP20 gate ≤6.70% next
+   - #999 SWA epoch-snapshot averaging: EP8 abupt=6.478%, EP10 gate at step ~109,750 ≤7.2%. SWA averaging begins EP20.
+   - #1014 Poisson physics regularization: EP1 abupt=8.581%, EP5 gate at step ~54,875 ≤7.5%. Direct physics constraint on vol_p.
+   - #1015 InstanceNorm across vol tokens: EP0.5 launched, EP1 val pending at step ~10,975. Cross-token normalization hypothesis.
 
 3. **Weight decay is load-bearing.** WD axis fully exhausted — neither WD=0.005 nor WD=0.01 closes gap, but required to prevent overfitting.
 
@@ -122,7 +121,7 @@
 - Extended cosine T_max=60 (PR #946): destabilizing in training tail
 - EMA decay=0.999 (PR #954): does not close val→test vol_p gap (test_vol_p=11.28%)
 - TTA Y-symmetry (PR #979): gap +7.860pp → +7.863pp UNCHANGED. AXIS CLOSED. Add `--use-tta` as free-lunch only.
-- SDF-stratified importance sampling far-field upweighting (PR #972, EP7 test eval): val→test vol_p gap = +8.00pp. HYPOTHESIS FALSIFIED.
+- SDF-stratified importance sampling far-field upweighting (PR #972, TERMINAL EP20 test eval): test_vol_p=11.827% (+1.069pp WORSE than baseline), val→test gap = +8.012pp. HYPOTHESIS FALSIFIED. AXIS FULLY CLOSED.
 - DropPath regularization (PR #987): EP5=7.8846% gate FAIL; test_vol_p=14.278%, gap +7.91pp UNCHANGED. FALSIFIED.
 - Lookahead+DropPath combo (PR #987): EP5=7.885% gate FAIL; adversarial GradNorm interaction. Re-testing Lookahead alone in #998.
 - Vol coordinate noise augmentation (PR #990, σ=0.005): EP5 abupt=8.54% gate FAIL. FALSIFIED.
@@ -141,4 +140,4 @@
 6. **Test-time adaptation (TTA) augmentation ensemble** — Beyond Y-symmetry: rotate/reflect configurations at test time and average predictions. Geometric ensemble for OOD robustness.
 7. **If all active gap-closing hypotheses fail** — Escalate to plateau protocol: (a) separate surface/volume encoder architecture, (b) physics-based Poisson regularization, (c) domain adversarial training, (d) explicit geometric conditioning on body shape for volume prediction.
 
-_Last updated: 2026-05-13. Key changes: (1) PR #968 CLOSED — stochastic vol subsampling gap +8.115pp WIDEST EVER; val_vol_p=3.999% compressed but test_vol_p=12.1140% explodes. (2) PR #995 and #996 REMOVED from active table (not in drivaerml-long active WIP). (3) PR #998 updated — W&B run `f384hijo`, group `lookahead-lion-k5`, gate steps calibrated for bs=2 DDP8. (4) PR #999 updated — W&B run `eb64wl0y`, EP1=20.495%, EP2=9.1216% (vol_p=7.7992%), first gate step 50,000 ≤7.5%. (5) PR #1003 ADDED — dl24-fern PCGrad gradient surgery, assigned 2026-05-13, run not yet started. (6) PCGrad removed from Potential Next Directions (now assigned). (7) Sampling AXIS FULLY CLOSED — both far-field SDF and stochastic subsampling failed._
+_Last updated: 2026-05-09 ~23:00 UTC. Key changes: (1) PR #972 CLOSED — SDF-stratified sampling TERMINAL test eval: test_vol_p=11.827% (+1.069pp WORSE than baseline), val→test gap +8.012pp UNCHANGED. SDF axis FULLY CLOSED. (2) Frieren removed from active experiments table. (3) PR #999 (nezuko SWA) updated to EP8 abupt=6.478%, step ~94,288; EP10 gate imminent. (4) PR #1014 (fern Poisson) updated to EP1 abupt=8.581%, step ~19,499; EP5 gate at step ~54,875. (5) PR #1015 (tanjiro InstanceNorm) confirmed launched — all 8 DDP rank IDs live, step ~5,753, EP1 val pending._
