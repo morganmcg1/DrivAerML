@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_slot_vol_attn: bool = False
+    slot_vol_attn_num_slots: int = 64
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_slot_vol_attn": (
+            "Enable slot-based vol attention (PR #1024). Inserts a "
+            "Perceiver-IO-style bottleneck between the backbone vol_hidden "
+            "and the surf->vol xattn: S=64 learnable slot queries aggregate "
+            "from the full N vol tokens (vol->slot), then N vol queries "
+            "broadcast back from the S slot summaries (slot->vol). Both "
+            "MultiheadAttention sublayers have zero-init out_proj so the "
+            "module is identity at init. Drops attention compute from "
+            "O(N^2 * d) to O(N * S * d). num_heads follows --model-heads, "
+            "embed_dim follows --model-hidden-dim."
+        ),
+        "slot_vol_attn_num_slots": (
+            "Number of slot queries for --use-slot-vol-attn (default 64). "
+            "Acts as a bottleneck width: smaller S compresses vol context "
+            "more aggressively; larger S preserves more detail at higher "
+            "cost."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +327,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_slot_vol_attn=config.use_slot_vol_attn,
+        slot_vol_attn_num_slots=config.slot_vol_attn_num_slots,
     )
 
 
@@ -773,7 +794,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # Slot-vol attention (PR #1024) has the same problem on
+            # volume_tokens > 0 (and is itself an identity-at-init module
+            # whose params can be unused across the loss path early on), so it
+            # also requires find_unused_parameters.
+            if config.use_surf_to_vol_xattn or config.use_slot_vol_attn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

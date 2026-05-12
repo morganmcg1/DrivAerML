@@ -320,6 +320,86 @@ class Transformer(nn.Module):
         return x
 
 
+class SlotVolAttn(nn.Module):
+    """Perceiver-IO-style slot bottleneck for vol tokens (PR #1024).
+
+    vol->slot: S slot queries aggregate from N vol tokens (Q=slots, K=V=vol_normed).
+    slot->vol: N vol queries broadcast from S slot summaries (Q=vol_normed, K=V=updated_slots).
+
+    Both cross-attention sublayers have zero-initialised ``out_proj`` weight and
+    bias, so the module is the identity at initialisation. The slot embeddings
+    are initialised with a small Gaussian (std=0.02) to break symmetry while
+    staying close to zero. The projection cost drops from O(N * d^2) (naive
+    full-N attention) to O(S * d^2 + N * d^2) on the projections, but the
+    attention compute itself drops from O(N^2 * d) to O(N * S * d), the
+    Perceiver-IO bottleneck win.
+
+    Padding handling mirrors ``surf_to_vol_xattn``: we do NOT pass a
+    ``key_padding_mask`` to MHA because doing so forces the slower attention
+    kernel path (no flash / mem-efficient SDPA). Padded vol positions enter the
+    backbone already token-masked to zero, so their V contribution to the slot
+    aggregation is the MHA value-projection bias only (small). The slot_to_vol
+    output is re-masked with ``vol_mask`` before the residual add so padded
+    vol positions stay exactly zero downstream.
+    """
+
+    def __init__(self, hidden_dim: int, num_slots: int = 64, num_heads: int = 4):
+        super().__init__()
+        self.num_slots = num_slots
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+
+        self.slot_embeds = nn.Parameter(torch.randn(num_slots, hidden_dim) * 0.02)
+
+        self.vol_to_slot_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            batch_first=True,
+        )
+        self.slot_to_vol_attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            batch_first=True,
+        )
+
+        self.norm_slots = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_vol = nn.LayerNorm(hidden_dim, eps=1e-6)
+
+        nn.init.zeros_(self.vol_to_slot_attn.out_proj.weight)
+        nn.init.zeros_(self.vol_to_slot_attn.out_proj.bias)
+        nn.init.zeros_(self.slot_to_vol_attn.out_proj.weight)
+        nn.init.zeros_(self.slot_to_vol_attn.out_proj.bias)
+
+    def forward(
+        self,
+        vol_hidden: torch.Tensor,
+        vol_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        batch_size = vol_hidden.shape[0]
+        slots = self.slot_embeds.unsqueeze(0).expand(batch_size, -1, -1)
+
+        slots_normed = self.norm_slots(slots)
+        vol_normed = self.norm_vol(vol_hidden)
+
+        updated_slots, _ = self.vol_to_slot_attn(
+            query=slots_normed,
+            key=vol_normed,
+            value=vol_normed,
+            need_weights=False,
+        )
+        updated_slots = slots + updated_slots
+
+        vol_out, _ = self.slot_to_vol_attn(
+            query=vol_normed,
+            key=updated_slots,
+            value=updated_slots,
+            need_weights=False,
+        )
+        vol_out = _apply_token_mask(vol_out, vol_mask)
+        vol_hidden = vol_hidden + vol_out
+        return _apply_token_mask(vol_hidden, vol_mask)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +423,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_slot_vol_attn: bool = False,
+        slot_vol_attn_num_slots: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +438,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_slot_vol_attn = use_slot_vol_attn
+        self.slot_vol_attn_num_slots = slot_vol_attn_num_slots
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -460,6 +544,18 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Slot-based vol attention (PR #1024): Perceiver-IO bottleneck inserted
+        # between backbone vol_hidden and surf->vol xattn. Both attention
+        # sublayers are zero-init in out_proj for identity-at-init.
+        if use_slot_vol_attn:
+            self.slot_vol_attn = SlotVolAttn(
+                hidden_dim=n_hidden,
+                num_slots=slot_vol_attn_num_slots,
+                num_heads=n_head,
+            )
+        else:
+            self.slot_vol_attn = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -544,6 +640,13 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.slot_vol_attn is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            volume_hidden = self.slot_vol_attn(volume_hidden, vol_mask=volume_mask)
 
         if (
             self.surf_to_vol_xattn is not None
