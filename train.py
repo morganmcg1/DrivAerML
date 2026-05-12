@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_pre_xattn_vol_self_attn: bool = False
+    pre_xattn_vol_self_attn_layers: int = 1
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_pre_xattn_vol_self_attn": (
+            "Enable pre-cross-attention volume self-attention (PR #1031). "
+            "Inserts --pre-xattn-vol-self-attn-layers pre-norm + residual "
+            "nn.MultiheadAttention blocks over the volume tokens BEFORE "
+            "the surf->vol cross-attention so vol tokens can pool local "
+            "3D context before being queried by the surface side "
+            "(Perceiver IO latent self-attn pattern, Jaegle et al. 2022). "
+            "Requires --use-surf-to-vol-xattn. out_proj weight+bias are "
+            "zero-init so the block is identity at init."
+        ),
+        "pre_xattn_vol_self_attn_layers": (
+            "Number of stacked pre-norm + residual self-attention blocks "
+            "in the pre-xattn vol self-attention stack. Only used when "
+            "--use-pre-xattn-vol-self-attn is set. Default 1."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +325,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_pre_xattn_vol_self_attn=config.use_pre_xattn_vol_self_attn,
+        pre_xattn_vol_self_attn_layers=config.pre_xattn_vol_self_attn_layers,
     )
 
 

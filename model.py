@@ -343,6 +343,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_pre_xattn_vol_self_attn: bool = False,
+        pre_xattn_vol_self_attn_layers: int = 1,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +358,18 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_pre_xattn_vol_self_attn = use_pre_xattn_vol_self_attn
+        self.pre_xattn_vol_self_attn_layers = pre_xattn_vol_self_attn_layers
+        if use_pre_xattn_vol_self_attn and not use_surf_to_vol_xattn:
+            raise ValueError(
+                "use_pre_xattn_vol_self_attn=True requires use_surf_to_vol_xattn=True "
+                "(the pre-xattn self-attention is the 'pre' step of the cross-attention)."
+            )
+        if use_pre_xattn_vol_self_attn and pre_xattn_vol_self_attn_layers < 1:
+            raise ValueError(
+                "pre_xattn_vol_self_attn_layers must be >= 1 when "
+                "use_pre_xattn_vol_self_attn=True."
+            )
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -460,6 +474,40 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Pre-xattn vol self-attention (PR #1031): one or more pre-norm
+        # nn.MultiheadAttention sublayers over the volume tokens that run
+        # BEFORE the surf->vol cross-attention. Lets each vol token pool
+        # local 3D context from other vol tokens before being queried by
+        # the surface side. Analogous to Perceiver IO's latent self-attn
+        # before output cross-attn (Jaegle et al. 2022, arXiv:2107.14795).
+        # Zero-init out_proj weight+bias => identity at init.
+        # need_weights=False at call time routes through SDPA / Flash and
+        # avoids NaN on key-padded rows (pytorch/pytorch#41508).
+        if use_pre_xattn_vol_self_attn:
+            self.pre_xattn_vol_lns = nn.ModuleList(
+                [
+                    nn.LayerNorm(n_hidden, eps=1e-6)
+                    for _ in range(pre_xattn_vol_self_attn_layers)
+                ]
+            )
+            self.pre_xattn_vol_mhas = nn.ModuleList(
+                [
+                    nn.MultiheadAttention(
+                        embed_dim=n_hidden,
+                        num_heads=n_head,
+                        batch_first=True,
+                        dropout=dropout,
+                    )
+                    for _ in range(pre_xattn_vol_self_attn_layers)
+                ]
+            )
+            for mha in self.pre_xattn_vol_mhas:
+                nn.init.zeros_(mha.out_proj.weight)
+                nn.init.zeros_(mha.out_proj.bias)
+        else:
+            self.pre_xattn_vol_lns = None
+            self.pre_xattn_vol_mhas = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -552,6 +600,24 @@ class SurfaceTransolver(nn.Module):
             and surface_tokens > 0
             and volume_tokens > 0
         ):
+            if self.pre_xattn_vol_mhas is not None:
+                # Pre-norm + residual self-attention over volume tokens.
+                # key_padding_mask convention: True = ignore. volume_mask
+                # is True at valid positions, so flip it.
+                vol_key_padding = ~volume_mask
+                for ln, mha in zip(self.pre_xattn_vol_lns, self.pre_xattn_vol_mhas):
+                    vol_h_in = ln(volume_hidden)
+                    vol_h_out, _ = mha(
+                        vol_h_in,
+                        vol_h_in,
+                        vol_h_in,
+                        key_padding_mask=vol_key_padding,
+                        need_weights=False,
+                    )
+                    vol_h_out = _apply_token_mask(vol_h_out, volume_mask)
+                    volume_hidden = volume_hidden + vol_h_out
+                    volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
             xattn_out, _ = self.surf_to_vol_xattn(
                 query=volume_hidden,
                 key=surface_hidden,
