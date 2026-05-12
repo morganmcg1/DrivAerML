@@ -103,6 +103,10 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_slot_vol_attn: bool = False
+    slot_vol_num_slots: int = 64
+    slot_vol_num_heads: int = 4
+    use_vol_pressure_aux_head: bool = True
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +233,32 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_slot_vol_attn": (
+            "Enable Perceiver-IO style slot-based volume-token bottleneck "
+            "(PR #1043). After the backbone (and optional surf->vol xattn) "
+            "and before the vol_p head, S learnable slot queries cross-"
+            "attend to N_vol volume tokens, run a slot self-attention + MLP "
+            "block, and then the vol tokens cross-attend back to the slots. "
+            "The vol-to-slots out_proj weight and bias are zero-init so the "
+            "module is identity at init (preserves baseline at epoch 0). "
+            "Hypothesis: forcing vol_p through a compact latent set improves "
+            "OOD generalisation by discouraging per-token memorisation of "
+            "training-set flow topology."
+        ),
+        "slot_vol_num_slots": (
+            "Number of learnable slot queries (default 64). Sweep S to "
+            "balance bottleneck strength (smaller -> stronger compression) "
+            "vs capacity (larger -> richer global summary)."
+        ),
+        "slot_vol_num_heads": (
+            "Number of attention heads inside SlotVolAttention (default 4). "
+            "Must divide --model-hidden-dim evenly."
+        ),
+        "use_vol_pressure_aux_head": (
+            "No-op kept for back-compat with PR #958 launch commands. The "
+            "deeper 3-layer vol_p decoder head (PR #958) is now always "
+            "active in model.SurfaceTransolver.volume_out."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +338,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_slot_vol_attn=config.use_slot_vol_attn,
+        slot_vol_num_slots=config.slot_vol_num_slots,
+        slot_vol_num_heads=config.slot_vol_num_heads,
     )
 
 
@@ -773,7 +806,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_slot_vol_attn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

@@ -320,6 +320,52 @@ class Transformer(nn.Module):
         return x
 
 
+class SlotVolAttention(nn.Module):
+    """Perceiver-IO style slot pooling for volume tokens (PR #1043).
+
+    S learnable slot queries compress N_vol volume tokens into a geometry
+    bottleneck, then broadcast back to the volume tokens via cross-attention.
+    This geometry bottleneck is hypothesised to improve OOD vol_p generalisation
+    by forcing the model to route volume pressure through a compact latent space.
+
+    Zero-init on vol_to_slots_attn.out_proj ensures the broadcast MHA outputs
+    zero at init; the final ``vol_norm`` then renormalises the vol features
+    before the vol_p head, so the module is *not* strictly identity at init
+    (the LayerNorm restandardises magnitudes). This matches the PR body spec.
+
+    Architecturally related to Perceiver IO (Jaegle et al. 2107.14795) and
+    Set Transformer (Lee et al. 1810.00825).
+    """
+
+    def __init__(self, d_model: int, num_slots: int = 64, num_heads: int = 4):
+        super().__init__()
+        self.slots = nn.Parameter(torch.randn(num_slots, d_model) * 0.02)
+        self.slots_to_vol_attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
+        self.slots_norm1 = nn.LayerNorm(d_model)
+        self.slots_ff = nn.Sequential(
+            nn.Linear(d_model, d_model * 4), nn.GELU(), nn.Linear(d_model * 4, d_model)
+        )
+        self.slots_norm2 = nn.LayerNorm(d_model)
+        self.vol_to_slots_attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
+        self.vol_norm = nn.LayerNorm(d_model)
+        # Zero-init output projection for safe residual initialisation.
+        nn.init.zeros_(self.vol_to_slots_attn.out_proj.weight)
+        nn.init.zeros_(self.vol_to_slots_attn.out_proj.bias)
+
+    def forward(self, vol_hidden: torch.Tensor) -> torch.Tensor:
+        # vol_hidden: (B, N_vol, d_model)
+        B = vol_hidden.shape[0]
+        slots = self.slots.unsqueeze(0).expand(B, -1, -1)  # (B, S, d)
+        # Slots aggregate vol tokens (compress to bottleneck).
+        s_out, _ = self.slots_to_vol_attn(slots, vol_hidden, vol_hidden)
+        slots = self.slots_norm1(slots + s_out)
+        slots = self.slots_norm2(slots + self.slots_ff(slots))
+        # Vol tokens read from slots (residual broadcast from bottleneck).
+        v_out, _ = self.vol_to_slots_attn(vol_hidden, slots, slots)
+        vol_hidden = self.vol_norm(vol_hidden + v_out)
+        return vol_hidden
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +389,9 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_slot_vol_attn: bool = False,
+        slot_vol_num_slots: int = 64,
+        slot_vol_num_heads: int = 4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -460,6 +509,18 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Slot attention geometry bottleneck for volume tokens (PR #1043).
+        # SlotVolAttention runs after the backbone and surf_to_vol_xattn,
+        # immediately before the vol_p output head.
+        if use_slot_vol_attn:
+            self.slot_vol_attn = SlotVolAttention(
+                d_model=n_hidden,
+                num_slots=slot_vol_num_slots,
+                num_heads=slot_vol_num_heads,
+            )
+        else:
+            self.slot_vol_attn = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -560,6 +621,13 @@ class SurfaceTransolver(nn.Module):
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        # Slot attention geometry bottleneck (PR #1043): compress 65 k vol
+        # tokens through S latent slots, then broadcast back. Applied after
+        # surf_to_vol_xattn and before the vol_p output head.
+        if self.slot_vol_attn is not None and volume_x is not None and volume_tokens > 0:
+            volume_hidden = self.slot_vol_attn(volume_hidden)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
