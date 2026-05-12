@@ -103,6 +103,9 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_vol_instance_norm: bool = False
+    use_vol_zca_whiten: bool = False
+    vol_zca_whiten_dim: int = 64
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +232,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_vol_instance_norm": (
+            "PR #1013 Arm A: per-sample (instance) normalisation of volume "
+            "tokens before the Transolver backbone. Normalises mean/var "
+            "across N tokens independently per (B, D) — eliminates "
+            "batch/global statistics that cause OOD vol_p errors on "
+            "geometrically atypical test cases. Learnable affine "
+            "(gamma=1, beta=0 at init) so identity at init."
+        ),
+        "use_vol_zca_whiten": (
+            "PR #1013 Arm B: per-sample ZCA whitening of volume tokens via "
+            "a projected subspace (whiten_dim, default 64). Computes per-"
+            "sample covariance in the projected space, applies the ZCA "
+            "transform via eigendecomposition, and adds a zero-init "
+            "residual back to the full hidden dim. More aggressive than "
+            "InstanceNorm (decorrelates as well as scales) but ~10x "
+            "compute overhead on the whitening path."
+        ),
+        "vol_zca_whiten_dim": (
+            "ZCA whitening subspace dim for --use-vol-zca-whiten. Default 64."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,6 +317,32 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_vol_norm_metrics(model: nn.Module) -> dict[str, float]:
+    """Log gamma/beta / projection-norm statistics for the volume-token
+    normalisation modules (PR #1013). Tracks how far each affine drifts from
+    identity over training."""
+    metrics: dict[str, float] = {}
+    inst = getattr(model, "vol_instance_norm", None)
+    if inst is not None:
+        gamma = inst.gamma.detach().float()
+        beta = inst.beta.detach().float()
+        metrics["vol_instance_norm/gamma_mean"] = float(gamma.mean().item())
+        metrics["vol_instance_norm/gamma_std"] = float(gamma.std().item())
+        metrics["vol_instance_norm/gamma_min"] = float(gamma.min().item())
+        metrics["vol_instance_norm/gamma_max"] = float(gamma.max().item())
+        metrics["vol_instance_norm/beta_mean"] = float(beta.mean().item())
+        metrics["vol_instance_norm/beta_std"] = float(beta.std().item())
+        metrics["vol_instance_norm/beta_abs_max"] = float(beta.abs().max().item())
+    zca = getattr(model, "vol_zca_whiten", None)
+    if zca is not None:
+        proj_down = zca.proj_down.weight.detach().float()
+        proj_up = zca.proj_up.weight.detach().float()
+        metrics["vol_zca_whiten/proj_down_fro"] = float(proj_down.norm().item())
+        metrics["vol_zca_whiten/proj_up_fro"] = float(proj_up.norm().item())
+        metrics["vol_zca_whiten/proj_up_abs_max"] = float(proj_up.abs().max().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -308,6 +357,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_vol_instance_norm=config.use_vol_instance_norm,
+        use_vol_zca_whiten=config.use_vol_zca_whiten,
+        vol_zca_whiten_dim=config.vol_zca_whiten_dim,
     )
 
 
@@ -1262,6 +1314,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_vol_norm_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

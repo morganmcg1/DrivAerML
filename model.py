@@ -188,6 +188,106 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class VolumeInstanceNorm(nn.Module):
+    """Per-sample (instance) normalisation for volume tokens.
+
+    Computes mean/var across the N token dimension independently for each
+    sample in the batch and channel d. Removes batch/global statistics that
+    cause OOD vol_p errors on geometrically atypical test cases. Honours an
+    optional [B, N] token mask so padded positions don't bias the statistics.
+    Learnable affine (``gamma``, ``beta``) lets the model re-introduce any
+    bias/scale the placeholder used to provide.
+    """
+
+    def __init__(self, hidden_dim: int, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.ones(hidden_dim))
+        self.beta = nn.Parameter(torch.zeros(hidden_dim))
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        # x: [B, N, D]; mask: [B, N] (optional, bool/0-1).
+        if mask is None:
+            mean = x.mean(dim=1, keepdim=True)
+            var = x.var(dim=1, keepdim=True, unbiased=False)
+        else:
+            mask_f = mask.to(dtype=x.dtype, device=x.device).unsqueeze(-1)
+            valid_count = mask_f.sum(dim=1, keepdim=True).clamp(min=1.0)
+            mean = (x * mask_f).sum(dim=1, keepdim=True) / valid_count
+            centered = (x - mean) * mask_f
+            var = centered.pow(2).sum(dim=1, keepdim=True) / valid_count
+        x_norm = (x - mean) * torch.rsqrt(var + self.eps)
+        out = x_norm * self.gamma + self.beta
+        if mask is not None:
+            out = out * mask.to(dtype=x.dtype, device=x.device).unsqueeze(-1)
+        return out
+
+
+class VolumeZCAWhiten(nn.Module):
+    """Per-sample ZCA whitening of volume tokens in a projected subspace.
+
+    Projects [B, N, D] tokens down to [B, N, d] (``whiten_dim``), whitens the
+    per-sample covariance, projects back to [B, N, D] and adds the result as
+    a residual. ``proj_up`` is zero-initialised so the layer is identity at
+    init (preserves baseline). Honours an optional [B, N] mask.
+    Eigendecomposition is forced to fp32 for numerical stability under bf16
+    autocast.
+    """
+
+    def __init__(self, hidden_dim: int, whiten_dim: int = 64, eps: float = 1e-4):
+        super().__init__()
+        self.whiten_dim = whiten_dim
+        self.eps = eps
+        self.proj_down = nn.Linear(hidden_dim, whiten_dim, bias=False)
+        self.proj_up = nn.Linear(whiten_dim, hidden_dim, bias=False)
+        nn.init.trunc_normal_(self.proj_down.weight, std=0.02)
+        nn.init.zeros_(self.proj_up.weight)
+
+    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        # x: [B, N, D]; mask: [B, N] (optional).
+        z = self.proj_down(x)  # [B, N, d]
+        # Compute masked mean / per-sample centered tokens.
+        if mask is None:
+            mean = z.mean(dim=1, keepdim=True)
+            z_c = z - mean
+            denom = float(z.shape[1])
+        else:
+            mask_f = mask.to(dtype=z.dtype, device=z.device).unsqueeze(-1)
+            valid_count = mask_f.sum(dim=1, keepdim=True).clamp(min=1.0)
+            mean = (z * mask_f).sum(dim=1, keepdim=True) / valid_count
+            z_c = (z - mean) * mask_f
+            denom = valid_count.squeeze(-1)  # [B, 1]
+        # Force fp32 for the covariance / eigh path for numerical stability
+        # (torch.linalg.eigh has no bf16 kernel; bmm under autocast would
+        # also drop to bf16 otherwise). The ZCA matrix is detached from
+        # autograd: eigh backward is numerically unstable when eigenvalues
+        # are close (1/(λ_i-λ_j) terms blow up), which produces NaN grads
+        # at init (zero proj_up means upstream grad=0, but 0*∞=NaN). With
+        # zca.detach(), learning still flows back through z_c via the bmm
+        # — proj_down and the surrounding parameters update normally, only
+        # the eigendecomposition itself is treated as a fixed (per-batch)
+        # operator. This is the same trick used in Barlow Twins / DBN.
+        with torch.amp.autocast(device_type=x.device.type, enabled=False):
+            z_c_fp32 = z_c.float()
+            with torch.no_grad():
+                cov = torch.bmm(z_c_fp32.transpose(1, 2), z_c_fp32)
+                if isinstance(denom, torch.Tensor):
+                    cov = cov / denom.to(cov.dtype).unsqueeze(-1)
+                else:
+                    cov = cov / denom
+                eye = torch.eye(self.whiten_dim, device=cov.device, dtype=cov.dtype).unsqueeze(0)
+                cov = cov + self.eps * eye
+                eigvals, eigvecs = torch.linalg.eigh(cov)
+                inv_sqrt = eigvals.clamp(min=self.eps).rsqrt()  # [B, d]
+                zca = eigvecs @ torch.diag_embed(inv_sqrt) @ eigvecs.transpose(-1, -2)  # [B, d, d]
+            z_white = torch.bmm(z_c_fp32, zca.transpose(-1, -2))  # [B, N, d]
+        z_white = z_white.to(dtype=x.dtype)
+        delta = self.proj_up(z_white)  # [B, N, D]
+        if mask is not None:
+            delta = delta * mask.to(dtype=delta.dtype, device=delta.device).unsqueeze(-1)
+        return x + delta
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -343,6 +443,9 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_instance_norm: bool = False,
+        use_vol_zca_whiten: bool = False,
+        vol_zca_whiten_dim: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +459,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_instance_norm = use_vol_instance_norm
+        self.use_vol_zca_whiten = use_vol_zca_whiten
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -460,6 +565,24 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # PR #1013 Arm A: per-sample (instance) normalisation of volume tokens
+        # before the Transolver backbone. Targets the OOD test_vol_p gap
+        # (val=3.9%, test=12.0%) by adapting feature statistics to each shape
+        # at inference time. Identity at init (gamma=1, beta=0).
+        if use_vol_instance_norm:
+            self.vol_instance_norm = VolumeInstanceNorm(hidden_dim=n_hidden)
+        else:
+            self.vol_instance_norm = None
+        # PR #1013 Arm B: per-sample ZCA whitening of vol tokens projected
+        # into a low-dim subspace (whiten_dim=64), with a zero-init residual
+        # path (identity at init).
+        if use_vol_zca_whiten:
+            self.vol_zca_whiten = VolumeZCAWhiten(
+                hidden_dim=n_hidden, whiten_dim=vol_zca_whiten_dim
+            )
+        else:
+            self.vol_zca_whiten = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -522,16 +645,20 @@ class SurfaceTransolver(nn.Module):
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    volume_x,
-                    rff=self.volume_rff,
-                    string_sep=self.volume_string_sep,
-                    project_features=self.project_volume_features,
-                    bias=self.volume_bias,
-                    placeholder=self.volume_placeholder,
-                )
+            vol_initial = self._encode_group(
+                volume_x,
+                rff=self.volume_rff,
+                string_sep=self.volume_string_sep,
+                project_features=self.project_volume_features,
+                bias=self.volume_bias,
+                placeholder=self.volume_placeholder,
             )
+            # PR #1013: per-sample normalisation of vol tokens before backbone.
+            if self.vol_instance_norm is not None:
+                vol_initial = self.vol_instance_norm(vol_initial, mask=volume_mask)
+            if self.vol_zca_whiten is not None:
+                vol_initial = self.vol_zca_whiten(vol_initial, mask=volume_mask)
+            tokens.append(vol_initial)
             masks.append(volume_mask)
 
         attn_mask = torch.cat(masks, dim=1)
