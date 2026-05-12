@@ -236,8 +236,8 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(index 0 of volume predictions/targets in normalized space) before "
             "computing the MSE training loss. Leaves all other channels and the "
             "surface losses untouched. Hypothesis: compressing large-magnitude "
-            "pressure outliers during training (val_vol_p ~ 3.9% vs test_vol_p ~ "
-            "12% on the SOTA baseline) reduces MSE's quadratic over-weighting of "
+            "pressure outliers during training (val_vol_p ~ 3.9%% vs test_vol_p ~ "
+            "12%% on the SOTA baseline) reduces MSE's quadratic over-weighting of "
             "heavy-tail residuals and improves OOD generalization. Eval metrics "
             "are unchanged (still raw MSE in denormalized space)."
         ),
