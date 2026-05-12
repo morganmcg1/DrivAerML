@@ -132,6 +132,10 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_focal_vol_reweight: bool = False
+    focal_vol_ema_decay: float = 0.99
+    focal_vol_clip_min: float = 0.5
+    focal_vol_clip_max: float = 3.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -301,6 +305,7 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    vol_loss_scale: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     batch = batch.to(device)
     if use_y_symmetry_aug:
@@ -319,6 +324,8 @@ def train_loss(
         )
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # Apply optional per-case focal reweighting to the volume loss
+        scaled_volume_loss = volume_loss * vol_loss_scale
         if gradnorm_weights is not None:
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
@@ -326,15 +333,16 @@ def train_loss(
             volume_per_ch = per_channel_masked_mse(
                 out["volume_preds"], volume_target, batch.volume_mask
             )  # [1]: vol_p
-            task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
+            scaled_volume_per_ch = volume_per_ch * vol_loss_scale
+            task_losses = torch.cat([surface_per_ch, scaled_volume_per_ch])  # [5]
             w_detached = gradnorm_weights.weights.detach()
             loss = (w_detached * task_losses).sum()
             weighted_surface_loss = (w_detached[:4] * surface_per_ch).sum()
-            weighted_volume_loss = w_detached[4] * volume_per_ch[0]
+            weighted_volume_loss = w_detached[4] * scaled_volume_per_ch[0]
         else:
             task_losses = None
             weighted_surface_loss = surface_loss_weight * surface_loss
-            weighted_volume_loss = volume_loss_weight * volume_loss
+            weighted_volume_loss = volume_loss_weight * scaled_volume_loss
             loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
     return loss, {
@@ -544,6 +552,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         timeout_hit = False
         train_start = time.time()
 
+        # Online focal vol reweighting: per-case EMA of volume_loss magnitude
+        focal_case_ema: dict[str, float] = {}  # case_id -> EMA of volume_loss
+        focal_global_ema: float = 1.0  # global EMA used to normalise scale
+        if config.use_focal_vol_reweight and state.is_main:
+            print(
+                f"Focal vol reweight enabled: ema_decay={config.focal_vol_ema_decay}, "
+                f"clip=[{config.focal_vol_clip_min}, {config.focal_vol_clip_max}]"
+            )
+
         for epoch in range(max_epochs):
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
@@ -571,6 +588,23 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 aug_log: dict[str, int] = {}
+
+                # Compute per-case focal vol scale from EMA buffer
+                focal_vol_scale: float = 1.0
+                if config.use_focal_vol_reweight:
+                    batch_case_ids: list[str] = batch.case_ids
+                    # Average the EMA values for cases in this batch
+                    batch_ema_vals = [
+                        focal_case_ema.get(cid, focal_global_ema)
+                        for cid in batch_case_ids
+                    ]
+                    batch_avg_ema = sum(batch_ema_vals) / max(len(batch_ema_vals), 1)
+                    denom = focal_global_ema if focal_global_ema > 0.0 else 1.0
+                    raw_scale = batch_avg_ema / denom
+                    focal_vol_scale = float(
+                        max(config.focal_vol_clip_min, min(config.focal_vol_clip_max, raw_scale))
+                    )
+
                 loss, batch_loss_metrics, task_losses = train_loss(
                     model,
                     batch,
@@ -583,7 +617,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    vol_loss_scale=focal_vol_scale,
                 )
+
+                # Update per-case and global EMA after computing raw volume_loss
+                if config.use_focal_vol_reweight:
+                    raw_vol_loss: float = batch_loss_metrics["volume_loss"]
+                    decay = config.focal_vol_ema_decay
+                    for cid in batch_case_ids:
+                        prev = focal_case_ema.get(cid, raw_vol_loss)
+                        focal_case_ema[cid] = decay * prev + (1.0 - decay) * raw_vol_loss
+                    focal_global_ema = decay * focal_global_ema + (1.0 - decay) * raw_vol_loss
                 if (
                     config.use_y_symmetry_aug
                     and state.is_main
@@ -645,6 +689,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     train_log["train/aug/y_symmetry_batch_size"] = aug_log.get(
                         "batch_size", 0
                     )
+                if config.use_focal_vol_reweight:
+                    train_log["train/focal_vol/scale"] = focal_vol_scale
+                    train_log["train/focal_vol/global_ema"] = focal_global_ema
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
