@@ -1,0 +1,4 @@
+GradNorm corrected-dataset experiment
+
+Training with --use-gradnorm --gradnorm-mode ema_proxy --gradnorm-alpha 1.5
+Data: /mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511
