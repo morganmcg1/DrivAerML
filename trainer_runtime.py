@@ -865,6 +865,17 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+def log1p_signed(x: torch.Tensor) -> torch.Tensor:
+    """sign(x) * log1p(|x|) — a smooth, symmetric log-space transform.
+
+    Compresses large-magnitude values while preserving sign and being well-behaved
+    at zero (f(0)=0). Gradient = 1/(1+|x|) almost everywhere, so large-magnitude
+    inputs receive smaller gradients than under the identity. Numerically stable
+    for any finite input.
+    """
+    return x.sign() * torch.log1p(x.abs())
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,

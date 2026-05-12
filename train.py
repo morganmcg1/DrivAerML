@@ -53,6 +53,7 @@ from trainer_runtime import (
     init_wandb_run,
     is_valid_primary_metric,
     loader_kwargs,
+    log1p_signed,
     make_loaders,
     masked_mse,
     metric_namespace,
@@ -138,6 +139,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    vol_p_log_space_loss: bool = False
     debug: bool = False
 
 
@@ -228,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "vol_p_log_space_loss": (
+            "Apply sign(x)*log1p(|x|) transform to the volume-pressure channel "
+            "(index 0 of volume predictions/targets in normalized space) before "
+            "computing the MSE training loss. Leaves all other channels and the "
+            "surface losses untouched. Hypothesis: compressing large-magnitude "
+            "pressure outliers during training (val_vol_p ~ 3.9% vs test_vol_p ~ "
+            "12% on the SOTA baseline) reduces MSE's quadratic over-weighting of "
+            "heavy-tail residuals and improves OOD generalization. Eval metrics "
+            "are unchanged (still raw MSE in denormalized space)."
         ),
     }
     for field in fields(Config):
@@ -321,6 +333,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_p_log_space_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -341,7 +354,22 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        vol_pred_for_loss = out["volume_preds"]
+        vol_target_for_loss = volume_target
+        if vol_p_log_space_loss:
+            # Compress channel-0 (volume pressure) magnitudes in normalized space
+            # so MSE no longer weights heavy-tail residuals quadratically. Built
+            # via cat-of-slices to avoid in-place slice assignment, which
+            # invalidates autograd version counters on the cloned tensor.
+            vol_pred_for_loss = torch.cat(
+                [log1p_signed(vol_pred_for_loss[..., :1]), vol_pred_for_loss[..., 1:]],
+                dim=-1,
+            )
+            vol_target_for_loss = torch.cat(
+                [log1p_signed(vol_target_for_loss[..., :1]), vol_target_for_loss[..., 1:]],
+                dim=-1,
+            )
+        volume_loss = masked_mse(vol_pred_for_loss, vol_target_for_loss, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -1030,6 +1058,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_p_log_space_loss=config.vol_p_log_space_loss,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
