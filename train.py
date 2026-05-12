@@ -139,6 +139,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    init_from_checkpoint: str = ""
     debug: bool = False
 
 
@@ -237,6 +238,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "init_from_checkpoint": (
+            "Optional path to a checkpoint .pt file. When set, loads "
+            "``ckpt['model']`` (or the file itself if it is a raw "
+            "state_dict) into the model with ``strict=False`` before "
+            "optimizer/EMA construction. Optimizer state, scheduler "
+            "state, and the epoch counter are NOT loaded; the cosine "
+            "schedule restarts from epoch 0 on the warm weights. This "
+            "is the chain-run mechanism for continuing a previous "
+            "training run with a fresh LR schedule."
         ),
     }
     for field in fields(Config):
@@ -788,6 +799,35 @@ def main(argv: Iterable[str] | None = None) -> None:
         base_model = unwrap_model(model)
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+
+        if config.init_from_checkpoint:
+            ckpt = torch.load(
+                config.init_from_checkpoint, map_location="cpu", weights_only=False
+            )
+            if isinstance(ckpt, dict) and "model" in ckpt:
+                state_dict = ckpt["model"]
+                ckpt_epoch = ckpt.get("epoch")
+                ckpt_source = ckpt.get("checkpoint_source")
+            else:
+                state_dict = ckpt
+                ckpt_epoch = None
+                ckpt_source = None
+            missing, unexpected = base_model.load_state_dict(state_dict, strict=False)
+            if state.is_main:
+                print(f"[init-from-checkpoint] loaded {config.init_from_checkpoint}")
+                if ckpt_epoch is not None:
+                    print(
+                        f"[init-from-checkpoint] source-epoch={ckpt_epoch} "
+                        f"source-checkpoint={ckpt_source}"
+                    )
+                print(
+                    f"[init-from-checkpoint] missing keys: {len(missing)} "
+                    f"(e.g. {missing[:3]})"
+                )
+                print(
+                    f"[init-from-checkpoint] unexpected keys: {len(unexpected)} "
+                    f"(e.g. {unexpected[:3]})"
+                )
 
         optimizer = build_optimizer(base_model, config)
         initial_steps_per_epoch = max(1, len(train_loader))
