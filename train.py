@@ -132,6 +132,9 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    lambda_poisson: float = 0.0
+    poisson_k: int = 8
+    poisson_subsample_m: int = 2048
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -207,6 +210,37 @@ class GradNormWeights(nn.Module):
     @property
     def weights(self) -> torch.Tensor:
         return torch.exp(self.log_weights)
+
+
+def laplacian_smoothness_loss(
+    vol_preds: torch.Tensor,
+    vol_coords: torch.Tensor,
+    k: int = 8,
+    n_subsample: int = 2048,
+) -> torch.Tensor:
+    """Approximate ∇²p via k-NN finite differences over predicted volume pressure.
+
+    vol_preds:  (N, 1) predicted (normalized) pressure at *valid* volume points.
+    vol_coords: (N, 3) 3D coordinates of those same valid volume points.
+    Returns the mean squared discrete Laplacian: ``mean( (mean(NN) - self)^2 )``.
+
+    Implements the physics-motivated smoothness prior described in PR #1014.
+    Pairwise distance is computed in fp32 for stability under bf16 autocast.
+    """
+    N = vol_preds.shape[0]
+    if N <= k:
+        return vol_preds.new_zeros(())
+    M = min(n_subsample, N)
+    idx = torch.randperm(N, device=vol_preds.device)[:M]
+    coords_sub = vol_coords[idx].float()  # (M, 3)
+    preds_sub = vol_preds[idx]            # (M, 1)
+    diff = coords_sub.unsqueeze(1) - coords_sub.unsqueeze(0)  # (M, M, 3)
+    dist2 = (diff * diff).sum(-1)                              # (M, M)
+    dist2.fill_diagonal_(float("inf"))
+    _, nn_idx = dist2.topk(k, dim=1, largest=False)            # (M, k)
+    nn_preds = preds_sub[nn_idx]                               # (M, k, 1)
+    laplacian = nn_preds.mean(dim=1) - preds_sub               # (M, 1)
+    return (laplacian * laplacian).mean()
 
 
 def per_channel_masked_mse(
@@ -301,6 +335,9 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    lambda_poisson: float = 0.0,
+    poisson_k: int = 8,
+    poisson_subsample_m: int = 2048,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     batch = batch.to(device)
     if use_y_symmetry_aug:
@@ -337,12 +374,40 @@ def train_loss(
             weighted_volume_loss = volume_loss_weight * volume_loss
             loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+
+    poisson_loss_value = 0.0
+    poisson_n_samples = 0
+    if lambda_poisson > 0.0:
+        vol_preds_full = out["volume_preds"]  # [B, N, 1]
+        per_sample_losses: list[torch.Tensor] = []
+        for b in range(vol_preds_full.shape[0]):
+            mask_b = batch.volume_mask[b].bool()
+            n_valid = int(mask_b.sum().item())
+            if n_valid > poisson_k:
+                preds_b = vol_preds_full[b][mask_b]            # [N_valid, 1]
+                coords_b = batch.volume_x[b, :, :3][mask_b]    # [N_valid, 3]
+                per_sample_losses.append(
+                    laplacian_smoothness_loss(
+                        preds_b,
+                        coords_b,
+                        k=poisson_k,
+                        n_subsample=poisson_subsample_m,
+                    )
+                )
+        if per_sample_losses:
+            poisson_loss_tensor = torch.stack(per_sample_losses).mean()
+            loss = loss + lambda_poisson * poisson_loss_tensor
+            poisson_loss_value = float(poisson_loss_tensor.detach().cpu().item())
+            poisson_n_samples = len(per_sample_losses)
+
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "poisson_loss": poisson_loss_value,
+        "poisson_n_samples": float(poisson_n_samples),
     }, task_losses
 
 
@@ -583,6 +648,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    lambda_poisson=config.lambda_poisson,
+                    poisson_k=config.poisson_k,
+                    poisson_subsample_m=config.poisson_subsample_m,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -634,6 +702,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if config.lambda_poisson > 0.0:
+                        train_log["train/poisson_loss"] = batch_loss_metrics["poisson_loss"]
+                        train_log["train/poisson_loss_weighted"] = (
+                            config.lambda_poisson * batch_loss_metrics["poisson_loss"]
+                        )
+                        train_log["train/poisson_n_samples"] = batch_loss_metrics["poisson_n_samples"]
                 if config.use_y_symmetry_aug and aug_log:
                     bs = max(1, aug_log.get("batch_size", 0))
                     train_log["train/aug/y_symmetry_flip_rate"] = (
