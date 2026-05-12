@@ -181,6 +181,11 @@ class SpectralConv3d(nn.Module):
     positive (:modes) and negative (-modes:) corners. This follows the
     canonical Zongyi Li implementation with 4 corner weight blocks.
 
+    Weights are stored as real float32 tensors with a trailing ``2`` dim
+    (real, imag) so optimizers that do not support complex parameters
+    (e.g. Lion's ``sign_()``) can still train them. ``torch.view_as_complex``
+    forms the complex view on each forward without copy.
+
     FFT operations are performed in float32 to avoid bf16/fp16 precision
     issues in torch.fft.
     """
@@ -194,22 +199,17 @@ class SpectralConv3d(nn.Module):
         self.modes2 = modes2
         self.modes3 = modes3
         scale = 1.0 / (in_channels * out_channels)
-        shape = (in_channels, out_channels, modes1, modes2, modes3)
-        self.weights1 = nn.Parameter(
-            scale * torch.randn(*shape, dtype=torch.cfloat)
-        )
-        self.weights2 = nn.Parameter(
-            scale * torch.randn(*shape, dtype=torch.cfloat)
-        )
-        self.weights3 = nn.Parameter(
-            scale * torch.randn(*shape, dtype=torch.cfloat)
-        )
-        self.weights4 = nn.Parameter(
-            scale * torch.randn(*shape, dtype=torch.cfloat)
-        )
+        real_shape = (in_channels, out_channels, modes1, modes2, modes3, 2)
+        self.weights1 = nn.Parameter(scale * torch.randn(*real_shape))
+        self.weights2 = nn.Parameter(scale * torch.randn(*real_shape))
+        self.weights3 = nn.Parameter(scale * torch.randn(*real_shape))
+        self.weights4 = nn.Parameter(scale * torch.randn(*real_shape))
 
     @staticmethod
-    def _compl_mul3d(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    def _compl_mul3d(x: torch.Tensor, w_real: torch.Tensor) -> torch.Tensor:
+        # x: [B, C_in, m1, m2, m3] complex
+        # w_real: [C_in, C_out, m1, m2, m3, 2] real
+        w = torch.view_as_complex(w_real)
         return torch.einsum("bixyz,ioxyz->boxyz", x, w)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
