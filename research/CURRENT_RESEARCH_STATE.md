@@ -22,19 +22,20 @@
 
 **15+ model-side interventions FALSIFIED on this axis:** WD variants (0.005/0.01), GradNorm α-variants (0.25/0.75), fixed loss weights (2.0/3.0 with/without GradNorm), extended cosine T_max=60, EMA (decay=0.999/0.9999), BBox normalization, TTA Y-symmetry, DropPath, vol coord noise, stochastic vol subsampling, SDF-stratified sampling (far-field + near-surface), InstanceNorm across vol tokens, Lookahead. Gap is structurally embedded in the train/test distribution split.
 
-## Active Experiments (2026-05-12 ~15:30 UTC)
+## Active Experiments (2026-05-12 ~17:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 259,120 (EP23.61). SWA active, n=4 snapshots (EP20–EP23). | val_abupt=**6.1926%** (EP23 best), val_vol_p=**3.899%** | EP25 gate ≤6.65% at step ~274,375 (~1.5h). WILL PASS (margin +0.472pp). EP30 terminal eval with SWA-averaged weights (11 snapshots EP20–EP30). Advisor EP25 gate preview comment posted. |
-| #1014 | dl24-fern | **Poisson pressure physics regularization** — auxiliary loss λ=0.01 × k-NN Laplacian smoothness penalty on predicted pressure; 4L architecture | `l5urrdmk` (rank0) | **Running** — step 304,853 (EP27.90). All gates passed. | val_abupt=**6.403%** (EP17 best), val_vol_p=**4.022%** (EP17 best); regression continues EP17→EP28 | **⚠ REGRESSION**: monotonic worsening from EP17 onward. Advisor comment posted: use EP17 checkpoint for test eval. EP30 completion ~2h. |
-| #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — second `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights (no GradNorm feedback) | `ttnva184` (rank0) | **Running** — step 120,124 (EP10.99). EP10 gate PASSED ✓. | val_abupt=**6.422%**, val_vol_p=**3.553%** | **BEST val_vol_p across all active experiments (3.553%)**. EP15 gate ≤6.80% at step ~164,625 (~4.5h). Margin +0.378pp — WILL PASS. Advisor comment posted. |
-| #1034 | dl24-tanjiro | **Domain adversarial training (DANN)** — GRL on backbone features + discriminator to predict train-vs-test domain; forces distribution-invariant volume representations | `9q77j1wi` (rank0, group: `val-test-gap-domain-adaptation`) | **Running** — step 5,549 (EP≈0.51). No val yet. | — (no val yet — first val at EP1, ~step 10,927) | DANN ramping: grl_lambda ramping up. domain_acc=0.75 at EP0.33. EP5 gate ≤7.5% ~14h from now. |
+| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 259,120 (EP23.61). SWA active, n=4 snapshots (EP20–EP23). | val_abupt=**6.1926%** (EP23 best), val_vol_p=**3.899%** | EP25 gate ≤6.65% at step ~274,375. WILL PASS (margin +0.472pp). EP30 terminal eval with SWA-averaged weights (11 snapshots EP20–EP30). |
+| #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — second `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights (no GradNorm feedback) | `ttnva184` (rank0) | **Running** — step 120,124 (EP10.99). EP10 gate PASSED ✓. | val_abupt=**6.422%**, val_vol_p=**3.553%** | **BEST val_vol_p across all active experiments (3.553%)**. EP15 gate ≤6.80% at step ~164,625. Margin +0.378pp — WILL PASS. |
+| #1034 | dl24-tanjiro | **Domain adversarial training (DANN)** — GRL on backbone features + discriminator to predict train-vs-test domain; forces distribution-invariant volume representations | `9q77j1wi` (rank0, group: `val-test-gap-domain-adaptation`) | **⚠ REBASE REQUESTED** — merge conflict with advisor branch. Student sent rebase instructions. Run itself ongoing. | — (early, EP≈0.5) | Awaiting tanjiro rebase; EP5 gate ≤7.5% at step ~54,415. Cannot merge until rebase + terminal result. |
+| #1035 | dl24-fern | **Independent vol_p transformer tower** — separate `nn.ModuleList` of 6 transformer blocks processes ONLY volume tokens; no shared backbone parameters for vol predictions; vol-token LayerNorm included (from #1025) | — (not yet started) | **New assignment** — awaiting student implementation | — | Tests shared-feature interference as root cause of val→test gap. First EP5 gate at step ~54,930 (≤7.5%). |
 
 ## Recently Closed (since 2026-05-09)
 
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
+| #1014 | Poisson pressure physics regularization (fern) | **CLOSED** — regression from EP17 onward; monotonic worsening despite all gates passing. Best result was EP17 (val_abupt=6.403%, val_vol_p=4.022%). EP17 checkpoint recommended for test eval. | Laplacian smoothness penalty diverges in training tail. Physics-constraint approach on k-NN graph insufficient. |
 | #1033 | Online focal-vol reweight with Adam bias correction (tanjiro) | **CLOSED** — scale=3 ceiling degeneration persisted despite bias correction fix; same symptom as #1026. Global EMA still converges orders of magnitude faster than per-case EMA regardless of bias correction. Replaced by #1034 DANN. | Focal reweighting axis closed. EMA ratio approach fundamentally broken at different timescale convergence rates. |
 | #1026 | Online focal vol reweight (initial, dl24-tanjiro) | **CLOSED** — `train/focal_vol/scale=3` ceiling degeneration: global EMA converges in O(steps), per-case EMA converges in O(case_touches), ratio ≈10.2x → always clips to max. Bug: no bias correction for asymmetric convergence rates. Replaced by #1033 with bias correction fix. | Bias correction REQUIRED for multi-rate EMA ratios. |
 | #972 | SDF-stratified far-field sampling (α=2.0) | **CLOSED** — test_vol_p=11.827% (+1.069pp WORSE than baseline 10.758%), val→test gap +8.012pp UNCHANGED | SDF sampling FULLY FALSIFIED. AXIS CLOSED. |
@@ -50,9 +51,9 @@
 
 2. **Current 4 active gap-closing candidates** all attack the gap via different mechanisms:
    - **#999 SWA**: flat-minima weight averaging hypothesis — averaging EP20–EP30 snapshots may converge to wider basin with better OOD generalization
-   - **#1014 Poisson**: direct physics constraint — Laplacian smoothness penalty enforces physically consistent pressure fields
-   - **#1025 vol-token LN no GradNorm**: representation-level regularization without adaptive loss balancing feedback
-   - **#1034 DANN covariate shift adversarial**: domain adversarial neural network — discriminator forces backbone to learn domain-invariant features, directly targeting the train/test distribution gap
+   - **#1025 vol-token LN no GradNorm**: representation-level regularization without adaptive loss balancing feedback; **best val_vol_p=3.553%**
+   - **#1034 DANN covariate shift adversarial**: domain adversarial neural network — discriminator forces backbone to learn domain-invariant features, directly targeting the train/test distribution gap (awaiting rebase)
+   - **#1035 independent vol tower**: fully separate transformer encoder for volume predictions — no shared backbone parameters with surface path; tests shared-feature interference as root cause of gap
 
 3. **Weight decay is load-bearing.** WD axis fully exhausted — neither WD=0.005 nor WD=0.01 closes gap.
 
@@ -127,11 +128,11 @@
 
 If the 4 active gap-closing experiments fail to close the gap, escalate per Plateau Protocol — bold architecture-level moves:
 
-1. **Independent vol_p transformer tower** — fully separate encoder for volume head; train surface and volume jointly but with no shared backbone parameters. Tests whether the val→test gap is shared-feature interference.
+1. ~~**Independent vol_p transformer tower**~~ — **ASSIGNED to fern as PR #1035**
 2. **DETR-style learned query positions for volume decoder** — replace coordinate-based vol queries with N learned query embeddings, allowing model to learn its own canonical volume sampling pattern.
 3. **Voxel-based aggregation with spatial attention** — discretize volume into voxel grid, apply 3D attention; treats vol prediction as a structured grid problem rather than scattered point regression.
 4. **Top-K val checkpoint averaging** — instead of best single val checkpoint, average the K best by val; orthogonal to SWA epoch-snapshot averaging.
 5. **Geometric conditioning on body shape for vol prediction** — explicit shape descriptor (e.g., spherical harmonics of car silhouette) prepended to volume queries.
 6. **Pure Fourier neural operator (FNO) for vol_p** — completely replace volume decoder with FNO on a regular grid, interpolated to query points; tests whether spectral aggregation generalizes better than per-point MLP.
 
-_Last updated: 2026-05-12 ~15:30 UTC. Key changes: (1) #999 nezuko SWA EP23.61 (step=259,120), abupt=6.1926% (EP23 best), SWA n=4 snapshots (EP20-EP23), EP25 gate preview comment posted (WILL PASS, margin +0.472pp). (2) #1014 fern Poisson EP27.90 (step=304,853) — REGRESSION CONFIRMED: use EP17 checkpoint (abupt=6.403%, vol_p=4.022%) for test eval. EP30 approx 2h. (3) #1025 frieren vol-LN EP10.99 (step=120,124), abupt=6.422%, vol_p=3.553% — BEST val_vol_p across all active experiments. EP15 gate approx 4.5h away (+0.378pp margin). (4) #1034 tanjiro DANN EP0.51 (step=5,745) — ramping, no val yet. EP1 first val approx 1h._
+_Last updated: 2026-05-12 ~17:00 UTC. Key changes: (1) #1014 fern Poisson CLOSED — regression from EP17 onward; use EP17 checkpoint (val_abupt=6.403%, val_vol_p=4.022%) for test eval. (2) #1035 fern independent vol tower ASSIGNED — new WIP, awaiting student implementation. (3) #1034 tanjiro DANN — rebase instructions sent, awaiting student action; run ongoing at EP≈0.5. (4) #999 nezuko SWA EP23.61, n=4 SWA snapshots, EP25 gate WILL PASS. (5) #1025 frieren vol-LN EP10.99, best val_vol_p=3.553% across all active experiments._
