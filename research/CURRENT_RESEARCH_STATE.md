@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-12 ~14:35 UTC
+- 2026-05-12 ~15:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -22,13 +22,13 @@
 
 **15+ model-side interventions FALSIFIED on this axis:** WD variants (0.005/0.01), GradNorm α-variants (0.25/0.75), fixed loss weights (2.0/3.0 with/without GradNorm), extended cosine T_max=60, EMA (decay=0.999/0.9999), BBox normalization, TTA Y-symmetry, DropPath, vol coord noise, stochastic vol subsampling, SDF-stratified sampling (far-field + near-surface), InstanceNorm across vol tokens, Lookahead. Gap is structurally embedded in the train/test distribution split.
 
-## Active Experiments (2026-05-12 ~14:35 UTC)
+## Active Experiments (2026-05-12 ~15:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
 | #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 302,502 (EP27.5). SWA active, n=~8 snapshots (EP20–EP27). | val_abupt=**6.199%**, val_vol_p=**3.951%** | EP25 (6.1891%) and EP26 (6.1878%) best — slow improvement. ~2.5 epochs to EP30 terminal SWA eval. |
 | #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights | `ttnva184` | **Running** — step 168,081 (EP15.3). EP15 PASSED at step 163,720 (val_abupt=6.3726%, margin +0.427pp). | val_abupt=**6.373%**, val_vol_p=**3.536%** | **Best val_vol_p=3.5283% at EP12** — plateau confirmed. EP20 gate ≤6.70% upcoming at step ~219,720 (~17:00Z). Plan: eval best-val (EP12) checkpoint after EP20. |
-| #1037 | dl24-tanjiro | **Domain adversarial training (DANN) v2** — GRL on backbone features + discriminator to predict train-vs-test domain (clean branch, v2 of #1034) | `9q77j1wi` | **⚠ CODE NOT COMMITTED** — 2nd escalation posted 14:30Z. Run alive (step=17,213, EP~1.6). Student has not committed DANN code to git branch despite 2 escalation messages. | val_abupt=11.826% (EP1.6, normal early DANN) | EP5 gate ≤7.5% at step ~54,930 (~2h from now). Code MUST be committed before EP5 to enable merge. |
+| #1038 | dl24-tanjiro | **Top-K val checkpoint averaging (K=5)** — maintain heap of K=5 best-by-val checkpoints throughout training, arithmetic-average state_dicts at EP30 terminal; orthogonal to SWA epoch-snapshot averaging; tests flat-minima OOD generalisation via selection | TBD | **NEW ASSIGNMENT** — branch `tanjiro/top-k-val-checkpoint-avg` created 15:00Z. Code commit required before EP5 (~step 54,930). | — | CODE-FIRST: must commit implementation before EP5 gate. |
 | #1035 | dl24-fern | **Independent vol_p transformer tower** — separate 6L transformer backbone for volume tokens only | `1dijs6g1` | **Running** — step 1,922 (EP~0.2). Very early, no val metrics yet. | — | EP5 gate at step ~54,930 (~3h from now). Tests shared-feature interference as root cause of val→test gap. |
 
 ## Recently Closed (since 2026-05-09)
@@ -36,6 +36,7 @@
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
 | #1014 | Poisson pressure physics regularization (fern) | **CLOSED** — regression from EP17 onward; monotonic worsening despite all gates passing. Best result was EP17 (val_abupt=6.403%, val_vol_p=4.022%). EP17 checkpoint recommended for test eval. | Laplacian smoothness penalty diverges in training tail. Physics-constraint approach on k-NN graph insufficient. |
+| #1037 | DANN v2 (tanjiro) | **CLOSED** — student did not commit DANN implementation after 2 escalations; code-first violation. Run `9q77j1wi` alive but unverifiable. Replaced by PR #1038 Top-K averaging. | Code-first rule enforced. DANN axis remains open for future. |
 | #1033 | Online focal-vol reweight with Adam bias correction (tanjiro) | **CLOSED** — scale=3 ceiling degeneration persisted despite bias correction fix; same symptom as #1026. Global EMA still converges orders of magnitude faster than per-case EMA regardless of bias correction. Replaced by #1034 DANN. | Focal reweighting axis closed. EMA ratio approach fundamentally broken at different timescale convergence rates. |
 | #1026 | Online focal vol reweight (initial, dl24-tanjiro) | **CLOSED** — `train/focal_vol/scale=3` ceiling degeneration: global EMA converges in O(steps), per-case EMA converges in O(case_touches), ratio ≈10.2x → always clips to max. Bug: no bias correction for asymmetric convergence rates. Replaced by #1033 with bias correction fix. | Bias correction REQUIRED for multi-rate EMA ratios. |
 | #972 | SDF-stratified far-field sampling (α=2.0) | **CLOSED** — test_vol_p=11.827% (+1.069pp WORSE than baseline 10.758%), val→test gap +8.012pp UNCHANGED | SDF sampling FULLY FALSIFIED. AXIS CLOSED. |
@@ -52,7 +53,7 @@
 2. **Current 4 active gap-closing candidates** all attack the gap via different mechanisms:
    - **#999 SWA**: flat-minima weight averaging hypothesis — averaging EP20–EP30 snapshots may converge to wider basin with better OOD generalization
    - **#1025 vol-token LN no GradNorm**: representation-level regularization without adaptive loss balancing feedback; **best val_vol_p=3.553%**
-   - **#1034 DANN covariate shift adversarial**: domain adversarial neural network — discriminator forces backbone to learn domain-invariant features, directly targeting the train/test distribution gap (awaiting rebase)
+   - **#1038 Top-K val checkpoint averaging**: K=5 best checkpoints by val score averaged at terminal — flat-minima OOD generalisation via discrete selection (new, orthogonal to SWA)
    - **#1035 independent vol tower**: fully separate transformer encoder for volume predictions — no shared backbone parameters with surface path; tests shared-feature interference as root cause of gap
 
 3. **Weight decay is load-bearing.** WD axis fully exhausted — neither WD=0.005 nor WD=0.01 closes gap.
@@ -131,8 +132,8 @@ If the 4 active gap-closing experiments fail to close the gap, escalate per Plat
 1. ~~**Independent vol_p transformer tower**~~ — **ASSIGNED to fern as PR #1035**
 2. **DETR-style learned query positions for volume decoder** — replace coordinate-based vol queries with N learned query embeddings, allowing model to learn its own canonical volume sampling pattern.
 3. **Voxel-based aggregation with spatial attention** — discretize volume into voxel grid, apply 3D attention; treats vol prediction as a structured grid problem rather than scattered point regression.
-4. **Top-K val checkpoint averaging** — instead of best single val checkpoint, average the K best by val; orthogonal to SWA epoch-snapshot averaging.
+4. ~~**Top-K val checkpoint averaging**~~ — **ASSIGNED to tanjiro as PR #1038**
 5. **Geometric conditioning on body shape for vol prediction** — explicit shape descriptor (e.g., spherical harmonics of car silhouette) prepended to volume queries.
 6. **Pure Fourier neural operator (FNO) for vol_p** — completely replace volume decoder with FNO on a regular grid, interpolated to query points; tests whether spectral aggregation generalizes better than per-point MLP.
 
-_Last updated: 2026-05-12 ~21:00 UTC. Key changes: (1) #999 nezuko SWA EP26.5 (step 291,353), n=7 snapshots (EP20–EP26), val_abupt=6.188%, advisor EP30 terminal eval instructions posted. (2) #1025 frieren vol-LN EP14.1 (step 155,118), val_vol_p=3.540% — plateau confirmed, micro-regressing from best=3.528% at EP12; advisor EP14 plateau comment posted; EP15 gate will pass. (3) #1034 tanjiro DANN — 4th escalation posted; conflict unresolved for 5+ hours. (4) #1035 fern independent vol tower — launched! Run 1dijs6g1 at step 502 (EP0.05), implementation commit d8dc33d confirmed, advisor launch confirmation posted._
+_Last updated: 2026-05-12 ~15:00 UTC. Key changes: (1) #999 nezuko SWA EP27.5 (step 302,502), n=~8 snapshots (EP20–EP27), val_abupt=6.199%, val_vol_p=3.951%; ~2.5 epochs to EP30 terminal. (2) #1025 frieren vol-LN EP15.3 (step 168,081), val_vol_p=3.536%, best=3.5283% at EP12; plateau confirmed; EP20 gate ~17:00Z. (3) #1037 tanjiro DANN v2 CLOSED — code-first violation; student never committed implementation. (4) #1035 fern independent vol tower — step 1,922 (EP0.2), early. (5) #1038 tanjiro Top-K val checkpoint averaging ASSIGNED — branch created 15:00Z, code-first requirement enforced._
