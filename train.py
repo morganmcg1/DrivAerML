@@ -255,7 +255,7 @@ def apply_sdf_stratified_stochastic_sampling(
 
             n_total = int(sdf_abs.shape[0])
             n_sample = min(n_vol_local, n_total) if n_vol_local > 0 else n_total
-            vol_idx = torch.multinomial(weights, n_sample, replacement=True)
+            vol_idx = torch.multinomial(weights, n_sample, replacement=False)
             vol_idx, _ = torch.sort(vol_idx)
 
             case = self.store.load_case(
@@ -300,6 +300,10 @@ def apply_sdf_stratified_stochastic_sampling(
         print(
             f"[sdf-stratified-stochastic] enabled: alpha={alpha}, "
             f"n_volume={n_volume} (subclass={_SDFStratifiedStochasticDataset.__name__})"
+        )
+        print(
+            "[sdf-stratified-stochastic] weight_form=1/(1+alpha*|sdf|) (near-surface emphasis), "
+            "multinomial replacement=False"
         )
 
 
