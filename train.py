@@ -138,6 +138,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    coord_aug_rot_std: float = 0.0
+    coord_aug_scale_std: float = 0.0
+    coord_aug_prob: float = 1.0
     debug: bool = False
 
 
@@ -229,6 +232,30 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "coord_aug_rot_std": (
+            "Standard deviation (radians) of per-sample random yaw "
+            "rotation applied to surface/volume coordinates during "
+            "training only (PR #1029). 0.0 disables. Yaw is around the z "
+            "(vertical) axis, preserving ground-plane priors. Normals are "
+            "rotated by R (preserving unit length). Wall-shear targets "
+            "(tau_x, tau_y, tau_z) are rotated by R as a 3-vector. "
+            "Scalar targets (surface_pressure, volume_pressure) and "
+            "scalar features (area, sdf) are not rotated. Eval/test "
+            "remain on the canonical frame."
+        ),
+        "coord_aug_scale_std": (
+            "Standard deviation of per-sample log-normal isotropic "
+            "scale applied to surface/volume coordinates during training "
+            "only (PR #1029). 0.0 disables. scale = exp(N(0, std**2)). "
+            "Coordinates xyz and the SDF channel scale by the same "
+            "factor (signed distance scales with geometry). Normals and "
+            "scalar targets/features are not scaled. Wall-shear vectors "
+            "are not scaled (stress is not geometry-scale-dependent)."
+        ),
+        "coord_aug_prob": (
+            "Per-batch probability of applying coord-frame augmentation "
+            "(PR #1029). Default 1.0 (always on when std>0)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +338,89 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def apply_coord_augmentation(
+    batch,
+    *,
+    rot_std: float,
+    scale_std: float,
+    prob: float,
+) -> None:
+    """Apply random yaw rotation + isotropic scale to coordinate frames in-place.
+
+    Per-sample (per batch element) augmentation. Yaw is rotation around z
+    (vertical) only — DrivAerML vehicles are ground-aligned. Scale is
+    log-normal with std=scale_std (so ~exp(0)=1 mean factor, multiplicative).
+
+    surface_x layout: [xyz(3), normals(3), area(1)] (7 channels)
+    volume_x  layout: [xyz(3), sdf(1)] (4 channels)
+    surface_y layout: [surface_pressure(1), tau_x, tau_y, tau_z]
+    volume_y  layout: [volume_pressure(1)]
+
+    Transforms:
+      xyz coords (surface, volume) -> rotate + scale
+      normals                       -> rotate only (preserve unit length)
+      sdf                           -> scale only (distance scales with geometry)
+      tau_x/y/z target              -> rotate only (vector target)
+      area, surface_pressure,
+       volume_pressure              -> unchanged (scalar)
+
+    Padded rows are zero and remain zero after rotation/scale, so the
+    surface_mask / volume_mask semantics are preserved.
+    """
+    if rot_std <= 0.0 and scale_std <= 0.0:
+        return
+    if prob < 1.0:
+        if torch.rand(()).item() > prob:
+            return
+
+    B = batch.surface_x.shape[0]
+    device = batch.surface_x.device
+    dtype = batch.surface_x.dtype
+
+    if rot_std > 0.0:
+        theta = torch.randn(B, device=device, dtype=dtype) * rot_std
+        cos_t = torch.cos(theta)
+        sin_t = torch.sin(theta)
+        zeros = torch.zeros(B, device=device, dtype=dtype)
+        ones = torch.ones(B, device=device, dtype=dtype)
+        R = torch.stack(
+            [
+                torch.stack([cos_t, -sin_t, zeros], dim=-1),
+                torch.stack([sin_t, cos_t, zeros], dim=-1),
+                torch.stack([zeros, zeros, ones], dim=-1),
+            ],
+            dim=1,
+        )
+    else:
+        R = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).expand(B, -1, -1).contiguous()
+
+    if scale_std > 0.0:
+        scale = torch.exp(torch.randn(B, device=device, dtype=dtype) * scale_std)
+    else:
+        scale = torch.ones(B, device=device, dtype=dtype)
+
+    R_T = R.transpose(1, 2)
+    R_scaled_T = R_T * scale.view(B, 1, 1)
+    scale_b11 = scale.view(B, 1, 1)
+
+    surf = batch.surface_x
+    surf_xyz_aug = torch.bmm(surf[..., 0:3], R_scaled_T)
+    surf_normals_aug = torch.bmm(surf[..., 3:6], R_T)
+    new_surface_x = torch.cat([surf_xyz_aug, surf_normals_aug, surf[..., 6:]], dim=-1)
+    batch.surface_x = new_surface_x
+
+    surf_y = batch.surface_y
+    tau_aug = torch.bmm(surf_y[..., 1:4], R_T)
+    new_surface_y = torch.cat([surf_y[..., 0:1], tau_aug], dim=-1)
+    batch.surface_y = new_surface_y
+
+    vol = batch.volume_x
+    vol_xyz_aug = torch.bmm(vol[..., 0:3], R_scaled_T)
+    vol_sdf_aug = vol[..., 3:4] * scale_b11
+    new_volume_x = torch.cat([vol_xyz_aug, vol_sdf_aug, vol[..., 4:]], dim=-1)
+    batch.volume_x = new_volume_x
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,8 +431,17 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    coord_aug_rot_std: float = 0.0,
+    coord_aug_scale_std: float = 0.0,
+    coord_aug_prob: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
+    apply_coord_augmentation(
+        batch,
+        rot_std=coord_aug_rot_std,
+        scale_std=coord_aug_scale_std,
+        prob=coord_aug_prob,
+    )
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -364,6 +483,10 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    coord_aug_rot_std: float = 0.0,
+    coord_aug_scale_std: float = 0.0,
+    coord_aug_prob: float = 1.0,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -374,6 +497,12 @@ def per_task_train_losses(
     """
 
     batch = batch.to(device)
+    apply_coord_augmentation(
+        batch,
+        rot_std=coord_aug_rot_std,
+        scale_std=coord_aug_scale_std,
+        prob=coord_aug_prob,
+    )
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
     with autocast_context(device, amp_mode):
@@ -883,6 +1012,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["coord_aug/rot_std"] = config.coord_aug_rot_std
+            wandb.summary["coord_aug/scale_std"] = config.coord_aug_scale_std
+            wandb.summary["coord_aug/prob"] = config.coord_aug_prob
+            wandb.summary["coord_aug/enabled"] = float(
+                config.coord_aug_rot_std > 0.0 or config.coord_aug_scale_std > 0.0
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -939,7 +1074,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        coord_aug_rot_std=config.coord_aug_rot_std,
+                        coord_aug_scale_std=config.coord_aug_scale_std,
+                        coord_aug_prob=config.coord_aug_prob,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,6 +1172,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        coord_aug_rot_std=config.coord_aug_rot_std,
+                        coord_aug_scale_std=config.coord_aug_scale_std,
+                        coord_aug_prob=config.coord_aug_prob,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
