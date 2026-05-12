@@ -59,8 +59,8 @@ Lower is better. Final reports should include the individual AB-UPT comparison c
 The processed DrivAerML arrays are expected on the PVC at one of:
 
 ```
-/mnt/pvc/Processed/drivaerml_processed
-/mnt/new-pvc/Processed/drivaerml_processed
+/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511
+/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 
 You can also point to another copy:
@@ -89,10 +89,39 @@ Regenerate the split manifest from the PVC manifests:
 python data/generate_manifest.py
 ```
 
+The split manifest has one `case_splits` map. The same train/val/test case IDs
+are used for both surface and volume fields.
+
 Validate all case arrays and write point counts:
 
 ```
 python data/preload.py
+```
+
+Build the canonical raw-only processed root. This hardlinks or copies the
+surface arrays from the packaged processed root, then regenerates every volume
+array from complete raw VTUs. SDF values are clamped to zero so
+`volume_sdf.npy` is nonnegative.
+
+```
+python scripts/preprocess_drivaerml_raw.py \
+  --source-root /mnt/new-pvc/Processed/drivaerml_processed \
+  --raw-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511 \
+  --output-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
+```
+
+Compute target normalizers from the training case split:
+
+```
+python scripts/compute_normalizers.py \
+  --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
+```
+
+Audit SDF distributions after preprocessing:
+
+```
+python scripts/audit_sdf_distribution.py \
+  --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 
 If the PVC is mounted somewhere other than `/mnt/pvc` or `/mnt/new-pvc`, set:

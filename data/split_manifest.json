@@ -1,15 +1,14 @@
 {
   "dataset": "DrivAerML",
-  "manifest_version": 1,
-  "source_surface_manifest": "/mnt/pvc/Processed/drivaerml_processed/manifest.csv",
-  "source_surface_manifest_full": "/mnt/pvc/Processed/drivaerml_processed/manifest_full_failed10_included.csv",
-  "source_volume_manifest": "/mnt/pvc/Processed/drivaerml_processed/volume_manifest.csv",
-  "case_root": "/mnt/pvc/Processed/drivaerml_processed",
+  "manifest_version": 2,
+  "source_case_manifest": "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest.csv",
+  "source_case_manifest_full": "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest_full_failed10_included.csv",
+  "case_root": "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511",
   "case_root_candidates": [
-    "/mnt/pvc/Processed/drivaerml_processed",
-    "/mnt/new-pvc/Processed/drivaerml_processed"
+    "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511",
+    "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511"
   ],
-  "surface_splits": {
+  "case_splits": {
     "train": [
       "run_1",
       "run_2",
@@ -501,42 +500,17 @@
       "run_472"
     ]
   },
-  "surface_split_counts": {
+  "case_split_counts": {
     "train": 400,
     "val": 34,
     "test": 50
   },
-  "volume_splits": {
-    "train": [
-      "run_485",
-      "run_486",
-      "run_488",
-      "run_489",
-      "run_490",
-      "run_491",
-      "run_492",
-      "run_493",
-      "run_494",
-      "run_495",
-      "run_496",
-      "run_497",
-      "run_498",
-      "run_499",
-      "run_500"
-    ],
-    "val": [
-      "run_487"
-    ]
-  },
-  "volume_split_counts": {
-    "train": 15,
-    "val": 1
-  },
   "excluded_case_ids": [],
   "excluded_case_count": 0,
   "notes": [
-    "Surface splits come directly from the current preprocessed manifest.csv on the PVC.",
-    "Volume splits come from volume_manifest.csv and are a strict subset of the surface cases.",
-    "manifest.csv and manifest_full_failed10_included.csv currently agree on all packaged processed surface cases."
+    "Case splits come directly from the packaged processed manifest.csv.",
+    "The same train/val/test case IDs are used for both surface and volume fields.",
+    "manifest_full_failed10_included.csv is used to verify repaired public cases are present.",
+    "Volume arrays come from the canonical raw-only preprocessing root; no synthetic inside-body rows are added."
   ]
 }

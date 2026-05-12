@@ -2,23 +2,27 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
 
-"""Build `data/split_manifest.json` from the processed DrivAerML PVC manifests."""
+"""Build `data/split_manifest.json` from the processed DrivAerML PVC manifest."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
-from data.split_utils import expand_pvc_candidates, ensure_disjoint, rewrite_under_pvc_mount, write_json
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from split_utils import expand_pvc_candidates, ensure_disjoint, rewrite_under_pvc_mount, write_json
+else:
+    from data.split_utils import expand_pvc_candidates, ensure_disjoint, rewrite_under_pvc_mount, write_json
 
-DEFAULT_SURFACE_MANIFEST = "/mnt/pvc/Processed/drivaerml_processed/manifest.csv"
-DEFAULT_SURFACE_MANIFEST_FULL = "/mnt/pvc/Processed/drivaerml_processed/manifest_full_failed10_included.csv"
-DEFAULT_VOLUME_MANIFEST = "/mnt/pvc/Processed/drivaerml_processed/volume_manifest.csv"
-DEFAULT_CASE_ROOT = "/mnt/pvc/Processed/drivaerml_processed"
+DEFAULT_CASE_MANIFEST = "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest.csv"
+DEFAULT_CASE_MANIFEST_FULL = "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511/manifest_full_failed10_included.csv"
+DEFAULT_CASE_ROOT = "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511"
 DEFAULT_CASE_ROOT_CANDIDATES = [
-    "/mnt/pvc/Processed/drivaerml_processed",
-    "/mnt/new-pvc/Processed/drivaerml_processed",
+    "/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511",
+    "/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511",
 ]
 DEFAULT_OUTPUT = Path(__file__).with_name("split_manifest.json")
 
@@ -29,79 +33,58 @@ def _read_csv_rows(path: str | Path) -> list[dict[str, str]]:
 
 
 def build_manifest(
-    surface_manifest_path: str,
-    surface_full_manifest_path: str,
-    volume_manifest_path: str,
+    case_manifest_path: str,
+    case_full_manifest_path: str,
     case_root: str,
     case_root_candidates: list[str],
     *,
-    surface_manifest_read_path: str | None = None,
-    surface_full_manifest_read_path: str | None = None,
-    volume_manifest_read_path: str | None = None,
+    case_manifest_read_path: str | None = None,
+    case_full_manifest_read_path: str | None = None,
 ) -> dict:
-    surface_rows = _read_csv_rows(surface_manifest_read_path or surface_manifest_path)
-    surface_full_rows = _read_csv_rows(surface_full_manifest_read_path or surface_full_manifest_path)
-    volume_rows = _read_csv_rows(volume_manifest_read_path or volume_manifest_path)
+    case_rows = _read_csv_rows(case_manifest_read_path or case_manifest_path)
+    case_full_rows = _read_csv_rows(case_full_manifest_read_path or case_full_manifest_path)
 
-    surface_splits = {
-        split: [row["case_id"] for row in surface_rows if row["split"] == split]
+    case_splits = {
+        split: [row["case_id"] for row in case_rows if row["split"] == split]
         for split in ("train", "val", "test")
     }
-    volume_splits = {
-        split: [row["case_id"] for row in volume_rows if row["split"] == split]
-        for split in sorted({row["split"] for row in volume_rows})
-    }
-    current_ids = {row["case_id"] for row in surface_rows}
-    full_ids = {row["case_id"] for row in surface_full_rows}
+    current_ids = {row["case_id"] for row in case_rows}
+    full_ids = {row["case_id"] for row in case_full_rows}
     excluded_case_ids = sorted(full_ids - current_ids)
 
     return {
         "dataset": "DrivAerML",
-        "manifest_version": 1,
-        "source_surface_manifest": surface_manifest_path,
-        "source_surface_manifest_full": surface_full_manifest_path,
-        "source_volume_manifest": volume_manifest_path,
+        "manifest_version": 2,
+        "source_case_manifest": case_manifest_path,
+        "source_case_manifest_full": case_full_manifest_path,
         "case_root": case_root,
         "case_root_candidates": case_root_candidates,
-        "surface_splits": surface_splits,
-        "surface_split_counts": {k: len(v) for k, v in surface_splits.items()},
-        "volume_splits": volume_splits,
-        "volume_split_counts": {k: len(v) for k, v in volume_splits.items()},
+        "case_splits": case_splits,
+        "case_split_counts": {k: len(v) for k, v in case_splits.items()},
         "excluded_case_ids": excluded_case_ids,
         "excluded_case_count": len(excluded_case_ids),
         "notes": [
-            "Surface splits come directly from the packaged processed manifest.csv.",
-            "Volume splits are used by the grouped surface/volume baseline trainer.",
+            "Case splits come directly from the packaged processed manifest.csv.",
+            "The same train/val/test case IDs are used for both surface and volume fields.",
             "manifest_full_failed10_included.csv is used to verify repaired public cases are present.",
+            "Volume arrays come from the canonical raw-only preprocessing root; no synthetic inside-body rows are added.",
         ],
     }
 
 
 def verify_manifest(manifest: dict) -> None:
-    surface_counts = manifest["surface_split_counts"]
-    if surface_counts != {"train": 400, "val": 34, "test": 50}:
-        raise ValueError(f"Unexpected DrivAerML surface split counts: {surface_counts}")
-    ensure_disjoint(manifest["surface_splits"])
+    case_counts = manifest["case_split_counts"]
+    if case_counts != {"train": 400, "val": 34, "test": 50}:
+        raise ValueError(f"Unexpected DrivAerML case split counts: {case_counts}")
+    ensure_disjoint(manifest["case_splits"])
     if manifest["excluded_case_count"] != 0:
         raise ValueError(f"Expected 0 excluded DrivAerML cases, got {manifest['excluded_case_count']}")
-
-    surface_by_case = {}
-    for split, case_ids in manifest["surface_splits"].items():
-        for case_id in case_ids:
-            surface_by_case[case_id] = split
-    for split, case_ids in manifest["volume_splits"].items():
-        for case_id in case_ids:
-            if surface_by_case.get(case_id) != split:
-                raise ValueError(
-                    f"Volume case {case_id} split {split} mismatches surface split {surface_by_case.get(case_id)}"
-                )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--surface-manifest", default=DEFAULT_SURFACE_MANIFEST)
-    parser.add_argument("--surface-manifest-full", default=DEFAULT_SURFACE_MANIFEST_FULL)
-    parser.add_argument("--volume-manifest", default=DEFAULT_VOLUME_MANIFEST)
+    parser.add_argument("--case-manifest", default=DEFAULT_CASE_MANIFEST)
+    parser.add_argument("--case-manifest-full", default=DEFAULT_CASE_MANIFEST_FULL)
     parser.add_argument("--case-root", default=DEFAULT_CASE_ROOT)
     parser.add_argument("--case-root-candidate", action="append", default=[])
     parser.add_argument("--out", default=str(DEFAULT_OUTPUT))
@@ -109,20 +92,17 @@ def main() -> None:
 
     case_root_candidates = args.case_root_candidate or DEFAULT_CASE_ROOT_CANDIDATES
     manifest = build_manifest(
-        surface_manifest_path=str(args.surface_manifest),
-        surface_full_manifest_path=str(args.surface_manifest_full),
-        volume_manifest_path=str(args.volume_manifest),
+        case_manifest_path=str(args.case_manifest),
+        case_full_manifest_path=str(args.case_manifest_full),
         case_root=str(args.case_root),
         case_root_candidates=expand_pvc_candidates(case_root_candidates),
-        surface_manifest_read_path=str(rewrite_under_pvc_mount(args.surface_manifest)),
-        surface_full_manifest_read_path=str(rewrite_under_pvc_mount(args.surface_manifest_full)),
-        volume_manifest_read_path=str(rewrite_under_pvc_mount(args.volume_manifest)),
+        case_manifest_read_path=str(rewrite_under_pvc_mount(args.case_manifest)),
+        case_full_manifest_read_path=str(rewrite_under_pvc_mount(args.case_manifest_full)),
     )
     verify_manifest(manifest)
     write_json(args.out, manifest)
     print(f"Wrote {args.out}")
-    print("Surface splits:", manifest["surface_split_counts"])
-    print("Volume splits :", manifest["volume_split_counts"])
+    print("Case splits:", manifest["case_split_counts"])
     print("Excluded cases:", manifest["excluded_case_count"], manifest["excluded_case_ids"])
 
 

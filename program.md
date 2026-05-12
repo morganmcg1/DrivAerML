@@ -34,7 +34,7 @@ The baseline model given in `model.py` and trained by `train.py` is a plain grou
 
 ## Data
 
-Processed samples live on the PVC at `/mnt/pvc/Processed/drivaerml_processed` or `/mnt/new-pvc/Processed/drivaerml_processed`.
+Processed samples live on the PVC at `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511` or `/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511`.
 
 Each case directory must contain:
 
@@ -71,7 +71,7 @@ The pinned split follows the packaged public processed DrivAerML manifest:
 | val | 34 |
 | test | 50 |
 
-`data/loader.py` validates that the split is exactly `400 / 34 / 50`, has no overlap, and includes the restored public case IDs.
+`data/loader.py` validates that the case split is exactly `400 / 34 / 50`, has no overlap, and includes the restored public case IDs.
 
 ## Point-View Sampling in the Reference train.py
 

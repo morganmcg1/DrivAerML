@@ -41,7 +41,7 @@ VOLUME_X_DIM = 4  # xyz(3) + sdf(1)
 VOLUME_Y_DIM = 1  # volume pressure
 SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")
 VOLUME_TARGET_NAMES = ("volume_pressure",)
-EXPECTED_SURFACE_SPLIT_COUNTS = {"train": 400, "val": 34, "test": 50}
+EXPECTED_CASE_SPLIT_COUNTS = {"train": 400, "val": 34, "test": 50}
 EXPECTED_EXCLUDED_CASE_COUNT = 0
 REQUIRED_RESTORED_CASE_IDS = frozenset(
     {
@@ -121,25 +121,25 @@ def read_json(path: str | Path) -> dict:
 
 
 def validate_manifest(manifest: dict, manifest_path: str | Path) -> None:
-    surface_splits = manifest.get("surface_splits")
-    if not isinstance(surface_splits, dict):
-        raise ValueError(f"DrivAerML manifest {manifest_path} is missing surface_splits")
+    case_splits = manifest.get("case_splits")
+    if not isinstance(case_splits, dict):
+        raise ValueError(f"DrivAerML manifest {manifest_path} is missing case_splits")
 
-    missing_splits = sorted(set(EXPECTED_SURFACE_SPLIT_COUNTS) - set(surface_splits))
+    missing_splits = sorted(set(EXPECTED_CASE_SPLIT_COUNTS) - set(case_splits))
     if missing_splits:
         raise ValueError(f"DrivAerML manifest {manifest_path} is missing splits: {missing_splits}")
 
-    actual_counts = {split: len(surface_splits[split]) for split in EXPECTED_SURFACE_SPLIT_COUNTS}
-    if actual_counts != EXPECTED_SURFACE_SPLIT_COUNTS:
+    actual_counts = {split: len(case_splits[split]) for split in EXPECTED_CASE_SPLIT_COUNTS}
+    if actual_counts != EXPECTED_CASE_SPLIT_COUNTS:
         raise ValueError(
             "DrivAerML manifest does not match the public processed split: "
-            f"{actual_counts} vs {EXPECTED_SURFACE_SPLIT_COUNTS} ({manifest_path})"
+            f"{actual_counts} vs {EXPECTED_CASE_SPLIT_COUNTS} ({manifest_path})"
         )
 
-    split_sets = {split: set(surface_splits[split]) for split in EXPECTED_SURFACE_SPLIT_COUNTS}
-    surface_case_ids = set().union(*split_sets.values())
-    if len(surface_case_ids) != sum(actual_counts.values()):
-        raise ValueError(f"DrivAerML manifest {manifest_path} has overlapping surface splits")
+    split_sets = {split: set(case_splits[split]) for split in EXPECTED_CASE_SPLIT_COUNTS}
+    case_ids = set().union(*split_sets.values())
+    if len(case_ids) != sum(actual_counts.values()):
+        raise ValueError(f"DrivAerML manifest {manifest_path} has overlapping case splits")
 
     excluded_count = int(manifest.get("excluded_case_count", len(manifest.get("excluded_case_ids", []))))
     if excluded_count != EXPECTED_EXCLUDED_CASE_COUNT:
@@ -148,7 +148,7 @@ def validate_manifest(manifest: dict, manifest_path: str | Path) -> None:
             f"{excluded_count} excluded in {manifest_path}"
         )
 
-    missing_required = sorted(REQUIRED_RESTORED_CASE_IDS - surface_case_ids)
+    missing_required = sorted(REQUIRED_RESTORED_CASE_IDS - case_ids)
     if missing_required:
         raise ValueError(
             f"DrivAerML manifest {manifest_path} is missing restored public cases: {missing_required}"
@@ -330,7 +330,7 @@ class DrivAerMLCaseStore:
         self._point_count_cache: dict[str, dict[str, int]] = {}
 
     def case_ids(self, split: str) -> list[str]:
-        return list(self.manifest["surface_splits"][split])
+        return list(self.manifest["case_splits"][split])
 
     def load_case(
         self,

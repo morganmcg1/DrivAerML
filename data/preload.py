@@ -7,12 +7,16 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from data.loader import DEFAULT_MANIFEST, DrivAerMLCaseStore
 from data.split_utils import write_json
 
-DEFAULT_OUTPUT = Path("/mnt/new-pvc/datasets/drivaerml/point_counts.json")
+DEFAULT_OUTPUT = Path("/mnt/new-pvc/datasets/drivaerml/rawcanon_point_counts.json")
 
 
 def main() -> None:
