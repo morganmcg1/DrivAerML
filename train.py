@@ -108,6 +108,9 @@ class Config:
     ema_decay: float = 0.999
     ema_start_step: int = 50
     eval_raw_vs_ema: bool = False
+    use_swa: bool = False
+    swa_start_epoch: int = 20
+    swa_freq: int = 1
     lr_warmup_epochs: int = 0
     lr_warmup_steps: int = 0
     lr_warmup_start_lr: float = 1e-5
@@ -207,6 +210,67 @@ class GradNormWeights(nn.Module):
     @property
     def weights(self) -> torch.Tensor:
         return torch.exp(self.log_weights)
+
+
+class SWA:
+    """Stochastic Weight Averaging (Izmailov et al. 2018, arXiv:1803.05407).
+
+    Maintains a running uniform average of ``model.state_dict()`` tensors
+    collected at the end of each eligible epoch. Snapshots live on CPU as
+    float32 to keep GPU memory free and to preserve averaging precision
+    under bf16 training. Integer / non-float tensors (if any) are stored
+    once from the first snapshot.
+
+    The averaged weights are intended for final evaluation only; per-epoch
+    val metrics remain those of the in-training model. Transolver uses
+    LayerNorm (no running statistics), so no post-SWA BN recalibration is
+    required.
+    """
+
+    def __init__(self, swa_start: int, swa_freq: int = 1):
+        self.swa_start = swa_start
+        self.swa_freq = swa_freq
+        self._n = 0
+        self._avg_state: dict[str, torch.Tensor] | None = None
+
+    def should_update(self, epoch_one_indexed: int) -> bool:
+        if epoch_one_indexed < self.swa_start:
+            return False
+        return (epoch_one_indexed - self.swa_start) % self.swa_freq == 0
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        if self._avg_state is None:
+            self._avg_state = {}
+            for key, tensor in model.state_dict().items():
+                detached = tensor.detach().cpu()
+                if detached.dtype.is_floating_point:
+                    self._avg_state[key] = detached.float().clone()
+                else:
+                    self._avg_state[key] = detached.clone()
+            self._n = 1
+            return
+        self._n += 1
+        factor = 1.0 / self._n
+        for key, tensor in model.state_dict().items():
+            if not tensor.dtype.is_floating_point:
+                continue
+            avg = self._avg_state[key]
+            avg.mul_(1.0 - factor).add_(tensor.detach().float().cpu(), alpha=factor)
+
+    def state_dict_for(self, model: nn.Module) -> dict[str, torch.Tensor]:
+        """Return SWA-averaged state_dict cast to model's dtypes/devices."""
+        if self._avg_state is None:
+            return {}
+        ref_state = model.state_dict()
+        return {
+            key: tensor.to(dtype=ref_state[key].dtype, device=ref_state[key].device)
+            for key, tensor in self._avg_state.items()
+        }
+
+    @property
+    def n_snapshots(self) -> int:
+        return self._n
 
 
 def per_channel_masked_mse(
@@ -476,6 +540,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
+        swa = SWA(swa_start=config.swa_start_epoch, swa_freq=config.swa_freq) if config.use_swa else None
+        if config.use_swa and state.is_main:
+            print(
+                f"SWA enabled: start_epoch={config.swa_start_epoch}, "
+                f"freq={config.swa_freq} (final eval only; per-epoch val unchanged)"
+            )
 
         gradnorm_weights: GradNormWeights | None = None
         gradnorm_opt: torch.optim.Optimizer | None = None
@@ -981,6 +1051,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                 wandb.log(log_metrics)
             if ema is not None:
                 ema.restore(base_model)
+            if swa is not None and state.is_main and swa.should_update(epoch + 1):
+                swa.update(base_model)
+                wandb.log(
+                    {
+                        "train/swa/n_snapshots": float(swa.n_snapshots),
+                        "train/swa/collected_epoch": float(epoch + 1),
+                        "global_step": global_step,
+                    }
+                )
             stop_requested = distributed_any(state, early_stop_reason is not None, device)
             if stop_requested and early_stop_reason is None:
                 early_stop_reason = "rank 0 requested early stop"
@@ -1025,10 +1104,44 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.finish()
             return
 
+        final_eval_model_path = model_path
+        final_checkpoint_source = best_checkpoint_source
+        if swa is not None and swa.n_snapshots > 0:
+            print(
+                f"Applying SWA weights ({swa.n_snapshots} snapshots, "
+                f"start_epoch={config.swa_start_epoch}, freq={config.swa_freq}) "
+                "for final evaluation"
+            )
+            swa_model_path = output_dir / "swa_checkpoint.pt"
+            torch.save(
+                {
+                    "model": swa.state_dict_for(base_model),
+                    "config": asdict(config),
+                    "epoch": max_epochs,
+                    "checkpoint_source": "swa",
+                    "selection_metric": "swa_uniform_average",
+                    "swa_n_snapshots": swa.n_snapshots,
+                    "swa_start_epoch": config.swa_start_epoch,
+                    "swa_freq": config.swa_freq,
+                },
+                swa_model_path,
+            )
+            wandb.summary.update(
+                {
+                    "swa/enabled": 1.0,
+                    "swa/n_snapshots": float(swa.n_snapshots),
+                    "swa/start_epoch": float(config.swa_start_epoch),
+                    "swa/freq": float(config.swa_freq),
+                    "swa/checkpoint_path": str(swa_model_path),
+                }
+            )
+            final_eval_model_path = swa_model_path
+            final_checkpoint_source = f"swa_{swa.n_snapshots}snapshots"
+
         run_final_evaluation(
             run=run,
             model=base_model,
-            model_path=model_path,
+            model_path=final_eval_model_path,
             config_path=config_path,
             config=config,
             transform=transform,
@@ -1036,7 +1149,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             final_val_loaders=final_val_loaders,
             final_test_loaders=final_test_loaders,
             best_metrics=best_metrics,
-            best_checkpoint_source=best_checkpoint_source,
+            best_checkpoint_source=final_checkpoint_source,
             n_params=n_params,
             global_step=global_step,
             total_minutes=total_minutes,
