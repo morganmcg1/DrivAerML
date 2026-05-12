@@ -1,100 +1,103 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-09 (latest invocation: 2026-05-12 ~11:30Z)
+- **Date:** 2026-05-12 (latest invocation: 2026-05-12 ~22:00Z)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
 ---
 
-## Most Recent Research Direction from Human Researcher Team
+## CORRECTED DATASET IN EFFECT (since 2026-05-11)
 
-From Issue #717 (2026-05-09): **test-volume pressure L2 reduction is the single target.** Radical architecture and data preprocessing ideas welcome. Surface/wall shear should not be degraded but do not need further improvement.
+Issue #1053 (deployed 2026-05-11) fixed a case-split/indexing bug that was producing an artificial ~3× vol_p OOD gap (val_vol_p ≈ 3.9% vs test_vol_p ≈ 12%). On the corrected split, top models achieve test_vol_p ≈ 3.6–4.0%, close to val values.
 
-Key OOD gap: val_vol_p ≈ 3.9% vs test_vol_p ≈ 12.0% — a ~3× multiplier. This is the primary unsolved problem.
+**Corrected dataset path:** `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511` (also `/mnt/new-pvc/Processed/...`)
+**Split:** val=34 cases/7295 views, test=50 cases/11091 views
+
+All new runs MUST use the corrected dataset path.
 
 ---
 
-## Current Best Results
+## Most Recent Research Direction from Human Researcher Team
 
-### Single-Model SOTA (PR #958 — nezuko, dedicated vol_p aux head)
-- val_abupt = 6.2868% | test_abupt = 7.7445%
-- val_vol_p = 3.9152% | **test_vol_p = 12.0063%** (OOD gap ~3×)
-- val_surf_p = 4.1766% | test_surf_p = 3.9100%
-- W&B run: 29nohj67
+From Issue #717 (2026-05-09): **test-volume pressure L2 reduction is the single target.** Radical architecture and data preprocessing ideas welcome.
 
-### Ensemble SOTA (PR #1030 — nezuko, pool-33 K=3 greedy)
-- val_abupt = 5.9170% | test_abupt = 7.3192%
-- val_vol_p = 3.5136% | **test_vol_p = 11.6492%**
-- K=3 members: 29nohj67, ghh0s4ne, 4k25s25e
+**Status post-corrected-split:** The vol_p OOD gap was a data artifact. On the corrected split the gap is eliminated. Current research focus is now pushing val_abupt below 6.0% (single-model) on the corrected dataset.
 
-### Gate to Beat
-- Single-model training: val_abupt < 6.2868%
-- Ensemble: val_abupt < 5.9170%
+---
+
+## Current Best Results (Corrected Split)
+
+### Single-Model SOTA (PR #972 — SDF-stratified vol importance sampling)
+- val_abupt = 6.126% | test_abupt = 5.844%
+- val_vol_p = 3.798% | test_vol_p = 3.643%
+- W&B: source=`56bcqp3m`, eval=`zxnhtagj`
+
+### Rank 2 Single-Model (PR #968 — Stochastic vol subsampling)
+- val_abupt = 6.278% | test_abupt = 5.986%
+- W&B: source=`a0yoxy85`, eval=`qbg9pkmx`
+
+### Best Ensemble (PR #880 — K=6 greedy ensemble)
+- val_abupt = 6.031% | test_abupt = 6.010%
+- W&B: source=`zst3y2mp`, eval=`x78xbsfn`
+- Note: test_WSS=6.708% is best WSS across all configurations
+
+### Gate to Beat (corrected split)
+- **PASS:** val_abupt ≤ 6.2% AND val_vol_p ≤ 4.5%
+- **MARGINAL:** val_abupt ≤ 6.5% AND val_vol_p ≤ 5.0%
+- **KILL:** otherwise
 
 ---
 
 ## Current Research Focus and Themes
 
-### Theme 1: Reducing the OOD test_vol_p Gap (PRIMARY)
-- **Per-case loss upweighting** (alphonse PR #1019): Arm A (scale=2.0) **NEGATIVE** at 4ep (val_abupt=7.16%, test_vol_p=12.5534% vs baseline 12.0063%). Arm B (scale=1.5, run `plxzyhxa`) running; expected NEGATIVE. **Likely closure imminent.**
-- **Instance normalization (RevIN)** (thorfinn PR #1017): EP5 val_abupt=7.3989%, awaiting test eval to compare test_vol_p vs baseline 12.0063%. Run `c1r0iuun`.
-- **INR coord-conditioned decoder** (edward PR #1028): EP1 val_abupt=10.22% (bottom of projected band), trajectory healthy. EP3 gate at ~12:55Z.
-- **Slot-based vol attention** (askeladd PR #1024): EP4 screen val_abupt=7.0938%. **Phase 2 Option C launched** with `0:49152:1:65536` curriculum, 7 epochs, ~348 min. Strong step-aligned advantage throughout screen.
+### Key Insight from Corrected Split
+Training-time volume point sampling changes (PR #972 SDF-stratified, PR #968 stochastic) generalize better than loss-weighting, SDF-conditioning, or deeper-stack experiments. The vol_p OOD gap was a data artifact, not a model-capacity problem. New research direction: architecture and training innovations to push below val_abupt 6.0%.
 
-### Theme 2: Architecture Capacity and Expressivity
-- **L=7 depth** (nezuko PR #1032): Compressed 4-epoch screen `5vswi9ix` running. EP1 expected ~09:48Z.
-- **Pre-xattn vol self-attn** (fern PR #1031): Run `769cr3it` running. Plan: collect EP0/EP1, decide on chain-run continuation. **Blocked on tanjiro's `--init-from-checkpoint` infra (PR #1027).**
-
-### Theme 3: Training Dynamics and Augmentation
-- **Step-warmup-8000** (tanjiro PR #1027): Implementing `--init-from-checkpoint` infra flag (~30 lines) before launching the chain-run. **Unblocks chain-runs across multiple PRs.**
-- **Coord frame augmentation** (frieren PR #1029): Arm A (rot=0.1, scale=0.02) **PASSED EP3 gate** (val_abupt=7.9469 ≤ 8.0). Arm B (rot=0.25, scale=0.05) auto-queued at ~11:30-12:30Z.
-
----
-
-## Active WIP PRs (Round 30+)
+### Active WIP PRs (all transitioning to corrected dataset)
 
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #1032 | nezuko | L=7 depth (ensemble pool candidate) | Screen running `5vswi9ix` |
-| #1031 | fern | Pre-xattn vol self-attn | Running `769cr3it`; chain-run blocked on PR #1027 infra |
-| #1029 | frieren | Coord frame augmentation (yaw+scale) | Arm A PASS EP3; Arm B queued |
-| #1028 | edward | INR coord-conditioned vol decoder | EP1 healthy; EP3 gate ~12:55Z |
-| #1027 | tanjiro | Step-warmup-8000 + `--init-from-checkpoint` infra | Implementing infra flag |
-| #1024 | askeladd | Slot-based vol attn (Perceiver-IO, S=64) | **Phase 2 Option C launching** (7ep, 6@65K) |
-| #1019 | alphonse | OOD-4 vol-only loss upweighting (scale 2.0/1.5) | Arm A NEGATIVE; Arm B running |
-| #1017 | thorfinn | Per-case vol_pressure RevIN normalization | EP5 val_abupt=7.40%; test eval running |
+| #1042 | alphonse | INR coord-conditioned vol decoder | Running `kbkj2lko` to EP13 on OLD dataset; propose corrected-split retrain if PASS/MARGINAL |
+| #1043 | nezuko | (details TBD — awaiting student update) | WIP |
+| #1047 | frieren | (details TBD — awaiting student update) | WIP |
+| #1048 | fern | Log-space vol_p loss (sign·log1p) | Continue `skozsn41` EP2 as directional signal; follow-up PR on corrected dataset if positive |
+| #1049 | askeladd | EMA weight averaging | Running; EP6 gate = val_abupt ≤8.0% AND val_vol_p ≤5.5%; raw model eval requested |
+| #1050 | edward | Corrected-split baseline rerun | Launched `nc7lpobi` on corrected dataset — standard retrain |
+| #1051 | tanjiro | Coarse-to-fine vol curriculum (16K→65K) | EP3 gate check pending (~22:35Z); NOT killed at EP2 (val_abupt=8.03% is close call) |
+| #1052 | thorfinn | (details TBD — awaiting student update) | WIP |
 
 ---
 
 ## Potential Next Research Directions
 
-### High Priority (test_vol_p OOD gap)
-1. **Domain randomization / geometry augmentation at training time** — if frieren coord aug Arm A/B shows signal, push further: random reflections, stretch along principal axes
-2. **Test-time adaptation (TTA)** for vol_p — compute a per-run adaptation signal at inference using available geometry info without labels
-3. **Geometry-conditioned separate volume decoder** — condition the vol decoder on global geometry descriptors (SDF statistics, bbox, etc.) explicitly rather than relying on attention to propagate geometry context
-4. **Curriculum by geometry distance** — order training samples so OOD-proximate geometries are seen more frequently in later epochs
-5. **Vol_p-specific loss reformulation** — log-space MSE, normalized prediction (z-score per run), or relative pressure prediction
-6. **Combine RevIN (#1017) with slot-vol-attn (#1024)** — if both are positive, they may stack since they target different parts of the OOD gap (test-time normalization vs richer representation)
+### High Priority (push below val_abupt 6.0% on corrected split)
+1. **Extend SDF-stratified sampling (PR #972)** — it's the SOTA on corrected split; explore stronger SDF biasing, dynamic curriculum over training
+2. **Combine SDF-stratified sampling + architecture improvements** — stack the best sampling strategy with deeper/wider backbone changes
+3. **Ensemble diversity on corrected split** — rebuild greedy ensemble pool from corrected-split trained models; PR #880 K=6 was built on old dataset
+4. **Vol point density curriculum** — progressive increase in vol sampling density during training (related to PR #1051 coarse-to-fine)
+5. **Geometry-aware surface→vol cross-attention** — condition cross-attention keys on SDF values to focus on far-field vol pressure
+6. **Per-run instance normalization (RevIN-style)** — normalize vol_p predictions per-case at test time to handle distribution shift within corrected split
 
 ### Architecture Directions
-7. **Deeper ensemble diversity** — after L=7 result (PR #1032), run L=6 explicitly as a pool member to maximize diversity
-8. **Mixed-resolution volume training** — train with more vol points at lower resolution early, then focus on high-res late epochs for the OOD geometries
-9. **Surface-volume feature fusion via FiLM conditioning** — use surface global statistics to modulate volume decoder via feature-wise linear modulation
+7. **L=7 depth** — deeper backbone for corrected-split training; PR #1032 was run on old dataset
+8. **Wider MLP heads** — increase decoder capacity for vol prediction given corrected-split has larger test set
+9. **Multi-scale vol encoding** — hierarchical vol point aggregation at coarse/fine scales
 
 ### Learning / Optimization
-10. **Per-channel loss weighting sweep** — grid search over vol_loss_weight ∈ {1.5, 2.0, 3.0} with the PR #958 baseline stack
-11. **Sharpness-aware minimization (SAM)** for better generalization to OOD geometries
+10. **Longer training (more epochs)** — baseline training regimen was tuned for old dataset; corrected split has 34 val cases vs 50 test; may benefit from more epochs
+11. **Learning rate schedule tuning** — OneCycleLR or cosine warmup variants tuned for corrected-split scale
+12. **SAM (Sharpness-Aware Minimization)** — better generalization across geometry distribution in corrected split
 
 ---
 
 ## Key Findings to Date
 
-- **L=5 depth** is the backbone sweet spot; L=7 (PR #1032) being tested for ensemble diversity
-- **Surf→vol cross-attention** (PR #823) gave +2.4% val improvement — biggest single architecture win
-- **Vol_p aux head** (PR #958) improved val_abupt further but did NOT reduce OOD gap (test_vol_p got worse)
-- **Total-loss upweighting** (PR #888, scale=3.0) on SDF-neighbour proxies = NEGATIVE
-- **Vol-only loss upweighting** (PR #1019 Arm A, scale=2.0) on SDF-neighbour TRAIN proxies = NEGATIVE on all metrics including test_vol_p. The SDF-neighbour selection strategy does not identify cases that meaningfully share the geometric distribution shift of the test cases.
-- **Slot-based vol attention** (PR #1024 screen) delivered consistent step-aligned advantage over PR #958 throughout 4-epoch screen — Phase 2 13-epoch-equivalent extended run launching to confirm.
-- **Ensemble (K=3)** beats single-model by ~0.37pp val abupt; pool diversity matters more than size
-- The OOD test/val gap on vol_p (~3×) is a data distribution problem, not model capacity — suggests need for geometric generalization strategies
-- **Infra constraint**: `--init-from-checkpoint` was NOT a shipped flag; tanjiro PR #1027 is implementing it inline to unblock chain-run continuation for multiple PRs
+- **Corrected dataset (2026-05-11)** eliminated the artificial ~3× vol_p OOD gap — this was the biggest single insight of the research program so far
+- **SDF-stratified vol importance sampling** (PR #972) is the new SOTA: val_abupt=6.126%, test_abupt=5.844%
+- **Training-time vol sampling strategy** matters more than loss weighting, SDF conditioning, or architecture depth for vol_p generalization
+- **L=5 depth** remains the backbone sweet spot
+- **Surf→vol cross-attention** (PR #823) gave +2.4% val improvement — biggest single architecture win historically
+- **Vol_p aux head** (PR #958) improved val further but adds complexity; still Rank 4 on corrected split
+- **K=6 ensemble** (PR #880) provides best ensemble result on corrected split but was built before corrected dataset; needs rebuild with corrected-split models
+- **Infra note:** `--data-root` (not `--data-path`); mount point is `/mnt/new-pvc/` (not `/mnt/pvc/`); students must use corrected flag names
+- **EMA lag warning:** eval_raw_vs_ema=False means only EMA weights evaluated — early-epoch EMA metrics appear worse than raw model due to trailing-window lag
