@@ -22,20 +22,21 @@
 
 **15+ model-side interventions FALSIFIED on this axis:** WD variants (0.005/0.01), GradNorm α-variants (0.25/0.75), fixed loss weights (2.0/3.0 with/without GradNorm), extended cosine T_max=60, EMA (decay=0.999/0.9999), BBox normalization, TTA Y-symmetry, DropPath, vol coord noise, stochastic vol subsampling, SDF-stratified sampling (far-field + near-surface), InstanceNorm across vol tokens, Lookahead. Gap is structurally embedded in the train/test distribution split.
 
-## Active Experiments (2026-05-12 ~12:00 UTC)
+## Active Experiments (2026-05-12 ~13:00 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
 | #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 212,392 (EP19.35). EP20 gate ≤6.70% imminent (~7k steps). SWA will activate at EP20. | val_abupt=**6.223%**, val_vol_p=**3.878%** | EP15 PASS ✓ (6.277%), EP20 gate approaching — current abupt 6.223% gives +0.477pp margin over gate. SWA not yet activated; watch for `train/swa/n_snapshots≥1`. |
 | #1014 | dl24-fern | **Poisson pressure physics regularization** — auxiliary loss λ=0.01 × k-NN Laplacian smoothness penalty on predicted pressure; `--use-poisson-reg --poisson-lambda 0.01 --poisson-k 8 --poisson-m 2048`; 4L architecture | `l5urrdmk` (rank0) | **Running** — step 223,719 (EP20.38). EP20 gate ≤6.70% PASSED ✓ (+0.284pp). Next: EP25 gate ≤6.65% at step ~274,375. | val_abupt=**6.416%**, val_vol_p=**4.071%** | `train/poisson_loss` stable. Physics regularization active. **NOTE: 4L not 6L** — absolute metrics lag 6L SOTA but mechanism signal is what matters. EP20 PASS confirmed, next gate EP25. |
 | #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — second `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights (no GradNorm feedback); hypothesis reassigned from CLOSED #1023 | `ttnva184` (rank0) | **Running** — step 69,002 (EP6.29). EP5 gate ≤7.5% PASSED ✓ (6.567%). Next: EP10 gate ≤7.20% at step ~109,750. | val_abupt=**6.567%**, val_vol_p=**3.620%** | Excellent convergence — already at 6.567% in EP6, below EP10 gate threshold. vol_p 3.620% strong. Healthy trajectory. |
-| #1033 | dl24-tanjiro | **Online focal-vol reweight with Adam bias correction (bug fix of #1026)** — per-case EMA ratio `(case_ema/global_ema)`, each EMA bias-corrected by `1 - decay^n`; clipped `[0.5, 3.0]` | `e316e9iz` (rank0) | **Running** — step 24,194 (EP2.20). 4-epoch screen ongoing (EP4 ~step 43,900). | val_abupt=**7.418%**, val_vol_p=**5.112%** | **CRITICAL ISSUE**: `train/focal_vol/scale=3` (ceiling) at EP2 — same symptom as PR #1026 bug that this PR was meant to fix. Diagnostic comment posted requesting `scale_mean`, `scale_std`, `per_case_ema_mean`, `bias_correction_mean`. Awaiting tanjiro response. EP2 abupt 7.418% is below 8.5% kill threshold so run continues. |
+| #1034 | dl24-tanjiro | **Domain adversarial training (DANN)** — GRL on backbone features + discriminator to predict train-vs-test domain; forces distribution-invariant volume representations; attacks covariate shift as root cause of +7–8pp val→test vol_p gap | TBD | **Assigned** — PR created, awaiting student start. | — | λ=0.1 + linear schedule. Wave SOTA config (6L STRING 5-oct + GradNorm α=0.5 + WD=0.005 + Y-sym p=0.5 + 65k + Lion lr=1e-4 + `--no-compile-model`). |
 
 ## Recently Closed (since 2026-05-09)
 
 | PR | Hypothesis | Result | Lesson |
 |----|-----------|--------|--------|
-| #1026 | Online focal vol reweight (initial, dl24-tanjiro) | **CLOSED** — `train/focal_vol/scale=3` ceiling degeneration: global EMA converges in O(steps), per-case EMA converges in O(case_touches), ratio ≈10.2x → always clips to max. Bug: no bias correction for asymmetric convergence rates. Replaced by #1033 with bias correction fix. | Bias correction REQUIRED for multi-rate EMA ratios. |
+| #1026 | Online focal vol reweight — initial (dl24-tanjiro) | **CLOSED** — `train/focal_vol/scale=3` ceiling degeneration: global EMA converges in O(steps), per-case EMA converges in O(case_touches), ratio ≈10.2x → always clips to max. Bug: no bias correction for asymmetric convergence rates. | Bias correction REQUIRED for multi-rate EMA ratios. |
+| #1033 | Online focal-vol reweight with Adam bias correction — bug fix of #1026 (dl24-tanjiro) | **CLOSED** — Same `scale=3` ceiling degeneration; bias correction insufficient to fix asymmetric EMA convergence rates. Focal-vol reweighting AXIS FULLY CLOSED. | Per-case dynamic loss reweighting fundamentally flawed for this dataset. |
 | #972 | SDF-stratified far-field sampling (α=2.0) | **CLOSED** — test_vol_p=11.827% (+1.069pp WORSE than baseline 10.758%), val→test gap +8.012pp UNCHANGED | SDF sampling FULLY FALSIFIED. AXIS CLOSED. |
 | #968 | Stochastic vol subsampling (fresh random draw every batch) | **CLOSED** — test_vol_p=12.114%, gap +8.115pp **WIDEST EVER** | Sampling strategy does NOT address structural val→test shift. AXIS CLOSED. |
 | #1015 | InstanceNorm across volume tokens (tanjiro) | **CLOSED** — predecessor of #1023/#1025 vol-token LN line | Path led to vol-token LayerNorm direction. |
@@ -118,6 +119,7 @@
 - Bbox normalization (PR #978): regression. CLOSED.
 - Stochastic vol subsampling (PR #968): test_vol_p=12.114%, gap +8.115pp WIDEST EVER. AXIS FULLY CLOSED.
 - InstanceNorm across vol tokens (PR #1015): closed before terminal — direction continued as #1025 vol-token LN.
+- Online focal-vol reweighting (PRs #1026, #1033): scale=3 ceiling degeneration in both variants (with and without Adam bias correction). AXIS FULLY CLOSED.
 
 ## Potential Next Directions (Not Yet Assigned)
 
@@ -126,9 +128,9 @@ If the 4 active gap-closing experiments fail to close the gap, escalate per Plat
 1. **Independent vol_p transformer tower** — fully separate encoder for volume head; train surface and volume jointly but with no shared backbone parameters. Tests whether the val→test gap is shared-feature interference.
 2. **DETR-style learned query positions for volume decoder** — replace coordinate-based vol queries with N learned query embeddings, allowing model to learn its own canonical volume sampling pattern.
 3. **Voxel-based aggregation with spatial attention** — discretize volume into voxel grid, apply 3D attention; treats vol prediction as a structured grid problem rather than scattered point regression.
-4. **Domain adversarial training** — train a discriminator on backbone features to predict train-vs-test domain; backprop adversarial loss to make features distribution-invariant.
+4. ~~**Domain adversarial training** — ASSIGNED to dl24-tanjiro as PR #1034.~~
 5. **Top-K val checkpoint averaging** — instead of best single val checkpoint, average the K best by val; orthogonal to SWA epoch-snapshot averaging.
 6. **Geometric conditioning on body shape for vol prediction** — explicit shape descriptor (e.g., spherical harmonics of car silhouette) prepended to volume queries.
 7. **Pure Fourier neural operator (FNO) for vol_p** — completely replace volume decoder with FNO on a regular grid, interpolated to query points; tests whether spectral aggregation generalizes better than per-point MLP.
 
-_Last updated: 2026-05-12 ~12:00 UTC. Key changes: (1) #999 nezuko SWA at EP19.35 (step=212,392), abupt=6.223%, EP20 gate (≤6.70%) imminent with +0.477pp margin; SWA activates at EP20. (2) #1014 fern Poisson at EP20.38 (step=223,719), EP20 gate PASSED ✓ (abupt=6.416%, +0.284pp margin); next EP25 gate ≤6.65%. (3) #1025 frieren vol-LN at EP6.29 (step=69,002), abupt=6.567% — excellent early trajectory, EP10 gate ≤7.20% comfortably cleared already. (4) #1026 CLOSED (focal-vol scale degeneration bug — global vs per-case EMA asymmetric convergence); replaced by #1033 with Adam bias correction fix. #1033 tanjiro at EP2.20 (step=24,194), scale=3 still ceiling-stuck — diagnostic comment posted, awaiting tanjiro response. (5) EP20 gate PASS comment posted on #1014._
+_Last updated: 2026-05-12 ~13:00 UTC. Key changes: (1) #999 nezuko SWA at EP19.35 (step=212,392), abupt=6.223%, EP20 gate (≤6.70%) imminent; SWA activates at EP20. (2) #1014 fern Poisson at EP20.38 (step=223,719), EP20 gate PASSED ✓ (abupt=6.416%); next EP25 gate ≤6.65%. (3) #1025 frieren vol-LN at EP6.29 (step=69,002), abupt=6.567% — excellent trajectory. (4) #1033 CLOSED (focal-vol bias correction still degenerated to scale=3 ceiling — focal reweighting AXIS FULLY CLOSED). (5) #1034 assigned to tanjiro — domain adversarial training (DANN), direct attack on covariate shift hypothesis._
