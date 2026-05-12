@@ -320,6 +320,78 @@ class Transformer(nn.Module):
         return x
 
 
+class GeomFiLMBlock(nn.Module):
+    """FiLM conditioning from per-case SDF scalar statistics (PR #1008).
+
+    Extracts per-sample summary statistics from the SDF field channel of
+    ``volume_x`` (e.g. ``sdf_min``, ``sdf_negative_frac``), encodes them via a
+    small 2-layer MLP, and applies scale+shift modulation to volume hidden
+    states. The output layer is zero-initialised so the block is identity at
+    init, preserving baseline behavior at epoch 0. Padded tokens are excluded
+    from the statistics using the provided ``volume_mask``.
+
+    Arm A (n_scalars=2): sdf_min, sdf_negative_frac.
+    Arm B (n_scalars=4): adds sdf_q05, sdf_near_surface_frac.
+    """
+
+    _SUPPORTED_N_SCALARS = (2, 4)
+
+    def __init__(self, n_scalars: int, n_hidden: int):
+        super().__init__()
+        if n_scalars not in self._SUPPORTED_N_SCALARS:
+            raise ValueError(
+                f"GeomFiLMBlock: n_scalars must be in {self._SUPPORTED_N_SCALARS}, got {n_scalars}"
+            )
+        self.n_scalars = n_scalars
+        self.n_hidden = n_hidden
+        self.mlp = nn.Sequential(
+            nn.Linear(n_scalars, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, n_hidden * 2),
+        )
+        nn.init.zeros_(self.mlp[-1].weight)
+        nn.init.zeros_(self.mlp[-1].bias)
+
+    def compute_scalars(
+        self,
+        volume_x: torch.Tensor,
+        volume_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        # Use float32 for the statistics so torch.quantile (Arm B) and the
+        # subtraction in sdf_min stay numerically stable under bf16 autocast.
+        sdf = volume_x[:, :, 3].float()
+        if volume_mask is None:
+            valid = torch.ones_like(sdf, dtype=torch.bool)
+        else:
+            valid = volume_mask.bool()
+        n_valid = valid.to(dtype=sdf.dtype).sum(dim=1).clamp(min=1.0)
+        sdf_for_min = torch.where(valid, sdf, torch.full_like(sdf, float("inf")))
+        sdf_min = sdf_for_min.min(dim=1).values
+        sdf_neg = ((sdf < 0.0) & valid).to(dtype=sdf.dtype).sum(dim=1)
+        sdf_neg_frac = sdf_neg / n_valid
+        if self.n_scalars == 2:
+            return torch.stack([sdf_min, sdf_neg_frac], dim=1)
+        # For sdf_q05 we need to ignore padded points. Replace them with +inf
+        # then clamp to a large finite value so quantile interpolation is well
+        # defined; with full-batch valid points q05 lies well below the clamp.
+        sdf_q05 = torch.quantile(sdf_for_min.clamp(max=1e6), 0.05, dim=1)
+        near_surf = (
+            ((sdf > -0.05) & (sdf < 0.05) & valid).to(dtype=sdf.dtype).sum(dim=1) / n_valid
+        )
+        return torch.stack([sdf_min, sdf_neg_frac, sdf_q05, near_surf], dim=1)
+
+    def forward(
+        self,
+        hidden: torch.Tensor,
+        volume_x: torch.Tensor,
+        volume_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        scalars = self.compute_scalars(volume_x, volume_mask)
+        params = self.mlp(scalars).to(dtype=hidden.dtype)
+        scale, shift = params.chunk(2, dim=-1)
+        return hidden * (1.0 + scale.unsqueeze(1)) + shift.unsqueeze(1)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +415,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_sdf_geom_film: bool = False,
+        sdf_film_n_scalars: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +430,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_sdf_geom_film = use_sdf_geom_film
+        self.sdf_film_n_scalars = sdf_film_n_scalars
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -460,6 +536,13 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        if use_sdf_geom_film:
+            self.geom_film = GeomFiLMBlock(
+                n_scalars=sdf_film_n_scalars, n_hidden=n_hidden
+            )
+        else:
+            self.geom_film = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -544,6 +627,14 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.geom_film is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            volume_hidden = self.geom_film(volume_hidden, volume_x, volume_mask)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if (
             self.surf_to_vol_xattn is not None

@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_sdf_geom_film: bool = False
+    sdf_film_n_scalars: int = 2
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_geom_film": (
+            "Enable SDF-scalar FiLM conditioning of volume hidden states "
+            "(PR #1008). Extracts per-case scalar statistics from the SDF "
+            "field (channel 3 of volume_x), encodes them via a 2-layer MLP, "
+            "and applies feature-wise linear modulation (scale + shift) to "
+            "the volume hidden states before the surf->vol cross-attention. "
+            "Output layer is zero-initialised so the block is identity at "
+            "init and preserves baseline behavior at epoch 0. Padded tokens "
+            "are excluded from the scalar statistics via volume_mask."
+        ),
+        "sdf_film_n_scalars": (
+            "Number of SDF scalar statistics used by --use-sdf-geom-film. "
+            "Arm A (default): 2 = [sdf_min, sdf_negative_frac]. Arm B: 4 = "
+            "previous two + [sdf_q05, sdf_near_surface_frac]."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,6 +311,25 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_geom_film_metrics(model: nn.Module) -> dict[str, float]:
+    """Log FiLM output-layer weight stats so we can see if the conditioning
+    has moved away from identity (the zero-init starting point)."""
+    metrics: dict[str, float] = {}
+    film = getattr(model, "geom_film", None)
+    if film is None:
+        return metrics
+    last_linear = film.mlp[-1]
+    w = last_linear.weight.detach().float()
+    b = last_linear.bias.detach().float()
+    metrics["geom_film/out_weight_l2"] = float(w.norm().item())
+    metrics["geom_film/out_weight_absmean"] = float(w.abs().mean().item())
+    metrics["geom_film/out_weight_absmax"] = float(w.abs().max().item())
+    metrics["geom_film/out_bias_l2"] = float(b.norm().item())
+    metrics["geom_film/out_bias_absmean"] = float(b.abs().mean().item())
+    metrics["geom_film/out_bias_absmax"] = float(b.abs().max().item())
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -308,6 +344,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_sdf_geom_film=config.use_sdf_geom_film,
+        sdf_film_n_scalars=config.sdf_film_n_scalars,
     )
 
 
@@ -773,7 +811,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_sdf_geom_film:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -883,6 +921,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/use_sdf_geom_film"] = config.use_sdf_geom_film
+            if config.use_sdf_geom_film:
+                wandb.summary["model/sdf_film_n_scalars"] = config.sdf_film_n_scalars
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1262,6 +1303,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_geom_film_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
