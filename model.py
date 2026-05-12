@@ -361,7 +361,20 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
         )
+        # Independent volume tower: same hyperparams as the shared backbone but
+        # fresh parameters (no shared weights). Tests whether the val->test
+        # vol_p gap is caused by surface-task interference on the shared
+        # backbone (PR #1035 hypothesis).
+        self.vol_blocks = Transformer(
+            depth=n_layers,
+            hidden_dim=n_hidden,
+            num_heads=n_head,
+            mlp_expansion_factor=mlp_ratio,
+            num_slices=slice_num,
+            dropout=dropout,
+        )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        self.vol_token_norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -424,27 +437,41 @@ class SurfaceTransolver(nn.Module):
             masks.append(volume_mask)
 
         attn_mask = torch.cat(masks, dim=1)
-        hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        initial_tokens = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
+        # Independent volume tokens BEFORE the shared backbone — fed into the
+        # independent vol_blocks tower so volume predictions never depend on
+        # the shared backbone output.
+        if volume_x is not None:
+            initial_volume_tokens = initial_tokens[:, surface_tokens : surface_tokens + volume_tokens]
+        else:
+            initial_volume_tokens = None
+
+        # Shared backbone (used for surface predictions; volume slot output is
+        # intentionally discarded under the independent-tower architecture).
+        hidden = self.backbone(initial_tokens, attn_mask=attn_mask)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
-        cursor = 0
-        surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
-        cursor += surface_tokens
-        volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+        surface_hidden = hidden_norm[:, :surface_tokens]
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
-            surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+            surface_preds = hidden_norm.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            # Independent volume tower: process only volume tokens through a
+            # dedicated transformer stack with fresh parameters.
+            vol_hidden = self.vol_blocks(initial_volume_tokens, attn_mask=volume_mask)
+            vol_hidden = _apply_token_mask(vol_hidden, volume_mask)
+            vol_hidden_normed = _apply_token_mask(self.vol_token_norm(vol_hidden), volume_mask)
+            volume_preds = self.volume_out(vol_hidden_normed) * volume_mask.unsqueeze(-1)
+            volume_hidden = vol_hidden_normed
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+            volume_hidden = surface_hidden.new_zeros(batch_size, 0, hidden_norm.shape[-1])
 
         return {
             "surface_preds": surface_preds,

@@ -661,7 +661,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                         if task_losses_finite:
                             if gradnorm_L0 is None:
                                 gradnorm_L0 = task_losses.detach().clone()
-                            shared_param = base_model.norm.weight
+                            # Anchor at pos_embed.project.weight: under the
+                            # independent vol tower (PR #1035), self.norm is
+                            # in the surface gradient path only. The
+                            # positional embedding is the closest parameter
+                            # that is genuinely shared across all 5 task
+                            # losses (it feeds both the shared backbone and
+                            # the independent vol_blocks tower).
+                            shared_param = base_model.pos_embed.project.weight
                             c_per_task: list[torch.Tensor] = []
                             for i in range(gradnorm_n_tasks):
                                 g_i = torch.autograd.grad(
@@ -742,6 +749,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_log:
                         train_log.update(gradnorm_log)
                     loss.backward()
+                    if hasattr(base_model, "vol_blocks"):
+                        vol_tower_grad_sq = torch.zeros((), device=device, dtype=torch.float32)
+                        for p in base_model.vol_blocks.parameters():
+                            if p.grad is not None:
+                                vol_tower_grad_sq = vol_tower_grad_sq + p.grad.detach().float().pow(2).sum()
+                        train_log["train/vol_tower/grad_norm"] = float(
+                            vol_tower_grad_sq.sqrt().cpu().item()
+                        )
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
