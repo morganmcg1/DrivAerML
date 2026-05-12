@@ -39,17 +39,46 @@ Run IDs and explicit configs are stronger evidence than PR merge state. The map 
 
 When a wave PR merges with terminal `SENPAI-RESULT` and lower `test_primary/abupt_axis_mean_rel_l2_pct` than the in-wave best, append a new line to the table below and bump the "Current single-model best" pointer.
 
-### In-wave merged single-model results
+### In-wave merged single-model results (OLD DATASET — rawcanon pre-20260511, ARTIFACT)
 
-| PR | Run | Mechanism | Test aggregate | Surface | Volume | Wall | tau_x / tau_y / tau_z |
+> **IMPORTANT (2026-05-12):** A case-split bug in the dataset was identified on 2026-05-12 (Issue #1053). The results below were produced on the **old split** and are affected by a dataset artifact that created a spurious +7–8pp val→test volume pressure gap. These results are retained for historical continuity but should NOT be used as comparison targets. See the corrected-split table below.
+
+| PR | Run | Mechanism | Test aggregate (OLD) | Surface | Volume | Wall | tau_x / tau_y / tau_z |
 |---|---|---|---:|---:|---:|---:|---:|
 | #599 | `sogus8sx` | multi-sigma STRING PE (`pe_init_sigmas=[0.25,0.5,1.0,2.0,4.0]`) | 7.9303 | — | — | — | — |
 | #741 | `lszc4ri7` / `1tal40wr` | Y-axis symmetry augmentation (bilateral car geometry) | 7.8232 | 3.9821 | 11.3345 | 7.3076 | 6.5304 / 7.9248 / 9.3444 |
-| #740 | `5x8wofzm` | GradNorm α=0.5 adaptive loss balancing | **7.5195** | 3.8810 | 10.7580 | 7.0610 | 6.3490 / 7.5600 / 9.0480 |
+| #740 | `5x8wofzm` | GradNorm α=0.5 adaptive loss balancing | 7.5195 | 3.8810 | 10.7580 | 7.0610 | 6.3490 / 7.5600 / 9.0480 |
+
+> Under the corrected split, PR #740 (`5x8wofzm`) re-evaluates to test_ABUPT=**8.165%** (rank 22) and PR #741 to 8.156% (rank 21). The 7.52% result was an artifact of the old split.
+
+---
+
+### Corrected-split results (rawcanon_20260511, 2026-05-12) — AUTHORITATIVE
+
+Dataset: `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511`  
+Eval params: `eval_surface_points=65536`, `eval_volume_points=65536`  
+Split: 34 val cases / 7,295 views; 50 test cases / 11,091 views  
+Source: Issue #1053 revalidation run 2026-05-12 (all PRs re-evaluated on corrected split)
+
+| Rank | PR | Source run | Eval run | test_ABUPT | test_VP | test_SP | test_WSS |
+|------|-----|-----------|---------|------------|---------|---------|---------|
+| 1 | **#972** | `56bcqp3m` | `zxnhtagj` | **5.844%** | 3.643% | 3.577% | 6.727% |
+| 2 | #968 | `a0yoxy85` | `qbg9pkmx` | 5.986% | 3.957% | 3.673% | 6.825% |
+| 3 | #880 | `zst3y2mp` | `x78xbsfn` | 6.010% | 4.501% | 3.611% | **6.708%** |
+| 4 | #958 | `29nohj67` | `fkjc12c8` | 6.107% | 3.818% | 3.911% | 6.985% |
+| 5 | #939 | `yfitnqia` | — | 6.242% | — | — | — |
+| … | … | … | … | … | … | … | … |
+| 21 | #741 | `lszc4ri7`/`1tal40wr` | — | 8.156% | 11.744% | — | — |
+| 22 | #740 | `5x8wofzm` | — | 8.165% | 13.660% | — | — |
+
+> **Note on PRs #972, #968, #880, #958:** These PRs were CLOSED as FALSIFIED under the old dataset due to the spurious +7–8pp val→test vol_p gap. Under the corrected split, they are the **top 4 performers** in the entire wave. They were NOT merged (already closed), so their techniques should be used as the foundation for new experiments on the corrected dataset.
 
 ### Current single-model best on `drivaerml-long-20260504`
 
-PR #740 (`5x8wofzm`), test_primary/abupt_axis_mean_rel_l2_pct = **7.5195%** (fern, GradNorm α=0.5 adaptive loss balancing) — improved from 7.8232% (+0.3037pp)
+**CORRECTED-SPLIT SOTA (2026-05-12):** PR #972 (`56bcqp3m`, eval `zxnhtagj`) — SDF-stratified volume sampling (α=2.0)  
+test_primary/abupt_axis_mean_rel_l2_pct = **5.844%**, test_vol_p = **3.643%**, test_surf_p = 3.577%, test_wss = 6.727%
+
+All new experiments must be evaluated on the corrected dataset and target beating **5.844%**.
 
 ### In-wave val target (to beat before merging)
 

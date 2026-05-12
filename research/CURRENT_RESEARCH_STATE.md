@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-12 ~15:00 UTC
+- 2026-05-12 ~20:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -8,63 +8,90 @@
 - Published SOTA models show significantly better volume pressure test metrics are achievable — large headroom to close
 - All new student assignments must be designed with volume pressure improvement as the singular focus
 
-## Wave SOTA (Test — Merged on Branch)
+## DATASET ARTIFACT RESOLVED (2026-05-12) — Issue #1053
 
-**PR #740** (dl24-fern, run `5x8wofzm`): `abupt_axis_mean_rel_l2_pct` = **7.5195%**
+**CRITICAL — All prior val→test vol_p gap analysis is INVALIDATED.**
+
+The persistent +7–8pp val→test volume pressure gap reported across all prior experiments was a **DATASET ARTIFACT** caused by a case-split bug in the pre-20260511 dataset. Under the corrected split (`rawcanon_20260511`), the gap disappears entirely.
+
+**Corrected dataset path (MANDATORY for all new and active experiments):**
+`/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511`
+
+**Corrected eval parameters:** `eval_surface_points=65536`, `eval_volume_points=65536` (chunk sizes, not caps), 34 val cases / 7,295 views, 50 test cases / 11,091 views.
+
+**Impact on prior results:**
+- PRs #972 and #968, previously labeled FALSIFIED, are the **TOP TWO PERFORMERS** on the corrected split.
+- PR #740 (old SOTA at 7.5195%) re-evaluates to 8.165% — **rank 22** under the corrected split.
+- All "AXIS FULLY CLOSED" labels on sampling strategies are **RETRACTED**.
+- The 15+ "falsified" interventions were not tested on a valid dataset split.
+
+## Wave SOTA (Corrected Split — rawcanon_20260511)
+
+**PR #972** (SDF-stratified far-field sampling, α=2.0, run `56bcqp3m`, eval `zxnhtagj`): `abupt_axis_mean_rel_l2_pct` = **5.844%**
+
 | Metric | Value |
 |--------|-------|
-| test_abupt | 7.5195% |
-| surf_p | 3.8810% |
-| vol_p | 10.7580% |
-| wall_shear | 7.0610% |
+| test_abupt | **5.844%** |
+| test_surf_p | 3.577% |
+| test_vol_p | **3.643%** |
+| test_wss | 6.727% |
 
-**Central unsolved problem:** val vol_p ≈ 3.8–4.0%, test vol_p ≈ 10.7–12.2% — systematic +7–8pp val→test gap confirmed across ALL completed long runs. All active experiments are designed to close this gap.
+> Note: PR #972 is CLOSED (was falsely closed under old dataset). The SDF-stratified sampling technique is the current SOTA and must be treated as the baseline configuration for new experiments.
 
-**15+ model-side interventions FALSIFIED on this axis:** WD variants (0.005/0.01), GradNorm α-variants (0.25/0.75), fixed loss weights (2.0/3.0 with/without GradNorm), extended cosine T_max=60, EMA (decay=0.999/0.9999), BBox normalization, TTA Y-symmetry, DropPath, vol coord noise, stochastic vol subsampling, SDF-stratified sampling (far-field + near-surface), InstanceNorm across vol tokens, Lookahead. Gap is structurally embedded in the train/test distribution split.
+**Top 5 on corrected split:**
 
-## Active Experiments (2026-05-12 ~15:00 UTC)
+| Rank | PR | test_ABUPT | test_vol_p | Notes |
+|------|----|------------|------------|-------|
+| 1 | **#972** | **5.844%** | 3.643% | SDF-stratified far-field sampling (α=2.0) — **CLOSED, FALSELY** |
+| 2 | #968 | 5.986% | 3.957% | Stochastic vol subsampling — **CLOSED, FALSELY** |
+| 3 | #880 | 6.010% | 4.501% | (see BASELINE.md for full run IDs) — CLOSED |
+| 4 | #958 | 6.107% | 3.818% | — CLOSED |
+| 5 | #939 | 6.242% | — | — CLOSED |
+| … | … | … | … | … |
+| 22 | #740 | 8.165% | 13.660% | Old "SOTA" — NOW ARTIFACT |
+
+## Active Experiments (2026-05-12 ~20:30 UTC)
+
+> **ACTION REQUIRED FOR ALL ACTIVE EXPERIMENTS**: Switch dataset to corrected split path
+> `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511`
+> Existing runs trained on old split should be restarted from scratch on corrected split.
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #999 | dl24-nezuko | **SWA (Stochastic Weight Averaging)** — uniform epoch-snapshot averaging EP20–EP30; `--use-swa --swa-start-epoch 20 --swa-freq 1`; bs=1 DDP8 | `f8rc8ahi` | **Running** — step 302,502 (EP27.5). SWA active, n=~8 snapshots (EP20–EP27). | val_abupt=**6.199%**, val_vol_p=**3.951%** | EP25 (6.1891%) and EP26 (6.1878%) best — slow improvement. ~2.5 epochs to EP30 terminal SWA eval. |
-| #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** — `nn.LayerNorm(hidden_dim=512)` on volume_hidden + fixed task weights | `ttnva184` | **Running** — step 168,081 (EP15.3). EP15 PASSED at step 163,720 (val_abupt=6.3726%, margin +0.427pp). | val_abupt=**6.373%**, val_vol_p=**3.536%** | **Best val_vol_p=3.5283% at EP12** — plateau confirmed. EP20 gate ≤6.70% upcoming at step ~219,720 (~17:00Z). Plan: eval best-val (EP12) checkpoint after EP20. |
-| #1038 | dl24-tanjiro | **Top-K val checkpoint averaging (K=5)** — maintain heap of K=5 best-by-val checkpoints throughout training, arithmetic-average state_dicts at EP30 terminal; orthogonal to SWA epoch-snapshot averaging; tests flat-minima OOD generalisation via selection | TBD | **NEW ASSIGNMENT** — branch `tanjiro/top-k-val-checkpoint-avg` created 15:00Z. Code commit required before EP5 (~step 54,930). | — | CODE-FIRST: must commit implementation before EP5 gate. |
-| #1035 | dl24-fern | **Independent vol_p transformer tower** — separate 6L transformer backbone for volume tokens only | `1dijs6g1` | **Running** — step 1,922 (EP~0.2). Very early, no val metrics yet. | — | EP5 gate at step ~54,930 (~3h from now). Tests shared-feature interference as root cause of val→test gap. |
+| #1025 | dl24-frieren | **Vol-token LayerNorm WITHOUT GradNorm** | `ttnva184` | Running — EP23.2 | val_abupt=6.3639%, val_vol_p=3.5467% | **MUST RESTART** on corrected dataset. Old-split results not comparable. |
+| #1035 | dl24-fern | **Independent vol_p transformer tower** | `1dijs6g1` | Running — EP2.02 | val_abupt=10.378%, val_vol_p=11.213% | **MUST RESTART** on corrected dataset. Early enough to restart cleanly. |
+| TBD | dl24-tanjiro | **DETR-style learned query positions** | TBD | Assigning | — | **ASSIGN ON CORRECTED DATASET from the start.** |
+| TBD | dl24-nezuko | **Pure FNO for vol_p** | TBD | Assigning | — | **ASSIGN ON CORRECTED DATASET from the start.** |
 
-## Recently Closed (since 2026-05-09)
+## Key Insights (Post-Artifact-Resolution)
 
-| PR | Hypothesis | Result | Lesson |
-|----|-----------|--------|--------|
-| #1014 | Poisson pressure physics regularization (fern) | **CLOSED** — regression from EP17 onward; monotonic worsening despite all gates passing. Best result was EP17 (val_abupt=6.403%, val_vol_p=4.022%). EP17 checkpoint recommended for test eval. | Laplacian smoothness penalty diverges in training tail. Physics-constraint approach on k-NN graph insufficient. |
-| #1037 | DANN v2 (tanjiro) | **CLOSED** — student did not commit DANN implementation after 2 escalations; code-first violation. Run `9q77j1wi` alive but unverifiable. Replaced by PR #1038 Top-K averaging. | Code-first rule enforced. DANN axis remains open for future. |
-| #1033 | Online focal-vol reweight with Adam bias correction (tanjiro) | **CLOSED** — scale=3 ceiling degeneration persisted despite bias correction fix; same symptom as #1026. Global EMA still converges orders of magnitude faster than per-case EMA regardless of bias correction. Replaced by #1034 DANN. | Focal reweighting axis closed. EMA ratio approach fundamentally broken at different timescale convergence rates. |
-| #1026 | Online focal vol reweight (initial, dl24-tanjiro) | **CLOSED** — `train/focal_vol/scale=3` ceiling degeneration: global EMA converges in O(steps), per-case EMA converges in O(case_touches), ratio ≈10.2x → always clips to max. Bug: no bias correction for asymmetric convergence rates. Replaced by #1033 with bias correction fix. | Bias correction REQUIRED for multi-rate EMA ratios. |
-| #972 | SDF-stratified far-field sampling (α=2.0) | **CLOSED** — test_vol_p=11.827% (+1.069pp WORSE than baseline 10.758%), val→test gap +8.012pp UNCHANGED | SDF sampling FULLY FALSIFIED. AXIS CLOSED. |
-| #968 | Stochastic vol subsampling (fresh random draw every batch) | **CLOSED** — test_vol_p=12.114%, gap +8.115pp **WIDEST EVER** | Sampling strategy does NOT address structural val→test shift. AXIS CLOSED. |
-| #1015 | InstanceNorm across volume tokens (tanjiro) | **CLOSED** — predecessor of #1023/#1025 vol-token LN line | Path led to vol-token LayerNorm direction. |
-| #1023 | Vol-token LN (tanjiro) | **CLOSED — unresponsive student** | Hypothesis reassigned to frieren as #1025. |
-| #998 | Lookahead Lion (tanjiro) | **CLOSED** — EP5 FAIL | Lookahead direction exhausted. |
-| #1003 | PCGrad gradient surgery (fern) | **CLOSED** — bad config runs, hypothesis unconverted | PCGrad implementation needs re-think before retry. |
+1. **The val→test vol_p gap was entirely artificial.** Under `rawcanon_20260511`, test_vol_p tracks val_vol_p closely (~3.6–4.0% range). No covariate shift hypothesis needed.
 
-## Key Insights
+2. **SDF-stratified far-field sampling (PR #972) is the SOTA technique.** α=2.0 upweighting of far-field volume points yields test_abupt=5.844%. This must be treated as the baseline config.
 
-1. **The val→test vol_p gap is structural and unsolved.** Persistent +7–8pp gap across 15+ falsified interventions. Almost certainly covariate shift between training and test aerodynamic configurations.
+3. **Stochastic vol subsampling (PR #968) is the #2 technique.** Fresh random draw every batch: test_abupt=5.986%. Complementary to SDF stratification — combining them is Tier 1.
 
-2. **Current 4 active gap-closing candidates** all attack the gap via different mechanisms:
-   - **#999 SWA**: flat-minima weight averaging hypothesis — averaging EP20–EP30 snapshots may converge to wider basin with better OOD generalization
-   - **#1025 vol-token LN no GradNorm**: representation-level regularization without adaptive loss balancing feedback; **best val_vol_p=3.553%**
-   - **#1038 Top-K val checkpoint averaging**: K=5 best checkpoints by val score averaged at terminal — flat-minima OOD generalisation via discrete selection (new, orthogonal to SWA)
-   - **#1035 independent vol tower**: fully separate transformer encoder for volume predictions — no shared backbone parameters with surface path; tests shared-feature interference as root cause of gap
+4. **The 15+ "falsified" interventions need re-evaluation.** WD variants, GradNorm α-variants, EMA, BBox norm, DropPath, vol coord noise, etc. — all were tested on a broken dataset. Some may still be dead ends; others may show benefit on the corrected split.
 
-3. **Weight decay is load-bearing.** WD axis fully exhausted — neither WD=0.005 nor WD=0.01 closes gap.
+5. **GradNorm + AdamW = catastrophic instability**: CONFIRMED HARDWARE-LEVEL. Not dataset-dependent. Use Lion when using GradNorm.
 
-4. **GradNorm α=0.5 is optimal.** α=0.25 causes test regression; α=0.75 causes catastrophic instability at EP16.
+6. **String multisigma PE (5-octave) is confirmed best.** σ=[0.25, 0.5, 1.0, 2.0, 4.0]. Not dataset-dependent.
 
-5. **String multisigma PE (5-octave) is confirmed best.** σ=[0.25, 0.5, 1.0, 2.0, 4.0].
+7. **Vol-token LayerNorm** (PR #1025) showed val_vol_p=3.547% on old dataset at EP23 — promising but needs re-run on corrected split to determine true rank.
 
-6. **Sampling AXIS CLOSED.** Both far-field SDF upweighting (#972) and stochastic subsampling (#968) failed. Gap +8.115pp on #968 (WIDEST EVER).
+## Tier 1 Follow-Ups (Highest Priority — Assign Immediately)
 
-7. **Focal vol reweighting AXIS CLOSED.** Both #1026 (no bias correction) and #1033 (with bias correction) show scale=3 ceiling degeneration. EMA ratio approach fundamentally broken at different timescale convergence rates.
+1. **SDF-stratified + Stochastic combined** — combine PR #972's α=2.0 SDF upweighting with PR #968's fresh random draw every batch. Neither was tried together. Expected: ≤5.7% test_abupt.
+2. **SDF-stratified + dedicated vol decoder (6L vol tower)** — combine the #1 sampling technique with the independent vol tower architecture (#1035). Tests whether the vol tower benefit stacks with better sampling.
+3. **SDF α sweep on corrected split** — try α=1.5, 3.0, 4.0 to identify optimal far-field upweighting. α=2.0 was the only value tested.
+
+## Tier 2 Follow-Ups (After Tier 1 Results)
+
+4. **Re-run vol-token LN (PR #1025 config) on corrected split from scratch** — corrected-split val_vol_p likely to be ~3.5% (already promising on old split).
+5. **SDF + 5L depth** — lighter model may generalize better with strong SDF sampling.
+6. **Ensemble refresh on corrected split** — new ensemble from top corrected-split checkpoints (#972, #968, #880, #958) could push below 5.5%.
+7. **WD=0.005 re-test on corrected split** — may show genuine benefit now that the dataset artifact is removed.
+8. **EMA decay=0.999 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
 
 ## Gate Schedule
 
@@ -76,6 +103,8 @@
 | EP20 | ≤6.70% | ~109,876 | ~219,720 |
 | EP25 | ≤6.65% | ~137,345 | — |
 | EP30 | ≤6.60% | ~164,814 | — |
+
+> Note: Gate thresholds calibrated to old dataset. With corrected split showing test_abupt=5.844% as current SOTA, consider tightening gates in future rounds (e.g., EP20 ≤6.30%, EP30 ≤5.95%).
 
 ## Critical Config Constraints
 
@@ -93,20 +122,20 @@
 12. **Steps/epoch at bs=1 DDP8**: ~10,975–10,986.
 13. **Steps/epoch at bs=2 DDP8 (standard)**: ~10,975.
 
-## Confirmed Dead Ends (Do Not Retry)
+## Confirmed Dead Ends (Hardware/Architecture — Not Dataset-Dependent)
+
+These results are confirmed on multiple runs and are likely dataset-independent:
 
 - No weight decay: overfits at EP9 (PR #898)
 - 7L depth without full regularization: catastrophic bounce (PR #873)
 - 8L depth: EP11 bounce +0.222pp (PR #965)
 - Dropout=0.1: consistent degradation (PR #899)
 - vol-loss-weight=2.0 WITH GradNorm: self-cancelling (PR #911)
-- vol-loss-weight=2.0 WITHOUT GradNorm: actively harmful, EP5=9.010% (PR #936)
-- vol-loss-weight=3.0 WITHOUT GradNorm: WORST EVER test_abupt=8.0190%, gap +8.12pp (PR #964) — AXIS FULLY CLOSED
+- vol-loss-weight=2.0 WITHOUT GradNorm: actively harmful (PR #936)
+- vol-loss-weight=3.0 WITHOUT GradNorm: WORST EVER on old dataset (PR #964)
 - 96k vol points without proportional surface increase: gradient starvation (PR #912)
-- 96k+60k balanced sampling on 5L at default lr=1e-4: catastrophic divergence EP5=15.22% (PR #938)
+- 96k+60k balanced sampling on 5L at default lr=1e-4: catastrophic divergence (PR #938)
 - Proportional sampling 96k+60k at 6L: slower convergence, vol_p oscillation (PR #951)
-- WD=0.01: does not close val→test vol_p gap (PR #900)
-- WD=0.005: val matches WD=0.01; test gap persists (PR #914)
 - QK-Norm: consistent failures (multiple PRs)
 - Y-sym p=1.0: over-augmentation (PR #866)
 - 7-octave STRING PE (PR #843): σ=16.0 destabilization
@@ -114,26 +143,22 @@
 - GradNorm α=0.25 (multiple PRs): terminal test regression
 - GradNorm α=0.75 (PR #874): catastrophic instability at EP16
 - Extended cosine T_max=60 (PR #946): destabilizing in training tail
-- EMA decay=0.999 (PR #954): does not close val→test vol_p gap (test_vol_p=11.28%)
-- TTA Y-symmetry (PR #979): gap UNCHANGED. AXIS CLOSED.
-- SDF-stratified importance sampling (PR #972): test_vol_p=11.827% WORSE than baseline. AXIS FULLY CLOSED.
-- DropPath regularization (PR #987): EP5 gate FAIL; gap +7.91pp UNCHANGED. FALSIFIED.
-- Lookahead Lion (PR #998): EP5 FAIL. FALSIFIED.
-- Vol coordinate noise (PR #990): EP5=8.54% gate FAIL. FALSIFIED.
-- Bbox normalization (PR #978): regression. CLOSED.
-- Stochastic vol subsampling (PR #968): test_vol_p=12.114%, gap +8.115pp WIDEST EVER. AXIS FULLY CLOSED.
-- InstanceNorm across vol tokens (PR #1015): closed before terminal — direction continued as #1025 vol-token LN.
-- Online focal vol reweighting (#1026, #1033): scale=3 ceiling degeneration in BOTH bias-corrected and uncorrected variants. EMA ratio approach AXIS CLOSED.
+- DropPath regularization (PR #987): EP5 gate FAIL (likely architecture-level, not dataset-dependent)
+- Lookahead Lion (PR #998): EP5 FAIL (optimizer-level)
+- Online focal vol reweighting (#1026, #1033): scale=3 ceiling degeneration — EMA ratio approach AXIS CLOSED
+- InstanceNorm across vol tokens (PR #1015): closed before terminal — vol-token LN (#1025) is successor
 
-## Potential Next Directions (Not Yet Assigned)
+## Removed from Dead Ends (RETRACTED — Dataset Artifact)
 
-If the 4 active gap-closing experiments fail to close the gap, escalate per Plateau Protocol — bold architecture-level moves:
+The following were previously listed as dead ends but were tested on the broken pre-20260511 dataset split. They are **NOT confirmed dead ends** and some are now SOTA techniques:
 
-1. ~~**Independent vol_p transformer tower**~~ — **ASSIGNED to fern as PR #1035**
-2. **DETR-style learned query positions for volume decoder** — replace coordinate-based vol queries with N learned query embeddings, allowing model to learn its own canonical volume sampling pattern.
-3. **Voxel-based aggregation with spatial attention** — discretize volume into voxel grid, apply 3D attention; treats vol prediction as a structured grid problem rather than scattered point regression.
-4. ~~**Top-K val checkpoint averaging**~~ — **ASSIGNED to tanjiro as PR #1038**
-5. **Geometric conditioning on body shape for vol prediction** — explicit shape descriptor (e.g., spherical harmonics of car silhouette) prepended to volume queries.
-6. **Pure Fourier neural operator (FNO) for vol_p** — completely replace volume decoder with FNO on a regular grid, interpolated to query points; tests whether spectral aggregation generalizes better than per-point MLP.
+- ~~SDF-stratified importance sampling (PR #972)~~: **NOW RANK 1 SOTA** (test_abupt=5.844%)
+- ~~Stochastic vol subsampling (PR #968)~~: **NOW RANK 2 SOTA** (test_abupt=5.986%)
+- WD=0.01 (PR #900): needs re-test on corrected split before concluding
+- WD=0.005 (PR #914): needs re-test on corrected split before concluding
+- TTA Y-symmetry (PR #979): may still be neutral; re-test on corrected split before concluding
+- Vol coordinate noise (PR #990): EP5 gate FAIL — may be architecture-level; re-test on corrected split
+- Bbox normalization (PR #978): may need re-test
+- EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-12 ~15:00 UTC. Key changes: (1) #999 nezuko SWA EP27.5 (step 302,502), n=~8 snapshots (EP20–EP27), val_abupt=6.199%, val_vol_p=3.951%; ~2.5 epochs to EP30 terminal. (2) #1025 frieren vol-LN EP15.3 (step 168,081), val_vol_p=3.536%, best=3.5283% at EP12; plateau confirmed; EP20 gate ~17:00Z. (3) #1037 tanjiro DANN v2 CLOSED — code-first violation; student never committed implementation. (4) #1035 fern independent vol tower — step 1,922 (EP0.2), early. (5) #1038 tanjiro Top-K val checkpoint averaging ASSIGNED — branch created 15:00Z, code-first requirement enforced._
+_Last updated: 2026-05-12 ~20:30 UTC. MAJOR UPDATE: Dataset artifact resolved (Issue #1053). Corrected split `rawcanon_20260511` shows no val→test vol_p gap. PR #972 (SDF-stratified sampling) is new SOTA at test_abupt=5.844%. All "AXIS FULLY CLOSED" labels on sampling strategies RETRACTED. PR #740 old SOTA now ranks 22 at 8.165% (artifact). All active experiments must restart on corrected dataset path._
