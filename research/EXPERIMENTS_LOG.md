@@ -66,6 +66,37 @@
 
 ---
 
+## 2026-05-11 16:00 — PR #985: Per-case geometry embedding v2: cross-attn vol × all surface tokens (alphonse) — CLOSED (NEGATIVE)
+
+- **Branch**: `alphonse/geo-embed-v2-xattn` (closed)
+- **W&B run**: `7e3k06fj`
+- **Hypothesis**: PR #976 tested mean-pooling surface tokens into a case geometry embedding (NEGATIVE — mean-pool collapsed spatial information). This PR tests a stacked double cross-attention: a dedicated `geo_cond_xattn` (Q=vol_hidden, K=V=surf_hidden, zero-init out_proj) conditions vol_hidden on surface geometry BEFORE the existing surf→vol xattn block. The geometry-conditioned vol queries should better target OOD test cases (run_133, 226, 203, 158) that dominate test_vol_pressure failure.
+- **Parameter count**: 18.04M (+1.05M stacked geo-cond xattn layer, ~6.2% increase over 16.99M baseline)
+
+| Epoch | Step | val_abupt | val_vol_p | Gate | Status |
+|---|---:|---:|---:|---|---|
+| EP1 | ~10,864 | ≤30% | — | PASS | continuing |
+| EP2 | ~21,728 | ≤16% | — | PASS | continuing |
+| EP3 | ~32,592 | 8.2740% | 5.5706% | FAIL dual gate (>8.0% AND >5.0%) | killed |
+| EP4 | ~43,456 | **8.2145%** | 5.5254% | — | terminal (run continued after gate) |
+
+**Test metrics (EP4 terminal):**
+
+| Metric | Value |
+|---|---:|
+| test_abupt | 9.4094% |
+| test_vol_p | 13.0508% |
+
+**Results commentary:**
+- EP3 dual gate FAILED on both axes: val_abupt=8.2740% (threshold ≤8.0%) and val_vol_p=5.5706% (threshold ≤5.0%). Both exceeded the gate by 0.27pp and 0.57pp respectively.
+- EP4 terminal val_abupt=8.2145% — marginally better than EP3 (converging near 8.2%) but 1.97pp above the SOTA baseline of 6.2869%. No improvement trend observed.
+- test_vol_p=13.0508% is WORSE than the baseline (~12.0%), confirming the stacked xattn does not address OOD vol_pressure failure.
+- The double cross-attention stacking (geo_cond_xattn → surf→vol xattn) appears to degrade performance relative to the single xattn baseline. Possible explanation: the second xattn over the same K=V=surf_hidden tokens introduces redundancy that over-conditions vol_hidden on surface features, reducing the model's ability to fit interior volume structure independently.
+- The zero-init out_proj on geo_cond_xattn was intended to start as identity, but with two xattn layers stacking residuals over identical keys/values, the optimization landscape may be ill-conditioned from the start.
+- **Conclusion:** Stacked double cross-attention is NEGATIVE. Geometry conditioning via a second xattn layer over all surface tokens does not improve OOD generalization. The OOD vol_p failures are driven by distribution shift in the 4 outlier geometries, not by insufficient surface-conditioning capacity.
+
+---
+
 ## 2026-05-11 14:00 — PR #988: Pre-xattn vol self-attention (frieren) — CLOSED (INCONCLUSIVE/TIMEOUT)
 
 - **Branch**: `frieren/pre-xattn-vol-selfattn` (closed)

@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-11 — Round 29 active (7 WIP; PR #958 nezuko MERGED)
+- **Date:** 2026-05-11 — Round 29 active (9 WIP; PR #958 nezuko MERGED)
 - **Advisor branch:** `tay`
 - **W&B project:** `wandb-applied-ai-team/senpai-v1-drivaerml-ddp8`
 
@@ -34,20 +34,21 @@
 
 ---
 
-## Active PRs (Round 29) — 8 WIP
+## Active PRs (Round 29) — 9 WIP
 
 | Student | PR | Hypothesis | Branch | Status |
 |---|---|---|---|---|
 | nezuko | #958 | Vol aux decoder head: **MERGED** — Arm A val_abupt=6.2868% (new single-model SOTA, run `29nohj67`, EP13). Arm B (`--volume-loss-weight 2.0`) run `6xja19q9` in progress. | `nezuko/vol-pressure-aux-decoder-head` | **MERGED** — Arm B continuing; if Arm B beats 6.2868% it becomes new SOTA |
-| tanjiro | #994 | LR-warmup decouple from vol-schedule boundary: complete LR warmup before EP1→EP2 boundary so only vol_points jump happens at that step, eliminating the 18× LR+curriculum co-shock from PR #983. | `tanjiro/lr-warmup-decouple-from-vol-schedule` | WIP — assigned; awaiting/running |
-| askeladd | #986 | Adaptive SDF vol loss weighting: exp(-\|d_sdf\|/sigma) per-token weight; sigma sweep {0.5, 1.0, 2.0} m. | `askeladd/adaptive-sdf-vol-loss` | WIP — running |
-| frieren | #995 | Pre-xattn vol LayerNorm ablation: single LN inserted immediately before surf→vol xattn (no MHA); isolates whether EP1 gain in #988 came from normalizing vol_h vs self-attn capacity. Zero FLOP overhead. | `frieren/pre-xattn-vol-ln-only` | WIP — assigned; awaiting/running |
-| fern | #996 | Near-surface SDF-stratified vol sampling: correct-direction inverse SDF weighting `exp(-alpha×|sdf|)` concentrates vol points near car surface; Arm A alpha=1.0, Arm B alpha=2.0. | `fern/near-surface-sdf-stratified-sampling` | WIP — assigned; awaiting/running |
-| thorfinn | #991 | Per-head learnable xattn temperature: scalar per-head scale initialized to 1.0 replacing the global constant from PR #984; isolates per-head sharpening signal. | `thorfinn/per-head-learnable-xattn-temp` | WIP — assigned; awaiting/running |
-| edward | #992 | Global surface embedding: learnable aggregation (attention pooling) over all surface tokens → geometry code added to vol queries before surf→vol xattn; richer spatial context than mean-pool. | `edward/global-surface-embedding` | WIP — assigned; awaiting/running |
-| alphonse | #1000 | SDF vol asinh encoding sweep: asinh(sdf/scale) normalization for vol SDF input feature; scale sweep {10.0, 20.0} m. Follow-up to closed tanh (#973) and raw-linear (#966) axes. | `alphonse/sdf-vol-asinh-encoding` | WIP — assigned; not started |
+| tanjiro | #994 | LR-warmup decouple from vol-schedule boundary: complete LR warmup before EP1→EP2 boundary so only vol_points jump happens at that step, eliminating the 18× LR+curriculum co-shock from PR #983. | `tanjiro/lr-warmup-decouple-from-vol-schedule` | **EXCEPTIONAL** — run `p3v6veyl`, step 18,990. val_abupt=7.44%, vol_p=4.83% — BOTH EP3 dual-gate conditions already met. Linear projection ~1.0% abupt at EP3 gate. Likely to beat single-model SOTA 6.2868%. EP3 gate at step ~32,592. |
+| askeladd | #986 | Adaptive SDF vol loss weighting: exp(-\|d_sdf\|/sigma) per-token weight; sigma sweep {0.5, 1.0, 2.0} m. Arm A (sigma=0.5). | `askeladd/adaptive-sdf-vol-loss` | WIP — run `i9qlgavj`, step 15,413. val_abupt=29.38%. **EP2 WARNING: needs ≤16% at step ~21,728 (~6,315 steps remaining). Trajectory concerning: needs -13.4pp in 6k steps. Monitoring.** |
+| frieren | #995 | Pre-xattn vol LayerNorm ablation: single LN inserted immediately before surf→vol xattn (no MHA); isolates whether EP1 gain in #988 came from normalizing vol_h vs self-attn capacity. Zero FLOP overhead. | `frieren/pre-xattn-vol-ln-only` | WIP — run `sdt3tzq3`, step 14,768. val_abupt=27.65%. **EP2 WARNING: needs ≤16% at step ~21,728 (~6,960 steps remaining). Monitoring.** |
+| fern | #996 | Near-surface SDF-stratified vol sampling: correct-direction inverse SDF weighting `exp(-alpha×|sdf|)` concentrates vol points near car surface; Arm A alpha=1.0, Arm B alpha=2.0. | `fern/near-surface-sdf-stratified-sampling` | WIP — Arm A run `4evy7zcx`, step 15,350. val_abupt=28.20%. **EP2 WARNING: needs ≤16% at step ~21,728 (~6,378 steps remaining). Monitoring.** Arm B pending Arm A EP2 verdict. |
+| thorfinn | #1002 | Per-head learnable xattn temperature: log-parameterized per-head scale (`log_temp = nn.Parameter(zeros(H))`; `temp = exp(log_temp)`, init=1.0) applied post-W_q before head-split. Manual MHA implementation `SurfToVolCrossAttnPerHeadTemp`. | `thorfinn/per-head-learnable-xattn-temp` | WIP — New run launched 2026-05-11T16:45:17Z. Group=`per-head-xattn-temp`, rank0=`mzghptb0`. EP1 gate monitoring at step ~10,864. (Prior stale run `mgm7o7pb` killed.) |
+| edward | #992 | Global surface embedding: learnable aggregation (attention pooling) over all surface tokens → geometry code added to vol queries before surf→vol xattn; richer spatial context than mean-pool. | `edward/global-surface-embedding` | WIP — run `l730ai6d`, step 13,728. val_abupt=27.57%. **EP2 WARNING: needs ≤16% at step ~21,728 (~8,000 steps remaining). Monitoring.** |
+| alphonse | #1000 | SDF vol asinh encoding sweep: asinh(sdf/scale) normalization for vol SDF input feature; scale sweep {10.0, 20.0} m. Follow-up to closed tanh (#973) and raw-linear (#966) axes. | `alphonse/sdf-vol-asinh-encoding` | WIP — Arm A (scale=10.0) run `7pjhz629`, launched 2026-05-11T15:38:37Z. Step ~7,600. No val metrics yet (EP1 not fired at ~10,864). |
+| nezuko | #1001 | Knowledge distillation: K=6 teacher ensemble → L=5 student via soft-label distillation. `distill_lambda_kd=0.5`. | `nezuko/kd-ensemble-distillation` | WIP — Running smoke tests without KD first: runs `6jz3xwvj` (step 2,066) and `jva4lf5u` (step 3,282), group=`kd-debug-smoke-no-kd`. Advisor suggested leveraging existing SOTA checkpoints (#929, #925-#928) as teacher ensemble members. |
 
-### 7 students active WIP; nezuko #958 MERGED (Arm A new single-model SOTA 6.2868%)
+### 9 students active WIP; nezuko #958 MERGED (Arm A new single-model SOTA 6.2868%)
 
 ---
 
@@ -108,11 +109,11 @@ Single LN inserted immediately before surf→vol xattn (no MHA) to isolate wheth
 ### Theme 3: Near-Surface SDF-Stratified Vol Sampling (fern #996)
 Correct-direction inverse SDF weighting `weight = exp(-alpha×|sdf|)` concentrates vol points near car surface during training. Two arms: Arm A alpha=1.0, Arm B alpha=2.0. Directly addresses the finding that far-field bias (frieren #981 wrong direction) catastrophically fails; correct near-surface bias has been untested until now.
 
-### Theme 4: LR-Warmup Decoupling from Vol-Schedule Boundary (tanjiro #994)
-Complete LR warmup before EP1→EP2 boundary so only the vol_points jump happens at that transition. PR #983 mechanistic finding: the EP1→EP2 shock was driven by an 18× LR jump (5e-6→9e-5 from `--lr-warmup-epochs=1`) completing simultaneously with the vol_points curriculum jump. EP2→EP3 was smooth (LR already in cosine decay). Decoupling should eliminate the co-shock and allow clean curriculum evaluation.
+### Theme 4: LR-Warmup Decoupling from Vol-Schedule Boundary (tanjiro #994) — EXCEPTIONAL
+Complete LR warmup before EP1→EP2 boundary so only the vol_points jump happens at that transition. PR #983 mechanistic finding: the EP1→EP2 shock was driven by an 18× LR jump (5e-6→9e-5 from `--lr-warmup-epochs=1`) completing simultaneously with the vol_points curriculum jump. EP2→EP3 was smooth (LR already in cosine decay). **OUTSTANDING RESULT**: run `p3v6veyl` at step 18,990 shows val_abupt=7.44% AND vol_p=4.83% — both EP3 dual-gate thresholds (≤8.0%, ≤5.0%) already met with ~13,602 steps remaining. abupt slope=-0.476%/1k steps, vol_p slope=-0.268%/1k steps. Linear projection suggests ~1% abupt at EP3 gate (step 32,592). This may beat single-model SOTA 6.2868%.
 
-### Theme 5: Per-Head Learnable xattn Temperature (thorfinn #991)
-Per-head scalar temperature scale initialized to 1.0 for surf→vol xattn, replacing the global constant from PR #984 (Q×0.5). Follow-up to collapsed MLP (#974) and constant-scale NEGATIVE (#984). Per-head learned scale should capture head-specific sharpening patterns instead of global uniform scaling.
+### Theme 5: Per-Head Learnable xattn Temperature (thorfinn #1002)
+Per-head scalar temperature scale using log-parameterization (`log_temp = nn.Parameter(zeros(H))`; `temp = exp(log_temp)`, init=1.0) applied post-W_q before head-split in a manual `SurfToVolCrossAttnPerHeadTemp` MHA implementation. Log-parameterization ensures temperatures stay positive and symmetric around 1.0. Replaces old PR #991 (thorfinn assigned new PR #1002). Follow-up to collapsed MLP (#974) and constant-scale NEGATIVE (#984). New run `mzghptb0` (rank0), group=`per-head-xattn-temp`, launched 2026-05-11T16:45:17Z.
 
 ### Theme 6: Global Surface Embedding (edward #992)
 Learnable attention pooling over all surface hidden tokens to produce a geometry code, added to vol queries before surf→vol xattn. More expressive than failed mean-pool (#976, #980) because attention pooling preserves spatial selectivity. Zero-init residual.
@@ -124,6 +125,9 @@ asinh(sdf/scale) bounded normalization for the vol SDF input feature, replacing 
 
 ### Theme 8: Adaptive SDF Vol Loss Weighting (askeladd #986)
 Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundaries where OOD geometry differences are most pronounced. Sigma sweep {0.5, 1.0, 2.0} m. Parameter-free. Running.
+
+### Theme 9: Knowledge Distillation from Ensemble (nezuko #1001)
+K=6 teacher ensemble → L=5 student via soft-label distillation. `distill_lambda_kd=0.5`. Student inherits from single-model SOTA architecture (L=5, hidden=512, xattn). Smoke tests running first without KD (no teacher_path) to validate training loop: runs `6jz3xwvj` (step 2,066) and `jva4lf5u` (step 3,282), group=`kd-debug-smoke-no-kd`. Advisor suggested exploring existing SOTA checkpoints from prior PRs (#929, #925-#928) as potential teacher ensemble members to avoid K=6 full new training runs.
 
 ### Closed Themes
 - **SDF data quality** (edward #941): CLOSED NEGATIVE — SDF corruption is NOT the root cause of vol_p OOD gap.
@@ -196,7 +200,7 @@ Weight vol loss per-token by exp(-|d_sdf|/sigma) to focus learning near boundari
 ### Attention temperature scaling: CLOSED (constant/MLP variants)
 - **#974 thorfinn** (SDF-conditioned xattn temp MLP): MLP collapsed to global constant scale=0.515. CLOSED NEGATIVE.
 - **#984 thorfinn** (constant xattn temp scale=0.5): Beats MLP baseline but not SOTA. CLOSED NEGATIVE.
-- Per-head learnable scale (#991) still in flight.
+- Per-head learnable scale (#1002) still in flight.
 
 ### SDF-modulated vol PE octave scaling: CLOSED NEGATIVE
 - **#989 fern** (MLP: SDF→per-octave scale): EP4 val_abupt=7.4901%, test_abupt=8.7927%. 1.0–1.1pp worse than single-model SOTA. MLP learned physically coherent near-surface amplification but far-field attenuation (mean scale=0.157 at sdf=+2.0m) degraded far-field vol point discrimination. SDF-modulated PE octave scaling axis FULLY CLOSED.
