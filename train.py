@@ -132,6 +132,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -189,6 +191,112 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
         return None
     sigmas = [float(s) for s in spec.split(",") if s.strip()]
     return sigmas or None
+
+
+def apply_sdf_stratified_stochastic_sampling(
+    train_dataset,
+    *,
+    alpha: float,
+    n_volume: int,
+    is_main: bool = False,
+) -> None:
+    """Swap ``train_dataset.__class__`` with a subclass that does SDF-stratified
+    stochastic volume sampling.
+
+    Combines two mechanisms shown to independently improve test_vol_p on the
+    corrected-split DrivAerML wave:
+
+    1. **SDF-stratified weighting** (PR #972): per-call weights are
+       ``1 + alpha * |sdf|`` so far-field / boundary-adjacent points are
+       up-weighted in the multinomial draw.
+    2. **Stochastic freshness** (PR #968): no manual reseeding before the
+       multinomial; the global torch RNG advances with each call, and each
+       DDP rank + DataLoader worker carries a distinct RNG state.
+
+    Implementation note: instance-level monkey-patching of ``__getitem__``
+    via ``types.MethodType`` does NOT take effect when DataLoader uses
+    ``dataset[idx]`` subscript (Python special-method lookup goes through
+    the type, not the instance). We therefore install the new behaviour by
+    reassigning ``train_dataset.__class__`` to a freshly built subclass.
+
+    IO optimisation vs. the literal PR-body code: instead of loading every
+    volume point per ``__getitem__`` (~294 MB/case), we load only
+    ``volume_sdf.npy`` to compute weights, sample indices, then call
+    ``store.load_case`` with ``volume_rows=`` so only the chosen rows are
+    read for xyz / sdf / pressure. Functionally identical, ~5x faster IO.
+    """
+    from data.loader import DrivAerMLCase, _case_dir, _load_npy_rows
+
+    base_cls = type(train_dataset)
+
+    class _SDFStratifiedStochasticDataset(base_cls):
+        def __getitem__(self, idx: int) -> DrivAerMLCase:
+            alpha_local = self._sdf_stratified_alpha
+            n_vol_local = self._sdf_stratified_n_volume
+
+            view = self.views[idx]
+            counts = self.store.case_point_counts(view.case_id)
+
+            surface_idx = self._indices(
+                counts["n_surface"],
+                self.max_surface_points,
+                view,
+                group_view_count=view.surface_view_count,
+            )
+
+            case_dir = _case_dir(self.store.root, view.case_id)
+            sdf_arr = _load_npy_rows(case_dir / "volume_sdf.npy", rows=None)
+            sdf_flat = sdf_arr.reshape(-1) if sdf_arr.ndim > 1 else sdf_arr
+            sdf_abs = torch.from_numpy(sdf_flat).abs()
+            weights = 1.0 + alpha_local * sdf_abs
+
+            n_total = int(sdf_abs.shape[0])
+            n_sample = min(n_vol_local, n_total) if n_vol_local > 0 else n_total
+            vol_idx = torch.multinomial(weights, n_sample, replacement=True)
+            vol_idx, _ = torch.sort(vol_idx)
+
+            case = self.store.load_case(
+                view.case_id,
+                surface_rows=None if surface_idx is None else surface_idx.numpy(),
+                volume_rows=vol_idx.numpy(),
+            )
+
+            metadata = dict(case.metadata)
+            metadata["n_surface_full"] = int(counts["n_surface"])
+            metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+            metadata["surface_view_index"] = int(view.view_index)
+            metadata["surface_view_count"] = int(view.surface_view_count)
+            metadata["surface_sampling_mode"] = view.sampling_mode
+            metadata["n_volume_full"] = n_total
+            metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+            metadata["volume_view_index"] = int(view.view_index)
+            metadata["volume_view_count"] = int(view.volume_view_count)
+            metadata["volume_sampling_mode"] = "sdf_stratified_stochastic"
+            metadata["joint_view_count"] = int(view.view_count)
+            metadata["sdf_stratified_alpha"] = float(alpha_local)
+
+            return DrivAerMLCase(
+                case_id=case.case_id,
+                surface_x=case.surface_x,
+                surface_y=case.surface_y,
+                volume_x=case.volume_x,
+                volume_y=case.volume_y,
+                metadata=metadata,
+            )
+
+    _SDFStratifiedStochasticDataset.__name__ = (
+        f"{base_cls.__name__}_SDFStratifiedStochastic"
+    )
+
+    train_dataset._sdf_stratified_alpha = float(alpha)
+    train_dataset._sdf_stratified_n_volume = int(n_volume)
+    train_dataset.__class__ = _SDFStratifiedStochasticDataset
+
+    if is_main:
+        print(
+            f"[sdf-stratified-stochastic] enabled: alpha={alpha}, "
+            f"n_volume={n_volume} (subclass={_SDFStratifiedStochasticDataset.__name__})"
+        )
 
 
 class GradNormWeights(nn.Module):
@@ -438,7 +546,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             run_eval_only(config, state)
             return
         if config.seed >= 0:
-            seed_everything(config.seed)
+            rank_offset = state.rank if state.enabled else 0
+            seed_everything(config.seed + rank_offset)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
@@ -451,6 +560,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_sdf_stratified_vol_sampling:
+            apply_sdf_stratified_stochastic_sampling(
+                train_loader.dataset,
+                alpha=config.sdf_stratified_alpha,
+                n_volume=config.train_volume_points,
+                is_main=state.is_main,
+            )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
