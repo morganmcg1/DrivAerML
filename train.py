@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_manifold_mixup: bool = False
+    mixup_alpha: float = 0.2
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_manifold_mixup": (
+            "Enable Manifold Mixup (Verma et al., ICML 2019, "
+            "https://arxiv.org/abs/1806.05236) on post-backbone hidden "
+            "states. On 50%% of training steps (gated by a cross-rank-"
+            "synced Bernoulli flip), two forward passes are run with the "
+            "second pass on a within-rank-shuffled batch. The "
+            "post-norm surface_hidden and volume_hidden tensors are mixed "
+            "with lam~Beta(alpha,alpha) and decoded through the existing "
+            "output heads. Targets are mixed in normalized space with the "
+            "same lam. Surface and volume masks are intersected so only "
+            "positions valid in both samples contribute. PR #1006."
+        ),
+        "mixup_alpha": (
+            "Beta(alpha, alpha) parameter for Manifold Mixup. Lower "
+            "values (~0.2) concentrate lam near 0 and 1 (mostly near-clean "
+            "samples with rare strong interpolations). Higher values "
+            "(~1.0) give uniform lam in [0,1]. RegMixup / C-Mixup "
+            "literature recommends 0.1-0.5 for regression tasks. Default "
+            "0.2."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -309,6 +331,85 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
     )
+
+
+def manifold_mixup_train_loss(
+    model: nn.Module,
+    batch,
+    transform: TargetTransform,
+    device: torch.device,
+    amp_mode: str,
+    *,
+    lam: float,
+    idx_b: torch.Tensor,
+    surface_loss_weight: float = 1.0,
+    volume_loss_weight: float = 1.0,
+    surface_channel_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Manifold Mixup (PR #1006): two forward passes, mix post-norm hidden
+    states with lam, decode via output heads, supervise against lam-mixed
+    normalized targets. ``idx_b`` is the within-rank permutation for
+    sample B; ``lam`` is the Beta-sampled mixing weight. Caller must
+    ensure ``lam`` and the gate decision are synchronized across DDP
+    ranks; ``idx_b`` is per-rank (within-rank shuffle).
+    """
+
+    batch = batch.to(device)
+    base_model = unwrap_model(model)
+
+    surface_target_a = transform.apply_surface(batch.surface_y)
+    volume_target_a = transform.apply_volume(batch.volume_y)
+    surface_target_b = surface_target_a[idx_b]
+    volume_target_b = volume_target_a[idx_b]
+    surface_target_mix = lam * surface_target_a + (1.0 - lam) * surface_target_b
+    volume_target_mix = lam * volume_target_a + (1.0 - lam) * volume_target_b
+
+    surface_mask_mix = batch.surface_mask & batch.surface_mask[idx_b]
+    volume_mask_mix = batch.volume_mask & batch.volume_mask[idx_b]
+
+    with autocast_context(device, amp_mode):
+        out_a = model(
+            surface_x=batch.surface_x,
+            surface_mask=batch.surface_mask,
+            volume_x=batch.volume_x,
+            volume_mask=batch.volume_mask,
+        )
+        out_b = model(
+            surface_x=batch.surface_x[idx_b],
+            surface_mask=batch.surface_mask[idx_b],
+            volume_x=batch.volume_x[idx_b],
+            volume_mask=batch.volume_mask[idx_b],
+        )
+        surf_h_mix = lam * out_a["surface_hidden"] + (1.0 - lam) * out_b["surface_hidden"]
+        vol_h_mix = lam * out_a["volume_hidden"] + (1.0 - lam) * out_b["volume_hidden"]
+
+        surface_mask_mix_f = surface_mask_mix.to(dtype=surf_h_mix.dtype).unsqueeze(-1)
+        volume_mask_mix_f = volume_mask_mix.to(dtype=vol_h_mix.dtype).unsqueeze(-1)
+        surface_preds_mix = base_model.surface_out(surf_h_mix) * surface_mask_mix_f
+        volume_preds_mix = base_model.volume_out(vol_h_mix) * volume_mask_mix_f
+
+        if surface_channel_weights is not None:
+            surface_loss = weighted_channel_mse(
+                surface_preds_mix,
+                surface_target_mix,
+                surface_mask_mix,
+                surface_channel_weights,
+            )
+        else:
+            surface_loss = masked_mse(surface_preds_mix, surface_target_mix, surface_mask_mix)
+        volume_loss = masked_mse(volume_preds_mix, volume_target_mix, volume_mask_mix)
+        weighted_surface_loss = surface_loss_weight * surface_loss
+        weighted_volume_loss = volume_loss_weight * volume_loss
+        loss = weighted_surface_loss + weighted_volume_loss
+        base_mse_loss = surface_loss + volume_loss
+    return loss, {
+        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
+        "surface_loss": float(surface_loss.detach().cpu().item()),
+        "volume_loss": float(volume_loss.detach().cpu().item()),
+        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
+        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "mixup_lam": float(lam),
+    }
 
 
 def train_loss(
@@ -773,7 +874,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_manifold_mixup:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1021,16 +1122,53 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
-                    loss, batch_loss_metrics = train_loss(
-                        model,
-                        batch,
-                        transform,
-                        device,
-                        config.amp_mode,
-                        surface_loss_weight=config.surface_loss_weight,
-                        volume_loss_weight=config.volume_loss_weight,
-                        surface_channel_weights=surface_channel_weights if use_channel_weights else None,
-                    )
+                    mixup_active = False
+                    mixup_lam = 0.0
+                    if config.use_manifold_mixup:
+                        # Sample the 50% gate and lam on rank 0, broadcast so
+                        # every rank takes the same forward path (else DDP
+                        # graph mismatch deadlocks the gradient bucket).
+                        sync = torch.zeros(2, device=device, dtype=torch.float32)
+                        if state.is_main:
+                            sync[0] = float(torch.rand(1).item())
+                            sync[1] = float(
+                                torch.distributions.Beta(
+                                    config.mixup_alpha, config.mixup_alpha
+                                ).sample().item()
+                            )
+                        if state.enabled:
+                            dist.broadcast(sync, src=0)
+                        mixup_active = bool(sync[0].item() < 0.5)
+                        mixup_lam = float(sync[1].item())
+                    if mixup_active:
+                        B = batch.surface_x.shape[0]
+                        idx_b = torch.randperm(B, device=device)
+                        loss, batch_loss_metrics = manifold_mixup_train_loss(
+                            model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            lam=mixup_lam,
+                            idx_b=idx_b,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        )
+                    else:
+                        loss, batch_loss_metrics = train_loss(
+                            model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        )
+                    if config.use_manifold_mixup:
+                        batch_loss_metrics["mixup_active"] = 1.0 if mixup_active else 0.0
+                        batch_loss_metrics["mixup_lam"] = mixup_lam if mixup_active else 0.0
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1070,6 +1208,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "mixup_active" in batch_loss_metrics:
+                        train_log["train/mixup_active"] = batch_loss_metrics["mixup_active"]
+                        train_log["train/mixup_lam"] = batch_loss_metrics["mixup_lam"]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
