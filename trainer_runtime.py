@@ -832,6 +832,54 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+VOL_REVIN_EPS = 1e-6
+
+
+def vol_revin_stats(
+    volume_target_norm: torch.Tensor,
+    volume_mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-sample mean/std of volume_pressure (channel 0) over valid points.
+
+    Computed in the ``transform.apply_volume`` (globally-normalized) space.
+    Returns ``(mean, std)`` each of shape ``[B, 1, 1]`` so they broadcast
+    directly against ``[B, N, 1]`` volume tensors.
+    """
+    vol_p = volume_target_norm[..., 0]
+    mask = volume_mask.to(device=vol_p.device, dtype=vol_p.dtype)
+    n_valid = mask.sum(dim=-1, keepdim=True).clamp(min=1.0)
+    mean = (vol_p * mask).sum(dim=-1, keepdim=True) / n_valid
+    centered = (vol_p - mean) * mask
+    var = (centered * centered).sum(dim=-1, keepdim=True) / n_valid
+    std = (var + VOL_REVIN_EPS * VOL_REVIN_EPS).sqrt()
+    return mean.unsqueeze(-1), std.unsqueeze(-1)
+
+
+def apply_vol_revin(
+    volume_target_norm: torch.Tensor,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+) -> torch.Tensor:
+    """Apply per-sample instance norm to channel 0 (vol_p) of ``volume_target_norm``.
+
+    Other channels (none currently — VOLUME_Y_DIM == 1) pass through unchanged.
+    """
+    out = volume_target_norm.clone()
+    out[..., 0:1] = (out[..., 0:1] - mean) / (std + VOL_REVIN_EPS)
+    return out
+
+
+def invert_vol_revin(
+    volume_pred_norm: torch.Tensor,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+) -> torch.Tensor:
+    """Invert per-sample instance norm on channel 0 (vol_p), back to apply_volume space."""
+    out = volume_pred_norm.clone()
+    out[..., 0:1] = out[..., 0:1] * (std + VOL_REVIN_EPS) + mean
+    return out
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -955,6 +1003,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    use_vol_revin: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -969,8 +1018,21 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    if use_vol_revin:
+        # Model output is in instance-normalized + globally-normalized space.
+        # Invert the per-sample instance norm back to globally-normalized space
+        # using stats derived from the (globally-normalized) GT target. Loss is
+        # then computed against the instance-normalized target so train/val
+        # losses remain comparable.
+        vol_revin_mean, vol_revin_std = vol_revin_stats(volume_target_norm, batch.volume_mask)
+        volume_target_norm_inst = apply_vol_revin(volume_target_norm, vol_revin_mean, vol_revin_std)
+        volume_sse, volume_count = _masked_sse_count(
+            volume_pred_norm, volume_target_norm_inst, batch.volume_mask
+        )
+        volume_pred_norm = invert_vol_revin(volume_pred_norm, vol_revin_mean, vol_revin_std)
+    else:
+        volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
-    volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
     accumulator.surface_loss_count += surface_count
     accumulator.volume_loss_sse += volume_sse
@@ -1121,6 +1183,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    use_vol_revin: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1132,6 +1195,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            use_vol_revin=use_vol_revin,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1465,8 +1529,16 @@ def run_final_evaluation(
         }
     )
 
+    use_vol_revin = bool(getattr(config, "use_vol_revin", False))
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_vol_revin=use_vol_revin,
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1486,7 +1558,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_vol_revin=use_vol_revin,
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

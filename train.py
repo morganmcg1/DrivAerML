@@ -38,6 +38,7 @@ from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
     TargetTransform,
+    apply_vol_revin,
     autocast_context,
     build_lr_scheduler,
     check_kill_thresholds,
@@ -56,6 +57,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    vol_revin_stats,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -138,6 +140,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_vol_revin: bool = False
     debug: bool = False
 
 
@@ -228,6 +231,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_vol_revin": (
+            "RevIN-style per-case instance normalization on volume_pressure "
+            "targets (Kim et al., ICLR 2022). At train time, normalize each "
+            "sample's vol_p to zero-mean/unit-std (computed in apply_volume "
+            "space, over the valid volume points). At inference, invert the "
+            "normalization using per-sample stats from the GT before metric "
+            "logging so metrics remain in physical units. Targets the ~3x "
+            "OOD val/test vol_p gap by removing absolute pressure-level shift."
         ),
     }
     for field in fields(Config):
@@ -321,10 +333,14 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_vol_revin: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if use_vol_revin:
+        vol_revin_mean, vol_revin_std = vol_revin_stats(volume_target, batch.volume_mask)
+        volume_target = apply_vol_revin(volume_target, vol_revin_mean, vol_revin_std)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -364,6 +380,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    use_vol_revin: bool = False,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -376,6 +394,9 @@ def per_task_train_losses(
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if use_vol_revin:
+        vol_revin_mean, vol_revin_std = vol_revin_stats(volume_target, batch.volume_mask)
+        volume_target = apply_vol_revin(volume_target, vol_revin_mean, vol_revin_std)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -939,7 +960,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        use_vol_revin=config.use_vol_revin,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,6 +1056,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_vol_revin=config.use_vol_revin,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1233,6 +1260,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        use_vol_revin=config.use_vol_revin,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1247,6 +1275,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    use_vol_revin=config.use_vol_revin,
                 )
                 for name, loader in val_loaders.items()
             }
