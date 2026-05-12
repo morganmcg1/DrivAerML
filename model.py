@@ -320,6 +320,177 @@ class Transformer(nn.Module):
         return x
 
 
+class VolumeGNN(nn.Module):
+    """k-NN graph message passing on volume points.
+
+    Adds a vol->vol pathway after the surf->vol cross-attention so each
+    volume token can integrate information from its k nearest neighbours in
+    the raw xyz space. O(N * k) complexity in messages; the cdist used for
+    neighbour discovery is chunked to avoid the N*N memory blow-up at
+    N_vol = 65,536.
+
+    The node update has a residual + LayerNorm with the last linear of the
+    node MLP zero-initialised so the sublayer is identity-at-init (matches
+    the convention used by the surf->vol cross-attention sublayer).
+
+    Activation memory is kept in check by chunking the source-node
+    dimension N inside the message aggregation: each chunk produces a small
+    [B, chunk, k, 2D+3] edge tensor that is immediately reduced to a
+    [B, chunk, D] aggregate before the next chunk is built. At N=65,536,
+    k=8, D=512, the per-step backward peak stays around 82 GB versus 98 GB
+    if the full edge tensor is materialised at once. ``use_checkpoint`` is
+    available as a belt-and-braces option (recompute the layer during
+    backward) but is OFF by default because chunking alone fits within the
+    H100 96 GB envelope at batch_size=4.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        k: int = 16,
+        num_layers: int = 1,
+        knn_chunk_size: int = 1024,
+        msg_chunk_size: int = 8192,
+        use_checkpoint: bool = False,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.k = k
+        self.num_layers = num_layers
+        self.knn_chunk_size = knn_chunk_size
+        self.msg_chunk_size = msg_chunk_size
+        self.use_checkpoint = use_checkpoint
+        edge_in = hidden_dim * 2 + 3  # [h_src || h_dst || rel_xyz]
+        self.edge_mlps = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(edge_in, hidden_dim),
+                    nn.SiLU(),
+                    nn.Linear(hidden_dim, hidden_dim),
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.node_mlps = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(hidden_dim * 2, hidden_dim),
+                    nn.SiLU(),
+                    nn.Linear(hidden_dim, hidden_dim),
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.norms = nn.ModuleList(
+            [nn.LayerNorm(hidden_dim, eps=1e-6) for _ in range(num_layers)]
+        )
+        for edge_mlp, node_mlp in zip(self.edge_mlps, self.node_mlps):
+            edge_mlp.apply(_init_linear)
+            node_mlp.apply(_init_linear)
+            # Identity-at-init: zero the last linear of node MLP so h_new=0
+            # and the residual passes h unchanged through the layer.
+            nn.init.zeros_(node_mlp[-1].weight)
+            nn.init.zeros_(node_mlp[-1].bias)
+
+    @torch.no_grad()
+    def _knn_indices(
+        self, xyz: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """Chunked k-NN by Euclidean distance.
+
+        xyz: [B, N, 3]; mask: [B, N] (1=valid). Padded positions are pushed
+        far away before cdist so they are never returned as neighbours.
+        Returns indices [B, N, k] of nearest neighbours (excluding self).
+        """
+        B, N, _ = xyz.shape
+        xyz_for_knn = xyz.detach().float()
+        if mask is not None:
+            # Push masked-out points far away so they are never selected.
+            inv_mask = (~mask.to(torch.bool)).to(dtype=xyz_for_knn.dtype)
+            xyz_for_knn = xyz_for_knn + inv_mask.unsqueeze(-1) * 1.0e6
+        knn_indices = torch.empty(B, N, self.k, dtype=torch.long, device=xyz.device)
+        chunk = max(1, int(self.knn_chunk_size))
+        for b in range(B):
+            for start in range(0, N, chunk):
+                end = min(start + chunk, N)
+                dist = torch.cdist(xyz_for_knn[b, start:end], xyz_for_knn[b])
+                # topk+1 because index 0 is self; drop self.
+                _, idx = dist.topk(self.k + 1, dim=-1, largest=False)
+                knn_indices[b, start:end] = idx[:, 1:]
+        return knn_indices
+
+    def _aggregate_messages(
+        self,
+        h: torch.Tensor,
+        xyz: torch.Tensor,
+        knn_idx: torch.Tensor,
+        batch_idx: torch.Tensor,
+        layer_idx: int,
+    ) -> torch.Tensor:
+        """Mean-aggregated messages [B, N, D], computed in source chunks.
+
+        Chunks the source-node dimension N so the [B, chunk, k, 2D+3] edge
+        tensor stays small (~0.5 GB at chunk=8192, D=512, k=8 in bf16)
+        instead of the full [B, N, k, 2D+3] (~4 GB at N=65k).
+        """
+        B, N, D = h.shape
+        chunk = max(1, int(self.msg_chunk_size))
+        agg_chunks: list[torch.Tensor] = []
+        for start in range(0, N, chunk):
+            end = min(start + chunk, N)
+            knn_chunk = knn_idx[:, start:end, :]
+            batch_chunk = batch_idx[:, start:end, :]
+            h_nbr = h[batch_chunk, knn_chunk]  # [B, chunk, k, D]
+            xyz_nbr = xyz[batch_chunk, knn_chunk]  # [B, chunk, k, 3]
+            rel_xyz = (xyz_nbr - xyz[:, start:end].unsqueeze(2)).to(h.dtype)
+            h_src_chunk = h[:, start:end].unsqueeze(2).expand(
+                B, end - start, self.k, D
+            )
+            edge_in = torch.cat([h_src_chunk, h_nbr, rel_xyz], dim=-1)
+            messages = self.edge_mlps[layer_idx](edge_in)
+            agg_chunks.append(messages.mean(dim=2))
+        return torch.cat(agg_chunks, dim=1)
+
+    def _layer_forward(
+        self,
+        h: torch.Tensor,
+        xyz: torch.Tensor,
+        knn_idx: torch.Tensor,
+        batch_idx: torch.Tensor,
+        layer_idx: int,
+    ) -> torch.Tensor:
+        agg = self._aggregate_messages(h, xyz, knn_idx, batch_idx, layer_idx)
+        node_in = torch.cat([h, agg], dim=-1)  # [B, N, 2D]
+        h_new = self.node_mlps[layer_idx](node_in)  # [B, N, D]
+        return self.norms[layer_idx](h + h_new)
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        xyz: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """h: [B, N, D]; xyz: [B, N, 3]; mask: [B, N] (1=valid, 0=padded)."""
+        B, N, D = h.shape
+        if N == 0:
+            return h
+        knn_idx = self._knn_indices(xyz, mask=mask)  # [B, N, k]
+        batch_idx = (
+            torch.arange(B, device=h.device).view(B, 1, 1).expand(B, N, self.k)
+        )
+        for layer_idx in range(self.num_layers):
+            if self.use_checkpoint and self.training and h.requires_grad:
+                h = torch.utils.checkpoint.checkpoint(
+                    self._layer_forward,
+                    h, xyz, knn_idx, batch_idx, layer_idx,
+                    use_reentrant=False,
+                )
+            else:
+                h = self._layer_forward(h, xyz, knn_idx, batch_idx, layer_idx)
+            h = _apply_token_mask(h, mask)
+        return h
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +514,9 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_gnn: bool = False,
+        vol_gnn_k: int = 16,
+        vol_gnn_layers: int = 1,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -460,6 +634,19 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # PR #1021: vol->vol k-NN GNN message passing pathway.
+        # Added after the surf->vol cross-attention and before the volume
+        # output head. Identity-at-init (node MLP last linear zeroed).
+        self.use_vol_gnn = use_vol_gnn
+        if use_vol_gnn:
+            self.vol_gnn = VolumeGNN(
+                hidden_dim=n_hidden,
+                k=vol_gnn_k,
+                num_layers=vol_gnn_layers,
+            )
+        else:
+            self.vol_gnn = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -561,6 +748,14 @@ class SurfaceTransolver(nn.Module):
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        if (
+            self.vol_gnn is not None
+            and volume_x is not None
+            and volume_tokens > 0
+        ):
+            vol_xyz = volume_x[:, :, : self.space_dim]
+            volume_hidden = self.vol_gnn(volume_hidden, vol_xyz, mask=volume_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)

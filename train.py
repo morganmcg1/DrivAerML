@@ -103,6 +103,9 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_vol_gnn: bool = False
+    vol_gnn_k: int = 16
+    vol_gnn_layers: int = 1
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +232,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_vol_gnn": (
+            "Enable a k-NN graph message-passing pathway on volume points "
+            "(PR #1021). Inserted after the surf->vol cross-attention and "
+            "before the volume output head. Each volume token aggregates "
+            "messages from its k nearest spatial neighbours (chunked cdist "
+            "to stay tractable at N_vol=65,536). The node-update MLP's "
+            "last linear is zero-initialised so the sublayer is identity "
+            "at init."
+        ),
+        "vol_gnn_k": (
+            "Number of nearest neighbours per volume token in the GNN. "
+            "Default 16. Smaller k (e.g. 8) reduces memory; larger k "
+            "captures more far-field context."
+        ),
+        "vol_gnn_layers": (
+            "Number of stacked vol->vol GNN message-passing layers. "
+            "Default 1. Each layer adds another round of neighbour "
+            "aggregation; more layers grow the receptive field but "
+            "increase memory linearly."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +331,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_vol_gnn=config.use_vol_gnn,
+        vol_gnn_k=config.vol_gnn_k,
+        vol_gnn_layers=config.vol_gnn_layers,
     )
 
 
@@ -773,7 +799,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # The vol->vol GNN (PR #1021) gates on `volume_tokens > 0` for the
+            # same reason and is wired through the same DDP fix.
+            if config.use_surf_to_vol_xattn or config.use_vol_gnn:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
