@@ -103,6 +103,10 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_fno_vol_decoder: bool = False
+    fno_grid_resolution: int = 32
+    fno_modes: int = 12
+    fno_width: int = 32
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +233,29 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_fno_vol_decoder": (
+            "Enable FNO spectral residual decoder for volume pressure "
+            "(PR #1040). Scatters volume token features to a regular 3D "
+            "grid (trilinear splat), runs spectral convolutions (FFT-space "
+            "weights, mode truncation), and queries back at point "
+            "positions; output is added as a residual to the MLP vol head. "
+            "Final Linear is zero-initialised so the model starts as the "
+            "plain MLP baseline. Spectral weights are stored as float32 "
+            "with trailing dim=2 (real, imag) for Lion compatibility."
+        ),
+        "fno_grid_resolution": (
+            "3D grid resolution per axis for FNO splatting (R). Default 32. "
+            "Memory cost scales as O(R^3). Must satisfy 2*--fno-modes <= R."
+        ),
+        "fno_modes": (
+            "Number of Fourier modes per spatial axis retained in the FNO "
+            "spectral conv. Default 12. Must satisfy 2*modes <= "
+            "--fno-grid-resolution (Nyquist)."
+        ),
+        "fno_width": (
+            "FNO channel width (lifted-feature dim used inside the spectral "
+            "conv stack). Default 32."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +335,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_fno_vol_decoder=config.use_fno_vol_decoder,
+        fno_grid_resolution=config.fno_grid_resolution,
+        fno_modes=config.fno_modes,
+        fno_width=config.fno_width,
     )
 
 

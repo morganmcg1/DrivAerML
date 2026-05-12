@@ -11,6 +11,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.fft
 
 from data import SURFACE_X_DIM, SURFACE_Y_DIM, VOLUME_X_DIM, VOLUME_Y_DIM
 
@@ -188,6 +189,214 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+def normalize_to_unit_cube(
+    xyz: torch.Tensor, mask: torch.Tensor | None = None
+) -> torch.Tensor:
+    """Normalize vol coords to [-1, 1]^3 per batch using per-sample bbox.
+
+    Padded tokens (mask=0) are excluded from the min/max computation by
+    replacing them with +/-inf sentinels before the reduction.
+    """
+    if mask is not None:
+        m = mask.unsqueeze(-1).bool().to(device=xyz.device)
+        inf_pos = torch.full_like(xyz, float("inf"))
+        inf_neg = torch.full_like(xyz, float("-inf"))
+        xyz_for_min = torch.where(m, xyz, inf_pos)
+        xyz_for_max = torch.where(m, xyz, inf_neg)
+        mins = xyz_for_min.amin(dim=1, keepdim=True)
+        maxs = xyz_for_max.amax(dim=1, keepdim=True)
+    else:
+        mins = xyz.amin(dim=1, keepdim=True)
+        maxs = xyz.amax(dim=1, keepdim=True)
+    span = (maxs - mins).clamp(min=1e-6)
+    return 2.0 * (xyz - mins) / span - 1.0
+
+
+class SpectralConv3d(nn.Module):
+    """3D Fourier spectral convolution layer (FNO building block).
+
+    Weights stored as float32 with trailing dim=2 (real, imag) for Lion
+    optimizer compatibility (Lion errors on torch.cfloat parameters).
+    Uses torch.view_as_complex() at forward time. norm="ortho" is used in
+    both rfftn and irfftn for spectral energy stability.
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, modes: int):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.modes = modes
+
+        scale = 1.0 / (in_channels * out_channels)
+        self.weights = nn.Parameter(
+            scale * torch.randn(in_channels, out_channels, modes, modes, modes, 2)
+        )
+
+    def _get_complex_weights(self) -> torch.Tensor:
+        return torch.view_as_complex(self.weights.contiguous())
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, C, D, H, W]; FFT runs in float32 regardless of autocast dtype
+        B, _, D, H, W = x.shape
+        x_ft = torch.fft.rfftn(x.float(), dim=[-3, -2, -1], norm="ortho")
+        w = self._get_complex_weights()  # [in_C, out_C, m, m, m] complex64
+        m = self.modes
+        out_ft = torch.zeros(
+            B, self.out_channels, D, H, W // 2 + 1,
+            dtype=x_ft.dtype, device=x_ft.device,
+        )
+        out_ft[:, :, :m, :m, :m] = torch.einsum(
+            "bixyz,ioxyz->boxyz",
+            x_ft[:, :, :m, :m, :m],
+            w,
+        )
+        x_out = torch.fft.irfftn(out_ft, s=[D, H, W], dim=[-3, -2, -1], norm="ortho")
+        return x_out.to(dtype=x.dtype)
+
+
+class FNOVolDecoder(nn.Module):
+    """FNO-based volume pressure decoder (residual correction head).
+
+    Scatter point features to a regular 3D grid (trilinear splatting), run
+    a stack of spectral convolutions, query back at point positions
+    (trilinear via F.grid_sample), and project to a scalar correction.
+
+    Designed as an additive residual on top of the existing MLP vol head.
+    The final Linear is zero-initialised so the FNO output is exactly zero
+    at init -- the model starts as the plain MLP and learns the spectral
+    correction.
+
+    Grid layout: [B, C, Z, Y, X] (z-outermost) so F.grid_sample receives
+    coords in the natural (x, y, z) order. See implementation notes inline.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        grid_res: int = 32,
+        modes: int = 12,
+        fno_width: int = 32,
+        num_layers: int = 2,
+    ):
+        super().__init__()
+        self.grid_res = grid_res
+        self.modes = modes
+        self.fno_width = fno_width
+        if modes * 2 > grid_res:
+            raise ValueError(
+                f"FNO modes ({modes}) must be <= grid_res//2 ({grid_res // 2})"
+            )
+
+        self.lift = nn.Linear(hidden_dim, fno_width)
+
+        self.spectral_convs = nn.ModuleList(
+            [SpectralConv3d(fno_width, fno_width, modes) for _ in range(num_layers)]
+        )
+        self.w_convs = nn.ModuleList(
+            [nn.Conv3d(fno_width, fno_width, kernel_size=1) for _ in range(num_layers)]
+        )
+        self.norms = nn.ModuleList(
+            [nn.GroupNorm(min(8, fno_width), fno_width) for _ in range(num_layers)]
+        )
+
+        self.proj = nn.Sequential(
+            nn.Linear(fno_width, fno_width),
+            nn.GELU(),
+            nn.Linear(fno_width, 1),
+        )
+        # Identity init: zero the final Linear so the FNO correction is 0 at start.
+        nn.init.zeros_(self.proj[-1].weight)
+        nn.init.zeros_(self.proj[-1].bias)
+
+    def _scatter_to_grid(
+        self, h: torch.Tensor, xyz_norm: torch.Tensor
+    ) -> torch.Tensor:
+        """Trilinear splat point features to a [B, C, Z, Y, X] grid.
+
+        flat_idx = iz*R*R + iy*R + ix so the resulting tensor has Z as the
+        outer-most spatial dim. When that grid is later passed to
+        F.grid_sample (which treats the 5D input as [B, C, D, H, W] and
+        expects the query last-dim as (x, y, z) -> (W, H, D)), the natural
+        (x_norm, y_norm, z_norm) query maps correctly: x -> W -> ix axis,
+        y -> H -> iy axis, z -> D -> iz axis.
+        """
+        B, N, C = h.shape
+        R = self.grid_res
+        device = h.device
+        dtype = h.dtype
+
+        # Map [-1, 1] -> [0, R-1] voxel coords
+        xyz_grid = (xyz_norm + 1.0) * 0.5 * (R - 1)  # [B, N, 3]
+        idx = xyz_grid.long().clamp(0, R - 2)  # [B, N, 3]
+        frac = xyz_grid - idx.to(dtype=xyz_grid.dtype)  # [B, N, 3]
+
+        grid_flat = torch.zeros(B, C, R * R * R, device=device, dtype=dtype)
+
+        for dx in range(2):
+            wx = (1 - frac[..., 0]) if dx == 0 else frac[..., 0]
+            for dy in range(2):
+                wy = (1 - frac[..., 1]) if dy == 0 else frac[..., 1]
+                for dz in range(2):
+                    wz = (1 - frac[..., 2]) if dz == 0 else frac[..., 2]
+                    w = (wx * wy * wz).unsqueeze(-1)  # [B, N, 1]
+                    ix = (idx[..., 0] + dx).clamp(0, R - 1)
+                    iy = (idx[..., 1] + dy).clamp(0, R - 1)
+                    iz = (idx[..., 2] + dz).clamp(0, R - 1)
+                    flat_idx = iz * R * R + iy * R + ix  # [B, N]
+                    grid_flat.scatter_add_(
+                        2,
+                        flat_idx.unsqueeze(1).expand(B, C, N),
+                        (h * w.to(dtype=dtype)).permute(0, 2, 1),
+                    )
+
+        return grid_flat.view(B, C, R, R, R)
+
+    def _query_grid(
+        self, grid: torch.Tensor, xyz_norm: torch.Tensor
+    ) -> torch.Tensor:
+        """Trilinear sample [B, C, Z, Y, X] grid at xyz_norm in [-1, 1]^3.
+
+        F.grid_sample 5D last-dim is (x, y, z) -> (W, H, D); our grid has
+        Z=D, Y=H, X=W, so passing xyz_norm in (x, y, z) order is correct.
+        """
+        query = xyz_norm[:, None, None, :, :]  # [B, 1, 1, N, 3]
+        sampled = F.grid_sample(
+            grid, query,
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=True,
+        )  # [B, C, 1, 1, N]
+        return sampled[:, :, 0, 0, :].permute(0, 2, 1)  # [B, N, C]
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        vol_xyz: torch.Tensor,
+        vol_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            h: [B, N, hidden_dim] vol token features from the backbone.
+            vol_xyz: [B, N, 3] vol coords in physical units.
+            vol_mask: [B, N] mask (1=real, 0=padding) or None.
+        Returns:
+            correction: [B, N, 1] additive correction for the MLP head.
+        """
+        xyz_norm = normalize_to_unit_cube(vol_xyz, vol_mask)
+
+        h_fno = self.lift(h)  # [B, N, fno_width]
+        if vol_mask is not None:
+            h_fno = h_fno * vol_mask.unsqueeze(-1).to(dtype=h_fno.dtype)
+
+        grid = self._scatter_to_grid(h_fno, xyz_norm)  # [B, fno_width, R, R, R]
+
+        for spec, w_conv, norm in zip(self.spectral_convs, self.w_convs, self.norms):
+            grid = F.gelu(norm(spec(grid) + w_conv(grid)))
+
+        h_out = self._query_grid(grid, xyz_norm)  # [B, N, fno_width]
+        return self.proj(h_out)  # [B, N, 1]
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -343,6 +552,10 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_fno_vol_decoder: bool = False,
+        fno_grid_resolution: int = 32,
+        fno_modes: int = 12,
+        fno_width: int = 32,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +569,10 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_fno_vol_decoder = use_fno_vol_decoder
+        self.fno_grid_resolution = fno_grid_resolution
+        self.fno_modes = fno_modes
+        self.fno_width = fno_width
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -459,6 +676,21 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # PR #1040: FNO spectral residual decoder for volume pressure.
+        # Scatter vol token features to a regular 3D grid, run spectral
+        # convolutions, query back at point positions, and add to the MLP
+        # vol head output. Final Linear is zero-initialised inside
+        # FNOVolDecoder so the model starts identical to the plain MLP.
+        if use_fno_vol_decoder:
+            self.fno_vol_decoder = FNOVolDecoder(
+                hidden_dim=n_hidden,
+                grid_res=fno_grid_resolution,
+                modes=fno_modes,
+                fno_width=fno_width,
+            )
+        else:
+            self.fno_vol_decoder = None
 
     def _encode_group(
         self,
@@ -569,7 +801,14 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            volume_logits = self.volume_out(volume_hidden)
+            if self.fno_vol_decoder is not None:
+                vol_xyz = volume_x[:, :, : self.space_dim]
+                fno_correction = self.fno_vol_decoder(
+                    volume_hidden, vol_xyz, volume_mask
+                )
+                volume_logits = volume_logits + fno_correction
+            volume_preds = volume_logits * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
