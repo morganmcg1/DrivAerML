@@ -4,7 +4,30 @@
 
 ---
 
-## ENSEMBLE SOTA: nezuko PR #880 greedy ensemble pool-32 refresh K=6 (Caruana 2004) — 2026-05-01
+## ENSEMBLE SOTA: nezuko PR #1030 greedy ensemble pool-33 refresh K=3 (Caruana 2004) — 2026-05-12
+
+**val_abupt=5.9170%** / **test_abupt=7.3192%** — −0.1119pp val (−1.86% relative) vs prior K=6 (#880, 6.0289%); −0.0501pp test (−0.68% relative)
+
+Pool refresh adds PR #958 Arm A run `29nohj67` (single-model SOTA, val=6.2868%) to the prior K=6 pool. Pre-#958 pool members re-cached at git worktree commit `5b28c2d` (PR #958 replaced surface_out/volume_out with deeper MLPs causing load_state_dict failures). Greedy forward selection stopped at K=3 (next delta at K=4 was −0.0012pp < 0.005pp threshold). Note: test_vol_p regressed slightly (+0.30pp to 11.6492%) but net test_abupt improved.
+
+**W&B run:** `wpji54h7` (group `nezuko-ensemble-pool33-refresh`)
+**PR:** #1030
+**K=3 members:** 29nohj67, ghh0s4ne, 4k25s25e
+
+**Val per-channel (K=3):** surface_pressure=3.8379%, volume_pressure=3.5136%, wall_shear=6.7232%
+**Test per-channel (K=3):** surface_pressure=3.5439%, volume_pressure=11.6492%, wall_shear=6.5461%
+
+**Greedy selection path:**
+- Step 1: val=6.2869% (seed: 29nohj67, PR #958 vol_p aux head)
+- Step 2: val=6.0021% (delta=0.2848pp; added: ghh0s4ne, PR #823 surf→vol xattn)
+- Step 3: val=5.9170% (delta=0.0852pp; added: 4k25s25e, PR #880 pool)
+- (Step 4: next delta=−0.0012pp → stopped, below 0.005pp threshold)
+
+**Ensemble gate:** val_abupt < **5.9170%**
+
+---
+
+## Prior Ensemble SOTA: nezuko PR #880 greedy ensemble pool-32 refresh K=6 (Caruana 2004) — 2026-05-01
 
 **val_abupt=6.0289%** / **test_abupt=7.3693%** — −0.1462pp val (−2.37% relative) vs prior K=7 (#612, 6.1751%); −0.1654pp test (−2.19% relative)
 
@@ -27,7 +50,7 @@ Pool expanded from 24→32 by adding PR #823 surf→vol cross-attn run `ghh0s4ne
 
 **Key finding:** Pool-32 with PR #823 surf-xattn run as seed delivers +2.37% val / +2.19% test improvement over pool-24 K=7. Volume_pressure test-vs-val gap persists (val≈3.6%, test≈11.3%, ~3.2×) — primary systematic issue.
 
-**Ensemble gate:** val_abupt < **6.0289%**
+**Ensemble gate:** val_abupt < **6.0289%** (superseded by PR #1030)
 
 ---
 
@@ -92,7 +115,7 @@ uv run python ensemble_eval.py \
 **W&B runs (K=5 members):** `9mm3sz7x` (askeladd), `49aimdiz` (alphonse), `wyz68o8r` (thorfinn/SOTA), `qqtdnlwq` (alphonse), `5o7jc7wi` (edward) — ensemble group `ensemble-inference-v1`
 **PR:** #556
 
-**Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.2868% (single-model SOTA #958). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=6 pool.
+**Policy:** Ensemble SOTA gates ensemble-tier evaluation. Single-model training PRs continue to gate against val_abupt < 6.2868% (single-model SOTA #958). When a new single-model winner emerges, run `ensemble_eval.py` to check if it improves the K=3 pool.
 
 ---
 
