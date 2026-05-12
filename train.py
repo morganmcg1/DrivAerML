@@ -138,6 +138,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    ood_case_ids: str = ""
+    ood_vol_loss_scale: float = 1.0
     debug: bool = False
 
 
@@ -229,6 +231,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "ood_case_ids": (
+            "PR #1019: comma-separated train-split case IDs whose volumetric "
+            "loss is multiplied by --ood-vol-loss-scale. Empty string "
+            "disables per-case vol upweighting (baseline behaviour). Note: "
+            "these IDs must be present in the TRAIN split — IDs that resolve "
+            "to val/test cases are never sampled at train time and would be "
+            "silent no-ops. Example: "
+            "'run_184,run_249,run_310,run_416,run_44,run_484' (SDF-Mahalanobis "
+            "K=4 nearest-train-neighbours of the 4 OOD test cases run_133/158/"
+            "203/226)."
+        ),
+        "ood_vol_loss_scale": (
+            "PR #1019: per-case multiplier applied to vol_loss for cases "
+            "listed in --ood-case-ids. Default 1.0 is a no-op (matches "
+            "baseline). Surface loss is left untouched — only the volumetric "
+            "gradient is amplified, which is the genuinely-new angle versus "
+            "the NEGATIVE PR #888 (which scaled surface + volume combined)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +331,25 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def _masked_mse_per_sample(
+    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """Per-sample masked MSE for shape [B, N, C]. Returns shape [B].
+
+    Each sample's MSE is averaged over its valid (N × C) entries independently.
+    When all samples have the same valid-point count this matches the global
+    ``masked_mse`` after a ``.mean()`` so non-OOD batches stay identical to the
+    baseline path.
+    """
+
+    sq_err = (pred - target).square()
+    mask_dev = mask.to(device=sq_err.device, dtype=sq_err.dtype).unsqueeze(-1)
+    weighted = sq_err * mask_dev
+    sum_per_sample = weighted.sum(dim=(1, 2))
+    count_per_sample = mask_dev.expand_as(sq_err).sum(dim=(1, 2)).clamp_min(1.0)
+    return sum_per_sample / count_per_sample
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,10 +360,18 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    ood_case_id_set: frozenset[str] | None = None,
+    ood_vol_loss_scale: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    apply_ood_scaling = (
+        ood_case_id_set is not None
+        and len(ood_case_id_set) > 0
+        and not math.isclose(ood_vol_loss_scale, 1.0)
+    )
+    ood_cases_in_batch = 0
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -341,7 +388,20 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if apply_ood_scaling:
+            vol_per_sample = _masked_mse_per_sample(
+                out["volume_preds"], volume_target, batch.volume_mask
+            )
+            ood_flags = torch.tensor(
+                [cid in ood_case_id_set for cid in batch.case_ids],
+                device=vol_per_sample.device,
+                dtype=vol_per_sample.dtype,
+            )
+            ood_cases_in_batch = int(ood_flags.sum().item())
+            per_sample_scale = 1.0 + (ood_vol_loss_scale - 1.0) * ood_flags
+            volume_loss = (vol_per_sample * per_sample_scale).mean()
+        else:
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -352,6 +412,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "ood_cases_in_batch": float(ood_cases_in_batch),
     }
 
 
@@ -758,6 +819,34 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+        ood_case_id_set = frozenset(
+            cid.strip() for cid in config.ood_case_ids.split(",") if cid.strip()
+        )
+        if ood_case_id_set:
+            # PR #888 silently no-op'd by passing test-split IDs that the train
+            # DataLoader never samples; we hard-fail on every rank for real runs
+            # and warn in --debug mode (which subsets the train set to 4 cases).
+            train_case_ids = set(train_loader.dataset.case_ids)
+            missing_in_train = sorted(ood_case_id_set - train_case_ids)
+            if missing_in_train and not config.debug:
+                raise ValueError(
+                    "PR #1019: --ood-case-ids contains IDs not present in the "
+                    f"train split, which would be silent no-ops: {missing_in_train}. "
+                    "If you intended OOD test geometries, pass their nearest "
+                    "train-split SDF neighbours instead."
+                )
+            if state.is_main:
+                if missing_in_train:
+                    print(
+                        f"OOD per-case vol upweighting [DEBUG]: scale={config.ood_vol_loss_scale}, "
+                        f"{len(ood_case_id_set) - len(missing_in_train)}/{len(ood_case_id_set)} "
+                        f"target IDs hit the debug train subset; missing={missing_in_train}"
+                    )
+                else:
+                    print(
+                        f"OOD per-case vol upweighting: scale={config.ood_vol_loss_scale} "
+                        f"on {len(ood_case_id_set)} train case(s): {sorted(ood_case_id_set)}"
+                    )
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -1030,6 +1119,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        ood_case_id_set=ood_case_id_set,
+                        ood_vol_loss_scale=config.ood_vol_loss_scale,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1161,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if ood_case_id_set:
+                        train_log["train/ood_vol_loss_scale"] = config.ood_vol_loss_scale
+                        train_log["train/ood_cases_in_batch"] = batch_loss_metrics.get(
+                            "ood_cases_in_batch", 0.0
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
