@@ -207,8 +207,11 @@ def apply_sdf_stratified_stochastic_sampling(
     corrected-split DrivAerML wave:
 
     1. **SDF-stratified weighting** (PR #972): per-call weights are
-       ``1 + alpha * |sdf|`` so far-field / boundary-adjacent points are
-       up-weighted in the multinomial draw.
+       ``1 / (1 + alpha * |sdf|)`` so near-surface volume points (small
+       ``|sdf|``) are up-weighted in the multinomial draw. In this dataset
+       ``|sdf|`` reaches ~80m while the median is ~5mm, so an additive
+       ``1 + alpha * |sdf|`` would instead concentrate draws in the far
+       field, which is the opposite of the physical intuition.
     2. **Stochastic freshness** (PR #968): no manual reseeding before the
        multinomial; the global torch RNG advances with each call, and each
        DDP rank + DataLoader worker carries a distinct RNG state.
@@ -248,7 +251,7 @@ def apply_sdf_stratified_stochastic_sampling(
             sdf_arr = _load_npy_rows(case_dir / "volume_sdf.npy", rows=None)
             sdf_flat = sdf_arr.reshape(-1) if sdf_arr.ndim > 1 else sdf_arr
             sdf_abs = torch.from_numpy(sdf_flat).abs()
-            weights = 1.0 + alpha_local * sdf_abs
+            weights = 1.0 / (1.0 + alpha_local * sdf_abs)
 
             n_total = int(sdf_abs.shape[0])
             n_sample = min(n_vol_local, n_total) if n_vol_local > 0 else n_total
@@ -271,9 +274,10 @@ def apply_sdf_stratified_stochastic_sampling(
             metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
             metadata["volume_view_index"] = int(view.view_index)
             metadata["volume_view_count"] = int(view.volume_view_count)
-            metadata["volume_sampling_mode"] = "sdf_stratified_stochastic"
+            metadata["volume_sampling_mode"] = "sdf_stratified_stochastic_inv"
             metadata["joint_view_count"] = int(view.view_count)
             metadata["sdf_stratified_alpha"] = float(alpha_local)
+            metadata["sdf_stratified_weight_form"] = "1/(1+alpha*|sdf|)"
 
             return DrivAerMLCase(
                 case_id=case.case_id,
