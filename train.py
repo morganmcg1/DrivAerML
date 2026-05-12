@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_coord_vol_decoder: bool = False
+    coord_decoder_num_freq: int = 16
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_coord_vol_decoder": (
+            "Enable INR-style coordinate-conditioned volume decoder "
+            "(PR #1028). Replaces the baseline 3-layer volume_out MLP with "
+            "a 4-layer SiLU MLP that takes [volume_hidden || gamma(xyz)] as "
+            "input, where gamma is a multi-scale Gaussian Fourier feature "
+            "encoding of the raw xyz coordinate. Reuses --rff-init-sigmas "
+            "(or sigma=1.0 with a single RFF if no init_sigmas are set). "
+            "Mirrors NeRF/DeepSDF/GINO-style coord decoders to add a "
+            "spatial prior at decode time. Best combined with "
+            "--use-surf-to-vol-xattn."
+        ),
+        "coord_decoder_num_freq": (
+            "Number of Fourier features per component in the coord-"
+            "conditioned vol decoder. With M init_sigmas the encoder "
+            "stacks M RFF blocks of (num_freq // M) features each => total "
+            "coord embedding dim = 2 * (num_freq // M) * M. Without "
+            "init_sigmas a single RFF of num_freq features is used "
+            "(coord dim = 2 * num_freq). Used only when "
+            "--use-coord-vol-decoder is set. Default 16."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +330,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_coord_vol_decoder=config.use_coord_vol_decoder,
+        coord_decoder_num_freq=config.coord_decoder_num_freq,
     )
 
 

@@ -320,6 +320,77 @@ class Transformer(nn.Module):
         return x
 
 
+class CoordConditionedVolDecoder(nn.Module):
+    """INR-style coordinate-conditioned volume decoder (PR #1028).
+
+    Each per-point volume hidden state ``h_i`` is concatenated with a
+    multi-scale Gaussian Fourier feature embedding ``gamma(xyz_i)`` of the raw
+    coordinate before a 4-layer SiLU MLP regresses the field value. Mirrors
+    NeRF/DeepSDF-style decoders, where the coordinate provides a continuous
+    spatial prior independent of the backbone tokenisation.
+
+    When ``init_sigmas`` is provided the encoder is a stack of independent
+    Gaussian RFF blocks, one per sigma, reusing the backbone's multi-scale
+    sigma layout. With a single sigma it falls back to a single fixed
+    Gaussian random Fourier projection (Tancik et al. 2020).
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        output_dim: int,
+        num_freq: int = 16,
+        init_sigmas: list[float] | None = None,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        if init_sigmas:
+            num_per = max(1, num_freq // len(init_sigmas))
+            self.coord_rffs = nn.ModuleList(
+                [
+                    RFFEncoding(in_dim=3, num_features=num_per, sigma=s)
+                    for s in init_sigmas
+                ]
+            )
+            coord_feat_dim = 2 * num_per * len(init_sigmas)
+            self.init_sigmas = list(init_sigmas)
+            self.num_features_per_sigma = num_per
+        else:
+            self.coord_rffs = nn.ModuleList(
+                [RFFEncoding(in_dim=3, num_features=num_freq, sigma=1.0)]
+            )
+            coord_feat_dim = 2 * num_freq
+            self.init_sigmas = None
+            self.num_features_per_sigma = num_freq
+        self.coord_feat_dim = coord_feat_dim
+
+        in_dim = hidden_dim + coord_feat_dim
+        hidden = hidden_dim // 2
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, hidden // 2),
+            nn.SiLU(),
+            nn.Linear(hidden // 2, output_dim),
+        )
+        self.mlp.apply(_init_linear)
+
+    def _encode_coords(self, coords: torch.Tensor) -> torch.Tensor:
+        return torch.cat([rff(coords) for rff in self.coord_rffs], dim=-1)
+
+    def forward(
+        self,
+        volume_hidden: torch.Tensor,
+        vol_coords: torch.Tensor,
+    ) -> torch.Tensor:
+        coord_feats = self._encode_coords(vol_coords)
+        x = torch.cat([volume_hidden, coord_feats], dim=-1)
+        return self.mlp(x)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -343,6 +414,8 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_coord_vol_decoder: bool = False,
+        coord_decoder_num_freq: int = 16,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,6 +429,8 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_coord_vol_decoder = use_coord_vol_decoder
+        self.coord_decoder_num_freq = coord_decoder_num_freq
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -431,14 +506,26 @@ class SurfaceTransolver(nn.Module):
             nn.Linear(n_hidden, self.surface_output_dim),
         )
         self.surface_out.apply(_init_linear)
-        self.volume_out = nn.Sequential(
-            nn.Linear(n_hidden, n_hidden // 2),
-            nn.SiLU(),
-            nn.Linear(n_hidden // 2, n_hidden // 4),
-            nn.SiLU(),
-            nn.Linear(n_hidden // 4, self.volume_output_dim),
-        )
-        self.volume_out.apply(_init_linear)
+        if use_coord_vol_decoder:
+            # PR #1028: INR-style coord-conditioned decoder replaces the
+            # baseline volume_out MLP. Reuses the backbone's multi-scale
+            # sigma layout so the coord RFF spans the same spectral range as
+            # the tokeniser.
+            self.volume_out = CoordConditionedVolDecoder(
+                hidden_dim=n_hidden,
+                output_dim=self.volume_output_dim,
+                num_freq=coord_decoder_num_freq,
+                init_sigmas=self.rff_init_sigmas,
+            )
+        else:
+            self.volume_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden // 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 2, n_hidden // 4),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 4, self.volume_output_dim),
+            )
+            self.volume_out.apply(_init_linear)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -569,7 +656,11 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
-            volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            if self.use_coord_vol_decoder:
+                vol_coords = volume_x[:, :, : self.space_dim]
+                volume_preds = self.volume_out(volume_hidden, vol_coords) * volume_mask.unsqueeze(-1)
+            else:
+                volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
