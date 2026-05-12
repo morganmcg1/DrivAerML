@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import heapq
 import math
 import os
 import random
@@ -53,6 +54,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    numeric_metric_items,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -132,6 +134,7 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    topk_avg_k: int = 5
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -543,6 +546,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         early_stop_reason: str | None = None
         timeout_hit = False
         train_start = time.time()
+
+        # Top-K val-checkpoint heap: items are (-primary_val, counter, path).
+        # heapq is a min-heap; pushing the negated val makes heappop() evict the
+        # WORST (largest) val so the K best (lowest val) checkpoints are retained.
+        topk_heap: list[tuple[float, int, Path]] = []
+        topk_counter = 0
+        topk_k = max(1, int(config.topk_avg_k))
 
         for epoch in range(max_epochs):
             if isinstance(train_loader.sampler, DistributedSampler):
@@ -969,6 +979,32 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 log_metrics["best_checkpoint/updated"] = 1.0 if improved else 0.0
                 log_metrics["best_checkpoint/valid_primary"] = 1.0 if is_valid_primary_metric(primary_val) else 0.0
+                # Top-K val-checkpoint tracking: save every valid val epoch, evict
+                # worst (largest val) when heap exceeds K. base_model holds EMA
+                # weights here when EMA is enabled (ema.copy_to was called above).
+                if is_valid_primary_metric(primary_val):
+                    topk_ckpt_path = output_dir / f"checkpoint_topk_{topk_counter:03d}.pt"
+                    torch.save(
+                        {
+                            "model": base_model.state_dict(),
+                            "epoch": epoch + 1,
+                            "val_primary": primary_val,
+                            "checkpoint_source": best_checkpoint_source,
+                        },
+                        topk_ckpt_path,
+                    )
+                    heapq.heappush(topk_heap, (-primary_val, topk_counter, topk_ckpt_path))
+                    topk_counter += 1
+                    if len(topk_heap) > topk_k:
+                        _, _, worst_path = heapq.heappop(topk_heap)
+                        worst_path.unlink(missing_ok=True)
+                    log_metrics["topk/heap_size"] = float(len(topk_heap))
+                    log_metrics["topk/saved_total"] = float(topk_counter)
+                    if topk_heap:
+                        worst_kept = max(-neg for (neg, _, _) in topk_heap)
+                        best_kept = min(-neg for (neg, _, _) in topk_heap)
+                        log_metrics["topk/heap_worst_val"] = float(worst_kept)
+                        log_metrics["topk/heap_best_val"] = float(best_kept)
                 wandb.log(log_metrics)
                 tag = " *" if improved else ""
                 print(
@@ -1041,6 +1077,106 @@ def main(argv: Iterable[str] | None = None) -> None:
             global_step=global_step,
             total_minutes=total_minutes,
         )
+
+        # Top-K checkpoint averaging: arithmetic-average state_dicts of the K
+        # best-by-val checkpoints, then run val + test eval on rank 0. This is
+        # additive to run_final_evaluation (which already evaluated the single
+        # best-val checkpoint and left it loaded into base_model).
+        if topk_heap:
+            topk_sorted = sorted(topk_heap, key=lambda x: -x[0])
+            topk_paths = [p for (_, _, p) in topk_sorted]
+            topk_vals = [-neg_v for (neg_v, _, _) in topk_sorted]
+            K = len(topk_paths)
+            print(f"\n[TopK] Averaging K={K} best-by-val checkpoints:")
+            for p, v in zip(topk_paths, topk_vals):
+                print(f"  val_abupt={v:.4f}%  ->  {p.name}")
+
+            state_dicts = [
+                torch.load(p, map_location="cpu", weights_only=True)["model"]
+                for p in topk_paths
+            ]
+            avg_state: dict[str, torch.Tensor] = {}
+            for key, ref in state_dicts[0].items():
+                if ref.dtype.is_floating_point:
+                    stacked = torch.stack([sd[key].float() for sd in state_dicts])
+                    avg_state[key] = stacked.mean(dim=0).to(ref.dtype)
+                else:
+                    avg_state[key] = ref.clone()
+
+            avg_ckpt_path = output_dir / "checkpoint_topk_avg.pt"
+            torch.save(
+                {
+                    "model": avg_state,
+                    "config": asdict(config),
+                    "epoch": "topk_avg",
+                    "k": K,
+                    "topk_val_scores": topk_vals,
+                    "checkpoint_source": "topk_avg",
+                },
+                avg_ckpt_path,
+            )
+            print(f"[TopK] Saved averaged checkpoint to {avg_ckpt_path}")
+
+            base_model.load_state_dict(avg_state)
+            print("[TopK] Running val + test evaluation on averaged checkpoint...")
+            avg_full_val_metrics = {
+                name: evaluate_split(
+                    base_model, loader, transform, device, amp_mode=config.amp_mode
+                )
+                for name, loader in final_val_loaders.items()
+            }
+            avg_test_metrics = {
+                name: evaluate_split(
+                    base_model, loader, transform, device, amp_mode=config.amp_mode
+                )
+                for name, loader in final_test_loaders.items()
+            }
+
+            topk_log: dict[str, object] = {
+                "global_step": global_step,
+                "topk_avg/k": K,
+                "topk_avg/val_score_mean": float(sum(topk_vals) / K),
+                "topk_avg/val_score_best": float(min(topk_vals)),
+                "topk_avg/val_score_worst": float(max(topk_vals)),
+            }
+            for i, v in enumerate(topk_vals):
+                topk_log[f"topk_avg/val_score_rank_{i}"] = float(v)
+            topk_log.update(
+                primary_metric_log(
+                    "topk_avg_full_val_primary", avg_full_val_metrics["val_surface"]
+                )
+            )
+            for split_name, metrics in avg_full_val_metrics.items():
+                topk_log.update(
+                    metric_namespace("topk_avg_full_val", split_name, metrics)
+                )
+            topk_log.update(
+                primary_metric_log(
+                    "topk_avg_test_primary", avg_test_metrics["test_surface"]
+                )
+            )
+            for split_name, metrics in avg_test_metrics.items():
+                topk_log.update(metric_namespace("topk_avg_test", split_name, metrics))
+            wandb.log(topk_log)
+            wandb.summary.update(numeric_metric_items(topk_log))
+
+            test_surface = avg_test_metrics["test_surface"]
+            topk_test_abupt = float(test_surface["abupt_axis_mean_rel_l2_pct"])
+            wandb.summary.update(
+                {
+                    "topk_avg/test_abupt": topk_test_abupt,
+                    "topk_avg/test_vol_p": float(test_surface["volume_pressure_rel_l2_pct"]),
+                    "topk_avg/test_surf_p": float(test_surface["surface_pressure_rel_l2_pct"]),
+                    "topk_avg/test_wall": float(test_surface["wall_shear_rel_l2_pct"]),
+                    "topk_avg/full_val_abupt": float(
+                        avg_full_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                    ),
+                }
+            )
+            print_metrics("topk_avg/val", avg_full_val_metrics["val_surface"])
+            print_metrics("topk_avg/test", avg_test_metrics["test_surface"])
+            print(f"[TopK] avg-over-K={K} test_abupt={topk_test_abupt:.4f}%")
+
         wandb.finish()
     finally:
         cleanup_distributed(state)
