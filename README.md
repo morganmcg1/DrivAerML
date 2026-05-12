@@ -98,42 +98,22 @@ Validate all case arrays and write point counts:
 python data/preload.py
 ```
 
-Audit and repair raw `volume_i.vtu` files that are split into multiple
-Hugging Face parts without overwriting the original raw root:
-
-```
-python scripts/repair_volume_vtus.py \
-  --raw-root /mnt/new-pvc/Datasets/2_Drivearml \
-  --fixed-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511 \
-  --repair
-```
-
 Build the canonical raw-only processed root. This hardlinks or copies the
-surface arrays from the previous processed root, then regenerates every volume
-array from the complete fixed raw VTUs. It does not add synthetic inside-body
-samples:
+surface arrays from the packaged processed root, then regenerates every volume
+array from complete raw VTUs. SDF values are clamped to zero so
+`volume_sdf.npy` is nonnegative.
 
 ```
 python scripts/preprocess_drivaerml_raw.py \
-  --source-root /mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511 \
+  --source-root /mnt/new-pvc/Processed/drivaerml_processed \
   --raw-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511 \
   --output-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 
-For sharded runs, write one shard manifest per worker and collect the per-case
-sidecars afterwards:
+Compute target normalizers from the training case split:
 
 ```
-python scripts/collect_drivaerml_provenance.py \
-  --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
-  --source-root /mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511 \
-  --raw-root /mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511
-```
-
-Recompute target normalizers from the training case split:
-
-```
-python scripts/recompute_normalizers.py \
+python scripts/compute_normalizers.py \
   --root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
 

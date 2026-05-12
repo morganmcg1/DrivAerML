@@ -65,6 +65,7 @@ def case_sdf_stats(store: DrivAerMLCaseStore, split: str, case_id: str) -> dict[
 
 def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     neg = np.asarray([row["sdf_negative_frac"] for row in rows], dtype=np.float64)
+    neg_counts = np.asarray([row["sdf_negative_count"] for row in rows], dtype=np.int64)
     mins = np.asarray([row["sdf_min"] for row in rows], dtype=np.float64)
     restored = [row for row in rows if row["restored_case"]]
     normal = [row for row in rows if not row["restored_case"]]
@@ -73,6 +74,7 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "negative_frac_min": float(np.min(neg)),
         "negative_frac_median": float(np.median(neg)),
         "negative_frac_max": float(np.max(neg)),
+        "negative_count_total": int(np.sum(neg_counts)),
         "sdf_min_min": float(np.min(mins)),
         "sdf_min_median": float(np.median(mins)),
         "sdf_min_max": float(np.max(mins)),
@@ -111,6 +113,7 @@ def render_markdown(root: Path, rows: list[dict[str, Any]], summary: dict[str, A
         "",
         f"- Root: `{root}`",
         f"- Cases audited: {summary['case_count']}",
+        f"- Negative SDF values: `{summary['negative_count_total']}`",
         f"- Negative SDF fraction median: `{summary['negative_frac_median']:.6g}`",
         f"- Negative SDF fraction range: `{summary['negative_frac_min']:.6g}` to `{summary['negative_frac_max']:.6g}`",
         f"- SDF minimum median: `{summary['sdf_min_median']:.6g}`",
@@ -190,6 +193,8 @@ def main() -> None:
     print(f"Wrote {csv_out}")
     print(f"Wrote {md_out}")
     print(f"Wrote {json_out}")
+    if summary["negative_count_total"] != 0:
+        raise RuntimeError(f"Found negative SDF values: {summary['negative_count_total']}")
 
 
 if __name__ == "__main__":

@@ -5,8 +5,9 @@
 """Build a canonical raw-only DrivAerML processed root.
 
 This script intentionally does not synthesize inside-body samples. It derives
-volume arrays from complete raw `volume_i.vtu` files and computes SDF at the
-sampled VTU cell centers against the corresponding STL surface.
+volume arrays from complete raw `volume_i.vtu` files and computes nonnegative
+surface distance at the sampled VTU cell centers against the corresponding STL
+surface.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from typing import Any
 
 import numpy as np
 
-DEFAULT_SOURCE_ROOT = Path("/mnt/new-pvc/Processed/drivaerml_processed_fixed_20260511")
+DEFAULT_SOURCE_ROOT = Path("/mnt/new-pvc/Processed/drivaerml_processed")
 DEFAULT_RAW_ROOT = Path("/mnt/new-pvc/Datasets/2_Drivearml_fixed_20260511")
 DEFAULT_OUTPUT_ROOT = Path("/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511")
 
@@ -37,7 +38,7 @@ PRESSURE_FIELD = "pMeanTrim"
 VELOCITY_FIELD = "UMeanTrim"
 TOTAL_PRESSURE_FIELD = "CptMeanTrim"
 SAMPLE_RATIO = 0.1
-PROCESSOR_VERSION = "rawcanon-v1"
+PROCESSOR_VERSION = "rawcanon-v2"
 SDF_NEAR_SURFACE_ABS = 0.1
 VOLUME_OUTPUTS = {
     "volume_xyz.npy",
@@ -324,6 +325,11 @@ def sdf_stats(sdf: np.ndarray) -> dict[str, float | int]:
     return stats
 
 
+def clamp_sdf(sdf: np.ndarray) -> np.ndarray:
+    np.maximum(sdf, 0.0, out=sdf)
+    return sdf
+
+
 def atomic_save(path: Path, array: np.ndarray, overwrite: bool) -> None:
     if path.exists() or path.is_symlink():
         if not overwrite:
@@ -405,11 +411,14 @@ def process_case(
 
     print(f"  sampled {sample_count}/{n_cells} cells; computing SDF", flush=True)
     sdf = compute_sdf(stl_path, xyz, sdf_chunk_points)
+    sdf_pre_clamp_summary = sdf_stats(sdf)
+    sdf = clamp_sdf(sdf)
     sdf_summary = sdf_stats(sdf)
     print(
         "  SDF "
         f"min={sdf_summary['min']:.6g} max={sdf_summary['max']:.6g} "
-        f"neg_frac={sdf_summary['negative_frac']:.6g}",
+        f"neg_frac={sdf_summary['negative_frac']:.6g} "
+        f"pre_clamp_neg_frac={sdf_pre_clamp_summary['negative_frac']:.6g}",
         flush=True,
     )
 
@@ -442,9 +451,16 @@ def process_case(
         "sample_ratio": sample_ratio,
         "sample_seed": run_id,
         "surface_distance_method": "pyvista.compute_implicit_distance",
+        "surface_distance_postprocess": "clamp_min_0",
         "pressure_field": PRESSURE_FIELD,
         "velocity_field": VELOCITY_FIELD,
         "total_pressure_field": TOTAL_PRESSURE_FIELD,
+        "sdf_pre_clamp_min": sdf_pre_clamp_summary["min"],
+        "sdf_pre_clamp_max": sdf_pre_clamp_summary["max"],
+        "sdf_pre_clamp_mean": sdf_pre_clamp_summary["mean"],
+        "sdf_pre_clamp_std": sdf_pre_clamp_summary["std"],
+        "sdf_pre_clamp_negative_count": sdf_pre_clamp_summary["negative_count"],
+        "sdf_pre_clamp_negative_frac": sdf_pre_clamp_summary["negative_frac"],
         "sdf_min": sdf_summary["min"],
         "sdf_max": sdf_summary["max"],
         "sdf_mean": sdf_summary["mean"],
@@ -488,9 +504,22 @@ def write_dataset_provenance(
             "Surface arrays are resolved from the source processed root and hardlinked or copied.",
             "Volume arrays are regenerated for every case from complete raw VTU files.",
             "No synthetic inside-body samples are added.",
+            "SDF values are clamped with max(sdf, 0) after signed-distance computation.",
         ],
     }
     write_json(output_root / "preprocessing_provenance.json", payload)
+
+
+def collect_existing_provenance(output_root: Path, cases: list[CaseInput]) -> tuple[list[dict[str, Any]], list[str]]:
+    rows: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for case in cases:
+        provenance_path = output_root / case.case_id / "volume_provenance.json"
+        if not provenance_path.exists():
+            missing.append(case.case_id)
+            continue
+        rows.append(json.loads(provenance_path.read_text()))
+    return rows, missing
 
 
 def main() -> None:
@@ -512,7 +541,8 @@ def main() -> None:
     if not (0.0 < args.sample_ratio <= 1.0):
         raise ValueError(f"sample-ratio must be in (0, 1], got {args.sample_ratio}")
 
-    cases = select_shard(load_cases(args.source_root, args.cases), args.shard_index, args.shard_count)
+    all_cases = load_cases(args.source_root, args.cases)
+    cases = select_shard(all_cases, args.shard_index, args.shard_count)
     if not cases:
         raise ValueError("No cases selected")
 
@@ -521,7 +551,13 @@ def main() -> None:
         copy_root_files(args.source_root, args.output_root, overwrite=args.overwrite)
 
     rows: list[dict[str, Any]] = []
-    volume_manifest_path = args.output_root / args.volume_manifest_name
+    volume_manifest_name = Path(args.volume_manifest_name)
+    if args.shard_count > 1:
+        volume_manifest_path = args.output_root / (
+            f"{volume_manifest_name.stem}_shard_{args.shard_index}{volume_manifest_name.suffix}"
+        )
+    else:
+        volume_manifest_path = args.output_root / args.volume_manifest_name
     for index, case in enumerate(cases, start=1):
         print(f"\n--- {index}/{len(cases)} ---", flush=True)
         rows.append(
@@ -539,14 +575,19 @@ def main() -> None:
         write_csv_rows(volume_manifest_path, rows)
 
     write_csv_rows(volume_manifest_path, rows)
-    write_dataset_provenance(
-        args.output_root,
-        args.source_root,
-        args.raw_root,
-        cases,
-        rows,
-        args.sample_ratio,
-    )
+    all_rows, missing = collect_existing_provenance(args.output_root, all_cases)
+    if missing:
+        print(f"Skipping full root manifest; missing provenance for {len(missing)} cases", flush=True)
+    else:
+        write_csv_rows(args.output_root / args.volume_manifest_name, all_rows)
+        write_dataset_provenance(
+            args.output_root,
+            args.source_root,
+            args.raw_root,
+            all_cases,
+            all_rows,
+            args.sample_ratio,
+        )
     print(f"Wrote canonical raw-only processed root: {args.output_root}", flush=True)
 
 

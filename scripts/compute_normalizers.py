@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-PackageName: senpai
 
-"""Recompute DrivAerML normalizers from the manifest train case split."""
+"""Compute DrivAerML normalizers from the manifest train case split."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ DEFAULT_FIELDS = (
     "surface_cp",
     "surface_wallshearstress",
     "volume_pressure",
-    "volume_xyz",
 )
 
 
