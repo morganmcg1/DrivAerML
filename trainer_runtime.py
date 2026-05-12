@@ -882,6 +882,49 @@ def squared_relative_l2_loss(
     return pred.sum() * 0.0
 
 
+def vol_p_instance_stats(
+    volume_target: torch.Tensor,
+    volume_mask: torch.Tensor,
+    eps: float = 1e-8,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-sample mean / std of the volume_pressure channel over valid points.
+
+    volume_target: [B, N, C_vol] in globally-normalized space; channel 0 is vol_p.
+    volume_mask:   [B, N] bool/float; only valid points participate.
+    Returns (vol_p_mean, vol_p_std), each shaped [B, 1] in volume_target's dtype.
+    """
+    vol_p = volume_target[..., 0]
+    mask = volume_mask.to(device=vol_p.device, dtype=vol_p.dtype)
+    n_valid = mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+    vol_p_mean = (vol_p * mask).sum(dim=-1, keepdim=True) / n_valid
+    diff = (vol_p - vol_p_mean) * mask
+    vol_p_var = (diff * diff).sum(dim=-1, keepdim=True) / n_valid
+    vol_p_std = (vol_p_var + eps).sqrt()
+    return vol_p_mean, vol_p_std
+
+
+def apply_vol_p_instance_norm(
+    volume_target: torch.Tensor,
+    vol_p_mean: torch.Tensor,
+    vol_p_std: torch.Tensor,
+) -> torch.Tensor:
+    """RevIN-normalise volume_pressure channel (channel 0) using provided per-sample stats."""
+    out = volume_target.clone()
+    out[..., 0] = (volume_target[..., 0] - vol_p_mean) / vol_p_std
+    return out
+
+
+def invert_vol_p_instance_norm(
+    volume_pred: torch.Tensor,
+    vol_p_mean: torch.Tensor,
+    vol_p_std: torch.Tensor,
+) -> torch.Tensor:
+    """Invert RevIN on the volume_pressure channel of a prediction tensor."""
+    out = volume_pred.clone()
+    out[..., 0] = volume_pred[..., 0] * vol_p_std + vol_p_mean
+    return out
+
+
 EVAL_KEYS = (
     "surface_pressure",
     "wall_shear",
@@ -955,6 +998,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    use_vol_pressure_instance_norm: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -969,6 +1013,12 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    if use_vol_pressure_instance_norm:
+        # Model was trained to predict instance-normalised vol_p. Invert
+        # using per-sample stats computed from GT vol_p in globally-normalised
+        # space (standard RevIN test-time protocol).
+        vol_p_mean, vol_p_std = vol_p_instance_stats(volume_target_norm, batch.volume_mask)
+        volume_pred_norm = invert_vol_p_instance_norm(volume_pred_norm, vol_p_mean, vol_p_std)
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
@@ -1121,6 +1171,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    use_vol_pressure_instance_norm: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1132,6 +1183,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            use_vol_pressure_instance_norm=use_vol_pressure_instance_norm,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1466,7 +1518,14 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_vol_pressure_instance_norm=getattr(config, "use_vol_pressure_instance_norm", False),
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1486,7 +1545,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_vol_pressure_instance_norm=getattr(config, "use_vol_pressure_instance_norm", False),
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

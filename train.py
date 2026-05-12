@@ -38,6 +38,7 @@ from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
     TargetTransform,
+    apply_vol_p_instance_norm,
     autocast_context,
     build_lr_scheduler,
     check_kill_thresholds,
@@ -64,6 +65,7 @@ from trainer_runtime import (
     should_update_best_checkpoint,
     timeout_budget_minutes,
     unwrap_model,
+    vol_p_instance_stats,
 )
 
 
@@ -103,6 +105,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_vol_pressure_instance_norm: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -138,6 +141,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    init_from_checkpoint: str = ""
     debug: bool = False
 
 
@@ -228,6 +232,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_vol_pressure_instance_norm": (
+            "RevIN-style per-case instance norm on volume_pressure targets "
+            "(Kim et al., ICLR 2022). After the global TargetTransform, each "
+            "sample's vol_p is re-normalized to zero-mean/unit-std over its "
+            "valid volume points; the model is supervised in this space. At "
+            "inference, per-sample mean/std are computed from ground-truth "
+            "vol_p (in global-normalized space) and used to invert the "
+            "prediction before metric computation. Targets case-level "
+            "absolute-pressure shift hypothesised to drive the test_vol_p "
+            "OOD gap."
+        ),
+        "init_from_checkpoint": (
+            "Optional path to a checkpoint.pt file. If set, model weights are "
+            "loaded via load_state_dict before training begins. Optimizer and "
+            "EMA state are NOT restored (intentional: optimizer/EMA cold-start "
+            "is acceptable for short-tail run-chaining). Use --lr-cosine-t-max "
+            "to control the LR schedule of the continuation run."
         ),
     }
     for field in fields(Config):
@@ -321,10 +343,14 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_vol_pressure_instance_norm: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if use_vol_pressure_instance_norm:
+        vol_p_mean, vol_p_std = vol_p_instance_stats(volume_target, batch.volume_mask)
+        volume_target = apply_vol_p_instance_norm(volume_target, vol_p_mean, vol_p_std)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -364,6 +390,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    use_vol_pressure_instance_norm: bool = False,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -376,6 +404,9 @@ def per_task_train_losses(
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if use_vol_pressure_instance_norm:
+        vol_p_mean, vol_p_std = vol_p_instance_stats(volume_target, batch.volume_mask)
+        volume_target = apply_vol_p_instance_norm(volume_target, vol_p_mean, vol_p_std)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -747,6 +778,26 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
 
         model: nn.Module = build_model(config).to(device)
+        if config.init_from_checkpoint:
+            ckpt_path = Path(config.init_from_checkpoint)
+            if not ckpt_path.is_file():
+                raise FileNotFoundError(
+                    f"--init-from-checkpoint not found: {ckpt_path}"
+                )
+            ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+            ckpt_state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+            missing, unexpected = model.load_state_dict(ckpt_state, strict=False)
+            if state.is_main:
+                print(
+                    f"Loaded weights from {ckpt_path} "
+                    f"(missing={len(missing)}, unexpected={len(unexpected)})"
+                )
+                if missing:
+                    print(f"  missing keys (first 5): {list(missing)[:5]}")
+                if unexpected:
+                    print(f"  unexpected keys (first 5): {list(unexpected)[:5]}")
+                if isinstance(ckpt, dict) and "epoch" in ckpt:
+                    print(f"  source checkpoint epoch={ckpt['epoch']}")
         n_params = sum(param.numel() for param in model.parameters())
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
@@ -939,7 +990,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        use_vol_pressure_instance_norm=config.use_vol_pressure_instance_norm,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,6 +1086,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_vol_pressure_instance_norm=config.use_vol_pressure_instance_norm,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1233,6 +1290,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        use_vol_pressure_instance_norm=config.use_vol_pressure_instance_norm,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1247,6 +1305,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    use_vol_pressure_instance_norm=config.use_vol_pressure_instance_norm,
                 )
                 for name, loader in val_loaders.items()
             }
