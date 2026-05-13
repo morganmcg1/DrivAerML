@@ -84,28 +84,30 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~07:00 UTC)
+## Active Experiments (2026-05-12 ~12:00 UTC)
 
 | Student | PR | Hypothesis | Status |
 |---------|-----|-----------|--------|
-| tanjiro | #1055 | SDF near-surface sampling α=1.5 (corrected patch) | EP11 PASS ✓ (6.388%), EP15 gate (≤6.80%) approaching; MERGE CONFLICT |
+| tanjiro | #1055 | SDF near-surface sampling α=1.5 (corrected patch) | EP11 PASS ✓ (6.388%), EP15 gate (≤6.80%) approaching; rebase nudge posted (comment 4440007057) |
 | nezuko | #1072 | SDF near-surface sampling α=0.5 (corrected patch, softest regime) | JUST ASSIGNED — awaiting start |
-| frieren | #1070 | Combined vol+surf SDF weighting | Awaiting start (dup #1069 closed) |
-| fern | #1063 | [active experiment] | EP2 PASS ✓ (7.4836%), EP3 approaching |
-| edward | #1050 | [active experiment] | EP9=7.0886%, EP12 gate (≤6.5%/≤5.0% vol_p) approaching |
+| frieren | #1074 | WSS Improvement: Surface Curvature Features (κ_H, κ_G) | JUST ASSIGNED — awaiting start |
+| fern | #1063 | SDF near-surface alpha sweep band-B (α=0.25, 0.5, 1.0) | EP2 PASS ✓ (7.4836%), EP3 approaching |
+
+**PR #1070 frieren SUPERSEDED** — replaced by #1074 (WSS curvature focus; #1070 left open until student confirms).
 
 **PR #1054 nezuko KILLED** — EP15 FAIL: val_abupt=6.9264% vs gate ≤6.80%. Confirmed dead at α=2.0 near-surface SDF.
 
 **SDF α sweep status:**
 - α=0.5 → nezuko PR #1072 (just assigned — softest, α < 1.0 regime, untested)
-- α=1.5 → tanjiro PR #1055 (EP11 PASS, continuing)
+- α=1.5 → tanjiro PR #1055 (EP11 PASS, continuing; rebase nudge posted)
 - α=2.0 → nezuko PR #1054 (EP15 FAIL, KILLED — too aggressive)
 
 ## Tier 1 Follow-Ups (Current Priority)
 
 1. **True near-surface SDF sampling vol-only** — nezuko (#1072, α=0.5) and tanjiro (#1055, α=1.5). Primary open question — true SDF near-surface emphasis has NEVER run successfully.
-2. **Combined vol+surf SDF weighting** — frieren (#1070). Novel axis: apply SDF weighting to surface points as well.
-3. **α=1.0 SDF after #1072 and #1055 results** — the midpoint of the α sweep. Only warranted once we understand α=0.5 and α=1.5 shape.
+2. **WSS: Surface curvature features (κ_H, κ_G)** — frieren (#1074). Augments 7-channel surface input with mean/Gaussian curvature via k-NN shape-operator; target: test_WSS below 5.85% while keeping vol_p ≤ 3.643%. Human research directive Issue #1056.
+3. **Combined vol+surf SDF weighting** — frieren #1070 superseded by #1074; assign to next idle student after #1074 results.
+4. **α=1.0 SDF after #1072 and #1055 results** — the midpoint of the α sweep. Only warranted once we understand α=0.5 and α=1.5 shape.
 
 ## Tier 2 Follow-Ups (After Tier 1 Results)
 
@@ -180,4 +182,4 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~07:00 UTC. PR #1054 nezuko KILLED EP15 FAIL (6.9264% > 6.80%). PR #1072 assigned to nezuko (SDF α=0.5 near-surface, corrected patch + inverse formula). SDF α sweep: α=0.5 nezuko #1072 (new), α=1.5 tanjiro #1055 (EP11 PASS), α=2.0 DEAD._
+_Last updated: 2026-05-12 ~12:00 UTC. PR #1074 assigned to frieren (WSS surface curvature features κ_H/κ_G, Issue #1056 directive). PR #1072 assigned to nezuko (SDF α=0.5 near-surface, corrected patch + inverse formula). PR #1055 tanjiro rebase nudge posted (comment 4440007057). SDF α sweep: α=0.5 nezuko #1072, α=1.5 tanjiro #1055 (EP11 PASS), α=2.0 DEAD. Frieren #1070 superseded by #1074._
