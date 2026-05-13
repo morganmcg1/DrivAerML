@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~14:30 UTC
+- 2026-05-13 ~15:50 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -57,93 +57,105 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~14:30 UTC)
+## Active Experiments (2026-05-13 ~15:30 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | Current Step |
 |---------|-----|-----------|---------|-------------|
-| tanjiro | #1076 | SDF near-surface α=3.0 (corrected patch + inverse formula) | `ed01yw3z` | ~23,400 |
-| nezuko | #1072 | SDF near-surface α=0.5 (corrected patch + inverse formula) | `yp383yq2` | ~72,700 |
-| fern | #1063 | SDF near-surface α=0.25 (corrected patch + inverse formula) | `xfykblf9` | ~150,000 |
-| frieren | #1058 | GradNorm v5b: α=1.5, gradnorm_mode=ema_proxy | `4uyc5dyl` | ~94,900 |
+| tanjiro | #1076 | SDF near-surface α=3.0 (corrected patch + inverse formula) | `ed01yw3z` | ~44,047 (~EP4) |
+| nezuko | #1072 | SDF near-surface α=0.5 (corrected patch + inverse formula) | `yp383yq2` | ~95,307 (~EP8.7) |
+| fern | #1063 | SDF near-surface α=0.25 (corrected patch + inverse formula) | `xfykblf9` | ~170,584 (~EP15.5) |
+| frieren | #1077 | SDF near-surface α=1.0 (corrected patch + inverse formula) | UNSTARTED — rate limited | 0 |
+
+**FRIEREN STATUS NOTE:** PR #1077 was in DRAFT state for 9 days — fixed 2026-05-13 ~15:20 UTC (`gh pr ready 1077`). GitHub GraphQL rate limit also exhausted (resets 15:49 UTC). Escalation comment posted. Experiment expected to start within 1-2 iterations after rate limit reset (~16:00 UTC).
+
+**GradNorm v5b (PR #1058, run `4uyc5dyl`) — SUPERSEDED:** Frieren pod reassigned to SDF α=1.0 (PR #1077). GradNorm v5b was at EP8 abupt=6.233% when interrupted. GradNorm v4 (run `ysycg6xc`) remains pending review: val_abupt=6.1855%, test_vol_p=3.6328%.
 
 ### Val Checkpoint Histories (abupt_axis_mean_rel_l2_pct)
 
-**Tanjiro — PR #1076 — SDF α=3.0 — run `ed01yw3z`:**
+**Tanjiro — PR #1076 — SDF α=3.0 — run `ed01yw3z` — step 44,047 (~EP4):**
 
-| Gate | Step | Val abupt | Status |
-|------|------|-----------|--------|
-| EP1 | 10,975 | 24.11% | PASS (≤30%) |
-| EP2 | 21,950 | **8.885%** | PASS (≤16%) |
-| EP3 | 32,925 | — | **PENDING** (threshold ≤8.0%) |
+| EP | Step | Val abupt | Gate Status |
+|----|------|-----------|-------------|
+| EP1 | 10,975 | 24.1097% | PASS (≤30%) |
+| EP2 | 21,951 | 8.8851% | PASS (≤16%) |
+| EP3 | 32,927 | 7.0932% | PASS (≤8%) |
+| EP4 | 43,903 | 6.6782% | — |
+| EP5 | ~54,875 | — | **PENDING** (threshold ≤7.5%) — on track (EP4=6.68%) |
 
-Note: massive EP1→EP2 drop (24.11% → 8.89%). α=3.0 converging aggressively. EP3 outcome uncertain (0.89pp above threshold).
+Latest secondary: vol_p=4.7589%, surf_p=4.2551%, WSS=7.3426%
 
-**Nezuko — PR #1072 — SDF α=0.5 — run `yp383yq2`:**
+**Nezuko — PR #1072 — SDF α=0.5 — run `yp383yq2` — step 95,307 (~EP8.7):**
 
-| Gate | Step | Val abupt | Status |
-|------|------|-----------|--------|
-| EP1 | 10,975 | 21.54% | PASS (≤30%) |
-| EP2 | 21,950 | 7.29% | PASS (≤16%) |
-| EP3 | 32,925 | 6.67% | PASS (≤8%) |
-| EP5 | 54,875 | 6.43% | PASS (≤7.5%) |
-| EP6 | 65,850 | 6.42% | — |
-| EP10 | 109,750 | — | **PENDING** (threshold ≤7.2%) |
+| EP | Step | Val abupt | Gate Status |
+|----|------|-----------|-------------|
+| EP1 | 10,975 | 21.5355% | PASS (≤30%) |
+| EP2 | 21,951 | 7.2877% | PASS (≤16%) |
+| EP3 | 32,927 | 6.6746% | PASS (≤8%) |
+| EP4 | 43,903 | 6.4983% | — |
+| EP5 | 54,879 | 6.4348% | PASS (≤7.5%) |
+| EP6 | 65,855 | 6.4195% | — |
+| EP7 | 76,831 | **6.3410%** (best) | — |
+| EP8 | 87,807 | 6.4432% | — |
+| EP10 | ~109,750 | — | **PENDING** (threshold ≤7.2%) — on track |
 
-**Fern — PR #1063 — SDF α=0.25 — run `xfykblf9`:**
+Latest secondary: vol_p=4.6091%, surf_p=4.1625%, WSS=7.0672%
 
-| Gate | Step | Val abupt | Status |
-|------|------|-----------|--------|
-| EP1 | 10,975 | 20.94% | PASS (≤30%) |
-| EP2 | 21,950 | 7.48% | PASS (≤16%) |
-| EP3 | 32,925 | 6.62% | PASS (≤8%) |
-| EP5 | 54,875 | 6.35% | PASS (≤7.5%) |
-| EP8 | 87,800 | 6.31% | — |
-| EP9 | 98,775 | 6.27% | — |
-| EP10 | 109,750 | 6.28% | PASS (≤7.2%) |
-| EP11 | 120,725 | 6.26% | — |
-| EP12 | 131,700 | 6.27% | — |
-| EP13 | 142,675 | 6.31% | — |
-| EP15 | 164,625 | — | **PENDING** (threshold ≤6.80%) |
+**Fern — PR #1063 — SDF α=0.25 — run `xfykblf9` — step 170,584 (~EP15.5):**
 
-**Frieren — PR #1058 — GradNorm v5b α=1.5 — run `4uyc5dyl`:**
+| EP | Step | Val abupt | Gate Status |
+|----|------|-----------|-------------|
+| EP1 | 10,975 | 20.9380% | PASS (≤30%) |
+| EP2 | 21,951 | 7.4836% | PASS (≤16%) |
+| EP3 | 32,927 | 6.6204% | PASS (≤8%) |
+| EP4 | 43,903 | 6.4322% | — |
+| EP5 | 54,879 | 6.3496% | PASS (≤7.5%) |
+| EP6 | 65,855 | 6.3371% | — |
+| EP7 | 76,831 | 6.3257% | — |
+| EP8 | 87,807 | 6.3070% | — |
+| EP9 | 98,783 | 6.2742% | — |
+| EP10 | 109,759 | 6.2809% | PASS (≤7.2%) |
+| EP11 | 120,735 | **6.2647%** (best) | — |
+| EP12 | 131,711 | 6.2747% | — |
+| EP13 | 142,687 | 6.3132% | — |
+| EP14 | 153,663 | 6.2905% | — |
+| EP15 | 164,639 | 6.2784% | PASS (≤6.80%) |
+| EP20 | ~219,500 | — | **PENDING** (threshold ≤6.70%) — marginal (EP15=6.2784%) |
 
-| Gate | Step | Val abupt | Status |
-|------|------|-----------|--------|
-| EP1 | 10,974 | 19.13% | PASS (≤30%) |
-| EP2 | 21,948 | 7.53% | PASS (≤16%) |
-| EP3 | 32,922 | 6.77% | PASS (≤8%) |
-| EP5 | 54,870 | 6.42% | PASS (≤7.5%) |
-| EP7 | 76,818 | 6.26% | — |
-| EP8 | 87,792 | 6.23% | — |
-| EP10 | 109,750 | — | **PENDING** (threshold ≤7.2%) |
+Latest secondary: vol_p=4.2428%, surf_p=4.0591%, WSS=6.9617%
+
+**Frieren — PR #1077 — SDF α=1.0 — UNSTARTED (pod rate-limited, starting ~16:00 UTC)**
 
 ### SDF α Sweep Status
 
 | α value | Student | PR | Status |
 |---------|---------|-----|--------|
-| 0.25 | fern | #1063 | EP13 PASS (6.31%), EP15 gate PENDING |
-| 0.5 | nezuko | #1072 | EP6 PASS (6.42%), EP10 gate PENDING |
-| 1.0 | — | #1077 | **UNSTARTED** — frieren pod occupied; assign when free |
-| 3.0 | tanjiro | #1076 | EP2 PASS (8.885%), EP3 gate PENDING |
+| 0.25 | fern | #1063 | EP15 PASS (6.2784%), EP20 gate PENDING (≤6.70%) |
+| 0.5 | nezuko | #1072 | EP7 best=6.3410%, EP10 gate PENDING (≤7.2%) |
+| 1.0 | frieren | #1077 | **UNSTARTED** — starting ~16:00 UTC after rate limit reset |
+| 3.0 | tanjiro | #1076 | EP4=6.6782%, EP5 gate PENDING (≤7.5%) — on track |
+
+### SDF vol_p Concern
+
+All α values show vol_p significantly above SOTA 3.643%:
+- α=0.25 (fern): vol_p=4.2428% (+0.60pp above SOTA)
+- α=0.5 (nezuko): vol_p=4.6091% (+0.97pp above SOTA)
+- α=3.0 (tanjiro): vol_p=4.7589% (+1.12pp above SOTA)
+
+Pattern is unclear (U-shaped vs monotonic). α=1.0 data point needed to assess. **This is a potential systematic problem with SDF near-surface emphasis trading off vol_p for abupt.**
 
 ### GradNorm Status
 
-- **v4 (run `ysycg6xc`)**: COMPLETED with SENPAI-RESULT terminal=false, pending_arms=true. val_abupt=6.1855%, test_vol_p=3.6328% (BEATS SOTA by 0.010pp). Waiting for v5b completion to pick best arm.
-- **v5b (run `4uyc5dyl`)**: In progress — EP8 abupt=6.233%. EP10 gate PENDING (≤7.2% at step ~109,750). On track.
+- **v4 (run `ysycg6xc`)**: COMPLETED with SENPAI-RESULT terminal=false, pending_arms=true. val_abupt=6.1855%, test_vol_p=3.6328% (BEATS SOTA by 0.010pp). Awaiting merge decision.
+- **v5b (run `4uyc5dyl`)**: Pod reassigned to PR #1077 SDF α=1.0. GradNorm v5b interrupted at EP8 abupt=6.233%.
 
 ## Next Pending Gates (in order)
 
-1. **Tanjiro EP3** — step 32,925, threshold ≤8.0%. Current EP2=8.885% (0.89pp above). Uncertain — needs continued convergence.
-2. **Nezuko EP10** — step 109,750, threshold ≤7.2%. Current EP6=6.42%. Well on track.
-3. **Frieren GradNorm v5b EP10** — step ~109,750, threshold ≤7.2%. Current EP8=6.23%. Well on track.
-4. **Fern EP15** — step 164,625, threshold ≤6.80%. Current EP13=6.31%. Well on track.
-
-## Pending Assignments
-
-- **PR #1077 (SDF α=1.0)**: unstarted — assign to frieren pod once GradNorm v5b completes (EP10 gate ~15k steps away from frieren's current position)
-- **Post-GradNorm v5b**: Post terminal SENPAI-RESULT for PR #1058 picking best arm (v4 vs v5b), then merge if beats baseline
+1. **Tanjiro EP5** — ~step 54,875, threshold ≤7.5%. Current EP4=6.68%. Well on track.
+2. **Nezuko EP10** — ~step 109,750, threshold ≤7.2%. Current EP7=6.34%. Well on track.
+3. **Frieren EP1** — ~step 10,975, threshold ≤30%. Expected ~EP1 ~16:00-17:00 UTC.
+4. **Fern EP20** — ~step 219,500, threshold ≤6.70%. Current EP15=6.2784%. Well on track, but trend has been flat since EP11 (6.26%). Watch for plateauing.
 
 ## Gate Schedule
 
@@ -210,4 +222,4 @@ Note: massive EP1→EP2 drop (24.11% → 8.89%). α=3.0 converging aggressively.
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~14:30 UTC. 4 active DL24 experiments: tanjiro #1076 α=3.0 EP3 PENDING (8.885% at EP2, 0.89pp above threshold), nezuko #1072 α=0.5 EP10 PENDING (6.42% at EP6), fern #1063 α=0.25 EP15 PENDING (6.31% at EP13), frieren #1058 GradNorm v5b EP10 PENDING (6.23% at EP8). PR #1077 α=1.0 unstarted (frieren pod occupied). GradNorm v4 partial SOTA beat on test_vol_p (3.6328% vs 3.643%)._
+_Last updated: 2026-05-13 ~15:50 UTC. 4 active DL24 experiments: tanjiro #1076 α=3.0 EP4=6.68% (EP5 gate pending ≤7.5%), nezuko #1072 α=0.5 EP7 best=6.341% (EP10 gate pending ≤7.2%), fern #1063 α=0.25 EP15=6.278% (EP20 gate pending ≤6.70%), frieren #1077 α=1.0 UNSTARTED (PR was draft — fixed; rate limit resets 15:49 UTC, pod expected to pick up ~16:00 UTC). All α values show vol_p well above SOTA 3.643% — potential systematic SDF sampling trade-off concern. GradNorm v4 test_vol_p=3.6328% (BEATS SOTA by 0.010pp) pending merge decision._
