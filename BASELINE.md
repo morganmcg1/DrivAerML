@@ -4,7 +4,119 @@
 
 ---
 
-## ENSEMBLE SOTA: nezuko PR #1030 greedy ensemble pool-33 refresh K=3 (Caruana 2004) — 2026-05-12
+## *** CORRECTED DATASET IN EFFECT — 2026-05-09 ***
+
+The test split was rebuilt on 2026-05-11 to fix a case-split/indexing bug. All prior metrics labelled `[OLD DATASET]` below used the broken split. The corrected dataset is:
+
+- **Path:** `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511` (also `/mnt/new-pvc/...`)
+- **Val:** 34 cases / 7,295 views · **Test:** 50 cases / 11,091 views
+- `eval_surface_points=65536` and `eval_volume_points=65536` are **chunk sizes**, NOT point caps
+- The ~3× val→test vol_p OOD gap that motivated many Wave 24–25 experiments was a **data artifact** — on the corrected split, top models achieve test_vol_p=3.6–4.0%, close to val values
+
+**All new training and evaluation runs MUST use the new dataset path.**
+
+---
+
+## *** NEW CORRECTED-SPLIT ENSEMBLE SOTA: PR #1059 K=4 Greedy Ensemble — 2026-05-13 ***
+
+**val_abupt=5.758%** / **test_abupt=5.594%** (corrected split, K=4 greedy forward selection)
+
+K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Beats single-model SOTA (PR #972) by 0.368pp on val_abupt and 0.250pp on test_abupt. Note: test_vol_p regresses to 3.889% due to `ghh0s4ne` outlier (individual test_vol_p=6.67%). K=3 follow-up (dropping ghh0s4ne) expected to recover test_vol_p ≤ 3.643%.
+
+**W&B run:** `9iavr06j` (group `nezuko-greedy-ensemble`)
+**PR:** #1059
+
+**Val metrics (corrected split):** val_abupt=5.758%, val_vol_p=3.444%
+**Test metrics (corrected split):** test_abupt=5.594%, test_vol_p=3.889%, test_SP=3.366%, test_WSS=6.330%
+
+**K=4 members:** `56bcqp3m` (PR #972), `29nohj67` (PR #958), `a0yoxy85` (PR #968), `ghh0s4ne` (PR #823)
+
+**Greedy selection path:**
+- Step 1: val=6.126% (seed: 56bcqp3m)
+- Step 2: val=5.850% (delta=−0.276pp; added: 29nohj67)
+- Step 3: val=5.776% (delta=−0.075pp; added: a0yoxy85)
+- Step 4: val=5.758% (delta=−0.018pp; added: ghh0s4ne)
+
+**Cached predictions:** `outputs/ensemble_cache_corrected_20260513/pred_cache`
+
+**Ensemble gate:** val_abupt < **5.758%** AND test_vol_p ≤ **3.643%** (both must hold for true SOTA)
+
+---
+
+## CORRECTED-SPLIT SINGLE-MODEL SOTA: PR #972 SDF-stratified volume importance sampling — 2026-05-09
+
+**val_abupt=6.126%** / **test_abupt=5.844%** (corrected split)
+
+SDF-stratified importance sampling biases volume point sampling toward far-field / high-absolute-SDF cells that carry global pressure structure. Best single-model on corrected split across all metrics.
+
+**W&B run (source):** `56bcqp3m` → **eval run:** `zxnhtagj`
+**PR:** #972
+
+**Val metrics (corrected split):** val_abupt=6.126%, val_vol_p=3.798%
+**Test metrics (corrected split):** test_ABUPT=5.844%, test_vol_p=3.643%, test_SP=3.577%, test_WSS=6.727%
+
+**Single-model training gate (corrected split):** val_abupt ≤ **6.2%** AND val_vol_p ≤ **4.5%**
+
+**EP3 gates (corrected split):**
+- PASS: val_abupt ≤ 6.2% AND val_vol_p ≤ 4.5%
+- MARGINAL: val_abupt ≤ 6.5% AND val_vol_p ≤ 5.0%
+- KILL: otherwise
+
+---
+
+## CORRECTED-SPLIT RANK-2 SINGLE-MODEL: PR #968 Stochastic volume subsampling — 2026-05-09
+
+**val_abupt=6.278%** / **test_abupt=5.986%** (corrected split)
+
+Stochastic volume subsampling with uniform random point selection per forward pass. Second-best single model on corrected split.
+
+**W&B run (source):** `a0yoxy85` → **eval run:** `qbg9pkmx`
+**PR:** #968
+
+**Val metrics (corrected split):** val_abupt=6.278%
+**Test metrics (corrected split):** test_ABUPT=5.986%, test_vol_p=3.957%, test_SP=3.673%, test_WSS=6.825%
+
+---
+
+## CORRECTED-SPLIT RANK-3 ENSEMBLE: PR #880 K=6 greedy ensemble — 2026-05-09
+
+**val_abupt=6.031%** (corrected split) / best ensemble test_WSS=6.708% (corrected split)
+
+**W&B run:** `zst3y2mp` → **eval run:** `x78xbsfn`
+**PR:** #880
+**Test metrics (corrected split):** test_ABUPT=6.010%, test_vol_p=4.501%, test_SP=3.611%, test_WSS=6.708%
+
+Note: This ensemble retains value as a robustness baseline. test_WSS=6.708% is the best WSS across all evaluated configurations on the corrected split.
+
+---
+
+## CORRECTED-SPLIT RANK-4 SINGLE-MODEL: PR #958 dedicated vol_p aux decoder head — 2026-05-09
+
+**val_abupt=6.285%** / **test_abupt=6.107%** (corrected split)
+
+**W&B run (source):** `29nohj67` → **eval run:** `fkjc12c8`
+**PR:** #958
+**Test metrics (corrected split):** test_ABUPT=6.107%, test_vol_p=3.818%, test_SP=3.911%, test_WSS=6.985%
+
+---
+
+## Corrected-split ranked table (top 24 PRs, from Issue #1053) — 2026-05-09
+
+| Rank | PR | Description | source_run | eval_run | val_abupt | test_ABUPT | test_vol_p | test_SP | test_WSS |
+|---|---|---|---|---|---:|---:|---:|---:|---:|
+| 1 | **#1059** | **K=4 greedy ensemble (corrected split)** | — | 9iavr06j | **5.758%** | **5.594%** | 3.889%⚠ | **3.366%** | **6.330%** |
+| 2 | #972 | SDF-stratified vol importance sampling | 56bcqp3m | zxnhtagj | 6.126% | 5.844% | 3.643% | 3.577% | 6.727% |
+| 3 | #968 | Stochastic vol subsampling | a0yoxy85 | qbg9pkmx | 6.278% | 5.986% | 3.957% | 3.673% | 6.825% |
+| 4 | #880 | K=6 greedy ensemble (pool-32) | zst3y2mp | x78xbsfn | 6.031% | 6.010% | 4.501% | 3.611% | 6.708% |
+| 5 | #958 | vol_p aux decoder head (Arm A) | 29nohj67 | fkjc12c8 | 6.285% | 6.107% | 3.818% | 3.911% | 6.985% |
+| 6 | #823 | surf→vol cross-attention | ghh0s4ne | — | — | ~6.2% | — | — | — |
+| 7–24 | ... | ... | ... | ... | ... | ... | ... | ... | ... |
+
+**Key insight from corrected split:** Training-time volume point sampling changes (PR #972, #968) generalize better than loss-weighting, SDF-conditioning, or deeper-stack experiments. The vol_p OOD gap was a data artifact, not a model-capacity problem.
+
+---
+
+## [OLD DATASET] ENSEMBLE SOTA (superseded by corrected-split results above): nezuko PR #1030 greedy ensemble pool-33 refresh K=3 (Caruana 2004) — 2026-05-12
 
 **val_abupt=5.9170%** / **test_abupt=7.3192%** — −0.1119pp val (−1.86% relative) vs prior K=6 (#880, 6.0289%); −0.0501pp test (−0.68% relative)
 
@@ -27,7 +139,7 @@ Pool refresh adds PR #958 Arm A run `29nohj67` (single-model SOTA, val=6.2868%) 
 
 ---
 
-## Prior Ensemble SOTA: nezuko PR #880 greedy ensemble pool-32 refresh K=6 (Caruana 2004) — 2026-05-01
+## [OLD DATASET] Prior Ensemble SOTA: nezuko PR #880 greedy ensemble pool-32 refresh K=6 (Caruana 2004) — 2026-05-01
 
 **val_abupt=6.0289%** / **test_abupt=7.3693%** — −0.1462pp val (−2.37% relative) vs prior K=7 (#612, 6.1751%); −0.1654pp test (−2.19% relative)
 
@@ -48,13 +160,13 @@ Pool expanded from 24→32 by adding PR #823 surf→vol cross-attn run `ghh0s4ne
 - Step 4: val=6.0373% (delta=0.0143pp)
 - Step 5: val=6.0289% (delta=0.0085pp — stopped at K=6, next delta <0.005pp threshold)
 
-**Key finding:** Pool-32 with PR #823 surf-xattn run as seed delivers +2.37% val / +2.19% test improvement over pool-24 K=7. Volume_pressure test-vs-val gap persists (val≈3.6%, test≈11.3%, ~3.2×) — primary systematic issue.
+**Key finding:** Pool-32 with PR #823 surf-xattn run as seed delivers +2.37% val / +2.19% test improvement over pool-24 K=7. Volume_pressure test-vs-val gap persists (val≈3.6%, test≈11.3%, ~3.2×) — primary systematic issue. [NOTE: This gap was subsequently identified as a data artifact from the broken test split — on the corrected split (Issue #1053), test_vol_p=4.501% vs val_vol_p=3.568%.]
 
 **Ensemble gate:** val_abupt < **6.0289%** (superseded by PR #1030)
 
 ---
 
-## Prior Ensemble SOTA: nezuko PR #602 greedy forward ensemble selection K=7 (pool 22→23, Caruana 2004) — 2026-05-04
+## [OLD DATASET] Prior Ensemble SOTA: nezuko PR #602 greedy forward ensemble selection K=7 (pool 22→23, Caruana 2004) — 2026-05-04
 
 **val_abupt=6.2062%** / **test_abupt=7.5164%** — −0.0283pp val (−0.45% relative), −0.0269pp test vs prior K=7 (#562)
 
@@ -66,7 +178,7 @@ Pool expanded from 22→23 runs by adding PR #571 run `nh96x7m4` (askeladd, val=
 
 ---
 
-## Prior Ensemble SOTA: nezuko PR #562 greedy forward ensemble selection K=7 (Caruana 2004) — 2026-05-01
+## [OLD DATASET] Prior Ensemble SOTA: nezuko PR #562 greedy forward ensemble selection K=7 (Caruana 2004) — 2026-05-01
 
 **val_abupt=6.2345%** / **test_abupt=7.5433%** — **−0.54% relative on val, −0.50% on test vs prior K=5 top-val ensemble (#556)**
 
@@ -108,7 +220,7 @@ uv run python ensemble_eval.py \
 
 ---
 
-## Prior Ensemble SOTA: nezuko PR #556 K=5 inference-time ensemble — 2026-05-01
+## [OLD DATASET] Prior Ensemble SOTA: nezuko PR #556 K=5 inference-time ensemble — 2026-05-01
 
 **val_abupt=6.2681%** / **test_abupt=7.5813%** — First result to beat AB-UPT reference on surface_pressure AND wall_shear simultaneously on test.
 
@@ -119,11 +231,11 @@ uv run python ensemble_eval.py \
 
 ---
 
-## SINGLE-MODEL SOTA: nezuko PR #958 dedicated vol_p aux decoder head (Arm A) — 2026-05-09
+## [OLD DATASET] SINGLE-MODEL SOTA: nezuko PR #958 dedicated vol_p aux decoder head (Arm A) — 2026-05-09
 
 **val_abupt=6.2868%** / **test_abupt=7.7445%** — −0.154pp val (−2.39% relative) vs prior single-model SOTA (PR #823, 6.4407%); +0.045pp test regression. Hypothesis on vol_p OOD gap NEGATIVE.
 
-3-layer MLP auxiliary decoder head for volume_pressure (independent gradient path from volume tokens), stacked on full PR #823 SOTA config (surf→vol cross-attention). vol_loss_weight=1.0 (Arm A). Val_abupt improvement is broad-based (wall_shear −0.297pp val). Hypothesis that dedicated head would reduce OOD test_vol_p gap NEGATIVE — test_vol_p=12.0063% is worse than baseline 11.6704% (+0.336pp). The OOD gap (~3× val/test multiplier) is a data-distribution problem, not a model-capacity problem.
+3-layer MLP auxiliary decoder head for volume_pressure (independent gradient path from volume tokens), stacked on full PR #823 SOTA config (surf→vol cross-attention). vol_loss_weight=1.0 (Arm A). Val_abupt improvement is broad-based (wall_shear −0.297pp val). Hypothesis that dedicated head would reduce OOD test_vol_p gap NEGATIVE — test_vol_p=12.0063% is worse than baseline 11.6704% (+0.336pp). The OOD gap (~3× val/test multiplier) is a data-distribution problem, not a model-capacity problem. [NOTE: Subsequent corrected-split revalidation (Issue #1053) showed this gap was a data artifact from the broken test split — on the corrected split, test_vol_p=3.818% for this model, close to val_vol_p=3.9152%.]
 
 **W&B run:** `29nohj67` (group `nezuko-vol-aux-decoder-head`)
 **PR:** #958
@@ -131,7 +243,7 @@ uv run python ensemble_eval.py \
 **Val metrics (EP13 best checkpoint):** val_abupt=6.2868%, surface_pressure=4.1766%, volume_pressure=3.9152%, wall_shear=7.0476%, tau_x=6.1726%, tau_y=7.6648%, tau_z=9.5053%
 **Test metrics:** test_abupt=7.7445%, surface_pressure=3.9100%, volume_pressure=12.0063%, wall_shear=6.9848%, tau_x=6.2092%, tau_y=7.5689%, tau_z=9.0280%
 
-**Single-model training gate:** val_abupt < **6.2868%** (previously 6.4407% from PR #823)
+**Single-model training gate [OLD DATASET]:** val_abupt < **6.2868%** (previously 6.4407% from PR #823) — SUPERSEDED; corrected-split gate: val_abupt ≤ 6.2% AND val_vol_p ≤ 4.5% (EP3 PASS)
 
 ### Reproduce (L=5 + surf→vol xattn + vol_p aux head, Lion lr=9e-5, 13ep, vol-curriculum)
 
@@ -156,7 +268,7 @@ cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
 
 ---
 
-## Prior Single-Model SOTA: nezuko PR #823 surface→volume cross-attention — 2026-05-08
+## [OLD DATASET] Prior Single-Model SOTA: nezuko PR #823 surface→volume cross-attention — 2026-05-08
 
 **val_abupt=6.4407%** / **test_abupt=7.6992%** — −0.158pp val (−2.4% relative) vs prior single-model SOTA (PR #592, 6.5985%); −0.292pp test (−3.6% relative).
 
@@ -170,7 +282,7 @@ One `nn.MultiheadAttention(embed_dim=512, num_heads=4, batch_first=True)` after 
 
 ---
 
-## Prior Single-Model SOTA: alphonse PR #592 depth-L5 (model-layers=5) — 2026-05-04
+## [OLD DATASET] Prior Single-Model SOTA: alphonse PR #592 depth-L5 (model-layers=5) — 2026-05-04
 
 **W&B run:** `4k25s25e` (alphonse DDP8, rank-0) — group `model-depth-sweep`, name `alphonse/depth-L5`, best val **6.5985%** (EP4, step 43,459)
 **PR:** #592
@@ -206,14 +318,14 @@ cd target/ && torchrun --standalone --nproc_per_node=8 train.py \
 
 ---
 
-## Prior Single-Model SOTA: askeladd PR #594 rff32 on PR #571 SOTA stack — 2026-05-04
+## [OLD DATASET] Prior Single-Model SOTA: askeladd PR #594 rff32 on PR #571 SOTA stack — 2026-05-04
 
 **W&B run:** `d777epep` (askeladd DDP8, rank-0) — group `askeladd-rff32-pr571-sota`, best val **6.7258%** (EP4, step 43,462)
 **PR:** #594
 
 ---
 
-## Prior Single-Model SOTA: askeladd PR #571 tau_y×1.5 / tau_z×2.0 weight intensification — 2026-05-04
+## [OLD DATASET] Prior Single-Model SOTA: askeladd PR #571 tau_y×1.5 / tau_z×2.0 weight intensification — 2026-05-04
 
 **W&B run:** `nh96x7m4` (askeladd DDP8, rank-0) — group `askeladd-tau-sweep`, best val **6.7644%** (Arm A: tau_y×1.5 / tau_z×2.0), runtime ~4.7h
 **PR:** #571
@@ -249,7 +361,7 @@ torchrun --standalone --nproc_per_node=8 target/train.py \
 
 ---
 
-## Previous Single-Model SOTA: askeladd PR #516 per-channel tau_y/tau_z loss reweighting — 2026-05-04
+## [OLD DATASET] Previous Single-Model SOTA: askeladd PR #516 per-channel tau_y/tau_z loss reweighting — 2026-05-04
 
 **W&B run:** `9mm3sz7x` (askeladd DDP8, rank-0) — group `askeladd-tau-reweight-micro`, best val **6.8701%** (EP5), runtime ~4.7h
 **PR:** #516
@@ -380,10 +492,17 @@ torchrun --standalone --nproc_per_node=8 train.py \
 | **#510** | **alphonse** | **−0.0071pp (−0.10%) vs #511** | **surface-loss-weight=2.0: heavier surface gradient emphasis closes tau_x/tau_z/wall_shear at EP5 — val_abupt=7.0063%, test_abupt=8.2921%** |
 | **#523** | **thorfinn** | **−0.0817pp (−1.16%) vs #510** | **EMA-proxy GradNorm alpha=0.5, floor=0.7: dynamic tau_y/tau_z upweighting (1.16×/1.24×), closed-form EMA weight updates ~0% overhead — val_abupt=6.9246%, test_abupt=8.2355%** |
 | **#516** | **askeladd** | **−0.0545pp (−0.79%) vs #523** | **Per-channel tau_y×1.2 / tau_z×1.3 fixed loss reweighting (no GradNorm): simple static channel weights beat EMA-proxy GradNorm — val_abupt=6.8701%, test_abupt=8.1229%** |
+| **#571** | **askeladd** | **−0.1057pp (−1.54%) vs #516** | **tau_y×1.5 / tau_z×2.0 weight intensification: moderate intensification on PR #516 SOTA stack — val_abupt=6.7644%, test_abupt=8.171%** |
+| **#594** | **askeladd** | **−0.0386pp (−0.57%) vs #571** | **rff32 on PR #571 SOTA stack: 32-feature RFF on tau-weighted config — val_abupt=6.7258%** |
+| **#592** | **alphonse** | **−0.1273pp (−1.90%) vs #594** | **depth L=5 (model-layers=5): 5 transformer layers vs 4, ~4M extra params — val_abupt=6.5985%, test_abupt=7.9915%** |
+| **#823** | **nezuko** | **−0.1578pp (−2.39%) vs #592** | **surface→volume cross-attention: one MHA layer (Q=vol, K=V=surf) after backbone LayerNorm split — val_abupt=6.4407%, test_abupt=7.6992%** |
+| **#958** | **nezuko** | **−0.1539pp (−2.39%) vs #823** | **vol_p aux decoder head (Arm A, vol_loss_weight=1.0): dedicated 3-layer MLP head for volume_pressure — val_abupt=6.2868%, test_abupt=7.7445% [OLD DATASET]** |
+| *(dataset switch)* | — | *corrected-split revalidation (Issue #1053) — broken test split fixed; all prior test metrics superseded* | |
+| **#972** | **nezuko** | **val=6.126% / test=5.844% [corrected split]** | **SDF-stratified volume importance sampling: corrected-split SOTA, run `zxnhtagj` — single-model val_abupt=6.126%, test_abupt=5.844%, test_vol_p=3.643%** |
 
 ---
 
-## Prior SOTA record: thorfinn PR #489 volume-points curriculum 16k→65k ramp — 2026-05-03 (updated)
+## [OLD DATASET] Prior SOTA record: thorfinn PR #489 volume-points curriculum 16k→65k ramp — 2026-05-03 (updated)
 
 **PRIOR SOTA: thorfinn PR #489 (vol-points curriculum 16k→32k→49k→65k over 4 stages) beats PR #488 by −0.1880pp val (7.1792% vs 7.3672% val). W&B run `r5rw40rn`, EP11. Delta −2.55% relative.**
 
@@ -394,7 +513,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 ---
 
-## Prior SOTA record: alphonse PR #488 multi-sigma STRING-sep init — 2026-05-03 (updated)
+## [OLD DATASET] Prior SOTA record: alphonse PR #488 multi-sigma STRING-sep init — 2026-05-03 (updated)
 
 **PRIOR SOTA: alphonse PR #488 (multi-sigma RFF init across frequency octaves) beats PR #387 by −0.0144pp val (7.3672% vs 7.3816% val). W&B run `ki2q9ko9`, EP11.**
 
@@ -406,7 +525,7 @@ Multi-sigma STRING-sep init distributes `log_freq` parameters across frequency o
 
 ---
 
-## Prior SOTA record: alphonse PR #387 feat16 RFF + QK-norm + STRING-sep — 2026-05-01 (updated)
+## [OLD DATASET] Prior SOTA record: alphonse PR #387 feat16 RFF + QK-norm + STRING-sep — 2026-05-01 (updated)
 
 **PRIOR SOTA: alphonse PR #387 (feat16 RFF + QK-norm stacked on STRING-sep) beats PR #358 by −0.0105pp val (7.3816% vs 7.3921% val). W&B run `wj6mn6ve`, EP11 (Arm A: rff_num_features=16).**
 
@@ -418,7 +537,7 @@ RFF with rff_num_features=16 (feat16) stacks on top of the STRING-sep + QK-norm 
 
 ---
 
-## Prior SOTA record: thorfinn PR #358 STRING-sep + QK-norm stack — 2026-05-02 (updated)
+## [OLD DATASET] Prior SOTA record: thorfinn PR #358 STRING-sep + QK-norm stack — 2026-05-02 (updated)
 
 **PRIOR SOTA: thorfinn PR #358 (STRING-sep + QK-norm stack) beat PR #311 by −0.154pp val (7.3921% vs 7.546% val). W&B run `tkiigfmc`, EP11.**
 
@@ -430,7 +549,7 @@ QK-norm adds `nn.RMSNorm(dim_head, elementwise_affine=True)` applied to Q and K 
 
 ---
 
-## Prior SOTA record: edward PR #311 STRING-separable positional encoding — 2026-05-01 (updated)
+## [OLD DATASET] Prior SOTA record: edward PR #311 STRING-separable positional encoding — 2026-05-01 (updated)
 
 **NEW SOTA: edward PR #311 (STRING-separable pos encoding) beats PR #309 by −1.493pp val / −1.355pp test (7.546% vs 9.039% val, 8.771% vs 10.126% test). This is a −13.93% relative improvement on test_abupt.**
 
@@ -506,7 +625,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 ---
 
-## Prior SOTA record: thorfinn PR #309 grad-clip-norm=0.5 — 2026-05-02 07:17 UTC
+## [OLD DATASET] Prior SOTA record: thorfinn PR #309 grad-clip-norm=0.5 — 2026-05-02 07:17 UTC
 
 **PRIOR SOTA: thorfinn PR #309 grad-clip-norm=0.5 beats PR #232 by −0.026pp val / −0.064pp test (9.0389% vs 9.0650% val, 10.126% vs 10.190% test).**
 
@@ -516,7 +635,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 ---
 
-## Prior SOTA record: askeladd PR #232 model-heads=4 — 2026-05-01 21:06 UTC
+## [OLD DATASET] Prior SOTA record: askeladd PR #232 model-heads=4 — 2026-05-01 21:06 UTC
 
 **PRIOR SOTA: askeladd PR #232 heads=4 beat PR #222 by −0.226pp (9.0650% vs 9.2910% val).**
 
@@ -537,7 +656,7 @@ torchrun --standalone --nproc_per_node=8 train.py \
 
 ---
 
-## Prior SOTA record: fern PR #222 lr_warmup_epochs=1 — 2026-05-01 19:30 UTC
+## [OLD DATASET] Prior SOTA record: fern PR #222 lr_warmup_epochs=1 — 2026-05-01 19:30 UTC
 
 **NEW SOTA: fern PR #222 lr warmup 1ep beats PR #115 by −2.03% (9.2910 vs 9.484 val).**
 
