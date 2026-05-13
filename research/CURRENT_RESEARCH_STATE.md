@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~00:30 UTC
+- 2026-05-13 ~06:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -85,7 +85,7 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 | 5 | #939 | 6.242% | — | — CLOSED |
 | 22 | #740 | 8.165% | 13.660% | Old "SOTA" — NOW ARTIFACT |
 
-## Active Experiments (2026-05-13 ~04:55 UTC)
+## Active Experiments (2026-05-13 ~06:30 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
@@ -93,6 +93,7 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 | #1054 | dl24-nezuko | **SDF-stratified (α=2.0) + Stochastic combined** | `tlkx2jyh` | **RUNNING** | EP11=7.0236% @ step ~120,735 | EBS=8. EP15 kill gate (≤6.80%) PENDING at step 164,625. Monitor `bladclw00` active. |
 | #1055 | dl24-tanjiro | **SDF-stratified α=1.5** | Arm A: `58hk6r36` | **ARM A RUNNING** | EP8=6.3977% @ step ~87,807 | EBS=8. EP10 kill gate (≤7.2%) PENDING at step 109,750. Monitor `bgs69snxf` active. |
 | #1063 | dl24-fern | **DANN adaptive domain normalization (DL24 branch, α sweep)** | Arm A: `xfykblf9` | **ARM A RUNNING** | EP2=7.4836% PASS @ step 21,951 | EBS=8. EP3 kill gate (≤8.0% abupt, ≤5.0% vol_p) PENDING at step 32,927. Monitor `bbi9oexhj` active. Arms B/C queued. |
+| #1069 | dl24-frieren | **Combined SDF + Curvature Stratified Sampling** | — | **ASSIGNED** | — | Arm A: SDF-vol α=1.0 (fills gap between SOTA uniform and tanjiro α=1.5). Arm B: SDF-vol α=1.0 + curvature-stratified surface β=1.0 (novel axis — curvature_HK_v2.npy). DRAFT PR open. |
 | #1057 | tay-fern | **Log-space vol_p loss** | `gqgz3y36` | **CLOSED** | EP3 test: abupt=6.64%, vol_p=4.44%, surf_p=4.20%, WSS=7.49% | CLOSED: log-space vol_p loss not validated. 3/13 epochs completed before pod budget cutoff. All metrics above DL24 SOTA. |
 
 ## Active Kill-Gate Monitors
@@ -191,7 +192,7 @@ if args.use_sdf_stratified_vol_sampling:
 3. **First true SDF near-surface experiment is nezuko (#1054).** Run `yd8n1whr` live with correct inverse formula + `__class__` reassignment + `replacement=False`. This is a virgin experimental axis.
 4. **Stochastic vol subsampling (PR #968) is independently confirmed #2.** Fresh random draw every batch is a real technique. test_abupt=5.986%.
 5. **Near-surface SDF hypothesis is ESSENTIALLY UNTESTED until now.** Given that PR #972's apparent SOTA was actually uniform, true near-surface SDF emphasis may push vol_p well below 3.643%.
-6. **frieren is now assigned PR #1062**: combined vol+surf SDF weighting — novel axis not tested by any other student.
+6. **frieren is now assigned PR #1069**: SDF-vol α=1.0 (gap fill) + curvature-stratified surface β=1.0 (completely novel axis using `curvature_HK_v2.npy`). No `surface_sdf.npy` exists — the "combined SDF" hypothesis is reinterpreted as curvature surface weighting.
 
 ## Tier 1 Follow-Ups (Current Priority)
 
@@ -270,4 +271,4 @@ if args.use_sdf_stratified_vol_sampling:
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~04:55 UTC. PR #1057 CLOSED (fern_tay log-space vol_p loss not validated, gqgz3y36 finished at EP3 test_ABUPT=6.64%). All 4 DL24 monitors relaunched (bhz3pkvea/bgs69snxf/bladclw00/bbi9oexhj). 4 DL24 experiments active: edward EP12 gate imminent, tanjiro EP10 approaching, fern EP3 approaching, nezuko EP15 further out._
+_Last updated: 2026-05-13 ~06:30 UTC. PR #1069 OPENED for dl24-frieren (combined SDF vol α=1.0 + curvature-stratified surface β=1.0). 5 experiments now active: edward EP12 gate imminent, tanjiro EP10 approaching, fern EP3 approaching, nezuko EP15 further out, frieren ASSIGNED. Note: `surface_sdf.npy` does NOT exist in dataset — surface points are on vehicle boundary (SDF≈0); curvature_HK_v2.npy (shape: n_surface×2) is the correct novel surface-importance axis._
