@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~07:00 UTC
+- 2026-05-13 ~08:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -54,7 +54,7 @@ weight = 1.0 + α * |sdf[i]|
 
 **Correct near-surface emphasis formula:**
 ```
-weight = 1.0 / (1.0 + α * |sdf[i]|)
+weight = 1.0 / (1.0 + α * |sdf|)
 ```
 Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 
@@ -84,38 +84,38 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-12 ~12:00 UTC)
+## Active Experiments (2026-05-13 ~08:00 UTC)
 
 | Student | PR | Hypothesis | Status |
 |---------|-----|-----------|--------|
-| tanjiro | #1055 | SDF near-surface sampling α=1.5 (corrected patch) | EP11 PASS ✓ (6.388%), EP15 gate (≤6.80%) approaching; rebase nudge posted (comment 4440007057) |
-| nezuko | #1072 | SDF near-surface sampling α=0.5 (corrected patch, softest regime) | JUST ASSIGNED — awaiting start |
-| frieren | #1074 | WSS Improvement: Surface Curvature Features (κ_H, κ_G) | JUST ASSIGNED — awaiting start |
-| fern | #1063 | SDF near-surface alpha sweep band-B (α=0.25, 0.5, 1.0) | EP2 PASS ✓ (7.4836%), EP3 approaching |
+| fern | #1063 | SDF near-surface sampling α=0.25 (corrected patch + inverse formula) | step=141,746, abupt=6.275%, EP1–EP15 all PASS ✓. EP20 gate (≤6.70%) at step 219,500 (~88 min) |
+| nezuko | #1072 | SDF near-surface sampling α=0.5 (corrected patch + inverse formula) | step=63,606, abupt=6.435%, EP1–EP5 all PASS ✓. EP10 gate (≤7.2%) at step 109,750 (~175 min) |
+| tanjiro | #1076 | SDF near-surface sampling α=3.0 (corrected patch + inverse formula) | step=15,261, abupt=24.11%, EP1 PASS ✓ (24.11% ≤30%). EP2 gate (≤16%) at step 21,950 (~26 min) — AT RISK (8pp above threshold) |
+| frieren | #1077 | SDF near-surface sampling α=1.0 (corrected patch + inverse formula) | JUST ASSIGNED — awaiting start |
 
-**PR #1070 frieren SUPERSEDED** — replaced by #1074 (WSS curvature focus; #1070 left open until student confirms).
+**CLOSED this cycle:**
+- PR #1074 frieren: WSS surface curvature features κ_H/κ_G — CLOSED (frieren re-assigned to α=1.0 SDF sweep)
+- PR #1055 tanjiro: SDF near-surface α=1.5 (buggy patch, EP11 PASS) — CLOSED; tanjiro re-assigned to α=3.0
 
-**PR #1054 nezuko KILLED** — EP15 FAIL: val_abupt=6.9264% vs gate ≤6.80%. Confirmed dead at α=2.0 near-surface SDF.
-
-**SDF α sweep status:**
-- α=0.5 → nezuko PR #1072 (just assigned — softest, α < 1.0 regime, untested)
-- α=1.5 → tanjiro PR #1055 (EP11 PASS, continuing; rebase nudge posted)
-- α=2.0 → nezuko PR #1054 (EP15 FAIL, KILLED — too aggressive)
+**SDF α sweep status (corrected patch + inverse formula — ALL first true runs):**
+- α=0.25 → fern PR #1063 (EP15+ PASS ✓, continuing)
+- α=0.5 → nezuko PR #1072 (EP5+ PASS ✓, continuing)
+- α=1.0 → frieren PR #1077 (JUST ASSIGNED)
+- α=3.0 → tanjiro PR #1076 (EP2 gate AT RISK — may be too aggressive)
 
 ## Tier 1 Follow-Ups (Current Priority)
 
-1. **True near-surface SDF sampling vol-only** — nezuko (#1072, α=0.5) and tanjiro (#1055, α=1.5). Primary open question — true SDF near-surface emphasis has NEVER run successfully.
-2. **WSS: Surface curvature features (κ_H, κ_G)** — frieren (#1074). Augments 7-channel surface input with mean/Gaussian curvature via k-NN shape-operator; target: test_WSS below 5.85% while keeping vol_p ≤ 3.643%. Human research directive Issue #1056.
-3. **Combined vol+surf SDF weighting** — frieren #1070 superseded by #1074; assign to next idle student after #1074 results.
-4. **α=1.0 SDF after #1072 and #1055 results** — the midpoint of the α sweep. Only warranted once we understand α=0.5 and α=1.5 shape.
+1. **True near-surface SDF sampling α sweep** — fern (#1063, α=0.25), nezuko (#1072, α=0.5), frieren (#1077, α=1.0), tanjiro (#1076, α=3.0). Core open question — no valid SDF near-surface run has completed. α=0.25 and α=0.5 look healthy. α=3.0 is at risk at EP2 gate.
+2. **SDF-stratified + dedicated vol decoder (6L vol tower)** — combine near-surface SDF sampling with independent vol tower architecture. Assign after first α results are in.
+3. **Combined vol+surf SDF weighting** — assign to next idle student after α sweep results.
 
 ## Tier 2 Follow-Ups (After Tier 1 Results)
 
-4. **SDF-stratified + dedicated vol decoder (6L vol tower)** — combine near-surface SDF sampling with independent vol tower architecture.
-5. **Re-run vol-token LN (PR #1025 config) from scratch on corrected split** — showed val_vol_p=3.547% on old dataset; needs clean re-run.
-6. **WD=0.005 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
-7. **EMA decay=0.999 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
-8. **Stochastic vol subsampling combined with SDF weighting** — PR #968 confirmed rank 2 on corrected split; combining with true SDF near-surface emphasis has not been attempted.
+4. **Re-run vol-token LN (PR #1025 config) from scratch on corrected split** — showed val_vol_p=3.547% on old dataset; needs clean re-run.
+5. **WD=0.005 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
+6. **EMA decay=0.999 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
+7. **Stochastic vol subsampling combined with SDF weighting** — PR #968 confirmed rank 2 on corrected split; combining with true SDF near-surface emphasis has not been attempted.
+8. **α=1.5–2.5 range SDF** — the α sweep will reveal whether α=1.0 or α=0.25/0.5 is optimal; α=1.5–2.5 may be worth exploring once the current sweep completes (α=2.0 DEAD under old patch).
 
 ## Gate Schedule
 
@@ -170,6 +170,7 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 - Lookahead Lion (PR #998): EP5 FAIL
 - Online focal vol reweighting (#1026, #1033): scale=3 ceiling degeneration — EMA ratio approach AXIS CLOSED
 - SDF near-surface sampling α=2.0 (nezuko PR #1054): EP15 FAIL (6.9264% > 6.80%) — too aggressive near-surface concentration
+- SDF near-surface sampling α=3.0 (tanjiro PR #1076): EP2 gate AT RISK (step 15,261, abupt=24.11% vs ≤16% required) — likely too aggressive
 
 ## Removed from Dead Ends (RETRACTED — Dataset Artifact)
 
@@ -182,4 +183,4 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-12 ~12:00 UTC. PR #1074 assigned to frieren (WSS surface curvature features κ_H/κ_G, Issue #1056 directive). PR #1072 assigned to nezuko (SDF α=0.5 near-surface, corrected patch + inverse formula). PR #1055 tanjiro rebase nudge posted (comment 4440007057). SDF α sweep: α=0.5 nezuko #1072, α=1.5 tanjiro #1055 (EP11 PASS), α=2.0 DEAD. Frieren #1070 superseded by #1074._
+_Last updated: 2026-05-13 ~08:00 UTC. SDF α sweep underway with corrected patch + inverse formula: α=0.25 (fern EP15+ PASS), α=0.5 (nezuko EP5+ PASS), α=1.0 (frieren JUST ASSIGNED #1077), α=3.0 (tanjiro EP2 gate AT RISK #1076). PRs #1055 and #1074 CLOSED. α=3.0 likely too aggressive — monitoring EP2 gate._
