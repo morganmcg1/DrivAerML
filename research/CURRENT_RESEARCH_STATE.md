@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~20:42 UTC
+- 2026-05-13 ~21:15 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -18,6 +18,12 @@ The persistent +7–8pp val→test volume pressure gap reported across all prior
 `/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511`
 
 **Corrected eval parameters:** `eval_surface_points=65536`, `eval_volume_points=65536` (chunk sizes, not caps), 34 val cases / 7,295 views, 50 test cases / 11,091 views.
+
+## INFRASTRUCTURE FIX MERGED (2026-05-13 ~21:11 UTC): PR #1087 — EMA warm-start shadow re-init
+
+**Backport from main commit `860d08f` merged to advisor branch.** Bug: `EMA.update()` never re-synced shadow buffers at `step_counter == start_step` — shadow stayed at random-init for entire warmup window. Fix re-initializes shadow from live params at the trigger step.
+
+**Implication:** Past EMA verdicts on this branch (PR #954) are suspect — early-epoch metrics fed kill-thresholds with contaminated shadow. Long runs (>>7400 steps) decay contamination to ~0%, so PR #972 SOTA itself is unaffected. PR #1086 (tanjiro EMA re-test) is the first clean EMA run on this branch.
 
 ## CRITICAL DISCOVERY (2026-05-12 ~22:00 UTC): SDF Monkey-Patch Was a No-Op
 
@@ -97,10 +103,16 @@ Notes:
 
 The α-response is now mapped from both ends:
 - **Low α (0.25, 0.5):** Both competitive at val_abupt ≈6.26–6.29%. val_vol_p at 4.3–4.5%. Near-uniform sampling performs well.
-- **α=1.0 (frieren):** Data arriving in 2-3h. Critical missing point.
+- **α=1.0 (frieren):** EP2 PASS (slope −1.354/1k), data arriving in 1-2h.
 - **α=2.0, 3.0:** Over-concentration confirmed — worse abupt, no test harvest possible.
 
 **Productive band is definitively α ∈ [0.25, 0.5].** Lower values (α<0.25) remain untested. The new EMA experiment (tanjiro #1086) is an A/B vs fern at α=0.25, adding EMA as the next orthogonal lever.
+
+### STRATEGIC CONCERN: SDF is regressing vs uniform-sampling baseline
+
+PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abupt=6.126% / test_abupt=5.844%. Fern α=0.25 best val_abupt=6.265% at EP11 then regressed to 6.346% at EP22 (+0.081pp; vol_p +0.41pp). **None of the SDF α values are currently beating uniform sampling** — SDF concentration tuning is not the right lever for the corrected split. Implications:
+- After the SDF wave terminates (fern ~02:30Z, others follow), prioritize **orthogonal levers** (EMA, GradNorm composition, optimizer/schedule changes, regularization variants) instead of more α points.
+- Strongly favor test-from-best-checkpoint reporting at terminal (not terminal-epoch test). Fern's EP11 will likely be the test harvest target.
 
 ### GradNorm Status (resolved)
 
@@ -180,4 +192,4 @@ The α-response is now mapped from both ends:
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~20:42 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready. Tanjiro #1086 EMA smoke launched (`ugbkg660`); frieren #1077 α=1.0 EP2 PASS (slope −1.354/1k, healthy); nezuko #1072 EP16 best 6.290% (slope still negative); fern #1063 EP22.5 plateau at 6.265% (slope flat at +0.002/1k). Fern terminal expected ~02:30Z May 14 — first SDF-wave test harvest. Next idle student gets H1 (GradNorm + SDF composition) from RESEARCH_IDEAS_2026-05-13_19:30.md._
+_Last updated: 2026-05-13 ~21:15 UTC. PR #1087 (EMA warm-start fix backport) MERGED at 21:11Z — advisor branch now has correct EMA implementation; PR #1086 already inherits it. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP22.5 plateau confirmed: best=6.265% at EP11, regressing since (vol_p +0.41pp from EP11→EP22). **Strategic conclusion: SDF wave is not beating uniform-sampling SOTA.** When SDF runs terminate, pivot to orthogonal levers (EMA results from #1086, GradNorm+SDF composition, optimizer variants from RESEARCH_IDEAS). Next idle gets H1 from RESEARCH_IDEAS_2026-05-13_19:30.md._
