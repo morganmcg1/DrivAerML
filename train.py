@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_dedicated_wss_head: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_dedicated_wss_head": (
+            "Enable dedicated WSS auxiliary decoder head (PR #1068). "
+            "Splits the surface output head into a shallow 2-layer MLP "
+            "that predicts surface pressure (cp) only and a deeper 3-layer "
+            "MLP that predicts the 3 wall-shear-stress channels "
+            "(tau_x, tau_y, tau_z). Output is concatenated back into the "
+            "[cp, tau_x, tau_y, tau_z] channel order expected by the "
+            "training loss and metric code. Requires use_aux_decoder_heads."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_dedicated_wss_head=config.use_dedicated_wss_head,
     )
 
 
