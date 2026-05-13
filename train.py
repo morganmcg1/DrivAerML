@@ -130,6 +130,9 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    vol_points_min: int = 0
+    vol_points_max: int = 0
+    vol_points_epoch_repeat: int = 1
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -160,6 +163,35 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "vol_points_min": (
+            "Lower bound for stochastic per-batch volume-point sampling "
+            "(PR #1061). When both --vol-points-min and --vol-points-max are "
+            "set (>0) with min<=max, every training batch draws "
+            "n_vol ~ Uniform[min, max] (inclusive) and subsamples the "
+            "loaded volume points down to n_vol before the forward pass. "
+            "The draw is performed on rank 0 and broadcast to all DDP ranks "
+            "so the global batch shares a single query count. The dataset "
+            "is implicitly loaded with --train-volume-points overridden to "
+            "vol_points_max so enough points are available to subsample "
+            "from. Disabled (default) when either flag is 0. Mutually "
+            "exclusive with --vol-points-schedule. Evaluation always uses "
+            "--eval-volume-points unchanged."
+        ),
+        "vol_points_max": (
+            "Upper bound for stochastic per-batch volume-point sampling "
+            "(see --vol-points-min). Both bounds inclusive."
+        ),
+        "vol_points_epoch_repeat": (
+            "Repeat factor for the train sampler (PR #1061). When >1, the "
+            "DistributedSampler is wrapped so each case is visited "
+            "vol_points_epoch_repeat times per epoch with a distinct shuffle "
+            "for each pass; combined with --vol-points-min/--vol-points-max "
+            "and train_random sampling mode, every visit draws a fresh "
+            "stochastic n_vol and a fresh random point subsample. Lets a "
+            "stochastic-vol-points run step-match a SOTA baseline whose "
+            "curriculum chunks the loader at a smaller max_volume_points. "
+            "Default 1 (no expansion)."
         ),
         "use_gradnorm": (
             "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
@@ -659,6 +691,121 @@ def vol_points_for_epoch(
     return current
 
 
+def draw_stochastic_vol_points(
+    vol_points_min: int,
+    vol_points_max: int,
+    state,
+    device: torch.device,
+) -> int:
+    """Sample n_vol ~ Uniform[vol_points_min, vol_points_max] (inclusive).
+
+    Drawn on rank 0 and broadcast to every rank so the global batch shares
+    a single query count for each optimizer step (PR #1061).
+    """
+
+    n_vol_tensor = torch.empty((1,), dtype=torch.long, device=device)
+    if (not state.enabled) or state.is_main:
+        n_vol_tensor[0] = int(
+            torch.randint(vol_points_min, vol_points_max + 1, (1,)).item()
+        )
+    if state.enabled:
+        dist.broadcast(n_vol_tensor, src=0)
+    return int(n_vol_tensor.item())
+
+
+def subsample_volume_points(batch, n_vol: int, device: torch.device):
+    """Subsample the volume tensors in a SurfaceBatch down to n_vol points.
+
+    The dataset loader provides ``vol_points_max`` points per view; this
+    helper picks a random subset of ``n_vol`` indices and trims volume_x,
+    volume_y, and volume_mask. Surface tensors are untouched. The same
+    permutation is applied to every sample in the local batch (cheap; B
+    is small) which keeps the implementation simple — the volume_mask
+    still correctly marks any sample whose true valid count was below
+    ``n_vol``.
+
+    Returns the (mutated) batch and the actual n_vol used (clamped to the
+    incoming volume sequence length).
+    """
+
+    current_n = int(batch.volume_x.shape[1])
+    n_vol = max(1, min(n_vol, current_n))
+    if n_vol >= current_n:
+        return batch, current_n
+    perm = torch.randperm(current_n, device=device)[:n_vol]
+    perm = perm.sort().values
+    batch.volume_x = batch.volume_x.index_select(1, perm).contiguous()
+    batch.volume_y = batch.volume_y.index_select(1, perm).contiguous()
+    batch.volume_mask = batch.volume_mask.index_select(1, perm).contiguous()
+    return batch, n_vol
+
+
+class RepeatedDistributedSampler:
+    """Wrap a DistributedSampler to yield each case `repeat` times per epoch.
+
+    Used to step-match a stochastic-vol-points run to a curriculum baseline:
+    the SOTA stack starts the volume-points curriculum at 16384, which the
+    loader chunks finely and so gives ~10,864 steps/epoch. Stochastic
+    vol-points needs the loader chunked at vol_points_max (65536) so it can
+    subsample down, which collapses steps/epoch to ~2,720. Setting
+    repeat=4 restores parity by iterating the base sampler `repeat` times
+    per epoch with `repeat` distinct shuffle seeds. Because the dataset is
+    in train_random mode, each visit redraws random points; the per-batch
+    Uniform[min, max] draw is also fresh on every step. Net effect: same
+    case set as the baseline, ~4x the gradient updates, independent
+    stochastic vol-point views each step.
+    """
+
+    def __init__(self, base_sampler, repeat: int):
+        if not hasattr(base_sampler, "set_epoch"):
+            raise TypeError(
+                "RepeatedDistributedSampler requires a base sampler with set_epoch()"
+            )
+        if repeat < 1:
+            raise ValueError(f"repeat must be >= 1 (got {repeat})")
+        self.base_sampler = base_sampler
+        self.repeat = int(repeat)
+        self._epoch = 0
+
+    def __iter__(self):
+        for r in range(self.repeat):
+            self.base_sampler.set_epoch(self._epoch * self.repeat + r)
+            yield from iter(self.base_sampler)
+
+    def __len__(self) -> int:
+        return self.repeat * len(self.base_sampler)
+
+    def set_epoch(self, epoch: int) -> None:
+        self._epoch = int(epoch)
+
+
+def wrap_train_loader_with_repeat(
+    config: Config,
+    train_loader: DataLoader,
+    repeat: int,
+) -> DataLoader:
+    """Rebuild the train loader with a RepeatedDistributedSampler wrapper.
+
+    Only meaningful when DDP is active and the underlying sampler is a
+    DistributedSampler; otherwise returns the loader unchanged.
+    """
+
+    if repeat <= 1:
+        return train_loader
+    base_sampler = train_loader.sampler
+    if not isinstance(base_sampler, DistributedSampler):
+        return train_loader
+    wrapped = RepeatedDistributedSampler(base_sampler, repeat=repeat)
+    return DataLoader(
+        train_loader.dataset,
+        batch_size=config.batch_size,
+        shuffle=False,
+        sampler=wrapped,
+        drop_last=True,
+        **loader_kwargs(config),
+    )
+
+
 def rebuild_train_loader_with_vol_points(
     config: Config,
     old_train_loader: DataLoader,
@@ -712,6 +859,50 @@ def main(argv: Iterable[str] | None = None) -> None:
         config = parse_args(argv)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
+        stochastic_vol_points = (
+            config.vol_points_min > 0
+            and config.vol_points_max > 0
+            and config.vol_points_max >= config.vol_points_min
+        )
+        if stochastic_vol_points and vol_points_schedule:
+            raise ValueError(
+                "--vol-points-min/--vol-points-max are mutually exclusive with "
+                "--vol-points-schedule (PR #1061)."
+            )
+        if (config.vol_points_min > 0) != (config.vol_points_max > 0):
+            raise ValueError(
+                "Both --vol-points-min and --vol-points-max must be set (>0) "
+                "to enable stochastic volume-point sampling."
+            )
+        if (
+            config.vol_points_min > 0
+            and config.vol_points_max > 0
+            and config.vol_points_max < config.vol_points_min
+        ):
+            raise ValueError(
+                f"--vol-points-max ({config.vol_points_max}) must be >= "
+                f"--vol-points-min ({config.vol_points_min})."
+            )
+        if stochastic_vol_points:
+            if config.debug:
+                # Clamp both bounds when debug mode is active so views fit.
+                config.vol_points_min = min(config.vol_points_min, 8_192)
+                config.vol_points_max = min(config.vol_points_max, 8_192)
+            # Override train_volume_points so the dataloader supplies enough
+            # points to subsample down from each batch.
+            if config.train_volume_points != config.vol_points_max:
+                config.train_volume_points = config.vol_points_max
+        if config.vol_points_epoch_repeat < 1:
+            raise ValueError(
+                f"--vol-points-epoch-repeat must be >= 1 "
+                f"(got {config.vol_points_epoch_repeat})"
+            )
+        if config.vol_points_epoch_repeat > 1 and not stochastic_vol_points:
+            raise ValueError(
+                "--vol-points-epoch-repeat > 1 only makes sense together with "
+                "--vol-points-min/--vol-points-max stochastic sampling, since "
+                "fixed-count repeats would just duplicate identical views."
+            )
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -721,6 +912,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         if state.is_main:
             ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
+            if stochastic_vol_points:
+                print(
+                    "Stochastic vol-points enabled: per-batch "
+                    f"n_vol ~ Uniform[{config.vol_points_min}, {config.vol_points_max}] "
+                    f"(train_volume_points set to {config.train_volume_points} "
+                    "so the loader provides enough points to subsample from)."
+                )
 
         if vol_points_schedule:
             initial_vol_points = vol_points_for_epoch(
@@ -737,6 +935,18 @@ def main(argv: Iterable[str] | None = None) -> None:
         current_train_vol_points = config.train_volume_points
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.vol_points_epoch_repeat > 1:
+            base_steps_per_epoch = len(train_loader)
+            train_loader = wrap_train_loader_with_repeat(
+                config, train_loader, config.vol_points_epoch_repeat
+            )
+            if state.is_main:
+                print(
+                    f"vol_points_epoch_repeat={config.vol_points_epoch_repeat}: "
+                    f"steps/epoch {base_steps_per_epoch} -> {len(train_loader)} "
+                    "(each case visited multiple times per epoch with fresh "
+                    "stochastic vol-point draws)."
+                )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -883,6 +1093,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["vol_points/stochastic_enabled"] = bool(stochastic_vol_points)
+            if stochastic_vol_points:
+                wandb.summary["vol_points/min"] = int(config.vol_points_min)
+                wandb.summary["vol_points/max"] = int(config.vol_points_max)
+            wandb.summary["vol_points/epoch_repeat"] = int(config.vol_points_epoch_repeat)
+            wandb.summary["train/steps_per_epoch"] = int(len(train_loader))
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -911,7 +1127,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         config, train_loader, desired_vol_points, state
                     )
                     current_train_vol_points = desired_vol_points
-            if isinstance(train_loader.sampler, DistributedSampler):
+            if hasattr(train_loader.sampler, "set_epoch"):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
                 state,
@@ -936,6 +1152,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                if stochastic_vol_points:
+                    n_vol_step = draw_stochastic_vol_points(
+                        config.vol_points_min,
+                        config.vol_points_max,
+                        state,
+                        device,
+                    )
+                    batch, vol_points_this_step = subsample_volume_points(
+                        batch, n_vol_step, batch.volume_x.device
+                    )
+                else:
+                    vol_points_this_step = current_train_vol_points
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1053,7 +1281,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "global_step": global_step,
                     "train/lr": current_lr,
                     "lr": current_lr,
-                    "train/vol_points": float(current_train_vol_points),
+                    "train/vol_points": float(vol_points_this_step),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
