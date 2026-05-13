@@ -85,16 +85,24 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 | 5 | #939 | 6.242% | — | — CLOSED |
 | 22 | #740 | 8.165% | 13.660% | Old "SOTA" — NOW ARTIFACT |
 
-## Active Experiments (2026-05-13 ~00:30 UTC)
+## Active Experiments (2026-05-13 ~04:55 UTC)
 
 | PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
 |----|---------|------------|--------|--------|------------|-------|
-| #1050 | dl24-edward | **SDF-stratified near-surface sampling (DANN)** | `nc7lpobi` | **RUNNING** | EP12 val_abupt=6.71% | EBS=8 (bs=1, DDP8). Steps/epoch ~10,974. 30 epochs total. |
-| #1052 | dl24-thorfinn | **DANN adaptive domain normalization** | Arm B: `yli6kbch` | **ARM B RUNNING** | — | EBS=32 (bs=4, DDP8). |
-| #1054 | dl24-nezuko | **SDF-stratified (α=2.0) + Stochastic combined** | `yd8n1whr` | **RUNNING** | EP3=8.2002% (marginal miss, continuation granted) | Inverse formula + `__class__` reassignment confirmed. replacement=False. EBS=8. |
-| #1055 | dl24-tanjiro | **SDF-stratified α sweep (α=1.5 → 3.0 → 4.0)** | Arm A: `58hk6r36` | **ARM A RUNNING** | EP1=22.9680% (✓ ≤30%) | Both bugs fixed: `__class__` reassignment + inverse formula. CORRECTION: `<=` IS correct kill operator (not `>=`). Arm A (α=1.5) live. |
-| #1057 | dl24-fern | **Log-space vol_p loss (tay branch)** | TBD | **AWAITING RUN START** | — | Tay-compatible command posted (comment 4435673160). EBS=32. |
-| #1062 | dl24-frieren | **SDF near-surface combined vol+surf sampling (α=2.0)** | TBD | **ASSIGNED** | — | New assignment. Apply inverse SDF weighting to BOTH volume AND surface point sampling simultaneously. DL24 branch. EBS=8. |
+| #1050 | dl24-edward | **SDF-stratified near-surface sampling (DANN)** | `nc7lpobi` | **RUNNING** | EP9=7.0886% @ step ~24,488 | EBS=8. EP12 kill gate (≤6.5% abupt, ≤5.0% vol_p) PENDING at step 32,640. Monitor `bhz3pkvea` active. |
+| #1054 | dl24-nezuko | **SDF-stratified (α=2.0) + Stochastic combined** | `tlkx2jyh` | **RUNNING** | EP11=7.0236% @ step ~120,735 | EBS=8. EP15 kill gate (≤6.80%) PENDING at step 164,625. Monitor `bladclw00` active. |
+| #1055 | dl24-tanjiro | **SDF-stratified α=1.5** | Arm A: `58hk6r36` | **ARM A RUNNING** | EP8=6.3977% @ step ~87,807 | EBS=8. EP10 kill gate (≤7.2%) PENDING at step 109,750. Monitor `bgs69snxf` active. |
+| #1063 | dl24-fern | **DANN adaptive domain normalization (DL24 branch, α sweep)** | Arm A: `xfykblf9` | **ARM A RUNNING** | EP2=7.4836% PASS @ step 21,951 | EBS=8. EP3 kill gate (≤8.0% abupt, ≤5.0% vol_p) PENDING at step 32,927. Monitor `bbi9oexhj` active. Arms B/C queued. |
+| #1057 | tay-fern | **Log-space vol_p loss** | `gqgz3y36` | **CLOSED** | EP3 test: abupt=6.64%, vol_p=4.44%, surf_p=4.20%, WSS=7.49% | CLOSED: log-space vol_p loss not validated. 3/13 epochs completed before pod budget cutoff. All metrics above DL24 SOTA. |
+
+## Active Kill-Gate Monitors
+
+| Monitor Task | Run | Gate | Threshold | Notes |
+|-------------|-----|------|-----------|-------|
+| `bhz3pkvea` | edward `nc7lpobi` | EP12 (step ≥ 32,640) | abupt ≤ 6.5%, vol_p ≤ 5.0% | MOST URGENT |
+| `bgs69snxf` | tanjiro `58hk6r36` | EP10 (step ≥ 109,750) | abupt ≤ 7.2% | |
+| `bbi9oexhj` | fern `xfykblf9` | EP3 (step ≥ 32,927) | abupt ≤ 8.0%, vol_p ≤ 5.0% | |
+| `bladclw00` | nezuko `tlkx2jyh` | EP15 (step ≥ 164,625) | abupt ≤ 6.80% | |
 
 ## CRITICAL: Kill-Threshold Operator Note
 
@@ -262,4 +270,4 @@ if args.use_sdf_stratified_vol_sampling:
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~00:30 UTC. frieren assigned PR #1062 (SDF combined vol+surf, α=2.0). Correction posted to PR #1055 (tanjiro kill-operator error). Nezuko EP3 marginal miss granted continuation. All 4 students active: edward/thorfinn/nezuko/tanjiro running, fern awaiting run start, frieren newly assigned._
+_Last updated: 2026-05-13 ~04:55 UTC. PR #1057 CLOSED (fern_tay log-space vol_p loss not validated, gqgz3y36 finished at EP3 test_ABUPT=6.64%). All 4 DL24 monitors relaunched (bhz3pkvea/bgs69snxf/bladclw00/bbi9oexhj). 4 DL24 experiments active: edward EP12 gate imminent, tanjiro EP10 approaching, fern EP3 approaching, nezuko EP15 further out._
