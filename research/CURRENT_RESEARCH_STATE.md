@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~00:30 UTC
+- 2026-05-13 ~07:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -78,126 +78,34 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 
 | Rank | PR | test_ABUPT | test_vol_p | Notes |
 |------|----|------------|------------|-------|
-| 1 | **#972** | **5.844%** | 3.643% | Uniform sampling (monkey-patch no-op) — CLOSED |
+| 1 | #972 | 5.844% | 3.643% | Uniform (monkey-patch no-op) — CLOSED |
 | 2 | #968 | 5.986% | 3.957% | Stochastic vol subsampling — CLOSED |
-| 3 | #880 | 6.010% | 4.501% | — CLOSED |
-| 4 | #958 | 6.107% | 3.818% | — CLOSED |
-| 5 | #939 | 6.242% | — | — CLOSED |
-| 22 | #740 | 8.165% | 13.660% | Old "SOTA" — NOW ARTIFACT |
+| 3 | #880 | 6.010% | 4.501% | CLOSED |
+| 4 | #958 | 6.107% | 3.818% | CLOSED |
+| 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~04:55 UTC)
+## Active Experiments (2026-05-13 ~07:00 UTC)
 
-| PR | Student | Hypothesis | Run ID | Status | Latest Val | Notes |
-|----|---------|------------|--------|--------|------------|-------|
-| #1050 | dl24-edward | **SDF-stratified near-surface sampling (DANN)** | `nc7lpobi` | **RUNNING** | EP9=7.0886% @ step ~24,488 | EBS=8. EP12 kill gate (≤6.5% abupt, ≤5.0% vol_p) PENDING at step 32,640. Monitor `bhz3pkvea` active. |
-| #1054 | dl24-nezuko | **SDF-stratified (α=2.0) + Stochastic combined** | `tlkx2jyh` | **RUNNING** | EP11=7.0236% @ step ~120,735 | EBS=8. EP15 kill gate (≤6.80%) PENDING at step 164,625. Monitor `bladclw00` active. |
-| #1055 | dl24-tanjiro | **SDF-stratified α=1.5** | Arm A: `58hk6r36` | **ARM A RUNNING** | EP8=6.3977% @ step ~87,807 | EBS=8. EP10 kill gate (≤7.2%) PENDING at step 109,750. Monitor `bgs69snxf` active. |
-| #1063 | dl24-fern | **DANN adaptive domain normalization (DL24 branch, α sweep)** | Arm A: `xfykblf9` | **ARM A RUNNING** | EP2=7.4836% PASS @ step 21,951 | EBS=8. EP3 kill gate (≤8.0% abupt, ≤5.0% vol_p) PENDING at step 32,927. Monitor `bbi9oexhj` active. Arms B/C queued. |
-| #1057 | tay-fern | **Log-space vol_p loss** | `gqgz3y36` | **CLOSED** | EP3 test: abupt=6.64%, vol_p=4.44%, surf_p=4.20%, WSS=7.49% | CLOSED: log-space vol_p loss not validated. 3/13 epochs completed before pod budget cutoff. All metrics above DL24 SOTA. |
+| Student | PR | Hypothesis | Status |
+|---------|-----|-----------|--------|
+| tanjiro | #1055 | SDF near-surface sampling α=1.5 (corrected patch) | EP11 PASS ✓ (6.388%), EP15 gate (≤6.80%) approaching; MERGE CONFLICT |
+| nezuko | #1072 | SDF near-surface sampling α=0.5 (corrected patch, softest regime) | JUST ASSIGNED — awaiting start |
+| frieren | #1070 | Combined vol+surf SDF weighting | Awaiting start (dup #1069 closed) |
+| fern | #1063 | [active experiment] | EP2 PASS ✓ (7.4836%), EP3 approaching |
+| edward | #1050 | [active experiment] | EP9=7.0886%, EP12 gate (≤6.5%/≤5.0% vol_p) approaching |
 
-## Active Kill-Gate Monitors
+**PR #1054 nezuko KILLED** — EP15 FAIL: val_abupt=6.9264% vs gate ≤6.80%. Confirmed dead at α=2.0 near-surface SDF.
 
-| Monitor Task | Run | Gate | Threshold | Notes |
-|-------------|-----|------|-----------|-------|
-| `bhz3pkvea` | edward `nc7lpobi` | EP12 (step ≥ 32,640) | abupt ≤ 6.5%, vol_p ≤ 5.0% | MOST URGENT |
-| `bgs69snxf` | tanjiro `58hk6r36` | EP10 (step ≥ 109,750) | abupt ≤ 7.2% | |
-| `bbi9oexhj` | fern `xfykblf9` | EP3 (step ≥ 32,927) | abupt ≤ 8.0%, vol_p ≤ 5.0% | |
-| `bladclw00` | nezuko `tlkx2jyh` | EP15 (step ≥ 164,625) | abupt ≤ 6.80% | |
-
-## CRITICAL: Kill-Threshold Operator Note
-
-**For DL24-branch students (nezuko, tanjiro, frieren):**
-The correct operator is `<=` as written in the kill-threshold string. The harness `passes()` function returns `True` when `observed <= threshold`; it kills when `not passes()` (i.e., metric still too high). `<=` means "pass/keep if metric is at or below threshold."
-
-**For tay-branch students (fern) with EBS=32:**
-Step-epoch mapping: 87,794 ÷ 32 = 2,743 steps/epoch.
-
-**Step-to-epoch mapping (EBS=8, bs=1, DDP8):** 87,794 ÷ 8 = 10,975 steps/epoch
-- EP1=10,975, EP2=21,950, EP3=32,925, EP5=54,875, EP10=109,750, EP15=164,625, EP20=219,500, EP25=274,375, EP30=329,250
-
-**Kill gates for DL24 EBS=8:**
-`10975:val_abupt<=30,21950:val_abupt<=16,32925:val_abupt<=8,54875:val_abupt<=7.5,109750:val_abupt<=7.2,164625:val_abupt<=6.80,219500:val_abupt<=6.70,274375:val_abupt<=6.65,329250:val_abupt<=6.60`
-
-## Branch Architecture: tay vs DL24
-
-Two incompatible branch architectures exist. Flag sets are NOT interchangeable:
-
-**tay branch flags:**
-- `--pos-encoding-mode string_separable`
-- `--rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"`
-- `--rff-num-features 16`
-- `--vol-p-log-space-loss`
-- `--gradnorm-mode ema_proxy`
-- `--vol-points-schedule "1:65000"`
-
-**DL24 branch flags:**
-- `--model-pe string_multisigma`
-- `--pe-init-sigmas "0.25,0.5,1.0,2.0,4.0"`
-- `--model-layers 6`
-- `--batch-size 1`
-
-**Never mix flags across branches.** Sending DL24 flags to tay-branch students causes `unrecognized arguments` errors.
-
-## Canonical Corrected SDF Monkey-Patch (DL24 branch)
-
-```python
-if args.use_sdf_stratified_vol_sampling:
-    _ALPHA = args.sdf_stratified_alpha
-    _N_VOL = args.train_volume_points
-
-    class _SDFStratifiedDataset(type(train_dataset)):
-        def __getitem__(self, idx):
-            view = self.views[idx]
-            counts = self.store.case_point_counts(view.case_id)
-            surface_idx = self._indices(
-                counts["n_surface"], self.max_surface_points, view,
-                group_view_count=view.surface_view_count,
-            )
-            case = self.store.load_case(
-                view.case_id,
-                surface_rows=None if surface_idx is None else surface_idx.numpy(),
-                volume_rows=None,
-            )
-            n_total = case.volume_x.shape[0]
-            n_sample = min(self._sdf_n_vol, n_total)
-            sdf_vals = case.volume_x[:, 3].abs()
-            weights = 1.0 / (1.0 + self._sdf_alpha * sdf_vals)  # INVERSE = near-surface
-            vol_idx = torch.multinomial(weights, n_sample, replacement=False)
-            vol_idx = vol_idx.sort().values
-            from data.loader import DrivAerMLCase
-            return DrivAerMLCase(
-                case_id=case.case_id,
-                surface_x=case.surface_x, surface_y=case.surface_y,
-                volume_x=case.volume_x[vol_idx], volume_y=case.volume_y[vol_idx],
-                metadata={},
-            )
-
-    train_dataset._sdf_alpha = _ALPHA
-    train_dataset._sdf_n_vol = _N_VOL
-    train_dataset.__class__ = _SDFStratifiedDataset
-    assert type(train_dataset).__name__ == '_SDFStratifiedDataset', 'SDF patch not active'
-    print(f'[SDF] inverse near-surface vol sampling enabled: alpha={_ALPHA}, n_vol={_N_VOL}')
-```
-
-**THREE required elements:**
-1. `__class__` reassignment (NOT `types.MethodType` — that's a Python dunder no-op)
-2. Inverse formula `1/(1+α·|sdf|)` (NOT `1+α·|sdf|` — that upweights far-field)
-3. `replacement=False` in `torch.multinomial` (prevents duplicate point sampling)
-
-## Key Insights (Post-Artifact-Resolution)
-
-1. **The val→test vol_p gap was entirely artificial.** Under `rawcanon_20260511`, test_vol_p tracks val_vol_p closely (~3.6–4.0% range).
-2. **PR #972 "SDF-stratified" = UNIFORM sampling.** The monkey-patch was a Python dunder resolution no-op. All top-3 corrected-split results used uniform sampling.
-3. **First true SDF near-surface experiment is nezuko (#1054).** Run `yd8n1whr` live with correct inverse formula + `__class__` reassignment + `replacement=False`. This is a virgin experimental axis.
-4. **Stochastic vol subsampling (PR #968) is independently confirmed #2.** Fresh random draw every batch is a real technique. test_abupt=5.986%.
-5. **Near-surface SDF hypothesis is ESSENTIALLY UNTESTED until now.** Given that PR #972's apparent SOTA was actually uniform, true near-surface SDF emphasis may push vol_p well below 3.643%.
-6. **frieren is now assigned PR #1062**: combined vol+surf SDF weighting — novel axis not tested by any other student.
+**SDF α sweep status:**
+- α=0.5 → nezuko PR #1072 (just assigned — softest, α < 1.0 regime, untested)
+- α=1.5 → tanjiro PR #1055 (EP11 PASS, continuing)
+- α=2.0 → nezuko PR #1054 (EP15 FAIL, KILLED — too aggressive)
 
 ## Tier 1 Follow-Ups (Current Priority)
 
-1. **True near-surface SDF sampling vol-only** — nezuko (#1054) `yd8n1whr` and tanjiro (#1055) Arm A `58hk6r36`. Primary open question.
-2. **Combined vol+surf SDF weighting** — frieren (#1062). Novel axis.
-3. **Log-space vol_p loss** — fern (#1057) on tay branch. Direct attack on primary metric.
+1. **True near-surface SDF sampling vol-only** — nezuko (#1072, α=0.5) and tanjiro (#1055, α=1.5). Primary open question — true SDF near-surface emphasis has NEVER run successfully.
+2. **Combined vol+surf SDF weighting** — frieren (#1070). Novel axis: apply SDF weighting to surface points as well.
+3. **α=1.0 SDF after #1072 and #1055 results** — the midpoint of the α sweep. Only warranted once we understand α=0.5 and α=1.5 shape.
 
 ## Tier 2 Follow-Ups (After Tier 1 Results)
 
@@ -205,6 +113,7 @@ if args.use_sdf_stratified_vol_sampling:
 5. **Re-run vol-token LN (PR #1025 config) from scratch on corrected split** — showed val_vol_p=3.547% on old dataset; needs clean re-run.
 6. **WD=0.005 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
 7. **EMA decay=0.999 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
+8. **Stochastic vol subsampling combined with SDF weighting** — PR #968 confirmed rank 2 on corrected split; combining with true SDF near-surface emphasis has not been attempted.
 
 ## Gate Schedule
 
@@ -258,6 +167,7 @@ if args.use_sdf_stratified_vol_sampling:
 - DropPath regularization (PR #987): EP5 gate FAIL
 - Lookahead Lion (PR #998): EP5 FAIL
 - Online focal vol reweighting (#1026, #1033): scale=3 ceiling degeneration — EMA ratio approach AXIS CLOSED
+- SDF near-surface sampling α=2.0 (nezuko PR #1054): EP15 FAIL (6.9264% > 6.80%) — too aggressive near-surface concentration
 
 ## Removed from Dead Ends (RETRACTED — Dataset Artifact)
 
@@ -270,4 +180,4 @@ if args.use_sdf_stratified_vol_sampling:
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~04:55 UTC. PR #1057 CLOSED (fern_tay log-space vol_p loss not validated, gqgz3y36 finished at EP3 test_ABUPT=6.64%). All 4 DL24 monitors relaunched (bhz3pkvea/bgs69snxf/bladclw00/bbi9oexhj). 4 DL24 experiments active: edward EP12 gate imminent, tanjiro EP10 approaching, fern EP3 approaching, nezuko EP15 further out._
+_Last updated: 2026-05-13 ~07:00 UTC. PR #1054 nezuko KILLED EP15 FAIL (6.9264% > 6.80%). PR #1072 assigned to nezuko (SDF α=0.5 near-surface, corrected patch + inverse formula). SDF α sweep: α=0.5 nezuko #1072 (new), α=1.5 tanjiro #1055 (EP11 PASS), α=2.0 DEAD._
