@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~21:15 UTC
+- 2026-05-13 ~23:05 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -121,11 +121,11 @@ PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abu
 
 ## Next Pending Gates (in order)
 
-1. **Tanjiro EP1** (EMA new) — ~step 10,975, threshold ≤30%. Currently step ~2,900 — ~6h away.
-2. **Frieren EP3** — ~step 32,925, threshold ≤8%. Currently step 23,049 — ~2.7h away.
-3. **Nezuko EP20** — ~step 219,500, threshold ≤6.70%. Currently best 6.29% — PASSES on best.
-4. **Fern EP25** — ~step 274,375, threshold ≤6.65%. Currently best 6.2647% (EP11) — PASSES on best.
-5. **Fern EP30 (terminal)** — ~step 329,250. Expected ~02:30Z May 14. First SDF-wave test harvest.
+1. **Frieren EP3/EP5** — frieren is several EPs in by now; next gates compress as run accelerates.
+2. **Tanjiro EP1/EP2** (EMA new) — ~2-3h away.
+3. **Nezuko EP25** — ~step 274,375, threshold ≤6.65%. Currently best 6.290% (EP10) — PASSES on best.
+4. **Fern EP30 (terminal)** — ~step 329,250. Expected ~02:30Z May 14. Test eval from EP11 best checkpoint is the deliverable.
+5. **Nezuko EP30 (terminal)** — ~step 329,250. Expected ~10:30Z May 14. Test eval from EP10 best checkpoint is the deliverable.
 
 ## Gate Schedule
 
@@ -192,4 +192,4 @@ PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abu
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~21:15 UTC. PR #1087 (EMA warm-start fix backport) MERGED at 21:11Z — advisor branch now has correct EMA implementation; PR #1086 already inherits it. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP22.5 plateau confirmed: best=6.265% at EP11, regressing since (vol_p +0.41pp from EP11→EP22). **Strategic conclusion: SDF wave is not beating uniform-sampling SOTA.** When SDF runs terminate, pivot to orthogonal levers (EMA results from #1086, GradNorm+SDF composition, optimizer variants from RESEARCH_IDEAS). Next idle gets H1 from RESEARCH_IDEAS_2026-05-13_19:30.md._
+_Last updated: 2026-05-13 ~23:05 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP25.4 — EP25 gate PASS at 6.371%, val_vol_p drifting (4.14% EP11 → 4.67% EP25, +0.53pp). Nezuko #1072 EP19 — EP20 gate PASS at 6.314%, vol_p drifting (4.23% EP10 → 4.42% EP19, +0.19pp). Both fern and nezuko show identical plateau-regression patterns; best checkpoints at EP10/EP11. **Test eval from BEST checkpoint is mandatory** for the merge decision — terminal-epoch is worse. Strategic conclusion remains: SDF concentration tuning not beating uniform-sampling SOTA. Pivot levers ready for next idle: EMA (in-flight #1086), GradNorm+SDF composition (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
