@@ -98,7 +98,36 @@ def parse_rff_init_sigmas(raw: object) -> list[float] | None:
     raise ValueError(f"Unsupported rff_init_sigmas value: {raw!r}")
 
 
-def build_model_from_config(config: dict) -> SurfaceTransolver:
+def resolve_pos_encoding_mode(config: dict) -> str:
+    """Normalize the PE mode across config-key variants used by historical runs.
+
+    Newer configs use ``pos_encoding_mode`` (``sincos`` | ``string_separable``).
+    Earlier multi-sigma runs (PR #968/#972) used ``model_pe`` with the value
+    ``string_multisigma``. Map both to the canonical key the model accepts.
+    """
+
+    mode = config.get("pos_encoding_mode")
+    if mode is not None:
+        return str(mode)
+    legacy = config.get("model_pe")
+    if legacy is not None:
+        return str(legacy)
+    return "sincos"
+
+
+def build_model_from_config(
+    config: dict,
+    *,
+    use_aux_decoder_heads: bool = False,
+) -> SurfaceTransolver:
+    rff_num_features = int(config.get("rff_num_features", 0))
+    # Historical configs that used MultiSigmaStringPosEmbed parked the feature
+    # count under ``pe_num_features``; fall back to it when rff_num_features=0.
+    if rff_num_features == 0:
+        rff_num_features = int(config.get("pe_num_features", 0))
+    init_sigmas = parse_rff_init_sigmas(
+        config.get("rff_init_sigmas") or config.get("pe_init_sigmas")
+    )
     return SurfaceTransolver(
         n_layers=int(config.get("model_layers", 3)),
         n_hidden=int(config.get("model_hidden_dim", 192)),
@@ -106,12 +135,13 @@ def build_model_from_config(config: dict) -> SurfaceTransolver:
         n_head=int(config.get("model_heads", 3)),
         mlp_ratio=int(config.get("model_mlp_ratio", 4)),
         slice_num=int(config.get("model_slices", 96)),
-        rff_num_features=int(config.get("rff_num_features", 0)),
+        rff_num_features=rff_num_features,
         rff_sigma=float(config.get("rff_sigma", 1.0)),
-        rff_init_sigmas=parse_rff_init_sigmas(config.get("rff_init_sigmas", None)),
-        pos_encoding_mode=str(config.get("pos_encoding_mode", "sincos")),
+        rff_init_sigmas=init_sigmas,
+        pos_encoding_mode=resolve_pos_encoding_mode(config),
         use_qk_norm=bool(config.get("use_qk_norm", False)),
         use_surf_to_vol_xattn=bool(config.get("use_surf_to_vol_xattn", False)),
+        use_aux_decoder_heads=use_aux_decoder_heads,
     )
 
 
@@ -126,11 +156,16 @@ def load_member(
     checkpoint_path = artifact_dir / "checkpoint.pt"
     with config_path.open("r") as fh:
         config = yaml.safe_load(fh)
-    model = build_model_from_config(config).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if "model" not in checkpoint:
         raise RuntimeError(f"Checkpoint for run {run_id} is missing 'model' state dict")
     state_dict = {k: v for k, v in checkpoint["model"].items()}
+    # PR #958 used Sequential heads (e.g. ``surface_out.0.weight``) — not
+    # recorded in config, so detect it from the state dict directly.
+    use_aux_decoder_heads = "surface_out.0.weight" in state_dict
+    model = build_model_from_config(
+        config, use_aux_decoder_heads=use_aux_decoder_heads
+    ).to(device)
     missing, unexpected = model.load_state_dict(state_dict, strict=True)
     if missing or unexpected:
         raise RuntimeError(

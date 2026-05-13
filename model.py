@@ -136,6 +136,44 @@ class StringSeparableEncoding(nn.Module):
         return enc.flatten(start_dim=-2)
 
 
+class MultiSigmaStringPosEmbed(nn.Module):
+    """Drop-in replacement for ContinuousSincosEmbed using multi-sigma STRING.
+
+    Wraps StringSeparableEncoding (per-axis learnable log-frequency basis with
+    multi-sigma init) plus a linear projection to ``hidden_dim`` so the
+    surrounding model sees the same [B, N, hidden_dim] interface.
+
+    Used only by ensemble_eval.py to load PR #968 / #972 checkpoints
+    (model_pe=string_multisigma); not exercised by the current trainer.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        input_dim: int,
+        num_features: int = 16,
+        init_sigmas: list[float] | None = None,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
+        self.num_features = num_features
+        self.init_sigmas = list(init_sigmas) if init_sigmas else None
+        self.string = StringSeparableEncoding(
+            in_dim=input_dim,
+            num_features=num_features,
+            init_sigmas=self.init_sigmas,
+        )
+        self.project = nn.Linear(self.string.output_dim, hidden_dim)
+        nn.init.trunc_normal_(self.project.weight, std=0.02)
+        nn.init.zeros_(self.project.bias)
+
+    def forward(self, coords: torch.Tensor) -> torch.Tensor:
+        coords_f = coords.float()
+        enc = self.string(coords_f)
+        return self.project(enc)
+
+
 class ContinuousSincosEmbed(nn.Module):
     def __init__(self, hidden_dim: int, input_dim: int, max_wavelength: int = 10_000):
         super().__init__()
@@ -343,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_aux_decoder_heads: bool = True,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -356,10 +395,24 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_aux_decoder_heads = use_aux_decoder_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
-        if pos_encoding_mode == "string_separable":
+        if pos_encoding_mode == "string_multisigma":
+            string_sep_features = rff_num_features if rff_num_features > 0 else 16
+            self.pos_embed = MultiSigmaStringPosEmbed(
+                hidden_dim=n_hidden,
+                input_dim=space_dim,
+                num_features=string_sep_features,
+                init_sigmas=self.rff_init_sigmas,
+            )
+            self.surface_string_sep = None
+            self.volume_string_sep = None
+            self.surface_rff = None
+            self.volume_rff = None
+            rff_out_dim = 0
+        elif pos_encoding_mode == "string_separable":
             # STRING-separable: learnable per-axis log_freq + phase,
             # replaces fixed isotropic Gaussian RFF.
             # num_features defaults to rff_num_features if provided, else 32.
@@ -421,24 +474,30 @@ class SurfaceTransolver(nn.Module):
             use_qk_norm=use_qk_norm,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        # PR #958: dedicated vol_p auxiliary decoder head.
-        # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
-        # Volume head is a deeper 3-layer MLP for the harder vol_p task —
-        # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
-        self.surface_out = nn.Sequential(
-            nn.Linear(n_hidden, n_hidden),
-            nn.SiLU(),
-            nn.Linear(n_hidden, self.surface_output_dim),
-        )
-        self.surface_out.apply(_init_linear)
-        self.volume_out = nn.Sequential(
-            nn.Linear(n_hidden, n_hidden // 2),
-            nn.SiLU(),
-            nn.Linear(n_hidden // 2, n_hidden // 4),
-            nn.SiLU(),
-            nn.Linear(n_hidden // 4, self.volume_output_dim),
-        )
-        self.volume_out.apply(_init_linear)
+        if use_aux_decoder_heads:
+            # PR #958: dedicated vol_p auxiliary decoder head.
+            # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
+            # Volume head is a deeper 3-layer MLP for the harder vol_p task —
+            # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
+            # Default for current training; older checkpoints (PR #823 era,
+            # e.g. ghh0s4ne) set this False to load LinearProjection heads.
+            self.surface_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden),
+                nn.SiLU(),
+                nn.Linear(n_hidden, self.surface_output_dim),
+            )
+            self.surface_out.apply(_init_linear)
+            self.volume_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden // 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 2, n_hidden // 4),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 4, self.volume_output_dim),
+            )
+            self.volume_out.apply(_init_linear)
+        else:
+            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
