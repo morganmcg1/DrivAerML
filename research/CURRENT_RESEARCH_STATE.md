@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~08:00 UTC
+- 2026-05-13 ~14:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -19,47 +19,16 @@ The persistent +7–8pp val→test volume pressure gap reported across all prior
 
 **Corrected eval parameters:** `eval_surface_points=65536`, `eval_volume_points=65536` (chunk sizes, not caps), 34 val cases / 7,295 views, 50 test cases / 11,091 views.
 
-**Impact on prior results:**
-- PRs #972 and #968, previously labeled FALSIFIED, are the **TOP TWO PERFORMERS** on the corrected split.
-- PR #740 (old SOTA at 7.5195%) re-evaluates to 8.165% — **rank 22** under the corrected split.
-- All "AXIS FULLY CLOSED" labels on sampling strategies are **RETRACTED**.
-- The 15+ "falsified" interventions were not tested on a valid dataset split.
-
 ## CRITICAL DISCOVERY (2026-05-12 ~22:00 UTC): SDF Monkey-Patch Was a No-Op
 
 **PR #972 did NOT implement SDF-stratified sampling. It used uniform sampling.**
 
 Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 and copied to PRs #1054 and #1055:
 
-### Bug 1: Python dunder method resolution no-op
-`types.MethodType(__getitem__, dataset)` installs the function in the **instance dict**. Python resolves dunder methods (`__getitem__`) via **type MRO**, not instance dict. PyTorch DataLoader subscript access `dataset[idx]` calls the **class's** `__getitem__`, not the instance attribute. The monkey-patch is silently ignored.
+- **Bug 1 (Python dunder no-op)**: `types.MethodType(__getitem__, dataset)` installs in instance dict. Python resolves dunders via type MRO, not instance dict. Fix: use `__class__` reassignment to a dynamically-created subclass.
+- **Bug 2 (formula inversion)**: Original formula `weight = 1.0 + α * |sdf|` upweights far-field. Correct: `weight = 1.0 / (1.0 + α * |sdf|)` (upweights near-surface, sdf≈0).
 
-**Fix**: Dynamically create a subclass and reassign `__class__`:
-```python
-class _SDFStratifiedDataset(type(train_dataset)):
-    def __getitem__(self, idx):
-        ...
-train_dataset._sdf_alpha = args.sdf_stratified_alpha
-train_dataset._sdf_n_vol = args.train_volume_points
-train_dataset.__class__ = _SDFStratifiedDataset
-assert type(train_dataset).__name__ == '_SDFStratifiedDataset', 'SDF patch not active'
-```
-
-### Bug 2: SDF formula direction inverted
-`volume_sdf.npy` stores **unnormalized** SDF values with `max(|sdf|) ≈ 80m` per case. The original formula:
-```
-weight = 1.0 + α * |sdf[i]|
-```
-...upweights **far-field** points (weight ≈ 321 at α=4.0 and |sdf|=80), not near-surface. This is opposite to the stated hypothesis.
-
-**Correct near-surface emphasis formula:**
-```
-weight = 1.0 / (1.0 + α * |sdf|)
-```
-Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
-
-### Implication for SOTA table
-**ALL three top corrected-split results used uniform sampling.** No true SDF-stratified experiment has run to date. The SDF-stratified hypothesis remains (essentially) untested. This is an opportunity, not a setback.
+**ALL prior "SDF" experiments used uniform sampling. True SDF near-surface emphasis has never been tested until the DL24 branch (PRs #1054+).**
 
 ## Wave SOTA (Corrected Split — rawcanon_20260511)
 
@@ -74,6 +43,10 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 
 > Note: PR #972 used uniform sampling (monkey-patch was a no-op). This is the baseline to beat.
 
+**GradNorm v4 partial SOTA beat (PR #1058 arm `ysycg6xc`, terminal=false pending_arms=true):**
+- val_abupt=6.1855%, test_vol_p=**3.6328%** (BEATS SOTA by 0.010pp), test_abupt=5.9950%
+- This arm is NOT terminal; v5b arm still running. Final merge decision pending.
+
 **Top 5 on corrected split:**
 
 | Rank | PR | test_ABUPT | test_vol_p | Notes |
@@ -84,38 +57,93 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~08:00 UTC)
+## Active Experiments (2026-05-13 ~14:30 UTC)
 
-| Student | PR | Hypothesis | Status |
-|---------|-----|-----------|--------|
-| fern | #1063 | SDF near-surface sampling α=0.25 (corrected patch + inverse formula) | step=141,746, abupt=6.275%, EP1–EP15 all PASS ✓. EP20 gate (≤6.70%) at step 219,500 (~88 min) |
-| nezuko | #1072 | SDF near-surface sampling α=0.5 (corrected patch + inverse formula) | step=63,606, abupt=6.435%, EP1–EP5 all PASS ✓. EP10 gate (≤7.2%) at step 109,750 (~175 min) |
-| tanjiro | #1076 | SDF near-surface sampling α=3.0 (corrected patch + inverse formula) | step=15,261, abupt=24.11%, EP1 PASS ✓ (24.11% ≤30%). EP2 gate (≤16%) at step 21,950 (~26 min) — AT RISK (8pp above threshold) |
-| frieren | #1077 | SDF near-surface sampling α=1.0 (corrected patch + inverse formula) | JUST ASSIGNED — awaiting start |
+### Pod Assignments
 
-**CLOSED this cycle:**
-- PR #1074 frieren: WSS surface curvature features κ_H/κ_G — CLOSED (frieren re-assigned to α=1.0 SDF sweep)
-- PR #1055 tanjiro: SDF near-surface α=1.5 (buggy patch, EP11 PASS) — CLOSED; tanjiro re-assigned to α=3.0
+| Student | PR | Hypothesis | W&B Run | Current Step |
+|---------|-----|-----------|---------|-------------|
+| tanjiro | #1076 | SDF near-surface α=3.0 (corrected patch + inverse formula) | `ed01yw3z` | ~23,400 |
+| nezuko | #1072 | SDF near-surface α=0.5 (corrected patch + inverse formula) | `yp383yq2` | ~72,700 |
+| fern | #1063 | SDF near-surface α=0.25 (corrected patch + inverse formula) | `xfykblf9` | ~150,000 |
+| frieren | #1058 | GradNorm v5b: α=1.5, gradnorm_mode=ema_proxy | `4uyc5dyl` | ~94,900 |
 
-**SDF α sweep status (corrected patch + inverse formula — ALL first true runs):**
-- α=0.25 → fern PR #1063 (EP15+ PASS ✓, continuing)
-- α=0.5 → nezuko PR #1072 (EP5+ PASS ✓, continuing)
-- α=1.0 → frieren PR #1077 (JUST ASSIGNED)
-- α=3.0 → tanjiro PR #1076 (EP2 gate AT RISK — may be too aggressive)
+### Val Checkpoint Histories (abupt_axis_mean_rel_l2_pct)
 
-## Tier 1 Follow-Ups (Current Priority)
+**Tanjiro — PR #1076 — SDF α=3.0 — run `ed01yw3z`:**
 
-1. **True near-surface SDF sampling α sweep** — fern (#1063, α=0.25), nezuko (#1072, α=0.5), frieren (#1077, α=1.0), tanjiro (#1076, α=3.0). Core open question — no valid SDF near-surface run has completed. α=0.25 and α=0.5 look healthy. α=3.0 is at risk at EP2 gate.
-2. **SDF-stratified + dedicated vol decoder (6L vol tower)** — combine near-surface SDF sampling with independent vol tower architecture. Assign after first α results are in.
-3. **Combined vol+surf SDF weighting** — assign to next idle student after α sweep results.
+| Gate | Step | Val abupt | Status |
+|------|------|-----------|--------|
+| EP1 | 10,975 | 24.11% | PASS (≤30%) |
+| EP2 | 21,950 | **8.885%** | PASS (≤16%) |
+| EP3 | 32,925 | — | **PENDING** (threshold ≤8.0%) |
 
-## Tier 2 Follow-Ups (After Tier 1 Results)
+Note: massive EP1→EP2 drop (24.11% → 8.89%). α=3.0 converging aggressively. EP3 outcome uncertain (0.89pp above threshold).
 
-4. **Re-run vol-token LN (PR #1025 config) from scratch on corrected split** — showed val_vol_p=3.547% on old dataset; needs clean re-run.
-5. **WD=0.005 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
-6. **EMA decay=0.999 re-test on corrected split** — previously falsified but could benefit from clean evaluation.
-7. **Stochastic vol subsampling combined with SDF weighting** — PR #968 confirmed rank 2 on corrected split; combining with true SDF near-surface emphasis has not been attempted.
-8. **α=1.5–2.5 range SDF** — the α sweep will reveal whether α=1.0 or α=0.25/0.5 is optimal; α=1.5–2.5 may be worth exploring once the current sweep completes (α=2.0 DEAD under old patch).
+**Nezuko — PR #1072 — SDF α=0.5 — run `yp383yq2`:**
+
+| Gate | Step | Val abupt | Status |
+|------|------|-----------|--------|
+| EP1 | 10,975 | 21.54% | PASS (≤30%) |
+| EP2 | 21,950 | 7.29% | PASS (≤16%) |
+| EP3 | 32,925 | 6.67% | PASS (≤8%) |
+| EP5 | 54,875 | 6.43% | PASS (≤7.5%) |
+| EP6 | 65,850 | 6.42% | — |
+| EP10 | 109,750 | — | **PENDING** (threshold ≤7.2%) |
+
+**Fern — PR #1063 — SDF α=0.25 — run `xfykblf9`:**
+
+| Gate | Step | Val abupt | Status |
+|------|------|-----------|--------|
+| EP1 | 10,975 | 20.94% | PASS (≤30%) |
+| EP2 | 21,950 | 7.48% | PASS (≤16%) |
+| EP3 | 32,925 | 6.62% | PASS (≤8%) |
+| EP5 | 54,875 | 6.35% | PASS (≤7.5%) |
+| EP8 | 87,800 | 6.31% | — |
+| EP9 | 98,775 | 6.27% | — |
+| EP10 | 109,750 | 6.28% | PASS (≤7.2%) |
+| EP11 | 120,725 | 6.26% | — |
+| EP12 | 131,700 | 6.27% | — |
+| EP13 | 142,675 | 6.31% | — |
+| EP15 | 164,625 | — | **PENDING** (threshold ≤6.80%) |
+
+**Frieren — PR #1058 — GradNorm v5b α=1.5 — run `4uyc5dyl`:**
+
+| Gate | Step | Val abupt | Status |
+|------|------|-----------|--------|
+| EP1 | 10,974 | 19.13% | PASS (≤30%) |
+| EP2 | 21,948 | 7.53% | PASS (≤16%) |
+| EP3 | 32,922 | 6.77% | PASS (≤8%) |
+| EP5 | 54,870 | 6.42% | PASS (≤7.5%) |
+| EP7 | 76,818 | 6.26% | — |
+| EP8 | 87,792 | 6.23% | — |
+| EP10 | 109,750 | — | **PENDING** (threshold ≤7.2%) |
+
+### SDF α Sweep Status
+
+| α value | Student | PR | Status |
+|---------|---------|-----|--------|
+| 0.25 | fern | #1063 | EP13 PASS (6.31%), EP15 gate PENDING |
+| 0.5 | nezuko | #1072 | EP6 PASS (6.42%), EP10 gate PENDING |
+| 1.0 | — | #1077 | **UNSTARTED** — frieren pod occupied; assign when free |
+| 3.0 | tanjiro | #1076 | EP2 PASS (8.885%), EP3 gate PENDING |
+
+### GradNorm Status
+
+- **v4 (run `ysycg6xc`)**: COMPLETED with SENPAI-RESULT terminal=false, pending_arms=true. val_abupt=6.1855%, test_vol_p=3.6328% (BEATS SOTA by 0.010pp). Waiting for v5b completion to pick best arm.
+- **v5b (run `4uyc5dyl`)**: In progress — EP8 abupt=6.233%. EP10 gate PENDING (≤7.2% at step ~109,750). On track.
+
+## Next Pending Gates (in order)
+
+1. **Tanjiro EP3** — step 32,925, threshold ≤8.0%. Current EP2=8.885% (0.89pp above). Uncertain — needs continued convergence.
+2. **Nezuko EP10** — step 109,750, threshold ≤7.2%. Current EP6=6.42%. Well on track.
+3. **Frieren GradNorm v5b EP10** — step ~109,750, threshold ≤7.2%. Current EP8=6.23%. Well on track.
+4. **Fern EP15** — step 164,625, threshold ≤6.80%. Current EP13=6.31%. Well on track.
+
+## Pending Assignments
+
+- **PR #1077 (SDF α=1.0)**: unstarted — assign to frieren pod once GradNorm v5b completes (EP10 gate ~15k steps away from frieren's current position)
+- **Post-GradNorm v5b**: Post terminal SENPAI-RESULT for PR #1058 picking best arm (v4 vs v5b), then merge if beats baseline
 
 ## Gate Schedule
 
@@ -170,7 +198,6 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 - Lookahead Lion (PR #998): EP5 FAIL
 - Online focal vol reweighting (#1026, #1033): scale=3 ceiling degeneration — EMA ratio approach AXIS CLOSED
 - SDF near-surface sampling α=2.0 (nezuko PR #1054): EP15 FAIL (6.9264% > 6.80%) — too aggressive near-surface concentration
-- SDF near-surface sampling α=3.0 (tanjiro PR #1076): EP2 gate AT RISK (step 15,261, abupt=24.11% vs ≤16% required) — likely too aggressive
 
 ## Removed from Dead Ends (RETRACTED — Dataset Artifact)
 
@@ -183,4 +210,4 @@ Surface points (sdf≈0) get weight≈1.0; far-field points get weight→0.
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~08:00 UTC. SDF α sweep underway with corrected patch + inverse formula: α=0.25 (fern EP15+ PASS), α=0.5 (nezuko EP5+ PASS), α=1.0 (frieren JUST ASSIGNED #1077), α=3.0 (tanjiro EP2 gate AT RISK #1076). PRs #1055 and #1074 CLOSED. α=3.0 likely too aggressive — monitoring EP2 gate._
+_Last updated: 2026-05-13 ~14:30 UTC. 4 active DL24 experiments: tanjiro #1076 α=3.0 EP3 PENDING (8.885% at EP2, 0.89pp above threshold), nezuko #1072 α=0.5 EP10 PENDING (6.42% at EP6), fern #1063 α=0.25 EP15 PENDING (6.31% at EP13), frieren #1058 GradNorm v5b EP10 PENDING (6.23% at EP8). PR #1077 α=1.0 unstarted (frieren pod occupied). GradNorm v4 partial SOTA beat on test_vol_p (3.6328% vs 3.643%)._
