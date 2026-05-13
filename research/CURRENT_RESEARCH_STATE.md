@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~20:25 UTC
+- 2026-05-13 ~20:42 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -55,33 +55,33 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~20:25 UTC)
+## Active Experiments (2026-05-13 ~20:42 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | Approx EP | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | NEW | Smoke pending | Just assigned — direct A/B vs fern #1063 |
-| nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP15 | EP15 gate PASSED (best 6.290%) |
-| fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | ~EP22 | EP20 gate PASSED (best 6.265%) |
-| frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP1-2 | EP1 PASSED (22.42%), EP2 running |
+| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `ugbkg660` | ~EP0.3 | Just launched (~20:30Z), no val yet |
+| nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP16 | EP15 gate PASSED (best 6.290%), slope still negative |
+| fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | ~EP22 | EP20 gate PASSED (best 6.265%), plateau persists, slope ≈ flat |
+| frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP2 | EP2 progressing, fast descent (slope −1.354/1k) |
 
 **Tanjiro PR #1076 (α=3.0) CLOSED 2026-05-13 ~20:20Z:** Killed at EP10 gate (val_abupt=7.25% > ≤7.2%). Best val_abupt=6.5012% at EP6 then drifted upward — over-concentration confirmed. α=3.0 FALSIFIED.
 
-### Val Checkpoint Snapshots (latest, 2026-05-13 ~19:30 UTC)
+### Val Checkpoint Snapshots (latest, 2026-05-13 ~20:40 UTC)
 
-| Student | PR / α | Run | Step / EP | val_abupt latest | val_abupt best | val_vol_p | val_surf_p | val_wss |
-|---------|--------|-----|-----------|-----------------:|---------------:|----------:|-----------:|--------:|
-| fern    | #1063 / 0.25 | `xfykblf9` | 230,644 (~EP21) | 6.3239% | **6.2647%** | 4.4906% | 4.0605% | 6.9574% |
-| nezuko  | #1072 / 0.5  | `yp383yq2` | 160,960 (~EP14.7) | 6.3020% | **6.2904%** | 4.2884% | 4.1072% | 6.9682% |
-| tanjiro | #1076 / 3.0  | `ed01yw3z` | 104,100 (~EP9.5) | 6.7509% | 6.5012% | 4.3635% | 4.2430% | 7.5196% |
-| frieren | #1077 / 1.0  | `m4z2gb65` | 8,508 (~EP0.8) | — | — | — | — | — |
+| Student | PR / α | Run | Step / EP | val_abupt latest | val_abupt best | Slope /1k | val_vol_p (latest) |
+|---------|--------|-----|-----------|-----------------:|---------------:|----------:|-----------------:|
+| fern    | #1063 / 0.25 | `xfykblf9` | 246,379 (~EP22.5) | 6.346% | **6.2647%** | +0.002 ⚠️ flat | ~4.5% |
+| nezuko  | #1072 / 0.5  | `yp383yq2` | 177,761 (~EP16.2) | 6.317% | **6.2904%** | −0.003 ✅ | ~4.3% |
+| tanjiro | #1086 / EMA  | `ugbkg660` | ~2,900 (~EP0.3) | — | — | — | — |
+| frieren | #1077 / 1.0  | `m4z2gb65` | 23,049 (~EP2.1) | 7.562% | **7.562%** | −1.354 ✅ | — |
 
 Notes:
-- **fern (α=0.25):** Now PAST EP20 gate window. EP20 gate ≤6.70% PASSED comfortably (best=6.2647% at EP11). Plateau persists since EP11 in the 6.26–6.32% band. Will likely terminate at EP30 or kill on plateau — needs final test harvest.
-- **nezuko (α=0.5):** Best improved from 6.341% (EP7) → **6.2904%** — best now indistinguishable from fern. EP15 gate ≤6.80% imminent (~step 164,625) — already PASSED on best. The α-sweep midpoint is now competitive with α=0.25.
-- **tanjiro (α=3.0):** EP10 gate ≤7.2% imminent (~step 109,750). Currently at 6.50% best — well within gate; aggressive α concentration may still pay off late.
-- **frieren (α=1.0):** Just launched. EP1 gate ≤30% due ~step 10,975 (~2k steps away).
+- **fern (α=0.25):** Past EP20. Best=6.2647% (EP11). Slope flat at +0.002/1k — plateau since EP11 confirmed. Run on track to terminate ~02:30Z May 14 at EP30 with terminal val_abupt ≈6.30%. Test harvest at terminal will be the **first SDF wave test metric**.
+- **nezuko (α=0.5):** Past EP15. Best=6.2904% (EP10). Still slowly improving. EP20 gate ≤6.70% at step 219,500 (~9.6h from now). Terminal expected ~10:30Z May 14.
+- **tanjiro (α=3.0 closed → EMA 0.999 new):** New A/B vs fern. Smoke run barely started; EP1 gate ~6h from now.
+- **frieren (α=1.0):** Filling in the missing α-sweep midpoint. EP2 PASS (7.562% ≤16%). Steep descent slope is healthy. EP3 gate ≤8% due ~step 32,925 (~2.7h from now).
 
 ### SDF α Sweep Status (2026-05-13 ~20:25 UTC)
 
@@ -109,10 +109,11 @@ The α-response is now mapped from both ends:
 
 ## Next Pending Gates (in order)
 
-1. **Frieren EP1** — ~step 10,975, threshold ≤30%. Currently step 8,508 — imminent (~2k steps).
-2. **Tanjiro EP10** — ~step 109,750, threshold ≤7.2%. Currently best 6.50% — PASSES on best.
-3. **Nezuko EP15** — ~step 164,625, threshold ≤6.80%. Currently best 6.29% — already PASSED on best.
-4. **Fern EP25** — ~step 274,375, threshold ≤6.65%. Currently best 6.2647% (EP11) — PASSES on best; recent epochs flat, but plateau is below the gate.
+1. **Tanjiro EP1** (EMA new) — ~step 10,975, threshold ≤30%. Currently step ~2,900 — ~6h away.
+2. **Frieren EP3** — ~step 32,925, threshold ≤8%. Currently step 23,049 — ~2.7h away.
+3. **Nezuko EP20** — ~step 219,500, threshold ≤6.70%. Currently best 6.29% — PASSES on best.
+4. **Fern EP25** — ~step 274,375, threshold ≤6.65%. Currently best 6.2647% (EP11) — PASSES on best.
+5. **Fern EP30 (terminal)** — ~step 329,250. Expected ~02:30Z May 14. First SDF-wave test harvest.
 
 ## Gate Schedule
 
@@ -179,4 +180,4 @@ The α-response is now mapped from both ends:
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~20:25 UTC. PR #1076 (tanjiro α=3.0) closed — EP10 KILL, over-concentration confirmed. Tanjiro reassigned to PR #1086 (EMA 0.999 + SDF α=0.25, A/B vs fern). 4/4 students WIP: tanjiro #1086 new-smoke, nezuko #1072 EP15 PASSED, fern #1063 EP22 plateau, frieren #1077 EP1-2. α-sweep conclusion: productive band α∈[0.25, 0.5], α≥2.0 over-concentration. Next levers: EMA (tanjiro), frieren α=1.0 data point, GradNorm+SDF composition for next idle student._
+_Last updated: 2026-05-13 ~20:42 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready. Tanjiro #1086 EMA smoke launched (`ugbkg660`); frieren #1077 α=1.0 EP2 PASS (slope −1.354/1k, healthy); nezuko #1072 EP16 best 6.290% (slope still negative); fern #1063 EP22.5 plateau at 6.265% (slope flat at +0.002/1k). Fern terminal expected ~02:30Z May 14 — first SDF-wave test harvest. Next idle student gets H1 (GradNorm + SDF composition) from RESEARCH_IDEAS_2026-05-13_19:30.md._
