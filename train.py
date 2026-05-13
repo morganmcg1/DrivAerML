@@ -132,6 +132,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -451,6 +453,64 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_sdf_stratified_vol_sampling:
+            _SDF_ALPHA = config.sdf_stratified_alpha
+            _SDF_N_VOL = config.train_volume_points
+            train_dataset = train_loader.dataset
+
+            class _SDFStratifiedDataset(type(train_dataset)):
+                def __getitem__(self, idx):
+                    view = self.views[idx]
+                    counts = self.store.case_point_counts(view.case_id)
+                    surface_idx = self._indices(
+                        counts["n_surface"],
+                        self.max_surface_points,
+                        view,
+                        group_view_count=view.surface_view_count,
+                    )
+                    case = self.store.load_case(
+                        view.case_id,
+                        surface_rows=None if surface_idx is None else surface_idx.numpy(),
+                        volume_rows=None,
+                    )
+                    n_total = case.volume_x.shape[0]
+                    n_sample = min(self._sdf_n_vol, n_total)
+                    sdf_vals = case.volume_x[:, 3].abs().float()
+                    weights = 1.0 / (1.0 + self._sdf_alpha * sdf_vals)
+                    vol_idx = torch.multinomial(weights, n_sample, replacement=False)
+                    vol_idx = vol_idx.sort().values
+                    metadata = dict(case.metadata)
+                    metadata["n_surface_full"] = int(counts["n_surface"])
+                    metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+                    metadata["surface_view_index"] = int(view.view_index)
+                    metadata["surface_view_count"] = int(view.surface_view_count)
+                    metadata["surface_sampling_mode"] = view.sampling_mode
+                    metadata["n_volume_full"] = int(n_total)
+                    metadata["n_volume_loaded"] = int(n_sample)
+                    metadata["volume_view_index"] = int(view.view_index)
+                    metadata["volume_view_count"] = int(view.volume_view_count)
+                    metadata["volume_sampling_mode"] = "sdf_stratified_inverse"
+                    metadata["joint_view_count"] = int(view.view_count)
+                    metadata["sdf_alpha"] = float(self._sdf_alpha)
+                    return type(case)(
+                        case_id=case.case_id,
+                        surface_x=case.surface_x,
+                        surface_y=case.surface_y,
+                        volume_x=case.volume_x[vol_idx],
+                        volume_y=case.volume_y[vol_idx],
+                        metadata=metadata,
+                    )
+
+            train_dataset._sdf_alpha = _SDF_ALPHA
+            train_dataset._sdf_n_vol = _SDF_N_VOL
+            train_dataset.__class__ = _SDFStratifiedDataset
+            assert type(train_dataset).__name__ == "_SDFStratifiedDataset", "SDF patch not active"
+            if state.is_main:
+                print(
+                    f"[SDF] inverse near-surface vol sampling enabled: "
+                    f"alpha={_SDF_ALPHA}, n_vol={_SDF_N_VOL}, "
+                    f"dataset class={type(train_dataset).__name__}"
+                )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
