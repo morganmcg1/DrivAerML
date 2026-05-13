@@ -138,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    gradnorm_tasks: str = ""
     debug: bool = False
 
 
@@ -219,6 +220,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "gradnorm_tasks": (
+            "Optional comma-separated subset of task names that GradNorm is "
+            "allowed to rebalance. Valid names: sp, tau_x, tau_y, tau_z, vp. "
+            "Tasks NOT listed here are FROZEN: their GradNorm weight stays "
+            "at 1.0 and they are excluded from the per-step normalisation. "
+            "Their loss is still backpropagated; their effective scale is "
+            "whatever multiplier the downstream channel-weight path applies "
+            "(e.g. --tau-y-loss-weight, --tau-z-loss-weight for the surface "
+            "MSE channels). Active tasks share a mean-1 weight constraint "
+            "computed only over the active subset. Empty string (default) "
+            "means all 5 tasks are active (legacy GradNorm behaviour)."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -469,6 +482,7 @@ class GradNormBalancer:
         log_clip: float,
         ema_beta: float,
         min_weight: float = 0.0,
+        active_mask: torch.Tensor | None = None,
     ):
         if mode not in GRADNORM_MODES:
             raise ValueError(
@@ -483,6 +497,17 @@ class GradNormBalancer:
         self.ema_beta = float(ema_beta)
         self.min_weight = float(min_weight)
         self.log_weights = nn.Parameter(torch.zeros(num_tasks, device=device))
+        if active_mask is None:
+            self.active_mask = torch.ones(num_tasks, dtype=torch.bool, device=device)
+        else:
+            self.active_mask = active_mask.to(device=device, dtype=torch.bool)
+            if self.active_mask.shape != (num_tasks,):
+                raise ValueError(
+                    f"active_mask shape {tuple(self.active_mask.shape)} != ({num_tasks},)"
+                )
+            if not bool(self.active_mask.any().item()):
+                raise ValueError("GradNormBalancer requires at least one active task.")
+        self.num_active = int(self.active_mask.sum().item())
         if mode == "full":
             self.optimizer: torch.optim.Optimizer | None = torch.optim.Adam(
                 [self.log_weights], lr=lr
@@ -501,7 +526,11 @@ class GradNormBalancer:
 
     def task_weights(self) -> torch.Tensor:
         w = self.log_weights.exp()
-        return w * (self.num_tasks / w.sum().clamp(min=1e-12))
+        if self.num_active == self.num_tasks:
+            return w * (self.num_tasks / w.sum().clamp(min=1e-12))
+        w_active_sum = (w * self.active_mask.to(w.dtype)).sum().clamp(min=1e-12)
+        norm_factor = self.num_active / w_active_sum
+        return torch.where(self.active_mask, w * norm_factor, torch.ones_like(w))
 
     def task_weights_detached(self) -> torch.Tensor:
         return self.task_weights().detach()
@@ -548,9 +577,10 @@ class GradNormBalancer:
             self.ema_loss = (
                 self.ema_beta * self.ema_loss + (1.0 - self.ema_beta) * L
             )
-            r = (self.ema_loss / self.initial_loss).clamp(min=1e-12)
-            r = r / r.mean().clamp(min=1e-12)
-            w_raw_pre = r.pow(self.alpha).clamp(min=1e-12)
+            r_full = (self.ema_loss / self.initial_loss).clamp(min=1e-12)
+            r_active = r_full[self.active_mask]
+            r_active = r_active / r_active.mean().clamp(min=1e-12)
+            w_raw_pre = r_active.pow(self.alpha).clamp(min=1e-12)
             if self.min_weight > 0.0:
                 self.last_floor_active = int(
                     (w_raw_pre < self.min_weight).sum().item()
@@ -559,24 +589,29 @@ class GradNormBalancer:
             else:
                 self.last_floor_active = 0
                 w_raw = w_raw_pre
-            w = w_raw * (self.num_tasks / w_raw.sum().clamp(min=1e-12))
+            w_active = w_raw * (self.num_active / w_raw.sum().clamp(min=1e-12))
             with torch.no_grad():
-                self.log_weights.data = w.log().clamp(
+                log_w = torch.zeros_like(self.log_weights.data)
+                log_w[self.active_mask] = w_active.log().clamp(
                     -self.log_clip, self.log_clip
                 )
-            return (r - 1.0).abs().sum().detach()
+                self.log_weights.data = log_w
+            return (r_active - 1.0).abs().sum().detach()
 
         if per_task_grad_norms_synced is None:
             raise ValueError(
                 "GradNormBalancer.step: gradient norms are required in mode='full'."
             )
         G_detached = per_task_grad_norms_synced.detach().to(self.device)
-        r = (L / self.initial_loss).clamp(min=1e-12)
-        r = r / r.mean().clamp(min=1e-12)
-        target = (G_detached.mean() * (r ** self.alpha)).detach()
+        r_full = (L / self.initial_loss).clamp(min=1e-12)
+        r_active = r_full[self.active_mask]
+        r_active = r_active / r_active.mean().clamp(min=1e-12)
+        G_active = G_detached[self.active_mask]
+        target = (G_active.mean() * (r_active ** self.alpha)).detach()
 
         W = self.task_weights()
-        G = W * G_detached
+        W_active = W[self.active_mask]
+        G = W_active * G_active
         gradnorm_loss = (G - target).abs().sum()
 
         self.optimizer.zero_grad()
@@ -584,6 +619,7 @@ class GradNormBalancer:
         self.optimizer.step()
 
         with torch.no_grad():
+            self.log_weights.data[~self.active_mask] = 0.0
             self.log_weights.clamp_(-self.log_clip, self.log_clip)
         return gradnorm_loss.detach()
 
@@ -786,12 +822,35 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
+        gradnorm_active_names: tuple[str, ...] = GRADNORM_TASK_NAMES
         if config.use_gradnorm:
             if config.gradnorm_mode == "full" and config.compile_model:
                 raise ValueError(
                     "--use-gradnorm --gradnorm-mode full requires --no-compile-model "
                     "(autograd.grad with retain_graph is not supported through "
                     "torch.compile)."
+                )
+            gradnorm_active_mask_t: torch.Tensor | None = None
+            if config.gradnorm_tasks.strip():
+                requested = [t.strip() for t in config.gradnorm_tasks.split(",") if t.strip()]
+                invalid = [t for t in requested if t not in GRADNORM_TASK_NAMES]
+                if invalid:
+                    raise ValueError(
+                        f"--gradnorm-tasks contains unknown task names {invalid!r}; "
+                        f"valid names: {GRADNORM_TASK_NAMES}"
+                    )
+                if not requested:
+                    raise ValueError(
+                        "--gradnorm-tasks must list at least one task name "
+                        f"(valid names: {GRADNORM_TASK_NAMES})"
+                    )
+                gradnorm_active_names = tuple(
+                    name for name in GRADNORM_TASK_NAMES if name in set(requested)
+                )
+                gradnorm_active_mask_t = torch.tensor(
+                    [name in set(requested) for name in GRADNORM_TASK_NAMES],
+                    dtype=torch.bool,
+                    device=device,
                 )
             balancer = GradNormBalancer(
                 num_tasks=len(GRADNORM_TASK_NAMES),
@@ -803,6 +862,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_clip=config.gradnorm_log_clip,
                 ema_beta=config.gradnorm_ema_beta,
                 min_weight=config.gradnorm_min_weight,
+                active_mask=gradnorm_active_mask_t,
             )
             if config.gradnorm_mode == "full":
                 gradnorm_shared_params = [
@@ -813,19 +873,28 @@ def main(argv: Iterable[str] | None = None) -> None:
                         "GradNorm: no trainable parameters in the last shared encoder block."
                     )
             if state.is_main:
+                frozen_names = tuple(
+                    name for name in GRADNORM_TASK_NAMES if name not in set(gradnorm_active_names)
+                )
+                task_descriptor = (
+                    f"active=({', '.join(gradnorm_active_names)})"
+                    + (f" frozen=({', '.join(frozen_names)})" if frozen_names else "")
+                )
                 if config.gradnorm_mode == "full":
                     shared_param_count = sum(p.numel() for p in gradnorm_shared_params)
                     print(
-                        f"GradNorm enabled (mode=full): {len(GRADNORM_TASK_NAMES)} tasks "
-                        f"({', '.join(GRADNORM_TASK_NAMES)}); alpha={config.gradnorm_alpha}; "
-                        f"lr={config.gradnorm_lr}; warmup={config.gradnorm_init_warmup_steps} "
-                        f"steps; log_clip={config.gradnorm_log_clip}; "
+                        f"GradNorm enabled (mode=full): {len(gradnorm_active_names)}/"
+                        f"{len(GRADNORM_TASK_NAMES)} tasks balanced; {task_descriptor}; "
+                        f"alpha={config.gradnorm_alpha}; lr={config.gradnorm_lr}; "
+                        f"warmup={config.gradnorm_init_warmup_steps} steps; "
+                        f"log_clip={config.gradnorm_log_clip}; "
                         f"shared_params={shared_param_count:,d} (last backbone block)"
                     )
                 else:
                     print(
-                        f"GradNorm enabled (mode=ema_proxy): {len(GRADNORM_TASK_NAMES)} tasks "
-                        f"({', '.join(GRADNORM_TASK_NAMES)}); alpha={config.gradnorm_alpha}; "
+                        f"GradNorm enabled (mode=ema_proxy): {len(gradnorm_active_names)}/"
+                        f"{len(GRADNORM_TASK_NAMES)} tasks balanced; {task_descriptor}; "
+                        f"alpha={config.gradnorm_alpha}; "
                         f"ema_beta={config.gradnorm_ema_beta}; "
                         f"warmup={config.gradnorm_init_warmup_steps} steps; "
                         f"log_clip={config.gradnorm_log_clip}; "
@@ -883,6 +952,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if config.use_gradnorm:
+                wandb.summary["gradnorm/active_tasks"] = ",".join(gradnorm_active_names)
+                wandb.summary["gradnorm/num_active"] = len(gradnorm_active_names)
+                for name in GRADNORM_TASK_NAMES:
+                    wandb.summary[f"gradnorm/is_active_{name}"] = int(
+                        name in set(gradnorm_active_names)
+                    )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -970,7 +1046,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                         dist.broadcast(balancer.log_weights.data, src=0)
 
                     W_detached = balancer.task_weights_detached()
-                    weighted_terms = [W_detached[i] * per_task_losses[i] for i in range(len(per_task_losses))]
+                    if use_channel_weights:
+                        per_task_channel_mult = torch.tensor(
+                            [
+                                1.0,
+                                1.0,
+                                config.tau_y_loss_weight,
+                                config.tau_z_loss_weight,
+                                1.0,
+                            ],
+                            device=W_detached.device,
+                            dtype=W_detached.dtype,
+                        )
+                        W_effective = W_detached * per_task_channel_mult
+                    else:
+                        W_effective = W_detached
+                    weighted_terms = [W_effective[i] * per_task_losses[i] for i in range(len(per_task_losses))]
                     loss = weighted_terms[0]
                     for term in weighted_terms[1:]:
                         loss = loss + term
@@ -979,9 +1070,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_unweighted = surface_unweighted + term
                     base_mse_total = surface_unweighted + per_task_losses[4]
                     weighted_surface = (
-                        W_detached[:4] * torch.stack([t.detach() for t in per_task_losses[:4]])
+                        W_effective[:4] * torch.stack([t.detach() for t in per_task_losses[:4]])
                     ).sum()
-                    weighted_volume = W_detached[4] * per_task_losses[4].detach()
+                    weighted_volume = W_effective[4] * per_task_losses[4].detach()
                     batch_loss_metrics = {
                         "base_mse_loss": float(base_mse_total.detach().cpu().item()),
                         "surface_loss": float(surface_unweighted.detach().cpu().item()),
@@ -990,9 +1081,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                         "volume_loss_weighted": float(weighted_volume.cpu().item()),
                     }
                     weights_cpu = W_detached.cpu().tolist()
+                    eff_weights_cpu = W_effective.cpu().tolist()
                     losses_cpu = synced_losses.detach().cpu().tolist()
                     for i, name in enumerate(GRADNORM_TASK_NAMES):
                         gradnorm_metrics[f"gradnorm/weight_{name}"] = weights_cpu[i]
+                        gradnorm_metrics[f"gradnorm/effective_weight_{name}"] = eff_weights_cpu[i]
                         gradnorm_metrics[f"train/loss_{name}"] = losses_cpu[i]
                     if synced_norms is not None:
                         norms_cpu = synced_norms.detach().cpu().tolist()
