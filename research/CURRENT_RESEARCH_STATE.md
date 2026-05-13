@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~19:30 UTC
+- 2026-05-13 ~20:25 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -43,9 +43,7 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 
 > Note: PR #972 used uniform sampling (monkey-patch was a no-op). This is the baseline to beat.
 
-**GradNorm v4 partial SOTA beat (PR #1058 arm `ysycg6xc`, terminal=false pending_arms=true):**
-- val_abupt=6.1855%, test_vol_p=**3.6328%** (BEATS SOTA by 0.010pp), test_abupt=5.9950%
-- This arm is NOT terminal; v5b arm still running. Final merge decision pending.
+**GradNorm v4 (PR #1058, tay branch) — CLOSED 2026-05-13:** test_abupt=5.9950% regresses aggregate vs SOTA 5.844%. Not a merge candidate.
 
 **Top 5 on corrected split:**
 
@@ -57,20 +55,18 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~19:30 UTC)
+## Active Experiments (2026-05-13 ~20:25 UTC)
 
 ### Pod Assignments
 
-| Student | PR | Hypothesis | W&B Run | Current Step | Approx EP | Runtime |
-|---------|-----|-----------|---------|-------------|-----------|---------|
-| tanjiro | #1076 | SDF near-surface α=3.0 (inverse formula) | `ed01yw3z` | ~104,100 | ~EP9.5 | 7.3h |
-| nezuko | #1072 | SDF near-surface α=0.5 (inverse formula) | `yp383yq2` | ~160,960 | ~EP14.7 | 10.3h |
-| fern | #1063 | SDF near-surface α=0.25 (inverse formula) | `xfykblf9` | ~230,644 | ~EP21 | 16.1h |
-| frieren | #1077 | SDF near-surface α=1.0 (inverse formula) | `m4z2gb65` | ~8,508 | ~EP0.8 | 0.6h |
+| Student | PR | Hypothesis | W&B Run | Approx EP | Notes |
+|---------|-----|-----------|---------|-----------|-------|
+| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | NEW | Smoke pending | Just assigned — direct A/B vs fern #1063 |
+| nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP15 | EP15 gate PASSED (best 6.290%) |
+| fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | ~EP22 | EP20 gate PASSED (best 6.265%) |
+| frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP1-2 | EP1 PASSED (22.42%), EP2 running |
 
-**FRIEREN UPDATE (19:30Z):** PR #1077 launched at `m4z2gb65`. Rate limit reset; pod picked up the assignment. Currently at step 8,508 (~EP0.8), well within EP1 gate window. First val snapshot due around step 10,975.
-
-**GradNorm v4 (PR #1058, run `ysycg6xc`) — PENDING DISPOSITION:** Result is terminal=false, pending_arms=true (v5b arm was interrupted when frieren was reassigned to SDF α=1.0). val_abupt=6.1855%, test_vol_p=3.6328% (BEATS SOTA 3.643% by 0.010pp). Because the marker is non-terminal, the merge-winner skill will refuse — it cannot be merged unless a new terminal SENPAI-RESULT is posted. Holding pending a fresh terminal harvest.
+**Tanjiro PR #1076 (α=3.0) CLOSED 2026-05-13 ~20:20Z:** Killed at EP10 gate (val_abupt=7.25% > ≤7.2%). Best val_abupt=6.5012% at EP6 then drifted upward — over-concentration confirmed. α=3.0 FALSIFIED.
 
 ### Val Checkpoint Snapshots (latest, 2026-05-13 ~19:30 UTC)
 
@@ -87,24 +83,24 @@ Notes:
 - **tanjiro (α=3.0):** EP10 gate ≤7.2% imminent (~step 109,750). Currently at 6.50% best — well within gate; aggressive α concentration may still pay off late.
 - **frieren (α=1.0):** Just launched. EP1 gate ≤30% due ~step 10,975 (~2k steps away).
 
-### SDF α Sweep Status (2026-05-13 ~19:30 UTC)
+### SDF α Sweep Status (2026-05-13 ~20:25 UTC)
 
 | α value | Student | PR | Best val_abupt | Latest val_vol_p | Status |
 |---------|---------|-----|---------------:|-----------------:|--------|
-| 0.25 | fern | #1063 | **6.2647%** | 4.4906% | EP21, past EP20 gate, plateau since EP11 |
-| 0.5  | nezuko | #1072 | **6.2904%** | 4.2884% | EP15 gate ≤6.80% PASSED on best |
-| 1.0  | frieren | #1077 | — | — | Just launched (EP0.8) |
-| 3.0  | tanjiro | #1076 | 6.5012% | 4.3635% | EP10 gate imminent — within ≤7.2% |
+| 0.25 | fern   | #1063 | **6.2647%** | 4.491% | EP22 running, plateau since EP11 |
+| 0.5  | nezuko | #1072 | **6.2904%** | 4.288% | EP15 gate PASSED, continuing |
+| 1.0  | frieren | #1077 | ~22% (EP1) | — | EP1 PASS (22.42%), EP2 running |
+| 2.0  | — | #1054 | CLOSED | — | EP15 FAIL (6.9264% > 6.80%) |
+| 3.0  | tanjiro | #1076 | **6.5012%** | 4.364% | **CLOSED (EP10 KILL — over-concentration)** |
 
-### SDF vol_p Trend (refreshed)
+### α-sweep Conclusion (updated)
 
-| α | val_vol_p | vs SOTA 3.643% |
-|---|----------:|---------------:|
-| 0.25 (fern, EP21) | 4.4906% | +0.85pp |
-| 0.5  (nezuko, EP14.7) | **4.2884%** | +0.65pp |
-| 3.0  (tanjiro, EP9.5) | 4.3635% | +0.72pp |
+The α-response is now mapped from both ends:
+- **Low α (0.25, 0.5):** Both competitive at val_abupt ≈6.26–6.29%. val_vol_p at 4.3–4.5%. Near-uniform sampling performs well.
+- **α=1.0 (frieren):** Data arriving in 2-3h. Critical missing point.
+- **α=2.0, 3.0:** Over-concentration confirmed — worse abupt, no test harvest possible.
 
-α=0.5 now shows the best val_vol_p of the sweep — better than both α=0.25 and α=3.0. This points toward a **U-shaped or non-monotonic** response with optimum near α≈0.5, NOT a monotone trade-off. α=1.0 data point will arrive in 3-5h and is critical for confirming/refuting this shape. The earlier α=2.0 dead-end (PR #1054, FAIL) plus current α=3.0 (slowest to converge) bracket the upper edge — the productive band is likely α ∈ [0.25, 1.0].
+**Productive band is definitively α ∈ [0.25, 0.5].** Lower values (α<0.25) remain untested. The new EMA experiment (tanjiro #1086) is an A/B vs fern at α=0.25, adding EMA as the next orthogonal lever.
 
 ### GradNorm Status (resolved)
 
@@ -183,4 +179,4 @@ Notes:
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~19:30 UTC. 4 active DL24 experiments, all healthy: fern #1063 α=0.25 EP21 best=6.2647% (plateau since EP11), nezuko #1072 α=0.5 EP14.7 best=6.2904% (val_vol_p=4.288% — best of sweep), tanjiro #1076 α=3.0 EP9.5 best=6.5012% (slowest converger), frieren #1077 α=1.0 just launched at `m4z2gb65` (EP0.8). α=0.5 leading on val_vol_p suggests U-shaped α response with optimum near 0.5; α=1.0 data point will arbitrate. GradNorm v4 (PR #1058, tay branch) CLOSED — does not beat aggregate SOTA. Researcher-agent generating fresh hypotheses for next round (background)._
+_Last updated: 2026-05-13 ~20:25 UTC. PR #1076 (tanjiro α=3.0) closed — EP10 KILL, over-concentration confirmed. Tanjiro reassigned to PR #1086 (EMA 0.999 + SDF α=0.25, A/B vs fern). 4/4 students WIP: tanjiro #1086 new-smoke, nezuko #1072 EP15 PASSED, fern #1063 EP22 plateau, frieren #1077 EP1-2. α-sweep conclusion: productive band α∈[0.25, 0.5], α≥2.0 over-concentration. Next levers: EMA (tanjiro), frieren α=1.0 data point, GradNorm+SDF composition for next idle student._

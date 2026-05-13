@@ -8,6 +8,58 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-13 ~20:20 UTC — PR #1076 CLOSED: SDF Inverse Vol Sampling α=3.0 (dl24-tanjiro, `ed01yw3z`)
+
+- **Branch:** `dl24-tanjiro/sdf-inverse-alpha-sweep-3.0`
+- **W&B Run:** `ed01yw3z`
+- **Hypothesis:** Strong near-surface SDF-inverse weighting `w = 1/(1+α|sdf|)` with α=3.0 concentrates volume-point training signal in the boundary layer, improving surface pressure and WSS accuracy.
+
+### Per-epoch val trajectory
+
+| EP | Step | val_abupt% | val_surf_p% | val_vol_p% | val_wss% | Gate | Status |
+|----|------|-----------|------------|-----------|---------|------|--------|
+| 1  | 10,975  | 24.1097 | 17.2723 | 20.4422 | 24.6239 | ≤30% | PASS |
+| 2  | 21,951  |  8.8851 |  5.5719 |  8.7092 |  9.1929 | ≤16% | PASS |
+| 3  | 32,927  |  7.0932 |  4.4177 |  5.8164 |  7.6021 | ≤8%  | PASS |
+| 5  | 54,879  |  6.8262 |  4.3205 |  5.4883 |  7.3277 | ≤7.5%| PASS |
+| 6  | 65,855  | **6.5012** | 4.1921 | 4.4730 | 7.1842 | info | ★ best |
+| 7  | 76,831  |  6.5675 |  4.2110 |  4.4883 |  7.2666 | info | — |
+| 8  | 87,807  |  6.7547 |  4.2312 |  4.4291 |  7.5101 | info | — |
+| 9  | 98,783  |  6.7509 |  4.2430 |  4.3635 |  7.5196 | info | — |
+| 10 | 109,759 |  7.2509 |  4.3723 |  4.5303 |  8.0798 | ≤7.2%| **KILL** |
+
+**Best val_abupt = 6.5012% at EP6.** No test_primary metric (kill terminated training before test eval).
+
+### Results: no test metric, hypothesis FALSIFIED
+
+| Metric | Result |
+|--------|--------|
+| test_abupt | N/A (killed at EP10) |
+| test_vol_p | N/A |
+| val_abupt best | 6.5012% (EP6) |
+| val_vol_p best | 4.3635% (EP9) |
+| Wave SOTA test_abupt | 5.844% |
+| Wave SOTA test_vol_p | 3.643% |
+
+### Analysis
+
+α=3.0 over-concentrates near-surface sampling: at |sdf|≈1m, weight ≈ 0.25 → far-field volume points sampled ~4× less frequently. Effect:
+1. **EP6 floor then regression** — val_abupt: 7.09% (EP3) → 6.50% (EP6) then UP to 7.25% (EP10). W&B slope at kill = +0.046%/1k steps (structural, not noise).
+2. **WSS degradation** — WSS drifted from 7.18% (EP6) to 8.08% (EP10). Far-field starvation hurts global pressure representation needed for WSS.
+3. **vol_p recovery** — vol_p actually improved EP5→EP9 (5.49%→4.36%), but was still ~0.7pp above SOTA at its best. α=3.0 does not solve the vol_p bottleneck.
+
+Compared to fern (α=0.25, best 6.265%) and nezuko (α=0.5, best 6.290%), the α-response is now mapped:
+- α≤0.5: competitive (best val_abupt ≈ 6.26–6.29%)
+- α=1.0: TBD (frieren just started)
+- α=2.0: EP15 FAIL (PR #1054, previously closed)
+- α=3.0: EP10 KILL — over-concentration confirmed
+
+**Conclusion: productive α-band is definitively [0.25, 0.5] or lower; α≥2.0 is the over-concentration regime.**
+
+**Config:** 6L STRING 5-oct, Lion lr=1e-4, WD=0.005, GradNorm α=0.5, Y-sym p=0.5, SDF α=3.0, NO EMA; 8×DDP, bs=1, EBS=8, ~10,975 steps/epoch.
+
+---
+
 ## 2026-05-09 ~22:30 UTC — PR #972 CLOSED: SDF-stratified importance sampling, far-field bias α=2.0 (dl24-frieren, `56bcqp3m`)
 
 - **Branch:** `dl24-frieren/sdf-stratified-sampling`
