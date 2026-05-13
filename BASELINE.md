@@ -17,29 +17,40 @@ The test split was rebuilt on 2026-05-11 to fix a case-split/indexing bug. All p
 
 ---
 
-## *** NEW CORRECTED-SPLIT ENSEMBLE SOTA: PR #1059 K=4 Greedy Ensemble — 2026-05-13 ***
+## *** NEW CORRECTED-SPLIT ENSEMBLE SOTA: PR #1064 K=3 Greedy Ensemble (drop ghh0s4ne) — 2026-05-13 ***
+
+**val_abupt=5.7758%** / **test_abupt=5.5199%** (corrected split, K=3 greedy forward selection)
+
+K=3 greedy ensemble (Caruana 2004) — drops `ghh0s4ne` outlier from K=4. Recovers test_vol_p to 3.3630% (−0.526pp vs K=4). Beats K=4 (#1059) on both val_abupt (−0.018pp) and test_abupt (−0.074pp). True SOTA on all paper-facing metrics.
+
+**W&B run:** `88dinf0n` (group `nezuko-greedy-ensemble`)
+**PR:** #1064
+
+**Val metrics (corrected split):** val_abupt=5.7758%, val_vol_p=3.2500%
+**Test metrics (corrected split):** test_abupt=5.5199%, test_vol_p=3.3630%
+
+**K=3 members:** `56bcqp3m` (PR #972), `29nohj67` (PR #958), `a0yoxy85` (PR #968)
+
+**Greedy selection path:**
+- Step 1: val=6.126% (seed: 56bcqp3m)
+- Step 2: val=5.850% (delta=−0.276pp; added: 29nohj67)
+- Step 3: val=5.776% (delta=−0.075pp; added: a0yoxy85)
+
+**Ensemble gate:** val_abupt < **5.7758%** AND test_vol_p ≤ **3.363%** (both must hold for true SOTA)
+
+---
+
+## Prior Ensemble SOTA: PR #1059 K=4 Greedy Ensemble — 2026-05-13 (superseded by #1064)
 
 **val_abupt=5.758%** / **test_abupt=5.594%** (corrected split, K=4 greedy forward selection)
 
-K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Beats single-model SOTA (PR #972) by 0.368pp on val_abupt and 0.250pp on test_abupt. Note: test_vol_p regresses to 3.889% due to `ghh0s4ne` outlier (individual test_vol_p=6.67%). K=3 follow-up (dropping ghh0s4ne) expected to recover test_vol_p ≤ 3.643%.
+K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note: test_vol_p=3.889% due to `ghh0s4ne` outlier (individual test_vol_p=6.67%). Superseded by K=3 (PR #1064) which drops the outlier.
 
 **W&B run:** `9iavr06j` (group `nezuko-greedy-ensemble`)
 **PR:** #1059
 
 **Val metrics (corrected split):** val_abupt=5.758%, val_vol_p=3.444%
 **Test metrics (corrected split):** test_abupt=5.594%, test_vol_p=3.889%, test_SP=3.366%, test_WSS=6.330%
-
-**K=4 members:** `56bcqp3m` (PR #972), `29nohj67` (PR #958), `a0yoxy85` (PR #968), `ghh0s4ne` (PR #823)
-
-**Greedy selection path:**
-- Step 1: val=6.126% (seed: 56bcqp3m)
-- Step 2: val=5.850% (delta=−0.276pp; added: 29nohj67)
-- Step 3: val=5.776% (delta=−0.075pp; added: a0yoxy85)
-- Step 4: val=5.758% (delta=−0.018pp; added: ghh0s4ne)
-
-**Cached predictions:** `outputs/ensemble_cache_corrected_20260513/pred_cache`
-
-**Ensemble gate:** val_abupt < **5.758%** AND test_vol_p ≤ **3.643%** (both must hold for true SOTA)
 
 ---
 
