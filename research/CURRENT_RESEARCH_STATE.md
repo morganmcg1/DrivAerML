@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-13 ~23:05 UTC
+- 2026-05-13 ~23:15 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -67,7 +67,7 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 
 | Student | PR | Hypothesis | W&B Run | Approx EP | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `ugbkg660` | ~EP0.3 | Just launched (~20:30Z), no val yet |
+| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `fby84xtu` (long) | ~EP2.3 | Smoke `ugbkg660` EP1 PASS; long-run launched 21:23Z; EP2=7.48% (matches fern, expected since val uses live weights) |
 | nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP16 | EP15 gate PASSED (best 6.290%), slope still negative |
 | fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | ~EP22 | EP20 gate PASSED (best 6.265%), plateau persists, slope ≈ flat |
 | frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP2 | EP2 progressing, fast descent (slope −1.354/1k) |
@@ -192,4 +192,4 @@ PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abu
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-13 ~23:05 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP25.4 — EP25 gate PASS at 6.371%, val_vol_p drifting (4.14% EP11 → 4.67% EP25, +0.53pp). Nezuko #1072 EP19 — EP20 gate PASS at 6.314%, vol_p drifting (4.23% EP10 → 4.42% EP19, +0.19pp). Both fern and nezuko show identical plateau-regression patterns; best checkpoints at EP10/EP11. **Test eval from BEST checkpoint is mandatory** for the merge decision — terminal-epoch is worse. Strategic conclusion remains: SDF concentration tuning not beating uniform-sampling SOTA. Pivot levers ready for next idle: EMA (in-flight #1086), GradNorm+SDF composition (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
+_Last updated: 2026-05-13 ~23:15 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Tanjiro #1086: smoke `ugbkg660` EP1 PASS (20.94%), long-run `fby84xtu` launched 21:23Z at EP2.3 (val_abupt 7.48% matches fern at same step — expected since val uses live weights, EMA only matters at terminal test eval). Fern #1063 EP25.4: EP25 PASS, val_vol_p drift confirmed. Nezuko #1072 EP19: EP20 PASS, vol_p drift confirmed. Strategic conclusion holds: SDF concentration tuning not beating uniform-sampling SOTA. **Test eval from BEST checkpoint mandatory at terminal.** EMA #1086 is the next data point — its test will decide whether EMA helps on corrected split. Pivot levers ready: GradNorm+SDF (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
