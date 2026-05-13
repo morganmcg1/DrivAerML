@@ -132,6 +132,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -259,6 +261,84 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     raise ValueError(
         f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion."
     )
+
+
+def apply_sdf_stratified_vol_sampling(
+    train_dataset,
+    *,
+    alpha: float,
+    n_volume_points: int,
+) -> None:
+    """Patch the training dataset to draw volume points with near-surface
+    emphasis: weight = 1 / (1 + alpha * |sdf|).
+
+    At |sdf|=0 (surface boundary) weight=1.0. As |sdf| grows, weight decays
+    toward 0, concentrating samples near the surface boundary. Larger alpha =
+    sharper near-surface concentration.
+
+    Uses __class__ reassignment to a dynamic subclass because Python resolves
+    dunder methods (__getitem__) via the type MRO, not the instance dict — an
+    instance-level types.MethodType assignment is silently bypassed by
+    DataLoader's `dataset[idx]` call.
+
+    SDF lives at channel 3 of volume_x (xyz + sdf). Surface sampling untouched.
+    Replaces train volume sampling only — val/test loaders use original
+    deterministic chunked sampling.
+    """
+    from data.loader import DrivAerMLCase
+
+    _alpha = float(alpha)
+    _n_vol = int(n_volume_points)
+
+    class _SDFStratifiedDataset(type(train_dataset)):
+        def __getitem__(self, idx: int) -> DrivAerMLCase:
+            view = self.views[idx]
+            counts = self.store.case_point_counts(view.case_id)
+            surface_idx = self._indices(
+                counts["n_surface"],
+                self.max_surface_points,
+                view,
+                group_view_count=view.surface_view_count,
+            )
+            case = self.store.load_case(
+                view.case_id,
+                surface_rows=None if surface_idx is None else surface_idx.numpy(),
+                volume_rows=None,
+            )
+            n_total = case.volume_x.shape[0]
+            n_sample = min(self._sdf_n_vol, n_total)
+            sdf_vals = case.volume_x[:, 3].abs().float()
+            weights = 1.0 / (1.0 + self._sdf_alpha * sdf_vals)
+            vol_idx = torch.multinomial(weights, n_sample, replacement=False)
+            vol_idx = vol_idx.sort().values
+            metadata = {
+                "case_id": case.case_id,
+                "n_surface_full": int(counts["n_surface"]),
+                "n_surface_loaded": int(case.surface_x.shape[0]),
+                "surface_view_index": int(view.view_index),
+                "surface_view_count": int(view.surface_view_count),
+                "surface_sampling_mode": view.sampling_mode,
+                "n_volume_full": int(n_total),
+                "n_volume_loaded": int(n_sample),
+                "volume_view_index": int(view.view_index),
+                "volume_view_count": int(view.volume_view_count),
+                "volume_sampling_mode": "sdf_stratified_inv",
+                "joint_view_count": int(view.view_count),
+                "sdf_stratified_alpha": self._sdf_alpha,
+            }
+            return DrivAerMLCase(
+                case_id=case.case_id,
+                surface_x=case.surface_x,
+                surface_y=case.surface_y,
+                volume_x=case.volume_x[vol_idx],
+                volume_y=case.volume_y[vol_idx],
+                metadata=metadata,
+            )
+
+    train_dataset._sdf_alpha = _alpha
+    train_dataset._sdf_n_vol = _n_vol
+    train_dataset.__class__ = _SDFStratifiedDataset
+    assert type(train_dataset).__name__ == "_SDFStratifiedDataset", "SDF patch not active"
 
 
 def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
@@ -451,6 +531,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_sdf_stratified_vol_sampling:
+            apply_sdf_stratified_vol_sampling(
+                train_loader.dataset,
+                alpha=config.sdf_stratified_alpha,
+                n_volume_points=config.train_volume_points,
+            )
+            if state.is_main:
+                print(
+                    "[SDF] inverse near-surface vol sampling enabled: "
+                    f"alpha={config.sdf_stratified_alpha}, "
+                    f"n_vol={config.train_volume_points}, "
+                    f"dataset class={type(train_loader.dataset).__name__}"
+                )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
