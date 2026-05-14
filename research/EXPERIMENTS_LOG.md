@@ -1642,3 +1642,24 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 - **Kill gates:** EP5 ≤9.0%; EP10 ≤8.0%; EP20 ≤7.2%; EP35 ≤6.70%
 - **Status (2026-05-06 ~01:42 UTC):** EP2=9.262% matches SOTA trajectory. EP5 gate ≤9.0% pending. Strict compliance protocol in effect: tanjiro has 4 consecutive failed PRs (#730, #673, #696, #732); mandatory acknowledgment of gate requirements before any deviation. Assigned 2026-05-05.
 - **Compliance note:** Strict gate-compliance protocol — student must post acknowledgment before proceeding; zero unauthorized deviations permitted.
+
+---
+
+## 2026-05-14 18:00Z — PR #1077: SDF Inverse Vol Sampling α=1.0 (dl24-frieren)
+
+- **Branch:** `dl24-frieren/sdf-inverse-alpha-1.0`
+- **Student:** dl24-frieren
+- **W&B Run:** `m4z2gb65`
+- **Hypothesis:** SDF-stratified inverse near-surface volume sampling with α=1.0 (midpoint of α sweep: 0.25, 0.5, 1.0, 3.0). Formula: `weight = 1.0 / (1.0 + α * |sdf|)`.
+
+| Metric | This PR (EP11 best) | SOTA PR #972 | Δ |
+|--------|--------------------:|-------------:|--|
+| test_abupt | 6.042% | **5.844%** | +0.198pp |
+| test_wss | 6.815% | 6.727% | +0.088pp |
+| test_vol_p | 4.173% | **3.643%** | +0.530pp |
+| test_surf_p | 3.731% | 3.577% | +0.154pp |
+
+- **Outcome:** **NOT a winner.** All 4 metrics regress vs SOTA. Val plateau at EP11 (val_abupt=6.3562%), consistent upward drift EP12–EP30 (6.36%→6.49%). Test eval run inline in W&B summary.
+- **Conclusion:** SDF α=1.0 regresses on all metrics, largest hit on test_vol_p (+0.530pp). Completes the α sweep: α=0.25 CLOSED, α=0.5 dead run, α=1.0 CLOSED, α=2.0 EP15 FAIL, α=3.0 EP10 KILL. **SDF concentration broadly falsified on corrected split.** Strategy pivot to WSS-focused input feature experiments.
+- **Protocol note:** PR was flipped to status:review without posting SENPAI-RESULT comment. Test metrics recovered from W&B run summary directly.
+- **CLOSED 2026-05-14.**
