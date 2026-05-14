@@ -56,6 +56,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    ohem_supplementary_loss,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -138,6 +139,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    ohem_surface_ratio: float = 1.0
+    ohem_warmup_epochs: int = 0
+    ohem_min_k: int = 100
+    ohem_lambda: float = 0.5
     debug: bool = False
 
 
@@ -219,6 +224,30 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "ohem_surface_ratio": (
+            "Top-K fraction of hardest surface points for the supplementary "
+            "OHEM (online hard example mining) loss term. 1.0 = disabled "
+            "(default). 0.20 = top-20%% hardest points per sample. The OHEM "
+            "term adds 'ohem_lambda * MSE(top-K hardest)' on top of the "
+            "standard surface_loss so all points still receive gradient."
+        ),
+        "ohem_warmup_epochs": (
+            "Number of epochs before OHEM activates. During warmup the OHEM "
+            "supplementary term is zero so the model can calibrate its error "
+            "distribution before being asked to focus on hard examples. "
+            "Default 0 = no warmup."
+        ),
+        "ohem_min_k": (
+            "Minimum number of hard points to select per sample regardless "
+            "of ohem_surface_ratio. Prevents degenerate top-K selection at "
+            "very small surface views. Default 100."
+        ),
+        "ohem_lambda": (
+            "Weight multiplier on the OHEM supplementary loss term. Final "
+            "loss = surface_loss_weight*surface_loss + volume_loss_weight*"
+            "volume_loss + ohem_lambda*ohem_hard_loss. Default 0.5 keeps "
+            "the supplementary term from dominating."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -321,6 +350,10 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    ohem_surface_ratio: float = 1.0,
+    ohem_warmup_active: bool = False,
+    ohem_min_k: int = 100,
+    ohem_lambda: float = 0.5,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -342,9 +375,25 @@ def train_loss(
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+
+        ohem_active = (ohem_surface_ratio < 1.0) and (not ohem_warmup_active)
+        if ohem_active:
+            ohem_loss = ohem_supplementary_loss(
+                pred=out["surface_preds"],
+                target=surface_target,
+                mask=batch.surface_mask,
+                ohem_ratio=ohem_surface_ratio,
+                min_k=ohem_min_k,
+                channel_weights=surface_channel_weights,
+            )
+            ohem_contribution = ohem_lambda * ohem_loss
+        else:
+            ohem_loss = torch.zeros((), device=device)
+            ohem_contribution = torch.zeros((), device=device)
+
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        loss = weighted_surface_loss + weighted_volume_loss + ohem_contribution
         base_mse_loss = surface_loss + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
@@ -352,6 +401,10 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "ohem/active": float(ohem_active),
+        "ohem/in_warmup": float(ohem_warmup_active),
+        "ohem/hard_loss": float(ohem_loss.detach().cpu().item()),
+        "ohem/lambda_contribution": float(ohem_contribution.detach().cpu().item()),
     }
 
 
@@ -913,6 +966,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     current_train_vol_points = desired_vol_points
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
+            ohem_warmup_active = (
+                config.ohem_surface_ratio < 1.0
+                and config.ohem_warmup_epochs > 0
+                and epoch < config.ohem_warmup_epochs
+            )
             timeout_hit = distributed_any(
                 state,
                 (time.time() - train_start) / 60.0 >= timeout_minutes,
@@ -1030,6 +1088,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        ohem_surface_ratio=config.ohem_surface_ratio,
+                        ohem_warmup_active=ohem_warmup_active,
+                        ohem_min_k=config.ohem_min_k,
+                        ohem_lambda=config.ohem_lambda,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1132,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "ohem/active" in batch_loss_metrics:
+                        train_log.update(
+                            {
+                                "train/ohem/active": batch_loss_metrics["ohem/active"],
+                                "train/ohem/in_warmup": batch_loss_metrics["ohem/in_warmup"],
+                                "train/ohem/hard_loss": batch_loss_metrics["ohem/hard_loss"],
+                                "train/ohem/lambda_contribution": batch_loss_metrics["ohem/lambda_contribution"],
+                                "train/ohem/ratio": config.ohem_surface_ratio,
+                                "train/ohem/lambda": config.ohem_lambda,
+                                "train/ohem/min_k": float(config.ohem_min_k),
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

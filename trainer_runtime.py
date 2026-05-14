@@ -870,6 +870,47 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+def ohem_supplementary_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    ohem_ratio: float,
+    min_k: int = 100,
+    channel_weights: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Compute supplementary OHEM surface loss over top-K% hardest points.
+
+    pred / target: [B, N, C]; mask: [B, N] boolean (True = valid point).
+    ``ohem_ratio`` is the fraction of points to select as hard (e.g. 0.20).
+    ``min_k`` is the per-sample floor on the number of hard points selected.
+    Returns a scalar mean squared error computed only over the top-K hardest
+    points per sample, optionally per-channel weighted to match the main loss.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+
+    sq_err = (pred - target).square()  # [B, N, C]
+    per_point_loss = sq_err.mean(dim=-1).float()  # [B, N], fp32 for stable ranking
+
+    mask_dev = mask.to(device=pred.device).bool()
+    per_point_loss = per_point_loss.masked_fill(~mask_dev, float("-inf"))
+
+    valid_counts = mask_dev.float().sum(dim=1)  # [B]
+    k = max(min_k, int(ohem_ratio * per_point_loss.shape[1]))
+    k = min(k, int(valid_counts.min().item()))
+    k = max(k, 1)
+
+    _, hard_indices = per_point_loss.topk(k, dim=1, largest=True, sorted=False)
+    idx_expanded = hard_indices.unsqueeze(-1).expand(-1, -1, pred.shape[-1])
+    hard_sq_err = sq_err.gather(1, idx_expanded.to(dtype=torch.long))  # [B, k, C]
+
+    if channel_weights is not None:
+        weights_dev = channel_weights.to(device=pred.device, dtype=hard_sq_err.dtype)
+        hard_sq_err = hard_sq_err * weights_dev.unsqueeze(0).unsqueeze(0)
+
+    return hard_sq_err.mean()
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
