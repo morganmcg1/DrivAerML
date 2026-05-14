@@ -1,5 +1,29 @@
 # SENPAI Research Results
 
+## 2026-05-14 09:15 — PR #1099: WSS-targeted greedy ensemble reselection (fern) — CLOSED (CONFIRMATORY NULL)
+
+- **Branch**: `fern/wss-targeted-greedy-ensemble`
+- **W&B runs**: `tfcaumtl` (WSS-targeted), `6et5sse7` (tau_z-targeted)
+- **Hypothesis**: Re-running greedy forward selection on the K=4 candidate pool but optimizing `--selection-metric wall_shear_rel_l2_pct` (instead of default `abupt_axis_mean_rel_l2_pct`) would find a different ensemble subset that minimizes WSS specifically. Secondary arm: tau_z-targeted greedy (`wall_shear_z_rel_l2_pct`).
+
+| Arm | Final K | Members | test_abupt | test_vol_p | test_WSS | test_tau_z | Constraint |
+|---|---:|---|---:|---:|---:|---:|---|
+| WSS-targeted | 3 | `56bcqp3m`+`29nohj67`+`a0yoxy85` | 5.5199% | **3.3630%** ✓ | 6.3712% | 8.3130% | PASS |
+| tau_z-targeted | 4 | + `ghh0s4ne` | 5.5938% | **3.8891%** ✗ | 6.3298% | 8.2546% | FAIL (vol_p) |
+| PR #1064 K=3 ref | 3 | same as WSS arm | 5.5199% | 3.3630% | 6.3712% | 8.3130% | PASS |
+
+**Result**: WSS-targeted greedy converges to **exactly the same K=3 ensemble as PR #1064's ABUPT-targeted greedy** — identical members, identical metrics. The hypothesis that WSS-minimizing diversity differs from ABUPT-minimizing diversity is **NOT supported** on this 4-member pool. tau_z-targeted greedy keeps `ghh0s4ne` for a marginal WSS gain (−0.041pp) at the cost of large vol_p regression (+0.526pp, blowing constraint).
+
+**Key insights:**
+1. K=3 ensemble is **Pareto-optimal** on this candidate pool under the vol_p≤3.643% constraint
+2. `ghh0s4ne` is the constraint-violating member — uniquely useful tau_z signal but weak vol_p prediction
+3. **Newly documented baseline:** test_WSS=6.3712%, test_tau_z=8.3130% for the compliant K=3 ensemble — gap to Issue #1056 target is **−0.521pp test_WSS**
+4. Data-bug surfaced: `data/split_manifest.json` silently resolves to deprecated backup tree when `--data-root` is omitted (caught by student, recovery successful)
+
+**Decision**: CLOSED (no merge — no code change, no metric improvement). BASELINE.md updated with newly-documented test_WSS/test_tau_z values. Follow-up assigned: weighted ensemble via `--allow-replacement` (Caruana with-replacement formulation).
+
+---
+
 ## 2026-05-11 15:11 — PR #958: Vol aux decoder head (nezuko) — MERGED (POSITIVE: new single-model SOTA)
 
 - **Branch**: `nezuko/vol-pressure-aux-decoder-head` (merged)

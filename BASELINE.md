@@ -26,8 +26,10 @@ K=3 greedy ensemble (Caruana 2004) — drops `ghh0s4ne` outlier from K=4. Recove
 **W&B run:** `88dinf0n` (group `nezuko-greedy-ensemble`)
 **PR:** #1064
 
-**Val metrics (corrected split):** val_abupt=5.7758%, val_vol_p=3.2500%
-**Test metrics (corrected split):** test_abupt=5.5199%, test_vol_p=3.3630%
+**Val metrics (corrected split):** val_abupt=5.7758%, val_vol_p=3.2500%, val_WSS=6.5410%, val_tau_z=8.8737%
+**Test metrics (corrected split):** test_abupt=5.5199%, test_vol_p=3.3630%, test_SP=3.3889%, **test_WSS=6.3712%**, test_tau_x=5.6480%, test_tau_y=6.8866%, **test_tau_z=8.3130%**
+
+> Full WSS/tau_z breakdown captured via PR #1099 (fern, WSS-targeted greedy re-eval, W&B `tfcaumtl`, 2026-05-14). Same members as PR #1064 — WSS-targeted greedy converges to identical K=3 subset, confirming Pareto-optimal under vol_p≤3.643% constraint on this 4-member pool.
 
 **K=3 members:** `56bcqp3m` (PR #972), `29nohj67` (PR #958), `a0yoxy85` (PR #968)
 
