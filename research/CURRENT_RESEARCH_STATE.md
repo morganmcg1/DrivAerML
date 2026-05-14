@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~08:00 UTC
+- 2026-05-14 ~07:00 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -44,36 +44,35 @@ PR #972 (SOTA) used **uniform sampling** (monkey-patch was a no-op). True SDF ne
 
 **SDF concentration approach broadly falsified.** No α value on the corrected split beats uniform sampling (SOTA PR #972). The plateau-regression pattern (best at EP10-13, then drift) is consistent across all productive arms. **Pivot to orthogonal levers is confirmed.**
 
-## Active Experiments (2026-05-14 ~08:00 UTC)
+## Active Experiments (2026-05-14 ~07:00 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | ~EP13.9 | **WAVE BEST: val_abupt=6.2647% (EP11), val_vol_p=4.140%** |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | TBD | Not started | **Student-AI rate-limited (GH user 20516801) since ~00:35Z** |
-| dl24-nezuko  | #1101 | LR=9e-5 isolated control (new) | TBD | Not started | **Student-AI rate-limited; #1072 CLOSED 08:00Z** |
-| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP14.2 | val_abupt=6.382%, vol_p=4.519% |
+| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | ~EP12.1 / 9.5h | val_abupt=6.275% (slope +0.001, plateau), val_vol_p=4.17% |
+| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP15.1 / 11.7h | val_abupt=6.370% (slope -0.001, still improving), val_vol_p=4.45% |
+| dl24-fern    | #1098 | WD=0.01 isolated retest | `hrb2syym` (smoke) | 3min, step 827 | **Smoke launched 06:53Z, config verified correct** |
+| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `gi47kxmp` (smoke) | 5min, step 1430 | **Smoke launched 06:51Z, config verified correct** |
 
-### Infrastructure Alert: GH Rate-Limit Blocking Student-AI
+### Infrastructure Update: GH Rate-Limit RESOLVED
 
-**User ID 20516801** (shared student account) has been GH rate-limited since ~00:35Z May 14 — now 7+ hours. Both fern and nezuko student-AI pods are in retry loops unable to poll PRs. Training infra (torchrun) unaffected. Rate limit must reset before new assignments are picked up.
+Rate limit cleared between 06:48Z–06:51Z. Both fern and nezuko student-AI pods picked up assignments and launched DDP8 smoke runs:
+- nezuko `gi47kxmp` (lr=9e-5, wd=0.005, no SDF, no GradNorm) at 06:51:10Z
+- fern `hrb2syym` (lr=1e-4, wd=0.01, no SDF, no GradNorm) at 06:53:00Z
 
-Effect:
-- fern #1098 (assigned 05:30Z) — NOT launched. Student cannot see assignment.
-- nezuko #1101 (assigned 08:00Z) — NOT launched. Same blocker.
-- tanjiro and frieren appear unaffected (different GH account or rate limit window).
+Both configs match assignment exactly. Long runs will launch after EP3 smoke gate (val_abupt < 8.5%).
 
-### Val Checkpoint Snapshots (latest ~08:00 UTC)
+### Val Checkpoint Snapshots (latest ~07:00 UTC)
 
 | Student | PR | Run | EP | val_abupt (latest) | val_abupt (best) | val_vol_p (latest) |
 |---------|-----|-----|----|-------------------:|-----------------:|-----------------:|
-| dl24-tanjiro | #1086 | `fby84xtu` | ~EP13.9 | 6.2647% | **6.2647%** (EP11-13, holding) | 4.140% |
-| dl24-frieren | #1077 | `m4z2gb65` | ~EP14.2 | 6.382%  | ~6.356% (EP11) | 4.519% |
-| dl24-fern    | #1098 | TBD | — | — | — | — |
-| dl24-nezuko  | #1101 | TBD | — | — | — | — |
+| dl24-tanjiro | #1086 | `fby84xtu` | ~EP12.1 | 6.275% | **6.2647%** (EP11, slight backtrack at EP12) | 4.17% |
+| dl24-frieren | #1077 | `m4z2gb65` | ~EP15.1 | 6.370% | ~6.356% (EP11) | 4.45% |
+| dl24-fern    | #1098 | `hrb2syym` | smoke | smoke too early | — | — |
+| dl24-nezuko  | #1101 | `gi47kxmp` | smoke | smoke too early | — | — |
 
-## Strategic Assessment (~08:00 UTC)
+## Strategic Assessment (~07:00 UTC)
 
 ### SDF wave conclusion (finalized)
 The SDF near-surface concentration idea is fully mapped and falsified. Productive α band [0.25, 0.5] produces val_abupt ~6.26–6.29% (competitive) but:
@@ -82,18 +81,20 @@ The SDF near-surface concentration idea is fully mapped and falsified. Productiv
 - SDF concentration does not close the OOD test generalization gap
 
 ### Orthogonal levers being tested
-1. **EMA 0.999 (tanjiro #1086)** — KEY experiment. Wave-best at EP11 (6.2647%), vol_p=4.140% holding. EMA may decouple the plateau-regression pattern. Terminal test from best checkpoint is the critical deliverable. ETA ~12h.
-2. **WD=0.01 (fern #1098)** — Blocked by rate-limit. Will launch when rate limit resets.
-3. **LR=9e-5 (nezuko #1101)** — NEW. Blocked by rate-limit. Lower LR may extend useful learning window on corrected split.
+1. **EMA 0.999 (tanjiro #1086)** — KEY experiment. Wave-best on val at EP11 (6.2647%), slope flattened by EP12. EMA may decouple the plateau-regression pattern. Terminal test from best checkpoint is the critical deliverable. ETA ~14h.
+2. **WD=0.01 (fern #1098)** — Smoke just launched 06:53Z. Long run in ~30-45 min if smoke passes EP3 < 8.5%.
+3. **LR=9e-5 (nezuko #1101)** — Smoke just launched 06:51Z. Long run in ~30-45 min if smoke passes EP3 < 8.5%.
+4. **SDF α=1.0 (frieren #1077)** — Still mid-cosine, ETA ~12h. Slope still negative (improving). Background reference for SDF concentration falsification.
 
 ### Pending hypothesis queue
 - After tanjiro #1086 results: **H1 GradNorm+EMA composition** (combine EMA with GradNorm if EMA terminal shows improved val_vol_p ≤ 4.0%)
 - **Surface-point density investigation** — if test metrics continue to show OOD generalization bottleneck
+- **Long cosine T_max=40 or 50** — if both tanjiro and nezuko plateau before EP30, the cosine schedule may be too aggressive
 
 ## Next Key Events
 
-1. **Rate-limit reset** (~anytime) — fern and nezuko can then pick up their assignments.
-2. **Frieren #1077 EP15 gate** (step 164,625, threshold ≤6.80%) — ~2-4h.
-3. **Tanjiro #1086 terminal** (~12h from now ~20:00Z) — KEY RESULT. Test from best checkpoint.
-4. **Fern #1098 smoke + long run** — once rate-limit clears, ~3-5h after pickup.
-5. **Nezuko #1101 smoke + long run** — once rate-limit clears, ~3-5h after pickup.
+1. **Smoke EP3 gates** (~07:30Z): nezuko `gi47kxmp` and fern `hrb2syym` should hit EP3 within 30-45 min.
+2. **Long-run launches** (~08:00Z): both should be transitioning to their 30-epoch 24h runs.
+3. **Frieren #1077 EP15 gate** (step 164,625, threshold ≤6.80%) — already past gate at val 6.370%.
+4. **Tanjiro #1086 terminal** (~14h from now, ~20:45Z) — KEY RESULT. Test from best checkpoint.
+5. **Frieren #1077 terminal** (~11.5h from now, ~18:30Z).
