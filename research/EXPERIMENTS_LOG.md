@@ -1,5 +1,57 @@
 # SENPAI Research Results
 
+## 2026-05-14 21:00 — PR #1111: GradNorm adaptive task balancing with curriculum (fern) — CLOSED (TEST FLOORS REGRESS, GRADNORM-FINDING IS THE DELIVERABLE)
+
+- **Branch**: `fern/gradnorm-curriculum-compatible` (closed)
+- **W&B run**: `pbjrixfv` (rank 0, finished at EP3 truncation, 271.13 min wall-clock)
+- **Hypothesis**: GradNorm adaptive task weighting on (sp, τ_x, τ_y, τ_z, vp) loss heads, with curriculum-compatibility patches to avoid PR #1095's vol-head-starvation failure mode. Initial mean-1-normalised priors derived from baseline weights (sp:1.0, τ_x:1.0, τ_y:1.5, τ_z:2.0, vp:1.0). α=0.12 GradNorm learning rate.
+
+### Test metrics (EP3 best-val EMA checkpoint, 50 test cases)
+
+| Metric | Test | Target/Floor | Δ | Status |
+|---|---:|---:|---:|---|
+| test_WSS | 7.473% | ≤6.727% (PR #972 SOTA) | +75bp | MISS |
+| test_vol_p | 3.943% | ≤3.643% (floor) | +30bp | **FLOOR REGRESSION** |
+| test_SP | 4.144% | ≤3.577% (floor) | +57bp | **FLOOR REGRESSION** |
+| test_abupt | 6.530% | — | — | — |
+| test_tau_z | 9.613% | — | — | — |
+
+### Full-val metrics (EP3 best EMA, 34 val cases)
+
+| Metric | Value |
+|---|---:|
+| full_val_abupt | 6.866% |
+| full_val_vol_p | 4.053% |
+| full_val_WSS | 7.737% |
+| full_val_tau_z | 10.397% |
+
+### Headline: GradNorm de-emphasizes the hardcoded τ_z=2.0 prior
+
+| Task | Init (mean-1) | EP3 final | Δ |
+|---|---:|---:|---:|
+| sp | 0.769 | 0.930 | +0.161 |
+| τ_x | 0.769 | 0.996 | +0.227 |
+| τ_y | 1.154 | 1.052 | -0.102 |
+| **τ_z** | **1.538** | **1.063** | **-0.475 (largest negative move)** |
+| vp | 0.769 | 0.960 | +0.191 |
+
+GradNorm converges all five task weights toward a near-uniform mean-1 distribution within 30k steps. τ_z drops 47% from its starting prior of 2.0. No reset events; no curriculum-transition spikes; gradient-norm signal stays informative throughout.
+
+### Curriculum-compatibility achieved
+
+PR #1095's vol-head-starvation feedback loop did NOT recur. Vol curriculum (0:16384→3:32768) stayed intact through the EP3 transition. `gradnorm/reset_event_count=0` (timeout at EP3 truncated before later transitions could fire). The "curriculum-compatible" claim is empirically supported within the 3.5-epoch window.
+
+### Diagnosis and paper-relevant findings
+
+1. **Off-SOTA negative result on metrics but positive methodological finding.** test_WSS misses SOTA by 75bp and both test_vol_p and test_SP regress through their floors — disqualifying for merge. But the GradNorm weight trajectory is itself a deliverable.
+2. **τ_z=2.0 hardcoded prior is empirically over-corrected.** GradNorm's gradient-norm signal disagrees with the PR #972-era assumption that τ_z is gradient-starved. The model naturally allocates gradient effort to τ_z without explicit upweighting.
+3. **Wave 28 per-channel work implicitly carries this over-corrected prior.** Tanjiro #1114 (learnable WSS channel weights, init at baseline) and edward #1116 (per-channel WSS heads, no per-channel loss reweighting) are operating on the same starting assumption; their results should be interpreted with this finding in context.
+4. **Budget mismatch is the proximate killer.** 271 min / 76 min-per-epoch ≈ 3.5 epochs in a 13-ep cosine schedule. The cosine LR is still very high at termination, mechanically inflating absolute error. Shared constraint across all heavy surf-to-vol-xattn recipes at 65536 vol-points.
+5. **GradNorm-as-prior-discovery framing.** The converged weights `w* ≈ uniform mean-1` become a data-driven prior for future fixed-weight runs. Worth testing whether `w*` applied as fixed channel weights beats the hardcoded τ_z=2.0 prior in a full-convergence run.
+6. **Rank-0 W&B run id correction**: `pbjrixfv` (not `jkhnq2zd` which was rank 7) — noted for log reference.
+
+Fern reassigned to short-cycle GradNorm (`--lr-cosine-t-max 6 --epochs 6` with reduced vol-points) for full-convergence test of "learned weights vs hardcoded τ_z=2.0 prior" hypothesis.
+
 ## 2026-05-14 20:35 — PR #1110: OHEM surface top-20% hard mining (askeladd) — CLOSED (EP3 KILL, OHEM SCALE-COLLAPSE)
 
 - **Branch**: `askeladd/ohem-surface-top20pct` (closed)
