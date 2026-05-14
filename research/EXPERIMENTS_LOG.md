@@ -8,6 +8,49 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-14 ~03:40 UTC — PR #1063 TERMINAL: SDF Inverse Vol Sampling α=0.25 (dl24-fern, `xfykblf9`)
+
+- **Branch:** `dl24-fern/sdf-near-surface-alpha-sweep-band-b`
+- **W&B Run:** `xfykblf9`
+- **Hypothesis:** Low-α inverse near-surface SDF weighting `w = 1/(1+α|sdf|)` with α=0.25 mildly concentrates volume sampling near boundary; should retain volume coverage while gently emphasizing the boundary layer.
+- **Status:** RUN TERMINATED at EP29.3 (step 321,739, wallclock-limited). Test eval auto-logged at terminal. Student pod was rate-limited so SENPAI-RESULT marker not yet posted — advisor harvested metrics directly from W&B.
+
+### Test metrics (terminal-epoch auto-logged)
+
+| Metric | Value | PR #972 SOTA | Δ |
+|--------|------:|-------------:|---:|
+| test_abupt | **5.955%** | 5.844% | +0.111pp (regression, +1.9% rel) |
+| test_vol_p | **3.990%** | 3.643% | +0.347pp (regression, +9.5% rel) |
+| test_surf_p | 3.707% | 3.577% | +0.130pp |
+| test_wss | 6.746% | 6.727% | ~noise |
+
+### Per-metric best val checkpoints
+
+| Metric | Best Val | Step | EP |
+|--------|---------:|-----:|---:|
+| val_abupt | 6.2647% | 120,735 | 11 |
+| val_vol_p | 4.1178% | 98,783 | 9 |
+| val_surf_p | 4.058% | 175,615 | 16 |
+| val_wss | 6.954% | 197,567 | 18 |
+
+### Verdict: NOT A MERGE CANDIDATE
+
+- test_abupt regresses +0.111pp vs SOTA (small, but not improvement)
+- test_vol_p (human-priority metric per Issue #882) regresses +0.347pp = +9.5% rel — clearly worse
+- Plateau-regression pattern confirmed: val_abupt peaked at EP11 (6.265%), drifted upward through terminal (6.409%)
+- Test from terminal-epoch checkpoint, NOT best val-checkpoint. Test from EP11-best still pending.
+
+### Strategic implications
+
+- SDF inverse near-surface sampling at α=0.25 does NOT beat uniform-sampling baseline (PR #972) on corrected dataset
+- Combined with α=2.0 (PR #1054 EP15 FAIL) and α=3.0 (PR #1076 EP10 KILL), the SDF-concentration approach is now broadly falsified on this dataset
+- α=0.5 (nezuko #1072, still running) and α=1.0 (frieren #1077, still running) will close the remaining sweep, but expectations are now low
+- Pivot levers (orthogonal to SDF concentration) take priority: EMA #1086 in-flight, GradNorm+SDF composition (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4)
+
+PR not yet closed — waiting for student to post EP11-best test eval. If EP11-best test_abupt ≤ 5.844% AND test_vol_p ≤ 3.643%, merge candidate. Otherwise close.
+
+---
+
 ## 2026-05-13 ~20:20 UTC — PR #1076 CLOSED: SDF Inverse Vol Sampling α=3.0 (dl24-tanjiro, `ed01yw3z`)
 
 - **Branch:** `dl24-tanjiro/sdf-inverse-alpha-sweep-3.0`

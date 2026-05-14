@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~02:35 UTC
+- 2026-05-14 ~04:05 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -61,27 +61,38 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-13 ~20:42 UTC)
+## Active Experiments (2026-05-14 ~04:05 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | Approx EP | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `fby84xtu` (long) | ~EP2.3 | Smoke `ugbkg660` EP1 PASS; long-run launched 21:23Z; EP2=7.48% (matches fern, expected since val uses live weights) |
-| nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP16 | EP15 gate PASSED (best 6.290%), slope still negative |
-| fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | ~EP22 | EP20 gate PASSED (best 6.265%), plateau persists, slope ≈ flat |
-| frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP2 | EP2 progressing, fast descent (slope −1.354/1k) |
+| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `fby84xtu` (long) | ~EP7.3 | val_abupt=6.326% (trending well), terminal ~15h |
+| nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP25.1 | EP25 gate PASSED at 6.399%, terminal ~5h |
+| fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | **TERMINAL EP29.3** | **test_abupt=5.955% (+1.9% vs SOTA — NOT a winner)**, awaiting EP11-best test eval, student rate-limited |
+| frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP10.2 | val_abupt=6.370%, mid-run |
 
 **Tanjiro PR #1076 (α=3.0) CLOSED 2026-05-13 ~20:20Z:** Killed at EP10 gate (val_abupt=7.25% > ≤7.2%). Best val_abupt=6.5012% at EP6 then drifted upward — over-concentration confirmed. α=3.0 FALSIFIED.
 
-### Val Checkpoint Snapshots (latest, 2026-05-14 ~00:40 UTC)
+### Val Checkpoint Snapshots (latest, 2026-05-14 ~04:00 UTC)
 
 | Student | PR / α | Run | Step / EP | val_abupt latest | val_abupt best | val_vol_p (latest) |
 |---------|--------|-----|-----------|-----------------:|---------------:|-----------------:|
-| fern    | #1063 / 0.25 | `xfykblf9` | 305,918 (~EP27.9) | 6.415% | **6.2647%** (EP11) | 4.875% |
-| nezuko  | #1072 / 0.5  | `yp383yq2` | 243,015 (~EP22.1) | 6.337% | **6.2904%** (EP10) | 4.481% |
-| tanjiro | #1086 / EMA  | `fby84xtu` | 50,522 (~EP4.6) | 6.432% | **6.432%** (EP4) | 4.251% |
-| frieren | #1077 / 1.0  | `m4z2gb65` | 82,486 (~EP7.5) | 6.387% | **6.387%** (EP7) | 4.492% |
+| fern    | #1063 / 0.25 | `xfykblf9` | **321,739 TERMINAL** | 6.409% | **6.2647%** (EP11) | 4.854% |
+| nezuko  | #1072 / 0.5  | `yp383yq2` | 275,776 (~EP25.1) | 6.399% | **6.2904%** (EP10) | 4.753% |
+| tanjiro | #1086 / EMA  | `fby84xtu` | 79,821 (~EP7.3) | 6.326% | **6.326%** (EP7) | 4.178% |
+| frieren | #1077 / 1.0  | `m4z2gb65` | 112,070 (~EP10.2) | 6.370% | **6.370%** (EP10) | 4.481% |
+
+### Fern Terminal Results (TEST metrics auto-logged at terminal)
+
+| Metric | Fern terminal | PR #972 SOTA | Δ |
+|--------|---------------:|-------------:|---:|
+| test_abupt | **5.955%** | 5.844% | +0.111pp (+1.9% rel) |
+| test_vol_p | **3.990%** | 3.643% | +0.347pp (+9.5% rel) |
+| test_surf_p | 3.707% | 3.577% | +0.130pp |
+| test_wss | 6.746% | 6.727% | ~noise |
+
+**Verdict: NOT A MERGE CANDIDATE.** Test from terminal-epoch only; EP11-best test eval still pending (student rate-limited). If EP11-best test_abupt ≤ 5.844% AND test_vol_p ≤ 3.643%, merge. Otherwise close PR #1063.
 
 Notes:
 - **fern (α=0.25):** Past EP20. Best=6.2647% (EP11). Slope flat at +0.002/1k — plateau since EP11 confirmed. Run on track to terminate ~02:30Z May 14 at EP30 with terminal val_abupt ≈6.30%. Test harvest at terminal will be the **first SDF wave test metric**.
@@ -192,4 +203,4 @@ PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abu
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-14 ~02:35 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP28.2 — terminal ~76 min away. **Fern student pod is stuck in GH rate-limit retry loop since ~00:35Z** (last heartbeat iteration 1043 at 01:04Z) but training process is unaffected (GPUs at 91-100%). Will recover when rate-limit window resets. Best per-metric checkpoints from W&B for fern: abupt=6.265% (EP11), vol_p=4.118% (EP9), surf_p=4.058% (EP16), wss=6.954% (EP18). Strategic conclusion holds: SDF concentration tuning not beating uniform-sampling SOTA (test 5.844%). Pivot levers ready for first idle slot: GradNorm+SDF (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
+_Last updated: 2026-05-14 ~04:05 UTC. **🏁 FERN #1063 TERMINATED at EP29.3** with W&B-logged test metrics: test_abupt=5.955% (+1.9% vs SOTA 5.844%, NOT a winner), test_vol_p=3.990% (+9.5% vs SOTA 3.643% — clearly worse on priority metric). SDF concentration approach now broadly falsified on corrected dataset (α=0.25 regresses; α=2.0, 3.0 already failed). Fern's student pod still rate-limited (since ~00:35Z); waiting on EP11-best test eval before final close-or-merge decision. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Nezuko EP25 PASS at 6.399%; tanjiro EMA EP7.3 (6.326%); frieren EP10.2 (6.370%). **Strategic pivot now necessary**: when student GPUs free up, prioritize orthogonal levers — EMA (in-flight), GradNorm+SDF (H1), WD retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
