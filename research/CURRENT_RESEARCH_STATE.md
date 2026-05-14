@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~04:05 UTC
+- 2026-05-14 ~05:10 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -74,14 +74,14 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 
 **Tanjiro PR #1076 (α=3.0) CLOSED 2026-05-13 ~20:20Z:** Killed at EP10 gate (val_abupt=7.25% > ≤7.2%). Best val_abupt=6.5012% at EP6 then drifted upward — over-concentration confirmed. α=3.0 FALSIFIED.
 
-### Val Checkpoint Snapshots (latest, 2026-05-14 ~04:00 UTC)
+### Val Checkpoint Snapshots (latest, 2026-05-14 ~05:10 UTC)
 
 | Student | PR / α | Run | Step / EP | val_abupt latest | val_abupt best | val_vol_p (latest) |
 |---------|--------|-----|-----------|-----------------:|---------------:|-----------------:|
 | fern    | #1063 / 0.25 | `xfykblf9` | **321,739 TERMINAL** | 6.409% | **6.2647%** (EP11) | 4.854% |
-| nezuko  | #1072 / 0.5  | `yp383yq2` | 275,776 (~EP25.1) | 6.399% | **6.2904%** (EP10) | 4.753% |
-| tanjiro | #1086 / EMA  | `fby84xtu` | 79,821 (~EP7.3) | 6.326% | **6.326%** (EP7) | 4.178% |
-| frieren | #1077 / 1.0  | `m4z2gb65` | 112,070 (~EP10.2) | 6.370% | **6.370%** (EP10) | 4.481% |
+| nezuko  | #1072 / 0.5  | `yp383yq2` | 308,932 (~EP28.1) | 6.434% | **6.2904%** (EP10) | 4.863% |
+| tanjiro | #1086 / EMA  | `fby84xtu` | 109,758 (~EP7.5) | **6.2742%** | **6.2742%** (EP7, current best) | **4.1178%** |
+| frieren | #1077 / 1.0  | `m4z2gb65` | 142,459 (~EP9.7) | 6.362% | **6.362%** (EP9, slight regression slope) | 4.430% |
 
 ### Fern Terminal Results (TEST metrics auto-logged at terminal)
 
@@ -203,4 +203,4 @@ PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abu
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-14 ~04:05 UTC. **🏁 FERN #1063 TERMINATED at EP29.3** with W&B-logged test metrics: test_abupt=5.955% (+1.9% vs SOTA 5.844%, NOT a winner), test_vol_p=3.990% (+9.5% vs SOTA 3.643% — clearly worse on priority metric). SDF concentration approach now broadly falsified on corrected dataset (α=0.25 regresses; α=2.0, 3.0 already failed). Fern's student pod still rate-limited (since ~00:35Z); waiting on EP11-best test eval before final close-or-merge decision. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Nezuko EP25 PASS at 6.399%; tanjiro EMA EP7.3 (6.326%); frieren EP10.2 (6.370%). **Strategic pivot now necessary**: when student GPUs free up, prioritize orthogonal levers — EMA (in-flight), GradNorm+SDF (H1), WD retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
+_Last updated: 2026-05-14 ~05:10 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. **🌟 Tanjiro #1086 (EMA 0.999) is now strongest active trajectory** — at EP7.5: val_abupt=6.274% (best in wave), val_vol_p=4.118% (matches fern's all-time-best vp at EP9 already). EMA-shadow test eval at terminal will determine if EMA decouples the plateau-regression problem that hurt fern. Nezuko #1072 at EP28.1 (terminal ~1.5h away), val 6.434% (regressing toward fern's pattern). Frieren #1077 EP9.7 with slight positive slope (concerning early sign). Fern #1063 terminated, NOT a winner (test_abupt 5.955%, test_vol_p 3.990% both regress vs SOTA); EP11-best test eval pending. **Key forecast**: EMA likely the only lever that could beat SOTA in this wave. Pivot levers ready for next idle: GradNorm+SDF (H1), WD retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
