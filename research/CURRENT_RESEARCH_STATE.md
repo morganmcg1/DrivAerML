@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~14:30 UTC
+- 2026-05-14 ~20:45 UTC
 
 ## Human Research Directive (Issue #1056 — 2026-05-14, NEW)
 
@@ -49,16 +49,16 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 | 2.0 | #1054 | — | EP15 FAIL | Over-concentration |
 | 3.0 | #1076 | — | 6.5012% (EP6) | EP10 KILL |
 
-## Active Experiments (2026-05-14 ~20:30 UTC)
+## Active Experiments (2026-05-14 ~20:45 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | **#1117** | **H2: WSS curvature features** (kappa_H + kappa_G input channels) | TBD | **Assigned 20:30Z** | **NEW WSS hypothesis.** #1086 CLOSED (test_abupt=5.9555% bit-identical to fern, NOT-a-winner). Key insight: tau_y=7.36%, tau_z=8.75% — curvature targets these. |
-| dl24-frieren | #1115 | H1: WSS wind-exposure proxy (max(0,-nx) + \|ny\| input channels) | TBD | Assigned 18:10Z, student on branch | EP3 smoke gate pending. |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | EP10+ | EP3 val_vol_p=3.674% — winner candidate. Terminal ~04-06Z May 15. |
-| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | EP10+ | **val_vol_p=3.574% at EP5 — BELOW SOTA test target.** Tightened gates. **STRONGEST WINNER CANDIDATE.** Terminal ~04-06Z May 15. |
+| dl24-tanjiro | **#1117** | **H2: WSS curvature features** (kappa_H + kappa_G input channels) | NOT STARTED | Plan A approved 20:36Z | **Pre-flight data audit caught missing HK in 4 val + 1 test cases.** Approved 3-channel plan (surface_kappa_v2 + zero-filled H + zero-filled K, 7→10 channels). Expect launch by ~21:30Z. |
+| dl24-frieren | #1115 | H1: WSS wind-exposure proxy (max(0,-nx) + \|ny\| input channels) | `3rja7gw6` | EP~1 (1.8h in) | **RUNNING.** Launched ~18:51Z. Wave-2 restart at 19:38Z crashed all 8 ranks in <1min; wave-1 still healthy. EP3 smoke gate ~22:00Z. PR has 0 student comments — flag if not posted by EP3. |
+| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | step 185k, 11.2h | val_abupt=**6.298%**, val_vol_p=**3.512%**, val_wss=7.200%. **Winner candidate.** Terminal ~04-06Z May 15. |
+| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | step 194k, 11.5h | val_abupt=**6.352%**, val_vol_p=**3.489%**, val_wss=7.295%. **STRONGEST WINNER CANDIDATE — val_vol_p 0.154pp below SOTA test_vol_p=3.643%.** Terminal ~04-06Z May 15. |
 
 ### Per-Axis WSS Insight (from tanjiro #1086 fby84xtu terminal)
 
@@ -70,14 +70,16 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 
 Cross-flow shear (tau_y, tau_z) dominates. H1/H2 wind-exposure + curvature features directly target this.
 
-### Val Checkpoint Snapshots (latest ~20:30 UTC)
+### Val Checkpoint Snapshots (latest ~20:45 UTC, RUNNING values from W&B)
 
-| Student | PR | Run | EP | val_abupt (best) | val_vol_p (best) | val_wss |
-|---------|-----|-----|----|-----------------:|-----------------:|---------:|
-| dl24-tanjiro | #1117 | TBD | EP0 | — | — | — (just assigned) |
-| dl24-frieren | #1115 | TBD | EP0 | — | — | — (implementing) |
-| dl24-fern    | #1098 | `q4eok915` | EP3 | 6.6782% (EP3) | **3.6741% (EP3)** | 7.6094% |
-| dl24-nezuko  | #1101 | `5qumfbrs` | EP5 | **6.4955% (EP5)** | **3.5740% (EP5)** | 7.4400% |
+| Student | PR | Run | EP / step | val_abupt | val_vol_p | val_surf_p | val_wss |
+|---------|-----|-----|----------:|----------:|----------:|-----------:|--------:|
+| dl24-tanjiro | #1117 | TBD | not started | — | — | — | — |
+| dl24-frieren | #1115 | `3rja7gw6` | EP~1 (27k) | 7.480% | 5.983% | 4.753% | 7.970% |
+| dl24-fern    | #1098 | `q4eok915` | 185k (11.2h) | **6.298%** | **3.512%** | 4.113% | 7.200% |
+| dl24-nezuko  | #1101 | `5qumfbrs` | 194k (11.5h) | **6.352%** | **3.489%** | 4.125% | 7.295% |
+
+**Headline:** nezuko and fern both val_vol_p well below SOTA test_vol_p=3.643% (margin 0.13-0.15pp at step 185-194k). Terminal projection ~04-06Z May 15 — if held, **new aggregate SOTA candidates**. Neither is competitive on val_wss yet (Transolver-3 target 5.85%, both ~7.2-7.3% — large WSS gap remains for H1/H2 hypotheses to close on a fresh stack).
 
 ## Strategic Assessment (~14:30 UTC) — WSS PIVOT
 
@@ -142,9 +144,15 @@ The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arm
 
 ## Next Key Events
 
-1. ~~**Frieren #1077 terminal**~~ **DONE** (18:00Z) — CLOSED, NOT-a-winner. **H1 assigned → PR #1115.**
-2. **Frieren #1115 EP3 smoke gate** (~21:00Z) — val_wss ≤ 7.5%, val_vol_p ≤ 5.5%.
-3. ~~**Tanjiro #1086 terminal**~~ **DONE** (20:16Z) — CLOSED bit-identical to fern (test_abupt=5.9555%). **H2 assigned → PR #1117.** tau_y=7.36%/tau_z=8.75% per-axis insight captured.
-4. **Fern #1098 EP10 gate** (~19:00Z) — gate ≤ 6.5%.
-5. **Nezuko #1101 EP10 tightened gate** (~19:30Z) — gate ≤ 6.30%.
-6. **Fern + Nezuko terminal** (~04-06Z May 15) — if winners, compose with WSS lever; else assign H3 (nezuko) / H4 (fern).
+1. ~~**Frieren #1077 terminal**~~ **DONE** (18:00Z) — CLOSED, NOT-a-winner.
+2. ~~**Tanjiro #1086 terminal**~~ **DONE** (20:16Z) — CLOSED bit-identical to fern.
+3. **Tanjiro #1117 launch** (~21:00-21:30Z) — Plan A approved 20:36Z, 3 curvature channels (surface_kappa_v2 + zero-filled H + zero-filled K).
+4. **Frieren #1115 EP3 smoke gate** (~22:00Z) — val_wss ≤ 7.5%, val_vol_p ≤ 5.5%, val_abupt ≤ 7.5%.
+5. **Fern + Nezuko terminal** (~04-06Z May 15) — **CRITICAL.** If winners, merge sequentially and compose with H1/H2 WSS hypotheses for combinatorial wave; else assign H3 (nezuko) / H4 (fern).
+
+## Quiet-state Notes (2026-05-14 ~20:45 UTC)
+
+- All 4 students WIP, all pods 1/1 READY.
+- `stale_wip` flag on #1098, #1101, #1115 ignored per operator instruction (08:26Z).
+- Frieren #1115 has 0 PR comments despite run live for 1.8h; tolerate until EP3 gate (~22:00Z) — student probably composing the gate-pass writeup. If still silent at EP6, prompt for comment.
+- Frieren wave-2 W&B run crashed at 19:38Z; wave-1 healthy. Will surface in EP3 comment.
