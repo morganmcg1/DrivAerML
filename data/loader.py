@@ -240,6 +240,19 @@ def _resolve_artifact_path(path: Path) -> Path:
     raise FileNotFoundError(f"Could not resolve DrivAerML artifact {path}; checked {checked}")
 
 
+_MISSING_CURVATURE_WARNED: set[str] = set()
+
+
+def _warn_missing_curvature(case_id: str) -> None:
+    if case_id in _MISSING_CURVATURE_WARNED:
+        return
+    _MISSING_CURVATURE_WARNED.add(case_id)
+    print(
+        f"[loader] curvature_HK_v2.npy missing for {case_id}; falling back to zeros",
+        flush=True,
+    )
+
+
 def _load_npy_rows(path: Path, rows: np.ndarray | None = None) -> np.ndarray:
     resolved = _resolve_artifact_path(path)
     if rows is None:
@@ -288,19 +301,26 @@ def load_case(
     )
     surface_x = np.concatenate([xyz, normals, area], axis=1)
     if use_surface_curvature:
-        # H and K span ~6 orders of magnitude with heavy tails (K up to ±10M).
-        # Compute per-case stats on the FULL array (so sampled views see the same
-        # normalisation), then row-index after normalising.
-        full_curv = np.load(
-            _resolve_artifact_path(case_dir / "curvature_HK_v2.npy"), mmap_mode="r"
-        )
-        full_curv = np.asarray(full_curv, dtype=np.float32).copy()
-        for ch in range(full_curv.shape[1]):
-            lo, hi = np.percentile(full_curv[:, ch], [1, 99])
-            np.clip(full_curv[:, ch], lo, hi, out=full_curv[:, ch])
-            mu = full_curv[:, ch].mean()
-            sigma = full_curv[:, ch].std() + 1e-8
-            full_curv[:, ch] = (full_curv[:, ch] - mu) / sigma
+        # 62 / 484 cases in the corrected split lack curvature_HK_v2.npy; fall back
+        # to zeros for those (post per-case z-score, 0 ≡ case-mean curvature, i.e.
+        # a constant per case, so the model can simply ignore the feature there).
+        try:
+            curv_path = _resolve_artifact_path(case_dir / "curvature_HK_v2.npy")
+        except FileNotFoundError:
+            _warn_missing_curvature(case_dir.name)
+            n_full = _npy_row_count(case_dir / "surface_xyz.npy")
+            full_curv = np.zeros((n_full, 2), dtype=np.float32)
+        else:
+            # H and K span ~6 orders of magnitude with heavy tails (K up to ±10M).
+            # Compute per-case stats on the FULL array (so sampled views see the same
+            # normalisation), then row-index after normalising.
+            full_curv = np.asarray(np.load(curv_path, mmap_mode="r"), dtype=np.float32).copy()
+            for ch in range(full_curv.shape[1]):
+                lo, hi = np.percentile(full_curv[:, ch], [1, 99])
+                np.clip(full_curv[:, ch], lo, hi, out=full_curv[:, ch])
+                mu = full_curv[:, ch].mean()
+                sigma = full_curv[:, ch].std() + 1e-8
+                full_curv[:, ch] = (full_curv[:, ch] - mu) / sigma
         curv = full_curv if surface_rows is None else full_curv[surface_rows]
         surface_x = np.concatenate([surface_x, curv], axis=1)
     surface_y = np.concatenate([cp, wall_shear], axis=1)
