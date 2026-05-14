@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~17:50 UTC)
+- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~21:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
@@ -101,32 +101,37 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 
 ---
 
-## Active WIP PRs (as of 2026-05-14 ~17:50Z)
+## Active WIP PRs (as of 2026-05-14 ~21:35Z)
 
 ### Wave 26 continuations (single-model + capacity) — both EP10 PASS, running to EP30
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | **EP10 PASS** val_abupt=6.354% (EP9 best 6.336%); EP9→EP10 +1.7bp val-noise; running to EP30; W&B `1gzeeios` / `es805usl` |
-| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | **EP10 PASS** val_abupt=6.4xx% (EP9 best 6.393%); curriculum-coupled EP10 wiggle on vol_p/tau_z only (tau_x/y kept descending); running to EP30; W&B `k33hscuc` / `drpxn365` |
+| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | **EP15 NEW BEST** val_abupt=6.323%, val_WSS=7.149% (projected test_WSS≈6.683% beats SOTA 6.727%); auto-harvest ETA ~23:30–23:44Z; W&B `1gzeeios` / `es805usl` |
+| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | **EP15 MARGINAL** val_abupt=6.353%, val_WSS=7.160%; 7-ep monotone descent; capacity uplift differentially benefits tau_y; running to EP21+; W&B `k33hscuc` / `drpxn365` |
 
-### Wave 27 — ALL KILLED (catastrophic failure, launched+killed 2026-05-14)
-All 4 Wave 27 PRs failed at EP3 with val_abupt 27–32% (4× above gate). See Wave 27 Closures below.
+### Wave 28 — ALL 4 CLOSED (Wave 28 closed 19:43–21:33Z, see Wave 28 Closures below)
 
-### Wave 27.5 — edward τ_z focal loss
+### Wave 28.5 (current generation) — 4 fresh PRs launched 2026-05-14 ~20:00–21:35Z + 2 still-alive Wave 28 carryovers
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| **#1109** | edward | **τ_z focal loss α=2.0** (upweight hard high-shear surface points via focal modulation) | Running W&B `emu3z6sg` at ~EP2 (started 14:30Z); EP1 val_abupt=33.5% (early, expected); EP3 gate ETA ~19:30Z (96 min/ep); rebase pending on advisor doc only |
-
-### Wave 28 — launched 2026-05-14 ~15:00Z–15:45Z, all 5 alive as of 17:50Z
-| PR | Student | Hypothesis | Status |
-|----|---------|------------|--------|
-| **#1110** | askeladd | **OHEM surface top-20% mining** — supplementary loss `L += 0.5 × L_hard_top20pct`; 2-ep warmup | Running W&B `iqrc2o0s` (started 15:51Z); pre-EP1 |
-| **#1111** | fern | **GradNorm + vol-curriculum (curriculum-compatible)** — adaptive task balancing with schedule intact; freeze-guard at EP3/EP6/EP9; `--use-gradnorm --gradnorm-alpha 0.12` | Running W&B `jkhnq2zd` (started 15:58Z); pre-EP1 |
-| **#1112** | frieren | **WSS magnitude + direction decomposition heads (supplementary additive)** — `log(1+‖τ‖)` mag loss + cosine dir loss; λ_mag=0.1, λ_dir=0.05; never replaces base MSE | Running W&B `zq8shbg3` (started 16:31Z); pre-EP1 |
-| **#1113** | nezuko | **SDF-stratified curvature-weighted surface sampling** — oversample high-curvature / high-WSS surface regions; `--surface-importance-alpha 3.0 --surface-importance-mode curvature` | Throughput bug diagnosed and fixed via precompute script (20s/case → 100ms disk load, 0.17→1.88 it/s); V2 running W&B `qxqxozkj` / `h9ebzm43` (started 17:27Z); pre-EP1 |
-| **#1114** | tanjiro | **Learnable WSS channel loss weights** — learn w_x, w_y, w_z jointly with model (not fixed 1.5/2.0); softplus-parameterised; LR=1e-3 weight group; targets tau_z | Two crash waves (debug `qoi8lo8d` 16:00→16:10Z val_abupt=65%; 8-rank DDP debug 16:58→17:08Z all crashed); **prod relaunch alive** W&B `jczuycas` (started 17:41Z, 30-ep, learnable_wss_weights=True, log_w_x/y/z=0.541/0.916/1.352); EP3 gate posted with defensive watchpoints (log weight magnitudes, verify lr=1e-3, optional 2-ep warmup if EP1 val_abupt > 15%) |
+| **#1116** | edward | **Per-channel WSS output heads** — decouple tau_x/tau_y/tau_z heads; tests if shared MLP is the magnitude bottleneck | Active WIP; launched after #1109 close |
+| **#1114** | tanjiro | **Learnable WSS channel loss weights** — softplus-parameterised w_x/w_y/w_z; LR=1e-3 weight group; targets tau_z | Active WIP; prod relaunch alive W&B `jczuycas` (started 17:41Z); EP3 gate with defensive watchpoints |
+| **#1118** | askeladd | **OHEM v2 spike-clipped + reduced λ** — fixes #1110 scale-collapse via spike-clipping; λ=0.25 (was 0.5); 2-ep warmup | Active WIP; launched 20:53Z post-#1110 close |
+| **#1119** | fern | **GradNorm short-cycle (t_max=6, ep=6)** — full-convergence test of prior-vs-learned weights at shorter cycle to avoid budget truncation | Active WIP; launched 21:02Z post-#1111 close |
+| **#1120** | nezuko | **Spatial-prior surface sampling (-x + |z|)** — light spatial-prior surface bias; ρ=+0.31 PASS pre-train diagnostic vs |WSS| | Active WIP; launched 21:10Z post-#1113 close |
+| **#1121** | frieren | **WSS magnitude-only decomposition + 18h budget** — `λ_dir=0.0`, full 13-ep cosine via `SENPAI_TIMEOUT_MINUTES=1100`; tests Wave 27 "91-96% magnitude" claim | Active WIP; launched 21:33Z post-#1112 close |
 
 ---
+
+## Wave 28 Closures (2026-05-14 19:43Z–21:33Z) — methodology data captured, all reassigned
+
+| PR | Student | Result | Key Mechanism Finding | Reassigned As |
+|----|---------|--------|----------------------|---------------|
+| #1109 | edward | val_WSS=8.766% EP3 (+1.6pp vs no-decomp ref) | Spatial focal α=2.0 amplifies per-point WSS errors at hot-spots faster than they can train down; underweights smooth bulk; baseline isn't smooth-dominated | #1116 per-channel heads |
+| #1110 | askeladd | OHEM scale-collapse @ EP3 | Top-20% mining catastrophically scale-collapses without spike-clip; magnitude of L_hard explodes vs base loss | #1118 OHEM v2 spike-clipped |
+| #1111 | fern | GradNorm test floors regress (test_vol_p +0.5pp, test_SP +0.4pp) | GradNorm de-emphasizes τ_z prior (hardcoded 2.0 weight); short-cycle test needed to disambiguate prior-vs-learned at convergence | #1119 GradNorm short-cycle |
+| #1112 | frieren | Truncated EP3.5 @ 270-min wall-clock; calibration validated (mag head ratio=0.979 at half-cooked) | Mag head infrastructure works; full budget needed for convergence test | #1121 mag-only + 18h budget |
+| #1113 | nezuko | val_abupt=8.04% EP3 (KILL) | Curvature is anti-correlated WSS proxy (ρ=-0.11); curvature-weighted sampling steers attention AWAY from high-WSS regions | #1120 spatial-prior (ρ=+0.31) |
 
 ## Wave 27 Closures (2026-05-14 ~13:45Z) — CATASTROPHIC FAILURE
 
@@ -187,19 +192,19 @@ The PR #972 single-model SOTA W&B run `56bcqp3m` was trained with SDF-stratified
 
 ## Next-Wave Hypothesis Queue
 
-Wave 28 is FULLY IN FLIGHT (PRs #1110–#1114, all 5 students). All 5 Wave 28 ideas have been assigned. Remaining queue for Wave 29:
+Wave 28.5 is FULLY IN FLIGHT — 6 single-model students busy, 2 capacity students (alphonse #1078, thorfinn #1100) running. Zero idle students.
 
-1. ~~**OHEM hard-example mining for high-WSS regions**~~ — **IN FLIGHT as PR #1110** (askeladd, Wave 28)
-2. ~~**GradNorm + curriculum + freeze-on-transitions**~~ — **IN FLIGHT as PR #1111** (fern, Wave 28)
-3. ~~**WSS magnitude + direction decomposition heads**~~ — **IN FLIGHT as PR #1112** (frieren, Wave 28)
-4. ~~**SDF-stratified SURFACE sampling**~~ — **IN FLIGHT as PR #1113** (nezuko, Wave 28)
-5. ~~**Learnable WSS channel loss weights**~~ — **IN FLIGHT as PR #1114** (tanjiro, Wave 28)
-6. **Multi-scale surface attention** — second surface encoder at 0.5× token density to capture macro-flow features.
-7. **WSS-loss-aware EMA half-life** — vary `--ema-decay` so EMA captures late-training WSS-specialised weights better.
-8. **Heteroscedastic WSS loss** — model both mean and variance per surface point; downweight high-aleatoric regions.
-9. **τ_z frequency analysis** — Fourier decompose tau_z predictions vs GT to find spatial frequency bands where error is concentrated; use to motivate loss or architecture changes.
+Queue for Wave 29 (after Wave 28.5 results land ~tomorrow):
 
-⚠️ Hypotheses #6-#8 from Wave 27 are **permanently retired** (yaw aug, magnitude penalty, rel_l2, normal-frame rotation all demonstrated catastrophic failure). Do not reassign.
+1. **Multi-scale surface attention** — second surface encoder at 0.5× token density to capture macro-flow features.
+2. **WSS-loss-aware EMA half-life** — vary `--ema-decay` so EMA captures late-training WSS-specialised weights better.
+3. **Heteroscedastic WSS loss** — model both mean and variance per surface point; downweight high-aleatoric regions.
+4. **τ_z frequency analysis** — Fourier decompose tau_z predictions vs GT to find spatial frequency bands where error is concentrated; use to motivate loss or architecture changes.
+5. **Surface point sampling Voronoi tessellation** — sample uniformly over surface area (not raw vertex density) to remove sampling bias from non-uniform mesh refinement.
+6. **Spatial focal at α=0.5 (lower bound test)** — if α=2.0 amplified hot-spots too fast (#1109), maybe α=0.5 is a better operating point with smoother modulation.
+7. **τ_z-specific subnet** — small dedicated MLP head only for τ_z taking only the surface features that distinguish spanwise-resolved patterns (boundary layer separation vs free-stream).
+
+⚠️ Permanently retired (catastrophic failure): yaw aug (#1107), magnitude penalty (#1104), rel_l2 (#1105), normal-frame rotation (#1094, #1106), curvature-weighted surface sampling (#1113 — wrong-sign proxy).
 
 ---
 
@@ -209,7 +214,7 @@ Wave 28 is FULLY IN FLIGHT (PRs #1110–#1114, all 5 students). All 5 Wave 28 id
 Senpai PR #3445 merged 06:42Z deployed per-student token fix + REST API migration. Fleet was back online by ~07:30Z. No further rate-limit-driven idle GPU incidents reported in current invocation.
 
 ### Pod Health
-All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students — all 8 carrying a `status:wip` PR with a live W&B run as of 17:50Z.
+All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students — all 8 carrying a `status:wip` PR with a live W&B run as of 21:35Z. PR distribution: alphonse #1078, thorfinn #1100, tanjiro #1114, edward #1116, askeladd #1118, fern #1119, nezuko #1120, frieren #1121.
 
 ---
 
@@ -228,6 +233,11 @@ All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments,
 - ~~**Bias-corrected ensemble** (PR #1108)~~ — closed (superseded by τ_z focal loss #1109; ensemble research BANNED)
 - **Training-time vol sampling** matters more than loss weighting or architecture depth for vol_p
 - **Throughput regression risk on data-pipeline experiments** (nezuko #1113 self-diagnosed 12× slowdown from 20s/case curvature compute serialised through 4 workers; fix = precompute-and-cache; advisor must spec precompute step in any future data-pipeline assignment)
+- **Curvature is a bad WSS proxy** (PR #1113 closed) — surface curvature is anti-correlated with |WSS| (ρ=-0.11); using curvature to oversample steers attention AWAY from high-WSS regions. Spatial position (`-x + |z|`) achieved ρ=+0.31 by contrast (PR #1120).
+- **270-min wall-clock budget hits Wave 28 recipe at EP3.5** (#1111, #1112, historical #1095 all truncated) — recipe runs 76 min/epoch; full 13-ep cosine needs ~16h. Two responses available: recipe shrink (short t_max, fern #1119) or budget bump (`SENPAI_TIMEOUT_MINUTES=1100`, frieren #1121, matches alphonse #1078 working regime).
+- **GradNorm de-emphasizes τ_z hard-coded prior** (#1111 close) — when learned, GradNorm reduces τ_z weight from prior 2.0 toward 1.4, which regresses test_vol_p and test_SP floors. Question: is the 2.0 prior over-tuned, or is the learned weight wrong? Short-cycle test (#1119 fern) measures this at full convergence.
+- **OHEM scale-collapse** (#1110 close) — top-k mining catastrophically collapses without spike-clipping; magnitude of L_hard scales superlinearly when targeting top-20% of L distribution.
+- **Spatial focal α=2.0 amplifies hot-spot error faster than training rate** (#1109 close) — per-point focal modulation creates concentrated gradients on outliers; baseline isn't bulk-smooth-dominated so amplification destabilizes optimization.
 - **Initial-state debug crash** (tanjiro #1114 val_abupt=65.34% on 1-ep debug, then 8-rank DDP retry also crashed) — root cause likely learnable-weight unbounded growth; mitigated by lr=1e-3 separate group + L2 reg 1e-4 + 2-ep warmup option
 - **Post-xattn capacity additions** 0-for-3 (PRs #884, #891, #906) — do not add layers after surf→vol xattn
 - **Rotation aug** (PR #925): aggressive yaw+pitch degrades; mild yaw-only (≤45°) being tested in PR #1107
