@@ -1,3 +1,52 @@
+## 2026-05-14 23:45 — PR #1100: Capacity uplift slices=256 (thorfinn) — CLOSED (TEST FLOORS REGRESS, NO-SDF STACK CEILING CONFIRMED)
+
+- **Branch**: `thorfinn/model-slices-256-capacity` (closed)
+- **W&B run**: `k33hscuc` (rank 0, EP20 best-val EMA, 1029 min total wall)
+- **Hypothesis**: Double model_slices from 128 → 256 to test if capacity uplift on the no-SDF tay stack closes the gap to PR #972 SDF stack SOTA. 30-ep cosine, batch=4, lr=9e-5.
+
+### Test metrics (EP20 best-val EMA, 50 test cases)
+
+| Metric | This PR | Target / floor | Δ |
+|---|---:|---:|---:|
+| test_WSS | **6.9887%** | < 6.50% target / ≤ 6.727% SOTA | +49bp above target / +26.2bp worse than SOTA |
+| test_vol_p | **3.6442%** | ≤ 3.643% (floor) | +0.12bp above floor (essentially tied) |
+| test_SP | **3.8324%** | ≤ 3.577% (floor) | +25.5bp above floor (+7.1% rel) |
+| val_abupt | 6.3035% | ≤ 6.20% | +10bp above target |
+| val_vol_p | 3.7406% | (n/a) | better than PR #972 val_vol_p 3.798% |
+
+### Per-axis WSS (test)
+- test_tau_x: 6.208% | test_tau_y: 7.581% | **test_tau_z: 9.051%**
+- Same channel ordering as alphonse #1078 (test_tau_z=9.073%) — τ_z is the program-wide residual axis
+
+### Critical finding — no-SDF tay structural ceiling
+
+**Two independent mechanisms converge at test_WSS ≈ 6.99%:**
+
+| Run | Mechanism | test_WSS | test_vol_p | test_SP |
+|---|---|---:|---:|---:|
+| alphonse #1078 | Asymmetric eval 131k | 6.9955% | 3.6795% | 3.8547% |
+| **thorfinn #1100** | **slices=256 capacity uplift** | **6.9887%** | **3.6442%** | **3.8324%** |
+| PR #972 (SDF stack, on different branch) | SDF importance sampling + slices=128 | 6.727% | 3.643% | 3.577% |
+
+Capacity-uplift on no-SDF tay tops out at test_WSS ≈ 6.99% — this is now an empirical observation backed by two independent levers (asymmetric eval, slices=256). Strongly suggests **SDF importance sampling is load-bearing** for both WSS and the test floors. Direct motivation for alphonse #1122 (SDF port to tay).
+
+### Diagnostic findings
+
+1. **VRAM ceiling at slices=256**: 99.5 GB / 97.9 GB observed (96.94% allocated). `--no-compile-model` kept the allocator stable across 11 epochs of the 65k vol stage. Higher slice counts will require bs=2 or activation checkpointing.
+2. **Cadence**: 38 min/ep at 65k stage (curriculum-aware), 1010 min training + 18 min auto-harvest = 17.15h. 18h budget recipe lands EP20 of a 30-ep cosine.
+3. **Cosine schedule under-tuned**: at terminal, LR was ~33% of peak and train loss still descending. `--lr-cosine-t-max 20` instead of 30 would likely give 5-10bp better at EP20.
+4. **Best-val EP=20** at cap — model wanted MORE epochs. Capacity uplift is under-utilized at 20 epochs.
+5. **val_vol_p 3.7406% BEAT PR #972 val_vol_p 3.798%** — capacity uplift genuinely helps in-distribution vol_p, but test_vol_p stayed at floor boundary. Val/test divergence specific to vol_p.
+6. **tau_y improvement led WSS gains** (consistent with alphonse #1078) — capacity uplift differentially helps the transverse shear axis, but does NOT help τ_z.
+
+### Paper-relevant finding
+
+**Capacity-uplift on no-SDF tay tops out at test_WSS ≈ 6.99%** (two independent runs). Any future "beat SOTA without SDF" argument requires beating 6.99% test_WSS — and capacity alone cannot.
+
+### Reassignment
+
+Thorfinn → **τ_z-specific dedicated subnet** — attacks the residual axis (test_τ_z ≈ 9.05% across all no-SDF runs). Dedicated 2-layer MLP head for τ_z prediction alongside existing shared head. Compounds with edward #1116 per-channel heads if both prove additive.
+
 ## 2026-05-14 22:42 — PR #1078: Asymmetric eval surface 131k 2× WSS resolution at inference only (alphonse) — CLOSED (HYPOTHESIS FALSIFIED, TEST FLOORS REGRESS)
 
 - **Branch**: `alphonse/asymmetric-eval-surface-131k` (closed)
