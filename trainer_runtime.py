@@ -832,6 +832,63 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def build_surface_normal_frames(normals: torch.Tensor) -> torch.Tensor:
+    """Per-point orthonormal frames R = [n̂, t̂, b̂] (row vectors) from unit normals.
+
+    For each surface point we pick a reference vector r — (0, 0, 1) by default,
+    swapped to (1, 0, 0) where the normal is near-parallel to r (|n̂_z| > 0.9) —
+    and build a tangent t̂ = normalize(r × n̂) plus binormal b̂ = n̂ × t̂. The
+    resulting rotation matrix maps a world-frame vector v_world into the local
+    surface frame via v_local = R @ v_world, and back via v_world = R^T @ v_local.
+
+    The (1, 0, 0) fallback introduces a coordinate discontinuity wherever the
+    threshold flips, but for a transformer that sees each point independently
+    this is acceptable — see PR #1094 research notes.
+
+    Args:
+        normals: [B, N, 3] unit surface normals.
+
+    Returns:
+        R: [B, N, 3, 3] rotation matrices with rows [n̂, t̂, b̂].
+    """
+
+    ref = torch.zeros_like(normals)
+    ref[..., 2] = 1.0
+    near_parallel = normals[..., 2].abs() > 0.9
+    if near_parallel.any():
+        fallback = torch.tensor(
+            [1.0, 0.0, 0.0], device=normals.device, dtype=normals.dtype
+        )
+        ref = torch.where(near_parallel.unsqueeze(-1), fallback.expand_as(ref), ref)
+    t = torch.cross(ref, normals, dim=-1)
+    t = t / (t.norm(dim=-1, keepdim=True) + 1e-8)
+    b = torch.cross(normals, t, dim=-1)
+    b = b / (b.norm(dim=-1, keepdim=True) + 1e-8)
+    return torch.stack([normals, t, b], dim=-2)
+
+
+def rotate_surface_wss(
+    surface: torch.Tensor, R: torch.Tensor, *, inverse: bool = False
+) -> torch.Tensor:
+    """Rotate the WSS channels (1:4) of a [B, N, 4] surface tensor by R.
+
+    Channel 0 (surface pressure / cp) is passed through unchanged. When
+    ``inverse=False`` the WSS is mapped world → local (v_local = R @ v_world);
+    when ``inverse=True`` it is mapped local → world (v_world = R^T @ v_local).
+    """
+
+    if surface.shape[-1] != 4:
+        raise ValueError(
+            f"rotate_surface_wss expects last dim 4 (cp + tau_xyz); got {surface.shape}"
+        )
+    cp = surface[..., 0:1]
+    wss = surface[..., 1:4]
+    matrix = R.transpose(-2, -1) if inverse else R
+    matrix = matrix.to(wss.dtype)
+    rotated = (matrix @ wss.unsqueeze(-1)).squeeze(-1)
+    return torch.cat([cp, rotated], dim=-1)
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -955,6 +1012,7 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    surface_normal_frame_wss: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -969,6 +1027,12 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    if surface_normal_frame_wss:
+        # Model predicts in local surface frame; rotate WSS channels back to
+        # world frame (still normalised) before denormalisation and metrics.
+        normals = batch.surface_x[..., 3:6].to(device=device, dtype=torch.float32)
+        R = build_surface_normal_frames(normals)
+        surface_pred_norm = rotate_surface_wss(surface_pred_norm, R, inverse=True)
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
@@ -1121,6 +1185,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    surface_normal_frame_wss: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1132,6 +1197,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            surface_normal_frame_wss=surface_normal_frame_wss,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1466,7 +1532,14 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            surface_normal_frame_wss=getattr(config, "surface_normal_frame_wss", False),
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1486,7 +1559,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            surface_normal_frame_wss=getattr(config, "surface_normal_frame_wss", False),
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

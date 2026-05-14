@@ -40,6 +40,7 @@ from trainer_runtime import (
     TargetTransform,
     autocast_context,
     build_lr_scheduler,
+    build_surface_normal_frames,
     check_kill_thresholds,
     cleanup_distributed,
     collect_gradient_metrics,
@@ -56,6 +57,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    rotate_surface_wss,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -105,6 +107,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    surface_normal_frame_wss: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -229,6 +232,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "surface_normal_frame_wss": (
+            "Predict WSS in a per-point local surface frame (n̂, t̂, b̂). "
+            "Rotates the WSS channels of both the prediction and the "
+            "(already-normalised) target into the local frame for loss; "
+            "evaluation rotates predictions back to world frame before "
+            "denormalisation so all metrics remain in physical units. The "
+            "(--tau-y-loss-weight, --tau-z-loss-weight) channel weights are "
+            "reinterpreted as (t̂, b̂) weights in the local frame; the "
+            "n̂-component weight stays at 1.0. PR #1094."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -321,6 +334,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    surface_normal_frame_wss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,15 +346,32 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_pred = out["surface_preds"]
+        local_frame_metrics: dict[str, float] = {}
+        if surface_normal_frame_wss:
+            normals = batch.surface_x[..., 3:6].to(device=device, dtype=torch.float32)
+            R = build_surface_normal_frames(normals)
+            surface_pred = rotate_surface_wss(surface_pred, R)
+            surface_target = rotate_surface_wss(surface_target, R)
+            # Diagnostic: the n-component of normalised target ≠ 0 (per-channel
+            # standardisation does not commute with rotation), but we still log
+            # it so it can be tracked across runs.
+            with torch.no_grad():
+                tau_n_target = surface_target[..., 1]
+                mask_f = batch.surface_mask.to(device=device, dtype=torch.float32)
+                denom = mask_f.sum().clamp_min(1.0)
+                local_frame_metrics["tau_n_target_abs_mean"] = float(
+                    (tau_n_target.abs() * mask_f).sum().detach().cpu().item() / float(denom.cpu().item())
+                )
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_pred,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
@@ -352,6 +383,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **local_frame_metrics,
     }
 
 
@@ -852,6 +884,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.surface_normal_frame_wss:
+                print(
+                    "Surface-normal frame WSS: rotating WSS channels to local "
+                    "(n̂, t̂, b̂) frame for loss; predictions rotated back to "
+                    "world frame at eval. tau_y/tau_z weights reinterpreted as "
+                    "(t̂, b̂) component weights."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -1030,6 +1069,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        surface_normal_frame_wss=config.surface_normal_frame_wss,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1110,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "tau_n_target_abs_mean" in batch_loss_metrics:
+                        train_log["train/tau_n_target_abs_mean"] = batch_loss_metrics[
+                            "tau_n_target_abs_mean"
+                        ]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
@@ -1233,6 +1277,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        surface_normal_frame_wss=config.surface_normal_frame_wss,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1247,6 +1292,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    surface_normal_frame_wss=config.surface_normal_frame_wss,
                 )
                 for name, loader in val_loaders.items()
             }
