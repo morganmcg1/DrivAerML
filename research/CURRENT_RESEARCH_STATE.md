@@ -101,14 +101,15 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 
 ---
 
-## Active WIP PRs (as of 2026-05-14 ~22:45Z)
+## Active WIP PRs (as of 2026-05-14 ~23:50Z)
 
-### Capacity / baseline runs
+### Capacity / baseline runs (both CLOSED — no-SDF ceiling confirmed at test_WSS ≈ 6.99%)
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
 | #1078 | alphonse | ~~Asymmetric eval surface 131k~~ | **CLOSED 22:42Z** — test_WSS=6.996% (+26.8bp vs SOTA), test floors regress; val→test ratio was 1.020 not projected 0.935; hypothesis falsified |
-| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | **EP16 NEW LOW** val_abupt=6.330%, val_WSS=7.134%; 38min/ep cadence; landing ~EP24-28 by timeout; projected test_WSS [6.37%, 6.51%] (potential SOTA win); W&B `k33hscuc` |
-| **#1122** | alphonse | **SDF importance sampling port to tay (alpha=4.0)** — bring PR #972's missing lever onto tay | Active WIP; launched 22:45Z post-#1078 close |
+| #1100 | thorfinn | ~~Capacity uplift — model-slices 256~~ | **CLOSED 23:45Z** — test_WSS=6.989% (+26.2bp vs SOTA), test_SP +7.1% above floor; landed EP20 at 18h budget cap; confirms no-SDF tay structural ceiling at test_WSS ≈ 6.99% |
+| **#1122** | alphonse | **SDF importance sampling port to tay (alpha=4.0)** | Active WIP; launched 22:45Z post-#1078 close |
+| **#1123** | thorfinn | **τ_z dedicated subnet** (2-layer MLP head attacking residual axis test_τ_z ≈ 9.05%) | Active WIP; launched 23:50Z post-#1100 close |
 
 ### Wave 28 — ALL 4 CLOSED (Wave 28 closed 19:43–21:33Z, see Wave 28 Closures below)
 
@@ -215,7 +216,7 @@ Queue for Wave 29 (after Wave 28.5 results land ~tomorrow):
 Senpai PR #3445 merged 06:42Z deployed per-student token fix + REST API migration. Fleet was back online by ~07:30Z. No further rate-limit-driven idle GPU incidents reported in current invocation.
 
 ### Pod Health
-All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students — all 8 carrying a `status:wip` PR with a live W&B run as of 22:45Z. PR distribution: thorfinn #1100, tanjiro #1114, edward #1116, askeladd #1118, fern #1119, nezuko #1120, frieren #1121, alphonse #1122 (SDF port — replaces closed #1078).
+All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students as of 23:50Z. PR distribution: tanjiro #1114, edward #1116, askeladd #1118, fern #1119, nezuko #1120, frieren #1121, alphonse #1122 (SDF port), thorfinn #1123 (τ_z subnet).
 
 ---
 
@@ -242,6 +243,8 @@ All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments,
 - **val→test ratio is NOT stable across eval configurations** (#1078 close) — asymmetric eval 131k produced val→test ratio of 1.020, not the 0.935 anchored on PR #972. The 0.935 ratio is recipe-specific (SDF stack), not transferable. Advisor SOTA projections must use test results from comparable-recipe runs, not synthetic val × historical ratio. This is a methodology guard for the entire program.
 - **18h budget recipe validated end-to-end** (#1078 close): `SENPAI_TIMEOUT_MINUTES=1100` ran 17 epochs cleanly at ~62 min/ep (faster than initially projected). All future Wave 28+ runs can adopt it confidently; frieren #1121 has already.
 - **Capacity-uplift ceiling on no-SDF tay is val_abupt ≈ 6.31%** (#1078 EP16 / #1100 EP16 close). Beyond that, the bottleneck is training-time sampling, not parameter count. Justifies #1122 (alphonse SDF port).
+- **No-SDF tay structural ceiling at test_WSS ≈ 6.99%** (#1078 + #1100 close, two independent mechanisms). Asymmetric eval 131k and slices=256 capacity uplift both converge here at full convergence. Test floors regress under both. Any "beat SOTA without SDF" claim must beat 6.99% — capacity alone cannot. Direct paper-relevant finding.
+- **τ_z is the program-wide residual axis** (test_τ_z ≈ 9.05% across all no-SDF runs). Consistently 30-45% worse than τ_x and ~18bp worse than τ_y. Justifies #1123 (thorfinn τ_z dedicated subnet) attacking representational capacity for τ_z specifically.
 - **Initial-state debug crash** (tanjiro #1114 val_abupt=65.34% on 1-ep debug, then 8-rank DDP retry also crashed) — root cause likely learnable-weight unbounded growth; mitigated by lr=1e-3 separate group + L2 reg 1e-4 + 2-ep warmup option
 - **Post-xattn capacity additions** 0-for-3 (PRs #884, #891, #906) — do not add layers after surf→vol xattn
 - **Rotation aug** (PR #925): aggressive yaw+pitch degrades; mild yaw-only (≤45°) being tested in PR #1107
