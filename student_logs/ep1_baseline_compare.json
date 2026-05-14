@@ -1,0 +1,43 @@
+{
+  "my_run_id": "qxqxozkj",
+  "baseline_run_id": "emu3z6sg",
+  "baseline_name": "edward/tau-z-focal-alpha-2p0-rank0",
+  "comparison": [
+    {
+      "run": "nezuko_sdf_v2",
+      "step": 10864,
+      "epoch": null,
+      "val_abupt_pct": 33.63124149060481,
+      "val_WSS_pct": 38.51977435273902,
+      "val_vol_p_pct": 18.62303290016013,
+      "val_SP_pct": 26.572957287709393
+    },
+    {
+      "run": "edward_tauz_focal",
+      "step": 10864,
+      "epoch": null,
+      "val_abupt_pct": 33.53750189907714,
+      "val_WSS_pct": 37.09484897426171,
+      "val_vol_p_pct": 21.18967670576669,
+      "val_SP_pct": 25.501960140941854
+    },
+    {
+      "run": "edward_tauz_focal",
+      "step": 21729,
+      "epoch": null,
+      "val_abupt_pct": 9.772150432579833,
+      "val_WSS_pct": 10.933622352947586,
+      "val_vol_p_pct": 6.306803549430782,
+      "val_SP_pct": 6.696292894854993
+    },
+    {
+      "run": "edward_tauz_focal",
+      "step": 30470,
+      "epoch": null,
+      "val_abupt_pct": 8.252679600300802,
+      "val_WSS_pct": 9.266104903082589,
+      "val_vol_p_pct": 5.210550418968977,
+      "val_SP_pct": 5.621017358315057
+    }
+  ]
+}

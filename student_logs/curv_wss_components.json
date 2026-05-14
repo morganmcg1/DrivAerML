@@ -1,0 +1,18 @@
+{
+  "summary": "Pearson correlation and top-10% kappa-vs-target overlap on 7 cases (run_1, 50, 100, 200, 300, 400, 485). Curvature anti-correlates with the dominant WSS_x component (~half of random overlap) and weakly positively correlates with WSS_z. Net |WSS| effect is negative because |WSS_x| dominates magnitude.",
+  "random_baseline_top10_pct": 10.0,
+  "mean_per_metric": {
+    "kappa_vs_|WSS|_pearson": -0.056,
+    "kappa_vs_|WSS|_top10_pct": 7.20,
+    "kappa_vs_|Cp|_pearson": -0.010,
+    "kappa_vs_|Cp|_top10_pct": 6.38,
+    "kappa_vs_|WSS_x|_pearson": -0.084,
+    "kappa_vs_|WSS_x|_top10_pct": 4.73,
+    "kappa_vs_|WSS_y|_pearson": -0.003,
+    "kappa_vs_|WSS_y|_top10_pct": 8.86,
+    "kappa_vs_|WSS_z|_pearson": 0.017,
+    "kappa_vs_|WSS_z|_top10_pct": 13.69,
+    "neg_x_coord_vs_|WSS|_pearson": -0.236
+  },
+  "interpretation": "WSS_x is the dominant component (mean magnitude ~1.5 vs ~0.6 for WSS_y/WSS_z) and is the most strongly anti-correlated with kappa. So the curvature-weighted sampling actively oversamples low-WSS_x regions (smooth panels are good for WSS_x, sharp edges separate flow). WSS_z weakly improves (top-10% capture 13.69% vs random 10%) because vertical shear DOES localize near sharp transverse edges (wheel arches, A-pillar). The advisor's specific watch-list note 'if val_tau_z improves vs baseline at EP3' is the only signal expected to survive."
+}

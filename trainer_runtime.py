@@ -31,6 +31,7 @@ from data import (
     load_data,
     pad_collate,
 )
+from data.curvature_sampler import CurvatureWeightedSurfaceDataset
 
 
 class EMA:
@@ -287,6 +288,18 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    alpha = float(getattr(config, "surface_importance_alpha", 0.0))
+    if alpha > 0.0:
+        train_ds = CurvatureWeightedSurfaceDataset(
+            train_ds.case_ids,
+            store=train_ds.store,
+            max_surface_points=train_ds.max_surface_points,
+            max_volume_points=train_ds.max_volume_points,
+            sampling_mode=train_ds.sampling_mode,
+            surface_importance_alpha=alpha,
+            surface_importance_k=int(getattr(config, "surface_importance_k", 8)),
+            surface_importance_floor=float(getattr(config, "surface_importance_floor", 0.1)),
+        )
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:

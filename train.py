@@ -33,6 +33,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import DrivAerMLSurfaceDataset
+from data.curvature_sampler import CurvatureWeightedSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -138,6 +139,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    surface_importance_alpha: float = 0.0
+    surface_importance_k: int = 8
+    surface_importance_floor: float = 0.1
     debug: bool = False
 
 
@@ -228,6 +232,30 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "surface_importance_alpha": (
+            "Curvature-weighted surface sampling strength (PR #1113). "
+            "0.0 disables (uniform random sampling, baseline). For alpha>0, "
+            "the training-time surface point draw is biased toward "
+            "high-curvature regions with weight w_i = 1 + alpha * "
+            "(kappa_i / mean(kappa)), where kappa is approximate mean "
+            "curvature estimated via discrete divergence-of-normals over "
+            "a kNN neighborhood (k from --surface-importance-k). "
+            "Geometry-only proxy, no target leakage. Curvature is "
+            "precomputed once per case and cached per worker. Eval and "
+            "test sampling are unchanged."
+        ),
+        "surface_importance_k": (
+            "k for the kNN neighborhood used to estimate mean curvature in "
+            "--surface-importance-alpha. Higher k = smoother curvature "
+            "(less local edge detection); lower k = noisier but more "
+            "responsive to sharp edges. PCPNET-style range: 8-32."
+        ),
+        "surface_importance_floor": (
+            "Lower bound on the per-point sampling weight after applying "
+            "--surface-importance-alpha. Mostly redundant with the +1 "
+            "constant in the weight formula but provides a safety net "
+            "against degenerate cases (e.g. degenerate normals)."
         ),
     }
     for field in fields(Config):
@@ -677,13 +705,25 @@ def rebuild_train_loader_with_vol_points(
     sampling_mode = (
         "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
     )
-    train_ds = DrivAerMLSurfaceDataset(
-        old_ds.case_ids,
-        store=old_ds.store,
-        max_surface_points=config.train_surface_points,
-        max_volume_points=n_points,
-        sampling_mode=sampling_mode,
-    )
+    if float(getattr(config, "surface_importance_alpha", 0.0)) > 0.0:
+        train_ds = CurvatureWeightedSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+            surface_importance_alpha=float(config.surface_importance_alpha),
+            surface_importance_k=int(getattr(config, "surface_importance_k", 8)),
+            surface_importance_floor=float(getattr(config, "surface_importance_floor", 0.1)),
+        )
+    else:
+        train_ds = DrivAerMLSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+        )
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:

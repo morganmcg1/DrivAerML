@@ -1,0 +1,102 @@
+[run_1] N= 8828095 kappa: mean=55.17 max=4977.6 p99=853.5 | w_max=271.7
+   bin 0: kappa [0.00, 0.07]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.07, 0.23]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.23, 0.50]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.50, 1.12]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.12, 2.63]  uniform=10.00% weighted= 2.74% oversample x0.27
+   bin 5: kappa [2.63, 6.90]  uniform=10.00% weighted= 3.09% oversample x0.31
+   bin 6: kappa [6.90, 17.13]  uniform=10.00% weighted= 4.04% oversample x0.40
+   bin 7: kappa [17.13, 42.67]  uniform=10.00% weighted= 6.29% oversample x0.63
+   bin 8: kappa [42.67, 135.86]  uniform=10.00% weighted=12.88% oversample x1.29
+   bin 9: kappa [135.86, 4977.62]  uniform=10.00% weighted=60.79% oversample x6.08
+   wss corr: pearson=-0.050 spearman=-0.061 top10WSSinTop10Kappa=6.8%
+[run_50] N= 8194077 kappa: mean=53.84 max=4750.3 p99=877.5 | w_max=265.7
+   bin 0: kappa [0.00, 0.07]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.07, 0.23]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.23, 0.49]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.49, 1.09]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.09, 2.58]  uniform=10.00% weighted= 2.74% oversample x0.27
+   bin 5: kappa [2.58, 6.70]  uniform=10.00% weighted= 3.09% oversample x0.31
+   bin 6: kappa [6.70, 16.56]  uniform=10.00% weighted= 4.03% oversample x0.40
+   bin 7: kappa [16.56, 42.26]  uniform=10.00% weighted= 6.31% oversample x0.63
+   bin 8: kappa [42.26, 123.90]  uniform=10.00% weighted=12.60% oversample x1.26
+   bin 9: kappa [123.90, 4750.27]  uniform=10.00% weighted=61.05% oversample x6.11
+   wss corr: pearson=-0.055 spearman=-0.077 top10WSSinTop10Kappa=7.6%
+[run_100] N= 8254434 kappa: mean=54.88 max=4819.0 p99=903.2 | w_max=264.4
+   bin 0: kappa [0.00, 0.06]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.06, 0.22]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.22, 0.50]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.50, 1.11]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.11, 2.63]  uniform=10.00% weighted= 2.74% oversample x0.27
+   bin 5: kappa [2.63, 6.85]  uniform=10.00% weighted= 3.10% oversample x0.31
+   bin 6: kappa [6.85, 16.46]  uniform=10.00% weighted= 4.00% oversample x0.40
+   bin 7: kappa [16.46, 42.02]  uniform=10.00% weighted= 6.19% oversample x0.62
+   bin 8: kappa [42.02, 127.74]  uniform=10.00% weighted=12.56% oversample x1.26
+   bin 9: kappa [127.74, 4818.98]  uniform=10.00% weighted=61.23% oversample x6.12
+   wss corr: pearson=-0.061 spearman=-0.073 top10WSSinTop10Kappa=6.9%
+[run_200] N= 8377308 kappa: mean=53.46 max=4384.2 p99=874.8 | w_max=247.0
+   bin 0: kappa [0.00, 0.06]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.06, 0.22]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.22, 0.48]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.48, 1.06]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.06, 2.51]  uniform=10.00% weighted= 2.74% oversample x0.27
+   bin 5: kappa [2.51, 6.48]  uniform=10.00% weighted= 3.08% oversample x0.31
+   bin 6: kappa [6.48, 16.23]  uniform=10.00% weighted= 4.00% oversample x0.40
+   bin 7: kappa [16.23, 41.60]  uniform=10.00% weighted= 6.26% oversample x0.63
+   bin 8: kappa [41.60, 122.14]  uniform=10.00% weighted=12.54% oversample x1.25
+   bin 9: kappa [122.14, 4384.21]  uniform=10.00% weighted=61.22% oversample x6.12
+   wss corr: pearson=-0.059 spearman=-0.073 top10WSSinTop10Kappa=7.3%
+[run_300] N= 8185956 kappa: mean=53.82 max=4422.9 p99=869.2 | w_max=247.5
+   bin 0: kappa [0.00, 0.06]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.06, 0.21]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.21, 0.48]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.48, 1.05]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.05, 2.50]  uniform=10.00% weighted= 2.73% oversample x0.27
+   bin 5: kappa [2.50, 6.62]  uniform=10.00% weighted= 3.08% oversample x0.31
+   bin 6: kappa [6.62, 16.17]  uniform=10.00% weighted= 4.00% oversample x0.40
+   bin 7: kappa [16.17, 41.56]  uniform=10.00% weighted= 6.22% oversample x0.62
+   bin 8: kappa [41.56, 126.60]  uniform=10.00% weighted=12.70% oversample x1.27
+   bin 9: kappa [126.60, 4422.91]  uniform=10.00% weighted=61.10% oversample x6.11
+   wss corr: pearson=-0.059 spearman=-0.078 top10WSSinTop10Kappa=7.0%
+[run_400] N= 8701452 kappa: mean=54.33 max=4417.7 p99=890.0 | w_max=245.0
+   bin 0: kappa [0.00, 0.06]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.06, 0.22]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.22, 0.48]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.48, 1.06]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.06, 2.51]  uniform=10.00% weighted= 2.73% oversample x0.27
+   bin 5: kappa [2.51, 6.31]  uniform=10.00% weighted= 3.06% oversample x0.31
+   bin 6: kappa [6.31, 15.71]  uniform=10.00% weighted= 3.93% oversample x0.39
+   bin 7: kappa [15.71, 40.13]  uniform=10.00% weighted= 6.08% oversample x0.61
+   bin 8: kappa [40.13, 127.18]  uniform=10.00% weighted=12.35% oversample x1.23
+   bin 9: kappa [127.18, 4417.67]  uniform=10.00% weighted=61.67% oversample x6.17
+   wss corr: pearson=-0.056 spearman=-0.053 top10WSSinTop10Kappa=7.4%
+[run_485] N= 9242495 kappa: mean=58.33 max=5016.1 p99=886.8 | w_max=259.0
+   bin 0: kappa [0.00, 0.07]  uniform=10.00% weighted= 2.50% oversample x0.25
+   bin 1: kappa [0.07, 0.23]  uniform=10.00% weighted= 2.52% oversample x0.25
+   bin 2: kappa [0.23, 0.51]  uniform=10.00% weighted= 2.55% oversample x0.25
+   bin 3: kappa [0.51, 1.15]  uniform=10.00% weighted= 2.60% oversample x0.26
+   bin 4: kappa [1.15, 2.68]  uniform=10.00% weighted= 2.73% oversample x0.27
+   bin 5: kappa [2.68, 7.08]  uniform=10.00% weighted= 3.08% oversample x0.31
+   bin 6: kappa [7.08, 17.53]  uniform=10.00% weighted= 3.99% oversample x0.40
+   bin 7: kappa [17.53, 44.98]  uniform=10.00% weighted= 6.22% oversample x0.62
+   bin 8: kappa [44.98, 149.91]  uniform=10.00% weighted=13.22% oversample x1.32
+   bin 9: kappa [149.91, 5016.12]  uniform=10.00% weighted=60.60% oversample x6.06
+   wss corr: pearson=-0.050 spearman=-0.074 top10WSSinTop10Kappa=7.3%
+
+=== AVERAGED ACROSS CASES ===
+bin 0: uniform=10.00% weighted= 2.50% oversample x0.25
+bin 1: uniform=10.00% weighted= 2.52% oversample x0.25
+bin 2: uniform=10.00% weighted= 2.55% oversample x0.25
+bin 3: uniform=10.00% weighted= 2.60% oversample x0.26
+bin 4: uniform=10.00% weighted= 2.74% oversample x0.27
+bin 5: uniform=10.00% weighted= 3.08% oversample x0.31
+bin 6: uniform=10.00% weighted= 4.00% oversample x0.40
+bin 7: uniform=10.00% weighted= 6.22% oversample x0.62
+bin 8: uniform=10.00% weighted=12.69% oversample x1.27
+bin 9: uniform=10.00% weighted=61.10% oversample x6.11
+
+WSS-vs-kappa pearson  mean=-0.056 (per-case range [-0.061, -0.050])
+WSS-vs-kappa spearman mean=-0.070 (per-case range [-0.078, -0.053])
+Top-10% WSS coverage by top-10% kappa: mean=7.2% (per-case range [6.8%, 7.6%])
+
+Wrote student_logs/curv_bin_hist.json
