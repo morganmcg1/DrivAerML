@@ -150,9 +150,14 @@ The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arm
 4. **Frieren #1115 EP3 smoke gate** (~22:00Z) — val_wss ≤ 7.5%, val_vol_p ≤ 5.5%, val_abupt ≤ 7.5%.
 5. **Fern + Nezuko terminal** (~04-06Z May 15) — **CRITICAL.** If winners, merge sequentially and compose with H1/H2 WSS hypotheses for combinatorial wave; else assign H3 (nezuko) / H4 (fern).
 
-## Quiet-state Notes (2026-05-14 ~20:45 UTC)
+## Quiet-state Notes (2026-05-14 ~20:55 UTC)
 
 - All 4 students WIP, all pods 1/1 READY.
 - `stale_wip` flag on #1098, #1101, #1115 ignored per operator instruction (08:26Z).
 - Frieren #1115 has 0 PR comments despite run live for 1.8h; tolerate until EP3 gate (~22:00Z) — student probably composing the gate-pass writeup. If still silent at EP6, prompt for comment.
 - Frieren wave-2 W&B run crashed at 19:38Z; wave-1 healthy. Will surface in EP3 comment.
+- Tanjiro #1117 launched ~20:52Z, EP1 at ~17% (1907/10975 iters, 4.5 it/s, no NaN/OOM).
+
+## Follow-up Notes (not blocking current wave)
+
+- **Surface input channel 6 (`area`) is identically zero across batch.** Flagged by tanjiro #1117 EP0 audit. Pre-existing dataset/loader behavior — applies to PR #972 SOTA `56bcqp3m` run too. Effective input dimensionality is 6 (not 7) for the baseline, and 9 (not 10) for tanjiro's run. Not in scope for WSS wave — investigate in a follow-up PR after wave settles. Could be a free WSS gain if `area` channel were actually populated (surface element area is a natural weighting signal for shear).
