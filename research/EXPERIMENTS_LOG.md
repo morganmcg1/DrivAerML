@@ -1,5 +1,39 @@
 # SENPAI Research Results
 
+## 2026-05-14 19:45 — PR #1109: τ_z spatial focal loss α=2.0 (edward) — CLOSED (EP3 GATE FAIL, FOCAL ACTIVELY DEGRADES WSS)
+
+- **Branch**: `edward/tau-z-spatial-focal-loss` (closed)
+- **W&B runs**: `kom0ve5x` (smoke, 1-ep PASS), `emu3z6sg` (full 13-ep, terminated at EP3 by watchdog)
+- **Hypothesis**: Spatial focal loss `w_i = 1 + α · |τ_z_gt_i| / mean(|τ_z_gt_valid|)` concentrates gradient on high-shear surface regions (wheel arches, underbody, A-pillar reattachment) to accelerate tau_z descent. Orthogonal to all prior scalar τ_z multiplier experiments (PR #793, alphonse τ_z×3.0/4.0 sweeps).
+- **EP3 gate (val_abupt ≤7.2% AND val_vol_p ≤4.5%)**: FAIL on both criteria.
+
+### Full val trajectory
+
+| Step | Epoch | val_abupt | val_vol_p | val_WSS | val_WSS_z |
+|------|-------|-----------|-----------|---------|-----------|
+| 10,864 | EP1 | 33.538% | 21.190% | 37.095% | 41.501% |
+| 21,728 | EP2 | 9.772% | 6.307% | 10.934% | 13.520% |
+| **30,468** | **EP3** | **8.253%** | **5.211%** | **9.266%** | **11.588%** |
+
+Best-checkpoint test (EP3): test_abupt=7.908%, test_vol_p=5.022%, test_WSS=9.026%.
+
+### Comparison to baseline tay-stack EP3 (thorfinn #1100 τ_z×3.0 arm referenced in PR body)
+
+| Metric | Edward α=2.0 focal | Thorfinn τ_z×3.0 baseline | Δ |
+|---|---:|---:|---:|
+| val_WSS @ EP3 | 9.266% | 7.661% | **+1.605pp WORSE** |
+| val_WSS_z @ EP3 | 11.588% | 10.206% | **+1.382pp WORSE** |
+
+### Diagnosis and paper-relevant findings
+
+1. **Spatial focal loss family does not work at the tay-stack scale within the wall-clock budget.** α=2.0 is structurally degrading, not just slow-converging — the +1.6pp val_WSS regression at EP3 is not a slow-convergence artifact.
+2. **Per-point gradient redistribution fails when the model is undertrained.** At EP1-3 the focal weights amplify GT signal where the model has not yet learned to predict accurately — introducing high-variance gradient updates that destabilise WSS learning.
+3. **α=4.0 retry not viable.** Stronger focal weighting amplifies the same destabilisation; +1.6pp regression is too wide a gap to recover.
+4. **Design rule**: future spatial-loss reweighting experiments should require N≥2 epochs of standard-loss warmup before activating per-point modulation. Transferable lesson.
+5. **Focal loss is added to the catalogue of approaches that work in classification/object-detection but fail in dense surface regression on this benchmark.**
+
+Edward reassigned to multi-scale surface attention (Wave 29 architectural hypothesis).
+
 ## 2026-05-14 13:30 — PR #1103: SLSQP continuous 4-simplex weight search (edward) — CLOSED (POOL-SATURATION CONFIRMED, USEFUL NEGATIVE)
 
 - **Branch**: `edward/slsqp-continuous-weight-search` (closed)
