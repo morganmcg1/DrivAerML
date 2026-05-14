@@ -349,9 +349,13 @@ def train_loss(
         surface_pred = out["surface_preds"]
         local_frame_metrics: dict[str, float] = {}
         if surface_normal_frame_wss:
+            # The model output is interpreted as living in the per-point local
+            # surface frame (n̂, t̂, b̂). We only rotate the target into the
+            # local frame; the prediction is compared directly. At eval the
+            # prediction is rotated back to world frame by R^T before metrics
+            # — see trainer_runtime.accumulate_eval_batch.
             normals = batch.surface_x[..., 3:6].to(device=device, dtype=torch.float32)
             R = build_surface_normal_frames(normals)
-            surface_pred = rotate_surface_wss(surface_pred, R)
             surface_target = rotate_surface_wss(surface_target, R)
             # Diagnostic: the n-component of normalised target ≠ 0 (per-channel
             # standardisation does not commute with rotation), but we still log
