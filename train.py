@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -105,6 +106,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_direction_loss_weight: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -229,6 +231,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "wss_direction_loss_weight": (
+            "Weight for cosine-similarity direction penalty on WSS "
+            "(tau_x/y/z) vector predictions. Adds "
+            "lambda * mean(1 - cos_sim(pred_wss, target_wss)) to the total "
+            "loss, computed in normalized space over valid surface points. "
+            "0.0 disables (default). Typical range: 0.05 - 1.0."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -321,6 +330,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    wss_direction_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,13 +356,34 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        if wss_direction_loss_weight > 0.0:
+            # Compute cosine-similarity direction loss on WSS vector (tau_x,
+            # tau_y, tau_z) in normalized space. Channels 1:4 of the surface
+            # tensor are [tau_x, tau_y, tau_z]; channel 0 is cp.
+            wss_pred = out["surface_preds"][..., 1:4].float()
+            wss_gt = surface_target[..., 1:4].float()
+            cos_sim = torch.nn.functional.cosine_similarity(
+                wss_pred, wss_gt, dim=-1, eps=1e-8
+            )
+            wss_direction_loss = masked_mean(1.0 - cos_sim, batch.surface_mask)
+            weighted_wss_direction_loss = wss_direction_loss_weight * wss_direction_loss
+            loss = loss + weighted_wss_direction_loss
+        else:
+            wss_direction_loss = None
+            weighted_wss_direction_loss = None
+    loss_metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if wss_direction_loss is not None:
+        loss_metrics["wss_direction_loss"] = float(wss_direction_loss.detach().cpu().item())
+        loss_metrics["wss_direction_loss_weighted"] = float(
+            weighted_wss_direction_loss.detach().cpu().item()
+        )
+    return loss, loss_metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -883,6 +914,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/wss_direction_loss_weight"] = config.wss_direction_loss_weight
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1062,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        wss_direction_loss_weight=config.wss_direction_loss_weight,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1103,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "wss_direction_loss" in batch_loss_metrics:
+                        train_log["train/wss_direction_loss"] = batch_loss_metrics[
+                            "wss_direction_loss"
+                        ]
+                        train_log["train/wss_direction_loss_weighted"] = batch_loss_metrics[
+                            "wss_direction_loss_weighted"
+                        ]
+                        train_log["train/wss_direction_loss_weight"] = (
+                            config.wss_direction_loss_weight
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
