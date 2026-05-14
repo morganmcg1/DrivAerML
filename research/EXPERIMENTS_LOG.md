@@ -1,5 +1,57 @@
 # SENPAI Research Results
 
+## 2026-05-14 21:15 — PR #1113: SDF-stratified curvature-weighted surface sampling (nezuko) — CLOSED (EP2 KILL, CURVATURE IS BAD WSS PROXY)
+
+- **Branch**: `nezuko/sdf-stratified-surface-sampling` (closed)
+- **W&B run**: `qxqxozkj` (rank 0, killed at EP3 step 204, EP2 catastrophe abort)
+- **Hypothesis**: Curvature-weighted surface sampling (top-decile κ → 61% of sampling mass) accelerates WSS learning by concentrating gradient on high-curvature regions where flow separation seeds high WSS. Implementation via mean-normalised weight `w = 1 + α · κ/mean(κ)` with α=3.0.
+- **EP2 catastrophe abort gates** (advisor-set after offline diagnostic found κ-vs-|WSS| anti-correlation): val_abupt > 12% AND val_WSS > 13%. **Both triggered with margin** at EP2.
+
+### Pre-training diagnostic (offline, before EP3)
+
+| Quantity | Mean (7 cases) | Range |
+|---|---:|---|
+| Pearson(κ, \|WSS\|) | **-0.056** | [-0.061, -0.050] |
+| Spearman(κ, \|WSS\|) | **-0.070** | [-0.078, -0.053] |
+| Top-10% \|WSS\| ⊂ Top-10% κ | **7.2%** | [6.8%, 7.6%] |
+
+Cross-checked against orthogonal estimator `curvature_HK_v2.npy`: `pearson(H, |WSS|) = -0.032`, `pearson(K, |WSS|) = +0.003`. Not estimator error.
+
+Sanity baseline (coordinate priors): `pearson(-x, |WSS|) = +0.236`, `pearson(|z|, |WSS|) = +0.176`, `pearson(|y|, |WSS|) = +0.101` — coordinate priors are 4× the magnitude of κ.
+
+### Training-dynamics confirmation at EP2
+
+| Metric | Nezuko EP2 (α=3) | Edward EP2 (α=0 baseline) | Δ |
+|---|---:|---:|---:|
+| val_abupt | 13.12% | 9.77% | **+3.35pp** |
+| val_WSS | 15.84% | 10.93% | **+4.91pp** |
+| val_WSS_x | 14.88% | 9.65% | **+5.23pp** |
+| val_WSS_y | 16.43% | 12.69% | **+3.74pp** |
+| val_WSS_z | 18.92% | 13.52% | **+5.40pp** |
+| val_SP | 9.61% | 6.70% | +2.91pp |
+| val_vol_p | 5.73% | 6.31% | **-0.58pp** (improvement!) |
+
+### Bin-occupancy diagnostic (mechanism verification)
+
+| κ decile | Uniform | Weighted | Oversample |
+|---|---:|---:|---:|
+| Top 10% | 10% | **61.10%** | ×6.11 |
+| Bottom 80% | 80% | 26.21% | ×0.33 |
+
+Mechanism wired correctly. Stratification design intent satisfied. Premise (κ → |WSS|) fails empirically.
+
+### Diagnosis and paper-relevant findings
+
+1. **Curvature is a bad WSS proxy on transport-vehicle CFD benchmarks.** ρ≈-0.056 (slight anti-correlation). Physical mechanism: high-κ regions (leading edges, A-pillars, wheel arches) seed flow separation → low |WSS|. High |WSS| lives on smooth attached-flow panels (underbody, roof) and downstream wakes.
+2. **WSS subchannel regressions are uniform** (+3.7-5.4pp across x/y/z) — the misalignment is structural, not channel-specific. Eliminates "maybe the proxy works for one component" rescue.
+3. **Surface pressure also regresses (+2.91pp).** Misalignment affects both surface fields → the failure is geometric, not WSS-specific.
+4. **Volume pressure improves (-0.58pp at EP2).** Interesting *positive* side-finding: front-bumper/stagnation region oversampling helps surface→volume xattn for vol_p prediction. Logged as Wave 29 follow-up: "front-bumper surface importance sampling for vol_p (decoupled from WSS optimization)."
+5. **Diagnostic-first kill saved ~4h of confirmatory GPU time.** Pattern to repeat: when a hypothesis has a cheap pre-training falsification test, run it before EP3 and use the cheapest EP1/EP2 readout to confirm/reject.
+6. **Throughput parity infrastructure** is solid (1.88 vs 1.9 it/s baseline). All 484 cases have `surface_kappa_v2.npy` precomputed in the data root for any future curvature-conditioned experiment without re-compute cost.
+7. **Design rule**: Any surface importance sampling experiment must include a pre-training `Pearson(weight_signal, |target|)` diagnostic on a 5-10 case sample. If ρ < 0.1 in magnitude, do not run training.
+
+Nezuko reassigned to spatial-prior surface sampling (front-bumper + ground-plane bias) — her own Suggestion #1 from this PR. The coordinate priors `-x` and `|z|` have real positive correlation with |WSS| (4× the magnitude of κ).
+
 ## 2026-05-14 21:00 — PR #1111: GradNorm adaptive task balancing with curriculum (fern) — CLOSED (TEST FLOORS REGRESS, GRADNORM-FINDING IS THE DELIVERABLE)
 
 - **Branch**: `fern/gradnorm-curriculum-compatible` (closed)
