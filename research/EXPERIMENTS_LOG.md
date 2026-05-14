@@ -1,5 +1,72 @@
 # SENPAI Research Results
 
+## 2026-05-14 13:30 — PR #1103: SLSQP continuous 4-simplex weight search (edward) — CLOSED (POOL-SATURATION CONFIRMED, USEFUL NEGATIVE)
+
+- **Branch**: `edward/slsqp-continuous-weight-search` (closed)
+- **W&B runs**: `nqaiyt6m` (v2 — full regime sweep), `4f743to9` (v1 — unconstrained + as-specified only)
+- **Hypothesis**: K=8 Caruana weights `{0.375, 0.250, 0.250, 0.125}` are quantized to multiples of 1/8; the continuous SLSQP optimum on the 4-simplex over the same pool (`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4ne`) should yield a lower val_WSS and propagate to test, under val_vol_p≤3.643% and val_SP≤3.577% constraints. No GPU training — pure post-hoc optimization over cached predictions.
+
+### Convergence — 3 SLSQP regimes × 5 starting points
+
+| Regime | Optimal w = [56bcqp3m, 29nohj67, a0yoxy85, ghh0s4ne] | val_WSS | Feasible? |
+|---|---|---:|---|
+| Unconstrained | [0.3483, 0.3048, 0.2198, 0.1271] | **6.5156** | ✅ all 5 starts converge identically |
+| As-specified (val_vol_p≤3.643, val_SP≤3.577) | [0.3432, 0.2020, 0.2512, 0.2036] | 6.5302 | ❌ INFEASIBLE (val_SP=3.7178 > 3.577) |
+| No-regression vs K=8 (val_vol_p≤3.4360, val_SP≤3.7234) | [0.3471, 0.2783, 0.2282, 0.1464] | 6.5165 | ✅ all 5 starts converge identically |
+| vol_p-only (val_vol_p≤3.643, no SP cap) | [0.3483, 0.3048, 0.2198, 0.1271] | 6.5156 | ✅ same as unconstrained (vol_p not binding) |
+
+K=8 Caruana reference: `[0.375, 0.250, 0.250, 0.125]`, val_WSS=6.5195. All continuous optima sit **~0.03 L1 from the K=8 vertex** — K=8 is one rounding step away from optimal on this pool.
+
+### Gate Check — Win = val_abupt<5.7452 ∧ test_vol_p≤3.643 ∧ test_WSS<6.3263
+
+| Variant | val_abupt | test_vol_p | test_WSS | Gate? |
+|---|---:|---:|---:|---|
+| K=8 Caruana (PR #1102 baseline) | 5.7452 | 3.5397 | 6.3263 | reference |
+| SLSQP unconstrained | 5.7440 | 3.5443 | 6.3307 ❌ | FAIL (test_WSS) |
+| SLSQP as-specified | — | — | — | INFEASIBLE |
+| SLSQP no-regression | **5.7427** | 3.5922 | **6.3253** ✓ | PASS by +0.0010pp |
+
+### Full Test Metrics — No-Regression vs K=8 Caruana
+
+| Metric | K=8 baseline | SLSQP no-regression | Δ | Direction |
+|---|---:|---:|---:|---|
+| val_abupt | 5.7452 | **5.7427** | −0.0025 | ✓ |
+| val_vol_p | 3.4360 | 3.4322 | −0.0038 | ✓ |
+| val_WSS | 6.5195 | 6.5165 | −0.0030 | ✓ |
+| val_SP | 3.7234 | 3.7234 | 0.0000 | ↔ (binding) |
+| test_abupt | **5.5196** | 5.5304 | +0.0108 | ✗ |
+| test_vol_p | **3.5397** | 3.5922 | +0.0525 | ✗ |
+| test_WSS | 6.3263 | **6.3253** | −0.0010 | ✓ (gate margin) |
+| test_SP | **3.3529** | 3.3583 | +0.0054 | ✗ |
+| test_tau_x | 5.6071 | **5.6062** | −0.0009 | ✓ |
+| test_tau_y | 6.8397 | 6.8397 | −0.0000 | ↔ |
+| test_tau_z | 8.2585 | **8.2555** | −0.0030 | ✓ |
+
+### Pool quality — single-model val metrics
+
+| Member | val_abupt | val_WSS | val_vol_p | val_SP |
+|---|---:|---:|---:|---:|
+| 56bcqp3m | 6.1264 | 6.9168 | 3.7976 | 3.9793 |
+| 29nohj67 | 6.2853 | 7.0491 | 3.8988 | 4.1820 |
+| a0yoxy85 | 6.2783 | 7.0702 | 3.9773 | 4.0644 |
+| ghh0s4ne | 6.5319 | 7.4008 | 4.1150 | 4.2113 |
+
+Min reachable val_SP on the 4-simplex ≈ 3.72% (every member has val_SP ≥ 3.98%). The PR's val_SP ≤ 3.577% target lies **below the achievable floor**, hence infeasibility.
+
+### Results commentary
+
+1. **K=8 Caruana is near-globally-optimal on the 4-member pool.** Three independent SLSQP regimes converge to weights within ~0.03 L1 of `[0.375, 0.250, 0.250, 0.125]`. All 5 starts in every regime hit the same optimum to 6 decimal places. Best-case val_WSS reduction is **0.0039pp** (0.06% relative). The val_WSS surface near K=8 is locally flat.
+2. **Continuous unconstrained optimum FAILS test_WSS gate** (+0.0044pp). Classic val-overfit signature: SLSQP minimises val exactly, val→test WSS gap swallows the gain.
+3. **No-regression variant** technically passes the gate by Δ=−0.0010pp on test_WSS, but this sits well below the test-set bootstrap stderr (~0.05–0.10pp on 50 cases). Three other test metrics regress (abupt +0.0108, vol_p +0.0525, SP +0.0054). Operationally storing real-valued weights vs simple integer/8 picks for an unmeasurable gain = disproportionate complexity.
+4. **As-specified constraints are infeasible** — the val_SP≤3.577% bound is below the pool's reachable floor (3.72%) because every member has val_SP≥3.98%. The 3.577% is the previous SOTA *test_SP*, applied as a *val* constraint with no consideration of the val/test gap.
+5. **Pool extension is the operative campaign lever** — not weight resolution. Wave 27 (#1104 fern magnitude penalty, #1105 tanjiro rel_l2, #1106 frieren physical-frame, #1107 nezuko yaw aug) produces single-model variants with **different error patterns**, expanding the pool's reachable simplex polytope rather than refining position within the current polytope.
+
+### Decision
+
+CLOSED (useful negative + mechanism finding, no merge — no code change to baseline, no meaningful metric improvement). K=8 Caruana SOTA at test_WSS=6.3263% (PR #1102) stands unchanged. Edward's follow-up #2 — **bias-corrected ensemble** `pred = Σ w_i · pred_i + b_c` per channel — is assigned next; it addresses the structural pool offset uncovered here via a different lever than convex re-weighting.
+
+---
+
 ## 2026-05-14 09:15 — PR #1099: WSS-targeted greedy ensemble reselection (fern) — CLOSED (CONFIRMATORY NULL)
 
 - **Branch**: `fern/wss-targeted-greedy-ensemble`
