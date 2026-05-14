@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-13 (latest invocation: 2026-05-13 ~00:30Z)
+- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~00:20Z)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
@@ -88,32 +88,35 @@ All new runs MUST use the corrected dataset path and `--data-root` flag (not `--
 ### WSS Hypothesis Priority Queue (for next idle students)
 | Priority | Hypothesis | Key Change | Est. Gain |
 |----------|-----------|------------|-----------|
-| H1 | Stronger tau_z/tau_y loss weights | tau_y×2.0, tau_z×3.0 (Arm A); tau_y×2.5, tau_z×4.0 (Arm B) | −0.2 to −0.5pp |
-| H2 | WSS-targeted greedy ensemble | `--greedy-metric val_WSS` instead of val_abupt | −0.3 to −0.5pp |
-| H7 | Mild yaw-only aug screen | yaw≤3°, pitch=0, p=0.3, 4-ep screen | −0.1 to −0.2pp |
+| H1 | WSS-targeted greedy ensemble | `--greedy-metric val_WSS` with corrected-split models | −0.3 to −0.5pp |
+| H2 | Mild yaw-only aug screen | yaw≤3°, pitch=0, p=0.3, 4-ep screen | −0.1 to −0.2pp |
 | H3 | Surface-normal frame prediction | Predict tau in normal/tangent/binormal frame | −0.2 to −0.4pp |
-| H5 | Magnitude+direction decomposition | Split WSS into |τ| + unit direction | −0.1 to −0.3pp |
+| H4 | Magnitude+direction decomposition | Split WSS into |τ| + unit direction | −0.1 to −0.3pp |
+| H5 | Stronger tau_z loss weight (τ_z×3.0) | Isolated from other changes, EP13 run | −0.1 to −0.3pp |
+| H6 | Multi-scale surface attention | Additional surface encoder at 0.5× token density | −0.1 to −0.3pp |
+| H7 | Test-time ensemble via SDF stochasticity | Average 5 stochastic forward passes at inference | −0.05 to −0.15pp |
 
 ---
 
-## Active WIP PRs (all on corrected dataset)
+## Active WIP PRs (all on corrected dataset, Round 25+)
 
-| PR | Student | Hypothesis | W&B Run | WSS Relevance |
-|----|---------|------------|---------|--------------|
-| #1042 | alphonse | INR coord-conditioned vol decoder | TBD | Low — vol_p focused |
-| #1050 | edward | Dropout regularization (p=0.1) | `nc7lpobi` | Low — vol_p focused |
-| #1052 | thorfinn | RFF sigma sweep (2.0, 4.0) | `yli6kbch` | Medium — spatial freq affects WSS |
-| #1057 | fern | Log-space vol_p loss on corrected dataset | running | Low — vol_p focused |
-| #1058 | frieren | GradNorm dynamic loss balancing | `nt6w9tqp` | HIGH — auto-weights tau axes |
-| #1060 | askeladd | Vol-loss-weight sweep (1.5, 2.0, 3.0) | running | Low — vol_p focused |
-| #1061 | tanjiro | Stochastic per-batch vol points | running | Low — vol_p focused |
-| #1064 | nezuko | K=3 greedy ensemble (drop ghh0s4ne) | running | HIGH — restores vol_p compliance |
-| #1065 | stark | Extended SDF-stratified (45 epochs) | running | Medium — may improve WSS via longer training |
+| PR | Student | Hypothesis | W&B Run | Status | WSS Relevance |
+|----|---------|------------|---------|--------|--------------|
+| #1067 | thorfinn | RFF octave ladder EP30 (sigmas 1.0–16.0) | `0zutsus4` | EP~19/30, val_abupt=6.346% ← projected EP30 ~6.23% | Medium |
+| #1075 | tanjiro | EMA decay=0.9995 start-step=2000 | `9i1uu66t` | EP4 screen started | Medium |
+| #1078 | alphonse | Asymmetric eval 131k surface (2× resolution at inference) | running | 30-ep run started (EP1 ~95 min) | Medium |
+| #1081 | askeladd | SLW=3.0 full 30-ep re-run (Arm B slw=4.0 KILLED EP1) | multi-run | Arm A re-run in progress | Medium |
+| #1084 | edward | Surface curvature features H+K for WSS | TBD | Draft cleared, starting | High |
+| #1085 | frieren | Adaptive per-point WSS loss via surface curvature | TBD | Draft cleared, starting | High |
+| #1089 | nezuko | GradNorm ema_proxy α=2.0 full EP30 | `goh7mght` | EP3 passed (6.666%), continuing to EP5 | High |
+| #1090 | fern | GradNorm-partial (sp/vp/tau_x only, freeze tau_y/tau_z) | `g2o80osc` | EP1 ~8% through | High |
 
 **Key WSS-relevant active PRs:**
-- **PR #1058 (frieren GradNorm):** Auto-balances tau_x/tau_y/tau_z loss weights via GradNorm. At EP1: tau_z upweighted 1.9× more than tau_x (1.59× vs 0.83×). EP3 gate check pending — most relevant active WSS experiment.
-- **PR #1064 (nezuko K=3):** Drops `ghh0s4ne` (PR #823) from the K=4 ensemble to restore test_vol_p ≤ 3.643%. Expected val_abupt ≈ 5.776%. Critical for establishing a compliant ensemble baseline to build on.
-- **PR #1065 (stark 45-epoch):** Extended training of SDF-stratified stack. If val_WSS decreases beyond EP13, this confirms longer training helps WSS.
+- **PR #1089 (nezuko GradNorm ema_proxy):** α=2.0, EP3 val_abupt=6.666%, excellent trajectory. EP5 gate ≤7.5%. If this stabilizes to ~6.0% by EP10, it will be the cleanest GradNorm win yet.
+- **PR #1090 (fern GradNorm-partial):** Restricts GradNorm balancing to sp/vp/tau_x only, freezes tau_y/tau_z at their explicit weights (1.5×/2.0×). Tests whether letting GradNorm interfere with tau_y/tau_z hurt the #1058 experiment.
+- **PR #1084 (edward curvature features):** H+K surface curvature as extra input features for WSS prediction — addresses the root cause (model lacks geometric signal about high-curvature regions where WSS is hardest).
+- **PR #1085 (frieren curvature-adaptive WSS loss):** Upweights loss at high-curvature surface points where WSS prediction is most difficult.
+- **PR #1067 (thorfinn RFF octave ladder):** Extended 30-ep confirmation run. At EP19 val_abupt=6.346% — likely new best single-model if trajectory holds to EP30 projection of ~6.23%.
 
 ---
 
@@ -136,6 +139,16 @@ All new WSS experiments should use this as the base:
 --sdf-importance-sampling --sdf-alpha 4.0
 --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
+
+---
+
+## Infrastructure Status
+
+### GitHub Token Rate Limiting (ACTIVE ISSUE — escalated 2026-05-13)
+The shared student token (`senpai-launch-secrets-drivaerml-ddp8`) is perpetually rate-limited. 8 students × ~2 GraphQL calls per 300s poll = ~9600 points/hour vs 5000/hour limit. This caused tanjiro and frieren to miss PR assignments by ~7 hours.
+
+**Workarounds in use:** Manual draft-clearing and direct pod instruction for affected students.
+**Recommended fix:** Per-student dedicated GitHub tokens OR switch `student_poll_for_work` from GraphQL to REST API (60k calls/hour limit).
 
 ---
 
