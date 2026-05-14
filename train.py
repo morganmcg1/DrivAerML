@@ -132,6 +132,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -222,6 +224,78 @@ def per_channel_masked_mse(
     weighted = diff_sq * mask_f  # broadcast [B, N, C]
     denom = mask_f.sum().clamp_min(1.0)
     return weighted.sum(dim=(0, 1)) / denom  # [C]
+
+
+def install_sdf_stratified_vol_sampling(
+    train_dataset, *, alpha: float, n_vol: int, is_main: bool
+) -> None:
+    """Override the train dataset's __getitem__ to draw volume points with
+    inverse near-surface SDF weighting: weight = 1 / (1 + alpha * |sdf|).
+
+    Surface sampling is unchanged. Volume sampling is replaced: load full
+    volume arrays, draw n_vol indices via torch.multinomial weighted by the
+    inverse-SDF weights, then return only those volume rows. The full
+    n_volume count is logged into metadata so downstream telemetry remains
+    coherent. Implemented via __class__ reassignment because Python only
+    dispatches dunder methods through type(self), not the instance dict.
+    """
+    from data.loader import DrivAerMLCase
+
+    base_cls = type(train_dataset)
+
+    class _SDFStratifiedDataset(base_cls):
+        def __getitem__(self, idx: int):
+            view = self.views[idx]
+            counts = self.store.case_point_counts(view.case_id)
+            surface_idx = self._indices(
+                counts["n_surface"],
+                self.max_surface_points,
+                view,
+                group_view_count=view.surface_view_count,
+            )
+            case = self.store.load_case(
+                view.case_id,
+                surface_rows=None if surface_idx is None else surface_idx.numpy(),
+                volume_rows=None,
+            )
+            n_total = case.volume_x.shape[0]
+            n_sample = min(self._sdf_n_vol, n_total)
+            sdf_vals = case.volume_x[:, 3].abs()
+            weights = 1.0 / (1.0 + self._sdf_alpha * sdf_vals)
+            vol_idx = torch.multinomial(weights, n_sample, replacement=False).sort().values
+            metadata = dict(case.metadata)
+            metadata["n_surface_full"] = int(counts["n_surface"])
+            metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+            metadata["surface_view_index"] = int(view.view_index)
+            metadata["surface_view_count"] = int(view.surface_view_count)
+            metadata["surface_sampling_mode"] = view.sampling_mode
+            metadata["n_volume_full"] = int(n_total)
+            metadata["n_volume_loaded"] = int(n_sample)
+            metadata["volume_view_index"] = int(view.view_index)
+            metadata["volume_view_count"] = int(view.volume_view_count)
+            metadata["volume_sampling_mode"] = "sdf_stratified"
+            metadata["joint_view_count"] = int(view.view_count)
+            metadata["sdf_stratified_alpha"] = float(self._sdf_alpha)
+            return DrivAerMLCase(
+                case_id=case.case_id,
+                surface_x=case.surface_x,
+                surface_y=case.surface_y,
+                volume_x=case.volume_x[vol_idx],
+                volume_y=case.volume_y[vol_idx],
+                metadata=metadata,
+            )
+
+    train_dataset._sdf_alpha = float(alpha)
+    train_dataset._sdf_n_vol = int(n_vol)
+    train_dataset.__class__ = _SDFStratifiedDataset
+    assert type(train_dataset).__name__ == "_SDFStratifiedDataset", (
+        "SDF stratified patch not active"
+    )
+    if is_main:
+        print(
+            f"[SDF] inverse near-surface vol sampling enabled: "
+            f"alpha={alpha}, n_vol={n_vol}, dataset class={type(train_dataset).__name__}"
+        )
 
 
 def build_model(config: Config) -> SurfaceTransolver:
@@ -451,6 +525,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_sdf_stratified_vol_sampling:
+            install_sdf_stratified_vol_sampling(
+                train_loader.dataset,
+                alpha=config.sdf_stratified_alpha,
+                n_vol=config.train_volume_points,
+                is_main=state.is_main,
+            )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -524,6 +605,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "pe_source_run_ki2q9ko9": (
                         config.model_pe == "string_multisigma"
                     ),
+                    "sdf_stratified_active": bool(config.use_sdf_stratified_vol_sampling),
+                    "sdf_stratified_alpha_runtime": float(config.sdf_stratified_alpha),
+                    "sdf_stratified_n_vol_runtime": int(config.train_volume_points),
+                    "ema_warmstart_fix_active": bool(config.use_ema),
+                    "train_dataset_class": type(train_loader.dataset).__name__,
                 },
                 allow_val_change=True,
             )
