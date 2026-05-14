@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~11:45 UTC
+- 2026-05-14 ~12:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -48,8 +48,8 @@ Branch includes fix (`860d08f`): shadow now initialized from live weights at `em
 |---------|-----|-----------|---------|-----------|-------|
 | dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | EP18.7 / 205,163 | 14.6h elapsed / 24h budget. EMA best **6.2647% (EP11)**. Raw trending DOWN 6.51→6.38 — EMA may find new best in EP19-30. |
 | dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | EP20+ / 219,519+ | val_abupt EP20=6.4311% PASS. Plateaued. Best EP11=6.3562%. Terminal protocol: evaluate from EP11 best checkpoint. |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | EP3 PASS, EP4 in progress | **val_vol_p=3.674% at EP3** — exceptional early signal (SOTA test_vol_p=3.643%). Long run launched 10:11Z. |
-| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | EP3 PASS, EP4 in progress | **val_vol_p=3.706% at EP3** — also strong. Long run launched 09:06Z. |
+| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | EP3 PASS, ~EP5 mid | **val_vol_p=3.674% at EP3** — exceptional early signal (SOTA test_vol_p=3.643%). Long run launched 10:11Z. EP5 gate ~13:20Z. |
+| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | **EP5 PASS** | **val_vol_p=3.574% at EP5 — already 0.07pp BELOW SOTA test target.** val_abupt=6.4955%. Trajectory monotonic descent. Tightened gates set for EP10/15/20/25. **WINNER CANDIDATE.** |
 
 ### Val Checkpoint Snapshots (latest ~11:45 UTC)
 
@@ -58,12 +58,16 @@ Branch includes fix (`860d08f`): shadow now initialized from live weights at `em
 | dl24-tanjiro | #1086 | `fby84xtu` | EP18.7 | 6.291% (EMA) | **6.2647% (EP11)** | 4.346% (EMA) |
 | dl24-frieren | #1077 | `m4z2gb65` | EP20+ | 6.4311% | 6.3562% (EP11) | 4.6080% |
 | dl24-fern    | #1098 | `q4eok915` | EP3 | 6.6782% | 6.6782% (EP3) | **3.6741%** |
-| dl24-nezuko  | #1101 | `5qumfbrs` | EP3 | 6.7568% | 6.7568% (EP3) | **3.7057%** |
+| dl24-nezuko  | #1101 | `5qumfbrs` | **EP5** | **6.4955%** | **6.4955% (EP5)** | **3.5740%** ← BELOW SOTA test |
 
 ## Strategic Assessment (~11:45 UTC)
 
-### Promising new signal: fern + nezuko val_vol_p at EP3
-Both isolated control arms (WD=0.01 and LR=9e-5) hit val_vol_p ≈ 3.7% at EP3 — extremely close to current SOTA test_vol_p=3.643%. For context, the prior SOTA training stack typically saw val_vol_p ~ 3.9-4.1% at EP3. This is the strongest early-epoch volume_p signal in recent waves. If either holds through EP15-30, this becomes the next-wave target.
+### Promising new signal: nezuko EP5 ALREADY BELOW SOTA test_vol_p
+At EP5, nezuko LR=9e-5 has val_vol_p=**3.574%** — already 0.07pp below SOTA `test_vol_p=3.643%`, with 25 epochs remaining. Trajectory is monotonic descent on val_abupt (22.1→7.66→6.76→6.53→6.50), val_vol_p (13.86→4.90→3.71→3.58→3.57), and val_wss (24.1→8.55→7.74→7.49→7.44). Only wss_z showed a 0.02pp uptick EP4→EP5 (within noise).
+
+Fern WD=0.01 at EP3 hit val_vol_p=3.674% (similar magnitude). EP5 gate expected ~13:20Z. If fern also crosses below 3.6% at EP5, both isolated controls are confirmed winner candidates. **Tightened gates are now set on nezuko #1101** to maintain pressure on the descent trajectory.
+
+For context, the prior SOTA training stack typically saw val_vol_p ~ 3.9-4.1% at EP3. This is the strongest early-epoch volume_p signal in recent waves.
 
 ### Tanjiro update: raw val trending down past EP11
 The "bit-identical to fern through EP15" framing was based on EMA shadow. The **raw** val_abupt is now trending DOWN from EP11 (6.510%) to EP18 (6.381%) — a 0.13pp downward drift. Since EMA tracks raw with ~1000-step delay, the EMA shadow may find a new best in EP19-30. Terminal report should evaluate from EP11 best-val checkpoint AND consider running test from final EMA shadow if EP25+ EMA dips below 6.2647%.
