@@ -305,17 +305,23 @@ def load_case(
     volume_y = _column(_load_npy_rows(case_dir / "volume_pressure.npy", volume_rows))
     surface_curvature_tensor: torch.Tensor | None = None
     if load_surface_curvature:
-        curv = _load_npy_rows(case_dir / "curvature_HK_v2.npy", surface_rows)
-        if curv.ndim != 2 or curv.shape[1] != 2:
-            raise ValueError(
-                f"curvature_HK_v2.npy must have shape [N, 2], got {curv.shape}"
+        curv_path = case_dir / "curvature_HK_v2.npy"
+        if curv_path.exists():
+            curv = _load_npy_rows(curv_path, surface_rows)
+            if curv.ndim != 2 or curv.shape[1] != 2:
+                raise ValueError(
+                    f"curvature_HK_v2.npy must have shape [N, 2], got {curv.shape}"
+                )
+            if curv.shape[0] != surface_x.shape[0]:
+                raise ValueError(
+                    f"curvature row count {curv.shape[0]} != surface row count "
+                    f"{surface_x.shape[0]} for case {case_id}"
+                )
+            surface_curvature_tensor = torch.from_numpy(np.ascontiguousarray(curv))
+        else:
+            surface_curvature_tensor = torch.zeros(
+                (surface_x.shape[0], 2), dtype=torch.float32
             )
-        if curv.shape[0] != surface_x.shape[0]:
-            raise ValueError(
-                f"curvature row count {curv.shape[0]} != surface row count "
-                f"{surface_x.shape[0]} for case {case_id}"
-            )
-        surface_curvature_tensor = torch.from_numpy(np.ascontiguousarray(curv))
     return DrivAerMLCase(
         case_id=case_id,
         surface_x=torch.from_numpy(surface_x),
