@@ -138,6 +138,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    gradnorm_initial_priors: str = ""
+    gradnorm_reset_on_curriculum: bool = False
     debug: bool = False
 
 
@@ -219,6 +221,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "gradnorm_initial_priors": (
+            "Comma-separated initial per-task weight priors for "
+            "log_weights, in the order (sp, tau_x, tau_y, tau_z, vp). "
+            "Values are normalised to mean=1 and used to initialise "
+            "log_weights = log(prior_norm). Recommended when "
+            "gradnorm_alpha is small (the priors dominate). Empty "
+            "string defaults to uniform priors (all 1.0). Example: "
+            "'1.0,1.0,1.5,2.0,1.0'."
+        ),
+        "gradnorm_reset_on_curriculum": (
+            "When True, the GradNorm balancer's reference state "
+            "(initial_loss, ema_loss, warmup accumulator) is hard-reset "
+            "at every vol-points-schedule transition. The log_weights "
+            "(current per-task weights) are preserved so the previous "
+            "stage's weights continue to apply during the post-reset "
+            "warmup window, and a fresh L_i(0) is re-baselined on the "
+            "new vol-points resolution. Prevents the PR #1089 pathology "
+            "where curriculum-induced volume-loss drops were misread "
+            "as 'fast vp convergence'. Default False (no reset)."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -469,6 +491,7 @@ class GradNormBalancer:
         log_clip: float,
         ema_beta: float,
         min_weight: float = 0.0,
+        initial_priors: list[float] | None = None,
     ):
         if mode not in GRADNORM_MODES:
             raise ValueError(
@@ -482,7 +505,19 @@ class GradNormBalancer:
         self.log_clip = float(log_clip)
         self.ema_beta = float(ema_beta)
         self.min_weight = float(min_weight)
-        self.log_weights = nn.Parameter(torch.zeros(num_tasks, device=device))
+        if initial_priors is not None:
+            if len(initial_priors) != num_tasks:
+                raise ValueError(
+                    f"initial_priors length {len(initial_priors)} != num_tasks {num_tasks}"
+                )
+            priors = torch.tensor(initial_priors, device=device, dtype=torch.float32)
+            if (priors <= 0.0).any():
+                raise ValueError(f"initial_priors must be positive: {initial_priors}")
+            priors_norm = priors * (num_tasks / priors.sum())
+            init_log_weights = priors_norm.log().clamp(-log_clip, log_clip)
+        else:
+            init_log_weights = torch.zeros(num_tasks, device=device)
+        self.log_weights = nn.Parameter(init_log_weights)
         if mode == "full":
             self.optimizer: torch.optim.Optimizer | None = torch.optim.Adam(
                 [self.log_weights], lr=lr
@@ -494,6 +529,24 @@ class GradNormBalancer:
         self.initial_loss: torch.Tensor | None = None
         self.ema_loss: torch.Tensor | None = None
         self.last_floor_active: int = 0
+        self.reset_event_count: int = 0
+
+    def reset_reference_state(self) -> None:
+        """Hard-reset the L_i(0) reference state for a curriculum transition.
+
+        Preserves ``log_weights`` (current per-task weights continue to apply
+        during the post-reset warmup window). Clears the EMA loss tracker,
+        the warmup accumulator, and the captured ``initial_loss``. The next
+        ``init_warmup_steps`` calls to ``update_initial_loss`` will re-baseline
+        L_i(0) on the new vol-points resolution.
+        """
+
+        self.initial_loss = None
+        self.ema_loss = None
+        self._init_loss_sum = torch.zeros(self.num_tasks, device=self.device)
+        self._init_loss_count = 0
+        self.last_floor_active = 0
+        self.reset_event_count += 1
 
     @property
     def ready(self) -> bool:
@@ -793,6 +846,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "(autograd.grad with retain_graph is not supported through "
                     "torch.compile)."
                 )
+            priors_spec = (config.gradnorm_initial_priors or "").strip()
+            initial_priors: list[float] | None = None
+            if priors_spec:
+                tokens = [tok.strip() for tok in priors_spec.split(",") if tok.strip()]
+                try:
+                    initial_priors = [float(tok) for tok in tokens]
+                except ValueError as exc:
+                    raise ValueError(
+                        f"--gradnorm-initial-priors must be comma-separated floats; "
+                        f"got '{priors_spec}'"
+                    ) from exc
             balancer = GradNormBalancer(
                 num_tasks=len(GRADNORM_TASK_NAMES),
                 mode=config.gradnorm_mode,
@@ -803,6 +867,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_clip=config.gradnorm_log_clip,
                 ema_beta=config.gradnorm_ema_beta,
                 min_weight=config.gradnorm_min_weight,
+                initial_priors=initial_priors,
             )
             if config.gradnorm_mode == "full":
                 gradnorm_shared_params = [
@@ -831,6 +896,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"log_clip={config.gradnorm_log_clip}; "
                         f"min_weight={config.gradnorm_min_weight}; "
                         f"closed-form weights from r_i = ema_loss_i / initial_loss_i"
+                    )
+                if initial_priors is not None:
+                    init_w = balancer.task_weights_detached().cpu().tolist()
+                    print(
+                        "GradNorm initial priors (mean-1 normalised): "
+                        + ", ".join(
+                            f"{name}={w:.3f}"
+                            for name, w in zip(GRADNORM_TASK_NAMES, init_w)
+                        )
+                    )
+                if config.gradnorm_reset_on_curriculum and vol_points_schedule:
+                    transitions = [e for e, _ in vol_points_schedule if e > 0]
+                    print(
+                        f"GradNorm reset_on_curriculum=True: hard-reset of "
+                        f"initial_loss/ema_loss/warmup at epochs {transitions} "
+                        f"(log_weights preserved during re-warmup)"
                     )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
@@ -911,6 +992,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                         config, train_loader, desired_vol_points, state
                     )
                     current_train_vol_points = desired_vol_points
+                    if balancer is not None and config.gradnorm_reset_on_curriculum:
+                        pre_reset_weights = balancer.task_weights_detached().cpu().tolist()
+                        balancer.reset_reference_state()
+                        if state.is_main:
+                            print(
+                                f"GradNorm reference reset (event "
+                                f"{balancer.reset_event_count}) at epoch {epoch} "
+                                f"(new vol_points={desired_vol_points}). "
+                                "Preserved weights: "
+                                + ", ".join(
+                                    f"{name}={w:.3f}"
+                                    for name, w in zip(GRADNORM_TASK_NAMES, pre_reset_weights)
+                                )
+                            )
             if isinstance(train_loader.sampler, DistributedSampler):
                 train_loader.sampler.set_epoch(epoch)
             timeout_hit = distributed_any(
@@ -1009,6 +1104,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             for i, name in enumerate(GRADNORM_TASK_NAMES):
                                 gradnorm_metrics[f"gradnorm/r_{name}"] = r_vec[i]
                     gradnorm_metrics["gradnorm/ready"] = 1.0 if balancer.ready else 0.0
+                    gradnorm_metrics["gradnorm/reset_event_count"] = float(
+                        balancer.reset_event_count
+                    )
                     if balancer.initial_loss is not None:
                         for i, name in enumerate(GRADNORM_TASK_NAMES):
                             gradnorm_metrics[f"gradnorm/initial_loss_{name}"] = float(
