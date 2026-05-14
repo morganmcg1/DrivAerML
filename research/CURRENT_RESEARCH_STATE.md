@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~07:00 UTC
+- 2026-05-14 ~09:15 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -38,63 +38,61 @@ PR #972 (SOTA) used **uniform sampling** (monkey-patch was a no-op). True SDF ne
 |---|-----|-----|---------------:|-------------|--------|
 | 0.25 | #1063 | `xfykblf9` | 6.2647% (EP11) | test_abupt=5.955%, test_vol_p=3.990% | **CLOSED** — all metrics regress |
 | 0.5 | #1072 | `yp383yq2` | 6.2904% (EP10) | No test (run died EP29.7) | **CLOSED** — dead run, rate-limited student |
-| 1.0 | #1077 | `m4z2gb65` | ~6.35% (EP11) | Running ~EP14 | In progress |
+| 1.0 | #1077 | `m4z2gb65` | ~6.356% (EP11) | Running mid-EP19 | In progress, plateaued |
 | 2.0 | #1054 | — | CLOSED | EP15 FAIL | Over-concentration |
 | 3.0 | #1076 | — | 6.5012% (EP6) | No test | Over-concentration, EP10 KILL |
 
 **SDF concentration approach broadly falsified.** No α value on the corrected split beats uniform sampling (SOTA PR #972). The plateau-regression pattern (best at EP10-13, then drift) is consistent across all productive arms. **Pivot to orthogonal levers is confirmed.**
 
-## Active Experiments (2026-05-14 ~07:00 UTC)
+## Active Experiments (2026-05-14 ~09:15 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | ~EP12.1 / 9.5h | val_abupt=6.275% (slope +0.001, plateau), val_vol_p=4.17% |
-| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP15.1 / 11.7h | val_abupt=6.370% (slope -0.001, still improving), val_vol_p=4.45% |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | `hrb2syym` (smoke) | 3min, step 827 | **Smoke launched 06:53Z, config verified correct** |
-| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `gi47kxmp` (smoke) | 5min, step 1430 | **Smoke launched 06:51Z, config verified correct** |
+| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | EP15 / 164,625 | **EP11 best EMA val_abupt=6.2647%** — bit-identical to fern through EP15. EP15 EMA=6.2784% PASS. Continuing to terminal. |
+| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | EP18 done, mid-EP19 | val_abupt **fully plateaued 6.356–6.405%** since EP10. Training-best EP11=6.3562%. ETA terminal ~14:00Z. |
+| dl24-fern    | #1098 | WD=0.01 isolated retest | `hrb2syym` (smoke) | EP3 PASS 6.9209% | **Smoke PASSED at 09:08Z, long-run launching imminent** |
+| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` (long) | Just launched 09:06Z | Long run started; 30 epochs DDP8, ~19h ETA |
 
-### Infrastructure Update: GH Rate-Limit RESOLVED
-
-Rate limit cleared between 06:48Z–06:51Z. Both fern and nezuko student-AI pods picked up assignments and launched DDP8 smoke runs:
-- nezuko `gi47kxmp` (lr=9e-5, wd=0.005, no SDF, no GradNorm) at 06:51:10Z
-- fern `hrb2syym` (lr=1e-4, wd=0.01, no SDF, no GradNorm) at 06:53:00Z
-
-Both configs match assignment exactly. Long runs will launch after EP3 smoke gate (val_abupt < 8.5%).
-
-### Val Checkpoint Snapshots (latest ~07:00 UTC)
+### Val Checkpoint Snapshots (latest ~09:15 UTC)
 
 | Student | PR | Run | EP | val_abupt (latest) | val_abupt (best) | val_vol_p (latest) |
 |---------|-----|-----|----|-------------------:|-----------------:|-----------------:|
-| dl24-tanjiro | #1086 | `fby84xtu` | ~EP12.1 | 6.275% | **6.2647%** (EP11, slight backtrack at EP12) | 4.17% |
-| dl24-frieren | #1077 | `m4z2gb65` | ~EP15.1 | 6.370% | ~6.356% (EP11) | 4.45% |
-| dl24-fern    | #1098 | `hrb2syym` | smoke | smoke too early | — | — |
-| dl24-nezuko  | #1101 | `gi47kxmp` | smoke | smoke too early | — | — |
+| dl24-tanjiro | #1086 | `fby84xtu` | EP15 | 6.2784% (EMA) | **6.2647% (EP11)** | 4.2428% (EMA) |
+| dl24-frieren | #1077 | `m4z2gb65` | EP18 | 6.4049% | 6.3562% (EP11) | 4.5270% |
+| dl24-fern    | #1098 | `hrb2syym` | smoke EP3 | 6.9209% (smoke) | — | 7.57% (smoke) |
+| dl24-nezuko  | #1101 | `5qumfbrs` | just launched | — | — | — |
 
-## Strategic Assessment (~07:00 UTC)
+## Strategic Assessment (~09:15 UTC)
 
-### SDF wave conclusion (finalized)
-The SDF near-surface concentration idea is fully mapped and falsified. Productive α band [0.25, 0.5] produces val_abupt ~6.26–6.29% (competitive) but:
-- All arms show plateau-regression (best EP10-13, then drift)
-- Terminal-epoch tests regress all metrics vs SOTA
-- SDF concentration does not close the OOD test generalization gap
+### Tanjiro #1086 = bit-identical to fern through EP15
+Tanjiro confirmed (via config deep-dive at EP6 already) that the trajectory is **bit-identical to fern `xfykblf9`** through at least EP15. The original A/B framing (EMA warm-start fix vs no-fix) is invalidated; both runs use `use_ema=True` and the contamination decayed by step ~7,400. This PR now serves as a **clean re-harvest of fern's run with proper test eval from EP11 best checkpoint**. If terminal test from EP11-best ≠ fern terminal test (5.955%), that proves checkpoint selection matters; if equal, both are CLOSED.
 
-### Orthogonal levers being tested
-1. **EMA 0.999 (tanjiro #1086)** — KEY experiment. Wave-best on val at EP11 (6.2647%), slope flattened by EP12. EMA may decouple the plateau-regression pattern. Terminal test from best checkpoint is the critical deliverable. ETA ~14h.
-2. **WD=0.01 (fern #1098)** — Smoke just launched 06:53Z. Long run in ~30-45 min if smoke passes EP3 < 8.5%.
-3. **LR=9e-5 (nezuko #1101)** — Smoke just launched 06:51Z. Long run in ~30-45 min if smoke passes EP3 < 8.5%.
-4. **SDF α=1.0 (frieren #1077)** — Still mid-cosine, ETA ~12h. Slope still negative (improving). Background reference for SDF concentration falsification.
+### Orthogonal levers
+1. **WD=0.01 (fern #1098)** — Smoke clean. Long-run launching now. ETA ~19h to terminal (~04:00Z May 15).
+2. **LR=9e-5 (nezuko #1101)** — Long run launched 09:06Z. ETA ~04:00Z May 15.
+3. **EMA(0.999) replication (tanjiro #1086)** — EP15 PASS; ETA terminal ~ in 10h. Need to confirm test-from-best-checkpoint differs from fern terminal.
+4. **SDF α=1.0 (frieren #1077)** — Plateaued at EP10-18. Will run to terminal for archival completeness. ETA ~14:00Z.
 
 ### Pending hypothesis queue
-- After tanjiro #1086 results: **H1 GradNorm+EMA composition** (combine EMA with GradNorm if EMA terminal shows improved val_vol_p ≤ 4.0%)
-- **Surface-point density investigation** — if test metrics continue to show OOD generalization bottleneck
-- **Long cosine T_max=40 or 50** — if both tanjiro and nezuko plateau before EP30, the cosine schedule may be too aggressive
+Three candidate next-wave directions (ranked):
+1. **H1 GradNorm+SDF composition** — only if SDF α=0.5 arm or EMA arm produces a new test SOTA (currently both falling short on val). Lower priority now that SDF concentration is broadly falsified.
+2. **Long cosine T_max=40/50** — the plateau at EP10-15 across SDF/EMA/lr/wd arms suggests current 30-epoch cosine schedule may be too aggressive. Worth testing with the strongest arm config.
+3. **Surface-point density investigation** — if all OOD test metrics continue to plateau, the surface sampling budget may be the next lever (currently 11k surface train points).
 
 ## Next Key Events
 
-1. **Smoke EP3 gates** (~07:30Z): nezuko `gi47kxmp` and fern `hrb2syym` should hit EP3 within 30-45 min.
-2. **Long-run launches** (~08:00Z): both should be transitioning to their 30-epoch 24h runs.
-3. **Frieren #1077 EP15 gate** (step 164,625, threshold ≤6.80%) — already past gate at val 6.370%.
-4. **Tanjiro #1086 terminal** (~14h from now, ~20:45Z) — KEY RESULT. Test from best checkpoint.
-5. **Frieren #1077 terminal** (~11.5h from now, ~18:30Z).
+1. **Fern #1098 long-run launch** (within 30 min of 09:15Z)
+2. **Frieren #1077 terminal** (~14:00Z) — likely NOT a winner, will close.
+3. **Tanjiro #1086 terminal** (~20:00Z) — KEY RESULT for EMA checkpoint-selection hypothesis.
+4. **Fern #1098 / Nezuko #1101 terminal** (~04:00Z May 15) — clean orthogonal controls.
+
+## Plateau-Pattern Observation Across the Wave
+
+The cross-arm plateau is now a research signal:
+- All productive arms peak at EP10-13 val_abupt ≈ 6.26–6.35%
+- val→test gap is no longer the 7-8pp dataset artifact, but a true generalization gap (~−0.4 to −0.5pp difference)
+- Multi-arm convergence to ~6.27% val_abupt **with no SDF dependency** suggests this is the current model capacity / cosine-schedule fixed point.
+
+**If tanjiro/fern/nezuko all terminal with test_abupt ≥ 5.9% from best val checkpoint, the next round should pivot to architecture/loss family** (T_max ↑, surface density ↑, or H1 GradNorm composition).
