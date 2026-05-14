@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_per_channel_surface_heads: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_per_channel_surface_heads = use_per_channel_surface_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -481,12 +483,35 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
-            self.surface_out.apply(_init_linear)
+            if use_per_channel_surface_heads:
+                # PR #1116: replace the single shared surface MLP head with
+                # surface_output_dim independent MLP heads (one per output
+                # channel). Each head matches the original 2-layer MLP shape
+                # (Linear -> SiLU -> Linear) but emits a single channel. The
+                # encoder features are shared; only the final projection is
+                # decoupled, which removes head-level gradient interference
+                # between cp/tau_x/tau_y/tau_z and lets each channel learn
+                # a channel-specific projection.
+                self.surface_out = None
+                self.surface_heads = nn.ModuleList(
+                    [
+                        nn.Sequential(
+                            nn.Linear(n_hidden, n_hidden),
+                            nn.SiLU(),
+                            nn.Linear(n_hidden, 1),
+                        )
+                        for _ in range(self.surface_output_dim)
+                    ]
+                )
+                self.surface_heads.apply(_init_linear)
+            else:
+                self.surface_out = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, self.surface_output_dim),
+                )
+                self.surface_out.apply(_init_linear)
+                self.surface_heads = None
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),
                 nn.SiLU(),
@@ -496,7 +521,16 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
-            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            if use_per_channel_surface_heads:
+                # Per-channel linear projections to mirror the LinearProjection
+                # baseline (older checkpoint compatibility path).
+                self.surface_out = None
+                self.surface_heads = nn.ModuleList(
+                    [LinearProjection(n_hidden, 1) for _ in range(self.surface_output_dim)]
+                )
+            else:
+                self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+                self.surface_heads = None
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
@@ -622,7 +656,12 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.use_per_channel_surface_heads:
+                surface_preds = torch.cat(
+                    [head(surface_hidden) for head in self.surface_heads], dim=-1
+                ) * surface_mask.unsqueeze(-1)
+            else:
+                surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)

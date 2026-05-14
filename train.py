@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_per_channel_surface_heads: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_per_channel_surface_heads": (
+            "PR #1116: replace the single shared surface MLP head with "
+            "surface_output_dim independent MLP heads (one per channel: "
+            "p, tau_x, tau_y, tau_z). Each head matches the baseline "
+            "two-layer SiLU MLP shape (n_hidden -> n_hidden -> 1). The "
+            "shared encoder features are unchanged; only the final "
+            "projection is decoupled, which removes head-level gradient "
+            "interference between channels and lets the hard tau_z axis "
+            "learn a channel-specific projection."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_per_channel_surface_heads=config.use_per_channel_surface_heads,
     )
 
 
