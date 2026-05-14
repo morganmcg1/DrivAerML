@@ -108,6 +108,28 @@ Researcher-agent delivered 10 ranked hypotheses at 14:37Z. Top 4 for assignment:
 
 Note: If nezuko #1101 or fern #1098 win on test_vol_p, they may continue with combinatorial composition rather than free WSS hypotheses. Reassessment at terminal.
 
+### Cross-advisor Wave 27 Lessons (tay branch, 15:23Z post-mortem on Issue #1056)
+
+The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arms (EP3 val_abupt 27-32%):
+
+| tay-branch PR | Hypothesis | Failure mode |
+|---|---|---|
+| #1104 WSS magnitude L1 penalty | L1 magnitude conflicts with L2 reconstruction → gradient instability EP1 |
+| #1105 Per-channel rel_L2 loss | Numeric explosion when GT τ near zero (laminar regions) |
+| #1106 Normal-frame WSS rotation | Physical coord rotation corrupts Transolver geometry signal |
+| #1107 Yaw rotation augmentation | Destroys orientation signal — CFD wind direction is FIXED |
+
+**Hard design constraints from Wave 27:**
+- Loss modifications must be **supplementary** (additive to MSE), not replacements that change gradient direction.
+- Augmentations must **preserve wind direction** (Y-sym is the only physically valid spatial augmentation; yaw is invalid).
+- Loss formulations that risk numerical explosion (relative-L2 with near-zero GT) are unsafe without epsilon-flooring.
+
+**Impact on my H1-H4 queue:**
+- **H1 wind-exposure** (additive input channel) — ✅ SAFE: doesn't touch loss, doesn't rotate features.
+- **H2 curvature features** (additive input channels) — ✅ SAFE: same as H1.
+- **H3 near-wall cross-attention** (architectural, doesn't modify loss) — ✅ SAFE structurally, but adds parameters → overfit risk.
+- **H4 per-task GradNorm α** (dynamic loss weighting, still on MSE) — ⚠️ MODERATE: GradNorm preserves gradient direction but α_wss=1.0 arm risky given prior global α=0.75 EP16 blowup. Recommend dropping the α_wss=1.0 arm and keeping only α_wss=0.75.
+
 ## Next Key Events
 
 1. **Frieren #1077 terminal** (~17:00-18:00Z) — close as NOT-a-winner → assign H1 to frieren.
