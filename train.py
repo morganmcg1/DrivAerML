@@ -57,6 +57,7 @@ from trainer_runtime import (
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
+    focal_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -105,6 +106,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    tau_z_focal_alpha: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,10 +323,13 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    tau_z_focal_alpha: float = 0.0,
+    tau_z_channel_idx: int = 3,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    tau_z_focal_mean_w: float = 1.0
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -333,12 +338,25 @@ def train_loss(
             volume_mask=batch.volume_mask,
         )
         if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
-                batch.surface_mask,
-                surface_channel_weights,
-            )
+            if tau_z_focal_alpha > 0.0:
+                focal_target = surface_target[..., tau_z_channel_idx]
+                surface_loss, mean_w = focal_channel_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                    focal_target=focal_target,
+                    focal_channel_idx=tau_z_channel_idx,
+                    focal_alpha=tau_z_focal_alpha,
+                )
+                tau_z_focal_mean_w = float(mean_w.detach().cpu().item())
+            else:
+                surface_loss = weighted_channel_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
@@ -352,6 +370,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "tau_z_focal_mean_w": tau_z_focal_mean_w,
     }
 
 
@@ -852,6 +871,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.tau_z_focal_alpha > 0.0:
+                print(
+                    f"Spatial focal loss enabled on tau_z (channel idx=3): "
+                    f"alpha={config.tau_z_focal_alpha}, "
+                    f"w_i = 1 + alpha * |tau_z_gt_i| / mean(|tau_z_gt|)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +908,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/tau_z_focal_alpha"] = config.tau_z_focal_alpha
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1056,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        tau_z_focal_alpha=config.tau_z_focal_alpha,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1068,8 +1095,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/tau_z_focal_alpha": config.tau_z_focal_alpha,
                         }
                     )
+                    if (
+                        config.tau_z_focal_alpha > 0.0
+                        and "tau_z_focal_mean_w" in batch_loss_metrics
+                    ):
+                        train_log["train/tau_z_focal_mean_w"] = batch_loss_metrics[
+                            "tau_z_focal_mean_w"
+                        ]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

@@ -870,6 +870,87 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+def focal_channel_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    channel_weights: torch.Tensor,
+    focal_target: torch.Tensor,
+    focal_channel_idx: int,
+    focal_alpha: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-channel weighted masked MSE with extra per-point spatial weighting on one focal channel.
+
+    Identical to :func:`weighted_channel_mse` except the channel at
+    ``focal_channel_idx`` receives an additional per-point multiplier
+    ``w_i = 1 + focal_alpha * |focal_target_i| / (mean(|focal_target|) + eps)``
+    where the mean is computed per-sample over valid (non-masked) points.
+    Other channels keep their uniform ``channel_weights[c]`` multiplier.
+
+    The focal weight is derived only from ``focal_target`` (the GT tensor for
+    that channel) so no gradient flows through ``w_i`` — only the magnitude of
+    the squared error is rescaled.
+
+    Args:
+        pred / target: [B, N, C].
+        mask: [B, N] (1=valid, 0=pad).
+        channel_weights: [C] uniform per-channel scalars.
+        focal_target: [B, N] — GT values for the focal channel (typically
+            ``target[..., focal_channel_idx]``; pass ``.abs()`` is unnecessary
+            since this function takes ``abs`` internally).
+        focal_channel_idx: which channel to apply spatial weighting to.
+        focal_alpha: concentration parameter. 0.0 reduces to weighted_channel_mse.
+
+    Returns:
+        (loss, mean_spatial_weight) — loss is the scalar averaged over
+        (valid points × channels); mean_spatial_weight is the masked mean of
+        the per-point focal weight, useful as a diagnostic (should be ≈ 1 + α
+        when |focal_target| ≈ mean, and substantially > 1 if the distribution
+        has a heavy tail). When pred is empty, returns (0, 1.0).
+    """
+    if pred.numel() == 0:
+        zero = pred.sum() * 0.0
+        return zero, zero + 1.0
+    channel_weights_dev = channel_weights.to(device=pred.device, dtype=pred.dtype)
+    if channel_weights_dev.shape[-1] != pred.shape[-1]:
+        raise ValueError(
+            f"channel_weights last-dim {channel_weights_dev.shape[-1]} must equal pred last-dim {pred.shape[-1]}"
+        )
+    if focal_channel_idx < 0 or focal_channel_idx >= pred.shape[-1]:
+        raise ValueError(
+            f"focal_channel_idx {focal_channel_idx} out of range for pred with C={pred.shape[-1]}"
+        )
+
+    eps = 1e-8
+    mask_dev = mask.to(device=pred.device, dtype=pred.dtype)  # [B, N]
+    mask_3d = mask_dev.unsqueeze(-1)  # [B, N, 1]
+
+    sq_err = (pred - target).square()  # [B, N, C]
+
+    focal_target_dev = focal_target.to(device=pred.device, dtype=pred.dtype)  # [B, N]
+    abs_focal = focal_target_dev.abs()
+    valid_sum = (abs_focal * mask_dev).sum(dim=1, keepdim=True)  # [B, 1]
+    valid_count = mask_dev.sum(dim=1, keepdim=True).clamp_min(1.0)  # [B, 1]
+    mean_abs_focal = valid_sum / valid_count  # [B, 1]
+    spatial_w = 1.0 + focal_alpha * abs_focal / (mean_abs_focal + eps)  # [B, N]
+
+    per_channel_w = channel_weights_dev.view(1, 1, -1).expand_as(sq_err).clone()  # [B, N, C]
+    per_channel_w[..., focal_channel_idx] = (
+        channel_weights_dev[focal_channel_idx] * spatial_w
+    )
+
+    weighted = sq_err * per_channel_w * mask_3d  # [B, N, C]
+    valid_points = mask_3d.sum()
+    denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
+
+    masked_w_sum = (spatial_w * mask_dev).sum()
+    mean_spatial_w = masked_w_sum / mask_dev.sum().clamp_min(1.0)
+
+    if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denominator, mean_spatial_w
+    return pred.sum() * 0.0, mean_spatial_w
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
