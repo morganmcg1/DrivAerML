@@ -132,6 +132,11 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    # Curvature input features (WSS H2 PR #1117)
+    # Empty string disables; "kappa_HK" loads 3 channels (kappa_v2 + H + K from
+    # cached arrays), "kappa_only" loads 1 channel from surface_kappa_v2.npy.
+    surface_curvature_mode: str = ""
+    surface_input_channels: int = 7
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -235,6 +240,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        surface_input_dim=config.surface_input_channels,
     )
 
 
@@ -524,6 +530,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "pe_source_run_ki2q9ko9": (
                         config.model_pe == "string_multisigma"
                     ),
+                    "surface_curvature_mode": config.surface_curvature_mode or "off",
+                    "surface_input_channels_effective": config.surface_input_channels,
                 },
                 allow_val_change=True,
             )
@@ -570,6 +578,29 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                if state.is_main and epoch == 0 and global_step == 0:
+                    sx = batch.surface_x
+                    sm = batch.surface_mask
+                    if sm.any():
+                        valid = sx[sm]
+                        per_chan = [
+                            (
+                                float(valid[:, c].min().item()),
+                                float(valid[:, c].max().item()),
+                                float(valid[:, c].mean().item()),
+                                float(valid[:, c].std().item()),
+                            )
+                            for c in range(valid.shape[-1])
+                        ]
+                        print(
+                            f"[input debug] EP0 surface_x dim={valid.shape[-1]}; "
+                            f"per-channel [min,max,mean,std]:"
+                        )
+                        for c, stats_c in enumerate(per_chan):
+                            print(
+                                f"  ch{c}: min={stats_c[0]:.3f} max={stats_c[1]:.3f} "
+                                f"mean={stats_c[2]:.3f} std={stats_c[3]:.3f}"
+                            )
                 aug_log: dict[str, int] = {}
                 loss, batch_loss_metrics, task_losses = train_loss(
                     model,

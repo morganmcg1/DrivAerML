@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -31,6 +32,7 @@ from data import (
     load_data,
     pad_collate,
 )
+from data.loader import DrivAerMLCase, DrivAerMLCaseStore, DrivAerMLSurfaceDataset
 
 
 class EMA:
@@ -229,10 +231,181 @@ def resolve_num_workers(config) -> int:
     return min(4, os.cpu_count() or 4)
 
 
+def _variable_channel_pad_collate(samples: list) -> SurfaceBatch:
+    """pad_collate variant that infers the channel count from the samples.
+
+    Required because data.pad_collate hard-codes ``SURFACE_X_DIM=7``; when
+    curvature features are appended (going to 8/9/10 channels) the original
+    collate would silently truncate. Otherwise byte-identical behaviour.
+    """
+    if not samples:
+        raise ValueError("pad_collate received an empty batch")
+    max_surface_n = max(sample.surface_x.shape[0] for sample in samples)
+    max_volume_n = max(sample.volume_x.shape[0] for sample in samples)
+    batch_size = len(samples)
+    surface_x_dim = samples[0].surface_x.shape[-1]
+    surface_y_dim = samples[0].surface_y.shape[-1]
+    volume_x_dim = samples[0].volume_x.shape[-1]
+    volume_y_dim = samples[0].volume_y.shape[-1]
+    surface_x = torch.zeros(batch_size, max_surface_n, surface_x_dim, dtype=samples[0].surface_x.dtype)
+    surface_y = torch.zeros(batch_size, max_surface_n, surface_y_dim, dtype=samples[0].surface_y.dtype)
+    surface_mask = torch.zeros(batch_size, max_surface_n, dtype=torch.bool)
+    volume_x = torch.zeros(batch_size, max_volume_n, volume_x_dim, dtype=samples[0].volume_x.dtype)
+    volume_y = torch.zeros(batch_size, max_volume_n, volume_y_dim, dtype=samples[0].volume_y.dtype)
+    volume_mask = torch.zeros(batch_size, max_volume_n, dtype=torch.bool)
+    for i, sample in enumerate(samples):
+        surface_n = sample.surface_x.shape[0]
+        volume_n = sample.volume_x.shape[0]
+        surface_x[i, :surface_n] = sample.surface_x
+        surface_y[i, :surface_n] = sample.surface_y
+        surface_mask[i, :surface_n] = True
+        volume_x[i, :volume_n] = sample.volume_x
+        volume_y[i, :volume_n] = sample.volume_y
+        volume_mask[i, :volume_n] = True
+    return SurfaceBatch(
+        case_ids=[sample.case_id for sample in samples],
+        surface_x=surface_x,
+        surface_y=surface_y,
+        surface_mask=surface_mask,
+        volume_x=volume_x,
+        volume_y=volume_y,
+        volume_mask=volume_mask,
+        metadata=[dict(sample.metadata) for sample in samples],
+    )
+
+
+class CurvatureAugmentedCaseStore(DrivAerMLCaseStore):
+    """Case store that appends per-vertex curvature features to surface_x.
+
+    Loads pre-computed curvature arrays from each case directory and appends
+    them as additional surface input channels. Designed for the WSS curvature
+    features experiment (PR #1117).
+
+    Channels appended depend on ``mode``:
+      - ``"kappa_HK"``: 3 channels = [log1p(|kappa_v2|), signed_log1p(H), signed_log1p(K)]
+        H and K read from ``curvature_HK_v2.npy`` (falls back to 0 if missing).
+      - ``"kappa_only"``: 1 channel = [log1p(|kappa_v2|)] using ``surface_kappa_v2.npy``
+        which is available for every case.
+
+    Each channel is z-scored using ``stats`` (mean/std measured on a sample of
+    training cases at preprocessing time). This ensures curvature features have
+    similar scale to the existing 7 surface channels and the model can learn
+    them on equal footing.
+    """
+
+    def __init__(
+        self,
+        manifest_path: str | Path,
+        root: str | Path | None = None,
+        *,
+        mode: str = "kappa_HK",
+        stats: dict[str, float] | None = None,
+    ):
+        super().__init__(manifest_path=manifest_path, root=root)
+        if mode not in ("kappa_HK", "kappa_only"):
+            raise ValueError(f"Unknown curvature mode: {mode}")
+        self.mode = mode
+        if stats is None:
+            stats_path = Path(__file__).with_name("curvature_stats.json")
+            if not stats_path.exists():
+                raise FileNotFoundError(
+                    f"Curvature stats file missing: {stats_path}. Run the stats helper first."
+                )
+            import json
+            with stats_path.open() as f:
+                stats = json.load(f)
+        self.stats = stats
+        self._kappa_mean = float(stats["kappa_v2_log1p_mean"])
+        self._kappa_std = max(float(stats["kappa_v2_log1p_std"]), 1e-6)
+        self._H_mean = float(stats.get("kappa_H_signed_log_mean", 0.0))
+        self._H_std = max(float(stats.get("kappa_H_signed_log_std", 1.0)), 1e-6)
+        self._K_mean = float(stats.get("kappa_G_signed_log_mean", 0.0))
+        self._K_std = max(float(stats.get("kappa_G_signed_log_std", 1.0)), 1e-6)
+
+    @property
+    def extra_surface_channels(self) -> int:
+        return 3 if self.mode == "kappa_HK" else 1
+
+    def _load_curvature_channels(
+        self,
+        case_id: str,
+        surface_rows: np.ndarray | None,
+        n_surface: int,
+    ) -> np.ndarray:
+        case_dir = self.root / case_id
+        kappa_path = case_dir / "surface_kappa_v2.npy"
+        if not kappa_path.exists():
+            raise FileNotFoundError(f"Missing surface_kappa_v2.npy for case {case_id}")
+        if surface_rows is None:
+            kappa = np.asarray(np.load(kappa_path), dtype=np.float32)
+        else:
+            mm = np.load(kappa_path, mmap_mode="r")
+            kappa = np.asarray(mm[surface_rows], dtype=np.float32)
+        kappa = np.nan_to_num(kappa, nan=0.0, posinf=0.0, neginf=0.0)
+        # log1p(|x|) is fine since kappa is non-negative; preserve any sign just in case.
+        kappa_feat = (np.sign(kappa) * np.log1p(np.abs(kappa)) - self._kappa_mean) / self._kappa_std
+
+        if self.mode == "kappa_only":
+            return kappa_feat.reshape(-1, 1)
+
+        hk_path = case_dir / "curvature_HK_v2.npy"
+        if hk_path.exists():
+            if surface_rows is None:
+                HK = np.asarray(np.load(hk_path), dtype=np.float32)
+            else:
+                mm = np.load(hk_path, mmap_mode="r")
+                HK = np.asarray(mm[surface_rows], dtype=np.float32)
+            HK = np.nan_to_num(HK, nan=0.0, posinf=0.0, neginf=0.0)
+            H_feat = (np.sign(HK[:, 0]) * np.log1p(np.abs(HK[:, 0])) - self._H_mean) / self._H_std
+            K_feat = (np.sign(HK[:, 1]) * np.log1p(np.abs(HK[:, 1])) - self._K_mean) / self._K_std
+        else:
+            # Missing HK file: fill with zero (post-standardisation that means "mean log curvature");
+            # the always-present kappa channel still carries curvature magnitude.
+            target_n = kappa.shape[0]
+            H_feat = np.zeros(target_n, dtype=np.float32)
+            K_feat = np.zeros(target_n, dtype=np.float32)
+        return np.stack([kappa_feat, H_feat, K_feat], axis=1)
+
+    def load_case(
+        self,
+        case_id: str,
+        *,
+        surface_rows: np.ndarray | None = None,
+        volume_rows: np.ndarray | None = None,
+    ) -> DrivAerMLCase:
+        case = super().load_case(
+            case_id,
+            surface_rows=surface_rows,
+            volume_rows=volume_rows,
+        )
+        n_surface = case.surface_x.shape[0]
+        curv = self._load_curvature_channels(case_id, surface_rows, n_surface)
+        if curv.shape[0] != n_surface:
+            raise RuntimeError(
+                f"Curvature rows for {case_id} mismatch surface rows: "
+                f"{curv.shape[0]} vs {n_surface}"
+            )
+        curv_t = torch.from_numpy(np.ascontiguousarray(curv))
+        surface_x_aug = torch.cat([case.surface_x, curv_t], dim=-1)
+        metadata = dict(case.metadata)
+        metadata["surface_x_dim"] = int(surface_x_aug.shape[-1])
+        metadata["surface_curvature_mode"] = self.mode
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=surface_x_aug,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
 def loader_kwargs(config) -> dict[str, object]:
     num_workers = resolve_num_workers(config)
+    # Always use the variable-channel collate so the loader handles 7/8/9/10-channel
+    # surface inputs without truncation.
     kwargs: dict[str, object] = {
-        "collate_fn": pad_collate,
+        "collate_fn": _variable_channel_pad_collate,
         "num_workers": num_workers,
         "pin_memory": config.pin_memory and torch.cuda.is_available(),
     }
@@ -274,6 +447,46 @@ def full_eval_loaders_from(
     }
 
 
+def _surface_curvature_mode(config) -> str | None:
+    """Resolve the requested curvature mode from the config.
+
+    Returns ``None`` when curvature features are disabled, otherwise the mode
+    name (``"kappa_HK"`` or ``"kappa_only"``).
+    """
+    mode = getattr(config, "surface_curvature_mode", "") or ""
+    mode = mode.strip()
+    return mode or None
+
+
+def _maybe_swap_store_for_curvature(
+    config,
+    train_ds,
+    val_splits,
+    test_splits,
+):
+    """If curvature features are enabled, replace each dataset's store in place.
+
+    Returns the curvature-augmented store (or None if not requested).
+    """
+    mode = _surface_curvature_mode(config)
+    if mode is None:
+        return None
+    store = CurvatureAugmentedCaseStore(
+        manifest_path=config.manifest,
+        root=config.data_root or None,
+        mode=mode,
+    )
+    # Reuse the cached point counts that load_data already gathered, so we don't
+    # re-walk the PVC.
+    store._point_count_cache.update(train_ds.store._point_count_cache)
+    train_ds.store = store
+    for ds in val_splits.values():
+        ds.store = store
+    for ds in test_splits.values():
+        ds.store = store
+    return store
+
+
 def make_loaders(
     config,
     distributed_state: DistributedState | None = None,
@@ -287,6 +500,7 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    _maybe_swap_store_for_curvature(config, train_ds, val_splits, test_splits)
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:

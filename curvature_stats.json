@@ -1,0 +1,10 @@
+{
+  "kappa_v2_log1p_mean": 1.9191299676895142,
+  "kappa_v2_log1p_std": 1.8683401346206665,
+  "kappa_H_signed_log_mean": -0.6570849418640137,
+  "kappa_H_signed_log_std": 2.962175130844116,
+  "kappa_G_signed_log_mean": 0.1050228551030159,
+  "kappa_G_signed_log_std": 4.1630964279174805,
+  "n_train_cases_sampled": 30,
+  "pts_per_case_sampled": 50000
+}
