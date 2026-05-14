@@ -63,10 +63,12 @@ All new runs MUST use the corrected dataset path and `--data-root` flag (not `--
 
 ## Gate Criteria
 
-### Single-Model Gates (new experiments)
-- **PASS:** val_abupt ≤ 6.2% AND val_vol_p ≤ 4.5%
-- **MARGINAL:** val_abupt ≤ 6.5% AND val_vol_p ≤ 5.0%
+### Single-Model EP3 Gates (current tay stack — no SDF importance sampling)
+- **PASS:** val_abupt ≤ **7.2%** AND val_vol_p ≤ 4.5%
+- **MARGINAL:** val_abupt ≤ 7.6% AND val_vol_p ≤ 5.0%
 - **KILL:** otherwise
+
+(Historical PR #972 SDF stack gates were ≤ 6.2% / ≤ 6.5% — those reflect SDF-stratified sampling that is NOT on tay; do not apply to current single-model runs.)
 
 ### WSS-Targeted Single-Model Win Criteria (becomes new pool member)
 - test_WSS ≤ 6.50% AND test_vol_p ≤ 3.643% AND test_SP ≤ 3.577% AND val_abupt ≤ 6.20%
@@ -129,26 +131,28 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 
 ---
 
-## Baseline Training Recipe (PR #972 Stack)
+## Baseline Training Recipe (current tay stack — NOT PR #972 SDF stack)
 
-All new WSS single-model experiments must start from this stack:
+⚠️ **IMPORTANT:** the PR #972 SDF-stratified vol sampling code (`--sdf-importance-sampling --sdf-alpha 4.0`) was **never merged into tay**. Do NOT include those flags in any assignment — `argparse` will reject them. The live tay baseline is the stack below (no SDF importance sampling). Single-model EP3 on this baseline lands ~6.7–6.9% val_abupt, not the historical PR #972 6.2%. Gates must be recalibrated accordingly: PASS ≤ 7.2%, MARGINAL ≤ 7.6%, KILL otherwise.
 
 ```
 --optimizer lion --lr 9e-5 --weight-decay 5e-4
 --tau-y-loss-weight 1.5 --tau-z-loss-weight 2.0 --surface-loss-weight 2.0
---ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1
+--use-ema --ema-decay 0.999 --grad-clip-norm 0.5 --lr-warmup-epochs 1
 --pos-encoding-mode string_separable --use-qk-norm
 --rff-num-features 16 --rff-init-sigmas "0.25,0.5,1.0,2.0,4.0"
 --lr-cosine-t-max 13 --epochs 13
 --vol-points-schedule "0:16384:3:32768:6:49152:9:65536"
+--no-compile-model
 --model-layers 5 --model-hidden-dim 512 --model-heads 4 --model-slices 128
 --batch-size 4 --validation-every 1
 --train-surface-points 65536 --eval-surface-points 65536
 --train-volume-points 65536 --eval-volume-points 65536
 --use-surf-to-vol-xattn
---sdf-importance-sampling --sdf-alpha 4.0
 --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511
 ```
+
+The PR #972 single-model SOTA W&B run `56bcqp3m` was trained with SDF-stratified sampling on a different branch (`dl24-frieren/vol-test-domain-augmentation`, commit `291efd2`); that code never landed on tay. Until it does, all new single-model runs are evaluated relative to the no-SDF tay baseline (thorfinn #1100 EP3=6.768% is a representative live trajectory).
 
 ---
 
