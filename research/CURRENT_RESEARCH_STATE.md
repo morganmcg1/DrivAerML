@@ -89,23 +89,30 @@ PR #972 wave SOTA test_wss = 6.727%. Transolver-3 target = 5.85%. Gap = 13% rela
 - **Fern #1098 WD=0.01**: val_vol_p=3.674% at EP3. If both nezuko AND fern beat SOTA, compose into LR=9e-5 + WD=0.01 + WSS lever for next wave.
 
 ### Terminal protocol for non-winners
-- **Frieren #1077** (terminal ~14:00Z): expected test_abupt ~5.96-6.05% (NOT-a-winner). Will close once SENPAI-RESULT lands.
+- **Frieren #1077** (terminal ~17:00-18:00Z, revised — was at EP20 at 10:40Z): expected test_abupt ~5.96-6.05% (NOT-a-winner). Will close once SENPAI-RESULT lands.
 - **Tanjiro #1086** (terminal ~20:45Z): bit-identical to fern, EMA didn't help. Close.
 
-## Pending hypothesis queue (WSS-focused, awaiting researcher output)
+## WSS Hypothesis Queue — READY (from `RESEARCH_IDEAS_WSS_2026-05-14_1430.md`)
 
-The next 3-4 idle students will be assigned WSS-focused hypotheses from `RESEARCH_IDEAS_WSS_2026-05-14_1430.md`. Likely first-pass directions (subject to researcher-agent refinement):
-1. **Surface-point density uplift** — 11k → 33k/65k surface train points (WSS is surface-only).
-2. **WSS-component channel weighting** — mild tau_y=1.2/tau_z=1.3 from `9mm3sz7x` history, retested on corrected split + Lion + STRING stack.
-3. **WSS-aware loss reformulation** — magnitude/direction decomposition (|τ| + unit-vector) instead of vector L2.
-4. **Surface-side curriculum / boundary-aware sampling** — biased toward high-shear regions (front bumper, A-pillar, wake separation).
+Researcher-agent delivered 10 ranked hypotheses at 14:37Z. Top 4 for assignment:
+
+| Rank | Hypothesis | One-line | Assigned to (when idle) |
+|------|-----------|----------|-------------------------|
+| **H1** | Wind-exposure geometric proxy (n·u_freestream + \|ny\| as 2 extra input channels) | Direct cross-flow attack-angle signal targets tau_y/z gap | **frieren** (first idle) |
+| **H2** | Surface curvature features (kappa_H + kappa_G as 2 extra channels) | Local shape curvature targets WSS spikes at separation edges | **tanjiro** (second idle) |
+| **H3** | Near-wall volume cross-attention into surface decoder (SDF<0.05m) | Inject boundary-layer velocity-gradient signal into WSS head | **nezuko** (when terminal closes — needs new assignment if not a winner) |
+| **H4** | Per-task GradNorm α sweep (α_wss=0.75 and 1.0, α_surf=α_vol=0.5 fixed) | Allow faster WSS rebalancing without global alpha=0.75 blowup risk | **fern** (when terminal closes — if not a winner) |
+
+**All four build on PR #972 stack** (Lion + 6L STRING 5-sigma + GradNorm α=0.5 + EMA 0.999 + Y-sym 0.5 + bs=1 + 65k surf/vol + SDF α=2.0 + corrected dataset).
+**All four explicitly protect vol_p ≤ 3.643% and surf_p ≤ 3.577% with EP6/EP10/EP15 gates.**
+
+Note: If nezuko #1101 or fern #1098 win on test_vol_p, they may continue with combinatorial composition rather than free WSS hypotheses. Reassessment at terminal.
 
 ## Next Key Events
 
-1. **Frieren #1077 terminal** (~14:00Z) — likely SENPAI-RESULT for close.
-2. **Tanjiro #1086 EP21-22** (~14:30-15:00Z) — non-gate but EMA may dip.
-3. **Fern #1098 EP6 gate** (~13:00Z, past) and **EP10 gate** (~16:00Z) — gates ≤6.8%/≤6.5%.
-4. **Nezuko #1101 EP6-7** (~13:30-14:30Z) and **EP10 gate** (~16:30Z) — tightened gate ≤6.30%.
-5. **Researcher-agent WSS output** (~ETA 30-60 min from launch 14:23Z).
-6. **Tanjiro #1086 terminal** (~20:45Z) — close as NOT-a-winner.
-7. **Fern + Nezuko terminal** (~04-06Z May 15) — clean orthogonal controls.
+1. **Frieren #1077 terminal** (~17:00-18:00Z) — close as NOT-a-winner → assign H1 to frieren.
+2. **Tanjiro #1086 EP21+** (~15:00Z+ — non-gate, but EMA may dip).
+3. **Fern #1098 EP6 gate** (~13:00Z past) and **EP10 gate** (~16:00Z).
+4. **Nezuko #1101 EP6+** (~13:30Z+) and **EP10 tightened gate** (~16:30Z, ≤6.30%).
+5. **Tanjiro #1086 terminal** (~20:45Z) — close, assign H2.
+6. **Fern + Nezuko terminal** (~04-06Z May 15) — clean orthogonal controls. If winners, compose; else assign H3/H4.
