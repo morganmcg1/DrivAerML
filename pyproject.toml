@@ -9,6 +9,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "numpy",
+    "scipy",
     "torch",
     "tqdm",
     "wandb",
