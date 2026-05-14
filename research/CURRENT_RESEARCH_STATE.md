@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~12:40 UTC)
+- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~13:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
@@ -87,14 +87,16 @@ All new runs MUST use the corrected dataset path and `--data-root` flag (not `--
 - **91–96% of remaining WSS residual is magnitude error.**
 - This pivots the campaign from "direction-aware" experiments (which #1094, #1096, #1097 all targeted) toward **magnitude-targeted** mechanisms (rel_l2 loss, magnitude penalty) and **frame-equivariance** (in-plane rotation aug).
 
-### Pool Saturation Observation
+### Pool Saturation — CONFIRMED (PR #1103 closed 2026-05-14 13:30Z)
 
-The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4ne`} is Pareto-saturated:
-- PR #1102 K=8 Caruana (this round, MERGED) — converges on continuous weighting
-- PR #1099 K=3 WSS-targeted (closed — converged to same K=3 subset as #1064)
-- PR #1103 SLSQP continuous optimisation (in flight) — final check on continuous optimum
+The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4ne`} is Pareto-saturated under convex combinations:
+- PR #1102 K=8 Caruana (MERGED) — near-globally-optimal at discrete 1/8 grid
+- PR #1099 K=3 WSS-targeted (CLOSED) — converged to identical K=3 subset as #1064
+- PR #1103 SLSQP continuous optimisation (CLOSED) — confirmed K=8 within ~0.03 L1 of global continuous optimum; best-case val_WSS improvement = 0.0039pp (0.06% relative); val_SP ≤ 3.577% **infeasible** on this pool (simplex floor ~3.72%, every member ≥ 3.98%)
 
-**Further ensemble gains require NEW pool members.** Wave 27 is exclusively focused on producing single-model variants with low WSS / compliant vol_p that extend the pool diversity.
+**Active lever for ensemble gains:**
+1. **Pool extension via new single-model members** (Wave 27 purpose)
+2. **Bias-corrected ensemble** (edward PR #1108, just assigned) — `pred = Σ w_i·pred_i + b_c` per channel, escapes convex hull structural offset
 
 ---
 
@@ -103,18 +105,18 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 ### Wave 26 continuations (single-model + capacity)
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | EP4 val_abupt=6.511%; tracking baseline ±0.06pp; EP6 gate ~13:55Z |
-| #1081 | askeladd | Surface loss weight slw=3.0 (full 30-ep relaunch) | W&B `qwi82vym` 11:04Z; proof EP9 vol_p=3.7439% ahead of SOTA |
+| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | EP4 val_abupt=6.511%; tracking baseline ±0.06pp |
+| #1081 | askeladd | Surface loss weight slw=3.0 (full 30-ep relaunch) | W&B `qwi82vym`; EP9 proof vol_p=3.7439% ahead of SOTA |
 | #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | EP3 val_abupt=6.768%, ~0.5pp ahead of typical EP3 (W&B `k33hscuc`) |
-| #1103 | edward | SLSQP continuous weight search over 4-simplex (CPU-only) | Just assigned 12:30Z — pure Python optimisation, no GPU |
 
-### Wave 27 (4 fresh assignments at 12:35Z) — all WSS-targeted, all PR #972 baseline
+### Wave 27 (launched 2026-05-14 ~12:35Z) + edward Wave 27.5
 | PR | Student | Hypothesis | Source |
 |----|---------|------------|--------|
 | **#1104** | fern | **WSS magnitude penalty** `λ·|‖τ‖−‖τ_gt‖|` L1 (λ=0.1, 0.3 arms) | From PR #1097 close (direction-loss mech analysis) |
 | **#1105** | tanjiro | **Per-channel rel_l2 loss** on τ axes (auto-emphasise high-shear) | From PR #1097 close (tanjiro's own suggested follow-up) |
 | **#1106** | frieren | **Physical-coordinate normal-frame WSS** (fix #1094 norm-space bug) | From PR #1094 close (frieren's own follow-up #1) |
 | **#1107** | nezuko | **In-plane yaw rotation aug** (15°/45° arms, Sim3-equivariance) | From PR #1096 close (advisor follow-up; yaw-only ≤45°) |
+| **#1108** | edward | **Bias-corrected ensemble** — `pred = Σ w_i·pred_i + b_c` per channel, LOOCV-regularised | From PR #1103 close (edward's own follow-up #2; escapes simplex floor structural offset) |
 
 ---
 
@@ -188,7 +190,8 @@ All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments,
 - **Corrected dataset** (2026-05-11) eliminated artificial ~3× vol_p OOD gap — biggest research-program insight
 - **SDF-stratified vol importance sampling** (PR #972) is single-model SOTA: val_abupt=6.126%, test_WSS=6.727%
 - **Ensemble SOTA** (PR #1102 K=8 Caruana) test_WSS=6.3263% — first compliant ensemble below 6.33%
-- **4-pool Pareto-saturated** — new pool members required for further ensemble gains
+- **4-pool Pareto-saturated** (PR #1103 CONFIRMED) — K=8 within 0.03 L1 of global continuous optimum; val_SP ≤ 3.577% infeasible on this pool (simplex floor ~3.72%); new pool members are the operative lever
+- **Bias-corrected ensemble** (PR #1108 in flight) — escapes the convex-hull structural offset with per-channel bias `b_c`; LOOCV regularisation guards val→test overfit
 - **Training-time vol sampling** matters more than loss weighting or architecture depth for vol_p
 - **Post-xattn capacity additions** 0-for-3 (PRs #884, #891, #906) — do not add layers after surf→vol xattn
 - **Rotation aug** (PR #925): aggressive yaw+pitch degrades; mild yaw-only (≤45°) being tested in PR #1107
