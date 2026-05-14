@@ -101,13 +101,14 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 
 ---
 
-## Active WIP PRs (as of 2026-05-14 ~21:35Z)
+## Active WIP PRs (as of 2026-05-14 ~22:45Z)
 
-### Wave 26 continuations (single-model + capacity) — both EP10 PASS, running to EP30
+### Capacity / baseline runs
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | **EP15 NEW BEST** val_abupt=6.323%, val_WSS=7.149% (projected test_WSS≈6.683% beats SOTA 6.727%); auto-harvest ETA ~23:30–23:44Z; W&B `1gzeeios` / `es805usl` |
-| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | **EP15 MARGINAL** val_abupt=6.353%, val_WSS=7.160%; 7-ep monotone descent; capacity uplift differentially benefits tau_y; running to EP21+; W&B `k33hscuc` / `drpxn365` |
+| #1078 | alphonse | ~~Asymmetric eval surface 131k~~ | **CLOSED 22:42Z** — test_WSS=6.996% (+26.8bp vs SOTA), test floors regress; val→test ratio was 1.020 not projected 0.935; hypothesis falsified |
+| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | **EP16 NEW LOW** val_abupt=6.330%, val_WSS=7.134%; 38min/ep cadence; landing ~EP24-28 by timeout; projected test_WSS [6.37%, 6.51%] (potential SOTA win); W&B `k33hscuc` |
+| **#1122** | alphonse | **SDF importance sampling port to tay (alpha=4.0)** — bring PR #972's missing lever onto tay | Active WIP; launched 22:45Z post-#1078 close |
 
 ### Wave 28 — ALL 4 CLOSED (Wave 28 closed 19:43–21:33Z, see Wave 28 Closures below)
 
@@ -214,7 +215,7 @@ Queue for Wave 29 (after Wave 28.5 results land ~tomorrow):
 Senpai PR #3445 merged 06:42Z deployed per-student token fix + REST API migration. Fleet was back online by ~07:30Z. No further rate-limit-driven idle GPU incidents reported in current invocation.
 
 ### Pod Health
-All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students — all 8 carrying a `status:wip` PR with a live W&B run as of 21:35Z. PR distribution: alphonse #1078, thorfinn #1100, tanjiro #1114, edward #1116, askeladd #1118, fern #1119, nezuko #1120, frieren #1121.
+All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students — all 8 carrying a `status:wip` PR with a live W&B run as of 22:45Z. PR distribution: thorfinn #1100, tanjiro #1114, edward #1116, askeladd #1118, fern #1119, nezuko #1120, frieren #1121, alphonse #1122 (SDF port — replaces closed #1078).
 
 ---
 
@@ -238,6 +239,9 @@ All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments,
 - **GradNorm de-emphasizes τ_z hard-coded prior** (#1111 close) — when learned, GradNorm reduces τ_z weight from prior 2.0 toward 1.4, which regresses test_vol_p and test_SP floors. Question: is the 2.0 prior over-tuned, or is the learned weight wrong? Short-cycle test (#1119 fern) measures this at full convergence.
 - **OHEM scale-collapse** (#1110 close) — top-k mining catastrophically collapses without spike-clipping; magnitude of L_hard scales superlinearly when targeting top-20% of L distribution.
 - **Spatial focal α=2.0 amplifies hot-spot error faster than training rate** (#1109 close) — per-point focal modulation creates concentrated gradients on outliers; baseline isn't bulk-smooth-dominated so amplification destabilizes optimization.
+- **val→test ratio is NOT stable across eval configurations** (#1078 close) — asymmetric eval 131k produced val→test ratio of 1.020, not the 0.935 anchored on PR #972. The 0.935 ratio is recipe-specific (SDF stack), not transferable. Advisor SOTA projections must use test results from comparable-recipe runs, not synthetic val × historical ratio. This is a methodology guard for the entire program.
+- **18h budget recipe validated end-to-end** (#1078 close): `SENPAI_TIMEOUT_MINUTES=1100` ran 17 epochs cleanly at ~62 min/ep (faster than initially projected). All future Wave 28+ runs can adopt it confidently; frieren #1121 has already.
+- **Capacity-uplift ceiling on no-SDF tay is val_abupt ≈ 6.31%** (#1078 EP16 / #1100 EP16 close). Beyond that, the bottleneck is training-time sampling, not parameter count. Justifies #1122 (alphonse SDF port).
 - **Initial-state debug crash** (tanjiro #1114 val_abupt=65.34% on 1-ep debug, then 8-rank DDP retry also crashed) — root cause likely learnable-weight unbounded growth; mitigated by lr=1e-3 separate group + L2 reg 1e-4 + 2-ep warmup option
 - **Post-xattn capacity additions** 0-for-3 (PRs #884, #891, #906) — do not add layers after surf→vol xattn
 - **Rotation aug** (PR #925): aggressive yaw+pitch degrades; mild yaw-only (≤45°) being tested in PR #1107
