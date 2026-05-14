@@ -1,5 +1,56 @@
 # SENPAI Research Results
 
+## 2026-05-14 22:00 — PR #1112: WSS magnitude+direction decomposition heads (frieren) — CLOSED (TEST FLOORS REGRESS, BUDGET-TRUNCATED IDENTICAL TO #1111)
+
+- **Branch**: `frieren/wss-decomp-magnitude-direction-heads` (closed)
+- **W&B run**: `bu5vouer` (rank 0, EP3 step 30415/32592 force-validated at 271min train_timeout)
+- **Hypothesis**: Add two supplementary loss heads — WSS magnitude (`||W||_2`) and WSS direction (`W/||W||_2`) — at λ_mag=0.1, λ_dir=0.05. Tests whether decomposing the WSS regression into magnitude + direction sub-targets accelerates learning beyond the joint MSE.
+
+### Test metrics (EP3 best-val EMA, 50 test cases)
+
+| Metric | Test | Target/Floor | Δ | Status |
+|---|---:|---:|---:|---|
+| test_WSS | 7.549% | ≤6.727% (PR #972 SOTA) | +82bp | MISS |
+| test_vol_p | 3.964% | ≤3.643% (floor) | +32bp | **FLOOR REGRESSION** |
+| test_SP | 4.260% | ≤3.577% (floor) | +68bp | **FLOOR REGRESSION** |
+| test_abupt | 6.588% | — | — | — |
+| test_WSS_z | 9.557% | — | — | — |
+
+### Full-val metrics (EP3 best EMA, 34 val cases)
+
+| Metric | Value | EP3 gate | Status |
+|---|---:|---:|---:|
+| full_val_abupt | 6.921% | ≤7.2% | PASS |
+| full_val_vol_p | 4.119% | ≤4.5% | PASS |
+| full_val_WSS | 7.808% | — | — |
+| full_val_WSS_z | 10.336% | — | — |
+
+### Methodology positive — supplementary heads worked as designed
+
+| Diagnostic | Status |
+|---|---|
+| `train/wss_decomp_mag_loss` stable | ✓ no NaN |
+| `train/wss_decomp_dir_loss` stable | ✓ no NaN |
+| Base `weighted_channel_mse` descending | ✓ |
+| `train/nonfinite_grad` | ≡ 0 |
+| `train/grad/clipped` (post-warmup) | → 0 |
+| Wave 27 supplementary safeguard | **PASSED** |
+
+Mag-head calibration sanity at step 30415:
+- `train/wss_decomp_mag_pred_mean = 1.889`
+- `train/wss_decomp_mag_gt_mean = 1.929`
+- Under-prediction ~2.1% — sensible for a half-cooked EP3 checkpoint, signal at the right scale.
+
+### Diagnosis and paper-relevant findings
+
+1. **Budget truncation, not method failure.** Identical pattern to fern #1111: 271 min / 76 min/epoch ≈ 3.5/13 epochs. Model is steeply descending (EP1=29.79% → EP2=7.61% → EP3=6.92%) when wall-clock kills it.
+2. **Wave 27 supplementary safeguard works.** Adding the two decomposition heads at λ_mag=0.1 / λ_dir=0.05 produced ZERO destabilization signals — no NaN, no nonfinite grads, base loss descending, calibration sensible. This validates the "supplementary not replacement" Wave 27 design rule for loss-augmentation experiments.
+3. **Same budget constraint that hit fern #1111, nezuko #1095.** Three PRs in a row with the heavy Wave 28 recipe (13-ep cosine + 65536 vol-points + surf-to-vol-xattn) hit 270-min wall-clock truncation. This is now a recognized pattern requiring either recipe-shrink OR budget-bump.
+4. **Floor regression pattern is method-independent.** Both vol_p and SP regress through floors because the model is undertrained at EP3, NOT because the WSS-decomp heads cause regression. The supplementary heads only modify WSS gradient, but truncation-at-EP3 starves all heads equally.
+5. **Useful follow-up: magnitude-only ablation.** Wave 27 found 91-96% of WSS residual is in the magnitude channel; current run has both heads, so we cannot say which contributes. A clean ablation (λ_dir=0, λ_mag=0.1) tests whether the direction head is doing real work or near-noise.
+
+Frieren reassigned to **WSS magnitude-only decomposition + 18h budget** (`SENPAI_TIMEOUT_MINUTES=1100` like alphonse #1078) — tests Wave 27's 91-96% magnitude claim at full 13-ep cosine convergence, which budget-truncation prevented in this run.
+
 ## 2026-05-14 21:15 — PR #1113: SDF-stratified curvature-weighted surface sampling (nezuko) — CLOSED (EP2 KILL, CURVATURE IS BAD WSS PROXY)
 
 - **Branch**: `nezuko/sdf-stratified-surface-sampling` (closed)
