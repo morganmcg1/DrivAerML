@@ -50,6 +50,11 @@ class EMA:
         self.step_counter += 1
         if self.step_counter < self.start_step:
             return
+        if self.step_counter == self.start_step:
+            for name, param in model.named_parameters():
+                if param.requires_grad and name in self.shadow:
+                    self.shadow[name].copy_(param.detach())
+            return
         for name, param in model.named_parameters():
             if param.requires_grad and name in self.shadow:
                 self.shadow[name].mul_(self.decay).add_(param.detach(), alpha=1 - self.decay)
