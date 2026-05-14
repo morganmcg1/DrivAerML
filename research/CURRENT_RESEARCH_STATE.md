@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~00:45 UTC
+- 2026-05-14 ~02:35 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -192,4 +192,4 @@ PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abu
 - Bbox normalization (PR #978): may need re-test
 - EMA decay=0.999 (PR #954): needs re-test on corrected split
 
-_Last updated: 2026-05-14 ~00:45 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP27.9 — terminal imminent (~1.5-2h). Nezuko #1072 EP22.1, EP25 gate ~3-4h. Tanjiro #1086 EP4.6 (EP4=6.432% identical to fern, confirming val uses live weights — EMA effect only surfaces at terminal test eval). Frieren #1077 EP7.5, slightly behind α=0.25/0.5 at same EP as expected. Strategic conclusion holds: SDF concentration tuning not beating uniform-sampling SOTA. Pivot levers ready for first idle slot: GradNorm+SDF (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
+_Last updated: 2026-05-14 ~02:35 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. Fern #1063 EP28.2 — terminal ~76 min away. **Fern student pod is stuck in GH rate-limit retry loop since ~00:35Z** (last heartbeat iteration 1043 at 01:04Z) but training process is unaffected (GPUs at 91-100%). Will recover when rate-limit window resets. Best per-metric checkpoints from W&B for fern: abupt=6.265% (EP11), vol_p=4.118% (EP9), surf_p=4.058% (EP16), wss=6.954% (EP18). Strategic conclusion holds: SDF concentration tuning not beating uniform-sampling SOTA (test 5.844%). Pivot levers ready for first idle slot: GradNorm+SDF (H1), WD=0.01 retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
