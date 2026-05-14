@@ -896,14 +896,17 @@ def per_channel_relative_l2_loss(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Per-channel per-sample relative-L2 norm, weighted across channels.
 
-    For each channel ``c`` and sample ``b``:
-        rel_l2_{b,c} = sqrt(sum_n mask_{b,n} (pred_{b,n,c} - target_{b,n,c})^2)
+    For each channel ``c`` and sample ``b`` with at least one valid point:
+        rel_l2_{b,c} = sqrt(sum_n mask_{b,n} (pred_{b,n,c} - target_{b,n,c})^2 + eps^2)
                       / sqrt(sum_n mask_{b,n} target_{b,n,c}^2 + eps^2)
 
-    Returns ``(weighted_loss, per_channel_loss)`` where ``weighted_loss`` is the
-    scalar ``mean_b(sum_c channel_weights[c] * rel_l2_{b,c})`` and
-    ``per_channel_loss`` is the unweighted per-channel mean ``mean_b(rel_l2_{b,c})``
-    for logging.
+    The ``+ eps^2`` inside both square roots keeps the backward pass numerically
+    stable when a batch has no valid surface points (mask all zero) — without
+    it, ``sqrt(0)`` has an infinite gradient and the multiplication by the
+    zero mask produces NaN, which is what we observed in run ``48ylgpfb``.
+
+    Samples whose target norm is zero (no valid points) are excluded from the
+    per-channel mean so the floor introduced by ``eps`` cannot bias the loss.
     """
     if pred.numel() == 0:
         zero = pred.sum() * 0.0
@@ -914,12 +917,14 @@ def per_channel_relative_l2_loss(
     diff_norm_sq = diff_sq.sum(dim=1)  # [B, C]
     target_norm_sq = target_sq.sum(dim=1)  # [B, C]
     eps_sq = float(eps) * float(eps)
-    rel_l2 = torch.sqrt(diff_norm_sq.clamp_min(0.0)) / torch.sqrt(
-        target_norm_sq.clamp_min(eps_sq)
+    rel_l2 = torch.sqrt(diff_norm_sq + eps_sq) / torch.sqrt(
+        target_norm_sq + eps_sq
     )  # [B, C], dimensionless
-    per_channel_mean = rel_l2.mean(dim=0)  # [C]
+    valid = (target_norm_sq > 0).to(dtype=rel_l2.dtype)  # [B, C]
+    valid_count = valid.sum(dim=0).clamp_min(1.0)  # [C]
+    per_channel_mean = (rel_l2 * valid).sum(dim=0) / valid_count  # [C]
     weights = channel_weights.to(device=pred.device, dtype=rel_l2.dtype)
-    weighted = (rel_l2 * weights).sum(dim=-1).mean()
+    weighted = (per_channel_mean * weights).sum()
     return weighted.to(pred.dtype), per_channel_mean.detach().to(pred.dtype)
 
 
