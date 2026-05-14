@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~13:45 UTC)
+- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~15:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
@@ -18,7 +18,7 @@
 - Single-model best: **6.727%** (PR #972) → need −0.88pp
 - Ensemble best (compliant): **6.3263%** (PR #1102 K=8 Caruana) → need **−0.476pp**
 
-Most recent human check-in: 2026-05-14 09:37 UTC — "ok i think we're back on track. how is our training looking?" Status update posted at ~12:35 UTC.
+Most recent human check-in: 2026-05-14 14:17 UTC — **"NO MORE ENSEMBLES! Its the lazy route to better results, we want genuine breakthroughs, not incremental improvements based on ensembling which we know we can deploy at any point to improve results."** (Issue #1056 comment from morganmcg1). Ensemble experiments are BANNED until explicitly unlocked. Status updates posted at ~12:35 UTC and ~15:00 UTC.
 
 ---
 
@@ -80,7 +80,7 @@ All new runs MUST use the corrected dataset path and `--data-root` flag (not `--
 
 ## Current Research Focus and Themes
 
-### Primary: WSS Magnitude Bottleneck Attack (Wave 27)
+### Primary: WSS Magnitude Bottleneck Attack (Wave 28 onwards — single-model only)
 
 **New mechanism finding from PR #1097 close (tanjiro, WSS direction loss NEGATIVE):**
 - WSS **direction is essentially solved** — cos_sim stabilises at 0.996 (~5° angular error) by EP2.
@@ -95,41 +95,64 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 - PR #1103 SLSQP continuous optimisation (CLOSED) — confirmed K=8 within ~0.03 L1 of global continuous optimum; best-case val_WSS improvement = 0.0039pp (0.06% relative); val_SP ≤ 3.577% **infeasible** on this pool (simplex floor ~3.72%, every member ≥ 3.98%)
 
 **Active lever for ensemble gains:**
-1. **Pool extension via new single-model members** (Wave 27 purpose)
-2. **Bias-corrected ensemble** (edward PR #1108, just assigned) — `pred = Σ w_i·pred_i + b_c` per channel, escapes convex hull structural offset
+1. **Pool extension via new single-model members** — only remaining path (ensembles BANNED per human directive)
+
+⚠️ **ENSEMBLES BANNED** — Per morganmcg1 Issue #1056 directive 2026-05-14 14:17Z: no new ensemble experiments until explicitly unlocked. PR #1108 (bias-corrected ensemble) was superseded by PR #1109 (τ_z focal loss) before training started; #1108 is effectively dead.
 
 ---
 
-## Active WIP PRs (Wave 27 launched 2026-05-14 ~12:35Z)
+## Active WIP PRs (as of 2026-05-14 ~15:15Z)
 
 ### Wave 26 continuations (single-model + capacity)
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | EP4 val_abupt=6.511%; tracking baseline ±0.06pp |
-| #1081 | askeladd | Surface loss weight slw=3.0 (full 30-ep relaunch) | W&B `qwi82vym`; EP9 proof vol_p=3.7439% ahead of SOTA |
-| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | EP3 val_abupt=6.768%, ~0.5pp ahead of typical EP3 (W&B `k33hscuc`) |
+| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS res at inference only) | EP8 val_abupt=6.364%; approaching EP10 gate ≤6.5% |
+| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | EP8 val_abupt=6.441%; approaching EP10 gate ≤6.5% (W&B `k33hscuc`) |
 
-### Wave 27 (launched 2026-05-14 ~12:35Z) + edward Wave 27.5
-| PR | Student | Hypothesis | Source |
+### Wave 27 — ALL KILLED (catastrophic failure, launched+killed 2026-05-14)
+All 4 Wave 27 PRs failed at EP3 with val_abupt 27–32% (4× above gate). See Wave 27 Closures below.
+
+### Wave 27.5 — edward τ_z focal loss
+| PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| **#1104** | fern | **WSS magnitude penalty** `λ·|‖τ‖−‖τ_gt‖|` L1 (λ=0.1, 0.3 arms) | From PR #1097 close (direction-loss mech analysis) |
-| **#1105** | tanjiro | **Per-channel rel_l2 loss** on τ axes (auto-emphasise high-shear) | From PR #1097 close (tanjiro's own suggested follow-up) |
-| **#1106** | frieren | **Physical-coordinate normal-frame WSS** (fix #1094 norm-space bug) | From PR #1094 close (frieren's own follow-up #1) |
-| **#1107** | nezuko | **In-plane yaw rotation aug** (15°/45° arms, Sim3-equivariance) | From PR #1096 close (advisor follow-up; yaw-only ≤45°) |
-| **#1108** | edward | **Bias-corrected ensemble** — `pred = Σ w_i·pred_i + b_c` per channel, LOOCV-regularised | From PR #1103 close (edward's own follow-up #2; escapes simplex floor structural offset) |
+| **#1109** | edward | **τ_z focal loss α=2.0** (upweight hard high-shear surface points via focal modulation) | EP3 gate pending |
+
+### Wave 28 — launched 2026-05-14 ~15:00Z
+| PR | Student | Hypothesis | Status |
+|----|---------|------------|--------|
+| **#1110** | askeladd | **OHEM surface top-20% mining** — supplementary loss `L += 0.5 × L_hard_top20pct`; 2-ep warmup | Assigned; training not yet started |
 
 ---
+
+## Wave 27 Closures (2026-05-14 ~13:45Z) — CATASTROPHIC FAILURE
+
+All 4 experiments failed at EP3 with val_abupt 27–32% (4× above EP3 KILL gate of 7.6%). Root causes:
+
+| PR | Student | val_abupt@EP3 | Root Cause |
+|----|---------|---------------|------------|
+| #1104 | fern | ~27% | L1 magnitude penalty `|‖τ‖−‖τ_gt‖|` creates conflicting gradients vs MSE loss; loss scale mismatch blows up training |
+| #1105 | tanjiro | ~30% | Relative L2 `(pred-gt)²/‖gt‖²` numerically explodes when GT~0; near-zero WSS regions produce infinite loss |
+| #1106 | frieren | ~28% | Physical-coordinate normal-frame rotation corrupts geometry signal — coordinate transformation invalidates learned features |
+| #1107 | nezuko | ~32% | Yaw augmentation destroys physical orientation; model cannot learn orientation-dependent aerodynamics |
+
+Common diagnosis: Wave 27 hypotheses all modified the **loss function or input transformation** at a fundamental level without sufficient numerical safeguards. The supplementary-loss OHEM approach (Wave 28) is designed to avoid these failure modes by adding a *supplementary* term (not replacing the base loss) with warmup and floor guards.
+
+## Wave 26 Additional Kill (2026-05-14)
+
+| PR | Student | Result | Key Mechanism Finding |
+|----|---------|--------|----------------------|
+| #1081 | askeladd | KILL @ EP10 (val_abupt=7.97%) | slw=3.0 surface loss weight — too aggressive; distorts vol_p head; baseline slw=2.0 is optimal |
 
 ## Wave 26 Closures (2026-05-13 → 2026-05-14)
 
 | PR | Student | Result | Key Mechanism Finding |
 |----|---------|--------|----------------------|
-| #1094 | frieren | KILL @ EP3 (val_abupt=7.465%) | Normal-frame supervision built in normalised space — non-orthonormal. Follow-up = physical-coordinate (now PR #1106) |
+| #1094 | frieren | KILL @ EP3 (val_abupt=7.465%) | Normal-frame supervision built in normalised space — non-orthonormal |
 | #1095 | nezuko | NEGATIVE (test_WSS=7.761% +1.03pp) | GradNorm mechanism healthy but starved vol head; curriculum is load-bearing |
-| #1096 | edward | NEGATIVE (test_WSS +0.261pp vs ref) | Tangent-frame features redundant with normals; z-hat fallback discontinuity. Follow-up = yaw aug (now PR #1107) |
-| #1097 | tanjiro | NEGATIVE (val_abupt=6.847% > KILL) | Direction NOT the bottleneck (cos_sim=0.996). Follow-up = magnitude penalty (now #1104), rel_l2 (now #1105) |
+| #1096 | edward | NEGATIVE (test_WSS +0.261pp vs ref) | Tangent-frame features redundant with normals; z-hat fallback discontinuity |
+| #1097 | tanjiro | NEGATIVE (val_abupt=6.847% > KILL) | Direction NOT the bottleneck (cos_sim=0.996) |
 | #1099 | fern | CONVERGED (same K=3 as #1064) | WSS-targeted greedy on 4-member pool converges to identical subset |
-| #1102 | fern | **MERGED — new SOTA** | K=8 Caruana extracts ghh0s4ne WSS signal at 12.5% weight, vol_p stays compliant |
+| #1102 | fern | **MERGED — new ensemble SOTA** | K=8 Caruana extracts ghh0s4ne WSS signal at 12.5% weight; NOW BANNED FROM EXTENSION per human directive |
 
 ---
 
@@ -158,18 +181,20 @@ The PR #972 single-model SOTA W&B run `56bcqp3m` was trained with SDF-stratified
 
 ---
 
-## Next-Wave Hypothesis Queue (for Wave 28 once Wave 27 settles)
+## Next-Wave Hypothesis Queue
 
-Ordered by expected WSS impact + low complexity:
+Wave 28 #1 is NOW IN FLIGHT (askeladd PR #1110). Remaining queue ordered by expected WSS impact + low complexity:
 
-1. **OHEM hard-example mining for high-WSS regions** — top-K loss reweighting per training step (H6 from RESEARCH_IDEAS_2026-05-13_WSS.md). Mechanistically distinct from rel_l2 (hard cutoff vs soft 1/||gt|| weight).
-2. **GradNorm + curriculum + freeze-on-transitions** — nezuko's PR #1095 follow-up #1; unify cheap-early-epochs advantage with adaptive task balancing.
-3. **WSS magnitude + direction decomposition heads** — H5 from research_ideas; separate magnitude scalar head + 3-direction L2-normalised head, MSE on log(1+|τ|) + cosine loss on direction.
-4. **SDF-stratified SURFACE sampling** (H4) — analogous to PR #972 vol-side, oversample high-curvature surface regions.
-5. **Multi-scale surface attention** (H6) — second surface encoder at 0.5× token density to capture macro-flow features.
-6. **Test-time SDF stochasticity ensemble** (H7) — 5 stochastic forward passes averaged at inference.
+1. ~~**OHEM hard-example mining for high-WSS regions**~~ — **IN FLIGHT as PR #1110** (askeladd, Wave 28)
+2. **GradNorm + curriculum + freeze-on-transitions** — nezuko's PR #1095 follow-up #1; unify cheap-early-epochs advantage with adaptive task balancing; this time use curriculum-compatible vol schedule.
+3. **WSS magnitude + direction decomposition heads** — separate magnitude scalar head + 3-direction L2-normalised head, MSE on log(1+|τ|) + cosine loss on direction; must NOT replace base MSE loss (Wave 27 lesson: supplement, never replace).
+4. **SDF-stratified SURFACE sampling** — analogous to PR #972 vol-side, oversample high-curvature / high-WSS surface regions; could directly target tau_z at separation points.
+5. **Learnable WSS channel loss weights** — learn `w_x, w_y, w_z` jointly with model (not fixed 1.5/2.0); backprop through weights; targets tau_z systematically.
+6. **Multi-scale surface attention** — second surface encoder at 0.5× token density to capture macro-flow features.
 7. **WSS-loss-aware EMA half-life** — vary `--ema-decay` so EMA captures late-training WSS-specialised weights better.
 8. **Heteroscedastic WSS loss** — model both mean and variance per surface point; downweight high-aleatoric regions.
+
+⚠️ Hypotheses #6-#8 from Wave 27 are **permanently retired** (yaw aug, magnitude penalty, rel_l2, normal-frame rotation all demonstrated catastrophic failure). Do not reassign.
 
 ---
 
@@ -187,6 +212,10 @@ All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments,
 
 - **WSS error is magnitude-dominated** (91–96% of residual, not direction) — pivot away from direction-aware experiments
 - **tau_z (spanwise) still worst axis** (test_tau_z=8.2585% on PR #1102) — primary remaining target
+- **Wave 27 catastrophic lesson**: NEVER replace base MSE loss — always use supplementary/additive formulations; loss scale mismatches and numerical instability (div-by-near-zero) destroy training even at 27–32% val_abupt; Wave 28 OHEM designed as additive supplement with 2-ep warmup to avoid this
+- **Relative L2 loss is unstable** (PR #1105) — near-zero GT WSS regions produce unbounded loss; avoid any loss form with GT in denominator without explicit safeguards
+- **slw=3.0 surface weight too aggressive** (PR #1081 killed) — baseline slw=2.0 is optimal
+- **ENSEMBLES BANNED** (human directive 2026-05-14 14:17Z) — all new work must improve the single-model SOTA
 - **Corrected dataset** (2026-05-11) eliminated artificial ~3× vol_p OOD gap — biggest research-program insight
 - **SDF-stratified vol importance sampling** (PR #972) is single-model SOTA: val_abupt=6.126%, test_WSS=6.727%
 - **Ensemble SOTA** (PR #1102 K=8 Caruana) test_WSS=6.3263% — first compliant ensemble below 6.33%
