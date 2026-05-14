@@ -70,16 +70,26 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 
 Cross-flow shear (tau_y, tau_z) dominates. H1/H2 wind-exposure + curvature features directly target this.
 
-### Val Checkpoint Snapshots (latest ~20:45 UTC, RUNNING values from W&B)
+### Val Checkpoint Snapshots (latest ~22:55 UTC, RUNNING values from W&B)
 
 | Student | PR | Run | EP / step | val_abupt | val_vol_p | val_surf_p | val_wss |
 |---------|-----|-----|----------:|----------:|----------:|-----------:|--------:|
-| dl24-tanjiro | #1117 | TBD | not started | — | — | — | — |
-| dl24-frieren | #1115 | `3rja7gw6` | EP~1 (27k) | 7.480% | 5.983% | 4.753% | 7.970% |
+| dl24-tanjiro | #1117 | `1a08e7b`-pid1951208 | **EP3 PASS** | 6.466% | 4.384% | 4.216% | 7.156% |
+| dl24-frieren | #1115 | `3rja7gw6` | **EP3 PASS** (no student post yet) | 6.505% | 4.422% | 4.233% | 7.180% |
 | dl24-fern    | #1098 | `q4eok915` | 185k (11.2h) | **6.298%** | **3.512%** | 4.113% | 7.200% |
 | dl24-nezuko  | #1101 | `5qumfbrs` | 194k (11.5h) | **6.352%** | **3.489%** | 4.125% | 7.295% |
 
-**Headline:** nezuko and fern both val_vol_p well below SOTA test_vol_p=3.643% (margin 0.13-0.15pp at step 185-194k). Terminal projection ~04-06Z May 15 — if held, **new aggregate SOTA candidates**. Neither is competitive on val_wss yet (Transolver-3 target 5.85%, both ~7.2-7.3% — large WSS gap remains for H1/H2 hypotheses to close on a fresh stack).
+**Headline:** nezuko and fern both val_vol_p well below SOTA test_vol_p=3.643% (margin 0.13-0.15pp at step 185-194k). Terminal projection ~04-06Z May 15 — if held, **new aggregate SOTA candidates**.
+
+### H1 vs H2 EP3 Cross-Flow Comparison (the hypothesis target)
+
+| τ component | baseline (#972 fby84xtu) | frieren H1 EP3 | tanjiro H2 EP3 | H1 delta | H2 delta |
+|---|---:|---:|---:|---:|---:|
+| τ_x | 5.971% | 6.221% | 6.232% | +0.25pp | +0.26pp |
+| τ_y | 7.362% | 7.983% | 7.846% | +0.62pp | +0.48pp |
+| τ_z | 8.747% | 9.669% | 9.654% | +0.92pp | +0.91pp |
+
+**H1 ≈ H2 at EP3** — both features encode geometrically related information (wind-exposure and curvature both target separation/edge regions). All τ components are slightly worse than baseline at EP3, which is expected for added features that need epochs to integrate. The downward slopes (especially τ_z at ~-0.038pp/1k-steps for tanjiro) suggest mid-training improvement. **EP10-EP15 will be the real verdict for both H1/H2** — if they diverge here, that reveals which geometric signal is more useful.
 
 ## Strategic Assessment (~14:30 UTC) — WSS PIVOT
 
