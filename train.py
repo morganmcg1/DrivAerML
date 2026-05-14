@@ -56,6 +56,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    per_channel_relative_l2_loss,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -105,6 +106,8 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    tau_rel_l2_loss: bool = False
+    tau_rel_l2_eps: float = 1e-8
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,10 +324,13 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    tau_rel_l2_loss: bool = False,
+    tau_rel_l2_eps: float = 1e-8,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    extra_metrics: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -332,27 +338,63 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        surface_pred = out["surface_preds"]
+        if tau_rel_l2_loss:
+            # cp (channel 0): masked MSE, weighted by surface_channel_weights[0]
+            cp_weight = (
+                float(surface_channel_weights[0].item())
+                if surface_channel_weights is not None
+                else 1.0
+            )
+            cp_mse = masked_mse(
+                surface_pred[..., 0:1],
+                surface_target[..., 0:1],
+                batch.surface_mask,
+            )
+            # tau channels (1..3): per-axis per-sample rel-L2, weighted per-axis
+            if surface_channel_weights is not None:
+                tau_weights = surface_channel_weights[1:4]
+            else:
+                tau_weights = torch.ones(3, device=device, dtype=surface_pred.dtype)
+            tau_loss_weighted, tau_per_channel = per_channel_relative_l2_loss(
+                surface_pred[..., 1:4],
+                surface_target[..., 1:4],
+                batch.surface_mask,
+                tau_weights,
+                eps=tau_rel_l2_eps,
+            )
+            surface_loss = cp_weight * cp_mse + tau_loss_weighted
+            extra_metrics["cp_mse"] = float(cp_mse.detach().cpu().item())
+            extra_metrics["tau_rel_l2_weighted"] = float(
+                tau_loss_weighted.detach().cpu().item()
+            )
+            tau_pc_cpu = tau_per_channel.detach().cpu().tolist()
+            extra_metrics["tau_x_rel_l2"] = float(tau_pc_cpu[0])
+            extra_metrics["tau_y_rel_l2"] = float(tau_pc_cpu[1])
+            extra_metrics["tau_z_rel_l2"] = float(tau_pc_cpu[2])
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_pred,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(extra_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +894,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.tau_rel_l2_loss:
+                print(
+                    "Tau loss: per-axis per-sample relative-L2 "
+                    f"(eps={config.tau_rel_l2_eps:.1e}); cp keeps MSE"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +930,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/tau_rel_l2_loss"] = bool(config.tau_rel_l2_loss)
+            wandb.summary["loss/tau_rel_l2_eps"] = float(config.tau_rel_l2_eps)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1021,6 +1070,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    surface_weights_for_loss = (
+                        surface_channel_weights
+                        if (use_channel_weights or config.tau_rel_l2_loss)
+                        else None
+                    )
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1029,7 +1083,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         config.amp_mode,
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
-                        surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        surface_channel_weights=surface_weights_for_loss,
+                        tau_rel_l2_loss=config.tau_rel_l2_loss,
+                        tau_rel_l2_eps=config.tau_rel_l2_eps,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1126,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for tau_key in (
+                        "cp_mse",
+                        "tau_rel_l2_weighted",
+                        "tau_x_rel_l2",
+                        "tau_y_rel_l2",
+                        "tau_z_rel_l2",
+                    ):
+                        if tau_key in batch_loss_metrics:
+                            train_log[f"train/{tau_key}"] = batch_loss_metrics[tau_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

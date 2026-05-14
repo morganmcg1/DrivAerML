@@ -887,6 +887,42 @@ def squared_relative_l2_loss(
     return pred.sum() * 0.0
 
 
+def per_channel_relative_l2_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    channel_weights: torch.Tensor,
+    eps: float = 1e-8,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Per-channel per-sample relative-L2 norm, weighted across channels.
+
+    For each channel ``c`` and sample ``b``:
+        rel_l2_{b,c} = sqrt(sum_n mask_{b,n} (pred_{b,n,c} - target_{b,n,c})^2)
+                      / sqrt(sum_n mask_{b,n} target_{b,n,c}^2 + eps^2)
+
+    Returns ``(weighted_loss, per_channel_loss)`` where ``weighted_loss`` is the
+    scalar ``mean_b(sum_c channel_weights[c] * rel_l2_{b,c})`` and
+    ``per_channel_loss`` is the unweighted per-channel mean ``mean_b(rel_l2_{b,c})``
+    for logging.
+    """
+    if pred.numel() == 0:
+        zero = pred.sum() * 0.0
+        return zero, zero.new_zeros(pred.shape[-1])
+    mask_float = mask.to(device=pred.device, dtype=torch.float32).unsqueeze(-1)
+    diff_sq = (pred.float() - target.float()).square() * mask_float  # [B, N, C]
+    target_sq = target.float().square() * mask_float  # [B, N, C]
+    diff_norm_sq = diff_sq.sum(dim=1)  # [B, C]
+    target_norm_sq = target_sq.sum(dim=1)  # [B, C]
+    eps_sq = float(eps) * float(eps)
+    rel_l2 = torch.sqrt(diff_norm_sq.clamp_min(0.0)) / torch.sqrt(
+        target_norm_sq.clamp_min(eps_sq)
+    )  # [B, C], dimensionless
+    per_channel_mean = rel_l2.mean(dim=0)  # [C]
+    weights = channel_weights.to(device=pred.device, dtype=rel_l2.dtype)
+    weighted = (rel_l2 * weights).sum(dim=-1).mean()
+    return weighted.to(pred.dtype), per_channel_mean.detach().to(pred.dtype)
+
+
 EVAL_KEYS = (
     "surface_pressure",
     "wall_shear",
