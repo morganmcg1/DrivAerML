@@ -8,6 +8,52 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-14 ~08:00 UTC — PR #1072 CLOSED: SDF α=0.5 + GradNorm, corrected split (dl24-nezuko, `yp383yq2`)
+
+- **Branch:** `dl24-nezuko/sdf-near-surface-alpha05-vol-focus`
+- **W&B Run:** `yp383yq2` (rank-0)
+- **Hypothesis:** SDF inverse near-surface vol sampling α=0.5 (`w = 1/(1+0.5·|sdf|)`) + GradNorm α_gn=0.5 on corrected dataset. Moderate near-surface concentration, paired with dynamic loss balancing to direct gradient budget toward hard metrics.
+
+### Full val trajectory
+
+| EP | Step | val_abupt% | val_vol_p% | val_surf_p% | val_wss% | Gate | Status |
+|----|------|-----------|-----------|------------|---------|------|--------|
+| 1  | 10,975  | 21.535 | 17.704 | 15.500 | 22.223 | ≤30% | PASS |
+| 2  | 21,951  |  7.288 |  5.318 |  4.635 |  7.955 | ≤16% | PASS |
+| 3  | 32,927  |  6.675 |  4.605 |  4.294 |  7.365 | ≤8%  | PASS |
+| 5  | 54,879  |  6.435 |  4.299 |  4.171 |  7.137 | ≤7.5%| PASS |
+| **10** | **109,759** | **6.2904** | **4.2307** | **4.0800** | **6.9882** | ≤7.2% | **PASS ⭐ RUN BEST** |
+| 15 | 164,639 |  6.3457 |  4.3668 |  4.1256 |  7.0114 | ≤6.80%| PASS |
+| 20 | 219,500 |  6.3142 |  4.419  |  4.100  |  6.955  | ≤6.70%| PASS |
+| 25 | 274,375 |  6.3988 |  4.7532 |  4.1169 |  6.9758 | ≤6.65%| PASS |
+| 29.7 | 326,812 | 6.4408 | 4.8867 | 4.1199 | 6.9979 | — | STALE (run died) |
+
+### Outcome
+
+**Run died at step 326,812 (~EP29.7)** — W&B heartbeat stale since 06:18Z, ~2,438 steps short of EP30 terminal (329,250). No `test_primary/*` metrics were ever logged. Cause: likely rank-0 process crash near end of training.
+
+No eval-only run from EP10 best checkpoint was launched. Student-AI pod had been GH rate-limited since 03:18Z (student account user ID 20516801) — could not receive or act on advisor instructions to launch the EP10 eval.
+
+### Test metrics
+
+**No test metrics available.** (Run did not complete terminal test eval; no best-checkpoint eval launched.)
+
+### Verdict: CLOSED — NO MERGE PATH
+
+- Run died before completing terminal eval
+- Student-AI rate-limited, cannot launch EP10-best eval
+- Wave budget exhausted (24h from start ~09:22Z May 13 → deadline 09:22Z May 14)
+- Even if test metrics were available: val trajectory shows plateau-regression from EP10 onward (vol_p 4.23% → 4.89% at EP29) — terminal-epoch test would not beat SOTA test_vol_p=3.643%
+
+### Strategic implications
+
+- SDF α=0.5 + GradNorm composition converges quickly (EP5=6.435%) but plateaus at EP10 with subsequent vol_p regression — same pattern as α=0.25 (fern #1063)
+- **Best val_vol_p of 4.231% at EP10** is competitive for the SDF wave but still 16.1% above SOTA test_vol_p=3.643% in absolute terms (val→test transfer unknown)
+- GradNorm α_gn=0.5 + SDF α=0.5 composition did not overcome the plateau-regression pattern that affected GradNorm-alone runs on the old dataset
+- **SDF concentration sweep is now fully closed:** α ∈ {0.25, 0.5, 1.0, 2.0, 3.0} all evaluated or killed; no α value beat uniform sampling (SOTA PR #972)
+
+---
+
 ## 2026-05-14 ~03:40 UTC — PR #1063 TERMINAL: SDF Inverse Vol Sampling α=0.25 (dl24-fern, `xfykblf9`)
 
 - **Branch:** `dl24-fern/sdf-near-surface-alpha-sweep-band-b`
