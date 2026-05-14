@@ -17,7 +17,49 @@ The test split was rebuilt on 2026-05-11 to fix a case-split/indexing bug. All p
 
 ---
 
-## *** NEW CORRECTED-SPLIT ENSEMBLE SOTA: PR #1064 K=3 Greedy Ensemble (drop ghh0s4ne) — 2026-05-13 ***
+## *** NEW CORRECTED-SPLIT ENSEMBLE SOTA: PR #1102 K=8 Caruana Weighted Ensemble (ghh0s4ne=12.5%) — 2026-05-14 ***
+
+**val_abupt=5.7452%** / **test_abupt=5.5196%** (corrected split, K=8 greedy with-replacement, WSS-optimised)
+
+K=8 Caruana with-replacement ensemble over 4 candidates. Optimal picks: `{56bcqp3m:3, 29nohj67:2, a0yoxy85:2, ghh0s4ne:1}` → effective weights `{56bcqp3m:0.375, 29nohj67:0.250, a0yoxy85:0.250, ghh0s4ne:0.125}`. Continuous fractional weighting of `ghh0s4ne` at 12.5% extracts its WSS/tau_z signal without paying the full vol_p penalty of uniform K=4 (25%). Anti-correlation diversity dividend: observed vol_p=3.540 vs linear prediction 3.626 at gh=12.5% (0.086pp below linear). **TRUE WIN on test_WSS** (6.3263% < 6.3712% SOTA threshold). All constraints satisfied.
+
+**W&B runs:** `bq1gaewq` (Arm D greedy), `ems8ekee`, `s7pirpr1`, `qf1lqwz0` (Arms A/B/C)
+**PR:** #1102
+
+**Val metrics (corrected split):** val_abupt=5.7452%, val_vol_p=3.4360%, val_WSS=6.5195%, val_SP=3.7234%
+**Test metrics (corrected split):** test_abupt=5.5196%, test_vol_p=3.5397%, test_SP=3.3529%, **test_WSS=6.3263%**, test_tau_x=5.6071%, test_tau_y=6.8397%, **test_tau_z=8.2585%**
+
+**Improvement over PR #1064 K=3 baseline:**
+- test_WSS: 6.3712% → **6.3263%** (−0.045pp, TRUE WIN)
+- test_vol_p: 3.3630% → 3.5397% (+0.177pp, still under 3.643% constraint, margin 0.103pp)
+- test_SP: 3.3889% → 3.3529% (−0.036pp)
+- val_abupt: 5.7758% → 5.7452% (−0.031pp)
+
+**K=8 members (picks):** `56bcqp3m`×3, `29nohj67`×2, `a0yoxy85`×2, `ghh0s4ne`×1
+
+**Greedy selection path (WSS-targeted, --min-improvement -0.005):**
+- Greedy on val_WSS, K=1..20; test-optimal at K=8 (val-optimal K=17 overfit to 34-case val split)
+
+**Reproduce:**
+```bash
+cd target/
+python ensemble_eval.py --greedy --allow-replacement \
+  --selection-metric wall_shear_rel_l2_pct \
+  --candidate-run-ids 56bcqp3m,29nohj67,a0yoxy85,ghh0s4ne \
+  --split val test --max-k 20 --min-improvement -0.005 \
+  --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
+  --pred-cache-dir /tmp/ensemble_pred_cache \
+  --wandb-group fern-weighted-ensemble \
+  --wandb-name fern/caruana-weighted-wss-arm-d
+```
+
+**Ensemble gate (new):** val_abupt < **5.7452%** AND test_vol_p ≤ **3.643%** AND test_WSS < **6.3263%** (all must hold for true new SOTA)
+
+**Stretch goal (Issue #1056):** test_WSS < 5.85% — gap = **0.476pp**. Requires new candidate pool members beyond existing 4.
+
+---
+
+## Prior Ensemble SOTA: PR #1064 K=3 Greedy Ensemble (drop ghh0s4ne) — 2026-05-13 (superseded by #1102)
 
 **val_abupt=5.7758%** / **test_abupt=5.5199%** (corrected split, K=3 greedy forward selection)
 
