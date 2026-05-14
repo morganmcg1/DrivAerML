@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import SURFACE_X_DIM, DrivAerMLSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -138,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_surface_curvature: bool = False
     debug: bool = False
 
 
@@ -295,7 +296,9 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    surface_input_dim = SURFACE_X_DIM + (2 if config.use_surface_curvature else 0)
     return SurfaceTransolver(
+        surface_input_dim=surface_input_dim,
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
@@ -683,6 +686,7 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        use_surface_curvature=getattr(old_ds, "use_surface_curvature", False),
     )
     train_sampler = None
     train_shuffle = True

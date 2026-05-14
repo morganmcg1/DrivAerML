@@ -275,6 +275,7 @@ def load_case(
     *,
     surface_rows: np.ndarray | None = None,
     volume_rows: np.ndarray | None = None,
+    use_surface_curvature: bool = False,
 ) -> DrivAerMLCase:
     case_dir = _case_dir(Path(root), case_id)
     xyz = _load_npy_rows(case_dir / "surface_xyz.npy", surface_rows)
@@ -286,6 +287,22 @@ def load_case(
         "surface_wallshearstress.npy",
     )
     surface_x = np.concatenate([xyz, normals, area], axis=1)
+    if use_surface_curvature:
+        # H and K span ~6 orders of magnitude with heavy tails (K up to ±10M).
+        # Compute per-case stats on the FULL array (so sampled views see the same
+        # normalisation), then row-index after normalising.
+        full_curv = np.load(
+            _resolve_artifact_path(case_dir / "curvature_HK_v2.npy"), mmap_mode="r"
+        )
+        full_curv = np.asarray(full_curv, dtype=np.float32).copy()
+        for ch in range(full_curv.shape[1]):
+            lo, hi = np.percentile(full_curv[:, ch], [1, 99])
+            np.clip(full_curv[:, ch], lo, hi, out=full_curv[:, ch])
+            mu = full_curv[:, ch].mean()
+            sigma = full_curv[:, ch].std() + 1e-8
+            full_curv[:, ch] = (full_curv[:, ch] - mu) / sigma
+        curv = full_curv if surface_rows is None else full_curv[surface_rows]
+        surface_x = np.concatenate([surface_x, curv], axis=1)
     surface_y = np.concatenate([cp, wall_shear], axis=1)
     volume_x = np.concatenate(
         [
@@ -338,8 +355,15 @@ class DrivAerMLCaseStore:
         *,
         surface_rows: np.ndarray | None = None,
         volume_rows: np.ndarray | None = None,
+        use_surface_curvature: bool = False,
     ) -> DrivAerMLCase:
-        return load_case(self.root, case_id, surface_rows=surface_rows, volume_rows=volume_rows)
+        return load_case(
+            self.root,
+            case_id,
+            surface_rows=surface_rows,
+            volume_rows=volume_rows,
+            use_surface_curvature=use_surface_curvature,
+        )
 
     def case_point_counts(self, case_id: str) -> dict[str, int]:
         cached = self._point_count_cache.get(case_id)
@@ -367,6 +391,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        use_surface_curvature: bool = False,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +401,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.use_surface_curvature = use_surface_curvature
+        self.surface_input_dim = SURFACE_X_DIM + (2 if use_surface_curvature else 0)
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -444,6 +471,7 @@ class DrivAerMLSurfaceDataset(Dataset):
             view.case_id,
             surface_rows=None if surface_idx is None else surface_idx.numpy(),
             volume_rows=None if volume_idx is None else volume_idx.numpy(),
+            use_surface_curvature=self.use_surface_curvature,
         )
         metadata = dict(case.metadata)
         metadata["n_surface_full"] = int(counts["n_surface"])
@@ -473,7 +501,8 @@ def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
     max_surface_n = max(sample.surface_x.shape[0] for sample in samples)
     max_volume_n = max(sample.volume_x.shape[0] for sample in samples)
     batch_size = len(samples)
-    surface_x = torch.zeros(batch_size, max_surface_n, SURFACE_X_DIM, dtype=samples[0].surface_x.dtype)
+    surface_x_dim = samples[0].surface_x.shape[1]
+    surface_x = torch.zeros(batch_size, max_surface_n, surface_x_dim, dtype=samples[0].surface_x.dtype)
     surface_y = torch.zeros(batch_size, max_surface_n, SURFACE_Y_DIM, dtype=samples[0].surface_y.dtype)
     surface_mask = torch.zeros(batch_size, max_surface_n, dtype=torch.bool)
     volume_x = torch.zeros(batch_size, max_volume_n, VOLUME_X_DIM, dtype=samples[0].volume_x.dtype)
@@ -544,6 +573,7 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    use_surface_curvature: bool = False,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +598,7 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        use_surface_curvature=use_surface_curvature,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(
@@ -576,6 +607,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            use_surface_curvature=use_surface_curvature,
         )
     }
     test_splits = {
@@ -585,6 +617,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            use_surface_curvature=use_surface_curvature,
         )
     }
     stats = target_stats_from_normalizers(store)
