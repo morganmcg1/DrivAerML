@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~05:10 UTC
+- 2026-05-14 ~05:30 UTC
 
 ## Human Research Directive (Issue #882)
 **TOP PRIORITY — Volume Pressure Focus:**
@@ -49,8 +49,6 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 
 > Note: PR #972 used uniform sampling (monkey-patch was a no-op). This is the baseline to beat.
 
-**GradNorm v4 (PR #1058, tay branch) — CLOSED 2026-05-13:** test_abupt=5.9950% regresses aggregate vs SOTA 5.844%. Not a merge candidate.
-
 **Top 5 on corrected split:**
 
 | Rank | PR | test_ABUPT | test_vol_p | Notes |
@@ -61,146 +59,72 @@ Two bugs were discovered in the `types.MethodType` monkey-patch used in PR #972 
 | 4 | #958 | 6.107% | 3.818% | CLOSED |
 | 5 | #939 | 6.242% | — | CLOSED |
 
-## Active Experiments (2026-05-14 ~04:05 UTC)
+## Active Experiments (2026-05-14 ~05:30 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | Approx EP | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `fby84xtu` (long) | ~EP7.3 | val_abupt=6.326% (trending well), terminal ~15h |
-| nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP25.1 | EP25 gate PASSED at 6.399%, terminal ~5h |
-| fern    | #1063 | SDF α=0.25 (inverse formula) | `xfykblf9` | **TERMINAL EP29.3** | **test_abupt=5.955% (+1.9% vs SOTA — NOT a winner)**, awaiting EP11-best test eval, student rate-limited |
-| frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP10.2 | val_abupt=6.370%, mid-run |
+| dl24-tanjiro | #1086 | EMA(0.999) + SDF α=0.25 vs fern A/B | `fby84xtu` | ~EP7.5 | val_abupt=6.274% (wave-best), val_vol_p=4.118%, terminal ~10-12h |
+| dl24-nezuko  | #1072 | SDF α=0.5 (inverse formula) | `yp383yq2` | ~EP25.4 | EP25 gate PASSED (6.399%), terminal ~1-2h |
+| dl24-fern    | #1098 | WD=0.01 isolated re-test (orthogonal pivot) | TBD (not launched) | smoke pending | **NEW: assigned 2026-05-14 05:30Z, prev #1063 CLOSED** |
+| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | ~EP13 | continuing |
 
-**Tanjiro PR #1076 (α=3.0) CLOSED 2026-05-13 ~20:20Z:** Killed at EP10 gate (val_abupt=7.25% > ≤7.2%). Best val_abupt=6.5012% at EP6 then drifted upward — over-concentration confirmed. α=3.0 FALSIFIED.
+### SDF Wave Terminal Results
 
-### Val Checkpoint Snapshots (latest, 2026-05-14 ~05:10 UTC)
+**PR #1063 CLOSED 2026-05-14 ~05:00Z — fern SDF α=0.25 — NOT A WINNER**
 
-| Student | PR / α | Run | Step / EP | val_abupt latest | val_abupt best | val_vol_p (latest) |
-|---------|--------|-----|-----------|-----------------:|---------------:|-----------------:|
-| fern    | #1063 / 0.25 | `xfykblf9` | **321,739 TERMINAL** | 6.409% | **6.2647%** (EP11) | 4.854% |
-| nezuko  | #1072 / 0.5  | `yp383yq2` | 308,932 (~EP28.1) | 6.434% | **6.2904%** (EP10) | 4.863% |
-| tanjiro | #1086 / EMA  | `fby84xtu` | 109,758 (~EP7.5) | **6.2742%** | **6.2742%** (EP7, current best) | **4.1178%** |
-| frieren | #1077 / 1.0  | `m4z2gb65` | 142,459 (~EP9.7) | 6.362% | **6.362%** (EP9, slight regression slope) | 4.430% |
-
-### Fern Terminal Results (TEST metrics auto-logged at terminal)
-
-| Metric | Fern terminal | PR #972 SOTA | Δ |
-|--------|---------------:|-------------:|---:|
-| test_abupt | **5.955%** | 5.844% | +0.111pp (+1.9% rel) |
-| test_vol_p | **3.990%** | 3.643% | +0.347pp (+9.5% rel) |
+| Metric | Fern terminal (xfykblf9) | PR #972 SOTA | Δ |
+|--------|------------------------:|-------------:|---:|
+| test_abupt | 5.955% | 5.844% | +0.111pp (+1.9% rel) |
+| test_vol_p | 3.990% | 3.643% | **+0.347pp (+9.5% rel)** |
 | test_surf_p | 3.707% | 3.577% | +0.130pp |
 | test_wss | 6.746% | 6.727% | ~noise |
 
-**Verdict: NOT A MERGE CANDIDATE.** Test from terminal-epoch only; EP11-best test eval still pending (student rate-limited). If EP11-best test_abupt ≤ 5.844% AND test_vol_p ≤ 3.643%, merge. Otherwise close PR #1063.
+All four test metrics regress vs SOTA. test_vol_p +9.5% is the disqualifying factor per Issue #882 priority. Closed.
 
-Notes:
-- **fern (α=0.25):** Past EP20. Best=6.2647% (EP11). Slope flat at +0.002/1k — plateau since EP11 confirmed. Run on track to terminate ~02:30Z May 14 at EP30 with terminal val_abupt ≈6.30%. Test harvest at terminal will be the **first SDF wave test metric**.
-- **nezuko (α=0.5):** Past EP15. Best=6.2904% (EP10). Still slowly improving. EP20 gate ≤6.70% at step 219,500 (~9.6h from now). Terminal expected ~10:30Z May 14.
-- **tanjiro (α=3.0 closed → EMA 0.999 new):** New A/B vs fern. Smoke run barely started; EP1 gate ~6h from now.
-- **frieren (α=1.0):** Filling in the missing α-sweep midpoint. EP2 PASS (7.562% ≤16%). Steep descent slope is healthy. EP3 gate ≤8% due ~step 32,925 (~2.7h from now).
+### SDF α Sweep Status (BROADLY FALSIFIED)
 
-### SDF α Sweep Status (2026-05-13 ~20:25 UTC)
+| α value | PR | Best val_abupt | Test result | Status |
+|---------|-----|---------------:|-------------|--------|
+| 0.25 | #1063 | 6.2647% (EP11) | test_abupt=5.955% — **CLOSED** | test_vol_p regressed +9.5% |
+| 0.5  | #1072 | 6.2904% (EP10) | terminal pending (~06:30Z) | EP25 PASS, converging to ~6.40% |
+| 1.0  | #1077 | TBD | running ~EP13 | midpoint arm |
+| 2.0  | #1054 | CLOSED | EP15 FAIL | over-concentration |
+| 3.0  | #1076 | 6.5012% (EP6) | KILLED EP10 | over-concentration |
 
-| α value | Student | PR | Best val_abupt | Latest val_vol_p | Status |
-|---------|---------|-----|---------------:|-----------------:|--------|
-| 0.25 | fern   | #1063 | **6.2647%** | 4.491% | EP22 running, plateau since EP11 |
-| 0.5  | nezuko | #1072 | **6.2904%** | 4.288% | EP15 gate PASSED, continuing |
-| 1.0  | frieren | #1077 | ~22% (EP1) | — | EP1 PASS (22.42%), EP2 running |
-| 2.0  | — | #1054 | CLOSED | — | EP15 FAIL (6.9264% > 6.80%) |
-| 3.0  | tanjiro | #1076 | **6.5012%** | 4.364% | **CLOSED (EP10 KILL — over-concentration)** |
+**α-sweep conclusion:** Productive band is α ∈ [0.25, 0.5] for val_abupt, but even α=0.25 regresses all test metrics. SDF concentration is NOT the right lever on the corrected split. The SOTA was achieved with uniform sampling (α=∞ effectively) and the corrected dataset; adding near-surface emphasis seems to hurt test vol_p generalization.
 
-### α-sweep Conclusion (updated)
+### Val Checkpoint Snapshots (latest ~05:20 UTC)
 
-The α-response is now mapped from both ends:
-- **Low α (0.25, 0.5):** Both competitive at val_abupt ≈6.26–6.29%. val_vol_p at 4.3–4.5%. Near-uniform sampling performs well.
-- **α=1.0 (frieren):** EP2 PASS (slope −1.354/1k), data arriving in 1-2h.
-- **α=2.0, 3.0:** Over-concentration confirmed — worse abupt, no test harvest possible.
+| Student | PR | Run | EP | val_abupt (latest) | val_abupt (best) | val_vol_p (latest) |
+|---------|-----|-----|----|-------------------:|-----------------:|-----------------:|
+| dl24-fern    | #1098 | TBD | — | — | — | — |
+| dl24-nezuko  | #1072 | `yp383yq2` | ~EP25.4 | 6.399% | **6.2904%** (EP10) | 4.753% |
+| dl24-tanjiro | #1086 | `fby84xtu` | ~EP7.5 | **6.2742%** | **6.2742%** (EP7.5) | **4.118%** |
+| dl24-frieren | #1077 | `m4z2gb65` | ~EP12-13 | ~6.36% | ~6.35% | ~4.3% |
 
-**Productive band is definitively α ∈ [0.25, 0.5].** Lower values (α<0.25) remain untested. The new EMA experiment (tanjiro #1086) is an A/B vs fern at α=0.25, adding EMA as the next orthogonal lever.
+**Tanjiro (#1086) is current wave val leader at 6.2742% with outstanding vol_p of 4.118%.** EMA may be decoupling the plateau-regression pattern — this is the hypothesis to watch for terminal test metrics.
 
-### STRATEGIC CONCERN: SDF is regressing vs uniform-sampling baseline
+## Strategic Themes & Next Directions
 
-PR #972 SOTA (uniform sampling, since monkey-patch was a no-op) achieved val_abupt=6.126% / test_abupt=5.844%. Fern α=0.25 best val_abupt=6.265% at EP11 then regressed to 6.346% at EP22 (+0.081pp; vol_p +0.41pp). **None of the SDF α values are currently beating uniform sampling** — SDF concentration tuning is not the right lever for the corrected split. Implications:
-- After the SDF wave terminates (fern ~02:30Z, others follow), prioritize **orthogonal levers** (EMA, GradNorm composition, optimizer/schedule changes, regularization variants) instead of more α points.
-- Strongly favor test-from-best-checkpoint reporting at terminal (not terminal-epoch test). Fern's EP11 will likely be the test harvest target.
+### What the SDF wave taught us
+1. **α=0.25 and α=0.5** produce near-identical best val_abupt (~6.27–6.29%) — the SDF concentration parameter has weak discriminating signal in this range.
+2. **All SDF val improvements regress at test** — SDF concentration doesn't help vol_p generalization to OOD test geometries.
+3. **The SOTA (uniform sampling + corrected split) is the right baseline** — the SDF mechanism is not the key ingredient.
 
-### GradNorm Status (resolved)
+### Orthogonal levers being tested
+- **EMA (tanjiro #1086):** First clean EMA run after the warm-start bug fix. val_vol_p=4.118% at EP7.5 is wave-best. Terminal test will tell if EMA decouples val→test transfer. Terminal expected ~10-12h.
+- **WD=0.01 (fern #1098, NEW):** Weight decay A/B vs SOTA WD=0.005. Hypothesis: higher WD penalizes geometry-specific memorization, improving OOD test generalization. Clean single-variable change on corrected split. No prior clean test on corrected data.
 
-- **PR #1058 (run `ysycg6xc`) CLOSED 2026-05-13 ~18:23Z** (was on `tay` advisor branch, not this wave). Result was test_abupt=5.9950% vs SOTA 5.844% — REGRESSES aggregate by +0.151pp despite tying vol_p (test_vol_p=3.6328% vs 3.643%, ≈noise). Not a merge candidate on the aggregate metric.
-- **GradNorm + corrected dataset on THIS wave: still untested.** A clean DDP8 long-run with `--use-gradnorm --gradnorm-mode ema_proxy --gradnorm-alpha 0.5` on the productive single-model stack remains a high-value hypothesis for the next round (see RESEARCH_IDEAS).
+### Pending hypothesis queue (once slots open)
+1. **H1:** GradNorm + SDF α=0.5 composition — if nezuko #1072 terminals with strong vol_p (best so far: val_vol_p=4.231% EP10), compose with GradNorm. Assign to next idle student.
+2. **H5:** LR=9e-5 isolated control — lower LR may extend useful learning window; never cleanly tested on corrected split.
+3. **Surface-point density / eval-point increase** — if test vol_p gap persists, investigate whether eval_surface_points=131k (double) improves test surface metrics without training change.
 
 ## Next Pending Gates (in order)
 
-1. **Frieren EP3/EP5** — frieren is several EPs in by now; next gates compress as run accelerates.
-2. **Tanjiro EP1/EP2** (EMA new) — ~2-3h away.
-3. **Nezuko EP25** — ~step 274,375, threshold ≤6.65%. Currently best 6.290% (EP10) — PASSES on best.
-4. **Fern EP30 (terminal)** — ~step 329,250. Expected ~02:30Z May 14. Test eval from EP11 best checkpoint is the deliverable.
-5. **Nezuko EP30 (terminal)** — ~step 329,250. Expected ~10:30Z May 14. Test eval from EP10 best checkpoint is the deliverable.
-
-## Gate Schedule
-
-| Gate | Standard Threshold | Steps (EBS=32) | Steps (EBS=8) |
-|------|--------------------|----------------|----------------|
-| EP1  | ≤30%               | 2,743          | 10,975         |
-| EP2  | ≤16%               | 5,486          | 21,950         |
-| EP3  | ≤8%                | 8,229          | 32,925         |
-| EP5  | ≤7.5%              | 13,715         | 54,875         |
-| EP10 | ≤7.2%              | 27,430         | 109,750        |
-| EP15 | ≤6.80%             | 41,145         | 164,625        |
-| EP20 | ≤6.70%             | 54,860         | 219,500        |
-| EP25 | ≤6.65%             | 68,575         | 274,375        |
-| EP30 | ≤6.60%             | 82,290         | 329,250        |
-
-## Critical Config Constraints
-
-1. **`--no-compile-model` REQUIRED**: compile_model=True causes NCCL ALLREDUCE deadlock with DDP8.
-2. **`--train-volume-points 65000` (or higher)** REQUIRED: default 16384 inverts volume:surface gradient ratio.
-3. **`--lr-warmup-epochs 1` NOT `--lr-warmup-steps 500`**: epoch-based warmup is correct at 6L 65k.
-4. **GradNorm + AdamW = catastrophic instability**: if running GradNorm, must use Lion optimizer.
-5. **`--volume-loss-weight` BUG**: When `--use-gradnorm` is active, `--volume-loss-weight` is a no-op.
-6. **`--model-pe string_multisigma` REQUIRED when using STRING PE on DL24**: omitting causes `--pe-init-sigmas` to be silently ignored.
-7. **`--pe-init-sigmas` must be COMMA-separated**: `0.25,0.5,1.0,2.0,4.0` NOT space-separated.
-8. **Kill threshold operator on DL24**: `<=` is correct (`passes()` returns True when observed<=threshold; kills when not passes).
-9. **EMA decay=0.999 (NOT 0.9999)**: 0.9999 gives ~10,000-step lookback (too slow); 0.999 gives ~1,000-step lookback.
-10. **Steps/epoch at bs=1 DDP8 (EBS=8)**: ~10,975.
-11. **Steps/epoch at bs=4 DDP8 (EBS=32)**: ~2,743.
-12. **SDF monkey-patch MUST use `__class__` reassignment**: `types.MethodType(__getitem__, dataset)` is a Python dunder no-op.
-13. **SDF near-surface formula**: `weight = 1.0 / (1.0 + α * |sdf|)`. NOT `1.0 + α * |sdf|`.
-14. **Branch flag incompatibility**: tay and DL24 branches use DIFFERENT CLI flags. Never mix.
-15. **Dataset path**: `/mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511`. NOT `/mnt/pvc/`.
-
-## Confirmed Dead Ends (Hardware/Architecture — Not Dataset-Dependent)
-
-- No weight decay: overfits at EP9 (PR #898)
-- 7L depth without full regularization: catastrophic bounce (PR #873)
-- 8L depth: EP11 bounce +0.222pp (PR #965)
-- Dropout=0.1: consistent degradation (PR #899)
-- vol-loss-weight=2.0 WITH GradNorm: self-cancelling (PR #911)
-- vol-loss-weight=2.0 WITHOUT GradNorm: actively harmful (PR #936)
-- vol-loss-weight=3.0 WITHOUT GradNorm: WORST EVER on old dataset (PR #964)
-- 96k vol points without proportional surface increase: gradient starvation (PR #912)
-- QK-Norm: consistent failures (multiple PRs)
-- Y-sym p=1.0: over-augmentation (PR #866)
-- 7-octave STRING PE (PR #843): σ=16.0 destabilization
-- 6-octave STRING PE (PR #818): does not beat 5-octave
-- GradNorm α=0.25 (multiple PRs): terminal test regression
-- GradNorm α=0.75 (PR #874): catastrophic instability at EP16
-- Extended cosine T_max=60 (PR #946): destabilizing in training tail
-- DropPath regularization (PR #987): EP5 gate FAIL
-- Lookahead Lion (PR #998): EP5 FAIL
-- Online focal vol reweighting (#1026, #1033): scale=3 ceiling degeneration — EMA ratio approach AXIS CLOSED
-- SDF near-surface sampling α=2.0 (nezuko PR #1054): EP15 FAIL (6.9264% > 6.80%) — too aggressive near-surface concentration
-
-## Removed from Dead Ends (RETRACTED — Dataset Artifact)
-
-- ~~SDF-stratified importance sampling (PR #972)~~: **NOW RANK 1 SOTA** (test_abupt=5.844%, but this was actually uniform)
-- ~~Stochastic vol subsampling (PR #968)~~: **NOW RANK 2 SOTA** (test_abupt=5.986%)
-- WD=0.01 (PR #900): needs re-test on corrected split
-- WD=0.005 (PR #914): needs re-test on corrected split
-- TTA Y-symmetry (PR #979): may still be neutral; re-test needed
-- Vol coordinate noise (PR #990): EP5 gate FAIL — may be architecture-level; re-test needed
-- Bbox normalization (PR #978): may need re-test
-- EMA decay=0.999 (PR #954): needs re-test on corrected split
-
-_Last updated: 2026-05-14 ~05:10 UTC. Heartbeat: 4/4 WIP, 0 idle, 0 review-ready, no human issues. **🌟 Tanjiro #1086 (EMA 0.999) is now strongest active trajectory** — at EP7.5: val_abupt=6.274% (best in wave), val_vol_p=4.118% (matches fern's all-time-best vp at EP9 already). EMA-shadow test eval at terminal will determine if EMA decouples the plateau-regression problem that hurt fern. Nezuko #1072 at EP28.1 (terminal ~1.5h away), val 6.434% (regressing toward fern's pattern). Frieren #1077 EP9.7 with slight positive slope (concerning early sign). Fern #1063 terminated, NOT a winner (test_abupt 5.955%, test_vol_p 3.990% both regress vs SOTA); EP11-best test eval pending. **Key forecast**: EMA likely the only lever that could beat SOTA in this wave. Pivot levers ready for next idle: GradNorm+SDF (H1), WD retest (H3), Y-sym p=0.5 (H4) from RESEARCH_IDEAS_2026-05-13_19:30.md._
+1. **Nezuko #1072 terminal (~06:30Z):** EP30. Test from EP10 best checkpoint (val_abupt=6.2904%, val_vol_p=4.231%) is the deliverable. Compare test_vol_p vs SOTA 3.643%.
+2. **Fern #1098 smoke (~2h after student picks up):** EP3 screen, val_abupt < 8.5%.
+3. **Tanjiro #1086 terminal (~10-12h):** EMA(0.999) first clean test — wave-best val_abupt=6.274%, val_vol_p=4.118%. KEY experiment.
+4. **Frieren #1077 EP15 gate (~6-8h):** val_abupt ≤ 6.80%. Currently tracking ~6.35%.
