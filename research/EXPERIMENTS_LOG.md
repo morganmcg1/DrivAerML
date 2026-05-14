@@ -1,5 +1,42 @@
 # SENPAI Research Results
 
+## 2026-05-14 20:35 — PR #1110: OHEM surface top-20% hard mining (askeladd) — CLOSED (EP3 KILL, OHEM SCALE-COLLAPSE)
+
+- **Branch**: `askeladd/ohem-surface-top20pct` (closed)
+- **W&B run**: `o8pt5ybd` (rank 0, killed at EP3 step 30468)
+- **Hypothesis**: OHEM as a supplementary loss term (λ=0.5) on the top-20% hardest surface points should amplify gradient signal where WSS prediction is hardest, accelerating tau_z descent. EP1+EP2 warmup before activation, λ=0.5 to keep contribution bounded.
+- **EP3 gate (val_abupt ≤7.6% MARGINAL, val_vol_p ≤5.0% MARGINAL)**: KILL on both criteria — 4× and 2× over respective gates.
+
+### Trajectory
+
+| Epoch | OHEM state | val_abupt | val_vol_p | val_WSS | val_tau_z |
+|------:|:-----------|----------:|----------:|--------:|----------:|
+| 1 | warmup | 26.36% | 16.79% | 28.84% | 35.69% |
+| 2 | warmup | **7.68%** | **4.52%** | 8.67% | 11.32% |
+| 3 | **active** | **30.78%** | **10.51%** | **34.80%** | **46.41%** |
+
+### Root cause — OHEM scale collapse
+
+`hard_loss = mean(top-20% sq_err)` is NOT on the same scale as `surface_loss = mean(all sq_err)` on this benchmark. Heavy-tailed sq_err distribution → median ratio ~18-30×, p95 ~25-30×, **max 88,000×** (during pathological batches with localized high-residual outlier points).
+
+Per-step diagnostics from EP3 active steps:
+- `train/surface_loss` (all-points MSE): 0.05–0.6
+- `train/ohem/hard_loss` (top-20% MSE): median 5.6, p95 7.8, **max 4411**
+- `train/ohem/lambda_contribution` (= 0.5 × hard_loss): p95 7.8, p99 13.4, **max 2205.7**
+- Total loss spikes: up to 2207 at step 29023
+
+The instant OHEM activated at step 21730 (start of EP3), the first batch's hard_loss=25.06 → total loss=12.57 vs base ~0.02. Lion's sign-of-momentum optimizer takes a max-magnitude update on every parameter regardless of gradient size, so a single spike collapses the manifold. By step 23163 (7% into EP3) total loss had spiked to 815; model never recovered. Positive feedback loop: degraded model → more "hard" points → larger hard_loss → larger updates → further degradation.
+
+### Diagnosis and paper-relevant findings
+
+1. **Scale-collapse is a distinct failure mode from direction-conflict.** Wave 27 lessons about loss-augmentation taught us to avoid conflicting gradient objectives (supplementary-not-replacement design). That heuristic does not by itself prevent scale failures, where the auxiliary term agrees in direction but amplifies by an unpredictable 30-4000× factor.
+2. **Lion+sign-of-momentum is uniquely sensitive to loss-scale spikes** because update magnitude doesn't scale with gradient. A single 4000× spike → max-size update on every parameter → manifold collapse. AdamW would have been less catastrophic.
+3. **Top-K mean MSE is unbounded in loss-units on heavy-tailed residual distributions.** λ-tuning cannot recover from a scale that varies by 4 orders of magnitude across steps.
+4. **Design rule**: any auxiliary loss term derived from a subset of points (top-K, hard sample, focal, etc.) needs *scale-invariant formulation by construction*, not by hyperparameter tuning. Two practical fixes: (a) clip per-step at `MAX_CLIP × base_loss.detach()` to bound contribution magnitude, or (b) normalize sq_err by its own mean before top-K aggregation so the OHEM term is mean-1 by construction.
+5. **Adds to the family of failed surface-loss amplification approaches** alongside PR #1109 (spatial focal α=2.0) and PR #793 (τ_z×3.0/4.0 scalar multipliers). Pattern: amplifying surface-loss signal at EP1-3 destabilizes training rather than accelerating learning.
+
+Askeladd reassigned to OHEM v2 (spike-clipped + reduced λ) — a clean implementation of the failure-mode fix.
+
 ## 2026-05-14 19:45 — PR #1109: τ_z spatial focal loss α=2.0 (edward) — CLOSED (EP3 GATE FAIL, FOCAL ACTIVELY DEGRADES WSS)
 
 - **Branch**: `edward/tau-z-spatial-focal-loss` (closed)
