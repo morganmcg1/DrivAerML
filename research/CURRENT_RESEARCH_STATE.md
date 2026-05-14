@@ -1,12 +1,21 @@
 # SENPAI Research State
-- 2026-05-14 ~12:30 UTC
+- 2026-05-14 ~14:30 UTC
 
-## Human Research Directive (Issue #882)
-**TOP PRIORITY — Volume Pressure Focus:**
-- The **TEST volume pressure L2 error** is the only metric that matters for new experiment design
-- Do NOT degrade surface error or wall shear stress metrics
-- Published SOTA models show significantly better volume pressure test metrics are achievable — large headroom to close
-- All new student assignments must be designed with volume pressure improvement as the singular focus
+## Human Research Directive (Issue #1056 — 2026-05-14, NEW)
+
+**TOP PRIORITY — Wall Shear Stress (WSS) Focus:**
+- The **TEST wall shear stress L2 error** is now the primary metric to drive down
+- Target: **test_wss < 5.85%** (Transolver-3 reference, current PR #972 SOTA = 6.727%, gap +0.877pp = 13% relative reduction)
+- **Strict floors** (must NOT degrade vs PR #972 SOTA):
+  - `test_vol_p ≤ 3.643%`
+  - `test_surf_p ≤ 3.577%`
+- `test_abupt` may regress slightly if WSS gains are large, but should remain competitive
+- **NO ENSEMBLES** — single-model only. Per Morgan 14:17Z: "we want genuine breakthroughs, not incremental improvements based on ensembling".
+- All NEW WSS hypotheses must build on PR #972's training stack (multi-sigma STRING + Lion + EMA + cosine + bs=1 + 65k points) — already in advisor branch `drivaerml-long-20260504`.
+
+## Prior Directive (Issue #882 — superseded for new work):
+- Volume pressure was the prior priority. nezuko #1101 and fern #1098 in-flight runs continue under this directive (winner candidates if they beat test_vol_p=3.643%).
+- All in-flight runs MUST report final WSS metrics for cross-comparison against new wave.
 
 ## DATASET ARTIFACT RESOLVED (2026-05-12) — Issue #1053
 
@@ -15,81 +24,88 @@ The persistent +7–8pp val→test volume pressure gap was a **DATASET ARTIFACT*
 
 ## INFRASTRUCTURE FIX MERGED: PR #1087 — EMA warm-start shadow re-init
 
-Branch includes fix (`860d08f`): shadow now initialized from live weights at `ema-start-step`. All new EMA runs are clean.
+Branch includes fix (`860d08f`/backport `15afb57`): shadow now initialized from live weights at `ema-start-step`. All new EMA runs are clean.
 
 ## Wave SOTA (Corrected Split — rawcanon_20260511)
 
-**PR #972** (run `56bcqp3m`, eval `zxnhtagj`)
+**PR #972** (run `56bcqp3m`, eval `zxnhtagj`) — single-model best on advisor branch
 
-| Metric | Value |
-|--------|-------|
-| test_abupt | **5.844%** |
-| test_surf_p | 3.577% |
-| test_vol_p | **3.643%** |
-| test_wss | 6.727% |
+| Metric | Value | Status |
+|--------|-------|--------|
+| test_abupt | **5.844%** | wave SOTA |
+| test_surf_p | 3.577% | **floor for WSS wave** |
+| test_vol_p | **3.643%** | **floor for WSS wave** |
+| test_wss | 6.727% | **TARGET: < 5.85% (Transolver-3)** |
 
-## SDF α Sweep — FULLY CLOSED
+Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA arises from the underlying stack: multi-sigma STRING + Lion + EMA + cosine T_max=30 + bs=1 + 65k points + corrected dataset.
 
-| α | PR | Run | Best val_abupt | Test result | Status |
-|---|-----|-----|---------------:|-------------|--------|
-| 0.25 | #1063 | `xfykblf9` | 6.2647% (EP11) | test_abupt=5.955%, test_vol_p=3.990% | **CLOSED** — all metrics regress |
-| 0.5 | #1072 | `yp383yq2` | 6.2904% (EP10) | No test (run died EP29.7) | **CLOSED** — dead run |
-| 1.0 | #1077 | `m4z2gb65` | 6.3562% (EP11) | terminal pending EP30→EP11-best | In progress, fully plateaued |
-| 2.0 | #1054 | — | CLOSED | EP15 FAIL | Over-concentration |
-| 3.0 | #1076 | — | 6.5012% (EP6) | No test | Over-concentration, EP10 KILL |
+## SDF α Sweep — FULLY CLOSED (broadly falsified on corrected split)
 
-**SDF concentration broadly falsified on corrected split.** Pivot to orthogonal levers confirmed.
+| α | PR | Run | Best val_abupt | Status |
+|---|-----|-----|---------------:|--------|
+| 0.25 | #1063 | `xfykblf9` | 6.2647% (EP11) | **CLOSED** — test regresses |
+| 0.5 | #1072 | `yp383yq2` | 6.2904% (EP10) | **CLOSED** — dead run |
+| 1.0 | #1077 | `m4z2gb65` | 6.3562% (EP11) | In progress, terminal ~14:00Z |
+| 2.0 | #1054 | — | EP15 FAIL | Over-concentration |
+| 3.0 | #1076 | — | 6.5012% (EP6) | EP10 KILL |
 
-## Active Experiments (2026-05-14 ~11:45 UTC)
+## Active Experiments (2026-05-14 ~14:30 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | EP18.7 / 205,163 | 14.6h elapsed / 24h budget. EMA best **6.2647% (EP11)**. Raw trending DOWN 6.51→6.38 — EMA may find new best in EP19-30. |
-| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | EP20+ / 219,519+ | val_abupt EP20=6.4311% PASS. Plateaued. Best EP11=6.3562%. Terminal protocol: evaluate from EP11 best checkpoint. |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | EP3 PASS, ~EP5 mid | **val_vol_p=3.674% at EP3** — exceptional early signal (SOTA test_vol_p=3.643%). Long run launched 10:11Z. EP5 gate ~13:20Z. |
-| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | **EP5 PASS** | **val_vol_p=3.574% at EP5 — already 0.07pp BELOW SOTA test target.** val_abupt=6.4955%. Trajectory monotonic descent. Tightened gates set for EP10/15/20/25. **WINNER CANDIDATE.** |
+| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | EP19+ / 209k+ | Best EP11 6.2647%. Raw trending DOWN. Terminal ~20:45Z. **NOT-a-winner (bit-identical to fern).** |
+| dl24-frieren | #1077 | SDF α=1.0 (inverse formula) | `m4z2gb65` | EP21+ / 219,519+ | Plateaued. Best EP11=6.3562%. Terminal protocol: evaluate from EP11 best. Terminal ~14:00Z, likely **close as NOT-a-winner**. |
+| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | EP6+ | EP3 val_vol_p=3.674% — winner candidate. Terminal ~04-06Z May 15. |
+| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | EP5+ PASS | **val_vol_p=3.574% at EP5 — 0.07pp BELOW SOTA test target.** Tightened gates EP10-25. **STRONGEST WINNER CANDIDATE.** Terminal ~04-06Z May 15. |
 
 ### Val Checkpoint Snapshots (latest ~11:45 UTC)
 
-| Student | PR | Run | EP | val_abupt (latest) | val_abupt (best) | val_vol_p (latest) |
-|---------|-----|-----|----|-------------------:|-----------------:|-----------------:|
-| dl24-tanjiro | #1086 | `fby84xtu` | EP18.7 | 6.291% (EMA) | **6.2647% (EP11)** | 4.346% (EMA) |
-| dl24-frieren | #1077 | `m4z2gb65` | EP20+ | 6.4311% | 6.3562% (EP11) | 4.6080% |
-| dl24-fern    | #1098 | `q4eok915` | EP3 | 6.6782% | 6.6782% (EP3) | **3.6741%** |
-| dl24-nezuko  | #1101 | `5qumfbrs` | **EP5** | **6.4955%** | **6.4955% (EP5)** | **3.5740%** ← BELOW SOTA test |
+| Student | PR | Run | EP | val_abupt (best) | val_vol_p (best) | val_wss (latest) |
+|---------|-----|-----|----|-----------------:|-----------------:|-----------------:|
+| dl24-tanjiro | #1086 | `fby84xtu` | EP19 | 6.2647% (EP11) | 4.1395% (EP11) | ~6.97% |
+| dl24-frieren | #1077 | `m4z2gb65` | EP20 | 6.3562% (EP11) | 4.4500% (EP15) | 7.03% |
+| dl24-fern    | #1098 | `q4eok915` | EP3 | 6.6782% (EP3) | **3.6741% (EP3)** | 7.6094% |
+| dl24-nezuko  | #1101 | `5qumfbrs` | EP5 | **6.4955% (EP5)** | **3.5740% (EP5)** | 7.4400% |
 
-## Strategic Assessment (~11:45 UTC)
+## Strategic Assessment (~14:30 UTC) — WSS PIVOT
 
-### Promising new signal: nezuko EP5 ALREADY BELOW SOTA test_vol_p
-At EP5, nezuko LR=9e-5 has val_vol_p=**3.574%** — already 0.07pp below SOTA `test_vol_p=3.643%`, with 25 epochs remaining. Trajectory is monotonic descent on val_abupt (22.1→7.66→6.76→6.53→6.50), val_vol_p (13.86→4.90→3.71→3.58→3.57), and val_wss (24.1→8.55→7.74→7.49→7.44). Only wss_z showed a 0.02pp uptick EP4→EP5 (within noise).
+### WSS Headroom Analysis
+PR #972 wave SOTA test_wss = 6.727%. Transolver-3 target = 5.85%. Gap = 13% relative reduction. All current in-flight runs have val_wss ~7.0-7.6% — none are competitive on WSS. This means **new hypothesis wave specifically targets WSS mechanism**, not aggregate.
 
-Fern WD=0.01 at EP3 hit val_vol_p=3.674% (similar magnitude). EP5 gate expected ~13:20Z. If fern also crosses below 3.6% at EP5, both isolated controls are confirmed winner candidates. **Tightened gates are now set on nezuko #1101** to maintain pressure on the descent trajectory.
+### WSS-relevant signals from historical experiments (background scan)
+- **Mild tau weighting (`9mm3sz7x`)**: tau_y=1.2 / tau_z=1.3 + LR=9e-5 → test_wss=7.454% (old split, best WSS in early-wave). LR=9e-5 stack already in nezuko #1101.
+- **Surface-loss weight 2.0 (`qqtdnlwq`)**: test_wss=7.634% (old split). Modest.
+- **Surface-point density**: 11k surface train budget is current; WSS is a surface-only quantity, so increasing density is a natural lever.
 
-For context, the prior SOTA training stack typically saw val_vol_p ~ 3.9-4.1% at EP3. This is the strongest early-epoch volume_p signal in recent waves.
+### Researcher-agent WSS hypothesis generation
+- Async researcher-agent (ID `a382a78f1c3b32adf`) launched 14:23Z.
+- Output target: `target/research/RESEARCH_IDEAS_WSS_2026-05-14_1430.md`
+- Constraints: no ensemble, no hard tangent constraints, no extreme weights (<0.5 or >2.0), no backbone replacements, must include floors for vol_p ≤ 3.643% and surf_p ≤ 3.577%.
 
-### Tanjiro update: raw val trending down past EP11
-The "bit-identical to fern through EP15" framing was based on EMA shadow. The **raw** val_abupt is now trending DOWN from EP11 (6.510%) to EP18 (6.381%) — a 0.13pp downward drift. Since EMA tracks raw with ~1000-step delay, the EMA shadow may find a new best in EP19-30. Terminal report should evaluate from EP11 best-val checkpoint AND consider running test from final EMA shadow if EP25+ EMA dips below 6.2647%.
+### In-flight winner candidates (volume_p directive — Issue #882):
+- **Nezuko #1101 LR=9e-5**: val_vol_p=3.574% at EP5 is exceptional. If it holds through EP30 and beats test_vol_p=3.643%, this is the new SOTA on the *aggregate* — and unlocks a WSS-floor combinatorial wave (LR=9e-5 + WSS lever).
+- **Fern #1098 WD=0.01**: val_vol_p=3.674% at EP3. If both nezuko AND fern beat SOTA, compose into LR=9e-5 + WD=0.01 + WSS lever for next wave.
 
-### Frieren #1077: clear close candidate
-SDF α=1.0 plateaued for 9+ epochs. Best EP11=6.3562%. Terminal protocol confirmed: evaluate from EP11 checkpoint; expected test_abupt ~5.96-6.05% (will NOT beat SOTA). Will close once SENPAI-RESULT lands.
+### Terminal protocol for non-winners
+- **Frieren #1077** (terminal ~14:00Z): expected test_abupt ~5.96-6.05% (NOT-a-winner). Will close once SENPAI-RESULT lands.
+- **Tanjiro #1086** (terminal ~20:45Z): bit-identical to fern, EMA didn't help. Close.
 
-### Pending hypothesis queue
-1. **H1 GradNorm+SDF composition** — deprioritized (SDF concentration falsified).
-2. **Long cosine T_max=40/50** — promising if fern/nezuko plateau before EP30.
-3. **WD/LR composition (if fern OR nezuko wins individually)** — combine winning regularization with EMA(0.999) or extended cosine.
-4. **Surface-point density investigation** — if all OOD test metrics continue to plateau, increase 11k surface train budget.
+## Pending hypothesis queue (WSS-focused, awaiting researcher output)
+
+The next 3-4 idle students will be assigned WSS-focused hypotheses from `RESEARCH_IDEAS_WSS_2026-05-14_1430.md`. Likely first-pass directions (subject to researcher-agent refinement):
+1. **Surface-point density uplift** — 11k → 33k/65k surface train points (WSS is surface-only).
+2. **WSS-component channel weighting** — mild tau_y=1.2/tau_z=1.3 from `9mm3sz7x` history, retested on corrected split + Lion + STRING stack.
+3. **WSS-aware loss reformulation** — magnitude/direction decomposition (|τ| + unit-vector) instead of vector L2.
+4. **Surface-side curriculum / boundary-aware sampling** — biased toward high-shear regions (front bumper, A-pillar, wake separation).
 
 ## Next Key Events
 
-1. **Tanjiro #1086 EP20-21** (~13:00-13:30Z) — gate ≤6.70%
-2. **Fern #1098 EP6 gate** (~13:00Z) — gate ≤6.8% PASS, ≤7.2% MARGINAL, >7.2% KILL. Critical to confirm val_vol_p ≈ 3.7% trajectory holds.
-3. **Nezuko #1101 EP5-6 gates** (~13:00Z) — confirm val_vol_p ≈ 3.7% trajectory.
-4. **Frieren #1077 terminal** (~14:00Z) — likely SENPAI-RESULT for close.
-5. **Tanjiro #1086 terminal** (~20:45Z) — KEY result for EMA checkpoint hypothesis.
-6. **Fern + Nezuko terminal** (~04-06Z May 15) — clean orthogonal controls. If either beats SOTA, this is a winner candidate.
-
-## Plateau Pattern (across the wave)
-
-All productive arms peak at EP10-13 val_abupt ≈ 6.26–6.35% under the 30-epoch / cosine T_max=30 budget. Val→test gap is now a true generalization gap (~−0.4 to −0.5pp). **If WD=0.01 or LR=9e-5 breaks this pattern by giving stronger late-epoch convergence (val_abupt at EP25-30 < 6.20%), it's the new SOTA direction. If they plateau too, the next pivot must be schedule/architecture (T_max=40, depth=8, or surface density).**
+1. **Frieren #1077 terminal** (~14:00Z) — likely SENPAI-RESULT for close.
+2. **Tanjiro #1086 EP21-22** (~14:30-15:00Z) — non-gate but EMA may dip.
+3. **Fern #1098 EP6 gate** (~13:00Z, past) and **EP10 gate** (~16:00Z) — gates ≤6.8%/≤6.5%.
+4. **Nezuko #1101 EP6-7** (~13:30-14:30Z) and **EP10 gate** (~16:30Z) — tightened gate ≤6.30%.
+5. **Researcher-agent WSS output** (~ETA 30-60 min from launch 14:23Z).
+6. **Tanjiro #1086 terminal** (~20:45Z) — close as NOT-a-winner.
+7. **Fern + Nezuko terminal** (~04-06Z May 15) — clean orthogonal controls.
