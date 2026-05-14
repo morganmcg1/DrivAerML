@@ -35,7 +35,7 @@ from torch.utils.data import Dataset
 from .split_utils import expand_pvc_candidates, first_existing
 
 DEFAULT_MANIFEST = Path(__file__).with_name("split_manifest.json")
-SURFACE_X_DIM = 7  # xyz(3) + normals(3) + panel area(1)
+SURFACE_X_DIM = 13  # xyz(3) + normals(3) + panel area(1) + tangent_frame(6: e1[3]+e2[3])
 SURFACE_Y_DIM = 4  # cp(1) + wall shear stress(3)
 VOLUME_X_DIM = 4  # xyz(3) + sdf(1)
 VOLUME_Y_DIM = 1  # volume pressure
@@ -269,6 +269,33 @@ def _three_column(value: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def _compute_tangent_frame(normals_arr: np.ndarray) -> np.ndarray:
+    """Two orthonormal tangent vectors per surface point.
+
+    e1 = normalize(cross(n, z_hat)), falls back to cross(n, x_hat) when
+    |cross(n, z_hat)| < 1e-6 (nearly vertical normals on roof/underbody).
+    e2 = cross(n, e1) — already unit length since n and e1 are unit and orthogonal.
+
+    Returns (N, 6) tensor: [e1_x, e1_y, e1_z, e2_x, e2_y, e2_z].
+    """
+    z_hat = np.array([0.0, 0.0, 1.0], dtype=normals_arr.dtype)
+    x_hat = np.array([1.0, 0.0, 0.0], dtype=normals_arr.dtype)
+
+    e1 = np.cross(normals_arr, z_hat)
+    e1_norm = np.linalg.norm(e1, axis=1, keepdims=True)
+
+    e1_fallback = np.cross(normals_arr, x_hat)
+    e1_fallback_norm = np.linalg.norm(e1_fallback, axis=1, keepdims=True)
+
+    use_fallback = (e1_norm < 1e-6).squeeze(1)
+    e1[use_fallback] = e1_fallback[use_fallback]
+    e1_norm[use_fallback] = e1_fallback_norm[use_fallback]
+
+    e1 = e1 / (e1_norm + 1e-12)
+    e2 = np.cross(normals_arr, e1)
+    return np.concatenate([e1, e2], axis=1)
+
+
 def load_case(
     root: str | Path,
     case_id: str,
@@ -285,7 +312,8 @@ def load_case(
         _load_npy_rows(case_dir / "surface_wallshearstress.npy", surface_rows),
         "surface_wallshearstress.npy",
     )
-    surface_x = np.concatenate([xyz, normals, area], axis=1)
+    tangent_frame = _compute_tangent_frame(normals.astype(np.float32, copy=False))
+    surface_x = np.concatenate([xyz, normals, area, tangent_frame], axis=1)
     surface_y = np.concatenate([cp, wall_shear], axis=1)
     volume_x = np.concatenate(
         [
