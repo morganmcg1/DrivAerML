@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -105,6 +106,8 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_decomp_lambda_mag: float = 0.0
+    wss_decomp_lambda_dir: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -229,6 +232,29 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "wss_decomp_lambda_mag": (
+            "Supplementary additive WSS magnitude head weight (PR #1112). "
+            "When > 0, adds lambda_mag * MSE(log1p(||tau_pred||), "
+            "log1p(||tau_gt||)) to the total loss. ||tau|| is the L2 norm "
+            "of the 3-vector WSS prediction, computed in PHYSICAL "
+            "(denormalised) space so the log1p magnitude reflects physical "
+            "Pa and is not distorted by per-channel standardisation. The "
+            "base weighted_channel_mse loss is preserved (NEVER replaced) "
+            "— this is strictly an additive supervision signal targeting "
+            "the magnitude scalar that carries 91-96%% of remaining WSS "
+            "residual (PR #1097 finding). Recommended initial 0.1; "
+            "reduce to 0.05 if val_abupt rises at EP3."
+        ),
+        "wss_decomp_lambda_dir": (
+            "Supplementary additive WSS direction head weight (PR #1112). "
+            "When > 0, adds lambda_dir * (1 - cos_sim(tau_hat_pred, "
+            "tau_hat_gt)) per valid point, with tau_hat = tau / "
+            "max(||tau||, 1e-3) (Wave 27 safeguard against garbage "
+            "gradients in near-zero WSS zones). Computed in PHYSICAL "
+            "space. Provides scale-invariant direction signal in "
+            "low-magnitude regions where plain MSE vanishes — useful "
+            "for vortex/separation identification. Recommended 0.05."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -321,6 +347,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    wss_decomp_lambda_mag: float = 0.0,
+    wss_decomp_lambda_dir: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,26 +360,71 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_pred = out["surface_preds"]
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_pred,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+
+    extra_metrics: dict[str, float] = {}
+    if wss_decomp_lambda_mag > 0.0 or wss_decomp_lambda_dir > 0.0:
+        # WSS magnitude + direction decomposition heads (PR #1112). Compute in
+        # PHYSICAL (denormalised) Pa so the log1p magnitude reflects physical
+        # range and the cosine angle is not distorted by per-channel std
+        # rotation (tau_x, tau_y, tau_z have different stds in normalizers).
+        # Upcast to float32 outside the autocast block — bf16 norm/log1p loses
+        # precision on small WSS values and is the only ~free safety move.
+        tau_pred_phys = transform.invert_surface(surface_pred.float())[..., 1:4]
+        tau_gt_phys = transform.invert_surface(surface_target.float())[..., 1:4]
+        mask_f = batch.surface_mask.to(device=tau_pred_phys.device, dtype=torch.float32)
+        mag_pred = torch.linalg.vector_norm(tau_pred_phys, dim=-1)
+        mag_gt = torch.linalg.vector_norm(tau_gt_phys, dim=-1)
+        # Magnitude term: MSE on log1p of physical magnitudes (compresses the
+        # ~3-orders-of-magnitude WSS range so high-tau regions stop dominating).
+        log_mag_sq_err = (torch.log1p(mag_pred) - torch.log1p(mag_gt)).square()
+        mag_loss = masked_mean(log_mag_sq_err, mask_f)
+        # Direction term: 1 - cos_sim with eps=1e-3 floor on the denominator
+        # (Wave 27 safeguard — eps suppresses garbage-direction gradients from
+        # essentially-zero WSS points without weighting them out entirely).
+        eps_dir = 1e-3
+        tau_pred_hat = tau_pred_phys / mag_pred.unsqueeze(-1).clamp_min(eps_dir)
+        tau_gt_hat = tau_gt_phys / mag_gt.unsqueeze(-1).clamp_min(eps_dir)
+        cos_sim = (tau_pred_hat * tau_gt_hat).sum(dim=-1)
+        dir_loss = masked_mean(1.0 - cos_sim, mask_f)
+
+        weighted_mag = wss_decomp_lambda_mag * mag_loss
+        weighted_dir = wss_decomp_lambda_dir * dir_loss
+        loss = loss + weighted_mag.to(loss.dtype) + weighted_dir.to(loss.dtype)
+
+        extra_metrics["wss_decomp_mag_loss"] = float(mag_loss.detach().cpu().item())
+        extra_metrics["wss_decomp_dir_loss"] = float(dir_loss.detach().cpu().item())
+        extra_metrics["wss_decomp_mag_loss_weighted"] = float(weighted_mag.detach().cpu().item())
+        extra_metrics["wss_decomp_dir_loss_weighted"] = float(weighted_dir.detach().cpu().item())
+        with torch.no_grad():
+            extra_metrics["wss_decomp_mag_pred_mean"] = float(
+                ((mag_pred * mask_f).sum() / mask_f.sum().clamp_min(1.0)).detach().cpu().item()
+            )
+            extra_metrics["wss_decomp_mag_gt_mean"] = float(
+                ((mag_gt * mask_f).sum() / mask_f.sum().clamp_min(1.0)).detach().cpu().item()
+            )
+
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **extra_metrics,
     }
 
 
@@ -852,6 +925,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.wss_decomp_lambda_mag > 0.0 or config.wss_decomp_lambda_dir > 0.0:
+                print(
+                    f"WSS decomposition heads (PR #1112, supplementary additive): "
+                    f"lambda_mag={config.wss_decomp_lambda_mag} (log1p magnitude in physical Pa), "
+                    f"lambda_dir={config.wss_decomp_lambda_dir} (cos-sim direction with eps=1e-3 floor)."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -1030,6 +1109,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        wss_decomp_lambda_mag=config.wss_decomp_lambda_mag,
+                        wss_decomp_lambda_dir=config.wss_decomp_lambda_dir,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1151,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "wss_decomp_mag_loss" in batch_loss_metrics:
+                        train_log.update(
+                            {
+                                "train/wss_decomp_mag_loss": batch_loss_metrics["wss_decomp_mag_loss"],
+                                "train/wss_decomp_dir_loss": batch_loss_metrics["wss_decomp_dir_loss"],
+                                "train/wss_decomp_mag_loss_weighted": batch_loss_metrics["wss_decomp_mag_loss_weighted"],
+                                "train/wss_decomp_dir_loss_weighted": batch_loss_metrics["wss_decomp_dir_loss_weighted"],
+                                "train/wss_decomp_mag_pred_mean": batch_loss_metrics["wss_decomp_mag_pred_mean"],
+                                "train/wss_decomp_mag_gt_mean": batch_loss_metrics["wss_decomp_mag_gt_mean"],
+                                "train/wss_decomp_lambda_mag": config.wss_decomp_lambda_mag,
+                                "train/wss_decomp_lambda_dir": config.wss_decomp_lambda_dir,
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
