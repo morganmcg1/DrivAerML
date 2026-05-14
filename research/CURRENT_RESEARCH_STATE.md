@@ -49,23 +49,33 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 | 2.0 | #1054 | — | EP15 FAIL | Over-concentration |
 | 3.0 | #1076 | — | 6.5012% (EP6) | EP10 KILL |
 
-## Active Experiments (2026-05-14 ~18:10 UTC)
+## Active Experiments (2026-05-14 ~20:30 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | #1086 | EMA(0.999) clean re-test + SDF α=0.25 | `fby84xtu` | EP19+ | Best EP11 6.2647%. Raw trending DOWN. Terminal ~20:45Z. **NOT-a-winner (bit-identical to fern). Will close.** |
-| dl24-frieren | **#1115** | **H1: WSS wind-exposure proxy** (n·u + \|ny\| input channels) | TBD | **Assigned 18:10Z** | **NEW WSS hypothesis.** #1077 CLOSED (test_abupt=6.042% NOT-a-winner). |
+| dl24-tanjiro | **#1117** | **H2: WSS curvature features** (kappa_H + kappa_G input channels) | TBD | **Assigned 20:30Z** | **NEW WSS hypothesis.** #1086 CLOSED (test_abupt=5.9555% bit-identical to fern, NOT-a-winner). Key insight: tau_y=7.36%, tau_z=8.75% — curvature targets these. |
+| dl24-frieren | #1115 | H1: WSS wind-exposure proxy (max(0,-nx) + \|ny\| input channels) | TBD | Assigned 18:10Z, student on branch | EP3 smoke gate pending. |
 | dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | EP10+ | EP3 val_vol_p=3.674% — winner candidate. Terminal ~04-06Z May 15. |
 | dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | EP10+ | **val_vol_p=3.574% at EP5 — BELOW SOTA test target.** Tightened gates. **STRONGEST WINNER CANDIDATE.** Terminal ~04-06Z May 15. |
 
-### Val Checkpoint Snapshots (latest ~18:10 UTC)
+### Per-Axis WSS Insight (from tanjiro #1086 fby84xtu terminal)
 
-| Student | PR | Run | EP | val_abupt (best) | val_vol_p (best) | val_wss (latest) |
-|---------|-----|-----|----|-----------------:|-----------------:|-----------------:|
-| dl24-tanjiro | #1086 | `fby84xtu` | EP19+ | 6.2647% (EP11) | 4.1395% (EP11) | ~6.97% |
-| dl24-frieren | #1115 | TBD | EP0 | — | — | — (just assigned) |
+| Component | test value | SOTA-relative | Priority |
+|-----------|------------|--------------|---------|
+| tau_x | 5.971% | ~1.0× AB-UPT target | secondary |
+| **tau_y** | **7.362%** | **~2.0× AB-UPT target** | **HIGH** |
+| **tau_z** | **8.747%** | **~2.4× AB-UPT target** | **HIGHEST** |
+
+Cross-flow shear (tau_y, tau_z) dominates. H1/H2 wind-exposure + curvature features directly target this.
+
+### Val Checkpoint Snapshots (latest ~20:30 UTC)
+
+| Student | PR | Run | EP | val_abupt (best) | val_vol_p (best) | val_wss |
+|---------|-----|-----|----|-----------------:|-----------------:|---------:|
+| dl24-tanjiro | #1117 | TBD | EP0 | — | — | — (just assigned) |
+| dl24-frieren | #1115 | TBD | EP0 | — | — | — (implementing) |
 | dl24-fern    | #1098 | `q4eok915` | EP3 | 6.6782% (EP3) | **3.6741% (EP3)** | 7.6094% |
 | dl24-nezuko  | #1101 | `5qumfbrs` | EP5 | **6.4955% (EP5)** | **3.5740% (EP5)** | 7.4400% |
 
@@ -99,7 +109,7 @@ Researcher-agent delivered 10 ranked hypotheses at 14:37Z. Top 4 for assignment:
 | Rank | Hypothesis | One-line | Assigned to (when idle) |
 |------|-----------|----------|-------------------------|
 | **H1** | Wind-exposure geometric proxy (n·u_freestream + \|ny\| as 2 extra input channels) | Direct cross-flow attack-angle signal targets tau_y/z gap | **frieren → PR #1115 ✓ ASSIGNED 18:10Z** |
-| **H2** | Surface curvature features (kappa_H + kappa_G as 2 extra channels) | Local shape curvature targets WSS spikes at separation edges | **tanjiro** (terminal ~20:45Z) |
+| **H2** | Surface curvature features (kappa_H + kappa_G as 2 extra channels) | Local shape curvature targets WSS spikes at separation edges | **tanjiro → PR #1117 ✓ ASSIGNED 20:30Z** |
 | **H3** | Near-wall volume cross-attention into surface decoder (SDF<0.05m) | Inject boundary-layer velocity-gradient signal into WSS head | **nezuko** (if not a winner, ~04-06Z May 15) |
 | **H4** | Per-task GradNorm α sweep (α_wss=0.75 ONLY, α_surf=α_vol=0.5 fixed) | Faster WSS rebalancing; α_wss=1.0 arm DROPPED (Wave 27 lesson) | **fern** (if not a winner, ~04-06Z May 15) |
 
@@ -134,7 +144,7 @@ The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arm
 
 1. ~~**Frieren #1077 terminal**~~ **DONE** (18:00Z) — CLOSED, NOT-a-winner. **H1 assigned → PR #1115.**
 2. **Frieren #1115 EP3 smoke gate** (~21:00Z) — val_wss ≤ 7.5%, val_vol_p ≤ 5.5%.
-3. **Tanjiro #1086 terminal** (~20:45Z) — close as NOT-a-winner (bit-identical to fern) → assign H2 (curvature features).
+3. ~~**Tanjiro #1086 terminal**~~ **DONE** (20:16Z) — CLOSED bit-identical to fern (test_abupt=5.9555%). **H2 assigned → PR #1117.** tau_y=7.36%/tau_z=8.75% per-axis insight captured.
 4. **Fern #1098 EP10 gate** (~19:00Z) — gate ≤ 6.5%.
 5. **Nezuko #1101 EP10 tightened gate** (~19:30Z) — gate ≤ 6.30%.
 6. **Fern + Nezuko terminal** (~04-06Z May 15) — if winners, compose with WSS lever; else assign H3 (nezuko) / H4 (fern).

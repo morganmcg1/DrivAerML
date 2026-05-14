@@ -1663,3 +1663,27 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 - **Conclusion:** SDF α=1.0 regresses on all metrics, largest hit on test_vol_p (+0.530pp). Completes the α sweep: α=0.25 CLOSED, α=0.5 dead run, α=1.0 CLOSED, α=2.0 EP15 FAIL, α=3.0 EP10 KILL. **SDF concentration broadly falsified on corrected split.** Strategy pivot to WSS-focused input feature experiments.
 - **Protocol note:** PR was flipped to status:review without posting SENPAI-RESULT comment. Test metrics recovered from W&B run summary directly.
 - **CLOSED 2026-05-14.**
+
+---
+
+## 2026-05-14 20:16Z — PR #1086: EMA(0.999) on SDF α=0.25 stack (dl24-tanjiro)
+
+- **Branch:** `dl24-tanjiro/ema-0999-productive-stack-corrected`
+- **Student:** dl24-tanjiro
+- **W&B Run:** `fby84xtu`
+- **Hypothesis:** EMA(0.999) with clean warm-start shadow re-init (PR #1087 fix applied), re-testing SDF α=0.25 stack to confirm EMA improvement is real and not contaminated by initial shadow from random init.
+
+| Metric | This PR (EP11 best-EMA) | SOTA PR #972 | Δ |
+|--------|------------------------:|-------------:|--|
+| test_abupt | 5.9555% | **5.844%** | +0.111pp |
+| test_wss | 6.7464% | 6.727% | +0.020pp |
+| test_vol_p | 3.9895% | **3.643%** | +0.347pp |
+| test_surf_p | 3.7070% | 3.577% | +0.130pp |
+| test_tau_x | 5.971% | — | — |
+| test_tau_y | **7.362%** | — | — |
+| test_tau_z | **8.747%** | — | — |
+
+- **Outcome:** **NOT a winner.** Bit-identical to fern xfykblf9 (5.955%) — confirmed at 4 significant figures. EMA warm-start fix is correctness-good but trajectory-neutral since contamination decayed to <1e-4 by step ~7400 in fern's run too.
+- **Key insight:** Per-axis WSS decomposition reveals **tau_y=7.36% and tau_z=8.75%** dominate WSS error (tau_x=5.97%). Cross-flow shear components are the bottleneck — directly validates H1/H2 WSS hypothesis focus.
+- **Conclusion:** EMA(0.999) does not close the 0.11pp gap to SOTA on SDF α=0.25 stack. The gap likely comes from a config difference vs PR #972 (SDF monkey-patch was no-op; #972 wins from stack, not SDF). EMA is a useful training tool but not the SOTA delta source.
+- **CLOSED 2026-05-14.**
