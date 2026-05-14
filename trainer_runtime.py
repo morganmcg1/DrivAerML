@@ -281,6 +281,7 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        load_surface_curvature=float(getattr(config, "wss_curvature_weight_scale", 0.0)) > 0.0,
     )
     train_sampler = None
     train_shuffle = True
@@ -861,6 +862,45 @@ def weighted_channel_mse(
     valid_points = mask_dev.sum()
     denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
     if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denominator
+    return pred.sum() * 0.0
+
+
+def weighted_point_channel_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    channel_weights: torch.Tensor,
+    point_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Per-channel and per-point weighted masked MSE.
+
+    pred / target: [B, N, C]; mask: [B, N]; channel_weights: [C]; point_weights: [B, N].
+    Computes a weighted mean of squared errors where the per-sample weight of a
+    given (point, channel) entry is ``mask * point_weights * channel_weights``.
+    The denominator is ``sum(mask * point_weights) * C`` so that when
+    ``point_weights ≡ 1`` this collapses exactly to ``weighted_channel_mse`` and
+    the overall loss magnitude is preserved under non-uniform point weighting.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    ch_w = channel_weights.to(device=pred.device, dtype=pred.dtype)
+    if ch_w.shape[-1] != pred.shape[-1]:
+        raise ValueError(
+            f"channel_weights last-dim {ch_w.shape[-1]} must equal pred last-dim {pred.shape[-1]}"
+        )
+    pt_w = point_weights.to(device=pred.device, dtype=pred.dtype)
+    mask_dev = mask.to(device=pred.device, dtype=pred.dtype)
+    if pt_w.shape != mask_dev.shape:
+        raise ValueError(
+            f"point_weights shape {tuple(pt_w.shape)} must match mask shape {tuple(mask_dev.shape)}"
+        )
+    sq_err = (pred - target).square()
+    combined = (mask_dev * pt_w).unsqueeze(-1)  # [B, N, 1]
+    weighted = sq_err * ch_w.view(1, 1, -1) * combined
+    weighted_valid = (mask_dev * pt_w).sum()
+    denominator = (weighted_valid * pred.shape[-1]).clamp_min(1.0)
+    if bool(mask_dev.sum().detach().cpu().item() > 0):
         return weighted.sum() / denominator
     return pred.sum() * 0.0
 

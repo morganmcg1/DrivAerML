@@ -67,6 +67,7 @@ class DrivAerMLCase:
     volume_x: torch.Tensor
     volume_y: torch.Tensor
     metadata: dict[str, Any]
+    surface_curvature: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class SurfaceBatch:
     volume_y: torch.Tensor
     volume_mask: torch.Tensor
     metadata: list[dict[str, Any]]
+    surface_curvature: torch.Tensor | None = None
 
     def to(self, device: torch.device | str) -> "SurfaceBatch":
         return SurfaceBatch(
@@ -100,6 +102,11 @@ class SurfaceBatch:
             volume_y=self.volume_y.to(device),
             volume_mask=self.volume_mask.to(device),
             metadata=list(self.metadata),
+            surface_curvature=(
+                self.surface_curvature.to(device)
+                if self.surface_curvature is not None
+                else None
+            ),
         )
 
     @property
@@ -275,6 +282,7 @@ def load_case(
     *,
     surface_rows: np.ndarray | None = None,
     volume_rows: np.ndarray | None = None,
+    load_surface_curvature: bool = False,
 ) -> DrivAerMLCase:
     case_dir = _case_dir(Path(root), case_id)
     xyz = _load_npy_rows(case_dir / "surface_xyz.npy", surface_rows)
@@ -295,6 +303,19 @@ def load_case(
         axis=1,
     )
     volume_y = _column(_load_npy_rows(case_dir / "volume_pressure.npy", volume_rows))
+    surface_curvature_tensor: torch.Tensor | None = None
+    if load_surface_curvature:
+        curv = _load_npy_rows(case_dir / "curvature_HK_v2.npy", surface_rows)
+        if curv.ndim != 2 or curv.shape[1] != 2:
+            raise ValueError(
+                f"curvature_HK_v2.npy must have shape [N, 2], got {curv.shape}"
+            )
+        if curv.shape[0] != surface_x.shape[0]:
+            raise ValueError(
+                f"curvature row count {curv.shape[0]} != surface row count "
+                f"{surface_x.shape[0]} for case {case_id}"
+            )
+        surface_curvature_tensor = torch.from_numpy(np.ascontiguousarray(curv))
     return DrivAerMLCase(
         case_id=case_id,
         surface_x=torch.from_numpy(surface_x),
@@ -306,6 +327,7 @@ def load_case(
             "n_surface": int(surface_x.shape[0]),
             "n_volume": int(volume_x.shape[0]),
         },
+        surface_curvature=surface_curvature_tensor,
     )
 
 
@@ -338,8 +360,15 @@ class DrivAerMLCaseStore:
         *,
         surface_rows: np.ndarray | None = None,
         volume_rows: np.ndarray | None = None,
+        load_surface_curvature: bool = False,
     ) -> DrivAerMLCase:
-        return load_case(self.root, case_id, surface_rows=surface_rows, volume_rows=volume_rows)
+        return load_case(
+            self.root,
+            case_id,
+            surface_rows=surface_rows,
+            volume_rows=volume_rows,
+            load_surface_curvature=load_surface_curvature,
+        )
 
     def case_point_counts(self, case_id: str) -> dict[str, int]:
         cached = self._point_count_cache.get(case_id)
@@ -367,6 +396,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        load_surface_curvature: bool = False,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +406,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.load_surface_curvature = load_surface_curvature
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -444,6 +475,7 @@ class DrivAerMLSurfaceDataset(Dataset):
             view.case_id,
             surface_rows=None if surface_idx is None else surface_idx.numpy(),
             volume_rows=None if volume_idx is None else volume_idx.numpy(),
+            load_surface_curvature=self.load_surface_curvature,
         )
         metadata = dict(case.metadata)
         metadata["n_surface_full"] = int(counts["n_surface"])
@@ -464,6 +496,7 @@ class DrivAerMLSurfaceDataset(Dataset):
             volume_x=case.volume_x,
             volume_y=case.volume_y,
             metadata=metadata,
+            surface_curvature=case.surface_curvature,
         )
 
 
@@ -479,6 +512,11 @@ def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
     volume_x = torch.zeros(batch_size, max_volume_n, VOLUME_X_DIM, dtype=samples[0].volume_x.dtype)
     volume_y = torch.zeros(batch_size, max_volume_n, VOLUME_Y_DIM, dtype=samples[0].volume_y.dtype)
     volume_mask = torch.zeros(batch_size, max_volume_n, dtype=torch.bool)
+    has_curvature = all(sample.surface_curvature is not None for sample in samples)
+    surface_curvature: torch.Tensor | None = None
+    if has_curvature:
+        curv_dtype = samples[0].surface_curvature.dtype
+        surface_curvature = torch.zeros(batch_size, max_surface_n, 2, dtype=curv_dtype)
     for i, sample in enumerate(samples):
         surface_n = sample.surface_x.shape[0]
         volume_n = sample.volume_x.shape[0]
@@ -488,6 +526,8 @@ def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
         volume_x[i, :volume_n] = sample.volume_x
         volume_y[i, :volume_n] = sample.volume_y
         volume_mask[i, :volume_n] = True
+        if surface_curvature is not None:
+            surface_curvature[i, :surface_n] = sample.surface_curvature
     return SurfaceBatch(
         case_ids=[sample.case_id for sample in samples],
         surface_x=surface_x,
@@ -497,6 +537,7 @@ def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
         volume_y=volume_y,
         volume_mask=volume_mask,
         metadata=[dict(sample.metadata) for sample in samples],
+        surface_curvature=surface_curvature,
     )
 
 
@@ -544,6 +585,7 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    load_surface_curvature: bool = False,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +610,7 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        load_surface_curvature=load_surface_curvature,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(

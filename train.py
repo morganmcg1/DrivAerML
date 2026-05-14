@@ -57,6 +57,7 @@ from trainer_runtime import (
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
+    weighted_point_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -105,6 +106,9 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_curvature_weight_scale: float = 0.0
+    wss_curvature_mode: str = "H"
+    wss_curvature_clip_percentile: float = 95.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -220,6 +224,30 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "wss_curvature_weight_scale": (
+            "Scale factor for curvature-adaptive per-point loss weighting on "
+            "surface targets (cp + tau). 0.0 (default) disables the feature; "
+            "the loss path falls back exactly to the standard "
+            "weighted_channel_mse and the curvature .npy is not loaded. When "
+            "> 0, each surface point i receives a multiplier w_i = "
+            "1 + scale * mag_norm_i where mag_norm_i is the per-sample "
+            "percentile-clipped (default p95) curvature magnitude normalised "
+            "to [0, 1]. scale=1.0 yields max weight 2.0x at the most curved "
+            "points; scale=2.0 yields 3.0x."
+        ),
+        "wss_curvature_mode": (
+            "Which curvature signal feeds the per-point weight when "
+            "--wss-curvature-weight-scale > 0. 'H' uses |mean curvature|; "
+            "'K' uses sqrt(|Gaussian curvature|) (sqrt compresses the tail); "
+            "'HK' adds the two. The signal is then per-sample percentile-"
+            "clipped and normalised; see --wss-curvature-clip-percentile."
+        ),
+        "wss_curvature_clip_percentile": (
+            "Per-sample percentile used to clip and normalise the curvature "
+            "magnitude before turning it into the per-point weight. Default "
+            "95.0 caps the top 5% of points to weight 1 + scale (prevents "
+            "mesh-edge / panel-gap outliers from dominating the gradient)."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -311,6 +339,61 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+WSS_CURVATURE_MODES = ("H", "K", "HK")
+
+
+def curvature_wss_weights(
+    curvature_HK: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    scale: float,
+    mode: str = "H",
+    clip_percentile: float = 95.0,
+) -> torch.Tensor:
+    """Return per-point loss weights derived from surface curvature.
+
+    curvature_HK: [B, N, 2] — columns [mean curvature H, Gaussian curvature K]
+    mask: [B, N] — surface validity mask
+    scale: when 0 the function returns ones (no-op); otherwise the weight is
+        ``1 + scale * mag_norm`` where ``mag_norm`` is the per-sample
+        percentile-clipped curvature magnitude rescaled to [0, 1].
+    mode: which curvature scalar drives the weight (``H`` | ``K`` | ``HK``).
+        ``K`` is mapped through ``sqrt(|K|)`` to compress the heavy tail.
+    clip_percentile: per-sample quantile used to clip and renormalise the
+        magnitude (default 95.0).
+    """
+
+    if mode not in WSS_CURVATURE_MODES:
+        raise ValueError(
+            f"Unknown wss_curvature_mode '{mode}'. Supported: {WSS_CURVATURE_MODES}."
+        )
+    if scale <= 0.0 or curvature_HK.shape[-2] == 0:
+        return torch.ones_like(mask, dtype=curvature_HK.dtype)
+
+    H = curvature_HK[..., 0]
+    K = curvature_HK[..., 1]
+    if mode == "H":
+        mag = H.abs()
+    elif mode == "K":
+        mag = K.abs().clamp_min(0.0).sqrt()
+    else:  # mode == "HK"
+        mag = H.abs() + K.abs().clamp_min(0.0).sqrt()
+
+    mask_float = mask.to(mag.dtype)
+    # Zero out the padding rows; their values are arbitrary after pad_collate.
+    mag = mag * mask_float
+    flat = mag.reshape(mag.shape[0], -1)
+    q = max(min(clip_percentile, 100.0), 0.0) / 100.0
+    # torch.quantile fails on bf16/fp16 in some torch versions — cast to fp32.
+    flat_f32 = flat.float()
+    clip_val = torch.quantile(flat_f32, q, dim=1, keepdim=True).to(mag.dtype)
+    clip_val_safe = clip_val.clamp_min(1e-12)
+    mag_clipped = torch.minimum(mag, clip_val)
+    mag_norm = (mag_clipped / clip_val_safe).clamp(0.0, 1.0)
+    weight = 1.0 + scale * mag_norm
+    return weight
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,6 +404,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    surface_point_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,7 +416,24 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        if surface_point_weights is not None:
+            channel_weights = (
+                surface_channel_weights
+                if surface_channel_weights is not None
+                else torch.ones(
+                    out["surface_preds"].shape[-1],
+                    device=device,
+                    dtype=out["surface_preds"].dtype,
+                )
+            )
+            surface_loss = weighted_point_channel_mse(
+                out["surface_preds"],
+                surface_target,
+                batch.surface_mask,
+                channel_weights=channel_weights,
+                point_weights=surface_point_weights,
+            )
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -683,6 +784,7 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        load_surface_curvature=getattr(old_ds, "load_surface_curvature", False),
     )
     train_sampler = None
     train_shuffle = True
@@ -852,6 +954,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.wss_curvature_weight_scale > 0.0:
+                print(
+                    f"Curvature-adaptive surface loss enabled: "
+                    f"scale={config.wss_curvature_weight_scale} "
+                    f"mode={config.wss_curvature_mode} "
+                    f"clip_percentile={config.wss_curvature_clip_percentile} "
+                    f"(max weight = {1.0 + config.wss_curvature_weight_scale:.2f}x)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +993,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/wss_curvature_weight_scale"] = config.wss_curvature_weight_scale
+            wandb.summary["loss/wss_curvature_mode"] = config.wss_curvature_mode
+            wandb.summary["loss/wss_curvature_clip_percentile"] = config.wss_curvature_clip_percentile
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1021,6 +1134,28 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    curvature_point_weights: torch.Tensor | None = None
+                    curvature_metrics: dict[str, float] = {}
+                    if (
+                        config.wss_curvature_weight_scale > 0.0
+                        and getattr(batch, "surface_curvature", None) is not None
+                    ):
+                        curvature_point_weights = curvature_wss_weights(
+                            batch.surface_curvature.to(device),
+                            batch.surface_mask.to(device),
+                            scale=config.wss_curvature_weight_scale,
+                            mode=config.wss_curvature_mode,
+                            clip_percentile=config.wss_curvature_clip_percentile,
+                        )
+                        # Stats are mask-aware so padding doesn't dilute them.
+                        valid_w = curvature_point_weights[batch.surface_mask.to(device)]
+                        if valid_w.numel() > 0:
+                            curvature_metrics = {
+                                "train/curvature_weight_mean": float(valid_w.mean().detach().cpu().item()),
+                                "train/curvature_weight_max": float(valid_w.max().detach().cpu().item()),
+                                "train/curvature_weight_min": float(valid_w.min().detach().cpu().item()),
+                                "train/curvature_weight_std": float(valid_w.std().detach().cpu().item()),
+                            }
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1030,7 +1165,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        surface_point_weights=curvature_point_weights,
                     )
+                    if curvature_metrics:
+                        batch_loss_metrics.update(curvature_metrics)
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1070,6 +1208,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for curv_key in (
+                        "train/curvature_weight_mean",
+                        "train/curvature_weight_max",
+                        "train/curvature_weight_min",
+                        "train/curvature_weight_std",
+                    ):
+                        if curv_key in batch_loss_metrics:
+                            train_log[curv_key] = batch_loss_metrics[curv_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
