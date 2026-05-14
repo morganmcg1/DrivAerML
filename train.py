@@ -55,6 +55,7 @@ from trainer_runtime import (
     loader_kwargs,
     make_loaders,
     masked_mse,
+    masked_wss_magnitude_l1_loss,
     metric_namespace,
     weighted_channel_mse,
     parse_kill_thresholds,
@@ -105,6 +106,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_magnitude_loss_weight: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,6 +323,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    wss_magnitude_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,13 +349,26 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        if wss_magnitude_loss_weight > 0:
+            mag_loss = masked_wss_magnitude_l1_loss(
+                out["surface_preds"], surface_target, batch.surface_mask
+            )
+            weighted_mag_loss = wss_magnitude_loss_weight * mag_loss
+            loss = loss + weighted_mag_loss
+        else:
+            mag_loss = None
+            weighted_mag_loss = None
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if mag_loss is not None:
+        metrics["wss_magnitude_loss"] = float(mag_loss.detach().cpu().item())
+        metrics["wss_magnitude_loss_weighted"] = float(weighted_mag_loss.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -787,6 +803,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
         if config.use_gradnorm:
+            if config.wss_magnitude_loss_weight > 0:
+                raise ValueError(
+                    "--wss-magnitude-loss-weight is not implemented for the "
+                    "--use-gradnorm path (which bypasses train_loss). Disable "
+                    "one of the two."
+                )
             if config.gradnorm_mode == "full" and config.compile_model:
                 raise ValueError(
                     "--use-gradnorm --gradnorm-mode full requires --no-compile-model "
@@ -883,6 +905,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/wss_magnitude_loss_weight"] = config.wss_magnitude_loss_weight
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1053,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        wss_magnitude_loss_weight=config.wss_magnitude_loss_weight,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1094,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "wss_magnitude_loss" in batch_loss_metrics:
+                        train_log["train/wss_magnitude_loss"] = batch_loss_metrics["wss_magnitude_loss"]
+                        train_log["train/wss_magnitude_loss_weighted"] = batch_loss_metrics["wss_magnitude_loss_weighted"]
+                        train_log["train/wss_magnitude_loss_weight"] = config.wss_magnitude_loss_weight
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

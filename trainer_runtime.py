@@ -870,6 +870,36 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+def masked_wss_magnitude_l1_loss(
+    surface_pred: torch.Tensor,
+    surface_target: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    tau_start: int = 1,
+    tau_end: int = 4,
+) -> torch.Tensor:
+    """L1 loss on the per-point magnitude error of the wall-shear-stress vector.
+
+    surface_pred / surface_target: [B, N, C] (C >= 4 with cp at 0 and tau_x,y,z at 1:4).
+    mask: [B, N] boolean. Returns mean( |‖τ_pred‖₂ − ‖τ_gt‖₂| ) over valid points.
+    Mirrors the empty-batch guard in ``masked_mse`` so the surface-curriculum
+    case (B with N_surf=0) and a fully-masked batch both contribute a zeroed
+    differentiable term instead of NaN.
+    """
+    if surface_pred.numel() == 0 or surface_pred.shape[1] == 0:
+        return surface_pred.sum() * 0.0
+    tau_pred = surface_pred[..., tau_start:tau_end]
+    tau_gt = surface_target[..., tau_start:tau_end]
+    mag_pred = torch.linalg.vector_norm(tau_pred, dim=-1)
+    mag_gt = torch.linalg.vector_norm(tau_gt, dim=-1)
+    mask_float = mask.to(device=surface_pred.device, dtype=surface_pred.dtype)
+    per_point = torch.abs(mag_pred - mag_gt) * mask_float
+    valid = mask_float.sum()
+    if bool(valid.detach().cpu().item() > 0):
+        return per_point.sum() / valid.clamp_min(1.0)
+    return surface_pred.sum() * 0.0
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
