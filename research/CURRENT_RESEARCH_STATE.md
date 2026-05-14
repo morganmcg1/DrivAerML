@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~15:15 UTC)
+- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~15:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
@@ -117,10 +117,14 @@ All 4 Wave 27 PRs failed at EP3 with val_abupt 27–32% (4× above gate). See Wa
 |----|---------|------------|--------|
 | **#1109** | edward | **τ_z focal loss α=2.0** (upweight hard high-shear surface points via focal modulation) | EP3 gate pending |
 
-### Wave 28 — launched 2026-05-14 ~15:00Z
+### Wave 28 — launched 2026-05-14 ~15:00Z–15:45Z
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
 | **#1110** | askeladd | **OHEM surface top-20% mining** — supplementary loss `L += 0.5 × L_hard_top20pct`; 2-ep warmup | Assigned; training not yet started |
+| **#1111** | fern | **GradNorm + vol-curriculum (curriculum-compatible)** — adaptive task balancing with schedule intact; freeze-guard at EP3/EP6/EP9; `--use-gradnorm --gradnorm-alpha 0.12` | Assigned; training not yet started |
+| **#1112** | frieren | **WSS magnitude + direction decomposition heads (supplementary additive)** — `log(1+‖τ‖)` mag loss + cosine dir loss; λ_mag=0.1, λ_dir=0.05; never replaces base MSE | Assigned; training not yet started |
+| **#1113** | nezuko | **SDF-stratified curvature-weighted surface sampling** — oversample high-curvature / high-WSS surface regions; `--surface-importance-alpha 3.0 --surface-importance-mode curvature` | Assigned; training not yet started |
+| **#1114** | tanjiro | **Learnable WSS channel loss weights** — learn w_x, w_y, w_z jointly with model (not fixed 1.5/2.0); softplus-parameterised; LR=1e-3 weight group; targets tau_z | Assigned; training not yet started |
 
 ---
 
@@ -183,16 +187,17 @@ The PR #972 single-model SOTA W&B run `56bcqp3m` was trained with SDF-stratified
 
 ## Next-Wave Hypothesis Queue
 
-Wave 28 #1 is NOW IN FLIGHT (askeladd PR #1110). Remaining queue ordered by expected WSS impact + low complexity:
+Wave 28 is FULLY IN FLIGHT (PRs #1110–#1114, all 5 students). All 5 Wave 28 ideas have been assigned. Remaining queue for Wave 29:
 
 1. ~~**OHEM hard-example mining for high-WSS regions**~~ — **IN FLIGHT as PR #1110** (askeladd, Wave 28)
-2. **GradNorm + curriculum + freeze-on-transitions** — nezuko's PR #1095 follow-up #1; unify cheap-early-epochs advantage with adaptive task balancing; this time use curriculum-compatible vol schedule.
-3. **WSS magnitude + direction decomposition heads** — separate magnitude scalar head + 3-direction L2-normalised head, MSE on log(1+|τ|) + cosine loss on direction; must NOT replace base MSE loss (Wave 27 lesson: supplement, never replace).
-4. **SDF-stratified SURFACE sampling** — analogous to PR #972 vol-side, oversample high-curvature / high-WSS surface regions; could directly target tau_z at separation points.
-5. **Learnable WSS channel loss weights** — learn `w_x, w_y, w_z` jointly with model (not fixed 1.5/2.0); backprop through weights; targets tau_z systematically.
+2. ~~**GradNorm + curriculum + freeze-on-transitions**~~ — **IN FLIGHT as PR #1111** (fern, Wave 28)
+3. ~~**WSS magnitude + direction decomposition heads**~~ — **IN FLIGHT as PR #1112** (frieren, Wave 28)
+4. ~~**SDF-stratified SURFACE sampling**~~ — **IN FLIGHT as PR #1113** (nezuko, Wave 28)
+5. ~~**Learnable WSS channel loss weights**~~ — **IN FLIGHT as PR #1114** (tanjiro, Wave 28)
 6. **Multi-scale surface attention** — second surface encoder at 0.5× token density to capture macro-flow features.
 7. **WSS-loss-aware EMA half-life** — vary `--ema-decay` so EMA captures late-training WSS-specialised weights better.
 8. **Heteroscedastic WSS loss** — model both mean and variance per surface point; downweight high-aleatoric regions.
+9. **τ_z frequency analysis** — Fourier decompose tau_z predictions vs GT to find spatial frequency bands where error is concentrated; use to motivate loss or architecture changes.
 
 ⚠️ Hypotheses #6-#8 from Wave 27 are **permanently retired** (yaw aug, magnitude penalty, rel_l2, normal-frame rotation all demonstrated catastrophic failure). Do not reassign.
 
