@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~00:20Z)
+- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~07:00Z)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
@@ -98,25 +98,26 @@ All new runs MUST use the corrected dataset path and `--data-root` flag (not `--
 
 ---
 
-## Active WIP PRs (all on corrected dataset, Round 25+)
+## Active WIP PRs (all on corrected dataset, Round 26)
 
-| PR | Student | Hypothesis | W&B Run | Status | WSS Relevance |
-|----|---------|------------|---------|--------|--------------|
-| #1067 | thorfinn | RFF octave ladder EP30 (sigmas 1.0–16.0) | `0zutsus4` | EP~19/30, val_abupt=6.346% ← projected EP30 ~6.23% | Medium |
-| #1075 | tanjiro | EMA decay=0.9995 start-step=2000 | `9i1uu66t` | EP4 screen started | Medium |
-| #1078 | alphonse | Asymmetric eval 131k surface (2× resolution at inference) | running | 30-ep run started (EP1 ~95 min) | Medium |
-| #1081 | askeladd | SLW=3.0 full 30-ep re-run (Arm B slw=4.0 KILLED EP1) | multi-run | Arm A re-run in progress | Medium |
-| #1084 | edward | Surface curvature features H+K for WSS | TBD | Draft cleared, starting | High |
-| #1085 | frieren | Adaptive per-point WSS loss via surface curvature | TBD | Draft cleared, starting | High |
-| #1089 | nezuko | GradNorm ema_proxy α=2.0 full EP30 | `goh7mght` | EP3 passed (6.666%), continuing to EP5 | High |
-| #1090 | fern | GradNorm-partial (sp/vp/tau_x only, freeze tau_y/tau_z) | `g2o80osc` | EP1 ~8% through | High |
+| PR | Student | Hypothesis | Status | WSS Relevance |
+|----|---------|------------|--------|--------------|
+| #1078 | alphonse | Asymmetric eval surface 131k (2× WSS resolution at inference) | Fresh 30-ep restart after checkpoint/EMA loss; running | Medium |
+| #1081 | askeladd | Surface-loss-weight sweep (slw=3.0, full 30-ep) | Arm A EP4 val_abupt=6.532% — excellent trajectory, 0.247pp from SOTA | Medium |
+| #1094 | frieren | Surface-normal frame WSS prediction (local τ frame) | Draft cleared, launched without SDF flags | High |
+| #1095 | nezuko | GradNorm α=2.0 ema_proxy, fixed vol points (no curriculum) | EP3 confirmed, gate overridden, continuing | High |
+| #1096 | edward | WSS tangent frame features e1, e2 surface input augmentation | Draft cleared, launched without SDF flags | High |
+| #1097 | tanjiro | WSS direction loss: cosine similarity penalty on τ vector | GPU kill confirmed, Arm A launching | High |
+| #1099 | fern | WSS-targeted greedy ensemble reselection (`--greedy-metric val_WSS`) | Phase 1 caching in progress (~396s/candidate) | **Direct WSS** |
+| #1100 | thorfinn | Capacity uplift — model-slices 256 vs PR #972 baseline 128 | Draft cleared, launching | Medium |
 
 **Key WSS-relevant active PRs:**
-- **PR #1089 (nezuko GradNorm ema_proxy):** α=2.0, EP3 val_abupt=6.666%, excellent trajectory. EP5 gate ≤7.5%. If this stabilizes to ~6.0% by EP10, it will be the cleanest GradNorm win yet.
-- **PR #1090 (fern GradNorm-partial):** Restricts GradNorm balancing to sp/vp/tau_x only, freezes tau_y/tau_z at their explicit weights (1.5×/2.0×). Tests whether letting GradNorm interfere with tau_y/tau_z hurt the #1058 experiment.
-- **PR #1084 (edward curvature features):** H+K surface curvature as extra input features for WSS prediction — addresses the root cause (model lacks geometric signal about high-curvature regions where WSS is hardest).
-- **PR #1085 (frieren curvature-adaptive WSS loss):** Upweights loss at high-curvature surface points where WSS prediction is most difficult.
-- **PR #1067 (thorfinn RFF octave ladder):** Extended 30-ep confirmation run. At EP19 val_abupt=6.346% — likely new best single-model if trajectory holds to EP30 projection of ~6.23%.
+- **PR #1099 (fern WSS-targeted ensemble):** Reselects greedy ensemble members optimizing for val_WSS rather than val_abupt. Most direct attack on the WSS gap — should produce a Pareto-optimal ensemble that respects the test_vol_p ≤ 3.643% constraint.
+- **PR #1097 (tanjiro WSS direction loss):** Adds a cosine-similarity penalty on the τ vector direction, decoupled from magnitude. Targets tau_z directly by making the model learn orientation explicitly.
+- **PR #1094 (frieren surface-normal frame):** Reformulates WSS prediction in the local normal/tangent/binormal frame. Removes the cross-axis coupling that biases tau_z error.
+- **PR #1096 (edward tangent frame features):** Adds explicit e1, e2 tangent basis vectors as surface input features. Provides the model with the geometric scaffolding needed to predict τ in the right frame.
+- **PR #1095 (nezuko GradNorm fixed-vol):** Tests whether GradNorm gains hold when vol curriculum is removed, isolating the loss-balancing effect from the curriculum effect.
+- **PR #1081 (askeladd SLW=3.0):** Strong trajectory at EP4 (val_abupt=6.532% vs SOTA 6.285%). If EP30 holds gradient, could be a clean single-model win.
 
 ---
 
