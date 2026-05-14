@@ -1,3 +1,39 @@
+## 2026-05-14 22:42 — PR #1078: Asymmetric eval surface 131k 2× WSS resolution at inference only (alphonse) — CLOSED (HYPOTHESIS FALSIFIED, TEST FLOORS REGRESS)
+
+- **Branch**: `alphonse/asymmetric-eval-surface-131k` (closed)
+- **W&B run**: `1gzeeios` (rank 0, EP17 terminal, EP16 best-val EMA)
+- **Hypothesis**: Doubling eval surface points from 65k to 131k at inference time (train remained 65k) would extract 2× spatial resolution on WSS prediction quality without retraining cost. Projection from PR #972's val→test ratio 0.935 anticipated test_WSS≈6.676% (~5bp under SOTA 6.727%).
+
+### Test metrics (EP16 best-val EMA checkpoint, 50 test cases)
+
+| Metric | This PR | Target / floor | Δ |
+|---|---:|---:|---:|
+| test_WSS | **6.9955%** | < 6.727% (SOTA) | **+26.8bp worse** |
+| test_vol_p | **3.6795%** | ≤ 3.643% (floor) | +3.6bp above floor |
+| test_SP | **3.8547%** | ≤ 3.577% (floor) | +27.8bp above floor (+7.8% rel) |
+| val_abupt | 6.3164% | ≤ 6.20% | +11.6bp above target |
+| val_WSS | 7.1399% | (n/a) | — |
+| val_vol_p | 3.7162% | (n/a) | better than tay-SOTA 3.818% |
+
+### Per-axis WSS (test, EP16)
+- test_tau_x: 6.190% | test_tau_y: 7.635% | test_tau_z: 9.073%
+- Same channel ordering as val; 131k eval does NOT preferentially benefit worst axis
+
+### Diagnostic findings
+
+1. **val→test ratio was 1.020, not 0.935** as projected from PR #972 — falsifies the synthetic projection. val benefits more from 131k eval than test does. Plausible mechanism: 34 val cases get error-structure resolution boost from finer surface; 50 OOD test cases don't.
+2. **17 full cosine epochs completed cleanly on 18h budget** at ~62 min/ep — validates `SENPAI_TIMEOUT_MINUTES=1100` recipe for other students. Adopted by frieren #1121.
+3. **val_abupt=6.316% is the strongest no-SDF tay single-model result on 17 epochs** — confirms capacity-uplift partially substitutes for SDF importance sampling but tops out around 6.31% on this stack.
+4. **tau_y led WSS gains** (EP9→EP16 −0.092pp), confirming the read that 131k eval pays off most where transverse shear was the limiter. tau_z stayed flat/regressed (EP9 best 9.660% → EP17 9.700%).
+
+### Paper-relevant finding
+
+**Eval-resolution multipliers do NOT translate cleanly val→test.** Going forward, advisor SOTA projections should anchor on test results from comparable-recipe runs, not val × historical ratio. The 0.935 ratio from PR #972 is recipe-specific (SDF importance sampling stack), not transferable.
+
+### Reassignment
+
+Alphonse → **SDF importance sampling port to tay** — PR #972's `--sdf-importance-sampling --sdf-alpha 4.0` is the single largest known-working lever NOT on tay. Asymmetric eval result confirms capacity-uplift alone tops out around 6.31% val_abupt; SDF importance sampling drove PR #972 to 6.126%. Time to bring the lever to tay.
+
 # SENPAI Research Results
 
 ## 2026-05-14 22:00 — PR #1112: WSS magnitude+direction decomposition heads (frieren) — CLOSED (TEST FLOORS REGRESS, BUDGET-TRUNCATED IDENTICAL TO #1111)
