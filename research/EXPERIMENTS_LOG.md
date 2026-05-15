@@ -1,3 +1,43 @@
+## 2026-05-15 19:00 — PR #1125: Spatial-prior α=10 + 18h budget (nezuko) — CLOSED (3/4 gate fail; test_vol_p PASS is fleet-best signal, α=10 too aggressive)
+
+- **Branch**: `nezuko/spatial-prior-alpha10-18h` (closed)
+- **W&B run**: posted in PR comments by nezuko (terminal SENPAI-RESULT confirmed `pending_arms=false`)
+- **Hypothesis**: Stronger spatial-prior oversample (α=10 vs prior α=5) at 18h budget tilts loss toward near-vehicle samples where most error concentrates → expects test_WSS improvement at convergence.
+
+### Terminal metrics (test, single-model, 50 cases)
+
+| Metric | This PR | PR #972 single-model SOTA | Delta | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.390% | 6.126% | +0.264pp | misses |
+| **test_WSS** | **7.106%** | **6.727%** | **+0.379pp** | **misses** ❌ |
+| **test_vol_p** | **3.634%** | 3.643% (floor) | **−0.009pp** | **PASS** (fleet-best margin) ✅ |
+| **test_SP** | **3.954%** | 3.577% (floor) | **+0.377pp** | **floor regress** ❌ |
+| test τz/τx | **1.449** | — | — | sub-structural (below 1.50 band) |
+
+**Decision: CLOSE.** Fails 3/4 merge gates. test_SP +0.377pp floor regress is the dealbreaker.
+
+### Mechanism — α=10 over-tilted near-vehicle attention
+
+- α=5 from prior winning configurations remains the sweet spot
+- α=10 over-weights near-vehicle samples at expense of far-field structural learning
+- 18h schedule did not recover what α tilt damaged
+- The test_SP regression is the clearest signal that spatial weighting reaches diminishing returns past α=5
+
+### Data preserved as research artifact
+
+1. **test_vol_p = 3.634% is fleet-best on volume pressure** (margin 0.009pp below baseline). Spatial-prior is an **orthogonal mechanism for vol_p improvement** worth keeping in the toolbox for future stacking experiments.
+2. **val→test τz/τx compression continues** — val 1.549 → test 1.449 (0.10 unit compression). Now confirmed across tanjiro #1124, nezuko prior runs, and this run. Distribution shift between val and test partially reduces τ_z bottleneck consistently.
+
+### τ_z structural finding — NINEFOLD CONFIRMATION
+
+Nezuko #1125 closes as the 9th mechanistically-distinct mechanism converging τz/τx ratio to the 1.40-1.57 structural band. Spatial-prior tilt joins (loss weighting, sampling, output capacity, EMA, mag-only decomp, per-channel heads, SDF FAR-field, decoder depth). **τ_z bottleneck remains backbone-representation-side and requires architectural pivot.**
+
+### Reassigned as
+
+- Nezuko → **Wave 30 H2: Normal Spectral Encoding** — apply StringSeparableEncoding-style Fourier spectral basis to surface normals (nx, ny, nz) so they get the same multi-frequency representation as positions. ~35 LOC change in `model.py`.
+
+---
+
 ## 2026-05-15 16:30 — PR #1124: EMA decay 0.9995 + 18h budget (tanjiro) — CLOSED (slow-decay hypothesis REFUTED; fails all 4 merge gates)
 
 - **Branch**: `tanjiro/ema-slow-decay-18h` (closed)

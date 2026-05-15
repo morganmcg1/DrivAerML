@@ -1,10 +1,78 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~12:45 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~19:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~16:30Z) — tanjiro #1124 CLOSED terminal, Wave 30 architectural pivot launched (PR #1134 H6 local-frame WSS head)
+## Latest invocation actions (2026-05-15 ~19:00Z) — nezuko #1125 CLOSED terminal, Wave 30 second architectural experiment launched (PR #1136 H2 normal spectral encoding)
+
+### Actions this invocation
+
+- **CLOSED PR #1125 (nezuko spatial-prior α=10)** at terminal.
+  - Test metrics: test_WSS=**7.106%** (+0.379pp miss vs 6.727%), test_vol_p=**3.634%** (PASS, fleet-best margin 0.009pp below floor), test_SP=**3.954%** (+0.377pp floor regress), val_abupt=6.390%.
+  - **Fails 3/4 merge gates.** Spatial-prior α=10 was too aggressive vs the prior α=5 sweet spot. Test_SP +0.377pp is the dealbreaker.
+  - Test τz/τx = **1.449** (val 1.549) — val→test compression of 0.10 units consistent with tanjiro #1124. 9th confirmation of the structural bottleneck.
+  - **Signal preserved**: test_vol_p=3.634% is fleet-best on volume pressure — spatial-prior remains an orthogonal mechanism for vol_p improvement worth stacking later. α=5 remains the sweet spot.
+
+- **POSTED check-in on PR #1133 (frieren per-axis mag decomp)** to clear `stale_wip` flag. W&B run `5l9i6fjn` verified alive at EP2.72, step 29,268, heartbeat 0.2 min — false-positive between-epoch silence. Open question to frieren on whether `mag_z_loss`/`mag_xy_loss`/`calib_ratio` in W&B summary are epoch-boundary-only logging (grads on aux heads are non-zero, suggesting the heads ARE training).
+
+- **Assigned PR #1136 (nezuko: Wave 30 H2 normal spectral encoding)** — SECOND architectural experiment of Wave 30, runs in parallel with tanjiro #1134 H6.
+  - **Hypothesis**: Surface normals (nx, ny, nz) currently pass through a single linear projection while positions (x, y, z) get full per-axis spectral basis via `StringSeparableEncoding`. Closing this obvious asymmetry — apply the same spectral encoding to normals — should improve orientation-conditional features, especially for τ_z (which depends most heavily on patch orientation).
+  - **Theoretical basis**: Fourier features for directional quantities on the sphere are classical in physics. Recent geometric DL work (NequIP, Equiformer, Clifford Neural Layers) consistently shows spectral treatment of directional inputs outperforms linear projection on directional output quantities.
+  - **Implementation**: ~35 LOC in `model.py`, single CLI flag `--normal-spectral-encoding`. Volume path unchanged (only SDF, no normals). Surface extras split into normals (indices 3:6) + area (index 6:7); spectral encoding applied to normals, area concatenated as-is.
+  - **Falsifiability**: MAJOR WIN if test τz/τx ≤ 1.40. MERGE if test_WSS < 6.727% with both floors. FAIL if τz/τx stays > 1.47 (rules out input-side orientation encoding as the bottleneck).
+  - **Orthogonality to H6**: H6 tests output-side decomposition (local-frame WSS head); H2 tests input-side representation (normal Fourier features). If BOTH fail, the bottleneck is in the middle (backbone attention) → H5 Y-architecture next.
+
+### Wave 30 fleet status (2 architectural experiments active in parallel)
+
+| PR | Student | Mechanism | Tier | EP/Status |
+|----|---------|-----------|------|-----------|
+| #1134 | tanjiro | H6: local-frame WSS head (τ·n=0 by construction) | output-side | EP0 (just launched) |
+| #1136 | nezuko | H2: normal spectral encoding (StringSep on nx,ny,nz) | input-side | EP0 (just launched) |
+
+Wave 29 mid-late fleet still in flight:
+
+| PR | Student | Mechanism | EP/Status |
+|----|---------|-----------|-----------|
+| #1116 | edward | per-channel WSS output heads | ~EP10+ (terminal imminent) |
+| #1122 | alphonse | SDF FAR-field α=2.0 (only SDF stack) | EP10 truncate due |
+| #1126 | fern | surface_out depth=4 | ~EP10+ (terminal soon) |
+| #1127 | askeladd | surface_loss warmup curriculum | ~EP8 |
+| #1128 | thorfinn | τ_z loss weight 3.0 | terminal imminent (EP13) |
+| #1133 | frieren | per-axis WSS mag decomp | EP2.72 |
+
+**Zero idle. Eight students all running.**
+
+### Wave 30 architectural roadmap progress
+
+| Rank | ID | Hypothesis | LOC | Risk | Status |
+|------|----|------------|-----|------|--------|
+| 1 | H6 | Local-frame WSS head (τ·n=0 by construction) | ~65 | LOW | **tanjiro PR #1134 ACTIVE** |
+| 2 | H2 | Normal spectral encoding (Fourier basis on normals) | ~35 | LOW | **nezuko PR #1136 ACTIVE** |
+| 3 | H5 | Y-architecture dual-backbone (split cp vs WSS branches) | ~80 | MEDIUM | reserve for next idle |
+| 4 | H3 | Normal-aligned slice groups (soft routing) | ~50 | MEDIUM | reserve |
+| 5 | H4 | Hard normal routing (dedicated τz slice partition) | ~70 | MEDIUM | reserve |
+| 6 | H1 | Cylindrical coords (r, θ, z) input | ~35 | LOW | reserve |
+| 7 | H7 | Normal-prediction auxiliary head | ~80 | MEDIUM | reserve |
+| 8 | H8 | Contrastive orientation regularization | ~80 | MEDIUM | reserve |
+
+Full details in `research/RESEARCH_IDEAS_2026-05-15_18:00.md`.
+
+### Next-highest-EV gates (post nezuko #1125 close + H2 launch)
+
+| ETA | Event | Action |
+|-----|-------|--------|
+| ~20:00Z | thorfinn #1128 EP13 terminal | First merge-eligible Wave 29 single-model candidate (val_abupt currently 6.31%) |
+| ~20:00Z | fern #1126 EP13 + test eval | Decoder-depth verdict (val_abupt 6.36% at EP9, new best) |
+| ~20:00Z | edward #1116 EP13 terminal | Per-channel heads verdict |
+| ~20:45Z | alphonse #1122 EP10 + test eval | SDF FAR-field verdict |
+| ~21:00Z | askeladd #1127 EP13 terminal | Surface-loss warmup curriculum verdict |
+| ~next day | tanjiro #1134 EP3 gate | First Wave 30 H6 architectural verdict |
+| ~next day | nezuko #1136 EP3 gate | First Wave 30 H2 architectural verdict |
+
+---
+
+## Prior invocation actions (2026-05-15 ~16:30Z) — tanjiro #1124 CLOSED terminal, Wave 30 architectural pivot launched (PR #1134 H6 local-frame WSS head)
 
 ### Actions this invocation
 
