@@ -8,6 +8,38 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-15 16:44 UTC — PR #1115 CLOSED: WSS H1 wind-exposure proxy (dl24-frieren, `3rja7gw6`)
+
+- **Branch:** `dl24-frieren/wss-wind-exposure-proxy`
+- **W&B run:** `3rja7gw6` (21.4h single run, no wave-2 — sibling dirs were rank shards)
+- **Hypothesis:** Adding `wind_exposure=max(0,-nx)` and `abs_cross_normal=|ny|` as extra surface input channels (7→9) would directly encode the cross-flow attack-angle signal targeting τ_y/τ_z dominant error axes.
+
+### Test metrics (best-val EP9 EMA checkpoint)
+
+| Metric | H1 | SOTA #972 | Δ | Verdict |
+|--------|----:|----:|---:|---|
+| **test_abupt (PRIMARY)** | 5.994% | 5.844% | **+0.150pp** | ❌ Regression |
+| test_surf_p (FLOOR) | 3.705% | 3.577% | **+0.128pp** | ❌ **FLOOR BREACH** |
+| **test_vol_p (FLOOR)** | **4.080%** | 3.643% | **+0.437pp** | ❌ **FLOOR BREACH** (severe) |
+| **test_wss (WSS target)** | 6.767% | 6.727% | +0.040pp | ❌ Slight regression |
+| τ_x | 5.975% | 5.971% | +0.004pp | tied |
+| τ_y | 7.408% | 7.362% | +0.046pp | slightly worse |
+| τ_z | 8.801% | 8.747% | +0.054pp | slightly worse |
+
+### Mechanism — identical to H2 #1117 failure
+
+Adding 2 surface input channels (input_dim 7→9) → dilutes per-token feature budget → gradnorm task-share imbalance under-weights volume head → val_vol_p drifts up from EP10 onward (4.28→5.02 in val). The wind-exposure signal itself is geometrically reasonable (EP0 audit confirmed `wind_exposure∈[0,1]`, mean≈0.16), but the *injection point* (raw input channels) breaks the SOTA stack's task-share invariant.
+
+### Key findings
+
+1. **Robust observation: raw additional surface input channels via `surface_input_dim` is the wrong injection point for any WSS-targeting feature.** Both H1 (wind-exposure) and H2 (curvature) exhibit the *identical* failure pattern. The shared mechanism is gradnorm task-share imbalance, not any specific feature defect.
+2. **Strong corroboration of H5 (#1132) mechanism.** H5 takes H2's *same curvature signal* via zero-init additive attention bias (no input-dim change). At EP9 live: H5 leads H2 across all metrics (val_abupt 6.232 vs 6.288, val_wss 6.938 vs 6.991, val_vol_p 4.051 vs 4.136). Zero-init bias method bypasses the gradnorm imbalance.
+3. **Student's terminal post-mortem** flagged 5 useful follow-ups (normal-frame loss, smaller per-axis weights, --volume-loss-weight 1.5 floor protection, region-weighted MSE, per-region diagnostic). Queue as candidates for the next wave.
+
+Decision: closed as NOT-a-winner.
+
+---
+
 ## 2026-05-15 ~08:00 UTC — PR #1117 CLOSED: WSS H2 surface curvature features (dl24-tanjiro, `b5g7776p`)
 
 - **Branch:** `dl24-tanjiro/wss-curvature-features`
