@@ -1,3 +1,41 @@
+## 2026-05-15 01:13 — PR #1114: Learnable WSS channel loss weights (tanjiro) — CLOSED (MECHANISM NULL AT CONVERGENCE)
+
+- **Branch**: `tanjiro/learnable-wss-channel-weights` (closed)
+- **W&B runs**: `q95b2awa` (debug, softplus+L2→0 collapse), `jczuycas` (Kendall, killed EP1), `hqciq900` (v2 softplus+L2-to-init, terminal at EP3)
+- **Hypothesis**: Replace hand-tuned WSS channel weights [1.0, 1.5, 2.0] with softplus-parameterised learnable weights + dedicated optimizer param group at lr=1e-3, to find a better τ_z weighting than the prior.
+
+### Terminal results (run `hqciq900`, 3-EP budget-truncated)
+
+| Metric | hqciq900 | mempfubx (matched 3-EP) | Current SOTA | Δ vs SOTA |
+|---|---:|---:|---:|---:|
+| val_abupt | **7.066%** | 7.465% (−0.40pp ✓) | 5.7452% (#1102) | +1.32pp |
+| **test_WSS** | **7.726%** | 8.331% (−0.60pp ✓) | 6.3263% (#1102) | **+1.40pp** |
+| test_vol_p | 4.026% | 4.039% | 3.5397% | +0.49pp |
+| test_SP | 4.387% | 4.477% | 3.3529% | +1.03pp |
+| test_tau_z | 9.814% | 10.134% | 8.2585% | +1.56pp |
+
+### Mechanism finding — learnable weights converge to baseline
+
+**Weight trajectory:** init `[1.0, 1.5, 2.0]` → mid-EP1 drift down to `[0.55, 0.76, 1.00]` (–46% to –50%, gradient wants to reduce WSS capacity) → EP2/EP3 quadratic well pulls weights back → EP3 final `[0.979, 1.452, 1.937]` (within 3% of init).
+
+**Regularization balance:**
+- EP1 transient (step 2500): `wss_reg=0.037` dominant over per-channel weighted losses (≈0); reg is the active force pulling weights back.
+- EP3 (step 30377): `wss_reg=0.0001` vs `Σweighted_wss=0.041` (reg recessive at 0.25% of weighted loss); equilibrium at ~init.
+
+**Hypothesis falsified at convergence:** the +0.40pp val_abupt vs matched 3-EP baseline is from the EP1 transient drift acting as an implicit volume-first curriculum (capacity briefly shifted to vol/sp, then restored to baseline by reg), NOT from a better learned weight setting. Steady-state mechanism is null.
+
+### Methodology learnings (preserved)
+
+1. **Kendall heteroscedastic uncertainty `L_i / (2σ_i²) + log σ_i` INVERTS the hypothesis** — it down-weights large-train-loss channels (which we WANT to up-weight in the test-metric direction). vol_p 16.71% → 24.95% at EP1 with Kendall. **Permanently retired.**
+2. **Original softplus + L2-toward-zero collapses trivially** — by EP2 weights crashed to ~0.01. The L2→0 reg accelerates collapse rather than preventing it. **Permanently retired.**
+3. **v2 softplus + L2-reg-toward-init is the correct formulation** for any future learnable-weights experiment (quadratic well centered at init prevents collapse and bounds drift).
+
+### Wave 29 follow-up queued
+
+- **Warmup-epochs=30 control** (frozen baseline weights, identical training setup) — isolates "is the +0.4pp matched-baseline win from the mechanism or from training-setup variance?"
+
+---
+
 ## 2026-05-14 23:45 — PR #1100: Capacity uplift slices=256 (thorfinn) — CLOSED (TEST FLOORS REGRESS, NO-SDF STACK CEILING CONFIRMED)
 
 - **Branch**: `thorfinn/model-slices-256-capacity` (closed)
