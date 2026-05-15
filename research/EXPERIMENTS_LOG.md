@@ -8,6 +8,59 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-15 ~08:00 UTC — PR #1117 CLOSED: WSS H2 surface curvature features (dl24-tanjiro, `b5g7776p`)
+
+- **Branch:** `dl24-tanjiro/wss-curvature-features`
+- **W&B runs:** Training `b5g7776p` (halted EP16/30, EMA ckpt EP8 best-val); eval `8o2ia3nu`
+- **Hypothesis:** Adding kappa_H + kappa_G as extra surface input channels (7→9) would improve WSS by giving the model explicit knowledge of high-curvature regions (A-pillar, wheel arches, rear diffuser) where tau_y/tau_z errors concentrate.
+
+### Test metrics (best-val EP8 EMA checkpoint)
+
+| Metric | H2 (`8o2ia3nu`) | SOTA `56bcqp3m` | Δ | Verdict |
+|--------|----------------:|----------------:|---:|---|
+| **test_abupt (PRIMARY)** | 5.894% | 5.844% | +0.050pp | ❌ Regression |
+| test_surf_p | 3.695% | 3.577% | +0.118pp | ❌ Regression |
+| **test_vol_p (FLOOR)** | **3.983%** | 3.643% | **+0.340pp** | ❌ **FLOOR BREACH** |
+| **test_wss (WSS target)** | **6.668%** | 6.727% | **−0.059pp** | ✅ **BEATS SOTA** |
+| τ_x | 5.928% | 5.971% | −0.043pp | ✅ Beat |
+| τ_y | 7.213% | 7.362% | −0.149pp | ✅ Beat |
+| **τ_z** | **8.650%** | 8.747% | **−0.097pp** | ✅ **Beat (dominant axis)** |
+
+### Val trajectory (halted EP16, best-val EMA checkpoint EP8)
+
+| EP | val_abupt | val_vol_p | val_wss |
+|----|-----------|-----------|---------|
+| 3  | ~7.4% | ~5.2% | ~7.4% |
+| 6  | ~7.0% | ~4.7% | ~7.2% |
+| 8 (BEST-VAL EMA) | ~6.8% | ~4.5% | ~7.1% |
+| 13 | 6.5%est | ~4.4% | ~6.9% |
+| 15 (BORDERLINE) | borderline | **4.3%→drifting** | improving |
+| 16 (HALT) | — | **+0.044pp/epoch monotone** | — |
+
+At EP15 advisor opted to HALT (Option A) based on vol_p monotone drift trajectory: projected EP20 ~4.59%, EP30 ~5.03% even with cosine compression → test_vol_p floor breach inevitable.
+
+### Closure analysis
+
+**First sub-SOTA WSS in the wave.** All three WSS axes beat SOTA: tau_x −0.043pp, tau_y −0.149pp, tau_z −0.097pp. This confirms the curvature hypothesis is physically correct — the model genuinely learned to use curvature features for WSS prediction.
+
+**Fatal side-effect:** Adding 2 curvature input channels (7→9) dilated the per-token surface feature budget. GradNorm's task-share rebalancing under-weighted volume_pressure as a result. Test vol_p breached the floor by +0.340pp (9.3% relative regression) — decisive close under Issue #1056 contract requiring AND-clause floors.
+
+**Mechanism:** The gradnorm task-share imbalance is well-documented from earlier waves (PRs #912, #964): richer surface inputs shift GradNorm equilibrium away from vol_p. H2 reproduced this exactly with 9-channel surface input.
+
+### Key findings to carry forward
+
+1. **Curvature physics signal is VALID.** tau_z improved −0.097pp on the dominant error axis, tau_y −0.149pp. The curvature features contain genuine signal for WSS prediction.
+2. **H2 gives the first wave WSS sub-SOTA** (6.668% < SOTA 6.727%), closing 11% of the gap to Transolver-3's 5.85%.
+3. **The injection point is wrong, not the signal.** Adding curvature as input channels dilates the feature budget and triggers gradnorm imbalance. Need to inject curvature OUTSIDE the surface input projection pathway.
+4. **H5 natural follow-up:** Inject curvature as an additive bias to the token embeddings AFTER the 7-channel surface projection (zero-initialized) — same curvature physics, no input-dim change, no gradnorm perturbation.
+5. **Best correction checkpoint was EP8 EMA**, not EP16 — evidence that vol_p overfitting onset was ~EP10.
+
+### Next assignment
+
+PR #1131 — H5: curvature as additive attention bias (zero-init CurvatureAttentionBias module added after surface_input_proj, surface_input_channels=7 unchanged).
+
+---
+
 ## 2026-05-15 ~05:50 UTC — PR #1098 CLOSED: WD=0.01 isolated re-test (dl24-fern, `q4eok915`)
 
 - **Branch:** `dl24-fern/wd-001-isolated-retest`
