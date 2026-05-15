@@ -172,6 +172,49 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+def compute_wind_exposure_features(normals: torch.Tensor) -> torch.Tensor:
+    """Per-token wind-exposure geometry from surface unit normals.
+
+    normals: [..., 3] unit normal (nx, ny, nz). Returns [..., 3]:
+        wind_exposure    = max(0, -nx)   one-sided frontal cross-flow attack
+        abs_cross_normal = |ny|          lateral cross-flow attack
+        wind_mag         = sqrt(we^2 + acn^2)  combined magnitude
+
+    All three channels are y-reflection invariant by construction (|-ny|=|ny|;
+    nx unaffected). For unit normals each channel lies in [0, sqrt(2)].
+    """
+    nx = normals[..., 0:1]
+    ny = normals[..., 1:2]
+    wind_exposure = torch.clamp(-nx, min=0.0)
+    abs_cross_normal = torch.abs(ny)
+    wind_mag = torch.sqrt(wind_exposure * wind_exposure + abs_cross_normal * abs_cross_normal)
+    return torch.cat([wind_exposure, abs_cross_normal, wind_mag], dim=-1)
+
+
+class WindExposureAttentionBias(nn.Module):
+    """Zero-init projection of 3-channel wind-exposure → hidden_dim token bias (H6).
+
+    Added after the 7-channel surface input projection so ``surface_input_channels``
+    stays at 7 and the per-token feature/GradNorm budget is preserved. The final
+    Linear is zero-initialised so the module contributes exactly 0 at step 0,
+    matching the SOTA baseline forward pass identically.
+    """
+
+    def __init__(self, hidden_dim: int, wind_exposure_dim: int = 3):
+        super().__init__()
+        mid = max(hidden_dim // 8, 16)
+        self.net = nn.Sequential(
+            nn.Linear(wind_exposure_dim, mid),
+            nn.SiLU(),
+            nn.Linear(mid, hidden_dim),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, wind_exposure: torch.Tensor) -> torch.Tensor:
+        return self.net(wind_exposure)
+
+
 class UpActDownMlp(nn.Module):
     def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
         super().__init__()
@@ -315,6 +358,7 @@ class SurfaceTransolver(nn.Module):
         pe_kind: str = "sincos",
         pe_num_features: int = 16,
         pe_init_sigmas: list[float] | None = None,
+        use_wind_exposure_attention_bias: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -325,6 +369,12 @@ class SurfaceTransolver(nn.Module):
         self.pe_kind = pe_kind
         self.pe_num_features = pe_num_features
         self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
+        self.use_wind_exposure_attention_bias = use_wind_exposure_attention_bias
+        if use_wind_exposure_attention_bias and surface_input_dim < space_dim + 3:
+            raise ValueError(
+                "use_wind_exposure_attention_bias requires surface_input_dim >= "
+                f"{space_dim + 3} to include unit normals (got {surface_input_dim})"
+            )
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -364,6 +414,11 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        self.wind_exposure_attn_bias: WindExposureAttentionBias | None = (
+            WindExposureAttentionBias(hidden_dim=n_hidden)
+            if use_wind_exposure_attention_bias
+            else None
+        )
 
     def _encode_group(
         self,
@@ -401,14 +456,24 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    surface_x,
-                    project_features=self.project_surface_features,
-                    bias=self.surface_bias,
-                    placeholder=self.surface_placeholder,
-                )
+            surface_token_emb = self._encode_group(
+                surface_x,
+                project_features=self.project_surface_features,
+                bias=self.surface_bias,
+                placeholder=self.surface_placeholder,
             )
+            if self.wind_exposure_attn_bias is not None:
+                normals = surface_x[..., self.space_dim : self.space_dim + 3]
+                wind_exposure = compute_wind_exposure_features(normals).to(
+                    dtype=surface_token_emb.dtype
+                )
+                wind_bias = self.wind_exposure_attn_bias(wind_exposure)
+                if surface_mask is not None:
+                    wind_bias = wind_bias * surface_mask.unsqueeze(-1).to(
+                        dtype=wind_bias.dtype
+                    )
+                surface_token_emb = surface_token_emb + wind_bias
+            tokens.append(surface_token_emb)
             masks.append(surface_mask)
 
         if volume_x is not None:

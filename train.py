@@ -132,6 +132,7 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_wind_exposure_attention_bias: bool = False
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -235,6 +236,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        use_wind_exposure_attention_bias=config.use_wind_exposure_attention_bias,
     )
 
 
