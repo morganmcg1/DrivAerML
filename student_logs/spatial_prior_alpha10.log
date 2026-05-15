@@ -1,0 +1,394 @@
+W0515 02:41:29.474000 452125 torch/distributed/run.py:851] 
+W0515 02:41:29.474000 452125 torch/distributed/run.py:851] *****************************************
+W0515 02:41:29.474000 452125 torch/distributed/run.py:851] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0515 02:41:29.474000 452125 torch/distributed/run.py:851] *****************************************
+Device: cuda:0, DDP world_size=8
+Volume-points curriculum: ep0->16384, ep3->32768, ep6->49152, ep9->65536
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 casesDrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+DrivAerML: train=347657 views/400 cases, val=7295 views/34 cases, test=11091 views/50 cases
+Model: SurfaceTransolver grouped surface+volume (17.41M params)
+Surface channel weights: cp=1.0 tau_x=1.0 tau_y=1.5 tau_z=2.0
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024137-rp1op3z6
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank0
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/rp1op3z6
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024138-xpprgz8b
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank1
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/xpprgz8b
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024139-of9x0awu
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank2
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/of9x0awu
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run y5lforbj
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024140-y5lforbj
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank3
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/y5lforbj
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024141-cgowjoig
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank4
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/cgowjoig
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run jrdmjxlf
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024142-jrdmjxlf
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank5
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/jrdmjxlf
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024143-sveawoz1
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank6
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/sveawoz1
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: W&B API key is configured. Use `wandb login --relogin` to force relogin
+wandb: setting up run y803xlcc
+wandb: Tracking run with wandb version 0.26.1
+wandb: Run data is saved locally in /workspace/senpai/target/wandb/run-20260515_024145-y803xlcc
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank7
+wandb: ⭐️ View project at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: 🚀 View run at https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/y803xlcc
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank1]:[W515 02:41:47.624442271 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+/usr/local/lib/python3.10/dist-packages/torch/nn/functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at /build/pytorch/aten/src/ATen/native/layer_norm.cpp:344.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+[rank7]:[W515 02:41:47.881412864 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank4]:[W515 02:41:47.881989510 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank5]:[W515 02:41:47.896428889 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank3]:[W515 02:41:47.905049146 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/13:   0%|          | 1/10864 [00:01<5:12:47,  1.73s/it][rank2]:[W515 02:41:48.397053421 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+[rank6]:[W515 02:41:48.397889506 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+Epoch 1/13:   0%|          | 2/10864 [00:02<3:05:56,  1.03s/it][rank0]:[W515 02:41:48.920775768 reducer.cpp:1502] Warning: find_unused_parameters=True was specified in DDP constructor, but did not find any unused parameters in the forward pass. This flag results in an extra traversal of the autograd graph every iteration,  which can adversely affect performance. If your model indeed never has any unused parameters in the forward pass, consider turning this flag off. Note that this warning may be a false positive if your model has flow control causing later iterations to have unused parameters. (function operator())
+val_surface    loss=0.10073 abupt_axis_rel_l2_pct=28.9145 surface_p_mae=0.06144 volume_p_mae=33.39017 wall_shear_mae=0.31031 cases=34
+val_surface    loss=0.00834 abupt_axis_rel_l2_pct=8.2365 surface_p_mae=0.01580 volume_p_mae=9.27200 wall_shear_mae=0.08483 cases=34
+val_surface    loss=0.00646 abupt_axis_rel_l2_pct=7.2286 surface_p_mae=0.01355 volume_p_mae=8.04314 wall_shear_mae=0.07289 cases=34
+Volume-points curriculum: epoch 3 -> train_volume_points=32768 (was 16384)
+val_surface    loss=0.00577 abupt_axis_rel_l2_pct=6.8139 surface_p_mae=0.01261 volume_p_mae=7.72332 wall_shear_mae=0.06806 cases=34
+val_surface    loss=0.00560 abupt_axis_rel_l2_pct=6.7039 surface_p_mae=0.01229 volume_p_mae=7.62988 wall_shear_mae=0.06649 cases=34
+val_surface    loss=0.00547 abupt_axis_rel_l2_pct=6.6169 surface_p_mae=0.01209 volume_p_mae=7.53666 wall_shear_mae=0.06532 cases=34
+Volume-points curriculum: epoch 6 -> train_volume_points=49152 (was 32768)
+val_surface    loss=0.00531 abupt_axis_rel_l2_pct=6.5122 surface_p_mae=0.01185 volume_p_mae=7.43809 wall_shear_mae=0.06400 cases=34
+val_surface    loss=0.00524 abupt_axis_rel_l2_pct=6.4696 surface_p_mae=0.01176 volume_p_mae=7.37787 wall_shear_mae=0.06353 cases=34
+val_surface    loss=0.00519 abupt_axis_rel_l2_pct=6.4390 surface_p_mae=0.01167 volume_p_mae=7.33760 wall_shear_mae=0.06311 cases=34
+Volume-points curriculum: epoch 9 -> train_volume_points=65536 (was 49152)
+val_surface    loss=0.00513 abupt_axis_rel_l2_pct=6.4039 surface_p_mae=0.01160 volume_p_mae=7.29800 wall_shear_mae=0.06263 cases=34
+val_surface    loss=0.00513 abupt_axis_rel_l2_pct=6.3973 surface_p_mae=0.01161 volume_p_mae=7.28665 wall_shear_mae=0.06247 cases=34
+val_surface    loss=0.00512 abupt_axis_rel_l2_pct=6.3896 surface_p_mae=0.01156 volume_p_mae=7.27088 wall_shear_mae=0.06233 cases=34
+val_surface    loss=0.00512 abupt_axis_rel_l2_pct=6.3920 surface_p_mae=0.01154 volume_p_mae=7.26453 wall_shear_mae=0.06230 cases=34
+Training done in 839.1 min
+/usr/local/lib/python3.10/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+Best val: epoch 12, abupt_axis_mean_rel_l2_pct=6.3896
+wandb: updating run metadata
+wandb: updating run metadata
+wandb: updating run metadata
+wandb: updating run metadata
+wandb: updating run metadata
+wandb: updating run metadata
+wandb: updating run metadata
+wandb: uploading output.log
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: uploading history steps 70664-70664, summary
+wandb: uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: uploading history steps 70664-70664, summary
+wandb: uploading history steps 70664-70664, summary
+wandb: uploading output.log; uploading wandb-summary.json
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▁▁▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇█████
+wandb:                              lr ▁▁▁▁▁▁▁▁▁███████████▇▇▇▆▆▆▆▆▆▅▅▅▅▄▃▂▂▂▁▁
+wandb:             train/base_mse_loss █▇▂▄▄▂▂▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▃▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped ██████▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip █▅▇▅▇▂▁▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss ▄▂▂▁▂▂▁▁█▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁████████████████▇▆▆▆▆▆▆▅▅▅▃▃▃▃▂▂▂▂▁▁
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.02295
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15224
+wandb:             train/base_mse_loss 0.00314
+wandb:                train/epoch_loss 0.00613
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00574
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▇▇▇▇▇▇██
+wandb:                              lr ▁▁▁▁▁▁▁▁█████████████████▇▇▇▇▇▆▆▆▅▅▄▄▃▃▁
+wandb:             train/base_mse_loss █▂▂▃▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▃▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped ██████▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip ▇▆█▅▆▅▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss ▃█▇▇▂▂▄▃▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁▁▁▁████████████████▇▇▆▆▆▆▆▆▆▅▅▅▄▃▂▂▁
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.02309
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15224
+wandb:             train/base_mse_loss 0.00303
+wandb:                train/epoch_loss 0.00595
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00561
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank5 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/jrdmjxlf
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024142-jrdmjxlf/logs
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank6 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/sveawoz1
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024143-sveawoz1/logs
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▁▁▂▂▂▂▃▃▄▄▄▄▄▄▅▅▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇▇████
+wandb:                              lr ▁▁▁▁▁▁▁▁▁▁████████████████▇▇▇▆▆▆▆▅▄▄▃▂▂▁
+wandb:             train/base_mse_loss ▃█▃▃▃▂▅▂▁▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▂▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped ██████████▁▁█▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip ▇▇█▇▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss ██▇▄▄▁▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁▁▁▁████████████████████▇▇▆▆▆▆▅▅▄▃▂▂▁
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.02298
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15225
+wandb:             train/base_mse_loss 0.00343
+wandb:                train/epoch_loss 0.00596
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00629
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank7 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/y803xlcc
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024145-y803xlcc/logs
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▃▃▄▄▄▄▄▅▅▅▅▅▆▆▆▆▆▆▆▆▆▇▇██
+wandb:                              lr ▁▁▁▁█████████████████████▇▇▇▆▆▆▆▆▆▅▃▂▂▂▁
+wandb:             train/base_mse_loss ▅▂▄▁▁▁▂█▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▃▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped ██████████▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip ▂▄▇██▆▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss ▄▃▃▂█▆▂▅▅▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁▁▁▁▁▁▁███████████████▇▇▆▆▆▆▆▆▅▅▄▄▄▄▂
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.0231
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15224
+wandb:             train/base_mse_loss 0.00299
+wandb:                train/epoch_loss 0.00611
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00553
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank4 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/cgowjoig
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024141-cgowjoig/logs
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▁▁▂▂▂▂▂▂▂▂▃▃▃▃▃▃▃▄▄▅▅▅▅▅▅▅▅▅▆▆▆▆▇▇▇███
+wandb:                              lr ▁▁▁▁▁██████████████████▇▇▇▇▆▆▆▆▆▆▅▅▃▂▂▂▁
+wandb:             train/base_mse_loss ▃█▇▅▆▂▁▁▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▃▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped █████████▁█▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip █▄▄▆▃▄▃▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss █▂▂▁▁▃▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁▁▁███████████████████▇▇▆▆▆▅▅▄▄▄▃▂▂▂▁
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.02312
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15224
+wandb:             train/base_mse_loss 0.00301
+wandb:                train/epoch_loss 0.00592
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00559
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank2 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/of9x0awu
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024139-of9x0awu/logs
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▁▁▁▂▂▂▂▂▃▃▃▃▃▃▃▃▃▃▄▄▄▄▄▄▄▄▅▅▅▅▅▅▅▇▇▇▇█
+wandb:                              lr ▁▁▁▁▁█████████████████▇▇▇▆▆▆▆▆▆▆▅▅▄▄▃▂▁▁
+wandb:             train/base_mse_loss █▁▂▂▁▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▃▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped ██████████▁▁█▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip ▆▇▆▇█▆▄▃▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss █▁▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁▁▁██████████████▇▇▇▆▆▆▆▆▆▆▅▅▅▄▃▂▂▂▂▁
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.02298
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15223
+wandb:             train/base_mse_loss 0.00317
+wandb:                train/epoch_loss 0.00625
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00584
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank3 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/y5lforbj
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024140-y5lforbj/logs
+wandb: 
+wandb: Run history:
+wandb:                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:                     global_step ▁▁▁▁▂▂▂▂▂▂▂▂▂▃▃▃▃▃▄▄▄▅▅▅▅▅▅▅▆▆▆▆▆▇▇▇▇▇██
+wandb:                              lr ▁▁▁▁▁███████████████████▇▆▆▆▆▆▆▅▅▅▄▃▂▂▂▁
+wandb:             train/base_mse_loss █▆▄▂▂▂▃▃▁▁▁▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                train/epoch_loss █▃▁▁▁▁▁▁▁▁▁▁▁
+wandb:              train/grad/clipped ████████▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: train/grad/global_norm_pre_clip █▆▄▅▅▅▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                      train/loss ▂█▂▂▂▃▁▃▃▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                        train/lr ▁▁▁▁███████████████▇▆▆▆▆▅▅▅▅▄▄▃▃▃▃▃▂▂▂▂▁
+wandb:            train/nonfinite_grad ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                             +29 ...
+wandb: 
+wandb: Run summary:
+wandb:                    epoch_time_s 2845.0231
+wandb:                     global_step 70652
+wandb:                              lr 0.0
+wandb:             total_train_minutes 839.15222
+wandb:             train/base_mse_loss 0.00324
+wandb:                train/epoch_loss 0.00597
+wandb:              train/grad/clipped 0
+wandb: train/grad/global_norm_pre_clip 0.0375
+wandb:                      train/loss 0.00602
+wandb:                        train/lr 0.0
+wandb:                             +30 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank1 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/xpprgz8b
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024138-xpprgz8b/logs
+full_val       loss=0.00512 abupt_axis_rel_l2_pct=6.3896 surface_p_mae=0.01156 volume_p_mae=7.27093 wall_shear_mae=0.06233 cases=34
+test_surface   loss=0.00468 abupt_axis_rel_l2_pct=6.1563 surface_p_mae=0.01160 volume_p_mae=7.30597 wall_shear_mae=0.06062 cases=50
+Logged model artifact 'model-nezuko-spatial-prior-alpha10-18h-20260515T024128Z-rp1op3z6'
+wandb: uploading artifact model-nezuko-spatial-prior-alpha10-18h-20260515T024128Z-rp1op3z6; updating run metadata
+wandb: uploading artifact model-nezuko-spatial-prior-alpha10-18h-20260515T024128Z-rp1op3z6
+wandb: uploading history steps 70666-70666, summary, console lines 39-40
+wandb: uploading data
+wandb: 
+wandb: Run history:
+wandb:                         best_checkpoint/updated ████████████▁
+wandb:                   best_checkpoint/valid_primary ▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                                    epoch_time_s ███▃▃▃▂▂▂▁▁▁▁
+wandb:     full_val/val_surface/abupt_axis_mean_rel_l2 ▁
+wandb: full_val/val_surface/abupt_axis_mean_rel_l2_pct ▁
+wandb:                      full_val/val_surface/cases ▁
+wandb:                       full_val/val_surface/loss ▁
+wandb:              full_val/val_surface/surface_cases ▁
+wandb:               full_val/val_surface/surface_loss ▁
+wandb:       full_val/val_surface/surface_pressure_mae ▁
+wandb:                                          +6,679 ...
+wandb: 
+wandb: Run summary:
+wandb:            best_checkpoint/selection_metric val_primary/abupt_ax...
+wandb:                      best_checkpoint/source ema
+wandb:                     best_checkpoint/updated 0
+wandb:               best_checkpoint/valid_primary 1
+wandb:                                  best_epoch 12
+wandb:               best_val/surface_pressure_mae 0.01156
+wandb:                best_val/volume_pressure_mae 7.27088
+wandb:                     best_val/wall_shear_mae 0.06233
+wandb: best_val_primary/abupt_axis_mean_rel_l2_pct 6.38961
+wandb:                                epoch_time_s 2845.02351
+wandb:                                      +6,690 ...
+wandb: 
+wandb: 🚀 View run nezuko/spatial-prior-alpha10-18h-20260515T024128Z-rank0 at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/rp1op3z6
+wandb: ⭐️ View project at: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+wandb: Synced 7 W&B file(s), 0 media file(s), 3 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/run-20260515_024137-rp1op3z6/logs
