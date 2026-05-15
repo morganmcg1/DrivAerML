@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-15 ~08:15 UTC
+- 2026-05-15 ~12:00 UTC (W&B trajectory snapshot)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14, NEW)
 
@@ -51,14 +51,16 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 
 ## Active Experiments (2026-05-15 ~08:15 UTC)
 
-### Pod Assignments
+### Pod Assignments + Live W&B Snapshot (12:00Z)
 
-| Student | PR | Hypothesis | W&B Run | EP | Notes |
-|---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | **#1132** | **H5: curvature as additive attention bias** (zero-init, surface_input_channels=7) | TBD | Assigned 08:10Z | **NEW.** #1117 CLOSED (first wave sub-SOTA WSS 6.668% but vol_p floor breach +0.340pp). H5 = same curvature physics, injected AFTER 7-ch projection, zero-init → no gradnorm imbalance. |
-| dl24-frieren | #1115 | **H1: wind-exposure proxy** (max(0,-nx) + \|ny\|) | `3rja7gw6` | EP~15–20 | val_wss=**6.936%** sub-7.0%; val_abupt=6.334%. Terminal ~15:40Z. Active. |
-| dl24-fern    | #1130 | **H4: per-axis WSS loss weights [1.0, 1.5, 2.5]** (τ_x/τ_y/τ_z) | `3i0nnneh` | EP1 PASS ~20% | EP3 gate ~10:00Z. Direct τ_z loss attack. #1098 CLOSED NOT-a-winner. |
-| dl24-nezuko  | #1129 | **H3: near-wall volume cross-attn** (SDF<0.05m → surface decoder) | TBD | Stale ~10h | Pod READY 1/1; no comments. Do not close on stale signal alone — awaiting student EP3 post. |
+| Student | PR | Hypothesis | W&B Run (rank0) | Live EP | val_abupt | val_wss | val_vol_p | val_surf_p | Read |
+|---------|-----|-----------|---------|---------:|----------:|--------:|----------:|-----------:|------|
+| dl24-tanjiro | **#1132** | **H5: curvature additive attention bias** (zero-init, surf_in=7) | `lbi210l2` | EP2.8 (step 31016) | 7.18% (EP2) | 7.58% (EP2) | 6.13% (EP2) | 4.50% (EP2) | **Tracks H2 closely** at EP2 (H2: 7.14/7.51/6.23/4.51) → mechanism preserved. EP3 ~12:45Z. |
+| dl24-fern    | #1130 | **H4: per-axis WSS loss weights [1.0, 1.5, 2.5]** | `3i0nnneh` | EP8.3 (step 91310) | **6.21%** | **7.08%** | **3.48%** | 4.11% | **Fleet leader.** val_vol_p UNDER FLOOR (3.643%), val_wss below 7.5% gate. EP10 ~13:00Z. |
+| dl24-nezuko  | #1129 | **H3: near-wall volume cross-attn** (SDF<0.05m) | `h75p7dt9` | EP5.7 (step 62460) | **6.38%** | 7.29% | **3.51%** | 4.15% | val_vol_p UNDER FLOOR at EP5. val_wss above gate but trending (-0.10pp/ep). EP6 ~12:25Z. |
+| dl24-frieren | #1115 | **H1: wind-exposure proxy** (max(0,-nx) + \|ny\|) | `3rja7gw6` | EP23 (step 252448) | 6.41% | **6.93%** | **4.92%** ⚠️ | 4.11% | **WSS great, vol_p drift UP since EP16 (4.59→4.92) — predicted FLOOR BREACH at terminal.** Same gradnorm task-share pattern as H2. Terminal ~18:50Z. |
+
+**Wave summary**: Fern H4 and nezuko H3 are the live winner candidates (both UNDER vol_p floor). H4 leads on aggregate (val_abupt, val_wss). Frieren H1 is showing the H2 failure pattern (WSS down, vol_p up = gradnorm imbalance from added input channels). Tanjiro H5 is too early to call but step-2 trajectory matches H2 closely.
 
 ### Per-Axis WSS Insight (from tanjiro #1086 fby84xtu terminal)
 
@@ -162,18 +164,15 @@ The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arm
 - **H3 near-wall cross-attention** (architectural, doesn't modify loss) — ✅ SAFE structurally, but adds parameters → overfit risk.
 - **H4 per-task GradNorm α** (dynamic loss weighting, still on MSE) — ⚠️ MODERATE: GradNorm preserves gradient direction but α_wss=1.0 arm risky given prior global α=0.75 EP16 blowup. Recommend dropping the α_wss=1.0 arm and keeping only α_wss=0.75.
 
-## Next Key Events
+## Next Key Events (revised 12:00Z based on W&B step rates)
 
-1. ~~**Frieren #1077 terminal**~~ DONE (18:00Z) — CLOSED.
-2. ~~**Tanjiro #1086 terminal**~~ DONE (20:16Z) — CLOSED.
-3. ~~**Tanjiro #1117 launch**~~ DONE (~21:00Z May 14) — EP13 running strong.
-4. ~~**Fern #1098 terminal**~~ DONE (05:39Z May 15) — CLOSED NOT-a-winner. H4 assigned PR #1130.
-5. ~~**Nezuko #1101 terminal**~~ DONE (05:11Z May 15) — CLOSED NOT-a-winner. H3 assigned PR #1129.
-6. ~~**Tanjiro #1117 EP15 gate**~~ DONE (08:00Z May 15) — HALTED at EP16. vol_p drift confirmed. **CLOSED** — first sub-SOTA WSS but floor breach.
-7. **Nezuko #1129 H3 EP3 gate** (~10:00Z May 15) — first viability check for cross-attn. (stale — awaiting student post)
-8. **Fern #1130 H4 EP3 gate** (~10:00Z May 15) — per-axis loss weights smoke check.
-9. **Frieren #1115 terminal** (~15:40Z May 15) — H1 wind-exposure full verdict.
-10. **Tanjiro #1132 H5 EP3 gate** (~12:00Z May 15, est.) — curvature attention bias smoke check.
+1. **Tanjiro #1132 H5 EP3** (~12:45Z May 15) — first WSS-axis read at val checkpoint.
+2. **Nezuko #1129 H3 EP6** (~12:25Z May 15) — student-posted EP3 still pending; W&B side-check shows live data.
+3. **Fern #1130 H4 EP10** (~13:00Z May 15) — τ_z/τ_y ratio target ≤1.10; abupt ≤6.60%; wss ≤7.1%.
+4. **Frieren #1115 terminal** (~18:50Z May 15, revised) — H1 wind-exposure; vol_p drift suggests close on floor breach.
+5. **Tanjiro #1132 / Nezuko #1129 / Fern #1130 terminals** — all ~03-07Z May 16 based on current step rates (~21h per 30-epoch run).
+
+**Note on step rate**: All current runs are at ~4.4-5.6 steps/sec → ~21 hours for 30 epochs (longer than initial 6h estimates). Update advisor cadence accordingly.
 
 ## Quiet-state Notes (2026-05-14 ~20:55 UTC)
 
