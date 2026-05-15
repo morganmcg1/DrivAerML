@@ -1,10 +1,90 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~19:45 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~21:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~19:45Z) — fern #1126 CLOSED terminal (decoder-depth hypothesis FALSIFIED, **no-SDF ceiling convergence finding**), Wave 30 third architectural experiment launched (PR #1137 H5 Y-architecture)
+## Latest invocation actions (2026-05-15 ~21:00Z) — TRIPLE CLOSURE (thorfinn #1128, askeladd #1127, edward #1116), Wave 30 FLEET EXPANSION to 6-of-8 (thorfinn H3 #1138, edward H1 #1139, askeladd H7 #1140)
+
+### Actions this invocation
+
+- **CLOSED PR #1128 (thorfinn τ_z loss weight 3.0)** at terminal.
+  - Test metrics: test_WSS=**6.938%** (+0.211pp miss), test_τ_z=−0.44pp absolute on target axis but test_τ_x +0.18pp / test_τ_y +0.19pp off-axis costs wiped the net gain. test_vol_p=**3.584%** PASS (−0.059pp under floor — isolated win). test_SP=**3.838%** (+0.261pp floor regress).
+  - **Fails 3/4 merge gates.** Mechanism is real but pays for τ_z gain in τ_x and τ_y — the τ_z bottleneck is **not just loss-weight** but a structural ratio that loss-side levers can shift but not break.
+  - Test τz/τx = **~1.44** — **ELEVENTH** confirmation of the structural ratio band.
+
+- **CLOSED PR #1127 (askeladd surface_loss warmup curriculum)** at terminal.
+  - Test metrics: test_WSS=**7.227%** (+0.500pp miss), test_τ_z=**9.293%** (+0.24pp REGRESS on the target axis), all floors regressed.
+  - **Worst Wave 29 result of this batch.** Hypothesis cleanly falsified. Three independent loss-curriculum/shape attempts (#1127, #1109 spatial focal, #1110/#1118 OHEM) all negative — **loss-side exploration exhausted**.
+
+- **CLOSED PR #1116 (edward per-channel WSS heads)** at terminal.
+  - Test metrics: test_WSS=**6.900%** (+0.173pp vs PR #972 SOTA, beats no-SDF ceiling 6.989% by only 0.089pp), test_SP=**3.801%** (+0.224pp floor regress).
+  - **Mechanism reproducible**: matched-budget 3-EP A/B showed −0.660pp test_WSS; full 18h showed −0.062pp val_WSS vs single-head. Per-head gradient decoupling confirmed (τ_z head pulls **1.57× more gradient** than τ_x head — physically expected).
+  - Test τz/τx = **~1.46** — **TWELFTH** confirmation. Per-channel heads marked as **stackable mechanism** for future Wave 30 winners (decoupled per-axis output is a healthy primitive; just can't break the ceiling alone).
+
+- **MECHANISTIC CONSOLIDATION (Wave 29 → Wave 30 pivot rationale)**:
+  - 12 independent mechanisms (capacity uplifts, loss reshaping, EMA, sampling priors, depth, per-channel heads, τ_z weight escalation) all converge to test τz/τx in the **1.44–1.57 band** with val→test compression of ~0.085–0.10 units.
+  - PR #1126 (fern depth=4) and PR #1100 (thorfinn slices=256) hit identical **no-SDF ceiling within 0.001pp** on test_WSS, test_vol_p, test_SP — TWO orthogonal capacity uplifts saturate together.
+  - **Conclusion confirmed**: bottleneck is a **representation-axis bottleneck**, not capacity, not loss curriculum. Architectural mechanisms targeting normal/orientation handling are the open frontier.
+
+- **Assigned PR #1138 (thorfinn: Wave 30 H3 normal-aligned slice groups)** — FOURTH Wave 30 architectural attack.
+  - **Hypothesis**: Add learnable `Linear(3, num_heads × num_slices)` bias to TransolverAttention slice logits, scaled by `--normal-slice-alpha 0.5`. Zero-init so EP0 behavior preserved. Creates orientation-coherent slice token groups (upward-facing patches attract to "roof" slice, sideways patches to "side" slice).
+  - **Theoretical basis**: PointBERT 2022, Point-MAE 2022, DGCNN 2019 — geometric attention with orientation-aware grouping outperforms purely feature-based grouping for shape-dependent outputs. Extends the original Transolver paper's "physics-informed slicing" principle from spatial to orientation grouping.
+  - **Diagnostic**: slice-weight entropy (should drop 5–10% vs alpha=0 baseline if mechanism engages).
+
+- **Assigned PR #1139 (edward: Wave 30 H1 cylindrical coords (r, θ, z))** — FIFTH Wave 30 attack (simplest).
+  - **Hypothesis**: Replace Cartesian `(x, y, z)` with cylindrical `(r=√(x²+y²), θ=atan2(y,x), z)` before pos_embed/string_sep. The car has near-mirror symmetry across x-z plane; cylindrical around z makes `z` (the τ_z-relevant axis) a dedicated channel and explicitly separates horizontal layout from altitude.
+  - **Theoretical basis**: Equivariant networks (SE(3)-Transformer, EGNN, Tensor Field Networks) consistently improve sample efficiency when input coords align with geometry's symmetry axis.
+  - **Cheapest test in Wave 30** — ~35 LOC, one CLI flag `--use-cylindrical-coords`, definitive answer in 18h.
+
+- **Assigned PR #1140 (askeladd: Wave 30 H7 normal-prediction aux head)** — SIXTH Wave 30 attack.
+  - **Hypothesis**: Add `Linear(hidden_dim, 3)` aux head predicting input surface normal from each surface backbone-emitted feature; cosine-embedding aux loss weighted at 0.1×. Forces backbone to **retain orientation information** through the stack. Different from H2 (which adds normal Fourier info *into* the model): H7 attacks the **gradient signal** to make orientation legible at every surface token.
+  - **Theoretical basis**: Self-supervised aux tasks (DINO, MAE, Point-MAE) consistently preserve representation quality. For τ_z specifically, recovering `n_z` from features makes downstream τ_z regression easier.
+  - **Diagnostic**: `train/normal_aux_loss` should drop from ~1.0 (random) to <0.1 at EP13 if mechanism engages.
+
+### Wave 30 fleet status — SIX of EIGHT architectural attack axes now active in parallel
+
+| PR | Student | Mechanism | Attack axis | LOC | EP/Status |
+|----|---------|-----------|-------------|-----|-----------|
+| #1134 | tanjiro | H6: local-frame WSS head (τ·n=0 by construction) | output-side | ~65 | EP3 gate due ~tomorrow |
+| #1136 | nezuko | H2: normal spectral encoding (StringSep on nx,ny,nz) | input-side features | ~35 | EP1-2 |
+| #1137 | fern | H5: Y-architecture dual-backbone (cp vs WSS branches) | backbone split | ~80 | EP0-1 |
+| **#1138** | **thorfinn** | **H3: normal-aligned slice groups (soft attention routing)** | **attention layer** | **~50** | **EP0 (just launched)** |
+| **#1139** | **edward** | **H1: cylindrical coords (r, θ, z) input frame** | **input coord frame** | **~35** | **EP0 (just launched)** |
+| **#1140** | **askeladd** | **H7: normal-prediction aux head (gradient signal regularizer)** | **gradient flow** | **~80** | **EP0 (just launched)** |
+
+**Six mechanisms, six layers of the architecture stack, all targeting the τ_z bottleneck:**
+- Input coord frame (H1) → Input features (H2) → Attention routing (H3) → Backbone split (H5) → Output decomposition (H6) → Gradient signal (H7)
+- If ANY of these breaks the τz/τx ≤ 1.40 wall, the corresponding architectural layer is the structural bottleneck.
+
+Wave 30 reserve (2 of 8 still on the bench): H4 (hard normal routing) and H8 (contrastive orientation regularization). Reserved as next-cohort assignments depending on which of H1/H2/H3/H5/H6/H7 succeeds.
+
+Wave 29 fleet still in flight (3 of 8):
+
+| PR | Student | Mechanism | EP/Status |
+|----|---------|-----------|-----------|
+| #1122 | alphonse | SDF FAR-field α=2.0 (only SDF stack) | EP10 truncate due |
+| #1133 | frieren | per-axis WSS mag decomp | EP3+ alive |
+| (PR #972 SOTA: val_abupt=6.126%, test_WSS=6.727%, test_vol_p=3.643%, test_SP=3.577%)| | | |
+
+**Zero idle. Eight students all running.**
+
+### Next-highest-EV gates (post triple-closure + Wave 30 expansion)
+
+| ETA | Event | Action |
+|-----|-------|--------|
+| ~21:30Z | thorfinn #1138 EP1 smoke (slice-weight entropy logged) | Verify mechanism engages |
+| ~21:30Z | edward #1139 EP1 smoke (no-NaN gradient) | Verify cylindrical transform safe |
+| ~21:30Z | askeladd #1140 EP1 smoke (`train/normal_aux_loss` drops) | Verify aux head learns |
+| ~next-day-AM | tanjiro #1134 EP3 gate | First Wave 30 H6 verdict |
+| ~next-day-AM | nezuko #1136 EP3 gate | First Wave 30 H2 verdict |
+| ~next-day-AM | fern #1137 EP3 gate | First Wave 30 H5 verdict |
+| ~next-day-PM | thorfinn #1138 / edward #1139 / askeladd #1140 EP3 gates | Wave 30 H3/H1/H7 verdicts (staggered) |
+| ~next-day | alphonse #1122 EP10 + test eval | SDF FAR-field verdict |
+
+---
+
+## Prior invocation actions (2026-05-15 ~19:45Z) — fern #1126 CLOSED terminal (decoder-depth hypothesis FALSIFIED, **no-SDF ceiling convergence finding**), Wave 30 third architectural experiment launched (PR #1137 H5 Y-architecture)
 
 ### Actions this invocation
 

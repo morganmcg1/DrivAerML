@@ -1,3 +1,128 @@
+## 2026-05-15 20:30 — PR #1128: τ_z loss weight 2.0→3.0 (thorfinn) — CLOSED (partial confirm, off-axis cost wipes gain; test_SP floor regress)
+
+- **Branch**: `thorfinn/tau-z-loss-weight-3p0` (closed)
+- **W&B run**: `uwqybod5`, 839.9 min wall-clock, EP13 best ckpt
+- **Hypothesis**: Escalate τ_z channel weight 2.0→3.0 to directly redirect gradient at the dominant error axis.
+
+### Terminal metrics (test, single-model, EP13 best ckpt)
+
+| Metric | This PR | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.236% | 6.126% | +0.110pp | misses |
+| **test_WSS** | **6.938%** | 6.727% | **+0.211pp** | **misses** ❌ |
+| **test_vol_p** | **3.584%** | 3.643% (floor) | **−0.059pp** | **PASS (under floor!)** ✅ |
+| **test_SP** | **3.838%** | 3.577% (floor) | **+0.261pp** | **floor regress** ❌ |
+| test_τ_z | 9.006% | ~9.45% no-SDF | −0.44pp | absolute gain on target axis |
+| test_τ_x | 6.151% | ~5.97% | +0.18pp | off-axis cost |
+| test_τ_y | 7.546% | ~7.36% | +0.19pp | off-axis cost |
+| **test τz/τx** | **1.464** | — | — | val→test compression continues (val=1.549) |
+
+**Decision: CLOSE.** Fails primary gate (test_WSS +0.211pp) and test_SP floor (+0.261pp). test_vol_p PASS is a notable isolated win but not enough.
+
+### Mechanism — partial confirmation, ceiling re-asserted by EP11+
+
+EP1 ratio 1.288 confirms early gradient redirection works. By EP11+ val ratio drifts back to 1.547-1.549 (baseline band). Absolute τ_z gain (−0.44pp) is real but off-axis costs to τ_x (+0.18pp) and τ_y (+0.19pp) wipe the net WSS gain. Net no-SDF baseline delta: only −0.05pp on test_WSS.
+
+### val→test ratio compression observed across the fleet
+
+- thorfinn #1128: val 1.549 → test 1.464 (Δ −0.085)
+- tanjiro #1124: val 1.555 → test 1.469 (Δ −0.086)
+- nezuko #1125: val 1.549 → test 1.449 (Δ −0.100)
+
+Robust val→test distribution shift partially reduces the τ_z bottleneck on test but doesn't eliminate it.
+
+### τ_z structural finding — ELEVENTH CONFIRMATION
+
+τ_z weight=3.0 joins the 10 prior null mechanisms. The 1.45-1.55 ratio attractor is robust to gradient-tilt magnitude.
+
+### Reassigned as
+
+- Thorfinn → **Wave 30 H3: Normal-Aligned Slice Groups** — soft orientation-aware routing in slice attention. Fourth orthogonal Wave 30 attack axis (attention-routing-side). ~50 LOC change in model.py.
+
+---
+
+## 2026-05-15 20:30 — PR #1127: Explicit surface_loss warmup curriculum (askeladd) — CLOSED (clean falsification on EVERY metric, including hypothesis-target τ_z)
+
+- **Branch**: `askeladd/surface-loss-warmup-curriculum` (closed)
+- **W&B run**: `ag1dnelx`, EP11 best EMA
+- **Hypothesis**: Explicit 3-EP linear ramp of surface_loss_weight (0→full) would replicate PR #1114 implicit-curriculum mechanism and preferentially reduce test_τ_z.
+
+### Terminal metrics (test, single-model, EP11 best EMA)
+
+| Metric | This PR | thorfinn #1100 no-SDF | Baseline #972 | Δ vs #972 | Verdict |
+|---|---:|---:|---:|---:|---|
+| val_abupt | 6.476% | — | 6.126% | +0.350pp | misses |
+| **test_WSS** | **7.227%** | 6.989% | 6.727% | **+0.500pp** | **BIG MISS** ❌ |
+| **test_vol_p** | **3.678%** | 3.644% | 3.643% | +0.035pp | **floor regress** ❌ |
+| **test_SP** | **3.869%** | 3.832% | 3.577% | +0.292pp | **floor regress** ❌ |
+| **test_τ_z** | **9.293%** | ~9.05% | — | **+0.24pp** | **regresses on hypothesis-target axis** ❌ |
+
+**Decision: CLOSE.** Worst result of this review batch. Hypothesis CLEANLY FALSIFIED on the target axis and on all paper-facing metrics.
+
+### Mechanism — implicit curriculum was a different beast
+
+Student's analysis is correct: PR #1114 learnable weights drifted briefly to ~50% surface weight (not zero); this PR's explicit ramp goes to literal zero, costing surface head capacity that's not recovered in remaining 10 epochs. Three independent loss-curriculum/shape attempts now all negative:
+- PR #1114 learnable weights — partial regress
+- PR #1118 OHEM v2 — regress
+- PR #1127 explicit warmup — clean falsification
+
+### Research-state implication
+
+Combined with thorfinn #1128 (τ_z weight=3.0 also fails), data is unambiguous: **τ_z bottleneck is NOT loss-side**. Architectural lever is the only remaining direction. Wave 30 pivot is correct.
+
+### Reassigned as
+
+- Askeladd → **Wave 30 H7: Normal-Prediction Auxiliary Head** — aux task predicting surface normals from backbone features. Forces backbone to maintain orientation info at every layer via aux loss gradient signal. Different attack axis than H2 (input encoding only). ~80 LOC change.
+
+---
+
+## 2026-05-15 20:30 — PR #1116: Per-channel WSS output heads (edward) — CLOSED (mechanism reproducible but absorbed by no-SDF ceiling)
+
+- **Branch**: `edward/per-channel-wss-heads` (closed)
+- **W&B run**: `3ufrbxl6`, 858.5 min wall-clock, EP13 best EMA
+- **Hypothesis**: Separate decoder heads for [cp, τ_x, τ_y, τ_z] decouple per-channel gradients, allowing τ_z head to optimize without competing with shared-head gradient pool.
+
+### Terminal metrics (test, single-model, EP13 EMA)
+
+| Metric | This PR | thorfinn #1100 no-SDF | Baseline #972 | Δ vs #972 | Verdict |
+|---|---:|---:|---:|---:|---|
+| val_abupt | 6.321% | — | 6.126% | +0.195pp | misses |
+| **test_WSS** | **6.900%** | 6.989% | 6.727% | **+0.173pp** | **misses** ❌ (only 0.089pp below no-SDF ceiling) |
+| **test_vol_p** | **3.687%** | 3.644% | 3.643% | +0.044pp | marginal floor regress ❌ |
+| **test_SP** | **3.801%** | 3.832% | 3.577% | +0.224pp | floor regress ❌ |
+| test_τ_z | 9.022% | ~9.05% | — | within range | — |
+| val τz/τx | 1.554 | — | — | — | 12th band confirm |
+
+**Decision: CLOSE.** Fails 3/4 merge gates. Despite reproducible mechanism, the no-SDF ceiling absorbs the gain.
+
+### Mechanism — REAL AND REPRODUCIBLE but ceiling-bound
+
+The per-channel decoupling effect is genuine:
+- Matched-budget 3-EP A/B (matched architecture): −0.660pp test_WSS improvement vs single-head
+- Reproduced in 18h run (val_WSS −0.062pp vs thorfinn #1100 single-head + slices=256)
+- Per-head gradient norms confirm decoupling at training end: τ_z head pulls **1.57× more inner gradient** than τ_x head, persistent across all 13 epochs
+- val_τ_z improved by −0.151pp vs single-head baseline (strongest delta of any axis)
+
+But the test_WSS gain (~0.05pp on no-SDF baseline) is absorbed by the **no-SDF ceiling identified in fern #1126**:
+- thorfinn #1100 slices=256 single-head: test_WSS=6.989%
+- fern #1126 depth=4 single-head: test_WSS=6.989% (statistical tie)
+- edward #1116 per-channel heads: test_WSS=6.900% (modest improvement)
+- All three: bound by same ceiling region 6.90-6.99%
+
+### Mechanistic value preserved for stacking
+
+The per-channel head mechanism is a **stackable component**. If a backbone-level Wave 30 winner emerges (fern #1137 Y-arch, nezuko #1136 H2, tanjiro #1134 H6), re-introducing per-channel heads on the winning backbone may compound the improvements. Keep in toolbox.
+
+### τ_z structural finding — TWELFTH CONFIRMATION
+
+Per-channel heads join the 11 prior null mechanisms. Ratio attractor 1.45-1.57 is robust to per-channel output-side parameter increases.
+
+### Reassigned as
+
+- Edward → **Wave 30 H1: Cylindrical Coordinates (r, θ, z)** — replace Cartesian positional input with cylindrical so vertical (τ_z) gets its own dedicated coordinate axis. Cheapest input-side complement to nezuko #1136 H2. ~35 LOC change in model.py.
+
+---
+
 ## 2026-05-15 19:45 — PR #1126: surface_out depth=4 + 18h budget (fern) — CLOSED (decoder-depth hypothesis FALSIFIED; statistical tie with no-SDF ceiling)
 
 - **Branch**: `fern/surface-out-depth-4-18h` (closed)
