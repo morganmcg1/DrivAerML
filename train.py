@@ -132,6 +132,7 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    wss_axis_loss_weights: str = "1.0,1.0,1.0"
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -189,6 +190,24 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
         return None
     sigmas = [float(s) for s in spec.split(",") if s.strip()]
     return sigmas or None
+
+
+def parse_wss_axis_loss_weights(spec: str) -> tuple[float, float, float]:
+    """Parse per-axis WSS loss weights spec ``"w_x,w_y,w_z"`` to a 3-tuple."""
+    spec = (spec or "").strip()
+    if not spec:
+        return (1.0, 1.0, 1.0)
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    if len(parts) != 3:
+        raise ValueError(
+            f"--wss-axis-loss-weights expects 3 comma-separated floats (w_x,w_y,w_z); got {spec!r}"
+        )
+    weights = tuple(float(p) for p in parts)
+    if any(w < 0.0 or not math.isfinite(w) for w in weights):
+        raise ValueError(
+            f"--wss-axis-loss-weights must be non-negative finite floats; got {weights}"
+        )
+    return weights  # type: ignore[return-value]
 
 
 class GradNormWeights(nn.Module):
@@ -301,6 +320,7 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    wss_axis_loss_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     batch = batch.to(device)
     if use_y_symmetry_aug:
@@ -310,6 +330,7 @@ def train_loss(
             aug_log["batch_size"] = int(flip_mask.shape[0])
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    use_per_axis_wss = any(abs(w - 1.0) > 0.0 for w in wss_axis_loss_weights)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -317,12 +338,23 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+        surface_per_ch = per_channel_masked_mse(
+            out["surface_preds"], surface_target, batch.surface_mask
+        )  # [4]: cp, tau_x, tau_y, tau_z
+        # surface_per_ch sums to 4 * masked_mse, so mean over the 4 channels
+        # reproduces the original uniform masked_mse exactly.
+        surface_loss = surface_per_ch.mean()
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        if use_per_axis_wss:
+            wss_w = torch.tensor(
+                [1.0, *wss_axis_loss_weights],
+                dtype=surface_per_ch.dtype,
+                device=surface_per_ch.device,
+            )  # [4]: cp, tau_x, tau_y, tau_z weights
+            surface_loss_for_loss = (wss_w * surface_per_ch).mean()
+        else:
+            surface_loss_for_loss = surface_loss
         if gradnorm_weights is not None:
-            surface_per_ch = per_channel_masked_mse(
-                out["surface_preds"], surface_target, batch.surface_mask
-            )  # [4]: cp, tau_x, tau_y, tau_z
             volume_per_ch = per_channel_masked_mse(
                 out["volume_preds"], volume_target, batch.volume_mask
             )  # [1]: vol_p
@@ -333,17 +365,22 @@ def train_loss(
             weighted_volume_loss = w_detached[4] * volume_per_ch[0]
         else:
             task_losses = None
-            weighted_surface_loss = surface_loss_weight * surface_loss
+            weighted_surface_loss = surface_loss_weight * surface_loss_for_loss
             weighted_volume_loss = volume_loss_weight * volume_loss
             loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    loss_log = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
-    }, task_losses
+        "surface_loss_cp": float(surface_per_ch[0].detach().cpu().item()),
+        "surface_loss_tau_x": float(surface_per_ch[1].detach().cpu().item()),
+        "surface_loss_tau_y": float(surface_per_ch[2].detach().cpu().item()),
+        "surface_loss_tau_z": float(surface_per_ch[3].detach().cpu().item()),
+    }
+    return loss, loss_log, task_losses
 
 
 def run_eval_only(config: Config, state) -> None:
@@ -440,6 +477,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         if config.seed >= 0:
             seed_everything(config.seed)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
+        wss_axis_loss_weights_tuple = parse_wss_axis_loss_weights(config.wss_axis_loss_weights)
+        if state.is_main and any(abs(w - 1.0) > 0.0 for w in wss_axis_loss_weights_tuple):
+            print(
+                "Per-axis WSS loss weights enabled: "
+                f"tau_x={wss_axis_loss_weights_tuple[0]}, "
+                f"tau_y={wss_axis_loss_weights_tuple[1]}, "
+                f"tau_z={wss_axis_loss_weights_tuple[2]} "
+                "(cp weight fixed at 1.0)"
+            )
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -524,6 +570,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "pe_source_run_ki2q9ko9": (
                         config.model_pe == "string_multisigma"
                     ),
+                    "wss_axis_loss_weight_x": wss_axis_loss_weights_tuple[0],
+                    "wss_axis_loss_weight_y": wss_axis_loss_weights_tuple[1],
+                    "wss_axis_loss_weight_z": wss_axis_loss_weights_tuple[2],
+                    "wss_axis_loss_weights_enabled": any(
+                        abs(w - 1.0) > 0.0 for w in wss_axis_loss_weights_tuple
+                    ),
                 },
                 allow_val_change=True,
             )
@@ -583,6 +635,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    wss_axis_loss_weights=wss_axis_loss_weights_tuple,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -632,6 +685,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/surface_loss_cp": batch_loss_metrics["surface_loss_cp"],
+                            "train/surface_loss_tau_x": batch_loss_metrics["surface_loss_tau_x"],
+                            "train/surface_loss_tau_y": batch_loss_metrics["surface_loss_tau_y"],
+                            "train/surface_loss_tau_z": batch_loss_metrics["surface_loss_tau_z"],
                         }
                     )
                 if config.use_y_symmetry_aug and aug_log:
