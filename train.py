@@ -138,6 +138,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
     debug: bool = False
 
 
@@ -229,6 +231,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_sdf_stratified_vol_sampling": (
+            "Enable SDF-stratified inverse-distance volume importance "
+            "sampling (PR #972 mechanism). Train-time __getitem__ draws "
+            "volume points with weights = 1 / (1 + alpha * |sdf|), "
+            "over-sampling near-surface points where the pressure field "
+            "has steep gradients vs the uniform far field. Eval splits "
+            "are untouched (full-fidelity deterministic chunks)."
+        ),
+        "sdf_stratified_alpha": (
+            "Concentration parameter for SDF-stratified sampling weights. "
+            "Higher alpha = more surface-concentrated; alpha=0 reduces to "
+            "uniform. PR #972 SOTA used alpha=4.0."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -241,6 +256,111 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
+
+
+def install_sdf_stratified_vol_sampling(
+    train_dataset,
+    *,
+    alpha: float,
+    n_volume: int,
+    is_main: bool = False,
+) -> None:
+    """Swap ``train_dataset.__class__`` with a subclass that does SDF-stratified
+    inverse-distance volume importance sampling (PR #972 mechanism).
+
+    For each train-mode ``__getitem__`` call, volume indices are drawn with
+    weights = 1 / (1 + alpha * |sdf|) so near-surface points (small |sdf|) are
+    up-weighted in the multinomial draw. Vehicle aerodynamics has steep
+    gradients near the surface (boundary layer, wake) and gentle gradients
+    in the far field, so uniform sampling wastes resolution on smooth regions
+    and under-samples where vol_p actually has structure.
+
+    Eval datasets (sampling_mode != "train_random") fall back to the
+    original deterministic chunked behaviour, so val/test remain full-fidelity.
+
+    IO optimisation vs. the literal PR-body code: instead of loading every
+    volume point per call (~294 MB/case), we load only volume_sdf.npy to
+    compute weights, sample indices, then call store.load_case with
+    volume_rows= so only the chosen rows are read for xyz / sdf / pressure.
+    Functionally identical, ~5x faster IO.
+    """
+    from data.loader import DrivAerMLCase, _case_dir, _load_npy_rows
+
+    base_cls = type(train_dataset)
+
+    class _SDFStratifiedDataset(base_cls):
+        def __getitem__(self, idx: int) -> DrivAerMLCase:
+            view = self.views[idx]
+            if view.sampling_mode != "train_random":
+                return base_cls.__getitem__(self, idx)
+
+            alpha_local = type(self)._sdf_stratified_alpha
+            n_vol_local = self.max_volume_points
+
+            counts = self.store.case_point_counts(view.case_id)
+            surface_idx = self._indices(
+                counts["n_surface"],
+                self.max_surface_points,
+                view,
+                group_view_count=view.surface_view_count,
+            )
+
+            case_dir = _case_dir(self.store.root, view.case_id)
+            sdf_arr = _load_npy_rows(case_dir / "volume_sdf.npy", rows=None)
+            sdf_flat = sdf_arr.reshape(-1) if sdf_arr.ndim > 1 else sdf_arr
+            sdf_abs = torch.from_numpy(sdf_flat).abs()
+            weights = 1.0 / (1.0 + alpha_local * sdf_abs)
+
+            n_total = int(sdf_abs.shape[0])
+            n_sample = min(n_vol_local, n_total) if n_vol_local > 0 else n_total
+            vol_idx = torch.multinomial(weights, n_sample, replacement=False)
+            vol_idx, _ = torch.sort(vol_idx)
+
+            case = self.store.load_case(
+                view.case_id,
+                surface_rows=None if surface_idx is None else surface_idx.numpy(),
+                volume_rows=vol_idx.numpy(),
+            )
+
+            metadata = dict(case.metadata)
+            metadata["n_surface_full"] = int(counts["n_surface"])
+            metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+            metadata["surface_view_index"] = int(view.view_index)
+            metadata["surface_view_count"] = int(view.surface_view_count)
+            metadata["surface_sampling_mode"] = view.sampling_mode
+            metadata["n_volume_full"] = n_total
+            metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+            metadata["volume_view_index"] = int(view.view_index)
+            metadata["volume_view_count"] = int(view.volume_view_count)
+            metadata["volume_sampling_mode"] = "sdf_stratified_inverse"
+            metadata["joint_view_count"] = int(view.view_count)
+            metadata["sdf_stratified_alpha"] = float(alpha_local)
+            metadata["sdf_stratified_weight_form"] = "1/(1+alpha*|sdf|)"
+
+            return DrivAerMLCase(
+                case_id=case.case_id,
+                surface_x=case.surface_x,
+                surface_y=case.surface_y,
+                volume_x=case.volume_x,
+                volume_y=case.volume_y,
+                metadata=metadata,
+            )
+
+    _SDFStratifiedDataset.__name__ = "_SDFStratifiedDataset"
+    _SDFStratifiedDataset.__qualname__ = "_SDFStratifiedDataset"
+    _SDFStratifiedDataset._sdf_stratified_alpha = float(alpha)
+
+    train_dataset.__class__ = _SDFStratifiedDataset
+
+    if is_main:
+        print(
+            f"[SDF] inverse near-surface vol sampling enabled: alpha={alpha}, "
+            f"n_vol={n_volume}, dataset class=_SDFStratifiedDataset"
+        )
+        print(
+            "[SDF] weight_form=1/(1+alpha*|sdf|) (near-surface emphasis), "
+            "multinomial replacement=False"
+        )
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -695,7 +815,7 @@ def rebuild_train_loader_with_vol_points(
             drop_last=True,
         )
         train_shuffle = False
-    return DataLoader(
+    new_loader = DataLoader(
         train_ds,
         batch_size=config.batch_size,
         shuffle=train_shuffle,
@@ -703,6 +823,15 @@ def rebuild_train_loader_with_vol_points(
         drop_last=True,
         **loader_kwargs(config),
     )
+    if config.use_sdf_stratified_vol_sampling:
+        is_main = distributed_state is not None and distributed_state.is_main
+        install_sdf_stratified_vol_sampling(
+            new_loader.dataset,
+            alpha=config.sdf_stratified_alpha,
+            n_volume=n_points,
+            is_main=is_main,
+        )
+    return new_loader
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -737,6 +866,13 @@ def main(argv: Iterable[str] | None = None) -> None:
         current_train_vol_points = config.train_volume_points
 
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
+        if config.use_sdf_stratified_vol_sampling:
+            install_sdf_stratified_vol_sampling(
+                train_loader.dataset,
+                alpha=config.sdf_stratified_alpha,
+                n_volume=config.train_volume_points,
+                is_main=state.is_main,
+            )
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
         transform = TargetTransform(
@@ -883,6 +1019,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["sdf_stratified_active"] = bool(
+                config.use_sdf_stratified_vol_sampling
+            )
+            wandb.summary["sdf_stratified_alpha_runtime"] = (
+                float(config.sdf_stratified_alpha)
+                if config.use_sdf_stratified_vol_sampling
+                else 0.0
+            )
+            wandb.summary["train_dataset_class"] = type(train_loader.dataset).__name__
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1057,6 +1202,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                 }
+                if config.use_sdf_stratified_vol_sampling:
+                    train_log["train/sdf_stratified_n_vol_runtime"] = float(
+                        current_train_vol_points
+                    )
+                    train_log["train/sdf_stratified_alpha"] = float(
+                        config.sdf_stratified_alpha
+                    )
                 if not loss_is_nonfinite:
                     train_log.update(
                         {
