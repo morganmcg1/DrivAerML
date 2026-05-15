@@ -1,0 +1,167 @@
+{
+  "alpha": 5.0,
+  "n_cases": 7,
+  "mean_pearson_spatial_vs_WSS_mag": 0.3148751599448068,
+  "mean_pearson_spatial_vs_Cp_abs": 0.4529129479612623,
+  "mean_top10pct_mass": 0.14804187629904067,
+  "mean_top10pct_oversample": 1.4804187629904066,
+  "mean_bottom50pct_mass": 0.3638545998505184,
+  "mean_bottom50pct_undersample": 0.7277091997010368,
+  "green_light_threshold_rho_ge_0_20": true,
+  "per_case": [
+    {
+      "case_id": "run_1",
+      "n_surface": 8828095,
+      "pearson_spatial_vs_WSS_mag": 0.3081609904766083,
+      "pearson_spatial_vs_Cp_abs": 0.43498897552490234,
+      "weights_min": 1.0252925157546997,
+      "weights_max": 4.759421348571777,
+      "weights_mean": 2.885387420654297,
+      "bin_occupancy": {
+        "d1_top10pct": 0.15241356194019318,
+        "d2_top20pct": 0.28595924377441406,
+        "d3_top30pct": 0.4134441614151001,
+        "d4_top40pct": 0.5332209467887878,
+        "d5_top50pct": 0.6443226337432861,
+        "d6_top60pct": 0.7387833595275879,
+        "d7_top70pct": 0.8139603734016418,
+        "d8_top80pct": 0.8846791386604309,
+        "d9_top90pct": 0.9476345777511597,
+        "d10_top100pct": 1.000001072883606,
+        "bottom_50pct_share": 0.3556784391403198
+      }
+    },
+    {
+      "case_id": "run_50",
+      "n_surface": 8194077,
+      "pearson_spatial_vs_WSS_mag": 0.28457504510879517,
+      "pearson_spatial_vs_Cp_abs": 0.41925686597824097,
+      "weights_min": 1.1037702560424805,
+      "weights_max": 4.711198806762695,
+      "weights_mean": 2.9232518672943115,
+      "bin_occupancy": {
+        "d1_top10pct": 0.1456434726715088,
+        "d2_top20pct": 0.27603158354759216,
+        "d3_top30pct": 0.40211623907089233,
+        "d4_top40pct": 0.5203832387924194,
+        "d5_top50pct": 0.6305034160614014,
+        "d6_top60pct": 0.7297377586364746,
+        "d7_top70pct": 0.8086427450180054,
+        "d8_top80pct": 0.8822736144065857,
+        "d9_top90pct": 0.9468644261360168,
+        "d10_top100pct": 1.0000003576278687,
+        "bottom_50pct_share": 0.36949706077575684
+      }
+    },
+    {
+      "case_id": "run_100",
+      "n_surface": 8254434,
+      "pearson_spatial_vs_WSS_mag": 0.35072749853134155,
+      "pearson_spatial_vs_Cp_abs": 0.4730038642883301,
+      "weights_min": 1.0101596117019653,
+      "weights_max": 4.701615333557129,
+      "weights_mean": 2.931049346923828,
+      "bin_occupancy": {
+        "d1_top10pct": 0.14550626277923584,
+        "d2_top20pct": 0.2775086760520935,
+        "d3_top30pct": 0.40519633889198303,
+        "d4_top40pct": 0.5245171785354614,
+        "d5_top50pct": 0.6351123452186584,
+        "d6_top60pct": 0.7333288788795471,
+        "d7_top70pct": 0.8118668794631958,
+        "d8_top80pct": 0.8850751519203186,
+        "d9_top90pct": 0.9483447670936584,
+        "d10_top100pct": 1.0000001192092896,
+        "bottom_50pct_share": 0.3648874759674072
+      }
+    },
+    {
+      "case_id": "run_200",
+      "n_surface": 8377308,
+      "pearson_spatial_vs_WSS_mag": 0.32821017503738403,
+      "pearson_spatial_vs_Cp_abs": 0.482928603887558,
+      "weights_min": 1.0205786228179932,
+      "weights_max": 4.752322196960449,
+      "weights_mean": 2.88128662109375,
+      "bin_occupancy": {
+        "d1_top10pct": 0.15013539791107178,
+        "d2_top20pct": 0.2815866470336914,
+        "d3_top30pct": 0.40754178166389465,
+        "d4_top40pct": 0.5264123678207397,
+        "d5_top50pct": 0.6374609470367432,
+        "d6_top60pct": 0.7375074625015259,
+        "d7_top70pct": 0.8144147396087646,
+        "d8_top80pct": 0.8855096697807312,
+        "d9_top90pct": 0.9482538104057312,
+        "d10_top100pct": 1.0000009536743164,
+        "bottom_50pct_share": 0.3625395596027374
+      }
+    },
+    {
+      "case_id": "run_300",
+      "n_surface": 8185956,
+      "pearson_spatial_vs_WSS_mag": 0.3421241044998169,
+      "pearson_spatial_vs_Cp_abs": 0.47566697001457214,
+      "weights_min": 1.019005537033081,
+      "weights_max": 4.720150947570801,
+      "weights_mean": 2.9712817668914795,
+      "bin_occupancy": {
+        "d1_top10pct": 0.1447688192129135,
+        "d2_top20pct": 0.2764442265033722,
+        "d3_top30pct": 0.4037664830684662,
+        "d4_top40pct": 0.5228877663612366,
+        "d5_top50pct": 0.6333184242248535,
+        "d6_top60pct": 0.7308720946311951,
+        "d7_top70pct": 0.809844970703125,
+        "d8_top80pct": 0.8836183547973633,
+        "d9_top90pct": 0.9476817846298218,
+        "d10_top100pct": 1.0000008344650269,
+        "bottom_50pct_share": 0.36668282747268677
+      }
+    },
+    {
+      "case_id": "run_400",
+      "n_surface": 8701452,
+      "pearson_spatial_vs_WSS_mag": 0.2993924915790558,
+      "pearson_spatial_vs_Cp_abs": 0.4502580761909485,
+      "weights_min": 1.1402264833450317,
+      "weights_max": 4.76638126373291,
+      "weights_mean": 2.90757417678833,
+      "bin_occupancy": {
+        "d1_top10pct": 0.1502951830625534,
+        "d2_top20pct": 0.28195178508758545,
+        "d3_top30pct": 0.4077404737472534,
+        "d4_top40pct": 0.5262356996536255,
+        "d5_top50pct": 0.6368243098258972,
+        "d6_top60pct": 0.7352653741836548,
+        "d7_top70pct": 0.8115371465682983,
+        "d8_top80pct": 0.883202850818634,
+        "d9_top90pct": 0.9468634128570557,
+        "d10_top100pct": 0.9999997615814209,
+        "bottom_50pct_share": 0.3631756901741028
+      }
+    },
+    {
+      "case_id": "run_485",
+      "n_surface": 9242495,
+      "pearson_spatial_vs_WSS_mag": 0.29093581438064575,
+      "pearson_spatial_vs_Cp_abs": 0.43428727984428406,
+      "weights_min": 1.0172796249389648,
+      "weights_max": 4.75830078125,
+      "weights_mean": 2.956382989883423,
+      "bin_occupancy": {
+        "d1_top10pct": 0.1475304365158081,
+        "d2_top20pct": 0.27887362241744995,
+        "d3_top30pct": 0.4056047201156616,
+        "d4_top40pct": 0.5246723294258118,
+        "d5_top50pct": 0.6354796290397644,
+        "d6_top60pct": 0.7328494787216187,
+        "d7_top70pct": 0.810482919216156,
+        "d8_top80pct": 0.8831649422645569,
+        "d9_top90pct": 0.9472485780715942,
+        "d10_top100pct": 1.0000008344650269,
+        "bottom_50pct_share": 0.3645211458206177
+      }
+    }
+  ]
+}
