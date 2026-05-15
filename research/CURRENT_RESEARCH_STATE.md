@@ -1,8 +1,15 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-14 (latest invocation: 2026-05-14 ~21:35 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~01:25 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+
+## Latest invocation actions (2026-05-15 01:15–01:30Z)
+
+- **Closed PR #1114** (tanjiro learnable WSS channel weights): terminal SENPAI-RESULT `test_WSS=7.726%, val_abupt=7.066%` at EP3 (budget-truncated). +0.40pp val_abupt over matched 3-EP baseline (mempfubx 7.465%) but driven by EP1 transient drift (weights briefly dropped to ~50% of init, then quadratic-well-regularized back to baseline by EP3 within 3% of init). Mechanism null at convergence. Methodology data preserved.
+- **Reassigned tanjiro → PR #1124** (EMA decay 0.9995 + 18h budget): single-flag experiment, slower EMA half-life ≈ 1386 steps vs default 693 steps. Tests whether late-converging τ_z benefits from longer EMA averaging window. Full 13-EP convergence test, comparison to no-SDF tay ceiling 6.99%.
+- **Sent PR #1116 back to edward** (per-channel WSS heads, draft state): matched-budget A/B at EP3 truncated showed −0.66pp test_WSS, −0.09pp test_vol_p, −0.23pp test_SP — every metric improved vs single-head baseline `mempfubx`. **First clean positive Wave 28.5 signal.** But test_WSS=7.671% does not beat no-SDF ceiling (6.99%), so requires 18h budget convergence confirmation: if matched-budget delta holds at EP13, test_WSS → 6.33%, would tie/beat ensemble SOTA. Re-running with `SENPAI_TIMEOUT_MINUTES=1100`, no other changes.
+- **τ_z/τ_x ratio finding (edward EP3)**: per-channel heads UNIFORMLY uplift capacity, not τ_z-specifically — ratio went 1.44 → 1.52 (wrong direction). Mechanism is "decoupled head capacity", not "τ_z specialization". Implies follow-on work needs deeper/wider τ_z head specifically (overlaps with thorfinn #1123 τ_z subnet).
 
 ---
 
@@ -101,27 +108,28 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 
 ---
 
-## Active WIP PRs (as of 2026-05-14 ~23:50Z)
+## Active WIP PRs (as of 2026-05-15 ~01:25Z)
 
 ### Capacity / baseline runs (both CLOSED — no-SDF ceiling confirmed at test_WSS ≈ 6.99%)
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
 | #1078 | alphonse | ~~Asymmetric eval surface 131k~~ | **CLOSED 22:42Z** — test_WSS=6.996% (+26.8bp vs SOTA), test floors regress; val→test ratio was 1.020 not projected 0.935; hypothesis falsified |
 | #1100 | thorfinn | ~~Capacity uplift — model-slices 256~~ | **CLOSED 23:45Z** — test_WSS=6.989% (+26.2bp vs SOTA), test_SP +7.1% above floor; landed EP20 at 18h budget cap; confirms no-SDF tay structural ceiling at test_WSS ≈ 6.99% |
-| **#1122** | alphonse | **SDF importance sampling port to tay (alpha=4.0)** | Active WIP; launched 22:45Z post-#1078 close |
-| **#1123** | thorfinn | **τ_z dedicated subnet** (2-layer MLP head attacking residual axis test_τ_z ≈ 9.05%) | Active WIP; launched 23:50Z post-#1100 close |
 
 ### Wave 28 — ALL 4 CLOSED (Wave 28 closed 19:43–21:33Z, see Wave 28 Closures below)
 
-### Wave 28.5 (current generation) — 4 fresh PRs launched 2026-05-14 ~20:00–21:35Z + 2 still-alive Wave 28 carryovers
+### Wave 28.5 (current generation) — 1 sent-back, 1 closed, 5 still in flight
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| **#1116** | edward | **Per-channel WSS output heads** — decouple tau_x/tau_y/tau_z heads; tests if shared MLP is the magnitude bottleneck | Active WIP; launched after #1109 close |
-| **#1114** | tanjiro | **Learnable WSS channel loss weights** — softplus-parameterised w_x/w_y/w_z; LR=1e-3 weight group; targets tau_z | Active WIP; prod relaunch alive W&B `jczuycas` (started 17:41Z); EP3 gate with defensive watchpoints |
-| **#1118** | askeladd | **OHEM v2 spike-clipped + reduced λ** — fixes #1110 scale-collapse via spike-clipping; λ=0.25 (was 0.5); 2-ep warmup | Active WIP; launched 20:53Z post-#1110 close |
-| **#1119** | fern | **GradNorm short-cycle (t_max=6, ep=6)** — full-convergence test of prior-vs-learned weights at shorter cycle to avoid budget truncation | Active WIP; launched 21:02Z post-#1111 close |
-| **#1120** | nezuko | **Spatial-prior surface sampling (-x + |z|)** — light spatial-prior surface bias; ρ=+0.31 PASS pre-train diagnostic vs |WSS| | Active WIP; launched 21:10Z post-#1113 close |
-| **#1121** | frieren | **WSS magnitude-only decomposition + 18h budget** — `λ_dir=0.0`, full 13-ep cosine via `SENPAI_TIMEOUT_MINUTES=1100`; tests Wave 27 "91-96% magnitude" claim | Active WIP; launched 21:33Z post-#1112 close |
+| ~~#1114~~ | tanjiro | ~~Learnable WSS channel loss weights~~ | **CLOSED 01:13Z** — terminal `test_WSS=7.726%`, mechanism null at convergence (weights drift back to ~baseline by EP3), +0.4pp matched-baseline win from EP1 transient (implicit volume-first curriculum); reassigned → #1124 |
+| **#1116** | edward | **Per-channel WSS output heads** — decouple tau_x/tau_y/tau_z heads | **CHANGES REQUESTED 01:25Z** (draft) — terminal `test_WSS=7.671%, val_abupt=6.915%` at EP3; matched-budget A/B: every metric improves vs `mempfubx` baseline (test_WSS −0.66pp). Re-running at 18h budget to confirm at convergence. If delta holds, projected test_WSS ≈ 6.33% (would tie ensemble SOTA). |
+| **#1118** | askeladd | **OHEM v2 spike-clipped + reduced λ** — fixes #1110 scale-collapse via spike-clipping; λ=0.25 (was 0.5); 2-ep warmup | Active WIP; OHEM warmup ends end of EP2 ~00:46Z; EP3 gate ~02:21Z |
+| **#1119** | fern | **GradNorm short-cycle (t_max=6, ep=6)** — full-convergence test of prior-vs-learned weights at shorter cycle | Active WIP; EP1 learned τ_z weight=1.047 vs prior 2.0 (same de-emphasis pattern as #1111); EP6 terminal ~07:00Z |
+| **#1120** | nezuko | **Spatial-prior surface sampling (-x + \|z\|)** — light spatial-prior surface bias; ρ=+0.31 PASS pre-train diagnostic vs |WSS| | Active WIP; **EP2 catastrophe-gate PASS by wide margin** (val_abupt=7.84% vs #1113 13.12% at same EP); EP3 gate ~02:20Z |
+| **#1121** | frieren | **WSS magnitude-only decomposition + 18h budget** — `λ_dir=0.0`, full 13-ep cosine via `SENPAI_TIMEOUT_MINUTES=1100`; tests Wave 27 "91-96% magnitude" claim | Active WIP; EP1 val_abupt=28.347% (warmup floor); decomp infra confirmed (λ_dir=0 in train logs); EP3 gate ~02:48Z; EP13 ~14:00Z |
+| **#1122** | alphonse | **SDF importance sampling port to tay (alpha=4.0)** — highest-EV untested-on-tay lever; ports PR #972's SDF-stratified vol sampling | Active WIP; launched 22:45Z post-#1078 close; pod healthy (kubectl confirmed 90-100% GPU util × 8 ranks); EP3 gate ~04:00Z |
+| **#1123** | thorfinn | **τ_z dedicated subnet** — 2-layer MLP head attacking residual axis test_τ_z ≈ 9.05% | Active WIP; launched 23:50Z post-#1100 close |
+| **#1124** | tanjiro | **EMA decay 0.9995 + 18h budget** — single-flag test of slower EMA half-life (~1386 vs 693 steps) for late-converging τ_z | Active WIP; assigned 01:18Z post-#1114 close; full 13-EP convergence test |
 
 ---
 
