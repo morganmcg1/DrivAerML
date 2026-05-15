@@ -1,3 +1,140 @@
+## 2026-05-15 04:00 — Wave 29 Active Fleet (8 PRs in flight)
+
+All 8 student pods READY (1/1). Full 18h/13ep convergence budget assigned. Gate criteria (no-SDF students): EP1 ≤35%, EP3 ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL. Alphonse (SDF): EP3 ≤6.9% PASS / ≤7.2% MARGINAL / >7.2% KILL.
+
+---
+
+## 2026-05-15 03:50 — PR #1128: τ_z loss-weight 3.0 escalation (thorfinn) — IN FLIGHT
+
+- **Branch**: `thorfinn/tau-z-loss-weight-3p0`
+- **W&B run**: `uwqybod5` (group `tau-z-loss-weight-3p0`, launched 03:48:42Z, ACK 03:49:15Z)
+- **Hypothesis**: Escalate `--tau-z-loss-weight` from 2.0 → 3.0 (single CLI flag change). τ_z is the dominant WSS error axis (8.75% vs τ_x 5.97%, τ_y 7.36%). Prior PR #1123 unresponsive; reassigned as a simpler single-flag experiment to fill the slot. Tests whether further weighting beyond the standard τ_z=2.0 prior continues to drive τ_z improvement without degrading τ_x/τ_y.
+- **Key signal**: τ_z/τ_x ratio (should decrease from baseline 1.47× if mechanism works)
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP1 | ~06:00Z | ≤35% val_abupt | pending |
+| EP3 | ~08:30Z | ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL | pending |
+| EP13 | ~15:30Z | terminal | pending |
+
+---
+
+## 2026-05-15 03:10 — PR #1127: Surface_loss warmup curriculum (askeladd) — IN FLIGHT
+
+- **Branch**: `askeladd/surface-loss-warmup`
+- **W&B run**: `dtgfdsgv` (launched ~03:00Z)
+- **Hypothesis**: Explicit 3-epoch ramp from `surface_loss_weight=0 → 2.0` (`--surface-loss-weight-warmup-epochs 3`). Directly tests PR #1114 finding that EP1 WSS wins may be curriculum artifacts from implicit warmup. If explicit curriculum > implicit constant-weight, gain may compound at convergence.
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP1 | ~04:30Z | ≤35% val_abupt | pending |
+| EP3 | ~06:00Z | ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL | pending |
+| EP13 | ~14:00Z | terminal | pending |
+
+---
+
+## 2026-05-15 03:00 — PR #1126: Deeper surface_out MLP depth=4 (fern) — IN FLIGHT
+
+- **Branch**: `fern/surface-out-depth-4`
+- **W&B run**: fern run (group `surface-out-depth-4`, launched ~02:59Z)
+- **Hypothesis**: Increase `surface_out` MLP depth from 2 → 4 layers (+525k params, +3% total, 17.94M params total). Tests whether τ_z prediction benefits from deeper output projection capacity. Orthogonal to main transformer; negligible VRAM impact.
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP1 | ~04:30Z | ≤35% val_abupt | pending |
+| EP3 | ~06:00Z | ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL | pending |
+| EP13 | ~14:00Z | terminal | pending |
+
+---
+
+## 2026-05-15 02:50 — PR #1125: Spatial-prior surface sampling α=10 (nezuko) — IN FLIGHT
+
+- **Branch**: `nezuko/spatial-prior-alpha-10`
+- **W&B run**: nezuko run (group `spatial-prior-alpha-10`, launched ~02:45Z)
+- **Hypothesis**: Spatial bias `w = 1 + 10.0·(front_bias + |z|_bias)/2` at full 18h/13ep budget. Prior PR #1120 (α=3) showed real mechanism signal (EP3 val_WSS −0.67pp vs baseline, ρ=+0.31 correlation with |WSS|) but was budget-truncated at 47%. α=10 increases front/side oversample to ×3–4× to drive more τ_z-region coverage.
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP1 | ~05:00Z | ≤35% val_abupt | pending |
+| EP3 | ~06:00Z | ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL | pending |
+| EP13 | ~14:00Z | terminal | pending |
+
+---
+
+## 2026-05-15 02:00 — PR #1124: EMA decay 0.9995 (tanjiro) — IN FLIGHT
+
+- **Branch**: `tanjiro/ema-slow-decay`
+- **W&B run**: `mw6d04kc` (launched ~01:25Z)
+- **Hypothesis**: Slow EMA decay 0.999 → 0.9995 (double the averaging window at EP13). At 13ep standard recipe, current EMA τ ≈ 141 steps; 0.9995 → τ ≈ 2000 steps. Tests whether EMA over-weights recent noisy steps near cosine LR floor. Primary signal: EMA–raw gap inversion (EMA should outperform raw by larger margin).
+- **EP1 result**: val_abupt = 31.48% — **PASS** (≤35%)
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP1 | DONE | ≤35% | **PASS (31.48%)** |
+| EP3 | ~06:15Z | ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL | pending |
+| EP13 | ~15:00Z | terminal | pending |
+
+---
+
+## 2026-05-15 01:30 — PR #1122: SDF FAR-field α=2.0 (alphonse) — IN FLIGHT
+
+- **Branch**: `alphonse/sdf-far-field-alpha-2`
+- **W&B run**: alphonse run (launched ~01:00Z, smoke PASS: 5.6× sampled/population weight ratio confirmed)
+- **Hypothesis**: Port SOTA SDF weighting mechanism `weight = 1 + α·|sdf|` (FAR-field amplification) with α=2.0. Prior ADVISOR error: assigned wrong mechanism (NEAR-field `1/(1+α|sdf|)` with α=4.0); alphonse self-caught and corrected. FAR-field mechanism up-weights points far from surface where gradients concentrate → complementary to surface_loss term.
+- **Pace note**: At vol=16k → 860 views/case → 10,864 iters/rank/epoch × 1.38 it/s = **131 min/epoch** (not 80 min as initially estimated). Rate-limiting step is view_count=max(130,860).
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| Smoke | DONE | 5.6× weight ratio | **PASS** |
+| EP1 | ~05:50Z | ≤35% val_abupt | pending |
+| EP3 | ~07:55Z | ≤6.9% PASS / ≤7.2% MARGINAL / >7.2% KILL | pending |
+| EP13 | ~16:30Z | terminal | pending |
+
+**Key signals to monitor**: per-axis WSS at EP3 (τ_z should be the primary beneficiary of FAR-field weighting), sampled/population weight ratio stability.
+
+---
+
+## 2026-05-15 01:00 — PR #1121: WSS magnitude-only decomposition (frieren) — IN FLIGHT
+
+- **Branch**: `frieren/wss-mag-only-decomp`
+- **W&B run**: frieren run (group `wss-mag-only-decomp`, launched ~00:30Z)
+- **Hypothesis**: Decompose WSS auxiliary loss as magnitude-only: λ_dir=0, λ_mag=0.1. Suppresses direction-component loss that may add cross-axis interference. Tests whether magnitude supervision alone drives stronger τ_z learning without the directional penalty competing.
+- **EP3 result (PASS — strongest in decomp family)**:
+
+| Metric | EP3 value | Gate |
+|---|---:|---|
+| val_abupt | **6.746%** | ≤7.2% **PASS** |
+| val_τ_x | 6.580% | — |
+| val_τ_y | 8.593% | — |
+| val_τ_z | 10.093% | — |
+
+EP3 val_abupt=6.746% is strongest in any decomp-family run. Continuing to full 18h/13ep convergence.
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP3 | DONE | ≤7.2% | **PASS (6.746%)** |
+| EP6 sanity | ~06:00Z | ≤6.5% PASS / ≤6.8% MARGINAL | pending |
+| EP13 terminal | ~14:30Z | terminal | pending |
+
+---
+
+## 2026-05-15 00:30 — PR #1116: Per-channel WSS output heads (edward) — IN FLIGHT (relaunched)
+
+- **Branch**: `edward/per-channel-surface-heads`
+- **W&B run**: `3ufrbxl6` (relaunched 03:08:59Z after pod restart killed `rfapq0o3` at EP1 ~97min in)
+- **Hypothesis**: `--use-per-channel-surface-heads`: separate linear output heads per WSS axis (τ_x, τ_y, τ_z) instead of shared head. Tests whether per-axis specialization reduces τ_z/τ_x interference. Budget-matched arm (`hqp13ztw`) showed test_WSS −0.66pp vs baseline; τ_z/τ_x ratio went wrong direction (1.36→1.44). This 18h convergence run tests whether the trend reverses at full budget.
+- **Pod restart**: Pod wipe at 03:05:35Z killed `rfapq0o3` during EP1. Python env wiped (lost `lion_pytorch`). Student re-installed, relaunched as `3ufrbxl6` at 03:08:59Z.
+
+| Gate | ETA | Criterion | Status |
+|---|---|---|---|
+| EP1 | ~05:10Z | ≤35% val_abupt | pending |
+| EP3 | ~08:00Z | ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL | pending |
+| EP13 | ~14:00Z | terminal | pending |
+
+**Key signal**: τ_z/τ_x ratio at EP3 — should decrease from 1.44 (budget-matched arm) toward 1.47 (baseline) or better. If ratio increases further → approach is degrading τ_z.
+
+---
+
 ## 2026-05-15 02:35 — PR #1118: OHEM v2 spike-clipped + reduced λ (askeladd) — CLOSED (DEFINITIVE NEGATIVE: ZERO OHEM GRADIENT)
 
 - **Branch**: `askeladd/ohem-v2-spike-clipped` (closed)
