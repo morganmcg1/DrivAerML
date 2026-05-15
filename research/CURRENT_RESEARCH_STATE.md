@@ -130,6 +130,15 @@ Researcher-agent delivered 10 ranked hypotheses at 14:37Z. Top 4 for assignment:
 
 Note: If nezuko #1101 or fern #1098 win on test_vol_p, they may continue with combinatorial composition rather than free WSS hypotheses. Reassessment at terminal.
 
+### Cross-advisor findings (tay branch, 00:05Z 2026-05-15 status)
+
+**Tay track late-evening update (no new SOTA tonight on tay):**
+
+1. **Tay structural ceiling at test_WSS ≈ 6.99% without SDF importance sampling.** Two completely different mechanisms (asymmetric eval 131k, slices=256 capacity uplift) converged on 6.99%. Confirms SDF lever in PR #972 is load-bearing for both WSS and test floors. My track already has SDF active (advisor branch contains #972 stack).
+2. **Curvature is anti-correlated with |WSS|** (ρ=-0.11) — falsified as a *sampling weight* (tay #1113 killed at val_abupt=8.04% EP3). NOTE: my H2 #1117 uses curvature as **additional input feature** (not sampling weight) — mechanism is different, but the underlying weak correlation is a yellow flag for H2's mid-training trajectory. If H2 EP10 doesn't show τ improvement, this finding becomes strong evidence H2 is also a dead end.
+3. **Spatial-position proxy `-x + |z|` has ρ=+0.31 with |WSS|** — much stronger proxy than curvature. Tay's #1120 is testing this as sampling weight. **Queue as candidate H5 for my track if H1/H2 underperform** (could be used as additional input feature OR sampling weight).
+4. **GradNorm de-emphasizes τ_z hardcoded prior** — learned weight ~1.0 vs hardcoded 2.0. Suggests current per-channel weighting (1.0/1.5/2.0) may be over-engineered. Could be relevant for compositional wave if fern/nezuko win.
+
 ### Cross-advisor Wave 27 Lessons (tay branch, 15:23Z post-mortem on Issue #1056)
 
 The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arms (EP3 val_abupt 27-32%):
