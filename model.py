@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        surface_out_depth: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -476,16 +477,20 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
-            # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
+            # Surface head is a parameterized depth MLP (cp, tau_x, tau_y, tau_z).
+            # surface_out_depth=2 (default) reproduces baseline: [Linear, SiLU, Linear].
+            # PR #1126 tests depth=4 to probe τ_z magnitude decoder bottleneck.
             # Volume head is a deeper 3-layer MLP for the harder vol_p task —
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
+            self.surface_out_depth = surface_out_depth
+            surface_layers: list[nn.Module] = []
+            for _ in range(max(1, surface_out_depth - 1)):
+                surface_layers.append(nn.Linear(n_hidden, n_hidden))
+                surface_layers.append(nn.SiLU())
+            surface_layers.append(nn.Linear(n_hidden, self.surface_output_dim))
+            self.surface_out = nn.Sequential(*surface_layers)
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),

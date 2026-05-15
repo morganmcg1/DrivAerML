@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    surface_out_depth: int = 2
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -220,6 +221,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "surface_out_depth": (
+            "Number of Linear layers in the surface output head MLP (PR #1126). "
+            "Default 2 reproduces the baseline [Linear, SiLU, Linear]. "
+            "Increasing to 4 inserts two additional [Linear, SiLU] blocks, "
+            "giving the surface head more representational capacity for τ_z "
+            "magnitude regression. At depth=N the head is (N-1) [Linear, SiLU] "
+            "blocks followed by a final Linear(n_hidden, surface_output_dim). "
+            "Only applies when --use-aux-decoder-heads (default True)."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -308,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        surface_out_depth=config.surface_out_depth,
     )
 
 
