@@ -253,16 +253,11 @@ class TransolverAttention(nn.Module):
             self.num_slices_xy = num_slices - self.num_slices_z
             if self.num_slices_xy <= 0:
                 raise ValueError(
-                    f"z_slice_fraction={z_slice_fraction} leaves no xy-slices "
-                    f"(num_slices={num_slices})"
+                    "z_slice_fraction too high: would leave zero slices for xy-surfaces"
                 )
         else:
             self.num_slices_z = 0
             self.num_slices_xy = num_slices
-        # Diagnostic stash (populated only when hard routing engages).
-        self.last_z_fraction: float | None = None
-        self.last_util_z: float | None = None
-        self.last_util_xy: float | None = None
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -278,37 +273,45 @@ class TransolverAttention(nn.Module):
             self.q_norm = None
             self.k_norm = None
 
+        # Hard-routing diagnostic buffers, refreshed per forward pass when routing is on.
+        # Stored on-device as 0-dim tensors so DDP/AMP do not complicate the read path.
+        self._last_z_surface_fraction: torch.Tensor | None = None
+        self._last_util_z: torch.Tensor | None = None
+        self._last_util_xy: torch.Tensor | None = None
+
     def build_routing_mask(
         self,
         normals: torch.Tensor,
         num_tokens: int,
-        device: torch.device,
-    ) -> torch.Tensor | None:
-        """Per-token boolean slice mask [B, N, S] enforcing hard normal-routing.
+    ) -> torch.Tensor:
+        """Returns [B, N, S] boolean mask for hard normal-routing.
 
-        Surface tokens with |n_z| >= threshold may attend only to the last
-        ``num_slices_z`` slices; surface tokens with |n_z| < threshold may
-        attend only to the first ``num_slices_xy`` slices. Volume tokens
-        (passed in with all-zero normals) keep the full slice budget so the
-        baseline behaviour is preserved.
+        True = token may attend to slice; False = token forbidden from slice.
+        Volume tokens (all-zero normals) are permitted everywhere.
         """
-        if self.z_slice_fraction <= 0.0 or normals is None:
-            return None
-        abs_nz = normals[..., 2].abs()
-        is_z_surface = abs_nz >= self.nz_routing_threshold
-        is_volume = normals.abs().sum(dim=-1) < 1e-6
+        batch_size = normals.shape[0]
+        device = normals.device
+        abs_nz = normals[..., 2].abs()  # [B, N]
+        is_z_surface = abs_nz >= self.nz_routing_threshold  # [B, N]
         mask = torch.zeros(
-            normals.shape[0], num_tokens, self.num_slices,
-            device=device, dtype=torch.bool,
+            batch_size,
+            num_tokens,
+            self.num_slices,
+            device=device,
+            dtype=torch.bool,
         )
-        mask[:, :, -self.num_slices_z:] = is_z_surface.unsqueeze(-1)
-        mask[:, :, : self.num_slices_xy] = (~is_z_surface).unsqueeze(-1)
+        if self.num_slices_z > 0:
+            mask[:, :, -self.num_slices_z:] = is_z_surface.unsqueeze(-1)
+        if self.num_slices_xy > 0:
+            mask[:, :, : self.num_slices_xy] = (~is_z_surface).unsqueeze(-1)
+        # Volume tokens carry zero normals; allow all slices for them.
+        is_volume = normals.abs().sum(dim=-1) < 1e-6  # [B, N]
         mask = mask | is_volume.unsqueeze(-1)
-        if not mask.any(dim=-1).all():
-            # Fallback: any pathological token with no allowed slice falls back
-            # to the full mask. Prevents softmax NaN from an all-false row.
-            bad_tokens = ~mask.any(dim=-1)
-            mask = mask | bad_tokens.unsqueeze(-1)
+        # Safety: any token with zero allowed slices (e.g. degenerate normal)
+        # falls back to all-True to avoid softmax(-inf, ..., -inf) = NaN.
+        no_allowed = ~mask.any(dim=-1)  # [B, N]
+        if no_allowed.any():
+            mask = mask | no_allowed.unsqueeze(-1)
         return mask
 
     def create_slices(
@@ -321,16 +324,17 @@ class TransolverAttention(nn.Module):
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
-        routing_mask = None
+
         if self.z_slice_fraction > 0.0 and normals is not None:
-            routing_mask = self.build_routing_mask(normals, num_tokens, x.device)
-            if routing_mask is not None:
-                # Broadcast across heads: [B, 1, N, S]. Use a large finite
-                # negative (Switch Transformer §6) rather than -inf so a row
-                # that ends up all-suppressed in bf16 can never become NaN.
-                routing_mask_h = routing_mask.unsqueeze(1)
-                neg_inf = torch.finfo(slice_logits.dtype).min / 2
-                slice_logits = slice_logits.masked_fill(~routing_mask_h, neg_inf)
+            routing_mask = self.build_routing_mask(normals, num_tokens)  # [B, N, S]
+            # Broadcast across heads: [B, 1, N, S]; cast to logits dtype for the masked_fill.
+            routing_mask_h = routing_mask.unsqueeze(1)
+            slice_logits = slice_logits.masked_fill(
+                ~routing_mask_h, torch.finfo(slice_logits.dtype).min
+            )
+            if self.training:
+                self._record_routing_diagnostics(slice_logits, normals, attn_mask)
+
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -339,44 +343,37 @@ class TransolverAttention(nn.Module):
             )
         slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
-        if routing_mask is not None:
-            self._stash_routing_diag(slice_weights, normals, attn_mask)
         return slice_tokens, slice_weights
 
-    def _stash_routing_diag(
+    def _record_routing_diagnostics(
         self,
-        slice_weights: torch.Tensor,
+        slice_logits: torch.Tensor,
         normals: torch.Tensor,
         attn_mask: torch.Tensor | None,
     ) -> None:
-        """Record cheap mean diagnostics so the trainer can log them."""
+        """Record per-batch hard-routing utilization (head-averaged, surface-only)."""
+        # slice_logits: [B, H, N, S]
         with torch.no_grad():
-            abs_nz = normals[..., 2].abs()
-            is_z = abs_nz >= self.nz_routing_threshold
-            is_volume = normals.abs().sum(dim=-1) < 1e-6
-            is_surface = ~is_volume
+            sw = F.softmax(slice_logits.detach().float(), dim=-1)  # [B, H, N, S]
+            # Only surface tokens carry real normals; volume tokens are all-zero.
+            is_surface = normals.abs().sum(dim=-1) > 1e-6  # [B, N]
             if attn_mask is not None:
-                surface_valid = is_surface & attn_mask.bool()
-            else:
-                surface_valid = is_surface
-            is_z_surface = is_z & surface_valid
-            is_xy_surface = (~is_z) & surface_valid
-            n_surface = surface_valid.float().sum().clamp_min(1.0)
-            self.last_z_fraction = float(
-                (is_z_surface.float().sum() / n_surface).item()
-            )
-            # Average over heads -> [B, N, S]
-            sw_mean = slice_weights.mean(dim=1).float()
-            z_util_per_token = sw_mean[..., -self.num_slices_z:].sum(dim=-1)
-            xy_util_per_token = sw_mean[..., : self.num_slices_xy].sum(dim=-1)
-            n_z = is_z_surface.float().sum().clamp_min(1.0)
-            n_xy = is_xy_surface.float().sum().clamp_min(1.0)
-            self.last_util_z = float(
-                ((z_util_per_token * is_z_surface.float()).sum() / n_z).item()
-            )
-            self.last_util_xy = float(
-                ((xy_util_per_token * is_xy_surface.float()).sum() / n_xy).item()
-            )
+                is_surface = is_surface & attn_mask.to(dtype=torch.bool)
+            abs_nz = normals[..., 2].abs()
+            is_z_surface = (abs_nz >= self.nz_routing_threshold) & is_surface
+            is_xy_surface = (abs_nz < self.nz_routing_threshold) & is_surface
+            # Head-averaged softmax weights: [B, N, S]
+            sw_mean_heads = sw.mean(dim=1)
+            util_z = sw_mean_heads[..., -self.num_slices_z:].sum(dim=-1)  # [B, N]
+            util_xy = sw_mean_heads[..., : self.num_slices_xy].sum(dim=-1)  # [B, N]
+
+            z_count = is_z_surface.sum().clamp(min=1).float()
+            xy_count = is_xy_surface.sum().clamp(min=1).float()
+            surf_count = is_surface.sum().clamp(min=1).float()
+
+            self._last_util_z = (util_z * is_z_surface.float()).sum() / z_count
+            self._last_util_xy = (util_xy * is_xy_surface.float()).sum() / xy_count
+            self._last_z_surface_fraction = is_z_surface.sum().float() / surf_count
 
     def forward(
         self,
@@ -384,9 +381,7 @@ class TransolverAttention(nn.Module):
         attn_mask: torch.Tensor | None = None,
         normals: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(
-            x, attn_mask=attn_mask, normals=normals,
-        )
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask, normals=normals)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -732,17 +727,16 @@ class SurfaceTransolver(nn.Module):
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
 
         combined_normals: torch.Tensor | None = None
-        if self.z_slice_fraction > 0.0 and surface_x is not None:
-            # Surface features are [x, y, z, nx, ny, nz, area]; re-normalise the
-            # raw mesh normals so the |n_z| >= threshold cut is well-defined
-            # regardless of any upstream rescaling.
-            surf_normals = F.normalize(
-                surface_x[:, :, 3:6].to(hidden.dtype), dim=-1, eps=1e-6
-            )
-            if volume_x is not None:
+        if self.z_slice_fraction > 0.0 and surface_x is not None and surface_x.shape[-1] >= 6:
+            # Channels 3:6 of surface_x are the per-point surface normal (nx, ny, nz).
+            surf_normals = F.normalize(surface_x[..., 3:6], dim=-1, eps=1e-6)
+            if volume_x is not None and volume_tokens > 0:
                 vol_zeros = torch.zeros(
-                    volume_x.shape[0], volume_x.shape[1], 3,
-                    device=surf_normals.device, dtype=surf_normals.dtype,
+                    volume_x.shape[0],
+                    volume_tokens,
+                    3,
+                    device=surf_normals.device,
+                    dtype=surf_normals.dtype,
                 )
                 combined_normals = torch.cat([surf_normals, vol_zeros], dim=1)
             else:

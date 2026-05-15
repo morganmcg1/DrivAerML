@@ -232,18 +232,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
         "z_slice_fraction": (
-            "PR #1141 Wave 30 H4: fraction of --model-slices reserved for "
-            "z-normal surface tokens. When > 0, surface tokens with "
-            "|n_z| >= --nz-routing-threshold are hard-routed to the last "
-            "int(z_slice_fraction * num_slices) slices via pre-softmax "
-            "masking; other surface tokens are routed to the remaining "
-            "xy-slices. Volume tokens keep full slice access. At 0.0 the "
-            "model is bit-exact baseline."
+            "Hard normal-routing fraction for slice attention (PR #1141, "
+            "Wave 30 H4). When >0, partitions --model-slices into two "
+            "disjoint groups: int(model_slices * z_slice_fraction) z-slices "
+            "(last) and the rest as xy-slices (first). Surface tokens with "
+            "|n_z| >= --nz-routing-threshold are hard-routed (via pre-softmax "
+            "-inf masking) to z-slices ONLY; tokens with |n_z| below the "
+            "threshold are hard-routed to xy-slices ONLY. Volume tokens "
+            "(no normals) retain soft routing across all slices. At 0.0 "
+            "the model is bit-exact baseline. Recommended 0.25."
         ),
         "nz_routing_threshold": (
-            "PR #1141 Wave 30 H4: absolute z-normal threshold separating "
-            "z-surface tokens (|n_z| >= threshold) from xy-surface tokens. "
-            "Only active when --z-slice-fraction > 0."
+            "Threshold on |n_z| for the hard normal-routing classifier "
+            "(see --z-slice-fraction). Surface tokens with |n_z| >= this "
+            "threshold are routed to z-slices; tokens below it are routed "
+            "to xy-slices. Default 0.5. Ignored when --z-slice-fraction=0."
         ),
     }
     for field in fields(Config):
@@ -292,6 +295,43 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_hard_routing_metrics(model: nn.Module) -> dict[str, float]:
+    """Read per-block hard-routing diagnostics stashed by TransolverAttention.
+
+    Returns mean-over-layers utilization and z-surface fraction, plus per-layer
+    keys for debugging. Empty dict if hard routing is not engaged.
+    """
+    metrics: dict[str, float] = {}
+    backbone = getattr(model, "backbone", None)
+    if backbone is None:
+        return metrics
+    util_z_vals: list[float] = []
+    util_xy_vals: list[float] = []
+    z_frac_vals: list[float] = []
+    for block_idx, block in enumerate(getattr(backbone, "blocks", [])):
+        attn = getattr(block, "attention", None)
+        if attn is None or getattr(attn, "z_slice_fraction", 0.0) <= 0.0:
+            continue
+        uz = getattr(attn, "_last_util_z", None)
+        ux = getattr(attn, "_last_util_xy", None)
+        zf = getattr(attn, "_last_z_surface_fraction", None)
+        if uz is None or ux is None or zf is None:
+            continue
+        uz_v = float(uz.detach().cpu().item())
+        ux_v = float(ux.detach().cpu().item())
+        zf_v = float(zf.detach().cpu().item())
+        util_z_vals.append(uz_v)
+        util_xy_vals.append(ux_v)
+        z_frac_vals.append(zf_v)
+        metrics[f"train/slice_capacity_utilization_z/block_{block_idx}"] = uz_v
+        metrics[f"train/slice_capacity_utilization_xy/block_{block_idx}"] = ux_v
+    if util_z_vals:
+        metrics["train/slice_capacity_utilization_z"] = sum(util_z_vals) / len(util_z_vals)
+        metrics["train/slice_capacity_utilization_xy"] = sum(util_xy_vals) / len(util_xy_vals)
+        metrics["train/z_surface_fraction"] = sum(z_frac_vals) / len(z_frac_vals)
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -307,40 +347,6 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
         for axis in range(log_freq.shape[0]):
             metrics[f"{prefix}/freq_axis_{axis}_mean"] = float(log_freq[axis].mean().item())
             metrics[f"{prefix}/freq_axis_{axis}_std"] = float(log_freq[axis].std().item())
-    return metrics
-
-
-def collect_slice_routing_metrics(model: nn.Module) -> dict[str, float]:
-    """PR #1141: per-layer z-routing diagnostics for hard-normal slice routing.
-
-    Logs the most recent training-batch slice-utilisation stats that each
-    TransolverAttention stashed during forward. Returns nothing when
-    z_slice_fraction is disabled.
-    """
-    from model import TransolverAttention
-
-    metrics: dict[str, float] = {}
-    z_fracs: list[float] = []
-    util_zs: list[float] = []
-    util_xys: list[float] = []
-    for name, module in model.named_modules():
-        if not isinstance(module, TransolverAttention):
-            continue
-        if module.z_slice_fraction <= 0.0:
-            continue
-        if module.last_z_fraction is None:
-            continue
-        path = name.replace(".", "/")
-        metrics[f"slice_routing/{path}/z_surface_fraction"] = module.last_z_fraction
-        metrics[f"slice_routing/{path}/util_z"] = module.last_util_z
-        metrics[f"slice_routing/{path}/util_xy"] = module.last_util_xy
-        z_fracs.append(module.last_z_fraction)
-        util_zs.append(module.last_util_z)
-        util_xys.append(module.last_util_xy)
-    if z_fracs:
-        metrics["slice_routing/mean/z_surface_fraction"] = sum(z_fracs) / len(z_fracs)
-        metrics["slice_routing/mean/util_z"] = sum(util_zs) / len(util_zs)
-        metrics["slice_routing/mean/util_xy"] = sum(util_xys) / len(util_xys)
     return metrics
 
 
@@ -1178,6 +1184,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        if (
+                            state.is_main
+                            and config.z_slice_fraction > 0.0
+                            and config.gradient_log_every > 0
+                            and global_step % config.gradient_log_every == 0
+                        ):
+                            train_log.update(collect_hard_routing_metrics(base_model))
 
                 train_log.update(
                     train_slope_tracker.update(
@@ -1314,7 +1327,6 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
-                log_metrics.update(collect_slice_routing_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
