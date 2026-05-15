@@ -234,6 +234,8 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        z_slice_fraction: float = 0.0,
+        nz_routing_threshold: float = 0.5,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -244,6 +246,23 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.z_slice_fraction = z_slice_fraction
+        self.nz_routing_threshold = nz_routing_threshold
+        if z_slice_fraction > 0.0:
+            self.num_slices_z = max(1, int(num_slices * z_slice_fraction))
+            self.num_slices_xy = num_slices - self.num_slices_z
+            if self.num_slices_xy <= 0:
+                raise ValueError(
+                    f"z_slice_fraction={z_slice_fraction} leaves no xy-slices "
+                    f"(num_slices={num_slices})"
+                )
+        else:
+            self.num_slices_z = 0
+            self.num_slices_xy = num_slices
+        # Diagnostic stash (populated only when hard routing engages).
+        self.last_z_fraction: float | None = None
+        self.last_util_z: float | None = None
+        self.last_util_xy: float | None = None
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -259,11 +278,59 @@ class TransolverAttention(nn.Module):
             self.q_norm = None
             self.k_norm = None
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def build_routing_mask(
+        self,
+        normals: torch.Tensor,
+        num_tokens: int,
+        device: torch.device,
+    ) -> torch.Tensor | None:
+        """Per-token boolean slice mask [B, N, S] enforcing hard normal-routing.
+
+        Surface tokens with |n_z| >= threshold may attend only to the last
+        ``num_slices_z`` slices; surface tokens with |n_z| < threshold may
+        attend only to the first ``num_slices_xy`` slices. Volume tokens
+        (passed in with all-zero normals) keep the full slice budget so the
+        baseline behaviour is preserved.
+        """
+        if self.z_slice_fraction <= 0.0 or normals is None:
+            return None
+        abs_nz = normals[..., 2].abs()
+        is_z_surface = abs_nz >= self.nz_routing_threshold
+        is_volume = normals.abs().sum(dim=-1) < 1e-6
+        mask = torch.zeros(
+            normals.shape[0], num_tokens, self.num_slices,
+            device=device, dtype=torch.bool,
+        )
+        mask[:, :, -self.num_slices_z:] = is_z_surface.unsqueeze(-1)
+        mask[:, :, : self.num_slices_xy] = (~is_z_surface).unsqueeze(-1)
+        mask = mask | is_volume.unsqueeze(-1)
+        if not mask.any(dim=-1).all():
+            # Fallback: any pathological token with no allowed slice falls back
+            # to the full mask. Prevents softmax NaN from an all-false row.
+            bad_tokens = ~mask.any(dim=-1)
+            mask = mask | bad_tokens.unsqueeze(-1)
+        return mask
+
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
+        routing_mask = None
+        if self.z_slice_fraction > 0.0 and normals is not None:
+            routing_mask = self.build_routing_mask(normals, num_tokens, x.device)
+            if routing_mask is not None:
+                # Broadcast across heads: [B, 1, N, S]. Use a large finite
+                # negative (Switch Transformer §6) rather than -inf so a row
+                # that ends up all-suppressed in bf16 can never become NaN.
+                routing_mask_h = routing_mask.unsqueeze(1)
+                neg_inf = torch.finfo(slice_logits.dtype).min / 2
+                slice_logits = slice_logits.masked_fill(~routing_mask_h, neg_inf)
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -272,10 +339,54 @@ class TransolverAttention(nn.Module):
             )
         slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
+        if routing_mask is not None:
+            self._stash_routing_diag(slice_weights, normals, attn_mask)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def _stash_routing_diag(
+        self,
+        slice_weights: torch.Tensor,
+        normals: torch.Tensor,
+        attn_mask: torch.Tensor | None,
+    ) -> None:
+        """Record cheap mean diagnostics so the trainer can log them."""
+        with torch.no_grad():
+            abs_nz = normals[..., 2].abs()
+            is_z = abs_nz >= self.nz_routing_threshold
+            is_volume = normals.abs().sum(dim=-1) < 1e-6
+            is_surface = ~is_volume
+            if attn_mask is not None:
+                surface_valid = is_surface & attn_mask.bool()
+            else:
+                surface_valid = is_surface
+            is_z_surface = is_z & surface_valid
+            is_xy_surface = (~is_z) & surface_valid
+            n_surface = surface_valid.float().sum().clamp_min(1.0)
+            self.last_z_fraction = float(
+                (is_z_surface.float().sum() / n_surface).item()
+            )
+            # Average over heads -> [B, N, S]
+            sw_mean = slice_weights.mean(dim=1).float()
+            z_util_per_token = sw_mean[..., -self.num_slices_z:].sum(dim=-1)
+            xy_util_per_token = sw_mean[..., : self.num_slices_xy].sum(dim=-1)
+            n_z = is_z_surface.float().sum().clamp_min(1.0)
+            n_xy = is_xy_surface.float().sum().clamp_min(1.0)
+            self.last_util_z = float(
+                ((z_util_per_token * is_z_surface.float()).sum() / n_z).item()
+            )
+            self.last_util_xy = float(
+                ((xy_util_per_token * is_xy_surface.float()).sum() / n_xy).item()
+            )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(
+            x, attn_mask=attn_mask, normals=normals,
+        )
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -303,6 +414,8 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        z_slice_fraction: float = 0.0,
+        nz_routing_threshold: float = 0.5,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -313,13 +426,20 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            z_slice_fraction=z_slice_fraction,
+            nz_routing_threshold=nz_routing_threshold,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, normals=normals)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -336,6 +456,8 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        z_slice_fraction: float = 0.0,
+        nz_routing_threshold: float = 0.5,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,14 +469,21 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    z_slice_fraction=z_slice_fraction,
+                    nz_routing_threshold=nz_routing_threshold,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, normals=normals)
         return x
 
 
@@ -382,6 +511,8 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        z_slice_fraction: float = 0.0,
+        nz_routing_threshold: float = 0.5,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +527,8 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.z_slice_fraction = z_slice_fraction
+        self.nz_routing_threshold = nz_routing_threshold
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +605,8 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            z_slice_fraction=z_slice_fraction,
+            nz_routing_threshold=nz_routing_threshold,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
@@ -595,7 +730,25 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        combined_normals: torch.Tensor | None = None
+        if self.z_slice_fraction > 0.0 and surface_x is not None:
+            # Surface features are [x, y, z, nx, ny, nz, area]; re-normalise the
+            # raw mesh normals so the |n_z| >= threshold cut is well-defined
+            # regardless of any upstream rescaling.
+            surf_normals = F.normalize(
+                surface_x[:, :, 3:6].to(hidden.dtype), dim=-1, eps=1e-6
+            )
+            if volume_x is not None:
+                vol_zeros = torch.zeros(
+                    volume_x.shape[0], volume_x.shape[1], 3,
+                    device=surf_normals.device, dtype=surf_normals.dtype,
+                )
+                combined_normals = torch.cat([surf_normals, vol_zeros], dim=1)
+            else:
+                combined_normals = surf_normals
+
+        hidden = self.backbone(hidden, attn_mask=attn_mask, normals=combined_normals)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
