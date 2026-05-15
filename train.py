@@ -31,6 +31,9 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+import data.loader as _data_loader
+import trainer_runtime as _trainer_runtime
+from data import SURFACE_X_DIM as DEFAULT_SURFACE_X_DIM
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -61,6 +64,8 @@ from trainer_runtime import (
     timeout_budget_minutes,
     unwrap_model,
 )
+
+WIND_EXPOSURE_EXTRA_CHANNELS = 2  # wind_exposure + abs_cross_normal
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +137,7 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_wind_exposure_features: bool = False
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -225,7 +231,11 @@ def per_channel_masked_mse(
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    surface_input_dim = DEFAULT_SURFACE_X_DIM
+    if config.use_wind_exposure_features:
+        surface_input_dim = DEFAULT_SURFACE_X_DIM + WIND_EXPOSURE_EXTRA_CHANNELS
     return SurfaceTransolver(
+        surface_input_dim=surface_input_dim,
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
         dropout=config.model_dropout,
@@ -259,6 +269,114 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     raise ValueError(
         f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion."
     )
+
+
+_wind_exposure_first_batch_logged = False
+
+
+def _wind_exposure_features(surface_x: torch.Tensor) -> torch.Tensor:
+    """Compute [wind_exposure, abs_cross_normal] from surface_x[..., 3:5] (nx, ny).
+
+    surface_x: (..., 7) feature tensor laid out [x, y, z, nx, ny, nz, area].
+    Returns: (..., 2) tensor concatenating
+        wind_exposure   = max(0, -nx)   one-sided freestream attack
+        abs_cross_normal = |ny|         cross-flow exposure
+    Both are invariant under y-reflection (max(0,-nx) depends only on nx; |-ny|=|ny|).
+    """
+    nx = surface_x[..., 3:4]
+    ny = surface_x[..., 4:5]
+    wind_exposure = torch.clamp(-nx, min=0.0)
+    abs_cross_normal = torch.abs(ny)
+    return torch.cat([wind_exposure, abs_cross_normal], dim=-1)
+
+
+def _wind_exposure_pad_collate(samples):
+    """pad_collate wrapper that appends wind-exposure channels to surface_x.
+
+    The original pad_collate produces surface_x of shape [B, N, 7] with padded
+    rows zeroed. Padded rows have nx=ny=0, so the new channels are 0 there.
+    Surface mask is unchanged.
+    """
+    batch = _data_loader.pad_collate(samples)
+    extra = _wind_exposure_features(batch.surface_x)
+    batch.surface_x = torch.cat([batch.surface_x, extra], dim=-1)
+    return batch
+
+
+def maybe_install_wind_exposure_collate(config: Config) -> None:
+    """If wind-exposure features are enabled, patch trainer_runtime.pad_collate."""
+    if not config.use_wind_exposure_features:
+        return
+    _trainer_runtime.pad_collate = _wind_exposure_pad_collate
+
+
+def log_wind_exposure_sanity(
+    batch, *, is_main: bool, state_enabled: bool, run
+) -> None:
+    """One-shot diagnostic on the first batch: range/mean of new channels."""
+    global _wind_exposure_first_batch_logged
+    if _wind_exposure_first_batch_logged or not is_main:
+        return
+    _wind_exposure_first_batch_logged = True
+    mask = batch.surface_mask.bool()
+    if not mask.any():
+        return
+    surface_x = batch.surface_x
+    valid = surface_x[mask]  # [Nvalid, C]
+    if valid.shape[-1] < 9:
+        return
+    we = valid[:, 7].float()
+    ac = valid[:, 8].float()
+    we_min = float(we.min().item())
+    we_max = float(we.max().item())
+    we_mean = float(we.mean().item())
+    ac_min = float(ac.min().item())
+    ac_max = float(ac.max().item())
+    ac_mean = float(ac.mean().item())
+    nx = valid[:, 3].float()
+    ny = valid[:, 4].float()
+    nz = valid[:, 5].float()
+    norm_sq = (nx * nx + ny * ny + nz * nz)
+    norm_mean = float(norm_sq.sqrt().mean().item())
+    line = (
+        "[wind-exposure] EP0 step0: "
+        f"wind_exposure min={we_min:.4f} max={we_max:.4f} mean={we_mean:.4f}; "
+        f"abs_cross_normal min={ac_min:.4f} max={ac_max:.4f} mean={ac_mean:.4f}; "
+        f"||normal||_2 mean={norm_mean:.4f} (unit normals expect ~1.0)"
+    )
+    try:
+        tqdm.write(line)
+    except Exception:
+        print(line)
+    in_range = (
+        we_min >= 0.0 and we_max <= 1.0 + 1e-4
+        and ac_min >= 0.0 and ac_max <= 1.0 + 1e-4
+    )
+    if not in_range:
+        warn_msg = (
+            "[wind-exposure] WARNING: feature values outside [0, 1]; "
+            "normals likely not unit length"
+        )
+        try:
+            tqdm.write(warn_msg)
+        except Exception:
+            print(warn_msg)
+    if run is not None:
+        try:
+            wandb.log(
+                {
+                    "wind_exposure/init/wind_exposure_min": we_min,
+                    "wind_exposure/init/wind_exposure_max": we_max,
+                    "wind_exposure/init/wind_exposure_mean": we_mean,
+                    "wind_exposure/init/abs_cross_normal_min": ac_min,
+                    "wind_exposure/init/abs_cross_normal_max": ac_max,
+                    "wind_exposure/init/abs_cross_normal_mean": ac_mean,
+                    "wind_exposure/init/normal_norm_mean": norm_mean,
+                    "wind_exposure/init/values_in_unit_range": float(in_range),
+                }
+            )
+        except Exception:
+            pass
 
 
 def apply_y_symmetry_aug(batch, prob: float) -> torch.Tensor:
@@ -434,6 +552,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        maybe_install_wind_exposure_collate(config)
         if config.eval_only:
             run_eval_only(config, state)
             return
@@ -471,7 +590,11 @@ def main(argv: Iterable[str] | None = None) -> None:
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
-            print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+            print(
+                f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params) "
+                f"surface_input_dim={base_model.surface_input_dim} "
+                f"wind_exposure_features={'on' if config.use_wind_exposure_features else 'off'}"
+            )
 
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
@@ -570,6 +693,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                if config.use_wind_exposure_features and epoch == 0 and global_step == 0:
+                    log_wind_exposure_sanity(
+                        batch,
+                        is_main=state.is_main,
+                        state_enabled=state.enabled,
+                        run=run,
+                    )
                 aug_log: dict[str, int] = {}
                 loss, batch_loss_metrics, task_losses = train_loss(
                     model,
