@@ -84,6 +84,7 @@ class Config:
     eval_volume_points: int = 40_000
     validation_every: int = 1
     surface_loss_weight: float = 1.0
+    surface_loss_weight_warmup_epochs: int = 0
     volume_loss_weight: float = 1.0
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
@@ -219,6 +220,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "surface_loss_weight_warmup_epochs": (
+            "Linearly ramp the surface_loss_weight from 0 -> full over the "
+            "first N epochs (per-batch smooth, not stepwise). After EP=N the "
+            "full --surface-loss-weight applies unchanged. Volume loss is "
+            "unaffected. 0 disables (baseline behavior). Multiplies the loss "
+            "term (not gradient / residual), so gradient flow is preserved "
+            "throughout the ramp. Only applies in the legacy (non-GradNorm) "
+            "loss path; GradNorm handles task balancing itself."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -929,13 +939,32 @@ def main(argv: Iterable[str] | None = None) -> None:
             model.train()
             train_loss_sum = 0.0
             n_batches = 0
+            num_batches_per_epoch = len(train_loader)
 
-            for batch in tqdm(
+            for batch_idx, batch in enumerate(tqdm(
                 train_loader,
                 desc=f"Epoch {epoch + 1}/{max_epochs}",
                 leave=False,
                 disable=not state.is_main,
-            ):
+            )):
+                if (
+                    config.surface_loss_weight_warmup_epochs > 0
+                    and epoch < config.surface_loss_weight_warmup_epochs
+                ):
+                    batch_progress_in_epoch = (
+                        (batch_idx / num_batches_per_epoch)
+                        if num_batches_per_epoch > 0
+                        else 0.0
+                    )
+                    ramp_progress = (
+                        (epoch + batch_progress_in_epoch)
+                        / config.surface_loss_weight_warmup_epochs
+                    )
+                    effective_surface_loss_weight = (
+                        config.surface_loss_weight * ramp_progress
+                    )
+                else:
+                    effective_surface_loss_weight = config.surface_loss_weight
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1027,7 +1056,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         transform,
                         device,
                         config.amp_mode,
-                        surface_loss_weight=config.surface_loss_weight,
+                        surface_loss_weight=effective_surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
                     )
@@ -1056,6 +1085,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/surface_loss_weight_effective": float(
+                        effective_surface_loss_weight
+                    ),
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
