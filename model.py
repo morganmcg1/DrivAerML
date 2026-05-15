@@ -234,6 +234,7 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        normal_slice_alpha: float = 0.0,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -244,6 +245,7 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.normal_slice_alpha = float(normal_slice_alpha)
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -258,24 +260,60 @@ class TransolverAttention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
+        if self.normal_slice_alpha > 0.0:
+            # Project 3-D unit normal into per-head slice-logit space.
+            # Zero-init so the bias is identity at EP0 (preserves baseline behavior).
+            self.normal_slice_bias = nn.Linear(3, num_heads * num_slices, bias=False)
+            nn.init.zeros_(self.normal_slice_bias.weight)
+        else:
+            self.normal_slice_bias = None
+        # Diagnostic: last batch's slice-weight entropy (scalar, normalized by log(num_slices)).
+        self._last_slice_entropy: torch.Tensor | None = None
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
+        if self.normal_slice_bias is not None and normals is not None:
+            # normals: [B, N, 3]; zero rows for volume tokens pass through to zero bias.
+            nb = self.normal_slice_bias(normals.to(dtype=slice_logits.dtype))
+            nb = nb.view(batch_size, num_tokens, self.num_heads, self.num_slices)
+            nb = nb.permute(0, 2, 1, 3)  # [B, H, N, S]
+            slice_logits = slice_logits + self.normal_slice_alpha * nb
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
                 device=slice_weights.device,
                 dtype=slice_weights.dtype,
             )
+        with torch.no_grad():
+            log_p = torch.log(slice_weights.detach().clamp_min(1e-12))
+            per_token_entropy = -(slice_weights.detach() * log_p).sum(dim=-1)  # [B, H, N]
+            if attn_mask is not None:
+                mask_b1n = attn_mask[:, None, :].to(dtype=per_token_entropy.dtype)
+                ent_sum = (per_token_entropy * mask_b1n).sum()
+                n_valid = mask_b1n.sum().clamp_min(1.0) * float(self.num_heads)
+                ent_mean = ent_sum / n_valid
+            else:
+                ent_mean = per_token_entropy.mean()
+            self._last_slice_entropy = ent_mean
         slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask, normals=normals)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -303,6 +341,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        normal_slice_alpha: float = 0.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -313,13 +352,19 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            normal_slice_alpha=normal_slice_alpha,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, normals=normals)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -336,6 +381,7 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        normal_slice_alpha: float = 0.0,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,14 +393,20 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    normal_slice_alpha=normal_slice_alpha,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        normals: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, normals=normals)
         return x
 
 
@@ -382,6 +434,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        normal_slice_alpha: float = 0.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +449,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.normal_slice_alpha = float(normal_slice_alpha)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +526,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            normal_slice_alpha=normal_slice_alpha,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
@@ -595,7 +650,23 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        combined_normals: torch.Tensor | None = None
+        if self.normal_slice_alpha > 0.0:
+            parts: list[torch.Tensor] = []
+            if surface_x is not None:
+                surf_normals = surface_x[..., 3:6].to(dtype=hidden.dtype)
+                surf_normals = F.normalize(surf_normals, dim=-1, eps=1e-6)
+                # Mask invalid (padded) surface tokens so they contribute zero bias.
+                if surface_mask is not None:
+                    surf_normals = surf_normals * surface_mask.unsqueeze(-1).to(
+                        device=surf_normals.device, dtype=surf_normals.dtype
+                    )
+                parts.append(surf_normals)
+            if volume_x is not None:
+                vol_zeros = hidden.new_zeros(volume_x.shape[0], volume_x.shape[1], 3)
+                parts.append(vol_zeros)
+            combined_normals = torch.cat(parts, dim=1)
+        hidden = self.backbone(hidden, attn_mask=attn_mask, normals=combined_normals)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -640,3 +711,32 @@ class SurfaceTransolver(nn.Module):
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+
+    def collect_slice_entropy_metrics(self) -> dict[str, float]:
+        """Return slice-weight entropy diagnostics from the last forward pass.
+
+        H3 mechanism gauge: lower entropy = more concentrated slice assignment.
+        The normalized score in [0, 1] is the raw entropy divided by log(num_slices),
+        so a uniform softmax score is 1.0 and a degenerate one-slice score is 0.0.
+        """
+        metrics: dict[str, float] = {}
+        block_norm: list[float] = []
+        num_slices_ref: int | None = None
+        for i, block in enumerate(self.backbone.blocks):
+            attn = block.attention
+            num_slices_ref = num_slices_ref or attn.num_slices
+            ent = attn._last_slice_entropy
+            if ent is None:
+                continue
+            raw = float(ent.item())
+            denom = math.log(max(attn.num_slices, 2))
+            norm = raw / denom if denom > 0 else 0.0
+            metrics[f"train/slice_entropy/block_{i}_raw"] = raw
+            metrics[f"train/slice_entropy/block_{i}_norm"] = norm
+            block_norm.append(norm)
+        if block_norm:
+            avg_norm = sum(block_norm) / len(block_norm)
+            metrics["train/slice_entropy/mean_norm"] = avg_norm
+            # Higher score = more orientation-coherent (lower entropy) grouping.
+            metrics["train/slice_normal_alignment_score"] = 1.0 - avg_norm
+        return metrics
