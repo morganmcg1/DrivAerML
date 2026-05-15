@@ -1,3 +1,55 @@
+## 2026-05-15 16:30 — PR #1124: EMA decay 0.9995 + 18h budget (tanjiro) — CLOSED (slow-decay hypothesis REFUTED; fails all 4 merge gates)
+
+- **Branch**: `tanjiro/ema-slow-decay-18h` (closed)
+- **W&B run**: `mw6d04kc` (EP13/13 complete, 853.8 min wall-clock = 14h14m, ~3h45m under 18h cap, best EMA = EP13)
+- **Hypothesis**: Slow EMA decay (0.9995, half-life ≈ 1386 steps) preserves late-training τ_z specialization → Δ(raw − ema) on τ_z should GROW through EP6→EP13.
+
+### Terminal metrics (best EMA = EP13, test on 50 cases)
+
+| Metric | This PR | PR #972 single-model SOTA | Delta | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.221% | 6.126% | +0.095pp | misses |
+| **test_WSS** | **6.898%** | **6.727%** | **+0.171pp** | **misses** ❌ |
+| **test_vol_p** | **3.666%** | 3.643% (floor) | **+0.023pp** | **floor regress** ❌ |
+| **test_SP** | **3.811%** | 3.577% (floor) | **+0.234pp** | **floor regress** ❌ |
+| test_abupt | 6.011% | 5.844% | +0.167pp | — |
+| test_τ_z | 8.979% | — | — | — |
+| test_τ_x | 6.117% | — | — | — |
+| test τz/τx | **1.469** | — | — | — |
+
+**Decision: CLOSE.** Fails all four merge gates — single-model winners must beat PR #972 baseline on test_WSS AND hold both floors.
+
+### Mechanism — slow-decay EMA hypothesis REFUTED
+
+Full per-epoch EMA-vs-raw Δ tracking on τ_z (cleanest single-run instance on tay):
+
+| EP | Δ_abupt (raw−ema) | Δ_τ_z (raw−ema) | Note |
+|---|---:|---:|---|
+| 1 | −2.357 | −3.369 | warmup, raw ahead |
+| 2 | +0.302 | +0.323 | crossover |
+| **3** | +0.591 | **+0.937** | **peak (predicted to keep growing)** |
+| 4-7 | +0.540→+0.206 | +0.716→+0.255 | monotonic narrowing |
+| 8-12 | +0.176→+0.029 | +0.201→+0.046 | continued narrowing |
+| **13** | **+0.013** | **+0.021** | **98% shrinkage from peak** |
+
+EMA smoothed mid-training noise, but raw model fully caught up by terminal. Slow decay added noise robustness during mid-training but did NOT preserve late-training τ_z specialization as hypothesized. Mechanism is **null at convergence**. Hypothesis cleanly refuted.
+
+### Data preserved as research artifact
+
+1. **Test τz/τx = 1.469 is interestingly tighter than val (1.555)** — first observed val→test compression of the structural ratio on tay. Distribution shift between val and test partially reduces τ_z bottleneck but doesn't eliminate it. Candidate paper-figure.
+2. **`best_checkpoint/updated=1` at every recent epoch gate** — pure monotonic descent, run quality is high.
+3. **EMA-vs-raw Δ trajectory is publishable** as the definitive characterization of slow-EMA in late training.
+
+### τ_z structural finding — EIGHTFOLD CONFIRMATION
+
+Tanjiro #1124 closes as the 8th mechanistically-distinct mechanism converging τz/τx ratio to the 1.50-1.57 structural band. **τ_z bottleneck is BACKBONE-representation-side.** Wave 30 architectural pivot commissioned: researcher-agent generated 8 candidate architectural hypotheses (`research/RESEARCH_IDEAS_2026-05-15_18:00.md`); top-3 picks are H6 (local-frame WSS head), H2 (normal spectral encoding), H5 (Y-architecture dual-backbone).
+
+### Reassigned as
+
+- Tanjiro → **Wave 30 H6: Local-Frame WSS Head** — replaces global Cartesian (τ_x, τ_y, τ_z) output with local-frame (τ_t1, τ_t2) prediction using orthonormal surface basis. Enforces physics constraint τ·n=0 by construction. ~65 LOC change in `model.py`.
+
+---
+
 ## 2026-05-15 12:45 — PR #1121: WSS magnitude-only decomposition + 18h budget (frieren) — CLOSED (TEST_SP FLOOR REGRESS BLOCKS MERGE; methodology preserved)
 
 - **Branch**: `frieren/wss-mag-only-full-budget` (closed)

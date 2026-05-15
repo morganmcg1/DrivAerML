@@ -4,7 +4,65 @@
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~15:10Z) — τ_z structural finding SEVENFOLD confirmed (alphonse EP4), tanjiro #1124 leading fleet
+## Latest invocation actions (2026-05-15 ~16:30Z) — tanjiro #1124 CLOSED terminal, Wave 30 architectural pivot launched (PR #1134 H6 local-frame WSS head)
+
+### Actions this invocation
+
+- **CLOSED PR #1124 (tanjiro EMA decay 0.9995)** at terminal EP13.
+  - Test metrics: test_WSS=**6.898%** (+0.171pp vs PR #972 6.727%), test_vol_p=**3.666%** (+0.023pp floor regress), test_SP=**3.811%** (+0.234pp floor regress), val_abupt=6.221%.
+  - **Fails all 4 merge gates.** Slow-decay EMA hypothesis cleanly REFUTED (EMA-vs-raw Δ on τ_z peaked at EP3 +0.937pp and shrank to +0.021pp at EP13 — 98% shrinkage from peak; opposite of predicted growth).
+  - Test τz/τx = **1.469** — 8th confirmation of the structural bottleneck pattern (val:test compression observed for first time).
+  - Run quality high: `best_checkpoint/updated=1` at every recent epoch gate, pure monotonic descent.
+
+- **Generated Wave 30 architectural roadmap** via researcher-agent. Output: `research/RESEARCH_IDEAS_2026-05-15_18:00.md` — 8 candidate architectural hypotheses, scored on Mechanism×Risk×EV.
+
+- **Assigned PR #1134 (tanjiro: Wave 30 H6 local-frame WSS head)** — FIRST architectural experiment of Wave 30.
+  - **Hypothesis**: Replace global Cartesian (τ_x, τ_y, τ_z) head with local-frame (τ_t1, τ_t2) head using orthonormal surface basis from Gram-Schmidt of surface normals. Reconstructs `τ_global = τ_t1·t1 + τ_t2·t2`, which automatically satisfies physics constraint **τ·n=0**.
+  - **Theoretical basis**: WSS is by definition the tangential component of the wall stress tensor; τ·n=0 ALWAYS. Current Cartesian head doesn't enforce this and must learn it from data — the eightfold structural finding is consistent with the model being unable to learn this constraint reliably.
+  - **Implementation**: ~65 LOC in `model.py`, single CLI flag `--local-frame-wss-head`, no loader changes (normals already in `surface_x[..., 3:6]`).
+  - **Pre-flight diagnostic**: compute `mean(|τ·n|/|τ|)` on baseline predictions. Expect >0.01 (constraint violated). If <0.01, hypothesis is wrong (close immediately).
+  - **Falsifiability**: MAJOR WIN if test_τz/τx ≤ 1.40 (first mechanism to break structural pattern). MERGE if test_WSS<6.727% with both floors. FAIL if val_τz/τx > 1.45 at EP13 (bottleneck deeper than output head).
+  - **Falsification value**: if H6 fails, the bottleneck is NOT at the output head — points to backbone slice-attention (H3) or full backbone replacement (H5 Y-architecture) as next bets.
+
+### Active fleet — Wave 29 (6 students still mid-late-EP) + Wave 30 (tanjiro starting)
+
+| PR | Student | Mechanism | EP/Status |
+|----|---------|-----------|-----------|
+| #1116 | edward | per-channel WSS output heads | ~EP9-10 (slope shallow, val_abupt 6.34%) |
+| #1122 | alphonse | SDF FAR-field α=2.0 (only SDF stack) | EP4 MARGINAL → EP10 truncate |
+| #1125 | nezuko | spatial-prior α=10 | ~EP6 (val_abupt 6.40%) |
+| #1126 | fern | surface_out depth=4 | ~EP9-10 (val_abupt 6.36% new best at EP9) |
+| #1127 | askeladd | surface_loss warmup curriculum | ~EP6 (val_abupt 6.48%) |
+| #1128 | thorfinn | τ_z loss weight 3.0 | ~EP9 (val_abupt 6.31%, ratio asymptoted 1.539) |
+| #1133 | frieren | per-axis WSS mag decomp | EP1.32 (just launched) |
+| **#1134** | **tanjiro** | **Wave 30 H6: Local-frame WSS head** | **EP0 (just launched)** |
+
+**Zero idle.** Eight students all running.
+
+### Wave 30 architectural roadmap (researcher-agent output, top-3)
+
+| Rank | ID | Hypothesis | LOC | Risk | Status |
+|------|----|------------|-----|------|--------|
+| 1 | H6 | Local-frame WSS head (τ·n=0 by construction) | ~65 | LOW | **tanjiro PR #1134 ACTIVE** |
+| 2 | H2 | Normal spectral encoding (give normals Fourier basis like positions) | ~35 | LOW | reserve for next idle |
+| 3 | H5 | Y-architecture dual-backbone (split cp vs WSS branches) | ~80 | MEDIUM | reserve for next idle |
+
+The remaining 5 ideas (H1, H3, H4, H7, H8) are in `research/RESEARCH_IDEAS_2026-05-15_18:00.md`.
+
+### Next-highest-EV gates (post tanjiro #1124 close)
+
+| ETA | Event | Action |
+|-----|-------|--------|
+| ~16:25Z (passed) | alphonse #1122 EP6 readout | Slope continuation; if hit, reassess EP10 truncate |
+| ~18:00Z | thorfinn #1128 EP13 terminal | First merge-eligible single-model candidate of remaining fleet |
+| ~19:30Z | fern #1126 EP13 + test eval | Decoder-depth verdict |
+| ~17:30Z | frieren #1133 EP3 gate | mag_z_loss + mag_xy_loss separation |
+| ~20:45Z | alphonse #1122 EP10 + test eval | SDF FAR-field verdict + budget-extension request |
+| ~next day | tanjiro #1134 EP3 gate | First Wave 30 architectural verdict |
+
+---
+
+## Prior invocation actions (2026-05-15 ~15:10Z) — τ_z structural finding SEVENFOLD confirmed (alphonse EP4), tanjiro #1124 leading fleet
 
 ### Verified fleet metrics (2026-05-15 ~15:05Z, GraphQL + W&B parallel pulls)
 
