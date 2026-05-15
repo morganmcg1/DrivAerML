@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        normal_aux_loss_weight: float = 0.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.normal_aux_loss_weight = float(normal_aux_loss_weight)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,19 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # PR #1140: normal-prediction auxiliary head. Predicts the input surface
+        # normal (nx, ny, nz) from each surface token's post-norm hidden state.
+        # Trained with cosine-distance against `surface_x[..., 3:6]`, weighted
+        # by `normal_aux_loss_weight` in the trainer. Zero-init weight AND bias
+        # so the head outputs 0 at init => aux loss = 1.0 at step 0, preserving
+        # baseline gradient flow until the head learns.
+        if self.normal_aux_loss_weight > 0.0:
+            self.normal_aux_head = nn.Linear(n_hidden, 3)
+            nn.init.zeros_(self.normal_aux_head.weight)
+            nn.init.zeros_(self.normal_aux_head.bias)
+        else:
+            self.normal_aux_head = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -633,10 +648,20 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
+        if (
+            self.normal_aux_head is not None
+            and surface_x is not None
+            and surface_tokens > 0
+        ):
+            normal_pred = self.normal_aux_head(surface_hidden) * surface_mask.unsqueeze(-1)
+        else:
+            normal_pred = None
+
         return {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "normal_pred": normal_pred,
         }

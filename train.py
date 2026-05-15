@@ -105,6 +105,8 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    normal_aux_loss_weight: float = 0.0
+    normal_aux_warmup_epochs: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -229,6 +231,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "normal_aux_loss_weight": (
+            "PR #1140: enable a normal-prediction auxiliary head on the "
+            "surface tokens. When > 0, a small Linear head predicts the "
+            "input surface normal (nx, ny, nz) from each token's post-norm "
+            "hidden state. A masked cosine-distance loss (1 - cos(pred, "
+            "target_unit_normal)) is added to the total loss, scaled by "
+            "this weight. The head's weight and bias are zero-initialised, "
+            "so EP0 gradient flow matches the baseline. Default 0.0 "
+            "(disabled). Recommended 0.1."
+        ),
+        "normal_aux_warmup_epochs": (
+            "Linearly ramp the normal-aux loss weight from 0 -> "
+            "--normal-aux-loss-weight over this many epochs. Default 0 "
+            "applies full weight from EP0; the zero-init of the aux head "
+            "usually makes warmup unnecessary."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +326,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        normal_aux_loss_weight=config.normal_aux_loss_weight,
     )
 
 
@@ -321,6 +340,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    normal_aux_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,12 +366,35 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+
+        normal_aux_loss_val = 0.0
+        if normal_aux_loss_weight > 0.0 and out.get("normal_pred") is not None:
+            # batch.surface_x is [B, N, 7] = [x, y, z, nx, ny, nz, area].
+            # Compute masked cosine distance against the unit-normalized
+            # input normals, in fp32 to avoid bf16 underflow when the head
+            # is near-zero at init.
+            target_normals = torch.nn.functional.normalize(
+                batch.surface_x[..., 3:6].float(), dim=-1, eps=1e-6
+            )
+            pred_normals = torch.nn.functional.normalize(
+                out["normal_pred"].float(), dim=-1, eps=1e-6
+            )
+            cos = (pred_normals * target_normals).sum(dim=-1)  # [B, N]
+            cos_loss_per_token = 1.0 - cos  # [B, N]
+            mask = batch.surface_mask.float()
+            denom = mask.sum().clamp(min=1.0)
+            normal_aux_loss = (cos_loss_per_token * mask).sum() / denom
+            loss = loss + normal_aux_loss_weight * normal_aux_loss
+            normal_aux_loss_val = float(normal_aux_loss.detach().cpu().item())
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "normal_aux_loss": normal_aux_loss_val,
+        "normal_aux_loss_weighted": normal_aux_loss_weight * normal_aux_loss_val,
+        "normal_aux_loss_weight_effective": float(normal_aux_loss_weight),
     }
 
 
@@ -772,8 +815,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             # batch, so DDP's default find_unused_parameters=False deadlocks
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
-            # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # params across ranks, at a small per-step overhead. The
+            # normal-aux head (PR #1140) is gated the same way, so enable it
+            # there too.
+            if config.use_surf_to_vol_xattn or config.normal_aux_loss_weight > 0.0:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -852,6 +897,15 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.normal_aux_loss_weight > 0.0:
+                aux_head = getattr(base_model, "normal_aux_head", None)
+                aux_params = sum(p.numel() for p in aux_head.parameters()) if aux_head is not None else 0
+                print(
+                    f"Normal-aux head ON: weight={config.normal_aux_loss_weight} "
+                    f"warmup_epochs={config.normal_aux_warmup_epochs} "
+                    f"aux_params={aux_params:,d} "
+                    f"(zero-init Linear({config.model_hidden_dim}, 3))"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +937,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/normal_aux_loss_weight"] = config.normal_aux_loss_weight
+            wandb.summary["loss/normal_aux_warmup_epochs"] = config.normal_aux_warmup_epochs
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1021,6 +1077,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    if (
+                        config.normal_aux_loss_weight > 0.0
+                        and config.normal_aux_warmup_epochs > 0
+                        and epoch < config.normal_aux_warmup_epochs
+                    ):
+                        normal_aux_w_step = (
+                            config.normal_aux_loss_weight
+                            * (epoch / config.normal_aux_warmup_epochs)
+                        )
+                    else:
+                        normal_aux_w_step = config.normal_aux_loss_weight
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1030,6 +1097,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        normal_aux_loss_weight=normal_aux_w_step,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1138,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "normal_aux_loss" in batch_loss_metrics:
+                        train_log.update(
+                            {
+                                "train/normal_aux_loss": batch_loss_metrics["normal_aux_loss"],
+                                "train/normal_aux_loss_weighted": batch_loss_metrics["normal_aux_loss_weighted"],
+                                "train/normal_aux_loss_weight_effective": batch_loss_metrics[
+                                    "normal_aux_loss_weight_effective"
+                                ],
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
