@@ -57,7 +57,7 @@ At EP15 advisor opted to HALT (Option A) based on vol_p monotone drift trajector
 
 ### Next assignment
 
-PR #1131 — H5: curvature as additive attention bias (zero-init CurvatureAttentionBias module added after surface_input_proj, surface_input_channels=7 unchanged).
+PR #1132 — H5: curvature as additive attention bias (zero-init CurvatureAttentionBias module added after surface_input_proj, surface_input_channels=7 unchanged).
 
 ---
 

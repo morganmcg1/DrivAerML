@@ -55,7 +55,7 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 
 | Student | PR | Hypothesis | W&B Run | EP | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | **#1131** | **H5: curvature as additive attention bias** (zero-init, surface_input_channels=7) | TBD | Assigned 08:10Z | **NEW.** #1117 CLOSED (first wave sub-SOTA WSS 6.668% but vol_p floor breach +0.340pp). H5 = same curvature physics, injected AFTER 7-ch projection, zero-init → no gradnorm imbalance. |
+| dl24-tanjiro | **#1132** | **H5: curvature as additive attention bias** (zero-init, surface_input_channels=7) | TBD | Assigned 08:10Z | **NEW.** #1117 CLOSED (first wave sub-SOTA WSS 6.668% but vol_p floor breach +0.340pp). H5 = same curvature physics, injected AFTER 7-ch projection, zero-init → no gradnorm imbalance. |
 | dl24-frieren | #1115 | **H1: wind-exposure proxy** (max(0,-nx) + \|ny\|) | `3rja7gw6` | EP~15–20 | val_wss=**6.936%** sub-7.0%; val_abupt=6.334%. Terminal ~15:40Z. Active. |
 | dl24-fern    | #1130 | **H4: per-axis WSS loss weights [1.0, 1.5, 2.5]** (τ_x/τ_y/τ_z) | `3i0nnneh` | EP1 PASS ~20% | EP3 gate ~10:00Z. Direct τ_z loss attack. #1098 CLOSED NOT-a-winner. |
 | dl24-nezuko  | #1129 | **H3: near-wall volume cross-attn** (SDF<0.05m → surface decoder) | TBD | Stale ~10h | Pod READY 1/1; no comments. Do not close on stale signal alone — awaiting student EP3 post. |
@@ -124,7 +124,7 @@ Researcher-agent delivered 10 ranked hypotheses at 14:37Z. Top 4 for assignment:
 | **H2** | Surface curvature features (kappa_H + kappa_G as 2 extra channels) | Local shape curvature targets WSS spikes at separation edges | **tanjiro → PR #1117 ✓ CLOSED** — first sub-SOTA WSS (6.668%) but vol_p floor breach +0.340pp. Positive signal: curvature works. |
 | **H3** | Near-wall volume cross-attention into surface decoder (SDF<0.05m) | Inject boundary-layer velocity-gradient signal into WSS head | **nezuko → PR #1129 ✓ ASSIGNED (stale, monitoring)** |
 | **H4** | Per-axis WSS loss weights [τ_x=1.0, τ_y=1.5, τ_z=2.5] | Direct τ_z/τ_y error-budget attack via loss reweighting (no arch change) | **fern → PR #1130 ✓ ASSIGNED 05:50Z May 15** |
-| **H5** | Curvature as additive attention bias (zero-init, no input-dim change) | H2 fix: inject curvature AFTER 7-ch projection, bypasses gradnorm imbalance | **tanjiro → PR #1131 ✓ ASSIGNED 08:10Z May 15** |
+| **H5** | Curvature as additive attention bias (zero-init, no input-dim change) | H2 fix: inject curvature AFTER 7-ch projection, bypasses gradnorm imbalance | **tanjiro → PR #1132 ✓ ASSIGNED 08:10Z May 15** |
 
 **All four build on PR #972 stack** (Lion + 6L STRING 5-sigma + GradNorm α=0.5 + EMA 0.999 + Y-sym 0.5 + bs=1 + 65k surf/vol + SDF α=2.0 + corrected dataset).
 **All four explicitly protect vol_p ≤ 3.643% and surf_p ≤ 3.577% with EP6/EP10/EP15 gates.**
@@ -173,7 +173,7 @@ The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arm
 7. **Nezuko #1129 H3 EP3 gate** (~10:00Z May 15) — first viability check for cross-attn. (stale — awaiting student post)
 8. **Fern #1130 H4 EP3 gate** (~10:00Z May 15) — per-axis loss weights smoke check.
 9. **Frieren #1115 terminal** (~15:40Z May 15) — H1 wind-exposure full verdict.
-10. **Tanjiro #1131 H5 EP3 gate** (~12:00Z May 15, est.) — curvature attention bias smoke check.
+10. **Tanjiro #1132 H5 EP3 gate** (~12:00Z May 15, est.) — curvature attention bias smoke check.
 
 ## Quiet-state Notes (2026-05-14 ~20:55 UTC)
 
