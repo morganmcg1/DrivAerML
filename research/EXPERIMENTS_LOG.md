@@ -1,3 +1,80 @@
+## 2026-05-15 02:30 — PR #1120: Spatial-prior surface sampling α=3 (nezuko) — CLOSED (MECHANISM RIGHT, BUDGET TOO SHORT)
+
+- **Branch**: `nezuko/spatial-prior-surface-sampling` (closed)
+- **W&B run**: `vt2fsxdf` (group `spatial-prior-sampling`, EP3 truncated at 47% of planned 6 epochs by 270-min train cap)
+- **Hypothesis**: Spatial bias `w = 1 + 3.0·(front_bias + |z|_bias)/2` with ρ=+0.31 vs |WSS| → safe + meaningful WSS lift without #1113's curvature catastrophe.
+
+### Test metrics (EP3 best EMA)
+
+| Metric | This PR | SOTA target / floor | Δ |
+|---|---:|---:|---:|
+| test_WSS | 7.7574% | < 6.727% target | +1.030pp regression |
+| test_vol_p | 4.0677% | ≤ 3.643% floor | +0.425pp above floor |
+| test_SP | 4.3831% | ≤ 3.577% floor | +0.806pp above floor |
+| test_τ_z | 9.851% | < 9.05% reference | +0.80pp above no-SDF ceiling |
+
+### Methodology — paper-relevant findings preserved
+
+1. **ρ=+0.31 is a sufficient safety floor for surface-sampling reweighting** — EP2 val_abupt=7.84% (vs #1113 ρ=-0.11 EP2=13.12%); no catastrophe.
+2. **Linear-ramp spatial weight is throughput-neutral** — 1.90 it/s = baseline parity; no precompute, no per-step penalty.
+3. **Bin-occupancy diagnostic accuracy validated** — ×1.39 top-decile oversample matched pre-training prediction.
+4. **Strongest 3-EP truncated WSS in this recipe family** — EP3 val_WSS=7.94% vs edward EP2 no-SIA 10.93% and matched-baseline mempfubx EP3 8.61% (−0.67pp). Real mechanism signal, just budget-truncated.
+
+### Pattern observation
+
+- Short-cycle EP3 at this point config consistently cannot reach single-model SOTA floors: edward #1116 EP3 test_WSS=7.67%, frieren mempfubx EP3 test_WSS=8.33%, nezuko #1120 EP3 test_WSS=7.76%. All within 0.66pp of each other regardless of mechanism. **The EP3 budget is the dominant constraint at this point config**, not the mechanism.
+
+### Reassigned as
+
+- PR #1125 (TBD): spatial-prior α=10 at 18h budget — student's own suggested follow-up #2.
+
+---
+
+## 2026-05-15 02:27 — PR #1119: GradNorm short-cycle 6-ep convergence (fern) — CLOSED (PRIOR-DISCOVERY HYPOTHESIS REFUTED)
+
+- **Branch**: `fern/gradnorm-short-cycle` (closed)
+- **W&B run**: `eokmp0b5` (group `gradnorm-short-cycle`, 6/6 epochs, 289 min wall-clock, EP6 EMA best ckpt)
+- **Hypothesis**: GradNorm at short-cycle t_max=6, ep=6 will rediscover the hand-tuned prior τ_z=2.0 at convergence (testable in budget).
+
+### Test metrics (EP6 best EMA)
+
+| Metric | This PR | SOTA target / floor | Δ |
+|---|---:|---:|---:|
+| test_WSS | 7.467% | < 6.727% target | +0.740pp regression |
+| test_vol_p | 4.122% | ≤ 3.643% floor | +0.479pp above floor |
+| test_SP | 4.093% | ≤ 3.577% floor | +0.516pp above floor |
+| val_abupt | 6.852% | ≤ 6.5% target | +0.352pp regression |
+
+### Critical finding — hardcoded prior empirically validated
+
+**GradNorm permanently settles at uniform-ish weighting:**
+
+| Task | Hardcoded prior (mean-1 norm) | Learned at EP6 (mean-1 norm) | Effective Δ |
+|---|---:|---:|---:|
+| SP | 0.83 | 0.939 | +13% |
+| τ_x | 0.83 | 0.998 | +20% |
+| τ_y | 1.25 | 1.054 | −16% |
+| **τ_z** | **1.67** | **1.069** | **−36%** |
+| **VP** | **0.42** | **0.941** | **+124%** |
+
+τ_z trajectory: 1.01 (EP0) → 1.04 (EP1) → 1.05 (EP2) → 1.06 (EP3) → 1.07 (EP4) → **1.07 (EP6 plateau)**. **Never approaches the prior 1.67** at any point in training.
+
+### Hypotheses tested
+
+- "GradNorm rediscovers prior at convergence" → **REFUTED**. τ_z weight plateaus at 1.07, 36% below prior.
+- "GradNorm's flat assignment is correct" → **REFUTED** by floor regression. Hardcoded prior is empirically doing real work on test floors.
+- "Cosine completion was needed to disambiguate prior vs GradNorm" → confirmed irrelevant. EP3.5 (#1111) ≈ EP6 (#1119) on val_abupt (6.87% / 6.85%) — GradNorm hits ceiling early.
+
+### Pattern observation
+
+- Two independent GradNorm runs (#1111 GN + #1119 short-cycle GN) both show identical τ_z de-emphasis (~1.06-1.07) and test floor regression. **The hand-tuned `[1.0, 1.5, 2.0]` prior is empirically validated as load-bearing on this dataset.**
+
+### Reassigned as
+
+- PR #1126 (TBD): architectural change (deeper surface_out MLP) — pivots away from loss-balance-learning entirely after #1111 + #1119 double refutation.
+
+---
+
 ## 2026-05-15 01:13 — PR #1114: Learnable WSS channel loss weights (tanjiro) — CLOSED (MECHANISM NULL AT CONVERGENCE)
 
 - **Branch**: `tanjiro/learnable-wss-channel-weights` (closed)
