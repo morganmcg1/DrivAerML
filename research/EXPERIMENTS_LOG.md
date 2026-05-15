@@ -8,6 +8,51 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-15 ~05:50 UTC — PR #1098 CLOSED: WD=0.01 isolated re-test (dl24-fern, `q4eok915`)
+
+- **Branch:** `dl24-fern/wd-001-isolated-retest`
+- **W&B Run:** `q4eok915` (rank-0); ranks 1-7: `iln1bhtf`, `caya1jtm`, `c62r5twl`, `zs1rxo2s`, `6tjgb148`, `rdatvqf1`, `l9cgorz5`
+- **Hypothesis:** WD=0.01 (vs SOTA WD=0.005) would reduce volume-head overfitting, improving test_vol_p. Lion+high-WD known failure mode caveat acknowledged.
+
+### Test metrics (best-val EP19 EMA checkpoint, 30-epoch run)
+
+| Metric | WD=0.01 (`q4eok915`) | SOTA `56bcqp3m` | Δ | Verdict |
+|--------|---------------------:|----------------:|---:|---|
+| **test_abupt (PRIMARY)** | **6.046%** | 5.844% | **+0.202pp** | ❌ REGRESSION |
+| test_surf_p (FLOOR) | 3.745% | 3.577% | **+0.168pp** | ❌ **FLOOR BREACH** |
+| test_wss (WSS target) | 7.054% | 6.727% | +0.327pp | ❌ REGRESSION |
+| test_vol_p | **3.411%** | 3.643% | **−0.232pp** | ✓ Improvement |
+| τ_x | 6.262% | 5.971% | +0.291pp | ❌ |
+| τ_y | 7.636% | 7.362% | +0.274pp | ❌ |
+| τ_z | 9.176% | 8.747% | +0.429pp | ❌ WORST AXIS |
+
+### Val trajectory (best checkpoint EP19 of 30)
+
+| EP | val_abupt | val_vol_p | val_surf_p | val_wss |
+|----|-----------|-----------|------------|---------|
+| 3  | 6.678% | 3.674% | 4.365% | 7.609% |
+| 10 | 6.311% | 3.518% | 4.126% | 7.212% |
+| **19 (BEST)** | **6.283%** | **3.499%** | **4.098%** | **7.188%** |
+| 30 | 6.333% | 3.525% | 4.120% | 7.250% |
+
+Val→test: all channels where test is slightly better than val — clean corrected-split transfer confirmed.
+
+### Closure analysis
+
+WD=0.01 confirms the known Lion+high-WD failure mode: sign-based Lion updates × 2× WD = surface/WSS under-training. The vol_p benefit (−0.232pp) is real but is outweighed by WSS regression (+0.327pp) and surf_p floor breach (+0.168pp). Primary metric regresses +0.202pp. Three of four metrics wrong direction, surf_p floor breached — decisive close.
+
+### Key findings to carry forward
+
+1. **test_vol_p ≤ 3.41% is achievable** with WD=0.01 stack — if we ever want a pure vol_p push, this is a known lever.
+2. **τ_z=9.176% is the dominant error axis** — all three WD runs (nezuko LR=9e-5 + fern WD=0.01) show τ_z as hardest, +0.43-0.43pp above SOTA. Architecture attack (H3 cross-attn) and loss attack (H4 per-axis weights) both targeting this.
+3. **Corrected-split val→test transfer is clean** (test < val across all channels) — dataset fix is working.
+
+### Next assignment
+
+PR #1130 — H4: WSS per-axis loss weights [τ_x=1.0, τ_y=1.5, τ_z=2.5] on SOTA stack (WD=0.005). Direct attack on dominant error axis via loss reweighting.
+
+---
+
 ## 2026-05-15 ~05:10 UTC — PR #1101 CLOSED: LR=9e-5 isolated control (dl24-nezuko, `5qumfbrs`)
 
 - **Branch:** `dl24-nezuko/lr-9e-5-isolated-control`

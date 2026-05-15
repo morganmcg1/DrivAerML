@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-14 ~20:45 UTC
+- 2026-05-15 ~05:50 UTC
 
 ## Human Research Directive (Issue #1056 — 2026-05-14, NEW)
 
@@ -53,12 +53,12 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 
 ### Pod Assignments
 
-| Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
+| Student | PR | Hypothesis | W&B Run | EP | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | #1117 | **H2: WSS curvature features** (kappa_H + kappa_G input channels) | `b5g7776p` | EP10 PASS (6.48h, 101k step) | val_wss=6.985% (sub-7.0%!), τ_y converging (+0.16pp gap), τ_z stuck (+0.77pp). EP15 ETA ~05:30Z. **Proceed.** |
-| dl24-frieren | #1115 | H1: WSS wind-exposure proxy (max(0,-nx) + \|ny\| input channels) | `3rja7gw6` | EP~7 (5.1h) | val_wss=**6.998%** at EP7. First sub-7.0% on H1 wave. |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` | EP~27 (19.2h) | val_abupt=6.327%, val_vol_p=**3.522%**, val_wss=7.244%. **Winner candidate. Terminal ~06-07Z May 15.** |
-| dl24-nezuko  | **#1129** | **H3: near-wall volume cross-attention** into surface decoder (SDF<0.05m) | TBD | Assigned 05:15Z | **NEW WSS hypothesis.** #1101 CLOSED (NOT-a-winner — test_abupt+0.153pp, test_wss+0.260pp, test_surf_p breaches floor). Targets τ_z via boundary-layer velocity-gradient signal from near-wall volume tokens. |
+| dl24-tanjiro | #1117 | **H2: curvature features** (kappa_H + kappa_G) | `b5g7776p` | EP~13 (8.3h) | val_abupt=6.288%, val_wss=**6.976%** (improving). EP15 ETA ~06:30Z. Tanjiro leads on WSS. |
+| dl24-frieren | #1115 | **H1: wind-exposure proxy** (max(0,-nx) + \|ny\|) | `3rja7gw6` | EP~15 (10.4h) | val_wss=**6.936%** (leader — sub-7.0%). val_abupt=6.334%. Terminal ~15:40Z. |
+| dl24-fern    | **#1130** | **H4: per-axis WSS loss weights [1.0, 1.5, 2.5]** (τ_x/τ_y/τ_z) | TBD | Assigned 05:50Z | **NEW.** #1098 CLOSED (NOT-a-winner — primary +0.202pp, surf_p floor breach +0.168pp, wss +0.327pp). Direct loss-level attack on τ_z dominant error (9.176% SOTA 8.747%). |
+| dl24-nezuko  | #1129 | **H3: near-wall volume cross-attn** (SDF<0.05m → surface decoder) | TBD | Starting (05:16Z) | Pod picked up assignment at iteration 763. EP3 gate ~10:00Z. |
 
 ### Per-Axis WSS Insight (from tanjiro #1086 fby84xtu terminal)
 
@@ -123,7 +123,7 @@ Researcher-agent delivered 10 ranked hypotheses at 14:37Z. Top 4 for assignment:
 | **H1** | Wind-exposure geometric proxy (n·u_freestream + \|ny\| as 2 extra input channels) | Direct cross-flow attack-angle signal targets tau_y/z gap | **frieren → PR #1115 ✓ ASSIGNED 18:10Z** |
 | **H2** | Surface curvature features (kappa_H + kappa_G as 2 extra channels) | Local shape curvature targets WSS spikes at separation edges | **tanjiro → PR #1117 ✓ ASSIGNED 20:30Z** |
 | **H3** | Near-wall volume cross-attention into surface decoder (SDF<0.05m) | Inject boundary-layer velocity-gradient signal into WSS head | **nezuko** (if not a winner, ~04-06Z May 15) |
-| **H4** | Per-task GradNorm α sweep (α_wss=0.75 ONLY, α_surf=α_vol=0.5 fixed) | Faster WSS rebalancing; α_wss=1.0 arm DROPPED (Wave 27 lesson) | **fern** (if not a winner, ~04-06Z May 15) |
+| **H4** | Per-axis WSS loss weights [τ_x=1.0, τ_y=1.5, τ_z=2.5] | Direct τ_z/τ_y error-budget attack via loss reweighting (no arch change) | **fern → PR #1130 ✓ ASSIGNED 05:50Z May 15** |
 
 **All four build on PR #972 stack** (Lion + 6L STRING 5-sigma + GradNorm α=0.5 + EMA 0.999 + Y-sym 0.5 + bs=1 + 65k surf/vol + SDF α=2.0 + corrected dataset).
 **All four explicitly protect vol_p ≤ 3.643% and surf_p ≤ 3.577% with EP6/EP10/EP15 gates.**
@@ -163,11 +163,16 @@ The other advisor's WSS-focused Wave 27 failed catastrophically across all 4 arm
 
 ## Next Key Events
 
-1. ~~**Frieren #1077 terminal**~~ **DONE** (18:00Z) — CLOSED, NOT-a-winner.
-2. ~~**Tanjiro #1086 terminal**~~ **DONE** (20:16Z) — CLOSED bit-identical to fern.
-3. **Tanjiro #1117 launch** (~21:00-21:30Z) — Plan A approved 20:36Z, 3 curvature channels (surface_kappa_v2 + zero-filled H + zero-filled K).
-4. **Frieren #1115 EP3 smoke gate** (~22:00Z) — val_wss ≤ 7.5%, val_vol_p ≤ 5.5%, val_abupt ≤ 7.5%.
-5. **Fern + Nezuko terminal** (~04-06Z May 15) — **CRITICAL.** If winners, merge sequentially and compose with H1/H2 WSS hypotheses for combinatorial wave; else assign H3 (nezuko) / H4 (fern).
+1. ~~**Frieren #1077 terminal**~~ DONE (18:00Z) — CLOSED.
+2. ~~**Tanjiro #1086 terminal**~~ DONE (20:16Z) — CLOSED.
+3. ~~**Tanjiro #1117 launch**~~ DONE (~21:00Z May 14) — EP13 running strong.
+4. ~~**Fern #1098 terminal**~~ DONE (05:39Z May 15) — CLOSED NOT-a-winner. H4 assigned PR #1130.
+5. ~~**Nezuko #1101 terminal**~~ DONE (05:11Z May 15) — CLOSED NOT-a-winner. H3 assigned PR #1129.
+6. **Tanjiro #1117 EP15 gate** (~06:30Z May 15) — key mid-run gate; val_wss trajectory critical.
+7. **Nezuko #1129 H3 EP3 gate** (~10:00Z May 15) — first viability check for cross-attn.
+8. **Fern #1130 H4 EP3 gate** (~10:00Z May 15) — per-axis loss weights smoke check.
+9. **Frieren #1115 terminal** (~15:40Z May 15) — H1 wind-exposure full verdict.
+10. **Tanjiro #1117 terminal** (~16:30Z May 15) — H2 curvature full verdict.
 
 ## Quiet-state Notes (2026-05-14 ~20:55 UTC)
 
