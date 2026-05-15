@@ -49,16 +49,16 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 | 2.0 | #1054 | — | EP15 FAIL | Over-concentration |
 | 3.0 | #1076 | — | 6.5012% (EP6) | EP10 KILL |
 
-## Active Experiments (2026-05-14 ~20:45 UTC)
+## Active Experiments (2026-05-15 ~05:15 UTC)
 
 ### Pod Assignments
 
 | Student | PR | Hypothesis | W&B Run | EP / Step | Notes |
 |---------|-----|-----------|---------|-----------|-------|
-| dl24-tanjiro | **#1117** | **H2: WSS curvature features** (kappa_H + kappa_G input channels) | NOT STARTED | Plan A approved 20:36Z | **Pre-flight data audit caught missing HK in 4 val + 1 test cases.** Approved 3-channel plan (surface_kappa_v2 + zero-filled H + zero-filled K, 7→10 channels). Expect launch by ~21:30Z. |
-| dl24-frieren | #1115 | H1: WSS wind-exposure proxy (max(0,-nx) + \|ny\| input channels) | `3rja7gw6` | EP~1 (1.8h in) | **RUNNING.** Launched ~18:51Z. Wave-2 restart at 19:38Z crashed all 8 ranks in <1min; wave-1 still healthy. EP3 smoke gate ~22:00Z. PR has 0 student comments — flag if not posted by EP3. |
-| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` (long) | step 185k, 11.2h | val_abupt=**6.298%**, val_vol_p=**3.512%**, val_wss=7.200%. **Winner candidate.** Terminal ~04-06Z May 15. |
-| dl24-nezuko  | #1101 | LR=9e-5 isolated control | `5qumfbrs` | step 194k, 11.5h | val_abupt=**6.352%**, val_vol_p=**3.489%**, val_wss=7.295%. **STRONGEST WINNER CANDIDATE — val_vol_p 0.154pp below SOTA test_vol_p=3.643%.** Terminal ~04-06Z May 15. |
+| dl24-tanjiro | #1117 | **H2: WSS curvature features** (kappa_H + kappa_G input channels) | `b5g7776p` | EP10 PASS (6.48h, 101k step) | val_wss=6.985% (sub-7.0%!), τ_y converging (+0.16pp gap), τ_z stuck (+0.77pp). EP15 ETA ~05:30Z. **Proceed.** |
+| dl24-frieren | #1115 | H1: WSS wind-exposure proxy (max(0,-nx) + \|ny\| input channels) | `3rja7gw6` | EP~7 (5.1h) | val_wss=**6.998%** at EP7. First sub-7.0% on H1 wave. |
+| dl24-fern    | #1098 | WD=0.01 isolated retest | `q4eok915` | EP~27 (19.2h) | val_abupt=6.327%, val_vol_p=**3.522%**, val_wss=7.244%. **Winner candidate. Terminal ~06-07Z May 15.** |
+| dl24-nezuko  | **#1129** | **H3: near-wall volume cross-attention** into surface decoder (SDF<0.05m) | TBD | Assigned 05:15Z | **NEW WSS hypothesis.** #1101 CLOSED (NOT-a-winner — test_abupt+0.153pp, test_wss+0.260pp, test_surf_p breaches floor). Targets τ_z via boundary-layer velocity-gradient signal from near-wall volume tokens. |
 
 ### Per-Axis WSS Insight (from tanjiro #1086 fby84xtu terminal)
 

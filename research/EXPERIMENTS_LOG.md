@@ -8,6 +8,48 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-15 ~05:10 UTC — PR #1101 CLOSED: LR=9e-5 isolated control (dl24-nezuko, `5qumfbrs`)
+
+- **Branch:** `dl24-nezuko/lr-9e-5-isolated-control`
+- **W&B Run:** `5qumfbrs` (rank-0)
+- **Hypothesis:** Lion lr=9e-5 (vs SOTA 1e-4) would help volume pressure via reduced overshoot of fine minima. Test prediction: test_vol_p improvement.
+
+### Test metrics (best-val checkpoint EP13, evaluated by trainer)
+
+| Metric | Run | SOTA `56bcqp3m` | Δ | Verdict |
+|--------|----:|----:|----:|---|
+| **test_abupt (PRIMARY)** | **5.9974%** | 5.844% | **+0.153pp** | ❌ regresses |
+| test_wss (WSS target)    | 6.9870% | 6.727% | +0.260pp | ❌ regresses |
+| test_surf_p (FLOOR)      | 3.7245% | 3.577% | +0.148pp | ❌ **breaches floor** |
+| test_vol_p               | 3.3727% | 3.643% | **-0.270pp** | ✓ improves |
+| test_wss_x               | 6.1778% | — | — | — |
+| test_wss_y               | 7.6269% | — | — | — |
+| test_wss_z               | 9.0849% | — | — | — |
+
+### Best-val trajectory peaked at EP13 (full 30-EP run)
+
+- EP10 val_abupt=6.39%, val_vol_p=3.510%, val_wss=7.328%
+- **EP13 (BEST):** val_abupt=6.345%, val_vol_p=3.490%, val_wss=7.287% — checkpoint used for test eval
+- EP20+: plateau drift, val_abupt slowly climbs to 6.354-6.390% — late epochs DON'T help, slightly hurt
+- EP30 terminal: val_abupt=6.390%, val_vol_p=3.510%, val_wss=7.339%
+
+### Closure analysis
+
+The hypothesis's specific prediction was correct on its own terms: lr=9e-5 substantially improves test_vol_p (-0.270pp, strongest vol_p single-result on corrected split). But this came with:
+1. **Primary metric regression** (test_abupt +0.153pp) — disqualifies merge.
+2. **WSS target regression** (test_wss +0.260pp) — opposite direction from Morgan's Issue #1056 directive.
+3. **test_surf_p floor breach** (+0.148pp above 3.577%) — explicit merge-blocker per Issue #1056.
+
+The "smoother loss landscape generalizes" framing failed for surface metrics. lr=9e-5 may simply undertrain surface tasks relative to lr=1e-4. Cosine T_max=30 already walks LR through 5e-5 mid-training, so "hybrid LR" follow-ups are unlikely to recapture the vol_p gain without the surf_p cost.
+
+### Useful follow-up information
+
+- **test_vol_p≤3.40% is achievable** with lr=9e-5 + current stack. If we ever want to push vol_p specifically, this is a known lever.
+- **wss_z = 9.08% remains the dominant residual error** — confirmed across all corrected-split runs. Local geometric features (curvature, wind-exposure) don't reach it. Architectural mechanism needed (cross-attention from near-wall volume features into surface decoder — assigned next as H3).
+- **EP15-25 KILL zone**: had the tightened EP20 KILL (val_abupt>6.30%) been wired into `--kill-thresholds`, this run would have been killed at EP20 and saved ~5h compute. The pre-tightened threshold passed easily and didn't trigger. Process improvement: align `--kill-thresholds` arg with advisor's tightened gates.
+
+---
+
 ## 2026-05-14 ~08:00 UTC — PR #1072 CLOSED: SDF α=0.5 + GradNorm, corrected split (dl24-nezuko, `yp383yq2`)
 
 - **Branch:** `dl24-nezuko/sdf-near-surface-alpha05-vol-focus`
