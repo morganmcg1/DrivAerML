@@ -870,6 +870,74 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+def ohem_supplementary_loss_clipped(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    ohem_ratio: float,
+    surface_loss_detach: torch.Tensor,
+    min_k: int = 100,
+    max_clip: float = 2.0,
+    channel_weights: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Supplementary OHEM surface loss over top-K hardest points, spike-clipped.
+
+    pred / target: [B, N, C]; mask: [B, N] boolean.
+    ``ohem_ratio`` is the fraction of points selected as hard (e.g. 0.20).
+    ``min_k`` floors the per-sample count of hard points.
+    ``surface_loss_detach`` is the detached base surface MSE used to bound the
+    hard term: the raw top-K MSE is clamped to ``max_clip * surface_loss_detach``
+    so the OHEM contribution is at most ``ohem_lambda * max_clip * surface_loss``
+    regardless of how pathological the residual distribution is on a given step.
+
+    Returns:
+        clipped_hard_loss: scalar (clamped MSE over top-K hardest points), with
+            an unclipped backward path when not clipped and the clamp constant
+            otherwise (``clamp_max`` retains gradient through the smaller input).
+        diag: floats for logging — hard_loss_raw, hard_loss_clipped,
+            clip_active (0/1), max_clip_value (the per-step ceiling).
+    """
+    if pred.numel() == 0:
+        zero = pred.sum() * 0.0
+        return zero, {
+            "hard_loss_raw": 0.0,
+            "hard_loss_clipped": 0.0,
+            "clip_active": 0.0,
+            "max_clip_value": 0.0,
+        }
+
+    sq_err = (pred - target).square()
+    per_point_loss = sq_err.mean(dim=-1).float()
+
+    mask_dev = mask.to(device=pred.device).bool()
+    per_point_loss = per_point_loss.masked_fill(~mask_dev, float("-inf"))
+
+    valid_counts = mask_dev.float().sum(dim=1)
+    k = max(min_k, int(ohem_ratio * per_point_loss.shape[1]))
+    k = min(k, int(valid_counts.min().item()))
+    k = max(k, 1)
+
+    _, hard_indices = per_point_loss.topk(k, dim=1, largest=True, sorted=False)
+    idx_expanded = hard_indices.unsqueeze(-1).expand(-1, -1, pred.shape[-1])
+    hard_sq_err = sq_err.gather(1, idx_expanded.to(dtype=torch.long))
+
+    if channel_weights is not None:
+        weights_dev = channel_weights.to(device=pred.device, dtype=hard_sq_err.dtype)
+        hard_sq_err = hard_sq_err * weights_dev.unsqueeze(0).unsqueeze(0)
+
+    hard_loss_raw = hard_sq_err.mean()
+    max_clip_value = (max_clip * surface_loss_detach.to(hard_loss_raw.dtype)).clamp_min(1e-8)
+    hard_loss_clipped = hard_loss_raw.clamp_max(max_clip_value)
+
+    clip_active = float((hard_loss_raw.detach() > max_clip_value.detach()).item())
+    return hard_loss_clipped, {
+        "hard_loss_raw": float(hard_loss_raw.detach().cpu().item()),
+        "hard_loss_clipped": float(hard_loss_clipped.detach().cpu().item()),
+        "clip_active": clip_active,
+        "max_clip_value": float(max_clip_value.detach().cpu().item()),
+    }
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
