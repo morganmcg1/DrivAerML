@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        normal_spectral_encoding: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_normal_spectral_encoding = normal_spectral_encoding
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -456,6 +458,30 @@ class SurfaceTransolver(nn.Module):
 
         surface_proj_in = surface_extra_dim + rff_out_dim
         volume_proj_in = volume_extra_dim + rff_out_dim
+
+        # PR #1136: apply StringSeparableEncoding to surface normals
+        # (nx, ny, nz). When enabled, the surface feature concat replaces the
+        # raw 3-dim normal slice with 2 * 3 * normal_features extra dims
+        # produced by surface_normal_string_sep. Volume has no normals; only
+        # the surface projection grows. Mirrors the position string_sep init
+        # so behaviour is governed by the same --rff-sigma / --rff-init-sigmas
+        # knobs already exercised by SOTA recipes (PR #972, frieren #1133).
+        if normal_spectral_encoding:
+            normal_features = rff_num_features if rff_num_features > 0 else 32
+            self.surface_normal_string_sep = StringSeparableEncoding(
+                in_dim=3,
+                num_features=normal_features,
+                sigma=rff_sigma,
+                init_sigmas=self.rff_init_sigmas,
+            )
+            normal_proj_dim = self.surface_normal_string_sep.output_dim
+            # Surface extras are [normals(3), area(1)]; the normals slice is
+            # replaced by the spectral encoding output, so we subtract 3 then
+            # add the encoder output dim.
+            surface_proj_in = surface_proj_in - 3 + normal_proj_dim
+        else:
+            self.surface_normal_string_sep = None
+
         self.project_surface_features = (
             LinearProjection(surface_proj_in, n_hidden) if surface_proj_in > 0 else None
         )
@@ -528,11 +554,21 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        normal_string_sep: nn.Module | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
-        if x.shape[-1] > self.space_dim:
+        if normal_string_sep is not None and x.shape[-1] >= self.space_dim + 3:
+            # PR #1136: surface extras layout is [nx, ny, nz, area]. Replace
+            # the raw normal slice with the per-axis StringSeparableEncoding;
+            # keep area (and any future trailing scalar feature) untouched.
+            normals = x[:, :, self.space_dim : self.space_dim + 3]
+            rest = x[:, :, self.space_dim + 3 :]
+            feature_parts.append(normal_string_sep(normals))
+            if rest.shape[-1] > 0:
+                feature_parts.append(rest)
+        elif x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
         if string_sep is not None:
             feature_parts.append(string_sep(pos))
@@ -575,6 +611,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
+                    normal_string_sep=self.surface_normal_string_sep,
                 )
             )
             masks.append(surface_mask)

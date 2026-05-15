@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    normal_spectral_encoding: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "normal_spectral_encoding": (
+            "Apply StringSeparableEncoding to the surface normal vector "
+            "(nx, ny, nz) using the same per-axis learnable log_freq + "
+            "phase parameterization currently used only for (x, y, z) "
+            "positions. Builds a dedicated surface_normal_string_sep "
+            "encoder (in_dim=3, num_features matches positions, sigma and "
+            "init_sigmas mirror --rff-sigma / --rff-init-sigmas). The "
+            "normal encoding output is concatenated alongside the existing "
+            "position string-sep features into the surface "
+            "project_features Linear; volume input (xyz+sdf) is untouched "
+            "because volume has no normal channel. PR #1136."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -278,7 +291,7 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
 
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
-    for attr in ("surface_string_sep", "volume_string_sep"):
+    for attr in ("surface_string_sep", "volume_string_sep", "surface_normal_string_sep"):
         module = getattr(model, attr, None)
         if module is None:
             continue
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        normal_spectral_encoding=config.normal_spectral_encoding,
     )
 
 
