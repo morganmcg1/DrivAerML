@@ -1,3 +1,73 @@
+## 2026-05-15 19:45 — PR #1126: surface_out depth=4 + 18h budget (fern) — CLOSED (decoder-depth hypothesis FALSIFIED; statistical tie with no-SDF ceiling)
+
+- **Branch**: `fern/surface-out-depth-4-18h` (closed)
+- **W&B run**: `gr9ht3h5` (group `fern-surface-out-depth-4-18h`, EP13/13 complete, 843.6 min wall-clock = 14.06h, best EMA = EP11)
+- **Hypothesis**: Deeper surface_out MLP (depth 2→4) gives more decoder representational capacity, which would preferentially reduce τ_z magnitude error if τ_z is decoder-depth-bottlenecked.
+
+### Terminal metrics (best EMA EP11, test on 50 cases)
+
+| Metric | This PR | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.342% | 6.126% | +0.216pp | misses |
+| **test_WSS** | **6.9886%** | **6.727%** | **+0.262pp** | **misses** ❌ |
+| **test_vol_p** | **3.6452%** | 3.643% (floor) | **+0.0010pp** | **marginal floor regress** ❌ (statistical tie) |
+| **test_SP** | **3.8335%** | 3.577% (floor) | **+0.257pp** | **floor regress** ❌ |
+| test_abupt | 6.0674% | 5.844% | +0.223pp | — |
+| test τ_z | 9.075% | ~8.96% (SDF SOTA) | +0.115pp | — |
+| test τ_x | 6.206% | — | — | — |
+| test τ_y | 7.577% | — | — | — |
+| **test τz/τx** | **1.462** | — | — | 10th band confirmation |
+
+**Decision: CLOSE.** Fails 3/4 merge gates. Decoder-depth-bottleneck hypothesis CLEANLY FALSIFIED.
+
+### Per-epoch τz/τx trajectory — monotonic rise, no crossover
+
+| EP | val_abupt | val_τ_x | val_τ_z | τz/τx |
+|---|---:|---:|---:|---:|
+| 1 | 31.614% | 31.598% | 42.361% | 1.341 |
+| 2 | 7.717% | 7.764% | 11.064% | 1.425 |
+| 3 | 6.924% | 6.905% | 10.253% | 1.485 |
+| 4 | 6.606% | 6.537% | 9.931% | 1.519 |
+| 5 | 6.498% | 6.434% | 9.814% | 1.525 |
+| 6 | 6.446% | 6.371% | 9.775% | 1.534 |
+| 7 | 6.402% | 6.325% | 9.734% | 1.539 |
+| 8 | 6.380% | 6.304% | 9.718% | 1.542 |
+| 9 | 6.360% | 6.287% | 9.696% | 1.542 |
+| 10 | 6.344% | 6.274% | 9.687% | 1.544 |
+| **11** | **6.342%** | **6.274%** | **9.694%** | **1.545** |
+| 12 | 6.342% | 6.276% | 9.702% | 1.546 |
+| 13 | 6.346% | 6.283% | 9.712% | 1.546 |
+
+**Ratio rose monotonically EP1→EP12** (1.341 → 1.546). τ_z was the SLOWEST axis at every epoch. Even in the vol_points=65536 dense-supervision regime (EP10-13), no crossover occurred. The hypothesis predicted preferential τ_z gain; the data shows preferential τ_x gain.
+
+### CRITICAL mechanistic finding — no-SDF ceiling convergence
+
+This experiment ties three independent metrics to the no-SDF tay ceiling within sub-0.001pp:
+
+| Metric | depth=4 (this run) | thorfinn #1100 no-SDF slices=256 ceiling | Δ |
+|---|---:|---:|---:|
+| test_WSS | 6.9886% | 6.989% | −0.0004pp |
+| test_vol_p | 3.6452% | 3.6442% | +0.0010pp |
+| test_SP | 3.8335% | 3.8324% | +0.0011pp |
+
+**Two independent capacity uplifts (backbone slices=256 and decoder depth=4) converge to the SAME no-SDF ceiling.** This is the strongest evidence yet that the bottleneck is a **representation-axis bottleneck**, not a capacity bottleneck. Aligns perfectly with the Wave 30 architectural-pivot direction.
+
+### τ_z structural finding — TENTH CONFIRMATION
+
+Decoder-depth d=4 joins the 9 prior null mechanisms. τz/τx ratio remains an attractor in 1.40-1.57 band across:
+- loss weighting (×3 vs ×1)
+- sampling bias (spatial-prior, SDF FAR-field)
+- output capacity (per-channel heads, decoder depth)
+- regularization (EMA decay)
+- decomposition (mag-only)
+- spatial-prior α
+
+### Reassigned as
+
+- Fern → **Wave 30 H5: Y-Architecture Dual-Backbone** — split backbone after first encoder layer into parallel pressure-branch (cp) and WSS-branch (τx, τy, τz) transformer stacks. Tests task-interference hypothesis: does shared backbone favor pressure over WSS optimization? ~80 LOC change in `model.py`. Third orthogonal Wave 30 attack axis (input H2 / output H6 / backbone H5).
+
+---
+
 ## 2026-05-15 19:00 — PR #1125: Spatial-prior α=10 + 18h budget (nezuko) — CLOSED (3/4 gate fail; test_vol_p PASS is fleet-best signal, α=10 too aggressive)
 
 - **Branch**: `nezuko/spatial-prior-alpha10-18h` (closed)

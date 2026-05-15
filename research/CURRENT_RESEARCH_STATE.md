@@ -1,10 +1,86 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~19:00 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~19:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~19:00Z) — nezuko #1125 CLOSED terminal, Wave 30 second architectural experiment launched (PR #1136 H2 normal spectral encoding)
+## Latest invocation actions (2026-05-15 ~19:45Z) — fern #1126 CLOSED terminal (decoder-depth hypothesis FALSIFIED, **no-SDF ceiling convergence finding**), Wave 30 third architectural experiment launched (PR #1137 H5 Y-architecture)
+
+### Actions this invocation
+
+- **CHECKED human GH issues** — all 4 open issues (#1056, #285, #618, #252) have advisor responses, no new human messages. Primary directive remains: test_WSS < 5.85% with floors test_vol_p ≤ 3.643%, test_SP ≤ 3.577%. NO MORE ENSEMBLES (explicit). Single-model breakthroughs only.
+
+- **CLOSED PR #1126 (fern surface_out depth=4)** at terminal.
+  - Test metrics: test_WSS=**6.9886%** (+0.262pp miss), test_vol_p=**3.6452%** (+0.001pp marginal floor regress, statistical tie), test_SP=**3.8335%** (+0.257pp floor regress), val_abupt=6.342%.
+  - **Fails 3/4 merge gates.** Decoder-depth-bottleneck hypothesis cleanly FALSIFIED — val τz/τx ratio rose MONOTONICALLY EP1→EP12 (1.341 → 1.546), τ_z was the slowest axis at every epoch, no crossover even in vol_points=65536 regime.
+  - Test τz/τx = **1.462** — 10th confirmation of the structural band.
+
+- **CRITICAL MECHANISTIC FINDING from #1126**: This run reveals that **TWO independent capacity uplifts** converge to *exactly* the same no-SDF ceiling within sub-0.001pp:
+  - test_WSS: 6.9886% (fern depth=4) vs 6.989% (thorfinn #1100 slices=256) — Δ = −0.0004pp
+  - test_vol_p: 3.6452% (fern depth=4) vs 3.6442% (thorfinn #1100) — Δ = +0.001pp
+  - test_SP: 3.8335% (fern depth=4) vs 3.8324% (thorfinn #1100) — Δ = +0.001pp
+
+  **This is the strongest evidence yet that the bottleneck is a REPRESENTATION-AXIS bottleneck, not a capacity bottleneck.** Two independent capacity uplifts (backbone width AND decoder depth) hit identical walls. Wave 30's architectural pivot is exactly the right direction.
+
+- **Assigned PR #1137 (fern: Wave 30 H5 Y-architecture dual-backbone)** — THIRD architectural experiment, runs in parallel with tanjiro #1134 H6 and nezuko #1136 H2.
+  - **Hypothesis**: Split backbone after first encoder layer into parallel pressure-branch (cp, vol_p) and WSS-branch (τx, τy, τz) transformer stacks. Tests task-interference hypothesis: does shared backbone optimization favor pressure over WSS optimization, leaving τ_z as residual?
+  - **Theoretical basis**: Pressure (potential/irrotational) and WSS (rotational/viscous) correspond to different physical modes. Cross-Stitch Networks (Misra 2016), Multi-Task Learning Survey (Vandenhende 2021) show Y-arch outperforms single-backbone multi-task models when tasks have structurally distinct optimal representations.
+  - **Implementation**: ~80 LOC in `model.py`, single CLI flag `--y-arch-split-layer 1`. With 5 layers and split-at-1, total params ~34M (1.8× baseline ~17.4M). Expected throughput drop +30%.
+  - **Branch separation diagnostic**: cos_sim between pressure-branch and WSS-branch surface features at EP3/EP10/EP13. <0.7 = branches diverging as intended; ~0.99 = branches collapsed (would need split_layer=2 retry).
+  - **Falsifiability**: BIG WIN if test τz/τx ≤ 1.40. MERGE if test_WSS < 6.727% with both floors. INTERESTING NULL if branches diverge but metrics don't move (rules out task-interference). FLAT NULL if branches collapse (retry with split_layer=2/3).
+
+### Wave 30 fleet status — THREE architectural attack axes now active in parallel
+
+| PR | Student | Mechanism | Attack axis | EP/Status |
+|----|---------|-----------|-------------|-----------|
+| #1134 | tanjiro | H6: local-frame WSS head (τ·n=0 by construction) | output-side | EP0 (launched ~16:30Z) |
+| #1136 | nezuko | H2: normal spectral encoding (StringSep on nx,ny,nz) | input-side | EP0 (launched ~19:00Z) |
+| **#1137** | **fern** | **H5: Y-architecture dual-backbone (cp vs WSS branches)** | **backbone-side** | **EP0 (just launched)** |
+
+If τ_z bottleneck is at the output → H6 wins. If at the input → H2 wins. If at shared backbone optimization → H5 wins. **Three orthogonal hypotheses, three independent students, parallel execution.**
+
+Wave 29 mid-late fleet still in flight:
+
+| PR | Student | Mechanism | EP/Status |
+|----|---------|-----------|-----------|
+| #1116 | edward | per-channel WSS output heads | terminal imminent |
+| #1122 | alphonse | SDF FAR-field α=2.0 (only SDF stack) | EP10 truncate due |
+| #1127 | askeladd | surface_loss warmup curriculum | terminal imminent |
+| #1128 | thorfinn | τ_z loss weight 3.0 | terminal imminent (val_abupt 6.31% at EP9) |
+| #1133 | frieren | per-axis WSS mag decomp | EP3+ (alive, checked) |
+
+**Zero idle. Eight students all running.**
+
+### Wave 30 architectural roadmap — three of eight active
+
+| Rank | ID | Hypothesis | LOC | Risk | Status |
+|------|----|------------|-----|------|--------|
+| 1 | H6 | Local-frame WSS head (τ·n=0 by construction) | ~65 | LOW | **tanjiro PR #1134 ACTIVE** |
+| 2 | H2 | Normal spectral encoding (Fourier basis on normals) | ~35 | LOW | **nezuko PR #1136 ACTIVE** |
+| 3 | H5 | Y-architecture dual-backbone | ~80 | MEDIUM | **fern PR #1137 ACTIVE** |
+| 4 | H3 | Normal-aligned slice groups (soft routing) | ~50 | MEDIUM | reserve |
+| 5 | H4 | Hard normal routing (dedicated τz slice partition) | ~70 | MEDIUM | reserve |
+| 6 | H1 | Cylindrical coords (r, θ, z) input | ~35 | LOW | reserve |
+| 7 | H7 | Normal-prediction auxiliary head | ~80 | MEDIUM | reserve |
+| 8 | H8 | Contrastive orientation regularization | ~80 | MEDIUM | reserve |
+
+Full details in `research/RESEARCH_IDEAS_2026-05-15_18:00.md`.
+
+### Next-highest-EV gates
+
+| ETA | Event | Action |
+|-----|-------|--------|
+| ~20:00Z | thorfinn #1128 EP13 terminal | First merge-eligible Wave 29 single-model candidate |
+| ~20:00Z | edward #1116 EP13 terminal | Per-channel heads verdict |
+| ~20:45Z | alphonse #1122 EP10 + test eval | SDF FAR-field verdict |
+| ~21:00Z | askeladd #1127 EP13 terminal | Surface-loss warmup curriculum verdict |
+| ~tomorrow | tanjiro #1134 EP3 gate | First Wave 30 H6 verdict |
+| ~tomorrow | nezuko #1136 EP3 gate | First Wave 30 H2 verdict |
+| ~tomorrow | fern #1137 EP3 gate | First Wave 30 H5 verdict |
+
+---
+
+## Prior invocation actions (2026-05-15 ~19:00Z) — nezuko #1125 CLOSED terminal, Wave 30 second architectural experiment launched (PR #1136 H2 normal spectral encoding)
 
 ### Actions this invocation
 
