@@ -327,6 +327,16 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
+    """Transolver backbone with optional Y-architecture dual-branch split (PR #1137).
+
+    When ``y_arch_split_layer == 0`` (default), this is a single stack of ``depth``
+    blocks (legacy behavior). When ``y_arch_split_layer > 0``, the first
+    ``y_arch_split_layer`` blocks are shared, then two parallel stacks of
+    ``depth - y_arch_split_layer`` blocks process the same shared output
+    independently: a "pressure" branch and a "WSS" branch. The split returns a
+    tuple ``(x_pressure, x_wss)`` to signal split mode to the caller.
+    """
+
     def __init__(
         self,
         depth: int,
@@ -336,26 +346,50 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        y_arch_split_layer: int = 0,
     ):
         super().__init__()
-        self.blocks = nn.ModuleList(
-            [
-                TransformerBlock(
-                    hidden_dim=hidden_dim,
-                    num_heads=num_heads,
-                    mlp_expansion_factor=mlp_expansion_factor,
-                    num_slices=num_slices,
-                    dropout=dropout,
-                    use_qk_norm=use_qk_norm,
-                )
-                for _ in range(depth)
-            ]
-        )
+        self.y_arch_split_layer = y_arch_split_layer
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+        def _make_block() -> TransformerBlock:
+            return TransformerBlock(
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                mlp_expansion_factor=mlp_expansion_factor,
+                num_slices=num_slices,
+                dropout=dropout,
+                use_qk_norm=use_qk_norm,
+            )
+
+        if y_arch_split_layer <= 0:
+            self.blocks = nn.ModuleList([_make_block() for _ in range(depth)])
+            self.pressure_blocks = None
+            self.wss_blocks = None
+        else:
+            if y_arch_split_layer >= depth:
+                raise ValueError(
+                    f"y_arch_split_layer={y_arch_split_layer} must be < depth={depth}"
+                )
+            n_shared = y_arch_split_layer
+            n_branch = depth - y_arch_split_layer
+            self.blocks = nn.ModuleList([_make_block() for _ in range(n_shared)])
+            self.pressure_blocks = nn.ModuleList([_make_block() for _ in range(n_branch)])
+            self.wss_blocks = nn.ModuleList([_make_block() for _ in range(n_branch)])
+
+    def forward(
+        self, x: torch.Tensor, attn_mask: torch.Tensor | None = None
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         for block in self.blocks:
             x = block(x, attn_mask=attn_mask)
-        return x
+        if self.pressure_blocks is None:
+            return x
+        x_pressure = x
+        x_wss = x
+        for block in self.pressure_blocks:
+            x_pressure = block(x_pressure, attn_mask=attn_mask)
+        for block in self.wss_blocks:
+            x_wss = block(x_wss, attn_mask=attn_mask)
+        return x_pressure, x_wss
 
 
 class SurfaceTransolver(nn.Module):
@@ -382,6 +416,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        y_arch_split_layer: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +431,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.y_arch_split_layer = y_arch_split_layer
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,9 +508,37 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            y_arch_split_layer=y_arch_split_layer,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        if use_aux_decoder_heads:
+        if y_arch_split_layer > 0:
+            # Y-arch: separate cp head (1 channel) and WSS head (3 channels).
+            # cp head consumes the pressure branch; WSS head consumes the WSS
+            # branch. surface_out is left as None — outputs are stitched into
+            # surface_preds in forward(). volume_out consumes the pressure
+            # branch since volume_pressure is also a pressure quantity.
+            self.surface_out_cp = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden),
+                nn.SiLU(),
+                nn.Linear(n_hidden, 1),
+            )
+            self.surface_out_cp.apply(_init_linear)
+            self.surface_out_wss = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden),
+                nn.SiLU(),
+                nn.Linear(n_hidden, 3),
+            )
+            self.surface_out_wss.apply(_init_linear)
+            self.surface_out = None
+            self.volume_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden // 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 2, n_hidden // 4),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 4, self.volume_output_dim),
+            )
+            self.volume_out.apply(_init_linear)
+        elif use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
             # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
             # Volume head is a deeper 3-layer MLP for the harder vol_p task —
@@ -595,8 +659,70 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
-        hidden = _apply_token_mask(hidden, attn_mask)
+        backbone_out = self.backbone(hidden, attn_mask=attn_mask)
+
+        if self.y_arch_split_layer > 0:
+            # Y-arch: backbone returns (pressure_branch, wss_branch).
+            # Volume tokens use the pressure branch (vol_p is a pressure
+            # prediction); surface tokens are split between the cp head
+            # (pressure branch) and the WSS head (WSS branch).
+            hidden_pressure, hidden_wss = backbone_out
+            hidden_pressure = _apply_token_mask(hidden_pressure, attn_mask)
+            hidden_wss = _apply_token_mask(hidden_wss, attn_mask)
+            hidden_pressure_norm = _apply_token_mask(self.norm(hidden_pressure), attn_mask)
+            hidden_wss_norm = _apply_token_mask(self.norm(hidden_wss), attn_mask)
+
+            surface_hidden_pressure = hidden_pressure_norm[:, :surface_tokens]
+            surface_hidden_wss = hidden_wss_norm[:, :surface_tokens]
+            volume_hidden = hidden_pressure_norm[:, surface_tokens : surface_tokens + volume_tokens]
+
+            if (
+                self.surf_to_vol_xattn is not None
+                and surface_x is not None
+                and volume_x is not None
+                and surface_tokens > 0
+                and volume_tokens > 0
+            ):
+                # surf-to-vol xattn uses pressure-branch surface tokens as K/V.
+                # (Volume is a pressure prediction; vol_p attending to
+                # WSS-branch features would defeat the purpose of the split.)
+                xattn_out, _ = self.surf_to_vol_xattn(
+                    query=volume_hidden,
+                    key=surface_hidden_pressure,
+                    value=surface_hidden_pressure,
+                    need_weights=False,
+                )
+                xattn_out = _apply_token_mask(xattn_out, volume_mask)
+                volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+                volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+            if surface_x is not None:
+                cp_pred = self.surface_out_cp(surface_hidden_pressure)
+                wss_pred = self.surface_out_wss(surface_hidden_wss)
+                surface_preds = torch.cat([cp_pred, wss_pred], dim=-1) * surface_mask.unsqueeze(-1)
+            else:
+                batch_size = volume_hidden.shape[0]
+                surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+
+            if volume_x is not None:
+                volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
+            else:
+                batch_size = surface_hidden_pressure.shape[0]
+                volume_preds = surface_hidden_pressure.new_zeros(
+                    batch_size, 0, self.volume_output_dim
+                )
+
+            return {
+                "surface_preds": surface_preds,
+                "volume_preds": volume_preds,
+                "hidden": hidden_pressure,
+                "surface_hidden": surface_hidden_pressure,
+                "volume_hidden": volume_hidden,
+                "surface_hidden_pressure": surface_hidden_pressure,
+                "surface_hidden_wss": surface_hidden_wss,
+            }
+
+        hidden = _apply_token_mask(backbone_out, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
         cursor = 0

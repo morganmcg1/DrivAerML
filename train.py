@@ -25,6 +25,7 @@ from typing import Iterable
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
@@ -103,6 +104,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    y_arch_split_layer: int = 0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "y_arch_split_layer": (
+            "PR #1137 — Y-architecture dual-backbone split. After "
+            "N shared layers (the first N TransformerBlocks), the backbone "
+            "splits into two parallel stacks of (depth - N) layers: a "
+            "pressure branch (drives cp + vol_p heads) and a WSS branch "
+            "(drives the tau_x/tau_y/tau_z head). 0 disables the split "
+            "(legacy single-stack backbone, default). Recommended: 1 = share "
+            "first layer, split the remaining --model-layers - 1. Must be "
+            "strictly less than --model-layers when enabled. Total backbone "
+            "params scale by ~1 + 2 * (depth - N) / depth (e.g. depth=5, "
+            "N=1 -> 1.8x backbone params)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +322,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        y_arch_split_layer=config.y_arch_split_layer,
     )
 
 
@@ -346,13 +361,26 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    log = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    # Y-arch branch separation diagnostic (PR #1137).
+    # cos_sim ~ 1.0 = branches collapse (split adds nothing);
+    # cos_sim < 0.7 = branches diverge as intended.
+    if "surface_hidden_pressure" in out and "surface_hidden_wss" in out:
+        hp = out["surface_hidden_pressure"].detach().float()
+        hw = out["surface_hidden_wss"].detach().float()
+        if hp.shape[1] > 0:
+            mask = batch.surface_mask.to(dtype=hp.dtype)
+            cos_per_token = F.cosine_similarity(hp, hw, dim=-1)
+            num = (cos_per_token * mask).sum()
+            den = mask.sum().clamp(min=1.0)
+            log["y_arch/branch_cos_sim_surface"] = float((num / den).item())
+    return loss, log
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -773,7 +801,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.y_arch_split_layer > 0:
+                # Y-arch (PR #1137): surface-only / volume-only views activate
+                # different output heads (cp+wss vs volume_out) and different
+                # branch paths, so ranks can see different sub-graphs in the
+                # same DDP step. find_unused_parameters=True synchronizes
+                # unused params across ranks.
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
