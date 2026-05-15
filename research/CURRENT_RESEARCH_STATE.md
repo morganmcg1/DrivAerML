@@ -4,7 +4,21 @@
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 01:15–01:30Z)
+## Latest invocation actions (2026-05-15 01:41Z) — CRITICAL SDF MECHANISM DIAGNOSTIC
+
+- **PR #1122 alphonse SDF port → CHANGES REQUESTED, corrected plan approved**: alphonse paused the 13ep run at 28min in (EP1 ~25% done) after spotting THREE issues with my original assignment:
+  1. **Mechanism inversion**: commit `023f766` I cited as reference impl implements `weight = 1/(1+α·|sdf|)` (NEAR-surface emphasis), but PR #972 body and the actual SOTA run `56bcqp3m` use `weight = 1 + α·|sdf|` (FAR-field emphasis). These are OPPOSITE hypotheses.
+  2. **α value mismatch**: SOTA `56bcqp3m` ran α=2.0, not α=4.0. The NEAR-surface alpha sweep on W&B (α=0.25→6.265%, α=0.5→6.290%, α=1.0→6.356%, α=3.0→7.251% over kill gate) shows higher α is monotonically worse for the NEAR-surface inversion.
+  3. **IO regression**: alphonse's port used `np.load(path, mmap_mode="r")[rows]` fancy-indexed memmap which runs ~3× slower than PR #972's contiguous load + in-memory slice on this PVC. Smoke EP1 took 114 min vs SOTA reference 41 min.
+  4. SOTA confounders captured: `56bcqp3m` also ran batch_size=1, model_layers=6, GradNorm, y_symmetry_aug, epochs=30 — these are NOT part of the corrected single-variable port.
+- **Approved corrected plan**: revert IO optimization, switch to FAR-field `weight = 1 + α·|sdf|` α=2.0, keep tay baseline recipe (batch_size=4, model_layers=5, no GradNorm, no y_sym, epochs=13), smoke 2EP then full 13EP. Single-variable change isolates the SDF mechanism; full-recipe SOTA reproduction held for follow-up if FAR-field α=2.0 alone doesn't beat 6.99% ceiling.
+- **Adjusted EP3 gate for FAR-field α=2.0**: PASS ≤ 6.9% / MARGINAL ≤ 7.2% / KILL otherwise. Projected EP13 terminal val_abupt ~6.4-6.6%, putting test_WSS in striking range of 6.5-6.7% (likely strongest single-model on tay).
+
+## Methodology lesson for advisor
+
+Always **verify the SOTA reference mechanism from the actual W&B config** before citing it in an assignment, not from a commit body that may be a different formulation. The PR body, the commit text, and the run config can all diverge. Going forward: when citing a SOTA mechanism, pull its W&B config first.
+
+## Prior invocation actions (2026-05-15 01:15–01:30Z)
 
 - **Closed PR #1114** (tanjiro learnable WSS channel weights): terminal SENPAI-RESULT `test_WSS=7.726%, val_abupt=7.066%` at EP3 (budget-truncated). +0.40pp val_abupt over matched 3-EP baseline (mempfubx 7.465%) but driven by EP1 transient drift (weights briefly dropped to ~50% of init, then quadratic-well-regularized back to baseline by EP3 within 3% of init). Mechanism null at convergence. Methodology data preserved.
 - **Reassigned tanjiro → PR #1124** (EMA decay 0.9995 + 18h budget): single-flag experiment, slower EMA half-life ≈ 1386 steps vs default 693 steps. Tests whether late-converging τ_z benefits from longer EMA averaging window. Full 13-EP convergence test, comparison to no-SDF tay ceiling 6.99%.
@@ -127,7 +141,7 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 | **#1119** | fern | **GradNorm short-cycle (t_max=6, ep=6)** — full-convergence test of prior-vs-learned weights at shorter cycle | Active WIP; EP1 learned τ_z weight=1.047 vs prior 2.0 (same de-emphasis pattern as #1111); EP6 terminal ~07:00Z |
 | **#1120** | nezuko | **Spatial-prior surface sampling (-x + \|z\|)** — light spatial-prior surface bias; ρ=+0.31 PASS pre-train diagnostic vs |WSS| | Active WIP; **EP2 catastrophe-gate PASS by wide margin** (val_abupt=7.84% vs #1113 13.12% at same EP); EP3 gate ~02:20Z |
 | **#1121** | frieren | **WSS magnitude-only decomposition + 18h budget** — `λ_dir=0.0`, full 13-ep cosine via `SENPAI_TIMEOUT_MINUTES=1100`; tests Wave 27 "91-96% magnitude" claim | Active WIP; EP1 val_abupt=28.347% (warmup floor); decomp infra confirmed (λ_dir=0 in train logs); EP3 gate ~02:48Z; EP13 ~14:00Z |
-| **#1122** | alphonse | **SDF importance sampling port to tay (alpha=4.0)** — highest-EV untested-on-tay lever; ports PR #972's SDF-stratified vol sampling | Active WIP; launched 22:45Z post-#1078 close; pod healthy (kubectl confirmed 90-100% GPU util × 8 ranks); EP3 gate ~04:00Z |
+| **#1122** | alphonse | **SDF importance sampling port to tay — FAR-field α=2.0 (corrected mechanism)** — highest-EV untested-on-tay lever; reproduces PR #972 SOTA mechanism `weight = 1 + α·|sdf|` (NOT the inverted `1/(1+α·|sdf|)` from commit 023f766 originally cited); IO reverted to contiguous load+slice | Active WIP draft post-correction (01:41Z); 13ep run paused at EP1 25%, smoke-then-full plan approved; EP3 gate adjusted ≤6.9% PASS for FAR-field mechanism |
 | **#1123** | thorfinn | **τ_z dedicated subnet** — 2-layer MLP head attacking residual axis test_τ_z ≈ 9.05% | Active WIP; launched 23:50Z post-#1100 close |
 | **#1124** | tanjiro | **EMA decay 0.9995 + 18h budget** — single-flag test of slower EMA half-life (~1386 vs 693 steps) for late-converging τ_z | Active WIP; assigned 01:18Z post-#1114 close; full 13-EP convergence test |
 
