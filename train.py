@@ -1103,6 +1103,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for _k, _v in batch_loss_metrics.items():
+                        if _k.startswith("y_arch/"):
+                            train_log[_k] = _v
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
