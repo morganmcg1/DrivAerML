@@ -1,10 +1,18 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~01:25 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~02:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 01:41Z) — CRITICAL SDF MECHANISM DIAGNOSTIC
+## Latest invocation actions (2026-05-15 02:35–02:50Z) — Wave 28.5 closures complete, Wave 29 architectural pivot launched
+
+- **Closed PR #1118 (askeladd OHEM v2)** — definitive negative mechanism: `clip_active`=100.00% across all 4218 EP3 OHEM-active steps → gradient through OHEM term is exactly zero → run is mathematically equivalent to baseline. Test metrics regressed +0.903pp test_WSS vs SOTA at EP3-only (truncated by 270-min cap). **OHEM-on-raw-residuals family terminally exhausted**: dataset's top-K residuals are intrinsically 100–25,000× larger than mean → any safe scalar cap fires 100% → zero learning signal. The `clip_active_pct` diagnostic was the right metric and identified the failure mode within EP3 — should remain in codebase for future loss-clip work.
+- **Wave 28.5 loss-engineering pattern: 0-for-3 at convergence** — #1114 learnable WSS (null), #1119 GradNorm short-cycle (refutes prior-rediscovery), #1118 OHEM v2 (zero gradient). Decisive pivot to capacity / data-sampling / architecture routes.
+- **Assigned PR #1126 (fern: deeper surface_out MLP depth 2→4 + 18h)** — Wave 29 architectural pivot. Tests whether τ_z magnitude prediction is decoder-depth-limited at the surface head (current 2-layer MLP). Orthogonal to thorfinn #1123 (separate τ_z branch) and edward #1116 (per-channel heads). Parameterizes `surface_out_depth` config; depth=2 default preserves backward compat. Full 13-EP convergence at SENPAI_TIMEOUT_MINUTES=1100.
+- **Assigned PR #1127 (askeladd: explicit surface_loss_weight warmup curriculum + 18h)** — directly tests #1114 finding that EP1 wins are implicit-curriculum artifacts. Adds `--surface-loss-weight-warmup-epochs 3` flag that linearly ramps surface_loss_weight from 0 → full over first 3 epochs. Gradient-flow-preserving (scalar multiplier, NOT residual reweight) → avoids OHEM #1118 trap. Predicted payoff: stable volume-conditioned backbone before surface head receives full gradient → better τ_z magnitude convergence at terminal.
+- **All 8 students now active**: alphonse #1122 (SDF FAR-field α=2.0), nezuko #1125 (spatial-prior α=10 + 18h), tanjiro #1124 (EMA decay 0.9995 + 18h), thorfinn #1123 (τ_z subnet), edward #1116 (per-channel heads, 18h convergence), frieren #1121 (magnitude-only + 18h), fern #1126 (surface_out depth=4 + 18h), askeladd #1127 (surface_loss warmup curriculum + 18h). **Zero idle.**
+
+## Prior invocation actions (2026-05-15 01:41Z) — CRITICAL SDF MECHANISM DIAGNOSTIC
 
 - **PR #1122 alphonse SDF port → CHANGES REQUESTED, corrected plan approved**: alphonse paused the 13ep run at 28min in (EP1 ~25% done) after spotting THREE issues with my original assignment:
   1. **Mechanism inversion**: commit `023f766` I cited as reference impl implements `weight = 1/(1+α·|sdf|)` (NEAR-surface emphasis), but PR #972 body and the actual SOTA run `56bcqp3m` use `weight = 1 + α·|sdf|` (FAR-field emphasis). These are OPPOSITE hypotheses.
@@ -122,28 +130,24 @@ The current 4-member candidate pool {`56bcqp3m`, `29nohj67`, `a0yoxy85`, `ghh0s4
 
 ---
 
-## Active WIP PRs (as of 2026-05-15 ~01:25Z)
+## Active WIP PRs (as of 2026-05-15 ~02:50Z)
 
-### Capacity / baseline runs (both CLOSED — no-SDF ceiling confirmed at test_WSS ≈ 6.99%)
+### Wave 28.5 → Wave 29 transition complete — all 8 students in flight
+
 | PR | Student | Hypothesis | Status |
 |----|---------|------------|--------|
-| #1078 | alphonse | ~~Asymmetric eval surface 131k~~ | **CLOSED 22:42Z** — test_WSS=6.996% (+26.8bp vs SOTA), test floors regress; val→test ratio was 1.020 not projected 0.935; hypothesis falsified |
-| #1100 | thorfinn | ~~Capacity uplift — model-slices 256~~ | **CLOSED 23:45Z** — test_WSS=6.989% (+26.2bp vs SOTA), test_SP +7.1% above floor; landed EP20 at 18h budget cap; confirms no-SDF tay structural ceiling at test_WSS ≈ 6.99% |
-
-### Wave 28 — ALL 4 CLOSED (Wave 28 closed 19:43–21:33Z, see Wave 28 Closures below)
-
-### Wave 28.5 (current generation) — 1 sent-back, 1 closed, 5 still in flight
-| PR | Student | Hypothesis | Status |
-|----|---------|------------|--------|
-| ~~#1114~~ | tanjiro | ~~Learnable WSS channel loss weights~~ | **CLOSED 01:13Z** — terminal `test_WSS=7.726%`, mechanism null at convergence (weights drift back to ~baseline by EP3), +0.4pp matched-baseline win from EP1 transient (implicit volume-first curriculum); reassigned → #1124 |
-| **#1116** | edward | **Per-channel WSS output heads** — decouple tau_x/tau_y/tau_z heads | **CHANGES REQUESTED 01:25Z** (draft) — terminal `test_WSS=7.671%, val_abupt=6.915%` at EP3; matched-budget A/B: every metric improves vs `mempfubx` baseline (test_WSS −0.66pp). Re-running at 18h budget to confirm at convergence. If delta holds, projected test_WSS ≈ 6.33% (would tie ensemble SOTA). |
-| **#1118** | askeladd | **OHEM v2 spike-clipped + reduced λ** — fixes #1110 scale-collapse via spike-clipping; λ=0.25 (was 0.5); 2-ep warmup | Active WIP; OHEM warmup ends end of EP2 ~00:46Z; EP3 gate ~02:21Z |
-| **#1119** | fern | **GradNorm short-cycle (t_max=6, ep=6)** — full-convergence test of prior-vs-learned weights at shorter cycle | Active WIP; EP1 learned τ_z weight=1.047 vs prior 2.0 (same de-emphasis pattern as #1111); EP6 terminal ~07:00Z |
-| **#1120** | nezuko | **Spatial-prior surface sampling (-x + \|z\|)** — light spatial-prior surface bias; ρ=+0.31 PASS pre-train diagnostic vs |WSS| | Active WIP; **EP2 catastrophe-gate PASS by wide margin** (val_abupt=7.84% vs #1113 13.12% at same EP); EP3 gate ~02:20Z |
-| **#1121** | frieren | **WSS magnitude-only decomposition + 18h budget** — `λ_dir=0.0`, full 13-ep cosine via `SENPAI_TIMEOUT_MINUTES=1100`; tests Wave 27 "91-96% magnitude" claim | Active WIP; EP1 val_abupt=28.347% (warmup floor); decomp infra confirmed (λ_dir=0 in train logs); EP3 gate ~02:48Z; EP13 ~14:00Z |
-| **#1122** | alphonse | **SDF importance sampling port to tay — FAR-field α=2.0 (corrected mechanism)** — highest-EV untested-on-tay lever; reproduces PR #972 SOTA mechanism `weight = 1 + α·|sdf|` (NOT the inverted `1/(1+α·|sdf|)` from commit 023f766 originally cited); IO reverted to contiguous load+slice | Active WIP draft post-correction (01:41Z); 13ep run paused at EP1 25%, smoke-then-full plan approved; EP3 gate adjusted ≤6.9% PASS for FAR-field mechanism |
+| ~~#1114~~ | tanjiro | ~~Learnable WSS channel loss weights~~ | **CLOSED 01:13Z** — mechanism null at convergence; reassigned → #1124 |
+| **#1116** | edward | **Per-channel WSS output heads** — decouple tau_x/tau_y/tau_z heads + 18h convergence | CHANGES REQUESTED 01:25Z — re-running at 18h to confirm matched-budget −0.66pp test_WSS delta holds at EP13; projected test_WSS ≈ 6.33% if delta holds (would tie ensemble SOTA) |
+| ~~#1118~~ | askeladd | ~~OHEM v2 spike-clipped~~ | **CLOSED 02:35Z** — `clip_active`=100% → zero OHEM gradient → mathematically baseline-equivalent; reassigned → #1127 |
+| ~~#1119~~ | fern | ~~GradNorm short-cycle (t_max=6, ep=6)~~ | **CLOSED 02:27Z** — REFUTES prior-rediscovery hypothesis; τ_z weight plateaus 1.07 (vs prior 2.0); hardcoded prior empirically validated; reassigned → #1126 |
+| ~~#1120~~ | nezuko | ~~Spatial-prior surface sampling α=3~~ | **CLOSED 02:30Z** — mechanism right (ρ=+0.31 PASS), EP3 budget too short; strongest 3-EP truncated WSS in family but truncated; reassigned → #1125 (α=10 + 18h) |
+| **#1121** | frieren | **WSS magnitude-only decomposition + 18h budget** — `λ_dir=0.0`, full 13-ep cosine; tests Wave 27 "91-96% magnitude" claim | Active WIP; EP3 gate ~02:48Z; EP13 ~14:00Z |
+| **#1122** | alphonse | **SDF importance sampling port to tay — FAR-field α=2.0 (corrected mechanism)** — `weight = 1 + α·|sdf|`; highest-EV untested-on-tay lever; reproduces PR #972 SOTA mechanism (NOT the inverted `1/(1+α·|sdf|)`) | Active WIP draft post-correction (01:41Z); smoke-then-full plan approved; EP3 gate ≤6.9% PASS |
 | **#1123** | thorfinn | **τ_z dedicated subnet** — 2-layer MLP head attacking residual axis test_τ_z ≈ 9.05% | Active WIP; launched 23:50Z post-#1100 close |
 | **#1124** | tanjiro | **EMA decay 0.9995 + 18h budget** — single-flag test of slower EMA half-life (~1386 vs 693 steps) for late-converging τ_z | Active WIP; assigned 01:18Z post-#1114 close; full 13-EP convergence test |
+| **#1125** | nezuko | **Spatial-prior surface sampling α=10 + 18h budget** — stronger oversample at full convergence (student's suggested follow-up #2); tests if mechanism scales without catastrophe | Active WIP; assigned 02:23Z post-#1120 close |
+| **#1126** | fern | **Deeper surface_out MLP (depth 2→4) + 18h budget** — Wave 29 architectural pivot; tests if τ_z magnitude is decoder-depth-limited at surface head; orthogonal to thorfinn #1123 (separate branch) and edward #1116 (per-channel heads) | Active WIP; assigned 02:45Z post-#1119 close |
+| **#1127** | askeladd | **Explicit surface_loss_weight warmup curriculum (3-ep ramp 0→full) + 18h** — directly tests #1114 implicit-curriculum finding; gradient-flow-preserving (avoids OHEM #1118 trap) | Active WIP; assigned 02:50Z post-#1118 close |
 
 ---
 
@@ -216,17 +220,18 @@ The PR #972 single-model SOTA W&B run `56bcqp3m` was trained with SDF-stratified
 
 ## Next-Wave Hypothesis Queue
 
-Wave 28.5 is FULLY IN FLIGHT — 6 single-model students busy, 2 capacity students (alphonse #1078, thorfinn #1100) running. Zero idle students.
+Wave 28.5 → Wave 29 in flight — 8 students busy, zero idle. Capacity students (alphonse #1078, thorfinn #1100) closed; SDF mechanism port (#1122) is the highest-EV active experiment.
 
-Queue for Wave 29 (after Wave 28.5 results land ~tomorrow):
+Queue for Wave 30 (after current cohort lands ~tomorrow):
 
-1. **Multi-scale surface attention** — second surface encoder at 0.5× token density to capture macro-flow features.
-2. **WSS-loss-aware EMA half-life** — vary `--ema-decay` so EMA captures late-training WSS-specialised weights better.
-3. **Heteroscedastic WSS loss** — model both mean and variance per surface point; downweight high-aleatoric regions.
-4. **τ_z frequency analysis** — Fourier decompose tau_z predictions vs GT to find spatial frequency bands where error is concentrated; use to motivate loss or architecture changes.
-5. **Surface point sampling Voronoi tessellation** — sample uniformly over surface area (not raw vertex density) to remove sampling bias from non-uniform mesh refinement.
-6. **Spatial focal at α=0.5 (lower bound test)** — if α=2.0 amplified hot-spots too fast (#1109), maybe α=0.5 is a better operating point with smoother modulation.
-7. **τ_z-specific subnet** — small dedicated MLP head only for τ_z taking only the surface features that distinguish spanwise-resolved patterns (boundary layer separation vs free-stream).
+1. **Higher τ_z loss weight (3.0 from current 2.0)** — if fern #1126 and edward #1116 reveal decoder is the bottleneck, the prior τ_z=2.0 may now be undertuned with the increased capacity.
+2. **WSS magnitude/direction joint head** — if frieren #1121 mag-only beats baseline, add a second head for direction (cos_sim) with bounded loss; combine via learnable α.
+3. **Multi-scale surface attention** — second surface encoder at 0.5× token density to capture macro-flow features.
+4. **Heteroscedastic WSS loss** — model both mean and variance per surface point; downweight high-aleatoric regions.
+5. **τ_z frequency analysis** — Fourier decompose tau_z predictions vs GT to find spatial frequency bands where error is concentrated; use to motivate loss or architecture changes.
+6. **Surface point sampling Voronoi tessellation** — sample uniformly over surface area (not raw vertex density) to remove sampling bias from non-uniform mesh refinement.
+7. **Combine SDF FAR-field α=2.0 (from #1122) with deeper surface_out (from #1126)** — if both win independently, the combination is the obvious next step; orthogonal mechanism stacking.
+8. **Curriculum at higher granularity** — if askeladd #1127 surface-loss warmup wins, try ramping individual WSS channel weights (τ_z last) instead of the global scalar.
 
 ⚠️ Permanently retired (catastrophic failure): yaw aug (#1107), magnitude penalty (#1104), rel_l2 (#1105), normal-frame rotation (#1094, #1106), curvature-weighted surface sampling (#1113 — wrong-sign proxy).
 
@@ -238,7 +243,7 @@ Queue for Wave 29 (after Wave 28.5 results land ~tomorrow):
 Senpai PR #3445 merged 06:42Z deployed per-student token fix + REST API migration. Fleet was back online by ~07:30Z. No further rate-limit-driven idle GPU incidents reported in current invocation.
 
 ### Pod Health
-All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students as of 23:50Z. PR distribution: tanjiro #1114, edward #1116, askeladd #1118, fern #1119, nezuko #1120, frieren #1121, alphonse #1122 (SDF port), thorfinn #1123 (τ_z subnet).
+All 8 students have active pods (kubectl: `senpai-drivaerml-ddp8-*` deployments, 1/1 ready). DDP via 8× H100 96GB per student. Zero idle students as of 02:50Z. **Wave 28.5 → Wave 29 transition complete.** PR distribution: edward #1116 (per-channel heads 18h), frieren #1121 (magnitude-only 18h), alphonse #1122 (SDF FAR-field α=2.0), thorfinn #1123 (τ_z subnet), tanjiro #1124 (EMA decay 0.9995 18h), nezuko #1125 (spatial-prior α=10 18h), fern #1126 (surface_out depth=4 18h), askeladd #1127 (surface_loss warmup curriculum 18h).
 
 ---
 

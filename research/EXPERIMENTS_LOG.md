@@ -1,3 +1,55 @@
+## 2026-05-15 02:35 — PR #1118: OHEM v2 spike-clipped + reduced λ (askeladd) — CLOSED (DEFINITIVE NEGATIVE: ZERO OHEM GRADIENT)
+
+- **Branch**: `askeladd/ohem-v2-spike-clipped` (closed)
+- **W&B run**: `023up1sk` (group `tay-wave28-ohem-v2`, EP3 truncated at 81% by 270-min train cap)
+- **Hypothesis**: spike-clipped OHEM v2 with `max_clip=2.0`, `λ=0.1`, warmup=2EP avoids v1's Lion-sign collapse by capping `hard_loss_raw` at `max_clip × surface_loss.detach()`.
+
+### EP3 gate verdict — PASS but mechanism null (see below)
+
+| Metric | EP3 value | gate | verdict |
+|---|---:|---|---|
+| val_abupt | 6.9805% | ≤7.2% PASS | **PASS** |
+| val_vol_p | 4.1231% | ≤4.5% PASS | **PASS** |
+| val_WSS | 7.864% | — | informational |
+| val_SP | 4.670% | — | informational |
+
+### Test metrics (EP3 best, paper-facing)
+
+| Metric | EP3 test | PR #972 SOTA baseline | Δ |
+|---|---:|---:|---:|
+| test_WSS | **7.6301%** | 6.727% | **+0.903pp regression** |
+| test_vol_p | 3.9592% | 3.643% (floor) | +0.316pp |
+| test_SP | 4.2961% | 3.577% (floor) | +0.719pp |
+| test_abupt | 6.6530% | 5.844% | +0.809pp |
+
+### Critical mechanism finding — OHEM contributed ZERO learning signal
+
+| diagnostic | EP3 value (4218 OHEM-active steps) |
+|---|---:|
+| `clip_active` fraction | **100.00%** (4218 / 4218) |
+| `hard_loss_raw` median / p95 / p99 / max | 3.03 / 12.45 / 24.42 / 4031.3 |
+| `raw / surface_loss` ratio median / p95 / max | 322× / 1205× / 25,749× |
+| `contribution` (λ × clipped) median / p95 / max | 0.001862 / 0.002572 / 0.05104 |
+
+**Mathematical consequence:** `hard_loss_raw.clamp_max(max_clip × surface_loss.detach())` returns the detached cap whenever raw > cap. **At 100% clip-active, the gradient through the OHEM term is exactly zero on every active step.** OHEM contributed no learning signal — the run is mathematically equivalent to the baseline minus tiny loss-value bookkeeping. The val_abupt=6.9805% gate-PASS is a baseline trajectory, not an OHEM-influenced trajectory.
+
+### Methodology — paper-relevant findings preserved
+
+1. **OHEM-family terminally exhausted on raw-residual reweighting for this dataset.** Dataset's top-K surface residual distribution is intrinsically 100–25,000× larger than mean residual. Any safe scalar cap (max_clip ≤ 100) sits below the natural top-K signal → cap fires 100% → zero gradient. v1 (#1110) failed via Lion-sign collapse on uncapped 4000× spikes; v2 (#1118) prevented divergence but at the cost of gradient flow. **Both ends of the cap spectrum are now closed.**
+2. **The `clip_active_pct` diagnostic is the right metric for any future loss-shaping work** — converts ambiguous "did clipping affect training?" into a binary mechanism gate. Should remain in codebase for future loss-clip experiments.
+3. **`hard_loss_raw` distribution is identical between v1 and v2** (v1: median 5.6, max 4411; v2: median 3.03, max 4031). Confirms 4000× residual spikes are intrinsic to dataset, not a v1 implementation pathology.
+4. **Communication discipline reinforced**: student silently launched a 2h smoke without acknowledging assignment → advisor flagged it as risk → student adopted ~30-min acknowledgment protocol going forward.
+
+### Pattern observation
+
+- Wave 28 loss-engineering family is now 0-for-3: tanjiro #1114 learnable WSS weights (null at convergence), fern #1119 GradNorm short-cycle (refuted prior-rediscovery), askeladd #1118 OHEM v2 (zero gradient). **Loss-balance-learning approaches are systematically failing on this dataset's residual structure.** Pivot is decisive: capacity / SDF / architecture routes.
+
+### Reassigned as
+
+- PR #1127 (TBD): explicit surface_loss_weight warmup curriculum (`--surface-loss-weight-warmup-epochs 3`) — directly tests #1114 finding that EP1 wins are curriculum artifacts; if explicit curriculum > implicit, gains may compound at convergence.
+
+---
+
 ## 2026-05-15 02:30 — PR #1120: Spatial-prior surface sampling α=3 (nezuko) — CLOSED (MECHANISM RIGHT, BUDGET TOO SHORT)
 
 - **Branch**: `nezuko/spatial-prior-surface-sampling` (closed)
