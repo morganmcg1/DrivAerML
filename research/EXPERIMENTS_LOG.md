@@ -1,3 +1,50 @@
+## 2026-05-15 21:15 — PR #1122: SDF FAR-field α=2.0 port (alphonse) — CLOSED (terminal NEGATIVE, EIGHTH structural ratio confirmation)
+
+- **Branch**: `alphonse/port-sdf-importance-sampling-pr972` (closed)
+- **W&B run**: `vvv84p32`, EP10 truncated at 17h57m (advisor decision EP4), best-EMA at EP7
+- **Hypothesis**: Port the SDF-stratified volume importance sampling stack from PR #972 (α=4.0 attempted, advisor down-scaled to α=2.0 to match historical sweet spot) to tay so the no-SDF tay baseline regains the sampling-side mechanism that drove the original SOTA.
+
+### Terminal metrics (test, single-model, EP7 best-EMA)
+
+| Metric | This PR | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.698% | 6.126% | +0.572pp | misses |
+| **test_abupt** | **6.657%** | — | — | val→test compression 0.041 (within fleet band) |
+| **test_WSS** | **7.518%** | 6.727% | **+0.792pp** | **REGRESS** ❌ |
+| **test_vol_p** | **4.524%** | 3.643% (floor) | **+0.881pp** | **floor regress** ❌ |
+| **test_SP** | **4.141%** | 3.577% (floor) | **+0.564pp** | **floor regress** ❌ |
+| test_τ_x | 6.640% | ~5.61% PR #972 | +1.03pp | off-target regress |
+| test_τ_y | 8.250% | ~6.93% PR #972 | +1.32pp | off-target regress |
+| test_τ_z | 9.730% | ~8.20% PR #972 | +1.53pp | target-axis regress |
+| **test τz/τx** | **1.465** | ~1.46 | **0.00** | **EIGHTH confirmation** |
+
+### Verdict: NEGATIVE — close
+
+Fails 3/3 merge gates. SDF FAR-field α=2.0 port did not reproduce PR #972's SOTA on no-SDF tay — likely because PR #972 relied on the full SDF stratification stack (`--sdf-importance-sampling --sdf-alpha 4.0` + careful schedule) which never landed on tay, and re-implementing only the FAR-field bias is insufficient. The α=2.0 down-scaling (advisor decision) preserved the structural-test purpose at the cost of expected absolute floor regress.
+
+### Mechanism — EIGHTHFOLD structural ratio confirmation
+
+EP3 τz/τx = 1.515, EP4 = 1.526 (sevenfold confirm), EP5 = 1.528, EP6 = 1.527, EP7 = 1.526, EP8 = 1.525, EP9-10 ~1.524, test = 1.465 (with val→test compression). The ratio is **invariant to volume-sampling distribution shifts**. Eight independent interventions now confirmed:
+
+| # | Mechanism | Lever | τz/τx (test) |
+|---|-----------|-------|------------:|
+| 1 | thorfinn EMA 0.9995 (#1124) | temporal | 1.469 |
+| 2 | nezuko spatial-prior α=10 (#1125) | sampling | 1.449 |
+| 3 | fern surface_out depth=4 (#1126) | output capacity | 1.462 |
+| 4 | edward per-channel heads (#1116) | output decoupling | 1.460 |
+| 5 | thorfinn τ_z weight 3.0 (#1128) | loss weighting | 1.44 |
+| 6 | askeladd surface_loss warmup (#1127) | curriculum | 1.52 |
+| 7 | frieren mag-only (#1121 → #1133 in flight) | loss reform | 1.46 (frieren #1121) |
+| **8** | **alphonse SDF FAR-field α=2.0 (#1122)** | **volume sampling** | **1.465** |
+
+**Conclusion confirmed**: data-side, loss-side, capacity-side, output-decoupling-side, and now volume-sampling-side mechanisms ALL converge to the structural band. Wave 30's architectural pivot is exactly the right direction.
+
+### Reassigned
+
+`alphonse` → PR #1141 (Wave 30 H4 hard normal slice routing) — completes the soft↔hard sweep on the attention layer alongside thorfinn's H3 #1138 (soft routing).
+
+---
+
 ## 2026-05-15 20:30 — PR #1128: τ_z loss weight 2.0→3.0 (thorfinn) — CLOSED (partial confirm, off-axis cost wipes gain; test_SP floor regress)
 
 - **Branch**: `thorfinn/tau-z-loss-weight-3p0` (closed)

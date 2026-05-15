@@ -1,10 +1,84 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~21:00 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~21:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~21:00Z) — TRIPLE CLOSURE (thorfinn #1128, askeladd #1127, edward #1116), Wave 30 FLEET EXPANSION to 6-of-8 (thorfinn H3 #1138, edward H1 #1139, askeladd H7 #1140)
+## Latest invocation actions (2026-05-15 ~21:20Z) — alphonse #1122 CLOSED (EIGHTHFOLD structural ratio confirmation), Wave 30 FLEET EXPANDED to 7-of-8 (H4 hard normal routing #1141 launched), stale_wip false-positives cleared on #1133 + #1140
+
+### Actions this invocation
+
+- **CLOSED PR #1122 (alphonse SDF FAR-field α=2.0)** at terminal.
+  - Test metrics: test_WSS=**7.518%** (+0.792pp), test_vol_p=**4.524%** (+0.881pp floor regress), test_SP=**4.141%** (+0.564pp floor regress), val_abupt=6.698%.
+  - **Fails 3/3 merge gates.** Volume-sampling-side mechanism cleanly REFUTED for fixing the τ_z structural bottleneck.
+  - Test τz/τx = **1.465** — **EIGHTHFOLD** confirmation of the structural ratio band.
+  - Note: this was a port test, not a SOTA attempt. PR #972 used the full SDF stratification stack (never landed on tay); FAR-field α=2.0 alone is insufficient to reproduce that result.
+
+- **FALSE-POSITIVE check-ins on #1133 (frieren per-axis WSS mag decomp) + #1140 (askeladd Wave 30 H7)**.
+  - #1133: run `5l9i6fjn` alive at step 46,522, runtime 7.66h (~EP6), val_abupt=**6.47%** (already below baseline 6.126% trajectory at this checkpoint). Strong signal.
+  - #1140: run `e5ztxjc3` alive at step 14,751, runtime 2.19h (~EP2), val_abupt=25% (warmup expected). Diagnostic note: `train/normal_aux_loss` is ~0.001 (1000× smaller than predicted) — student asked to confirm whether logged value is weighted or raw at next epoch report.
+
+- **Assigned PR #1141 (alphonse: Wave 30 H4 hard normal slice routing)** — SEVENTH Wave 30 attack axis, completes the soft↔hard sweep on attention routing.
+  - **Hypothesis**: Partition `num_slices=128` budget into `num_slices_z = int(0.25 × 128) = 32` for z-normal surfaces (|n_z| ≥ 0.5) and `num_slices_xy = 96` for sides. Hard-route via pre-softmax `masked_fill(-inf)` — MoE-style. Volume tokens (no normals) retain all-slice access (baseline behavior).
+  - **Theoretical basis**: Switch Transformer (Fedus 2022), Expert Choice (Zhou 2022) — hard routing > soft routing when problem has discrete structural modes (roof/underbody n_z≈±1 vs sides n_z≈0).
+  - **Diagnostic**: `slice_capacity_utilization_z` and `slice_capacity_utilization_xy` should both approach 1.0 once routing engages. Pairs with thorfinn #1138 (soft) for a clean soft↔hard sweep on the same architectural layer.
+  - **Falsifiability**: WIN if test τz/τx ≤ 1.40. Together with H3 result: if BOTH soft + hard routing fail to move τz/τx, the bottleneck is NOT at the attention layer.
+
+### Wave 30 fleet status — SEVEN of EIGHT architectural attack axes now active in parallel
+
+| PR | Student | Mechanism | Attack axis | LOC | EP/Status |
+|----|---------|-----------|-------------|-----|-----------|
+| #1134 | tanjiro | H6: local-frame WSS head (τ·n=0 by construction) | output decomposition | ~65 | EP3 gate due ~tomorrow AM |
+| #1136 | nezuko | H2: normal spectral encoding | input features | ~35 | EP1.7 healthy |
+| #1137 | fern | H5: Y-architecture dual-backbone | backbone split | ~80 | EP0-1 |
+| #1138 | thorfinn | H3: normal-aligned slice groups (SOFT routing) | attention layer (soft) | ~50 | EP0-1 |
+| #1139 | edward | H1: cylindrical coords (r, θ, z) | input coord frame | ~35 | EP0-1 |
+| #1140 | askeladd | H7: normal-prediction aux head | gradient signal | ~80 | EP2 healthy |
+| **#1141** | **alphonse** | **H4: hard normal slice routing (MoE-style)** | **attention layer (hard)** | **~70** | **EP0 (just launched)** |
+
+**Seven mechanisms, six layers of the architecture stack, all targeting the τ_z bottleneck:**
+- Input coord frame (H1) → Input features (H2) → Attention routing soft+hard (H3 + H4 pair) → Backbone split (H5) → Output decomposition (H6) → Gradient signal (H7)
+- **H3 + H4 form a soft↔hard sweep** on the attention-routing axis — diagnostic pair.
+
+Wave 30 reserve (1 of 8 still on the bench): H8 (contrastive orientation regularization). Reserved for next idle.
+
+Wave 29 fleet still in flight (1 of 8):
+
+| PR | Student | Mechanism | EP/Status |
+|----|---------|-----------|-----------|
+| #1133 | frieren | per-axis WSS mag decomp | ~EP6, val_abupt 6.47% |
+
+**Zero idle. Eight students all running.**
+
+### Eighthfold structural ratio confirmation — full table
+
+| # | Mechanism | Lever | test τz/τx |
+|---|-----------|-------|-----------:|
+| 1 | thorfinn EMA 0.9995 (#1124) | temporal | 1.469 |
+| 2 | nezuko spatial-prior α=10 (#1125) | sampling | 1.449 |
+| 3 | fern surface_out depth=4 (#1126) | output capacity | 1.462 |
+| 4 | edward per-channel heads (#1116) | output decoupling | 1.460 |
+| 5 | thorfinn τ_z weight 3.0 (#1128) | loss weighting | ~1.44 |
+| 6 | askeladd surface_loss warmup (#1127) | curriculum | ~1.52 |
+| 7 | frieren mag-only #1121 | loss reform | 1.46 |
+| **8** | **alphonse SDF FAR-field α=2.0 (#1122)** | **volume sampling** | **1.465** |
+
+Sampling-side and loss-side exploration both exhausted. Wave 30 architectural attacks are the entirety of the remaining frontier.
+
+### Next-highest-EV gates
+
+| ETA | Event | Action |
+|-----|-------|--------|
+| ~next-day-AM | tanjiro #1134 EP3 gate | First Wave 30 verdict (H6 output decomposition) |
+| ~next-day-AM | nezuko #1136 EP3 gate | Wave 30 H2 verdict (input features) |
+| ~next-day-AM | fern #1137 EP3 gate | Wave 30 H5 verdict (backbone split) |
+| ~next-day-PM | thorfinn #1138 / edward #1139 / askeladd #1140 EP3 gates | Wave 30 H3/H1/H7 verdicts (staggered) |
+| ~next-day-PM | alphonse #1141 EP3 gate | Wave 30 H4 verdict (hard routing) |
+| ~next-day-PM | frieren #1133 EP13 terminal | Last Wave 29 single-model candidate |
+
+---
+
+## Prior invocation actions (2026-05-15 ~21:00Z) — TRIPLE CLOSURE (thorfinn #1128, askeladd #1127, edward #1116), Wave 30 FLEET EXPANSION to 6-of-8 (thorfinn H3 #1138, edward H1 #1139, askeladd H7 #1140)
 
 ### Actions this invocation
 
