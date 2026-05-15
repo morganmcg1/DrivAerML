@@ -1,3 +1,59 @@
+## 2026-05-15 12:45 — PR #1121: WSS magnitude-only decomposition + 18h budget (frieren) — CLOSED (TEST_SP FLOOR REGRESS BLOCKS MERGE; methodology preserved)
+
+- **Branch**: `frieren/wss-mag-only-full-budget` (closed)
+- **W&B run**: `gljtmuvs` (group `frieren/mag-only-*`, EP13/13 complete, 839.9 min wall-clock = 14h, EP12 best-EMA auto-harvested)
+- **Hypothesis**: Wave 27 finding that 91-96% of WSS residual is magnitude error → λ_dir=0, λ_mag=0.1 mag-only decomp at 18h budget should improve test_WSS at convergence.
+
+### Test metrics (paper-facing, EP12 best EMA)
+
+| Metric | This PR | PR #972 SOTA | Δ vs SOTA | alphonse #1078 (no decomp) | Δ vs no-decomp |
+|---|---:|---:|---:|---:|---:|
+| **test_WSS** | **6.859%** | 6.727% | +0.132pp regress | 6.996% | **−0.137pp improvement** ✅ |
+| test_vol_p | 3.545% | 3.643% (floor) | −0.098pp PASS ✅ | 3.644% | −0.099pp ✅ |
+| **test_SP** | **3.734%** | 3.577% (floor) | **+0.157pp FLOOR REGRESS** ❌ | 3.832% | −0.098pp ✅ |
+| test_abupt | 5.939% | 5.844% | +0.095pp | — | — |
+
+### Val metrics (best EMA at EP12)
+
+| Metric | EP12 EMA | PR #972 baseline | Δ |
+|---|---:|---:|---:|
+| **val_abupt** | **6.073%** | 6.126% | **−0.053pp** (first single-model val improvement on no-SDF tay since corrected split) |
+| val_WSS | 6.875% | — | — |
+| val_vol_p | 3.517% | — | below test floor |
+
+### Per-axis test WSS
+
+| Axis | This PR | Note |
+|---|---:|---|
+| τ_x | 6.091% | — |
+| τ_y | 7.452% | — |
+| **τ_z** | **8.873%** | Dominant error channel (consistent with fleet-wide finding) |
+
+τz/τx test ratio = **1.457** (val EP13 was 1.57; test set has slightly less τ_z bottleneck but still dominant).
+
+### Decomp diagnostics — mechanism works as designed
+
+| Diagnostic | EP1 | EP3 | EP6 | EP13 final |
+|---|---:|---:|---:|---:|
+| mag_loss | 0.0331 | 0.0035 | 0.0015 | **0.0011** (4.4× tighter than #1112 EP3=0.0048) |
+| calib ratio (pred/gt) | 0.966 | 0.997 | 0.988–1.008 | **0.9993** (inside PR target 0.998–1.002) |
+
+The mag auxiliary head is **perfectly calibrated** at EP13. λ_dir=0 confirmed throughout training. The aux head is doing exactly what the architecture asked of it.
+
+### Methodology — paper-relevant findings preserved
+
+1. **Mag-only decomp produces the strongest no-SDF single-model test result yet** (test_WSS=6.859% vs no-decomp #1078 6.996%, −0.137pp). The methodology is a recommended building block for future stacking experiments — most natural pairing is SDF FAR-field α=2.0 (alphonse #1122 active).
+2. **First single-model val_abupt improvement on no-SDF tay** (6.073% vs 6.126%) since the corrected split landed. Demonstrates the no-SDF stack is NOT structurally saturated at val_abupt 6.126% — sampling/loss mechanism uplifts are still available.
+3. **test_SP floor regression blocks merge** — mag-only decomp slightly trades surface-pressure precision (+0.157pp test_SP) for the WSS/vol_p improvements. Single-model winners must hold both floors. Closing for this reason; the run is still a methodology success.
+4. **τ_z structural-bottleneck finding strengthened to SIXFOLD independent confirmation**: this run is the 6th active mechanism showing τz/τx ratio converges to ~1.50–1.57 by EP5-10 regardless of approach (loss weight, sampling, output capacity, EMA averaging, magnitude calibration). EP9→EP10 τ_z reversal (+0.020pp) is the cleanest single-run instance. **τ_z bottleneck is NOT addressable by these levers.**
+5. **Decomp infrastructure is established in the codebase** — future per-axis or heteroscedastic decomp variants can build directly on this PR's framework.
+
+### Reassigned as
+
+- PR (TBD): **Per-axis WSS magnitude decomposition** (|τ_z| + ||τ_xy|| as separate aux heads) — direct architectural attack on the structural τ_z finding, exploits frieren's proven aux-head implementation. If per-axis decomp gives τ_z its own dedicated supervised magnitude signal, this is the cleanest test of whether the structural bottleneck is information-bandwidth (mag-only mixes axes) or representational (backbone features just can't carry τ_z).
+
+---
+
 ## 2026-05-15 04:00 — Wave 29 Active Fleet (8 PRs in flight)
 
 All 8 student pods READY (1/1). Full 18h/13ep convergence budget assigned. Gate criteria (no-SDF students): EP1 ≤35%, EP3 ≤7.2% PASS / ≤7.6% MARGINAL / >7.6% KILL. Alphonse (SDF): EP3 ≤6.9% PASS / ≤7.2% MARGINAL / >7.2% KILL.

@@ -1,8 +1,87 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~03:50 UTC)
+- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~12:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+
+## Latest invocation actions (2026-05-15 ~12:45Z) — Frieren #1121 closed terminal, reassigned to #1133 per-axis-mag decomp
+
+### Actions this invocation
+
+- **Closed PR #1121 (frieren mag-only decomp + 18h)** at terminal EP13.
+  - Test metrics: test_WSS=**6.859%** (+0.132pp vs PR #972 SOTA, but **−0.137pp vs no-decomp #1078**), test_vol_p=3.545% PASS, **test_SP=3.734% (+0.157pp FLOOR REGRESS)** ❌, test_abupt=5.939%.
+  - Val: val_abupt=**6.073%** (−0.053pp vs PR #972 6.126% baseline) — **first single-model val_abupt improvement on no-SDF tay** since the corrected split landed.
+  - Methodology success: mag head perfectly calibrated (ratio 0.9993, mag_loss 0.0011, 4.4× tighter than #1112 EP3). λ_dir=0 confirmed throughout.
+  - **Why close**: test_SP floor regression is a merge blocker; single-model winners must hold both floors. Methodology preserved as strong building block for stacking (most natural pairing: SDF FAR-field α=2.0 ←→ alphonse #1122).
+  - **τ_z structural finding strengthened to SIXFOLD confirmation**: this is the 6th active mechanism (loss weight, sampling, output capacity, EMA, mag-only decomp, per-channel heads) converging to τz/τx ratio ~1.50–1.57 by EP5-10. EP9→EP10 τ_z reversal (+0.020pp) is the cleanest single-run instance. τ_z bottleneck is **NOT** addressable by these levers.
+
+- **Assigned PR #1133 (frieren: per-axis WSS magnitude decomp + 18h)** — direct architectural attack on τ_z structural finding.
+  - **Hypothesis**: split mag aux head into `surface_mag_z_aux` (predicts |τ_z|) and `surface_mag_xy_aux` (predicts ||τ_xy||₂) as SEPARATE heads. Tests whether mag-only's success was bandwidth-limited (single head must encode all three axes' magnitudes) vs. representational (backbone features can't carry τ_z).
+  - **Loss**: `L = L_base + λ_mag_z * MSE(|τ_z_pred|, |τ_z_gt|) + λ_mag_xy * MSE(||τ_xy_pred||₂, ||τ_xy_gt||₂)`
+  - **Asymmetric defaults**: λ_mag_z=0.1, λ_mag_xy=0.05 — emphasize τ_z bottleneck.
+  - **CLI flags**: `--wss-decomp-method per-axis-mag --wss-decomp-lambda-mag-z 0.1 --wss-decomp-lambda-mag-xy 0.05`
+  - **Win signal**: test_τ_z ≤ 8.50% (vs #1121's 8.873%, ≥0.37pp improvement). Reach: test_WSS<6.85% AND test_SP≤3.577% AND test_vol_p≤3.643% AND val_abupt≤6.20% → first single-model merge on tay since SDF stack.
+  - **Falsifiability**: test_τ_z ≥ 8.80% would confirm τ_z bottleneck is BACKBONE-side (no aux-head decomp can rescue) and force pivot to coordinate-system or attention-mechanism changes.
+  - 18h budget (`SENPAI_TIMEOUT_MINUTES=1100`), DDP 8 GPU, group `frieren-per-axis-mag-decomp`. Branch `frieren/per-axis-wss-mag-decomp-18h`.
+
+### Active fleet (7 students still in WIP from Wave 29 + frieren just reassigned)
+
+| PR | Student | Status |
+|----|---------|--------|
+| #1116 | edward | active — per-channel WSS output heads (τ_x/τ_y/τ_z), 18h |
+| #1122 | alphonse | active — SDF FAR-field α=2.0 corrected mechanism |
+| #1124 | tanjiro | active — EMA decay 0.9995, 18h |
+| #1125 | nezuko | active — spatial-prior surface sampling α=10, 18h |
+| #1126 | fern | active — deeper surface_out MLP (depth 2→4), 18h |
+| #1127 | askeladd | active — surface_loss warmup curriculum, 18h |
+| #1128 | thorfinn | active — τ_z loss weight 3.0, 18h |
+| #1133 | frieren | NEW — per-axis WSS magnitude decomp, 18h |
+
+**Zero idle.** Fleet remains at full 8 active.
+
+### Highest-EV next event
+
+- **alphonse #1122 EP3 gate** (~07:55Z if recipe held pace; verify W&B `vvv84p32` actual EP) — this is the corrected SDF FAR-field α=2.0 mechanism, the only SDF-stacked experiment in flight. Hit signal: ≤6.9% PASS / ≤7.2% MARGINAL. Largest expected uplift in the fleet.
+- After alphonse EP3, monitor EP5 gates fanning in for fern/askeladd/edward/thorfinn/nezuko in 06:00–08:30Z window.
+
+---
+
+## Prior invocation actions (2026-05-15 ~06:30Z) — Wave 29 EP gate monitoring, fleet-wide τ_z structural finding confirmed
+
+### Fleet-wide EP gate status (2026-05-15 ~06:30Z)
+
+| PR | Student | W&B run | Current EP | Latest val_abupt | Latest WSS | τz/τx | vol_p | Gate Status |
+|----|---------|---------|-----------|---------|---------|-------|-------|-------------|
+| #1121 | frieren | `gljtmuvs` | EP8.67 | **6.0782%** | **6.8775%** | 1.570 | **3.527%** | EP8 PASS ✓ — LEADING RUN |
+| #1122 | alphonse | `vvv84p32` | EP2.18 | 8.2300% | 9.0683% | 1.541 | 5.479% | EP3 gate pending (~163 min from 06:30Z) |
+| #1124 | tanjiro | `mw6d04kc` | EP6.21 | 6.3963% | 7.2069% | 1.547 | 3.831% | EP6 MARGINAL (0.096pp above ≤6.3% PASS); EP7 gate: ≤6.3% PASS |
+| #1125 | nezuko | `rp1op3z6` | EP5.19 | 6.7039% | 7.6024% | 1.516 | 3.897% | EP5 PASS (≤7.2%); EP8 gate pending |
+| #1126 | fern | `gr9ht3h5` | EP4.88 | 6.6062% | 7.4646% | 1.519 | 3.924% | EP4 MARGINAL; EP5 gate imminent |
+| #1127 | askeladd | `ag1dnelx` | EP4.91 | 6.7613% | 7.6589% | 1.526 | 3.966% | EP4 MARGINAL; EP5 gate imminent |
+| #1116 | edward | `3ufrbxl6` | EP4.59 | 6.5968% | 7.4533% | 1.537 | 3.925% | EP4 PASS; EP5 gate approaching |
+| #1128 | thorfinn | `uwqybod5` | EP4.14 | 6.5675% | 7.4273% | 1.513 | 3.880% | EP4 MARGINAL; EP5 approaching |
+
+### CRITICAL FLEET-WIDE FINDING: τ_z bottleneck is STRUCTURAL
+
+ALL τ_z-targeted interventions have FAILED to suppress τz/τx ratio. Every agent's ratio monotonically rises to ~1.50–1.57 by EP5-8 regardless of approach:
+- nezuko α=10: 1.371→1.516 by EP5
+- thorfinn τz_weight=3.0: 1.288→1.513 by EP4 (transient EP1 suppression only)
+- edward per-channel heads: 1.400→1.537 by EP4
+- frieren mag-only: 1.389→1.570 by EP8.5 (stabilizing)
+- tanjiro EMA 0.9995: 1.454→1.547 by EP6
+
+**Conclusion**: τ_z bottleneck is NOT addressable by loss weighting, sampling, or output capacity. Requires architectural solution targeting the τ_z representational bottleneck (e.g., coordinate system change, dedicated physics-informed τ_z head with orthogonal basis, or attention mechanism change).
+
+### Gate comments posted this invocation
+- **Frieren EP8 PASS** → EP10 gate: val_WSS ≤6.80% PASS / ≤6.85% MARGINAL / >6.85% KILL
+- **Tanjiro EP6 MARGINAL** → EP7 gate: val_abupt ≤6.3% PASS / 6.3-6.5% MARGINAL / >6.5% KILL
+- **Alphonse EP2 progress** → EP3 gate: ≤6.9% PASS / 6.9-7.2% MARGINAL / >7.2% KILL; vol_p ≤4.5%
+- **Fern EP4 MARGINAL** → EP5 gate: ≤6.5% PASS / ≤6.8% MARGINAL / >6.8% KILL
+- **Askeladd EP4 MARGINAL** → EP5 gate: ≤6.5% PASS / ≤6.8% MARGINAL / >6.8% KILL
+- **Edward EP4 PASS** → EP5 gate: ≤6.5% PASS / ≤7.0% MARGINAL / >7.0% KILL
+- **Thorfinn EP4 MARGINAL** → EP6 gate: ≤6.5% PASS / ≤6.8% MARGINAL / >6.8% KILL
+
+---
 
 ## Latest invocation actions (2026-05-15 03:48–04:00Z) — Wave 29 full fleet confirmed active, all 8 students running
 
