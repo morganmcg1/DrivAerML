@@ -31,6 +31,7 @@ from data import (
     load_data,
     pad_collate,
 )
+from data.spatial_prior_sampler import SpatialPriorSurfaceDataset
 
 
 class EMA:
@@ -287,6 +288,22 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    mode = str(getattr(config, "surface_importance_mode", "off") or "off").lower()
+    alpha = float(getattr(config, "surface_importance_alpha", 0.0))
+    if mode == "spatial" and alpha > 0.0:
+        train_ds = SpatialPriorSurfaceDataset(
+            train_ds.case_ids,
+            store=train_ds.store,
+            max_surface_points=train_ds.max_surface_points,
+            max_volume_points=train_ds.max_volume_points,
+            sampling_mode=train_ds.sampling_mode,
+            spatial_alpha=alpha,
+        )
+    elif mode not in ("off", "spatial"):
+        raise ValueError(
+            f"--surface-importance-mode={mode!r} not supported on this branch; "
+            "use 'off' or 'spatial'."
+        )
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:

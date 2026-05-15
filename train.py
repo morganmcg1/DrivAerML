@@ -33,6 +33,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import DrivAerMLSurfaceDataset
+from data.spatial_prior_sampler import SpatialPriorSurfaceDataset
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -138,6 +139,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    surface_importance_mode: str = "off"
+    surface_importance_alpha: float = 0.0
     debug: bool = False
 
 
@@ -219,6 +222,25 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "surface_importance_mode": (
+            "Surface point-sampling importance source for the training "
+            "loader. 'off' (default) draws uniformly with replacement; "
+            "'spatial' biases samples toward the front of the car (-x) "
+            "and far-from-ground regions (|z|), the two strongest "
+            "Pearson predictors of |WSS| on DrivAerML (rho~+0.236 and "
+            "+0.176 on the 7-case sample). Per-point weight "
+            "w = 1 + alpha * (front_bias + ground_bias) / 2, drawn via "
+            "torch.multinomial with replacement=True (PR #1113 throughput "
+            "infrastructure). Alpha controlled by "
+            "--surface-importance-alpha."
+        ),
+        "surface_importance_alpha": (
+            "Scalar strength of the surface-importance reweighting. "
+            "alpha=0 falls through to the baseline uniform sampler. "
+            "alpha>0 with --surface-importance-mode=spatial produces "
+            "weights w = 1 + alpha * (front_bias + ground_bias) / 2 "
+            "in [1, 1+alpha]. Default 0.0."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -677,13 +699,25 @@ def rebuild_train_loader_with_vol_points(
     sampling_mode = (
         "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
     )
-    train_ds = DrivAerMLSurfaceDataset(
-        old_ds.case_ids,
-        store=old_ds.store,
-        max_surface_points=config.train_surface_points,
-        max_volume_points=n_points,
-        sampling_mode=sampling_mode,
-    )
+    mode = str(getattr(config, "surface_importance_mode", "off") or "off").lower()
+    alpha = float(getattr(config, "surface_importance_alpha", 0.0))
+    if mode == "spatial" and alpha > 0.0:
+        train_ds = SpatialPriorSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+            spatial_alpha=alpha,
+        )
+    else:
+        train_ds = DrivAerMLSurfaceDataset(
+            old_ds.case_ids,
+            store=old_ds.store,
+            max_surface_points=config.train_surface_points,
+            max_volume_points=n_points,
+            sampling_mode=sampling_mode,
+        )
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
