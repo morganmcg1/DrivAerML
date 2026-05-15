@@ -4,7 +4,58 @@
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~12:45Z) — Frieren #1121 closed terminal, reassigned to #1133 per-axis-mag decomp
+## Latest invocation actions (2026-05-15 ~12:55Z) — Wave 29 mid-late EP fleet status, edward #1116 terminal imminent
+
+### Verified fleet metrics from W&B (2026-05-15 ~12:50Z)
+
+| Rank | PR | Student | Mechanism | W&B run | EP | val_abupt | val_WSS | vol_p | SP | τz/τx |
+|------|----|---------|-----------|---------|----|-----------|---------|-------|----|-------|
+| **1** | #1124 | tanjiro | EMA decay 0.9995 | `mw6d04kc` | ~6.2 | **6.228%** | **7.030%** | 3.704% | **4.110%** | 1.554 |
+| 2 | #1128 | thorfinn | τ_z loss weight 3.0 | `uwqybod5` | ~5.45 | 6.307% | 7.130% | 3.716% | 4.184% | 1.539 |
+| 3 | #1116 | edward | per-channel WSS heads | `3ufrbxl6` | **~12.6/13** | 6.340% | 7.150% | 3.810% | 4.160% | 1.551 |
+| 4 | #1126 | fern | surface_out depth=4 | `gr9ht3h5` | ~9.22 | 6.360% | 7.193% | 3.762% | 4.218% | 1.543 |
+| 5 | #1125 | nezuko | spatial-prior α=10 | `rp1op3z6` | ? | 6.404% | 7.248% | 3.727% | 4.267% | 1.548 |
+| 6 | #1127 | askeladd | surface_loss warmup | `ag1dnelx` | ? | 6.485% | 7.323% | 3.824% | 4.266% | 1.559 |
+| 7 | #1122 | alphonse | SDF FAR-field α=2.0 | `vvv84p32` | EP3 | 7.168% | 8.002% | 4.665% | 4.684% | 1.515 |
+| 8 | #1133 | frieren | per-axis mag decomp | TBD | EP0 | (just launched) | — | — | — | — |
+
+### Critical observations
+
+**1. Edward #1116 terminal imminent** (~13:30–13:50Z): at EP12.6/13, walltime 675.7 min = 11.26h. Final EP13 + test eval expected within 30-50 min. Edward's val_abupt=6.34% is unlikely to beat the 6.126% baseline at terminal — slope has flattened. **Most likely outcome: close (no improvement) or send back for variation.**
+
+**2. Tanjiro #1124 leads the fleet at val_abupt 6.228% at EP~6.2.** This is the slowest-EMA experiment in the fleet (EMA 0.9995 vs default 0.999, half-life 1386 vs 693 steps). Comparison to frieren #1121 terminal trajectory: frieren EP6 was 6.397%, terminal best-EMA EP12=6.073%. If tanjiro tracks similarly, terminal projection lands ~5.95–6.05% val_abupt — **would beat 6.126% baseline by 0.07–0.18pp**. Highest current single-model contender on no-SDF tay.
+
+**3. τ_z/τ_x ratio confirmed SEVENFOLD-EIGHTFOLD structural** (now including: tanjiro EMA 1.554, thorfinn τ_z×3 1.539, edward per-channel 1.551, fern depth=4 1.543, nezuko spatial-prior 1.548, askeladd warmup 1.559, alphonse SDF FAR-field 1.515 at early EP3, frieren #1121 closed 1.570). Ratio converges to ~1.50–1.57 across ALL mechanisms. **τ_z bottleneck is NOT addressable by loss weighting, sampling, output capacity, EMA, magnitude calibration, or input-bias re-weighting (SDF FAR-field is the latest test).** Architectural pivot required if alphonse and frieren #1133 also confirm.
+
+**4. Alphonse #1122 SDF FAR-field α=2.0 EP3 MARGINAL** at 7.168% val_abupt — already responded with budget-management guidance (prefer EP12 truncate over skip-eval) and τ_z/τ_x ratio monitoring ask for EP4. EP4 readout ~14:30Z is the cleanest mechanism test (vol curriculum bump from 16k→32k).
+
+**5. Floor analysis (val→test mapping):** PR #972 baseline floors are test_vol_p ≤3.643%, test_SP ≤3.577%. Val→test compression typically ~0.10pp (frieren #1121 was val_vol_p=3.517% → test=3.545%, val_SP=4.218% → test=3.734%). Current fleet:
+   - tanjiro val_SP=4.110% → test projection ~3.63% (close to floor)
+   - All other students val_SP ≥4.16% → test projection ≥3.7% (above floor)
+   - **Multiple runs at risk of test_SP floor regression at terminal.**
+
+### Action this invocation
+- Verified fleet state via parallel W&B pulls (tanjiro/nezuko/askeladd in one batch; thorfinn/fern/edward in three parallel agents).
+- Updated state doc with current EP positions and metrics.
+- Responded to alphonse #1122 EP3 MARGINAL with EP4 monitoring ask.
+- Issue #1056 status posted at 12:53Z (via check-human-issues).
+- Schedule ~35min wakeup for edward #1116 terminal.
+
+### Next-highest-EV events (ordered by ETA)
+
+| ETA | Event | Action |
+|-----|-------|--------|
+| ~13:30–13:50Z | **edward #1116 terminal** (EP13 + test eval) | Review terminal; merge if test_WSS<6.85% AND floors held, else close/back |
+| ~14:30Z | **alphonse #1122 EP4 readout** (vol curriculum bump 16k→32k) | Monitor τz/τx; <1.49 = SDF FAR-field breaks structural pattern |
+| ~14:30–15:00Z | thorfinn #1128 EP6/7 gate | Check slope; tanjiro EP6.5 reference |
+| ~15:30Z | fern #1126 EP10/11 | Late-EP slope check |
+| ~16:30–17:30Z | alphonse #1122 EP5/6 | Curriculum-shift convergence check |
+| ~17:00–18:00Z | tanjiro #1124 EP10 | Best-EMA crossover prediction |
+| ~18:00–20:00Z | tanjiro #1124 / thorfinn #1128 terminal | First merge-eligible single-model candidates |
+
+---
+
+## Prior invocation actions (2026-05-15 ~12:45Z) — Frieren #1121 closed terminal, reassigned to #1133 per-axis-mag decomp
 
 ### Actions this invocation
 
