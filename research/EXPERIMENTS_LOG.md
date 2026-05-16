@@ -8,6 +8,48 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 14:30 UTC — PR #1144 CLOSED: WSS H8 Lion→AdamW optimizer swap (dl24-nezuko, `ccpx4z28`+`7ifzpx0r`)
+
+- **Branch:** `dl24-nezuko/h8-adamw-optimizer-swap`
+- **W&B runs:** training `ccpx4z28` (DDP8, killed at EP10), eval `7ifzpx0r` (EP10 best-val EMA checkpoint)
+- **Hypothesis:** Lion → AdamW (lr=5e-4) Plateau Protocol tier-change — predicted that AdamW's magnitude-aware update `m/√(v+ε)` damps low-SNR τ_z axis noise that Lion's sign-update amplifies, while AdamW+GradNorm was predicted to maintain vol_p floor discipline.
+- **Kill reason:** τ_z bellwether 10.300% at EP10 exceeded 9.5% kill criterion. Mechanism NOT validated.
+
+### Terminal test metrics (EP10 best-val EMA checkpoint)
+
+| Metric | SOTA #972 | H8 test | Δ | Floor | Verdict |
+|--------|---:|---:|---:|---|---|
+| test_abupt | 5.844% | 6.392% | +0.548pp | — | ❌ regression |
+| test_vol_p | **3.643%** | **4.140%** | +0.497pp | **BREACH** | ❌ |
+| test_surf_p | **3.577%** | **4.077%** | +0.500pp | **BREACH** | ❌ |
+| test_wss | 6.727% | 7.264% | +0.537pp | — | ❌ regression |
+| test_τ_x | 5.971% | 6.443% | +0.472pp | — | ❌ regression |
+| test_τ_y | 7.362% | 7.958% | +0.596pp | — | ❌ regression |
+| test_τ_z | **8.747%** | **9.343%** | **+0.596pp** | **bellwether** | ❌ mechanism failed |
+
+### Analysis
+
+**Hypothesis REJECTED on every axis.** AdamW lr=5e-4 did NOT narrow the low-SNR τ_z gap vs Lion; τ_z test=9.343% sits +0.596pp above SOTA, and the trajectory EP3→EP10 showed no evidence of superior noise damping on τ_z vs Lion (H5 EP6 Lion τ_z=8.85% vs H8 EP10 AdamW τ_z=10.300% — Lion was better at same epoch count).
+
+**Root cause**: Convergence-rate deficit. AdamW lr=5e-4 + cosine T_max=30 ran at lower effective per-step descent than Lion lr=1e-4 on this regression problem. Val_abupt decelerated from −0.21 pp/ep (EP5→6) to −0.05 pp/ep (EP9→10) — running out of velocity before reaching competitive plateau.
+
+**Critical wave finding from H8 (GradNorm interaction confirmed stable):**
+
+| Stack | w_vol_p (terminal) | w_τ_z | ratio | vol_p test outcome |
+|---|---:|---:|---:|---|
+| Lion + GradNorm (H5) | 0.0064 | 2.318 | 362× | starvation → test breach |
+| **AdamW + GradNorm (H8 EP10)** | **0.298** | **1.570** | **5.3×** | **balanced, no starvation** |
+
+The H5 starvation mechanism (GradNorm crushes w_vol_p because vol_p has the lowest task-loss slope) is **optimizer-coupled**: Lion's sign-update exacerbates GradNorm imbalance, while AdamW's magnitude-aware update produces a stable, balanced equilibrium with the same GradNorm objective. Prior research warning "AdamW+GradNorm = catastrophic instability" **falsified** at lr=5e-4 + cosine + 1-ep warmup.
+
+**Implication**: Future experiments can use AdamW WITHOUT requiring the H9 hard w_vol_p clamp — AdamW's GradNorm dynamics self-stabilize. The H9 clamp is still insurance under Lion, but orthogonal safety is now available via optimizer choice.
+
+**What's NOT carried forward**: (a) AdamW at lr=5e-4 alone (lost convergence rate), (b) "AdamW will fix low-SNR τ_z" mechanism prediction (falsified).
+
+**What IS carried forward** → **H11 (PR #1154)**: AdamW + per-axis WSS τ-magnitude weighting (τ_x=1.0, τ_y=1.2, τ_z=1.5), peak lr=7e-4, T_max=25. Compounds H8 wave finding (AdamW=safe optimizer) with H4-revisited (per-axis weights, Lion-noise root cause now neutralized by optimizer).
+
+---
+
 ## 2026-05-16 09:30 UTC — PR #1135 CLOSED: WSS H6 wind-exposure additive attention bias (dl24-frieren, `u16jlft5`+`nb4mp52o`)
 
 - **Branch:** `dl24-frieren/h6-wind-exposure-attention-bias`

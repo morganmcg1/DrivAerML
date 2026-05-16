@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-16 13:45 UTC (H7 EP14 surf_p re-engaged, H9 EP6 strong, **H8 EP10 KILL AUTHORIZED**, H10 EP4 on plan)
+- 2026-05-16 14:35 UTC (H8 CLOSED, H11 assigned to nezuko; H7 EP14 surf_p re-engaged; H9 EP6 strong; H10 EP4 on plan)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -32,7 +32,7 @@
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
 | dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP14 live** / 10h | 6.246% | 7.127% | **3.500%** | 4.051% | **Surf_p slope re-engaged EP13→14 (−0.009pp vs EP10→13 mean −0.004). vol_p UNDER FLOOR by 0.143pp. EP15 student post expected ~14:20Z. Decision: val_surf_p ≤3.95% bull / 3.95-4.05% central / >4.05% bear. Currently 4.051% = bear edge but slope re-engaged. Continue to EP30 (~21:30Z).** |
 | **dl24-tanjiro** | **#1145** | **H9: curvature bias + w_vol_p clamp ≥0.05** | EP6 mid-EP7 / 6h | 6.307% | **7.041%** | **4.055%** | 4.102% | **STRONG: EP6 tied with H5 on WSS (7.04 vs 7.00), BETTER on vol_p (4.05 vs 4.18) BEFORE clamp activation. w_vol_p=0.147 declining toward 0.05 clamp (EP15-20 activation projected). Slope EP4→6 −0.058/ep — projects EP10 wss ≈ 6.81% (ahead of H5 EP10). Student posted EP3+6 combined at 13:33Z. EP10 next gate ~16:00Z (≤6.5/≤7.0/<4.0%).** |
-| dl24-nezuko | #1144 | H8: Lion → AdamW lr=5e-4 | **EP10 KILL** / 7h | 6.849% | 7.625% | 4.419% | 4.530% | **🛑 KILL AUTHORIZED 13:43Z. τz=10.300% well above 9.5% kill criterion. AdamW NOT delivering low-SNR τz gain. Student executing SIGTERM + eval + SENPAI-RESULT. WAVE FINDING: AdamW+GradNorm w_vol_p=0.293 vs Lion w_vol_p=0.0064 (68× saner ratio) — no vol_p starvation under AdamW. H11 assignment ready when terminal posts.** |
+| **dl24-nezuko** | **#1154** | **H11: AdamW lr=7e-4 + per-axis WSS τ-weights (τx=1.0, τy=1.2, τz=1.5)** | EP0 assigned 14:35Z | — | — | — | — | **NEW ASSIGNMENT. Compounds H8 wave finding (AdamW=safe+GradNorm stable) with H4-revisited (per-axis weights, Lion-noise root cause now neutralized). lr=7e-4 (40% above H8 to fix convergence rate), T_max=25 cosine. EP6 bellwether kill: val_τz > 9.80%.** |
 | dl24-frieren | #1149 | H10: Charbonnier supplementary WSS loss | EP4 live / 5h | 6.516% | 7.280% | 4.209% | 4.231% | **ON TRACK: τz=9.76% at EP4 already at H5/H6 EP6 reference (2 epochs ahead). Charb/MSE weighted share stabilizing 44-46% (squarely in 20-60% healthy band). Slope τz −0.19/ep projects EP6=9.4% (clears ≤9.5% bellwether). val_wss projection EP10 ≈ 6.3% would map to test_wss ~5.9-6.0% (in #1056 target band). EP6 gate ~14:40Z.** |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
@@ -83,11 +83,11 @@ GradNorm's relative-rate balancing crushes `w_vol_p` because vol_p has the lowes
 - **H7 fern (#1142)**: surface_loss_weight=1.5 — EP14 surf_p re-engaged after EP10-13 plateau. Bear-edge but trajectory still viable. EP15 decision metric ~14:20Z.
 - **H10 frieren (#1149)**: Charbonnier WSS loss — EP4 2 epochs ahead of H5/H6 reference on τz. Charb share 44-46% healthy. Floor-safe by construction. EP6 bellwether ~14:40Z.
 
-### Closing wave (8 GPUs freeing):
-- **H8 nezuko (#1144)**: KILL authorized 13:43Z. AdamW failed the τz bellwether at EP10. Wave finding: AdamW+GradNorm doesn't trigger vol_p starvation (68× saner ratio than Lion).
+### Running + newly assigned (4 students active):
+- **H11 nezuko (#1154)**: AdamW lr=7e-4 + per-axis WSS τ-magnitude weighting (τ_x=1.0, τ_y=1.2, τ_z=1.5). Compounds H8 wave finding (AdamW=safe optimizer) with H4-revisited (per-axis weighting, Lion-noise root cause now neutralized). lr bumped 40% + T_max=25 to address H8 convergence-rate deficit. **EP6 kill criterion: val_τ_z > 9.80%.**
 
-### H11 candidate ready for nezuko (assign on terminal SENPAI-RESULT):
-- **AdamW + per-axis WSS weights** (τ_x=1.0, τ_y=1.2, τ_z=1.5) — compounds H8 wave finding (AdamW=safe optimizer) with H4-revisited (per-axis weights, but Lion-noise root cause neutralized by AdamW). The cleanest scientific motivation: H4 failed because Lion-sign on weighted axes amplified noise — H8 proved AdamW makes that side stable.
+### Closed this wave (H8 nezuko):
+- **H8 nezuko (#1144 CLOSED)**: AdamW lr=5e-4 optimizer swap. REJECTED — test_wss +0.537pp regression, both floors breached. Convergence-rate deficit was the failure mode. WAVE FINDING: AdamW+GradNorm = stable (w_vol_p=0.298 vs Lion 0.0064 = 68× saner ratio). Prior "AdamW+GradNorm instability" warning falsified at lr=5e-4+cosine+1ep-warmup.
 
 ### Researcher-agent (background, agentId: a08af1e87b171e527):
 - Running since ~06:26Z. Output: `/workspace/senpai/target/research/RESEARCH_IDEAS_2026-05-16_<time>.md`
