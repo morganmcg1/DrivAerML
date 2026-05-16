@@ -1,8 +1,42 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~04:30 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~07:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+- **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
+
+## Latest invocation actions (2026-05-16 ~07:35Z) — Fleet mid-flight progress snapshot; human confirmed dl24 fleet is real (separate advisor); 4-of-4 Wave 30 model-side axes confirming τ_z structural ratio is NOT at the model layer
+
+### Mid-flight Wave 30 progress (val_abupt at 07:35Z W&B snapshot, no terminals yet)
+
+| PR | Student | Axis | val_abupt | val τz/τx | Runtime | EP gate |
+|---|---|---|---:|---:|---:|---|
+| #1140 | askeladd | H7 normal-aux head | **6.222%** | ~1.54 | 12.4h | EP7-8 PASS, leading fleet |
+| #1138 | thorfinn | H3 soft normal-routing | 6.334% | ~1.53 | 11.7h | EP6-7 PASS, slice-entropy 0.374 |
+| #1139 | edward | H1 cylindrical coords | 6.334% | ~1.53 | 11.2h | EP6-7 PASS |
+| #1141 | alphonse | H4 hard MoE routing | ~6.4% | ~1.54 | mid-EP7 | both partitions saturated 1.0 |
+| #1136 | nezuko | H2 normal Fourier | 6.404% | 1.542 | 13.7h | EP7+ PASS |
+| #1137 | fern | H5 Y-architecture | 6.523% | — | 12.0h | slow descender, EP6 borderline |
+| #1143 | frieren | H8 mirror-symmetry aug | — | — | warmup | just launched ~04:55Z |
+| #1134 | tanjiro | H6 local-frame τ·n=0 | **18.64%** | **1.351** | EP12 | mechanism break, terminal absolute fail |
+
+### Emerging Wave 30 finding (4-of-4 model-side axes that have reached EP6+)
+
+ALL clean absolute descent below baseline trajectory, BUT τz/τx uniformly widens 1.38 → ~1.54. **The structural τ_z bottleneck appears to be NOT at the model layer** — input frame (H1), input features (H2), attention routing soft+hard (H3+H4), gradient signal (H7) all improve aggregate metrics without breaking the structural ratio.
+
+**The single exception is tanjiro H6 (τz/τx=1.351, decisively below 1.40)** — but hard architectural τ·n=0 enforcement throws away ~5–8% real normal-component signal in GT, making it incompatible with the absolute metric. Mechanism works, metric fails.
+
+### Next decisive datapoint — frieren #1143 H8 mirror-symmetry data aug
+
+The ONLY attack on the input distribution. Two possible outcomes:
+- **If it moves τz/τx without metric loss** → bottleneck is data-level (symmetry-breaking), follow-up: stack with H1/H3/H7 winners
+- **If it's a null** → bottleneck is structural, next move is H6' soft-τ·n=0 penalty (λ~0.1) — preserves absolute WSS while retaining directional constraint signal
+
+### Human directive (07:29Z #1056)
+
+"please ensure to report val and test (if available) scores" — commit to val+test in all future updates. Test only available at EP13 terminal SENPAI-RESULT; val per-epoch during training.
+
+
 
 ## Latest invocation actions (2026-05-16 ~04:30Z) — frieren #1133 CLOSED terminal (NINTHFOLD structural ratio confirmation, magnitude decomposition cleanly falsified), Wave 30 fleet now 7-of-8 active + frieren idle pending reassignment; nezuko #1136 H2 mid-EP7 healthy descending but τz/τx widening (negative-mechanism / positive-absolute signal)
 
