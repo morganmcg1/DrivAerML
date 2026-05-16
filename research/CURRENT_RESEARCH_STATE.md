@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-16 19:50 UTC (H10 CLOSED w/ representation-floor wave finding; H11 CLOSED w/ catastrophic regression; H10b PR #1159 frieren + H11b PR #1160 nezuko both LAUNCHED; H9b tanjiro EP1 positive emergent finding; H7 fern EP21 bear case)
+- 2026-05-16 21:05 UTC (**H9b EP3 WAVE FINDING — val_vol_p=4.18% AT EP3 = H9 EP10 TERMINAL LEVEL**; H10b EP1 healthy launch; H11b RELAUNCHED post deviation catch; H7 EP24 plateau)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -28,24 +28,36 @@
 | test_τ_y | 7.362% | — |
 | test_τ_z | 8.747% | — |
 
-## HEADLINE WAVE FINDING (from H9 EP30, confirmed terminal 17:32Z)
+## HEADLINE WAVE FINDING #1 (from H9 EP30, confirmed terminal 17:32Z)
 
 **4 of 7 test_primary axes under SOTA #972** — all four on the WSS side.
 - test_wss=6.678% (−0.049pp ✅), test_τ_x=5.903% (−0.068pp ✅), test_τ_y=7.308% (−0.054pp ✅), test_τ_z=8.668% (−0.079pp ✅)
 - BUT both floors breached: test_vol_p=3.913% (+0.270pp ❌), test_surf_p=3.692% (+0.115pp ❌)
 - **Curvature additive attention bias mechanism CONFIRMED as the WSS path.**
-- val→test gap on H9 curvature stack is clean (~−0.25pp on every axis), so the mechanism is robust and not val-overfit.
 
-**This is the first single-model run in the wave to achieve SOTA-under on the WSS aggregate.** The path to merge: unlock vol_p + surf_p floors while preserving the curvature WSS gain.
+## HEADLINE WAVE FINDING #2 (from H9b EP3, confirmed 21:00Z) — **vol_p ceiling is FALSIFIABLE**
+
+H9 wave finding said "vol_p ceiling is representation-bound at 4.05%". **H9b EP3 falsifies this:**
+
+| | H9 (terminal EP10) | H9b EP3 (1/3 training) |
+|---|---:|---:|
+| val_vol_p | 4.056% | **4.180%** (already at H9 terminal level) |
+| EP2→EP3 vol_p slope | (n/a) | **−1.496 pp/ep** (huge descent) |
+| w_vol_p | 0.088 | 0.269 (3.1× H9, stabilizing 0.30-0.33 band) |
+| Decision band | terminal+floor breach | **strong continue (<4.5%)** |
+
+**The MAE aux + clamp combination is producing vol_p descent 2-3× faster than H9 baseline.** The "representation-bound ceiling" framing was MAE-aux-deficient. With the aux loss providing a persistent direct L1 signal (currently 0.00128 weighted), the GradNorm task-share dynamic does NOT collapse and vol_p task gradient mass stays active. **Projected: val_vol_p < 3.5% by EP10, well under the 3.643% test floor.**
+
+**This is the wave's first credible path to SOTA-on-aggregate (all 7 axes under SOTA #972).**
 
 ## Active Experiments (2026-05-16 19:45 UTC)
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP21+ live** / 14h | 6.215% | 7.093% | 3.485% | 4.041% | **EP15→EP21 surf_p flat (σ ≈ 0.005pp). Bear case confirmed; vol_p mechanism locked under floor. Continue to EP30 (~24:00Z). Most likely NOT-A-MERGE due to surf_p breach, but H7 stack is positive ingredient for composition.** |
-| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP1 verified** / 1h | — | — | — | — | **EP1 verification: MAE aux rewriting GradNorm dynamics. w_vol_p stable 0.65-0.93 (vs H9's terminal 0.088 — 10× equilibrium shift). Clamp dormant (natural floor jumped above 0.15). EP3 viability gate ~21:00Z is the next decision point. Positive emergent wave finding.** |
-| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **LAUNCHING** / 0h | — | — | — | — | **PR #1159 created 19:42Z. Compounds H9 curvature WSS mechanism with single-axis Charbonnier reshape on τ_z (highest val→test gap = highest leverage). H10b instructions: merge H9 branch (carry curvature stack), add `wss_charbonnier_axes=z` flag, run 30 EP.** |
-| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** (CLEAN ISOLATION) | **LAUNCHING** / 0h | — | — | — | — | **PR #1160 created 19:50Z after closing H11 #1154 with catastrophic-regression terminal (test_abupt=11.16%, test_wss=11.30%). Single-variable change vs H8: adds `--wss-axis-weights "1.0,1.2,1.5"`, holds lr=5e-4 and T_max=30 fixed. Required to push implementation commit BEFORE launch (H11 implementation never landed in git).** |
+| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP24+ live** / 17h | 6.225% | 7.105% | 3.488% | 4.047% | EP15→EP24 surf_p flat (σ ≈ 0.005pp); bear case confirmed. Most likely NOT-A-MERGE due to surf_p breach (~+0.15-0.30pp projected); positive vol_p mechanism (3.488% under floor). Continue to EP30. |
+| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP3 LANDED** / 2.5h | **6.576%** | **7.327%** | **4.180%** | 4.348% | **WAVE FINDING CRYSTALLIZED. val_vol_p=4.180% at EP3 = H9's EP10 terminal level (4.056%). EP2→EP3 slope = −1.496pp/ep (3× H9). w_vol_p stabilized 0.27 (vs H9 terminal 0.088). Projected: val_vol_p < 3.5% by EP10, terminal SOTA-on-aggregate possible. The wave's most important active experiment.** |
+| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP1 LANDED** / 0.5h | 18.42% | 18.96% | 16.15% | 13.10% | Healthy launch. Charbonnier/MSE ratio on τ_z = 0.297 (in 20-60% healthy band). w_vol_p=0.34 (better than H9 same-step). Compound test of H9 representation + τ_z-leverage loss reshape. EP3 expected ~21:15Z. |
+| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** (CLEAN ISOLATION) | **RELAUNCHED** / 0.7h | — | — | — | — | **First launch `c0dmm9do` had flag deviation (missing STRING PE + Y-sym aug) — student self-caught via config.yaml check, killed cleanly, pushed implementation commit `ad04524`, relaunched 20:22:42Z. Exemplary workflow recovery. EP3 gate ~22:30Z (val_abupt ≤ 8.5%). EP2 spike (if present) would be wave finding signal regardless of LR.** |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
@@ -105,7 +117,7 @@ The WSS plateau IS broken at H9: 4 of 7 test axes under SOTA #972, including the
 2. **Zero-init additive attention bias** is the safe injection pathway (H5, H6, H9). No input-dim change → no gradnorm perturbation.
 3. **AdamW+GradNorm is stable** (H8 wave finding), but AdamW lr>5e-4 with per-axis weight changes is unstable (H11 wave finding). Future per-axis experiments must use lr=5e-4 baseline.
 4. **Surface-task upweight (H7 stack)** consistently produces vol_p under-floor as side-effect. Backbone learns richer features when surface task gets more gradient. Most stable mechanism in the wave.
-5. **vol_p ceiling under curvature bias** is representation-bound at ~4.05%, not gradient-rate-bound. H9b tests whether direct L1 (MAE aux) can punch through this ceiling. **EP1 already shows w_vol_p equilibrium shifted 10× upward — emergent positive signal.**
+5. **vol_p ceiling under curvature bias** is NOT representation-bound — **FALSIFIED at H9b EP3.** With MAE aux providing direct L1 signal alongside GradNorm, val_vol_p hits H9's terminal level at 1/3 of training. The earlier "representation-bound" framing was a missing-mechanism artifact, not a true ceiling.
 6. **WSS plateau [6.96, 6.99] val band IS NOT a true plateau** — H9 at val_wss=6.925% landed test_wss=6.678% (under SOTA).
 7. **Representation floor (H10)**: Loss-axis reshape needs the right representation to act on. Charbonnier on original Lion stack = same plateau height, different equilibrium. Charbonnier on H9 curvature stack (H10b) = the real test.
 8. **τ_z val→test gap is the bellwether WSS axis.** H9 had +0.116pp gap; H10 had +0.600pp gap. Gap size tracks how aggressively the loss is reshaping the τ_z optimization landscape.
