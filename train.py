@@ -105,6 +105,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    surface_out_lr_multiplier: float = 1.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -245,18 +246,48 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
-    if optimizer_name == "adamw":
-        return torch.optim.AdamW(
-            model.parameters(),
-            lr=config.lr,
-            weight_decay=config.weight_decay,
+
+    head_params: list[nn.Parameter] = []
+    backbone_params: list[nn.Parameter] = []
+    head_param_names: list[str] = []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        if "surface_out" in name.split("."):
+            head_params.append(p)
+            head_param_names.append(name)
+        else:
+            backbone_params.append(p)
+
+    base_lr = float(config.lr)
+    multiplier = float(config.surface_out_lr_multiplier)
+    head_lr = base_lr * multiplier
+
+    backbone_count = sum(p.numel() for p in backbone_params)
+    head_count = sum(p.numel() for p in head_params)
+    print(
+        f"[build_optimizer] backbone params: {backbone_count:,} @ lr={base_lr:.2e}; "
+        f"head (surface_out): {head_count:,} @ lr={head_lr:.2e} "
+        f"(multiplier={multiplier:.4f}); head tensors: {head_param_names}"
+    )
+    if head_count == 0:
+        raise ValueError(
+            "[build_optimizer] surface_out head group has 0 params; check naming "
+            "(expected to match 'surface_out' as a dot-separated component)."
         )
+
+    param_groups = [
+        {"params": backbone_params, "lr": base_lr, "name": "backbone"},
+        {"params": head_params, "lr": head_lr, "name": "surface_out_head"},
+    ]
+
+    if optimizer_name == "adamw":
+        return torch.optim.AdamW(param_groups, weight_decay=config.weight_decay)
     if optimizer_name == "lion":
         from lion_pytorch import Lion
 
         return Lion(
-            model.parameters(),
-            lr=config.lr,
+            param_groups,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
@@ -1049,10 +1080,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                     and config.weight_log_every > 0
                     and global_step % config.weight_log_every == 0
                 )
+                last_lrs = scheduler.get_last_lr()
+                backbone_lr = float(last_lrs[0])
+                head_lr_value = float(last_lrs[1]) if len(last_lrs) > 1 else backbone_lr
+                head_to_backbone_ratio = (
+                    head_lr_value / backbone_lr if backbone_lr > 1e-12 else 0.0
+                )
                 train_log: dict[str, object] = {
                     "global_step": global_step,
                     "train/lr": current_lr,
                     "lr": current_lr,
+                    "lr/backbone": backbone_lr,
+                    "lr/surface_out_head": head_lr_value,
+                    "lr/head_to_backbone_ratio": head_to_backbone_ratio,
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
@@ -1175,10 +1215,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 or (timeout_hit and n_batches > 0)
             )
 
+            epoch_last_lrs = scheduler.get_last_lr()
+            epoch_backbone_lr = float(epoch_last_lrs[0])
+            epoch_head_lr = (
+                float(epoch_last_lrs[1]) if len(epoch_last_lrs) > 1 else epoch_backbone_lr
+            )
+            epoch_head_to_backbone_ratio = (
+                epoch_head_lr / epoch_backbone_lr if epoch_backbone_lr > 1e-12 else 0.0
+            )
             log_metrics: dict[str, object] = {
                 "train/epoch_loss": epoch_train_loss,
-                "train/lr": scheduler.get_last_lr()[0],
-                "lr": scheduler.get_last_lr()[0],
+                "train/lr": epoch_backbone_lr,
+                "lr": epoch_backbone_lr,
+                "lr/backbone": epoch_backbone_lr,
+                "lr/surface_out_head": epoch_head_lr,
+                "lr/head_to_backbone_ratio": epoch_head_to_backbone_ratio,
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
