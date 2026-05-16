@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        wss_decomp_method: str = "none",
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,11 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        if wss_decomp_method not in ("none", "per-axis-mag"):
+            raise ValueError(
+                f"wss_decomp_method must be one of 'none' or 'per-axis-mag', got {wss_decomp_method!r}"
+            )
+        self.wss_decomp_method = wss_decomp_method
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +525,24 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # PR #1133: per-axis WSS magnitude decomposition aux heads. Two scalar
+        # heads attached to the post-norm surface hidden states (same tap as
+        # surface_out): one predicts |tau_z| (wall-normal shear magnitude), the
+        # other predicts ||tau_xy||_2 (in-plane shear vector magnitude). Both
+        # targets are computed in NORMALIZED space (i.e. after per-channel
+        # standardisation), so calibration ratios (mean_pred / mean_gt) should
+        # converge to ~1.0. Used only when wss_decomp_method == "per-axis-mag".
+        if self.wss_decomp_method == "per-axis-mag":
+            self.surface_mag_z_aux = nn.Linear(n_hidden, 1)
+            self.surface_mag_xy_aux = nn.Linear(n_hidden, 1)
+            nn.init.trunc_normal_(self.surface_mag_z_aux.weight, std=0.02)
+            nn.init.trunc_normal_(self.surface_mag_xy_aux.weight, std=0.02)
+            nn.init.zeros_(self.surface_mag_z_aux.bias)
+            nn.init.zeros_(self.surface_mag_xy_aux.bias)
+        else:
+            self.surface_mag_z_aux = None
+            self.surface_mag_xy_aux = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -633,10 +657,22 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        outputs: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+
+        if (
+            self.surface_mag_z_aux is not None
+            and self.surface_mag_xy_aux is not None
+            and surface_x is not None
+        ):
+            mag_z_pred = self.surface_mag_z_aux(surface_hidden).squeeze(-1) * surface_mask
+            mag_xy_pred = self.surface_mag_xy_aux(surface_hidden).squeeze(-1) * surface_mask
+            outputs["surface_mag_z_pred"] = mag_z_pred
+            outputs["surface_mag_xy_pred"] = mag_xy_pred
+
+        return outputs

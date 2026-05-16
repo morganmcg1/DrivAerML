@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -105,6 +106,9 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    wss_decomp_method: str = "none"
+    wss_decomp_lambda_mag_z: float = 0.1
+    wss_decomp_lambda_mag_xy: float = 0.05
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -229,6 +233,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "wss_decomp_method": (
+            "WSS magnitude decomposition aux supervision (PR #1133). "
+            "'none' (default) disables aux heads. 'per-axis-mag' adds two "
+            "scalar Linear heads on the surface decoder: one predicting "
+            "|tau_z| (wall-normal magnitude) and one predicting "
+            "||tau_xy||_2 (in-plane vector magnitude), both in normalised "
+            "space. Forces the backbone to develop tau_z-specific features "
+            "instead of relying on the aggregate ||WSS|| signal."
+        ),
+        "wss_decomp_lambda_mag_z": (
+            "Loss weight for the |tau_z| aux head when "
+            "--wss-decomp-method=per-axis-mag. Default 0.1 (asymmetric — "
+            "emphasises the structural bottleneck axis). Used only when "
+            "wss_decomp_method == 'per-axis-mag'."
+        ),
+        "wss_decomp_lambda_mag_xy": (
+            "Loss weight for the ||tau_xy||_2 aux head when "
+            "--wss-decomp-method=per-axis-mag. Default 0.05. Used only "
+            "when wss_decomp_method == 'per-axis-mag'."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +332,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        wss_decomp_method=config.wss_decomp_method,
     )
 
 
@@ -321,6 +346,9 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    wss_decomp_method: str = "none",
+    wss_decomp_lambda_mag_z: float = 0.0,
+    wss_decomp_lambda_mag_xy: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,12 +374,57 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+
+    extra_metrics: dict[str, float] = {}
+    if wss_decomp_method == "per-axis-mag" and (
+        wss_decomp_lambda_mag_z > 0.0 or wss_decomp_lambda_mag_xy > 0.0
+    ):
+        # PR #1133: per-axis WSS magnitude aux supervision.
+        # surface_target channels: [cp, tau_x, tau_y, tau_z] in NORMALIZED space.
+        # mag_z_gt = |tau_z_norm|; mag_xy_gt = ||(tau_x_norm, tau_y_norm)||_2.
+        # Aux heads predict these scalars directly from surface_hidden — the
+        # dedicated supervision forces the backbone to develop tau_z-specific
+        # features instead of relying on the aggregate ||WSS|| signal.
+        mag_z_pred = out["surface_mag_z_pred"].float()
+        mag_xy_pred = out["surface_mag_xy_pred"].float()
+        surface_target_f = surface_target.float()
+        mag_z_gt = surface_target_f[..., 3].abs()
+        mag_xy_gt = torch.linalg.vector_norm(surface_target_f[..., 1:3], dim=-1)
+        mask = batch.surface_mask
+        mag_z_loss = masked_mse(mag_z_pred, mag_z_gt, mask)
+        mag_xy_loss = masked_mse(mag_xy_pred, mag_xy_gt, mask)
+        weighted_mag_z = wss_decomp_lambda_mag_z * mag_z_loss
+        weighted_mag_xy = wss_decomp_lambda_mag_xy * mag_xy_loss
+        loss = loss + weighted_mag_z.to(loss.dtype) + weighted_mag_xy.to(loss.dtype)
+
+        with torch.no_grad():
+            mask_f = mask.to(device=mag_z_pred.device, dtype=mag_z_pred.dtype)
+            mag_z_pred_mean = masked_mean(mag_z_pred, mask_f)
+            mag_z_gt_mean = masked_mean(mag_z_gt, mask_f)
+            mag_xy_pred_mean = masked_mean(mag_xy_pred, mask_f)
+            mag_xy_gt_mean = masked_mean(mag_xy_gt, mask_f)
+            mag_z_calib = mag_z_pred_mean / mag_z_gt_mean.clamp_min(1e-9)
+            mag_xy_calib = mag_xy_pred_mean / mag_xy_gt_mean.clamp_min(1e-9)
+        extra_metrics.update({
+            "wss_decomp_mag_z_loss": float(mag_z_loss.detach().cpu().item()),
+            "wss_decomp_mag_xy_loss": float(mag_xy_loss.detach().cpu().item()),
+            "wss_decomp_mag_z_loss_weighted": float(weighted_mag_z.detach().cpu().item()),
+            "wss_decomp_mag_xy_loss_weighted": float(weighted_mag_xy.detach().cpu().item()),
+            "wss_decomp_mag_z_pred_mean": float(mag_z_pred_mean.detach().cpu().item()),
+            "wss_decomp_mag_z_gt_mean": float(mag_z_gt_mean.detach().cpu().item()),
+            "wss_decomp_mag_xy_pred_mean": float(mag_xy_pred_mean.detach().cpu().item()),
+            "wss_decomp_mag_xy_gt_mean": float(mag_xy_gt_mean.detach().cpu().item()),
+            "wss_decomp_mag_z_calib_ratio": float(mag_z_calib.detach().cpu().item()),
+            "wss_decomp_mag_xy_calib_ratio": float(mag_xy_calib.detach().cpu().item()),
+        })
+
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        **extra_metrics,
     }
 
 
@@ -852,6 +925,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.wss_decomp_method == "per-axis-mag":
+                print(
+                    f"WSS decomp aux heads (PR #1133, per-axis-mag): "
+                    f"lambda_mag_z={config.wss_decomp_lambda_mag_z}, "
+                    f"lambda_mag_xy={config.wss_decomp_lambda_mag_xy}; "
+                    f"targets computed in normalized space (|tau_z_norm|, ||tau_xy_norm||_2)"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +963,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["wss_decomp/method"] = config.wss_decomp_method
+            wandb.summary["wss_decomp/lambda_mag_z"] = config.wss_decomp_lambda_mag_z
+            wandb.summary["wss_decomp/lambda_mag_xy"] = config.wss_decomp_lambda_mag_xy
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1113,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        wss_decomp_method=config.wss_decomp_method,
+                        wss_decomp_lambda_mag_z=config.wss_decomp_lambda_mag_z,
+                        wss_decomp_lambda_mag_xy=config.wss_decomp_lambda_mag_xy,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1156,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "wss_decomp_mag_z_loss" in batch_loss_metrics:
+                        train_log.update({
+                            "train/wss_decomp/mag_z_loss": batch_loss_metrics["wss_decomp_mag_z_loss"],
+                            "train/wss_decomp/mag_xy_loss": batch_loss_metrics["wss_decomp_mag_xy_loss"],
+                            "train/wss_decomp/mag_z_loss_weighted": batch_loss_metrics["wss_decomp_mag_z_loss_weighted"],
+                            "train/wss_decomp/mag_xy_loss_weighted": batch_loss_metrics["wss_decomp_mag_xy_loss_weighted"],
+                            "train/wss_decomp/mag_z_pred_mean": batch_loss_metrics["wss_decomp_mag_z_pred_mean"],
+                            "train/wss_decomp/mag_z_gt_mean": batch_loss_metrics["wss_decomp_mag_z_gt_mean"],
+                            "train/wss_decomp/mag_xy_pred_mean": batch_loss_metrics["wss_decomp_mag_xy_pred_mean"],
+                            "train/wss_decomp/mag_xy_gt_mean": batch_loss_metrics["wss_decomp_mag_xy_gt_mean"],
+                            "train/wss_decomp/mag_z_calib_ratio": batch_loss_metrics["wss_decomp_mag_z_calib_ratio"],
+                            "train/wss_decomp/mag_xy_calib_ratio": batch_loss_metrics["wss_decomp_mag_xy_calib_ratio"],
+                            "train/wss_decomp/lambda_mag_z": config.wss_decomp_lambda_mag_z,
+                            "train/wss_decomp/lambda_mag_xy": config.wss_decomp_lambda_mag_xy,
+                        })
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
