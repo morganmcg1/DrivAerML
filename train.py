@@ -52,10 +52,13 @@ from trainer_runtime import (
     init_distributed,
     init_wandb_run,
     is_valid_primary_metric,
+    huber_diagnostics,
     loader_kwargs,
     make_loaders,
+    masked_huber,
     masked_mse,
     metric_namespace,
+    weighted_channel_huber_mse,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -138,6 +141,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    tau_loss_fn: str = "mse"
+    tau_huber_delta: float = 1.0
     debug: bool = False
 
 
@@ -228,6 +233,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "tau_loss_fn": (
+            "Loss function applied to the wall-shear tau channels "
+            "(tau_x, tau_y, tau_z) in z-scored space. 'mse' (default) "
+            "matches the historical behaviour. 'huber' caps the gradient "
+            "magnitude in the tail at --tau-huber-delta, redirecting "
+            "capacity to bulk vertices instead of outlier separation/"
+            "wake regions. The cp channel always uses MSE. Volume "
+            "pressure (vp) always uses MSE."
+        ),
+        "tau_huber_delta": (
+            "Huber transition threshold in z-scored space when "
+            "--tau-loss-fn=huber. delta=1.0 transitions at 1 standard "
+            "deviation of the per-channel signal (e.g. tau_z sigma ~1.11 Pa "
+            "in raw units => delta=1.11 Pa). Loss is 0.5*err^2 for "
+            "|err|<delta and delta*(|err|-0.5*delta) for |err|>=delta. "
+            "Unused when --tau-loss-fn=mse."
         ),
     }
     for field in fields(Config):
@@ -321,7 +343,9 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    tau_loss_fn: str = "mse",
+    tau_huber_delta: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, object]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
@@ -332,27 +356,73 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_pred = out["surface_preds"]
         if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
-                batch.surface_mask,
-                surface_channel_weights,
-            )
+            if tau_loss_fn == "huber":
+                surface_loss = weighted_channel_huber_mse(
+                    surface_pred,
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                    tau_huber_delta=tau_huber_delta,
+                )
+            else:
+                surface_loss = weighted_channel_mse(
+                    surface_pred,
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            if tau_loss_fn == "huber":
+                surface_loss = weighted_channel_huber_mse(
+                    surface_pred,
+                    surface_target,
+                    batch.surface_mask,
+                    torch.ones(4, device=surface_pred.device, dtype=surface_pred.dtype),
+                    tau_huber_delta=tau_huber_delta,
+                )
+            else:
+                surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        # Per-channel detached diagnostics (cp MSE + per-tau Huber/MSE).
+        with torch.no_grad():
+            cp_mse = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
+            if tau_loss_fn == "huber":
+                tau_x_loss = masked_huber(
+                    surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask, tau_huber_delta
+                )
+                tau_y_loss = masked_huber(
+                    surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask, tau_huber_delta
+                )
+                tau_z_loss = masked_huber(
+                    surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask, tau_huber_delta
+                )
+            else:
+                tau_x_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
+                tau_y_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
+                tau_z_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+            huber_diag = huber_diagnostics(
+                surface_pred, surface_target, batch.surface_mask, tau_huber_delta
+            )
+    tau_suffix = "huber" if tau_loss_fn == "huber" else "mse"
+    metrics: dict[str, object] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "train/loss_per_channel/cp_mse": float(cp_mse.detach().cpu().item()),
+        f"train/loss_per_channel/tau_x_{tau_suffix}": float(tau_x_loss.detach().cpu().item()),
+        f"train/loss_per_channel/tau_y_{tau_suffix}": float(tau_y_loss.detach().cpu().item()),
+        f"train/loss_per_channel/tau_z_{tau_suffix}": float(tau_z_loss.detach().cpu().item()),
     }
+    metrics.update(huber_diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -364,13 +434,23 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-) -> list[torch.Tensor]:
+    *,
+    tau_loss_fn: str = "mse",
+    tau_huber_delta: float = 1.0,
+) -> tuple[list[torch.Tensor], dict[str, float]]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
-    Returns scalar tensors in order: [sp, tau_x, tau_y, tau_z, vp].
-    All five share the same forward graph so the GradNorm balancer can
-    extract per-task gradient norms via ``torch.autograd.grad`` with
-    ``retain_graph=True``.
+    Returns ``(losses, diagnostics)`` where ``losses`` is a list of scalar
+    tensors in order: ``[sp, tau_x, tau_y, tau_z, vp]``. All five share
+    the same forward graph so the GradNorm balancer can extract per-task
+    gradient norms via ``torch.autograd.grad`` with ``retain_graph=True``.
+
+    sp (cp) and vp always use MSE. tau channels use MSE or Huber
+    (``0.5*err^2`` for ``|err|<delta``; ``delta*(|err|-0.5*delta)``
+    otherwise) depending on ``tau_loss_fn``.
+
+    The ``diagnostics`` dict includes per-channel Huber/L1 fractions and
+    the tau_z max-abs-error (all in z-scored space).
     """
 
     batch = batch.to(device)
@@ -385,11 +465,25 @@ def per_task_train_losses(
         )
         surface_pred = out["surface_preds"]
         sp_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
-        taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
-        tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
-        tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+        if tau_loss_fn == "huber":
+            taux_loss = masked_huber(
+                surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask, tau_huber_delta
+            )
+            tauy_loss = masked_huber(
+                surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask, tau_huber_delta
+            )
+            tauz_loss = masked_huber(
+                surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask, tau_huber_delta
+            )
+        else:
+            taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
+            tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
+            tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
         vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
+        diagnostics = huber_diagnostics(
+            surface_pred, surface_target, batch.surface_mask, tau_huber_delta
+        )
+    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss], diagnostics
 
 
 GRADNORM_MODES = ("full", "ema_proxy")
@@ -937,9 +1031,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                huber_diag_metrics: dict[str, float] = {}
                 if balancer is not None:
-                    per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                    per_task_losses, huber_diag_metrics = per_task_train_losses(
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        tau_loss_fn=config.tau_loss_fn,
+                        tau_huber_delta=config.tau_huber_delta,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -994,6 +1095,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     for i, name in enumerate(GRADNORM_TASK_NAMES):
                         gradnorm_metrics[f"gradnorm/weight_{name}"] = weights_cpu[i]
                         gradnorm_metrics[f"train/loss_{name}"] = losses_cpu[i]
+                    tau_suffix = "huber" if config.tau_loss_fn == "huber" else "mse"
+                    gradnorm_metrics["train/loss_per_channel/cp_mse"] = losses_cpu[0]
+                    gradnorm_metrics[f"train/loss_per_channel/tau_x_{tau_suffix}"] = losses_cpu[1]
+                    gradnorm_metrics[f"train/loss_per_channel/tau_y_{tau_suffix}"] = losses_cpu[2]
+                    gradnorm_metrics[f"train/loss_per_channel/tau_z_{tau_suffix}"] = losses_cpu[3]
+                    gradnorm_metrics["train/loss_per_channel/vp_mse"] = losses_cpu[4]
                     if synced_norms is not None:
                         norms_cpu = synced_norms.detach().cpu().tolist()
                         for i, name in enumerate(GRADNORM_TASK_NAMES):
@@ -1030,6 +1137,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        tau_loss_fn=config.tau_loss_fn,
+                        tau_huber_delta=config.tau_huber_delta,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,8 +1179,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    # Pass through any train/* keys carried by batch_loss_metrics
+                    # (the no-GradNorm path emits per-channel loss + huber diags
+                    # under such keys; GradNorm path produces them separately).
+                    for key, val in batch_loss_metrics.items():
+                        if key.startswith("train/"):
+                            train_log[key] = val
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if huber_diag_metrics:
+                    train_log.update(huber_diag_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
