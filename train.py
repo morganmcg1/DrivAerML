@@ -105,6 +105,9 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    tau_anisotropic_loss_enable: bool = False
+    tau_anisotropic_alpha_tangent: float = 1.0
+    tau_anisotropic_beta_normal: float = 5.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -311,6 +314,91 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def tau_anisotropic_mse(
+    pred_surface: torch.Tensor,
+    target_surface: torch.Tensor,
+    mask: torch.Tensor,
+    surface_x: torch.Tensor,
+    alpha_tangent: float,
+    beta_normal: float,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Anisotropic surface MSE that decomposes the tau error along the
+    per-vertex normal/tangent frame.
+
+    Math identity: with unit normal n, the error ``e = pred - gt`` splits as
+    ``e = (e·n) n + (e - (e·n) n) = e_n + e_t`` with ``e_n ⟂ e_t``, so
+    ``‖e‖² = ‖e_t‖² + (e·n)²``. With ``alpha=beta=1``, the loss reduces to
+    ``masked_mse`` on the 4-channel surface output (averaging cp_err² + ‖tau_err‖²
+    over valid_points × 4).
+    """
+    if pred_surface.numel() == 0:
+        return pred_surface.sum() * 0.0, {
+            "tau_loss_tangent": 0.0,
+            "tau_loss_normal": 0.0,
+            "tau_normal_to_tangent_ratio": 0.0,
+            "tau_gt_tangent_magnitude": 0.0,
+            "tau_gt_normal_magnitude": 0.0,
+            "tau_gt_normal_to_tangent_ratio": 0.0,
+        }
+
+    work_dtype = torch.float32
+    pred = pred_surface.to(work_dtype)
+    tgt = target_surface.to(work_dtype)
+
+    cp_err_sq = (pred[..., 0:1] - tgt[..., 0:1]).square()  # [B, N, 1]
+
+    tau_pred = pred[..., 1:4]  # [B, N, 3]
+    tau_gt = tgt[..., 1:4]      # [B, N, 3]
+    err = tau_pred - tau_gt     # [B, N, 3]
+
+    # Per-vertex unit normal from surface_x channels 3,4,5; re-normalise to
+    # guard against bf16 / aug-pipeline drift away from unit length.
+    n = surface_x[..., 3:6].to(work_dtype)
+    n = n / n.norm(dim=-1, keepdim=True).clamp_min(1e-8)
+
+    err_n_scalar = (err * n).sum(dim=-1, keepdim=True)  # [B, N, 1]
+    err_t_vec = err - err_n_scalar * n                  # [B, N, 3]
+
+    tangent_sq = err_t_vec.square().sum(dim=-1, keepdim=True)  # [B, N, 1]
+    normal_sq = err_n_scalar.square()                           # [B, N, 1]
+
+    mask_dev = mask.to(device=pred.device, dtype=work_dtype).unsqueeze(-1)
+    valid_points = mask_dev.sum().clamp_min(1.0)
+
+    cp_term = cp_err_sq * mask_dev
+    tan_term = tangent_sq * mask_dev
+    nor_term = normal_sq * mask_dev
+
+    # 4-channel averaging budget so (alpha=1, beta=1) reproduces baseline
+    # masked_mse on [cp, tau_x, tau_y, tau_z] exactly.
+    denom = valid_points * 4.0
+    loss = (cp_term.sum() + alpha_tangent * tan_term.sum() + beta_normal * nor_term.sum()) / denom
+
+    # Diagnostics: per-channel error magnitudes (unweighted) plus GT decomposition
+    # magnitudes so we can read off the actual scale of the GT normal component.
+    with torch.no_grad():
+        tan_mean = tan_term.sum() / valid_points
+        nor_mean = nor_term.sum() / valid_points
+        gt_n_scalar = (tau_gt * n).sum(dim=-1, keepdim=True)
+        gt_n_sq = gt_n_scalar.square() * mask_dev
+        gt_t_vec = tau_gt - gt_n_scalar * n
+        gt_t_sq = gt_t_vec.square().sum(dim=-1, keepdim=True) * mask_dev
+        gt_tan_mean = gt_t_sq.sum() / valid_points
+        gt_nor_mean = gt_n_sq.sum() / valid_points
+        ratio = float(nor_mean / tan_mean.clamp_min(1e-12))
+        gt_ratio = float(gt_nor_mean / gt_tan_mean.clamp_min(1e-12))
+
+    diag = {
+        "tau_loss_tangent": float(tan_mean.cpu().item()),
+        "tau_loss_normal": float(nor_mean.cpu().item()),
+        "tau_normal_to_tangent_ratio": ratio,
+        "tau_gt_tangent_magnitude": float(gt_tan_mean.cpu().item()),
+        "tau_gt_normal_magnitude": float(gt_nor_mean.cpu().item()),
+        "tau_gt_normal_to_tangent_ratio": gt_ratio,
+    }
+    return loss, diag
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,10 +409,14 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    tau_anisotropic_loss_enable: bool = False,
+    tau_anisotropic_alpha_tangent: float = 1.0,
+    tau_anisotropic_beta_normal: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    aniso_diag: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -332,7 +424,16 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        if tau_anisotropic_loss_enable:
+            surface_loss, aniso_diag = tau_anisotropic_mse(
+                out["surface_preds"],
+                surface_target,
+                batch.surface_mask,
+                batch.surface_x,
+                tau_anisotropic_alpha_tangent,
+                tau_anisotropic_beta_normal,
+            )
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -346,13 +447,16 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if aniso_diag:
+        metrics.update(aniso_diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +956,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.tau_anisotropic_loss_enable:
+                bypass_note = (
+                    " (channel weights bypassed — anisotropic loss runs in "
+                    "tangent/normal basis)"
+                    if use_channel_weights
+                    else ""
+                )
+                print(
+                    f"H13 anisotropic loss ENABLED: alpha_tangent="
+                    f"{config.tau_anisotropic_alpha_tangent} beta_normal="
+                    f"{config.tau_anisotropic_beta_normal}{bypass_note}"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +999,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/tau_anisotropic_loss_enable"] = (
+                config.tau_anisotropic_loss_enable
+            )
+            wandb.summary["loss/tau_anisotropic_alpha_tangent"] = (
+                config.tau_anisotropic_alpha_tangent
+            )
+            wandb.summary["loss/tau_anisotropic_beta_normal"] = (
+                config.tau_anisotropic_beta_normal
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1155,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        tau_anisotropic_loss_enable=config.tau_anisotropic_loss_enable,
+                        tau_anisotropic_alpha_tangent=config.tau_anisotropic_alpha_tangent,
+                        tau_anisotropic_beta_normal=config.tau_anisotropic_beta_normal,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1198,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for aniso_key in (
+                        "tau_loss_tangent",
+                        "tau_loss_normal",
+                        "tau_normal_to_tangent_ratio",
+                        "tau_gt_tangent_magnitude",
+                        "tau_gt_normal_magnitude",
+                        "tau_gt_normal_to_tangent_ratio",
+                    ):
+                        if aniso_key in batch_loss_metrics:
+                            train_log[f"train/{aniso_key}"] = batch_loss_metrics[aniso_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
