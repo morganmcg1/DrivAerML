@@ -35,7 +35,7 @@ from torch.utils.data import Dataset
 from .split_utils import expand_pvc_candidates, first_existing
 
 DEFAULT_MANIFEST = Path(__file__).with_name("split_manifest.json")
-SURFACE_X_DIM = 7  # xyz(3) + normals(3) + panel area(1)
+SURFACE_X_DIM = 8  # xyz(3) + normals(3) + panel area(1) + curvature(1)
 SURFACE_Y_DIM = 4  # cp(1) + wall shear stress(3)
 VOLUME_X_DIM = 4  # xyz(3) + sdf(1)
 VOLUME_Y_DIM = 1  # volume pressure
@@ -269,6 +269,97 @@ def _three_column(value: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def _curvature_enabled() -> bool:
+    return os.environ.get("DRIVAERML_USE_CURVATURE", "0") in ("1", "true", "True", "TRUE")
+
+
+def _curvature_knn() -> int:
+    return int(os.environ.get("DRIVAERML_CURVATURE_KNN", "16"))
+
+
+def _compute_curvature_array(xyz: np.ndarray, normals: np.ndarray, knn: int) -> np.ndarray:
+    """Per-vertex curvature κ_i = mean_{j in kNN(i)} (1 - cos(n_i, n_j)) ∈ [0, 2].
+
+    Rotation- and translation-invariant. Concentrated at sharp edges (A-pillar,
+    mirror housings, wing tips). Computed via scipy.spatial.cKDTree on the FULL
+    case xyz and FULL case normals; sampling/indexing happens after this call
+    against the cached per-case array.
+    """
+
+    from scipy.spatial import cKDTree
+
+    n = int(xyz.shape[0])
+    if n <= knn + 1:
+        return np.zeros((n,), dtype=np.float32)
+    tree = cKDTree(xyz)
+    _, idx = tree.query(xyz, k=knn + 1, workers=-1)
+    n_norm = normals / (np.linalg.norm(normals, axis=1, keepdims=True) + 1e-8)
+    kappa = np.zeros(n, dtype=np.float32)
+    chunk = 200_000
+    for i in range(0, n, chunk):
+        j = min(i + chunk, n)
+        ns = n_norm[i:j][:, None, :]  # [c, 1, 3]
+        nbrs = n_norm[idx[i:j, 1:], :]  # [c, K, 3] (exclude self at idx[:, 0])
+        dots = (ns * nbrs).sum(axis=2)  # [c, K]
+        kappa[i:j] = (1.0 - dots).mean(axis=1).astype(np.float32)
+    return kappa
+
+
+def _load_or_compute_curvature(case_dir: Path, knn: int) -> Path:
+    """Resolve the cached curvature .npy path, computing it on first miss.
+
+    Cache filename includes `k` so different KNN values do not collide.
+    Atomic write via `os.replace` so concurrent workers do not corrupt
+    the file. Computation runs on the FULL case xyz/normals; per-view
+    sampling indexes the cached result downstream.
+    """
+
+    cache = case_dir / f"surface_curvature_k{knn}.npy"
+    if cache.exists():
+        return cache
+    try:
+        resolved = _resolve_artifact_path(cache)
+        if resolved.exists():
+            return resolved
+    except FileNotFoundError:
+        pass
+
+    xyz_path = _resolve_artifact_path(case_dir / "surface_xyz.npy")
+    normals_path = _resolve_artifact_path(case_dir / "surface_normals.npy")
+    xyz_full = np.asarray(np.load(xyz_path), dtype=np.float32)
+    normals_full = np.asarray(np.load(normals_path), dtype=np.float32)
+    kappa_full = _compute_curvature_array(xyz_full, normals_full, knn)
+    # `np.save` always appends `.npy`, so make the temp file already end
+    # in `.npy` and atomically rename onto the canonical cache path.
+    tmp = case_dir / f".{cache.stem}.pid{os.getpid()}.tmp.npy"
+    np.save(tmp, kappa_full)
+    os.replace(tmp, cache)
+    return cache
+
+
+def _curvature_column(
+    case_dir: Path,
+    n_rows: int,
+    surface_rows: np.ndarray | None,
+) -> np.ndarray:
+    """Return the per-vertex curvature as an [N, 1] float32 column.
+
+    Zero column when ``DRIVAERML_USE_CURVATURE`` is unset/0 (so SURFACE_X_DIM=8
+    is preserved regardless of flag state, keeping eval-on-trained-checkpoint
+    clean). Otherwise loads the cached per-case array and indexes by
+    ``surface_rows``.
+    """
+
+    if not _curvature_enabled():
+        return np.zeros((n_rows, 1), dtype=np.float32)
+    knn = _curvature_knn()
+    cache = _load_or_compute_curvature(case_dir, knn)
+    kappa = _load_npy_rows(cache, surface_rows)
+    if kappa.ndim == 1:
+        kappa = kappa[:, None]
+    return kappa.astype(np.float32, copy=False)
+
+
 def load_case(
     root: str | Path,
     case_id: str,
@@ -285,7 +376,8 @@ def load_case(
         _load_npy_rows(case_dir / "surface_wallshearstress.npy", surface_rows),
         "surface_wallshearstress.npy",
     )
-    surface_x = np.concatenate([xyz, normals, area], axis=1)
+    kappa = _curvature_column(case_dir, int(xyz.shape[0]), surface_rows)
+    surface_x = np.concatenate([xyz, normals, area, kappa], axis=1)
     surface_y = np.concatenate([cp, wall_shear], axis=1)
     volume_x = np.concatenate(
         [

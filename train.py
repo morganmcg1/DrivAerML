@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -85,6 +86,8 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    use_curvature_feature: bool = False
+    curvature_knn: int = 16
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -228,6 +231,24 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_curvature_feature": (
+            "Enable the per-vertex local surface curvature κ as the 8th "
+            "surface input channel (Wave 30 H9', PR #1146). κ_i = "
+            "mean_{j in kNN(i)} (1 - cos(n_i, n_j)) ∈ [0, 2] computed from "
+            "the existing surface normals over a kNN ball. Provides a "
+            "rotation/translation-invariant geometric prior concentrated "
+            "at A-pillar, mirror housings, wing tips — the same regions "
+            "where τ_z prediction is worst. When disabled the κ column "
+            "is set to zero so SURFACE_X_DIM=8 and model dim are constant. "
+            "Loader caches the per-case κ in surface_curvature_k{KNN}.npy."
+        ),
+        "curvature_knn": (
+            "Number of nearest neighbours (excluding self) used to compute "
+            "the curvature κ. Default 16. Larger values smooth κ; smaller "
+            "values give sharper edge detection. Cache filename includes "
+            "this value so different settings do not collide. Only "
+            "applies when --use-curvature-feature is on."
         ),
     }
     for field in fields(Config):
@@ -710,6 +731,11 @@ def main(argv: Iterable[str] | None = None) -> None:
     run = None
     try:
         config = parse_args(argv)
+        # Wire curvature feature flags into the loader before any data
+        # access. The loader reads these env vars at every load_case call,
+        # so setting them here propagates to all DataLoader workers.
+        os.environ["DRIVAERML_USE_CURVATURE"] = "1" if config.use_curvature_feature else "0"
+        os.environ["DRIVAERML_CURVATURE_KNN"] = str(int(config.curvature_knn))
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
         requested_epochs = config.epochs
@@ -883,6 +909,38 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["features/use_curvature_feature"] = bool(config.use_curvature_feature)
+            wandb.summary["features/curvature_knn"] = int(config.curvature_knn)
+            if config.use_curvature_feature:
+                # κ distribution smoke check: pull a single training case directly
+                # and report stats on the curvature channel (last surface_x column).
+                try:
+                    sample_case = train_loader.dataset[0]
+                    kappa_col = sample_case.surface_x[:, -1].detach().cpu().numpy()
+                    k_stats = {
+                        "features/kappa_min": float(kappa_col.min()),
+                        "features/kappa_max": float(kappa_col.max()),
+                        "features/kappa_mean": float(kappa_col.mean()),
+                        "features/kappa_std": float(kappa_col.std()),
+                        "features/kappa_p50": float(np.quantile(kappa_col, 0.50)),
+                        "features/kappa_p95": float(np.quantile(kappa_col, 0.95)),
+                        "features/kappa_p99": float(np.quantile(kappa_col, 0.99)),
+                        "features/kappa_nonzero_frac": float((kappa_col > 1e-6).mean()),
+                        "features/kappa_sample_case": str(sample_case.case_id),
+                    }
+                    for k, v in k_stats.items():
+                        wandb.summary[k] = v
+                    print(
+                        f"κ distribution ({sample_case.case_id}, K={config.curvature_knn}): "
+                        f"min={k_stats['features/kappa_min']:.4f} "
+                        f"max={k_stats['features/kappa_max']:.4f} "
+                        f"mean={k_stats['features/kappa_mean']:.4f} "
+                        f"std={k_stats['features/kappa_std']:.4f} "
+                        f"p95={k_stats['features/kappa_p95']:.4f} "
+                        f"p99={k_stats['features/kappa_p99']:.4f}"
+                    )
+                except Exception as exc:
+                    print(f"κ distribution probe failed: {exc!r}")
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
