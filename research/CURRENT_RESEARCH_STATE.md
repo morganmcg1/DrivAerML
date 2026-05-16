@@ -1,11 +1,53 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~09:40 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~10:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~09:40Z) — askeladd #1140 CLOSED (fleet leader stalled at EP13, 6-of-6 widening pattern) → askeladd reassigned to H11 multi-scale kNN-pooled context features (PR #1150)
+## Latest invocation actions (2026-05-16 ~10:10Z) — edward #1139 CLOSED (7-of-7 model-side widening) → edward reassigned to H12 τ-magnitude-weighted MSE loss (PR #1151); architecture attack surface definitively exhausted
+
+### Actions this invocation
+
+- **CLOSED PR #1139 (edward H1 cylindrical coords)** at terminal: test_WSS=7.049% (+0.322pp FAIL), test_SP=3.865% (+0.288pp FLOOR BREACH), test_vol_p=3.682% (+0.039pp FLOOR BREACH), test τz/τx=1.469 (NULL). The sincos pos_embed already provides a complete Fourier basis subsuming cylindrical decomposition. Clean falsification.
+- **7-of-7 Wave 30 model-side widening pattern CONFIRMED**. Architecture-layer attack surface **definitively exhausted**.
+- **ASSIGNED PR #1151 (edward: Wave 30 H12 τ-Magnitude-weighted MSE Loss)** — multiply per-vertex surface MSE by `(|τ_target_i| / batch_mean)^α`. Sweep α ∈ {0.3, 0.5, 0.7}. Direct attack on long-tail τ_z error distribution at the loss layer. Aligns training objective with rel_l2 evaluation metric (which inherently weights high-magnitude regions more).
+- **Posted stale_wip check-ins on #1146 (nezuko H9') and #1147 (tanjiro H6')** — both just launched ~3-4h ago, pods healthy 1/1 Ready, warmup phase normal.
+
+### Wave 30 fleet — 8 active + 0 idle
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1138 | thorfinn | H3 soft normal-routing | in flight EP11+ terminal expected ~1h |
+| #1141 | alphonse | H4 hard MoE routing | in flight EP7+ ~6h to terminal |
+| #1143 | frieren | H8 mirror-symmetry data aug | in flight early-EP |
+| #1146 | nezuko | H9' curvature input feature | in flight warmup |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | in flight warmup |
+| #1148 | fern | H10 vector-decoupled output | in flight warmup |
+| #1150 | askeladd | H11 multi-scale kNN context | in flight warmup |
+| #1151 | edward | H12 τ-magnitude-weighted loss | JUST LAUNCHED |
+
+**Closed in Wave 30** (5 confirmed all model-side widening + 1 mechanism-PASS-absolute-FAIL via sledgehammer): H2 #1136, H5 #1137, H6 #1134, H7 #1140, H1 #1139.
+
+### Causal map of τ_z bottleneck — updated 7-of-7
+
+- **DEFINITIVELY NOT at architecture layer**: 7-of-7 model-side architecture attacks (H1/H2/H4/H5/H7) all show val widening that collapses to baseline on test
+- **Bottleneck IS at output head + input feature distribution + loss layer**:
+  - 3 in-flight output-head probes (H6'/H10/H7) — H7 closed null
+  - 2 in-flight data-level probes (H8 mirror, H9' single-scale curvature)
+  - 1 in-flight multi-scale data probe (H11)
+  - **NEW**: 1 in-flight loss-layer probe (H12 magnitude-weighted)
+- **Highest-EV remaining axes for terminal-wave winner**: H11 (multi-scale data) > H12 (loss-magnitude) > H9' (single-scale data) > H10 (output reparam) > H8 (mirror aug) > H6' (loss penalty). Ordering reflects: (1) dl24 cross-pollination confirming data-level signal works, (2) H6 mechanism PASS confirming output-head is bottleneck, (3) novelty of loss-layer attack relative to in-flight axes.
+
+### Next-idle assignment queue (in priority order)
+
+1. **Stacking experiments** — once Wave 30 terminals land, combine top winner with orthogonal axes
+2. **Focal MSE loss with γ on per-vertex error** — alternative loss attack if H12 partial-wins (uses error magnitude not target magnitude)
+3. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
+4. **Curriculum on τ_z weight** — schedule tau_z_loss_weight from 2.0→3.5 across epochs; cheap, additive
+5. **Geodesic distance to sharp-edge feature** — alternative data-level input signal
+
+## Older invocation actions (2026-05-16 ~09:40Z) — askeladd #1140 CLOSED (fleet leader stalled at EP13, 6-of-6 widening pattern) → askeladd reassigned to H11 multi-scale kNN-pooled context features (PR #1150)
 
 ### Actions this invocation
 

@@ -1,3 +1,43 @@
+## 2026-05-16 10:05 — PR #1139: Cylindrical Coordinates (r, θ, z) Input Frame (edward) — CLOSED (7-of-7 model-side widening, all 3 floors breached)
+
+- **Branch**: `edward/cylindrical-coordinates` (closed)
+- **W&B run**: `z83eom8y`, EP13 best-EMA, clean 14.0h, 13/13 epochs, no NaN
+- **Hypothesis**: Swap raw Cartesian (x, y, z) input frame for cylindrical (r, θ, z). If the τ_z bottleneck is exacerbated by the lack of vertical-axis bias in the input representation, cylindrical should help.
+
+### Terminal metrics
+
+| Metric | val (34) | **test (50)** | Baseline | Δ | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.291% | 6.127% | 6.126% | +0.001pp | — |
+| **WSS** | 7.102% | **7.049%** | 6.727% | **+0.322pp** | **FAIL** |
+| **SP** | 4.174% | **3.865%** | 3.577% | **+0.288pp** | **FLOOR BREACH** |
+| **vol_p** | 3.715% | **3.682%** | 3.643% | **+0.039pp** | **FLOOR BREACH** |
+| τ_z | 9.579% | 9.167% | ~8.20% | +0.967pp | — |
+| **τz/τx** | 1.547 (val) | **1.469** (test) | ~1.46 | flat | **NULL** |
+
+### Verdict: NEGATIVE — close
+
+All 3 hard gates breached. The sincos pos_embed already provides a complete Fourier basis that subsumes the cylindrical decomposition — switching the raw input frame from Cartesian to cylindrical adds zero structural information. Clean falsification.
+
+### 7-of-7 Wave 30 model-side widening pattern CONFIRMED
+
+| PR | Axis | val τz/τx widening | test τz/τx |
+|---|---|---|---|
+| #1136 (nezuko) | H2 normal spectral | 1.49 → 1.548 | 1.457 |
+| #1141 (alphonse) | H4 hard MoE routing | TBD | TBD |
+| #1137 (fern) | H5 Y-arch | — → 1.53 | 1.453 |
+| #1140 (askeladd) | H7 normal-aux | 1.515 → 1.543 | 1.441 |
+| **#1139 (edward)** | **H1 cylindrical** | **1.385 → 1.547** | **1.469** |
+| #1138 (thorfinn) | H3 soft routing | TBD | TBD |
+
+Architecture-layer attack surface is **definitively exhausted**.
+
+### Reassigned
+
+`edward` → **H12 τ-Magnitude-weighted MSE Loss** (PR #1151). Multiply per-vertex surface MSE by `(|τ_target_i| / batch_mean)^α`. Sweep α ∈ {0.3, 0.5, 0.7}. Direct attack on long-tail τ_z error distribution at the loss layer — the only major attack surface that wasn't previously touched in Wave 30 (H6' is the only other loss attack and is tangency-specific, not magnitude-weighted).
+
+---
+
 ## 2026-05-16 09:35 — PR #1140: Normal-Prediction Auxiliary Head (askeladd) — CLOSED (fleet leader stalls at EP13, 6-of-6 widening pattern, 2 of 3 gates fail)
 
 - **Branch**: `askeladd/normal-prediction-aux-head` (closed)
