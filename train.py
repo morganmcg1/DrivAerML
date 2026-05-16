@@ -132,6 +132,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    gradnorm_min_w_vol_p: float = 0.0
+    use_curvature_attention_bias: bool = False
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -235,6 +237,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        use_curvature_attention_bias=config.use_curvature_attention_bias,
     )
 
 
@@ -302,7 +305,11 @@ def train_loss(
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
+    surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
+    if surface_curvature is not None:
+        surface_curvature = surface_curvature.to(device)
+        setattr(batch, "surface_curvature", surface_curvature)
     if use_y_symmetry_aug:
         flip_mask = apply_y_symmetry_aug(batch, y_symmetry_aug_prob)
         if aug_log is not None:
@@ -310,13 +317,16 @@ def train_loss(
             aug_log["batch_size"] = int(flip_mask.shape[0])
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    forward_kwargs: dict[str, torch.Tensor] = dict(
+        surface_x=batch.surface_x,
+        surface_mask=batch.surface_mask,
+        volume_x=batch.volume_x,
+        volume_mask=batch.volume_mask,
+    )
+    if surface_curvature is not None:
+        forward_kwargs["surface_curvature"] = surface_curvature
     with autocast_context(device, amp_mode):
-        out = model(
-            surface_x=batch.surface_x,
-            surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
-            volume_mask=batch.volume_mask,
-        )
+        out = model(**forward_kwargs)
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         if gradnorm_weights is not None:
@@ -706,6 +716,32 @@ def main(argv: Iterable[str] | None = None) -> None:
                                     float(gradnorm_n_tasks)
                                 )
                                 gradnorm_weights.log_weights.data.copy_(lw_norm)
+                                # H9: hard floor on vol_p task weight to prevent
+                                # GradNorm starvation (root cause of vol_p breach
+                                # in H1/H2/H3/H5). Indices: cp, tau_x, tau_y,
+                                # tau_z, vol_p.
+                                w_vol_p_clamp_active = False
+                                if config.gradnorm_min_w_vol_p > 0.0:
+                                    w_curr = gradnorm_weights.weights.detach()
+                                    vol_p_idx = 4
+                                    min_w = config.gradnorm_min_w_vol_p
+                                    if w_curr[vol_p_idx].item() < min_w:
+                                        w_vol_p_clamp_active = True
+                                        other_idx = torch.tensor(
+                                            [0, 1, 2, 3], device=w_curr.device
+                                        )
+                                        deficit = min_w - w_curr[vol_p_idx].item()
+                                        other_sum = w_curr[other_idx].sum().item()
+                                        scale = max(
+                                            (other_sum - deficit) / max(other_sum, 1e-12),
+                                            0.01,
+                                        )
+                                        new_w = w_curr.clone()
+                                        new_w[vol_p_idx] = min_w
+                                        new_w[other_idx] = w_curr[other_idx] * scale
+                                        gradnorm_weights.log_weights.data.copy_(
+                                            new_w.clamp_min(1e-12).log()
+                                        )
                                 # DDP: average log_weights across ranks for sync
                                 if state.enabled:
                                     torch.distributed.all_reduce(
@@ -739,6 +775,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 gradnorm_log["gradnorm/G_bar"] = float(
                                     G_bar.detach().cpu().item()
                                 )
+                                if config.gradnorm_min_w_vol_p > 0.0:
+                                    gradnorm_log["gradnorm/w_vol_p_clamp_active"] = float(
+                                        w_vol_p_clamp_active
+                                    )
+                                    gradnorm_log["gradnorm/min_w_vol_p"] = float(
+                                        config.gradnorm_min_w_vol_p
+                                    )
                     if gradnorm_log:
                         train_log.update(gradnorm_log)
                     loss.backward()
