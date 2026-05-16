@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_cylindrical_coords: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_cylindrical_coords": (
+            "Replace the Cartesian (x, y, z) position passed to pos_embed, "
+            "string_sep, and rff with cylindrical (r, theta, z) where "
+            "r = sqrt(x^2 + y^2 + 1e-8), theta = atan2(y, x). Surface "
+            "normals, area, and sdf are left in their Cartesian frame. "
+            "Targets attacking the tau_z bottleneck by giving the backbone "
+            "a direct height axis."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +317,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_cylindrical_coords=config.use_cylindrical_coords,
     )
 
 

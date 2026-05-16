@@ -27,6 +27,28 @@ def _init_linear(module: nn.Module, std: float = 0.02) -> None:
             nn.init.zeros_(module.bias)
 
 
+def _cartesian_to_cylindrical(pos: torch.Tensor) -> torch.Tensor:
+    """(..., 3): (x, y, z) -> (r, theta, z).
+
+    r = sqrt(x^2 + y^2 + 1e-8) >= ~1e-4 to keep r positive and gradients
+    finite. theta = atan2(y, x) in [-pi, pi]. atan2 backward is NaN at
+    (0, 0) (PyTorch issue #98276); padding tokens have x = y = 0, so we
+    swap in (safe_x=1, safe_y=0) near the z-axis via torch.where on constant
+    tensors to avoid poisoning autograd while preserving the angle for
+    real points (r^2 >= 1e-12).
+    """
+    x = pos[..., 0]
+    y = pos[..., 1]
+    z = pos[..., 2]
+    r2 = x * x + y * y
+    r = torch.sqrt(r2 + 1e-8)
+    near_axis = r2 < 1e-12
+    safe_x = torch.where(near_axis, torch.ones_like(x), x)
+    safe_y = torch.where(near_axis, torch.zeros_like(y), y)
+    theta = torch.atan2(safe_y, safe_x)
+    return torch.stack([r, theta, z], dim=-1)
+
+
 def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
     if mask is None:
         return x
@@ -382,6 +404,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_cylindrical_coords: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +419,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_cylindrical_coords = use_cylindrical_coords
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -530,6 +554,8 @@ class SurfaceTransolver(nn.Module):
         placeholder: torch.Tensor,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
+        if self.use_cylindrical_coords:
+            pos = _cartesian_to_cylindrical(pos)
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
