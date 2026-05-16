@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-15 ~12:00 UTC (W&B trajectory snapshot)
+- 2026-05-16 02:33 UTC (post-H4 terminal, H7 assigned)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14, NEW)
 
@@ -49,18 +49,22 @@ Note: PR #972 "SDF α=2.0" monkey-patch was a no-op (uniform sampling). The SOTA
 | 2.0 | #1054 | — | EP15 FAIL | Over-concentration |
 | 3.0 | #1076 | — | 6.5012% (EP6) | EP10 KILL |
 
-## Active Experiments (2026-05-15 ~08:15 UTC)
+## Active Experiments (2026-05-16 02:33 UTC)
 
-### Pod Assignments + Live W&B Snapshot (12:00Z)
+### Pod Assignments + Latest Known W&B State
 
-| Student | PR | Hypothesis | W&B Run (rank0) | Live EP | val_abupt | val_wss | val_vol_p | val_surf_p | Read |
-|---------|-----|-----------|---------|---------:|----------:|--------:|----------:|-----------:|------|
-| dl24-tanjiro | **#1132** | **H5: curvature additive attention bias** (zero-init, surf_in=7) | `lbi210l2` | EP2.8 (step 31016) | 7.18% (EP2) | 7.58% (EP2) | 6.13% (EP2) | 4.50% (EP2) | **Tracks H2 closely** at EP2 (H2: 7.14/7.51/6.23/4.51) → mechanism preserved. EP3 ~12:45Z. |
-| dl24-fern    | #1130 | **H4: per-axis WSS loss weights [1.0, 1.5, 2.5]** | `3i0nnneh` | EP8.3 (step 91310) | **6.21%** | **7.08%** | **3.48%** | 4.11% | **Fleet leader.** val_vol_p UNDER FLOOR (3.643%), val_wss below 7.5% gate. EP10 ~13:00Z. |
-| dl24-nezuko  | #1129 | **H3: near-wall volume cross-attn** (SDF<0.05m) | `h75p7dt9` | EP5.7 (step 62460) | **6.38%** | 7.29% | **3.51%** | 4.15% | val_vol_p UNDER FLOOR at EP5. val_wss above gate but trending (-0.10pp/ep). EP6 ~12:25Z. |
-| dl24-frieren | #1115 | **H1: wind-exposure proxy** (max(0,-nx) + \|ny\|) | `3rja7gw6` | EP23 (step 252448) | 6.41% | **6.93%** | **4.92%** ⚠️ | 4.11% | **WSS great, vol_p drift UP since EP16 (4.59→4.92) — predicted FLOOR BREACH at terminal.** Same gradnorm task-share pattern as H2. Terminal ~18:50Z. |
+| Student | PR | Hypothesis | W&B Run | Latest EP | val_abupt | val_wss | val_vol_p | val_surf_p | Read |
+|---------|-----|-----------|---------|----------:|----------:|--------:|----------:|-----------:|------|
+| dl24-tanjiro | #1132 | **H5: curvature additive attention bias** (zero-init) | `lbi210l2` | EP21 (step ~230k) | 6.177% | **6.838%** | 4.186% | 4.034% | **Late plateau.** wss descent near-stalled (−0.019pp over EP15→21). vol_p drift up +0.107pp since EP15. Still alive. Terminal ~07:00Z. |
+| dl24-fern | #1142 | **H7: surface-loss-weight=1.5** (H4 side-finding isolation) | PENDING | — | — | — | — | — | **NEW 02:33Z.** No code change needed; single CLI flag. Predicted: test_vol_p ~3.40-3.50%, test_surf_p under floor. Launch expected ~03:00Z. |
+| dl24-nezuko | #1129 | **H3: near-wall volume cross-attn** | `h75p7dt9` | EP20 (step ~220k) | 6.261% | 7.202% | 3.450% | 4.054% | Plateau on WSS, vol_p still under floor. Terminal ~04:00Z. |
+| dl24-frieren | #1135 | **H6: wind-exposure additive attention bias** (zero-init) | `u16jlft5` | EP10 (step ~110k) | 6.278% | **6.987%** | 4.110% | 4.062% | **wss<7.0% milestone hit at EP10. Vol_p stable band [4.06-4.15], no drift-up. EP15 gate ~04:30Z.** Terminal ~14:40Z. |
 
-**Wave summary**: Fern H4 and nezuko H3 are the live winner candidates (both UNDER vol_p floor). H4 leads on aggregate (val_abupt, val_wss). Frieren H1 is showing the H2 failure pattern (WSS down, vol_p up = gradnorm imbalance from added input channels). Tanjiro H5 is too early to call but step-2 trajectory matches H2 closely.
+**Wave summary (02:33Z):**
+- H4 (#1130) CLOSED — floor breach + WSS regression. Extracted positive side-finding (surface-task upweight mechanism) → H7 (#1142).
+- **H5 and H6 remain the leading WSS candidates** but both showing late-plateau risk (H5 already plateaued at EP21; H6 expected to plateau ~EP18-22 based on H5 trajectory shape).
+- H7 (surface_loss_weight=1.5) is the new high-confidence clean test: existing CLI flag, no code change, predicted test_vol_p under floor + test_abupt competitive.
+- H3 (nezuko): vol_p consistently under floor but WSS stuck ~7.2% — not a WSS winner, possible vol_p co-merge if tanjiro/frieren also win.
 
 ### Per-Axis WSS Insight (from tanjiro #1086 fby84xtu terminal)
 

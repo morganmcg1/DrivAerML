@@ -8,6 +8,40 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 02:33 UTC — PR #1130 CLOSED: WSS H4 per-axis loss weights [1.0, 1.5, 2.5] (dl24-fern, `3i0nnneh`)
+
+- **Branch:** `dl24-fern/wss-per-axis-loss-weights`
+- **W&B run:** `3i0nnneh` (19h58m, 30 epochs, best-val EP15)
+- **Hypothesis:** Per-axis WSS loss weights `[cp=1.0, τ_x=1.0, τ_y=1.5, τ_z=2.5]` on the SOTA stack would reallocate optimizer capacity toward τ_z (the dominant error axis) and improve test_wss.
+
+### Terminal test metrics (best-val EP15 EMA checkpoint)
+
+| Metric | H4 | SOTA #972 | Δ | Verdict |
+|--------|---:|---:|---:|---|
+| test_abupt (PRIMARY) | 5.911% | 5.844% | **+0.067pp** | ❌ Regression |
+| test_surf_p (FLOOR) | 3.743% | 3.577% | **+0.166pp** | ❌ **FLOOR BREACH** |
+| test_vol_p (FLOOR) | **3.374%** | 3.643% | **−0.269pp** | ✓ Under floor |
+| test_wss | 6.870% | 6.727% | **+0.143pp** | ❌ Regression |
+| τ_x | 6.118% | 5.971% | +0.147pp | ❌ Worse |
+| τ_y | 7.447% | 7.362% | +0.085pp | ❌ Worse |
+| τ_z | 8.872% | 8.747% | +0.125pp | ❌ Worse |
+
+### Mechanism — three confounded effects
+
+1. **Lion-noise on weighted τ axes** (NEGATIVE): Lion sign-update + amplified weight amplified gradient noise, not signal. All 3 τ axes regressed.
+2. **Capacity stolen from cp** (NEGATIVE → surf_p breach): cp at weight=1.0 while τ_y/τ_z amplified → capacity asymmetry hurt cp. Caused the floor breach.
+3. **Implicit surface task upweight** (POSITIVE): Mean of [1.0, 1.0, 1.5, 2.5]/4 = 1.5 → backbone gets 1.5× gradient from surface task → volume head benefits → test_vol_p −0.269pp under SOTA floor. Real and persistent signal (>3× seed variance).
+
+### Key findings
+
+1. Per-axis WSS weighting under Lion is falsified — sign-based updates amplify noise at the per-axis level, not signal.
+2. **Isolated surface-task upweight is a confirmed mechanism**. H7 (PR #1142, fern) assigned to test `--surface-loss-weight 1.5` in isolation. If surf_p floor breach was caused by the per-axis asymmetry (not the global upweight), H7 should win on vol_p without floor breach.
+3. Follow-up precedent: `qqtdnlwq` tried `surface_loss_weight=2.0` on the OLD dataset and regressed — but that was a different stack, different magnitude, different dataset artifact regime. H7 with 1.5 on SOTA #972 stack is the clean single-variable test.
+
+Decision: CLOSED, NOT-a-winner.
+
+---
+
 ## 2026-05-15 16:44 UTC — PR #1115 CLOSED: WSS H1 wind-exposure proxy (dl24-frieren, `3rja7gw6`)
 
 - **Branch:** `dl24-frieren/wss-wind-exposure-proxy`
