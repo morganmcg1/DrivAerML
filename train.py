@@ -132,6 +132,10 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_near_wall_cross_attn: bool = False
+    near_wall_num_heads: int = 4
+    near_wall_sdf_threshold_m: float = 0.05
+    near_wall_max_keys: int = 1024
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -235,6 +239,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        use_near_wall_cross_attn=config.use_near_wall_cross_attn,
+        near_wall_num_heads=config.near_wall_num_heads,
+        near_wall_sdf_threshold_m=config.near_wall_sdf_threshold_m,
+        near_wall_max_keys=config.near_wall_max_keys,
     )
 
 
@@ -371,9 +379,9 @@ def run_eval_only(config: Config, state) -> None:
     model: nn.Module = build_model(config).to(device)
     n_params = sum(param.numel() for param in model.parameters())
     if state.enabled:
-        ddp_kwargs = {}
+        ddp_kwargs = {"find_unused_parameters": config.use_near_wall_cross_attn}
         if device.type == "cuda":
-            ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            ddp_kwargs.update({"device_ids": [state.local_rank], "output_device": state.local_rank})
         model = DistributedDataParallel(model, **ddp_kwargs)
     base_model = unwrap_model(model)
 
@@ -465,9 +473,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
-            ddp_kwargs = {}
+            # find_unused_parameters=True: the data loader emits view-asymmetric
+            # batches (a case with surface_views < volume_views yields empty
+            # surface tensors on the trailing views, and vice versa). When
+            # surface is empty, the near-wall cross-attention produces a
+            # 0-shape output, so q_proj / k_proj / v_proj / out_proj receive no
+            # gradient on that step. Across ranks, different views land on
+            # different ranks each step, so the set of "used" parameters
+            # differs per-rank-per-step. Without find_unused_parameters,
+            # DDP's gradient AllReduce desyncs at first iteration
+            # (manifesting as the SeqNum=6 split-collective hang). Bitmap
+            # AllReduce at forward start adds a small overhead but keeps
+            # everything consistent. Required whenever
+            # use_near_wall_cross_attn is set; harmless otherwise.
+            ddp_kwargs = {"find_unused_parameters": config.use_near_wall_cross_attn}
             if device.type == "cuda":
-                ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+                ddp_kwargs.update({"device_ids": [state.local_rank], "output_device": state.local_rank})
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:

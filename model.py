@@ -295,6 +295,130 @@ class Transformer(nn.Module):
         return x
 
 
+class NearWallCrossAttention(nn.Module):
+    """Cross-attention: surface tokens query near-wall volume tokens (|SDF|<thr).
+
+    H3 hypothesis: τ_z (vertical wall-shear) is driven by boundary-layer
+    velocity gradients which are a volume quantity. By letting surface tokens
+    cross-attend to volume tokens with |SDF| < ``sdf_threshold_m`` after the
+    shared backbone, the surface head can incorporate near-wall flow info.
+
+    Inputs are expected to already be normalized (in this codebase that is
+    enforced by ``SurfaceTransolver.norm`` before the surface/volume split).
+    Implementation uses ``F.scaled_dot_product_attention`` (matching the
+    existing ``TransolverAttention`` pattern).
+
+    The output projection uses a small (std=0.01) init rather than exact
+    zero-init: a pure zero-init would zero-out gradients into Q/K/V on the
+    first iter (dL/d(act) = upstream_grad @ W_out.T == 0). A small-but-non-
+    zero init keeps the cross-attention near-identity at start while letting
+    Q/K/V receive non-trivial gradients from step 1.
+
+    Note on DDP: with this module enabled, the data loader produces view-
+    asymmetric batches (empty surface or empty volume tensors on trailing
+    views of cases where the two modalities have different point counts).
+    On those steps, Q/K/V/out projections receive no gradient, so DDP must
+    be constructed with ``find_unused_parameters=True`` to handle the per-
+    step variation in the used-parameter set across ranks.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int = 4,
+        sdf_threshold_m: float = 0.05,
+        max_keys: int = 1024,
+        out_proj_init_std: float = 0.01,
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError(
+                f"hidden_dim ({hidden_dim}) must be divisible by num_heads ({num_heads})"
+            )
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.sdf_threshold_m = sdf_threshold_m
+        self.max_keys = max_keys
+
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.k_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.v_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+
+        nn.init.trunc_normal_(self.q_proj.weight, std=0.02)
+        nn.init.zeros_(self.q_proj.bias)
+        nn.init.trunc_normal_(self.k_proj.weight, std=0.02)
+        nn.init.zeros_(self.k_proj.bias)
+        nn.init.trunc_normal_(self.v_proj.weight, std=0.02)
+        nn.init.zeros_(self.v_proj.bias)
+        # Small-init for out_proj keeps the cross-attention near-identity at
+        # init (residual change is O(0.01) * normal_activations) while keeping
+        # gradients to Q/K/V populated for DDP.
+        nn.init.normal_(self.out_proj.weight, std=out_proj_init_std)
+        nn.init.zeros_(self.out_proj.bias)
+
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+
+    def forward(
+        self,
+        surface_feats: torch.Tensor,
+        volume_feats: torch.Tensor,
+        volume_sdf: torch.Tensor,
+        surface_mask: torch.Tensor | None = None,
+        volume_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        # Fixed top-K: pick the K volume tokens with smallest |SDF| per sample.
+        # This gives a fixed key-tensor shape (B, K, D) across all batches and
+        # ranks — no CUDA syncs, no per-sample Python loop, no kernel
+        # recompilation. Tokens beyond ``sdf_threshold_m`` are masked out via
+        # an additive attention mask so they don't influence attention.
+        B, n_surf, D = surface_feats.shape
+        _, n_vol, _ = volume_feats.shape
+        k = min(self.max_keys, n_vol)
+        H = self.num_heads
+        d = self.head_dim
+
+        sdf_abs = volume_sdf.abs()
+        if volume_mask is not None:
+            valid_volume = volume_mask.to(dtype=torch.bool)
+            sdf_abs = torch.where(
+                valid_volume, sdf_abs, torch.full_like(sdf_abs, float("inf"))
+            )
+
+        topk_values, topk_indices = torch.topk(sdf_abs, k, dim=1, largest=False)
+        idx_expand = topk_indices.unsqueeze(-1).expand(-1, -1, D)
+        nw_feats = torch.gather(volume_feats, dim=1, index=idx_expand)
+        # True = mask out; unconditionally allow the closest key per sample to
+        # guard against the (rare) case where every nearest volume point is
+        # still beyond ``sdf_threshold_m`` (would otherwise softmax a fully
+        # -inf row and emit NaN).
+        pad_mask = topk_values >= self.sdf_threshold_m
+        pad_mask[:, 0] = False
+
+        # Build additive attention mask: 0 for valid keys, -inf for masked.
+        # Shape (B, 1, 1, k) broadcasts across (H, N_surf). Construct in fp32 so
+        # the -inf mask value survives bf16 autocast precision; SDPA upcasts the
+        # mask internally as needed.
+        attn_mask = torch.zeros(
+            B, 1, 1, k, device=surface_feats.device, dtype=torch.float32
+        )
+        attn_mask = attn_mask.masked_fill(
+            pad_mask.unsqueeze(1).unsqueeze(1), float("-inf")
+        )
+
+        q = self.q_proj(surface_feats).view(B, n_surf, H, d).transpose(1, 2)
+        k_t = self.k_proj(nw_feats).view(B, k, H, d).transpose(1, 2)
+        v_t = self.v_proj(nw_feats).view(B, k, H, d).transpose(1, 2)
+
+        out = F.scaled_dot_product_attention(q, k_t, v_t, attn_mask=attn_mask)
+        out = out.transpose(1, 2).contiguous().view(B, n_surf, D)
+        out = self.out_proj(out)
+
+        result = self.norm(surface_feats + out)
+        return _apply_token_mask(result, surface_mask)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -315,6 +439,10 @@ class SurfaceTransolver(nn.Module):
         pe_kind: str = "sincos",
         pe_num_features: int = 16,
         pe_init_sigmas: list[float] | None = None,
+        use_near_wall_cross_attn: bool = False,
+        near_wall_num_heads: int = 4,
+        near_wall_sdf_threshold_m: float = 0.05,
+        near_wall_max_keys: int = 1024,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -362,6 +490,19 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        self.use_near_wall_cross_attn = use_near_wall_cross_attn
+        self.near_wall_num_heads = near_wall_num_heads
+        self.near_wall_sdf_threshold_m = near_wall_sdf_threshold_m
+        self.near_wall_max_keys = near_wall_max_keys
+        if use_near_wall_cross_attn:
+            self.near_wall_cross_attn = NearWallCrossAttention(
+                hidden_dim=n_hidden,
+                num_heads=near_wall_num_heads,
+                sdf_threshold_m=near_wall_sdf_threshold_m,
+                max_keys=near_wall_max_keys,
+            )
+        else:
+            self.near_wall_cross_attn = None
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -433,6 +574,21 @@ class SurfaceTransolver(nn.Module):
         surface_hidden = hidden_norm[:, cursor : cursor + surface_tokens]
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
+
+        if (
+            self.near_wall_cross_attn is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            # volume_x channel layout is [x, y, z, sdf]; SDF is channel index 3
+            volume_sdf = volume_x[:, :, 3]
+            surface_hidden = self.near_wall_cross_attn(
+                surface_feats=surface_hidden,
+                volume_feats=volume_hidden,
+                volume_sdf=volume_sdf,
+                surface_mask=surface_mask,
+                volume_mask=volume_mask,
+            )
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
