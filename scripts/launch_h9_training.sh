@@ -9,6 +9,14 @@ if [[ ! -f curvature_proxy_stats_k16_v1.json ]]; then
   exit 2
 fi
 
+# Abort if an H9 torchrun is already running on this pod — prevents the
+# duplicate-launch GPU contention we saw on 2026-05-16 08:18Z.
+if pgrep -f "torchrun.*train.py.*outputs/h9_curvature_bias_gradnorm_clamp" >/dev/null; then
+  echo "ERROR: H9 torchrun already running on this pod; aborting." >&2
+  pgrep -af "torchrun.*train.py.*outputs/h9_curvature_bias_gradnorm_clamp" >&2 || true
+  exit 3
+fi
+
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 LOGFILE="runlogs/h9_clamp_${STAMP}.log"
 PIDFILE="runlogs/h9_clamp_${STAMP}.pid"
