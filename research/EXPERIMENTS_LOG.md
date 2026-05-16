@@ -8,6 +8,45 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 06:25 UTC — PR #1129 CLOSED: WSS H3 near-wall volume cross-attn into surface decoder (dl24-nezuko)
+
+- **Branch:** `dl24-nezuko/wss-near-wall-cross-attn`
+- **W&B run:** included in terminal SENPAI-RESULT
+- **Hypothesis:** Near-wall volume points (within 0.05m SDF shell) queried via cross-attention into the surface decoder would help the model leverage boundary-layer velocity gradient information to improve τ_z prediction (dominant error axis 8.747%).
+
+### Terminal test metrics (best-val checkpoint)
+
+| Metric | H3 | SOTA #972 | Δ | Verdict |
+|--------|---:|---:|---:|---|
+| test_abupt (PRIMARY) | 6.020% | 5.844% | **+0.176pp** | ❌ Regression |
+| test_surf_p (FLOOR) | 3.761% | 3.577% | **+0.184pp** | ❌ **FLOOR BREACH** |
+| test_vol_p | **3.432%** | 3.643% | **−0.211pp** | ✓ Under floor (side-effect) |
+| test_wss | 7.012% | 6.727% | **+0.285pp** | ❌ Regression |
+| τ_x | — | 5.971% | — | — |
+| τ_y | — | 7.362% | — | — |
+| **τ_z (HYPOTHESIS TARGET)** | **9.102%** | 8.747% | **+0.355pp** | ❌ **Target axis FAILED** |
+
+### Mechanism analysis
+
+The hypothesis was physically motivated: boundary-layer velocity gradient → τ via Newton's law, so near-wall volume points SHOULD carry τ signal. The failure was at the **injection mechanism level**, not the physics.
+
+Adding near-wall cross-attention to the surface decoder:
+1. **Expanded surface decoder capacity** → backbone attention budget shifted toward cross-attn queries → volume-pressure head starved → test_vol_p side-effect improvement, test_surf_p breach
+2. **Cross-attention signal duplication**: the existing shared backbone self-attention already aggregates near-wall boundary features via the volume encoder. Adding an explicit cross-attn pathway duplicated rather than augmented this signal, adding computational overhead + gradient noise.
+3. **τ_z hypothesis REFUTED**: τ_z regressed +0.355pp (the explicit target axis WORSENED). The model did not extract boundary-layer gradient signal from near-wall volume points via cross-attention.
+
+Student's correct diagnosis: "existing backbone already exposes boundary-layer info via shared self-attention; cross-attention duplicated signal."
+
+### Key findings to carry forward
+
+1. **Explicit cross-attention into the surface decoder from volume is the wrong injection pathway** — same lesson as H1/H2 (wrong injection point). The surface decoder already has implicit access to boundary features via the shared backbone.
+2. **vol_p side-effect (−0.211pp)** is consistent with H4 vol_p side-effect (−0.269pp) — whenever the surface task gets boosted gradient signal (here via cross-attn expansion, there via mean weight upscale), the backbone learns richer features that benefit vol_p. This is now a 2-experiment pattern.
+3. **Plateau Protocol activated**: 4 closed failures (H1, H2, H3, H4) + 2 plateauing (H5, H6) → tier change to optimizer regime (H8, AdamW).
+
+Decision: CLOSED, NOT-a-winner. Assigned H8 (Lion → AdamW, lr=5e-4) to nezuko as Plateau Protocol tier change (PR #1144).
+
+---
+
 ## 2026-05-16 02:33 UTC — PR #1130 CLOSED: WSS H4 per-axis loss weights [1.0, 1.5, 2.5] (dl24-fern, `3i0nnneh`)
 
 - **Branch:** `dl24-fern/wss-per-axis-loss-weights`
