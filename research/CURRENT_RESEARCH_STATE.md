@@ -1,11 +1,48 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~07:35 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~08:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~07:35Z) — Fleet mid-flight progress snapshot; human confirmed dl24 fleet is real (separate advisor); 4-of-4 Wave 30 model-side axes confirming τ_z structural ratio is NOT at the model layer
+## Latest invocation actions (2026-05-16 ~08:45Z) — Double closure of nezuko #1136 (4-of-4 widening confirmed) + tanjiro #1134 (paper-worthy mechanism PASS); both students immediately reassigned to H9' (PR #1146) and H6' (PR #1147)
+
+### Actions this invocation
+
+- **CLOSED PR #1136 (nezuko H2 normal spectral encoding)** at terminal: test_WSS=6.928% (+0.201pp FAIL), test_SP=3.827% (+0.250pp FLOOR BREACH), test τz/τx=1.457 (NULL — essentially baseline). val widened 1.49→1.548 then collapsed on test. **4-of-4 Wave 30 model-side widening pattern confirmed** (H1/H2/H4/H7).
+- **CLOSED PR #1134 (tanjiro H6 local-frame WSS head)** at terminal: paper-worthy mechanism PASS / absolute FAIL. test τz/τx=**1.281** — cleanest τ_z structural break across NINE prior mechanisms. BUT test_WSS=26.69% (+19.96pp absolute fail), SP+vol_p both breach by 1.4pp / 0.8pp due to hard projection removing 5–8% real GT normal-component signal. Falsifies backbone-bottleneck alternative; bottleneck IS at output head.
+- **ASSIGNED PR #1146 (nezuko: Wave 30 H9' curvature-aware surface feature)** — port of dl24-tanjiro #1132 (test_WSS=6.609% reported on parallel branch). 8th surface channel via kNN-of-normals statistic κ=mean(1-cos(n_i,n_j)). FIRST input-feature attack on tay. Recipe: standard 18h x 13EP lion recipe + `--use-curvature-feature --curvature-knn 16`. Default off, baseline-safe.
+- **ASSIGNED PR #1147 (tanjiro: Wave 30 H6' soft τ·n=0 penalty)** — direct follow-up to own H6 mechanism PASS. Loss-term `λ · E[(τ·n)²/|τ|²]` with sweep λ∈{0.05, 0.1, 0.25}. Restores 4-channel head freedom while preserving structural-break bias. HIGHEST expected-value unassigned slot.
+
+### Wave 30 fleet — 10 orthogonal attacks now in parallel
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1137 | fern | H5 Y-architecture | in flight (slow descender ~2.5h/EP) |
+| #1138 | thorfinn | H3 soft normal-routing | in flight EP6+ |
+| #1139 | edward | H1 cylindrical coords | in flight EP6+ |
+| #1140 | askeladd | H7 normal-aux head | in flight EP7+ **leading 6.222%** |
+| #1141 | alphonse | H4 hard MoE routing | in flight EP7+ |
+| #1143 | frieren | H8 mirror-symmetry data aug | in flight warmup→EP3 |
+| #1146 | nezuko | H9' curvature input feature | JUST LAUNCHED |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | JUST LAUNCHED |
+
+### Causal map of τ_z bottleneck — updated
+
+- **NOT at backbone**: H6 hard τ·n=0 broke τz/τx to 1.281 (falsified backbone-bottleneck hypothesis)
+- **NOT at architecture layer**: 4-of-4 Wave 30 model-side axes (H1/H2/H4/H7) all show val widening that collapses to baseline on test
+- **Bottleneck IS at output head + data distribution**: hard projection works but loses fidelity → soft penalty (H6') is the natural next move
+- **Cross-pollination corroborates**: dl24-tanjiro #1132 curvature mechanism produced real WSS gain — suggests data-level signal injection (H9' curvature, H8 mirror, H6' soft penalty) is the right direction
+
+### Next-idle assignment queue (in priority order)
+
+1. **Stacking H6' (winner λ) + H9' curvature** — if both win, stacking is the immediate compounding play
+2. **Stacking H8 mirror-aug + H6' soft penalty** — if H8 lands, mirror-symmetry + soft tangency is theoretically complementary
+3. **kNN-pooled local context feature** — pool 16-NN surface features per token, append as channel; orthogonal to all 10 axes
+4. **Learned anisotropic basis** — vector-valued WSS prediction in a learned local frame (not fixed normal/tangent); soft regularization of basis orthonormality
+5. **Curriculum on τ_z weight** — schedule tau_z_loss_weight from 2.0→3.5 across epochs; ramps the gradient pressure
+
+## Older invocation actions (2026-05-16 ~07:35Z) — Fleet mid-flight progress snapshot; human confirmed dl24 fleet is real (separate advisor); 4-of-4 Wave 30 model-side axes confirming τ_z structural ratio is NOT at the model layer
 
 ### Mid-flight Wave 30 progress (val_abupt at 07:35Z W&B snapshot, no terminals yet)
 

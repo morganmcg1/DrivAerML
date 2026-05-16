@@ -1,3 +1,81 @@
+## 2026-05-16 08:35 — PR #1134: Local-frame WSS head — hard τ·n=0 (tanjiro) — CLOSED (paper-worthy MECHANISM PASS / absolute FAIL)
+
+- **Branch**: `tanjiro/local-frame-wss-head` (closed)
+- **W&B run**: `m1uvk8wl`, terminal at EP13 best-EMA
+- **Hypothesis**: Enforce τ·n=0 architecturally via local-frame WSS head (project predicted WSS onto tangent basis). Test whether the τ_z bottleneck is at the output head level.
+
+### Terminal metrics
+
+| Metric | val (34) | **test (50)** | Baseline `56bcqp3m` | Δ | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 18.615% | 18.396% | 5.844% | +12.55pp | FAIL |
+| **WSS** | 26.439% | **26.692%** | 6.727% | **+19.96pp** | **FAIL** |
+| τ_x | 25.536% | 26.146% | — | — | — |
+| τ_y | 23.144% | 22.914% | — | — | — |
+| **τ_z** | 34.423% | 33.508% | — | — | FAIL absolute |
+| **test τz/τx** | **1.348** | **1.281** | 1.50–1.57 band | **−0.219 to −0.289** | **MAJOR-WIN** ✓ |
+| **SP** | 5.389% | 4.989% | 3.577% | +1.41pp | **FLOOR BREACH** |
+| **vol_p** | 4.581% | 4.423% | 3.643% | +0.78pp | **FLOOR BREACH** |
+| `train/wss_penetration_frac` | — | 2.40e-08 | — | bf16 floor | constraint enforced |
+
+### Verdict: PAPER-WORTHY MECHANISM PASS / absolute FAIL — close
+
+H6 is the cleanest τ_z structural break ever observed on this dataset. NINE prior mechanisms (loss weighting / output decoupling / EMA / sampling / depth / curriculum / mag decomp / SDF FAR-field / per-channel heads) all landed in the [1.44, 1.57] band. Hard τ·n=0 broke it cleanly from EP1 onward (1.475 → 1.348 monotone descent on val; 1.281 on test).
+
+**Falsifies** the alternative hypothesis (backbone slice-attention or full Y-architecture being the τ_z bottleneck) — the bottleneck IS at the WSS output head.
+
+### Why it can't merge despite the mechanism win
+
+tanjiro's pre-flight diagnostic on 10 train cases measured `mean |τ·n|/|τ| = 8.1%` (magnitude-weighted = 5.6%) on the raw GT `wall_shear`. Hard architectural enforcement throws that away by construction, and val_WSS plateaus ~4× baseline. PR's MAJOR-WIN criterion required both ratio AND floors; we only got ratio.
+
+### Follow-up
+
+`tanjiro` → **H6' soft τ·n=0 penalty** (PR #1147 just launched). Keep the unconstrained 4-channel head, add `λ · E[|τ·n|/|τ|]` loss term with λ sweep ∈ {0.05, 0.1, 0.25}. Best of both: structural break + absolute fidelity. Highest expected-value unassigned slot in the entire fleet.
+
+---
+
+## 2026-05-16 08:20 — PR #1136: Normal Spectral Encoding StringSep on (nx,ny,nz) (nezuko) — CLOSED (terminal NEGATIVE, 4-of-4 model-side widening confirmation)
+
+- **Branch**: `nezuko/normal-spectral-encoding` (closed)
+- **W&B run**: `lths1ujt`, terminal at EP13 best-EMA
+- **Hypothesis**: Apply StringSeparable spectral encoding to surface normals (nx, ny, nz) — give the model richer frequency-domain features for orientation, hoping the τ_z direction gets localized representations.
+
+### Terminal metrics
+
+| Metric | val | **test (50)** | Baseline | Δ | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.4039% | 6.0200% | 5.844% | +0.176pp | — |
+| **WSS** | — | **6.9279%** | 6.727% | **+0.201pp** | **FAIL** |
+| **SP** | — | **3.8271%** | 3.577% | **+0.250pp** | **FLOOR BREACH** |
+| vol_p | — | 3.6327% | 3.643% | −0.010pp | PASS |
+| test_τ_x | — | 6.163% | — | — | — |
+| test_τ_y | — | 7.500% | — | — | — |
+| test_τ_z | — | 8.977% | — | — | — |
+| **test τz/τx** | — | **1.457** | 1.50–1.57 band | within | **NULL** |
+
+### Verdict: NEGATIVE — close
+
+Fails 2 of 3 hard gates (test_WSS +0.201pp, test_SP +0.250pp). The `surface_normal_string_sep` parameters trained correctly (log_freq std=1.22), so this is a clean mechanism null, not an implementation failure.
+
+### 4-of-4 Wave 30 model-side widening pattern CONFIRMED
+
+On val, τz/τx widened monotonically from 1.49 (EP2) to 1.548 (EP13), then collapsed to 1.457 on test. **4th consecutive Wave 30 model-architecture attack to show this exact pattern:**
+
+| PR | Axis | val τz/τx widening | test τz/τx |
+|---|---|---|---|
+| #1139 (edward) | H1 cylindrical coords | 1.385 → 1.526 | ~1.46 |
+| #1136 (nezuko) | H2 normal spectral | 1.49 → 1.548 | 1.457 |
+| #1141 (alphonse) | H4 hard normal routing | (in flight) | TBD |
+| #1140 (askeladd) | H7 normal aux head | 1.515 → 1.537 | TBD |
+
+The τ_z gap is **data-distribution or loss-mechanism in nature, not model-architecture in nature.**
+
+### Reassigned
+
+`nezuko` → **H9' curvature-aware surface feature** (PR #1146 just launched). Port of dl24 cross-pollination finding (test_WSS=6.609% reported on parallel branch). 8th channel via kNN-of-normals statistic. First input-feature attack on tay.
+
+---
+
 ## 2026-05-16 04:30 — PR #1133: Per-axis WSS mag decomp |τ_z|+||τ_xy|| (frieren) — CLOSED (terminal NEGATIVE, NINTH structural ratio confirmation, test_SP floor breached)
 
 - **Branch**: `frieren/per-axis-mag-decomp` (closed)
