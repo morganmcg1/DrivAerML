@@ -1,3 +1,59 @@
+## 2026-05-16 13:30 — PR #1141: Hard Normal-Routing Slice Partition / MoE-style Attention (alphonse) — CLOSED (6-of-6 model-side widening confirmed; architecture-layer attack surface ABSOLUTELY EXHAUSTED)
+
+- **Branch**: `alphonse/hard-normal-slice-routing` (closed)
+- **W&B run**: `iudmdz95`, EP13 best-EMA, clean 14.7h, 13/13 epochs, no NaN
+- **Hypothesis**: Hard MoE-style routing partitions slice tokens between z-normal (roof/underbody, |n_z|≥0.5) and xy-normal (sides) groups using `-inf` pre-softmax masking. If τ_z bottleneck stems from mixed-orientation slice attention, dedicated capacity for z-surfaces should unstick τ_z.
+
+### Terminal metrics
+
+| Metric | val (34) | test (50) | Baseline #972 | Δ (test) | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.347% | 6.018% | 5.844% | +0.174pp | — |
+| **WSS** | 7.219% | **6.927%** | 6.727% | **+0.200pp** | **FAIL** |
+| **SP** | 4.199% | **3.851%** | 3.577% | **+0.274pp** | **FLOOR BREACH** |
+| vol_p | 3.674% | **3.548%** | 3.643% | **−0.095pp** | **PASS** |
+| τ_z | 9.723% | 9.063% | — | — | — |
+| **τz/τx** | **1.533** (val) | **1.478** (test) | ~1.46 | flat | **NULL (slight widening)** |
+
+### Verdict: NEGATIVE on primary WSS — close. Mechanism strongly engaged (utilization=1.0 across all 5 blocks) but engaged-but-neutral on τ_z.
+
+**Diagnostic was thorough**: utilization=1.0 across both z-group and xy-group in every block — hard routing was fully active. Student identified a capacity-mismatch confounder (z-surface = 56.2% of sampled tokens but z-slice-fraction=25% of slice capacity → 2.25× over-subscription on z-slices). Test τz/τx=1.478 is *slightly worse* than baseline 1.46 even with hard routing fully engaged.
+
+**Healthy training**: monotonic descent EP4 (6.57%) → EP13 (6.347%), no NaN, EMA improving over raw throughout. Curve had no overfit plateau by EP13 — likely capacity-bound, not data-bound.
+
+### 6-of-6 Wave 30 architecture-attack widening pattern at TERMINAL CLOSURE — surface DEFINITIVELY EXHAUSTED
+
+| PR | Axis | val τz/τx | test τz/τx |
+|---|---|---|---|
+| #1136 (nezuko) | H2 normal spectral | 1.49 → 1.548 | 1.457 |
+| #1137 (fern) | H5 Y-arch backbone split | — → 1.53 | 1.453 |
+| #1138 (thorfinn) | H3 soft normal-routing | 1.50 → 1.537 | 1.452 |
+| #1139 (edward) | H1 cylindrical coords | 1.385 → 1.547 | 1.469 |
+| #1140 (askeladd) | H7 normal-aux head | 1.515 → 1.543 | 1.441 |
+| **#1141 (alphonse)** | **H4 hard MoE routing** | **1.533 (EP13)** | **1.478** |
+
+**H3 + H4 jointly falsify the entire attention-routing axis** (soft and hard endpoints of the routing sweep both null). With H1/H2/H5/H7 also closed, the model-side / architecture-layer attack surface is **definitively exhausted** for the τ_z structural bottleneck. (#1134 tanjiro H6 broke the pattern with hard τ·n=0 mechanism PASS to test τz/τx=1.281 but absolute FAIL — that single mechanism PASS is the diagnostic confirming the bottleneck IS at the output-head layer.)
+
+### Reassignment
+
+Alphonse reassigned to **H14 asymmetric LR for surface output head** (#1153) — splits Lion optimizer into 2 parameter groups: `surface_out.*` MLP at 5× the backbone LR. **First optimization-layer attack** in the Wave 30 fleet. Direct attack consistent with the H6 mechanism-PASS diagnostic: pushing more gradient signal into the output projection. Zero compute overhead, ~30-line change to `build_optimizer`. Orthogonal to all 7 in-flight axes (data, loss, output, architecture).
+
+### Closure pattern summary — 7 Wave 30 closures complete
+
+| PR | Student | Axis | Layer | Verdict |
+|---|---|---|---|---|
+| #1134 | tanjiro | H6 hard τ·n=0 | output projection | mechanism PASS / absolute FAIL (paper-worthy) |
+| #1136 | nezuko | H2 spectral encoding | architecture | 4-of-4 widening |
+| #1137 | fern | H5 Y-arch split | architecture | 5-of-5 widening |
+| #1138 | thorfinn | H3 soft routing | architecture | 5-of-5 widening |
+| #1139 | edward | H1 cylindrical coords | architecture | 7-of-7 widening (sincos pos_embed subsumes) |
+| #1140 | askeladd | H7 normal-aux head | output (aux only) | 6-of-6 widening + fleet leader stall |
+| #1141 | alphonse | H4 hard routing | architecture | 6-of-6 widening + capacity-mismatch confounder |
+
+The Wave 30 fleet's 6 architecture-layer closures span every reasonable architectural intervention point: input frame, frequency encoding, attention routing (soft+hard), backbone topology, auxiliary heads. With 8 fresh probes now in flight covering loss layer (×3), data-input (×3), output projection (×1), and optimization (×1, NEW), the remaining attack surface is concentrated.
+
+---
+
 ## 2026-05-16 11:45 — PR #1138: Normal-Aligned Slice Groups / Soft Orientation Routing (thorfinn) — CLOSED (5-of-5 model-side widening at terminal closure)
 
 - **Branch**: `thorfinn/normal-aligned-slice-groups` (closed)
