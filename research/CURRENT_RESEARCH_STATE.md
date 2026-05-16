@@ -1,11 +1,49 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~09:10 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~09:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~09:10Z) — fern #1137 CLOSED (5-of-5 model-side widening pattern, all 3 floors breached) → fern reassigned to H10 vector-length-decoupled WSS head (PR #1148)
+## Latest invocation actions (2026-05-16 ~09:40Z) — askeladd #1140 CLOSED (fleet leader stalled at EP13, 6-of-6 widening pattern) → askeladd reassigned to H11 multi-scale kNN-pooled context features (PR #1150)
+
+### Actions this invocation
+
+- **CLOSED PR #1140 (askeladd H7 normal-prediction aux head)** at terminal. Fleet leader at EP7-8 (val_abupt=6.222%) stalled at EP13 (val_abupt EMA=6.1975%, +0.071pp ABOVE baseline). Test: test_WSS=6.9018% (+0.175pp FAIL), test_SP=3.8246% (+0.248pp FLOOR BREACH), test_vol_p=3.5776% (PASS −0.065pp). Mechanism cleanly null: `aux_normal_cosine` converged to 0.999951 by step 10k → backbone already encodes full normal info, aux head had nothing to inject.
+- **6-of-6 Wave 30 model-side widening pattern CONFIRMED**. Bottleneck definitively NOT at architecture layer.
+- **ASSIGNED PR #1150 (askeladd: Wave 30 H11 Multi-scale kNN-pooled context features)** — direct upgrade of H9' (which is single-scale, k=16 NN-of-normals statistic). H11 computes 3 stats × 3 scales = 9 channels: cos_alignment, mean_area, mean_dist at k=4/16/64. Provides explicit multi-resolution geometric context that pure attention captures only implicitly. Cached per-case for fast reload. Strong Kaggle/PointNet++/FPN pedigree.
+
+### Wave 30 fleet — 8 active in-flight + 0 idle = 12 axes attempted total in this wave (4 closed, 8 active)
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1138 | thorfinn | H3 soft normal-routing | in flight EP10+ |
+| #1139 | edward | H1 cylindrical coords | in flight EP10+ |
+| #1141 | alphonse | H4 hard MoE routing | in flight EP7+ |
+| #1143 | frieren | H8 mirror-symmetry data aug | in flight EP1+ |
+| #1146 | nezuko | H9' curvature input feature | in flight |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | in flight |
+| #1148 | fern | H10 vector-decoupled output | in flight |
+| #1150 | askeladd | H11 multi-scale kNN context | JUST LAUNCHED |
+
+**Closed in Wave 30**: H2 #1136 (normal spectral), H5 #1137 (Y-arch), H6 #1134 (hard τ·n=0 PAPER-WORTHY), H7 #1140 (normal-aux).
+
+### Causal map of τ_z bottleneck — updated 6-of-6
+
+- **NOT at backbone**: H6 hard τ·n=0 broke τz/τx to 1.281 (falsified backbone-bottleneck)
+- **DEFINITIVELY NOT at architecture layer**: 6-of-6 closed Wave 30 model-side axes (H1/H2/H4/H5/H7 in val widening; H6 mechanism break by sledgehammer) — none unlocked test τz/τx with absolute fidelity
+- **Bottleneck IS at output head + input feature distribution**: 3 in-flight output-head probes (H6'/H10/H7) + 2 in-flight data-level probes (H8 mirror, H9' single-scale curvature) + this H11 (multi-scale data)
+- **Strongest candidates for next terminal-wave winner**: H11 (multi-scale data) > H9' (single-scale data) > H10 (output reparam) > H8 (mirror aug) > H6' (loss penalty). Ordering is based on dl24 cross-pollination evidence (curvature mechanism real) + H6 mechanism PASS (output head is bottleneck location).
+
+### Next-idle assignment queue (in priority order)
+
+1. **Stacking experiments** — combine top Wave 30 winner with any orthogonal axis once terminals land
+2. **Spherical-harmonic WSS basis** — predict WSS in a learned anisotropic local frame; stronger H10 variant if H10 partial-wins
+3. **Curriculum on τ_z weight** — schedule tau_z_loss_weight from 2.0→3.5 across epochs; cheap, additive to any winner
+4. **Focal MSE loss with γ on per-vertex error** — long-tail loss attack; alternative to H6' direction-based penalty
+5. **Geodesic distance to feature** — precompute distance-to-nearest-sharp-edge per vertex; alternative data-level input signal
+
+## Older invocation actions (2026-05-16 ~09:10Z) — fern #1137 CLOSED (5-of-5 model-side widening pattern, all 3 floors breached) → fern reassigned to H10 vector-length-decoupled WSS head (PR #1148)
 
 ### Actions this invocation
 

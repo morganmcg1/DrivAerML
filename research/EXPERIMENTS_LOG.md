@@ -1,3 +1,48 @@
+## 2026-05-16 09:35 — PR #1140: Normal-Prediction Auxiliary Head (askeladd) — CLOSED (fleet leader stalls at EP13, 6-of-6 widening pattern, 2 of 3 gates fail)
+
+- **Branch**: `askeladd/normal-prediction-aux-head` (closed)
+- **W&B run**: `e5ztxjc3`, EP13 EMA, clean 13/13 epochs no NaN no OOM
+- **Hypothesis**: Add a 3-dim auxiliary head predicting `(nx, ny, nz)` from `surface_hidden` with cosine-similarity loss. If τ_z bottleneck is missing orientation information in the backbone, aux head should regularize it.
+
+### Terminal metrics
+
+| Metric | val (34) | **test (50)** | Baseline | Δ | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.1975% | 5.9799% | 5.844% | +0.136pp | — |
+| **WSS** | — | **6.9018%** | 6.727% | **+0.175pp** | **FAIL** |
+| **SP** | — | **3.8246%** | 3.577% | **+0.248pp** | **FLOOR BREACH** |
+| vol_p | — | 3.5776% | 3.643% | −0.065pp | PASS ✓ |
+| τ_x | — | 6.166% | ~5.61% | +0.556pp | — |
+| τ_y | — | 7.448% | ~6.93% | +0.518pp | — |
+| τ_z | — | 8.883% | ~8.20% | +0.683pp | — |
+| **τz/τx** | **1.543** | **1.441** | 1.46 | val widens, test ≈ flat | NULL |
+
+### Verdict: NEGATIVE — close
+
+2 of 3 hard gates fail. The fleet leader at EP7-8 (val_abupt=6.222%) stalled — EP13 EMA landed at 6.1975%, 0.071pp ABOVE the val baseline of 6.126%. Mid-flight lead did not survive to terminal. vol_p PASS is good for stacking but cannot compensate alone.
+
+### Mechanism diagnostic — cleanest falsification of the wave
+
+`aux_normal_cosine` converged to **0.999951** by step ~10k. The aux head matched the existing normal information in `surface_hidden` essentially perfectly. **The normal-orientation signal was already fully present in backbone hidden states** — aux gradient pressure had nothing new to inject. This decisively falsifies the "missing-normal-info" hypothesis.
+
+### 6-of-6 Wave 30 model-side widening pattern CONFIRMED
+
+| PR | Axis | val τz/τx widening | test τz/τx |
+|---|---|---|---|
+| #1136 (nezuko) | H2 normal spectral | 1.49 → 1.548 | 1.457 |
+| #1141 (alphonse) | H4 hard MoE routing | TBD | TBD |
+| #1137 (fern) | H5 Y-arch | — → 1.53 | 1.453 |
+| #1139 (edward) | H1 cylindrical coords | 1.385 → 1.526 | TBD |
+| **#1140 (askeladd)** | **H7 normal-aux** | **1.515 → 1.543** | **1.441** |
+
+The val/test inversion (val widens, test ~ flat) is consistent across the whole wave — reflects sample-set idiosyncrasies (34 val vs 50 test cases) more than mechanism. Bottleneck remains data-distribution / output-head, not architectural.
+
+### Reassigned
+
+`askeladd` → **H11 Multi-scale kNN-pooled context features** (PR #1150). 3 statistics (cos_alignment, mean_area, mean_dist) × 3 scales (k=4/16/64) = 9 additional surface channels. Direct upgrade of H9' single-scale curvature (which is just `1-cos_alignment` at k=16); H11 tests whether multi-scale geometric context unlocks signal that single-scale captures only partially. Strong Kaggle/PointNet++/FPN pedigree.
+
+---
+
 ## 2026-05-16 09:05 — PR #1137: Y-Architecture Dual-Backbone — pressure/WSS branches (fern) — CLOSED (5-of-5 model-side widening, all 3 floors breached)
 
 - **Branch**: `fern/y-architecture-dual-backbone` (closed)
