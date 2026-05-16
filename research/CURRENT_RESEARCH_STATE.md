@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-16 13:25 UTC (H7 EP10 PASS, H9 EP6 strong, H8 EP10 marginal, H10 EP2 launched)
+- 2026-05-16 13:45 UTC (H7 EP14 surf_p re-engaged, H9 EP6 strong, **H8 EP10 KILL AUTHORIZED**, H10 EP4 on plan)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -26,24 +26,24 @@
 | test_τ_y | 7.362% | — |
 | test_τ_z | 8.747% | — |
 
-## Active Experiments (2026-05-16 13:25 UTC)
+## Active Experiments (2026-05-16 13:45 UTC)
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP10 PASS** / 7h | **6.275%** | 7.153% | **3.524%** | 4.073% | **EP10 gate PASS: surf_p ≤4.10% threshold cleared by 0.027pp. vol_p UNDER FLOOR by 0.119pp. Cosine LR re-engaged surf_p slope post EP6. Continue to EP30 (~21:30Z). Terminal call surf_p center 3.55-3.65% — borderline.** |
-| **dl24-tanjiro** | **#1145** | **H9: curvature bias + w_vol_p clamp ≥0.05** | EP6 live / 5h | 6.307% | **7.041%** | 4.055% | 4.102% | **STRONG: EP6 tied with H5 on WSS (7.04 vs 7.00), BETTER on vol_p (4.05 vs 4.18). w_vol_p=0.148 declining toward 0.05 clamp (active in 3-5 EP). Student hasn't posted EP3/EP6 — nudged at 13:25Z.** |
-| dl24-nezuko | #1144 | H8: Lion → AdamW lr=5e-4 | ~EP9.5 / 7h | 6.903% | 7.689% | 4.446% | 4.561% | **EP10 marginal: wss 7.69% well over 7.1% gate. τz=10.38% still 1pp above H5 ref — AdamW NOT helping low-SNR axis as hypothesized. Vol_p discipline intact (no GradNorm starvation; w_vol_p 0.31). Likely close at terminal unless EP15+ surprises.** |
-| dl24-frieren | #1149 | H10: Charbonnier supplementary WSS loss | EP2 / 2h | 20.14% | 20.88% | 16.21% | 14.60% | **Launched 10:28Z. Student caught my Charb/MSE ratio prediction error — corrected at 13:25Z. EP3 gate (~14:00Z). Floor-safe by construction. τz=27.9% (EP1 noise). Bellwether EP6 τz target ≤9.5%.** |
+| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP14 live** / 10h | 6.246% | 7.127% | **3.500%** | 4.051% | **Surf_p slope re-engaged EP13→14 (−0.009pp vs EP10→13 mean −0.004). vol_p UNDER FLOOR by 0.143pp. EP15 student post expected ~14:20Z. Decision: val_surf_p ≤3.95% bull / 3.95-4.05% central / >4.05% bear. Currently 4.051% = bear edge but slope re-engaged. Continue to EP30 (~21:30Z).** |
+| **dl24-tanjiro** | **#1145** | **H9: curvature bias + w_vol_p clamp ≥0.05** | EP6 mid-EP7 / 6h | 6.307% | **7.041%** | **4.055%** | 4.102% | **STRONG: EP6 tied with H5 on WSS (7.04 vs 7.00), BETTER on vol_p (4.05 vs 4.18) BEFORE clamp activation. w_vol_p=0.147 declining toward 0.05 clamp (EP15-20 activation projected). Slope EP4→6 −0.058/ep — projects EP10 wss ≈ 6.81% (ahead of H5 EP10). Student posted EP3+6 combined at 13:33Z. EP10 next gate ~16:00Z (≤6.5/≤7.0/<4.0%).** |
+| dl24-nezuko | #1144 | H8: Lion → AdamW lr=5e-4 | **EP10 KILL** / 7h | 6.849% | 7.625% | 4.419% | 4.530% | **🛑 KILL AUTHORIZED 13:43Z. τz=10.300% well above 9.5% kill criterion. AdamW NOT delivering low-SNR τz gain. Student executing SIGTERM + eval + SENPAI-RESULT. WAVE FINDING: AdamW+GradNorm w_vol_p=0.293 vs Lion w_vol_p=0.0064 (68× saner ratio) — no vol_p starvation under AdamW. H11 assignment ready when terminal posts.** |
+| dl24-frieren | #1149 | H10: Charbonnier supplementary WSS loss | EP4 live / 5h | 6.516% | 7.280% | 4.209% | 4.231% | **ON TRACK: τz=9.76% at EP4 already at H5/H6 EP6 reference (2 epochs ahead). Charb/MSE weighted share stabilizing 44-46% (squarely in 20-60% healthy band). Slope τz −0.19/ep projects EP6=9.4% (clears ≤9.5% bellwether). val_wss projection EP10 ≈ 6.3% would map to test_wss ~5.9-6.0% (in #1056 target band). EP6 gate ~14:40Z.** |
 
-**Step rate correction**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
+**Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
-**Wave summary (13:25Z):**
+**Wave summary (13:45Z):**
 - **H5 tanjiro** CLOSED (#1132) — test_wss=6.609% (BEST WSS IN WAVE, −0.118pp under SOTA) BUT both floors breached. GradNorm starvation root cause identified.
 - **H6 frieren** CLOSED (#1135) — test_wss=6.770% tied, both floors breached. τy −0.057pp mechanism confirmed.
-- **H7 fern** EP10 PASS — val_surf_p 4.073% (under 4.10% threshold), val_vol_p 3.524% UNDER FLOOR. Slope re-engaged post EP5→6 transient flatline. Terminal surf_p center 3.55-3.65% (borderline). Continue to EP30.
-- **H8 nezuko** EP10 marginal — wss 7.69% over 7.1% gate, τz=10.38% over H5 ref by 1pp. AdamW NOT delivering predicted low-SNR τz gain. Vol_p discipline intact (no GradNorm starvation, w_vol_p 0.31). Likely close at terminal.
-- **H9 tanjiro** EP6 STRONG — val_wss 7.041 tied with H5, val_vol_p 4.055 BETTER than H5. w_vol_p declining to clamp; clamp activation expected EP9-12. Direct SOTA-chase trajectory ACTIVE.
-- **H10 frieren** EP2 — Charbonnier supplementary WSS loss. Student caught my Charb/MSE ratio prediction error (Charb/MSE rises as |δ| falls, not falls). Corrected guidance posted. Bellwether EP6 τz target ≤9.5%.
+- **H7 fern** EP14 — val_surf_p 4.051% (slope re-engaged from EP10→13 plateau), val_vol_p 3.500% deep UNDER FLOOR. Bear-edge but slope re-acceleration could carry surf_p below floor at terminal. Continue to EP30.
+- **H8 nezuko** EP10 **KILL AUTHORIZED** — τz=10.300% in 9.5+% kill range, hypothesis NOT validated. AdamW+GradNorm sanity is the wave finding. SIGTERM/eval/SENPAI-RESULT in progress. 8 GPUs freeing for H11.
+- **H9 tanjiro** EP6 STRONG — val_wss 7.041 tied with H5, val_vol_p 4.055 BETTER than H5 BEFORE clamp activation. Slope projects EP10 wss ≈ 6.81%. Direct SOTA-chase trajectory ACTIVE.
+- **H10 frieren** EP4 ON TRACK — τz=9.76% at EP4 already at H5/H6 EP6 reference. Charbonnier share 44-46% healthy. Floor-safe by construction. Bellwether EP6 gate ~14:40Z.
 
 ## Critical New Finding: GradNorm Vol_p Starvation Root Cause
 
@@ -79,9 +79,15 @@ GradNorm's relative-rate balancing crushes `w_vol_p` because vol_p has the lowes
 ## Next Research Directions
 
 ### Current running (may win):
-- **H6 frieren (#1135)**: Best remaining candidate. wss<7.0% at EP10, vol_p stable. Watch EP15-20 gate closely.
-- **H7 fern (#1142)**: surface_loss_weight=1.5 — clean isolation of the only positive H4 effect. High confidence. Watch EP3-EP10 closely for vol_p under-floor + surf_p not breaching.
-- **H8 nezuko (#1144)**: AdamW lr=5e-4 — tier-change sweep. Addresses Lion-noise root cause. Bold swing.
+- **H9 tanjiro (#1145)**: curvature bias + w_vol_p clamp ≥0.05. **Strongest active candidate** — EP6 beats H5 on vol_p preemptively, ties on WSS, slope projects EP10 wss ahead of H5. Clamp activation EP15-20.
+- **H7 fern (#1142)**: surface_loss_weight=1.5 — EP14 surf_p re-engaged after EP10-13 plateau. Bear-edge but trajectory still viable. EP15 decision metric ~14:20Z.
+- **H10 frieren (#1149)**: Charbonnier WSS loss — EP4 2 epochs ahead of H5/H6 reference on τz. Charb share 44-46% healthy. Floor-safe by construction. EP6 bellwether ~14:40Z.
+
+### Closing wave (8 GPUs freeing):
+- **H8 nezuko (#1144)**: KILL authorized 13:43Z. AdamW failed the τz bellwether at EP10. Wave finding: AdamW+GradNorm doesn't trigger vol_p starvation (68× saner ratio than Lion).
+
+### H11 candidate ready for nezuko (assign on terminal SENPAI-RESULT):
+- **AdamW + per-axis WSS weights** (τ_x=1.0, τ_y=1.2, τ_z=1.5) — compounds H8 wave finding (AdamW=safe optimizer) with H4-revisited (per-axis weights, but Lion-noise root cause neutralized by AdamW). The cleanest scientific motivation: H4 failed because Lion-sign on weighted axes amplified noise — H8 proved AdamW makes that side stable.
 
 ### Researcher-agent (background, agentId: a08af1e87b171e527):
 - Running since ~06:26Z. Output: `/workspace/senpai/target/research/RESEARCH_IDEAS_2026-05-16_<time>.md`
