@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-16 19:45 UTC (H10 CLOSED w/ representation-floor wave finding; H10b PR #1159 LAUNCHED frieren; H11 eval rank0 still running; H11b READY pending H11 close; H9b tanjiro EP1 wave finding; H7 fern EP21 bear case)
+- 2026-05-16 19:50 UTC (H10 CLOSED w/ representation-floor wave finding; H11 CLOSED w/ catastrophic regression; H10b PR #1159 frieren + H11b PR #1160 nezuko both LAUNCHED; H9b tanjiro EP1 positive emergent finding; H7 fern EP21 bear case)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -45,7 +45,7 @@
 | dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP21+ live** / 14h | 6.215% | 7.093% | 3.485% | 4.041% | **EP15→EP21 surf_p flat (σ ≈ 0.005pp). Bear case confirmed; vol_p mechanism locked under floor. Continue to EP30 (~24:00Z). Most likely NOT-A-MERGE due to surf_p breach, but H7 stack is positive ingredient for composition.** |
 | dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP1 verified** / 1h | — | — | — | — | **EP1 verification: MAE aux rewriting GradNorm dynamics. w_vol_p stable 0.65-0.93 (vs H9's terminal 0.088 — 10× equilibrium shift). Clamp dormant (natural floor jumped above 0.15). EP3 viability gate ~21:00Z is the next decision point. Positive emergent wave finding.** |
 | dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **LAUNCHING** / 0h | — | — | — | — | **PR #1159 created 19:42Z. Compounds H9 curvature WSS mechanism with single-axis Charbonnier reshape on τ_z (highest val→test gap = highest leverage). H10b instructions: merge H9 branch (carry curvature stack), add `wss_charbonnier_axes=z` flag, run 30 EP.** |
-| dl24-nezuko | #1154 | **H11: AdamW lr=7e-4 + per-axis WSS — KILLED EP5** | EP5 KILL → EVAL | — | — | — | — | **kukjenp5 crashed at 19:28:56Z (SIGTERM authorized 18:33Z). Eval-only run launched 19:29:50Z — 7/8 ranks finished, rank0 still running test eval at 19:43Z (best-val EP6 checkpoint). Best-val EP6 vals: val_abupt=11.78%, val_wss=11.74%, val_τ_z=16.03%. Test metrics expected ~19:50-20:00Z. H11b PR ready (blocked: helper refuses to create while #1154 still has status:wip).** |
+| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** (CLEAN ISOLATION) | **LAUNCHING** / 0h | — | — | — | — | **PR #1160 created 19:50Z after closing H11 #1154 with catastrophic-regression terminal (test_abupt=11.16%, test_wss=11.30%). Single-variable change vs H8: adds `--wss-axis-weights "1.0,1.2,1.5"`, holds lr=5e-4 and T_max=30 fixed. Required to push implementation commit BEFORE launch (H11 implementation never landed in git).** |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
@@ -94,9 +94,10 @@ The WSS plateau IS broken at H9: 4 of 7 test axes under SOTA #972, including the
 | #1144 H8 | Lion→AdamW lr=5e-4 | ❌ CLOSED | All-axis regression (+0.5pp); WAVE FINDING: AdamW+GradNorm stable (w_vol_p=0.298) |
 | #1145 H9 | Curvature bias + 0.05 clamp | 🎯 **WSS BREAKTHROUGH** | 4/7 axes under SOTA; floor breaches remain. Clamp dormant. |
 | #1149 H10 | Charbonnier WSS supp loss | ❌ CLOSED (19:30Z) | Representation-floor wave finding (same equilibrium, different residuals; +0.600pp τ_z val→test gap) |
-| #1154 H11 | AdamW lr=7e-4 + per-axis WSS | 🛑 KILLED EP5 (autonomous, eval in progress) | LR jump + per-axis weights compounded instability; H11b isolation pending |
+| #1154 H11 | AdamW lr=7e-4 + per-axis WSS | ❌ CLOSED 19:48Z | Catastrophic regression (test_abupt=11.16%, test_wss=11.30%); wave finding "AdamW lr>5e-4 + per-axis weights = instability" |
 | #1157 H9b | clamp=0.15 + curvature + vol_p MAE aux | 🟢 EP1 verified | Positive emergent: MAE aux equilibrium shift of 10× on w_vol_p; clamp dormant |
 | #1159 H10b | H9 curvature + Charbonnier on τ_z only | 🟢 LAUNCHING | Compound H9 representation × τ_z-leverage Charbonnier |
+| #1160 H11b | AdamW lr=5e-4 + per-axis WSS τ-weights | 🟢 LAUNCHING | Clean per-axis isolation; same as H8 stack + per-axis weights only |
 
 ## Key Mechanistic Findings (Wave Summary)
 
@@ -116,9 +117,8 @@ The WSS plateau IS broken at H9: 4 of 7 test axes under SOTA #972, including the
 - **H9b tanjiro (#1157)**: EP1 verified, MAE aux rewriting GradNorm. **The wave's most important active experiment.** EP3 viability gate ~21:00Z; EP10 decision ~02:00Z. If MAE aux + clamp punches through vol_p ceiling, we may be SOTA-on-aggregate.
 - **H10b frieren (#1159)**: launching. Compound of H9 curvature WSS unlock + Charbonnier-on-τ_z (highest val→test gap axis). 
 
-### Pending student action (next ~30 min):
-- **H11 nezuko eval**: rank0 still running test eval at 19:43Z. Terminal SENPAI-RESULT expected ~19:55-20:10Z. Once posted, close PR #1154 and create H11b PR (already prepared in `/tmp/h11b_pr_body.md`).
-- **H11b nezuko**: AdamW **lr=5e-4** + per-axis WSS τ-weights. Single-variable isolation; ready to launch immediately after H11 closes.
+### Just launched (next ~30 min):
+- **H11b nezuko (#1160)**: AdamW lr=5e-4 + per-axis WSS τ-weights (1.0, 1.2, 1.5). Clean single-variable isolation. EP3 gate ~22:00Z (val_abupt ≤ 8.5%, +0.24pp tolerance vs H8's 8.26%).
 
 ### Compositional candidates (post-H9b):
 - **H7 + H9 stack (composition)**: surface_loss_weight=1.5 + curvature bias + clamp=0.15. If H9b clears floor on vol_p, combine with H7's surface upweight mechanism for further surf_p reduction.

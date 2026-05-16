@@ -8,6 +8,80 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 19:48 UTC — PR #1154 CLOSED: WSS H11 AdamW lr=7e-4 + per-axis WSS τ-weights (dl24-nezuko, `kukjenp5`+`zhmyhxcd`)
+
+- **Branch:** `dl24-nezuko/h11-adamw-per-axis-wss`
+- **W&B runs:** training `kukjenp5` (DDP8, killed at EP5 via SIGTERM), eval-only `zhmyhxcd` (EP6 best-val EMA checkpoint)
+- **Hypothesis:** Apply per-axis WSS τ-magnitude weights (w_τ_x=1.0, w_τ_y=1.2, w_τ_z=1.5) AFTER GradNorm to concentrate optimization pressure on the hardest WSS axis. Stacked on AdamW lr=7e-4 (40% above H8 baseline) with cosine T_max=25 (vs H8's 30).
+- **Kill reason:** EP3 viability gate (val_abupt ≤ 8.0%) failed by 8.54pp (actual 16.54%). EP4=16.27%, EP5=12.21% trajectory all 4-8pp above H8 reference. 40-min silent radio after 17:47Z anomaly nudge confirmed unrecoverable. Advisor-killed autonomously at 18:33Z based on W&B direct read.
+
+### Terminal test metrics (EP6 best-val EMA checkpoint, eval run `zhmyhxcd`)
+
+| Metric | SOTA #972 | H11 test | Δ vs SOTA | Floor | Verdict |
+|--------|---:|---:|---:|---|---|
+| test_abupt | 5.844% | **11.163%** | **+5.319pp** | — | catastrophic regression |
+| test_wss | 6.727% | **11.304%** | **+4.577pp** | — | catastrophic regression |
+| test_τ_x | 5.971% | 9.980% | +4.009pp | — | ❌ |
+| test_τ_y | 7.362% | 12.315% | +4.953pp | — | ❌ |
+| **test_τ_z** | 8.747% | **14.811%** | **+6.064pp** | — | ❌ (bellwether worst hit) |
+| test_vol_p | **3.643%** | 10.148% | +6.505pp | **BREACH** | ❌ HARD FLOOR BREACH |
+| test_surf_p | **3.577%** | 8.561% | +4.984pp | **BREACH** | ❌ HARD FLOOR BREACH |
+
+**0 of 7 axes anywhere near SOTA.** All metrics ~2× SOTA — broken run from EP1, never recovered.
+
+### Val trajectory (val_primary)
+
+| EP | step | val_abupt | val_wss | val_vol_p | val_τ_z | gradnorm/w_vol_p |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10,975 | 20.04% | 20.84% | 16.53% | 26.66% | 0.451 |
+| 2 | 21,951 | **28.48%** | 28.14% | 28.24% | 35.57% | — |
+| 3 | 32,927 | 16.54% | 16.65% | 14.74% | 22.35% | — |
+| 4 | 43,903 | 16.27% | 14.66% | 21.56% | 19.72% | — |
+| 5 | 54,875 | 12.21% | — | — | — | 0.341 |
+| **EP6 best-val (checkpoint)** | — | **11.78%** | 11.74% | 10.72% | 16.03% | — |
+
+EP1→EP2 spike (+8.44pp on val_abupt) is the signature of warmup→full-LR optimization instability. Recovery slope after EP2 was real (−4.06pp/ep) but starting from 28.48% meant the trajectory could not reach competitive plateau in 30 epochs.
+
+### Wave finding (locked in): "AdamW lr>5e-4 + per-axis WSS weights = optimization instability"
+
+H11 stacked **three** simultaneous changes vs H8 baseline:
+1. AdamW lr 5e-4 → 7e-4 (40% higher peak LR)
+2. Per-axis WSS weights enabled (w_τ_x=1.0, w_τ_y=1.2, w_τ_z=1.5)
+3. cosine T_max 30 → 25
+
+The per-axis τ_z=1.5 boost amplified gradient norm during the post-warmup transition (EP1→EP2 spike). Lion can absorb this through sign-update saturation; AdamW's `m/sqrt(v+eps)` amplifies the gradient norm change directly. The recovery trajectory was real but the EP30 budget could not absorb the EP1-EP2 deficit.
+
+**Mechanism not falsified — only the LR-coupled instance was.** H11b PR #1160 holds lr=5e-4 and T_max=30 at H8 baseline values to isolate the per-axis mechanism cleanly. If H11b clears the EP3 gate, the per-axis mechanism is validated; if H11b also fails, per-axis under GradNorm is fundamentally broken.
+
+### Workflow finding (also locked in)
+
+The H11 branch only contained the empty assignment commit — the actual `--wss-axis-weights` implementation was modified locally on the student's working copy and used at launch without being committed to git. This breaks reproducibility. **H11b instructions explicitly require pushing the implementation commit BEFORE launching.**
+
+### Carry-forward to H11b
+
+- **H11b stack** = exact H8 PR #1144 baseline (AdamW lr=5e-4, GradNorm, cosine T_max=30, all SOTA #972 stack) + per-axis WSS τ-weights ONLY
+- Single-variable change → causally clean attribution
+- EP3 gate raised slightly from H8's 8.0% to 8.5% (+0.24pp tolerance for the per-axis mechanism overhead)
+- EP6 gate at 7.3% (vs H8 EP6 ~7.5%); EP10 gate at 7.0%
+
+### Run command (H11, for reference)
+
+```bash
+torchrun --standalone --nproc_per_node=8 train.py \
+  --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
+  --epochs 30 --batch-size 1 \
+  --model-layers 6 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --model-pe string_multisigma --pe-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --optimizer adamw --lr 7e-4 --weight-decay 0.005 \
+  --lr-warmup-epochs 1 --lr-cosine-t-max 25 \
+  --use-ema --ema-decay 0.999 --ema-start-step 500 \
+  --use-y-symmetry-aug --y-symmetry-aug-prob 0.5 \
+  --use-gradnorm \
+  --wss-axis-weights "1.0,1.2,1.5"  # uncommitted, applied locally
+```
+
+---
+
 ## 2026-05-16 19:30 UTC — PR #1149 CLOSED: WSS H10 Charbonnier supplementary loss on WSS (dl24-frieren, `wnj931pj`+`c5436ytt`)
 
 - **Branch:** `dl24-frieren/h10-charbonnier-wss-loss`
