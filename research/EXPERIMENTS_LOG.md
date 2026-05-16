@@ -1,3 +1,80 @@
+## 2026-05-16 20:30 — PR #1143: H8 Mirror-Symmetry Data Augmentation (frieren) — TERMINAL FLAT NULL, CLOSED (first dedicated data-distribution-layer attack on τ_z bottleneck — falsifies "data diversity" hypothesis cleanly; test τz/τx = 1.456 lands EXACTLY in collapse band of 6 closed model-side attacks)
+
+- **Branch**: `frieren/h8-mirror-symmetry-aug` (closed)
+- **W&B run**: `ft60dpdm` (group `wave30_h8_mirror_aug`) — 838.8 min total (14.0h), 13/13 epochs complete, EMA best at EP13, 0 ranks errored
+- **Hypothesis**: Apply x-z plane y-flip mirror augmentation at p=0.5 to break τ_z structural bottleneck by enforcing exact τ_y sign-flip equivariance + doubling geometric diversity in expectation.
+
+### Terminal results — paper-facing metrics
+
+| Metric | val (n=34) | test (n=50) | Baseline | Δ vs base | Gate |
+|---|---:|---:|---:|---:|:--|
+| abupt | 6.332% | 6.052% | val 6.126% | val +0.206pp | MERGE FAIL |
+| **WSS (overall)** | 7.188% | **7.001%** | test 6.727% | **test +0.274pp** | **MERGE FAIL** |
+| SP | 4.166% | 3.822% | test 3.577% (floor) | +0.245pp | FLOOR FAIL |
+| vol_p | 3.681% | 3.578% | test 3.643% (floor) | −0.065pp | floor PASS (cosmetic) |
+| τ_x | 6.292% | 6.229% | — | — | — |
+| τ_y | 7.767% | 7.562% | — | — | — |
+| **τ_z** | **9.752%** | **9.071%** | — | — | — |
+| **τz/τx** | val 1.550 | **test 1.456** | ~1.46 | ~0.00 | falsification target <1.40 NOT MET |
+
+### Verdict: FLAT NULL — DO NOT MERGE
+
+**The first dedicated data-distribution-layer attack on the τ_z bottleneck — and the cleanest "input-distribution attacks won't move the τ_z needle" data point we have.**
+
+Per PR's own success criteria:
+- "BIG WIN" (τz/τx ≤ 1.30 + WSS < 6.727%) — NOT MET
+- "MERGE" (test_WSS < 6.727% + floors held) — NOT MET (test_WSS +0.27pp; test_SP +0.245pp over floor)
+- "PARTIAL" (WSS within 0.1pp + τz/τx materially down) — NOT MET (τz/τx unchanged)
+- "FLAT NULL" — CLOSEST MATCH (val_WSS within 0.05pp but mildly worse than baseline)
+
+### Mechanistic intelligence — fleet-wide finding
+
+**The τ_z bottleneck is upstream of geometric data diversity.** Mirror-augmentation enforced an EXACT sign-flip equivariance on τ_y by construction and reflected geometry across x-z plane — yet:
+- val τz/τx widened monotonically (1.36 → 1.49 → ... → 1.55 terminal)
+- test τz/τx = 1.456 lands EXACTLY in the [1.44, 1.47] collapse band of all 6 closed model-side attacks
+- Per-channel test ordering τ_z > τ_y > τ_x is IDENTICAL to baseline (no re-ordering)
+- τ_y / τ_x ratio = 1.214 unchanged → augmentation enforced τ_y equivariance by construction yet τ_y rel-L2 remained anchored to τ_z's level
+
+**This cleanly rules out:**
+1. "Insufficient geometric diversity" hypothesis (mirror-aug doubles coverage) → REJECTED
+2. "Spurious τ_y co-adaptation" hypothesis (mirror-aug enforces equivariance) → REJECTED
+
+**Cleanly implicates** the τ_z bottleneck as residing at:
+- (a) Output projection / per-channel calibration
+- (b) Loss formulation across channels
+- (c) Dataset-level per-channel target statistics (variance, dynamic range)
+
+**NOT at model architecture or input augmentation distribution.**
+
+### Mild val regression (+0.21pp) explanation
+
+Plausibly the cost of pos-embed redundancy: the model already has string_separable sincos pos_embed + LayerNorm providing strong intrinsic rotation-invariance properties. Adding mirror-aug forces the network to spend a small slice of capacity stabilizing under what is already approximately invariant input — with no upside.
+
+### Implementation diagnostics (all PASS)
+
+- `config.mirror_aug_prob = 0.5` confirmed in W&B run config (all 8 ranks)
+- `mirror_collate` correctly flips: `surface_x[y, ny]`, `surface_y[τ_y]`, `volume_x[y]`; cp/vol_p invariant; volume handled with guard
+- Tensor `clone()` ensures no in-place mutation of cached dataset (critical)
+- Train-only augmentation: val + test DataLoaders use unchanged `pad_collate` (verified at `trainer_runtime.py:248-252`)
+- Expected ~2,600 mirror-augmented training views over 13 epochs (0.5 × 400 cases × 13 epochs), consistent with sampler
+
+### Fleet-wide intelligence — data-distribution layer EXHAUSTED on τ_z
+
+Combined with the 9 prior model-side attacks that all landed in τz/τx ∈ [1.44, 1.57], the data-distribution layer is now formally a NULL attack axis on the τ_z bottleneck. **Closing this layer as a viable Wave 30 attack vector.**
+
+### Suggested follow-ups (student diagnostic, captured for queue)
+
+1. **Per-channel target z-score normalization** — H16 assigned in PR #1161 to frieren as direct follow-up
+2. **Mirror-pair consistency loss** — explicit equivariance penalty (2× forward pass cost)
+3. **Per-channel target variance logging** — diagnostic to confirm τ_z's distribution moments
+4. **Cross-stack with future winner** — if any in-flight attack lands τz/τx ≤ 1.40, re-run with mirror-aug to test compounding/saturation
+
+### Closure summary
+
+**FLAT NULL with mild val regression.** Within "<5% regression" close band (test_WSS 4.1% over baseline). **Cleanest data-distribution-layer falsification in Wave 30.** frieren's diagnostic exemplary: math identity reasoning, complete implementation verification, per-channel ordering analysis, explicit "stop pursuing data-level attacks" recommendation. Reassigned in PR #1161 (H16 per-channel z-score) — directly addressing the output-side calibration axis flagged in this closure.
+
+---
+
 ## 2026-05-16 19:00 — PR #1156: H13b Tangent/Normal Anisotropic Loss at β=2 (thorfinn) — CLOSED (also diverged with DIFFERENT mechanism — corruption without gradient explosion; per-vertex anisotropic loss formulation itself broken, not just amplification factor)
 
 - **Branch**: `thorfinn/h13b-anisotropic-beta2` (closed)

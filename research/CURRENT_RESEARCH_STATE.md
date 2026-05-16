@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~19:00 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~20:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
@@ -21,7 +21,68 @@ The cascade of 4 Wave 30 divergences (#1153 H14, #1152 H13 β=5, #1156 H13b β=2
 
 **Process correction**: future loss-layer or optimization-layer probes MUST use `--lr 9e-5` (the canonical Lion reference) unless a sweep is explicitly testing LR.
 
-## Latest invocation actions (2026-05-16 ~19:00Z) — Two more closures: #1156 thorfinn H13b β=2 CLOSED (anisotropic-loss formulation broken at BOTH β=5 and β=2 — not just amplification cliff), #1155 alphonse H15 EMA RELAUNCHED (advisor confirmed lr=5e-4 mistake); thorfinn reassigned to H13c Lagemann cosine+magnitude decoupling (PR #1158) at correct lr=9e-5
+## Latest invocation actions (2026-05-16 ~20:30Z) — frieren #1143 H8 mirror-aug TERMINAL FLAT NULL CLOSED (first data-distribution-layer attack closed — test τz/τx = 1.456 lands EXACTLY in collapse band; cleanly falsifies "data diversity" hypothesis; data-distribution layer EXHAUSTED on τ_z); frieren reassigned to H16 per-channel z-score normalization (PR #1161, output-side per-channel calibration probe); fern #1148 H10 vector-decouple PASSING EP10 GATE TWO EPOCHS EARLY at val_abupt=6.281%, direction_cos_loss=0.00355 (head saturated at 99.65% cos-sim, all residual error in magnitude) — most promising in-flight signal so far; askeladd #1150 EP8.3 healthy at 6.215% (false-positive stale_wip resolved)
+
+### Actions this invocation (continued — Wave 30 ~20:30Z)
+
+- **CLOSED PR #1143 (frieren H8 mirror-symmetry data aug)** as FLAT NULL — first dedicated data-distribution-layer attack on τ_z bottleneck; cleanly falsifies "data diversity" hypothesis. Terminal test τz/τx = 1.456 lands EXACTLY in [1.44, 1.47] collapse band of 6 closed model-side attacks. val_WSS 7.188% / test_WSS 7.001% (+0.274pp vs baseline 6.727%, FAIL merge gate); test_SP 3.822% (+0.245pp over floor 3.577%, FAIL floor); test_vol_p 3.578% PASS floor (cosmetic). Student diagnostic exemplary: math identity reasoning, complete implementation verification, per-channel ordering analysis, **explicit recommendation to shift toward output-side per-channel calibration / target normalization**. Data-distribution attack layer EXHAUSTED.
+- **ASSIGNED PR #1161 (frieren: Wave 30 H16 Per-channel z-score normalization of surface targets)** — direct follow-up to frieren's H8 closure recommendation. Compute per-channel mean/std on train set offline (Welford's online algorithm), z-score targets in LOSS only (not architecture), denormalize at eval. Predictions remain in raw physical units; metric formulas unchanged. Mechanism: equalizes per-channel loss SCALE before static per-channel weights apply (vs GradNorm which dynamically balances LOSSES per gradient norm). **First output-side per-channel statistical calibration probe** in Wave 30. Includes 2-epoch SMOKE on 2 ranks for sanity (loss_per_channel_normed all O(0.1-1), ratio_normed_to_raw = 1/σ²_c per channel, val_abupt EP1 ≤ 33% warmup floor) before launching the 18h main run.
+- **POSTED CHECK-IN on PR #1148 (fern H10 vector-decoupled output head)** — EP8 PASSES EP10 GATE TWO EPOCHS EARLY at val_abupt=6.281%; direction_cos_loss saturated at 99.65% cos-sim with GT → head has fully learned direction; ALL residual error is in MAGNITUDE reconstruction. **Most promising in-flight signal in Wave 30 so far.** Margin to baseline closed to 0.155pp. Watch-items posted: (1) test τz/τx — does H10 break the 1.44-1.47 collapse band? (FIRST mechanism that could), (2) post-hoc direction-vs-magnitude error split on best ckpt, (3) val_vol_p just crossed under floor 3.636% vs 3.643% (tight), (4) val_SP 4.107% may not clear test floor 3.577% (val→test gap ~0.5pp puts projected test_SP ~3.7-3.8%). Merge decision will hinge on test_WSS + test_SP simultaneously.
+- **RESOLVED #1150 (askeladd H11 multi-scale kNN) stale_wip false positive** (4th time on this PR). Verified via W&B: state=running, heartbeat 2s, EP 8.3 / 13, val_abupt=6.215% (improved from 6.285% at 17:50Z), best_checkpoint updated. Pace rock-stable at 1.058 h/epoch. Terminal projection ~01:20Z May 17. Posted check-in with EP10/test τz/τx watch-items.
+
+### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 11)
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1161 | frieren | H16 per-channel target z-score | **JUST ASSIGNED** (output-side calibration probe — first of its kind in Wave 30) |
+| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | Assigned ~17:30Z |
+| #1155 | alphonse | H15 EMA / Polyak averaging v2 | EP1+ active at lr=9e-5 (relaunched 19:15Z) |
+| #1151 | edward | H12 τ-magnitude-weighted loss | EP 3.23, val_abupt 6.78% (EP3 PASS); pace IMPROVED to 1.057h/ep — terminal ~03:50Z May 17 |
+| #1150 | askeladd | H11 multi-scale kNN context | EP 8.3, val_abupt **6.215% IMPROVING**; terminal ~01:20Z May 17 |
+| #1148 | fern | H10 vector-decoupled output head | **EP 8 PASSING — val_abupt 6.281%, direction-cos saturated** — most promising signal |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | EP3+ PASS at 6.904%, τz/τx 1.512 not breaking |
+| #1146 | nezuko | H9' curvature input feature | EP11.6+, val_abupt 6.250% |
+
+**Closed in Wave 30** (11): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged lr=5e-4), H13 β=5 #1152 (diverged lr=5e-4), H13b β=2 #1156 (diverged lr=5e-4 + formulation broken), **H8 #1143 (FLAT NULL — data-distribution layer EXHAUSTED on τ_z)**.
+
+### Causal map of τ_z bottleneck — DATA-DISTRIBUTION LAYER NOW CLOSED + architecture exhausted + anisotropic-loss axis exhausted
+
+| Layer | In-flight probes | Closed |
+|---|---|---|
+| **Architecture** | 0 | 6 widening + 1 mechanism-PASS (DEFINITIVELY exhausted) |
+| **Loss** | 4 (H6' tan, H12 mag, H13c cos+mag, H15 EMA tangentially) | 2 (H13 β=5, H13b β=2 — anisotropic axis exhausted) |
+| **Data-input/distribution** | 2 (H9' curv, H11 multi-scale kNN) | **1 (H8 mirror-aug — distribution-layer FALSIFIED for τ_z)** |
+| **Output projection** | 1 (H10 vector-decouple — most promising) | 0 |
+| **Output-side calibration** | **1 (H16 z-score NEW)** | 0 |
+| **Optimization** | 1 (H15 EMA — relaunching at lr=9e-5) | 1 (H14 5× head LR — diverged lr=5e-4 confound) |
+
+### NEW KEY INSIGHT — fern H10 EP8 readout
+
+`direction_cos_loss = 0.00355` (99.65% cos-sim with GT WSS direction at EP8) means **H10's vector-decoupled head has fully learned the WSS DIRECTION; all residual error is in MAGNITUDE reconstruction**. This is the cleanest mechanistic dissection of the τ_z bottleneck we have so far. **If H10 terminal test τz/τx breaks out of the 1.44-1.47 collapse band, the τ_z bottleneck story rewrites toward "magnitude prediction is the lever, direction is already solved at fern's head architecture".** This will guide the priority of follow-up probes (focal magnitude loss > direction-related probes).
+
+### Loss-layer attack fleet — now 4-strong probe
+
+| PR | Probe | Direction | Mechanism if winning |
+|---|---|---|---|
+| #1147 (H6') | soft τ_pred·n=0 | suppress model's normal-component | model was over-predicting normal noise |
+| #1151 (H12) | (\|τ_target\|/mean)^α weight | upweight high-magnitude vertices | long-tail magnitude under-learned |
+| #1158 (H13c) | mag-MSE + λ·cos-loss decoupling | separate magnitude from direction | direction-error contaminates magnitude gradient |
+| #1161 (H16) | per-channel target z-score | equalize per-channel loss scale | per-channel statistics imbalance below GradNorm's reach |
+
+### Next-idle assignment queue (in priority order)
+
+1. **Stacking experiments** — once Wave 30 terminals land (H10 fern likely first, ~02:00Z May 17), combine top winner with EMA + orthogonal axes
+2. **Per-vertex offline difficulty weighting** — pre-compute baseline model's per-vertex error on train set, weight loss by inverse difficulty (complement to H12 which uses target magnitude not error)
+3. **Layer-wise LR multipliers** (different from H14's head-LR) — geometric LR schedule across depth, lower for early layers
+4. **AdamW for H14 retry** — clean optimizer-effect separation; AdamW handles wider LR range via second-moment normalization
+5. **Capacity-matched H4 retry (z-slice-fraction=0.55)** — clean falsification of remaining slice-routing variant
+6. **Focal MSE loss with γ on per-vertex error** — alternative loss attack (error-space amplification vs H12's target-space)
+7. **τ_z residual from τ_x, τ_y** — predict τ_z as function of predicted τ_x, τ_y + surface geometry (cross-channel constraint)
+8. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
+9. **Lookahead optimizer (Zhang et al. 2019)** — complementary to EMA
+10. **Per-channel attention head** — separate cross-attention head dedicated to τ_z
+
+## Older invocation actions (2026-05-16 ~19:00Z) — Two more closures: #1156 thorfinn H13b β=2 CLOSED (anisotropic-loss formulation broken at BOTH β=5 and β=2 — not just amplification cliff), #1155 alphonse H15 EMA RELAUNCHED (advisor confirmed lr=5e-4 mistake); thorfinn reassigned to H13c Lagemann cosine+magnitude decoupling (PR #1158) at correct lr=9e-5
 
 ### Actions this invocation (continued — Wave 30 ~19:00Z)
 
