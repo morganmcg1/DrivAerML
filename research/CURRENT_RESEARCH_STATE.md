@@ -1,11 +1,60 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~20:30 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~23:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## ★ CRITICAL FLEET-WIDE FINDING (2026-05-16 ~19:00Z): lr=5e-4 confound on 4 Wave 30 PRs
+## Latest invocation actions (2026-05-16 ~23:45Z) — nezuko #1146 H9' curvature input CLOSED NOT-A-MERGE (7th model-side τ_z fingerprint closure, test_SP +0.159pp floor breach, dl24 #1132 win FAILED to transfer to tay stack); frieren H16 Huber-δ=1.0 PIVOT-ACCEPTED (gradient-mass arithmetic confirms outlier mechanism active even at frac_in_L2=0.97, 2.5% tail vertices carry ~72% MSE-equivalent gradient mass); fern H10 EP10.8 near-terminal at ~01:25Z May 17 (cosine LR deep at 6.1e-6); askeladd EP9.6 healthy; thorfinn H13c EP2.5 on 1.6h/ep pace; alphonse H15 v2 EP3 raw 7.44% MARGINAL with EMA converging faster than predicted
+
+### Actions this invocation
+
+- **CLOSED PR #1146 (nezuko H9' curvature input feature)** as NOT-A-MERGE. Test_SP 3.7362% breaches floor 3.577% by +0.159pp; test_abupt +0.060pp WORSE; test_WSS +0.063pp WORSE; **vol_p improved by −0.123pp val / −0.056pp test (passes floor)** — kNN-of-normals is real signal for sharp surface-volume coupling regions, just not τ_z. **7th model-side closure on τ_z attractor fingerprint** (test τz/τx = 1.459, collapsed band 1.45-1.55). **dl24 #1132 test_WSS 6.609% did NOT transfer to tay stack** (our reproduction: 6.790%, +0.181pp worse) — suggests dl24's win was stack × κ, not κ in isolation. nezuko diagnostic exemplary: monotonic per-epoch trajectory, κ-feature health logging, dl24-cross-pollination falsification analysis, 3 well-reasoned follow-up suggestions.
+- **RULED ON #1161 frieren H16 Huber pivot — Option A (δ=1.0)**. Frieren's pre-flight diagnostic caught my (0.4, 0.8) frac_in_L2 sanity range as poorly calibrated for heavy-tailed τ_z (max_abs_error_normed = 5-17 throughout training). Their gradient-mass arithmetic: at δ=1.0, ~2.5% of vertices in L1 region carry ~72% of MSE-equivalent gradient mass; Huber delivers 10-34× gradient cap on those outliers vs MSE. **Tail-clipping IS the H16 mechanism**, just expressed differently than my range envisioned. δ=1.0 cleanly tests outlier-domination hypothesis; if it wins → follow-up with δ=0.5 to add bulk-reshape; if FLAT NULL → falsifies tail-domination, push to output-head architecture.
+- **SPAWNED researcher-agent** for fresh nezuko hypothesis on a different attack surface (output-head architecture or surface-normal-aligned coordinate frame for τ targets). Constraints: avoid more loss-reweighting (4 slots already), avoid more input-feature/architecture (7 closures), prefer output-projection or coordinate-frame attacks.
+- **POSTED CHECK-INS on #1158 (thorfinn H13c)**, **#1148 (fern H10)**, **#1150 (askeladd H11)**, **#1151 (edward H12)** stale_wip false positives. All 4 runs healthy, advancing, fresh heartbeats. Updated pace projections — fern likely first terminal at ~02:00Z May 17 (EP13 finish + test eval).
+
+### Wave 30 fleet — 7 active + 1 idle (nezuko); Wave 30 closed count: 12
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| (closed) | nezuko | (re-assigning) | **IDLE — awaiting researcher-agent hypothesis** |
+| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | Smoke EP1 mid-run (47% through), main launch after EP2 sanity |
+| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | EP 2.5, 1.6h/ep, partial-terminal at EP10-11 expected |
+| #1155 | alphonse | H15 EMA / Polyak v2 (lr=9e-5) | EP3 raw 7.44% MARGINAL, EMA at 23.72% (accelerating catch-up); 6h budget — TRUNCATES at EP5 |
+| #1151 | edward | H12 τ-magnitude-weighted loss | EP 4.17, train_loss 0.0104, best_ckpt updated, projects EP9-10 at 18h cliff |
+| #1150 | askeladd | H11 multi-scale kNN context | EP 9.61, val improving, best_ckpt updated; **~1.6h margin to EP13 by cliff** |
+| #1148 | fern | H10 vector-decoupled output head | **EP 10.8 / 13, lr=6.1e-6 deep cosine, terminal ~02:00-02:30Z May 17** — first terminal expected |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | EP3+ PASS at 6.904%, τz/τx 1.512 not breaking |
+
+**Closed in Wave 30** (12): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged lr=5e-4), H13 β=5 #1152 (diverged lr=5e-4), H13b β=2 #1156 (diverged lr=5e-4 + formulation broken), H8 #1143 (FLAT NULL data-distribution), **H9' #1146 (NOT-A-MERGE on test_SP floor breach; 7th model-side closure on τ_z fingerprint)**.
+
+### Causal map of τ_z bottleneck — 7 architecture/input closures + 1 data-distribution closure + 2 anisotropic-loss closures = **bottleneck localized to LOSS-FORMULATION / OUTPUT-PROJECTION layer**
+
+| Layer | In-flight probes | Closed |
+|---|---|---|
+| **Architecture / input-feature** | 1 (H11 multi-scale kNN — last gasp) | **7 closures** (6 widening + H9' curvature + H8 distribution) — DEFINITIVELY EXHAUSTED |
+| **Loss formulation** | **4** (H6' tan, H12 mag, H13c cos+mag, H16 Huber) | 2 (H13 β=5, H13b β=2) |
+| **Output projection** | 1 (H10 vector decouple — most promising) | 0 |
+| **Optimization** | 1 (H15 EMA v2) | 1 (H14 5× head LR — lr confound) |
+| **Output-side calibration** | (subsumed by H16 Huber pivot) | 0 |
+
+### Key signal: fern H10 EP10 PASS + direction_cos_loss 99.7% saturated
+
+The H10 vector-decoupled head separates direction from magnitude prediction. EP10 readout: **direction_cos_loss = 99.7% cos-sim with GT** → direction fully learned at head level. **All residual error is in MAGNITUDE.** If H10 terminal test_WSS beats baseline 6.727%, the τ_z bottleneck story rewrites toward "magnitude prediction is the lever, direction is solved." Watch test τz/τx — if it breaks below 1.40, magnitude-focused approaches (H16 Huber, H12 weighted) get strong priority for stacking.
+
+### Next-idle assignment queue (for after nezuko)
+
+1. **Stacking experiments** — combine top Wave 30 winner with EMA (H15 if any positive) + orthogonal axis
+2. **Output-head architecture: separate MLP head per τ component** (untested) — tests "single 4-channel head limits per-channel learning" hypothesis
+3. **Surface-normal-aligned coordinate frame for τ targets** — predict in (tangent_1, tangent_2, normal) basis instead of global xyz; tests "global-frame target → wrong inductive bias"
+4. **Adaptive vertex sampling** (focus training compute on hard τ_z vertices) — alternative to loss reweighting that changes the data, not the loss
+5. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
+6. **AdamW for H14 retry** — clean optimizer-effect separation
+7. **Focal MSE on per-vertex error** — error-space amplification (vs H12's target-space)
+8. **Lookahead optimizer** — complementary to EMA
+
+## ★ CRITICAL FLEET-WIDE FINDING (2026-05-16 ~19:00Z): lr=5e-4 confound on 4 Wave 30 PRs (preserved for reference)
 
 The cascade of 4 Wave 30 divergences (#1153 H14, #1152 H13 β=5, #1156 H13b β=2, #1155 H15) all stem from a single advisor error: writing `--lr 5e-4` instead of canonical `--lr 9e-5` on the PR commands. Conflation of SOTA single-model PR #972 (`--lr 1e-4`) with the Wave 30 Lion reference. The canonical Wave 30 recipe is BASELINE.md "L=5 + surf→vol xattn ... Lion **lr=9e-5**, 13ep" and most-recent closed-clean Wave 30 PR (#1138 H3) used exactly that.
 

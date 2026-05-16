@@ -1,3 +1,71 @@
+## 2026-05-16 23:35 — PR #1146: H9' Curvature-Aware Surface Feature (nezuko) — TERMINAL CLOSED NOT-A-MERGE (7th model-side closure on τ_z bottleneck fingerprint — curvature input feature is genuine signal for vol_p but axis-blind to τ_z; test_SP +0.159pp floor breach forbids merge; dl24 #1132 win FAILED to transfer to tay stack)
+
+- **Branch**: `nezuko/curvature-attention-bias` (closed)
+- **W&B run**: `utlmmp0t` (group `wave30_h9_curvature`) — 840.3 min total (14.0h, fastest pace in fleet at 0.79 h/ep), 13/13 epochs complete, EMA best at EP13
+- **Hypothesis**: Add per-vertex curvature `κ_i = mean_{j∈kNN(i)} (1 - cos(n_i, n_j))` as 8th surface channel (kNN=16), inspired by dl24 #1132's test_WSS 6.609% to test if curvature input → break τ_z attractor.
+
+### Terminal results — paper-facing metrics
+
+| Metric | val (n=34) | test (n=50) | Baseline | Δ vs base | dl24 #1132 | Gate |
+|---|---:|---:|---:|---:|---:|:--|
+| abupt | 6.1389% | **5.9037%** | val 6.126% / test 5.844% | val +0.013pp / test +0.060pp | — | MISS |
+| WSS | 6.9230% | **6.7900%** | 6.727% test | **test +0.063pp WORSE** | 6.609% (+0.181pp worse vs dl24) | FAIL |
+| **SP** | 4.0657% | **3.7362%** | 3.577% floor | **+0.159pp FLOOR BREACH** | — | **FAIL FLOOR** |
+| vol_p | 3.6747% | **3.5870%** | 3.643% floor | **−0.056pp** | — | **PASS FLOOR** |
+| τ_z | 9.3917% | 8.7945% | 8.26% | +0.534pp worse | — | — |
+| **τz/τx** | val 1.555 | **test 1.459** | ~1.46 | ~0.00 | — | collapsed band (1.45-1.55) |
+
+### Verdict: NOT-A-MERGE — clean negative on primary axis, isolated positive on vol_p
+
+Per merge gates:
+- test_SP floor breach alone forbids merge
+- test_abupt +0.060pp WORSE than baseline
+- test_WSS +0.063pp WORSE than baseline
+- vol_p −0.056pp under floor (genuine but isolated improvement)
+
+### Mechanistic intelligence — 7th model-side closure on τ_z fingerprint
+
+| Fingerprint | All 7+ closed model-side attacks |
+|---|---|
+| Test τz/τx | Lands in [1.44, 1.55] collapsed band |
+| Direction | Test ratio = 1.459 here; H8 mirror = 1.456; other closed = 1.44-1.50 |
+| GT vertex-level τz/τx | 0.08 (model over-predicts τ_z magnitude by ~18×) |
+
+**The τ_z bottleneck is robust across input features, architecture perturbations, attention biases, position encodings, augmentation. 7 attacks now confirm the same fingerprint.** This is now strong evidence the bottleneck is at the **output-projection / loss-formulation layer**, not at architecture or input distribution. Wave 30 has 4 in-flight attacks on the loss layer (frieren H16 Huber, thorfinn H13c cos+mag, edward H12 magnitude-weighted, tanjiro H6' tau_n penalty) — correct next tier.
+
+### dl24 #1132 cross-pollination FAILED to transfer
+
+dl24 reported test_WSS 6.609% with curvature feature. nezuko reproduction on tay stack: test_WSS 6.790% — 0.181pp WORSE than dl24, 0.063pp worse than tay baseline. **dl24's win was stack × κ, not κ in isolation.** Different normals computation, different volume head, or different curriculum upstream is the actual mechanism. This is the second time a cross-branch result has not reproduced cleanly — suggests baseline-stack-specific interactions matter.
+
+### Per-epoch trajectory (val EMA)
+
+E1: abupt=28.13 WSS=30.73 τz/τx=1.394 (warmup)
+E2: 7.32 WSS=8.16 τz/τx=1.498
+E5: 6.38 WSS=7.17 τz/τx=1.533
+E10: 6.17 WSS=6.95 τz/τx=1.551 (65k vol curriculum in — no regression)
+E13: 6.14 WSS=6.92 τz/τx=1.555 (monotonic; slope flattened from −0.05pp/epoch to −0.008pp/epoch)
+
+### Ancillary positive: vol_p improvement
+
+Both val_vol_p (3.675% vs 3.798% baseline, **−0.123pp**) and test_vol_p (3.587% vs 3.643% floor, **PASSES**) improved. kNN-of-normals is informative at sharp surface-to-volume coupling regions (wheel arches, A-pillars, mirror housings) — exactly where volume pressure is hardest. **Useful signal to remember for future vol_p-focused work, NOT for τ_z.**
+
+### Student suggested follow-ups (acknowledged, not pursued)
+
+1. Curvature-as-attention-bias variant (PR title was "curvature-attention-bias" but only input-feature was tried)
+2. Per-axis curvature decomposition (τ_z-aligned component)
+3. NO K-sweep (K isn't the lever)
+
+All three suggestions are still input/architecture-side modifications of an exhausted attack surface. Skip for now; if Wave 30 loss-formulation tier exhausts without breakthrough, revisit attention-bias variant.
+
+### Closure decision
+
+- 12th closure in Wave 30
+- 7th model-side attack confirming τ_z fingerprint
+- Strongest evidence yet that the bottleneck is loss-formulation/output-projection
+- Frees up nezuko for fresh hypothesis on different attack surface
+
+---
+
 ## 2026-05-16 20:30 — PR #1143: H8 Mirror-Symmetry Data Augmentation (frieren) — TERMINAL FLAT NULL, CLOSED (first dedicated data-distribution-layer attack on τ_z bottleneck — falsifies "data diversity" hypothesis cleanly; test τz/τx = 1.456 lands EXACTLY in collapse band of 6 closed model-side attacks)
 
 - **Branch**: `frieren/h8-mirror-symmetry-aug` (closed)
