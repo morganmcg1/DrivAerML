@@ -51,6 +51,7 @@ from trainer_runtime import (
     init_wandb_run,
     is_valid_primary_metric,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     parse_kill_thresholds,
@@ -133,6 +134,7 @@ class Config:
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
     gradnorm_min_w_vol_p: float = 0.0
+    vol_p_aux_mae_weight: float = 0.0
     use_curvature_attention_bias: bool = False
 
 
@@ -304,6 +306,7 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    vol_p_aux_mae_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -347,12 +350,29 @@ def train_loss(
             weighted_volume_loss = volume_loss_weight * volume_loss
             loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+        # H9b: vol_p MAE auxiliary — direct L1 vol_p signal added AFTER the
+        # GradNorm-weighted sum, bypassing GradNorm rate balancing. Tests
+        # whether the vol_p ceiling under H9 (~3.91% test) is set by gradient
+        # direction (L2 saturating on low-residual volumes) rather than
+        # gradient mass.
+        vol_p_mae_aux_val = 0.0
+        vol_p_mae_aux_weighted_val = 0.0
+        if vol_p_aux_mae_weight > 0.0:
+            vol_p_mae = masked_mean(
+                (out["volume_preds"] - volume_target).abs(),
+                batch.volume_mask,
+            )
+            loss = loss + vol_p_aux_mae_weight * vol_p_mae
+            vol_p_mae_aux_val = float(vol_p_mae.detach().cpu().item())
+            vol_p_mae_aux_weighted_val = vol_p_aux_mae_weight * vol_p_mae_aux_val
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "vol_p_mae_aux": vol_p_mae_aux_val,
+        "vol_p_mae_aux_weighted": vol_p_mae_aux_weighted_val,
     }, task_losses
 
 
@@ -593,6 +613,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    vol_p_aux_mae_weight=config.vol_p_aux_mae_weight,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -644,6 +665,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if config.vol_p_aux_mae_weight > 0.0:
+                        train_log["train/vol_p_mae_aux"] = batch_loss_metrics[
+                            "vol_p_mae_aux"
+                        ]
+                        train_log["train/vol_p_mae_aux_weighted"] = batch_loss_metrics[
+                            "vol_p_mae_aux_weighted"
+                        ]
+                        train_log["train/vol_p_aux_mae_weight"] = (
+                            config.vol_p_aux_mae_weight
+                        )
                 if config.use_y_symmetry_aug and aug_log:
                     bs = max(1, aug_log.get("batch_size", 0))
                     train_log["train/aug/y_symmetry_flip_rate"] = (
