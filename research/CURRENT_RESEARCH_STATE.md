@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-16 15:50 UTC (H7 EP15 surf_p borderline-bear, H9 EP10 imminent strong trajectory, H10 EP6 marginal slope-flattened, H11 EP1 launched + **H4 no-op finding**)
+- 2026-05-16 16:30 UTC (**H9 EP10 KILL** vol_p stall, H7 EP18 abupt ties H9 best, H10 EP8 marginal-kill territory, H11 EP2.2 healthy + **clamp-dormant wave finding**)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -30,10 +30,10 @@
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP15 live** / 11h | 6.231% | 7.107% | **3.488%** | **4.047%** | **EP15 surf_p at top edge of central band [3.95, 4.05]%, slope decelerating −0.004pp/ep (mirrors EP5→6 pattern). vol_p UNDER FLOOR by 0.155pp. WSS projection 6.50-6.65% test = beats SOTA. **Most likely terminal: surf_p breach 0.10-0.25pp**; bull case needs late-cosine LR re-engagement EP18-22. Continue to EP30. EP20 check ~17:50Z.** |
-| **dl24-tanjiro** | **#1145** | **H9: curvature bias + w_vol_p clamp ≥0.05** | **EP9.5 live W&B** / 7h | **6.232%** | **6.938%** | **4.051%** | 4.075% | **STRONG (live W&B step 105,914, EP10 imminent): val_wss=6.938 (down −0.103 from EP6), val_τz=9.403 (deceleration into target band), vol_p FLAT 4.051→4.055 EP6→9.5 (clamp positioning effect). w_vol_p=0.092 approaching 0.05 clamp (1-3 EP to engagement). Student EP10 post expected 16:05-16:15Z.** |
-| **dl24-nezuko** | **#1154** | **H11: AdamW lr=7e-4 + per-axis WSS τ-weights (τx=1.0, τy=1.2, τz=1.5)** | **EP1 mid live** / 1h | — | — | — | — | **LAUNCHED 14:55Z W&B `kukjenp5`. EP1 partial: w_vol_p=0.451 (well above 0.15 floor, even above H8 terminal 0.298). GradNorm balanced. CRITICAL FINDING from student: H4 PR #1130's wss_axis_loss_weights was a NO-OP under GradNorm — never entered loss. H4 effectively ran baseline τ-weighting. H11 is the FIRST actual test of per-axis weighting under GradNorm. EP3 gate ~16:55Z.** |
-| dl24-frieren | #1149 | H10: Charbonnier supplementary WSS loss | EP6 live / 7h | 6.423% | 7.192% | 4.090% | 4.204% | **MARGINAL: slope flattened sharply at EP4 (−0.168 → −0.033 → −0.055/ep), EP6 wss=7.192 (behind H9 EP6 7.041 by 0.15pp), τz=9.662 in continue-with-watch band [9.5, 9.7]. Charb share creeping 44→48%. EP10 decision logic locked: ≤6.85=STRONG, 6.85-6.99=OK, 6.99-7.05=marginal, ≥7.05=KILL. EP10 expected ~17:30Z.** |
+| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP18 live** / 12h | **6.219%** | 7.096% | **3.488%** | 4.045% | **EP18 live W&B 2nufmv3i step 198,379: val_abupt=6.219% (TIES H9 EP10 best, at EP18!), val_surf_p 4.047→4.045 (basically flat, slope −0.002pp over 3ep). vol_p locked deep under floor (3.488%). WSS still in 7.1% band. EP20 student check ~17:50Z. Bear scenario for surf_p plays out unless EP18-22 cosine re-engagement materializes.** |
+| **dl24-tanjiro** | **#1145** | **H9 KILLED EP10**: clamp dormant finding | **EP10 KILL** / 8h | 6.219% | 6.925% | 4.056% | 4.068% | **🛑 KILLED 16:12Z. vol_p=4.056% (0.056pp over kill criterion <4.0%). val_abupt 6.219 BEST EP10 in wave; val_wss 6.925 essentially at advisor target. WAVE FINDING: clamp NEVER fired (min w_vol_p=0.0879 = 13.7× alive vs H5's 0.0064). Curvature bias FUNDAMENTALLY changes GradNorm dynamics — vol_p starvation is mechanism-coupled, not universal. Test eval requested 16:25Z for actual test_primary metrics. H9b (clamp=0.15) queued.** |
+| **dl24-nezuko** | **#1154** | **H11: AdamW lr=7e-4 + per-axis WSS τ-weights (τx=1.0, τy=1.2, τz=1.5)** | **EP2.2 live** / 1.5h | — | — | — | — | **LAUNCHED 14:55Z W&B `kukjenp5`. EP2.2 step 24,855: warm-up regime metrics (val_abupt=28.5%, will descend rapidly EP3-5). w_vol_p=0.361 — well above 0.15 floor. EP3 gate ~16:55Z. CRITICAL FINDING from student: H4 PR #1130's wss_axis_loss_weights was a NO-OP under GradNorm. H11 is the FIRST actual test of per-axis weighting under GradNorm.** |
+| dl24-frieren | #1149 | H10: Charbonnier supplementary WSS loss | EP8 live / 9h | 6.353% | 7.112% | 4.067% | 4.164% | **PLATEAUING: EP6→8 wss slope -0.04/ep, projects EP10 wss ≈ 7.03% — right at kill threshold ≥7.05%. vol_p stable 4.067%, surf_p creeping to 4.164% (close to 4.15% warning). w_vol_p=0.127 stable. EP10 decision imminent ~17:30Z; likely marginal/kill.** |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
@@ -45,13 +45,21 @@
 - **H9 tanjiro** EP6 STRONG — val_wss 7.041 tied with H5, val_vol_p 4.055 BETTER than H5 BEFORE clamp activation. Slope projects EP10 wss ≈ 6.81%. Direct SOTA-chase trajectory ACTIVE.
 - **H10 frieren** EP4 ON TRACK — τz=9.76% at EP4 already at H5/H6 EP6 reference. Charbonnier share 44-46% healthy. Floor-safe by construction. Bellwether EP6 gate ~14:40Z.
 
-## Critical New Finding: GradNorm Vol_p Starvation Root Cause
+## Critical New Finding: GradNorm Vol_p Starvation Root Cause — REFINED (16:30Z)
 
-**Discovered via H5 tanjiro terminal (PR #1132, 08:00Z)**
+**Originally discovered via H5 tanjiro terminal (PR #1132, 08:00Z); refined by H9 EP10 kill (PR #1145, 16:12Z)**
 
-GradNorm's relative-rate balancing crushes `w_vol_p` because vol_p has the lowest task-loss slope (volume pressure is more linear / easier to fit than τ_z/τ_y). Final H5 weights: `w_vol_p=0.0064` vs `w_τ_z=2.318` (362× lower). This mechanism explains **every** vol_p floor breach in the wave (H1 +0.437pp, H2 +0.340pp, H3 +0.211pp, H5 +0.312pp) — all caused by the same GradNorm starvation regardless of injection point.
+The H5 vol_p starvation (w_vol_p crashed to 0.0064 vs w_τz=2.318, 362× ratio) was attributed to GradNorm's relative-rate balancing of task-loss-slope imbalance. **H9 EP10 refined this finding**: under curvature additive attention bias, GradNorm self-stabilizes w_vol_p at ~0.088 (13.7× alive vs H5's crashed value), and the 0.05 clamp was never binding. **The vol_p starvation is mechanism-coupled to surface representation, not a universal GradNorm pathology.**
 
-**Implication**: Any experiment that improves WSS (by increasing surface-task gradient signal) will also trigger GradNorm to crush `w_vol_p` further. The fix is a hard floor on `w_vol_p` (H9).
+- **H5 (no curvature bias)**: w_vol_p crashed to 0.0064 → vol_p test breach +0.312pp
+- **H9 (curvature bias active)**: w_vol_p self-stabilized at 0.088 → vol_p still stalled at val 4.05% (likely test ~3.85-3.95% = ~+0.20-0.30pp breach)
+- **H8 (AdamW + no curvature bias)**: w_vol_p stable at 0.298 → vol_p test 4.140% = +0.497pp breach (worst of all)
+
+**Refined implication**: 
+1. GradNorm starvation is sensitive to the surface-side representation quality. Mechanisms that improve surface signal (curvature bias) PARTIALLY rescue w_vol_p organically.
+2. **But organic rescue is insufficient**: even w_vol_p alive at 0.088, vol_p plateaus at ~4.05%. There's a representation-level cap on vol_p quality.
+3. **Clamp floor must constrain THIS trajectory's natural asymptote**, not H5's pathological floor. For H9 stack, binding clamp = ≥0.10-0.15.
+4. **Surface mechanisms with vol_p side-benefit** (H7 surface_loss_weight=1.5) appear to address the representation cap, not just the GradNorm rate.
 
 ## Plateau Protocol Status (ACTIVE)
 
@@ -83,11 +91,18 @@ GradNorm's relative-rate balancing crushes `w_vol_p` because vol_p has the lowes
 - **H7 fern (#1142)**: surface_loss_weight=1.5 — EP14 surf_p re-engaged after EP10-13 plateau. Bear-edge but trajectory still viable. EP15 decision metric ~14:20Z.
 - **H10 frieren (#1149)**: Charbonnier WSS loss — EP4 2 epochs ahead of H5/H6 reference on τz. Charb share 44-46% healthy. Floor-safe by construction. EP6 bellwether ~14:40Z.
 
-### Running + newly assigned (4 students active):
-- **H11 nezuko (#1154)**: AdamW lr=7e-4 + per-axis WSS τ-magnitude weighting (τ_x=1.0, τ_y=1.2, τ_z=1.5). Compounds H8 wave finding (AdamW=safe optimizer) with H4-revisited (per-axis weighting, Lion-noise root cause now neutralized). lr bumped 40% + T_max=25 to address H8 convergence-rate deficit. **EP6 kill criterion: val_τ_z > 9.80%.**
+### Running (3 students active):
+- **H11 nezuko (#1154)**: AdamW lr=7e-4 + per-axis WSS τ-magnitude weighting (τ_x=1.0, τ_y=1.2, τ_z=1.5). EP2.2 healthy. EP3 gate ~16:55Z.
+- **H7 fern (#1142)**: EP18, surf_p borderline. EP20 check ~17:50Z.
+- **H10 frieren (#1149)**: EP8, plateauing. EP10 decision ~17:30Z (likely marginal/kill).
 
-### Closed this wave (H8 nezuko):
-- **H8 nezuko (#1144 CLOSED)**: AdamW lr=5e-4 optimizer swap. REJECTED — test_wss +0.537pp regression, both floors breached. Convergence-rate deficit was the failure mode. WAVE FINDING: AdamW+GradNorm = stable (w_vol_p=0.298 vs Lion 0.0064 = 68× saner ratio). Prior "AdamW+GradNorm instability" warning falsified at lr=5e-4+cosine+1ep-warmup.
+### Queued for tanjiro (post-H9 eval):
+- **H9b: clamp=0.15 + curvature bias** (refinement of H9 with binding clamp floor). Likely adds vol_p MAE auxiliary regularizer at low weight (0.05) as second mechanism — orthogonal to GradNorm rate balancing.
+- Waiting for tanjiro test eval on H9 EP10 checkpoint before finalizing PR.
+
+### Closed this wave (H8 nezuko, H9 tanjiro):
+- **H8 nezuko (#1144 CLOSED 14:30Z)**: AdamW lr=5e-4 optimizer swap. REJECTED — test_wss +0.537pp regression, both floors breached. WAVE FINDING: AdamW+GradNorm = stable (w_vol_p=0.298 vs Lion 0.0064 = 68× saner ratio).
+- **H9 tanjiro (#1145 PENDING EVAL 16:25Z)**: curvature bias + 0.05 clamp. KILLED EP10 (vol_p stalled at 4.05%). WAVE FINDING: clamp NEVER fired (min w_vol_p=0.088, 13.7× alive vs H5). Curvature bias mechanism-couples vol_p starvation — partial organic rescue. Test eval requested.
 
 ### Researcher-agent (background, agentId: a08af1e87b171e527):
 - Running since ~06:26Z. Output: `/workspace/senpai/target/research/RESEARCH_IDEAS_2026-05-16_<time>.md`
