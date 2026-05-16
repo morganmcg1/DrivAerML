@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    local_frame_wss_head: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "local_frame_wss_head": (
+            "Replace the global Cartesian (tau_x, tau_y, tau_z) WSS output "
+            "head with a local-frame head predicting WSS in a 2D tangent "
+            "basis (tau_t1, tau_t2). A per-point orthonormal frame is built "
+            "from surface normals via Gram-Schmidt with axis-fallback, and "
+            "the global 3-vector is reconstructed by tau_global = "
+            "tau_t1*t1 + tau_t2*t2. This enforces tau.n=0 (WSS tangent to "
+            "the surface) by construction. The cp channel keeps its own "
+            "linear head; surface_preds remains [cp, tau_x, tau_y, tau_z]. "
+            "See PR #1134."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,7 +320,32 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        local_frame_wss_head=config.local_frame_wss_head,
     )
+
+
+def compute_wss_penetration_frac(
+    surface_preds: torch.Tensor,
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    space_dim: int = 3,
+) -> float:
+    """Mean |tau . n| / (|tau| + eps) over unmasked surface points.
+
+    A diagnostic for PR #1134: in the global Cartesian head this should be
+    strictly positive (the model can violate the tangent constraint); in the
+    local-frame head it should be at the numerical precision floor (<1e-5).
+    """
+    with torch.no_grad():
+        wss = surface_preds[..., 1:4].float()
+        normals = surface_x[..., space_dim : space_dim + 3].float()
+        n_unit = torch.nn.functional.normalize(normals, dim=-1, eps=1e-6)
+        penetration = (wss * n_unit).sum(-1).abs()
+        wss_norm = wss.norm(dim=-1).clamp(min=1e-8)
+        frac = penetration / wss_norm
+        mask = surface_mask.float()
+        denom = mask.sum().clamp(min=1.0)
+        return float(((frac * mask).sum() / denom).cpu().item())
 
 
 def train_loss(
@@ -321,6 +358,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    log_wss_penetration: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,13 +384,20 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if log_wss_penetration:
+        metrics["wss_penetration_frac"] = compute_wss_penetration_frac(
+            out["surface_preds"],
+            batch.surface_x,
+            batch.surface_mask,
+        )
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1030,6 +1075,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        log_wss_penetration=True,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1116,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "wss_penetration_frac" in batch_loss_metrics:
+                        train_log["train/wss_penetration_frac"] = batch_loss_metrics[
+                            "wss_penetration_frac"
+                        ]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

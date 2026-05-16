@@ -358,6 +358,32 @@ class Transformer(nn.Module):
         return x
 
 
+def build_orthonormal_frame(n: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build a per-point orthonormal tangent basis (t1, t2) from surface normals n.
+
+    Uses Gram-Schmidt with axis-fallback to avoid degeneracy:
+        pick e = (1, 0, 0) if |n_x| < 0.9 else (0, 1, 0)
+        t1 = normalize(e - (e . n) n)
+        t2 = n x t1
+
+    The frame is mathematically arbitrary (any rotation about n is valid) but
+    smooth except at the fallback boundary; since predictions are scalar
+    coefficients in this frame and the frame itself is a fixed function of
+    input normals (no learnable params), frame discontinuity does not affect
+    optimization. See PR #1134.
+    """
+    e_x = torch.zeros_like(n)
+    e_x[..., 0] = 1.0
+    e_y = torch.zeros_like(n)
+    e_y[..., 1] = 1.0
+    use_y = (n[..., 0].abs() > 0.9).unsqueeze(-1)
+    e = torch.where(use_y, e_y, e_x)
+    t1 = e - (e * n).sum(-1, keepdim=True) * n
+    t1 = F.normalize(t1, dim=-1, eps=1e-6)
+    t2 = torch.cross(n, t1, dim=-1)
+    return t1, t2
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -382,6 +408,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        local_frame_wss_head: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +423,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.local_frame_wss_head = local_frame_wss_head
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -481,12 +509,33 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
-            self.surface_out.apply(_init_linear)
+            if self.local_frame_wss_head:
+                # PR #1134: split surface output head into (cp) + (tau in 2D
+                # local frame), then reconstruct tau_global = t1*tau_t1 +
+                # t2*tau_t2 in the forward pass. The 4-channel
+                # surface_output_dim contract is preserved so callers see
+                # [cp, tau_x, tau_y, tau_z] as before.
+                if self.surface_output_dim != 4:
+                    raise ValueError(
+                        "local_frame_wss_head requires surface_output_dim=4 "
+                        f"(got {self.surface_output_dim})."
+                    )
+                self.surface_out_cp = nn.Linear(n_hidden, 1)
+                self.surface_out_wss_local = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, 2),
+                )
+                self.surface_out_cp.apply(_init_linear)
+                self.surface_out_wss_local.apply(_init_linear)
+                self.surface_out = None
+            else:
+                self.surface_out = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, self.surface_output_dim),
+                )
+                self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),
                 nn.SiLU(),
@@ -496,6 +545,10 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
+            if self.local_frame_wss_head:
+                raise ValueError(
+                    "local_frame_wss_head requires use_aux_decoder_heads=True."
+                )
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
@@ -621,8 +674,28 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        surface_normal_unit: torch.Tensor | None = None
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.local_frame_wss_head:
+                # Surface features are [x, y, z, nx, ny, nz, area]. Renormalize
+                # to guard against any preprocessing drift; the frame must be
+                # built from unit vectors. Detach so the frame is treated as a
+                # fixed input — gradients flow only through the predicted
+                # scalar coefficients tau_t1, tau_t2.
+                normals_raw = surface_x[..., self.space_dim : self.space_dim + 3]
+                n = F.normalize(normals_raw.float(), dim=-1, eps=1e-6).detach()
+                t1, t2 = build_orthonormal_frame(n)
+                t1 = t1.detach().to(dtype=surface_hidden.dtype)
+                t2 = t2.detach().to(dtype=surface_hidden.dtype)
+                surface_normal_unit = n.to(dtype=surface_hidden.dtype)
+
+                cp = self.surface_out_cp(surface_hidden)
+                wss_local = self.surface_out_wss_local(surface_hidden)
+                wss_global = wss_local[..., 0:1] * t1 + wss_local[..., 1:2] * t2
+                surface_preds = torch.cat([cp, wss_global], dim=-1)
+                surface_preds = surface_preds * surface_mask.unsqueeze(-1)
+            else:
+                surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -633,10 +706,13 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        result = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if surface_normal_unit is not None:
+            result["surface_normal_unit"] = surface_normal_unit
+        return result
