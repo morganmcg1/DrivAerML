@@ -20,13 +20,15 @@ This repo predicts surface pressure, wall shear / friction, and volume pressure.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import json
 import math
 import os
+import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import torch
@@ -498,6 +500,48 @@ def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
         volume_mask=volume_mask,
         metadata=[dict(sample.metadata) for sample in samples],
     )
+
+
+def mirror_collate(samples: Sequence[DrivAerMLCase], prob: float = 0.5) -> SurfaceBatch:
+    """Random x-z plane mirror augmentation collate (per-sample prob).
+
+    DrivAerML is generated at zero yaw and zero pitch, so y -> -y is an exact
+    geometric symmetry. Channel layout (confirmed from loader.py load_case):
+      surface_x = [x, y, z, nx, ny, nz, area]  -> flip y(1), ny(4)
+      surface_y = [cp, tau_x, tau_y, tau_z]    -> flip tau_y(2); cp(0) is scalar
+      volume_x  = [x, y, z, sdf]               -> flip y(1); sdf is scalar
+      volume_y  = [vol_p]                       -> scalar pressure, invariant
+
+    Args:
+      samples: list of DrivAerMLCase (frozen dataclass).
+      prob: per-sample mirror probability in [0, 1]; 0.0 disables aug.
+    """
+    if not samples:
+        raise ValueError("mirror_collate received an empty batch")
+    mirrored: list[DrivAerMLCase] = []
+    for case in samples:
+        if prob > 0.0 and random.random() < prob:
+            sx = case.surface_x.clone()
+            sy = case.surface_y.clone()
+            sx[:, 1] = -sx[:, 1]
+            sx[:, 4] = -sx[:, 4]
+            sy[:, 2] = -sy[:, 2]
+            new_fields: dict[str, Any] = {"surface_x": sx, "surface_y": sy}
+            if case.volume_x is not None and case.volume_x.shape[0] > 0:
+                vx = case.volume_x.clone()
+                vx[:, 1] = -vx[:, 1]
+                new_fields["volume_x"] = vx
+            metadata = dict(case.metadata)
+            metadata["mirror_flipped"] = True
+            new_fields["metadata"] = metadata
+            case = dataclasses.replace(case, **new_fields)
+        else:
+            if "mirror_flipped" not in case.metadata:
+                metadata = dict(case.metadata)
+                metadata["mirror_flipped"] = False
+                case = dataclasses.replace(case, metadata=metadata)
+        mirrored.append(case)
+    return pad_collate(mirrored)
 
 
 def _normalizer_tensor(raw: dict, name: str, expected_dim: int) -> tuple[torch.Tensor, torch.Tensor]:

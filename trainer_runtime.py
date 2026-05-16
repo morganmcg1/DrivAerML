@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import functools
 import math
 import os
 import re
@@ -13,7 +14,7 @@ import subprocess
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 import torch
 import torch.distributed as dist
@@ -29,6 +30,7 @@ from data import (
     VOLUME_TARGET_NAMES,
     VOLUME_Y_DIM,
     load_data,
+    mirror_collate,
     pad_collate,
 )
 
@@ -229,10 +231,10 @@ def resolve_num_workers(config) -> int:
     return min(4, os.cpu_count() or 4)
 
 
-def loader_kwargs(config) -> dict[str, object]:
+def loader_kwargs(config, *, collate_fn: Callable | None = None) -> dict[str, object]:
     num_workers = resolve_num_workers(config)
     kwargs: dict[str, object] = {
-        "collate_fn": pad_collate,
+        "collate_fn": collate_fn if collate_fn is not None else pad_collate,
         "num_workers": num_workers,
         "pin_memory": config.pin_memory and torch.cuda.is_available(),
     }
@@ -240,6 +242,14 @@ def loader_kwargs(config) -> dict[str, object]:
         kwargs["persistent_workers"] = config.persistent_workers
         kwargs["prefetch_factor"] = config.prefetch_factor
     return kwargs
+
+
+def build_train_collate_fn(config) -> Callable:
+    """Return the training-time collate_fn, applying mirror augmentation if enabled."""
+    prob = float(getattr(config, "mirror_aug_prob", 0.0) or 0.0)
+    if prob > 0.0:
+        return functools.partial(mirror_collate, prob=prob)
+    return pad_collate
 
 
 def eval_loader_for_dataset(
@@ -304,7 +314,7 @@ def make_loaders(
         shuffle=train_shuffle,
         sampler=train_sampler,
         drop_last=True,
-        **loader_kwargs(config),
+        **loader_kwargs(config, collate_fn=build_train_collate_fn(config)),
     )
     val_loaders = {
         name: eval_loader_for_dataset(ds, config, distributed_state=distributed_state)

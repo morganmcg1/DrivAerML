@@ -40,6 +40,7 @@ from trainer_runtime import (
     TargetTransform,
     autocast_context,
     build_lr_scheduler,
+    build_train_collate_fn,
     check_kill_thresholds,
     cleanup_distributed,
     collect_gradient_metrics,
@@ -105,6 +106,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    mirror_aug_prob: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -701,7 +703,7 @@ def rebuild_train_loader_with_vol_points(
         shuffle=train_shuffle,
         sampler=train_sampler,
         drop_last=True,
-        **loader_kwargs(config),
+        **loader_kwargs(config, collate_fn=build_train_collate_fn(config)),
     )
 
 

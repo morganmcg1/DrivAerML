@@ -16,6 +16,7 @@ from .loader import (
     DrivAerMLSurfaceDataset,
     SurfaceBatch,
     load_data,
+    mirror_collate,
     pad_collate,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "DrivAerMLSurfaceDataset",
     "SurfaceBatch",
     "load_data",
+    "mirror_collate",
     "pad_collate",
 ]
