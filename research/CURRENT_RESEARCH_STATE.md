@@ -26,14 +26,22 @@
 | test_τ_y | 7.362% | — |
 | test_τ_z | 8.747% | — |
 
-## Active Experiments (2026-05-16 06:28 UTC)
+## Active Experiments (2026-05-16 07:37 UTC)
 
-| Student | PR | Hypothesis | Latest EP | val_abupt | val_wss | val_vol_p | Status |
-|---------|-----|-----------|----------:|----------:|--------:|----------:|--------|
-| **dl24-nezuko** | **#1144** | **H8: Lion → AdamW (lr=5e-4)** | **JUST LAUNCHED** | — | — | — | **NEW 06:28Z. Plateau Protocol tier change.** |
-| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | RUNNING (EP0-2 est.) | — | — | — | Launched 04:25Z Option B. EP3 gate ~06:30Z. |
-| dl24-frieren | #1135 | H6: wind-exposure additive attn bias | EP14 best-val est. | ~6.28% | ~6.99% | ~4.11% | EP15 gate ~07:30Z. Terminal ~14:40Z. |
-| dl24-tanjiro | #1132 | H5: curvature additive attn bias | EP26 est. | ~6.18% | ~6.84% | ~4.31% | Plateau confirmed EP21. vol_p drifting up. Terminal ~07:00-08:00Z. Likely CLOSE. |
+| Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
+|---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
+| dl24-nezuko | #1144 | H8: Lion → AdamW lr=5e-4 | EP0.67 / 0h46m | partial | partial | partial | partial | AdamW launched 06:30Z. EP1 ~07:50Z. Step rate ~14/s (faster than Lion). |
+| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | EP2.6 / 2h54m | 6.523% | 7.418% | **3.675%** | 4.235% | val_vol_p slope −0.017%/1k steps. Best-positioned candidate. EP3 ~08:00Z. |
+| dl24-frieren | #1135 | H6: wind-exposure attn bias | EP11 / 13h35m | 6.308% | 6.989% | 4.243% | 4.069% | τ_y monotone descent (7.572). Step rate slower than expected → terminal ~20:30Z. |
+| dl24-tanjiro | #1132 | H5: curvature attn bias | EP~18 / 21h13m | 6.224% | 6.850% | 4.373% | 4.046% | **vol_p drifting up** (was 4.19% EP15). NOT-a-winner. Terminal ~19:30Z. |
+
+**Step rate correction**: All Lion runs at ~5.5 steps/sec → 30-epoch run ≈ **33 hours** (not 21h as previously estimated). AdamW runs ~14 steps/sec → ~12h. Cadence implications below.
+
+**Wave summary (07:37Z):**
+- **H5 tanjiro** approaching terminal but NOT-a-winner (vol_p +0.73pp above floor). Wait for SENPAI-RESULT.
+- **H6 frieren** still ~10h from terminal. vol_p +0.6pp above floor — unlikely to recover by EP30.
+- **H7 fern** strongest live candidate. val_vol_p 3.675% close to floor and improving. EP3-10 critical.
+- **H8 nezuko** earliest evidence ~07:50Z (EP1).
 
 ## Plateau Protocol Status (ACTIVE)
 
