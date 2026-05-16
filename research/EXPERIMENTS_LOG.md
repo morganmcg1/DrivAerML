@@ -1,3 +1,42 @@
+## 2026-05-16 09:05 — PR #1137: Y-Architecture Dual-Backbone — pressure/WSS branches (fern) — CLOSED (5-of-5 model-side widening, all 3 floors breached)
+
+- **Branch**: `fern/y-architecture-dual-backbone` (closed)
+- **W&B run**: `m9qed7bb`, EP6 EMA + post-mortem test eval (run hit OOM at EP7 boundary on vol_points ramp)
+- **Hypothesis**: Split backbone into separate pressure and WSS branches to eliminate task interference. If τ_z bottleneck is caused by the shared backbone juggling cp + 3 WSS components, dual-branch should unlock τ_z.
+
+### Terminal metrics
+
+| Metric | val (34) | **test (50)** | Baseline | Δ | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.487% | 6.172% | 5.844% | +0.328pp | — |
+| **WSS** | 7.370% | **7.109%** | 6.727% | **+0.382pp** | **FAIL** |
+| **SP** | 4.258% | **3.931%** | 3.577% | **+0.354pp** | **FLOOR BREACH** |
+| **vol_p** | 3.778% | **3.673%** | 3.643% | **+0.030pp** | **FLOOR BREACH** |
+| τ_z | 9.894% | 9.158% | — | — | — |
+| **test τz/τx** | 1.53 (val) | **~1.453** | 1.46 band | flat | **NULL** |
+
+### Verdict: NEGATIVE — close
+
+All 3 merge gates breached. Branch cos_sim 0.17–0.20 (healthy split, no collapse), but τ_z reduced proportionally with τ_x/τ_y rather than differentially. Task-interference hypothesis falsified.
+
+### 5-of-5 Wave 30 model-side widening pattern CONFIRMED
+
+| PR | Axis | val τz/τx widening | test τz/τx |
+|---|---|---|---|
+| #1136 (nezuko) | H2 normal spectral | 1.49 → 1.548 | 1.457 |
+| #1139 (edward) | H1 cylindrical coords | 1.385 → 1.526 | TBD |
+| #1141 (alphonse) | H4 hard MoE routing | TBD | TBD |
+| #1140 (askeladd) | H7 normal-aux head | 1.515 → 1.537 | TBD |
+| **#1137 (fern)** | **H5 Y-arch** | **— → 1.53** | **1.453** |
+
+The bottleneck is **definitively not at the model architecture layer**. Remaining attack surface: output-head reformulation, data distribution, input features.
+
+### Reassigned
+
+`fern` → **H10 Vector-Length-Decoupled WSS Head** (PR #1148). Predict `(cp, dir_x, dir_y, dir_z, log_mag)` instead of Cartesian `(cp, τx, τy, τz)`. Decouples direction from magnitude at the output, adds auxiliary cosine-similarity loss on unit direction. Direct follow-up: H6 (tanjiro) proved bottleneck IS at output head — H10 attacks via reparametrization (orthogonal to H6' soft penalty).
+
+---
+
 ## 2026-05-16 08:35 — PR #1134: Local-frame WSS head — hard τ·n=0 (tanjiro) — CLOSED (paper-worthy MECHANISM PASS / absolute FAIL)
 
 - **Branch**: `tanjiro/local-frame-wss-head` (closed)

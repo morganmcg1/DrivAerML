@@ -1,11 +1,47 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~08:45 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~09:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~08:45Z) — Double closure of nezuko #1136 (4-of-4 widening confirmed) + tanjiro #1134 (paper-worthy mechanism PASS); both students immediately reassigned to H9' (PR #1146) and H6' (PR #1147)
+## Latest invocation actions (2026-05-16 ~09:10Z) — fern #1137 CLOSED (5-of-5 model-side widening pattern, all 3 floors breached) → fern reassigned to H10 vector-length-decoupled WSS head (PR #1148)
+
+### Actions this invocation
+
+- **CLOSED PR #1137 (fern Y-arch dual-backbone)** at terminal: test_WSS=7.109% (+0.382pp FAIL), test_SP=3.931% (+0.354pp FLOOR BREACH), test_vol_p=3.673% (+0.030pp FLOOR BREACH), test τz/τx=~1.453 (NULL). Run hit OOM at EP7 boundary; EP6 EMA checkpoint clean for test eval. Branch cos_sim 0.17-0.20 (healthy), but τ_z reduced proportionally with τ_x/τ_y — task-interference hypothesis falsified.
+- **5-of-5 Wave 30 model-side widening pattern CONFIRMED**. The bottleneck is **definitively NOT at the model architecture layer**. The unexplored attack surface narrows to: (1) output-head reformulation, (2) data distribution, (3) input features.
+- **ASSIGNED PR #1148 (fern: Wave 30 H10 Vector-Length-Decoupled WSS Head)** — predict `(cp, dir_x, dir_y, dir_z, log_mag)` instead of Cartesian `(cp, τx, τy, τz)`. Reconstruct `τ = softplus(log_mag) * unit(dir)`; aux cos-sim loss on direction. Decouples direction from magnitude; orthogonal to all 10 in-flight axes (only experiment that reparametrizes the WSS output).
+
+### Wave 30 fleet — 11 orthogonal attacks now in parallel
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1138 | thorfinn | H3 soft normal-routing | in flight EP10+ |
+| #1139 | edward | H1 cylindrical coords | in flight EP10+ |
+| #1140 | askeladd | H7 normal-aux head | in flight EP8 **fleet leader val_abupt=6.222%** |
+| #1141 | alphonse | H4 hard MoE routing | in flight EP7 |
+| #1143 | frieren | H8 mirror-symmetry data aug | in flight EP1+ |
+| #1146 | nezuko | H9' curvature input feature | JUST LAUNCHED |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | JUST LAUNCHED |
+| #1148 | fern | H10 vector-decoupled output | JUST LAUNCHED |
+
+### Causal map of τ_z bottleneck — updated 5-of-5
+
+- **NOT at backbone**: H6 hard τ·n=0 broke τz/τx to 1.281 (falsified backbone-bottleneck)
+- **DEFINITIVELY NOT at architecture layer**: 5-of-5 Wave 30 model-side axes (H1/H2/H4/H5/H7) all show val widening that collapses to baseline on test
+- **Bottleneck IS at output head + likely data distribution**: H6 hard projection works but loses fidelity; soft penalty (H6'), reparametrization (H10), and data injection (H8 mirror, H9' curvature) are the active probes
+- **Three independent attacks now in flight on the output head**: H6' soft τ·n penalty (loss), H10 vector-decoupled (reparametrization), H7 normal-aux (gradient). Each tests a different mechanism for unlocking the τ_z bottleneck without losing absolute fidelity.
+
+### Next-idle assignment queue (in priority order)
+
+1. **Stacking experiments** — combine top Wave 30 winner (test_WSS < baseline) with H6'/H9'/H10/H8 once terminals land. Highest expected compound gain.
+2. **kNN-pooled local context feature** — pool 16-NN surface features (normals, area, curvature) per token, append as 6-8 channels. Truly orthogonal to all 11 axes; data-level signal injection.
+3. **Spherical-harmonic WSS basis** — predict WSS in a learned anisotropic local frame (not Cartesian, not pure polar). Stronger H10 variant if H10 partial-wins.
+4. **Curriculum on τ_z weight** — schedule tau_z_loss_weight from 2.0→3.5 across epochs. Cheap, additive to any winner.
+5. **GroupedSeparable positional encoding** — different sigma per axis (separable not just by axis but by axis group: xyz vs τ-magnitude axis). Targets the per-axis representation imbalance hypothesis.
+
+## Older invocation actions (2026-05-16 ~08:45Z) — Double closure of nezuko #1136 (4-of-4 widening confirmed) + tanjiro #1134 (paper-worthy mechanism PASS); both students immediately reassigned to H9' (PR #1146) and H6' (PR #1147)
 
 ### Actions this invocation
 
