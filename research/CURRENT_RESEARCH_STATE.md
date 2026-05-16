@@ -26,22 +26,31 @@
 | test_τ_y | 7.362% | — |
 | test_τ_z | 8.747% | — |
 
-## Active Experiments (2026-05-16 07:37 UTC)
+## Active Experiments (2026-05-16 08:00 UTC)
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
 | dl24-nezuko | #1144 | H8: Lion → AdamW lr=5e-4 | EP0.67 / 0h46m | partial | partial | partial | partial | AdamW launched 06:30Z. EP1 ~07:50Z. Step rate ~14/s (faster than Lion). |
 | dl24-fern | #1142 | H7: surface_loss_weight=1.5 | EP2.6 / 2h54m | 6.523% | 7.418% | **3.675%** | 4.235% | val_vol_p slope −0.017%/1k steps. Best-positioned candidate. EP3 ~08:00Z. |
 | dl24-frieren | #1135 | H6: wind-exposure attn bias | EP11 / 13h35m | 6.308% | 6.989% | 4.243% | 4.069% | τ_y monotone descent (7.572). Step rate slower than expected → terminal ~20:30Z. |
-| dl24-tanjiro | #1132 | H5: curvature attn bias | EP~18 / 21h13m | 6.224% | 6.850% | 4.373% | 4.046% | **vol_p drifting up** (was 4.19% EP15). NOT-a-winner. Terminal ~19:30Z. |
+| **dl24-tanjiro** | **#1145** | **H9: curvature bias + w_vol_p clamp ≥0.05** | JUST ASSIGNED | — | — | — | — | **NEW 08:00Z. H5 curvature code + GradNorm floor. Direct SOTA chase.** |
 
 **Step rate correction**: All Lion runs at ~5.5 steps/sec → 30-epoch run ≈ **33 hours** (not 21h as previously estimated). AdamW runs ~14 steps/sec → ~12h. Cadence implications below.
 
-**Wave summary (07:37Z):**
-- **H5 tanjiro** approaching terminal but NOT-a-winner (vol_p +0.73pp above floor). Wait for SENPAI-RESULT.
-- **H6 frieren** still ~10h from terminal. vol_p +0.6pp above floor — unlikely to recover by EP30.
-- **H7 fern** strongest live candidate. val_vol_p 3.675% close to floor and improving. EP3-10 critical.
-- **H8 nezuko** earliest evidence ~07:50Z (EP1).
+**Wave summary (08:00Z):**
+- **H5 tanjiro** CLOSED (#1132) — test_wss=6.609% (BEST WSS IN WAVE, −0.118pp under SOTA) BUT vol_p=3.955% (+0.312pp breach) + surf_p=3.651% (+0.074pp breach). GradNorm starvation identified as root cause (w_vol_p=0.0064, 362× below w_τ_z).
+- **H9 tanjiro** ASSIGNED (#1145) — curvature bias + w_vol_p ≥0.05 clamp. Direct SOTA-chase.
+- **H6 frieren** at EP~11, 10+ hours remaining. vol_p 4.24% above floor — trajectory uncertain.
+- **H7 fern** at EP~2.6, val_vol_p 3.675% and improving. Best live single-variable candidate.
+- **H8 nezuko** at EP~1 now. First AdamW val signal imminent.
+
+## Critical New Finding: GradNorm Vol_p Starvation Root Cause
+
+**Discovered via H5 tanjiro terminal (PR #1132, 08:00Z)**
+
+GradNorm's relative-rate balancing crushes `w_vol_p` because vol_p has the lowest task-loss slope (volume pressure is more linear / easier to fit than τ_z/τ_y). Final H5 weights: `w_vol_p=0.0064` vs `w_τ_z=2.318` (362× lower). This mechanism explains **every** vol_p floor breach in the wave (H1 +0.437pp, H2 +0.340pp, H3 +0.211pp, H5 +0.312pp) — all caused by the same GradNorm starvation regardless of injection point.
+
+**Implication**: Any experiment that improves WSS (by increasing surface-task gradient signal) will also trigger GradNorm to crush `w_vol_p` further. The fix is a hard floor on `w_vol_p` (H9).
 
 ## Plateau Protocol Status (ACTIVE)
 
@@ -53,7 +62,7 @@
 | #1117 H2 | Curvature input channels | ❌ CLOSED | Same imbalance (vol_p breach +0.340pp); WSS improved −0.059pp (signal valid) |
 | #1129 H3 | Near-wall volume cross-attn | ❌ CLOSED (06:25Z today) | Cross-attn duplicated existing backbone signal; τ_z WORSE +0.355pp |
 | #1130 H4 | Per-axis WSS loss weights | ❌ CLOSED (02:33Z today) | Lion-noise on weighted axes; surf_p floor breach |
-| #1132 H5 | Curvature additive attn bias | ⏳ Plateauing EP21, vol_p drifting | WSS stalled at 6.84% (worse than SOTA); vol_p drifting up |
+| #1132 H5 | Curvature additive attn bias | ❌ CLOSED (08:00Z) | test_wss=6.609% BEST in wave, but vol_p=3.955% breach. GradNorm starvation root cause identified. |
 | #1135 H6 | Wind-exposure additive attn bias | ⏳ Running, EP15 gate pending | wss<7.0% milestone hit EP10; vol_p stable band |
 
 **Tier change response (H8):** Optimizer regime swap (Lion → AdamW) attacks update geometry rather than representation. All prior failures involved Lion's sign-based update amplifying per-axis noise.

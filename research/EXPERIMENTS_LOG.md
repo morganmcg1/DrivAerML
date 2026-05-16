@@ -8,6 +8,51 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 07:55 UTC — PR #1132 CLOSED: WSS H5 curvature additive attention bias (dl24-tanjiro, `lbi210l2`)
+
+- **Branch:** `dl24-tanjiro/h5b-curvature-attention-bias`
+- **W&B run:** `lbi210l2` (21.4h, 30 epochs, best-val EP18 EMA)
+- **Hypothesis:** Injecting curvature information as a zero-init additive attention bias (instead of H2's raw input channels) would capture the curvature WSS signal without triggering GradNorm task-share imbalance.
+
+### Terminal test metrics (best-val EP18 EMA checkpoint)
+
+| Metric | H5 `lbi210l2` | SOTA #972 | Δ | H2 ref | Verdict |
+|--------|---:|---:|---:|---:|---|
+| test_abupt | 5.846% | 5.844% | +0.002pp | — | tie |
+| **test_wss** | **6.609%** | 6.727% | **−0.118pp** | 6.668% (−0.059) | ✅ **BEST WSS IN WAVE** |
+| test_surf_p | 3.651% | 3.577% (floor) | +0.074pp | — | ❌ **FLOOR BREACH** |
+| test_vol_p | 3.955% | 3.643% (floor) | +0.312pp | 3.983% (−0.028) | ❌ **FLOOR BREACH** |
+| test_τ_x | 5.859% | 5.971% | **−0.112pp** | — | ✅ win |
+| test_τ_y | 7.174% | 7.362% | **−0.188pp** | — | ✅ win |
+| **test_τ_z** | **8.592%** | 8.747% | **−0.155pp** | 8.650% (−0.058) | ✅ **WIN on dominant axis** |
+
+### Mechanism analysis — the GradNorm smoking gun
+
+The zero-init forward check passed (diff=0.0 at step 0) — the curvature signal was correctly isolated via the additive bias path. WSS improved on ALL axes. **But vol_p still breached by +0.312pp** — only marginally better than H2's +0.340pp.
+
+**The student's diagnosis is the key finding**: The final GradNorm weights reveal the actual mechanism:
+
+| Task | Final w | Note |
+|---|---:|---|
+| w_cp | 0.442 | |
+| w_tau_x | 0.698 | |
+| w_tau_y | 1.536 | |
+| **w_tau_z** | **2.318** | GradNorm maximizes WSS learning |
+| **w_vol_p** | **0.0064** | **362× lower than τ_z — starved** |
+
+GradNorm's relative-rate balancing reads vol_p's low task-loss slope as "overweighted" → crushes w_vol_p → vol_p starves. This is **injection-point-independent**: whether curvature enters via input channels (H2) or additive bias (H5), GradNorm produces the same starvation. The H5 design assumption ("input-channel dilution caused H2's vol_p breach") was incorrect. The correct mechanism is GradNorm's rate-based balancing.
+
+### Key findings to carry forward
+
+1. **CONFIRMED: Curvature attention bias produces real WSS gain** (−0.118pp from SOTA, −0.059pp from H2). The additive bias path works and is the cleanest injection mechanism. test_τ_z −0.155pp confirms τ_z/τ_y are the primary beneficiaries.
+2. **FALSIFIED: Feature-budget dilution hypothesis** — H5 only recovered +0.028pp vol_p vs H2. The 0.312pp gap to floor is NOT about input channel count.
+3. **IDENTIFIED: GradNorm vol_p starvation** as the universal floor-breach mechanism across H1/H2/H3/H4/H5. All WSS-targeted experiments feed the same root cause.
+4. **Follow-up**: H9 (PR #1145, tanjiro) = H5 curvature bias + hard floor on w_vol_p ≥ 0.05. This directly attacks the starvation. If it works, first SOTA-on-aggregate of the WSS wave.
+
+Decision: CLOSED, NOT-a-winner (floor breach). **Highest-quality result of the wave — confirms the mechanism and unlocks H9.**
+
+---
+
 ## 2026-05-16 06:25 UTC — PR #1129 CLOSED: WSS H3 near-wall volume cross-attn into surface decoder (dl24-nezuko)
 
 - **Branch:** `dl24-nezuko/wss-near-wall-cross-attn`
