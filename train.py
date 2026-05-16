@@ -134,6 +134,9 @@ class Config:
     gradnorm_lr: float = 1e-3
     gradnorm_min_w_vol_p: float = 0.0
     use_curvature_attention_bias: bool = False
+    wss_charbonnier_weight: float = 0.0
+    wss_charbonnier_eps: float = 1e-3
+    wss_charbonnier_axes: str = "all"
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -147,16 +150,30 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
         ),
+        "wss_charbonnier_axes": (
+            "Which WSS channels the supplementary Charbonnier loss applies to. "
+            "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b)."
+        ),
+    }
+    choices_text = {
+        "wss_charbonnier_axes": ["all", "z"],
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
         arg_name = f"--{field.name.replace('_', '-')}"
         help_value = help_text.get(field.name)
+        choices = choices_text.get(field.name)
         if isinstance(value, bool):
             parser.add_argument(arg_name, action="store_true", default=value, help=help_value)
             parser.add_argument(f"--no-{field.name.replace('_', '-')}", action="store_false", dest=field.name)
         else:
-            parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
+            parser.add_argument(
+                arg_name,
+                type=type(value),
+                default=value,
+                help=help_value,
+                choices=choices,
+            )
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
 
@@ -224,6 +241,27 @@ def per_channel_masked_mse(
     weighted = diff_sq * mask_f  # broadcast [B, N, C]
     denom = mask_f.sum().clamp_min(1.0)
     return weighted.sum(dim=(0, 1)) / denom  # [C]
+
+
+def masked_charbonnier(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    eps: float = 1e-3,
+) -> torch.Tensor:
+    """Masked Charbonnier (pseudo-Huber) loss: ``sqrt(eps^2 + (pred-target)^2) - eps``.
+
+    Averaged over masked spatial points and channels, matching the convention
+    used by :func:`masked_mse`. Differentiable everywhere, gradient bounded by 1
+    in magnitude — robust to outliers compared with squared error.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    delta = pred - target
+    values = torch.sqrt(eps * eps + delta * delta) - eps  # [B, N, C]
+    weighted = values * mask_f
+    n_pts = mask_f.sum().clamp_min(1.0)
+    n_ch = float(pred.shape[-1])
+    return weighted.sum() / (n_pts * n_ch)
 
 
 def build_model(config: Config) -> SurfaceTransolver:
@@ -304,6 +342,9 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    wss_charbonnier_weight: float = 0.0,
+    wss_charbonnier_eps: float = 1e-3,
+    wss_charbonnier_axes: str = "all",
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -347,13 +388,48 @@ def train_loss(
             weighted_volume_loss = volume_loss_weight * volume_loss
             loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        # H10b: Supplementary Charbonnier (pseudo-Huber) on WSS channels.
+        # Channels 1-3 of surface_preds/target are tau_x, tau_y, tau_z (idx 0 is cp).
+        # With axes="z", restrict to channel 3 (tau_z) — the axis with the
+        # largest val→test gap in H10, while letting τ_x/τ_y keep H9's MSE.
+        if wss_charbonnier_weight > 0.0:
+            if wss_charbonnier_axes == "z":
+                pred_wss = out["surface_preds"][..., 3:4]
+                target_wss = surface_target[..., 3:4]
+            elif wss_charbonnier_axes == "all":
+                pred_wss = out["surface_preds"][..., 1:4]
+                target_wss = surface_target[..., 1:4]
+            else:
+                raise ValueError(
+                    f"Unknown wss_charbonnier_axes={wss_charbonnier_axes}"
+                )
+            loss_wss_charb = masked_charbonnier(
+                pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
+            )
+            loss_wss_mse_diag = masked_mse(pred_wss, target_wss, batch.surface_mask)
+            loss = loss + wss_charbonnier_weight * loss_wss_charb
+            charb_metrics = {
+                "loss_wss_charb_unweighted": float(
+                    loss_wss_charb.detach().cpu().item()
+                ),
+                "loss_wss_charb_weighted": float(
+                    (wss_charbonnier_weight * loss_wss_charb).detach().cpu().item()
+                ),
+                "loss_wss_charb_target_mse": float(
+                    loss_wss_mse_diag.detach().cpu().item()
+                ),
+            }
+        else:
+            charb_metrics = {}
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
-    }, task_losses
+    }
+    metrics.update(charb_metrics)
+    return loss, metrics, task_losses
 
 
 def run_eval_only(config: Config, state) -> None:
@@ -593,6 +669,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    wss_charbonnier_weight=config.wss_charbonnier_weight,
+                    wss_charbonnier_eps=config.wss_charbonnier_eps,
+                    wss_charbonnier_axes=config.wss_charbonnier_axes,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -644,6 +723,36 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if "loss_wss_charb_unweighted" in batch_loss_metrics:
+                        # H10b diagnostics: key suffix follows --wss-charbonnier-axes
+                        # so dashboards can compare "wss" (all-axes) vs "tau_z" (z-only).
+                        wss_axes_label = (
+                            "tau_z"
+                            if config.wss_charbonnier_axes == "z"
+                            else "wss"
+                        )
+                        target_mse = batch_loss_metrics["loss_wss_charb_target_mse"]
+                        charb_unw = batch_loss_metrics["loss_wss_charb_unweighted"]
+                        charb_w = batch_loss_metrics["loss_wss_charb_weighted"]
+                        ratio_to_mse = (
+                            charb_unw / target_mse
+                            if target_mse > 1e-12
+                            else float("nan")
+                        )
+                        weighted_ratio = (
+                            charb_w / target_mse
+                            if target_mse > 1e-12
+                            else float("nan")
+                        )
+                        train_log.update(
+                            {
+                                f"train/loss_{wss_axes_label}_mse": target_mse,
+                                f"train/loss_{wss_axes_label}_charb_unweighted": charb_unw,
+                                f"train/loss_{wss_axes_label}_charb_weighted": charb_w,
+                                f"train/loss_{wss_axes_label}_charb_to_mse_ratio": ratio_to_mse,
+                                f"train/loss_{wss_axes_label}_charb_weighted_to_mse_ratio": weighted_ratio,
+                            }
+                        )
                 if config.use_y_symmetry_aug and aug_log:
                     bs = max(1, aug_log.get("batch_size", 0))
                     train_log["train/aug/y_symmetry_flip_rate"] = (
