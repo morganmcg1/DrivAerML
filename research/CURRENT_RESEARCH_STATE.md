@@ -1,11 +1,72 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~17:45 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~19:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~17:45Z) — thorfinn #1152 H13 β=5 CLOSED (catastrophic warmup-boundary divergence; mirror image of H14; math identity PASS; GT τ_n/τ_t = 0.08 measured = fleet-wide intelligence); thorfinn reassigned to H13b β=2 (PR #1156)
+## ★ CRITICAL FLEET-WIDE FINDING (2026-05-16 ~19:00Z): lr=5e-4 confound on 4 Wave 30 PRs
+
+The cascade of 4 Wave 30 divergences (#1153 H14, #1152 H13 β=5, #1156 H13b β=2, #1155 H15) all stem from a single advisor error: writing `--lr 5e-4` instead of canonical `--lr 9e-5` on the PR commands. Conflation of SOTA single-model PR #972 (`--lr 1e-4`) with the Wave 30 Lion reference. The canonical Wave 30 recipe is BASELINE.md "L=5 + surf→vol xattn ... Lion **lr=9e-5**, 13ep" and most-recent closed-clean Wave 30 PR (#1138 H3) used exactly that.
+
+**Survey of finished runs with `lr=5e-4 lion ep=13 bs=4`: NONE** (H14 crashed, H15 diverging). This LR has never reached a stable trajectory under this config.
+
+**Fleet-wide impact limited to those 4 PRs.** Verified all other in-flight Wave 30 PRs use lr=9e-5:
+- #1143 frieren H8 ✓ (running cleanly at val_abupt 6.340%)
+- #1146 nezuko H9' ✓
+- #1147 tanjiro H6' ✓
+- #1148 fern H10 ✓
+- #1150 askeladd H11 ✓
+- #1151 edward H12 ✓
+
+**Process correction**: future loss-layer or optimization-layer probes MUST use `--lr 9e-5` (the canonical Lion reference) unless a sweep is explicitly testing LR.
+
+## Latest invocation actions (2026-05-16 ~19:00Z) — Two more closures: #1156 thorfinn H13b β=2 CLOSED (anisotropic-loss formulation broken at BOTH β=5 and β=2 — not just amplification cliff), #1155 alphonse H15 EMA RELAUNCHED (advisor confirmed lr=5e-4 mistake); thorfinn reassigned to H13c Lagemann cosine+magnitude decoupling (PR #1158) at correct lr=9e-5
+
+### Actions this invocation (continued — Wave 30 ~19:00Z)
+
+- **CLOSED PR #1156 (thorfinn H13b β=2 anisotropic loss)** — DIFFERENT failure mode from H13 β=5: corruption WITHOUT gradient explosion (clipping prevented nonfinites entirely, 0% post-warmup nonfinite_grad vs H13's 100%). But near-identical EP1 val_abupt across β=5 and β=2 (49.43% vs 47.51%) during low-LR warmup at 2.5e-5 — BEFORE any LR×amplification interaction can fire. **The anisotropic-loss FORMULATION ITSELF disrupts learning, not just the amplification factor.** Student diagnostic exemplary: math identity verified pre-launch, model_n/t ≈ 0.066-0.073 tracks GT_n/t ≈ 0.079-0.083 (model IS learning correct geometry), step-skip distribution table cleanly distinguishes corruption-without-grad-explosion from grad-explosion mode. H13 hypothesis "model under-fits GT normal-component" FALSIFIED.
+- **SENT BACK PR #1155 (alphonse H15 EMA)** for relaunch at lr=9e-5. Student diagnostic identified the lr=5e-4 confound exactly: PR specified 5.5× the working reference. EMA implementation itself verified correct (skip on nonfinite_grad ✓, store/copy_to/restore mechanic ✓, ema warmup at EP1 raw=25.20% vs ema=81.39% as predicted). Live model is divergent at lr=5e-4 + Lion; EMA cannot smooth a divergent trajectory. Relabeled status:wip. Provided exact relaunch command matching H3 / PR #823 reference + EMA overlay. Answered all 3 student open questions: (1) lr=9e-5 confirmed; (2) train_surface_points=65536 to match H3; (3) ema_decay=0.9999 retained as the H15 hypothesis.
+- **ASSIGNED PR #1158 (thorfinn: Wave 30 H13c Lagemann cosine+magnitude decoupling)** at lr=9e-5. Following thorfinn's queued plan post-#1156 closure. Splits τ loss into `mag_loss + λ·cos_loss` (λ=0.1, small weight on cosine direction loss). Opposite design DNA from H13: no per-vertex tangent/normal frame, no amplification, decoupling instead of rotation. Published precedent: Lagemann et al. arxiv 2507.22817 (AAA WSS). Builds on thorfinn's H13 diagnostic infra (`model_n_t_ratio` panel reused). Clean overlay on the known-stable training trajectory (lr=9e-5, vol-curriculum 16k→65k, surf-to-vol xattn).
+- **ADVISOR ACKNOWLEDGMENT** to alphonse + thorfinn: explicit apology for the lr=5e-4 mistake on the H13/H13b/H14/H15 PR commands. Their fleet-wide intelligence catches saved further GPU waste.
+
+### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 10)
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1143 | frieren | H8 mirror-symmetry data aug | EP13 in test eval (val_abupt 6.340%, near-terminal SENPAI-RESULT pending) |
+| #1146 | nezuko | H9' curvature input feature | EP11.6+, val_abupt 6.250% (improving, EP10 PASS band) |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | EP3+ PASS at 6.904%, τz/τx 1.512 not breaking yet |
+| #1148 | fern | H10 vector-decoupled output | EP1-EP2 active training |
+| #1150 | askeladd | H11 multi-scale kNN context | EP2.5+, val_abupt 6.864% improving (EP3 PASS band) |
+| #1151 | edward | H12 τ-magnitude-weighted loss | EP2.34, val_abupt 8.23% improving, pace 1.59h/ep budget-risk |
+| #1155 | alphonse | H15 EMA / Polyak averaging | **RELAUNCHING at lr=9e-5** (just sent back) |
+| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | JUST ASSIGNED (replaces #1156) |
+
+**Closed in Wave 30** (10): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged lr=5e-4), H13 β=5 #1152 (diverged lr=5e-4), **H13b β=2 #1156 (diverged lr=5e-4 + formulation broken)**.
+
+### Causal map of τ_z bottleneck — architecture surface ABSOLUTELY EXHAUSTED (7 closures); amplification axis on normal-direction exhausted (3 closures: H6', H13 β=5, H13 β=2)
+
+| Layer | In-flight probes | Closed |
+|---|---|---|
+| **Architecture** | 0 | 6 widening + 1 mechanism-PASS (DEFINITIVELY exhausted) |
+| **Loss** | 4 (H6' tan, H12 mag, **H13c cos+mag NEW**, EMA tangentially) | 2 (H13 β=5, H13b β=2 — anisotropic axis exhausted) |
+| **Data-input** | 3 (H8 mirror, H9' curv, H11 multi-scale) | 0 |
+| **Output projection** | 1 (H10 vector decouple) | 0 |
+| **Optimization** | 1 (H15 EMA smoothing — relaunching at lr=9e-5) | 1 (H14 5× head LR DIVERGED, lr=5e-4 confound) |
+
+### Loss-layer attack fleet — now 4-strong probe of τ_z bottleneck direction
+
+| PR | Probe | Direction | Mechanism if winning |
+|---|---|---|---|
+| #1147 (H6') | soft τ_pred·n=0 | suppress model's normal-component | model was over-predicting normal noise |
+| #1151 (H12) | (\|τ_target\|/mean)^α weight | upweight high-magnitude vertices | long-tail magnitude under-learned |
+| #1158 (H13c) | mag-MSE + λ·cos-loss decoupling | separate magnitude from direction | direction-error contaminates magnitude gradient |
+| (closed H13/H13b) | β·MSE(τ_n_err) per-vertex anisotropy | upweight matching GT normal-component | (FALSIFIED — formulation breaks at all β) |
+
+**Loss-layer attack now wedge of THREE published-precedented techniques** plus the queued H6' diagnostic. The cosine+magnitude split (H13c) is fundamentally different from H6' (suppress) and H13 (amplify) — it decouples rather than re-weighting.
+
+## Older invocation actions (2026-05-16 ~17:45Z) — thorfinn #1152 H13 β=5 CLOSED (catastrophic warmup-boundary divergence; mirror image of H14; math identity PASS; GT τ_n/τ_t = 0.08 measured = fleet-wide intelligence); thorfinn reassigned to H13b β=2 (PR #1156)
 
 ### Actions this invocation
 

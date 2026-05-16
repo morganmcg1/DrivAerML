@@ -1,3 +1,105 @@
+## 2026-05-16 19:00 — PR #1156: H13b Tangent/Normal Anisotropic Loss at β=2 (thorfinn) — CLOSED (also diverged with DIFFERENT mechanism — corruption without gradient explosion; per-vertex anisotropic loss formulation itself broken, not just amplification factor)
+
+- **Branch**: `thorfinn/h13b-anisotropic-beta2` (closed)
+- **W&B runs**: 8 ranks (rank0=`iypg6fey`, ranks 1-7 various), terminated at step ~10,136 after EP2 KILL
+- **Hypothesis**: Soften H13 amplification from β=5 to β=2 (2.5× smaller per-vertex amplification of normal-direction MSE); if H13's failure was the LR×amplification cliff, β=2 should fit in the stable band per GT n/t = 0.08 measurement.
+
+### Terminal metrics
+
+| Metric | EP1 (low-LR warmup at 2.5e-5) | EP2 (post-warmup at 5e-4) | H13 β=5 EP1 | Baseline |
+|---|---:|---:|---:|---:|
+| val_abupt | **47.51%** | **88.33%** | 49.43% | 20.49% (live EP1) |
+| nonfinite_grad % post-warmup | 0% | 0% | 100% | 0% |
+| grad_norm peak | 138 (step 1499) | 55,309 (step 9501, clipped) | 137,953 (step 3793) | <50 |
+| model_n/t ratio | 0.063–0.067 | 0.068–0.070 | 0.061 (pre-divergence) | — |
+| GT n/t ratio | 0.079–0.080 | 0.079–0.083 | 0.080 | — |
+
+### Verdict: NEGATIVE — clean falsification with DIFFERENT mechanism from H13 β=5
+
+**Critical new fact: β=5 and β=2 give near-identical EP1 val_abupt (49.43% vs 47.51%)** during low-LR warmup at 2.5e-5 — BEFORE any LR×amplification interaction can fire. This is the smoking gun that the anisotropic-loss FORMULATION ITSELF is broken, not just the amplification factor.
+
+**Failure-mode comparison (β=5 vs β=2)**:
+
+| β | Mechanism | EP1 val_abupt | Post-warmup failure | nonfinite% |
+|---:|---|---:|---|---:|
+| 5 (H13) | gradient explosion via amplification | 49.43% | Grad norm 137k at warmup boundary, 100% steps nonfinite from step 5000+ | 100% |
+| 2 (H13b) | corruption WITHOUT explosion | 47.51% | Grad clipping (max_norm=1.0) prevents nonfinites, but corrupt representation drifts: val_abupt 47.5% → 88.3% across EP1→EP2 | 0% |
+
+**Root-cause analysis (student diagnostic)**:
+- Math identity verified PRE-launch: at α=β=1.0, tau_anisotropic_mse reproduces baseline 4-channel masked_mse exactly (abs diff 0.00).
+- Model successfully tracks GT n/t ≈ 0.08 geometry during training (model_n/t = 0.063–0.073 vs GT = 0.079–0.083). **The H13 hypothesis "model under-fits GT normal component" is FALSIFIED** — model IS learning the correct geometric structure.
+- The β-amplification creates a per-vertex anisotropic "pull" toward matching the small normal-component (GT ≈8% of tangent magnitude). Model overfits the per-vertex noise in that small signal (FEM interpolation, mesh resolution), learning a representation that minimizes the *anisotropic* objective but produces wildly off-target predictions in the *unweighted* val_abupt metric.
+- **The amplification axis is exhausted**: H6' (suppress normal — also closed earlier in Wave 30), H13 β=5 (5× amplify normal — diverged via grad explosion), H13 β=2 (2× amplify normal — corruption without explosion). All three points on the normal-direction-emphasis axis fail.
+
+### lr=5e-4 confound — advisor mistake on PR text
+
+Both H13 (#1152) and H13b (#1156) ran at `--lr 5e-4` due to advisor error on the PR command. Canonical Wave 30 reference (BASELINE.md "L=5 + surf→vol xattn ... Lion lr=9e-5") and most-recent closed-clean PR (#1138 H3) use `--lr 9e-5`. Cascade of 4 divergences (H14, H13, H13b, H15) all stem from this. **However**, the H13b EP1 failure at low-LR warmup (2.5e-5) happens BEFORE the LR transition — confirming the formulation issue is upstream of LR. The β=5 grad explosion at peak LR was clearly LR-dependent; the β=2 corruption is NOT.
+
+### Pivot trigger: Lagemann cosine+magnitude decoupling
+
+Per the PR's queued "if β=2 also diverges" branch, this terminal closure triggers a pivot to **Lagemann et al. arxiv 2507.22817** — the published opposite spirit of H13. Use a **magnitude-MSE loss + cosine-direction loss with cosine getting a SMALL weight** instead of rotating to a per-vertex tangent/normal frame. Assigned as H13c (PR #1158) at correct lr=9e-5.
+
+### Closure reasoning summary
+
+| H13 axis | Mechanism | Outcome |
+|---|---|---|
+| H13 β=5 | Per-vertex normal-grad amplification 5× | DIVERGED (grad explosion at warmup boundary) |
+| H13b β=2 | Per-vertex normal-grad amplification 2× | DIVERGED (corruption without explosion; clip prevented nonfinites) |
+| H13c (NEW PR #1158) | Mag+cos decoupled — NO per-vertex tangent frame | PROBE |
+
+---
+
+## 2026-05-16 19:00 — PR #1155: H15 EMA / Polyak Averaging (alphonse) — DIVERGED at EP3, RELAUNCH at lr=9e-5
+
+- **Branch**: `alphonse/h15-ema-polyak` (relabeled status:wip for relaunch)
+- **W&B runs**: group `wave30_ema_h15` 8-rank, killed at 18:33Z after EP3 KILL (~1h45min in)
+- **Hypothesis**: EMA (Polyak averaging) with decay=0.9999 smooths optimization trajectory; evaluate EMA model rather than live weights at val/test.
+
+### Terminal divergence trace
+
+| Epoch | train/epoch_loss | val_raw_primary/abupt_pct | val_primary/abupt_pct (EMA) | LR at epoch end |
+|---:|---:|---:|---:|---:|
+| 0 (warmup) | 0.930 | — | — | 2.5e-5 → 5e-4 |
+| 1 | 2.443 | 25.20% | 81.39% | 5e-4 |
+| 2 | 2.641 | 79.01% | 89.94% | 5e-4 |
+| 3 | (in flight) | **78.91%** (12× gate breach) | 88.14% | 4.93e-4 |
+
+EP0 base_mse_loss went 2.30 → 0.175 at step 3465 (during low-LR warmup at 2.5e-5). At LR transition to peak (step 2865 → lr=5e-4) loss spiked from 0.175 back to 1.49 at step 4331, then oscillated 1.0–2.0 forever. **No NaN, no nonfinite grads — clean optimizer divergence** under Lion's sign-step at over-driven LR.
+
+### Verdict: DIVERGED due to PR-text error (lr=5e-4 instead of canonical lr=9e-5)
+
+**Critical student diagnostic catch**: PR-prescribed `--lr 5e-4` is **5.5× the working reference** for (ep=13, bs=4, lion, ml=5, hidden=512). The canonical Wave 30 reference is BASELINE.md "L=5 + surf→vol xattn ... Lion **lr=9e-5**, 13ep" and the most-recent closed-clean Wave 30 PR (#1138 H3 alphonse, val_abupt EMA=6.197%) used exactly that. Survey of finished runs with `lr=5e-4 lion ep=13 bs=4`: **NONE**. Only two such runs ever attempted — H14 (CRASHED at 0.62h, ep_loss ≈ 90,000) and H15 (DIVERGING). So this LR has never reached a stable trajectory under this config.
+
+**EMA implementation verified correct**:
+- `EMA.update` correctly skipped on `nonfinite_grad / nonfinite_loss` (train.py:1115)
+- Eval pattern: raw → store/copy_to/restore (clean)
+- EMA decay tracking: EP1 ema=81.39% > raw=25.20% (EMA still warming, as PR predicted)
+- Grad norms healthy: mean ≈ 5 (excluding rare spikes), clipping engaged
+- The live model is divergent — EMA cannot smooth a divergent trajectory.
+
+### Action: relaunch with lr=9e-5 (PR back to status:wip)
+
+Relaunch command (matching H3 / PR #823 reference exactly + EMA overlay):
+```bash
+cd target/ && torchrun --nproc_per_node=8 train.py \
+  --batch-size 4 --epochs 13 \
+  --lr 9e-5 --lr-warmup-epochs 1 --lr-cosine-t-max 13 \
+  --optimizer lion --weight-decay 5e-4 \
+  --use-ema --ema-decay 0.9999 --eval-raw-vs-ema --ema-start-step 50 \
+  ...
+```
+
+Open questions answered:
+1. lr=9e-5 (NOT 5e-4) — student correct
+2. train_surface_points=65536 (NOT 40000) — match H3 reference
+3. ema_decay=0.9999 retained — that IS the H15 hypothesis (slow EMA on stable LR=9e-5 trajectory)
+
+### lr=5e-4 fleet-wide confound (advisor acknowledgment)
+
+The cascade of 4 Wave 30 divergences (#1153 H14, #1152 H13 β=5, #1156 H13b β=2, #1155 H15) all stem from the same advisor error: writing `--lr 5e-4` instead of the canonical `--lr 9e-5` on the PR commands. This conflated SOTA single-model PR #972 (`--lr 1e-4`) with the Wave 30 Lion reference. **All other in-flight Wave 30 PRs (#1143 H8 frieren, #1146 H9' nezuko, #1147 H6' tanjiro, #1148 H10 fern, #1150 H11 askeladd, #1151 H12 edward) correctly use lr=9e-5** (verified). Fleet-wide impact limited to the 4 divergent PRs.
+
+---
+
 ## 2026-05-16 17:45 — PR #1152: H13 Tangent/Normal Anisotropic Loss at β=5 (thorfinn) — CLOSED (catastrophic divergence at warmup boundary, mirror image of H14; mechanism PASS via math identity)
 
 - **Branch**: `thorfinn/h13-tau-anisotropic-loss` (closed)
