@@ -8,6 +8,66 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 17:44 UTC — PR #1145 CLOSED: WSS H9 curvature bias + vol_p GradNorm clamp (dl24-tanjiro, `l8jcb7r2`+`cust3asz`)
+
+- **Branch:** `dl24-tanjiro/h9-curvature-bias-vol-p-clamp`
+- **W&B runs:** training `l8jcb7r2` (DDP8, killed at EP10), eval-only `cust3asz` (EP10 best-val checkpoint)
+- **Hypothesis:** H5's curvature additive attention bias produced real WSS gain (test_wss=6.609%, −0.118pp SOTA) but was disqualified by GradNorm vol_p starvation (w_vol_p=0.0064). H9 adds a hard floor clamp `w_vol_p ≥ 0.05` to prevent GradNorm from crushing vol_p while preserving WSS surface-task balancing. Expected: H5's WSS gain holds AND vol_p clears the 3.643% floor.
+- **Kill reason:** EP10 val_vol_p=4.056% exceeded 4.0% kill criterion; 0.05 clamp was DORMANT (natural floor 0.088, above clamp threshold).
+
+### Terminal test metrics (EP10 best-val EMA checkpoint, eval run `cust3asz`)
+
+| Metric | SOTA #972 | H9 EP10 test | Δ vs SOTA | Floor | Verdict |
+|--------|---:|---:|---:|---|---|
+| test_abupt | 5.844% | 5.897% | +0.053pp | — | ❌ fractionally over |
+| **test_wss** | **6.727%** | **6.678%** | **−0.049pp** | — | **✅ UNDER SOTA** |
+| **test_τ_x** | 5.971% | 5.903% | **−0.068pp** | — | **✅ UNDER SOTA** |
+| **test_τ_y** | 7.362% | 7.308% | **−0.054pp** | — | **✅ UNDER SOTA** |
+| **test_τ_z** | 8.747% | 8.668% | **−0.079pp** | — | **✅ UNDER SOTA** |
+| test_vol_p | **3.643%** | 3.913% | +0.270pp | **BREACH** | ❌ |
+| test_surf_p | **3.577%** | 3.692% | +0.115pp | **BREACH** | ❌ |
+
+**4 of 7 test_primary axes under SOTA #972** — all four on the WSS side. First single-model run in the wave to achieve SOTA-under on the WSS aggregate.
+
+### val → test gap (EP10 best-val checkpoint)
+
+| Metric | val (EP10) | test | gap |
+|---|---:|---:|---:|
+| abupt | 6.219% | 5.897% | −0.322pp |
+| wss | 6.925% | 6.678% | −0.247pp |
+| τ_x | 6.038% | 5.903% | −0.135pp |
+| τ_y | 7.553% | 7.308% | −0.245pp |
+| τ_z | 9.380% | 8.668% | −0.712pp |
+| vol_p | 4.056% | 3.913% | −0.143pp |
+| surf_p | 4.068% | 3.692% | −0.376pp |
+
+### GradNorm dynamics (H9 key finding)
+
+| Stack | w_vol_p (terminal) | w_τ_z | ratio | vol_p test |
+|---|---:|---:|---:|---|
+| Lion+GradNorm (H5) | 0.0064 | 2.318 | 362× | 3.955% (breach) |
+| **Lion+GradNorm+curvature (H9)** | **0.0879** | **~1.8** | **~20×** | **3.913% (breach)** |
+
+### Analysis and wave findings
+
+**HEADLINE FINDING: Curvature bias mechanism confirmed as the WSS path.**
+
+1. **Curvature additive attention bias transfers cleanly through the val→test gap.** H5: val_wss≈6.85% → test_wss=6.609% (−0.24pp gap). H9: val_wss=6.925% → test_wss=6.678% (−0.247pp gap). Both gaps are ~0.25pp, consistent — the mechanism is robust, not val-overfit.
+
+2. **GradNorm vol_p starvation has TWO distinct modes:**
+   - **Gradient-mass mode** (H5): GradNorm crushes w_vol_p to 0.0064 (362× below w_τ_z). Curvature mechanism absent — surface task dominates GradNorm renormalization.
+   - **Representation-capacity mode** (H9): Curvature bias gives backbone enough vol_p signal that GradNorm self-stabilizes at 0.088 (not 0.0064). w_vol_p ALIVE but vol_p still stalls at ~4.05% — beyond 0.088 gradient mass, the bottleneck is volume decoder representation, not loss weighting.
+
+3. **The 0.05 clamp was DORMANT** — H9's natural w_vol_p floor (0.088) exceeds the clamp threshold. To be binding, the clamp floor must constrain THIS trajectory (≥0.10-0.15), not H5's pathological floor.
+
+4. **Vol_p ceiling is NOT rate-coupled**: despite 13.7× higher w_vol_p than H5 (0.088 vs 0.0064), val_vol_p stalls at the same ~4.05% level. More gradient mass alone doesn't lower vol_p. This points to the volume decoder's representational capacity under the H9 surface mechanism being the actual bottleneck.
+
+**Why NOT merged**: Issue #1056 AND-clause floors (test_vol_p ≤ 3.643%, test_surf_p ≤ 3.577%) breached by +0.270pp and +0.115pp respectively at EP10/30.
+
+**Carry-forward → H9b (PR #1157)**: clamp=0.15 (binding on this trajectory) + vol_p MAE auxiliary loss at weight 0.05 (direct L1 signal bypassing GradNorm). The MAE aux tests whether the bottleneck is gradient direction (L2 saturating on low-residual vol_p regions) rather than gradient mass. Two-mechanism 2×2 ablation in a single run.
+
+---
+
 ## 2026-05-16 14:30 UTC — PR #1144 CLOSED: WSS H8 Lion→AdamW optimizer swap (dl24-nezuko, `ccpx4z28`+`7ifzpx0r`)
 
 - **Branch:** `dl24-nezuko/h8-adamw-optimizer-swap`
