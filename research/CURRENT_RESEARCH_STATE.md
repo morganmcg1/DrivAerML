@@ -36,6 +36,28 @@ The ONLY attack on the input distribution. Two possible outcomes:
 
 "please ensure to report val and test (if available) scores" — commit to val+test in all future updates. Test only available at EP13 terminal SENPAI-RESULT; val per-epoch during training.
 
+### Cross-pollination from dl24 advisor (07:59Z #1056)
+
+The dl24 advisor (running parallel fleet on `drivaerml-long-20260504`) shared 5 terminal results. Two key findings:
+
+1. **Curvature attention bias #1132 (dl24-tanjiro H5): test_WSS=6.609% (−0.118 under SOTA), test_τ_z=8.592% (−0.155 on dominant axis), val_abupt=6.168%.** Blocked by floor breaches (test_vol_p=3.955%, test_SP=3.651%) due to GradNorm starving w_vol_p. **The curvature feature attack IS a real WSS mechanism — and is the GAP in tay Wave 30 fleet.** Filed as the next-idle assignment candidate: **H9' "Curvature attention bias on tay" — port dl24-tanjiro #1132's curvature mechanism to tay where we use FIXED loss weights (no GradNorm starvation). Should beat SOTA on WSS without floor breaches.**
+
+2. **GradNorm w_vol_p crushed to 0.0064 vs w_τ_z=2.318 (362× lower)** — explains every dl24 vol_p floor breach. tay fleet uses fixed loss weights so we don't share this failure mode. But it's the right diagnostic frame: **gradient-budget mismatch is the unifying explanation for both fleets** — dl24 starves vol_p, tay can't break τ_z without surrender. Both extremes (too soft = 4-of-4 widening, too hard = val_WSS=26%) confirm a Goldilocks zone for τ·n=0 type constraints.
+
+**dl24 active runs to watch for cross-pollination:**
+- #1135 frieren H6 wind-exposure attn bias zero-init — EP10 val_wss<7% first time in wave
+- #1142 fern H7 surface_loss_weight=1.5 — val_vol_p=3.675% (just above floor)
+- #1144 nezuko H8 Lion → AdamW Plateau Protocol — warmup
+- #1145 tanjiro H9 curvature bias + GradNorm w_vol_p clamp ≥0.05 — direct attack on #1132 root cause
+
+### Next-idle assignment queue (in priority order)
+
+1. **H9' Curvature attention bias on tay** (port of dl24-tanjiro #1132 mechanism) — high confidence test_WSS<SOTA
+2. **H6' Soft τ·n=0 penalty** (port of tanjiro #1134 mechanism with λ~0.1 soft constraint) — preserve absolute WSS while retaining directional constraint signal
+3. **Stacking experiments** — combine top Wave 30 winner with H9' or H6' once terminals land
+
+Once Wave 30 terminals start landing, deploy H9' on the first idle student.
+
 
 
 ## Latest invocation actions (2026-05-16 ~04:30Z) — frieren #1133 CLOSED terminal (NINTHFOLD structural ratio confirmation, magnitude decomposition cleanly falsified), Wave 30 fleet now 7-of-8 active + frieren idle pending reassignment; nezuko #1136 H2 mid-EP7 healthy descending but τz/τx widening (negative-mechanism / positive-absolute signal)
