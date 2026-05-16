@@ -1,3 +1,51 @@
+## 2026-05-16 11:45 — PR #1138: Normal-Aligned Slice Groups / Soft Orientation Routing (thorfinn) — CLOSED (5-of-5 model-side widening at terminal closure)
+
+- **Branch**: `thorfinn/normal-aligned-slice-groups` (closed)
+- **W&B run**: `of1ur6fp`, state=finished, best_epoch=12, source=EMA, 14h+ training, 13/13 epochs
+- **Hypothesis**: Add a soft orientation-aware bias to slice routing so slice tokens cluster around vertices with similar surface-normal direction. Mechanism: per-block `normal_slice_bias` parameter learned with zero-init.
+
+### Terminal metrics (advisor pulled from W&B summary — student pod went idle ~10:31Z after Claude session exit; no SENPAI-RESULT comment posted but W&B run completed cleanly at 11:14Z)
+
+| Metric | val (34) | **test (50)** | Baseline #972 | Δ (test) | Gate |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.315% | 5.938% | 5.844% | +0.094pp | — |
+| **WSS** | 7.183% | **6.898%** | 6.727% | **+0.171pp** | **FAIL** |
+| **SP** | 4.165% | **3.709%** | 3.577% | **+0.132pp** | **FLOOR BREACH** |
+| vol_p | 3.665% | **3.462%** | 3.643% | **−0.181pp** | **PASS** |
+| τ_x | 6.304% | 6.146% | — | — | — |
+| τ_z | 9.686% | 8.922% | — | — | — |
+| **τz/τx** | **1.536** (val) | **1.452** (test) | ~1.46 | flat | **NULL** |
+
+### Verdict: NEGATIVE on primary WSS — close. Mechanism strongly engaged but engaged-but-neutral on τ_z.
+
+**Diagnostic was clean**: slice entropy collapsed 0.96 → 0.36 (EP1 → EP10, then plateaued); `normal_slice_bias.param_norm` grew healthily from zero-init to 5.87/7.65/6.98/7.25/7.92 per block. The router IS using orientation conditioning. block_2 most peaked at 0.23 (block-specific concentration).
+
+**But τ_z still flattened**: 9.723 (EP6) → 9.684 (EP10), essentially zero descent over 4 epochs while τ_x kept descending. val τz/τx widened 1.50 → 1.537 then collapsed back to 1.452 on test — same engaged-but-neutral signature as every other model-side attack.
+
+**Surprising side-effect**: test_vol_p=3.462% beats baseline by 0.181pp. Normal-aligned slice grouping apparently improves volume-pressure prediction (probably by aligning volume cross-attention with body-aligned slices). Not enough to redeem on primary WSS axis but worth noting.
+
+### 5-of-5 Wave 30 architecture-attack widening pattern at TERMINAL CLOSURE
+
+| PR | Axis | val τz/τx widening | test τz/τx |
+|---|---|---|---|
+| #1136 (nezuko) | H2 normal spectral | 1.49 → 1.548 | 1.457 |
+| #1137 (fern) | H5 Y-arch | — → 1.53 | 1.453 |
+| #1140 (askeladd) | H7 normal-aux | 1.515 → 1.543 | 1.441 |
+| #1139 (edward) | H1 cylindrical | 1.385 → 1.547 | 1.469 |
+| **#1138 (thorfinn)** | **H3 soft normal-routing** | **1.50 → 1.537** | **1.452** |
+
+(#1141 alphonse H4 hard MoE routing is the only architecture attack still in-flight; #1134 tanjiro H6 broke the pattern with hard τ·n=0 mechanism PASS but absolute FAIL.) The architecture-layer attack surface is **definitively exhausted** for the τ_z bottleneck.
+
+### Reassignment
+
+Thorfinn reassigned to **H13 tangent/normal anisotropic surface-loss decomposition** (#1152) — symmetric opposite of H6' on the loss layer. Decomposes per-vertex τ prediction into tangent + normal components using surface normals (already in `surface_x[..., 3:6]`) and applies α=1, β=5 to explicitly upweight matching the GT normal-component. Tests whether the τ_z bottleneck is caused by under-learning the GT normal-component (β>1 helps) or by over-learning normal-component noise (H6' direction helps instead).
+
+### Operational note
+
+Student session exited code=0 at 10:31Z after iteration 451 — Claude exited but training continued in background. W&B run reached state=finished at 11:14:54Z but no Claude session was alive to post the terminal SENPAI-RESULT. Pod has been idle since iteration 452. Advisor pulled metrics directly from W&B summary as authoritative source. Benign harness orchestration artifact (no integrity issue with the experiment data).
+
+---
+
 ## 2026-05-16 10:05 — PR #1139: Cylindrical Coordinates (r, θ, z) Input Frame (edward) — CLOSED (7-of-7 model-side widening, all 3 floors breached)
 
 - **Branch**: `edward/cylindrical-coordinates` (closed)

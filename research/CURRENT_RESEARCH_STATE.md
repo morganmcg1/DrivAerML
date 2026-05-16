@@ -5,7 +5,57 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~10:10Z) — edward #1139 CLOSED (7-of-7 model-side widening) → edward reassigned to H12 τ-magnitude-weighted MSE loss (PR #1151); architecture attack surface definitively exhausted
+## Latest invocation actions (2026-05-16 ~11:50Z) — thorfinn #1138 CLOSED (5-of-5 model-side widening at terminal closure) → thorfinn reassigned to H13 tangent/normal anisotropic surface-loss decomposition (PR #1152); loss-layer attack fleet now 3-strong (H6'/H12/H13)
+
+### Actions this invocation
+
+- **CLOSED PR #1138 (thorfinn H3 soft normal-routing)** at terminal. W&B run `of1ur6fp` finished cleanly (best_epoch=12, EMA source, 14h+ training). Test: test_WSS=6.898% (+0.171pp FAIL), test_SP=3.709% (+0.132pp FLOOR BREACH), test_vol_p=3.462% (PASS −0.181pp), test τz/τx=1.452 (NULL collapse from val=1.536). Mechanism strongly engaged (slice entropy 0.96→0.36, `normal_slice_bias.param_norm` grew healthily) but engaged-but-neutral on τ_z. Surprising side-effect: vol_p beats baseline by 0.181pp. Student pod went idle at 10:31Z (Claude exited code=0 after iteration 451); training continued in background to finished state at 11:14Z but no Claude session was alive to post the terminal SENPAI-RESULT. Advisor pulled metrics from W&B summary as authoritative — benign harness orchestration artifact.
+- **5-of-5 Wave 30 architecture-attack widening pattern at TERMINAL CLOSURE CONFIRMED**. H1/H2/H3/H5/H7 all closed with the engaged-but-neutral signature. Only #1141 alphonse H4 hard MoE routing remains in-flight on the architecture layer.
+- **ASSIGNED PR #1152 (thorfinn: Wave 30 H13 Tangent/Normal Anisotropic Surface-Loss Decomposition)** — decompose per-vertex τ prediction into tangent (τ_t = τ − (τ·n)n) and normal (τ_n = (τ·n)n) components using surface normals from `surface_x[..., 3:6]`. Apply α_tangent=1, β_normal=5 to MSE. **Symmetric opposite of H6'**: H6' suppresses model's τ_pred·n; H13 explicitly upweights MATCHING the GT normal-component. Only one of (H6', H13) can be the correct direction at the τ_z bottleneck. Diagnostic `train/tau_normal_to_tangent_ratio` traces should clarify direction by EP3.
+
+### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 6)
+
+| PR | Student | Axis | Status |
+|---|---|---|---|
+| #1141 | alphonse | H4 hard MoE routing | in flight EP7+ ~6h to terminal |
+| #1143 | frieren | H8 mirror-symmetry data aug | in flight EP3 marginal |
+| #1146 | nezuko | H9' curvature input feature | in flight warmup |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | in flight warmup |
+| #1148 | fern | H10 vector-decoupled output | in flight warmup |
+| #1150 | askeladd | H11 multi-scale kNN context | in flight warmup |
+| #1151 | edward | H12 τ-magnitude-weighted loss | in flight warmup |
+| #1152 | thorfinn | H13 tangent/normal anisotropic loss | JUST LAUNCHED |
+
+**Closed in Wave 30** (5 widening + 1 mechanism-PASS-absolute-FAIL): H2 #1136, H5 #1137, H6 #1134, H7 #1140, H1 #1139, H3 #1138.
+
+### Loss-layer attack fleet — 3-strong probe of τ_z bottleneck location
+
+| PR | Probe | Direction | Mechanism if winning |
+|---|---|---|---|
+| #1147 (H6') | soft τ_pred·n=0 | suppress normal component | model was over-predicting noise |
+| #1151 (H12) | (\|τ_target\|/mean)^α weight | upweight high-magnitude vertices | long-tail magnitude under-learned |
+| #1152 (H13) | β·MSE(τ_n_err) on GT-normal component | upweight matching GT normal component | model was under-predicting normal signal |
+
+**H6' and H13 are direct symmetric opposites** — only one can be correct at the τ_z bottleneck. H12 is orthogonal to both (per-vertex magnitude weighting independent of direction). Combined, this 3-probe wedge tightly localizes which loss-layer reformulation breaks the structural τz/τx ceiling.
+
+### Causal map of τ_z bottleneck — 5-of-5 architecture closures terminal-confirmed
+
+- **DEFINITIVELY NOT at architecture layer**: 5-of-5 closed Wave 30 architecture attacks (H1/H2/H3/H5/H7) all show val widening 1.50-1.55 that collapses to test ~1.44-1.47 baseline band
+- **Bottleneck IS at output head + input feature distribution + loss layer**:
+  - 1 in-flight output-head probe (H10 vector decouple) — H6 closed mechanism PASS, H7 closed null
+  - 3 in-flight data-level probes (H8 mirror, H9' curvature, H11 multi-scale)
+  - 3 in-flight loss-layer probes (H6' tangent-penalty, H12 magnitude-weight, H13 anisotropic-decomp)
+- **Architecture-attack remnant**: #1141 alphonse H4 hard MoE routing is the only architecture attack still in-flight; expected to show the same widening pattern but stronger mechanism engagement than H3 (hard routing > soft routing)
+
+### Next-idle assignment queue (in priority order)
+
+1. **Stacking experiments** — once Wave 30 terminals land, combine top winner with orthogonal axes
+2. **Focal MSE loss with γ on per-vertex error** — alternative loss attack if H12 partial-wins (uses error magnitude not target magnitude)
+3. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
+4. **Curriculum on τ_z weight** — schedule tau_z_loss_weight from 2.0→3.5 across epochs; cheap, additive
+5. **Geodesic distance to sharp-edge feature** — alternative data-level input signal
+
+## Older invocation actions (2026-05-16 ~10:10Z) — edward #1139 CLOSED (7-of-7 model-side widening) → edward reassigned to H12 τ-magnitude-weighted MSE loss (PR #1151); architecture attack surface definitively exhausted
 
 ### Actions this invocation
 
