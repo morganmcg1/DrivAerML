@@ -1,10 +1,63 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-15 (latest invocation: 2026-05-15 ~21:20 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~04:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 
-## Latest invocation actions (2026-05-15 ~21:20Z) — alphonse #1122 CLOSED (EIGHTHFOLD structural ratio confirmation), Wave 30 FLEET EXPANDED to 7-of-8 (H4 hard normal routing #1141 launched), stale_wip false-positives cleared on #1133 + #1140
+## Latest invocation actions (2026-05-16 ~04:30Z) — frieren #1133 CLOSED terminal (NINTHFOLD structural ratio confirmation, magnitude decomposition cleanly falsified), Wave 30 fleet now 7-of-8 active + frieren idle pending reassignment; nezuko #1136 H2 mid-EP7 healthy descending but τz/τx widening (negative-mechanism / positive-absolute signal)
+
+### Actions this invocation
+
+- **CLOSED PR #1133 (frieren per-axis WSS mag decomp |τ_z|+||τ_xy||)** at terminal.
+  - Test metrics: test_WSS=**6.853%** (+0.126pp miss), test_vol_p=**3.620%** PASS, test_SP=**3.837%** (+0.260pp FLOOR BREACHED), val_abupt=6.254%, test τz/τx=**1.469**.
+  - **Fails 2/4 hard gates.** Clean mechanism falsification: mag_xy calibration ratio = 0.999 and mag_z calibration ratio = 1.001 by EP6, holding through EP13. mag_xy loss term EXCEEDED mag_z throughout training (1.07–1.34× ratio) — opposite of what τ_z-is-hard predicts. **Backbone represents |τ_z| just as easily as ||τ_xy||** — the bottleneck is *signed* τ_z, not magnitude encoding.
+  - **NINTHFOLD structural ratio confirmation** of the 1.44–1.57 band. Loss-side reformulation provides no traction.
+
+- **FALSE-POSITIVE check-in on #1136 (nezuko Wave 30 H2 normal Fourier features)**.
+  - Run `lths1ujt` alive at step 59,267, mid-EP7, heartbeat fresh at 04:37Z.
+  - Per-epoch val_abupt **monotonically descending**: 32.45% (EP1.3) → 7.55% (EP2.6) → 6.85% (EP3.9) → 6.60% (EP4.6) → 6.52% (EP5.2) → 6.47% (EP5.9) → 6.44% (EP6.3) → **6.43%** (EP6.7).
+  - **HOWEVER** τz/τx is monotonically *increasing* (1.385 → 1.542) — normal Fourier features help all axes but the relative balance favors τ_xy over τ_z. **Interesting negative-mechanism / positive-absolute signal.**
+  - Let run complete to EP13 for terminal — may still merge if test_WSS < 6.727% with both floors.
+
+- **ASSIGNED PR #1143 (frieren: Wave 30 H8 mirror-symmetry data augmentation)** — EIGHTH Wave 30 attack axis, ORTHOGONAL to all 7 in-flight architectural axes.
+  - **Hypothesis**: DrivAerML is zero-yaw zero-pitch → exact x-z mirror symmetry. Apply random 50% per-sample y-flip during training (flip surface_x y/ny, surface_y τ_y, volume_x y; cp + vol_p invariant). NOT an ensemble — single model, single forward pass at test time.
+  - **Why this attacks τ_z**: forces τ_y representations to be sign-flip-equivariant, breaks any spurious τ_y/τ_z correlation that biases the structural ratio. Doubles effective dataset (400 → 800 orientation views).
+  - **Theoretical basis**: Weiler & Cesa NeurIPS 2019 (exact symmetry → augmentation converges to equivariant solution); DrivAerML data paper documents exact symmetry.
+  - **Implementation**: ~35 LOC across train.py (Config flag) + data/loader.py (new `mirror_collate` wrapper) + trainer_runtime.py (conditional collate_fn). Frozen dataclass `DrivAerMLCase` → `dataclasses.replace`. Validation/test loaders unchanged.
+  - **Falsifiability**: WIN if test_WSS < 6.727% AND test τz/τx ≤ 1.40. Either result sharply updates the causal map of the τ_z bottleneck — first attack on the *input distribution*, all 9 prior attacks were on the model.
+
+### Wave 30 fleet now 8-of-8 architectural attack axes active in parallel
+
+| PR | Student | Mechanism | Attack layer |
+|----|---------|-----------|-------------|
+| #1134 | tanjiro | H6 local-frame WSS head (τ·n=0) | output decomposition |
+| #1136 | nezuko | H2 normal Fourier features | input features |
+| #1137 | fern | H5 Y-architecture dual-backbone | backbone split |
+| #1138 | thorfinn | H3 normal-aligned slice groups (SOFT) | attention soft |
+| #1139 | edward | H1 cylindrical coords (r,θ,z) | input coord frame |
+| #1140 | askeladd | H7 normal-prediction aux head | gradient signal |
+| #1141 | alphonse | H4 hard normal slice routing (MoE) | attention hard |
+| **#1143** | **frieren** | **H8 mirror-symmetry augmentation** | **input distribution** |
+
+**Eight orthogonal attacks. Eight students. Zero idle GPUs.**
+
+### Ninthfold structural ratio confirmation — full table
+
+| # | Mechanism | Lever | test τz/τx |
+|---|-----------|-------|-----------:|
+| 1 | thorfinn EMA 0.9995 (#1124) | temporal | 1.469 |
+| 2 | nezuko spatial-prior α=10 (#1125) | sampling | 1.449 |
+| 3 | fern surface_out depth=4 (#1126) | output capacity | 1.462 |
+| 4 | edward per-channel heads (#1116) | output decoupling | 1.460 |
+| 5 | thorfinn τ_z weight 3.0 (#1128) | loss weighting | ~1.44 |
+| 6 | askeladd surface_loss warmup (#1127) | curriculum | ~1.52 |
+| 7 | frieren mag-only #1121 | loss reform | 1.46 |
+| 8 | alphonse SDF FAR-field α=2.0 (#1122) | volume sampling | 1.465 |
+| **9** | **frieren mag-decomp #1133** | **loss reform v2** | **1.469** |
+
+Loss-side, sampling-side, capacity-side, output-decoupling-side, volume-sampling-side, and mag-decomp-side mechanisms ALL converge to the structural band. Wave 30 architectural attacks (7 in-flight) + data-distribution attack (H8 #1143) are the entirety of the remaining frontier.
+
+## Prior invocation actions (2026-05-15 ~21:20Z) — alphonse #1122 CLOSED (EIGHTHFOLD structural ratio confirmation), Wave 30 FLEET EXPANDED to 7-of-8 (H4 hard normal routing #1141 launched), stale_wip false-positives cleared on #1133 + #1140
 
 ### Actions this invocation
 

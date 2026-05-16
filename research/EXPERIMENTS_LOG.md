@@ -1,3 +1,42 @@
+## 2026-05-16 04:30 — PR #1133: Per-axis WSS mag decomp |τ_z|+||τ_xy|| (frieren) — CLOSED (terminal NEGATIVE, NINTH structural ratio confirmation, test_SP floor breached)
+
+- **Branch**: `frieren/per-axis-mag-decomp` (closed)
+- **W&B run**: `5l9i6fjn`, arm `lambda-z-0p1`, terminal at EP13
+- **Hypothesis**: Decompose WSS into magnitudes |τ_z| and ||τ_xy|| with separate aux heads — give the backbone a dedicated magnitude-scalar gradient signal on the dominant error axis, separate from the signed-3-vector main head.
+
+### Terminal metrics (test, single-model, EP13 terminal)
+
+| Metric | This PR | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.254% | 6.126% | +0.128pp | misses |
+| **test_WSS** | **6.853%** | 6.727% | **+0.126pp** | **misses** ❌ |
+| test_vol_p | 3.620% | 3.643% (floor) | −0.023pp | PASS ✅ |
+| **test_SP** | **3.837%** | 3.577% (floor) | **+0.260pp** | **FLOOR BREACHED** ❌ |
+| test_τ_x | 6.064% | ~5.61% | +0.45pp | regress |
+| test_τ_y | 7.473% | ~6.93% | +0.54pp | regress |
+| test_τ_z | 8.908% | ~8.20% | +0.71pp | target-axis regress |
+| **test τz/τx** | **1.469** | ~1.46 | 0.00 | **NINTH confirmation** |
+
+### Verdict: NEGATIVE — close
+
+Fails 2 of 4 hard gates: test_WSS misses by 0.126pp, test_SP floor breached by 0.260pp. Mechanism null.
+
+### Mechanism diagnostic — clean falsification
+
+The two aux-head calibration ratios converged symmetrically to ~1.000 by EP6 and held through EP13 (`mag_z_calib_ratio=1.001`, `mag_xy_calib_ratio=0.999`). The mag_xy loss term **exceeded** mag_z loss throughout training (1.07–1.34× ratio) — the OPPOSITE of what the τ_z-is-hard hypothesis would predict.
+
+**Conclusion**: the backbone represents |τ_z| just as easily as it represents ||τ_xy||. The bottleneck is in *signed* τ_z prediction, not in *magnitude* encoding. Magnitude decomposition provides no gradient signal the backbone couldn't already access.
+
+### NINTHFOLD structural ratio confirmation
+
+Adding #1133 to the table: now 9 distinct mechanisms have landed in the test τz/τx ∈ [1.44, 1.57] band. Mag-decomp is the 9th — pure loss-side reformulation provides zero traction.
+
+### Reassigned
+
+`frieren` → next Wave 30+ hypothesis. With 7 Wave 30 architectural axes (H1/H2/H3/H4/H5/H6/H7) already in flight, frieren's next axis must be **orthogonal to all of them** — likely a data-representation / multi-scale / training-procedure attack rather than architectural.
+
+---
+
 ## 2026-05-15 21:15 — PR #1122: SDF FAR-field α=2.0 port (alphonse) — CLOSED (terminal NEGATIVE, EIGHTH structural ratio confirmation)
 
 - **Branch**: `alphonse/port-sdf-importance-sampling-pr972` (closed)
