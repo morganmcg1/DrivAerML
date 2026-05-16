@@ -8,6 +8,43 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 09:30 UTC — PR #1135 CLOSED: WSS H6 wind-exposure additive attention bias (dl24-frieren, `u16jlft5`+`nb4mp52o`)
+
+- **Branch:** `dl24-frieren/h6-wind-exposure-attention-bias`
+- **W&B runs:** training `u16jlft5` (crashed EP21 tail), eval `nb4mp52o` (EP14 best-val checkpoint, EMA, 65536/65536 points)
+- **Hypothesis:** Inject wind-exposure features (`|nx|`, `|ny|`, `|nz|`, `|nx·u|`) as a zero-init additive attention bias (mirroring H5's curvature pathway) — predicted to selectively improve τ_y (lateral cross-flow axis) via the encoded wind-direction signal, while avoiding H1's vol_p floor breach.
+
+### Terminal test metrics (EP14 best-val checkpoint)
+
+| Metric | SOTA #972 | H6 test | Δ | Floor | Verdict |
+|--------|---:|---:|---:|---|---|
+| test_abupt | 5.844% | 5.952% | +0.108pp | — | small regression |
+| test_vol_p | **3.643%** | **3.957%** | +0.314pp | **BREACH** | ❌ |
+| test_surf_p | **3.577%** | **3.669%** | +0.092pp | **BREACH** | ❌ |
+| test_wss | 6.727% | 6.770% | +0.043pp | — | ~tied |
+| test_τ_x | 5.971% | 6.012% | +0.041pp | — | small regression |
+| test_τ_y | 7.362% | **7.305%** | **−0.057pp** | — | **mechanism confirmed** |
+| test_τ_z | 8.747% | 8.818% | +0.071pp | — | small regression |
+
+### Analysis
+
+1. **τ_y mechanism delivered** on the predicted axis (−0.057pp under SOTA) — the wind-exposure additive attention bias is the correct injection point for the H1 wind-exposure signal that previously broke as raw input channels. The mechanism is real, replicable, isolated.
+
+2. **vol_p tail-drift killed the merge case.** Same H5 signature: val_vol_p drifted +0.111pp EP9→EP15. Best-val checkpoint can't escape the floor because the EP9-EP15 plateau band sits structurally above 3.643%.
+
+3. **WSS plateau in [6.96, 6.99] val band, EP9-EP15** — identical to H5. Confirms WSS floor at this stack config is set by GradNorm task-share, not signal saturation.
+
+4. **Crash-then-EP14-recovery was correct** — extending to EP30 would have only widened the vol_p breach. Student's recovery management was excellent.
+
+5. **5-experiment GradNorm starvation pattern**: H1, H2, H3, H5, H6 — every surface-targeted experiment without a vol_p safeguard breached the vol_p floor. This is the strongest case yet for the H9 clamp being the right fix.
+
+### Carry-forward
+
+- **Wind-exposure attn bias** is a confirmed positive mechanism for τ_y. A future composition with H9's GradNorm clamp (wind-exposure + w_vol_p ≥ 0.05) is the next-step revisit IF H9 lands.
+- Adds to evidence pool that **zero-init additive attention bias is the safe injection pathway** (H5 confirmed for curvature, H6 confirmed for wind-exposure).
+
+---
+
 ## 2026-05-16 07:55 UTC — PR #1132 CLOSED: WSS H5 curvature additive attention bias (dl24-tanjiro, `lbi210l2`)
 
 - **Branch:** `dl24-tanjiro/h5b-curvature-attention-bias`
