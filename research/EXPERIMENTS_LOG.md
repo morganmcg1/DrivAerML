@@ -8,6 +8,84 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-16 19:30 UTC — PR #1149 CLOSED: WSS H10 Charbonnier supplementary loss on WSS (dl24-frieren, `wnj931pj`+`c5436ytt`)
+
+- **Branch:** `dl24-frieren/h10-charbonnier-wss-loss`
+- **W&B runs:** training `wnj931pj` (DDP8, killed at EP10 via SIGTERM), eval-only `c5436ytt` (EP10 best-val EMA)
+- **Hypothesis:** Add Charbonnier (pseudo-Huber, δ=eps=1e-3) supplementary loss on all WSS channels with weight=0.1. Mid-range residual reweighting (L1-like in the [eps, 1] residual band) was predicted to accelerate WSS descent past the [6.96, 6.99] H5/H6 plateau.
+- **Kill reason:** EP10 val_wss=7.078% ≥ 7.05% kill band; val_τ_z=9.549% > 9.5%; slope EP7-10 mean −0.018/ep → EP15 projection 6.97% (plateau-equivalent). Charbonnier mechanism was engaged (51.9% gradient share) but plateau-equivalent at EP10.
+
+### Terminal test metrics (EP10 best-val EMA checkpoint, eval run `c5436ytt`)
+
+| Metric | SOTA #972 | H10 EP10 test | Δ vs SOTA | Floor | Verdict |
+|--------|---:|---:|---:|---|---|
+| test_abupt | 5.844% | 6.059% | +0.215pp | — | ❌ regression |
+| test_wss | **6.727%** | 6.884% | +0.157pp | — | ❌ regression |
+| test_τ_x | 5.971% | 6.090% | +0.119pp | — | ❌ |
+| test_τ_y | 7.362% | 7.506% | +0.144pp | — | ❌ |
+| **test_τ_z** | 8.747% | **8.949%** | **+0.202pp** | — | ❌ (bellwether) |
+| test_vol_p | **3.643%** | 3.970% | +0.327pp | **BREACH** | ❌ (artifact of EP10 stop) |
+| test_surf_p | **3.577%** | 3.778% | +0.201pp | **BREACH** | ❌ (artifact of EP10 stop) |
+
+**0 of 7 test_primary axes under SOTA #972.** All-axis regression at EP10. Note: floor breaches are partly artifacts of the early kill at EP10 (vs SOTA's 30 EP training).
+
+### val→test gap (the H10 calibration finding)
+
+| Axis | val (EP10) | test | gap |
+|---|---:|---:|---:|
+| abupt | 6.341% | 6.059% | +0.282pp |
+| wss | 7.078% | 6.884% | +0.194pp |
+| τ_x | 6.208% | 6.090% | +0.118pp |
+| τ_y | 7.667% | 7.506% | +0.162pp |
+| **τ_z** | **9.549%** | **8.949%** | **+0.600pp** ← 3-4× typical, largest in wave |
+| vol_p | 4.133% | 3.970% | +0.163pp |
+| surf_p | 4.148% | 3.778% | +0.370pp |
+
+### Charbonnier weighted contribution to WSS gradient
+
+| Step | EP | MSE | Charb_w | Share |
+|---:|---:|---:|---:|---:|
+| 4801 | 0.4 | 0.1327 | 0.0201 | 13.2% |
+| 21600 | 2.0 | 0.0087 | 0.0050 | 36.5% |
+| 65855 | 6.0 | 0.0018 | 0.0017 | 48.9% |
+| 109759 | 10.0 | 0.0013 | 0.0014 | **51.9%** |
+
+Steady-state share ~50% — squarely in the 20-60% healthy band. Mechanism engaged correctly per design.
+
+### Wave finding — "Representation Floor"
+
+The largest informational bit: **τ_z val→test gap of +0.600pp** (3-4× larger than typical 0.150pp) — Charbonnier IS reshaping the loss landscape on the bellwether axis, just on the wrong representation. Loss-axis reshape produces a *different equilibrium at the same plateau height*. 
+
+H10 is a clean falsifying experiment for the loss-functional axis on the original Lion stack. Mechanism works at the gradient-budget level but cannot accelerate the val plateau without a representation upgrade. The wave plateau is robust to this perturbation.
+
+**Implication for next experiments**: Charbonnier must be paired with the H9 curvature representation upgrade to deliver value. H10b PR #1159 tests this directly with τ_z-only Charbonnier (highest leverage axis) on H9's curvature attention bias stack.
+
+### Carry-forward to H10b
+
+- **H10b stack** = H9 curvature attention bias carry-forward + Charbonnier on τ_z axis ONLY (channel index 3)
+- Single-axis isolation concentrates supplementary signal on bellwether (highest val→test gap = highest leverage)
+- Reduces total reshape pressure by ~3× vs H10's all-axis Charbonnier, leaving more capacity for vol_p/surf_p
+- Tests whether the H9 representation can capitalize on the loss reshape that the original Lion representation could not
+
+### Run command
+
+```bash
+torchrun --standalone --nproc_per_node=8 train.py \
+  --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
+  --output-dir outputs/h10_wss_charbonnier \
+  --epochs 30 --batch-size 1 \
+  --model-layers 6 --model-hidden-dim 512 --model-heads 4 --model-slices 128 \
+  --model-pe string_multisigma --pe-init-sigmas "0.25,0.5,1.0,2.0,4.0" \
+  --optimizer lion --lr 1e-4 --weight-decay 0.005 \
+  --lr-warmup-epochs 1 --lr-cosine-t-max 30 \
+  --use-ema --ema-decay 0.999 --ema-start-step 500 \
+  --use-y-symmetry-aug --y-symmetry-aug-prob 0.5 \
+  --use-gradnorm --gradnorm-alpha 0.5 \
+  --wss-charbonnier-weight 0.1 --wss-charbonnier-eps 1e-3
+```
+
+---
+
 ## 2026-05-16 17:44 UTC — PR #1145 CLOSED: WSS H9 curvature bias + vol_p GradNorm clamp (dl24-tanjiro, `l8jcb7r2`+`cust3asz`)
 
 - **Branch:** `dl24-tanjiro/h9-curvature-bias-vol-p-clamp`
