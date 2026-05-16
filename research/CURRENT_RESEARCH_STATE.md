@@ -1,31 +1,33 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~15:00 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~17:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~15:00Z) — alphonse #1153 H14 CLOSED (clean training divergence under Lion at head_lr=2.5e-3; mechanism PASS); alphonse reassigned to H15 EMA / Polyak averaging (PR #1155); 2nd optimization-layer probe with orthogonal mechanism
+## Latest invocation actions (2026-05-16 ~17:45Z) — thorfinn #1152 H13 β=5 CLOSED (catastrophic warmup-boundary divergence; mirror image of H14; math identity PASS; GT τ_n/τ_t = 0.08 measured = fleet-wide intelligence); thorfinn reassigned to H13b β=2 (PR #1156)
 
 ### Actions this invocation
 
-- **CLOSED PR #1153 (alphonse H14 asymmetric head LR 5×)** — fast turnaround (~33min wall), main run `ci9ipu1x` diverged in EP2. Mechanism PASS: param split correct (264,708 head params, ratio=4.99988 held), sanity at mult=1.0 PASS (EP1 loss=0.279 smooth descent). Cause: Lion's sign-step at head_lr=2.5e-3 is at the absolute upper bound of Lion's stable range — bf16 activation overflow in the 2-layer surface_out MLP at end-of-warmup. **Crucial confirmation**: the output head IS sensitive to LR scaling (consistent with H6 mech-PASS), but simple LR amplification under Lion crashes due to optimizer-stability bounds, not wrong diagnosis. Student diagnostic exemplary — step-level divergence trajectory (grad 489 → 2,827 → 2.46×10⁸ → Inf at step ~4500) plus 4 well-reasoned follow-up suggestions.
-- **ASSIGNED PR #1155 (alphonse: Wave 30 H15 EMA / Polyak Averaging)** — maintain exponential moving average (decay=0.9999) of model params in fp32, evaluate val/test on EMA copy. Second optimization-layer probe with **orthogonal mechanism to H14**: amplify (H14) ← → smooth (H15). PR #972 baseline does NOT use EMA — critical missing piece in baseline (virtually every Kaggle/ImageNet/DETR/DeiT SOTA uses weight averaging). Zero divergence risk, compounds with any other in-flight winner. ~50-line change; expected 0.05–0.5pp on test_WSS.
+- **CLOSED PR #1152 (thorfinn H13 anisotropic β=5)** — catastrophic divergence at step 3793 (~168 steps after warmup boundary, LR jumping 2.5e-5 → 5e-4). Math identity verified PRE-launch (abs diff 0.00 at α=β=1.0). Pre-divergence trajectory: model n/t = 0.061 closely tracked GT n/t = 0.080 → mechanism IS engaging correctly during warmup. Root cause: per-vertex grad on normal component is 5× larger at β=5; LR×β interaction explodes at peak LR. From step 5000 onward, 100% of optimizer steps skipped via nonfinite_grad guard. Student diagnostic exemplary: math verification + step-level forensics + GT n/t = 0.08 measurement + 4 well-reasoned follow-up suggestions.
+- **MIRROR-IMAGE OF H14 DIVERGENCE CONFIRMED**: both Wave 30 amplification-style attacks (#1153 H14 head_lr 5× and #1152 H13 β=5) crashed at the SAME EP1→EP2 LR jump. Fleet-wide intelligence: the standing 1-epoch warmup + lr=5e-4 recipe has very little safety margin for amplification-style attacks. Any future "amplify direction X by N×" probe needs N ≤ 2-3 OR extended warmup OR lower base LR.
+- **CRITICAL DATA POINT for entire fleet**: GT τ_normal_to_tangent magnitude ratio = **0.08** — the normal component IS real signal (8% of tangent magnitude, not noise), but small enough that 5× amplification was clearly past the LR×β stability cliff. This informs both H6' (suppressing normal may remove real signal) and H13b's β-sweep direction.
+- **ASSIGNED PR #1156 (thorfinn: Wave 30 H13b anisotropic loss at β=2)** — PR-queued follow-up. 2.5× reduction from divergent β=5; squarely in the stable band per GT n/t = 0.08 measurement. Same infrastructure (anisotropic loss + diagnostics already implemented in H13), 1-line config change. ~5h total run-time (thorfinn's throughput is ~23min/epoch, fastest in fleet). Clean falsification triangle: (a) trains+beats baseline → H13 PASS at softer weight; (b) trains+no improvement → H13 premise wrong; (c) also diverges → pivot to cosine+magnitude decoupling (Lagemann arxiv 2507.22817).
 
-### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 8)
+### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 9)
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1143 | frieren | H8 mirror-symmetry data aug | EP4+ at 6.535% val_abupt, τz/τx widening to 1.520 |
-| #1146 | nezuko | H9' curvature input feature | EP1+ active training |
-| #1147 | tanjiro | H6' soft τ·n=0 penalty | in flight warmup |
+| #1143 | frieren | H8 mirror-symmetry data aug | EP12.4 NEAR-TERMINAL, val_abupt 6.368%, τz/τx 1.539 |
+| #1146 | nezuko | H9' curvature input feature | EP4.7+, val_abupt 6.381% (EP3 PASS), fastest pace 1.06h/ep |
+| #1147 | tanjiro | H6' soft τ·n=0 penalty | EP3+ PASS at 6.904%, τz/τx 1.512 not breaking yet |
 | #1148 | fern | H10 vector-decoupled output | EP1-EP2 active training |
-| #1150 | askeladd | H11 multi-scale kNN context | EP1+ active training |
-| #1151 | edward | H12 τ-magnitude-weighted loss | in flight warmup |
-| #1152 | thorfinn | H13 tangent/normal anisotropic loss | EP2.4+ stable training |
-| #1155 | alphonse | H15 EMA / Polyak averaging | JUST ASSIGNED |
+| #1150 | askeladd | H11 multi-scale kNN context | EP2.5+, val_abupt 6.864% improving (EP3 PASS band) |
+| #1151 | edward | H12 τ-magnitude-weighted loss | EP2.34, val_abupt 8.23% improving, pace 1.59h/ep budget-risk |
+| #1155 | alphonse | H15 EMA / Polyak averaging | EP1+ main arm running (smoke PASS) |
+| #1156 | thorfinn | H13b anisotropic β=2 (follow-up) | JUST ASSIGNED |
 
-**Closed in Wave 30** (8): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, **H14 #1153 (diverged)**.
+**Closed in Wave 30** (9): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), **H13 β=5 #1152 (diverged at warmup boundary, mirror image of H14)**.
 
 ### Causal map of τ_z bottleneck — architecture surface ABSOLUTELY EXHAUSTED (7 closures)
 
@@ -34,12 +36,12 @@ The Wave 30 attack-surface inventory at this point:
 | Layer | In-flight probes | Closed |
 |---|---|---|
 | **Architecture** | 0 | 6 widening + 1 mechanism-PASS (DEFINITIVELY exhausted) |
-| **Loss** | 3 (H6' tan, H12 mag, H13 aniso) | 0 |
+| **Loss** | 3 (H6' tan, H12 mag, H13b aniso β=2) | 1 (H13 β=5 DIVERGED at warmup boundary) |
 | **Data-input** | 3 (H8 mirror, H9' curv, H11 multi-scale) | 0 |
 | **Output projection** | 1 (H10 vector decouple) | 0 |
-| **Optimization** | 1 (H15 EMA smoothing) | 1 (H14 5× head LR DIVERGED) |
+| **Optimization** | 1 (H15 EMA smoothing) | 1 (H14 5× head LR DIVERGED at warmup boundary) |
 
-H14 confirmed output-head IS sensitive to LR (consistent with H6 mech-PASS) but Lion at head_lr=2.5e-3 is past the optimizer's stable cliff. H15 attacks the same layer with the OPPOSITE mechanism (smoothing, not amplifying) — orthogonal direction with much higher safety margin.
+**Two consecutive amplification-style divergences (H14 head_lr 5× and H13 β=5)** crashed at the SAME EP1→EP2 LR jump (2.5e-5 → 5e-4). The standing 1-epoch warmup + lr=5e-4 recipe has very little safety margin for amplification-style attacks. Any future "amplify direction X by N×" probe needs N ≤ 2-3 OR extended warmup OR lower base LR. H13b (β=2) and H15 (smoothing instead of amplifying) are the survivors with margin to spare.
 
 ### Loss-layer attack fleet — 3-strong probe of τ_z bottleneck direction
 

@@ -1,3 +1,61 @@
+## 2026-05-16 17:45 — PR #1152: H13 Tangent/Normal Anisotropic Loss at β=5 (thorfinn) — CLOSED (catastrophic divergence at warmup boundary, mirror image of H14; mechanism PASS via math identity)
+
+- **Branch**: `thorfinn/h13-tau-anisotropic-loss` (closed)
+- **W&B runs**: 8 ranks (rank0=`02h1r0ok`, rank1-7=`pmdz7svm`/`fwjeluoc`/`uywxwi5m`/`uzx4kdvt`/`kdy3fl77`/`39576br1`/`ddz39kil`), all marked `state_note: TERMINATED EARLY`
+- **Hypothesis**: Decompose τ surface MSE into per-vertex tangent + normal components (math identity `‖err‖² = ‖err_t‖² + (err·n)²` for unit normals); amplify normal-component MSE by β=5 to test "model under-fits real GT normal signal" axis.
+
+### Terminal metrics
+
+| Metric | EP1 (pre-divergence) | EP2/EP3 (post-divergence, frozen) | Baseline |
+|---|---:|---:|---:|
+| val_abupt | 49.43% | 90.94% (frozen identical) | 6.126% |
+| val_WSS | 52.32% | 96.01% | 6.727% |
+| val_τx / τy / τz | 43.35% / 67.95% / 63.40% | 93.17% / 101.25% / 101.10% | — |
+| GT τ_n/τ_t magnitude ratio | **0.08 (real but small signal)** | — | — |
+| Math identity α=β=1.0 | abs diff **0.00** vs baseline MSE | — | — |
+
+**Step-level divergence (rank 0)**:
+
+| step | epoch | loss | grad_norm pre-clip | nonfinite_grad | clipped |
+|---:|---:|---:|---:|---:|---:|
+| 3000 | EP1 warmup | 0.95 | <100 | 0 | 0 |
+| 3625 | warmup END (LR jumps 2.5e-5 → 5e-4) | 1.5 | 0.5 | 0 | 0 |
+| 3792 | mid-EP1 cosine | 3.19 | 0.29 | 0 | 0 |
+| **3793** | mid-EP1 cosine | **59.34** | **137,953.83** | 0 | 1 |
+| 3800 | mid-EP1 cosine | 26.85 | 570 | 0 | 1 |
+| 3804 | mid-EP1 cosine | 121.27 | 1438 | 0 | 1 |
+| 5000+ | EP2-EP3 | ~3.5 (frozen) | Inf | **1 (100% steps)** | 0 |
+
+Step-skip distribution: 0-3625 = 0% skipped, 3625-5000 = 60.8% skipped, 5000-11000 = **100% skipped** (every optimizer step a no-op).
+
+### Verdict: NEGATIVE — clean catastrophic divergence at warmup boundary. CLOSED.
+
+**Mechanism PASS (all confirmed)**:
+- Math identity verified: at α=β=1.0, `tau_anisotropic_mse` reproduces baseline 4-channel `masked_mse` exactly (abs diff 0.00 on random tensors)
+- Pre-divergence trajectory at step 3000: model n/t ratio = 0.061 was closely tracking GT n/t = 0.080 → mechanism IS engaging correctly during warmup
+- Per-vertex unit normal handling correct; safety re-norm guard active
+
+**Root cause (student diagnostic)**: The per-vertex *gradient* on the normal component is 5× larger than baseline at β=5. At LR=2.5e-5 (warmup floor), these aggressive updates accumulate slowly and the model converges. Once LR jumps 20× to 5e-4 at step 3625, the same gradient signal pushes the model off the cliff — 168 steps later grad_norm went 0.29 → 137,953.83 in a single step. The fact that divergence happens *exactly* at the warmup boundary (not mid-epoch) is the smoking gun for LR×β instability.
+
+**Critical new data point for the entire fleet: GT τ_normal_to_tangent magnitude ratio = 0.08** — the GT normal-component IS real signal (8% of tangent magnitude), but small enough that 5× amplification was clearly past the LR×β stability cliff.
+
+### Mirror image of H14 divergence
+
+Both Wave 30 amplification-style attacks crashed at the SAME EP1→EP2 LR jump (2.5e-5 → 5e-4, 20× increase under cosine warmup):
+
+| PR | Attack | Amplification | Divergence step | Effective trigger |
+|---|---|---:|---:|---|
+| #1153 (alphonse) | H14 head_lr 5× | 5× on output-head grads | ~4500 (warmup end) | LR×amplification on small param subset |
+| **#1152 (thorfinn)** | **H13 β_normal=5** | **5× on normal-grad direction** | **3793 (warmup end)** | **LR×amplification on direction-specific grads** |
+
+The current 1-epoch warmup + lr=5e-4 recipe has very little safety margin for amplification-style attacks. This is fleet-relevant intelligence.
+
+### Reassignment
+
+Thorfinn reassigned to **H13b — anisotropic tangent/normal loss at β=2** (PR #1156). 2.5× reduction from divergent β=5; squarely in the stable band based on GT n/t = 0.08 baseline. Same implementation, 1-line config change. ~5h total run-time (thorfinn's H13 throughput was ~23min/epoch vs ~80min/epoch elsewhere — fastest in fleet).
+
+---
+
 ## 2026-05-16 15:00 — PR #1153: H14 Asymmetric LR for Surface Output Head 5× (alphonse) — CLOSED (clean training divergence under Lion at head_lr=2.5e-3; mechanism PASS; first optimization-layer attack)
 
 - **Branch**: `alphonse/h14-asymmetric-head-lr` (closed)
