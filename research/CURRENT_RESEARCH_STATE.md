@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-16 21:05 UTC (**H9b EP3 WAVE FINDING — val_vol_p=4.18% AT EP3 = H9 EP10 TERMINAL LEVEL**; H10b EP1 healthy launch; H11b RELAUNCHED post deviation catch; H7 EP24 plateau)
+- 2026-05-16 21:25 UTC (**H9b EP4 graceful decel val_vol_p=4.00%**; **H10b EP2 hypothesis WEAKENING — vol_p +0.33pp behind H9b, τ_z TIED**; **H11b EP1 5pp WORSE than H9b — per-axis WSS upweight stresses early-epoch optimization**; H7 EP25 surf_p=4.05% NOT-A-MERGE)
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -50,14 +50,14 @@ H9 wave finding said "vol_p ceiling is representation-bound at 4.05%". **H9b EP3
 
 **This is the wave's first credible path to SOTA-on-aggregate (all 7 axes under SOTA #972).**
 
-## Active Experiments (2026-05-16 19:45 UTC)
+## Active Experiments (2026-05-16 21:25 UTC)
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP24+ live** / 17h | 6.225% | 7.105% | 3.488% | 4.047% | EP15→EP24 surf_p flat (σ ≈ 0.005pp); bear case confirmed. Most likely NOT-A-MERGE due to surf_p breach (~+0.15-0.30pp projected); positive vol_p mechanism (3.488% under floor). Continue to EP30. |
-| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP3 LANDED** / 2.5h | **6.576%** | **7.327%** | **4.180%** | 4.348% | **WAVE FINDING CRYSTALLIZED. val_vol_p=4.180% at EP3 = H9's EP10 terminal level (4.056%). EP2→EP3 slope = −1.496pp/ep (3× H9). w_vol_p stabilized 0.27 (vs H9 terminal 0.088). Projected: val_vol_p < 3.5% by EP10, terminal SOTA-on-aggregate possible. The wave's most important active experiment.** |
-| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP1 LANDED** / 0.5h | 18.42% | 18.96% | 16.15% | 13.10% | Healthy launch. Charbonnier/MSE ratio on τ_z = 0.297 (in 20-60% healthy band). w_vol_p=0.34 (better than H9 same-step). Compound test of H9 representation + τ_z-leverage loss reshape. EP3 expected ~21:15Z. |
-| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** (CLEAN ISOLATION) | **RELAUNCHED** / 0.7h | — | — | — | — | **First launch `c0dmm9do` had flag deviation (missing STRING PE + Y-sym aug) — student self-caught via config.yaml check, killed cleanly, pushed implementation commit `ad04524`, relaunched 20:22:42Z. Exemplary workflow recovery. EP3 gate ~22:30Z (val_abupt ≤ 8.5%). EP2 spike (if present) would be wave finding signal regardless of LR.** |
+| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP25+ live** / 18h | 6.228% | 7.110% | **3.490%** ✅ | **4.048%** ❌ | val_surf_p flat at 4.05% across EP15-EP25 (σ ≈ 0.005pp); NOT-A-MERGE projection confirmed (surf_p breach +0.47pp). vol_p mechanism positive (under floor by 0.15pp). Continue to EP30 ~24:00Z. |
+| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP4 LANDED** / 3h | **6.444%** | **7.219%** | **4.000%** | 4.268% | **EP4 graceful cosine deceleration**: vol_p slope EP2→3=-1.496pp → EP3→4=-0.180pp (decay 0.12). Projected val_vol_p plateau 3.70-3.74% by EP10. Test floor 3.643%: val→test gap typically -0.1 to +0.3pp so terminal test_vol_p in [3.45, 3.85%] range — straddling floor. All other axes converging (1 EP behind H9 trajectory, MAE aux tax amortizing). |
+| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP2 LANDED** / 1.7h | 7.268% | 7.730% | 6.004% | 4.607% | **HYPOTHESIS WEAKENING.** vol_p +0.328pp BEHIND H9b at EP2 (no MAE aux means no vol_p acceleration). val_τ_z 10.227% **TIED** with H9b 10.179% — Charbonnier-alone NOT breaking τ_z. Charb/MSE ratio creep 0.30→0.66 (design-consistent — model grinding mid-residuals). w_vol_p stable 0.24, clamp dormant. EP3 ~21:45Z is next decision point. |
+| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** (CLEAN ISOLATION) | **EP1 LANDED** / 1h | 23.40% | 24.44% | 18.84% | 17.79% | **EP1 SIGNIFICANTLY WORSE than H9b (+4-5pp every axis).** Per-axis WSS upweight produces harder early-epoch optimization. EP2 spike test imminent (~21:35Z): val_abupt > val_abupt EP1 = "per-axis WSS unstable at any LR" wave finding. val_abupt ≤ 8.0% = recovery, continue. val_abupt > 9.0% = falsification. |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
