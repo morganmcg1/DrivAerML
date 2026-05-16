@@ -31,6 +31,8 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
+from data import DrivAerMLCase, DrivAerMLSurfaceDataset
+from data.loader import _resolve_artifact_path  # noqa: PLC2701 — internal helper for PVC fallback
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -61,6 +63,108 @@ from trainer_runtime import (
     timeout_budget_minutes,
     unwrap_model,
 )
+
+
+# ---------------------------------------------------------------------------
+# SDF-stratified volume sampling (port from frieren/sdf-stratified-vol-sampling,
+# matches PR #972 / run 56bcqp3m SOTA mechanism). Read-only data/loader.py is
+# preserved; we monkey-patch DrivAerMLSurfaceDataset.__getitem__ here.
+# ---------------------------------------------------------------------------
+
+_SDF_ABS_CACHE: dict[str, torch.Tensor] = {}
+
+
+def _load_case_sdf_abs(root, case_id: str, expected_n: int) -> torch.Tensor:
+    cached = _SDF_ABS_CACHE.get(case_id)
+    if cached is not None:
+        if cached.shape[0] != expected_n:
+            raise RuntimeError(
+                f"SDF cache for {case_id} has size {cached.shape[0]} but "
+                f"case_point_counts reports {expected_n}; cache poisoning?"
+            )
+        return cached
+    sdf_path = Path(root) / case_id / "volume_sdf.npy"
+    resolved = _resolve_artifact_path(sdf_path)
+    sdf_np = np.asarray(np.load(resolved), dtype=np.float32).reshape(-1)
+    if sdf_np.shape[0] != expected_n:
+        raise RuntimeError(
+            f"volume_sdf.npy for {case_id} has {sdf_np.shape[0]} rows but "
+            f"case_point_counts reports {expected_n}"
+        )
+    tensor = torch.from_numpy(np.abs(sdf_np)).contiguous()
+    _SDF_ABS_CACHE[case_id] = tensor
+    return tensor
+
+
+_orig_drivaerml_getitem = None
+
+
+def enable_sdf_stratified_sampling(alpha: float) -> None:
+    """Patch DrivAerMLSurfaceDataset.__getitem__ for SDF-stratified train sampling.
+
+    Eval (sampling_mode='eval_chunk') is untouched; only train_random views
+    use the SDF-weighted multinomial draw with weight[i] = 1 + alpha * |sdf[i]|.
+    """
+
+    global _orig_drivaerml_getitem
+    if _orig_drivaerml_getitem is None:
+        _orig_drivaerml_getitem = DrivAerMLSurfaceDataset.__getitem__
+    DrivAerMLSurfaceDataset._sdf_stratified_alpha = float(alpha)
+
+    def _patched_getitem(self, idx: int) -> DrivAerMLCase:
+        view = self.views[idx]
+        if view.sampling_mode != "train_random":
+            return _orig_drivaerml_getitem(self, idx)
+
+        counts = self.store.case_point_counts(view.case_id)
+        surface_idx = self._indices(
+            counts["n_surface"],
+            self.max_surface_points,
+            view,
+            group_view_count=view.surface_view_count,
+        )
+
+        n_total = int(counts["n_volume"])
+        N_vol = int(self.max_volume_points)
+        if view.view_index >= view.volume_view_count:
+            volume_idx_np = np.empty(0, dtype=np.int64)
+        elif N_vol <= 0 or n_total <= N_vol:
+            volume_idx_np = None
+        else:
+            sdf_abs = _load_case_sdf_abs(self.store.root, view.case_id, n_total)
+            alpha_val = getattr(self, "_sdf_stratified_alpha", 2.0)
+            weights = 1.0 + alpha_val * sdf_abs
+            sampled = torch.multinomial(weights, N_vol, replacement=True)
+            volume_idx_np = sampled.sort().values.numpy()
+
+        case = self.store.load_case(
+            view.case_id,
+            surface_rows=None if surface_idx is None else surface_idx.numpy(),
+            volume_rows=volume_idx_np,
+        )
+
+        metadata = dict(case.metadata)
+        metadata["n_surface_full"] = int(counts["n_surface"])
+        metadata["n_surface_loaded"] = int(case.surface_x.shape[0])
+        metadata["surface_view_index"] = int(view.view_index)
+        metadata["surface_view_count"] = int(view.surface_view_count)
+        metadata["surface_sampling_mode"] = view.sampling_mode
+        metadata["n_volume_full"] = int(counts["n_volume"])
+        metadata["n_volume_loaded"] = int(case.volume_x.shape[0])
+        metadata["volume_view_index"] = int(view.view_index)
+        metadata["volume_view_count"] = int(view.volume_view_count)
+        metadata["volume_sampling_mode"] = "sdf_stratified"
+        metadata["joint_view_count"] = int(view.view_count)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+    DrivAerMLSurfaceDataset.__getitem__ = _patched_getitem
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +236,8 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    use_sdf_stratified_vol_sampling: bool = False
+    sdf_stratified_alpha: float = 2.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -450,6 +556,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_suffix = f", DDP world_size={state.world_size}" if state.enabled else ""
             print(f"Device: {device}{ddp_suffix}" + (" [DEBUG]" if config.debug else ""))
 
+        if config.use_sdf_stratified_vol_sampling:
+            enable_sdf_stratified_sampling(config.sdf_stratified_alpha)
+            if state.is_main:
+                print(
+                    f"SDF-stratified volume sampling enabled: "
+                    f"alpha={config.sdf_stratified_alpha}"
+                )
         train_loader, val_loaders, test_loaders, stats = make_loaders(config, distributed_state=state)
         final_val_loaders = full_eval_loaders_from(val_loaders, config) if state.is_main else {}
         final_test_loaders = full_eval_loaders_from(test_loaders, config) if state.is_main else {}
