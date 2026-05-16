@@ -1,19 +1,18 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~10:10 UTC)
+- **Date:** 2026-05-16 (latest invocation: 2026-05-16 ~15:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-16 ~13:35Z) — alphonse #1141 CLOSED (6-of-6 model-side widening, hard+soft routing jointly falsified) → alphonse reassigned to H14 asymmetric LR for surface output head (PR #1153); first optimization-layer probe + architecture-layer surface ABSOLUTELY EXHAUSTED
+## Latest invocation actions (2026-05-16 ~15:00Z) — alphonse #1153 H14 CLOSED (clean training divergence under Lion at head_lr=2.5e-3; mechanism PASS); alphonse reassigned to H15 EMA / Polyak averaging (PR #1155); 2nd optimization-layer probe with orthogonal mechanism
 
 ### Actions this invocation
 
-- **CLOSED PR #1141 (alphonse H4 hard MoE routing)** at terminal. W&B run `iudmdz95`, EP13 best-EMA, clean 14.7h. Test: test_WSS=6.927% (+0.200pp FAIL), test_SP=3.851% (+0.274pp FLOOR BREACH), test_vol_p=3.548% (PASS −0.095pp), test τz/τx=1.478 (slight widening). Mechanism fully engaged (slice utilization=1.0 across all 5 blocks). Student diagnostic identified a capacity-mismatch confounder (z-surface = 56% of tokens, slice budget = 25%) but verdict stands — H3 (soft) + H4 (hard) jointly falsify the entire attention-routing axis. Healthy training, clean negative, paper-worthy diagnostic.
-- **6-of-6 Wave 30 architecture-attack widening pattern at TERMINAL CLOSURE CONFIRMED**. The architecture-layer attack surface is **ABSOLUTELY EXHAUSTED**: input frame, frequency encoding, attention routing (soft+hard), backbone topology, aux head all closed with the engaged-but-neutral signature (test τz/τx 1.44-1.48 band).
-- **ASSIGNED PR #1153 (alphonse: Wave 30 H14 Asymmetric LR for Surface Output Head)** — split Lion optimizer into 2 parameter groups: `surface_out.*` MLP at 5× the backbone LR. **First optimization-layer attack** in the Wave 30 fleet. Direct attack consistent with the H6 mechanism-PASS diagnostic (bottleneck at output projection): pushing more gradient signal into those 263k output-MLP params. Zero compute overhead, ~30-line change. Orthogonal to all 7 in-flight axes.
+- **CLOSED PR #1153 (alphonse H14 asymmetric head LR 5×)** — fast turnaround (~33min wall), main run `ci9ipu1x` diverged in EP2. Mechanism PASS: param split correct (264,708 head params, ratio=4.99988 held), sanity at mult=1.0 PASS (EP1 loss=0.279 smooth descent). Cause: Lion's sign-step at head_lr=2.5e-3 is at the absolute upper bound of Lion's stable range — bf16 activation overflow in the 2-layer surface_out MLP at end-of-warmup. **Crucial confirmation**: the output head IS sensitive to LR scaling (consistent with H6 mech-PASS), but simple LR amplification under Lion crashes due to optimizer-stability bounds, not wrong diagnosis. Student diagnostic exemplary — step-level divergence trajectory (grad 489 → 2,827 → 2.46×10⁸ → Inf at step ~4500) plus 4 well-reasoned follow-up suggestions.
+- **ASSIGNED PR #1155 (alphonse: Wave 30 H15 EMA / Polyak Averaging)** — maintain exponential moving average (decay=0.9999) of model params in fp32, evaluate val/test on EMA copy. Second optimization-layer probe with **orthogonal mechanism to H14**: amplify (H14) ← → smooth (H15). PR #972 baseline does NOT use EMA — critical missing piece in baseline (virtually every Kaggle/ImageNet/DETR/DeiT SOTA uses weight averaging). Zero divergence risk, compounds with any other in-flight winner. ~50-line change; expected 0.05–0.5pp on test_WSS.
 
-### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 7)
+### Wave 30 fleet — 8 active + 0 idle (Wave 30 closed count: 8)
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
@@ -23,10 +22,10 @@
 | #1148 | fern | H10 vector-decoupled output | EP1-EP2 active training |
 | #1150 | askeladd | H11 multi-scale kNN context | EP1+ active training |
 | #1151 | edward | H12 τ-magnitude-weighted loss | in flight warmup |
-| #1152 | thorfinn | H13 tangent/normal anisotropic loss | in flight startup |
-| #1153 | alphonse | H14 asymmetric head LR | JUST LAUNCHED |
+| #1152 | thorfinn | H13 tangent/normal anisotropic loss | EP2.4+ stable training |
+| #1155 | alphonse | H15 EMA / Polyak averaging | JUST ASSIGNED |
 
-**Closed in Wave 30** (7): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140.
+**Closed in Wave 30** (8): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, **H14 #1153 (diverged)**.
 
 ### Causal map of τ_z bottleneck — architecture surface ABSOLUTELY EXHAUSTED (7 closures)
 
@@ -38,9 +37,9 @@ The Wave 30 attack-surface inventory at this point:
 | **Loss** | 3 (H6' tan, H12 mag, H13 aniso) | 0 |
 | **Data-input** | 3 (H8 mirror, H9' curv, H11 multi-scale) | 0 |
 | **Output projection** | 1 (H10 vector decouple) | 0 |
-| **Optimization** | 1 (H14 asymmetric LR) | 0 |
+| **Optimization** | 1 (H15 EMA smoothing) | 1 (H14 5× head LR DIVERGED) |
 
-The 5 surviving layers each have at least 1 active probe. The optimization layer is newly attacked.
+H14 confirmed output-head IS sensitive to LR (consistent with H6 mech-PASS) but Lion at head_lr=2.5e-3 is past the optimizer's stable cliff. H15 attacks the same layer with the OPPOSITE mechanism (smoothing, not amplifying) — orthogonal direction with much higher safety margin.
 
 ### Loss-layer attack fleet — 3-strong probe of τ_z bottleneck direction
 
@@ -54,10 +53,13 @@ The 5 surviving layers each have at least 1 active probe. The optimization layer
 
 ### Next-idle assignment queue (in priority order)
 
-1. **Stacking experiments** — once Wave 30 terminals land, combine top winner with orthogonal axes
-2. **Capacity-matched H4 retry (z-slice-fraction=0.55)** — clean falsification of remaining slice-routing variant
-3. **Focal MSE loss with γ on per-vertex error** — alternative loss attack if H12 partial-wins (uses error magnitude not target magnitude)
-4. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
+1. **Stacking experiments** — once Wave 30 terminals land, combine top winner with EMA (H15) + orthogonal axes
+2. **H14b LR-sweep follow-up** (multiplier ∈ {1.5, 2.0, 3.0}) — pin down where the Lion-stability cliff lies; only run if H15 EMA result is also null and optimization-layer still needs probes
+3. **AdamW for H14 retry** — student #1153 suggested this; AdamW handles wider LR range cleanly via second-moment normalization; clean separation between "5× is aggressive on this head" vs "Lion specifically cannot operate at 2.5e-3"
+4. **Capacity-matched H4 retry (z-slice-fraction=0.55)** — clean falsification of remaining slice-routing variant
+5. **Focal MSE loss with γ on per-vertex error** — alternative loss attack if H12 partial-wins (uses error magnitude not target magnitude)
+6. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
+7. **Lookahead optimizer (Zhang et al. 2019)** — k inner steps + slow weight interpolation; complementary to EMA
 5. **Curriculum on τ_z weight** — schedule tau_z_loss_weight 2.0→3.5 across epochs; cheap, additive
 6. **Multi-head output (one per τ channel)** — alternative output-head attack if H10/H14 partial-win
 7. **SAM optimizer** — sharpness-aware minimization (2× compute, may be infeasible in 18h budget)

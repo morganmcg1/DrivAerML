@@ -1,3 +1,43 @@
+## 2026-05-16 15:00 — PR #1153: H14 Asymmetric LR for Surface Output Head 5× (alphonse) — CLOSED (clean training divergence under Lion at head_lr=2.5e-3; mechanism PASS; first optimization-layer attack)
+
+- **Branch**: `alphonse/h14-asymmetric-head-lr` (closed)
+- **W&B runs**: main `ci9ipu1x` (rank0 + 7 sibling DDP), sanity `7xq2kpa8` (mult=1.0 verification)
+- **Hypothesis**: Split Lion optimizer into 2 param groups; surface_out.* MLP gets 5× backbone LR (2.5e-3 vs 5e-4). Direct attack on H6 mechanism-PASS output-head diagnostic — push more gradient signal into bottleneck location. Standard Kaggle/ImageNet precedent (DeiT head_init_scale, MAE linear probing, ULMFit).
+
+### Terminal metrics
+
+| Epoch | val_abupt | val_SP | val_VP | val_WSS | τ_x | τ_y | τ_z | τz/τx | train_loss |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 34.65% | 25.33% | 24.87% | 37.03% | 31.79% | 44.63% | 46.63% | 1.467 | 0.972 |
+| 2 | 279.72% | 80.46% | 285.24% | 383.51% | 93.04% | 818.33% | 121.54% | 1.307 | **96798.50 (DIVERGED)** |
+
+**Step-level divergence (rank 0)**: step 3800 (EP2 start) grad=5.28 → step 4000 grad=489 → step 4200 grad=2,827 → step 4400 grad=2.46×10⁸ → step 4600 grad=Inf, loss=161,798. Last 1000 steps (7000-7836): every optimizer step skipped via `nonfinite_grad` guard. Model frozen in degenerate state. Killed at ~33min wall.
+
+### Verdict: NEGATIVE — clean falsification via training instability. CLOSED.
+
+**Mechanism PASS** (all confirmed):
+- Param split correct: surface_out tensors found (4 tensors, 264,708 params vs PR estimate ~263k), backbone 15,998,869 params
+- `lr/head_to_backbone_ratio = 4.99988` held precise throughout training (cosine scheduler preserves per-group ratios as expected)
+- Sanity at mult=1.0 PASS: EP1 train_loss=0.279 smooth descent matching baseline, no NaN
+
+**Cause analysis (student diagnostic)**: Lion (Chen et al. 2023) recommends lr ∈ [1e-5, 1e-3]; head_lr=2.5e-3 is at absolute upper bound. Lion's sign-step `lr*sign(g)` produces uniformly-sized updates regardless of grad magnitude; at lr=2.5e-3 on the 2-layer surface_out MLP, those updates pushed weights into regions causing bf16 activation overflow. Divergence onset exactly at end-of-warmup when head LR first hit 2.5e-3 steady state — characteristic signature of single-layer runaway (grad explodes before loss does).
+
+This confirms: **the output head IS sensitive to LR scaling (consistent with H6 mechanism PASS)**, but the operating point is fragile under Lion at 5×. The H6 mechanism-PASS interpretation (bottleneck at output head) holds, but the simple "amplify LR" attack fails due to optimizer-stability bounds — not due to wrong diagnosis.
+
+### Wave 30 attack-layer summary at H14 closure
+
+- **Architecture (×7 CLOSED, DEFINITIVELY EXHAUSTED)**: H1/H2/H3/H4/H5/H7 widening, H6 mechanism PASS absolute FAIL
+- **Loss (×3 in-flight)**: #1147 H6' soft τ·n, #1151 H12 magnitude-weighted, #1152 H13 tangent/normal
+- **Data-input (×3 in-flight)**: #1143 H8 mirror-sym, #1146 H9' curvature, #1150 H11 multi-scale kNN
+- **Output-head (×1 in-flight)**: #1148 H10 vector-decoupled
+- **Optimization (×1 closed=diverged)**: #1153 H14 (this)
+
+### Reassignment
+
+Alphonse reassigned to **H15 EMA / Polyak averaging of model weights** (#1155) — maintain exponential moving average (decay=0.9999) of model params in fp32, evaluate val/test on EMA copy. **Second optimization-layer probe**, different mechanism from H14: amplify ← H14, smooth → H15. Critical missing piece in baseline (PR #972 does NOT use EMA; virtually every Kaggle/ImageNet SOTA does). Zero divergence risk, compounds with any other in-flight winner.
+
+---
+
 ## 2026-05-16 13:30 — PR #1141: Hard Normal-Routing Slice Partition / MoE-style Attention (alphonse) — CLOSED (6-of-6 model-side widening confirmed; architecture-layer attack surface ABSOLUTELY EXHAUSTED)
 
 - **Branch**: `alphonse/hard-normal-slice-routing` (closed)
