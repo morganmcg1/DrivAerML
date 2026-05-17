@@ -1,11 +1,32 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~04:50 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~06:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~06:00Z) — frieren H16 CLOSED TERMINAL-NULL (δ=1.0 dormant, mechanism calibration failed, watchdog false-positive kill; reassigned to H16b δ=0.3 PR #1169); fern H10b EP3 PASS at 6.697% (CLOSEST to baseline of all in-flight attacks); frieren newly idle → H16b assigned
+## Latest invocation actions (2026-05-17 ~06:15Z) — alphonse H15b CLOSED NOT-A-MERGE (mechanism PASS / baseline FAIL, parked); nezuko H17 CLOSED TERMINAL-NULL (KILLED EP3, hard-constraint cold-start gap ~11pp); 2 students idle (alphonse, nezuko) → researcher-agent dispatching for H20/H21 fresh axes
+
+### Actions this invocation (06:15Z May 17)
+
+- **CLOSED PR #1165 alphonse H15b** as NOT-A-MERGE. Mechanism CONFIRMED (EMA AHEAD of raw by +0.80pp at EP3 — clean inverse of H15's −9.54pp gap, EMA crossed at EP1). But absolute metrics regress on ALL 4 axes + both floors breach: val_ema 6.838% / test 6.636% (+0.792pp), test_WSS 7.636% (+0.909pp), test_SP 4.268% (FAIL +0.691pp floor), test_vol_p 3.924% (FAIL +0.281pp floor). Recipe budget-starved (3/13 epochs trained, cosine LR barely 6% along). **NEW DATAPOINT**: test τz/τx = 1.439 from EMA weight averaging — 2nd-closest band-edge break after H6' 1.420. Implies EMA implicitly decorrelates per-vertex τ predictions. H15 series PARKED as stackable mechanism for future winners.
+- **CLOSED PR #1162 nezuko H17** as TERMINAL-NULL. Hard τ·n=0 by-construction tangent-frame implementation VERIFIED CORRECT (orthogonality residuals 2.51e-9 / 1.91e-8, max|τ·n| ≤ 2.4e-7 in fp32 — machine-zero). But trajectory PARALLEL to baseline (gap +12.83→+11.13→+11.34pp across EP1→EP3) — KILL at EP3 per PR's own gate. Cold-start representational gap: data-dependent output basis + reduced DOF in 2-channel head can't recover within 13ep lr=9e-5 budget. Soft-penalty (H6') is better experimental match in this budget; hard constraint requires longer warmup or transfer learning.
+- **DISPATCHED researcher-agent (background)** for 2 fresh fleet-orthogonal hypotheses: H20 for alphonse (optimization-layer angle, different from EMA series), H21 for nezuko (representation-layer angle, different from tangent-frame). Output to `RESEARCH_IDEAS_2026-05-17_06:00.md`.
+
+### KEY FLEET DIAGNOSTIC: 2nd band-edge break from optimization-layer (not architecture)
+
+Wave 30 now has **two distinct band-break signals** at test τz/τx:
+
+| Closure | Layer | Mechanism | test τz/τx | Verdict |
+|---|---|---|---:|:--|
+| H6' #1147 (closed) | output-loss layer | Soft τ·n=0 penalty | **1.420** (FIRST break) | NOT-A-MERGE SP floor |
+| H15b #1165 (closed) | optimization layer | EMA weight averaging | **1.439** (2nd closest) | NOT-A-MERGE all axes |
+
+**Research-direction implication**: Band-breaking is achievable from MULTIPLE layers, not just geometric-constraint or per-vertex-loss. EMA's implicit ensemble effect on per-vertex predictions hints that **prediction variance reduction across training trajectories has structural-decoupling content** — a fresh lens not yet exploited.
+
+Previous update (06:00Z May 17)
+
+### Latest invocation actions (2026-05-17 ~06:00Z) — frieren H16 CLOSED TERMINAL-NULL (δ=1.0 dormant, mechanism calibration failed, watchdog false-positive kill; reassigned to H16b δ=0.3 PR #1169); fern H10b EP3 PASS at 6.697% (CLOSEST to baseline of all in-flight attacks); frieren newly idle → H16b assigned
 
 ### Actions this invocation (06:00Z May 17)
 
@@ -40,20 +61,20 @@ Wave 30 now has **two independent** experimental confirmations that direction is
 
 **Research-direction implication**: any future loss-level cosine-aware or direction-only attack is now ruled out. The bottleneck has moved one layer down to the magnitude regression head and/or the τ_z over-prediction collapse band. H10b (in flight) attacks magnitude; H17 (in flight) attacks the band geometrically.
 
-### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 19
+### Wave 30 fleet — 6 active + 2 idle (alphonse, nezuko awaiting H20/H21); Wave 30 closed count: 21
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1169 | **frieren** | **H16b Huber loss on τ channels δ=0.3** (calibrated bulk-reshape — restart from H16) | **NEW — assigned 06:00Z May 17** (18h budget) |
+| #1169 | frieren | H16b Huber loss on τ channels δ=0.3 (calibrated bulk-reshape — restart from H16) | assigned 06:00Z May 17 (18h budget) |
 | #1168 | thorfinn | H19 VICReg batch-variance regularization on \|τ_z\| | assigned 05:00Z May 17 (18h budget) |
 | #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | EP~2.5 (gate active, mean_abs=0.223) |
-| #1165 | alphonse | H15b EMA decay=0.999 | EP3 EMA AHEAD of raw by +0.804pp — mechanism CONFIRMED; EP4 terminal |
 | #1164 | **fern** | **H10b bounded-exp magnitude fix (softplus→clamp.exp)** | **EP3 PASS 6.697%** — CLOSEST to baseline 6.126% of all in-flight |
 | #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h, healthy |
-| #1162 | nezuko | H17 tangent-frame output reparameterization | EP~3 / 18h; diagnostic keys not logging — flagged |
 | #1151 | edward | H12 τ-magnitude-weighted loss (sweep α=0.5 done, α=0.3 running) | a0p5 arm: NOT-A-MERGE (val 6.326%, floor breach); a0p3 running → terminal ~17:22Z |
+| TBD | **alphonse** | **H20 (fresh axis — researcher-agent assembling)** | **IDLE — awaiting assignment** |
+| TBD | **nezuko** | **H21 (fresh axis — researcher-agent assembling)** | **IDLE — awaiting assignment** |
 
-**Closed in Wave 30** (19): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**, **H16 #1161 (TERMINAL-NULL δ=1.0 dormant; watchdog false-positive kill at EP4; KEY LEARNING: Huber-on-τ requires post-EP1 δ calibration)**.
+**Closed in Wave 30** (21): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**, **H16 #1161 (TERMINAL-NULL δ=1.0 dormant; watchdog false-positive kill at EP4; KEY LEARNING: Huber-on-τ requires post-EP1 δ calibration)**, **H17 #1162 (TERMINAL-NULL KILLED EP3; hard-τ·n=0-by-construction implementation verified correct but cold-start gap ~11pp vs baseline; soft-penalty H6' is better budget-match)**, **H15b #1165 (NOT-A-MERGE; mechanism PASS — EMA AHEAD of raw +0.80pp at EP3, test τz/τx=1.439 band-edge — but baseline FAIL all axes + both floors; budget-starved 3/13 epochs)**.
 
 ### Causal map of τ_z bottleneck — updated after H10 and H6' diagnostics
 
