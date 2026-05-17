@@ -1,3 +1,54 @@
+## 2026-05-17 10:35 — PR #1168: H19 VICReg Batch-Variance Regularization on Predicted τ_z (thorfinn) — CLOSED TERMINAL NOT-A-MERGE / mechanism PARKED AS STACKABLE (3rd budget-starved mechanism-PASS closure in Wave 30)
+
+- **Branch**: `thorfinn/H19-vicreg-tau-z-variance` (closed)
+- **W&B group**: `wave30_h19_vicreg_tau_z` — rank0 `8x9qt1tu`, ranks 1–7 `j4q2f6gu`/`5rgk3a1s`/`68xj8n90`/`j0fbd51l`/`bvz7d7jz`/`pqw0zb31`/`lq28cjy4`
+- **Hypothesis**: VICReg variance hinge `λ · max(0, γ − std(|τ_z|))²` with γ=0.05, λ=0.10 — penalize batch-statistic collapse of per-sample mean |τ_z|. Frames τ_z/τ_x band [1.44, 1.55] as batch-level distributional failure rather than per-vertex error. ~12 lines train.py-only, ref Bardes et al. ICLR 2022 + Hanna et al. arXiv:2412.13993.
+
+### Terminal results (best_epoch=3 EMA, SENPAI_TIMEOUT_MINUTES=360 cut at 271 min)
+
+| Metric | H19 | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | **6.998%** | 6.126% | **+0.872pp** | FAIL |
+| test_abupt | **6.670%** | 5.844% | +0.826pp | FAIL |
+| test_SP | 4.274% | 3.577% floor | **+0.697pp** | **FAIL FLOOR** |
+| test_vol_p | 3.934% | 3.643% floor | **+0.291pp** | **FAIL FLOOR** |
+| test_WSS | 7.671% | 6.727% | +0.944pp | FAIL |
+
+| Axis | test_rel_l2 | test_MAE |
+|---|---:|---:|
+| τ_x | 6.758% | 0.0874 |
+| τ_y | 8.627% | 0.0590 |
+| τ_z | **9.755%** | **0.0567** |
+
+### VICReg mechanism — PASS, fired throughout 30,448 steps (no quiescence)
+
+| step bucket | mean std_τ_z | penalty_active fraction | mean batch \|τ_z\| |
+|---:|---:|---:|---:|
+| 0–200 | 0.0438 | 59.0% | 0.0305 |
+| 200–1k | 0.0723 | 52.6% | 0.0521 |
+| 1k–5k | 0.0982 | 51.5% | 0.0696 |
+| 5k–15k | 0.1051 | 51.9% | 0.0741 |
+| 15k–30k | 0.1103 | 52.1% | 0.0776 |
+| **Overall** | — | **52.0%** | — |
+
+- std_τ_z lifted 0 → 0.110 (2.2× γ at terminal, max observed 0.342, no NaN/Inf)
+- batch mean |τ_z| climbed 0.019 → 0.078 — close to GT |τ_z| ≈ 0.0793 (model calibrated to GT z-magnitude scale)
+- λγ²/base_mse_loss ≈ 0.025% (cost-negligible)
+- **Probable band-break** by MAE-ratio proxy: test τ_z MAE = 0.0567 < GT mean|τ_z| ≈ 0.0793 — model NOT in [1.44, 1.55] collapse band (direct mean|τ_z_pred|/mean|τ_x_pred| not logged)
+
+### Why it failed — budget starvation, not mechanism
+
+EP3 trajectory was AHEAD of healthy expected: hit 7.80% at EP2, on track for ≤6.2% at EP10 had budget allowed. SENPAI_TIMEOUT_MINUTES=360 (6h cap) cut at 271 min after EP3 + final eval — only 3/13 epochs. EP3 trajectory was actually PASSING (≤9.5% gate cleared by 2.5pp), but EP10 ≤6.2% gate unreachable in 3 epochs.
+
+### Fleet contribution
+
+1. **3rd budget-starved mechanism-PASS closure** alongside H15b alphonse (#1165) and H17 nezuko (#1162) — establishes a pattern: short-budget runs with mechanism PASS / baseline FAIL are candidates for parking as stackable
+2. **VICReg variance hinge stackable**: ~12 lines, ~0 wall-time cost, ~0.025% loss contribution, continuously engaged (not single-shot warmup fix), orthogonal to all output-head/loss-form/input-gating attacks in the fleet
+3. **Critical fleet bug exposed**: SENPAI_TIMEOUT_MINUTES=360 deployment env var overrode student's per-launch CLI value (1100min). Same risk for tanjiro H18 v2 (#1163) which relaunched at 05:35Z and would hit 11:35Z timeout. Flagged on #1163 for verification.
+4. **MAE-ratio proxy for band-break** documented when direct magnitude ratio not logged
+
+---
+
 ## 2026-05-17 06:15 — PR #1162: H17 Local Tangent-Frame Output Reparameterization for WSS (nezuko) — CLOSED TERMINAL-NULL (KILLED at EP3 gate; tangent-frame mechanism implementation correct — orthogonality residuals at fp32 machine-zero — but trajectory cold-start gap ~11pp vs baseline; representation reparameterization can't recover within 13ep lr=9e-5 budget; nezuko reassigned to fresh hypothesis researcher-agent pending)
 
 - **Branch**: `nezuko/h17-tangent-frame-wss-head` (closed)

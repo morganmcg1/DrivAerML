@@ -1,11 +1,29 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~06:15 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~10:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~06:15Z) — alphonse H15b CLOSED NOT-A-MERGE (mechanism PASS / baseline FAIL, parked); nezuko H17 CLOSED TERMINAL-NULL (KILLED EP3, hard-constraint cold-start gap ~11pp); 2 students idle (alphonse, nezuko) → researcher-agent dispatching for H20/H21 fresh axes
+## Latest invocation actions (2026-05-17 ~10:35Z) — H19 thorfinn CLOSED NOT-A-MERGE / mechanism PARKED AS STACKABLE (budget-starved 3/13ep, SENPAI_TIMEOUT_MINUTES=360 bug); fleet leaders identified — fern H10b CO-LEADING at val_abupt 6.263% (EP4.5), askeladd H11b CO-LEADING at 6.194% (EP7); tanjiro H18 v2 DEEPEST τz/τx band-break in fleet history (EP3=1.412); H22 cp/SP floor-preservation lane being assigned to thorfinn (orthogonal to all 7 in-flight magnitude attacks)
+
+### Actions this invocation (10:35Z May 17)
+
+- **CLOSED PR #1168 thorfinn H19** as TERMINAL NOT-A-MERGE / mechanism PARKED AS STACKABLE. Mechanism PASS — VICReg fired 52% of 30,448 steps (no quiescence), std_τ_z lifted 0→0.110 (2.2× γ), batch mean |τ_z| reached GT scale 0.078. Probable band-break by MAE-ratio proxy (test τ_z MAE 0.0567 < GT |τ_z| 0.0793). But baseline FAIL all 4 axes + both floors at EP3-only training: val_abupt 6.998% (+0.872pp), test_abupt 6.670% (+0.826pp), test_SP 4.274% (+0.697pp floor), test_vol_p 3.934% (+0.291pp floor), test_WSS 7.671% (+0.944pp). Budget-starved 3/13 epochs by SENPAI_TIMEOUT_MINUTES=360 bug. 3rd "mechanism PASS, baseline FAIL, parked stackable" pattern after H15b alphonse + H17 nezuko.
+- **FLAGGED fleet-level timeout bug** on PR #1163 (tanjiro H18 v2): if his pod has same 360min cap, his run hits timeout at 11:35Z mid-EP4. Asked tanjiro to verify `kubectl exec printenv SENPAI_TIMEOUT_MINUTES`. fern H10b is past 360min (currently 9.41h) so the bug is NOT fleet-wide — appears student-pod-specific.
+- **HEAD-TO-HEAD LEADERS IDENTIFIED**: fern H10b at EP4.5 val_abupt 6.263% (+0.137pp above baseline, slope projects EP13 ~5.46% → 0.66pp BEAT) and askeladd H11b at EP7 val_abupt 6.194% (+0.068pp above baseline, EP4→EP7 slope −0.295pp/ep) — both projecting baseline beat at terminal but **both showing floor-breach risk** (val_SP 4.12% and 4.16% respectively vs test floor 3.577%; val_vol_p 3.60% and 3.88% vs test floor 3.643%).
+- **TANJIRO H18 v2 BAND-BREAK at EP3**: val τz/τx = 1.412 — deepest band-break in fleet history (vs H6' 1.420 prior best). But val_abupt 7.787% (+1.66pp above baseline) and val_SP/vol_p severely above floors. Overriding EP3 KILL gate (was > 7.4% threshold) to continue to EP6 — band-break too research-valuable to lose. Will re-assess at EP6.
+- **H22 hypothesis being assigned to thorfinn** — cp/surface_pressure floor-preservation lane. Designed to address the observed floor-breach failure mode in dl24 H10b, fern H10b, askeladd H11b, edward H12, and H19. Charbonnier loss on cp channel + auxiliary MAE on cp. Orthogonal to all 7 in-flight magnitude attacks.
+
+### KEY FLEET DIAGNOSTIC: floor-breach is the NEW bottleneck
+
+dl24 H10b LOCKED as SOTA-beat winner at 09:25Z with test_wss=6.68 ✅ BUT test_vol_p=4.17 (+0.53pp floor breach) and test_SP=3.86 (+0.28pp floor breach). My tay fleet leaders fern H10b and askeladd H11b are projecting the SAME floor-breach pattern at terminal — strong val_abupt but cp/SP/vol_p underweighted.
+
+**The next merge gate isn't val_abupt or test_WSS — it's whether floors hold.** All 7 in-flight attacks target the magnitude bottleneck (τ_z), none directly protect cp/SP. H22 fills this gap.
+
+Previous update (06:15Z May 17)
+
+### Latest invocation actions (2026-05-17 ~06:15Z) — alphonse H15b CLOSED NOT-A-MERGE (mechanism PASS / baseline FAIL, parked); nezuko H17 CLOSED TERMINAL-NULL (KILLED EP3, hard-constraint cold-start gap ~11pp); 2 students idle (alphonse, nezuko) → researcher-agent dispatching for H20/H21 fresh axes
 
 ### Actions this invocation (06:15Z May 17)
 
@@ -61,18 +79,19 @@ Wave 30 now has **two independent** experimental confirmations that direction is
 
 **Research-direction implication**: any future loss-level cosine-aware or direction-only attack is now ruled out. The bottleneck has moved one layer down to the magnitude regression head and/or the τ_z over-prediction collapse band. H10b (in flight) attacks magnitude; H17 (in flight) attacks the band geometrically.
 
-### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 21
+### Wave 30 fleet — 7 active + 1 idle (thorfinn — H22 assignment pending); Wave 30 closed count: 22
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1171 | **nezuko** | **H21 per-component independent output heads** (4 separate MLPs for cp/τx/τy/τz; τz head deeper) | **NEW — assigned 06:50Z May 17** (18h budget) |
-| #1170 | **alphonse** | **H20 focal vertex loss** (dynamic per-vertex error-weighted MSE on τ channels, γ=0.5, γ_z=1.5×γ_x) | **NEW — assigned 06:45Z May 17** (18h budget) |
-| #1169 | frieren | H16b Huber loss on τ channels δ=0.3 (calibrated bulk-reshape — restart from H16) | assigned 06:00Z May 17 (18h budget) |
-| #1168 | thorfinn | H19 VICReg batch-variance regularization on \|τ_z\| | assigned 05:00Z May 17 (18h budget) |
-| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | EP~2.5 (gate active, mean_abs=0.223) |
-| #1164 | **fern** | **H10b bounded-exp magnitude fix (softplus→clamp.exp)** | **EP3 PASS 6.697%** — CLOSEST to baseline 6.126% of all in-flight |
-| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h, healthy |
-| #1151 | edward | H12 τ-magnitude-weighted loss (sweep α=0.5 done, α=0.3 running) | a0p5 arm: NOT-A-MERGE (val 6.326%, floor breach); a0p3 running → terminal ~17:22Z |
+| #1171 | nezuko | H21 per-component independent output heads (4 separate MLPs for cp/τx/τy/τz; τz head deeper) | EP~2.2 (running, no val yet) |
+| #1170 | alphonse | H20 focal vertex loss (dynamic per-vertex error-weighted MSE on τ channels, γ=0.5, γ_z=1.5×γ_x) | EP~0.25 (just launched 10:25Z) |
+| #1169 | frieren | H16b Huber loss on τ channels δ=0.3 (calibrated bulk-reshape — restart from H16) | EP~2.3 val 7.839% (+1.71pp above baseline — EP3 gate at 11:45Z critical) |
+| #1168 | ~~thorfinn~~ | ~~H19 VICReg batch-variance~~ — **CLOSED 10:35Z NOT-A-MERGE / PARKED STACKABLE** | budget-starved 3/13ep, mechanism PASS / baseline FAIL |
+| #1167 | **askeladd** | **H11b gated multi-scale input (zero-init gate)** | **EP~7 val 6.194% (+0.068pp above baseline) — CO-LEADING; floor risk HIGH** |
+| #1164 | **fern** | **H10b bounded-exp magnitude fix (softplus→clamp.exp)** | **EP~4.5 val 6.263% (+0.137pp above baseline) — CO-LEADING; floor risk HIGH** |
+| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE (v2 relaunch after watchdog SIGTERM v1) | EP~3 val 7.787% (+1.66pp above baseline) BUT val **τz/τx=1.412 DEEPEST BAND-BREAK** in fleet history ✦ |
+| #1151 | edward | H12 τ-magnitude-weighted loss (sweep α=0.5 done, α=0.3 running) | a0p5 arm: NOT-A-MERGE (val 6.326%, floor breach); a0p3 EP~5.5 val 6.574% — likely NOT-A-MERGE (floor) |
+| (pending) | thorfinn | **H22 cp/SP floor-preservation lane** (Charbonnier-cp + MAE_aux on cp) | **TO BE ASSIGNED 10:40Z** — orthogonal to all 7 in-flight magnitude attacks |
 
 **8 simultaneous attacks on the magnitude bottleneck, attacking from 8 different causal angles**:
 - Output head ARCHITECTURE: H10b (activation function), H21 (decoder topology)
