@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_tangent_frame_output: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_tangent_frame_output": (
+            "PR #1162 H17: local tangent-frame output reparameterization "
+            "for wall-shear-stress. Predict (alpha_t1, alpha_t2) in the "
+            "per-vertex tangent plane built by Gram-Schmidt from the "
+            "input surface normal, then reconstruct global-frame "
+            "tau = alpha_t1 * t1 + alpha_t2 * t2 inside model.forward(). "
+            "Surface head outputs 3 channels (cp + 2 tangent scalars) "
+            "instead of 4. Enforces tau . n = 0 in the predicted "
+            "(normalized) space by construction. Eval/loss code is "
+            "unchanged: predictions are still compared against the "
+            "normalized 4-channel surface target."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_tangent_frame_output=config.use_tangent_frame_output,
     )
 
 
@@ -346,13 +360,17 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    for key, value in out.items():
+        if key.startswith("tangent_frame/") and torch.is_tensor(value):
+            metrics[key] = float(value.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1070,6 +1088,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key, value in batch_loss_metrics.items():
+                        if key.startswith("tangent_frame/"):
+                            train_log[f"train/{key}"] = value
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

@@ -382,11 +382,14 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_tangent_frame_output: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
         self.surface_input_dim = surface_input_dim
         self.surface_output_dim = surface_output_dim
+        self.use_tangent_frame_output = use_tangent_frame_output
+        surface_head_channels = 3 if use_tangent_frame_output else surface_output_dim
         self.volume_input_dim = volume_input_dim
         self.volume_output_dim = volume_output_dim
         self.rff_num_features = rff_num_features
@@ -484,7 +487,7 @@ class SurfaceTransolver(nn.Module):
             self.surface_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden),
                 nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
+                nn.Linear(n_hidden, surface_head_channels),
             )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
@@ -496,7 +499,7 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
-            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.surface_out = LinearProjection(n_hidden, surface_head_channels)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
@@ -621,8 +624,57 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        tangent_diagnostics: dict[str, torch.Tensor] | None = None
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            raw = self.surface_out(surface_hidden)
+            if self.use_tangent_frame_output:
+                # Per-vertex normals from input features (channels 3:6 of surface_x).
+                n = F.normalize(surface_x[..., 3:6].float(), dim=-1)
+                # Degeneracy-safe reference: e_x if |n·e_x| < 0.9 else e_y.
+                e_x = torch.zeros_like(n)
+                e_x[..., 0] = 1.0
+                e_y = torch.zeros_like(n)
+                e_y[..., 1] = 1.0
+                dot_x = (n * e_x).sum(dim=-1, keepdim=True).abs()
+                degeneracy = (dot_x >= 0.9).float()
+                ref = torch.where(dot_x < 0.9, e_x, e_y)
+                # Gram-Schmidt tangent basis in fp32 for numerical stability.
+                t1 = F.normalize(ref - (ref * n).sum(dim=-1, keepdim=True) * n, dim=-1)
+                t2 = torch.linalg.cross(n, t1, dim=-1)
+                # Cast tangent basis back to raw dtype for combination with predicted coefficients.
+                t1_cast = t1.to(raw.dtype)
+                t2_cast = t2.to(raw.dtype)
+                alpha_t1 = raw[..., 1:2]
+                alpha_t2 = raw[..., 2:3]
+                # Reconstruct global-frame WSS in the (normalized) target space.
+                tau_wss = alpha_t1 * t1_cast + alpha_t2 * t2_cast  # [B, N, 3]
+                surface_preds = torch.cat([raw[..., 0:1], tau_wss], dim=-1)  # [B, N, 4]
+                # Diagnostics: only meaningful with at least one surface vertex
+                # in the batch. Surface-empty batches (e.g. volume-only views in
+                # the curriculum) produce 0-element tensors that crash .amax().
+                if surface_hidden.shape[1] > 0:
+                    mask_float = surface_mask.unsqueeze(-1).to(t1.dtype)
+                    mask_valid = mask_float.sum().clamp(min=1.0)
+                    t1_t2_orth = (t1 * t2).sum(dim=-1, keepdim=True).abs() * mask_float
+                    n_t1_orth = (n * t1).sum(dim=-1, keepdim=True).abs() * mask_float
+                    degeneracy_masked = degeneracy * mask_float
+                    alpha_t1_masked = alpha_t1.abs() * mask_float
+                    alpha_t2_masked = alpha_t2.abs() * mask_float
+                    tau_dot_n = (tau_wss.float() * n).sum(dim=-1, keepdim=True).abs() * mask_float
+                    tangent_diagnostics = {
+                        "t1_t2_orthogonality_residual": (t1_t2_orth.sum() / mask_valid).detach(),
+                        "n_t1_orthogonality_residual": (n_t1_orth.sum() / mask_valid).detach(),
+                        "degeneracy_frac": (degeneracy_masked.sum() / mask_valid).detach(),
+                        "alpha_t1_absmean": (alpha_t1_masked.sum() / mask_valid).detach(),
+                        "alpha_t2_absmean": (alpha_t2_masked.sum() / mask_valid).detach(),
+                        "alpha_t1_absmax": alpha_t1_masked.amax().detach(),
+                        "alpha_t2_absmax": alpha_t2_masked.amax().detach(),
+                        "tau_dot_n_max": tau_dot_n.amax().detach(),
+                        "tau_dot_n_mean": (tau_dot_n.sum() / mask_valid).detach(),
+                    }
+            else:
+                surface_preds = raw
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -633,10 +685,14 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if tangent_diagnostics is not None:
+            for key, value in tangent_diagnostics.items():
+                out[f"tangent_frame/{key}"] = value
+        return out
