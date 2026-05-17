@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_local_frame_proj: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_local_frame_proj": (
+            "Enable normal-projected coordinate augmentation (H26, PR "
+            "#1177). For each surface vertex, append 3 scalar features "
+            "[p.n, p.t1, p.t2] -- the global position projected onto the "
+            "vertex's local normal/tangent frame -- to the surface input "
+            "features before the projection linear. t1, t2 are a "
+            "Gram-Schmidt tangent basis from the surface normal. Goal: "
+            "give the encoder explicit local-frame position so it can "
+            "break the structural tau_z/tau_x band attractor at [1.44, "
+            "1.55]. The 3 new input columns of project_surface_features "
+            "are zero-init so step 0 is identical to the baseline. Volume "
+            "branch is unchanged."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +322,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_local_frame_proj=config.use_local_frame_proj,
     )
 
 
