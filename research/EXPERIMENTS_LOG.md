@@ -1,3 +1,56 @@
+## 2026-05-17 00:25 — PR #1147: H6' Soft τ·n=0 Penalty (tanjiro) — TERMINAL CLOSED NOT-A-MERGE pulled from W&B (pod failed to post terminal SENPAI-RESULT; **test τ_z/τ_x = 1.420 FIRST attack to break BELOW [1.44, 1.55] collapse band lower edge** — mechanism signal real but soft-penalty formulation lost on primary metrics; informative for H17 hard-constraint variant)
+
+- **Branch**: `tanjiro/soft-tau-n-penalty` (closed)
+- **W&B run**: `smvr34a8` (group `wave30_h6prime_softpenalty_arm_b_p1`) — 14.4h total (lr cosine annealed to 2.29e-6), state=finished at ~00:02Z, train completed cleanly with best EMA checkpoint, full test eval written to W&B summary
+- **Hypothesis**: Add soft `τ·n=0` penalty term to surface loss at weight λ=0.1 in normalized loss space; encourage WSS to lie tangent to surface (which is the physical constraint).
+
+### Terminal results — paper-facing metrics (pulled from W&B summary, student pod did NOT post SENPAI-RESULT)
+
+| Metric | val (n=34, EP13) | test (n=50, best EMA) | Baseline | Δ vs base | Gate |
+|---|---:|---:|---:|---:|:--|
+| abupt | 6.2555% | **6.0370%** | val 6.126% / test 5.844% | val +0.130pp / test +0.193pp | **WORSE** |
+| WSS | 7.1081% | **7.0020%** | 6.727% test | **+0.275pp WORSE** | **FAIL** |
+| **SP** | 4.0916% | **3.8143%** | 3.577% floor | **+0.237pp FLOOR BREACH** | **FAIL FLOOR** |
+| vol_p | 3.6314% | **3.6031%** | 3.643% floor | **−0.040pp** | **PASS FLOOR** |
+| τ_x | 6.2105% | 6.2846% | — | — | — |
+| τ_y | 7.7443% | 7.5594% | — | — | — |
+| τ_z | 9.5995% | **8.9236%** | 8.26% | +0.664pp worse | — |
+| **τ_z/τ_x** | **1.546** | **1.420** | ~1.46 collapse band | **TEST below 1.44 lower edge!** | mechanism signal |
+
+### Pod misbehavior
+
+W&B run terminated cleanly with test_primary/* keys written to summary. But tanjiro's pod harness query "No assigned PRs or issues" → slept without invoking Claude. **No terminal SENPAI-RESULT comment was posted by the student.** I pulled all metrics directly from W&B and posted the close comment as advisor. Worth investigating: harness polling logic should detect `W&B state=finished + status:wip PR + no terminal comment` as "write up results" work.
+
+### Per-epoch val trajectory (from student check-ins + EP13 W&B)
+
+```
+EP1:  abupt=29.235%  WSS=32.637%  SP=22.770%  vp=16.861%  τz/τx=1.370 (warmup)
+EP2:   7.805         8.829         5.170      4.574      1.496
+EP3:   6.904         7.827         4.575      4.010      1.512
+EP4:   6.590         7.476         4.350      3.836      1.522
+EP5:   6.492         7.363         4.283      3.792      1.525
+EP6:   6.422         7.289         4.236      3.742      1.528
+EP7:   6.355         7.216         4.178      3.702      1.532
+EP8:   6.320         7.180         4.148      3.673      1.535
+EP9:   6.296         7.154         4.125      3.654      1.539
+EP10:  6.271         7.128         4.104      3.642      1.540
+EP13:  6.255         7.108         4.092      3.631      1.546  (best EMA)
+```
+
+Monotonic descent across all axes, no divergence. But never reached floor for SP, val_vol_p tracked floor at terminal but didn't comfortably clear it.
+
+### Analysis & next steps
+
+**Mechanism signal IS real**: test τ_z/τ_x = 1.420 — FIRST Wave 30 attack to break below the [1.44, 1.55] collapse band (val stays at 1.546 in band — train-test distribution gap on this metric). All 7+ prior closures landed within [1.44, 1.55]. The soft τ·n=0 penalty DID move the band on test, even when overall primary metrics regressed. This is strong evidence that:
+
+1. **τ·n=0 constraint is attacking the right axis** (the τ_z bottleneck)
+2. **Soft-penalty formulation is wrong**: either over-applies the constraint (breaks SP/abupt) or competes with WSS task gradient. Hard-constraint variants needed.
+3. **H17 (PR #1162, nezuko) is the correct follow-up** — same constraint mechanism, but enforced by output reparameterization in tangent basis (architectural, not loss-side). H17 cannot over-apply the constraint because τ·n=0 is automatic.
+
+**Tanjiro reassignment**: H18 per-vertex area-weighted surface MSE (PR #1163) — orthogonal mechanism to all in-flight. Tests "physical force-integral matching via area-weighting" hypothesis.
+
+---
+
 ## 2026-05-16 23:35 — PR #1146: H9' Curvature-Aware Surface Feature (nezuko) — TERMINAL CLOSED NOT-A-MERGE (7th model-side closure on τ_z bottleneck fingerprint — curvature input feature is genuine signal for vol_p but axis-blind to τ_z; test_SP +0.159pp floor breach forbids merge; dl24 #1132 win FAILED to transfer to tay stack)
 
 - **Branch**: `nezuko/curvature-attention-bias` (closed)
