@@ -374,13 +374,42 @@ def train_loss(
         out = model(**forward_kwargs)
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # H19 advisor fix: pre-compute Charbonnier on vol_p so it can be
+        # passed to GradNorm as the vol_p task signal (the L0 anchor and
+        # per-task gradient norms need to reflect the reshaped Charb
+        # landscape, otherwise the H19 mechanism is invisible to the
+        # dynamic-weight balancing — root cause flagged in run i4zt1zrl).
+        if vol_p_charbonnier_weight > 0.0:
+            pred_vol_p = out["volume_preds"]  # [B, N_vol, 1]
+            target_vol_p = volume_target
+            loss_vol_p_charb = masked_charbonnier(
+                pred_vol_p,
+                target_vol_p,
+                batch.volume_mask,
+                eps=vol_p_charbonnier_eps,
+            )
+            loss_vol_p_mse_diag = masked_mse(
+                pred_vol_p, target_vol_p, batch.volume_mask
+            )
+        else:
+            loss_vol_p_charb = None
+            loss_vol_p_mse_diag = None
         if gradnorm_weights is not None:
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
             )  # [4]: cp, tau_x, tau_y, tau_z
-            volume_per_ch = per_channel_masked_mse(
-                out["volume_preds"], volume_target, batch.volume_mask
-            )  # [1]: vol_p
+            if loss_vol_p_charb is not None:
+                # H19 advisor fix: vol_p slot carries the Charbonnier tensor
+                # so GradNorm's L0 anchor and per-task gradient norms reflect
+                # the reshape. The Charb contribution to the total loss is
+                # now w_vol_p * Charb_vol_p via the weighted sum below —
+                # adding a separate `vol_p_charb_weight * Charb` term would
+                # double-count.
+                volume_per_ch = loss_vol_p_charb.unsqueeze(0)  # [1]
+            else:
+                volume_per_ch = per_channel_masked_mse(
+                    out["volume_preds"], volume_target, batch.volume_mask
+                )  # [1]: vol_p MSE
             task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
             w_detached = gradnorm_weights.weights.detach()
             loss = (w_detached * task_losses).sum()
@@ -425,24 +454,14 @@ def train_loss(
             }
         else:
             charb_metrics = {}
-        # H19: Supplementary Charbonnier on volume pressure channel.
-        # Mirrors the H10b τ_z mechanism — additive on top of the MSE so the
-        # GradNorm anchor for vol_p is not perturbed (the floor-preservation
-        # mechanism: reshape the high-residual curvature without injecting
-        # the +0.103pp wss anti-additive cost seen with H9b's MAE_aux head).
-        if vol_p_charbonnier_weight > 0.0:
-            pred_vol_p = out["volume_preds"]  # [B, N_vol, 1]
-            target_vol_p = volume_target
-            loss_vol_p_charb = masked_charbonnier(
-                pred_vol_p,
-                target_vol_p,
-                batch.volume_mask,
-                eps=vol_p_charbonnier_eps,
-            )
-            loss_vol_p_mse_diag = masked_mse(
-                pred_vol_p, target_vol_p, batch.volume_mask
-            )
-            loss = loss + vol_p_charbonnier_weight * loss_vol_p_charb
+        # H19: vol_p Charbonnier — under GradNorm, the Charb tensor is already
+        # in task_losses[4] above, contributing w_vol_p * Charb_vol_p to the
+        # weighted sum. Adding an extra additive term would double-count.
+        # Without GradNorm we fall back to the additive form (loss += w * Charb)
+        # so the mechanism still fires.
+        if loss_vol_p_charb is not None:
+            if gradnorm_weights is None:
+                loss = loss + vol_p_charbonnier_weight * loss_vol_p_charb
             vol_p_charb_metrics = {
                 "loss_vol_p_charb_unweighted": float(
                     loss_vol_p_charb.detach().cpu().item()
