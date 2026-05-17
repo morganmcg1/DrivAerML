@@ -105,6 +105,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    tau_magnitude_loss_alpha: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,6 +322,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    tau_magnitude_loss_alpha: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,7 +334,31 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        diag: dict[str, float] = {}
+        if tau_magnitude_loss_alpha > 0.0:
+            # H12: per-vertex weighting of surface MSE by physical |tau|^alpha.
+            # Replaces surface_channel_weights when active.
+            surface_pred = out["surface_preds"]
+            tau_target_phys = transform.invert_surface(surface_target)[..., 1:4]
+            tau_mag = tau_target_phys.float().norm(dim=-1)  # [B, N]
+            mask_f = batch.surface_mask.to(tau_mag.dtype)
+            valid_count = mask_f.sum().clamp(min=1.0)
+            mean_mag = (tau_mag * mask_f).sum() / valid_count
+            weights = (tau_mag / mean_mag.clamp(min=1e-8)) ** tau_magnitude_loss_alpha  # [B, N]
+            weights = weights * mask_f  # zero out padding so it never contributes
+            diff_sq = (surface_pred.float() - surface_target.float()).square()  # [B, N, 4]
+            diff_sq_mean_chan = diff_sq.mean(dim=-1)  # [B, N]
+            weight_sum = weights.sum().clamp(min=1.0)
+            surface_loss = (diff_sq_mean_chan * weights).sum() / weight_sum
+            with torch.no_grad():
+                w_valid = weights[mask_f > 0]
+                if w_valid.numel() > 0:
+                    diag["tau_mag_weight_max"] = float(w_valid.max().item())
+                    diag["tau_mag_weight_p95"] = float(w_valid.quantile(0.95).item())
+                    diag["tau_mag_weight_p50"] = float(w_valid.quantile(0.50).item())
+                    diag["tau_mag_weight_min"] = float(w_valid.min().item())
+                    diag["tau_mag_weight_mean"] = float(w_valid.mean().item())
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -346,13 +372,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +880,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.tau_magnitude_loss_alpha > 0.0:
+                print(
+                    f"H12 tau-magnitude surface MSE weighting: "
+                    f"alpha={config.tau_magnitude_loss_alpha} "
+                    f"(per-vertex w_i = (|tau_i| / batch_mean|tau|)^alpha)"
+                )
+                if use_channel_weights:
+                    print(
+                        "WARNING: --tau-magnitude-loss-alpha > 0 overrides "
+                        "--tau-y-loss-weight / --tau-z-loss-weight; channel weights are ignored."
+                    )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +922,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/tau_magnitude_loss_alpha"] = config.tau_magnitude_loss_alpha
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1070,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        tau_magnitude_loss_alpha=config.tau_magnitude_loss_alpha,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1068,8 +1109,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/tau_magnitude_loss_alpha": config.tau_magnitude_loss_alpha,
                         }
                     )
+                    for diag_key in (
+                        "tau_mag_weight_max",
+                        "tau_mag_weight_p95",
+                        "tau_mag_weight_p50",
+                        "tau_mag_weight_min",
+                        "tau_mag_weight_mean",
+                    ):
+                        if diag_key in batch_loss_metrics:
+                            train_log[f"train/{diag_key}"] = batch_loss_metrics[diag_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
