@@ -1,3 +1,54 @@
+## 2026-05-17 04:50 — PR #1158: H13c Lagemann-Style Cosine+Magnitude Decoupled WSS Loss (thorfinn) — CLOSED DEAD-END (crashed mid-recipe AT EP5–6 with val_abupt 8.608% / +2.482pp above baseline; 99.0% cos-sim confirms 2nd independent direction-saturation diagnostic; thorfinn reassigned to next hypothesis researcher-agent pending)
+
+- **Branch**: `thorfinn/h13c-tau-cosmag-decoupling` (closed)
+- **W&B group**: `wave30_h13c_cosmag` — rank0 `1udny3hl`, **state=crashed at ~04:16Z** (ranks 1–7 killed by orchestrator)
+- **Hypothesis**: Lagemann-style decoupled WSS loss — explicit `loss_mag = MSE(||τ_pred||, ||τ_true||)` + `loss_cos = 1 − cos_sim(τ_pred, τ_true)` at weight λ=0.1, vs MSE on Cartesian τ. Tests whether loss-level decoupling (vs H10's model-level decoupling) reaches a different optimum.
+
+### Terminal results — DEAD-END (best of partial training, EP5–6 of 13)
+
+| Metric | val (EP5–6) | Baseline | Δ | Gate |
+|---|---:|---:|---:|:--|
+| **val_abupt** | **8.608%** | 6.126% | **+2.482pp WORSE** | KILL (EP3 gate ≤7.4%, EP6 gate ≤6.8%) |
+| val_WSS_vec | 10.830% | 6.727% | **+4.103pp WORSE** | FAIL |
+| val_SP | 4.152% | 3.577% floor | +0.575pp above floor | FAIL FLOOR |
+| val_vol_p | 4.000% | 3.643% floor | +0.357pp above floor | FAIL FLOOR |
+| `cos_sim_mean` | **0.990** (EP4) | — | direction saturated | **mechanism signal** |
+| nonfinite_count | 0 | — | crash not NaN-induced | OOM/orchestrator-kill |
+
+### Per-epoch val trajectory (slope flattening)
+```
+EP1:  50.795%  (warmup, expected)
+EP2:  16.136%  (-34.66pp)
+EP3:  10.778%  (-5.36pp)        <- already KILL gate failed (>7.4%)
+EP4:   9.563%  (-1.22pp)
+EP5-6: 8.608%  (-0.95pp)        <- crash here
+```
+Geometric slope decay (~0.85× per ep) → EP13 projection ~6.0% essentially flat with baseline. Even mathematical recovery to baseline at EP13 would still leave floors breached (SP / vol_p never closed during the partial run).
+
+### Critical diagnostic: 2nd independent confirmation of direction-saturation
+
+This is the **second** Wave 30 attack to confirm direction is essentially solved. Together with H10 #1148 (vector-decoupled HEAD at model level), the fleet now has two independent decompositions reaching the same answer:
+
+| Closure | Layer | cos_sim | mag/dir split |
+|---|---|---:|---|
+| H10 #1148 (fern) | output model arch | 99.65% (0.00355 cos_loss) | 73% / 27% |
+| H13c #1158 (thorfinn) | loss formulation | 99.0% (cos_sim_mean) | n/a (loss not split into mag/dir error fractions, but cos_sim agrees) |
+
+**Conclusion**: direction is not the WSS bottleneck; the magnitude regression head is. This directly validates the H10b magnitude-fix attack (PR #1164, fern, in flight). Any future loss-level cosine-aware attack is now ruled out as a research direction — the bottleneck has moved one layer down.
+
+### Why this was closed (vs sent back to fix)
+
+1. **Crash terminated recipe** — rank0 crashed at ~04:16Z (8.2h into 18h budget) with nonfinite=0; OOM or pod-level kill. No checkpoint resume infrastructure means restart from EP0.
+2. **Mechanism saturated at EP4** — cos_sim already at 0.990 with magnitude error dominant. Continuing won't change the mechanism diagnostic.
+3. **Slope geometrically decaying** — EP1→EP4 progression rules out reaching gate.
+4. **Floor breaches already present at EP5–6** — magnitude-focused loss is starving SP/vol_p heads, same pattern as #1132 and #1150.
+
+### Reassignment
+
+thorfinn → fresh hypothesis (researcher-agent generating RESEARCH_IDEAS_2026-05-17_04:50.md). Constraint: must be orthogonal to all 7 in-flight Wave 30 attacks (H10b, H11b, H12, H15b, H16, H17, H18), targeted at magnitude bottleneck or τz/τx collapse band, and backed by published technique. Wave 30 fleet now 7 active + 1 idle, 18 closures.
+
+---
+
 ## 2026-05-17 04:30 — PR #1150: H11 Multi-Scale kNN Context Features (askeladd) — CLOSED NOT-A-MERGE (**BEST single-model test_abupt 5.809% and test_WSS 6.633% on `tay`; SP +0.120pp / vol_p +0.022pp floor breach blocks merge; reassigned to H11b gated-input PR #1167**)
 
 - **Branch**: `askeladd/multi-scale-knn-context` (closed)

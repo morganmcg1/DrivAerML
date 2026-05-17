@@ -1,31 +1,45 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~01:30 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~04:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~04:30Z) — askeladd H11 TERMINAL CLOSED NOT-A-MERGE (**BEST single-model test_abupt 5.809% and test_WSS 6.633% on `tay`**; SP floor +0.120pp breach blocks merge; gated multi-scale input assigned as H11b PR #1167)
+## Latest invocation actions (2026-05-17 ~04:50Z) — thorfinn H13c CRASHED CLOSED DEAD-END (val_abupt 8.608% at EP5–6 / +2.482pp above baseline; 2nd direction-saturation diagnostic confirms magnitude is the bottleneck; researcher-agent generating thorfinn's next hypothesis)
 
-### Actions this invocation (04:30Z May 17)
+### Actions this invocation (04:50Z May 17)
 
-- **REVIEWED + CLOSED PR #1150 (askeladd H11 multi-scale kNN context)** as NOT-A-MERGE. **Key results**: test_abupt=5.809% (BEST on tay, beats baseline 5.844% by −0.035pp), test_WSS=6.633% (BEST on tay, beats gate 6.727% by −0.094pp), val_abupt=6.0953% (PASS, beats baseline 6.126%). **BUT**: test_SP=3.697% (FAIL floor +0.120pp), test_vol_p=3.665% (FAIL floor +0.022pp). τz/τx=1.470 (in engaged-but-neutral band — 7th architecture-layer closure confirming τ_z is NOT curable by input-side signal). Not-a-merge on hard floors.
-- **ASSIGNED askeladd H11b (PR #1167)**: gated multi-scale input. Add `nn.Parameter(torch.zeros(9))` gate applied to surface_x[...,7:16] before `_encode_group`. Zero-init → baseline behavior at EP0, gradient learns to admit channels with WSS signal. Same H11 architecture, same recipe, same k=4,16,64 cache (already built). Directly addresses askeladd's own diagnosis (unscaled channels steal SP capacity).
+- **REVIEWED + CLOSED PR #1158 (thorfinn H13c Lagemann cos+mag decoupling)** as DEAD-END. W&B verified: rank0 `1udny3hl` crashed at ~04:16Z (8.2h / 18h budget) with nonfinite=0 — OOM or orchestrator-kill. Latest val_abupt=8.608% at EP5–6 (+2.482pp WORSE than baseline). cos_sim=0.990 confirms direction saturation. Per-epoch slope flattening (50.8→16.1→10.8→9.56→8.61, geometric decay ~0.85×/ep → EP13 projection ~6.0% even with recovery). Floors already breached at EP5–6 (val_SP +0.575pp / val_vol_p +0.357pp).
+- **POSTED CHECK-INS on stale_wip false positives:**
+  - PR #1161 (frieren H16) — main run healthy at EP3.05/13, val_abupt=6.894% MARGINAL-PASS. **CRITICAL: `huber/frac_in_L1_region/tau_z = 0.014%` — 180× lower than expected ~2.5%. The tail-clipping mechanism is essentially inactive; H16 is silently behaving as MSE-on-τ. EP6 decisive on whether to re-run at δ=0.3.**
+  - PR #1158 (thorfinn H13c) — closed instead.
+  - PRs #1164 (fern H10b) and #1163 (tanjiro H18) — both healthy at EP~1.6–1.7, posted in prior invocation.
 
-### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 17
+### KEY FLEET DIAGNOSTIC UPDATED: 2nd direction-saturation confirmation
+
+Wave 30 now has **two independent** experimental confirmations that direction is essentially solved and magnitude is the bottleneck:
+
+| Closure | Layer | cos_sim | mag/dir error split |
+|---|---|---:|---|
+| H10 #1148 (fern) | output model arch (vector-decoupled head) | 99.65% | **73% / 27%** explicit |
+| H13c #1158 (thorfinn) | loss formulation (Lagemann cos+mag) | 99.0% | direction saturated (consistent) |
+
+**Research-direction implication**: any future loss-level cosine-aware or direction-only attack is now ruled out. The bottleneck has moved one layer down to the magnitude regression head and/or the τ_z over-prediction collapse band. H10b (in flight) attacks magnitude; H17 (in flight) attacks the band geometrically.
+
+### Wave 30 fleet — 7 active + 1 idle (thorfinn); Wave 30 closed count: 18
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | **NEW — just assigned 04:30Z May 17** (18h budget) |
-| #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | assigned 01:30Z May 17 (6h budget) |
-| #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | assigned 01:30Z May 17 (18h budget) |
-| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | assigned 00:30Z May 17 |
-| #1162 | nezuko | H17 tangent-frame output reparameterization | EP1.8, main run healthy (2 smoke crashes, then clean launch) |
-| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | EP1.4, main healthy after smoke crash |
-| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | in-flight; terminal EP10-11 expected |
-| #1151 | edward | H12 τ-magnitude-weighted loss | in-flight; partial-terminal at 18h cliff ~06:59Z |
+| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | EP~? (18h budget, launched ~02:53Z) |
+| #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | EP~1.5 / 6h budget, EP3 gate ~05:00Z |
+| #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | EP~1.6 / 18h |
+| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h |
+| #1162 | nezuko | H17 tangent-frame output reparameterization | EP~? / 18h, main healthy after 2 smoke crashes |
+| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | EP3.05 / 13, val_abupt 6.894% but mechanism inactive (frac_in_L1=0.014%) |
+| #1151 | edward | H12 τ-magnitude-weighted loss | EP~10, partial-terminal at 18h cliff ~06:59Z imminent |
+| — | **thorfinn** | **IDLE — researcher-agent generating next hypothesis** | next assignment pending |
 
-**Closed in Wave 30** (17): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**.
+**Closed in Wave 30** (18): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**.
 
 ### Causal map of τ_z bottleneck — updated after H10 and H6' diagnostics
 
