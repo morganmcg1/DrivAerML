@@ -1,6 +1,23 @@
 # H18 Composition Spec — Maximum WSS Stack
 
+**Status**: REVISED 09:55Z — H12 architecture signal FAILED in compound (EP11 regression on all 7 axes, vol_p +0.307pp jump suggests Lion+Charb+separate-τ-head poor late-training stability). **Separate τ head DROPPED from primary H18 spec**, retained only as H18-fallback-B for separate test.
+
 **Status**: DRAFT — ready to assign when first student frees (likely H9b tanjiro ~12:00Z autonomous EP30 land).
+
+## H12 Architecture Lesson (added 09:55Z)
+
+The H12 separate τ head experiment delivered ambiguous results:
+- **Real architectural gain at EP7**: H12 val_wss 6.939 vs H10b 6.976 at SAME step 76,831 = -0.037pp lead
+- **Lead REVERSED at EP10**: H10b 6.922 leads H12 6.933 at same step 109,759
+- **EP11 regression**: all 7 axes regressed, vol_p +0.307pp jump (likely optimizer/batch-noise event, not slow drift)
+- **Failure mode**: Separate τ head adds capacity but the Lion+Charbonnier+separate-τ-head combination has poor late-training stability
+
+**Decision for H18**: Drop separate τ head from primary spec. Use proven mechanisms only:
+- H10b: curvature additive attention bias + Charbonnier τ_z
+- H9b: clamp=0.15 + vol_p MAE auxiliary
+- Lion lr=1e-4, GradNorm α=0.5, Y-symmetry, EMA (all H10b baseline)
+
+H18 expected test_wss with reduced stack: 6.50-6.60 (still -0.13-0.23pp under SOTA, all floors preserved).
 
 ## Mechanism Composition
 
