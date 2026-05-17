@@ -870,6 +870,104 @@ def weighted_channel_mse(
     return pred.sum() * 0.0
 
 
+def charbonnier_cp_with_weighted_tau_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    weights: torch.Tensor,
+    *,
+    charbonnier_eps: float,
+    cp_mae_aux_lambda: float,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """H22: Charbonnier + MAE-aux on cp channel; weighted MSE on τ channels.
+
+    Replaces the cp channel's MSE contribution with
+    ``sqrt(e^2 + ε^2) - ε + λ * |e|`` (Charbonnier 1994 smooth-L1 plus
+    auxiliary MAE) to prevent gradient saturation on smooth cp panels. The
+    τ_x, τ_y, τ_z channels keep their existing weighted MSE so the
+    advisor's tau_y / tau_z loss weights stay active.
+
+    pred / target: [B, N, 4] (channel 0 = cp, channels 1..3 = τ).
+    mask: [B, N]; weights: [4] (cp/τ_x/τ_y/τ_z channel weights — cp weight
+    multiplies the (Charbonnier + λ·MAE) sum to remain consistent with the
+    weighted_channel_mse contract).
+
+    Returns a scalar loss matching the magnitude of
+    ``weighted_channel_mse`` (averaged over valid points × 4 channels) plus
+    a diagnostics dict with per-element cp tensors for W&B logging.
+    """
+    if pred.numel() == 0:
+        zero = pred.sum() * 0.0
+        return zero, {
+            "cp_charb_mean": zero.detach(),
+            "cp_mae_mean": zero.detach(),
+            "cp_err_max_abs": zero.detach(),
+            "cp_err_p95": zero.detach(),
+            "cp_err_mean_abs": zero.detach(),
+            "tau_mse_mean": zero.detach(),
+        }
+    weights_dev = weights.to(device=pred.device, dtype=pred.dtype)
+    if weights_dev.shape[-1] != pred.shape[-1]:
+        raise ValueError(
+            f"weights last-dim {weights_dev.shape[-1]} must equal pred last-dim {pred.shape[-1]}"
+        )
+    mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    valid_points = mask_dev.sum()
+    denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
+
+    # cp channel — Charbonnier + auxiliary MAE
+    cp_err = pred[..., 0:1] - target[..., 0:1]
+    cp_charb = torch.sqrt(cp_err.square() + charbonnier_eps * charbonnier_eps) - charbonnier_eps
+    cp_mae = cp_err.abs()
+    cp_term = (cp_charb + cp_mae_aux_lambda * cp_mae) * weights_dev[0:1]
+
+    # τ channels — weighted MSE, unchanged
+    tau_sq_err = (pred[..., 1:] - target[..., 1:]).square()
+    tau_term = tau_sq_err * weights_dev[1:]
+
+    if not bool(valid_points.detach().cpu().item() > 0):
+        zero = pred.sum() * 0.0
+        return zero, {
+            "cp_charb_mean": zero.detach(),
+            "cp_mae_mean": zero.detach(),
+            "cp_err_max_abs": zero.detach(),
+            "cp_err_p95": zero.detach(),
+            "cp_err_mean_abs": zero.detach(),
+            "tau_mse_mean": zero.detach(),
+        }
+
+    loss = (cp_term * mask_dev).sum() / denominator + (tau_term * mask_dev).sum() / denominator
+
+    # Diagnostics — use masked stats so padding rows do not skew percentiles.
+    mask_1d = mask.to(device=pred.device).reshape(-1).bool()
+    cp_err_valid = cp_err.reshape(-1)[mask_1d].detach()
+    if cp_err_valid.numel() > 0:
+        cp_err_abs = cp_err_valid.abs().float()
+        cp_charb_valid = (
+            torch.sqrt(cp_err_valid.float().square() + charbonnier_eps * charbonnier_eps)
+            - charbonnier_eps
+        )
+        diagnostics = {
+            "cp_charb_mean": cp_charb_valid.mean(),
+            "cp_mae_mean": cp_err_abs.mean(),
+            "cp_err_max_abs": cp_err_abs.max(),
+            "cp_err_p95": torch.quantile(cp_err_abs, 0.95),
+            "cp_err_mean_abs": cp_err_abs.mean(),
+            "tau_mse_mean": (tau_sq_err.detach() * mask_dev).sum() / (denominator * 3.0 / pred.shape[-1]).clamp_min(1.0),
+        }
+    else:
+        zero = pred.sum() * 0.0
+        diagnostics = {
+            "cp_charb_mean": zero.detach(),
+            "cp_mae_mean": zero.detach(),
+            "cp_err_max_abs": zero.detach(),
+            "cp_err_p95": zero.detach(),
+            "cp_err_mean_abs": zero.detach(),
+            "tau_mse_mean": zero.detach(),
+        }
+    return loss, diagnostics
+
+
 def squared_relative_l2_loss(
     pred: torch.Tensor,
     target: torch.Tensor,

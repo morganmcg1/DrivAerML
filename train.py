@@ -40,6 +40,7 @@ from trainer_runtime import (
     TargetTransform,
     autocast_context,
     build_lr_scheduler,
+    charbonnier_cp_with_weighted_tau_mse,
     check_kill_thresholds,
     cleanup_distributed,
     collect_gradient_metrics,
@@ -105,6 +106,9 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    use_charbonnier_cp: bool = False
+    charbonnier_eps: float = 1e-3
+    cp_mae_aux_lambda: float = 0.5
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,10 +325,14 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_charbonnier_cp: bool = False,
+    charbonnier_eps: float = 1e-3,
+    cp_mae_aux_lambda: float = 0.5,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    charb_diag: dict[str, torch.Tensor] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -332,7 +340,26 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        if use_charbonnier_cp:
+            # H22: cp gets Charbonnier+MAE_aux, τ keeps weighted MSE. Provide a
+            # default unit-weight tensor when no per-channel weights are set so
+            # the helper still treats τ as plain MSE.
+            weights = surface_channel_weights
+            if weights is None:
+                weights = torch.ones(
+                    out["surface_preds"].shape[-1],
+                    device=out["surface_preds"].device,
+                    dtype=out["surface_preds"].dtype,
+                )
+            surface_loss, charb_diag = charbonnier_cp_with_weighted_tau_mse(
+                out["surface_preds"],
+                surface_target,
+                batch.surface_mask,
+                weights,
+                charbonnier_eps=charbonnier_eps,
+                cp_mae_aux_lambda=cp_mae_aux_lambda,
+            )
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -346,13 +373,16 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    for key, value in charb_diag.items():
+        metrics[f"charb_{key}"] = float(value.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +882,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.use_charbonnier_cp:
+                print(
+                    f"H22 cp loss: Charbonnier(ε={config.charbonnier_eps}) + "
+                    f"{config.cp_mae_aux_lambda}*|cp_err|; τ keeps weighted MSE."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +918,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/use_charbonnier_cp"] = config.use_charbonnier_cp
+            wandb.summary["loss/charbonnier_eps"] = config.charbonnier_eps
+            wandb.summary["loss/cp_mae_aux_lambda"] = config.cp_mae_aux_lambda
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1068,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_charbonnier_cp=config.use_charbonnier_cp,
+                        charbonnier_eps=config.charbonnier_eps,
+                        cp_mae_aux_lambda=config.cp_mae_aux_lambda,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1111,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for diag_key in (
+                        "charb_cp_charb_mean",
+                        "charb_cp_mae_mean",
+                        "charb_cp_err_max_abs",
+                        "charb_cp_err_p95",
+                        "charb_cp_err_mean_abs",
+                        "charb_tau_mse_mean",
+                    ):
+                        if diag_key in batch_loss_metrics:
+                            train_log[f"train/{diag_key}"] = batch_loss_metrics[diag_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
