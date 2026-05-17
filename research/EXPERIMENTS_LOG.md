@@ -1,3 +1,65 @@
+## 2026-05-17 19:40 — PR #1173: H23 Mean Teacher EMA Self-Distillation (frieren) — CLOSED TERMINAL KILL / MECHANISM-WORKS-BUT-NET-COST-EXCEEDS-NET-BENEFIT / 8TH-CONFIRMED-WAVE-30-DEAD-END
+
+- **Branch**: `frieren/h23-mean-teacher-ema-self-distillation` (closed)
+- **W&B group**: `wave30-mean-teacher`
+  - Main run: rank0 `e741qoo0`, 3 epochs reached, killed via senpai mechanism
+- **Hypothesis**: EMA teacher with consistency loss on coord-noise-augmented views to add training-side regularization, smoothing the optimization landscape and breaking the τz/τx [1.44, 1.55] band attractor. Parameters: EMA decay 0.999, λ_consistency 0.1, coord noise σ=0.01, warmup 2000 steps.
+
+### Terminal results — DECISIVE KILL AT EP3
+
+| Metric | EP1 | EP2 | EP3 | Baseline at EP3 | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | 37.95% | 22.31% | **21.36%** | ~7.0% | **FAIL** (+14.36pp gap from baseline pace) |
+| EP descent rate | — | −15.64pp | **−0.95pp** | — | **94% slope collapse EP2→EP3** |
+| val τz/τx | 1.426 (below band) | 1.836 | **1.866** | ~1.46 (band) | **NO band-break — drifted ABOVE band** (wrong direction) |
+| consistency_loss (raw) | 0.103 | 0.077 | 0.027 | — | descending ✅ (mechanism alive) |
+| student-teacher gap | 0.234 | 0.137 | **0.048** | — | shrinking ✅ (71% drop) |
+| `nonfinite_count` | 0 | 0 | 0 | — | clean — implementation perfect |
+
+**KILL gate triggered**: pre-specified EP3 val_abupt > 11.0% threshold. EP13 projection (linear extrapolation from EP2→EP3 slope) caps at ~11.9% best case — would not approach baseline 6.126% within budget.
+
+### Mechanism alive but objective-composition broken
+
+The Mean Teacher mechanism itself is **mechanically perfect**:
+- EMA teacher cleanly tracks student
+- consistency_loss descends well-calibrated
+- student-teacher gap shrinks 71% (0.234 → 0.048)
+- Zero NaN/Inf, clean numerics throughout
+
+**Failure mode**: at the objective-composition level. The consistency regularizer constrains the optimization manifold in a way that **prevents the supervised loss from finding a productive descent direction past EP2**. The supervised loss stops descending despite the regularizer working correctly — this is regularizer-supervisor trade-off, not a bug.
+
+The τz/τx drift to 1.866 (vs. ~1.46 baseline band) is particularly telling: the regularizer is making τz *worse*, suggesting the consistency-loss-constrained manifold is structurally hostile to the WSS gradient signal.
+
+### 8th confirmed Wave 30 dead end — closes training-regularization tier
+
+H23 is the FIRST Wave 30 attack on training-side regularization (EMA + consistency loss). Decisive negative with mechanism active means **regularization-based stabilization is not a free lunch for DrivAerML**:
+- Cold-start cost (+17pp at EP1 vs. baseline EP1)
+- Slope decay caps recovery
+- Even perfect mechanism cannot rescue trajectory
+
+This closes the **training-dynamics regularization sub-tier** at first attempt. Plateau Protocol: NOT pursuing parameter-space follow-ups (4 candidate recipes: λ=0.02, warmup 5000+, σ=0.003, EMA 0.9995) — would consume 36-54h GPU for diminishing-returns variants of a confirmed failure mode.
+
+### Wave 30 dead-end tally — 8 confirmed across multiple tiers
+
+| # | Hypothesis | Tier | Failure mode |
+|---|---|---|---|
+| 1 | H10b bounded-exp head | Output-head | Floor breach |
+| 2 | H11b learnable scalar | Loss reweighting | Floor breach |
+| 3 | H12 τ-magnitude weighted | Per-vertex loss | Structural bias, floor breach |
+| 4 | H16 focal MSE | Per-vertex loss | Floor breach |
+| 5 | H16b smooth-L1/Huber | Loss shape | Floor breach |
+| 6 | H20 focal per-vertex | Per-vertex loss | Floor breach |
+| 7 | H22 Charbonnier-cp+MAE-aux | Loss shape | Floor breach |
+| **8** | **H23 Mean Teacher EMA** | **Training-regularization** | **Slope collapse, KILL** |
+
+τz/τx band attractor [1.44, 1.55] now confirmed across 7+ runs; H23 broke it but in wrong direction (1.866 above band).
+
+### Follow-up
+
+frieren ASSIGNED H29 SSFL (PR #1182) — Spectral Surface Loss with Streamwise Frequency Upweighting. First frequency-domain loss attack in DrivAerML history. Plateau Protocol tier-shift: from training-regularization to spatial-frequency gradient rebalancing. EP3 gate `τz/τx ≤ 1.42 AND val_abupt ≤ 8.5% AND train/spectral_loss descending`. KILL if `val_abupt > 9.5%` OR `τz/τx > 1.55` OR `train/spectral_loss flat`. ~70 LOC train.py only, λ=0.0 baseline recovery guarantee, baseline-compute cost (no forward doubling unlike H28). Composable with H27 PRLP and H28 SAM for future H30.
+
+---
+
 ## 2026-05-17 17:55 — PR #1151: H12 τ-Magnitude-Weighted Surface MSE (edward) — CLOSED TERMINAL NEGATIVE / STRUCTURALLY-BIASED-CP-DAMAGE / 7TH-CONFIRMED-WAVE-30-DEAD-END
 
 - **Branch**: `edward/tau-magnitude-weighted-loss` (closed)

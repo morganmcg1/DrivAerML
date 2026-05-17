@@ -1,11 +1,93 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~17:55 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~19:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~17:55Z) — H12 closed, H28 SAM assigned — Wave 30 tier-shift to optimizer-space
+## Latest invocation actions (2026-05-17 ~19:40Z) — H23 KILLED, H29 SSFL assigned — Wave 30 tier-shift to frequency-domain loss
+
+### Headline updates
+
+1. **PR #1173 frieren H23 Mean Teacher CLOSED TERMINAL KILL / 8TH WAVE-30 DEAD END / MECHANISM-WORKS-BUT-NET-COST-EXCEEDS-NET-BENEFIT** — EP3 val_abupt 21.36% triggers pre-specified KILL gate (>11.0%). Trajectory slope collapse 94% (EP2→EP3: −15.64pp → −0.95pp); EP13 linear projection ~11.9% best case, never approaches baseline. Mechanism alive (consistency_loss descending, student-teacher gap −71%, zero nonfinite) — failure at **objective-composition level**: regularizer constrains optimization manifold, preventing supervised loss from finding productive descent. τz/τx drifted to 1.866 (vs ~1.46 baseline band — WRONG DIRECTION). **8 of 8 Wave 30 loss-shape + training-regularization attacks now dead.** NOT pursuing parameter-space follow-ups (λ=0.02, warmup 5000+, σ=0.003, EMA 0.9995) — would consume 36-54h for diminishing-returns variants of confirmed failure mode.
+
+2. **PR #1182 frieren H29 SSFL ASSIGNED — FIRST FREQUENCY-DOMAIN LOSS ATTACK in DrivAerML history** — Spectral Surface Loss with Streamwise Frequency Upweighting. Sort surface tokens by streamwise z-coord, apply `torch.fft.rfft` along sorted-N, compute frequency-weighted MSE with linear ramp `linspace(1.0, hf_weight=2.0, N//2+1)` upweighting Nyquist 2× vs DC. **F-principle grounding** (Xu et al. 2020): GD provably learns low-frequency first; high-frequency upweighting counteracts the bias. **Physical motivation**: separation events (windshield/A-pillar/mirror wakes) are LOCALIZED HIGH-SPATIAL-FREQUENCY in streamwise coords; MSE dilutes their gradient across smooth-region tokens. Recipe: `--lambda-spectral 0.1 --spectral-hf-weight 2.0 --spectral-channels wss` (τx/τy/τz only — cp is smooth). ~70 LOC train.py only. λ=0.0 = exact baseline recovery. EP3 falsifiable gate: `τz/τx ≤ 1.42 AND val_abupt ≤ 8.5% AND train/spectral_loss DESCENDING`. KILL if `val_abupt > 9.5%` OR `τz/τx > 1.55` OR `train/spectral_loss flat`. Baseline-compute (NO forward doubling unlike H28). Composable with H27 PRLP (loss-space orthogonal) and H28 SAM (optimizer-space orthogonal) for H30.
+
+3. **Plateau Protocol tier-shift activated for the second time in 2 hours** — Wave 30 now spans 6 attack tiers: INPUT (H24 GSTS, H26 NPCA), OUTPUT-HEAD (H21), REPRESENTATION COUPLING (H25 ALGP), TRAIN-EVAL SPACE (H27 PRLP), TRAINING DYNAMICS-OPTIMIZER (H28 SAM), TRAINING DYNAMICS-LOSS-FREQUENCY (H29 SSFL — NEW). Only remaining loss-shape arm: tanjiro H18 area-weighted MSE.
+
+### Fleet status (8/8 active after H29 assignment)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| **frieren** | **#1182** | **H29 SSFL — FIRST frequency-domain loss attack** | **just assigned (spectral gradient rebalancing)** |
+| edward | #1179 | H28 SAM — first optimizer-space attack | training, EP3 gate ~00:00-02:00Z May 18 |
+| askeladd | #1178 | H27 PRLP — train loss in eval space | EP3 gate ~23:46Z (post-bf16-NaN fix) |
+| fern | #1174 | H24 GSTS encoder slice-temperature | EP1 τz/τx 1.395 (FIRST band-break signal of Wave 30) — EP3 gate ~21:25Z |
+| nezuko | #1171 | H21 per-component output heads | EP10+ vol-65536 curriculum |
+| tanjiro | #1163 | H18 area-weighted MSE | EP12+ stalled 6.582% (only remaining loss-shape arm) |
+| alphonse | #1176 | H25 ALGP auxiliary local-gradient prediction | in-flight, needs-rebase notice (low priority) |
+| thorfinn | #1177 | H26 NPCA encoder input local-frame aug | Path B 5-epoch compressed (pod 360-min budget bug) |
+
+### Closed Wave 30 directions (now 8 confirmed dead ends spanning 2 tiers)
+
+1. Per-vertex error reweighting (H18[earlier-iter], H20) — rel_L2 normalization erases absolute-residual gains
+2. Static Huber on τ (H16, H16b) — frac_in_L1 decays 40× over training
+3. Bounded-exp output activation (H10, H10b) — 73%/27% split structural in encoder
+4. Output tangent-frame reparameterization (H17) — convergence gap too large
+5. Charbonnier on cp + MAE-aux (H22) — cp-MSE saturation NOT the disease
+6. Input-channel gating (H11b) — gate works mechanically but floor disease is DOWNSTREAM of input
+7. Per-vertex τ-magnitude weighted MSE (H12) — structurally biases cp gradient; monotonic regression in α; τz/τx unchanged
+8. **Mean Teacher EMA self-distillation (H23)** — 94% slope collapse; mechanism alive but regularizer kills supervised descent direction; τz/τx drifted to 1.866 (wrong direction)
+
+**Strong consensus tier 1**: rel_L2 metric geometry erases gain from absolute-residual per-vertex reweighting under DrivAerML — axis SATURATED (7/7).
+**Strong consensus tier 2**: training-regularization scheme stabilizes mechanism but breaks objective composition — axis CLOSED (1/1 with high information content).
+
+### KEY FLEET DIAGNOSTIC: Floor disease localization (after H23 closure)
+
+After 8 closed Wave 30 attempts spanning 2 tiers, the floor-breach disease is strongly localized to one of these surviving axes:
+- **Spatial-frequency gradient imbalance** (H29 frieren SSFL — NEW frequency-domain tier)
+- **Optimization landscape sharpness** (H28 edward SAM — optimizer-space)
+- **Output-head / per-head gradient paths** (H21 nezuko per-component MLPs)
+- **Backbone representation coupling cp/τ** (H25 alphonse ALGP)
+- **Train-eval space mismatch** (H27 askeladd PRLP)
+- **Encoder INPUT content** (H24 fern GSTS, H26 thorfinn NPCA)
+- **NOT input-channel gating** (H11b confirmed)
+- **NOT cp-loss-shape** (H22 confirmed)
+- **NOT per-vertex loss-reweighting** (7/7 confirmed)
+- **NOT training-side regularization** (H23 confirmed)
+
+### Band attractor — fleet-wide pattern (FIRST band-break signal at fern H24 EP1)
+
+| Run | EP1 τz/τx | EP_terminal τz/τx | Outcome |
+|:--|---:|---:|:--|
+| H10b fern | — | 1.530 | converged into band |
+| H11b askeladd | 1.466 | 1.556 | converged INTO band |
+| H12 edward | — | 1.476 | inside band (no shift) |
+| H18 tanjiro | 1.412 (transient) | 1.482 | faded into band |
+| H20 alphonse | 1.401 (transient) | 1.523 | faded into band |
+| H21 nezuko | — | 1.529 | inside band |
+| H22 thorfinn | — | (terminal pending offline test eval) | premise dead at EP3 |
+| H23 frieren | 1.426 | 1.866 (EP3 KILL) | drifted ABOVE band (wrong direction) |
+| **H24 fern** | **1.395 (LIVE)** | **EP3 gate ~21:25Z** | **FIRST true band-break signal** |
+
+Two axes NOT yet tested:
+- spectral content of gradient signal (H29 NEW)
+- (formerly: optimizer dynamics — now in-flight via H28)
+
+### Outstanding actions watch (next invocation)
+
+1. **fern H24 EP3 gate (~21:25Z)** — τz/τx ≤ 1.40 = band-break confirmed CONTINUE; 1.40-1.60 MARGINAL; > 1.60 KILL. EP1 1.395 is strongest band-exit signal in Wave 30 history.
+2. **askeladd H27 EP3 gate (~23:46Z)** — val_SP ≤ 4.10% CONTINUE; 4.10-4.40 MARGINAL; > 4.40 + τz/τx in band = KILL. Post-bf16-NaN fix (forward bf16, loss/grad fp32) verified clean.
+3. **edward H28 EP3 gate (~00:00-02:00Z May 18)** — τz/τx < 1.42 AND val_abupt < 6.00% = band-break confirmed; KILL if val_abupt > 6.50% OR τz/τx > 1.55.
+4. **frieren H29 EP1 launch confirmation** — verify `train/spectral_loss` in [0.001, 1.0]; if > 10, halve λ; if < 1e-4, increase hf_weight.
+5. **frieren H29 EP3 gate (~6-7h after launch)** — τz/τx ≤ 1.42 AND val_abupt ≤ 8.5% AND `train/spectral_loss` descending = CONTINUE.
+6. **thorfinn H26 Path B 5-ep gate (~3-4h after launch)** — geom band-break diagnostic in compressed schedule.
+7. **tanjiro H18 EP12+ stale_wip check-ins** — long job; pod healthy expected.
+8. **Three EP3 gates land in next 8 hours** — fern (~21:25), askeladd (~23:46), edward (~00:00-02:00). H29 will land ~01:30-02:30Z.
+
+---
+
+## Earlier invocation actions (2026-05-17 ~17:55Z) — H12 closed, H28 SAM assigned — Wave 30 tier-shift to optimizer-space
 
 ### Headline updates
 
