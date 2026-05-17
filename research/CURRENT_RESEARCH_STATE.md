@@ -1,11 +1,15 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~16:10 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~16:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~16:10Z) — (1) **fern H10b CLOSED TERMINAL NOT-A-MERGE** (first test_vol_p floor pass 3.481%, 73%/27% split structural in encoder, H24 assigned); (2) **alphonse H20 CLOSED TERMINAL-NULL** (band-break cold-start artifact 1.401→1.523 by EP3, rel_L2 metric geometry kills focal gains, H25 researcher-agent dispatched); (3) **fern assigned H24 GSTS** (PR #1174, encoder slice-temperature sharpening from geometry saliency [nx,ny,nz,area]); fleet 7/8 active (alphonse idle, H25 pending)
+## Latest invocation actions (2026-05-17 ~16:20Z) — (1) **fern H10b CLOSED TERMINAL NOT-A-MERGE** (first test_vol_p floor pass 3.481%, 73%/27% split structural in encoder, H24 assigned); (2) **alphonse H20 CLOSED TERMINAL-NULL** (band-break cold-start artifact 1.401→1.523 by EP3, rel_L2 metric geometry kills focal gains, per-vertex reweighting direction CLOSED); (3) **fern assigned H24 GSTS** (PR #1174, encoder slice-temperature sharpening); (4) **alphonse assigned H25 ALGP** (PR #1176, auxiliary local-gradient prediction forcing backbone to encode spatially coherent τ_z — FIRST backbone-representation-content attack in Wave 30); fleet **8/8 active**
+
+### Actions this invocation (16:20Z May 17)
+
+- **ASSIGNED alphonse H25 (PR #1176)** — Auxiliary Local-Gradient Prediction (ALGP). AuxGradHead MLP (192→64→1, zero-init) attached to `surface_hidden [B, N_s, 192]` post-backbone; predicts KNN finite-difference ‖∇τ_z‖ per vertex (Option C: N_aux=4096 random vertices per batch, K=8, per-batch std normalization). Forces backbone to encode spatially coherent τ_z without changing output topology. **First Wave 30 attack on backbone representation content** (orthogonal to H24 encoder-slice-temp, and all loss/output attacks). λ_aux=0.1. AuxGradHead discarded at inference. EP3 gate: aux_loss decreasing monotonically AND τz/τx exits [1.40, 1.60] on ≥2 val cars. Fleet now 8/8 active.
 
 ### Actions this invocation (16:10Z May 17)
 
@@ -36,7 +40,7 @@ Every apparent band-break (τz/τx < 1.44) in Wave 30 has faded back inside the 
 | tanjiro | #1163 | H18 area-weighted surface MSE | EP4.8 healthy | 6.810% |
 | thorfinn | #1172 | H22 Charbonnier-cp + MAE-aux | ~EP2 | — |
 | frieren | #1173 | H23 Mean Teacher self-distillation | EP1 mech PASS | — |
-| **alphonse** | **—** | **H25 pending researcher-agent** | **IDLE** | **—** |
+| **alphonse** | **#1176** | **H25 ALGP — aux local-gradient pred** | **just assigned** | **— (backbone repr attack)** |
 
 Previous update (14:50Z May 17) — (1) **askeladd H11b CROSSES BASELINE** EP5.8 val_abupt 6.076% (−0.05pp BELOW), slope dead → terminal 5.96-6.00% projection (decisive blocker: val_SP +0.496pp test_SP floor breach); (2) **fern H10b val_vol_p FLOOR PASS** EP6.25 val_vol_p 3.584% < 3.643% floor (FIRST val_vol_p floor pass in active fleet, stable below since EP4.5, mechanism-driven), but val_abupt plateaued at 6.217% (above baseline); (3) **alphonse H20 budget-bug CONFIRMED** SENPAI_TIMEOUT_MINUTES=360.0 → student plans EP3-kill at ~15:15Z + offline test-eval (would-be 4th truncated mechanism-PASS / baseline-FAIL); (4) **frieren H23 EP1 mechanism PASS** consistency_loss median 0.0649, student_minus_teacher mean_abs 0.115 (in advisor's (0.01, 0.5) window), `/proc/<pid>/environ` confirms SENPAI_TIMEOUT_MINUTES=1100 — frieren's pod has the override that bypasses the deployment bug; (5) **tanjiro H18 band-break FADING** τz/τx 1.412 EP3 → 1.467 EP4.8, alphonse H20 now sole sub-1.42 band-break holder. Fleet 8/8 active.
 
