@@ -1,3 +1,55 @@
+## 2026-05-17 22:50 — PR #1176: H25 Auxiliary Local-Gradient Prediction (alphonse) — CLOSED TERMINAL NOT-A-MERGE / RUN-CRASHED / 6TH COLD-START FADE / 11TH WAVE-30 DEAD END / MECHANISM-ALIVE-OBJECTIVE-DISCONNECTED
+
+- **Branch**: `alphonse/aux-local-grad-prediction` (closed pending student terminal SENPAI-RESULT)
+- **W&B rank0**: `pvdjrlx4` (crashed) — full 8-rank set in PR body
+- **Crash**: step 33,427 at 22:12Z (5h 03min runtime). Pod still showed `Running` per k8s after crash (zombie). Crash AFTER EP3 val landed at step 32,592.
+- **Hypothesis**: Auxiliary head predicts local gradient of τ_z at each surface point; aux task gradient flows into encoder, forcing representation to encode local boundary-layer derivatives. λ_aux=0.05, aux_grad_scale~14 (heavy-tailed coord-meter / unit-τ_z mismatch).
+
+### Pre-crash EP3 result — TERMINAL NOT-A-MERGE
+
+| Marker | EP1 step 10,864 | EP2 step 21,728 | EP3 step 32,592 | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | 25.567% | 8.076% | **7.142%** | FAIL +1.016pp vs baseline 6.126% |
+| val τz | 34.731% | 11.916% | 10.692% | — |
+| val τx | 25.214% | 7.933% | 7.072% | — |
+| **τz/τx** | **1.3774** ★ deepest EP1 | 1.5021 | **1.5117** | **6TH COLD-START FADE — band rebounded** |
+| val_SP | — | — | (not logged in summary) | — |
+| aux_loss | 1.71 → 0.81 | 0.789 mid-EP2 | continued descending | ✅ MECHANISM ALIVE |
+| aux_pred_std | 0.009 → 7.88 | 8.21 mid-EP2 | continued growing | ✅ MECHANISM ALIVE |
+
+### 6th confirmed cold-start fade — band attractor is warmup artifact
+
+| Hyp | Mechanism class | EP1 τz/τx | EP3 τz/τx | Fade direction |
+|---|---|---:|---:|:--|
+| H18 | per-vertex area weight | 1.412 | 1.489 | ↑ into band |
+| H20 | curvature-soft loss | 1.401 | 1.523 | ↑ into band |
+| H23 | EMA self-distill | 1.426 | 1.866 | ↑ over band (also KILL) |
+| H24 GSTS | slice temperature | 1.395 | 1.514 | ↑ into band |
+| **H25 ALGP** | **aux local-grad** | **1.377** ★ deepest | **1.512** | **↑ into band** |
+| H26 NPCA | spread-break (different class) | std 0.101 | TBD | — |
+
+H25's EP1 τz/τx 1.3774 is the DEEPEST EP1 mean-shift signal in Wave 30 history — yet it still rebounded into the [1.44, 1.55] attractor band by EP3. **Conclusion**: deeper EP1 cold-start mean-shifts do NOT survive warmup → they are universally warmup-dynamics artifacts, not representational changes. Closed axis: **mean-shift τz/τx representation manipulation via auxiliary task / saliency MLP**.
+
+### Mechanism worked, hypothesis was wrong
+
+The ALGP aux head learned its target as designed: aux_loss −53% over EP1, aux_pred_std rose 1000× tracking aux_grad_target_mean scale, aux_grad_head non-degenerate (weights/grads healthy throughout). But the gradient injected into the encoder did NOT reorganize τ_z representation in a way that survived warmup — final τ_z prediction tracked the standard band attractor exactly like the other 5 cold-start-fade Wave 30 attacks.
+
+### Engineering note — false-positive health check at 22:14Z
+
+A health-check comment posted at 22:14Z incorrectly reported the run as healthy at step 22,017. Root cause: queried W&B `summary_metrics` which returned EP2 cached state and `running` status, ~2 minutes after the actual crash at 22:12Z. Future health checks must cross-reference `_timestamp` / `_runtime` against expected step rate, not just `state == running`. Cost: 24 minutes from crash to correction.
+
+### Implication for alphonse next assignment
+
+H25 closure + H21 closure jointly localize the τ_z prediction floor as:
+- NOT decoder capacity (H21 proved)
+- NOT mean-shift aux task on encoder (H25 proves)
+- NOT mean-shift saliency on encoder (H24 GSTS faded)
+- → must be **encoder feature CONTENT** (information missing from input, not how it's processed)
+
+Next attack class: **explicit physical features in input** — wall-distance (log SDF), separation-line auxiliary classification, or pressure-gradient features. Aligns with H30 V2S cross-attention thesis (volume tokens carry off-body physics surface tokens need).
+
+---
+
 ## 2026-05-17 21:50 — PR #1171: H21 Per-Component Independent Output Heads (nezuko) — CLOSED TERMINAL NOT-A-MERGE / 10TH-WAVE-30-DEAD-END / DECODER-CAPACITY-NOT-THE-BOTTLENECK
 
 - **Branch**: `nezuko/h21-per-component-output-heads` (closed)

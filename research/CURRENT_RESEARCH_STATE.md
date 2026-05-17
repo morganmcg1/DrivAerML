@@ -1,11 +1,88 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~21:50 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~22:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~21:50Z) — H21 CLOSED (10th dead end, decoder-capacity-not-the-bottleneck), H30 V2S xattn assigned to nezuko
+## Latest invocation actions (2026-05-17 ~22:50Z) — H25 ALPHONSE CRASHED + EP3 FADE = 11TH DEAD END; H30 ASSIGNED; floor disease localized to encoder feature CONTENT
+
+### Headline updates
+
+1. **PR #1176 alphonse H25 ALGP CLOSED TERMINAL NOT-A-MERGE pending student terminal SENPAI-RESULT** — run `pvdjrlx4` crashed at 22:12Z step 33,427 (after EP3 val landed at step 32,592). EP3 verdict: val_abupt 7.142% FAIL +1.016pp vs baseline 6.126%; τz/τx 1.5117 = **6th confirmed cold-start fade** (EP1 deepest signal 1.3774 → EP3 1.5117 rebounded into band [1.44, 1.55]). Mechanism worked perfectly (aux_loss −53%, aux_pred_std 1000× growth) but objective-disconnected from τ_z floor. Engineering note: 22:14Z health check posted "healthy" status reading stale W&B summary; correction posted 22:50Z.
+
+2. **6th cold-start fade in Wave 30** — H18 (1.412→1.489), H20 (1.401→1.523), H23 (1.426→1.866 KILL), H24 (1.395→1.514), and now H25 (1.377→1.512). DEEPEST EP1 mean-shift in Wave 30 STILL faded. Conclusion: deeper EP1 mean-shifts are warmup-dynamics artifacts, NOT representational changes that survive epochs. **CLOSED axis: mean-shift τz/τx encoder manipulation via aux task / saliency MLP / curvature loss / temperature.**
+
+3. **Floor disease NOW localized to encoder feature CONTENT** — not decoder capacity (H21 closed), not mean-shift encoder manipulation (H25 + H24 + H18 + H20 + H23 closed), not channel-coupled position weighting (H18 closed). Remaining attack class: **explicit physical features in input** (wall-distance log-SDF, separation-line auxiliary, pressure-gradient input) AND cross-modal feature fusion (H30 V2S in flight). Alphonse next assignment will likely be WALLDIST (log-SDF input channel for volume tokens) — direct attack on encoder information content per H21 diagnosis.
+
+### Fleet status (8/8 active after H30 assignment, 7/8 after alphonse close pending)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| fern | #1174 | H24 GSTS encoder slice-temp | EP3 MARGINAL (τz/τx 1.5145 in-band rebound). EP6 binding gate ~02:00Z May 18 — decisive val_abupt baseline-crossing test |
+| **alphonse** | **#1176** | **H25 ALGP CRASHED** | **EP3 FAIL +1.016pp + 6th band fade; pending student terminal SENPAI-RESULT then CLOSE; WALLDIST queued for next assignment** |
+| thorfinn | #1177 | H26 NPCA local-frame input aug | training, EP3 mechanism gate ~23:48Z |
+| askeladd | #1178 | H27 PRLP train-loss in eval space | training, EP1 τz/τx 1.523 IN-BAND (expected — floor mechanism not band-attractor). EP3 gate ~23:46Z (val_SP ≤ 4.10% beating H11b EP3 4.368%) |
+| edward | #1179 | H28 SAM optimizer-sharpness | EP1: τz/τx 1.4406 lower band-edge (first optimizer-space signal). EP3 ~00:10–02:10Z May 18 |
+| frieren | #1182 | H29 SSFL frequency-domain loss | EP1 mechanism PASS, val async ~23:45Z |
+| tanjiro | #1183 | H18d channel-decoupled τz-only area weight | training, EP1 ETA ~23:04Z (overdue, agent reports step 14,984 at 22:58Z) |
+| nezuko | #1184 | H30 V2S xattn (volume→surface cross-modal) | just assigned 21:50Z, awaiting pickup |
+
+### Closed Wave 30 directions (11 confirmed dead ends + 1 outlier)
+
+| # | Hypothesis | Tier | Key result |
+|---|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape / per-vertex | All dead |
+| 8 | H23 Mean Teacher EMA | Training-regularization | KILL (21.36% EP3) |
+| 9 | H18 area-weighted MSE | Per-vertex position | OUTLIER: test τz/τx 1.418 ★ + test_vol_p PASS, but miss val/SP |
+| 10 | H21 per-component heads | Decoder capacity | DEAD — mechanism proved, capacity not the bottleneck |
+| **11** | **H25 ALGP aux local-grad** | **Mean-shift encoder via aux task** | **CRASHED + EP3 FADE — mechanism alive but objective-disconnected** |
+
+### KEY FLEET DIAGNOSTIC: Floor disease localization (after H25 closure)
+
+- **NOT decoder capacity** (H21 confirmed)
+- **NOT per-vertex loss-reweighting** (7 attacks confirmed)
+- **NOT training-regularization** (H23 confirmed)
+- **NOT channel-coupled position-weighting** (H18 confirmed)
+- **NOT mean-shift saliency MLP** (H24 partial fade — MARGINAL, not survive)
+- **NOT mean-shift aux gradient prediction** (H25 deepest EP1 signal still faded)
+- **NOT (likely) coordinate frame transformation** (pending H26 thorfinn EP3)
+
+Surviving attack axes:
+- **Encoder INPUT physical features** (alphonse WALLDIST next — log-SDF) — DIRECTLY targets H21 + H25 closure diagnosis
+- **Cross-modal encoder fusion** (H30 nezuko V2S, in flight)
+- **Spatial-frequency gradient** (H29 frieren SSFL — frequency-domain loss)
+- **Optimization landscape sharpness** (H28 edward SAM — optimizer-space)
+- **Train-eval space mismatch** (H27 askeladd PRLP — proxy loss)
+- **Encoder INPUT local frame** (H26 thorfinn NPCA — coordinate augmentation, different mechanism class spread-break)
+
+### Band attractor — fleet-wide pattern (6 confirmed cold-start fades + 1 test-survivor + 1 spread-break)
+
+| Run | EP1 τz/τx | EP3 τz/τx | Verdict |
+|:--|---:|---:|:--|
+| H18 tanjiro (CLOSED) | 1.357 | 1.489 | val-fade BUT test 1.418 survived ★ |
+| H24 fern (MARGINAL) | 1.395 | 1.514 | Cold-start fade |
+| H25 alphonse (CRASHED, CLOSED) | **1.377 ★ deepest** | **1.512** | **6th cold-start fade** |
+| H26 thorfinn (SPREAD-break) | std=0.101 | TBD | Different mechanism class |
+| H28 edward SAM | **1.4406 lower edge** | TBD | First optimizer-space signal |
+
+### Outstanding actions (next 12h chronological)
+
+1. **alphonse terminal SENPAI-RESULT** (any time now) — close PR #1176, assign WALLDIST
+2. **tanjiro H18d EP1** (~23:04Z, overdue) — channel-decoupled τz-only area weight gate
+3. **askeladd H27 EP3 gate ~23:46Z** — val_SP ≤ 4.10% beating H11b EP3 4.368%
+4. **thorfinn H26 EP3 mechanism gate ~23:48Z** — std + outside-band count
+5. **frieren H29 EP1 val ~23:45Z** — async val_budget_minutes=90
+6. **edward H28 EP3 ~00:10–02:10Z May 18** — optimizer-space τz/τx<1.42 + val_abupt<6.00%
+7. **tanjiro H18d EP3 ~01:31Z May 18** — channel-decoupling
+8. **fern H24 EP6 ~02:00Z May 18** — decisive val_abupt baseline-crossing test
+9. **nezuko H30 V2S pickup** — awaiting student poll
+
+**11 confirmed dead ends. Plateau Protocol active. Wave 30 attack tier diversity now spans 7 axes: per-vertex/loss-shape (CLOSED), regularization (CLOSED), decoder capacity (CLOSED), mean-shift encoder (CLOSED), encoder INPUT features (NEW — WALLDIST queued), cross-modal fusion (H30 IN-FLIGHT), optimizer-space (H28 IN-FLIGHT), frequency-domain loss (H29 IN-FLIGHT), train-eval-space loss (H27 IN-FLIGHT), coordinate-frame input (H26 IN-FLIGHT spread-break).**
+
+---
+
+## Earlier invocation actions (2026-05-17 ~21:50Z) — H21 CLOSED (10th dead end, decoder-capacity-not-the-bottleneck), H30 V2S xattn assigned to nezuko
 
 ### Headline updates
 
