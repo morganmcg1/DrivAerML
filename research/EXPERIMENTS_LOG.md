@@ -1,3 +1,54 @@
+## 2026-05-17 16:00 — PR #1170: H20 Focal Vertex Loss (alphonse) — CLOSED TERMINAL-NULL (mechanism executed, band-break cold-start artifact, rel_L2 metric geometry kills focal gains)
+
+- **Branch**: `alphonse/h20-focal-vertex-loss` (closed)
+- **W&B group**: `wave30_h20_focal_vertex_loss` — rank0 `jau1ksmq`, ranks 1–7 `cc50e9ct`/`6rodkhdo`/`6riuraqr`/`01lfixoh`/`90ld2a1u`/`0t57f90j`/`t77ard01`
+- **Best ckpt**: EP3 EMA (budget-starved at ~300min effective, EP4 killed by SIGTERM)
+- **Hypothesis**: Dynamic per-vertex error-weighted MSE on τ channels with γ=0.5 (γ_z=1.5×γ_x) to force the model to concentrate gradient on high-error, high-τ tail vertices and break the τz/τx collapse band.
+
+### Terminal results (EP3 EMA from offline eval — SENPAI_TIMEOUT_MINUTES effective ~300)
+
+| Metric | H20 EP3 | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | 8.671% | 6.126% | +2.545pp | FAIL (KILL gate: >6.70%) |
+| test_abupt | **8.480%** | 5.844% | +2.636pp | FAIL |
+| test_SP | 5.953% | 3.577% floor | +2.376pp | **FLOOR FAIL** |
+| test_vol_p | 5.159% | 3.643% floor | +1.516pp | **FLOOR FAIL** |
+| test_WSS | 9.478% | 6.727% | +2.751pp | FAIL |
+| val τz/τx | **1.523** | — | in band | break FADED |
+| test τz/τx | **1.481** | — | in band | break FADED |
+
+### Band-break diagnostic — cold-start artifact, not mechanism win
+
+| EP | τz/τx | Interpretation |
+|---|---|---|
+| EP1 (step 10,864) | **1.389** | Fleet-deepest — cold-start residual artifact |
+| EP2 (step 21,729) | **1.401** | Still below band — high EP1-2 variance artifact |
+| EP3 (step 32,594) | **1.523** | INSIDE band — natural channel-magnitude ratio restored |
+
+The early band-break was a cold-start transient: γ_z=1.5×γ_x preferentially shrinks τ_z's large EP1-2 residuals faster, lowering its L2 numerator transiently. Once the model fits the bulk distribution at EP3, the ratio reverts to the "natural" channel-magnitude ratio (~1.52).
+
+### Focal mechanism diagnostics — clean execution
+
+- `w_z_p95/w_z_mean = 3.75–3.86` throughout (heterogeneity maintained)
+- Normalization invariant `w_mean=1.0000` held exactly (implementation correct)
+- `raw_w_z > raw_w_x` at EP1 (τ_z residuals dominate warmup) → crossover at EP2 (`raw_w_z < raw_w_x`) → mechanism actually DID reduce τ_z absolute residual faster
+
+### Why TERMINAL-NULL despite clean mechanism execution
+
+Two fundamental metric-level blockers:
+1. **rel_L2 metric geometry**: metric normalizes by channel reference magnitude. τ_z has a structurally larger reference (dominant flow-aligned shear), so absolute-residual gains from focal weighting get erased by normalization. Per-vertex focal can win on absolute τ_z error but still fail on rel_L2.
+2. **Easy-vertex damping**: `raw_w_z ≈ 0.031` at EP3 → ~97% of typical-error vertices contribute almost nothing to gradient. Slows bulk convergence (val_abupt 8.671% at EP3 vs ~6.7% baseline).
+
+### NOT stackable
+
+Unlike H15b (EMA) and H19 (VICReg), H20's metric geometry mismatch is fundamental — stacking focal reweighting on a winner won't help since the normalization structure erases absolute gains. **Per-vertex error-reweighting direction CLOSED for DrivAerML rel_L2.**
+
+### Key Wave 31 implication
+
+The rel_L2 insight suggests future loss-form attacks should target **proportional error** (e.g., log-space regression, symmetric MAPE) rather than absolute-residual reweighting. Or skip the loss entirely and attack encoder representations directly (H24 GSTS, in flight).
+
+---
+
 ## 2026-05-17 15:45 — PR #1164: H10b bounded-exp magnitude head (fern) — CLOSED TERMINAL NOT-A-MERGE / MECHANISM-PASS / HYPOTHESIS-FALSIFIED / PARKED STACKABLE (first test_vol_p floor pass in active fleet)
 
 - **Branch**: `fern/h10b-bounded-exp-magnitude` (closed)
