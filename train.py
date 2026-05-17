@@ -105,6 +105,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    focal_gamma: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "focal_gamma": (
+            "Focal exponent for per-vertex error-weighted MSE on tau "
+            "channels (Lin et al., ICCV 2017, arXiv:1708.02002, regression "
+            "adaptation). Weight per vertex: "
+            "w_v = (|err_v|.detach() + 1e-6)^(2*gamma), per-channel "
+            "normalised so masked mean weight = 1 (preserves total loss "
+            "scale). 0=standard MSE on tau (baseline), 0.5=mild focus, "
+            "1.0=strong. tau_z gets 1.5x amplification of this gamma. "
+            "cp (channel 0) always uses standard masked MSE."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -311,6 +322,88 @@ def build_model(config: Config) -> SurfaceTransolver:
     )
 
 
+def focal_vertex_mse(
+    surface_preds: torch.Tensor,
+    surface_target: torch.Tensor,
+    surface_mask: torch.Tensor,
+    focal_gamma: float,
+    eps: float = 1e-6,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Focal-weighted per-vertex masked MSE on the tau channels (1, 2, 3).
+
+    Regression adaptation of Focal Loss (Lin et al., ICCV 2017,
+    arXiv:1708.02002). Per-vertex weight on tau is
+    ``w_v = (|err_v|.detach() + eps)^(2*gamma)``, per-channel normalised so
+    the masked mean weight equals 1 (preserves total loss scale relative to
+    standard ``masked_mse``). cp (channel 0) keeps standard masked MSE.
+
+    Channel-specific gamma: tau_x and tau_y use ``focal_gamma``; tau_z uses
+    ``1.5 * focal_gamma`` (matching the H10 finding that tau_z is the worst
+    WSS channel).
+
+    The returned scalar matches the per-element-averaged scale of
+    ``masked_mse(surface_preds, surface_target, surface_mask)`` so that the
+    surface vs. volume balance does not need retuning when ``focal_gamma=0``.
+    Diagnostics include both pre- and post-normalisation weight statistics.
+    """
+    # cp (channel 0) standard masked MSE.
+    cp_loss = masked_mse(
+        surface_preds[..., 0:1], surface_target[..., 0:1], surface_mask
+    )
+
+    tau_pred = surface_preds[..., 1:]
+    tau_tgt = surface_target[..., 1:]
+    tau_err = tau_pred - tau_tgt  # [B, N, 3]
+
+    # Weights are detached so gradient flows only through the err^2 factor.
+    abs_err = tau_err.detach().abs()
+
+    gamma_per_channel = torch.tensor(
+        [focal_gamma, focal_gamma, focal_gamma * 1.5],
+        device=surface_preds.device,
+        dtype=surface_preds.dtype,
+    )
+    focal_w_raw = (abs_err + eps).pow(2.0 * gamma_per_channel)  # [B, N, 3]
+
+    mask_expanded = surface_mask.to(dtype=surface_preds.dtype).unsqueeze(-1)
+    # Mask-aware per-channel mean so padding does not bias the normalisation.
+    valid_pts_per_channel = mask_expanded.sum(dim=(0, 1), keepdim=True)
+    masked_w_sum = (focal_w_raw * mask_expanded).sum(dim=(0, 1), keepdim=True)
+    focal_w_mean = masked_w_sum / valid_pts_per_channel.clamp_min(1.0)
+    focal_w = focal_w_raw / (focal_w_mean + eps)  # [B, N, 3], masked mean = 1
+
+    tau_sq = tau_err.pow(2)
+    weighted_tau_sq = focal_w * tau_sq * mask_expanded
+    denom = (mask_expanded.sum() * 3.0).clamp_min(1.0)
+    tau_loss = weighted_tau_sq.sum() / denom
+
+    # Combine on the same scale as masked_mse over 4 channels:
+    #   masked_mse(4ch) = (sum_cp_se + sum_tau_se) / (4 * valid_pts)
+    #   cp_loss         = sum_cp_se / valid_pts
+    #   tau_loss        = sum_tau_se / (3 * valid_pts)       (focal_w=1 case)
+    # => surface_loss = (cp_loss + 3*tau_loss) / 4 matches masked_mse(4ch).
+    surface_loss = (cp_loss + 3.0 * tau_loss) / 4.0
+
+    # Diagnostics. Post-normalisation means are ~1 by construction (they
+    # exist so the ratio gates "p95 / mean > 2.0" stay readable). Raw means
+    # expose the pre-normalisation asymmetry between tau_z (gamma*1.5) and
+    # tau_x / tau_y, which the normalised means hide. Percentiles are
+    # computed over valid (unmasked) entries only.
+    valid_mask_bool = surface_mask.bool()
+    diag: dict[str, float] = {}
+    if valid_mask_bool.any():
+        for ch, name in enumerate(("x", "y", "z")):
+            valid_w = focal_w[..., ch][valid_mask_bool]
+            diag[f"focal/w_{name}_mean"] = float(valid_w.mean().detach().cpu().item())
+            raw_w = focal_w_raw[..., ch][valid_mask_bool]
+            diag[f"focal/raw_mean_w_{name}"] = float(raw_w.mean().detach().cpu().item())
+        valid_w_z = focal_w[..., 2][valid_mask_bool].float()
+        diag["focal/w_z_p95"] = float(torch.quantile(valid_w_z, 0.95).detach().cpu().item())
+        diag["focal/w_z_p99"] = float(torch.quantile(valid_w_z, 0.99).detach().cpu().item())
+        diag["focal/w_z_p05"] = float(torch.quantile(valid_w_z, 0.05).detach().cpu().item())
+    return surface_loss, diag
+
+
 def train_loss(
     model: nn.Module,
     batch,
@@ -321,10 +414,12 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    focal_gamma: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    focal_diag: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -332,7 +427,14 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        if focal_gamma > 0.0:
+            surface_loss, focal_diag = focal_vertex_mse(
+                out["surface_preds"],
+                surface_target,
+                batch.surface_mask,
+                focal_gamma,
+            )
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -346,13 +448,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(focal_diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -1030,6 +1134,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        focal_gamma=config.focal_gamma,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1068,8 +1173,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/focal_gamma": config.focal_gamma,
                         }
                     )
+                    for key, value in batch_loss_metrics.items():
+                        if key.startswith("focal/"):
+                            train_log[key] = value
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
