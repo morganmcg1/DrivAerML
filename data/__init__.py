@@ -7,6 +7,7 @@ from .loader import (
     EXPECTED_SURFACE_SPLIT_COUNTS,
     SURFACE_TARGET_NAMES,
     SURFACE_X_DIM,
+    SURFACE_X_DIM_BASE,
     SURFACE_Y_DIM,
     VOLUME_TARGET_NAMES,
     VOLUME_X_DIM,
@@ -16,7 +17,9 @@ from .loader import (
     DrivAerMLSurfaceDataset,
     SurfaceBatch,
     load_data,
+    multiscale_surface_dim,
     pad_collate,
+    parse_multiscale_k_values,
 )
 
 __all__ = [
@@ -24,6 +27,7 @@ __all__ = [
     "EXPECTED_SURFACE_SPLIT_COUNTS",
     "SURFACE_TARGET_NAMES",
     "SURFACE_X_DIM",
+    "SURFACE_X_DIM_BASE",
     "SURFACE_Y_DIM",
     "VOLUME_TARGET_NAMES",
     "VOLUME_X_DIM",
@@ -33,5 +37,7 @@ __all__ = [
     "DrivAerMLSurfaceDataset",
     "SurfaceBatch",
     "load_data",
+    "multiscale_surface_dim",
     "pad_collate",
+    "parse_multiscale_k_values",
 ]

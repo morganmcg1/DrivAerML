@@ -32,7 +32,12 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import (
+    DrivAerMLSurfaceDataset,
+    SURFACE_X_DIM_BASE,
+    multiscale_surface_dim,
+    parse_multiscale_k_values,
+)
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -103,6 +108,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_multiscale_context: bool = False
+    multiscale_k_values: str = "4,16,64"
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +236,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_multiscale_context": (
+            "Enable PR #1150 multi-scale kNN-pooled local context features. "
+            "Adds 3 statistics x len(--multiscale-k-values) channels to the "
+            "7-channel surface input: per-vertex mean cosine alignment of "
+            "neighbor normals, log1p(mean panel area) and log1p(mean kNN "
+            "distance) at each scale. Computed once per case on the full "
+            "mesh via scipy cKDTree and cached as "
+            "surface_multiscale_k{ks}_v1.npy in each case directory."
+        ),
+        "multiscale_k_values": (
+            "Comma-separated kNN scales for --use-multiscale-context "
+            "(e.g. '4,16,64'). Each k produces 3 input channels."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,6 +314,74 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def resolve_surface_input_dim(config: Config) -> int:
+    """Compute the surface_x feature dimension implied by ``config``.
+
+    Returns the base SURFACE_X_DIM (xyz + normals + area = 7) plus 3 channels
+    per kNN scale when --use-multiscale-context is enabled.
+    """
+
+    if not config.use_multiscale_context:
+        return SURFACE_X_DIM_BASE
+    k_values = parse_multiscale_k_values(config.multiscale_k_values)
+    if not k_values:
+        raise ValueError(
+            "--use-multiscale-context requires --multiscale-k-values to be a "
+            "non-empty comma-separated list of positive ints (e.g. '4,16,64')."
+        )
+    return SURFACE_X_DIM_BASE + multiscale_surface_dim(k_values)
+
+
+def log_multiscale_input_stats(config: Config, train_loader: DataLoader) -> None:
+    """Log per-channel statistics of the multi-scale kNN features for one case.
+
+    Only logs when --use-multiscale-context is enabled. Pulls one full sample
+    from ``train_loader.dataset`` (no shuffling needed; we just need a real
+    case) and writes mean/std/p95 of each of the ``3 * len(k_values)`` extra
+    channels to ``wandb.summary`` under ``multiscale/*``. Triggers feature
+    compute for that case if not yet cached, which is harmless (the same
+    compute will run again on the first training batch otherwise).
+    """
+
+    import numpy as np  # local import keeps train.py module import light
+
+    k_values = parse_multiscale_k_values(config.multiscale_k_values)
+    if not k_values:
+        return
+    try:
+        sample = train_loader.dataset[0]
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        print(f"multiscale stats: could not load sample: {exc}")
+        return
+    ms = sample.surface_x[:, SURFACE_X_DIM_BASE:].numpy()
+    expected_dim = multiscale_surface_dim(k_values)
+    if ms.shape[-1] != expected_dim:
+        print(
+            f"multiscale stats: expected {expected_dim} extra channels, "
+            f"got {ms.shape[-1]} (cache shape mismatch?)"
+        )
+        return
+    stat_names = ("cos_align", "log_area", "log_dist")
+    summary: dict[str, float] = {}
+    for ki, k in enumerate(k_values):
+        for si, stat_name in enumerate(stat_names):
+            col = ms[:, ki * len(stat_names) + si]
+            summary[f"multiscale/k{k}/{stat_name}_mean"] = float(col.mean())
+            summary[f"multiscale/k{k}/{stat_name}_std"] = float(col.std())
+            summary[f"multiscale/k{k}/{stat_name}_p05"] = float(np.percentile(col, 5))
+            summary[f"multiscale/k{k}/{stat_name}_p50"] = float(np.percentile(col, 50))
+            summary[f"multiscale/k{k}/{stat_name}_p95"] = float(np.percentile(col, 95))
+    summary["multiscale/k_values"] = ",".join(str(k) for k in k_values)
+    summary["multiscale/surface_input_dim"] = int(sample.surface_x.shape[-1])
+    summary["multiscale/sample_case_id"] = str(sample.case_id)
+    wandb.summary.update(summary)
+    print(
+        f"Multi-scale context enabled: k_values={list(k_values)}, "
+        f"surface_input_dim={sample.surface_x.shape[-1]}, "
+        f"sample={sample.case_id}, extra channels={ms.shape[-1]}"
+    )
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -308,6 +396,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        surface_input_dim=resolve_surface_input_dim(config),
     )
 
 
@@ -683,6 +772,7 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        multiscale_k_values=getattr(old_ds, "multiscale_k_values", ()) or None,
     )
     train_sampler = None
     train_shuffle = True
@@ -883,6 +973,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if config.use_multiscale_context:
+                log_multiscale_input_stats(config, train_loader)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}

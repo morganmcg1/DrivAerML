@@ -30,6 +30,7 @@ from data import (
     VOLUME_Y_DIM,
     load_data,
     pad_collate,
+    parse_multiscale_k_values,
 )
 
 
@@ -278,6 +279,16 @@ def make_loaders(
     config,
     distributed_state: DistributedState | None = None,
 ) -> tuple[DataLoader, dict[str, DataLoader], dict[str, DataLoader], dict[str, torch.Tensor]]:
+    multiscale_k_values: tuple[int, ...] | None = None
+    if getattr(config, "use_multiscale_context", False):
+        spec = getattr(config, "multiscale_k_values", "") or ""
+        parsed = parse_multiscale_k_values(spec)
+        if not parsed:
+            raise ValueError(
+                "--use-multiscale-context requires --multiscale-k-values to be a "
+                "non-empty comma-separated list of positive ints (e.g. '4,16,64')."
+            )
+        multiscale_k_values = parsed
     train_ds, val_splits, test_splits, stats = load_data(
         manifest_path=config.manifest,
         root=config.data_root or None,
@@ -286,6 +297,7 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        multiscale_k_values=multiscale_k_values,
     )
     train_sampler = None
     train_shuffle = True
