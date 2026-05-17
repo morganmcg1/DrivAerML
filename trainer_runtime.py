@@ -837,6 +837,58 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_huber(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    delta: float,
+) -> torch.Tensor:
+    """Masked Huber (smooth-L1) loss.
+
+    For |err| < delta: 0.5 * err^2 (matches PyTorch nn.HuberLoss with default reduction).
+    For |err| >= delta: delta * (|err| - 0.5 * delta).
+    """
+    err = pred - target
+    abs_err = err.abs()
+    quadratic = 0.5 * err.square()
+    linear = delta * (abs_err - 0.5 * delta)
+    huber_elem = torch.where(abs_err < delta, quadratic, linear)
+    return masked_mean(huber_elem, mask)
+
+
+def huber_diagnostics(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    delta: float,
+) -> dict[str, float]:
+    """Per-channel Huber telemetry for the surface tau channels.
+
+    Computes the fraction of valid vertices whose normalized abs-error
+    falls in the L2 region (|err| < delta) vs the L1 region for tau_x,
+    tau_y, tau_z, plus the max abs error on tau_z. All values are floats
+    on CPU. Inputs are expected to be in z-scored (normalized) space.
+    """
+    out: dict[str, float] = {}
+    if pred.numel() == 0:
+        return out
+    with torch.no_grad():
+        err = (pred.detach() - target.detach()).float()
+        abs_err = err.abs()
+        mask_float = mask.to(device=err.device, dtype=torch.float32)
+        valid_total = mask_float.sum().clamp_min(1.0)
+        tau_names = ("tau_x", "tau_y", "tau_z")
+        for c_idx, name in zip((1, 2, 3), tau_names):
+            abs_err_c = abs_err[..., c_idx]
+            in_L2 = ((abs_err_c < delta).float() * mask_float).sum() / valid_total
+            in_L1 = ((abs_err_c >= delta).float() * mask_float).sum() / valid_total
+            out[f"train/huber/frac_in_L2_region/{name}"] = float(in_L2.item())
+            out[f"train/huber/frac_in_L1_region/{name}"] = float(in_L1.item())
+            abs_err_c_masked = abs_err_c * mask_float
+            out[f"train/max_abs_error_normed/{name}"] = float(abs_err_c_masked.max().item())
+    return out
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -863,6 +915,46 @@ def weighted_channel_mse(
     sq_err = (pred - target).square()
     mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
     weighted = sq_err * weights_dev * mask_dev
+    valid_points = mask_dev.sum()
+    denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
+    if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denominator
+    return pred.sum() * 0.0
+
+
+def weighted_channel_huber_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    weights: torch.Tensor,
+    *,
+    tau_huber_delta: float,
+) -> torch.Tensor:
+    """Per-channel weighted masked loss with MSE on channel 0 (cp) and Huber on channels 1: (tau_x, tau_y, tau_z).
+
+    pred / target: [B, N, 4]; mask: [B, N]; weights: [4]. Returns a single
+    scalar averaged over (valid points x channels), with each channel's
+    per-element loss multiplied by its weight before averaging. Matches
+    ``weighted_channel_mse`` semantics: the channel weights only rescale
+    the relative gradient budget; it does NOT decompose into per-channel
+    means.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    weights_dev = weights.to(device=pred.device, dtype=pred.dtype)
+    if weights_dev.shape[-1] != pred.shape[-1]:
+        raise ValueError(
+            f"weights last-dim {weights_dev.shape[-1]} must equal pred last-dim {pred.shape[-1]}"
+        )
+    err = pred - target
+    sq = err.square()
+    abs_err = err.abs()
+    quadratic = 0.5 * sq
+    linear = tau_huber_delta * (abs_err - 0.5 * tau_huber_delta)
+    huber_elem = torch.where(abs_err < tau_huber_delta, quadratic, linear)
+    per_elem = torch.cat([sq[..., 0:1], huber_elem[..., 1:]], dim=-1)
+    mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    weighted = per_elem * weights_dev * mask_dev
     valid_points = mask_dev.sum()
     denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
     if bool(valid_points.detach().cpu().item() > 0):
