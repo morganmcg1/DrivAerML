@@ -1,5 +1,6 @@
 # SENPAI Research State
-- 2026-05-17 00:35 UTC (**H10b EP6 sub-7% wss MILESTONE (6.996) but τ_z slope decel -0.036 → SOTA-beat downgraded to MARGINAL on wss only; H9b EP8 CLAMP ENGAGED (w_vol_p=0.150) with sustained -0.023 vol_p slope → EP10 projects 3.802% UNDER kill; H11b EP6 gap to H9b narrowed to 0.78pp; H7 fern EP30 terminal val LANDED, test eval requested**)
+- 2026-05-17 01:25 UTC (**H7 CLOSED NOT-A-MERGE (test_wss=7.006 +0.279 vs SOTA); H9b EP10 CLAMP LOAD-BEARING (vol_p=3.828, slope -0.015, EP30 proj clears floor); H10b EP7 τ_z slope decel (-0.012) — EP8 hot-swap decision pending; H11b EP7 gap closing 0.644pp; H12 separate-τ-head ASSIGNED to fern PR #1166**)
+
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
 
@@ -50,14 +51,14 @@ H9 wave finding said "vol_p ceiling is representation-bound at 4.05%". **H9b EP3
 
 **This is the wave's first credible path to SOTA-on-aggregate (all 7 axes under SOTA #972).**
 
-## Active Experiments (2026-05-17 00:35 UTC)
+## Active Experiments (2026-05-17 01:25 UTC)
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| dl24-fern | #1142 | H7: surface_loss_weight=1.5 | **EP30 TERMINAL val** / 21h | 6.234% | 7.116% | **3.495%** ✅ | **4.054%** ❌ | EP26-30 flat (σ <0.01pp). val_wss=7.116 → test_wss ~6.81-6.92% likely **NOT a SOTA-beat** (above 6.727 by 0.08-0.19pp). **Test eval requested at 00:36Z**, awaiting student SENPAI-RESULT post. NOT-A-MERGE expected. |
-| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP8 LANDED** / 5h | 6.301% | 7.076% | **3.848%** | 4.205% | **CLAMP ENGAGED**: w_vol_p=0.150 at floor. EP7→8 vol_p slope sustained at **-0.023** (no further decay!). EP10 projection: 3.802% — UNDER 3.85% kill margin. Clamp+MAE_aux mechanism load-bearing. EP30 vol_p ~3.30-3.46% → test ~3.15-3.50% **CLEARS floor 3.643** ✅. **BUT** surf_p stalled at 4.20% → test_surf_p ~4.0pp breaches floor 3.577 by ~0.4pp. wss/τ_z trajectories: marginal vs SOTA. |
-| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP6 LANDED** / 4.4h | 6.321% | **6.996%** ✅ | 4.268% | 4.110% | **First sub-7% val_wss in the wave**. 5/6 axes ahead of H9b at EP6. τ_z lead **NARROWED** from -0.198 to **-0.174pp** (slope decay 0.54×). Charb ratio=0.957. **EP7 is decisive**: slope ≥-0.025 = SOTA-beat alive; ≥-0.015 = recommend hot-swap to weight=0.05. **Downgraded to MARGINAL wss-only beat** projection (test_wss ~6.65-6.70 vs SOTA 6.727; τ_z likely 9.13% test, NOT beating SOTA 8.747). |
-| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** | **EP6 LANDED** / 4h | 7.118% | 7.837% | 4.933% | 4.789% | Case 2 marginal recovery sustaining: decay factor 0.43-0.53 across axes. Gap to H9b at EP6=0.776pp (closing -0.20pp/ep). **EP30 projection: val_abupt ~6.70%, ~0.4pp above H9b** → NOT a SOTA-beat candidate. Per-axis WSS upweight pays optimization friction tax. Continue to EP10 decision gate. |
+| dl24-fern | #1166 | **H12: separate τ head (2-layer MLP for τ_x/τ_y/τ_z vs linear cp)** | **JUST LAUNCHED** | — | — | — | — | Replace single `LinearProjection(n_hidden, 4)` with independent cp head + 2-layer MLP τ head. H9b stack. EP10 gate: val_wss ≤ 6.3%, val_τ_z ≤ 9.4%. Targets architecture bottleneck (no prior experiment has touched output head). |
+| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP10 LANDED** / 6h | 6.276% | 7.051% | **3.828%** ✅ | 4.200% | **CLAMP LOAD-BEARING**: w_vol_p=0.150 at floor, slope -0.015 sustained. EP30 proj: val_vol_p ~3.53-3.63% → test ~3.39-3.49% **CLEARS floor** ✅. surf_p stalled at 4.20% → test ~4.0% **BREACH floor 3.577** ❌. wss EP30 → test ~6.78% (marginal +0.05 above SOTA). EP15 mid-run review (~03:30Z). |
+| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP7 LANDED** / 5.2h | 6.302% | **6.976%** ✅ | 4.263% | 4.094% | τ_z slope -0.012 (border converge threshold -0.015). vol_p slope -0.005 (STALLED). Charb ratio ~1.0 (saturated). **EP8 HOT-SWAP DECISION**: slope ≥-0.012 = hot-swap to weight=0.05; slope rebound ≤-0.025 = continue. Δ_τ_z vs H9b WIDENED to -0.196 (lead preserved). MARGINAL wss-only beat candidate. |
+| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** | **EP7 LANDED** / 5h | 6.973% | 7.711% | 4.726% | 4.682% | Decay factor 0.62-0.76 (faster than expected). Gap to H9b EP7=0.644pp (closing -0.132/ep). EP30 proj val_abupt ~6.49%. Continue to EP10 decision gate. NOT a SOTA-beat candidate but clean isolation experiment. |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
