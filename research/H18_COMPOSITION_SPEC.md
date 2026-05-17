@@ -1,23 +1,27 @@
 # H18 Composition Spec — Maximum WSS Stack
 
-**Status**: REVISED 09:55Z — H12 architecture signal FAILED in compound (EP11 regression on all 7 axes, vol_p +0.307pp jump suggests Lion+Charb+separate-τ-head poor late-training stability). **Separate τ head DROPPED from primary H18 spec**, retained only as H18-fallback-B for separate test.
+**Status**: RE-REVISED 10:55Z — H12 EP12 recovery RECONSIDERS the 09:55Z drop. EP11 vol_p +0.307 was a single-step Lion+EMA optimizer trap (EP12 vol_p -0.310 = perfect mirror reversal). Architecture signal RE-ACTIVATED at EP12 (H12 leads H10b -0.021pp at same step 131,711). **Separate τ head HELD PENDING H12 EP15 verdict** (~12:40Z) before final H18 spec commitment.
 
-**Status**: DRAFT — ready to assign when first student frees (likely H9b tanjiro ~12:00Z autonomous EP30 land).
+**Status**: DRAFT — ready to assign when first student frees (likely H9b tanjiro ~17:00Z autonomous EP30 land).
 
-## H12 Architecture Lesson (added 09:55Z)
+## H12 Architecture Trajectory (updated 10:55Z)
 
-The H12 separate τ head experiment delivered ambiguous results:
-- **Real architectural gain at EP7**: H12 val_wss 6.939 vs H10b 6.976 at SAME step 76,831 = -0.037pp lead
-- **Lead REVERSED at EP10**: H10b 6.922 leads H12 6.933 at same step 109,759
-- **EP11 regression**: all 7 axes regressed, vol_p +0.307pp jump (likely optimizer/batch-noise event, not slow drift)
-- **Failure mode**: Separate τ head adds capacity but the Lion+Charbonnier+separate-τ-head combination has poor late-training stability
+The H12 separate τ head experiment has shown:
+- **EP7 real architectural gain**: H12 val_wss 6.939 vs H10b 6.976 at SAME step 76,831 = -0.037pp lead
+- **EP8-10 transient**: Lion+EMA flat plateau, lead temporarily reversed
+- **EP11 single-step regression**: vol_p +0.307pp jump (optimizer trap)
+- **EP12 PERFECT MIRROR RECOVERY**: all 7 axes reversed (vol_p -0.310), wss 6.961→6.906 NEW LOW, **H12 RECLAIMS LEAD at same step**: H12 6.906 vs H10b 6.927 = -0.021pp lead
+- **Failure mode (if any)**: TBD pending EP13-15 — if EP15 sustains <6.85, architecture signal is real and resilient
 
-**Decision for H18**: Drop separate τ head from primary spec. Use proven mechanisms only:
-- H10b: curvature additive attention bias + Charbonnier τ_z
-- H9b: clamp=0.15 + vol_p MAE auxiliary
-- Lion lr=1e-4, GradNorm α=0.5, Y-symmetry, EMA (all H10b baseline)
+**Decision matrix for H18 spec (EP15 ~12:40Z)**:
 
-H18 expected test_wss with reduced stack: 6.50-6.60 (still -0.13-0.23pp under SOTA, all floors preserved).
+| H12 EP15 outcome | H18 spec |
+|---|---|
+| val_wss < 6.85 (SOTA-beat trajectory) | **RE-INCLUDE separate τ head as primary**: H10b stack + H9b clamp+MAE_aux + H12 separate τ head |
+| val_wss 6.85-6.92 (continuing plateau) | Optional: include as H18-A; run H18-B in parallel without it |
+| val_wss ≥ 6.95 (hard kill triggers) | **DROP separate τ head from primary spec**, retain as fallback-B |
+
+**Spec content below describes the FULL 4-mechanism stack as originally intended.** Final commitment to include the separate τ head awaits the EP15 verdict.
 
 ## Mechanism Composition
 
