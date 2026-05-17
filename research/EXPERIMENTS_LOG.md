@@ -1,3 +1,56 @@
+## 2026-05-17 15:45 — PR #1164: H10b bounded-exp magnitude head (fern) — CLOSED TERMINAL NOT-A-MERGE / MECHANISM-PASS / HYPOTHESIS-FALSIFIED / PARKED STACKABLE (first test_vol_p floor pass in active fleet)
+
+- **Branch**: `fern/h10b-bounded-exp-magnitude` (closed)
+- **W&B group**: `wave30_h10b_bounded_exp` — rank0 `3rva90lq`, ranks 1–7 `itiohaf5`/`oiy85mv5`/`baj1ti7u`/`p2cvfel2`/`8ejobjsz`/`72ql8mkw`/`iopnmz2n`
+- **Best ckpt**: EP12 EMA, selection metric val_primary/abupt_axis_mean_rel_l2_pct
+- **Hypothesis**: Replace H10's softplus magnitude head (which had a >6.93 norm-space floor) with bounded-exp `clamp(log_mag, -3, +3).exp()`. The softplus floor was hypothesized to be the 73%/27% mag/dir error split's root cause.
+
+### Terminal results (EP12 EMA — full 13ep ran, 14.31h runtime, no budget-starvation)
+
+| Metric | H10b val | H10b test | Baseline #972 | Floor/Target | Verdict |
+|---|---:|---:|---:|---|:--|
+| val_abupt | **6.217%** | — | 6.126% | <6.126 | **FAIL** +0.091pp |
+| test_abupt | — | 5.998% | 5.844% | — | +0.154pp |
+| test_WSS | — | **6.980%** | 6.727% | <6.727 | **FAIL** +0.253pp |
+| test_SP | 4.077% | **3.755%** | 3.577% floor | ≤3.577 (HARD) | **FAIL** +0.178pp |
+| test_vol_p | 3.584% | **3.481%** | 3.643% floor | ≤3.643 (HARD) | **PASS −0.162pp ✓** (FIRST IN FLEET) |
+| test τz/τx | 1.530 | **1.441** | ~1.46 | <1.40 structural | band-edge break (output-head best) |
+
+### Magnitude/direction decomposition — DECISIVE NEGATIVE RESULT
+
+| Diagnostic | H10 | H10b | Target | Verdict |
+|---|---:|---:|---:|:--|
+| val mag_share_sq | 73% | **73.1%** | <50% | **REJECT — hypothesis falsified** |
+| test mag_share_sq | — | **73.2%** | <50% | unchanged |
+| pred median (norm) | — | **0.697** | match GT 0.700 | matched to 0.5% |
+| frac<6.93 floor | — | **0.993** | match GT 0.993 | exact match |
+| clamp engagement | — | **0.003%** | <1% | range correctly sized |
+
+**The mechanism executed flawlessly.** Pred distribution matches GT shape AND mean to 1% across every percentile. Bounded-exp clamps essentially never engage — the [-3, +3] log_mag range was correctly sized. BUT the 73%/27% mag/dir error split is UNCHANGED from H10 — **the softplus floor was NOT the magnitude bottleneck**.
+
+### Why the hypothesis was wrong (and what we learned)
+
+The 73%/27% mag/dir error split is a **structural property of the τ field**, not an activation artifact. Even when pred_mag matches GT shape AND mean, per-vertex squared magnitude error dominates per-vertex angular projection error. Per fern's interpretation: low-τ vertices dominate in count, and small absolute magnitude errors squared can still outweigh small angular errors on high-τ vertices.
+
+**Key Wave 31 implication**: direction-side attacks may have been undervalued, and the true bottleneck may be in **how the loss aggregates per-vertex errors** rather than **what activation produces the magnitude**. Fern's follow-up #2 (per-bin error decomposition over GT magnitude bins [0, p50, p90, p99, max]) becomes a high-priority diagnostic.
+
+### Wins — stackable signal
+
+1. **FIRST test_vol_p floor pass in active fleet** (3.481% < 3.643% by −0.162pp). Stable below floor since EP4.5, mechanism-driven.
+2. **Best output-head band-edge break** (test τz/τx 1.441) — only loss-side attacks (H18, H20) go deeper.
+3. **Non-worse than baseline on every comparable axis vs H10** — the EMA + bounded-exp + cos-loss recipe is a clean substrate for stacking.
+
+### Parked as stackable mechanism
+
+H10b is the **first stackable substrate with confirmed floor preservation on vol_p**. Natural stacking partner:
+- **H22 thorfinn Charbonnier-cp + MAE-aux** (PR #1172, EP~1.3) — H10b protects vol_p, H22 protects cp/SP. If H22 lands cleanly with vol_p preserved, the stack would be the first single-model merge candidate.
+
+### Fleet contribution
+
+H10b's clean negative result + the structural-split insight is the strongest negative evidence we have on the magnitude-bottleneck framing. Closes the output-head-activation-fix lane definitively. **Wave 31 direction-side attacks become higher priority.**
+
+---
+
 ## 2026-05-17 12:05 — PR #1169: H16b Huber loss on τ channels δ=0.3 (frieren) — CLOSED TERMINAL NOT-A-MERGE / Huber static-δ direction EXHAUSTED (4th budget-starved closure)
 
 - **Branch**: `frieren/H16b-huber-delta-03` (closed)
