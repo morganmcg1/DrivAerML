@@ -1,9 +1,82 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~17:30 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~17:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
+
+## Latest invocation actions (2026-05-17 ~17:55Z) — H12 closed, H28 SAM assigned — Wave 30 tier-shift to optimizer-space
+
+### Headline updates
+
+1. **PR #1151 edward H12 CLOSED TERMINAL NEGATIVE / STRUCTURALLY-BIASED / 7TH WAVE-30 DEAD END** — Both arms regressed. Arm A (α=0.3, best): val_abupt 6.290% (+0.164pp FAIL), test_WSS 6.952% (+0.225pp FAIL), test_SP 3.816% (+0.239pp FLOOR BREACH), test_vol_p 3.620% (held −0.023pp), τz/τx 1.476 (NO MECHANISM SHIFT). Arm C (α=0.7) skipped — monotonic regression confirmed at 2 points; further α-sweep would only deepen the failure. **H12a (channel-decoupled) NOT pursued** — τ-weighting itself produces no band-break per τz/τx 1.476, so decoupling cp doesn't fix what isn't broken in τ direction. **7 of 7 Wave 30 per-vertex/per-token loss-shape attacks now dead at floor breach gate** (H10b, H11b, H12, H16, H16b, H20, H22) — per-vertex loss-reweighting axis fully closed against rel_L2 metric geometry.
+
+2. **PR #1179 edward H28 SAM ASSIGNED — FIRST OPTIMIZER-SPACE ATTACK IN WAVE 30** — Sharpness-Aware Minimization (Foret et al. ICLR 2021) two-pass perturb-recompute-restore wrapper around Lion. `--sam-rho 0.05` default, ~60 LOC in target/train.py (SAMLion wrapper + DDP `no_sync()` first-pass + standard second-pass). zero-init at ρ=0 = exact baseline recovery. EP3 falsifiable gate: `τz/τx < 1.42 AND val_abupt < 6.00%` (band break required). KILL gate: `val_abupt > 6.50% OR τz/τx > 1.55`. ~36h wall-clock (2× forward passes), `SENPAI_TIMEOUT_MINUTES=2200`. **Information-value justification**: a definitive negative result rules out the entire optimizer-trajectory class of explanations for the τz/τx band attractor — load-bearing observation for Wave 31 design. Either SAM breaks the band (paradigm shift: opens optimizer-tuning direction) OR rules out optimizer-space decisively (redirects to representation H24/H26).
+
+3. **Tier-shift activated for Wave 30** — Plateau Protocol applied: 7 consecutive loss-shape closures triggered escalation from loss-layer attacks to optimizer-dynamics attacks. Wave 30 now spans 5 attack tiers simultaneously: INPUT (H24, H26), OUTPUT-HEAD (H21), REPRESENTATION COUPLING (H25), TRAIN-EVAL SPACE (H27), TRAINING DYNAMICS (H23 EMA, H28 SAM), with H18 the only remaining loss-shape arm.
+
+### Fleet status (8/8 active after H28 assignment)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| **edward** | **#1179** | **H28 SAM — FIRST optimizer-space attack** | **just assigned (training dynamics)** |
+| askeladd | #1178 | H27 PRLP — train loss in eval space | just assigned (loss normalization axis) |
+| fern | #1174 | H24 GSTS encoder slice-temperature | EP1 expected soon |
+| nezuko | #1171 | H21 per-component output heads | EP7 6.557% slope re-acceleration |
+| tanjiro | #1163 | H18 area-weighted MSE | EP8.9 6.635% (only remaining loss-shape arm) |
+| frieren | #1173 | H23 Mean Teacher self-distillation | EP2 22.31% MARGINAL, EP3 gate ~17:55Z |
+| alphonse | #1176 | H25 ALGP auxiliary local-gradient prediction | in-flight, needs-rebase notice posted (low priority) |
+| thorfinn | #1177 | H26 NPCA encoder input local-frame aug | just assigned |
+
+### Closed Wave 30 directions (now 7 confirmed dead ends — per-vertex loss-reweighting axis FULLY CLOSED)
+
+1. Per-vertex error reweighting (H18[earlier-iter], H20) — rel_L2 normalization erases absolute-residual gains
+2. Static Huber on τ (H16, H16b) — frac_in_L1 decays 40× over training
+3. Bounded-exp output activation (H10, H10b) — 73%/27% split structural in encoder
+4. Output tangent-frame reparameterization (H17) — convergence gap too large
+5. Charbonnier on cp + MAE-aux (H22) — cp-MSE saturation NOT the disease
+6. Input-channel gating (H11b) — gate works mechanically but floor disease is DOWNSTREAM of input
+7. **Per-vertex τ-magnitude weighted MSE (H12)** — structurally biases cp gradient; monotonic regression in α; τz/τx unchanged
+
+**Strong consensus**: rel_L2 metric geometry (per-car per-component normalization) erases gain from absolute-residual per-vertex reweighting under DrivAerML — axis is saturated, 7/7 confirmation.
+
+### KEY FLEET DIAGNOSTIC: Floor disease localization (refined after H12 closure)
+
+After 7 closed Wave 30 attempts, the floor-breach disease is strongly localized to:
+- **Output-head / per-head gradient paths** (H21 nezuko per-component MLPs, H27 askeladd train loss in eval space)
+- **Backbone representation coupling cp/τ** (H25 alphonse ALGP)
+- **Train-eval space mismatch** (H27 askeladd directly attacks)
+- **Optimization landscape sharpness** (H28 edward SAM — NEW tier)
+- **Encoder INPUT content** (H24 fern GSTS, H26 thorfinn NPCA)
+- **NOT input-channel gating** (H11b confirmed)
+- **NOT cp-loss-shape** (H22 confirmed)
+- **NOT per-vertex loss-reweighting** (7/7 confirmed)
+
+### Band attractor — fleet-wide pattern (7 independent confirmations)
+
+| Run | EP1 τz/τx | EP_terminal τz/τx | Outcome |
+|:--|---:|---:|:--|
+| H10b fern | — | 1.530 | converged into band |
+| H11b askeladd | 1.466 | 1.556 | converged INTO band |
+| **H12 edward** | — | **1.476** | inside band (no shift, monotonic in α) |
+| H18 tanjiro | 1.412 (transient) | 1.482 | faded into band |
+| H20 alphonse | 1.401 (transient) | 1.523 | faded into band |
+| H21 nezuko | — | 1.529 | inside band |
+| H22 thorfinn | — | (terminal pending offline test eval) | premise dead at EP3 |
+
+Pattern strengthens: the [1.44, 1.55] τz/τx attractor is the geometric signature of either a sharp optimization basin (H28 SAM tests this) or a representation-structural floor (H24/H26 test this). One axis NOT yet tested: encoder INPUT content (H24, H26 now in-flight). One axis tier NEW: optimizer dynamics (H28).
+
+### Outstanding actions watch (next invocation)
+
+1. **frieren H23 EP3 (~17:55-18:05Z)** — decisive Mean Teacher KILL/CONTINUE — val_abupt ≤ 8.5% PASS, ≤ 11% MARGINAL, > 11% KILL
+2. **fern H24 EP1 launch confirmation** — verify GSTS smoke smoke pre-run and EP1 token
+3. **alphonse H25 / thorfinn H26 / askeladd H27 / edward H28 EP1 launch confirmations** — 4 fresh PRs to monitor
+4. **nezuko H21 EP10 (~18:30Z)** — vol 65536 curriculum bump test
+5. **edward H28 EP3 gate (~6-8h from launch, ~00:00-02:00Z May 18)** — KEY band-break test; if τz/τx < 1.42, paradigm shift
+6. **edward H28 first SAM smoke 200 steps before main run** — verify DDP no_sync correctness, throughput ~50% baseline
+7. **tanjiro H18 + edward[was-H12]** — terminal SENPAI-RESULT collection complete; edward now H28
+
+---
 
 ## Latest invocation actions (2026-05-17 ~17:30Z) — H11b closed, H27 PRLP assigned
 

@@ -1,3 +1,88 @@
+## 2026-05-17 17:55 — PR #1151: H12 τ-Magnitude-Weighted Surface MSE (edward) — CLOSED TERMINAL NEGATIVE / STRUCTURALLY-BIASED-CP-DAMAGE / 7TH-CONFIRMED-WAVE-30-DEAD-END
+
+- **Branch**: `edward/tau-magnitude-weighted-loss` (closed)
+- **W&B group**: `wave30_h12_tau_magnitude_sweep`
+  - Arm B (α=0.5): rank0 `59v1qk32`, 70,652 steps, 14.0h
+  - Arm A (α=0.3): rank0 `koud56tg`, ~70k steps, 14.0h
+  - Arm C (α=0.7): SKIPPED (monotonic prediction confirmed at 2 points)
+  - Smoke (α=0.5): `953pq1ip`
+- **Best ckpt**: Arm A EP12 EMA (best of arms)
+- **Hypothesis**: Multiply per-vertex surface MSE by `w_i = (|τ_i| / batch_mean|τ|)^α` to upweight high-WSS regions where τ_z error concentrates, aligning training signal with rel_L2 evaluation. Sweep α ∈ {0.3, 0.5, 0.7}.
+
+### Terminal results — BOTH ARMS REGRESS
+
+| Metric | Baseline #972 | Arm B (α=0.5) | Arm A (α=0.3) | Best | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | 6.126% | 6.326% | **6.290%** | 6.290 | ❌ FAIL +0.164pp |
+| test_abupt | 5.844% | 6.085% | **6.046%** | 6.046 | ❌ FAIL +0.202pp |
+| test_WSS | 6.727% | 7.010% | **6.952%** | 6.952 | ❌ **FAIL primary goal +0.225pp** |
+| test_SP | 3.577% floor | 3.871% | **3.816%** | 3.816 | ❌ **FLOOR BREACH +0.239pp** |
+| test_vol_p | 3.643% floor | 3.584% | 3.620% | held | ✅ HELD by −0.023pp |
+| test_τ_x | — | 6.200% | 6.144% | — | — |
+| test_τ_y | — | 7.643% | 7.580% | — | — |
+| test_τ_z | — | 9.125% | 9.071% | — | — |
+| **test τz/τx** | ~1.46 (band) | 1.472 | **1.476** | 1.476 | **NO MECHANISM SHIFT** |
+
+**Merge gate**: 3 of 5 gates FAIL (val_abupt, test_WSS, test_SP). Floor breach decisive — NOT-A-MERGE.
+
+### Monotonic regression in α — confirms structural bias
+
+| α | test_WSS | test_SP | val_abupt |
+|---:|---:|---:|---:|
+| 0.0 (baseline) | 6.727 | 3.577 | 6.126 |
+| 0.3 (Arm A) | 6.952 (+0.23) | 3.816 (+0.24) | 6.290 (+0.16) |
+| 0.5 (Arm B) | 7.010 (+0.28) | 3.871 (+0.29) | 6.326 (+0.20) |
+
+Linear monotonic trend confirms: **lower α reduces the regression but does NOT recover floors**. Lowering further to α=0.1 would land near baseline parity — no improvement. The mechanism is structurally biased: per-vertex weight applies to channel-mean MSE across ALL 4 surface channels (cp + 3 τ); smooth body panels (low |τ|) get tiny w_i (down to 0.02 at α=0.5) which downweights the *cp gradient* on those panels even though cp itself is NOT long-tailed.
+
+### Weight statistics diagnostic — held to spec
+
+| Stat | Arm B (α=0.5) | Arm A (α=0.3) |
+|---|---:|---:|
+| p95 weight | 1.89 (PR-expected [1.5, 5.0]) ✓ | 1.47 ✓ |
+| p50 weight | 0.73 | 0.83 |
+| mean weight | 0.84 | 0.86 |
+| max weight | 4.0 (outliers up to 12.3) | 2.3 (max 4.5) |
+| min weight | 0.02 | 0.11 |
+
+Both arms zero `train/nonfinite_loss` and zero `train/nonfinite_grad` across ~70k steps each. **Implementation was clean — the mechanism is the wrong direction.**
+
+### Decisive negative result for Wave 30 — per-vertex loss-reweighting axis CLOSED
+
+**7 of 7 confirmed Wave 30 per-vertex / per-token loss-shape attacks have died at the floor breach gate**:
+- H10b fern — encoder slice-temperature widening (first test_vol_p floor pass)
+- H11b askeladd — gated multi-scale input (val/WSS beat but floor breach)
+- **H12 edward — THIS ONE (τ-magnitude weighting, structurally biases cp)**
+- H16 — focal MSE on absolute residuals
+- H16b — focal MSE iteration
+- H20 alphonse — per-vertex error reweighting (rel_L2 metric geometry blocker)
+- H22 thorfinn — Charbonnier-cp + MAE-aux (ε=1e-3 = MAE-equivalent)
+
+**Strong conclusion**: rel_L2 metric geometry (per-car per-component normalization) erases gain from absolute-residual reweighting under DrivAerML. The per-vertex loss-reweighting axis is exhausted.
+
+### Why H12a (channel-decoupled magnitude weighting) NOT pursued
+
+Student suggested H12a: apply weight only to 3 τ channels, leave cp un-reweighted. Decision: SKIP. Three reasons:
+1. **τz/τx 1.476 = NO mechanism shift** — the τ-weighting itself produces no band-break. Decoupling cp won't fix what isn't broken in the τ direction.
+2. **Predicted EP13 ceiling ~6.10-6.18% val_abupt** matches baseline within noise; test_WSS no better than 6.95%. 14h GPU for NEG/NEUTRAL.
+3. **Per-vertex loss-reweighting axis exhausted** across 7 attempts — H12a is just another point in this dead space.
+
+### Implications for Wave 30
+
+After H12 closure:
+- **Per-vertex/per-token loss reweighting axis fully closed** (7/7 deaths)
+- Remaining live axes for floor-breach attack:
+  - **INPUT representation**: H24 fern GSTS (slice-temperature widening), H26 thorfinn NPCA (local-frame coordinates) — orthogonal encoder content attacks
+  - **OUTPUT-HEAD topology**: H21 nezuko per-component independent heads
+  - **REPRESENTATION COUPLING**: H25 alphonse ALGP (auxiliary local-gradient prediction)
+  - **TRAIN-EVAL SPACE MATCH**: H27 askeladd PRLP (per-component rel_L2 in physical space) — first attack on loss NORMALIZATION SPACE
+  - **TRAINING DYNAMICS**: H23 frieren EMA Mean Teacher self-distillation
+  - **NEW for H28 edward**: SAM optimizer (flat-minima bias) — FIRST optimizer-space attack in Wave 30
+
+Edward reassigned H28 SAM (PR #1179) — `--sam-rho 0.05` two-pass perturb-recompute-restore Lion wrapper, ~60 LOC, EP3 falsifiable gate `τz/τx < 1.42 AND val_abupt < 6.00%`. ~36h wall-clock (2× compute).
+
+---
+
 ## 2026-05-17 17:30 — PR #1167: H11b Gated Multi-Scale Input (askeladd) — CLOSED TERMINAL NOT-A-MERGE / VAL-AND-WSS-BEAT-BUT-FLOOR-BREACH / 5TH-CONFIRMED-NEGATIVE-RESULT-IN-WAVE-30
 
 - **Branch**: `askeladd/h11b-gated-k4-16-64` (closed)
