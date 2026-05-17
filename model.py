@@ -46,6 +46,42 @@ class LinearProjection(nn.Module):
         return self.project(x)
 
 
+def compute_local_frame_proj(surface_x: torch.Tensor) -> torch.Tensor:
+    """Project global position onto a per-vertex local surface frame.
+
+    Computes ``[p·n, p·t1, p·t2]`` per vertex, where ``t1, t2`` are a
+    Gram-Schmidt tangent basis derived from the surface normal.
+
+    Computed in fp32 with an explicit eps=1e-6 in ``F.normalize`` so that
+    zero-padded tokens (normal == ``[0,0,0]``) produce zero projections
+    instead of NaN, even when called inside a bf16/fp16 autocast region.
+
+    Args:
+        surface_x: ``[B, N, >=6]`` with columns ``[x, y, z, nx, ny, nz, ...]``.
+
+    Returns:
+        ``[B, N, 3]`` with ``[p·n, p·t1, p·t2]`` per vertex, cast back to
+        the input dtype.
+    """
+    input_dtype = surface_x.dtype
+    sx = surface_x.float()
+    pos = sx[:, :, :3]
+    n = F.normalize(sx[:, :, 3:6], dim=-1, eps=1e-6)
+
+    ref_a = torch.tensor([0.0, 0.0, 1.0], device=n.device, dtype=n.dtype).expand_as(n)
+    ref_b = torch.tensor([0.0, 1.0, 0.0], device=n.device, dtype=n.dtype).expand_as(n)
+    parallel_mask = (n * ref_a).sum(-1, keepdim=True).abs() > 0.9
+    ref = torch.where(parallel_mask, ref_b, ref_a)
+
+    t1 = F.normalize(ref - (ref * n).sum(-1, keepdim=True) * n, dim=-1, eps=1e-6)
+    t2 = torch.cross(n, t1, dim=-1)
+
+    local_n = (pos * n).sum(-1, keepdim=True)
+    local_t1 = (pos * t1).sum(-1, keepdim=True)
+    local_t2 = (pos * t2).sum(-1, keepdim=True)
+    return torch.cat([local_n, local_t1, local_t2], dim=-1).to(dtype=input_dtype)
+
+
 class RFFEncoding(nn.Module):
     """Gaussian random Fourier feature coordinate encoding (Tancik et al. 2020).
 
@@ -382,6 +418,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_local_frame_proj: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,7 +433,10 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_local_frame_proj = use_local_frame_proj
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
+        if use_local_frame_proj:
+            surface_extra_dim += 3
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
         if pos_encoding_mode == "string_multisigma":
@@ -462,6 +502,14 @@ class SurfaceTransolver(nn.Module):
         self.project_volume_features = (
             LinearProjection(volume_proj_in, n_hidden) if volume_proj_in > 0 else None
         )
+        if use_local_frame_proj and self.project_surface_features is not None:
+            # Identity-init: zero the 3 NEW input columns of project_surface_features
+            # so the model starts from the current baseline at step 0. The 3 new
+            # columns sit at indices [4, 5, 6] of the surface feature vector
+            # (after [nx, ny, nz, area] at [0, 1, 2, 3]). The bias is already
+            # zero-init via _init_linear, so no extra step is needed.
+            with torch.no_grad():
+                self.project_surface_features.project.weight[:, 4:7].zero_()
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.backbone = Transformer(
@@ -528,12 +576,15 @@ class SurfaceTransolver(nn.Module):
         project_features: LinearProjection | None,
         bias: MLP,
         placeholder: torch.Tensor,
+        local_proj: torch.Tensor | None = None,
     ) -> torch.Tensor:
         pos = x[:, :, : self.space_dim]
         hidden = self.pos_embed(pos)
         feature_parts: list[torch.Tensor] = []
         if x.shape[-1] > self.space_dim:
             feature_parts.append(x[:, :, self.space_dim :])
+        if local_proj is not None:
+            feature_parts.append(local_proj)
         if string_sep is not None:
             feature_parts.append(string_sep(pos))
         elif rff is not None:
@@ -567,6 +618,9 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
+            local_proj = (
+                compute_local_frame_proj(surface_x) if self.use_local_frame_proj else None
+            )
             tokens.append(
                 self._encode_group(
                     surface_x,
@@ -575,6 +629,7 @@ class SurfaceTransolver(nn.Module):
                     project_features=self.project_surface_features,
                     bias=self.surface_bias,
                     placeholder=self.surface_placeholder,
+                    local_proj=local_proj,
                 )
             )
             masks.append(surface_mask)
