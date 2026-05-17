@@ -20,7 +20,7 @@
 | Student | PR | H | Status |
 |:--|---:|:--|:--|
 | fern | #1174 | H24 GSTS encoder slice-temp | EP3 MARGINAL (τz/τx 1.5145 in-band rebound). EP6 binding gate ~02:00Z May 18 — decisive val_abupt baseline-crossing test |
-| **alphonse** | **#1176** | **H25 ALGP CRASHED** | **EP3 FAIL +1.016pp + 6th band fade; pending student terminal SENPAI-RESULT then CLOSE; WALLDIST queued for next assignment** |
+| **alphonse** | **#1185** | **H31 WALLDIST (NEW)** | **#1176 CLOSED 23:10Z. H31 PR #1185 assigned ~23:22Z. log-SDF (volume_x col 3 already loaded) → log(|sdf|+1e-3) as 5th channel ~12 LOC. EP3 gate ~14:30Z May 18** |
 | thorfinn | #1177 | H26 NPCA local-frame input aug | training, EP3 mechanism gate ~23:48Z |
 | askeladd | #1178 | H27 PRLP train-loss in eval space | training, EP1 τz/τx 1.523 IN-BAND (expected — floor mechanism not band-attractor). EP3 gate ~23:46Z (val_SP ≤ 4.10% beating H11b EP3 4.368%) |
 | edward | #1179 | H28 SAM optimizer-sharpness | EP1: τz/τx 1.4406 lower band-edge (first optimizer-space signal). EP3 ~00:10–02:10Z May 18 |
