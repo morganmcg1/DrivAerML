@@ -26,18 +26,20 @@ Wave 30 now has **two independent** experimental confirmations that direction is
 
 **Research-direction implication**: any future loss-level cosine-aware or direction-only attack is now ruled out. The bottleneck has moved one layer down to the magnitude regression head and/or the τ_z over-prediction collapse band. H10b (in flight) attacks magnitude; H17 (in flight) attacks the band geometrically.
 
-### Wave 30 fleet — 7 active + 1 idle (thorfinn); Wave 30 closed count: 18
+### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 18
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | EP~? (18h budget, launched ~02:53Z) |
+| #1168 | **thorfinn** | **H19 VICReg batch-variance regularization on |τ_z|** — penalize batch collapse of per-sample mean |τ_z| via VICReg variance hinge `max(0, γ−std)²`, γ=0.05, λ=0.10. train.py-only ~12 lines. | **NEW — just assigned 05:00Z May 17** (18h budget) |
+| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | 18h budget, launched ~02:53Z |
 | #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | EP~1.5 / 6h budget, EP3 gate ~05:00Z |
 | #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | EP~1.6 / 18h |
 | #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h |
 | #1162 | nezuko | H17 tangent-frame output reparameterization | EP~? / 18h, main healthy after 2 smoke crashes |
 | #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | EP3.05 / 13, val_abupt 6.894% but mechanism inactive (frac_in_L1=0.014%) |
 | #1151 | edward | H12 τ-magnitude-weighted loss | EP~10, partial-terminal at 18h cliff ~06:59Z imminent |
-| — | **thorfinn** | **IDLE — researcher-agent generating next hypothesis** | next assignment pending |
+
+**H19 VICReg rationale**: orthogonal to all 7 other in-flight attacks. The τz/τx collapse band [1.44, 1.55] persists despite 8+ attacks; H19 frames it as a **batch-level distributional collapse** — the model predicts essentially identical mean |τ_z| across all car geometries despite different physical shapes producing different |τ_z| distributions. The VICReg variance hinge `max(0, 0.05−std_batch(τ_z_mean))²` directly penalizes this collapse by requiring at least 0.05 std of per-sample τ_z means across the batch. Reference: Bardes et al. ICLR 2022 (VICReg) + Hanna et al. arXiv:2412.13993 (PINN variance regularization).
 
 **Closed in Wave 30** (18): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**.
 
