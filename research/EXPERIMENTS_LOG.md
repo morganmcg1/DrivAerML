@@ -8,6 +8,162 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-17 17:52 UTC — PR #1159 CLOSED: WSS H10b curvature + Charbonnier on τ_z only (dl24-frieren, `60zl0p4h`)
+
+- **Branch:** `dl24-frieren/h10b-curvature-charb-tau-z`
+- **W&B run:** `60zl0p4h` (DDP8, EP30 terminal, 1296 min runtime). Test eval on EP15 best-val EMA checkpoint (auto-selected by `--best_val_checkpoint`).
+- **Hypothesis:** Compose H9's curvature additive attention bias (the H9 WSS wave finding) with Charbonnier loss restricted to τ_z only (the hardest WSS axis per representation-floor analysis). Single-axis Charbonnier keeps gradient-mass reshape contained to the worst axis without introducing the H10-full-axes vol_p starvation.
+- **Configuration:** Lion lr=1e-4, GradNorm α=0.5, `--gradnorm-min-w-vol-p=0.05`, `--use-curvature-attention-bias`, `--wss-charbonnier-weight=0.1 --wss-charbonnier-eps=1e-3 --wss-charbonnier-axes=z`, EMA decay=0.999, Y-symmetry aug p=0.5, STRING 5-octave PE.
+
+### Results — Terminal Test Metrics (EP15 best-ckpt)
+
+| Axis | H10b test | SOTA #972 | Δ vs SOTA | Verdict |
+|---|---:|---:|---:|---|
+| **test_wss** | **6.6651%** | **6.727%** | **−0.062pp** | ✅ **CLEAN BEAT (first wave SOTA-beat)** |
+| **test_τ_x** | 5.9147% | 5.971% | −0.056pp | ✅ BEAT |
+| **test_τ_y** | 7.2373% | 7.362% | −0.125pp | ✅ BEAT |
+| **test_τ_z** | 8.6426% | 8.747% | −0.104pp | ✅ BEAT |
+| test_abupt | 5.9289% | 5.844% | +0.085pp | trailing |
+| **test_vol_p** | **4.1598%** | **3.643% (floor)** | **+0.517pp** | ❌ **FLOOR BREACH** |
+| **test_surf_p** | **3.6900%** | **3.577% (floor)** | **+0.113pp** | ❌ **FLOOR BREACH** |
+
+**4 of 7 axes BEAT SOTA — first wave PR to achieve full WSS-landscape lead.** Per Issue #1056 floor clause (vol_p ≤ 3.643%, surf_p ≤ 3.577%), the +0.517pp vol_p breach and +0.113pp surf_p breach preclude merge. NOT-A-MERGE despite test_wss CLEAN BEAT.
+
+### H10b vs H9 #1145 (closest comparator — isolation of Charbonnier mechanism)
+
+| Axis | H9 test | H10b test | Δ (H10b − H9) | Read |
+|---|---:|---:|---:|---|
+| test_wss | 6.678 | **6.6651** | **−0.013pp** | H10b slightly better |
+| test_τ_y | 7.308 | **7.2373** | **−0.071pp** | **largest Charbonnier signal** |
+| test_τ_z | 8.668 | **8.6426** | **−0.025pp** | Charb mechanism delivered τ_z reshape signal |
+| test_vol_p | 3.913 | 4.1598 | **+0.247pp** | H9 better (no MAE_aux to defend vol_p) |
+| test_surf_p | 3.692 | 3.6900 | tied | unchanged |
+
+### val→test gap analysis
+
+| Axis | val | test | Gap |
+|---|---:|---:|---:|
+| τ_z | 9.3610 | 8.6426 | **−0.718pp** (largest favorable gap) |
+| abupt | 6.2487 | 5.9289 | −0.320pp |
+| wss | 6.8797 | 6.6651 | −0.215pp |
+| τ_y | 7.4706 | 7.2373 | −0.233pp |
+| surf_p | 4.0584 | 3.6900 | −0.368pp |
+| vol_p | 4.3670 | 4.1598 | −0.207pp |
+| τ_x | 5.9863 | 5.9147 | −0.072pp |
+
+Test UNIFORMLY better than val on all 7 axes. The corrected `rawcanon_20260511` split transfers cleanly. τ_z gap of −0.718pp matches H9 (−0.712pp) — Charbonnier preserves this transferable representation.
+
+### Mechanism diagnostics
+
+| Metric | EP1 | EP15 (best) | EP30 |
+|---|---:|---:|---:|
+| Charb/MSE ratio (τ_z) | 0.127 | ~1.10 | ~1.28 |
+| `gradnorm/w_vol_p` | 0.380 | ~0.068 | 0.050 (clamp floor) |
+| Clamp fires | 0 | rare | 0.35% steps |
+| nonfinite_count | 0 | 0 | 0 |
+
+Clean run end-to-end, 329k steps, zero numerical issues. EP15 wave-low (val_wss 6.880) held a 15-epoch plateau through EP30 (drift +0.003/ep); `--best_val_checkpoint` auto-loaded EP15 for terminal eval.
+
+### Wave Finding — Curvature + Charbonnier τ_z is the wave's strongest WSS-reduction lever
+
+Mechanism is **carried forward into H18 PR #1175** (dl24-tanjiro, run `xhx2qlpo`, launched 16:42Z) composed with H9b's clamp+MAE_aux floor preservation. H18 hypothesis: the curvature+Charb representation provides a richer wss landscape where vol_p MAE_aux exerts lower gradient-mass pull on wss signal, reducing the anti-additive cost below the H9→H9b measured +0.103pp.
+
+### Closing — H10b retired into H18 composition
+
+EP15 checkpoint and run `60zl0p4h` documented as the wave's first test_wss SOTA-beat. Mechanism carried forward.
+
+---
+
+## 2026-05-17 17:42 UTC — PR #1160 CLOSED: WSS H11b AdamW lr=5e-4 + per-axis WSS τ-weights (dl24-nezuko, `ch4cllcb`)
+
+- **Branch:** `dl24-nezuko/h11b-adamw-per-axis-only`
+- **W&B run:** `ch4cllcb` (DDP8, EP30 terminal, 1237.7 min runtime). Test eval on EP29 best-val EMA checkpoint.
+- **Hypothesis:** Clean isolation of per-axis WSS τ-magnitude weighting (`--wss-axis-weights 1.0,1.2,1.5`) vs H8 baseline. H11 PR #1154 used AdamW lr=7e-4 and crashed EP1→EP2 (+8.44pp val_abupt). H11b restricts lr=5e-4 to disambiguate: was H11's instability LR-coupled or per-axis-coupled?
+- **Configuration:** AdamW lr=5e-4 (vs H11's 7e-4), GradNorm α=0.5, `--wss-axis-weights "1.0,1.2,1.5"`, EMA decay=0.999, Y-symmetry aug p=0.5, STRING 5-octave PE, NO curvature bias, NO Charbonnier, NO clamp+MAE_aux.
+
+### Results — Terminal Test Metrics (EP29 best-ckpt)
+
+| Axis | H11b test | SOTA #972 | Δ | Verdict |
+|---|---:|---:|---:|---|
+| test_abupt | 6.148% | 5.844% | +0.304 | MISS |
+| test_wss | 7.019% | 6.727% | +0.292 | MISS (narrow) |
+| test_vol_p | 3.856% | 3.643% | +0.213 | FLOOR BREACH |
+| test_surf_p | 3.988% | 3.577% | +0.411 | FLOOR BREACH |
+| test_τ_z | 9.071% | 8.747% | +0.324 | MISS |
+
+**NOT contract winner.** Test_wss gap +0.292pp wide, all floors BREACHED.
+
+### H11b vs H8 (clean isolation, single variable = per-axis WSS weights)
+
+| Axis | H8 test | H11b test | Δ (H11b − H8) | Read |
+|---|---:|---:|---:|---|
+| test_wss | 7.264% | **7.019%** | **−0.245pp** | **per-axis mechanism validated** ⭐ |
+
+H11b improves on H8 by −0.245pp on test_wss with no other changes — per-axis τ-magnitude upweighting (τ_y=1.2, τ_z=1.5) IS a real WSS-reduction lever. But the absolute level is +0.292pp from SOTA, not enough for contract win.
+
+### Diagnostic answers (from student SENPAI-RESULT)
+
+1. **Was H11's instability LR-coupled or per-axis-coupled?** LR-coupled. H11b (lr=5e-4) showed NO EP1→EP2 spike (decrease −12.17pp), vs H11 (lr=7e-4) +8.44pp spike. Per-axis weights and lr=5e-4 coexist cleanly.
+
+2. **Did per-axis weighting starve vol_p via GradNorm?** No. GradNorm task weights stayed in healthy ranges throughout training; final w_vol_p stayed well above the 0.10 kill threshold across all 30 epochs.
+
+### Wave Finding — per-axis WSS τ-magnitude weighting is a saveable but insufficient WSS-reduction mechanism
+
+| Mechanism | test_wss reduction vs H8 baseline |
+|---|---:|
+| H11b per-axis WSS weights `1.0,1.2,1.5` | **−0.245pp** |
+| H9 curvature attention bias | **−0.586pp** |
+| H10b curvature + Charb τ_z | **−0.599pp** (strongest single mechanism) |
+
+Per-axis WSS weighting can compose with H10b's curvature+Charb but is not in the immediate H18 stack. **If H18 confirms curvature+Charb with floor preservation, a follow-up may re-add per-axis weighting on top** (H22-style composition).
+
+### Closing — mechanism documented, returned to wave pool
+
+---
+
+## 2026-05-17 16:25 UTC — PR #1157 CLOSED: WSS H9b curvature + clamp=0.15 + vol_p MAE auxiliary (dl24-tanjiro, `smflmb5t`)
+
+- **Branch:** `dl24-tanjiro/h9b-clamp-vol-p-mae-aux`
+- **W&B run:** `smflmb5t` (DDP8, EP30 terminal, 1290 min runtime). Test eval on EP21 best-val EMA checkpoint.
+- **Hypothesis:** H9's representation-floor finding said "vol_p ceiling is representation-bound at 4.05%". H9b tests whether MAE auxiliary loss (direct L1 signal bypassing GradNorm) + clamp=0.15 (binding floor on w_vol_p GradNorm task weight) can break that ceiling. Two-mechanism 2×2 ablation in single run.
+- **Configuration:** Lion lr=1e-4, GradNorm α=0.5, **`--gradnorm-min-w-vol-p=0.15`** (vs default 0.05), **`--vol-p-aux-mae-weight=0.05`** (NEW MAE_aux mechanism), `--use-curvature-attention-bias` (H9 carry-forward), EMA decay=0.999, Y-symmetry aug p=0.5, STRING 5-octave PE.
+
+### Results — Terminal Test Metrics (EP21 best-ckpt)
+
+| Axis | H9b test | SOTA #972 | Δ vs SOTA | Verdict |
+|---|---:|---:|---:|---|
+| test_wss | 6.781% | 6.727% | +0.054pp | MISS (narrow) |
+| **test_vol_p** | **3.646%** | **3.643% (floor)** | **+0.003pp** | ✅ **AT FLOOR (mechanism validated)** |
+| test_surf_p | 3.787% | 3.577% (floor) | +0.210pp | FLOOR BREACH |
+| test_abupt | (~6.00) | 5.844% | (~+0.16) | MISS |
+
+**NOT contract winner.** vol_p mechanism VALIDATED (3.646 within 0.003pp of floor, effectively at floor). test_wss narrow MISS, surf_p still breached.
+
+### H9b vs H9 (clean isolation of clamp+MAE_aux mechanism)
+
+| Axis | H9 test | H9b test | Δ (H9b − H9) | Read |
+|---|---:|---:|---:|---|
+| test_wss | 6.678% | 6.781% | **+0.103pp** | **anti-additive cost of clamp+MAE_aux on wss** |
+| test_vol_p | 3.913% | **3.646%** | **−0.267pp** | **vol_p floor preservation mechanism validated** |
+| test_surf_p | 3.692% | 3.787% | +0.095pp | surf_p slight regression |
+
+### Mechanism verification
+
+| Diagnostic | Value | Read |
+|---|---:|---|
+| `gradnorm/w_vol_p` (mean EP1-30, DDP-averaged) | **0.150 exactly** | clamp engaged hard floor from EP8 onward |
+| `vol_p_mae_aux/weighted` | smoothly decaying 0.18→0.07 EP1-30 | MAE auxiliary engaged, no spikes |
+| `val_vol_p` EP3 | 4.18 (vs H9 EP10 = 4.056) | EP3 already at H9 terminal level — descent 2-3× faster |
+| `best_epoch` | 21 | best-val converged mid-late training |
+
+### Wave Finding — vol_p floor preservation IS achievable via clamp+MAE_aux, with +0.103pp anti-additive cost on wss
+
+This mechanism is **carried forward into H18 PR #1175** as the floor-preservation stack composed with H10b's curvature+Charb wss-reduction stack. H18 falsification: if anti-additive cost dominates, H18 test_wss > 6.78 (narrow miss); if mechanisms orthogonal on H10b's richer curvature representation, H18 test_wss ~6.50-6.65 (BEAT + floors).
+
+### Closing — H9b retired into H18 composition
+
+---
+
 ## 2026-05-17 01:00 UTC — PR #1142 CLOSED: WSS H7 surface_loss_weight=1.5 uniform upweight (dl24-fern, `2nufmv3i`)
 
 - **Branch:** `dl24-fern/h7-surface-loss-weight-1p5`

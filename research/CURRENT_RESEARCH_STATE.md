@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-17 16:25 UTC (**H9b TERMINAL + H18 ASSIGNED: H9b EP30 CLOSED — test_wss=6.781 MISS (+0.054 above SOTA), test_vol_p=3.646 AT FLOOR (within 0.003pp, mechanism VALIDATED ✅), test_surf_p=3.787 BREACH. NOT contract winner. Key finding: clamp+MAE_aux costs +0.103pp test_wss vs H9 baseline (anti-additive risk for H18 composition). H18 PR #1175 ASSIGNED to dl24-tanjiro: H10b curvature+Charb+clamp+MAE_aux 3-mechanism composition. Expected outcome: if mechanisms orthogonal, test_wss ~6.50-6.65 (SOTA-BEAT) + floors preserved; if anti-additive, test_wss ~6.78 (narrow miss). This is the wave's highest-priority experiment. H12 EP18=6.900 NEW BEST (trap-pattern FALSIFIED at EP17, EP11-14 was a single transient instability burst). Architecture confirmed equivalent to H10b at terminal val, ZERO contract benefit for H18 spec (separate τ head DROPPED). H11b EP26=7.144 NEW BEST (val_vol_p NEW LOW 3.941), EP30 proj test_wss ~6.93 narrow MISS. H10b 13-epoch plateau LOCKED at wave-low, EP15 ckpt winner (test proj 6.68 -0.05pp CLEAN BEAT). NEXT: H18 #1175 EP3 gate, H10b/H11b/H12 EP30 terminals.**)
+- 2026-05-17 17:55 UTC (**H10b + H11b TERMINAL CLOSED — WAVE'S FIRST test_wss SOTA-BEAT achieved by H10b (6.6651% = −0.062pp under SOTA, 4 of 7 axes BEAT) BUT vol_p floor +0.517pp BREACH precludes merge per Issue #1056. H11b NOT contract winner (test_wss 7.019 +0.292 MISS, all floors breached) — per-axis WSS τ-weights mechanism validated as wave finding (−0.245pp vs H8). H18 PR #1175 RUNNING (xhx2qlpo EP0.5/30, all mechanisms verified engaged at step ~1500). H12 PR #1166 still RUNNING (EP21.5/30, autonomous to ~21:00Z). 2 students NEW IDLE: dl24-frieren + dl24-nezuko. Researcher-agent dispatched to identify orthogonal vol_p floor-preservation mechanisms (H19/H20 candidates) since H18 anti-additive risk REAL — H10b vol_p +0.517pp breach is largest in wave. NEXT: H18 EP3 viability gate ~21:48Z, H12 EP30 terminal ~21:00Z, H19/H20 assignments ~30 min.**)
 
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
@@ -51,20 +51,22 @@ H9 wave finding said "vol_p ceiling is representation-bound at 4.05%". **H9b EP3
 
 **This is the wave's first credible path to SOTA-on-aggregate (all 7 axes under SOTA #972).**
 
-## Active Experiments (2026-05-17 16:25 UTC)
+## Active Experiments (2026-05-17 17:55 UTC)
 
-| Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
-|---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| **dl24-tanjiro** | **#1175** | **H18: H10b+H9b composition** | **JUST LAUNCHED** / 0h | — | — | — | — | **Highest-priority experiment**: H10b curvature+Charb + H9b clamp=0.15+MAE_aux. Anti-additive risk quantified: H9b costs +0.103pp test_wss vs H9 baseline. If H10b curvature rep makes cost orthogonal, test_wss ~6.50-6.65 (BEAT + floors). If anti-additive, ~6.78 (miss). EP3 hard abort: val_wss > 7.10. |
-| dl24-fern | #1166 | **H12: separate τ head** | **EP18 LANDED — new best 6.900** / 14.0h | 6.289% | **6.900%** | 4.382% | 4.173% | Trap-pattern FALSIFIED. EP18 new H12 best. Architecture mechanistically equivalent to H10b at terminal val_wss — ZERO contract benefit vs H10b, confirms H18 should drop separate τ head. Continuing to EP30 (~21:00Z). |
-| dl24-frieren | #1159 | **H10b: curvature + Charbonnier τ_z** | **EP27 LANDED — 13-epoch plateau LOCKED** / 21.0h | 6.280% | **6.915%** | 4.374% | 4.087% | **EP15 ckpt LOCKED AS WINNER**: 13-epoch plateau at [6.880, 6.915], EP15 wave-low. Test proj from EP15 ckpt: **6.68 (-0.05pp under SOTA = CLEAN BEAT)**. vol_p/surf_p floors BREACHED. ~3 epochs to EP30 (~5h). Terminal review ~20:00Z. |
-| dl24-nezuko | #1160 | **H11b: AdamW + per-axis weights** | **EP27 LANDED — new best 7.144** / 20.0h | 6.396% | **7.144%** | 3.941% | 4.373% | EP26/27 = H11b best 7.144. val_vol_p NEW LOW 3.941. EP30 proj test_wss ~6.93 narrow MISS. NOT contract winner. Best-ckpt EP26. |
+| Student | PR | Hypothesis | EP / Duration | val_wss | Notes |
+|---------|-----|-----------|---------------|--------:|-------|
+| **dl24-tanjiro** | **#1175** | **H18: H10b+H9b composition** (curvature+Charb+clamp+MAE_aux) | **EP0.5/30 ~62 min in** | — | All mechanisms verified engaged at step ~1500. Charb/MSE ratio τ_z ≈ 1.0-1.4, MAE_aux smoothly decaying 0.46→0.18, GradNorm clamp configured (w_vol_p ≈ 0.69, no clamp fires yet). EP1 expected ~18:24Z, EP3 viability gate ~21:48Z (abort if val_wss > 7.10). EP30 ~21:42Z 2026-05-19 (53h wall). |
+| dl24-fern | #1166 | **H12: separate τ head** | **EP21.5/30 / ~15.8h** | (running) | Autonomous to EP30 ~21:00Z. Trap-pattern FALSIFIED at EP17. EP18 val_wss=6.900 NEW H12 BEST (architecturally equivalent to H10b terminal — confirms H18 drops separate τ head from primary). |
+| **dl24-frieren** | **NEW IDLE** | (awaiting H19 assignment) | — | — | H10b just closed. Researcher-agent dispatched. Likely H19 = volume-side curvature attention bias OR Charbonnier on vol_p. Target: vol_p floor preservation orthogonal to H9b's clamp+MAE_aux. |
+| **dl24-nezuko** | **NEW IDLE** | (awaiting H20 assignment) | — | — | H11b just closed. Researcher-agent dispatched. Likely H20 = SDF-stratified volume sampling OR volume Huber loss. Target: vol_p floor preservation through sampling-density mechanism. |
 
 ## Closed Experiments (2026-05-17)
 
 | PR | Student | Hypothesis | Test result | Closing reason |
 |---|---|---|---|---|
-| #1157 | dl24-tanjiro | **H9b: clamp+curvature+MAE_aux** | test_wss=6.781 (MISS +0.054pp), test_vol_p=3.646 (AT FLOOR ±0.003pp), test_surf_p=3.787 (BREACH) | NOT contract winner. vol_p mechanism VALIDATED for H18. Anti-additive cost +0.103pp test_wss vs H9 baseline quantified. |
+| **#1159** | dl24-frieren | **H10b: curvature + Charbonnier τ_z** | **test_wss=6.6651 (CLEAN BEAT −0.062pp)**, test_τ_x/y/z all BEAT, **test_vol_p=4.160 (BREACH +0.517pp)**, test_surf_p=3.690 (BREACH +0.113pp) | NOT-A-MERGE per Issue #1056 floor clause. Wave's first SOTA-beat on test_wss. Mechanism (curvature+Charb τ_z) carried forward to H18. |
+| #1160 | dl24-nezuko | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** | test_wss=7.019 (MISS +0.292), all floors BREACHED. Wave finding: −0.245pp vs H8 baseline | NOT contract winner. Per-axis mechanism validated for future composition. LR-coupling of H11 instability confirmed (lr=5e-4 stable, lr=7e-4 unstable). |
+| #1157 | dl24-tanjiro | **H9b: clamp=0.15 + vol_p MAE_aux + curvature** | test_wss=6.781 (MISS +0.054pp), **test_vol_p=3.646 (AT FLOOR ±0.003pp)**, test_surf_p=3.787 (BREACH) | NOT contract winner. vol_p mechanism VALIDATED for H18. Anti-additive cost +0.103pp test_wss vs H9 baseline quantified. |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
