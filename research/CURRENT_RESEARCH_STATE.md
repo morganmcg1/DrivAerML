@@ -61,18 +61,26 @@ Wave 30 now has **two independent** experimental confirmations that direction is
 
 **Research-direction implication**: any future loss-level cosine-aware or direction-only attack is now ruled out. The bottleneck has moved one layer down to the magnitude regression head and/or the τ_z over-prediction collapse band. H10b (in flight) attacks magnitude; H17 (in flight) attacks the band geometrically.
 
-### Wave 30 fleet — 6 active + 2 idle (alphonse, nezuko awaiting H20/H21); Wave 30 closed count: 21
+### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 21
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
+| #1171 | **nezuko** | **H21 per-component independent output heads** (4 separate MLPs for cp/τx/τy/τz; τz head deeper) | **NEW — assigned 06:50Z May 17** (18h budget) |
+| #1170 | **alphonse** | **H20 focal vertex loss** (dynamic per-vertex error-weighted MSE on τ channels, γ=0.5, γ_z=1.5×γ_x) | **NEW — assigned 06:45Z May 17** (18h budget) |
 | #1169 | frieren | H16b Huber loss on τ channels δ=0.3 (calibrated bulk-reshape — restart from H16) | assigned 06:00Z May 17 (18h budget) |
 | #1168 | thorfinn | H19 VICReg batch-variance regularization on \|τ_z\| | assigned 05:00Z May 17 (18h budget) |
 | #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | EP~2.5 (gate active, mean_abs=0.223) |
 | #1164 | **fern** | **H10b bounded-exp magnitude fix (softplus→clamp.exp)** | **EP3 PASS 6.697%** — CLOSEST to baseline 6.126% of all in-flight |
 | #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h, healthy |
 | #1151 | edward | H12 τ-magnitude-weighted loss (sweep α=0.5 done, α=0.3 running) | a0p5 arm: NOT-A-MERGE (val 6.326%, floor breach); a0p3 running → terminal ~17:22Z |
-| TBD | **alphonse** | **H20 (fresh axis — researcher-agent assembling)** | **IDLE — awaiting assignment** |
-| TBD | **nezuko** | **H21 (fresh axis — researcher-agent assembling)** | **IDLE — awaiting assignment** |
+
+**8 simultaneous attacks on the magnitude bottleneck, attacking from 8 different causal angles**:
+- Output head ARCHITECTURE: H10b (activation function), H21 (decoder topology)
+- Loss formulation per-vertex: H12 (static |τ_gt| weights), H18 (area weights), H20 (dynamic |error| weights), H16b (δ=0.3 outlier clipping)
+- Input feature gating: H11b (multi-scale)
+- Batch statistics: H19 (VICReg variance hinge)
+
+This is the best-controlled multi-pronged diagnostic pass we have run on a single bottleneck. Even partial wins from any angle will deeply update the causal map.
 
 **Closed in Wave 30** (21): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**, **H16 #1161 (TERMINAL-NULL δ=1.0 dormant; watchdog false-positive kill at EP4; KEY LEARNING: Huber-on-τ requires post-EP1 δ calibration)**, **H17 #1162 (TERMINAL-NULL KILLED EP3; hard-τ·n=0-by-construction implementation verified correct but cold-start gap ~11pp vs baseline; soft-penalty H6' is better budget-match)**, **H15b #1165 (NOT-A-MERGE; mechanism PASS — EMA AHEAD of raw +0.80pp at EP3, test τz/τx=1.439 band-edge — but baseline FAIL all axes + both floors; budget-starved 3/13 epochs)**.
 
