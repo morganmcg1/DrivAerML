@@ -1146,6 +1146,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                     early_stop_reason = "distributed peer requested early stop"
                 if early_stop_reason is not None:
                     train_log["early_stop/triggered"] = 1.0
+                # H24 mechanism-alive diagnostic: log per-vertex temperature
+                # statistics. At init t_v=1.0 for all vertices => std=0. As the
+                # MLP trains, std must rise (or mechanism is inert).
+                if (
+                    hasattr(base_model, "geom_temp_mlp")
+                    and batch.surface_x is not None
+                    and batch.surface_x.numel() > 0
+                    and batch.surface_x.shape[1] > 1
+                ):
+                    with torch.no_grad():
+                        _geom_feats = batch.surface_x[:, :, 3:7].to(device)
+                        _t_v = base_model.geom_temp_mlp(_geom_feats)
+                        train_log["train/geom_temp_std"] = float(_t_v.std().item())
+                        train_log["train/geom_temp_mean"] = float(_t_v.mean().item())
+                        train_log["train/geom_temp_min"] = float(_t_v.min().item())
+                        train_log["train/geom_temp_max"] = float(_t_v.max().item())
                 wandb.log(train_log)
                 if early_stop_reason is not None:
                     if state.is_main:

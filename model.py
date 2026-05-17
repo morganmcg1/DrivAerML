@@ -226,6 +226,32 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class GeomSaliencyTempMLP(nn.Module):
+    """Per-vertex slice-temperature multiplier from geometry saliency features (H24).
+
+    Maps [nx, ny, nz, area] -> t_v = exp(clamp(MLP(.), -3, 3)).
+    Zero-init final layer guarantees t_v = 1.0 at init (exact Transolver identity).
+    Applied multiplicatively to slice_logits BEFORE softmax, so t_v acts as 1/T:
+    high t_v -> sharper slice assignment, low t_v -> softer assignment.
+    """
+
+    def __init__(self, hidden: int = 16):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(4, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, 1),
+        )
+        nn.init.zeros_(self.mlp[2].weight)
+        nn.init.zeros_(self.mlp[2].bias)
+
+    def forward(self, geom_feats: torch.Tensor) -> torch.Tensor:
+        # geom_feats: [B, N, 4]  (nx, ny, nz, area from surface_x[:, :, 3:7])
+        raw = self.mlp(geom_feats).clamp(-3.0, 3.0)        # [B, N, 1]
+        t_v = torch.exp(raw)                                # [B, N, 1]
+        return t_v.permute(0, 2, 1).unsqueeze(-1)           # [B, 1, N, 1] broadcasts over [B, H, N, S]
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -259,11 +285,20 @@ class TransolverAttention(nn.Module):
             self.q_norm = None
             self.k_norm = None
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        vertex_temps: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
+        if vertex_temps is not None:
+            slice_logits = slice_logits * vertex_temps.to(
+                device=slice_logits.device, dtype=slice_logits.dtype
+            )
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -274,8 +309,13 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        vertex_temps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask, vertex_temps=vertex_temps)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -317,9 +357,14 @@ class TransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        vertex_temps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, vertex_temps=vertex_temps)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -352,9 +397,14 @@ class Transformer(nn.Module):
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        vertex_temps: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, vertex_temps=vertex_temps)
         return x
 
 
@@ -473,6 +523,10 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
         )
+        # H24 (PR #1174): geometry-saliency slice-temperature MLP. Conditions
+        # per-vertex slice-assignment temperature on [nx, ny, nz, area]; zero-init
+        # final layer preserves Transolver identity at step 0.
+        self.geom_temp_mlp = GeomSaliencyTempMLP(hidden=16)
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
@@ -595,7 +649,25 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        # H24 per-vertex slice-temperature from geometry saliency features.
+        # surface tokens precede volume tokens in the concat order above; the
+        # vertex_temps cat order must match. Volume tokens get a constant 1.0
+        # multiplier so their slice assignments are unchanged from baseline.
+        vertex_temps: torch.Tensor | None = None
+        if surface_x is not None:
+            geom_feats = surface_x[:, :, 3:7]  # [B, N_surf, 4]: nx, ny, nz, area
+            surf_temps = self.geom_temp_mlp(geom_feats)  # [B, 1, N_surf, 1]
+            if volume_x is not None and volume_tokens > 0:
+                vol_ones = torch.ones(
+                    surf_temps.shape[0], 1, volume_tokens, 1,
+                    device=surf_temps.device, dtype=surf_temps.dtype,
+                )
+                vertex_temps = torch.cat([surf_temps, vol_ones], dim=2)
+            else:
+                vertex_temps = surf_temps
+
+        hidden = self.backbone(hidden, attn_mask=attn_mask, vertex_temps=vertex_temps)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
