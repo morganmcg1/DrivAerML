@@ -1,11 +1,82 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~22:50 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~23:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~22:50Z) — H25 ALPHONSE CRASHED + EP3 FADE = 11TH DEAD END; H30 ASSIGNED; floor disease localized to encoder feature CONTENT
+## Latest invocation actions (2026-05-17 ~23:40Z) — H26 THORFINN MECHANISM PROVEN + COMPRESSED-BUDGET ACCURACY FAIL → SENT BACK FOR FULL 18H RETRY; H31 WALLDIST ASSIGNED ALPHONSE
+
+### Headline updates
+
+1. **PR #1177 thorfinn H26 NPCA — TERMINAL Path B then REQUEST-CHANGES SEND-BACK 23:38Z**. First encoder-level proof in Wave 30 that the τz/τx band attractor is BREAKABLE. std(τz/τx) grew baseline ~0.02 → EP3 val 0.216 = **10× dispersion**; max τz/τx 2.49; 14/34 val + 20/50 test cars outside [1.40, 1.60]. Test-side mechanism PRESERVED (test std 0.120, 20/50 outside band — DIFFERENT mechanism manifestation between val and test, same direction). **Accuracy failed** (val 6.97% vs baseline 6.126% +0.846pp) but training was cut at 3 of planned 5 epochs by Path B 6h budget AND trajectory was still descending at −0.088%/1k_steps with no plateau. Linear extrapolation conservative 4× slowdown → EP13 val_abupt 5.97% would BEAT baseline. SENT BACK for 18h Path A retry: `--epochs 13 --lr-cosine-t-max 13 --vol-points-schedule 0:16384:3:32768:6:49152:9:65536`. Decisive interim signal: EP6 val_abupt vs baseline.
+
+2. **Alphonse H25 CLOSED + H31 WALLDIST assigned (PR #1185)** — log(|sdf|+1e-3) as 5th volume encoder input channel, ~12 LOC change. Direct attack on H21+H25 joint encoder-information-content diagnosis.
+
+3. **edward H28 SAM step 18,393 / 3 epochs**, EP3 val landing imminently. Cosine alignment TIGHTENED EP1→EP3 (0.86 → 0.92) — SAM finding flat basin and staying. 10th stale_wip false positive of the day posted.
+
+4. **askeladd H27 EP3 ETA pushed back** from 23:46Z → 00:25Z May 18 (slower pace than projected — step rate ~6,826 steps/h not the assumed 7,500). Val_SP ≤ 4.10% binding gate stands.
+
+5. **frieren H29 EP1 val POSTED 22:31Z** with τz/τx 1.385 BELOW band attractor — 5th cold-start band-break signal of Wave 30 (joins fern 1.395, alphonse 1.377, edward 1.4406 EP1 edge, thorfinn 0.101 std). EP3 binding gate ~02:30Z May 18. Mechanism active (spectral_loss −80% in EP1).
+
+### Floor disease localization — REFINED after H26 mechanism proof
+
+H26 has now produced the **first evidence that the τz/τx band attractor is encoder-breakable** — but accuracy is still bounded. This SEPARATES the question:
+
+- **Question 1 (Wave 30 has been chasing): Can the band attractor be broken?** → H26 NPCA: YES (std 10× baseline, decisively passes any spread-break gate). Wave 30 finding: band attractor IS structural, IS breakable, but is broken by LOCAL FRAME PROJECTION on input, not by attention/loss/optimizer manipulation.
+
+- **Question 2 (newly opened): Does breaking the band attractor BEAT THE BASELINE on accuracy?** → H26 Path B is non-conclusive (budget-truncated). H26 Path A full-budget retry IS the test. If it beats baseline, the question is answered. If not, the band-break is necessary but insufficient.
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| fern | #1174 | H24 GSTS encoder slice-temp | EP3 MARGINAL CONTINUE (τz/τx 1.5145 in-band rebound). EP6 binding gate ~02:00Z May 18 — decisive val_abupt baseline-crossing test |
+| alphonse | #1185 | H31 WALLDIST log-SDF input channel (NEW) | just assigned 23:22Z, awaiting pickup. ~12 LOC. EP3 gate ~14:30Z May 18 |
+| thorfinn | #1177 | H26 NPCA full 18h retry | SENT BACK 23:38Z, awaiting student relaunch on 18h Path A. **Mechanism already proven at Path B EP3; question is whether full budget reaches baseline accuracy. EP6 interim check ~10h after launch.** |
+| askeladd | #1178 | H27 PRLP train-loss in eval space | training, step 28,106 healthy. EP3 ETA ~00:25Z May 18 (val_SP ≤ 4.10% beating H11b EP3 4.368%) |
+| edward | #1179 | H28 SAM optimizer-sharpness | training, step 18,393 / EP3 boundary just crossed, EP3 val IMMINENT. sam cos 0.86→0.92. 10th stale_wip false positive of the day |
+| frieren | #1182 | H29 SSFL frequency-domain loss | training, EP1 val POSTED 22:31Z with τz/τx 1.385 BELOW band (5th cold-start break of Wave 30). EP3 gate ~02:30Z May 18 |
+| tanjiro | #1183 | H18d channel-decoupled τz-only area weight | training, EP1 ETA passed 22:21Z val_abupt 30.77% PASS, τz/τx 1.634 ABOVE band (OPPOSITE direction from parent H18 EP1 1.412 — diagnostic of channel-coupling-mattering). EP3 ~01:31Z May 18 |
+| nezuko | #1184 | H30 V2S xattn cross-modal | just assigned 21:50Z, awaiting pickup |
+
+### Closed Wave 30 directions (11 confirmed dead ends + 1 outlier + 1 retry-in-flight)
+
+| # | Hypothesis | Tier | Key result |
+|---|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape / per-vertex | All dead |
+| 8 | H23 Mean Teacher EMA | Training-regularization | KILL (21.36% EP3) |
+| 9 | H18 area-weighted MSE | Per-vertex position | OUTLIER: test τz/τx 1.418 ★ + test_vol_p PASS, but miss val/SP |
+| 10 | H21 per-component heads | Decoder capacity | DEAD — mechanism proved, capacity not the bottleneck |
+| 11 | H25 ALGP aux local-grad | Mean-shift encoder via aux task | CRASHED + EP3 FADE — mechanism alive but objective-disconnected |
+| **Retry** | **H26 NPCA local frame** | **Encoder INPUT geometric transformation** | **PATH-B BUDGET-CUT; PATH-A 18H RETRY IN-FLIGHT. MECHANISM PROVEN.** |
+
+### Key fleet diagnostic refined after H26 mechanism proof
+
+- **Band attractor IS encoder-breakable** via input local-frame projection (Gram-Schmidt tangent frame from normals) — H26 NPCA proven mechanism
+- **Compressed budget masks accuracy potential** — H26 Path B EP3 6.97% with monotone descent does NOT preclude full-budget EP13 beating baseline (linear extrap 4× slowdown → 5.97%)
+- **Per-channel mechanism types in Wave 30** are now:
+  - Mean-shift below band (cold-start fade): fern H24 1.395→1.514, alphonse H25 1.377→1.512, frieren H29 1.385 EP1 only, tanjiro H18 1.412→1.489
+  - Spread-break (sustained at EP3+): thorfinn H26 std 0.101→0.216 (test 0.120)
+  - Lower-band-edge sitting: edward H28 EP1 1.4406
+  - Above-band (channel-decoupling inverse signal): tanjiro H18d EP1 1.634
+
+### Outstanding actions (next 12h chronological)
+
+1. **edward H28 EP3 val landing imminently** — τz/τx decisive (≤1.42 SUSTAIN, [1.44,1.55] KILL)
+2. **askeladd H27 EP3 ~00:25Z May 18** — val_SP ≤ 4.10% binding gate
+3. **tanjiro H18d EP3 ~01:31Z May 18** — channel-decoupling τz_only diagnostic
+4. **fern H24 EP6 ~02:00Z May 18** — decisive val_abupt baseline-crossing test
+5. **frieren H29 EP3 ~02:30Z May 18** — frequency-domain mechanism
+6. **alphonse H31 WALLDIST pickup + smoke + launch** (any time)
+7. **thorfinn H26 Path A 18h relaunch** + EP3 ~04:30Z + EP6 ~09:30Z + EP13 ~17:38Z May 18
+8. **nezuko H30 V2S xattn pickup + launch** (any time)
+
+**11 confirmed dead ends + 1 retry-in-flight. Plateau Protocol active. First Wave 30 mechanism-proven (H26 spread-break) sent for full-budget accuracy verification. H31 + H30 + H26 retry form the strongest active triad of Wave 30.**
+
+---
+
+## Earlier invocation actions (2026-05-17 ~22:50Z) — H25 ALPHONSE CRASHED + EP3 FADE = 11TH DEAD END; H30 ASSIGNED; floor disease localized to encoder feature CONTENT
 
 ### Headline updates
 
@@ -21,7 +92,7 @@
 |:--|---:|:--|:--|
 | fern | #1174 | H24 GSTS encoder slice-temp | EP3 MARGINAL (τz/τx 1.5145 in-band rebound). EP6 binding gate ~02:00Z May 18 — decisive val_abupt baseline-crossing test |
 | **alphonse** | **#1185** | **H31 WALLDIST (NEW)** | **#1176 CLOSED 23:10Z. H31 PR #1185 assigned ~23:22Z. log-SDF (volume_x col 3 already loaded) → log(|sdf|+1e-3) as 5th channel ~12 LOC. EP3 gate ~14:30Z May 18** |
-| thorfinn | #1177 | H26 NPCA local-frame input aug | training, EP3 mechanism gate ~23:48Z |
+| thorfinn | #1177 | H26 NPCA local-frame input aug | **PATH-B TERMINAL 23:18Z: mechanism PASSED decisively (std(τz/τx) 0.02→0.216 = 10× baseline, 14/34 val cars + 20/50 test cars outside band) — accuracy FAILED (val 6.97% vs 6.126%) BUT only 3 of 5 epochs ran (budget cut) AND trajectory still descending −0.088%/1k_steps. SENT BACK 23:38Z for full 18h Path A retry (epochs 13, vol-schedule 0:16384:3:32768:6:49152:9:65536). Linear extrapolation conservative 4× slowdown → EP13 val_abupt 5.97% would BEAT baseline. STRONGEST UNFINISHED HYPOTHESIS IN WAVE 30.** |
 | askeladd | #1178 | H27 PRLP train-loss in eval space | training, EP1 τz/τx 1.523 IN-BAND (expected — floor mechanism not band-attractor). EP3 gate ~23:46Z (val_SP ≤ 4.10% beating H11b EP3 4.368%) |
 | edward | #1179 | H28 SAM optimizer-sharpness | EP1: τz/τx 1.4406 lower band-edge (first optimizer-space signal). EP3 ~00:10–02:10Z May 18 |
 | frieren | #1182 | H29 SSFL frequency-domain loss | EP1 mechanism PASS, val async ~23:45Z |

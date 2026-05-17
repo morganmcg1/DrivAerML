@@ -1,3 +1,68 @@
+## 2026-05-17 23:38 — PR #1177: H26 NPCA (thorfinn) — PATH-B TERMINAL THEN REQUEST-CHANGES / FIRST WAVE-30 MECHANISM PROOF / ACCURACY-BUDGET-CUT / SENT BACK FOR FULL 18H PATH A RETRY
+
+- **Branch**: `thorfinn/h26-normal-projected-coord-aug` (sent back to WIP for 18h retry)
+- **Path B 8 W&B runs**: rank0 `nqc0tmx9`, ranks 1-7 `9bnxlmp7`/`9w2qo5vu`/`aw2a8ddm`/`axhbr1lq`/`csvy3v8z`/`dn4ibps9`/`glgoklez`
+- **Path B Total runtime**: 271 min (4.5h, well under 6h pod budget) but training cut at 3 of planned 5 epochs by train_timeout_minutes=270min (per-epoch wall ~90min at 65536 surface+volume on DDP-8 b=4, 4× higher than pre-launch smoke projection)
+- **Hypothesis**: Normal-Projected Coordinate Augmentation — append 3 extra encoder input channels = (p·n, p·t1, p·t2) projections of position onto local Gram-Schmidt tangent frame from per-vertex normals. Hypothesis: per-car local-frame coords break global band attractor by giving encoder per-car-geometry-specific position features.
+
+### Path B terminal results — FIRST MECHANISM PROOF in Wave 30
+
+| Marker | Value | Verdict |
+|---|---:|:--|
+| **Mechanism gate** (std(τz/τx) ≥ 0.04 AND ≥1/34 outside band) | **std 0.216, 14/34 outside @ EP3 val + std 0.120, 20/50 outside @ test** | **PASSED 5× margin on std, 14× margin on n_outside** ✅ |
+| val_abupt @ EP3 | 6.972% | FAIL +0.846pp vs baseline 6.126% |
+| val_abupt slope EP1→EP3 | −0.088%/1k_steps (−2.6pp per 30k steps) | STILL DESCENDING — no plateau detected |
+| test_abupt | 6.642% | +0.798pp |
+| test_SP | 4.278% | +0.701pp BREACH floor 3.577% |
+| test_vol_p | 3.985% | +0.341pp BREACH floor 3.643% |
+| test_WSS | 7.606% | +0.879pp |
+| `train/grad/nonfinite_count` | 0 across full run | ✅ |
+
+### Per-epoch τz/τx mechanism table — DECISIVE encoder-level band-attractor break
+
+| EP | mean | std | min | max | n_outside [1.40,1.60] |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1.4267 | **0.1014** | 1.27 | 1.63 | 17/34 |
+| 2 | 1.5174 | **0.1861** | 1.26 | 2.34 | 13/34 |
+| 3 | 1.5201 | **0.2161** | 1.29 | 2.49 | 14/34 |
+| **Test (EP3 reload)** | 1.4554 | **0.1196** | 1.10 | 1.73 | 20/50 |
+
+Baseline #972 reference: `std(τz/τx) ~ 0.02`, all 34 val cars locked in [1.44, 1.55]. **H26 dispersion is 5–11× baseline std.** First Wave 30 attack to produce sustained encoder-level band-attractor disruption.
+
+### Why this is NOT a close — three load-bearing observations
+
+1. **Mechanism is PROVEN**: std 10× baseline, max τz/τx 2.49, 14/34 val + 20/50 test cars outside band, at EP3, with test-side preservation. Different mechanism class from the closed Wave 30 attacks (all of which targeted mean-shift). NPCA is the first PER-CAR-VARIANCE attack and it works.
+
+2. **Trajectory was still descending**: val_abupt slope `−0.088%/1k_steps` at EP3, no plateau. Linear extrapolation conservative 4× slowdown → EP13 val_abupt 5.97% (would BEAT baseline by 0.16pp). Even 8× slowdown → 6.48% (within 0.36pp).
+
+3. **Budget was the binding constraint, not the hypothesis**: per-epoch wall time was 4× higher than pre-launch smoke; training cut at 3 of planned 5 epochs by Path B 270min budget. Full 18h Path A is 12-13 epochs.
+
+### Request-changes action
+
+Sent back 23:38Z with full 18h Path A recipe: `--epochs 13 --lr-cosine-t-max 13 --vol-points-schedule 0:16384:3:32768:6:49152:9:65536 SENPAI_TIMEOUT_MINUTES=1100`. Keeps all implementation hardening (Gram-Schmidt fp32-cast, `eps=1e-6` in F.normalize, padded-token zero invariant, `project.weight[:, 4:7].zero_()` correct attribute path). Pre-launch budget propagation check required (H25 post-mortem).
+
+### Key interim signal during retry: EP6 val_abupt
+
+EP6 (~10h from relaunch) is the decisive interim. If val_abupt > 6.5% at EP6, linear extrapolation has broken down and full-budget run is unlikely to recover. If val_abupt ≤ 6.5% at EP6, on-track for baseline-beating at EP13.
+
+### Implication for Wave 30 + Wave 31
+
+H26 NPCA opens a new question class:
+- **Wave 30 closed: Can band attractor be broken?** — Answer (mechanism): YES, via input local-frame projection
+- **Wave 30 NEW: Does breaking band attractor BEAT baseline accuracy?** — Answer pending H26 Path A 18h retry
+
+If H26 Path A beats baseline, the win composes with H30 V2S xattn (encoder cross-modal fusion, orthogonal axis) and H31 WALLDIST (encoder input log-SDF, orthogonal axis) for a Wave 31 triad stack.
+
+If H26 Path A does NOT beat baseline despite full budget, the conclusion is: band-attractor break is NECESSARY but INSUFFICIENT — accuracy is bounded by something else (likely encoder INFORMATION content, per H21+H25 closure diagnosis).
+
+### Engineering wins worth preserving
+
+- **Bug fix**: `self.project_surface_features.weight[:, 4:7].zero_()` would AttributeError; correct path is `self.project_surface_features.project.weight[:, 4:7].zero_()` (LinearProjection wraps nn.Linear at `self.project`).
+- **Numerical hardening**: `compute_local_frame_proj` casts to fp32 inside and uses `eps=1e-6` in `F.normalize`; padded tokens (`n == [0,0,0]`) produce `local_proj == 0` instead of NaN even under bf16 autocast.
+- **Identity-at-init**: `project_surface_features.project.weight[:, 4:7] == 0` verified offline; forward bit-identical whether local_proj is zero, real, or random.
+
+---
+
 ## 2026-05-17 22:50 — PR #1176: H25 Auxiliary Local-Gradient Prediction (alphonse) — CLOSED TERMINAL NOT-A-MERGE / RUN-CRASHED / 6TH COLD-START FADE / 11TH WAVE-30 DEAD END / MECHANISM-ALIVE-OBJECTIVE-DISCONNECTED
 
 - **Branch**: `alphonse/aux-local-grad-prediction` (closed pending student terminal SENPAI-RESULT)
