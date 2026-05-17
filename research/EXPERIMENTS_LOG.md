@@ -1,3 +1,75 @@
+## 2026-05-17 17:00 — PR #1172: H22 Charbonnier-cp + MAE-aux (thorfinn) — CLOSED TERMINAL-NEUTRAL / MECHANISM-WIRED-BUT-INEFFECTIVE / HYPOTHESIS-FALSIFIED / NOT-STACKABLE
+
+- **Branch**: `thorfinn/charbonnier-cp-mae-aux` (closed)
+- **W&B group**: `wave30_h22_charbonnier_cp` — rank0 `2y5zraax`, ranks 1–7 `tox671e8`/`ykuu27sy`/`r3potpuu`/`7drf0ja1`/`j3akfo56`/`l95qn7ig`/`qsal5gu1`
+- **Best ckpt**: EP3 EMA (truncated_partial — SENPAI_TIMEOUT_MINUTES=360 budget bug fired, run finished at 271min/EP3)
+- **Hypothesis**: Replace MSE on cp channel with Charbonnier `sqrt(e²+ε²)-ε + λ_aux·|e|` (ε=1e-3, λ_aux=0.5) to preserve cp gradient on smooth panels and steepen val_SP descent. Designed as floor-preservation stacking partner for H10b/H11b winners.
+
+### Terminal results (EP3 EMA from inline reload-eval at end of training)
+
+| Metric | H22 EP3 | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | 7.110% | 6.126% | +0.984pp | FAIL (truncated) |
+| test_abupt | **6.849%** | 5.844% | +1.005pp | FAIL |
+| test_SP | **4.079%** | 3.577% floor | +0.502pp | **FLOOR BREACH** |
+| test_vol_p | **4.139%** | 3.643% floor | +0.496pp | **FLOOR BREACH** |
+| test_WSS | 7.958% | 6.727% | +1.231pp | FAIL |
+| test τz/τx | **1.429** | — | below band | cold-start (EP3) |
+
+### Mechanism-wired-but-ineffective diagnostic
+
+Per-epoch Charbonnier diagnostics (rank0 `2y5zraax`):
+
+| EP | charb_cp_charb | charb_cp_mae | ratio | err_p95 | err_max | charb_tau_mse | base_mse |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 0.0866 | 0.0871 | 0.995 | 0.301 | 3.26 | 0.0930 | 0.273 |
+| 2 | 0.0376 | 0.0380 | 0.988 | 0.123 | 1.84 | 0.0261 | 0.073 |
+| 3 | 0.0136 | 0.0140 | 0.968 | 0.045 | 1.07 | 0.0042 | 0.013 |
+
+**Decisive falsification finding**: `charb_cp/cp_mae ratio ≈ 0.97` means with ε=1e-3 and typical |e|~0.2, the Charbonnier term degenerates to MAE — effective cp loss is `1.5·|e|` (MAE-equivalent). The smooth-L1 transition the hypothesis depended on was NEVER ENGAGED for bulk residuals.
+
+### EP3 floor gate — NEUTRAL match, not steeper
+
+| Run @ EP3 | val_abupt | val_SP | val_vol_p | val_WSS |
+|---|---:|---:|---:|---:|
+| **H22 (cp Charb+MAE-aux)** | **7.110** | **4.405** | **4.166** | **8.154** |
+| H11b askeladd (gated multi-scale) | 6.411 | 4.368 | 4.028 | 7.166 |
+| H10b fern (bounded-exp τ) | 6.697 | 4.422 | 3.884 | 7.615 |
+
+**val_SP @ EP3 matches H10b/H11b** — not steeper. The cp descent trajectory under MAE-equivalent is IDENTICAL to MSE-on-cp baselines. **Hypothesis falsified**: cp-MSE saturation is NOT the disease causing test_SP floor breach.
+
+### τ-channel side effect — NOT stackable
+
+At EP3, cp contribution to surface_loss is **4.9× larger** than τ contribution (0.0206 vs 0.0042). τ gradient share starved →:
+- val_abupt H22=7.110% vs H11b=6.411% (+0.70pp WORSE at matched epoch)
+- val_WSS H22=8.154% vs H11b=7.166% (+0.99pp WORSE)
+- val_τz H22=10.71% vs H11b ~9.0% (+1.7pp WORSE)
+
+Stacking H22 with a winning τ-attack would DEGRADE τ accuracy at the loss-aggregation level. **NOT-STACKABLE — premise dead.**
+
+### Closure rationale
+
+This is the **4th decisive negative result in Wave 30** (joining H16, H16b, H20). Floor-preservation via cp-side loss reformulation is now CLOSED:
+
+1. cp errors descend monotonically under MSE — there is no gradient saturation to fix
+2. MAE-equivalent on cp produces identical val_SP descent to MSE
+3. The disease causing test_SP floor breach is downstream of cp accuracy — correlates with τ_z magnitude error in shared backbone capacity
+4. ε=0.1 follow-up rejected — would not change the diagnosis
+
+### Key Wave 31 implication
+
+Future floor-preservation attacks must target either:
+- **τ-side directly** (e.g., Charbonnier on τ_z, though faces rel_L2 normalization headwind)
+- **cp/τ representation coupling at backbone level** (H25 ALGP is in this direction)
+- **Per-channel grad-norm equalization** (suggested as standard future diagnostic by thorfinn)
+- **NOT cp-side loss reformulation** — exhausted
+
+### Pre-launch budget verification
+
+Thorfinn's `printenv SENPAI_TIMEOUT_MINUTES=360.0` documented pre-launch is the cleanest end-to-end evidence of the budget bug to date — to be posted to #1056.
+
+---
+
 ## 2026-05-17 16:00 — PR #1170: H20 Focal Vertex Loss (alphonse) — CLOSED TERMINAL-NULL (mechanism executed, band-break cold-start artifact, rel_L2 metric geometry kills focal gains)
 
 - **Branch**: `alphonse/h20-focal-vertex-loss` (closed)

@@ -1,11 +1,70 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~16:40 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~17:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~16:40Z) — Mid-Wave-30 status update
+## Latest invocation actions (2026-05-17 ~17:00Z) — H22 closed, H26 NPCA assigned
+
+### Headline updates
+
+1. **PR #1172 thorfinn H22 CLOSED TERMINAL-NEUTRAL** — Charbonnier-cp + MAE-aux. Mechanism wired correctly but **decisively falsified at EP3**:
+   - cp_charb/cp_mae ratio 0.97 → effective loss is `1.5·|e|` (MAE-equivalent, smooth-L1 transition not engaged at ε=1e-3)
+   - val_SP @ EP3 = 4.405% **MATCHES** H10b 4.422% and H11b 4.368% — NOT steeper. cp descent under MAE-equivalent is identical to MSE
+   - Critical side effect: τ-channel REGRESSION (cp loss contribution 4.9× larger than τ at EP3) → val_abupt +0.70pp WORSE than H11b, val_WSS +0.99pp WORSE
+   - test_SP 4.079% (+0.502pp floor breach), test_vol_p 4.139% (+0.496pp floor breach), test_abupt 6.849% (+1.005pp baseline regression)
+   - **NOT-STACKABLE** — premise dead. Floor-preservation via cp-side loss reformulation now CLOSED.
+   - Student's pre-launch `printenv SENPAI_TIMEOUT_MINUTES=360.0` doc is the cleanest end-to-end budget bug evidence to date.
+
+2. **PR #1177 thorfinn H26 NPCA ASSIGNED** — Normal-Projected Coordinate Augmentation. Lightweight encoder-input feature augmentation: Gram-Schmidt local tangent frame `[t1, t2]` from existing normals, project global position onto `[p·n, p·t1, p·t2]`, append 3 scalar features to `project_surface_features` input (4→7 dims). **Parameter-free local frame** (deterministic Gram-Schmidt), zero-init of new weight columns ensures baseline-identical start. **First Wave 30 attack on encoder INPUT content** (orthogonal to H24 slice-temperature, H25 backbone-aux-loss). Targets band attractor `[1.44, 1.55]` at the most upstream lever. EP3 falsifiable gate: `std(τz/τx | per-val-car) ≥ 0.04` AND ≥ 1/34 val cars outside [1.40, 1.60]. NOT same failure as H17 (output reparam, convergence gap) — H26 keeps output basis global. Literature anchors: Intrinsic Vector Heat Network (ICML 2024), Beyond Canonicalization (ICLR 2025).
+
+3. **frieren H23 EP2 PENDING (~17:15Z)** — runtime 4.25h, EP~1.3. Earlier W&B check confused EP1 (37.95%) with EP2; EP2 has not been reported yet. EP2 gate: ≤20% PASS / ≤25% MARGINAL / >25% KILL.
+
+4. **edward H12 STALL CONFIRMED** — val_abupt 6.290% at EP9.6, slope −0.005%/1k (essentially flat). tau_mag_weight mean=0.858, p95=1.465, max=2.283 (weights too concentrated near 1.0, mechanism not engaging). val_vol_p marginal at +0.031pp above floor. EP10 imminent.
+
+5. **tanjiro H18 SLOW DESCENT** — val_abupt 6.635% at EP8.9, slope −0.015%/1k (3× faster than edward). val_vol_p only +0.018pp above floor — close to passing. τz/τx 1.482 still in band (cold-start break faded EP3 1.412 → EP9 1.482). EP10 imminent.
+
+### Fleet status (8/8 active after H26 assignment)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| askeladd | #1167 | H11b gated multi-scale input | EP~9, fleet best val 6.059% (only baseline crosser) |
+| fern | #1174 | H24 GSTS encoder slice-temperature | just launched, identity-init verified |
+| edward | #1151 | H12 τ-magnitude weighted MSE | EP9.6 stalled 6.290%, val_vol_p marginal floor |
+| nezuko | #1171 | H21 per-component output heads | EP7 slope re-acceleration 6.557%, EP13 projection 6.08% |
+| tanjiro | #1163 | H18 area-weighted MSE | EP8.9 6.635%, val_vol_p +0.018pp from floor, band re-collapsed |
+| frieren | #1173 | H23 Mean Teacher self-distillation | EP1.3 awaiting EP2 gate (~17:15Z) |
+| alphonse | #1176 | H25 ALGP auxiliary local-gradient prediction | just launched |
+| **thorfinn** | **#1177** | **H26 NPCA local-frame input aug** | **just assigned (bold orthogonal — encoder input)** |
+
+### Closed Wave 30 directions (now 5 confirmed dead ends)
+
+1. Per-vertex error reweighting (H18, H20) — rel_L2 normalization erases absolute-residual gains
+2. Static Huber on τ (H16, H16b) — frac_in_L1 decays 40× over training, single calibration insufficient
+3. Bounded-exp output activation (H10, H10b) — 73%/27% mag/dir split structural in encoder, NOT output
+4. Output tangent-frame reparameterization (H17) — convergence gap too large for 13ep at lr=9e-5
+5. **Charbonnier on cp + MAE-aux (H22)** — cp-MSE saturation is NOT the disease, MAE-equivalent matches MSE
+
+### KEY DIAGNOSTIC — H22 closure refines floor-breach diagnosis
+
+Test_SP floor breach is NOT caused by cp gradient saturation. cp errors descend monotonically under MSE (H10b/H11b) and under MAE-equivalent (H22) — same trajectory. Therefore the test_SP disease is downstream of cp accuracy:
+- Likely **structural in cp/τ representation coupling at backbone level** → H25 ALGP (in flight) addresses this
+- Could be **rel_L2 metric weighting large-cp regions differently than training loss** → no current attack on this
+- Per-channel grad-norm equalization is the natural future diagnostic
+
+### Floor-breach pattern (snapshot @ 17:00Z)
+
+| Student | PR | EP~ | val_abupt | val_SP | val_vol_p | τz/τx |
+|---|---|---|---|---|---|---|
+| askeladd H11b | #1167 | 9 | **6.059%** (#1) | 4.055% (+0.478) | 3.786% (+0.143) | 1.554 |
+| nezuko H21 | #1171 | 7 | 6.557% | 4.289% (+0.712) | 3.841% (+0.198) | 1.539 |
+| edward H12 | #1151 | 9.6 | 6.290% | 4.105% (+0.528) | 3.674% (+0.031 MARGINAL) | 1.554 |
+| tanjiro H18 | #1163 | 8.9 | 6.635% | 4.327% (+0.750) | 3.661% (+0.018 MARGINAL) | 1.482 |
+
+**Two runs (edward, tanjiro) have val_vol_p within +0.05pp of floor** — first within-noise approaches to floor pass since fern H10b's terminal pass. EP10-13 trajectory decides.
+
+## Previous invocation actions (2026-05-17 ~16:40Z) — Mid-Wave-30 status update
 
 ### Headline updates
 
