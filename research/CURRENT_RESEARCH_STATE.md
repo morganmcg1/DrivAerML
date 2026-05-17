@@ -1,11 +1,50 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~16:20 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~16:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~16:20Z) — (1) **fern H10b CLOSED TERMINAL NOT-A-MERGE** (first test_vol_p floor pass 3.481%, 73%/27% split structural in encoder, H24 assigned); (2) **alphonse H20 CLOSED TERMINAL-NULL** (band-break cold-start artifact 1.401→1.523 by EP3, rel_L2 metric geometry kills focal gains, per-vertex reweighting direction CLOSED); (3) **fern assigned H24 GSTS** (PR #1174, encoder slice-temperature sharpening); (4) **alphonse assigned H25 ALGP** (PR #1176, auxiliary local-gradient prediction forcing backbone to encode spatially coherent τ_z — FIRST backbone-representation-content attack in Wave 30); fleet **8/8 active**
+## Latest invocation actions (2026-05-17 ~16:40Z) — Mid-Wave-30 status update
+
+### Headline updates
+
+1. **thorfinn H22 SIGTERM @ 4.9h / EP3** — run `2y5zraax` finished early (360-min budget bug). val_abupt 7.110% at EP3 is **at-baseline-pace** (baseline #972 EP3 was ~7-8%) — NOT a mechanism failure, run was budget-killed before Charbonnier floor-preservation could take effect (typically EP8+). Requested student run offline test-eval on best-EP3 checkpoint to extract any signal. Closure decision pending eval results.
+
+2. **askeladd H11b NEW FLEET BEST val_abupt 6.059%** (down from EP5.8's 6.076%, at 13.9h ≈EP9) — still ONLY active-fleet baseline crosser, descending slowly. val_SP 4.055% (vs floor 3.577%, +0.478pp BREACH) remains binding merge blocker. EP10 gate ~18:00Z.
+
+3. **nezuko H21 EP7 slope RE-ACCELERATION** — vol curriculum advance 32768→49152 injected fresh descent: EP6→EP7 slope **−0.074pp/ep** (2.2× faster than EP5→EP6's −0.033pp/ep). EP7 val_abupt 6.557%, projected EP13 ~6.08% (below baseline 6.126%!). **Baseline beat back in play** if EP10 curriculum bump (65536 pts) maintains re-acceleration. Floor breach still binding (val_SP 4.289%, +0.712pp above floor at EP7).
+
+4. **fern H24 launched cleanly** — identity init verified (t_v=1.000 exactly at step 0, `geom_temp_std` 1.21e-06 step 0 → 3.41e-05 at step 497), SENPAI_TIMEOUT_MINUTES=1100 confirmed via /proc, no budget bug. Smoke loss 4.1→2.1 over 500 steps. Full 8-GPU 13ep run started 16:26Z. Acknowledged fern's correct flag pruning (`--vector-decoupled-head --direction-cos-loss-weight 0.1` were H10/H10b artifacts, not in current `tay`).
+
+5. **edward H12 stagnating** — val_abupt 6.290% at 13.4h (≈EP9-10), slope EP5.7→EP9-10 only −0.015pp/ep (severely flat). Projected NOT-A-MERGE. τz/τx 1.553 firmly in band — likely hitting same rel_L2 normalization blocker as H20 (per-token weighting can't beat absolute-residual erasure).
+
+6. **tanjiro H18 stagnating** — val_abupt 6.676% at 11.2h (≈EP8-9). Cold-start band-break faded EP3 1.412 → EP4.8 1.467 → EP9 **1.478** (drifting up toward band center). Confirms fleet-wide pattern: ALL EP1-3 band-breaks are cold-start residuals that fade.
+
+### Outstanding actions
+
+- thorfinn #1172: awaiting offline test-eval on EP3 best checkpoint (Path B execution)
+- frieren #1173: EP2 mechanism gate ~17:15Z (Mean Teacher kill-or-continue decision)
+- edward #1151, tanjiro #1163: EP10 gates ~17:00Z (both projected NOT-A-MERGE)
+- askeladd #1167: EP10 gate ~18:00Z (val_SP slope-watch for floor approach)
+- nezuko #1171: EP10 gate ~18:30Z (vol curriculum 65536 bump — does slope hold?)
+- fern #1174: EP1 expected ~17:30Z
+- alphonse #1176: launch confirmation expected
+- 4 status check-ins posted (#1172, #1167, #1151, #1163)
+
+### Floor-breach pattern (snapshot @ 16:40Z)
+
+| Student | PR | EP~ | val_abupt | val_SP | val_vol_p | τz/τx |
+|---|---|---|---|---|---|---|
+| **askeladd H11b** | #1167 | ~9 | **6.059%** (#1) | 4.055% (+0.478 floor) | 3.786% (+0.143 floor) | 1.554 |
+| nezuko H21 | #1171 | 7 | 6.557% | 4.289% (+0.712 floor) | 3.841% (+0.198 floor) | 1.539 |
+| edward H12 | #1151 | ~10 | 6.290% | 4.105% (+0.528 floor) | 3.674% (+0.031 floor) | 1.553 |
+| tanjiro H18 | #1163 | ~9 | 6.676% | 4.349% (+0.772 floor) | 3.670% (+0.027 floor) | 1.478 |
+| thorfinn H22 | #1172 | 3 (SIGTERM) | 7.110% | 4.405% | 4.166% | 1.502 |
+
+**Critical pattern**: 4/5 active mid-fleet runs hover at val_vol_p within +0.03–0.20pp of floor (3.643%). This is the test_vol_p floor pass that fern H10b achieved at terminal (3.481%) — multiple ongoing runs are positioned to test it. Test_SP floor (3.577%) is breached by >+0.45pp in all 5 — the dominant merge blocker fleet-wide.
+
+## Previous invocation actions (2026-05-17 ~16:20Z) — (1) **fern H10b CLOSED TERMINAL NOT-A-MERGE** (first test_vol_p floor pass 3.481%, 73%/27% split structural in encoder, H24 assigned); (2) **alphonse H20 CLOSED TERMINAL-NULL** (band-break cold-start artifact 1.401→1.523 by EP3, rel_L2 metric geometry kills focal gains, per-vertex reweighting direction CLOSED); (3) **fern assigned H24 GSTS** (PR #1174, encoder slice-temperature sharpening); (4) **alphonse assigned H25 ALGP** (PR #1176, auxiliary local-gradient prediction forcing backbone to encode spatially coherent τ_z — FIRST backbone-representation-content attack in Wave 30); fleet **8/8 active**
 
 ### Actions this invocation (16:20Z May 17)
 
