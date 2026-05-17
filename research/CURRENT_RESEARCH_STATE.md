@@ -1,5 +1,5 @@
 # SENPAI Research State
-- 2026-05-17 01:25 UTC (**H7 CLOSED NOT-A-MERGE (test_wss=7.006 +0.279 vs SOTA); H9b EP10 CLAMP LOAD-BEARING (vol_p=3.828, slope -0.015, EP30 proj clears floor); H10b EP7 τ_z slope decel (-0.012) — EP8 hot-swap decision pending; H11b EP7 gap closing 0.644pp; H12 separate-τ-head ASSIGNED to fern PR #1166**)
+- 2026-05-17 01:50 UTC (**H10b EP8 BRANCH-3 SATURATED — all 7 axes regressed, τ_z slope sign-flipped to +0.111, wait-for-EP9 decision (~02:18Z); H9b EP10 wss at-gate 7.050 but slopes RE-ACCELERATING — continue to EP15 mid-run; H11b EP8 landed gap closing slower 0.59pp; H12 fern PR #1166 flag-mismatch corrected — Option 1 standalone H12 launch pending**)
 
 
 ## Human Research Directive (Issue #1056 — 2026-05-14)
@@ -51,14 +51,14 @@ H9 wave finding said "vol_p ceiling is representation-bound at 4.05%". **H9b EP3
 
 **This is the wave's first credible path to SOTA-on-aggregate (all 7 axes under SOTA #972).**
 
-## Active Experiments (2026-05-17 01:25 UTC)
+## Active Experiments (2026-05-17 01:50 UTC)
 
 | Student | PR | Hypothesis | EP / Duration | val_abupt | val_wss | val_vol_p | val_surf_p | Notes |
 |---------|-----|-----------|---------------|----------:|--------:|----------:|-----------:|-------|
-| dl24-fern | #1166 | **H12: separate τ head (2-layer MLP for τ_x/τ_y/τ_z vs linear cp)** | **JUST LAUNCHED** | — | — | — | — | Replace single `LinearProjection(n_hidden, 4)` with independent cp head + 2-layer MLP τ head. H9b stack. EP10 gate: val_wss ≤ 6.3%, val_τ_z ≤ 9.4%. Targets architecture bottleneck (no prior experiment has touched output head). |
-| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP10 LANDED** / 6h | 6.276% | 7.051% | **3.828%** ✅ | 4.200% | **CLAMP LOAD-BEARING**: w_vol_p=0.150 at floor, slope -0.015 sustained. EP30 proj: val_vol_p ~3.53-3.63% → test ~3.39-3.49% **CLEARS floor** ✅. surf_p stalled at 4.20% → test ~4.0% **BREACH floor 3.577** ❌. wss EP30 → test ~6.78% (marginal +0.05 above SOTA). EP15 mid-run review (~03:30Z). |
-| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP7 LANDED** / 5.2h | 6.302% | **6.976%** ✅ | 4.263% | 4.094% | τ_z slope -0.012 (border converge threshold -0.015). vol_p slope -0.005 (STALLED). Charb ratio ~1.0 (saturated). **EP8 HOT-SWAP DECISION**: slope ≥-0.012 = hot-swap to weight=0.05; slope rebound ≤-0.025 = continue. Δ_τ_z vs H9b WIDENED to -0.196 (lead preserved). MARGINAL wss-only beat candidate. |
-| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** | **EP7 LANDED** / 5h | 6.973% | 7.711% | 4.726% | 4.682% | Decay factor 0.62-0.76 (faster than expected). Gap to H9b EP7=0.644pp (closing -0.132/ep). EP30 proj val_abupt ~6.49%. Continue to EP10 decision gate. NOT a SOTA-beat candidate but clean isolation experiment. |
+| dl24-fern | #1166 | **H12: separate τ head (2-layer MLP for τ_x/τ_y/τ_z vs linear cp)** | **AWAITING LAUNCH** | — | — | — | — | Student correctly flagged that PR command referenced H9b-stack flags (`--use-curvature-bias`, `--use-mae-aux`, `--grad-clamp`, `--volume-sdf-alpha`) NOT in advisor branch. Posted corrected Option 1: standalone H12 on PR #939 baseline stack (6L STRING + Lion lr=1e-4 + GradNorm α=0.5 + Y-sym + WD=0.005), 30 epochs. EP3 sanity / EP5 viability / EP10 hard gate (val_τ_z ≤ ref −0.3pp). Architecture-orthogonal — stacks on H9b post-merge. |
+| dl24-tanjiro | #1157 | **H9b: clamp=0.15 + curvature bias + vol_p MAE aux 0.05** | **EP10 LANDED, EP11 mid-flight** / 6.5h | 6.276% | 7.051% | **3.828%** ✅ | 4.200% | wss=7.0505% = at-gate (+0.0005pp over 7.05 strict kill, precision noise); vol_p slope EP9→10 RE-ACCELERATING to −0.015 (vs EP8→9 −0.006). Clamp DDP-mean pinned at 0.150 (load-bearing). Train clean (no NaN). EP30 proj: τ_y test ~7.33 (UNDER SOTA τ_y 7.362 by 0.03pp), but wss test ~6.86 (+0.13pp over), surf_p test ~4.07 (breach). **Continue to EP15 mid-run review (~03:35Z)**. |
+| dl24-frieren | #1159 | **H10b: H9 curvature bias + Charbonnier on τ_z only** | **EP8 BRANCH-3 SATURATED** / 6h | 6.445% | 7.104% | 4.489% | 4.222% | **CATASTROPHIC EP7→8 REGRESSION**: τ_z slope +0.111 (sign-flipped from −0.012), ALL 7 axes regressed, H9b lead collapsed from −0.196pp τ_z to −0.050pp. Train internally healthy (no NaN, clamp never fired). Single train_loss spike of 1.15 at step 82k = inflection point. **Mechanism likely Charb-saturated local minimum trap.** Wait-for-EP9 (~02:18Z): if recovers → hot-swap weight=0.05; if flat → kill weight=0.03; if regresses → KILL + declare Charb-late-saturation wave finding. |
+| dl24-nezuko | #1160 | **H11b: AdamW lr=5e-4 + per-axis WSS τ-weights** | **EP8 LANDED** / 6h | 6.889% | 7.629% | 4.615% | 4.623% | EP7→8 slopes DECELERATING: abupt −0.084 (vs −0.145 EP6→7, 0.58× decay). Gap to H9b: +0.588pp (closing only -0.056/ep vs prior -0.132/ep). EP30 asymptote proj: abupt ~6.49% (+0.39pp vs H9b), wss ~7.29% (+0.44pp vs H9b). **Not a SOTA-beat candidate.** Continue to EP10 decision: gap > 0.50pp = close-recommend; ≤ 0.40pp = continue. |
 
 **Step rate**: Both Lion AND AdamW run at ~4-5 steps/sec → 30-epoch run ≈ **33 hours**.
 
