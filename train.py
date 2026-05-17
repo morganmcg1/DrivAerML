@@ -382,6 +382,15 @@ def log_multiscale_input_stats(config: Config, train_loader: DataLoader) -> None
     )
 
 
+def resolve_num_multiscale_channels(config: Config) -> int:
+    """Return the number of multi-scale channels appended to surface_x."""
+
+    if not config.use_multiscale_context:
+        return 0
+    k_values = parse_multiscale_k_values(config.multiscale_k_values)
+    return multiscale_surface_dim(k_values)
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -397,6 +406,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         surface_input_dim=resolve_surface_input_dim(config),
+        num_multiscale_channels=resolve_num_multiscale_channels(config),
     )
 
 
@@ -975,6 +985,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
             if config.use_multiscale_context:
                 log_multiscale_input_stats(config, train_loader)
+            init_gate = getattr(base_model, "multiscale_gate", None)
+            if init_gate is not None:
+                init_gate_vals = init_gate.detach().float().cpu().tolist()
+                wandb.summary["multiscale_gate/init_values"] = init_gate_vals
+                wandb.summary["multiscale_gate/init_mean_abs"] = float(
+                    sum(abs(v) for v in init_gate_vals) / max(len(init_gate_vals), 1)
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1219,6 +1236,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
 
+                gate = getattr(base_model, "multiscale_gate", None)
+                if gate is not None:
+                    gate_vals = gate.detach().float().cpu()
+                    train_log["train/multiscale_gate/mean_abs"] = float(gate_vals.abs().mean())
+                    train_log["train/multiscale_gate/max_abs"] = float(gate_vals.abs().max())
+                    train_log["train/multiscale_gate/l2"] = float(gate_vals.norm())
+                    train_log["train/multiscale_gate/min"] = float(gate_vals.min())
+                    train_log["train/multiscale_gate/max"] = float(gate_vals.max())
+                    for i, g in enumerate(gate_vals.tolist()):
+                        train_log[f"train/multiscale_gate/channel_{i}"] = float(g)
+
                 train_log.update(
                     train_slope_tracker.update(
                         global_step=global_step,
@@ -1427,10 +1455,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             return
 
         distributed_barrier(state)
+        final_gate = getattr(base_model, "multiscale_gate", None)
         if not state.is_main:
             wandb.summary.update({"total_train_minutes": total_minutes})
             wandb.finish()
             return
+        if final_gate is not None:
+            final_vals = final_gate.detach().float().cpu().tolist()
+            abs_vals = [abs(v) for v in final_vals]
+            wandb.summary["multiscale_gate/final_values"] = final_vals
+            wandb.summary["multiscale_gate/final_mean_abs"] = float(
+                sum(abs_vals) / max(len(abs_vals), 1)
+            )
+            wandb.summary["multiscale_gate/final_max_abs"] = float(max(abs_vals) if abs_vals else 0.0)
 
         if not best_metrics:
             wandb.summary.update(

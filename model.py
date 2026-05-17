@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from data import SURFACE_X_DIM, SURFACE_Y_DIM, VOLUME_X_DIM, VOLUME_Y_DIM
+from data import SURFACE_X_DIM, SURFACE_X_DIM_BASE, SURFACE_Y_DIM, VOLUME_X_DIM, VOLUME_Y_DIM
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        num_multiscale_channels: int = 0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,8 +397,22 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.num_multiscale_channels = int(num_multiscale_channels)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
+
+        if self.num_multiscale_channels > 0:
+            expected = SURFACE_X_DIM_BASE + self.num_multiscale_channels
+            if self.surface_input_dim != expected:
+                raise ValueError(
+                    f"num_multiscale_channels={self.num_multiscale_channels} "
+                    f"requires surface_input_dim={expected} (base {SURFACE_X_DIM_BASE} + "
+                    f"multiscale {self.num_multiscale_channels}); got surface_input_dim="
+                    f"{self.surface_input_dim}"
+                )
+            self.multiscale_gate = nn.Parameter(torch.zeros(self.num_multiscale_channels))
+        else:
+            self.multiscale_gate = None
 
         if pos_encoding_mode == "string_multisigma":
             string_sep_features = rff_num_features if rff_num_features > 0 else 16
@@ -559,6 +574,11 @@ class SurfaceTransolver(nn.Module):
             raise ValueError("SurfaceTransolver requires surface_mask when surface_x is provided")
         if volume_x is not None and volume_mask is None:
             raise ValueError("SurfaceTransolver requires volume_mask when volume_x is provided")
+
+        if surface_x is not None and self.multiscale_gate is not None:
+            base = SURFACE_X_DIM_BASE
+            gated = surface_x[..., base:] * self.multiscale_gate
+            surface_x = torch.cat([surface_x[..., :base], gated], dim=-1)
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
