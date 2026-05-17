@@ -55,6 +55,7 @@ from trainer_runtime import (
     loader_kwargs,
     make_loaders,
     masked_mse,
+    masked_per_component_rel_l2,
     metric_namespace,
     weighted_channel_mse,
     parse_kill_thresholds,
@@ -138,6 +139,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    rel_l2_loss: bool = False
     debug: bool = False
 
 
@@ -321,6 +323,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    rel_l2_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,20 +335,40 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
-                batch.surface_mask,
-                surface_channel_weights,
-            )
-        else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-        weighted_surface_loss = surface_loss_weight * surface_loss
-        weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
-        base_mse_loss = surface_loss + volume_loss
+    if rel_l2_loss:
+        # H27 PRLP: compute per-car per-component rel-L2 in DENORMALIZED
+        # physical space OUTSIDE the autocast context with fp32 throughout.
+        # invert_surface multiplies by std (e.g. ~800 Pa for cp), and the
+        # gradient back through bf16 autocast cached ops produced NaN grads
+        # in the first launch — forcing fp32 here is the standard AMP-safe
+        # pattern for custom losses. surface_channel_weights is intentionally
+        # bypassed: rel-L2 is already per-component normalized.
+        surface_pred_fp32 = out["surface_preds"].float()
+        volume_pred_fp32 = out["volume_preds"].float()
+        surface_pred_denorm = transform.invert_surface(surface_pred_fp32)
+        volume_pred_denorm = transform.invert_volume(volume_pred_fp32)
+        surface_loss = masked_per_component_rel_l2(
+            surface_pred_denorm, batch.surface_y, batch.surface_mask
+        )
+        volume_loss = masked_per_component_rel_l2(
+            volume_pred_denorm, batch.volume_y, batch.volume_mask
+        )
+    else:
+        with autocast_context(device, amp_mode):
+            if surface_channel_weights is not None:
+                surface_loss = weighted_channel_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+            else:
+                surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+    weighted_surface_loss = surface_loss_weight * surface_loss
+    weighted_volume_loss = volume_loss_weight * volume_loss
+    loss = weighted_surface_loss + weighted_volume_loss
+    base_mse_loss = surface_loss + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
@@ -852,6 +875,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.rel_l2_loss:
+                print(
+                    "H27 PRLP: training loss = per-car per-component rel-L2 in "
+                    "DENORMALIZED physical space (surface_channel_weights bypassed)."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +911,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/rel_l2_loss"] = bool(config.rel_l2_loss)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1059,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        rel_l2_loss=config.rel_l2_loss,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1100,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if config.rel_l2_loss:
+                        train_log.update(
+                            {
+                                "train/rel_l2_loss_total": float(loss.detach().cpu().item()),
+                                "train/surface_rel_l2": batch_loss_metrics["surface_loss"],
+                                "train/volume_rel_l2": batch_loss_metrics["volume_loss"],
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

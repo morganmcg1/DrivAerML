@@ -887,6 +887,39 @@ def squared_relative_l2_loss(
     return pred.sum() * 0.0
 
 
+def masked_per_component_rel_l2(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Per-car, per-component relative-L2 loss mirroring the eval metric.
+
+    pred, target: [B, N, C] — must be in DENORMALIZED (physical) space.
+    mask: [B, N] bool.
+
+    Computes mean over (valid_cars × components) of:
+        sqrt( sum_points((pred-tgt)^2) / sum_points(tgt^2) )
+
+    Mirrors _accumulate_case_rel_l2 + _rel_l2 but operates per-component
+    (axis C) rather than collapsing all channels together.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    pred = pred.float()
+    target = target.float()
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    diff_sq = (pred - target).square() * mask_f       # [B, N, C]
+    target_sq = target.square() * mask_f              # [B, N, C]
+    num = diff_sq.sum(dim=1)                          # [B, C]
+    den = target_sq.sum(dim=1).clamp_min(eps)         # [B, C]
+    per_car_per_comp = (num / den).sqrt()             # [B, C]
+    valid_cars = mask.any(dim=1)                      # [B]
+    if not bool(valid_cars.any()):
+        return pred.sum() * 0.0
+    return per_car_per_comp[valid_cars].mean()
+
+
 EVAL_KEYS = (
     "surface_pressure",
     "wall_shear",
