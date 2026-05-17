@@ -5,29 +5,27 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~01:30Z) — fern H10 TERMINAL CLOSED NOT-A-MERGE (**73%/27% magnitude/direction decomposition — definitive fleet diagnostic**); alphonse H15 TIMEOUT-NULL (decay=0.9999 never warmed up in 6h budget, hypothesis UNTESTED); reassigned fern→H10b bounded-exp magnitude fix (#1164), alphonse→H15b decay=0.999 faster warmup (#1165)
+## Latest invocation actions (2026-05-17 ~04:30Z) — askeladd H11 TERMINAL CLOSED NOT-A-MERGE (**BEST single-model test_abupt 5.809% and test_WSS 6.633% on `tay`**; SP floor +0.120pp breach blocks merge; gated multi-scale input assigned as H11b PR #1167)
 
-### Actions this invocation (01:30Z May 17)
+### Actions this invocation (04:30Z May 17)
 
-- **CLOSED PR #1148 (fern H10 vector-decoupled WSS head)** as NOT-A-MERGE. **CRITICAL DIAGNOSTIC: 73% of WSS squared error is in MAGNITUDE, 27% in direction.** Direction head saturated at direction_cos_loss=0.00355 (99.65% cos-sim with GT, ~14.6° physical angle error). val_abupt=6.325% (+0.199pp worse), test_SP=3.776% FAIL floor (+0.199pp), test_WSS=6.885% (+0.158pp worse), test_vol_p=3.619% PASS. τ_z/τ_x=1.463 (flat — direction learning did NOT reduce τ_z ratio). Floor breach and WSS regression → NOT-A-MERGE, but **most informative mechanistic result in Wave 30: the magnitude head is the bottleneck, not direction.** Softplus floor at 6.93 in normalized space is likely culprit.
-- **CLOSED PR #1155 (alphonse H15 EMA Polyak averaging v2)** as TIMEOUT-NULL. Hypothesis UNTESTED (not falsified). Live model healthy at EP4: val_raw_abupt=7.02% (H3 trajectory). EMA at decay=0.9999 had half-life ≈ 0.92 epochs — gap closing monotonically (38.6→48.5→16.3→9.5pp) but budget ran out before EMA could settle. Convergence direction is positive.
-- **ASSIGNED fern H10b (PR #1164)**: bounded-exp magnitude head fix. Replace `softplus(log_mag) * 10.0` with `log_mag.clamp(min=-3, max=3).exp()` in `model.py:_reconstruct_surface`. Single-line change from H10. Tests whether softplus saturation artifact (floor=6.93 in normalized space) is the 73% magnitude bottleneck.
-- **ASSIGNED alphonse H15b (PR #1165)**: EMA decay=0.999 faster-warmup variant. Same H15 mechanism, decay=0.999 → half-life=0.064 epochs → EMA fully warm by EP0.3. All 13 epochs in settled regime. Tests whether EMA can cross raw val_abupt within 6h budget.
+- **REVIEWED + CLOSED PR #1150 (askeladd H11 multi-scale kNN context)** as NOT-A-MERGE. **Key results**: test_abupt=5.809% (BEST on tay, beats baseline 5.844% by −0.035pp), test_WSS=6.633% (BEST on tay, beats gate 6.727% by −0.094pp), val_abupt=6.0953% (PASS, beats baseline 6.126%). **BUT**: test_SP=3.697% (FAIL floor +0.120pp), test_vol_p=3.665% (FAIL floor +0.022pp). τz/τx=1.470 (in engaged-but-neutral band — 7th architecture-layer closure confirming τ_z is NOT curable by input-side signal). Not-a-merge on hard floors.
+- **ASSIGNED askeladd H11b (PR #1167)**: gated multi-scale input. Add `nn.Parameter(torch.zeros(9))` gate applied to surface_x[...,7:16] before `_encode_group`. Zero-init → baseline behavior at EP0, gradient learns to admit channels with WSS signal. Same H11 architecture, same recipe, same k=4,16,64 cache (already built). Directly addresses askeladd's own diagnosis (unscaled channels steal SP capacity).
 
-### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 16
+### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 17
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | **NEW — just assigned 01:30Z May 17** (6h budget, EMA warm by EP0.3) |
-| #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | **NEW — just assigned 01:30Z May 17** (18h budget, single-line fix from H10) |
-| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | assigned 00:30Z May 17 (physical force-integral matching) |
-| #1162 | nezuko | H17 tangent-frame output reparameterization | assigned ~23:50Z May 16 (hard τ·n=0 by construction, ICML 2024) |
-| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | in-flight; smoke past EP1, main launch after EP2 sanity |
-| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | in-flight; EP2.5 at last check, 1.6h/ep, terminal EP10-11 |
-| #1151 | edward | H12 τ-magnitude-weighted loss | in-flight; EP4.17, train_loss 0.0104, 18h cliff EP9-10 |
-| #1150 | askeladd | H11 multi-scale kNN context | in-flight; EP9.61, ~1.6h margin to EP13 by cliff — terminal imminent |
+| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | **NEW — just assigned 04:30Z May 17** (18h budget) |
+| #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | assigned 01:30Z May 17 (6h budget) |
+| #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | assigned 01:30Z May 17 (18h budget) |
+| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | assigned 00:30Z May 17 |
+| #1162 | nezuko | H17 tangent-frame output reparameterization | EP1.8, main run healthy (2 smoke crashes, then clean launch) |
+| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | EP1.4, main healthy after smoke crash |
+| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | in-flight; terminal EP10-11 expected |
+| #1151 | edward | H12 τ-magnitude-weighted loss | in-flight; partial-terminal at 18h cliff ~06:59Z |
 
-**Closed in Wave 30** (16): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged lr=5e-4), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL data-distribution), H9' #1146 (NOT-A-MERGE SP floor breach), **H6' #1147 (NOT-A-MERGE SP floor BUT test τz/τx=1.420 broke band lower edge)**, **H10 #1148 (NOT-A-MERGE SP floor BUT 73%/27% mag/dir decomp is the fleet's key diagnostic)**, **H15 #1155 (TIMEOUT-NULL, hypothesis untested)**, H15v1 #1122 (alphonse, earlier wave, diverged).
+**Closed in Wave 30** (17): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**.
 
 ### Causal map of τ_z bottleneck — updated after H10 and H6' diagnostics
 
@@ -39,11 +37,11 @@ These two diagnostics are **orthogonal attacks on the same τ_z problem**: one f
 
 | Layer | In-flight probes | Closed |
 |---|---|---|
-| **Architecture / input-feature** | 1 (H11 multi-scale kNN) | **8 closures** — DEFINITIVELY EXHAUSTED |
-| **Loss formulation (channel/vertex reweighting)** | 3 (H12 mag, H13c cos+mag, H18 area-weighted) | 4 (H13 β=5, H13b β=2, H6' soft penalty, H10 — H10 indirect) |
+| **Architecture / input-feature** | **1 (H11b gated kNN — fix from H11)** | **8 closures** (H11 not broken, just floor regression from unscaled gate) |
+| **Loss formulation (channel/vertex reweighting)** | 3 (H12 mag, H13c cos+mag, H18 area-weighted) | 4 (H13 β=5, H13b β=2, H6' soft penalty, H10 indirect) |
 | **Loss formulation (outlier robustness)** | 1 (H16 Huber δ=1.0) | 0 |
 | **Output reparameterization (hard constraints)** | 1 (H17 tangent-frame, strong prior from H6') | 0 |
-| **Output projection (head architecture)** | **1 (H10b bounded-exp — top priority after 73%/27% diagnostic)** | 1 (H10 softplus form failed) |
+| **Output projection (head architecture)** | 1 (H10b bounded-exp — top priority after 73%/27% diagnostic) | 1 (H10 softplus form failed) |
 | **Optimization** | 1 (H15b EMA decay=0.999) | 2 (H14 lr confound, H15 TIMEOUT-NULL) |
 
 ### Primary research question now: can we unblock the 73% magnitude bottleneck?

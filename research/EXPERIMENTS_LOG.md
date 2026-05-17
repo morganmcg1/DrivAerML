@@ -1,3 +1,41 @@
+## 2026-05-17 04:30 — PR #1150: H11 Multi-Scale kNN Context Features (askeladd) — CLOSED NOT-A-MERGE (**BEST single-model test_abupt 5.809% and test_WSS 6.633% on `tay`; SP +0.120pp / vol_p +0.022pp floor breach blocks merge; reassigned to H11b gated-input PR #1167**)
+
+- **Branch**: `askeladd/multi-scale-knn-context` (closed)
+- **W&B group**: `wave30_h11_multiscale_context`
+- **W&B run IDs (8 ranks)**: `vgfkotop`, `ta13zohv`, `od6kf98i`, `cw26gfyy`, `vzkp5zun`, `bf9h5gix`, `zroqhyzk`, `a6lv3p12` (rank0: `vgfkotop`)
+- **Best checkpoint**: EP12 (EMA source)
+- **Hypothesis**: Inject per-vertex multi-scale geometric context as 9 additional surface-x channels (3 statistics × 3 kNN scales k=4,16,64): mean cosine alignment of neighbor normals, log mean panel area per scale, log mean L2 distance. Hypothesis: richer geometric context enables better τ_z discrimination at creases and fender edges.
+
+### Terminal results (EP13 complete, 841.3 min / 1100 min budget)
+
+| Metric | H11 result | Baseline #972 | Δ | Gate |
+|---|---:|---:|---:|:--|
+| **val_abupt** | **6.0953%** | 6.126% | **−0.031pp WIN** | PASS |
+| **test_abupt** | **5.809%** | 5.844% | **−0.035pp WIN** | **BEST single-model on `tay`** |
+| **test_WSS** | **6.633%** | 6.727% | **−0.094pp WIN** | **BEST single-model on `tay`** |
+| test_vol_p | 3.665% | 3.643% (floor) | **+0.022pp** | **FAIL FLOOR** |
+| test_SP | 3.697% | 3.577% (floor) | **+0.120pp** | **FAIL FLOOR** |
+| test τz/τx | 1.470 | ~1.46 band | flat | engaged-but-neutral |
+
+vs dl24-tanjiro #1132 reference (test_WSS=6.609%, different data stack): +0.024pp behind.
+
+### Analysis
+
+**Mechanism IS positive on primary metrics.** test_abupt 5.809% is the lowest single-model test_abupt achieved on the tay stack with the corrected dataset. test_WSS 6.633% beats the single-model merge gate.
+
+**Floor regression mechanism**: 9 unscaled multi-scale channels concatenated unweighted at the input steal representational capacity from the SP head. The model must renormalise internally from EP0 onward, spending capacity that would otherwise serve SP regression. This is the capacity-stealing pattern.
+
+**τz/τx = 1.470**: solidly inside the [1.44, 1.55] engaged-but-neutral widening band of all 6 closed model-side architecture attacks. Multi-scale kNN context (like all architecture-layer inputs) cannot break the τ_z structural bottleneck — confirming the bottleneck is in the output head / loss formulation, not in the feature representation.
+
+**EP gate trajectory** (monotone improvement throughout):
+EP5.92: 6.285% → EP8.3: 6.215% → EP9.61: improving → EP11.23: 6.095% → EP12 (best): 6.0953%
+
+### Next step: H11b (PR #1167, askeladd)
+
+Add a learned diagonal gate `nn.Parameter(torch.zeros(9))` on the 9 multi-scale channels, applied in `forward()` before `_encode_group`. Zero-init → EP0 behavior = baseline (no multi-scale signal); gate warms from gradient, admitting only channels that help. Should restore SP/vol_p floors while preserving WSS gain. The prewarm cache (`surface_multiscale_k4_16_64_v1.npy`) is already built.
+
+---
+
 ## 2026-05-17 01:30 — PR #1155: H15 EMA Polyak Averaging v2 (alphonse) — CLOSED TIMEOUT-NULL (hypothesis UNTESTED, not falsified; decay=0.9999 never warmed up in 6h budget; live model healthy; reassigned to H15b decay=0.999 PR #1165)
 
 - **Branch**: `alphonse/h15-ema-polyak-averaging` (closed)
