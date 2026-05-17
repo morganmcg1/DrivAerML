@@ -54,7 +54,9 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    compute_area_vertex_weights,
     masked_mse,
+    masked_weighted_mse,
     metric_namespace,
     weighted_channel_mse,
     parse_kill_thresholds,
@@ -105,6 +107,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    use_area_weighted_loss: bool = False
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,10 +324,16 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_area_weighted_loss: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    vertex_weights: torch.Tensor | None = None
+    area_metrics: dict[str, float] = {}
+    if use_area_weighted_loss:
+        vertex_weights = compute_area_vertex_weights(batch.surface_x, batch.surface_mask)
+        area_metrics = _area_weight_diagnostics(vertex_weights, batch.surface_mask)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -338,6 +347,11 @@ def train_loss(
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
+                vertex_weights=vertex_weights,
+            )
+        elif vertex_weights is not None:
+            surface_loss = masked_weighted_mse(
+                out["surface_preds"], surface_target, batch.surface_mask, vertex_weights
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
@@ -346,12 +360,36 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+    }
+    metrics.update(area_metrics)
+    return loss, metrics
+
+
+def _area_weight_diagnostics(
+    vertex_weights: torch.Tensor,
+    surface_mask: torch.Tensor,
+) -> dict[str, float]:
+    """Summary stats for the per-vertex area weights (masked vertices only)."""
+    with torch.no_grad():
+        mask_bool = surface_mask.bool()
+        valid_weights = vertex_weights[mask_bool]
+        if valid_weights.numel() == 0:
+            return {}
+        w_max = float(valid_weights.max().item())
+        w_min = float(valid_weights.min().item())
+        w_p95 = float(torch.quantile(valid_weights.float(), 0.95).item())
+        dyn_range = w_max / max(w_min, 1e-8)
+    return {
+        "area_weighted/vertex_weight_max": w_max,
+        "area_weighted/vertex_weight_min": w_min,
+        "area_weighted/vertex_weight_p95": w_p95,
+        "area_weighted/effective_dynamic_range": dyn_range,
     }
 
 
@@ -364,6 +402,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    use_area_weighted_loss: bool = False,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -371,11 +411,18 @@ def per_task_train_losses(
     All five share the same forward graph so the GradNorm balancer can
     extract per-task gradient norms via ``torch.autograd.grad`` with
     ``retain_graph=True``.
+
+    When ``use_area_weighted_loss`` is True the four surface losses are
+    computed with per-vertex area weights (volume pressure stays unweighted
+    since it lives on a different mesh).
     """
 
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    vertex_weights: torch.Tensor | None = None
+    if use_area_weighted_loss:
+        vertex_weights = compute_area_vertex_weights(batch.surface_x, batch.surface_mask)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -384,10 +431,24 @@ def per_task_train_losses(
             volume_mask=batch.volume_mask,
         )
         surface_pred = out["surface_preds"]
-        sp_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
-        taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
-        tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
-        tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+        if vertex_weights is not None:
+            sp_loss = masked_weighted_mse(
+                surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask, vertex_weights
+            )
+            taux_loss = masked_weighted_mse(
+                surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask, vertex_weights
+            )
+            tauy_loss = masked_weighted_mse(
+                surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask, vertex_weights
+            )
+            tauz_loss = masked_weighted_mse(
+                surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask, vertex_weights
+            )
+        else:
+            sp_loss = masked_mse(surface_pred[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
+            taux_loss = masked_mse(surface_pred[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
+            tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
+            tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
         vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
     return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
 
@@ -883,6 +944,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/use_area_weighted_loss"] = config.use_area_weighted_loss
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -937,10 +999,24 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                area_diag_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        use_area_weighted_loss=config.use_area_weighted_loss,
                     )
+                    if config.use_area_weighted_loss:
+                        with torch.no_grad():
+                            _vw = compute_area_vertex_weights(
+                                batch.surface_x.to(device), batch.surface_mask.to(device)
+                            )
+                            area_diag_metrics = _area_weight_diagnostics(
+                                _vw, batch.surface_mask.to(device)
+                            )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
                     )
@@ -1030,7 +1106,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_area_weighted_loss=config.use_area_weighted_loss,
                     )
+                    if config.use_area_weighted_loss:
+                        for diag_key in (
+                            "area_weighted/vertex_weight_max",
+                            "area_weighted/vertex_weight_min",
+                            "area_weighted/vertex_weight_p95",
+                            "area_weighted/effective_dynamic_range",
+                        ):
+                            if diag_key in batch_loss_metrics:
+                                area_diag_metrics[diag_key] = batch_loss_metrics.pop(diag_key)
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1072,6 +1158,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if area_diag_metrics:
+                    train_log.update({f"train/{k}": v for k, v in area_diag_metrics.items()})
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)

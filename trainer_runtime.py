@@ -837,11 +837,35 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_weighted_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    vertex_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Per-vertex-weighted masked MSE.
+
+    pred / target: [B, N, C]; mask: [B, N]; vertex_weights: [B, N].
+    ``vertex_weights`` should be pre-normalized so the mean over masked
+    vertices in each sample equals 1.0; this preserves the loss magnitude
+    relative to ``masked_mse`` and keeps existing learning rates / channel
+    weights calibrated. Weights are broadcast over the channel axis so the
+    same vertex weighting applies to every output channel.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    weights_dev = vertex_weights.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    sq_err = (pred - target).square()
+    weighted_sq_err = sq_err * weights_dev
+    return masked_mean(weighted_sq_err, mask)
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
     mask: torch.Tensor,
     weights: torch.Tensor,
+    vertex_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Per-channel weighted masked MSE with a single mean over all entries.
 
@@ -852,6 +876,12 @@ def weighted_channel_mse(
     and only changes the relative gradient budget across channels — it does NOT
     decompose into per-channel means (which would double-weight the smaller
     channels and was the failure mode of PR #353).
+
+    When ``vertex_weights`` is supplied ([B, N], normalized so mean over masked
+    vertices = 1), each vertex's squared error is also multiplied by its own
+    weight. Channel and vertex weights compose multiplicatively; the
+    pre-normalization keeps the overall scale equal to ``weighted_channel_mse``
+    with uniform vertex weights.
     """
     if pred.numel() == 0:
         return pred.sum() * 0.0
@@ -863,11 +893,40 @@ def weighted_channel_mse(
     sq_err = (pred - target).square()
     mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
     weighted = sq_err * weights_dev * mask_dev
+    if vertex_weights is not None:
+        weighted = weighted * vertex_weights.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
     valid_points = mask_dev.sum()
     denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
     if bool(valid_points.detach().cpu().item() > 0):
         return weighted.sum() / denominator
     return pred.sum() * 0.0
+
+
+def compute_area_vertex_weights(
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    area_channel_idx: int = 6,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Per-sample area-normalized vertex weights for surface losses.
+
+    surface_x: [B, N, C_in] with raw per-vertex panel area at channel
+    ``area_channel_idx`` (default 6, matches ``data.loader.SURFACE_X_DIM``).
+    surface_mask: [B, N] with 1.0 on valid vertices.
+
+    Returns: [B, N] weights normalized per-sample so the mean over masked
+    vertices equals 1.0. This is a numerically-safe Voronoi-style discrete
+    approximation of ``∫ |τ-τ̂|^2 dA`` (DoMINO, arXiv 2501.13350); per-sample
+    (not per-batch) normalization keeps it consistent under DDP since each
+    rank sees full samples.
+    """
+    raw_area = surface_x[..., area_channel_idx].to(dtype=torch.float32)
+    raw_area = torch.clamp(raw_area, min=eps)
+    mask_float = surface_mask.to(dtype=raw_area.dtype, device=raw_area.device)
+    area_sum = (raw_area * mask_float).sum(dim=1, keepdim=True)
+    n_valid = mask_float.sum(dim=1, keepdim=True).clamp_min(1.0)
+    area_mean = (area_sum / n_valid).clamp_min(eps)
+    return raw_area / area_mean
 
 
 def squared_relative_l2_loss(
