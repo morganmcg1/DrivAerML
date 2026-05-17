@@ -837,11 +837,35 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_weighted_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    vertex_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Per-vertex-weighted masked MSE.
+
+    pred / target: [B, N, C]; mask: [B, N]; vertex_weights: [B, N].
+    ``vertex_weights`` should be pre-normalized so the mean over masked
+    vertices in each sample equals 1.0; this preserves the loss magnitude
+    relative to ``masked_mse`` and keeps existing learning rates / channel
+    weights calibrated. Weights are broadcast over the channel axis so the
+    same vertex weighting applies to every output channel.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    weights_dev = vertex_weights.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    sq_err = (pred - target).square()
+    weighted_sq_err = sq_err * weights_dev
+    return masked_mean(weighted_sq_err, mask)
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
     mask: torch.Tensor,
     weights: torch.Tensor,
+    vertex_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Per-channel weighted masked MSE with a single mean over all entries.
 
@@ -852,6 +876,12 @@ def weighted_channel_mse(
     and only changes the relative gradient budget across channels — it does NOT
     decompose into per-channel means (which would double-weight the smaller
     channels and was the failure mode of PR #353).
+
+    When ``vertex_weights`` is supplied ([B, N], normalized so mean over masked
+    vertices = 1), each vertex's squared error is also multiplied by its own
+    weight. Channel and vertex weights compose multiplicatively; the
+    pre-normalization keeps the overall scale equal to ``weighted_channel_mse``
+    with uniform vertex weights.
     """
     if pred.numel() == 0:
         return pred.sum() * 0.0
@@ -863,9 +893,118 @@ def weighted_channel_mse(
     sq_err = (pred - target).square()
     mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
     weighted = sq_err * weights_dev * mask_dev
+    if vertex_weights is not None:
+        weighted = weighted * vertex_weights.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
     valid_points = mask_dev.sum()
     denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
     if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denominator
+    return pred.sum() * 0.0
+
+
+def compute_area_vertex_weights(
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    area_channel_idx: int = 6,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Per-sample area-normalized vertex weights for surface losses.
+
+    surface_x: [B, N, C_in] with raw per-vertex panel area at channel
+    ``area_channel_idx`` (default 6, matches ``data.loader.SURFACE_X_DIM``).
+    surface_mask: [B, N] with 1.0 on valid vertices.
+
+    Returns: [B, N] weights normalized per-sample so the mean over masked
+    vertices equals 1.0. This is a numerically-safe Voronoi-style discrete
+    approximation of ``∫ |τ-τ̂|^2 dA`` (DoMINO, arXiv 2501.13350); per-sample
+    (not per-batch) normalization keeps it consistent under DDP since each
+    rank sees full samples.
+    """
+    raw_area = surface_x[..., area_channel_idx].to(dtype=torch.float32)
+    raw_area = torch.clamp(raw_area, min=eps)
+    mask_float = surface_mask.to(dtype=raw_area.dtype, device=raw_area.device)
+    area_sum = (raw_area * mask_float).sum(dim=1, keepdim=True)
+    n_valid = mask_float.sum(dim=1, keepdim=True).clamp_min(1.0)
+    area_mean = (area_sum / n_valid).clamp_min(eps)
+    return raw_area / area_mean
+
+
+def channel_decoupled_area_weighted_mse(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    vertex_weights: torch.Tensor,
+    channel_weights: torch.Tensor | None = None,
+    area_weight_channels: str = "all",
+) -> torch.Tensor:
+    """Channel-decoupled area-weighted masked MSE for surface targets (H18d).
+
+    pred / target: [B, N, 4]; mask: [B, N]; vertex_weights: [B, N], pre-normalized
+    so mean over masked vertices = 1 (matches ``compute_area_vertex_weights``).
+    channel_weights: [C] optional per-channel scale (composes multiplicatively).
+    area_weight_channels:
+        ``"all"``        — vertex weight applies to every channel (matches H18).
+        ``"tau_z_only"`` — vertex weight applies ONLY to channel 3 (tau_z);
+                           channels 0/1/2 (cp, tau_x, tau_y) use uniform vertex
+                           weighting. H18d main arm.
+        ``"wss"``        — vertex weight applies to channels 1/2/3 (tau_x/y/z);
+                           channel 0 (cp) uses uniform vertex weighting.
+
+    Channel-mean normalization (divide by ``valid * C``) keeps the scale
+    consistent with ``masked_mse``: with ``vertex_weights`` ones everywhere and
+    no ``channel_weights``, this reproduces ``masked_mse`` exactly.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    if pred.dim() != 3 or pred.shape != target.shape:
+        raise ValueError(
+            f"pred/target must be [B,N,C], got pred={tuple(pred.shape)}, target={tuple(target.shape)}"
+        )
+    B, N, C = pred.shape
+    device = pred.device
+    dtype = pred.dtype
+    vw = vertex_weights.to(device=device, dtype=dtype)
+    if vw.shape != (B, N):
+        raise ValueError(
+            f"vertex_weights must be [B,N]=({B},{N}), got {tuple(vw.shape)}"
+        )
+
+    if area_weight_channels == "all":
+        eff = vw.unsqueeze(-1).expand(B, N, C)
+    elif area_weight_channels == "tau_z_only":
+        if C != 4:
+            raise ValueError(
+                f"area_weight_channels='tau_z_only' expects C=4, got C={C}"
+            )
+        ones_3 = torch.ones((B, N, 3), device=device, dtype=dtype)
+        eff = torch.cat([ones_3, vw.unsqueeze(-1)], dim=-1)
+    elif area_weight_channels == "wss":
+        if C != 4:
+            raise ValueError(
+                f"area_weight_channels='wss' expects C=4, got C={C}"
+            )
+        ones_1 = torch.ones((B, N, 1), device=device, dtype=dtype)
+        vw_3 = vw.unsqueeze(-1).expand(B, N, 3)
+        eff = torch.cat([ones_1, vw_3], dim=-1)
+    else:
+        raise ValueError(
+            f"unknown area_weight_channels={area_weight_channels!r}; "
+            "expected one of {'all','tau_z_only','wss'}"
+        )
+
+    mask_dev = mask.to(device=device, dtype=dtype).unsqueeze(-1)
+    sq_err = (pred - target).square()
+    weighted = sq_err * eff * mask_dev
+    if channel_weights is not None:
+        ch_w = channel_weights.to(device=device, dtype=dtype)
+        if ch_w.shape[-1] != C:
+            raise ValueError(
+                f"channel_weights last-dim {ch_w.shape[-1]} must equal pred C={C}"
+            )
+        weighted = weighted * ch_w
+    valid = mask_dev.sum()
+    denominator = (valid * C).clamp_min(1.0)
+    if bool(valid.detach().cpu().item() > 0):
         return weighted.sum() / denominator
     return pred.sum() * 0.0
 
