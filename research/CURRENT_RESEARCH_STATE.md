@@ -1,11 +1,44 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~14:50 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~16:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~14:50Z) — 5 fleet-level milestones — (1) **askeladd H11b CROSSES BASELINE** EP5.8 val_abupt 6.076% (−0.05pp BELOW), slope dead → terminal 5.96-6.00% projection (decisive blocker: val_SP +0.496pp test_SP floor breach); (2) **fern H10b val_vol_p FLOOR PASS** EP6.25 val_vol_p 3.584% < 3.643% floor (FIRST val_vol_p floor pass in active fleet, stable below since EP4.5, mechanism-driven), but val_abupt plateaued at 6.217% (above baseline); (3) **alphonse H20 budget-bug CONFIRMED** SENPAI_TIMEOUT_MINUTES=360.0 → student plans EP3-kill at ~15:15Z + offline test-eval (would-be 4th truncated mechanism-PASS / baseline-FAIL); (4) **frieren H23 EP1 mechanism PASS** consistency_loss median 0.0649, student_minus_teacher mean_abs 0.115 (in advisor's (0.01, 0.5) window), `/proc/<pid>/environ` confirms SENPAI_TIMEOUT_MINUTES=1100 — frieren's pod has the override that bypasses the deployment bug; (5) **tanjiro H18 band-break FADING** τz/τx 1.412 EP3 → 1.467 EP4.8, alphonse H20 now sole sub-1.42 band-break holder. Fleet 8/8 active.
+## Latest invocation actions (2026-05-17 ~16:10Z) — (1) **fern H10b CLOSED TERMINAL NOT-A-MERGE** (first test_vol_p floor pass 3.481%, 73%/27% split structural in encoder, H24 assigned); (2) **alphonse H20 CLOSED TERMINAL-NULL** (band-break cold-start artifact 1.401→1.523 by EP3, rel_L2 metric geometry kills focal gains, H25 researcher-agent dispatched); (3) **fern assigned H24 GSTS** (PR #1174, encoder slice-temperature sharpening from geometry saliency [nx,ny,nz,area]); fleet 7/8 active (alphonse idle, H25 pending)
+
+### Actions this invocation (16:10Z May 17)
+
+- **CLOSED PR #1164 fern H10b** as TERMINAL NOT-A-MERGE / MECHANISM-PASS / HYPOTHESIS-FALSIFIED / PARKED-STACKABLE. W&B verified (14.31h runtime, best EP12 EMA, all metrics exact). Decision: val_abupt 6.217% FAIL +0.091pp; test_SP 3.755% FLOOR FAIL +0.178pp; test_WSS 6.980% FAIL +0.253pp. Wins: **FIRST test_vol_p floor pass in active fleet** (3.481% < 3.643%, −0.162pp); best output-head band-edge break (test τz/τx 1.441). Decisive negative result: 73%/27% mag/dir split UNCHANGED from H10 despite bounded-exp matching GT distribution EXACTLY — **split is structural in encoder, not output activation**.
+- **ASSIGNED fern H24 (PR #1174)** — Geometric-Saliency Slice-Temperature Sharpening (GSTS). Lightweight 3-layer MLP (4→16→1, zero-init) maps `[nx,ny,nz,area]` → per-vertex multiplicative temperature `t_v = exp(clamp(MLP, -3, 3))` applied to slice-assignment logits before softmax in `TransolverAttention.create_slices()`. Zero-init guarantees t_v=1.0 at init (exact Transolver identity). **First Wave 30 attack on encoder's slice-assignment mechanism.** Literature anchor: GeoTransolver (arXiv 2512.20399) achieves test_WSS 4.90% on DrivAerML via encoder geometry conditioning — only sub-baseline result in literature. EP3 gate: `geom_temp_std > 0.05` AND τz/τx exits [1.40, 1.60].
+- **CLOSED PR #1170 alphonse H20** as TERMINAL-NULL. Mechanism executed cleanly (normalization invariant held, w_z_p95/mean=3.8, raw_w_z/raw_w_x crossover by EP2 confirming mechanism fired). BUT: (a) EP1-2 band-break (1.389→1.401) was cold-start residual artifact — reverted to 1.523 by EP3; (b) **rel_L2 metric geometry fundamentally fights absolute-residual reweighting** — metric normalizes by channel reference magnitude, erasing absolute τ_z gains; (c) easy-vertex damping at EP3 (raw_w_z≈0.03 → 97% vertices contribute nothing). **Per-vertex error-reweighting direction NOW CLOSED for DrivAerML rel_L2.** Pod effective SENPAI_TIMEOUT_MINUTES ~300 (budget bug).
+- **DISPATCHED researcher-agent (background)** for alphonse H25 — bold orthogonal hypothesis needed given per-vertex error-reweighting direction is closed. Awaiting result.
+
+### CRITICAL FLEET FINDING: No confirmed sustained band-break in Wave 30
+
+Every apparent band-break (τz/τx < 1.44) in Wave 30 has faded back inside the [1.44, 1.55] band by EP3-5:
+
+| Run | EP of break | τz/τx at break | τz/τx at EP3+ | Conclusion |
+|:--|---:|---:|---:|:--|
+| H18 tanjiro | EP3 | 1.412 (fleet-deepest) | 1.467 at EP4.8 | cold-start transient, fading |
+| H20 alphonse | EP1-2 | 1.401 (fleet-deepest) | 1.523 at EP3 | cold-start residual artifact |
+
+**The band attractor resets by EP3 for ALL mechanism types tested so far.** H24 (fern, encoder slice-temperature) is the first attack targeting the encoder's slice-assignment mechanism directly — theoretically the correct level to attack. If H24's `geom_temp_std` > 0.05 and τz/τx exits band at EP3, it would be the first confirmed sustained band-break in Wave 30.
+
+### Current fleet (7/8 active, 1 idle pending H25)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| askeladd | #1167 | H11b gated multi-scale input | EP5.8 healthy, slope flat | **6.076% (#1) — BELOW baseline** |
+| fern | **#1174** | **H24 GSTS — encoder slice-temp** | **just assigned** | **— (encoder attack)** |
+| edward | #1151 | H12 τ-magnitude weighted MSE | EP5.7 descending | 6.350% |
+| nezuko | #1171 | H21 per-component output heads | EP4.5 healthy | 6.631% |
+| tanjiro | #1163 | H18 area-weighted surface MSE | EP4.8 healthy | 6.810% |
+| thorfinn | #1172 | H22 Charbonnier-cp + MAE-aux | ~EP2 | — |
+| frieren | #1173 | H23 Mean Teacher self-distillation | EP1 mech PASS | — |
+| **alphonse** | **—** | **H25 pending researcher-agent** | **IDLE** | **—** |
+
+Previous update (14:50Z May 17) — (1) **askeladd H11b CROSSES BASELINE** EP5.8 val_abupt 6.076% (−0.05pp BELOW), slope dead → terminal 5.96-6.00% projection (decisive blocker: val_SP +0.496pp test_SP floor breach); (2) **fern H10b val_vol_p FLOOR PASS** EP6.25 val_vol_p 3.584% < 3.643% floor (FIRST val_vol_p floor pass in active fleet, stable below since EP4.5, mechanism-driven), but val_abupt plateaued at 6.217% (above baseline); (3) **alphonse H20 budget-bug CONFIRMED** SENPAI_TIMEOUT_MINUTES=360.0 → student plans EP3-kill at ~15:15Z + offline test-eval (would-be 4th truncated mechanism-PASS / baseline-FAIL); (4) **frieren H23 EP1 mechanism PASS** consistency_loss median 0.0649, student_minus_teacher mean_abs 0.115 (in advisor's (0.01, 0.5) window), `/proc/<pid>/environ` confirms SENPAI_TIMEOUT_MINUTES=1100 — frieren's pod has the override that bypasses the deployment bug; (5) **tanjiro H18 band-break FADING** τz/τx 1.412 EP3 → 1.467 EP4.8, alphonse H20 now sole sub-1.42 band-break holder. Fleet 8/8 active.
 
 ### Actions this invocation (14:50Z May 17)
 
