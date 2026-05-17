@@ -1108,6 +1108,24 @@ def main(argv: Iterable[str] | None = None) -> None:
                         if should_log_gradients and not skip_step
                         else {}
                     )
+                    # H21 (PR #1171) diagnostic: per-component head gradient
+                    # norms. Verifies the mechanism is active — tau_z head
+                    # should receive more gradient signal than tau_y/cp heads.
+                    if should_log_gradients and not skip_step and hasattr(
+                        base_model, "surface_out"
+                    ) and hasattr(base_model.surface_out, "head_tau_z"):
+                        for head_name in (
+                            "head_cp",
+                            "head_tau_x",
+                            "head_tau_y",
+                            "head_tau_z",
+                        ):
+                            head = getattr(base_model.surface_out, head_name)
+                            grad_sq_sum = 0.0
+                            for p in head.parameters():
+                                if p.grad is not None:
+                                    grad_sq_sum += float(p.grad.detach().pow(2).sum().item())
+                            gradient_metrics[f"train/grad/h21_{head_name}_norm"] = grad_sq_sum ** 0.5
                     if skip_step:
                         optimizer.zero_grad(set_to_none=True)
                     else:

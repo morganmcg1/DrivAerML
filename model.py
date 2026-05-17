@@ -358,6 +358,62 @@ class Transformer(nn.Module):
         return x
 
 
+class PerComponentOutputHead(nn.Module):
+    """Per-component independent output heads for surface predictions (H21).
+
+    Replaces the shared 4-channel MLP with four independent decoder MLPs to
+    decouple gradient flow between surface targets (Sener & Koltun, NeurIPS 2018;
+    Standley et al., ICML 2020).
+
+    - cp head:    n_hidden -> n_hidden -> 1
+    - tau_x head: n_hidden -> n_hidden -> 1
+    - tau_y head: n_hidden -> n_hidden -> 1
+    - tau_z head: n_hidden -> n_hidden -> n_hidden -> 1  (extra layer for the
+      worst-performing channel; magnitude bottleneck per H10 diagnostic)
+
+    Hidden layers use trunc-normal _init_linear (same as baseline shared head);
+    final linear layers are zero-initialised so surface predictions start at
+    zero and warm up gradually, matching the spirit of zero-init residual
+    branches in the rest of the model.
+    """
+
+    def __init__(self, n_hidden: int):
+        super().__init__()
+        self.head_cp = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, 1),
+        )
+        self.head_tau_x = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, 1),
+        )
+        self.head_tau_y = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, 1),
+        )
+        self.head_tau_z = nn.Sequential(
+            nn.Linear(n_hidden, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, n_hidden),
+            nn.SiLU(),
+            nn.Linear(n_hidden, 1),
+        )
+        for head in (self.head_cp, self.head_tau_x, self.head_tau_y, self.head_tau_z):
+            head.apply(_init_linear)
+            nn.init.zeros_(head[-1].weight)
+            nn.init.zeros_(head[-1].bias)
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        cp = self.head_cp(z)
+        tau_x = self.head_tau_x(z)
+        tau_y = self.head_tau_y(z)
+        tau_z = self.head_tau_z(z)
+        return torch.cat([cp, tau_x, tau_y, tau_z], dim=-1)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -476,17 +532,10 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
-            # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
-            # Volume head is a deeper 3-layer MLP for the harder vol_p task —
-            # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
-            # Default for current training; older checkpoints (PR #823 era,
-            # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
-            self.surface_out.apply(_init_linear)
+            # H21 (PR #1171): surface decoder is four independent MLPs, one per
+            # surface channel, to decouple gradient flow between targets whose
+            # error magnitudes differ >2x (tau_z dominates). Returns [B, N, 4].
+            self.surface_out = PerComponentOutputHead(n_hidden=n_hidden)
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),
                 nn.SiLU(),
