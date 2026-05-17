@@ -1,62 +1,68 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~00:30 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~01:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~00:30Z) — tanjiro #1147 H6' soft τ·n=0 penalty CLOSED NOT-A-MERGE pulled from W&B because pod failed to post terminal SENPAI-RESULT (test_SP +0.237pp floor breach, test_WSS +0.275pp WORSE, test_abupt +0.193pp WORSE, **test τ_z/τ_x = 1.420 FIRST attack to break BELOW collapse band lower edge 1.44** — mechanism signal but lost on primary); tanjiro reassigned to H18 per-vertex area-weighted surface MSE (PR #1163, physical force-integral matching, orthogonal to all 7 in-flight Wave 30 attacks); nezuko reassigned earlier this turn to H17 tangent-frame output reparameterization (PR #1162); fern H10 EP10.8 still tracking ~02:00Z terminal; askeladd EP9.6 1.6h margin to cliff; alphonse v2 H15 EMA + thorfinn H13c + edward H12 + frieren H16 smoke all healthy
+## Latest invocation actions (2026-05-17 ~01:30Z) — fern H10 TERMINAL CLOSED NOT-A-MERGE (**73%/27% magnitude/direction decomposition — definitive fleet diagnostic**); alphonse H15 TIMEOUT-NULL (decay=0.9999 never warmed up in 6h budget, hypothesis UNTESTED); reassigned fern→H10b bounded-exp magnitude fix (#1164), alphonse→H15b decay=0.999 faster warmup (#1165)
 
-### Actions this invocation (00:30Z May 17)
+### Actions this invocation (01:30Z May 17)
 
-- **CLOSED PR #1147 (tanjiro H6' soft τ·n=0 penalty)** as NOT-A-MERGE pulled from W&B. Student pod failed to invoke Claude to post terminal SENPAI-RESULT — training completed normally at ~00:02Z with full test eval written to W&B, but pod's poll returned "No assigned PRs or issues" and slept. I pulled the results manually from run `smvr34a8` summary. **test_abupt 6.037%** (+0.193pp WORSE), **test_SP 3.814% FAIL floor (+0.237pp)**, **test_WSS 7.002%** (+0.275pp WORSE), test_vol_p 3.603% PASS floor (−0.040pp). **CRITICAL DIAGNOSTIC: test τ_z/τ_x = 1.420 — FIRST Wave 30 attack to break BELOW the [1.44, 1.55] collapse band lower edge.** All 7+ prior closures landed in band. Mechanism (τ·n=0 constraint) IS attacking the right axis, just the soft-penalty formulation lost on primary metrics. Informative for H17 #1162 (hard-constraint variant).
-- **ASSIGNED nezuko H17 Local Tangent-Frame Output Reparameterization (PR #1162)** — researcher-agent output, predict WSS as 2 tangent-plane scalars (α_t1, α_t2), reconstruct global frame via Gram-Schmidt basis inside `forward()`, enforcing τ·n=0 by CONSTRUCTION (not soft penalty). Implementation contained to ~15 LOC in `model.py:forward()`. Grounded in Gao et al. ICML 2024 (intrinsic vector heat networks) + Hendriks et al. 2020 (linearly constrained networks). Falsifiability: τ_z/τ_x ratio either breaks below 1.44 or stays in band — clean signal either way.
-- **ASSIGNED tanjiro H18 Per-vertex area-weighted surface MSE (PR #1163)** — physical force-integral matching (force = stress × area). Weight each vertex's MSE by panel area at `surface_x[..., 6]` (normalized so mean weight = 1). Hypothesis: τ_z over-prediction concentrated on high-area horizontal panels (hood/roof/trunk) where `n ≈ +z`; uniform vertex weighting under-emphasizes these regions. Different from H6' (soft penalty), H12 (channel-weighted), H17 (output reparam). Orthogonal to all in-flight; could compose with H17 later.
-- **PR #1161 frieren H16 Huber-δ=1.0 PIVOT-ACCEPTED** (earlier this turn cycle). Frieren's pre-flight diagnostic caught my (0.4, 0.8) frac_in_L2 sanity range as poorly calibrated for heavy-tailed τ_z (max_abs_error_normed = 5-17 throughout training). Their gradient-mass arithmetic: at δ=1.0, ~2.5% of vertices in L1 region carry ~72% of MSE-equivalent gradient mass; Huber delivers 10-34× gradient cap on those outliers vs MSE. **Tail-clipping IS the H16 mechanism**, just expressed differently than my range envisioned.
-- **POSTED CHECK-INS on stale_wip false positives** for #1158, #1148, #1150, #1151 across several invocations. All runs healthy. **NOTE: tanjiro pod misbehavior** — when W&B run finished cleanly with test_primary results, the harness's polling logic decided "no work assigned" and slept. Worth investigating: pod should detect `W&B state=finished + status:wip PR + no SENPAI-RESULT comment` as "write up terminal" work. Reported in #1147 close comment.
+- **CLOSED PR #1148 (fern H10 vector-decoupled WSS head)** as NOT-A-MERGE. **CRITICAL DIAGNOSTIC: 73% of WSS squared error is in MAGNITUDE, 27% in direction.** Direction head saturated at direction_cos_loss=0.00355 (99.65% cos-sim with GT, ~14.6° physical angle error). val_abupt=6.325% (+0.199pp worse), test_SP=3.776% FAIL floor (+0.199pp), test_WSS=6.885% (+0.158pp worse), test_vol_p=3.619% PASS. τ_z/τ_x=1.463 (flat — direction learning did NOT reduce τ_z ratio). Floor breach and WSS regression → NOT-A-MERGE, but **most informative mechanistic result in Wave 30: the magnitude head is the bottleneck, not direction.** Softplus floor at 6.93 in normalized space is likely culprit.
+- **CLOSED PR #1155 (alphonse H15 EMA Polyak averaging v2)** as TIMEOUT-NULL. Hypothesis UNTESTED (not falsified). Live model healthy at EP4: val_raw_abupt=7.02% (H3 trajectory). EMA at decay=0.9999 had half-life ≈ 0.92 epochs — gap closing monotonically (38.6→48.5→16.3→9.5pp) but budget ran out before EMA could settle. Convergence direction is positive.
+- **ASSIGNED fern H10b (PR #1164)**: bounded-exp magnitude head fix. Replace `softplus(log_mag) * 10.0` with `log_mag.clamp(min=-3, max=3).exp()` in `model.py:_reconstruct_surface`. Single-line change from H10. Tests whether softplus saturation artifact (floor=6.93 in normalized space) is the 73% magnitude bottleneck.
+- **ASSIGNED alphonse H15b (PR #1165)**: EMA decay=0.999 faster-warmup variant. Same H15 mechanism, decay=0.999 → half-life=0.064 epochs → EMA fully warm by EP0.3. All 13 epochs in settled regime. Tests whether EMA can cross raw val_abupt within 6h budget.
 
-### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 14
+### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 16
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | **NEW — just assigned 00:30Z May 17** (orthogonal: physical force-integral matching) |
-| #1162 | nezuko | H17 tangent-frame output reparameterization | **NEW — just assigned ~23:50Z** (hard τ·n=0 by construction, ICML 2024 Gao et al.) |
-| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | Smoke past EP1 mid-run (47% through last check), main launch after EP2 sanity |
-| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | EP 2.5, 1.6h/ep, partial-terminal at EP10-11 expected |
-| #1155 | alphonse | H15 EMA / Polyak v2 (lr=9e-5) | EP3 raw 7.44% MARGINAL, EMA at 23.72% (accelerating catch-up); 6h budget — TRUNCATES at EP5 |
-| #1151 | edward | H12 τ-magnitude-weighted loss | EP 4.17, train_loss 0.0104, best_ckpt updated, projects EP9-10 at 18h cliff |
-| #1150 | askeladd | H11 multi-scale kNN context | EP 9.61, val improving, best_ckpt updated; **~1.6h margin to EP13 by cliff** |
-| #1148 | fern | H10 vector-decoupled output head | **EP 10.8 / 13, lr=6.1e-6 deep cosine, terminal ~02:00-02:30Z May 17** — first terminal expected |
+| #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | **NEW — just assigned 01:30Z May 17** (6h budget, EMA warm by EP0.3) |
+| #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | **NEW — just assigned 01:30Z May 17** (18h budget, single-line fix from H10) |
+| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | assigned 00:30Z May 17 (physical force-integral matching) |
+| #1162 | nezuko | H17 tangent-frame output reparameterization | assigned ~23:50Z May 16 (hard τ·n=0 by construction, ICML 2024) |
+| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | in-flight; smoke past EP1, main launch after EP2 sanity |
+| #1158 | thorfinn | H13c Lagemann cos+mag decoupling | in-flight; EP2.5 at last check, 1.6h/ep, terminal EP10-11 |
+| #1151 | edward | H12 τ-magnitude-weighted loss | in-flight; EP4.17, train_loss 0.0104, 18h cliff EP9-10 |
+| #1150 | askeladd | H11 multi-scale kNN context | in-flight; EP9.61, ~1.6h margin to EP13 by cliff — terminal imminent |
 
-**Closed in Wave 30** (14): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged lr=5e-4), H13 β=5 #1152 (diverged lr=5e-4), H13b β=2 #1156 (diverged lr=5e-4 + formulation broken), H8 #1143 (FLAT NULL data-distribution), H9' #1146 (NOT-A-MERGE test_SP +0.159pp floor), **H6' #1147 (NOT-A-MERGE test_SP +0.237pp floor BUT test τz/τx = 1.420 broke band lower edge — mechanism signal worth chasing)**.
+**Closed in Wave 30** (16): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged lr=5e-4), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL data-distribution), H9' #1146 (NOT-A-MERGE SP floor breach), **H6' #1147 (NOT-A-MERGE SP floor BUT test τz/τx=1.420 broke band lower edge)**, **H10 #1148 (NOT-A-MERGE SP floor BUT 73%/27% mag/dir decomp is the fleet's key diagnostic)**, **H15 #1155 (TIMEOUT-NULL, hypothesis untested)**, H15v1 #1122 (alphonse, earlier wave, diverged).
 
-### Causal map of τ_z bottleneck — **NEW DIAGNOSTIC SIGNAL: H6' tanjiro got test τ_z/τ_x = 1.420, FIRST attack to break below collapse band**
+### Causal map of τ_z bottleneck — updated after H10 and H6' diagnostics
 
-The H6' closure result (test τz/τx = 1.420 vs in-flight band [1.44, 1.55]) is the FIRST mechanism signal that the bottleneck CAN be moved by output-side constraints. The soft-penalty formulation lost on primary metrics, but the band-breaking effect is real. This is direct support for H17 (nezuko, hard-constraint variant of the same mechanism) and warrants other output-side constraint attacks.
+Two orthogonal diagnostic signals define the research frontier:
+1. **H6' (PR #1147)**: τ·n=0 constraint CAN reduce τ_z/τ_x (test=1.420, below band lower edge 1.44). Soft-penalty formulation failed on primary metrics but mechanism is real → H17 hard-constraint is the right test.
+2. **H10 (PR #1148)**: 73% of WSS squared error is in MAGNITUDE, 27% in direction. Direction head saturated (99.65% cos-sim). Softplus floor prevents near-zero magnitude predictions → H10b bounded-exp is the targeted fix.
+
+These two diagnostics are **orthogonal attacks on the same τ_z problem**: one fixes the geometric constraint (τ·n=0), the other fixes the magnitude-prediction regime near zero. The ideal model would pass both H17 and H10b, then stack.
 
 | Layer | In-flight probes | Closed |
 |---|---|---|
-| **Architecture / input-feature** | 1 (H11 multi-scale kNN — last gasp) | **7 closures** (6 widening + H9' curvature + H8 distribution) — DEFINITIVELY EXHAUSTED |
-| **Loss formulation (channel/vertex reweighting)** | **3** (H12 mag, H13c cos+mag, H18 area-weighted) | 3 (H13 β=5, H13b β=2, H6' soft penalty) |
+| **Architecture / input-feature** | 1 (H11 multi-scale kNN) | **8 closures** — DEFINITIVELY EXHAUSTED |
+| **Loss formulation (channel/vertex reweighting)** | 3 (H12 mag, H13c cos+mag, H18 area-weighted) | 4 (H13 β=5, H13b β=2, H6' soft penalty, H10 — H10 indirect) |
 | **Loss formulation (outlier robustness)** | 1 (H16 Huber δ=1.0) | 0 |
-| **Output reparameterization (hard constraints)** | **1 (H17 tangent-frame, NEW) — strong prior from H6' test signal** | 0 |
-| **Output projection (head architecture)** | 1 (H10 vector decouple — most promising) | 0 |
-| **Optimization** | 1 (H15 EMA v2) | 1 (H14 5× head LR — lr confound) |
+| **Output reparameterization (hard constraints)** | 1 (H17 tangent-frame, strong prior from H6') | 0 |
+| **Output projection (head architecture)** | **1 (H10b bounded-exp — top priority after 73%/27% diagnostic)** | 1 (H10 softplus form failed) |
+| **Optimization** | 1 (H15b EMA decay=0.999) | 2 (H14 lr confound, H15 TIMEOUT-NULL) |
 
-### Key signal: fern H10 EP10 PASS + direction_cos_loss 99.7% saturated
+### Primary research question now: can we unblock the 73% magnitude bottleneck?
 
-The H10 vector-decoupled head separates direction from magnitude prediction. EP10 readout: **direction_cos_loss = 99.7% cos-sim with GT** → direction fully learned at head level. **All residual error is in MAGNITUDE.** If H10 terminal test_WSS beats baseline 6.727%, the τ_z bottleneck story rewrites toward "magnitude prediction is the lever, direction is solved." Watch test τz/τx — if it breaks below 1.40, magnitude-focused approaches (H16 Huber, H12 weighted) get strong priority for stacking.
+**H10b is the single highest-priority test.** If `log_mag.clamp(min=-3, max=3).exp()` unblocks the near-zero magnitude regime (floor drops from 6.93 to 0.05 in normalized space), we expect:
+- test_WSS to drop meaningfully (targeting < 6.600%)
+- magnitude error fraction to fall below 50%
+- τ_z/τ_x may respond if over-prediction is a magnitude artifact (τ_z is the "small" tangential component — consistently over-predicted in magnitude)
 
-### Next-idle assignment queue (for after nezuko)
+**H17 is the second highest-priority test** (nezuko in-flight). If hard tangent-frame output enforces τ·n=0 by construction and test τ_z/τ_x falls below 1.40, we have two orthogonal mechanism wins to stack.
 
-1. **Stacking experiments** — combine top Wave 30 winner with EMA (H15 if any positive) + orthogonal axis
-2. **Output-head architecture: separate MLP head per τ component** (untested) — tests "single 4-channel head limits per-channel learning" hypothesis
-3. **Surface-normal-aligned coordinate frame for τ targets** — predict in (tangent_1, tangent_2, normal) basis instead of global xyz; tests "global-frame target → wrong inductive bias"
-4. **Adaptive vertex sampling** (focus training compute on hard τ_z vertices) — alternative to loss reweighting that changes the data, not the loss
-5. **Spherical-harmonic WSS basis** — stronger H10 variant if H10 partial-wins
-6. **AdamW for H14 retry** — clean optimizer-effect separation
-7. **Focal MSE on per-vertex error** — error-space amplification (vs H12's target-space)
-8. **Lookahead optimizer** — complementary to EMA
+### Next-idle assignment queue
+
+1. **H10b + H17 stacking** — if both yield improvements, stack bounded-exp head in tangent-frame basis
+2. **Adaptive vertex sampling on high-τ_z vertices** — alternative to loss reweighting, changes data not loss  
+3. **Per-component output heads** — separate MLP per τ component (tests single-head capacity limitation)
+4. **Focal MSE on per-vertex error** — error-space amplification focused on worst vertices
+5. **Lookahead optimizer** — complementary to EMA, would stack with H15b
+6. **Surface-normal-aligned coordinate frame for τ targets** — predict in (t1, t2, n) basis; overlaps with H17 but approaches from training-target angle not output-constraint angle
 
 ## ★ CRITICAL FLEET-WIDE FINDING (2026-05-16 ~19:00Z): lr=5e-4 confound on 4 Wave 30 PRs (preserved for reference)
 

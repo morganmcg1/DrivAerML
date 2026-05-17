@@ -1,3 +1,77 @@
+## 2026-05-17 01:30 — PR #1155: H15 EMA Polyak Averaging v2 (alphonse) — CLOSED TIMEOUT-NULL (hypothesis UNTESTED, not falsified; decay=0.9999 never warmed up in 6h budget; live model healthy; reassigned to H15b decay=0.999 PR #1165)
+
+- **Branch**: `alphonse/h15-ema-polyak-averaging` (closed)
+- **W&B runs**: `d89u0x84,bso7alj5,s75wtnek,37wkovm3,dge1rijf,vodnwslo,fm5htatt,det8zjqg` (8 DDP ranks, all state=finished)
+- **Hypothesis**: Polyak/EMA averaging of model weights (decay=0.9999) as inference-time smoother. eval_raw_vs_ema=True for dual-eval. Tests whether weight averaging in cosine-decay LR schedules extracts a better generalization basin than the raw final checkpoint.
+
+### Terminal results — TIMEOUT-NULL (EP4/13, best_checkpoint = EMA, all gates fail due to untested EMA)
+
+| Metric | val_raw (EP4) | val_ema (EP4) | test (EMA) | Baseline | Notes |
+|---|---:|---:|---:|---:|---|
+| abupt | 7.02% | 16.5618% | **15.512%** | 6.126% / 5.844% | EMA not warm |
+| WSS | ~7.7% | — | **16.945%** | 6.727% | EMA at half-warmup |
+| SP | — | — | **10.673%** | 3.577% floor | FAIL floor +7.10pp |
+| vol_p | — | — | **12.119%** | 3.643% floor | FAIL floor +8.48pp |
+
+All test gates fail — but this is the EMA model at half warm-up, not the live model. **Live model healthy: val_raw_abupt=7.02% at EP4 is on H3 trajectory.**
+
+### EMA-vs-raw convergence diagnostic (most important result)
+
+| Epoch | val_raw_abupt | val_ema_abupt | gap (raw−ema) |
+|---:|---:|---:|---:|
+| 1 | 26.52% | 65.11% | −38.59pp |
+| 2 | 8.42% | 56.93% | −48.51pp |
+| 3 | 7.44% | 23.72% | −16.28pp |
+| 4 | **7.02%** | **16.56%** | **−9.54pp** |
+
+Gap closing monotonically: 38.6→48.5→16.3→9.5pp. EP2 widening is expected (raw descending faster than EMA can average random-init weights). By EP4, closing rate is +6.74pp/epoch. Extrapolating: EMA would cross raw around EP6-7 and pull ahead by EP10+ as raw begins overfitting.
+
+**decay=0.9999 half-life ≈ 10,000 steps ≈ 0.92 epochs**. Fully clean EMA at EP3–4. Budget ran out exactly where EMA was starting to settle.
+
+### Analysis & next steps
+
+H15 hypothesis NOT FALSIFIED — budget-truncated. Convergence direction is positive. Student's own option B (decay=0.999, half-life=0.064 epochs, fully warm by EP0.3) is the right follow-up under 6h constraints. **Assigned H15b PR #1165 (alphonse, decay=0.999).**
+
+---
+
+## 2026-05-17 01:00 — PR #1148: H10 Vector-Length-Decoupled WSS Head (fern) — TERMINAL CLOSED NOT-A-MERGE (**73%/27% magnitude/direction decomposition — definitive fleet diagnostic; direction head saturated at 99.65% cos-sim; ALL residual WSS error is in magnitude; softplus floor at 6.93 in normalized space is the likely bottleneck; reassigned to H10b bounded-exp PR #1164**)
+
+- **Branch**: `fern/vector-decoupled-wss-head` (closed)
+- **W&B group**: `wave30_h10_vector_decoupled`
+- **Hypothesis**: Replace 4-channel Cartesian WSS output with 5-channel (cp, dir_x, dir_y, dir_z, log_mag) parametrization. Reconstruct τ = softplus(log_mag) × mag_scale=10 × unit(dir). Add cosine-similarity aux loss (weight=0.1) on unit direction. Tests whether Cartesian MSE confounds direction and magnitude, handicapping τ_z prediction.
+
+### Terminal results
+
+| Metric | val (EP13) | test (best EMA) | Baseline | Δ vs base | Gate |
+|---|---:|---:|---:|---:|:--|
+| abupt | 6.325% | **~5.968%** | 6.126% / 5.844% | val +0.199pp / test +0.124pp | **WORSE** |
+| WSS | — | **6.885%** | 6.727% | **+0.158pp WORSE** | FAIL |
+| **SP** | — | **3.776%** | 3.577% floor | **+0.199pp FLOOR BREACH** | **FAIL FLOOR** |
+| vol_p | — | **3.619%** | 3.643% floor | **−0.024pp** | **PASS FLOOR** |
+| τ_z/τ_x | — | **1.463** | ~1.46 collapse band | flat | unchanged |
+| direction_cos_loss | **0.00355** | — | — | 99.65% cos-sim | **SATURATED** |
+
+### Critical diagnostic: 73% magnitude / 27% direction decomposition
+
+Post-hoc `eval_direction_magnitude.py` ran on test split predictions. Results (val/test agree):
+
+- **~73% of WSS squared error is in MAGNITUDE**
+- **~27% of WSS squared error is in DIRECTION**
+
+Direction head: 99.65% normalized cos-sim ≈ 14.6° physical angle error at terminal. **Direction is essentially learned.** The cosine aux loss worked — the head knows where τ points.
+
+Magnitude: softplus(log_mag) × 10.0 has floor at softplus(−∞) × 10 = ln(2) × 10 ≈ 6.93 in normalized space. For low-τ flat automotive panels (most vertices), the model CANNOT predict below 6.93 regardless of head weights — but the GT distribution (z-score normalized, σ=1) has many vertices near 0. This saturation artifact distorts the magnitude head's gradient signal.
+
+**τ_z/τ_x=1.463 is flat** (same as collapse band) despite direction learning — confirms τ_z bottleneck is NOT from direction-learning failure. It's from magnitude-scale coupling.
+
+### Analysis & next steps
+
+The 73%/27% split is the most informative mechanistic result in Wave 30. The magnitude head is the bottleneck, not the direction head. The softplus floor (6.93 in normalized space) is the most likely culprit — it prevents near-zero magnitude predictions. **H10b (PR #1164, fern)** tests fern's own suggestion: replace `softplus(log_mag) * 10.0` with `log_mag.clamp(min=-3, max=3).exp()` (floor = e^{-3} ≈ 0.05, covers [0.05, 20.09] without floor saturation).
+
+This finding **reorients the fleet research direction**: any approach that cannot fix per-vertex magnitude (loss reweighting, Huber outlier robustness, EMA) is complementary at best. The fundamental problem is that the model's magnitude head cannot reach near-zero for low-τ vertices.
+
+---
+
 ## 2026-05-17 00:25 — PR #1147: H6' Soft τ·n=0 Penalty (tanjiro) — TERMINAL CLOSED NOT-A-MERGE pulled from W&B (pod failed to post terminal SENPAI-RESULT; **test τ_z/τ_x = 1.420 FIRST attack to break BELOW [1.44, 1.55] collapse band lower edge** — mechanism signal real but soft-penalty formulation lost on primary metrics; informative for H17 hard-constraint variant)
 
 - **Branch**: `tanjiro/soft-tau-n-penalty` (closed)
