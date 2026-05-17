@@ -1,27 +1,33 @@
 # H18 Composition Spec — Maximum WSS Stack
 
-**Status**: RE-REVISED 10:55Z — H12 EP12 recovery RECONSIDERS the 09:55Z drop. EP11 vol_p +0.307 was a single-step Lion+EMA optimizer trap (EP12 vol_p -0.310 = perfect mirror reversal). Architecture signal RE-ACTIVATED at EP12 (H12 leads H10b -0.021pp at same step 131,711). **Separate τ head HELD PENDING H12 EP15 verdict** (~12:40Z) before final H18 spec commitment.
+**Status**: FINAL-REVISED 12:40Z — Separate τ head **DROPPED from primary H18 spec**, retained as H18-fallback-B for separate test only. Decision driven by H12 EP14 catastrophic regression confirming chronic Lion+Charb+separate-τ-head instability.
 
-**Status**: DRAFT — ready to assign when first student frees (likely H9b tanjiro ~17:00Z autonomous EP30 land).
+**Status**: DRAFT — ready to assign when first student frees (likely H12 fern ~13:00Z post-kill OR H9b tanjiro ~17:00Z autonomous EP30 land).
 
-## H12 Architecture Trajectory (updated 10:55Z)
+## H12 Architecture Final Trajectory (closed 12:40Z)
 
-The H12 separate τ head experiment has shown:
-- **EP7 real architectural gain**: H12 val_wss 6.939 vs H10b 6.976 at SAME step 76,831 = -0.037pp lead
-- **EP8-10 transient**: Lion+EMA flat plateau, lead temporarily reversed
-- **EP11 single-step regression**: vol_p +0.307pp jump (optimizer trap)
-- **EP12 PERFECT MIRROR RECOVERY**: all 7 axes reversed (vol_p -0.310), wss 6.961→6.906 NEW LOW, **H12 RECLAIMS LEAD at same step**: H12 6.906 vs H10b 6.927 = -0.021pp lead
-- **Failure mode (if any)**: TBD pending EP13-15 — if EP15 sustains <6.85, architecture signal is real and resilient
+The H12 separate τ head experiment ran 14+ epochs and exhibited a clear three-strike instability pattern:
 
-**Decision matrix for H18 spec (EP15 ~12:40Z)**:
+| EP | val_wss | val_vol_p | Event |
+|---|---:|---:|---|
+| 7 (real architectural lead) | 6.939 | 4.297 | -0.037pp same-step lead vs H10b at step 76,831 |
+| 8 (first trap) | 6.969 | 4.288 | +0.030 wss bounce → recovered EP9 |
+| 9-10 (plateau) | 6.933 | 4.236 | quiet recovery |
+| 11 (second trap) | **6.961** | **4.543** | +0.307 vol_p single-step jump |
+| 12 (mirror recovery) | 6.906 | 4.233 | -0.310 vol_p mirror reversal |
+| 13 (clean continuation) | **6.901 NEW BEST** | 4.233 | -0.005 wss |
+| 14 (third trap, catastrophic) | **7.173** | **5.505** | **+1.272 vol_p, all 7 axes severely regressed** |
 
-| H12 EP15 outcome | H18 spec |
-|---|---|
-| val_wss < 6.85 (SOTA-beat trajectory) | **RE-INCLUDE separate τ head as primary**: H10b stack + H9b clamp+MAE_aux + H12 separate τ head |
-| val_wss 6.85-6.92 (continuing plateau) | Optional: include as H18-A; run H18-B in parallel without it |
-| val_wss ≥ 6.95 (hard kill triggers) | **DROP separate τ head from primary spec**, retain as fallback-B |
+**Trap magnitude progression**: EP8 (+0.030) < EP11 (+0.307) < EP14 (+1.272) — **accelerating, not stationary**. Architecture provides a real mechanism (~-0.02pp same-step lead through EP12-13) but the Lion+Charbonnier+separate-τ-head combination has chronic late-training instability with magnitudes that grow.
 
-**Spec content below describes the FULL 4-mechanism stack as originally intended.** Final commitment to include the separate τ head awaits the EP15 verdict.
+**Final decision for H18**: **Drop separate τ head from primary spec.** Use proven mechanisms only:
+- H10b: curvature additive attention bias + Charbonnier τ_z (stable through 23 epochs at wave-low)
+- H9b: clamp=0.15 + vol_p MAE auxiliary (stable through 25 epochs, vol_p floor preserved)
+- Lion lr=1e-4, GradNorm α=0.5, Y-symmetry, EMA (all H10b baseline)
+
+H18 expected test_wss with **3-mechanism stack**: 6.50-6.60 (still -0.13-0.23pp under SOTA, all floors preserved).
+
+**Optional fallback-B** (if pod budget allows after primary H18 runs): rerun H12 architecture with **AdamW** optimizer (lr=5e-4 per H11 stability finding) instead of Lion — may unlock stable architecture gain. Separate experiment, not in primary path.
 
 ## Mechanism Composition
 
