@@ -138,6 +138,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_mean_teacher: bool = False
+    mean_teacher_cons_lambda: float = 0.1
+    mean_teacher_coord_noise_sigma: float = 0.01
+    mean_teacher_warmup_steps: int = 2000
     debug: bool = False
 
 
@@ -228,6 +232,34 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_mean_teacher": (
+            "Enable Mean Teacher self-distillation (Tarvainen & Valpola, "
+            "NeurIPS 2017, arxiv:1703.01780). Requires --use-ema. Adds a "
+            "consistency loss between the student's surface predictions on "
+            "coordinate-perturbed surface inputs and the EMA teacher's "
+            "surface predictions on the unperturbed inputs. The teacher "
+            "forward is a no_grad weight-swap through the same compiled+DDP "
+            "model — no second model is built. Channel weights match the "
+            "supervised loss (cp/tau_x/tau_y/tau_z)."
+        ),
+        "mean_teacher_cons_lambda": (
+            "Maximum consistency-loss weight (lambda_max). The applied weight "
+            "is linearly warmed from 0 over --mean-teacher-warmup-steps. "
+            "Default 0.1 — small enough that the supervised signal dominates."
+        ),
+        "mean_teacher_coord_noise_sigma": (
+            "Gaussian-noise stddev applied to the xyz columns (first 3) of "
+            "surface_x for the student forward (teacher sees the unperturbed "
+            "input). Applied only to valid points via the surface_mask. "
+            "Default 0.01 (~1 cm on car-body scale)."
+        ),
+        "mean_teacher_warmup_steps": (
+            "Number of training steps to linearly ramp the consistency "
+            "lambda from 0 to --mean-teacher-cons-lambda. Default 2000 "
+            "(roughly 1/3 of a 13ep run on 8 GPUs at batch_size=4) so the "
+            "regularizer reaches full strength with several epochs of "
+            "training left."
         ),
     }
     for field in fields(Config):
@@ -321,13 +353,17 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, dict[str, float]]:
+    surface_x_override: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    surface_x_for_forward = (
+        surface_x_override if surface_x_override is not None else batch.surface_x
+    )
     with autocast_context(device, amp_mode):
         out = model(
-            surface_x=batch.surface_x,
+            surface_x=surface_x_for_forward,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
@@ -352,7 +388,7 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
-    }
+    }, out["surface_preds"]
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -364,21 +400,29 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
-) -> list[torch.Tensor]:
+    *,
+    surface_x_override: torch.Tensor | None = None,
+) -> tuple[list[torch.Tensor], torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
-    Returns scalar tensors in order: [sp, tau_x, tau_y, tau_z, vp].
+    Returns ``(per_task_losses, surface_pred)`` where ``per_task_losses`` is
+    a list of scalar tensors in order ``[sp, tau_x, tau_y, tau_z, vp]``.
     All five share the same forward graph so the GradNorm balancer can
     extract per-task gradient norms via ``torch.autograd.grad`` with
-    ``retain_graph=True``.
+    ``retain_graph=True``. The raw ``surface_pred`` is returned so callers
+    can layer additional surface-side losses (e.g. Mean Teacher consistency
+    in PR #1173) without a second forward pass.
     """
 
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    surface_x_for_forward = (
+        surface_x_override if surface_x_override is not None else batch.surface_x
+    )
     with autocast_context(device, amp_mode):
         out = model(
-            surface_x=batch.surface_x,
+            surface_x=surface_x_for_forward,
             surface_mask=batch.surface_mask,
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
@@ -389,7 +433,7 @@ def per_task_train_losses(
         tauy_loss = masked_mse(surface_pred[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
         tauz_loss = masked_mse(surface_pred[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
         vp_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
-    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss]
+    return [sp_loss, taux_loss, tauy_loss, tauz_loss, vp_loss], surface_pred
 
 
 GRADNORM_MODES = ("full", "ema_proxy")
@@ -659,6 +703,97 @@ def vol_points_for_epoch(
     return current
 
 
+# ---------------------------------------------------------------------------
+# Mean Teacher self-distillation helpers (PR #1173 / H23)
+# ---------------------------------------------------------------------------
+
+
+def mean_teacher_lambda_at(global_step: int, warmup_steps: int, lambda_max: float) -> float:
+    """Linear warmup of the consistency-loss weight from 0 to ``lambda_max``."""
+    if lambda_max <= 0.0:
+        return 0.0
+    if warmup_steps <= 0:
+        return lambda_max
+    ramp = min(float(global_step) / float(warmup_steps), 1.0)
+    return ramp * lambda_max
+
+
+def apply_surface_coord_noise(
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    sigma: float,
+) -> torch.Tensor:
+    """Add Gaussian noise to the xyz (first 3) columns of ``surface_x``.
+
+    Noise is gated by ``surface_mask`` so padded points stay at their canonical
+    zero — preserves the contract that pad rows are exactly zero (which the
+    attention masking relies on).
+    """
+    if sigma <= 0.0:
+        return surface_x
+    out = surface_x.clone()
+    noise = torch.randn_like(out[..., :3]) * sigma
+    valid = surface_mask.unsqueeze(-1).to(noise.dtype)
+    out[..., :3] = out[..., :3] + noise * valid
+    return out
+
+
+@torch.no_grad()
+def teacher_forward_surface_preds(
+    model: nn.Module,
+    base_model: nn.Module,
+    ema: "EMA",
+    surface_x: torch.Tensor,
+    surface_mask: torch.Tensor,
+    volume_x: torch.Tensor,
+    volume_mask: torch.Tensor,
+    device: torch.device,
+    amp_mode: str,
+) -> torch.Tensor:
+    """Run a teacher forward via EMA weight-swap and return surface predictions.
+
+    Weights are swapped in-place on ``base_model``: this is the same pattern as
+    val-time EMA evaluation, so it is DDP/torch.compile-safe (the compiled
+    graph operates on the parameter ``.data`` pointer). The teacher forward
+    runs through the wrapped ``model`` (DDP or compiled) so it shares the
+    student's execution graph and any DDP communication is suppressed by
+    ``no_grad``.
+    """
+    was_training = model.training
+    model.eval()
+    ema.store(base_model)
+    ema.copy_to(base_model)
+    try:
+        with autocast_context(device, amp_mode):
+            teacher_out = model(
+                surface_x=surface_x,
+                surface_mask=surface_mask,
+                volume_x=volume_x,
+                volume_mask=volume_mask,
+            )
+        teacher_surf = teacher_out["surface_preds"].detach().float()
+    finally:
+        ema.restore(base_model)
+        if was_training:
+            model.train()
+    return teacher_surf
+
+
+def mean_teacher_consistency_loss(
+    student_surf: torch.Tensor,
+    teacher_surf: torch.Tensor,
+    mask: torch.Tensor,
+    channel_weights: torch.Tensor,
+) -> torch.Tensor:
+    """Per-channel weighted, mask-aware MSE between student and EMA-teacher surface preds.
+
+    ``teacher_surf`` is ``.detach()`` and cast to float in the caller; the cast
+    to the student dtype happens inside ``weighted_channel_mse``.
+    """
+    teacher_target = teacher_surf.to(dtype=student_surf.dtype).detach()
+    return weighted_channel_mse(student_surf, teacher_target, mask, channel_weights)
+
+
 def rebuild_train_loader_with_vol_points(
     config: Config,
     old_train_loader: DataLoader,
@@ -784,6 +919,22 @@ def main(argv: Iterable[str] | None = None) -> None:
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
+        if config.use_mean_teacher and ema is None:
+            raise ValueError(
+                "--use-mean-teacher requires --use-ema (teacher = EMA of student)."
+            )
+        mean_teacher_active = (
+            config.use_mean_teacher
+            and ema is not None
+            and config.mean_teacher_cons_lambda > 0.0
+        )
+        if mean_teacher_active and state.is_main:
+            print(
+                f"Mean Teacher enabled: cons_lambda_max={config.mean_teacher_cons_lambda}, "
+                f"coord_noise_sigma={config.mean_teacher_coord_noise_sigma}, "
+                f"warmup_steps={config.mean_teacher_warmup_steps}"
+            )
+
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
         if config.use_gradnorm:
@@ -883,6 +1034,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["mean_teacher/enabled"] = 1.0 if mean_teacher_active else 0.0
+            wandb.summary["mean_teacher/cons_lambda_max"] = config.mean_teacher_cons_lambda
+            wandb.summary["mean_teacher/coord_noise_sigma"] = config.mean_teacher_coord_noise_sigma
+            wandb.summary["mean_teacher/warmup_steps"] = config.mean_teacher_warmup_steps
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -937,9 +1092,50 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                mean_teacher_metrics: dict[str, float] = {}
+
+                cons_lambda = (
+                    mean_teacher_lambda_at(
+                        global_step + 1,
+                        config.mean_teacher_warmup_steps,
+                        config.mean_teacher_cons_lambda,
+                    )
+                    if mean_teacher_active
+                    else 0.0
+                )
+                teacher_surface_preds: torch.Tensor | None = None
+                surface_x_aug: torch.Tensor | None = None
+                if mean_teacher_active:
+                    # Move batch to device once so the teacher forward and the
+                    # student forward share the same tensors. ``train_loss`` and
+                    # ``per_task_train_losses`` call ``batch.to(device)`` again
+                    # — this is a no-op for already-on-device tensors.
+                    batch = batch.to(device)
+                    teacher_surface_preds = teacher_forward_surface_preds(
+                        model=model,
+                        base_model=base_model,
+                        ema=ema,
+                        surface_x=batch.surface_x,
+                        surface_mask=batch.surface_mask,
+                        volume_x=batch.volume_x,
+                        volume_mask=batch.volume_mask,
+                        device=device,
+                        amp_mode=config.amp_mode,
+                    )
+                    surface_x_aug = apply_surface_coord_noise(
+                        batch.surface_x,
+                        batch.surface_mask,
+                        config.mean_teacher_coord_noise_sigma,
+                    )
+
                 if balancer is not None:
-                    per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                    per_task_losses, student_surface_preds = per_task_train_losses(
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        surface_x_override=surface_x_aug,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1021,7 +1217,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
-                    loss, batch_loss_metrics = train_loss(
+                    loss, batch_loss_metrics, student_surface_preds = train_loss(
                         model,
                         batch,
                         transform,
@@ -1030,7 +1226,70 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        surface_x_override=surface_x_aug,
                     )
+
+                if (
+                    mean_teacher_active
+                    and teacher_surface_preds is not None
+                    and student_surface_preds is not None
+                ):
+                    surface_mask_dev = batch.surface_mask.to(device)
+                    cons_loss_tensor = mean_teacher_consistency_loss(
+                        student_surface_preds,
+                        teacher_surface_preds,
+                        surface_mask_dev,
+                        surface_channel_weights,
+                    )
+                    loss = loss + cons_lambda * cons_loss_tensor
+                    with torch.no_grad():
+                        student_f = student_surface_preds.detach().float()
+                        teacher_f = teacher_surface_preds.detach().float()
+                        diff = student_f - teacher_f
+                        mask_f = surface_mask_dev.to(diff.dtype).unsqueeze(-1)
+                        valid_points = mask_f.sum().clamp_min(1.0)
+                        per_channel_abs = (diff.abs() * mask_f).sum(dim=(0, 1)) / valid_points
+                        student_mean_abs = (student_f.abs() * mask_f).sum() / (
+                            valid_points * student_f.shape[-1]
+                        )
+                        teacher_mean_abs = (teacher_f.abs() * mask_f).sum() / (
+                            valid_points * teacher_f.shape[-1]
+                        )
+                        diff_mean_abs = per_channel_abs.mean()
+                    mean_teacher_metrics = {
+                        "train/mean_teacher/consistency_loss": float(
+                            cons_loss_tensor.detach().cpu().item()
+                        ),
+                        "train/mean_teacher/consistency_lambda": float(cons_lambda),
+                        "train/mean_teacher/consistency_loss_weighted": float(
+                            (cons_lambda * cons_loss_tensor).detach().cpu().item()
+                        ),
+                        "train/mean_teacher/student_mean_abs": float(
+                            student_mean_abs.cpu().item()
+                        ),
+                        "train/mean_teacher/teacher_mean_abs": float(
+                            teacher_mean_abs.cpu().item()
+                        ),
+                        "train/mean_teacher/student_minus_teacher_mean_abs": float(
+                            diff_mean_abs.cpu().item()
+                        ),
+                        "train/mean_teacher/student_minus_teacher_cp": float(
+                            per_channel_abs[0].cpu().item()
+                        ),
+                        "train/mean_teacher/student_minus_teacher_tau_x": float(
+                            per_channel_abs[1].cpu().item()
+                        ),
+                        "train/mean_teacher/student_minus_teacher_tau_y": float(
+                            per_channel_abs[2].cpu().item()
+                        ),
+                        "train/mean_teacher/student_minus_teacher_tau_z": float(
+                            per_channel_abs[3].cpu().item()
+                        ),
+                        "train/mean_teacher/coord_noise_sigma": float(
+                            config.mean_teacher_coord_noise_sigma
+                        ),
+                    }
+
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
                 current_lr = scheduler.get_last_lr()[0]
@@ -1072,6 +1331,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if mean_teacher_metrics:
+                    train_log.update(mean_teacher_metrics)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
