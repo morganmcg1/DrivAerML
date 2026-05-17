@@ -105,6 +105,12 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    # H19: VICReg batch-variance hinge on per-sample mean |τ_z| (PR #1168).
+    # Penalty fires only when std(per-sample-mean|τ_z|) < gamma; zero otherwise.
+    # Defaults 0.05/0.10 per PR; advisor contingency: re-run at gamma=0.10 if penalty never activates.
+    vicreg_tau_z_enable: bool = False
+    vicreg_tau_z_gamma: float = 0.05
+    vicreg_tau_z_lambda: float = 0.10
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -321,10 +327,14 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vicreg_tau_z_enable: bool = False,
+    vicreg_tau_z_gamma: float = 0.05,
+    vicreg_tau_z_lambda: float = 0.10,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    vicreg_diag: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -332,27 +342,55 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        surface_preds = out["surface_preds"]
         if surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_preds,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_preds, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+
+        if vicreg_tau_z_enable:
+            # H19: VICReg variance hinge on per-sample mean |τ_z| in normalized space.
+            # Penalizes batch collapse of τ_z magnitudes; zero when std ≥ gamma.
+            mask_f = batch.surface_mask.to(dtype=surface_preds.dtype)
+            tau_z_abs = surface_preds[..., 3].abs()
+            n_valid = mask_f.sum(dim=1).clamp_min(1.0)
+            tau_z_mean = (tau_z_abs * mask_f).sum(dim=1) / n_valid
+            if tau_z_mean.shape[0] > 1:
+                std_tau_z = tau_z_mean.std(unbiased=False)
+                vicreg_var_loss = torch.relu(vicreg_tau_z_gamma - std_tau_z).pow(2)
+            else:
+                zero = surface_preds.sum() * 0.0
+                std_tau_z = zero
+                vicreg_var_loss = zero
+            vicreg_var_loss_weighted = vicreg_tau_z_lambda * vicreg_var_loss
+            loss = loss + vicreg_var_loss_weighted
+            std_tau_z_f = float(std_tau_z.detach().cpu().item())
+            vicreg_diag = {
+                "vicreg_std_tau_z": std_tau_z_f,
+                "vicreg_var_loss": float(vicreg_var_loss.detach().cpu().item()),
+                "vicreg_var_loss_weighted": float(vicreg_var_loss_weighted.detach().cpu().item()),
+                "vicreg_penalty_active": 1.0 if std_tau_z_f < vicreg_tau_z_gamma else 0.0,
+                "vicreg_tau_z_batch_mean": float(tau_z_mean.detach().mean().cpu().item()),
+            }
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(vicreg_diag)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +890,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.vicreg_tau_z_enable:
+                print(
+                    f"H19 VICReg τ_z variance hinge: gamma={config.vicreg_tau_z_gamma} "
+                    f"lambda={config.vicreg_tau_z_lambda} (PR #1168). Penalty fires only when "
+                    f"std(per-sample-mean|τ_z|) < gamma; zero otherwise."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +927,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/vicreg_tau_z_enable"] = config.vicreg_tau_z_enable
+            wandb.summary["loss/vicreg_tau_z_gamma"] = config.vicreg_tau_z_gamma
+            wandb.summary["loss/vicreg_tau_z_lambda"] = config.vicreg_tau_z_lambda
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1077,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vicreg_tau_z_enable=config.vicreg_tau_z_enable,
+                        vicreg_tau_z_gamma=config.vicreg_tau_z_gamma,
+                        vicreg_tau_z_lambda=config.vicreg_tau_z_lambda,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1120,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if config.vicreg_tau_z_enable and "vicreg_std_tau_z" in batch_loss_metrics:
+                        train_log.update(
+                            {
+                                "vicreg/std_tau_z": batch_loss_metrics["vicreg_std_tau_z"],
+                                "vicreg/var_loss": batch_loss_metrics["vicreg_var_loss"],
+                                "vicreg/var_loss_weighted": batch_loss_metrics["vicreg_var_loss_weighted"],
+                                "vicreg/penalty_active": batch_loss_metrics["vicreg_penalty_active"],
+                                "vicreg/tau_z_batch_mean": batch_loss_metrics["vicreg_tau_z_batch_mean"],
+                                "vicreg/gamma": config.vicreg_tau_z_gamma,
+                                "vicreg/lambda": config.vicreg_tau_z_lambda,
+                            }
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
