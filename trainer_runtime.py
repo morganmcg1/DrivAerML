@@ -903,21 +903,29 @@ def masked_per_component_rel_l2(
 
     Mirrors _accumulate_case_rel_l2 + _rel_l2 but operates per-component
     (axis C) rather than collapsing all channels together.
+
+    Numerical-stability notes:
+      * `sqrt` has an infinite gradient at zero. For rows whose mask is all
+        False, `(num/den) = 0/eps = 0` and the elementwise backward
+        produces `0 * inf = NaN` even though those rows are masked out of
+        the final mean. We therefore select valid rows BEFORE the sqrt.
+      * `clamp_min(eps)` on the ratio guards the rare case where a valid
+        row happens to have `num=0` for some channel.
     """
     if pred.numel() == 0:
         return pred.sum() * 0.0
     pred = pred.float()
     target = target.float()
-    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
-    diff_sq = (pred - target).square() * mask_f       # [B, N, C]
-    target_sq = target.square() * mask_f              # [B, N, C]
-    num = diff_sq.sum(dim=1)                          # [B, C]
-    den = target_sq.sum(dim=1).clamp_min(eps)         # [B, C]
-    per_car_per_comp = (num / den).sqrt()             # [B, C]
     valid_cars = mask.any(dim=1)                      # [B]
     if not bool(valid_cars.any()):
         return pred.sum() * 0.0
-    return per_car_per_comp[valid_cars].mean()
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    diff_sq = (pred - target).square() * mask_f       # [B, N, C]
+    target_sq = target.square() * mask_f              # [B, N, C]
+    num = diff_sq.sum(dim=1)[valid_cars]              # [B_valid, C]
+    den = target_sq.sum(dim=1)[valid_cars].clamp_min(eps)  # [B_valid, C]
+    ratio = (num / den).clamp_min(eps)                # [B_valid, C], bounded
+    return ratio.sqrt().mean()
 
 
 EVAL_KEYS = (
