@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        vector_decoupled_head: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,11 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.vector_decoupled_head = vector_decoupled_head
+        # When True, surface head outputs 5 channels (cp, dir_x, dir_y, dir_z, log_mag).
+        # The 3-vector τ part is reconstructed as `log_mag.clamp(-3, 3).exp() * unit(dir)`
+        # in normalized space (H10b, PR #1164). Public surface_preds remain 4-channel.
+        self._surface_head_out_dim = self.surface_output_dim + (1 if vector_decoupled_head else 0)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -484,7 +490,7 @@ class SurfaceTransolver(nn.Module):
             self.surface_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden),
                 nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
+                nn.Linear(n_hidden, self._surface_head_out_dim),
             )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
@@ -496,7 +502,7 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
-            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.surface_out = LinearProjection(n_hidden, self._surface_head_out_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
@@ -518,6 +524,31 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+    def _reconstruct_surface(
+        self, raw: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Map raw 5-channel head output to (cp, τ_x, τ_y, τ_z) + decoupled diagnostics.
+
+        raw: [..., 5] = (cp, dir_x, dir_y, dir_z, log_mag)
+        Returns:
+            preds: [..., 4] = (cp, τ_x, τ_y, τ_z) in normalized space
+            dir_unit: [..., 3] L2-normalized direction
+            log_mag: [..., 1] raw log-magnitude channel (pre-clamp)
+
+        H10b: magnitude reconstructed as `clamp(log_mag, -3, 3).exp()` —
+        bounded log-normal in [e^-3, e^+3] ≈ [0.050, 20.09] without the
+        softplus floor (~0.693) that bottlenecked H10. Covers ±3σ of the
+        normalized τ-magnitude distribution.
+        """
+        cp = raw[..., 0:1]
+        dir_raw = raw[..., 1:4]
+        log_mag = raw[..., 4:5]
+        dir_unit = F.normalize(dir_raw, dim=-1, eps=1e-6)
+        mag = log_mag.clamp(min=-3.0, max=3.0).exp()
+        tau = mag * dir_unit
+        preds = torch.cat([cp, tau], dim=-1)
+        return preds, dir_unit, log_mag
 
     def _encode_group(
         self,
@@ -621,8 +652,20 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        surface_dir_unit: torch.Tensor | None = None
+        surface_log_mag: torch.Tensor | None = None
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_raw = self.surface_out(surface_hidden)
+            if self.vector_decoupled_head:
+                surface_preds_raw, surface_dir_unit, surface_log_mag = self._reconstruct_surface(
+                    surface_raw
+                )
+                mask_unsq = surface_mask.unsqueeze(-1)
+                surface_preds = surface_preds_raw * mask_unsq
+                surface_dir_unit = surface_dir_unit * mask_unsq
+                surface_log_mag = surface_log_mag * mask_unsq
+            else:
+                surface_preds = surface_raw * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -633,10 +676,14 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if self.vector_decoupled_head and surface_dir_unit is not None:
+            out["surface_pred_direction"] = surface_dir_unit
+            out["surface_pred_log_mag"] = surface_log_mag
+        return out

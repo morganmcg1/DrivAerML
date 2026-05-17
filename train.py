@@ -105,6 +105,8 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    vector_decoupled_head: bool = False
+    direction_cos_loss_weight: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -308,6 +310,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        vector_decoupled_head=config.vector_decoupled_head,
     )
 
 
@@ -321,6 +324,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    direction_cos_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -344,7 +348,26 @@ def train_loss(
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
+        # H10/H10b vector-decoupled head: cosine-similarity aux loss on the
+        # unit direction of the wall shear vector in normalized space.
+        # Predicted direction is L2-normalized at the model layer (see
+        # SurfaceTransolver._reconstruct_surface); GT direction is normalized
+        # here from surface_target[..., 1:4]. Only active when the model
+        # populated "surface_pred_direction" AND weight > 0.
+        direction_cos_loss = surface_loss.new_zeros(())
+        active = (
+            "surface_pred_direction" in out and direction_cos_loss_weight > 0.0
+        )
+        if active:
+            pred_dir = out["surface_pred_direction"]  # [B, N, 3] unit (model-side)
+            tau_target = surface_target[..., 1:4]
+            tgt_dir = torch.nn.functional.normalize(tau_target, dim=-1, eps=1e-6)
+            cos_sim = (pred_dir * tgt_dir).sum(dim=-1)
+            direction_cos_loss_pv = 1.0 - cos_sim
+            mask_f = batch.surface_mask.to(direction_cos_loss_pv.dtype)
+            direction_cos_loss = (direction_cos_loss_pv * mask_f).sum() / mask_f.sum().clamp(min=1)
+        weighted_direction_cos_loss = direction_cos_loss_weight * direction_cos_loss
+        loss = weighted_surface_loss + weighted_volume_loss + weighted_direction_cos_loss
         base_mse_loss = surface_loss + volume_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
@@ -352,6 +375,8 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "direction_cos_loss": float(direction_cos_loss.detach().cpu().item()),
+        "direction_cos_loss_weighted": float(weighted_direction_cos_loss.detach().cpu().item()),
     }
 
 
@@ -883,6 +908,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/vector_decoupled_head"] = bool(config.vector_decoupled_head)
+            wandb.summary["loss/direction_cos_loss_weight"] = float(config.direction_cos_loss_weight)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1057,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        direction_cos_loss_weight=config.direction_cos_loss_weight,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1098,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "direction_cos_loss" in batch_loss_metrics:
+                        train_log["train/direction_cos_loss"] = batch_loss_metrics["direction_cos_loss"]
+                        train_log["train/direction_cos_loss_weighted"] = batch_loss_metrics[
+                            "direction_cos_loss_weighted"
+                        ]
+                        train_log["train/direction_cos_loss_weight"] = config.direction_cos_loss_weight
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
