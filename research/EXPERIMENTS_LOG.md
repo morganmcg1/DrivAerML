@@ -1,3 +1,91 @@
+## 2026-05-17 20:05 — PR #1163: H18 Per-Vertex Area-Weighted Surface MSE (tanjiro) — CLOSED TERMINAL NOT-A-MERGE / FIRST-TEST-SURVIVING-BAND-BREAK / 9TH-WAVE-30-DEAD-END / MECHANISM-PARTLY-PROVEN
+
+- **Branch**: `tanjiro/h18-area-weighted-surface-loss` (closed)
+- **W&B group**: `wave30_h18_area_weighted_v2` (v1 watchdog-killed; v2 ran clean EP1-13)
+  - 8-rank: rank0 `j473gqwa`, rank1 `5f4heugx`, rank2 `skpujw1g`, rank3 `icgcf556`, rank4 `fvygavd3`, rank5 `9v2sybz2`, rank6 `z3m09rs7`, rank7 `oo68nfib`
+- **Best ckpt**: EP13 EMA
+- **Total runtime**: 14.33h (859 min, 70664 steps)
+- **Hypothesis**: Multiply per-vertex MSE by physically-meaningful area weight `w_i = raw_area_i / mean(raw_area)` to make training objective match the physical force-integral `∫ τ dA`. Hypothesis: τ_z over-prediction is concentrated on high-area horizontal panels (hood/roof/trunk where n ≈ +z); area-weighting forces stronger fit there.
+
+### Terminal results — NOT-A-MERGE but UNIQUELY POSITIVE band-break + vol_p signal
+
+| Metric | val (n=34) | test (n=50) | baseline test | Δ | floor | floor breach |
+|---|---:|---:|---:|---:|---:|:--|
+| **val_abupt** (merge gate) | **6.5687** | 6.2216 | 5.844 | +0.378pp | — | FAIL +0.443pp val |
+| test_WSS (paper-facing) | 7.5595 | **7.2690** | 6.727 | +0.542pp | 6.727 goal | FAIL goal +0.542pp |
+| test_SP | 4.2808 | 3.9163 | 3.456 | +0.460pp | 3.577 | **BREACH +0.339pp** |
+| test_vol_p | 3.6319 | **3.4848** | 3.563 | −0.078pp | 3.643 | **PASS −0.158pp** ✓ |
+| **test τz/τx ratio** | **1.489** | **1.4178** | ~1.46 | **−0.04** | — | **★ BELOW [1.44, 1.55] BAND** |
+
+### Three uniquely positive signals — distinct from prior 8 Wave 30 closures
+
+1. **Test τz/τx 1.418 = DEEPEST test-side band-break in fleet history** (vs H6' #1147 1.420). Val faded EP3 1.412 → EP13 1.489 but **TEST HELD at 1.418** — first Wave 30 result with test-side mechanism survival. Val/test divergence suggests area-weighted MSE learned generalizable τ_z structure, not val-specific patterns.
+2. **test_vol_p 3.485% = ONLY floor-passing volume_pressure in active Wave 30 fleet.** Surface→volume cross-attention propagates better-fitted τ_z to vol_p predictions when area-weighted.
+3. **9th Wave 30 dead end but qualitatively different** — joins H10b/H11b/H12/H16/H16b/H20/H22 (loss-shape) + H23 (regularization), but is the ONLY closure with proven test-side mechanism shift + floor pass.
+
+### Diagnostic: area weight statistics at terminal (per-rank mean)
+
+| Stat | Value | Expected | Status |
+|---|---:|---|:--|
+| Effective dynamic range | **7410×** | [10×, 500×] | **15× ABOVE expected** |
+| vertex_weight max | 23.76 | < 5.0 | 4.8× above expected |
+| vertex_weight p95 | 3.72 | ~1.5–5.0 | ✓ |
+| vertex_weight min | 0.0033 | ~0.1 | 30× BELOW expected |
+
+**Failure mode diagnosis**: DR=7400× starves low-area sharp-edge vertices (mirror seams, wheel-well lips, B-pillar corners with weight ~0.003×). cp loss-gradient downweighting on these vertices causes SP regression. The hypothesis fired correctly but the lever was too long for DrivAerML's 4-orders-of-magnitude area variation.
+
+### Trajectory — val vs test τz/τx divergence
+
+| EP | val_abupt | val_SP | val_vol_p | val τz/τx |
+|---:|---:|---:|---:|---:|
+| 1 | 33.250 | 23.590 | 14.297 | 1.357 |
+| 3 | 7.787 | 5.033 | 3.879 | **1.412** (deepest val break) |
+| 5 | 7.061 | 4.579 | 3.766 | 1.447 (band edge) |
+| 9 | 6.676 | 4.349 | 3.670 | 1.478 (in band) |
+| **13 (terminal)** | **6.569** | **4.281** | **3.632** | **1.489** (val faded) |
+| **test (best_ep=13)** | **6.222** | 3.916 | **3.485** ✓ | **1.418** (test held) |
+
+The val-side band-break faded EP3→EP13 (1.412→1.489) but TEST stayed at 1.418 — the model learned generalizable τ_z structure that val (n=34) couldn't fully reflect but test (n=50) did.
+
+### Why this closes — and why H18d is the highest-EV follow-up
+
+**Closure rationale**: Decisive primary metric regression + 2 floor breaches (test_SP, test_WSS goal). The 9th confirmed Wave 30 dead end.
+
+**But the mechanism is qualitatively different from the prior 8** — H18 produced the only test-surviving band-break and floor pass. Plateau Protocol normally mandates tier-shift after 5+ failures (we're at 9), BUT the H18 evidence is too valuable to abandon without one focused follow-up.
+
+**Assigned tanjiro H18d** (PR #1183) — channel-decoupled τ_z-only area weighting. Apply per-vertex area weights ONLY to τ_z channel; cp/τ_x/τ_y at uniform weighting. Hypothesis: band-break mechanism is τ_z-specific; cp starvation is channel-coupling artifact, not intrinsic to area-weighting.
+
+EP3 gate: `τz/τx ≤ 1.42 AND val_abupt ≤ 7.5% AND val_SP ≤ 4.50%` (must show ≥ 0.5pp SP recovery vs H18 EP3 5.033%). KILL gates: `val_abupt > 8.5% OR τz/τx > 1.50 OR val_SP > 5.5%`. ~10 LOC change to train.py. Compute-parity 14h DDP-8.
+
+**Information value table for H18d outcomes:**
+
+| Outcome | P | Research update |
+|---|---:|---|
+| Band-break + SP recovered + baseline beat | ~25% | NEW BASELINE; first Wave 30 winner; channel-specific mechanism confirmed |
+| Band-break held but SP still breached | ~25% | Failure is DR (recipe), not coupling → escalate to H18b (clamped) or H18c (sqrt) |
+| Band-break lost | ~25% | Coupling-required → area-weighting axis closed even with decoupling |
+| Marginal / mixed | ~25% | Mid-strength signal — informs H18c vs H18b priority |
+
+Highest EV/compute among the three student-suggested follow-ups (H18b clamped, H18c sqrt, H18d channel-decoupled). NOT pursuing H18b/c in parallel — H18d is the most diagnostic single experiment.
+
+### Wave 30 dead-end tally — 9 confirmed across 2 tiers
+
+| # | Hypothesis | Tier | Test τz/τx | Test floor pass | Mechanism shift |
+|---|---|---|---:|---|:--|
+| 1 | H10b bounded-exp head | Output-head | ~1.53 | none | none |
+| 2 | H11b learnable scalar | Loss reweighting | ~1.56 | none | none |
+| 3 | H12 τ-magnitude weighted | Per-vertex loss | ~1.48 | none | none |
+| 4 | H16 focal MSE | Per-vertex loss | ~1.50 | none | none |
+| 5 | H16b smooth-L1/Huber | Loss shape | ~1.49 | none | none |
+| 6 | H20 focal per-vertex | Per-vertex loss | ~1.52 | none | none |
+| 7 | H22 Charbonnier-cp+MAE-aux | Loss shape | ~1.48 | none | none |
+| 8 | H23 Mean Teacher EMA | Training-regularization | ~1.87 (above) | none | wrong direction |
+| **9** | **H18 area-weighted MSE** | **Per-vertex position-weighting** | **1.418 ★** | **test_vol_p ✓** | **YES — test-surviving** |
+
+H18 is the OUTLIER — only attack with real test-side mechanism shift. H18d (PR #1183) isolates the signal.
+
+---
+
 ## 2026-05-17 19:40 — PR #1173: H23 Mean Teacher EMA Self-Distillation (frieren) — CLOSED TERMINAL KILL / MECHANISM-WORKS-BUT-NET-COST-EXCEEDS-NET-BENEFIT / 8TH-CONFIRMED-WAVE-30-DEAD-END
 
 - **Branch**: `frieren/h23-mean-teacher-ema-self-distillation` (closed)

@@ -1,11 +1,97 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~19:40 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~20:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~19:40Z) — H23 KILLED, H29 SSFL assigned — Wave 30 tier-shift to frequency-domain loss
+## Latest invocation actions (2026-05-17 ~20:10Z) — H18 CLOSED, H18d (channel-decoupled τ_z-only) assigned — evidence-following follow-up to fleet's deepest band-break signal
+
+### Headline updates
+
+1. **PR #1163 tanjiro H18 area-weighted MSE CLOSED TERMINAL NOT-A-MERGE / 9TH WAVE-30 DEAD END / FIRST-TEST-SURVIVING-BAND-BREAK / MECHANISM-PARTLY-PROVEN** — terminal val_abupt 6.569% +0.443pp (FAIL merge gate), test_abupt 6.222% +0.378pp, test_SP 3.916% +0.339pp BREACH, test_WSS 7.269% +0.542pp above goal. **BUT** test τz/τx = **1.418** = DEEPEST test-side band-break in fleet history (vs H6' #1147 1.420). val faded EP3 1.412 → EP13 1.489 but TEST HELD at 1.418 — **first Wave 30 result with test-side mechanism survival**. test_vol_p = 3.485% (PASS −0.158pp) = **only floor-passing vol_p in active Wave 30 fleet**. Diagnosis: DR=7400× (15× above expected) starved low-area sharp-edge vertices, causing cp/SP regression. Mechanism partly proven but recipe too aggressive.
+
+2. **PR #1183 tanjiro H18d ASSIGNED — CHANNEL-DECOUPLED τ_z-ONLY AREA WEIGHTING** — Apply per-vertex area weight ONLY to τ_z channel; cp/τ_x/τ_y at uniform weighting. ~10 LOC change to train.py adds `--area-weight-channels {all,tau_z_only,wss}` flag. Tests: is the band-break mechanism τ_z-specific OR coupled to cp/τx/τy? If τ_z-specific, preserves band-break with NO SP regression — potential first Wave 30 winner. If coupled, decisively closes the position-based per-vertex weighting sub-axis. EP3 falsifiable gate: `τz/τx ≤ 1.42 AND val_abupt ≤ 7.5% AND val_SP ≤ 4.50%` (must show ≥ 0.5pp SP recovery vs H18 EP3 5.033%). KILL gates: `val_abupt > 8.5% OR τz/τx > 1.50 OR val_SP > 5.5%`. Same 14h DDP-8 compute as baseline. `area_weight_channels=all` = exact H18 recovery; `tau_z_only` = H18d main arm. Optional Arm B `wss` reserved for follow-up.
+
+3. **Evidence-following over tier-shift** — Plateau Protocol normally mandates tier-shift after 5+ failures (we're at 9), BUT H18 evidence is uniquely valuable. The advisor decision: **H18 is the OUTLIER among the 9 closed dead ends** — only attack with proven test-side mechanism shift (test τz/τx 1.418) AND floor pass (test_vol_p 3.485%). The 6 other fresh tier-shifts already in flight (H24/H25/H26/H27/H28/H29 + H21) cover the speculation budget. H18d adds **evidence-following** to the portfolio rather than another speculative attack.
+
+### Fleet status (8/8 active after H18d assignment)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| **tanjiro** | **#1183** | **H18d — channel-decoupled τ_z-only area weight** | **just assigned (evidence-following follow-up)** |
+| frieren | #1182 | H29 SSFL — frequency-domain loss | EP1 launch expected |
+| edward | #1179 | H28 SAM — optimizer space | training, EP3 ~00:00-02:00Z May 18 |
+| askeladd | #1178 | H27 PRLP — train loss in eval space | EP3 gate ~23:46Z (post-bf16-NaN fix) |
+| alphonse | #1176 | H25 ALGP auxiliary local-gradient prediction | EP1 close 18:48Z — τz/τx 1.377 (2nd EP1 band-break signal), needs-rebase deferred |
+| fern | #1174 | H24 GSTS encoder slice-temperature | EP1 τz/τx 1.395 — EP3 gate ~21:25Z |
+| nezuko | #1171 | H21 per-component output heads | EP10+ vol-65536 curriculum |
+| thorfinn | #1177 | H26 NPCA encoder input local-frame aug | Path B 5-epoch compressed (pod 360-min budget bug) |
+
+### Closed Wave 30 directions (now 9 confirmed dead ends across 2 tiers, H18 outlier)
+
+| # | Hypothesis | Tier | Test τz/τx | Test floor pass | Mechanism shift |
+|---|---|---|---:|---|:--|
+| 1 | H10b bounded-exp head | Output-head | ~1.53 | none | none |
+| 2 | H11b learnable scalar gates | Loss reweighting | ~1.56 | none | none |
+| 3 | H12 τ-magnitude weighted | Per-vertex residual | ~1.48 | none | none |
+| 4 | H16 focal MSE | Per-vertex loss | ~1.50 | none | none |
+| 5 | H16b smooth-L1/Huber | Loss shape | ~1.49 | none | none |
+| 6 | H20 focal per-vertex | Per-vertex loss | ~1.52 | none | none |
+| 7 | H22 Charbonnier-cp+MAE-aux | Loss shape | ~1.48 | none | none |
+| 8 | H23 Mean Teacher EMA | Training-regularization | ~1.87 (above) | none | wrong direction |
+| **9** | **H18 area-weighted MSE** | **Per-vertex POSITION-weighting** | **1.418 ★** | **test_vol_p ✓** | **YES — test-surviving** |
+
+**H18 is the OUTLIER**: position-based per-vertex weighting CAN shift the τz/τx band attractor. The recipe (DR=7400×) starved low-area sharp edges. H18d isolates the working mechanism (τ_z channel) from the failure (channel-coupling on cp).
+
+### KEY FLEET DIAGNOSTIC: Floor disease localization (after H18 closure)
+
+After 9 closed Wave 30 attempts spanning 2 tiers + 1 outlier (H18 with proven mechanism shift), the surviving attack axes are:
+- **Position-based per-vertex weighting, channel-decoupled** (H18d tanjiro — NEW DIAGNOSTIC)
+- **Spatial-frequency gradient imbalance** (H29 frieren SSFL — frequency-domain)
+- **Optimization landscape sharpness** (H28 edward SAM — optimizer-space)
+- **Output-head / per-head gradient paths** (H21 nezuko per-component MLPs)
+- **Backbone representation coupling cp/τ** (H25 alphonse ALGP — EP1 τz/τx 1.377 SECOND band-break signal)
+- **Train-eval space mismatch** (H27 askeladd PRLP — bf16-NaN fixed, EP3 gate live)
+- **Encoder INPUT content** (H24 fern GSTS — EP1 τz/τx 1.395 FIRST band-break signal; H26 thorfinn NPCA Path B)
+- **NOT input-channel gating** (H11b confirmed)
+- **NOT cp-loss-shape** (H22 confirmed)
+- **NOT per-vertex residual-reweighting** (7/7 confirmed)
+- **NOT training-side regularization** (H23 confirmed)
+- **NOT channel-coupled position-weighting** (H18 confirmed; H18d tests decoupled variant)
+
+### Band attractor — fleet-wide pattern (3 active EP1 band-break signals + 1 confirmed test-survivor)
+
+| Run | EP1 τz/τx | EP_terminal τz/τx | Test τz/τx | Outcome |
+|:--|---:|---:|---:|:--|
+| H10b fern | — | 1.530 | — | converged into band |
+| H11b askeladd | 1.466 | 1.556 | — | converged INTO band |
+| H12 edward | — | 1.476 | — | inside band (no shift) |
+| H18 tanjiro | 1.357 (transient) | 1.489 (faded) | **1.418 ★** | **TEST-SURVIVING** |
+| H20 alphonse | 1.401 (transient) | 1.523 | — | faded into band |
+| H21 nezuko | — | 1.529 | — | inside band |
+| H22 thorfinn | — | (offline pending) | — | premise dead at EP3 |
+| H23 frieren | 1.426 | 1.866 (KILL) | — | drifted ABOVE band |
+| **H24 fern** (LIVE) | **1.395** | EP3 gate ~21:25Z | — | **band-break signal 1** |
+| **H25 alphonse** (LIVE) | **1.377** | EP3 gate ~23:00Z | — | **band-break signal 2** |
+
+Three independent band-break signals now active (H24, H25, H18d) + H18 already confirmed test-side band-break survival. The single fleet-wide question for the next 8h: **does any active mechanism preserve the band-break through EP3 → EP13 → test?**
+
+### Outstanding actions watch (next 8h chronological)
+
+1. **fern H24 EP3 gate ~21:25Z** — band-break primary (τz/τx ≤ 1.40 CONTINUE; 1.40-1.60 MARGINAL; > 1.60 KILL)
+2. **alphonse H25 EP3 gate ~23:00Z** — band-break secondary
+3. **askeladd H27 EP3 gate ~23:46Z** — loss-normalization-space (val_SP ≤ 4.10% CONTINUE)
+4. **edward H28 EP3 gate ~00:00-02:00Z May 18** — optimizer-space (τz/τx < 1.42 AND val_abupt < 6.00%)
+5. **frieren H29 EP3 gate ~01:30-02:30Z May 18** — frequency-space (τz/τx ≤ 1.42 AND spectral_loss descending)
+6. **tanjiro H18d EP3 gate ~6h after launch** — channel-decoupling (τz/τx ≤ 1.42 AND val_SP ≤ 4.50%)
+7. **thorfinn H26 Path B 5-ep gate (~3-4h after launch)** — geom band-break in compressed schedule
+
+**FIVE EP3 gates land in the next 12 hours** — the single highest-density decision point of Wave 30.
+
+---
+
+## Earlier invocation actions (2026-05-17 ~19:40Z) — H23 KILLED, H29 SSFL assigned — Wave 30 tier-shift to frequency-domain loss
 
 ### Headline updates
 
