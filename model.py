@@ -381,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_to_surf_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
     ):
         super().__init__()
@@ -395,6 +396,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_to_surf_xattn = use_vol_to_surf_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
@@ -519,6 +521,27 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Volume->surface cross-attention (H30, PR #1184): single MHA sublayer
+        # where surface hidden states (Q) attend to volume hidden states (K/V).
+        # Brings off-body flow physics (separation, wake, recirculation) into
+        # the surface decoder to attack the tau_z prediction floor. Mirrors the
+        # surf_to_vol_xattn topology in reverse direction. Zero-init out_proj
+        # weight AND bias so the sublayer is identity at init (preserves
+        # baseline behavior at epoch 0).
+        if use_vol_to_surf_xattn:
+            self.vol_to_surf_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.vol_to_surf_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.vol_to_surf_xattn.out_proj.weight)
+            nn.init.zeros_(self.vol_to_surf_xattn.out_proj.bias)
+        else:
+            self.vol_to_surf_xattn = None
+            self.vol_to_surf_xattn_norm = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -620,6 +643,23 @@ class SurfaceTransolver(nn.Module):
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        if (
+            self.vol_to_surf_xattn is not None
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            xattn_out, _ = self.vol_to_surf_xattn(
+                query=surface_hidden,
+                key=volume_hidden,
+                value=volume_hidden,
+                need_weights=False,
+            )
+            xattn_out = _apply_token_mask(xattn_out, surface_mask)
+            surface_hidden = self.vol_to_surf_xattn_norm(surface_hidden + xattn_out)
+            surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
