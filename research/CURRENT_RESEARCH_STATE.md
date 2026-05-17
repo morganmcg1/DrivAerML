@@ -5,7 +5,21 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~04:50Z) — thorfinn H13c CRASHED CLOSED DEAD-END (val_abupt 8.608% at EP5–6 / +2.482pp above baseline; 2nd direction-saturation diagnostic confirms magnitude is the bottleneck; researcher-agent generating thorfinn's next hypothesis)
+## Latest invocation actions (2026-05-17 ~06:00Z) — frieren H16 CLOSED TERMINAL-NULL (δ=1.0 dormant, mechanism calibration failed, watchdog false-positive kill; reassigned to H16b δ=0.3 PR #1169); fern H10b EP3 PASS at 6.697% (CLOSEST to baseline of all in-flight attacks); frieren newly idle → H16b assigned
+
+### Actions this invocation (06:00Z May 17)
+
+- **CLOSED PR #1161 frieren H16** as TERMINAL-NULL. Pod killed by student-watchdog (false-positive label drift) at EP4 step 37k. EP3 val_abupt=6.894% (marginal-pass). Mechanism diagnostic: `frac_in_L1_region/tau_z = 0.014-0.018%` (expected 2.5%) — δ=1.0 dormant because heavy tail collapsed EP1→EP3 (max_abs 9.8→1.8σ). No test data. H16 was effectively MSE-on-τ. KEY LEARNING: Huber-on-τ requires post-EP1-distribution δ calibration.
+- **ASSIGNED frieren H16b (PR #1169)**: δ=0.3 restart (one-flag change). EP1 mechanism gate: `frac_in_L1_region/tau_z ∈ (0.4, 0.8)` — if achieved, Huber IS active on the bulk residual distribution.
+- **VERIFIED fern H10b (PR #1164)**: EP3 PASS at **val_abupt 6.697%** — currently CLOSEST to baseline 6.126% of all in-flight attacks. Val trajectory EP1→EP2→EP3: 31.80→7.42→6.70%. slope −0.072pp/1k steps. No magnitude-head diagnostic keys logged — asked student to add at EP6.
+
+### KEY FLEET DIAGNOSTIC UPDATED: fern H10b leads the fleet at EP3
+
+H10b at val_abupt 6.697% (EP3) is the closest any single-model in-flight Wave 30 attack has been to baseline 6.126% at this stage of training. If the EP2→EP3 improvement slope holds, EP6 projection ~6.0% which would beat baseline. **H10b is the top-priority watch-item this wave.**
+
+Previous update (04:50Z May 17)
+
+### Latest invocation actions (2026-05-17 ~04:50Z) — thorfinn H13c CRASHED CLOSED DEAD-END (val_abupt 8.608% at EP5–6 / +2.482pp above baseline; 2nd direction-saturation diagnostic confirms magnitude is the bottleneck; researcher-agent generating thorfinn's next hypothesis)
 
 ### Actions this invocation (04:50Z May 17)
 
@@ -26,22 +40,20 @@ Wave 30 now has **two independent** experimental confirmations that direction is
 
 **Research-direction implication**: any future loss-level cosine-aware or direction-only attack is now ruled out. The bottleneck has moved one layer down to the magnitude regression head and/or the τ_z over-prediction collapse band. H10b (in flight) attacks magnitude; H17 (in flight) attacks the band geometrically.
 
-### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 18
+### Wave 30 fleet — 8 active + 0 idle; Wave 30 closed count: 19
 
 | PR | Student | Axis | Status |
 |---|---|---|---|
-| #1168 | **thorfinn** | **H19 VICReg batch-variance regularization on |τ_z|** — penalize batch collapse of per-sample mean |τ_z| via VICReg variance hinge `max(0, γ−std)²`, γ=0.05, λ=0.10. train.py-only ~12 lines. | **NEW — just assigned 05:00Z May 17** (18h budget) |
-| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | 18h budget, launched ~02:53Z |
-| #1165 | alphonse | H15b EMA decay=0.999 (faster warmup) | EP~1.5 / 6h budget, EP3 gate ~05:00Z |
-| #1164 | fern | H10b bounded-exp magnitude fix (softplus→clamp.exp) | EP~1.6 / 18h |
-| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h |
-| #1162 | nezuko | H17 tangent-frame output reparameterization | EP~? / 18h, main healthy after 2 smoke crashes |
-| #1161 | frieren | H16 Huber loss on τ channels δ=1.0 | EP3.05 / 13, val_abupt 6.894% but mechanism inactive (frac_in_L1=0.014%) |
-| #1151 | edward | H12 τ-magnitude-weighted loss | EP~10, partial-terminal at 18h cliff ~06:59Z imminent |
+| #1169 | **frieren** | **H16b Huber loss on τ channels δ=0.3** (calibrated bulk-reshape — restart from H16) | **NEW — assigned 06:00Z May 17** (18h budget) |
+| #1168 | thorfinn | H19 VICReg batch-variance regularization on \|τ_z\| | assigned 05:00Z May 17 (18h budget) |
+| #1167 | askeladd | H11b gated multi-scale input (zero-init gate) | EP~2.5 (gate active, mean_abs=0.223) |
+| #1165 | alphonse | H15b EMA decay=0.999 | EP3 EMA AHEAD of raw by +0.804pp — mechanism CONFIRMED; EP4 terminal |
+| #1164 | **fern** | **H10b bounded-exp magnitude fix (softplus→clamp.exp)** | **EP3 PASS 6.697%** — CLOSEST to baseline 6.126% of all in-flight |
+| #1163 | tanjiro | H18 per-vertex area-weighted surface MSE | EP~1.7 / 18h, healthy |
+| #1162 | nezuko | H17 tangent-frame output reparameterization | EP~3 / 18h; diagnostic keys not logging — flagged |
+| #1151 | edward | H12 τ-magnitude-weighted loss (sweep α=0.5 done, α=0.3 running) | a0p5 arm: NOT-A-MERGE (val 6.326%, floor breach); a0p3 running → terminal ~17:22Z |
 
-**H19 VICReg rationale**: orthogonal to all 7 other in-flight attacks. The τz/τx collapse band [1.44, 1.55] persists despite 8+ attacks; H19 frames it as a **batch-level distributional collapse** — the model predicts essentially identical mean |τ_z| across all car geometries despite different physical shapes producing different |τ_z| distributions. The VICReg variance hinge `max(0, 0.05−std_batch(τ_z_mean))²` directly penalizes this collapse by requiring at least 0.05 std of per-sample τ_z means across the batch. Reference: Bardes et al. ICLR 2022 (VICReg) + Hanna et al. arXiv:2412.13993 (PINN variance regularization).
-
-**Closed in Wave 30** (18): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**.
+**Closed in Wave 30** (19): H1 #1139, H2 #1136, H3 #1138, H4 #1141, H5 #1137, H6 #1134 (mech-PASS), H7 #1140, H14 #1153 (diverged), H13 β=5 #1152 (diverged), H13b β=2 #1156 (diverged), H8 #1143 (FLAT NULL), H9' #1146 (NOT-A-MERGE SP floor), **H6' #1147 (NOT-A-MERGE SP floor; τz/τx=1.420 band-break signal)**, **H10 #1148 (NOT-A-MERGE; 73%/27% mag/dir diagnostic)**, **H15 #1155 (TIMEOUT-NULL)**, H15v1 #1122, **H11 #1150 (NOT-A-MERGE SP+vol_p floors; BEST single-model test_WSS 6.633% and test_abupt 5.809% on tay)**, **H13c #1158 (DEAD-END CRASHED; 2nd direction-saturation diagnostic)**, **H16 #1161 (TERMINAL-NULL δ=1.0 dormant; watchdog false-positive kill at EP4; KEY LEARNING: Huber-on-τ requires post-EP1 δ calibration)**.
 
 ### Causal map of τ_z bottleneck — updated after H10 and H6' diagnostics
 

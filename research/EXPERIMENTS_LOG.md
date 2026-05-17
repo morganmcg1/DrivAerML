@@ -1,3 +1,31 @@
+## 2026-05-17 06:00 — PR #1161: H16 Huber Loss on τ Channels δ=1.0 (frieren) — CLOSED TERMINAL-NULL (δ=1.0 dormant throughout; mechanism calibration failed; pod killed by watchdog at EP4~step 37k; no test data; reassigned frieren to H16b δ=0.3 PR #1169)
+
+- **Branch**: `frieren/h16-per-channel-zscore` (closed)
+- **W&B group**: `wave30_h16_huber_tau` — rank0 `w3gp9a8q`, state=crashed (pod SIGTERM'd 05:17Z)
+- **Hypothesis**: Apply Huber loss (δ=1.0 σ-units) to τ channels instead of MSE. Heavy-tailed τ_z error distribution (max_abs_error ∈ [5,17]σ at smoke, 2.5% of vertices in L1 region) motivated outlier-robust regression overlay.
+
+### Results — TERMINAL-NULL (no test data, mechanism inactive)
+
+| Epoch | val_abupt | val_WSS | val_SP | val_vol_p | val τz/τx | frac_in_L1/τz | max_abs/τz |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| Smoke EP0.5 | — | — | — | — | — | 2.7% | 9.8σ |
+| EP3 (last complete) | **6.894%** | 7.656% | 4.754% | 4.390% | 1.516 | **0.014%** | ~2.5σ |
+| EP4 partial (step 37k) | — | — | — | — | — | **0.018%** | **1.80σ** |
+
+**No test metrics** — pod killed by student-watchdog at 05:17Z (false positive on label drift: PR label desynced for 1816s while training actively. Harness needs grace period for active training runs). No checkpoint resume possible (optimizer/EMA/GradNorm state not saved).
+
+### Critical diagnostic: δ=1.0 was dormant throughout
+
+The heavy tail **collapsed during EP1→EP3** — max_abs_error_normed/tau_z dropped from 9.8σ (smoke) → 1.8σ (EP4). With δ=1.0σ, only 0.018% of τ_z residuals ever crossed the Huber threshold. **H16 at δ=1.0 was functionally MSE-on-τ for 99.98% of the data.** The hypothesis was never tested; δ=1.0 is too coarse for the post-EP1 residual distribution.
+
+### Analysis
+
+**What we learned**: Huber-on-τ requires post-EP1-distribution δ calibration. Residuals at the relevant training phase (EP1+) have max_abs ~2σ with bulk at 0.3–1.5σ. The original EP0.5 smoke diagnostics (max_abs ~10σ) suggested 2.5% in L1 at δ=1.0, but this was the transient heavy tail at initialization. By EP1, the model has learned to reduce the heavy tail dramatically.
+
+**H16b assignment** (PR #1169): δ=0.3 targets the post-EP1 residual bulk (0.3–1.5σ), where the canonical Huber-active fraction (0.4–0.8) is achievable. One-flag change from H16; student already has all diagnostic logging in place.
+
+---
+
 ## 2026-05-17 04:50 — PR #1158: H13c Lagemann-Style Cosine+Magnitude Decoupled WSS Loss (thorfinn) — CLOSED DEAD-END (crashed mid-recipe AT EP5–6 with val_abupt 8.608% / +2.482pp above baseline; 99.0% cos-sim confirms 2nd independent direction-saturation diagnostic; thorfinn reassigned to next hypothesis researcher-agent pending)
 
 - **Branch**: `thorfinn/h13c-tau-cosmag-decoupling` (closed)
