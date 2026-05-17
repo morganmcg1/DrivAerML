@@ -8,6 +8,51 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-17 01:00 UTC — PR #1142 CLOSED: WSS H7 surface_loss_weight=1.5 uniform upweight (dl24-fern, `2nufmv3i`)
+
+- **Branch:** `dl24-fern/h7-surface-loss-weight-1p5`
+- **W&B run:** `2nufmv3i` (DDP8, EP30 terminal). Test eval on EP20 best-val EMA checkpoint.
+- **Hypothesis:** H4's vol_p improvement was driven by an *implicit* surface task upweight (mean of [1.0, 1.0, 1.5, 2.5]/4 = 1.5×). Replacing per-axis weights with uniform `surface_loss_weight=1.5` should preserve the vol_p win and avoid H4's surf_p/wss/τ regressions (which H7 attributed to per-axis structure × Lion-noise amplification).
+- **Configuration:** Lion lr=5e-4, GradNorm OFF, `surface_loss_weight=1.5`, EMA decay=0.999, 30 epochs, ema_start_step=500.
+
+### Results — Terminal Test Metrics
+
+| Metric | H7 test | SOTA #972 | Δ vs SOTA | vs floor (#1056) | Verdict |
+|---|---:|---:|---:|---:|---|
+| **test_abupt** | **6.0366** | 5.844 | **+0.193** | — | ❌ regressed |
+| **test_vol_p** | **3.4962** | 3.643 | **−0.147** | UNDER floor by 0.147pp | ✅ floor cleared |
+| **test_surf_p** | **3.7816** | 3.577 | **+0.205** | BREACH by 0.205pp | ❌ floor breached |
+| **test_wss** | **7.0055** | 6.727 | **+0.279** | — | ❌ primary target failed |
+| test_τ_x | 6.2149 | 5.971 | +0.244 | — | regressed |
+| test_τ_y | 7.5469 | 7.362 | +0.185 | — | regressed |
+| test_τ_z | 9.1432 | 8.747 | +0.396 | — | regressed |
+
+**Val→test gap calibration**: abupt −0.177, vol_p +0.012, surf_p −0.258, wss −0.086, τ_x +0.027, τ_y −0.140, **τ_z −0.528**. Test was kinder than val on most axes; the large τ_z negative gap is consistent with H10's representation-floor finding (Charbonnier-related runs show large val→test gaps on τ_z).
+
+### Wave Finding — H4 mechanism decomposition REFUTED
+
+The H7 hypothesis (that H4 vol_p improvement was implicit-uniform-upweight and H4's costs were per-axis-Lion-noise) was tested by stripping per-axis structure and applying uniform 1.5× scaling. Three refutations:
+
+1. **vol_p mechanism is real and isolable** ✅ — test_vol_p=3.496% confirms shared-backbone enrichment from uniform surface upweight benefits the volume head. H4's test_vol_p=3.374% under same magnitude → consistent.
+
+2. **surf_p breach is INTRINSIC to magnitude, not structure** ❌ — H7 surf_p=3.781% is WORSE than H4 surf_p=3.743%, despite no per-axis structure. The breach is a 1.5× magnitude effect on surface gradient flow, not per-axis interference between cp and τ.
+
+3. **τ regressions are INTRINSIC to magnitude** ❌ — all 3 τ axes regress under uniform 1.5× upweight (no per-axis amplification possible). The Lion-noise/per-axis theory cannot explain this. The 1.5× magnitude itself shifts the WSS-side optimization regime in a way that costs τ accuracy.
+
+**Implication for #1056 contract**: Lower-magnitude surface upweight (1.1, 1.2) may attenuate the tax but won't eliminate it — the directional tradeoff between vol_p improvement and wss/surf_p/τ degradation is intrinsic to the surface-upweight mechanism. Surface upweight is a **vol_p-side mechanism**, NOT a wss-side mechanism. Combined with H9 wave finding (curvature bias = wss unlock without floor breach), the wave's mechanism map shows: vol_p and wss respond to DIFFERENT gradient-mass interventions. They cannot both be fixed with a single uniform scalar.
+
+### Cost & resource summary
+
+- Wall-time: ~20.0h training + ~10min test eval. Peak GPU memory ~21 GB/GPU, all 8 GPUs balanced.
+- W&B run IDs: rank-0 `2nufmv3i`, ranks 1-7: `0x9cfkv9`, `idet3da8`, `qkc0j2ow`, `tpd0ycfj`, `x80y99uf`, `xc3y3688`, `z3jijtxn`.
+- Group: `wss_h7_surface_upweight`.
+
+### Infra note from student
+
+dl24-fern reported a `senpai-pr-guard.py` bug: `result_markers()` scanned every line for `SENPAI-RESULT:` without skipping markdown code fences. My template comment on this PR included a JSON-shaped placeholder inside a code block that broke the marker scanner. Student's 5-line fix to track in_code_fence state in the scanner is the right approach. Cannot apply from advisor scope (infra repo, not target). Flagged to human team.
+
+---
+
 ## 2026-05-16 19:48 UTC — PR #1154 CLOSED: WSS H11 AdamW lr=7e-4 + per-axis WSS τ-weights (dl24-nezuko, `kukjenp5`+`zhmyhxcd`)
 
 - **Branch:** `dl24-nezuko/h11-adamw-per-axis-wss`
