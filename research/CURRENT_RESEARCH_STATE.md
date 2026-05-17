@@ -1,11 +1,75 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~17:00 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~17:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~17:00Z) — H22 closed, H26 NPCA assigned
+## Latest invocation actions (2026-05-17 ~17:30Z) — H11b closed, H27 PRLP assigned
+
+### Headline updates
+
+1. **PR #1167 askeladd H11b CLOSED TERMINAL NOT-A-MERGE / VAL-AND-WSS-BEAT-BUT-FLOOR-BREACH** — first sustained Wave 30 baseline beat (val_abupt 6.057%, test_abupt 5.8147%, test_WSS 6.6322% all beat baseline) BUT both floors breached (test_SP 3.7179% +0.141pp, test_vol_p 3.6773% +0.034pp). Gate mechanism worked (mean_abs 0→0.537, 3 channels saturated to |g|>0.7) but floor disease is downstream of input. **5th confirmed dead end in Wave 30**. Stackable as substrate.
+
+2. **PR #1178 askeladd H27 PRLP ASSIGNED** — Per-Component Relative-L2 Proxy Loss. Replace normalized-space MSE training loss with per-car per-component rel_L2 in DENORMALIZED (physical) space — making train objective structurally identical to eval metric. Direct attack on confirmed dual-space mismatch (trainer_runtime.py: training MSE in normalized space vs eval rel_L2 in physical space). ~60 lines. **First Wave 30 attack on loss NORMALIZATION SPACE** (orthogonal to all 6 closed loss-shape attacks). EP3 falsifiable gate: `val_SP ≤ 4.10%` (strictly below H11b EP3 4.368%). Explicitly composable with H11b for future stacking. Targets test_SP/test_vol_p floor breach directly.
+
+3. **frieren H23 EP2 = 22.31% MARGINAL** (≤25% gate, >20% pass) — cold-start drag resolved EP1 37.95% → EP2 22.31% (−15.64pp drop). Mean Teacher mechanism active and not blocking training. `consistency_loss` descending (slope −0.0078 per 1k steps). budget 1010min confirmed. **EP3 (~17:55-18:05Z) is decisive** — if val_abupt ≤ 8.5%, clean PASS; ≤ 11% MARGINAL; > 11% KILL.
+
+4. **PR #1176 alphonse H25 rebase notice posted** — branch needs rebase before final merge (tay advanced with 17:00Z + 16:40Z commits to research/ docs only, alphonse's training code untouched). Action: NONE while training; rebase after terminal SENPAI-RESULT. Low priority.
+
+### Fleet status (8/8 active after H27 assignment)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| **askeladd** | **#1178** | **H27 PRLP — train loss in eval space** | **just assigned (loss normalization axis)** |
+| fern | #1174 | H24 GSTS encoder slice-temperature | EP1 expected soon |
+| edward | #1151 | H12 τ-magnitude weighted MSE | EP9.6 stalled 6.290% |
+| nezuko | #1171 | H21 per-component output heads | EP7 6.557% slope re-acceleration |
+| tanjiro | #1163 | H18 area-weighted MSE | EP8.9 6.635% |
+| frieren | #1173 | H23 Mean Teacher self-distillation | EP2 22.31% MARGINAL, EP3 gate ~17:55Z |
+| alphonse | #1176 | H25 ALGP auxiliary local-gradient prediction | in-flight, needs-rebase notice posted (low priority) |
+| thorfinn | #1177 | H26 NPCA encoder input local-frame aug | just assigned |
+
+### Closed Wave 30 directions (now 6 confirmed dead ends)
+
+1. Per-vertex error reweighting (H18, H20) — rel_L2 normalization erases absolute-residual gains
+2. Static Huber on τ (H16, H16b) — frac_in_L1 decays 40× over training
+3. Bounded-exp output activation (H10, H10b) — 73%/27% split structural in encoder
+4. Output tangent-frame reparameterization (H17) — convergence gap too large
+5. Charbonnier on cp + MAE-aux (H22) — cp-MSE saturation NOT the disease
+6. **Input-channel gating (H11b)** — gate works mechanically but floor disease is DOWNSTREAM of input
+
+### KEY FLEET DIAGNOSTIC: Floor disease localization narrowing
+
+After H11b closure, the floor-breach disease is increasingly localized to:
+- **Output-head / per-head gradient paths** (H27 attack: train loss in eval space, H21 attack: separate MLPs)
+- **Backbone representation coupling cp/τ** (H25 ALGP attacks this)
+- **Train-eval space mismatch** (H27 attacks this directly)
+- **NOT input-side** (H11b confirmed)
+- **NOT cp-loss-shape** (H22 confirmed)
+
+### Band attractor — fleet-wide pattern (6 independent confirmations)
+
+| Run | EP1 τz/τx | EP_terminal τz/τx | Outcome |
+|:--|---:|---:|:--|
+| H10b fern | — | 1.530 | converged into band |
+| H11b askeladd | 1.466 | **1.556** | converged INTO band |
+| H12 edward | — | 1.553 | inside band |
+| H18 tanjiro | 1.412 (transient) | 1.482 | faded into band |
+| H20 alphonse | 1.401 (transient) | 1.523 | faded into band |
+| H21 nezuko | — | 1.529 | inside band |
+
+**The [1.44, 1.55] collapse band is now confirmed as a fleet-wide attractor for ALL input/output/loss-shape attacks. Future attacks must target either (a) the encoder mechanism (H24 GSTS), (b) backbone representation content (H25 ALGP), (c) encoder input feature content (H26 NPCA), or (d) the loss normalization space (H27 PRLP).**
+
+### Outstanding actions for next-invocation watch
+
+- frieren #1173 EP3 gate (~17:55-18:05Z) — decisive Mean Teacher kill/continue
+- fern #1174 H24 EP1 (any minute now)
+- alphonse #1176 H25 + thorfinn #1177 H26 launch confirmations
+- nezuko #1171 EP10 (~18:30Z) — vol 65536 curriculum bump test
+- edward #1151 + tanjiro #1163 — terminal SENPAI-RESULT expected at EP13
+
+## Previous invocation actions (2026-05-17 ~17:00Z) — H22 closed, H26 NPCA assigned
 
 ### Headline updates
 

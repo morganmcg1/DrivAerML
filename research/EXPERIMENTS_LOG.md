@@ -1,3 +1,82 @@
+## 2026-05-17 17:30 — PR #1167: H11b Gated Multi-Scale Input (askeladd) — CLOSED TERMINAL NOT-A-MERGE / VAL-AND-WSS-BEAT-BUT-FLOOR-BREACH / 5TH-CONFIRMED-NEGATIVE-RESULT-IN-WAVE-30
+
+- **Branch**: `askeladd/h11b-gated-k4-16-64` (closed)
+- **W&B group**: `wave30_h11b_gated_multiscale` — rank0 `ssavtag5`, ranks 1–7 `5i69ro1p`/`kw0d16d5`/`jochfjnl`/`2cejc66t`/`wleyf3j4`/`9wirio9r`/`k2xovile`
+- **Best ckpt**: EP13 EMA (complete, 14.07h runtime, no budget bug)
+- **Hypothesis**: Zero-init learned diagonal gate over 9 multi-scale kNN context channels (k∈{4,16,64} × {cos_align, log_area, log_dist}) to restore H11's SP/vol_p floor breach while preserving WSS gain.
+
+### Terminal results (EP13 EMA)
+
+| Metric | H11b | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | **6.057%** | 6.126% | −0.069pp | ✅ PASS — FIRST sustained Wave 30 baseline beat |
+| test_abupt | **5.8147%** | 5.844% | −0.029pp | ✅ PASS |
+| test_WSS | **6.6322%** | 6.727% | −0.095pp | ✅ PASS |
+| test_SP | **3.7179%** | 3.577% **FLOOR** | +0.141pp | ❌ **FLOOR BREACH** |
+| test_vol_p | **3.6773%** | 3.643% **FLOOR** | +0.034pp | ❌ **FLOOR BREACH** |
+| test τz/τx | 1.467 | — | in band | converged INTO [1.44,1.55] from below |
+
+**Merge gate result**: 3 of 5 gates pass (val_abupt + test_abupt + test_WSS) but BOTH floors breach → NO-MERGE. Student explicitly recommended NO-MERGE.
+
+### Gate mechanism diagnostic — gate WORKED but didn't fix floors
+
+Per-channel final gate values (init=0.0):
+
+| ch | k | feature | final | |gate| |
+|---:|---:|:--|---:|---:|
+| 0 | 4 | cos_align | **−0.785** | 0.79 (saturated negative) |
+| 1 | 4 | log_area | +0.284 | 0.28 |
+| 2 | 4 | log_dist | +0.530 | 0.53 |
+| 3 | 16 | cos_align | **+0.779** | 0.78 (saturated positive) |
+| 4 | 16 | log_area | −0.210 | 0.21 |
+| 5 | 16 | log_dist | +0.362 | 0.36 |
+| 6 | 64 | cos_align | **−0.995** | 1.00 (fully saturated) |
+| 7 | 64 | log_area | −0.332 | 0.33 |
+| 8 | 64 | log_dist | +0.556 | 0.56 |
+
+- mean_abs: 0 → **0.537** (warmed up smoothly through training)
+- max_abs: 0 → **0.995** (k=64 cos_align fully saturated)
+- L2: 0 → **1.781**
+- zero_fraction: 0 throughout (no channel collapsed)
+
+**Channel pattern**: cos_align channels saturated to |gate| > 0.7 with MIXED signs (k=4 negative, k=16 positive, k=64 negative-saturated). log_dist channels all admitted positively (+0.28 to +0.56). log_area channels split with smaller magnitudes. The gate learned a non-trivial differentiated routing.
+
+### Decisive negative-result insight
+
+The gate mechanism worked mechanically — it CAN down-weight unhelpful multi-scale channels and flip the sign of signal channels. But **the SP/vol_p floor breach was NOT fixed** because the multi-scale signal flows THROUGH the shared encoder before reaching the output heads. A 9-dim diagonal gate at the input cannot decorrelate per-head gradient paths inside the transformer where the actual cross-head interference occurs.
+
+### Band-break diagnostic — fleet-wide attractor confirmed (6th run)
+
+τz/τx trajectory: EP1=1.466 → EP3=1.506 → EP7=1.549 → **EP13=1.556**. Converged INTO the [1.44, 1.55] collapse band from below — exactly mirroring fern H10b, dl24 H10b, edward H12, nezuko H21, tanjiro H18 patterns. **6 independent runs now confirm the band as an attractor for all input/output/loss-form attacks.**
+
+### Why TERMINAL-NOT-A-MERGE despite val_abupt + test_WSS + test_abupt beats
+
+Both floors breach hard merge constraints (CLAUDE.md):
+- test_SP > 3.577% floor: **+0.141pp breach** (binding)
+- test_vol_p > 3.643% floor: +0.034pp breach (also binding but smaller)
+
+Merging would compound H11's pre-existing floor breach rather than restoring it. Floor passes are the dominant Wave 30 merge blocker — every fleet baseline-crosser hits this gate.
+
+### Key Wave 30 implication — floor disease is downstream of input
+
+H11b is the **5th confirmed dead end in Wave 30**, joining:
+- H18/H20 (per-vertex error reweighting): closed — rel_L2 normalization
+- H16/H16b (static Huber on τ): closed — frac_in_L1 decay
+- H10/H10b (bounded-exp output activation): closed — 73%/27% structural
+- H22 (Charbonnier-cp): closed — cp-MSE NOT the disease
+- **H11b (input gating)** ← NEW: disease downstream of input
+
+The floor disease is increasingly localized to:
+- **Output-head / per-head gradient paths** (H27 attack: train loss in eval space, H21 attack: separate per-channel MLPs)
+- **Backbone representation coupling between cp and τ** (H25 ALGP attacks this)
+- **The rel_L2 metric space mismatch** (H27 directly attacks this)
+
+### Stackability — H11b's val_abupt mechanism is real and worth preserving
+
+H11b's input-side multi-scale gating produces real val_abupt (−0.069pp) + test_abupt (−0.029pp) + test_WSS (−0.095pp) gains. The mechanism is alive — it just cannot fix floors alone. **H11b is publishable as a stackable substrate** for future floor-preservation attacks. If H27 (PRLP, askeladd's next) succeeds, the natural H28 is H11b+H27 compound.
+
+---
+
 ## 2026-05-17 17:00 — PR #1172: H22 Charbonnier-cp + MAE-aux (thorfinn) — CLOSED TERMINAL-NEUTRAL / MECHANISM-WIRED-BUT-INEFFECTIVE / HYPOTHESIS-FALSIFIED / NOT-STACKABLE
 
 - **Branch**: `thorfinn/charbonnier-cp-mae-aux` (closed)
