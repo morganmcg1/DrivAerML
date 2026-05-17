@@ -35,10 +35,15 @@ from torch.utils.data import Dataset
 from .split_utils import expand_pvc_candidates, first_existing
 
 DEFAULT_MANIFEST = Path(__file__).with_name("split_manifest.json")
-SURFACE_X_DIM = 7  # xyz(3) + normals(3) + panel area(1)
+SURFACE_X_DIM_BASE = 7  # xyz(3) + normals(3) + panel area(1)
+SURFACE_X_DIM = SURFACE_X_DIM_BASE  # default surface input dim; overridden when multi-scale features are enabled
 SURFACE_Y_DIM = 4  # cp(1) + wall shear stress(3)
 VOLUME_X_DIM = 4  # xyz(3) + sdf(1)
 VOLUME_Y_DIM = 1  # volume pressure
+MULTISCALE_FEATURES_PER_K = 3  # (cos_align, log1p(area), log1p(dist)) per scale
+MULTISCALE_AREA_SCALE = 1.0e6  # scales panel area (m^2) to ~unit range before log1p
+MULTISCALE_DIST_SCALE = 1.0e3  # scales kNN distance (m) to ~unit range before log1p
+MULTISCALE_CACHE_VERSION = "v1"
 SURFACE_TARGET_NAMES = ("surface_pressure", "wall_shear_x", "wall_shear_y", "wall_shear_z")
 VOLUME_TARGET_NAMES = ("volume_pressure",)
 EXPECTED_SURFACE_SPLIT_COUNTS = {"train": 400, "val": 34, "test": 50}
@@ -269,12 +274,154 @@ def _three_column(value: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def parse_multiscale_k_values(spec: str | tuple[int, ...] | list[int] | None) -> tuple[int, ...]:
+    """Parse a multi-scale kNN spec like ``"4,16,64"`` to a tuple of ints.
+
+    Returns an empty tuple when ``spec`` is falsy. Validates that each k is a
+    positive integer. Order is preserved so the cache key (``k4_16_64``)
+    matches the channel layout in the cached array.
+    """
+
+    if spec is None:
+        return ()
+    if isinstance(spec, str):
+        if not spec.strip():
+            return ()
+        parts = [token.strip() for token in spec.split(",") if token.strip()]
+    else:
+        parts = list(spec)
+    out: list[int] = []
+    for token in parts:
+        k = int(token)
+        if k < 1:
+            raise ValueError(f"multiscale_k_values entries must be positive, got {k}")
+        out.append(k)
+    return tuple(out)
+
+
+def multiscale_surface_dim(k_values: tuple[int, ...] | None) -> int:
+    """Return the surface_x dim contributed by multi-scale features."""
+
+    if not k_values:
+        return 0
+    return MULTISCALE_FEATURES_PER_K * len(k_values)
+
+
+def _multiscale_cache_path(case_dir: Path, k_values: tuple[int, ...]) -> Path:
+    k_key = "_".join(str(k) for k in k_values)
+    return case_dir / f"surface_multiscale_k{k_key}_{MULTISCALE_CACHE_VERSION}.npy"
+
+
+def _compute_multiscale_features(
+    xyz_full: np.ndarray,
+    normals_full: np.ndarray,
+    area_full: np.ndarray,
+    k_values: tuple[int, ...],
+) -> np.ndarray:
+    """Compute multi-scale per-vertex kNN context features.
+
+    For each scale ``k`` in ``k_values`` we emit 3 channels:
+        * mean cosine alignment of neighbor unit normals to self normal
+        * log1p of mean panel area in the k-neighborhood (after scaling)
+        * log1p of mean L2 distance to the k nearest neighbors (after scaling)
+
+    The query excludes the self point. Returns ``[N, 3 * len(k_values)]``
+    float32. Requires SciPy (``cKDTree``); raises ``RuntimeError`` if missing.
+    """
+
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError as exc:  # pragma: no cover - dependency required for this feature path
+        raise RuntimeError(
+            "Multi-scale kNN features require scipy.spatial.cKDTree. "
+            "Install scipy (>=1.10) to enable --use-multiscale-context."
+        ) from exc
+
+    if not k_values:
+        raise ValueError("k_values must be non-empty for multi-scale feature compute")
+
+    n_points = xyz_full.shape[0]
+    k_max = max(k_values)
+    if n_points <= k_max:
+        raise ValueError(
+            f"case has only {n_points} surface points; need > max(k_values)={k_max}"
+        )
+
+    xyz_64 = xyz_full.astype(np.float64, copy=False)
+    tree = cKDTree(xyz_64)
+    distances, indices = tree.query(xyz_64, k=k_max + 1, workers=-1)
+    distances = distances.astype(np.float32, copy=False)
+    indices = indices.astype(np.int64, copy=False)
+
+    normals_unit = normals_full.astype(np.float32, copy=False)
+    normals_unit = normals_unit / (
+        np.linalg.norm(normals_unit, axis=1, keepdims=True) + 1.0e-8
+    )
+    area_flat = area_full.astype(np.float32, copy=False).reshape(-1)
+
+    out_channels: list[np.ndarray] = []
+    for k in k_values:
+        nbr_idx = indices[:, 1 : k + 1]
+        nbr_normals = normals_unit[nbr_idx]
+        cos_align = np.einsum("nd,nkd->nk", normals_unit, nbr_normals).mean(axis=1)
+        cos_align = np.clip(cos_align, -1.0, 1.0).astype(np.float32)
+
+        mean_area = area_flat[nbr_idx].mean(axis=1)
+        mean_dist = distances[:, 1 : k + 1].mean(axis=1)
+        log_area = np.log1p(np.maximum(mean_area * MULTISCALE_AREA_SCALE, 0.0)).astype(np.float32)
+        log_dist = np.log1p(np.maximum(mean_dist * MULTISCALE_DIST_SCALE, 0.0)).astype(np.float32)
+
+        out_channels.extend([cos_align, log_area, log_dist])
+
+    return np.stack(out_channels, axis=1).astype(np.float32, copy=False)
+
+
+def _load_or_compute_multiscale_features(
+    case_dir: Path,
+    k_values: tuple[int, ...],
+    *,
+    full_rows: int | None = None,
+) -> np.ndarray:
+    """Return ``[N_full, 3 * len(k_values)]`` features, computing once and caching.
+
+    The cache filename encodes the exact ``k_values`` so different combinations
+    coexist. Writes through a ``.tmp.npy`` rename to be safe under parallel
+    worker access. If the file exists and its first-axis length matches
+    ``full_rows`` (when provided) it is returned via mmap; otherwise it is
+    re-computed and overwritten.
+    """
+
+    cache = _multiscale_cache_path(case_dir, k_values)
+    if cache.exists():
+        try:
+            arr = np.load(cache, mmap_mode="r")
+            expected_cols = MULTISCALE_FEATURES_PER_K * len(k_values)
+            shape_ok = arr.ndim == 2 and arr.shape[1] == expected_cols
+            len_ok = full_rows is None or arr.shape[0] == full_rows
+            if shape_ok and len_ok:
+                return arr
+        except (ValueError, OSError):
+            # Corrupt or partial write — fall through and rebuild.
+            pass
+
+    xyz_full = np.load(_resolve_artifact_path(case_dir / "surface_xyz.npy"))
+    normals_full = np.load(_resolve_artifact_path(case_dir / "surface_normals.npy"))
+    area_full = np.load(_resolve_artifact_path(case_dir / "surface_area.npy"))
+    features = _compute_multiscale_features(xyz_full, normals_full, area_full, k_values)
+
+    tmp = cache.with_suffix(".tmp.npy")
+    np.save(tmp, features)
+    os.replace(tmp, cache)
+    return features
+
+
 def load_case(
     root: str | Path,
     case_id: str,
     *,
     surface_rows: np.ndarray | None = None,
     volume_rows: np.ndarray | None = None,
+    multiscale_k_values: tuple[int, ...] | None = None,
 ) -> DrivAerMLCase:
     case_dir = _case_dir(Path(root), case_id)
     xyz = _load_npy_rows(case_dir / "surface_xyz.npy", surface_rows)
@@ -285,7 +432,18 @@ def load_case(
         _load_npy_rows(case_dir / "surface_wallshearstress.npy", surface_rows),
         "surface_wallshearstress.npy",
     )
-    surface_x = np.concatenate([xyz, normals, area], axis=1)
+    surface_parts = [xyz, normals, area]
+    if multiscale_k_values:
+        full_rows = _npy_row_count(case_dir / "surface_xyz.npy")
+        features_full = _load_or_compute_multiscale_features(
+            case_dir, multiscale_k_values, full_rows=full_rows
+        )
+        if surface_rows is None:
+            features = np.asarray(features_full, dtype=np.float32)
+        else:
+            features = np.asarray(features_full[surface_rows], dtype=np.float32)
+        surface_parts.append(features)
+    surface_x = np.concatenate(surface_parts, axis=1)
     surface_y = np.concatenate([cp, wall_shear], axis=1)
     volume_x = np.concatenate(
         [
@@ -338,8 +496,15 @@ class DrivAerMLCaseStore:
         *,
         surface_rows: np.ndarray | None = None,
         volume_rows: np.ndarray | None = None,
+        multiscale_k_values: tuple[int, ...] | None = None,
     ) -> DrivAerMLCase:
-        return load_case(self.root, case_id, surface_rows=surface_rows, volume_rows=volume_rows)
+        return load_case(
+            self.root,
+            case_id,
+            surface_rows=surface_rows,
+            volume_rows=volume_rows,
+            multiscale_k_values=multiscale_k_values,
+        )
 
     def case_point_counts(self, case_id: str) -> dict[str, int]:
         cached = self._point_count_cache.get(case_id)
@@ -367,6 +532,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        multiscale_k_values: tuple[int, ...] | None = None,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +542,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.multiscale_k_values = tuple(multiscale_k_values) if multiscale_k_values else ()
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -444,6 +611,7 @@ class DrivAerMLSurfaceDataset(Dataset):
             view.case_id,
             surface_rows=None if surface_idx is None else surface_idx.numpy(),
             volume_rows=None if volume_idx is None else volume_idx.numpy(),
+            multiscale_k_values=self.multiscale_k_values or None,
         )
         metadata = dict(case.metadata)
         metadata["n_surface_full"] = int(counts["n_surface"])
@@ -473,10 +641,12 @@ def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
     max_surface_n = max(sample.surface_x.shape[0] for sample in samples)
     max_volume_n = max(sample.volume_x.shape[0] for sample in samples)
     batch_size = len(samples)
-    surface_x = torch.zeros(batch_size, max_surface_n, SURFACE_X_DIM, dtype=samples[0].surface_x.dtype)
+    surface_x_dim = int(samples[0].surface_x.shape[1])
+    volume_x_dim = int(samples[0].volume_x.shape[1])
+    surface_x = torch.zeros(batch_size, max_surface_n, surface_x_dim, dtype=samples[0].surface_x.dtype)
     surface_y = torch.zeros(batch_size, max_surface_n, SURFACE_Y_DIM, dtype=samples[0].surface_y.dtype)
     surface_mask = torch.zeros(batch_size, max_surface_n, dtype=torch.bool)
-    volume_x = torch.zeros(batch_size, max_volume_n, VOLUME_X_DIM, dtype=samples[0].volume_x.dtype)
+    volume_x = torch.zeros(batch_size, max_volume_n, volume_x_dim, dtype=samples[0].volume_x.dtype)
     volume_y = torch.zeros(batch_size, max_volume_n, VOLUME_Y_DIM, dtype=samples[0].volume_y.dtype)
     volume_mask = torch.zeros(batch_size, max_volume_n, dtype=torch.bool)
     for i, sample in enumerate(samples):
@@ -544,6 +714,7 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    multiscale_k_values: tuple[int, ...] | None = None,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +739,7 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        multiscale_k_values=multiscale_k_values,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(
@@ -576,6 +748,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            multiscale_k_values=multiscale_k_values,
         )
     }
     test_splits = {
@@ -585,6 +758,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            multiscale_k_values=multiscale_k_values,
         )
     }
     stats = target_stats_from_normalizers(store)
