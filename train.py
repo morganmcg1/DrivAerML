@@ -138,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    sam_rho: float = 0.0
     debug: bool = False
 
 
@@ -220,6 +221,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "sam_rho": (
+            "SAM perturbation radius (Foret et al., ICLR 2021). "
+            "Two-pass optimizer wrap: backward at w to get g, perturb "
+            "w' = w + rho * g/||g||, backward at w' to get g_hat, "
+            "restore w and apply base optimizer update with g_hat. "
+            "When 0.0, the wrapper is a no-op and behavior matches the "
+            "base optimizer exactly (baseline recovery). With DDP, the "
+            "first backward is wrapped in model.no_sync() so only the "
+            "second backward all-reduces. Doubles forward/backward "
+            "cost during training; inference unchanged."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -262,6 +274,97 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
             use_triton=False,
         )
     raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+
+
+class SAMLion:
+    """Sharpness-Aware Minimization wrapper around any base optimizer.
+
+    Two-pass update (Foret et al., ICLR 2021):
+        1. Forward+backward at w -> compute g = grad L(w).
+        2. ``first_step`` perturbs w in-place by rho * g / ||g||.
+        3. Forward+backward at w' -> compute g_hat = grad L(w').
+        4. ``second_step`` restores w in-place, then calls base_optimizer.step()
+           using g_hat (the gradients currently in p.grad).
+
+    When ``rho == 0.0``, ``first_step`` is a no-op and ``second_step`` calls
+    base_optimizer.step() directly: baseline behavior is recovered exactly.
+    """
+
+    def __init__(self, optimizer: torch.optim.Optimizer, rho: float = 0.0):
+        if rho < 0.0:
+            raise ValueError(f"SAM rho must be >= 0; got {rho}")
+        self.optimizer = optimizer
+        self.rho = float(rho)
+        self.param_groups = optimizer.param_groups
+        self.defaults = getattr(optimizer, "defaults", {})
+        self.state = getattr(optimizer, "state", {})
+        self._e_w: dict[int, torch.Tensor] = {}
+
+    @torch.no_grad()
+    def first_step(self) -> torch.Tensor | None:
+        """Perturb weights in-place by rho * g / ||g||. Returns grad-norm tensor or None."""
+        if self.rho == 0.0:
+            return None
+        norm_sq = torch.zeros((), dtype=torch.float32)
+        device = None
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                if device is None:
+                    device = p.grad.device
+                    norm_sq = norm_sq.to(device)
+                norm_sq = norm_sq + p.grad.detach().float().square().sum()
+        grad_norm = norm_sq.sqrt()
+        scale = self.rho / (grad_norm + 1e-12)
+        self._e_w.clear()
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                e_w = p.grad.detach() * scale.to(p.grad.dtype)
+                p.add_(e_w)
+                self._e_w[id(p)] = e_w
+        return grad_norm
+
+    @torch.no_grad()
+    def restore_weights(self) -> None:
+        """Undo first_step's perturbation in-place. Safe to call when rho=0."""
+        if self.rho == 0.0 or not self._e_w:
+            return
+        for group in self.param_groups:
+            for p in group["params"]:
+                e_w = self._e_w.pop(id(p), None)
+                if e_w is not None:
+                    p.sub_(e_w)
+        self._e_w.clear()
+
+    @torch.no_grad()
+    def second_step(self) -> None:
+        """Restore weights then apply the base optimizer's update."""
+        if self.rho == 0.0:
+            self.optimizer.step()
+            return
+        self.restore_weights()
+        self.optimizer.step()
+
+    def step(self) -> None:
+        """Single-pass fallback (rho=0). Use first_step + second_step otherwise."""
+        if self.rho != 0.0:
+            raise RuntimeError(
+                "SAMLion.step() is single-pass and only valid when rho=0. "
+                "Use first_step/second_step for SAM updates."
+            )
+        self.optimizer.step()
+
+    def zero_grad(self, set_to_none: bool = True) -> None:
+        self.optimizer.zero_grad(set_to_none=set_to_none)
+
+    def state_dict(self) -> dict:
+        return self.optimizer.state_dict()
+
+    def load_state_dict(self, sd: dict) -> None:
+        self.optimizer.load_state_dict(sd)
 
 
 def parse_rff_init_sigmas(spec: str) -> list[float] | None:
@@ -781,7 +884,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
         optimizer = build_optimizer(base_model, config)
+        # Scheduler must see a real torch Optimizer (LRScheduler does an isinstance
+        # check); SAMLion wraps it but shares param_groups by reference, so LR
+        # updates by the scheduler are visible through the wrapper.
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
+        if config.sam_rho > 0.0:
+            optimizer = SAMLion(optimizer, rho=config.sam_rho)
+            if state.is_main:
+                print(
+                    f"SAM enabled (Foret et al. 2021): rho={config.sam_rho}, "
+                    f"two-pass perturb-recompute-restore wrapping "
+                    f"{config.optimizer}. DDP first backward uses no_sync; "
+                    f"second backward all-reduces."
+                )
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
         balancer: GradNormBalancer | None = None
@@ -1076,42 +1191,125 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
-                    loss.backward()
-                    if config.grad_clip_norm > 0.0:
-                        grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
-                            base_model.parameters(),
-                            max_norm=config.grad_clip_norm,
+                    sam_active = config.sam_rho > 0.0
+                    # First backward at w. With DDP+SAM, suppress all-reduce
+                    # so only the second backward synchronises gradients.
+                    if sam_active and state.enabled:
+                        with model.no_sync():
+                            loss.backward()
+                    else:
+                        loss.backward()
+
+                    sam_first_grad_norm = None
+                    if sam_active:
+                        # Perturb w in-place using the first-pass gradients.
+                        sam_first_grad_norm = optimizer.first_step()
+                        optimizer.zero_grad(set_to_none=True)
+                        # Recompute loss at perturbed weights; this backward
+                        # is the one whose gradients are all-reduced and
+                        # applied by the base optimizer.
+                        sam_loss_perturbed, _ = train_loss(
+                            model,
+                            batch,
+                            transform,
+                            device,
+                            config.amp_mode,
+                            surface_loss_weight=config.surface_loss_weight,
+                            volume_loss_weight=config.volume_loss_weight,
+                            surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        )
+                        perturbed_nonfinite = not bool(
+                            torch.isfinite(sam_loss_perturbed.detach()).item()
+                        )
+                        perturbed_skip = distributed_any(
+                            state, perturbed_nonfinite, device
+                        )
+                        train_log["train/sam/perturbed_loss"] = (
+                            float(sam_loss_perturbed.detach().cpu().item())
+                            if not perturbed_nonfinite
+                            else float("nan")
+                        )
+                        train_log["train/sam/perturbed_nonfinite"] = (
+                            1.0 if perturbed_nonfinite else 0.0
+                        )
+                        if sam_first_grad_norm is not None:
+                            train_log["train/sam/first_grad_norm"] = float(
+                                sam_first_grad_norm.detach().cpu().item()
+                            )
+                        if perturbed_skip:
+                            # Restore w (undo perturbation) and skip the step.
+                            optimizer.restore_weights()
+                            optimizer.zero_grad(set_to_none=True)
+                            skip_step = True
+                            train_log["train/step_skipped"] = 1.0
+                        else:
+                            sam_loss_perturbed.backward()
+                    if not skip_step:
+                        if config.grad_clip_norm > 0.0:
+                            grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
+                                base_model.parameters(),
+                                max_norm=config.grad_clip_norm,
+                            )
+                        else:
+                            grad_norm_tensor = global_grad_norm(base_model.parameters(), device)
+                        grad_norm_pre_clip = float(grad_norm_tensor.detach().cpu().item())
+                        grad_is_nonfinite = not math.isfinite(grad_norm_pre_clip)
+                        skip_step = distributed_any(state, grad_is_nonfinite, device)
+                        clipped = (
+                            config.grad_clip_norm > 0.0
+                            and math.isfinite(grad_norm_pre_clip)
+                            and grad_norm_pre_clip > config.grad_clip_norm
+                        )
+                        train_log.update(
+                            {
+                                "train/grad/global_norm_pre_clip": grad_norm_pre_clip,
+                                "train/grad/clipped": 1.0 if clipped else 0.0,
+                                "train/nonfinite_grad": 1.0 if grad_is_nonfinite else 0.0,
+                                "train/step_skipped": 1.0 if skip_step else 0.0,
+                            }
+                        )
+                        gradient_metrics = (
+                            collect_gradient_metrics(
+                                model,
+                                log_histograms=config.log_gradient_histograms,
+                            )
+                            if should_log_gradients and not skip_step
+                            else {}
                         )
                     else:
-                        grad_norm_tensor = global_grad_norm(base_model.parameters(), device)
-                    grad_norm_pre_clip = float(grad_norm_tensor.detach().cpu().item())
-                    grad_is_nonfinite = not math.isfinite(grad_norm_pre_clip)
-                    skip_step = distributed_any(state, grad_is_nonfinite, device)
-                    clipped = (
-                        config.grad_clip_norm > 0.0
-                        and math.isfinite(grad_norm_pre_clip)
-                        and grad_norm_pre_clip > config.grad_clip_norm
-                    )
-                    train_log.update(
-                        {
-                            "train/grad/global_norm_pre_clip": grad_norm_pre_clip,
-                            "train/grad/clipped": 1.0 if clipped else 0.0,
-                            "train/nonfinite_grad": 1.0 if grad_is_nonfinite else 0.0,
-                            "train/step_skipped": 1.0 if skip_step else 0.0,
-                        }
-                    )
-                    gradient_metrics = (
-                        collect_gradient_metrics(
-                            model,
-                            log_histograms=config.log_gradient_histograms,
-                        )
-                        if should_log_gradients and not skip_step
-                        else {}
-                    )
+                        gradient_metrics = {}
                     if skip_step:
+                        # Ensure weights are restored if SAM perturbed them.
+                        if sam_active:
+                            optimizer.restore_weights()
                         optimizer.zero_grad(set_to_none=True)
                     else:
-                        optimizer.step()
+                        if sam_active and should_log_gradients:
+                            # cos(g, g_hat) = e_w · g_hat / (rho * ||g_hat||)
+                            # (e_w = rho * g / ||g||, so g · g_hat = (||g|| / rho) e_w · g_hat).
+                            ew_dot_ghat = torch.zeros((), device=device, dtype=torch.float32)
+                            ghat_sq = torch.zeros((), device=device, dtype=torch.float32)
+                            for group_ in optimizer.param_groups:
+                                for p_ in group_["params"]:
+                                    if p_.grad is None:
+                                        continue
+                                    e_w = optimizer._e_w.get(id(p_))
+                                    if e_w is None:
+                                        continue
+                                    ew_dot_ghat = ew_dot_ghat + (
+                                        e_w.detach().float() * p_.grad.detach().float()
+                                    ).sum()
+                                    ghat_sq = ghat_sq + p_.grad.detach().float().square().sum()
+                            ghat_norm = ghat_sq.sqrt()
+                            denom = config.sam_rho * ghat_norm + 1e-12
+                            cos_sim = ew_dot_ghat / denom
+                            train_log["train/sam/grad_cos_g_ghat"] = float(
+                                cos_sim.detach().cpu().item()
+                            )
+                            train_log["train/sam/second_grad_norm"] = float(
+                                ghat_norm.detach().cpu().item()
+                            )
+                        optimizer.second_step()
                         if ema is not None:
                             ema.update(base_model)
                         weight_metrics = (
