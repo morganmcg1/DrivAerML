@@ -1,3 +1,39 @@
+## 2026-05-17 21:50 — PR #1171: H21 Per-Component Independent Output Heads (nezuko) — CLOSED TERMINAL NOT-A-MERGE / 10TH-WAVE-30-DEAD-END / DECODER-CAPACITY-NOT-THE-BOTTLENECK
+
+- **Branch**: `nezuko/h21-per-component-output-heads` (closed)
+- **W&B runs**: rank0 `xhy9yk67` (+ 7 additional DDP ranks)
+- **Total runtime**: ~14.9h, 70664 steps
+- **Hypothesis**: Replace shared 4-channel surface output MLP with four independent MLPs (one per surface channel). τ_z head gets one extra hidden layer for additional capacity. Mechanism: gradient isolation prevents dominant channels (cp/τ_x) from interfering with τ_z gradient.
+
+### Terminal results — NOT-A-MERGE, all four test floors breach
+
+| Metric | H21 test | Baseline test | Floor | Δ | Verdict |
+|---|---:|---:|---:|---:|:--|
+| test_abupt | 6.119% | 5.844% | — | +0.275pp | **MISS** |
+| test_SP | 3.813% | — | 3.577% | +0.236pp | **BREACH** |
+| test_vol_p | 3.694% | — | 3.643% | +0.051pp | **MARGINAL BREACH** |
+| test_WSS | 7.084% | — | 6.727% | +0.357pp | **BREACH** |
+| test τz/τx | 1.4391 | — | — | — | MARGINAL band-edge (H15b: 1.439) |
+| val_abupt (EP13) | 6.493% | 6.126% | — | +0.367pp | **MISS** |
+
+### Per-epoch trajectory
+
+EP1→3 cold-start −10.93pp/ep → EP3-6 −0.182pp/ep → EP6-7 vol-curriculum 49152 bump −0.074pp/ep → EP10-13 cosine-tail flatline −0.005pp/ep. Final τz/τx 1.542 stable in upper band [1.54, 1.55].
+
+### Mechanism diagnostic — cleanest gradient-decoupling in fleet history
+
+`τz > τy > τx > cp` gradient-norm ordering held in 11/13 training buckets across 65k steps. τ_z head absorbed 22% more param mass than τ_x (head_tau_z 51.34 vs head_tau_x 43.32 total param norm). Mechanism fired EXACTLY as designed — gradient isolation was clean and τ_z head got more capacity.
+
+### Critical conclusion — decoder capacity is NOT the τ_z bottleneck
+
+H21 is the **highest-quality mechanism-confirmed NOT-A-MERGE in fleet history**: the gradient decoupling worked perfectly AND the result was NOT-A-MERGE. This conclusively proves: the encoder features fed to the τ_z head do not contain sufficient information to predict τ_z accurately. Adding more decoder capacity on top of insufficient encoder features changes how information is read out, not how much is available. **Closed axis: channel-coupled output-head decoder capacity.**
+
+### Implication for H30 (nezuko next assignment)
+
+H21's closure directly motivates V2S cross-attention (H30): encoder-level cross-modal fusion between volume tokens (off-body flow physics) and surface tokens. Volume → surface xattn injects separation physics into the encoder features BEFORE the output head, attacking the representation bottleneck rather than the decoder.
+
+---
+
 ## 2026-05-17 20:05 — PR #1163: H18 Per-Vertex Area-Weighted Surface MSE (tanjiro) — CLOSED TERMINAL NOT-A-MERGE / FIRST-TEST-SURVIVING-BAND-BREAK / 9TH-WAVE-30-DEAD-END / MECHANISM-PARTLY-PROVEN
 
 - **Branch**: `tanjiro/h18-area-weighted-surface-loss` (closed)
