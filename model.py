@@ -358,6 +358,31 @@ class Transformer(nn.Module):
         return x
 
 
+class AuxGradHead(nn.Module):
+    """Auxiliary head predicting local tau_z spatial gradient magnitude.
+
+    Attached to surface_hidden [B, N_s, hidden_dim] post-backbone. Zero-init
+    final layer means outputs ~0 at init, no cold-start disruption. Discarded
+    at inference -- only affects backbone representation learning during
+    training via the auxiliary loss term.
+    """
+
+    def __init__(self, hidden_dim: int = 192, bottleneck: int = 64):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Linear(hidden_dim, bottleneck),
+            nn.GELU(),
+            nn.Linear(bottleneck, 1),
+        )
+        nn.init.trunc_normal_(self.head[0].weight, std=0.02)
+        nn.init.zeros_(self.head[0].bias)
+        nn.init.zeros_(self.head[2].weight)
+        nn.init.zeros_(self.head[2].bias)
+
+    def forward(self, surface_hidden: torch.Tensor) -> torch.Tensor:
+        return self.head(surface_hidden).squeeze(-1)
+
+
 class SurfaceTransolver(nn.Module):
     """Grouped Transolver for surface pressure, wall shear, and volume pressure."""
 
@@ -382,6 +407,8 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_aux_grad_head: bool = False,
+        aux_grad_head_bottleneck: int = 64,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -519,6 +546,17 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H25 ALGP (PR #1176): auxiliary head on surface_hidden predicting
+        # local tau_z spatial gradient magnitude. Active only during training
+        # (forward returns aux_grad_preds=None at eval) to keep inference free.
+        self.use_aux_grad_head = use_aux_grad_head
+        if use_aux_grad_head:
+            self.aux_grad_head = AuxGradHead(
+                hidden_dim=n_hidden, bottleneck=aux_grad_head_bottleneck
+            )
+        else:
+            self.aux_grad_head = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -633,10 +671,15 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
+        aux_grad_preds = None
+        if self.aux_grad_head is not None and self.training and surface_x is not None:
+            aux_grad_preds = self.aux_grad_head(surface_hidden) * surface_mask
+
         return {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "aux_grad_preds": aux_grad_preds,
         }

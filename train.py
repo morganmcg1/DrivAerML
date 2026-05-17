@@ -25,6 +25,7 @@ from typing import Iterable
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
@@ -138,6 +139,10 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    aux_grad_weight: float = 0.0
+    aux_grad_n_samples: int = 4096
+    aux_grad_k: int = 8
+    aux_grad_head_bottleneck: int = 64
     debug: bool = False
 
 
@@ -219,6 +224,35 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "tasks (tau_y/tau_z) to climb. Default 0.0 disables the floor "
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
+        ),
+        "aux_grad_weight": (
+            "H25 ALGP (PR #1176) auxiliary tau_z spatial-gradient prediction "
+            "loss weight. 0.0 disables (default). When >0, attaches an "
+            "AuxGradHead to surface_hidden that predicts the KNN finite-"
+            "difference local gradient magnitude of tau_z; the loss is added "
+            "to the primary loss as aux_grad_weight * aux_loss. The auxiliary "
+            "head is zero-init on the final layer (no cold-start disruption) "
+            "and discarded at inference (zero inference overhead). Hypothesis: "
+            "force backbone to encode spatially coherent gradient-aware "
+            "representations to break the tau_z/tau_x [1.44,1.55] band "
+            "attractor. Recommended starting weight: 0.1."
+        ),
+        "aux_grad_n_samples": (
+            "Number of surface vertices sampled per forward pass for KNN "
+            "gradient target computation when --aux-grad-weight > 0. Full "
+            "N_surface (~400K) would be O(N^2) infeasible; default 4096 "
+            "is a compute/coverage trade-off."
+        ),
+        "aux_grad_k": (
+            "Number of nearest neighbors used in the KNN finite-difference "
+            "gradient magnitude target (default 8). Active only when "
+            "--aux-grad-weight > 0."
+        ),
+        "aux_grad_head_bottleneck": (
+            "Width of the AuxGradHead bottleneck layer (default 64). The "
+            "head architecture is Linear(hidden_dim -> bottleneck) -> GELU "
+            "-> Linear(bottleneck -> 1) with zero-init final layer. Active "
+            "only when --aux-grad-weight > 0."
         ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
@@ -308,7 +342,97 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_aux_grad_head=(config.aux_grad_weight > 0.0),
+        aux_grad_head_bottleneck=config.aux_grad_head_bottleneck,
     )
+
+
+def compute_knn_grad_targets(
+    coords: torch.Tensor,
+    tau_z: torch.Tensor,
+    k: int = 8,
+) -> torch.Tensor:
+    """KNN finite-difference gradient magnitude of tau_z at each vertex.
+
+    Args:
+        coords: [B, N, 3] xyz positions (float32).
+        tau_z:  [B, N] tau_z values at each vertex (float32, normalized).
+        k:      number of nearest neighbors (excludes self).
+
+    Returns:
+        [B, N] mean absolute FD gradient magnitude per vertex.
+    """
+    B, N, _ = coords.shape
+    # cdist materializes [B, N, N] (~134MB at N=4096, B=2, fp32) -- avoids
+    # the [B, N, N, 3] broadcast subtraction blow-up flagged by H25 research.
+    dist_mat = torch.cdist(coords, coords, p=2)  # [B, N, N]
+    # K+1 smallest: index 0 is the self-distance (=0), keep K real neighbors.
+    _, knn_idx = dist_mat.topk(k + 1, dim=-1, largest=False)
+    knn_idx = knn_idx[:, :, 1:]  # [B, N, K]
+    batch_idx = torch.arange(B, device=coords.device).view(B, 1, 1).expand(B, N, k)
+    knn_coords = coords[batch_idx, knn_idx]  # [B, N, K, 3]
+    knn_tau_z = tau_z[batch_idx, knn_idx]    # [B, N, K]
+    edge_dist = (knn_coords - coords.unsqueeze(2)).norm(dim=-1).clamp(min=1e-6)
+    grad_mag = (knn_tau_z - tau_z.unsqueeze(2)).abs() / edge_dist
+    return grad_mag.mean(dim=-1)  # [B, N]
+
+
+def compute_aux_grad_loss(
+    aux_preds: torch.Tensor,
+    surface_x: torch.Tensor,
+    surface_target: torch.Tensor,
+    surface_mask: torch.Tensor,
+    *,
+    n_samples: int,
+    k: int,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """H25 ALGP auxiliary loss: predict KNN-FD gradient magnitude of tau_z.
+
+    Subsamples ``n_samples`` surface vertices uniformly, computes the FD
+    gradient target on the subsample (under no_grad), and returns the
+    per-batch std-normalized MSE between the aux head outputs and the
+    target. Masked at the sample level so padding tokens are ignored.
+    """
+    B, N_s = aux_preds.shape
+    # Some views in the DrivAerML loader contain empty surface tensors (when
+    # volume views outnumber surface views). KNN needs at least k+1 vertices.
+    if N_s < k + 1:
+        zero = aux_preds.new_zeros(()).requires_grad_(False)
+        aux_loss = aux_preds.sum() * 0.0  # keep graph for DDP
+        return aux_loss, {
+            "aux_loss": 0.0,
+            "aux_grad_scale": 0.0,
+            "aux_grad_target_mean": 0.0,
+            "aux_grad_target_max": 0.0,
+            "aux_pred_mean": 0.0,
+            "aux_pred_std": 0.0,
+            "aux_n_samples": 0.0,
+            "aux_skipped": 1.0,
+        }
+    n_eff = min(n_samples, N_s)
+    aux_idx = torch.randperm(N_s, device=aux_preds.device)[:n_eff]
+    coords_sub = surface_x[:, aux_idx, 0:3].float()           # [B, n_eff, 3]
+    tau_z_sub = surface_target[:, aux_idx, 3].float()         # [B, n_eff]
+    mask_sub = surface_mask[:, aux_idx].float()               # [B, n_eff]
+    aux_preds_sub = aux_preds[:, aux_idx].float()             # [B, n_eff]
+    with torch.no_grad():
+        gt_grad = compute_knn_grad_targets(coords_sub, tau_z_sub, k=k)  # [B, n_eff]
+        gt_grad_scale = gt_grad.std().clamp(min=1e-6)
+        gt_grad_norm = gt_grad / gt_grad_scale
+    aux_preds_norm = aux_preds_sub / gt_grad_scale
+    sq_err = (aux_preds_norm - gt_grad_norm).pow(2) * mask_sub
+    denom = mask_sub.sum().clamp(min=1.0)
+    aux_loss = sq_err.sum() / denom
+    return aux_loss, {
+        "aux_loss": float(aux_loss.detach().cpu().item()),
+        "aux_grad_scale": float(gt_grad_scale.detach().cpu().item()),
+        "aux_grad_target_mean": float(gt_grad.mean().detach().cpu().item()),
+        "aux_grad_target_max": float(gt_grad.max().detach().cpu().item()),
+        "aux_pred_mean": float(aux_preds_sub.mean().detach().cpu().item()),
+        "aux_pred_std": float(aux_preds_sub.std().detach().cpu().item()),
+        "aux_n_samples": float(n_eff),
+        "aux_skipped": 0.0,
+    }
 
 
 def train_loss(
@@ -321,6 +445,9 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    aux_grad_weight: float = 0.0,
+    aux_grad_n_samples: int = 4096,
+    aux_grad_k: int = 8,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,13 +473,33 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+
+    aux_metrics: dict[str, float] = {}
+    if aux_grad_weight > 0.0 and out.get("aux_grad_preds") is not None:
+        # Compute aux loss outside autocast in fp32 -- gradient magnitudes are
+        # tiny and the per-batch std normalization is fragile under fp16.
+        aux_loss, aux_metrics = compute_aux_grad_loss(
+            out["aux_grad_preds"],
+            batch.surface_x,
+            surface_target,
+            batch.surface_mask,
+            n_samples=aux_grad_n_samples,
+            k=aux_grad_k,
+        )
+        loss = loss + aux_grad_weight * aux_loss
+        aux_metrics["aux_loss_weighted"] = float(
+            (aux_grad_weight * aux_loss).detach().cpu().item()
+        )
+
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(aux_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -773,7 +920,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.aux_grad_weight > 0.0:
+                # H25 ALGP: empty-surface views skip the aux head entirely, so
+                # the aux_grad_head params are unused for that rank's batch.
+                # find_unused_parameters lets DDP synchronise around it.
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1030,6 +1180,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        aux_grad_weight=config.aux_grad_weight,
+                        aux_grad_n_samples=config.aux_grad_n_samples,
+                        aux_grad_k=config.aux_grad_k,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1223,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for aux_key in (
+                        "aux_loss",
+                        "aux_loss_weighted",
+                        "aux_grad_scale",
+                        "aux_grad_target_mean",
+                        "aux_grad_target_max",
+                        "aux_pred_mean",
+                        "aux_pred_std",
+                        "aux_n_samples",
+                        "aux_skipped",
+                    ):
+                        if aux_key in batch_loss_metrics:
+                            train_log[f"train/{aux_key}"] = batch_loss_metrics[aux_key]
+                    train_log["train/aux_grad_weight"] = config.aux_grad_weight
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
@@ -1261,6 +1428,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
+                tz_pct = val_metrics["val_surface"].get("wall_shear_z_rel_l2_pct")
+                tx_pct = val_metrics["val_surface"].get("wall_shear_x_rel_l2_pct")
+                if (
+                    tz_pct is not None
+                    and tx_pct is not None
+                    and math.isfinite(tz_pct)
+                    and math.isfinite(tx_pct)
+                    and tx_pct > 0.0
+                ):
+                    log_metrics["val_primary/tau_z_over_tau_x_ratio"] = tz_pct / tx_pct
                 log_metrics.update(collect_string_sep_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
