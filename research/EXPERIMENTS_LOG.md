@@ -1,3 +1,54 @@
+## 2026-05-17 12:05 — PR #1169: H16b Huber loss on τ channels δ=0.3 (frieren) — CLOSED TERMINAL NOT-A-MERGE / Huber static-δ direction EXHAUSTED (4th budget-starved closure)
+
+- **Branch**: `frieren/H16b-huber-delta-03` (closed)
+- **W&B group**: `wave30_h16b_huber_delta03` — rank0 `uhqnox73`, ranks 1–7 `jcojjk0b`/`l9lilfbj`/`em27zvr6`/`34w0eohc`/`zdvpvbmp`/`17ufldch`/`dyzx2u18`
+- **Hypothesis**: H16 (δ=1.0) proved Huber threshold too coarse (frac_in_L1/τz = 0.014% = effectively MSE). H16b tests δ=0.3 targeting bulk of post-EP1 residual distribution. ~1 flag change from H16.
+
+### Terminal results (EP3.79 truncated by SENPAI_TIMEOUT_MINUTES=360 confirmed via `/proc/<pid>/environ`)
+
+| Metric | H16b EP3 | Baseline #972 | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | 7.106% | 6.126% | +0.980pp | FAIL |
+| test_abupt | **6.767%** | 5.844% | +0.923pp | FAIL |
+| test_SP | 4.547% | 3.577% floor | **+0.970pp** | **FAIL FLOOR** |
+| test_vol_p | 4.635% | 3.643% floor | **+0.992pp** | **FAIL FLOOR** |
+| test_WSS | 7.538% | 6.727% | +0.811pp | FAIL |
+| test τz/τx | 1.440 | — | edge of band | no break |
+
+### Huber mechanism — FADES STRUCTURALLY across training
+
+| Step | EP | frac_L1 τx | frac_L1 τy | frac_L1 τz | max_abs/τz |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0 | — | — | 41.14% | 11.63σ |
+| 1500 | 1.0 | 24.40% | 21.39% | 27.21% | — |
+| 7500 | 2.0 | — | — | 3.41% | — |
+| 12500 | 3.3 | — | — | 1.29% | 2.83σ |
+| 14605 | 3.79 | 0.63% | 0.88% | 1.11% | 4.48σ |
+
+Mechanism fades 44%→1% across 3 epochs (40× decay). The residual distribution shrinks faster than δ=0.3σ can track. By EP6+, would be effectively MSE-on-τ — same failure mode as H16 (δ=1.0).
+
+### Why static-δ Huber is structurally exhausted
+
+| H | δ | EP1 frac_in_L1 | EP3 val_abupt | Outcome |
+|:--|---:|---:|---:|:--|
+| H16 (#1161) | 1.0 | 0.014% | 6.894% | mechanism inactive (too large) |
+| H16b (#1169) | 0.3 | 44.1% | 7.106% | mechanism fades (correct at EP1 but transient) |
+
+**The Huber direction is closed.** A static δ cannot track the shrinking residual distribution of a converging deep network. The static-tail-robust-loss family on this task is ruled out. Dynamic-δ Huber (cosine-decay or per-percentile-tracking) is the natural follow-up but was rejected as the next step in favor of bolder direction (per Plateau Protocol).
+
+### Fleet contributions
+
+1. **Decisive Huber-direction closure** — 2/2 fails across δ=1.0 and δ=0.3 confirms the family is structurally limited on this task.
+2. **Cleanest evidence of SENPAI_TIMEOUT_MINUTES=360 deployment bug**: student verified directly via `/proc/<pid>/environ`. 4 closures now known to be budget-starved (H15b, H17, H19, H16b).
+3. **Floor breach pattern reconfirmed**: test_SP and test_vol_p both +0.97pp / +0.99pp above floors at EP3. Even with full 13 epochs, this is a hard NO-MERGE blocker. Reinforces the floor-preservation lane (H22 thorfinn Charbonnier-cp + MAE-aux) as the necessary stacking partner.
+4. **Mechanism-fade analysis is reusable**: future loss-form attacks should pre-spec the running residual scale, not a fixed σ. The H16b finding that residual distribution shrinks 10× over 3 epochs informs any future tail-robust attack.
+
+### Reassignment
+
+frieren → **H23 Mean Teacher self-distillation** (PR #1173) — bold Plateau Protocol direction shift away from MSE/Huber/quantile loss-form attacks. Uses existing EMA model as teacher + spatial-coordinate input augmentation. Tarvainen & Valpola 2017. Train.py-only ~50 lines. Orthogonal to all 8 in-flight attacks (which target output/loss/topology — Mean Teacher targets TRAINING DYNAMICS).
+
+---
+
 ## 2026-05-17 10:35 — PR #1168: H19 VICReg Batch-Variance Regularization on Predicted τ_z (thorfinn) — CLOSED TERMINAL NOT-A-MERGE / mechanism PARKED AS STACKABLE (3rd budget-starved mechanism-PASS closure in Wave 30)
 
 - **Branch**: `thorfinn/H19-vicreg-tau-z-variance` (closed)

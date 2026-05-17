@@ -1,9 +1,56 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~10:35 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~12:05 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
+
+## Latest invocation actions (2026-05-17 ~12:05Z) — H16b frieren CLOSED NOT-A-MERGE / Huber static-δ direction EXHAUSTED (4th budget-starved closure, /proc-verified SENPAI_TIMEOUT_MINUTES=360 bug); fleet leader confirmed askeladd H11b EP6.5 val_abupt 6.119% (FLEET #1, just below baseline 6.126%); H23 Mean Teacher self-distillation assigned to frieren as Plateau Protocol bold direction shift (PR #1173); fleet now 8/8 active
+
+### Actions this invocation (12:05Z May 17)
+
+- **CLOSED PR #1169 frieren H16b** as TERMINAL NOT-A-MERGE / Huber static-δ direction EXHAUSTED. Student posted `terminal=false, status=truncated_partial` SENPAI-RESULT with direct `/proc/<pid>/environ` verification that SENPAI_TIMEOUT_MINUTES=360 overrode the PR-specified 1100. Result at EP3.79: test_abupt 6.767% (+0.923pp), test_SP 4.547% (+0.970pp FLOOR BREACH), test_vol_p 4.635% (+0.992pp FLOOR BREACH). **Mechanism FADES structurally**: frac_in_L1 = 44%→27%→3.4%→1.1% over EP1→EP3.79 (40× decay). Combined with H16 (δ=1.0, frac_in_L1 = 0.014%, MSE-equivalent), the static-δ Huber direction is exhausted — a single calibration cannot track shrinking residual distribution. Dynamic-δ rejected in favor of bolder direction.
+- **ASSIGNED frieren H23 (PR #1173)** — Mean Teacher self-distillation. Uses existing EMA model (`--use-ema --ema-decay 0.999`) as teacher; student forward on Gaussian-noise-augmented surface points (σ=0.01); consistency loss MSE(student_aug, teacher_unaug.detach()) with warmup λ → 0.1 over ~1 epoch. Tarvainen & Valpola 2017. Train.py-only ~50 lines. **Plateau Protocol bold-direction pick** — fundamentally different from MSE/Huber/quantile direction. Targets training dynamics, not output/loss/topology. Orthogonal to all 8 in-flight attacks.
+- **POSTED #1056 budget-bug update**: 4 closures now budget-starved (H15b, H17 different cause, H19, H16b). frieren's `/proc/<pid>/environ` evidence is the cleanest proof. Posted runtime audit: GOOD pods (fern/edward/askeladd >7h+) vs BAD pods (thorfinn/frieren 271min cap). Requested human-team pod-manifest audit.
+- **POSTED CHECK-IN PR #1167 askeladd H11b**: 2nd stale_wip false positive. EP6.5 val_abupt = **6.119%** — fleet #1, just below baseline 6.126%. floor breach risk severe (val_SP 4.099% +0.522pp, val_vol_p 3.826% +0.183pp).
+
+### KEY FLEET DIAGNOSTIC: Huber-direction is closed, Mean Teacher opens consistency-regularization lane
+
+Wave 30 has now exhausted the loss-form-on-τ direction:
+
+| Direction | Attacks | Outcome |
+|:--|:--|:--|
+| Static Huber on τ | H16 (δ=1.0), H16b (δ=0.3) | EXHAUSTED — 2/2 fail, structurally limited |
+| Magnitude-weighted MSE | H12 (edward), H13c (thorfinn closed) | in-flight (H12), 1 closed |
+| Per-vertex focal | H20 (alphonse) | new launch |
+| Charbonnier on cp | H22 (thorfinn) | new launch (floor preservation) |
+| Area-weighted MSE | H18 (tanjiro v2, band-break) | in-flight |
+
+The **consistency-regularization** lane (H23 Mean Teacher) is opened as the first attack on training dynamics rather than loss-form/output-head/topology. If H23 PR #1173 shows mechanism evidence (consistency loss → 0, student_minus_teacher_mean_abs decreasing), it validates a fresh lane for future Wave 31 attacks.
+
+### Floor-breach mode still dominant
+
+Test floors continue to be breached:
+- H16b EP3: test_SP +0.97pp, test_vol_p +0.99pp (decisive NO-MERGE blocker)
+- askeladd H11b val_SP at EP6.5: +0.522pp above floor (projected test_SP breach)
+- fern H10b val_SP at EP7: +0.526pp above floor (projected test_SP breach)
+
+H22 thorfinn (Charbonnier-cp + MAE-aux) is the dedicated floor-preservation attack. **It is the natural stacking partner** for both fern H10b and askeladd H11b winners if they clear val_abupt but breach floors.
+
+### Current fleet (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| askeladd | #1167 | H11b gated multi-scale input | EP6.5 healthy | **6.119% (#1)** |
+| fern | #1164 | H10b bounded-exp magnitude | EP7.0 healthy | 6.245% (#2) |
+| edward | #1151 | H12 τ-magnitude weighted MSE | ~EP6 approaching | 6.574% |
+| nezuko | #1171 | H21 per-component output heads | EP2.8 cold-start recovery | 7.98% |
+| tanjiro | #1163 | H18 area-weighted surface MSE v2 | EP3 band-break τz/τx=1.412 | 7.787% |
+| alphonse | #1170 | H20 focal vertex loss | new launch | — |
+| thorfinn | #1172 | H22 Charbonnier-cp + MAE-aux | new launch | — |
+| **frieren** | **#1173** | **H23 Mean Teacher self-distillation** | **just assigned** | **— (bold direction)** |
+
+Previous update (10:35Z May 17)
 
 ## Latest invocation actions (2026-05-17 ~10:35Z) — H19 thorfinn CLOSED NOT-A-MERGE / mechanism PARKED AS STACKABLE (budget-starved 3/13ep, SENPAI_TIMEOUT_MINUTES=360 bug); fleet leaders identified — fern H10b CO-LEADING at val_abupt 6.263% (EP4.5), askeladd H11b CO-LEADING at 6.194% (EP7); tanjiro H18 v2 DEEPEST τz/τx band-break in fleet history (EP3=1.412); H22 cp/SP floor-preservation lane being assigned to thorfinn (orthogonal to all 7 in-flight magnitude attacks)
 
