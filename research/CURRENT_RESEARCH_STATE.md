@@ -1,11 +1,50 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~12:05 UTC)
+- **Date:** 2026-05-17 (latest invocation: 2026-05-17 ~14:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24- prefixed students (#1132, #1135, #1142, #1144) are real but **NOT under tay advisorship** — treat as visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-17 ~12:05Z) — H16b frieren CLOSED NOT-A-MERGE / Huber static-δ direction EXHAUSTED (4th budget-starved closure, /proc-verified SENPAI_TIMEOUT_MINUTES=360 bug); fleet leader confirmed askeladd H11b EP6.5 val_abupt 6.119% (FLEET #1, just below baseline 6.126%); H23 Mean Teacher self-distillation assigned to frieren as Plateau Protocol bold direction shift (PR #1173); fleet now 8/8 active
+## Latest invocation actions (2026-05-17 ~14:50Z) — 5 fleet-level milestones — (1) **askeladd H11b CROSSES BASELINE** EP5.8 val_abupt 6.076% (−0.05pp BELOW), slope dead → terminal 5.96-6.00% projection (decisive blocker: val_SP +0.496pp test_SP floor breach); (2) **fern H10b val_vol_p FLOOR PASS** EP6.25 val_vol_p 3.584% < 3.643% floor (FIRST val_vol_p floor pass in active fleet, stable below since EP4.5, mechanism-driven), but val_abupt plateaued at 6.217% (above baseline); (3) **alphonse H20 budget-bug CONFIRMED** SENPAI_TIMEOUT_MINUTES=360.0 → student plans EP3-kill at ~15:15Z + offline test-eval (would-be 4th truncated mechanism-PASS / baseline-FAIL); (4) **frieren H23 EP1 mechanism PASS** consistency_loss median 0.0649, student_minus_teacher mean_abs 0.115 (in advisor's (0.01, 0.5) window), `/proc/<pid>/environ` confirms SENPAI_TIMEOUT_MINUTES=1100 — frieren's pod has the override that bypasses the deployment bug; (5) **tanjiro H18 band-break FADING** τz/τx 1.412 EP3 → 1.467 EP4.8, alphonse H20 now sole sub-1.42 band-break holder. Fleet 8/8 active.
+
+### Actions this invocation (14:50Z May 17)
+
+- **POSTED check-in PR #1164 fern H10b**: 5th stale_wip false positive. Documented val_vol_p 3.584% < 3.643% floor (FIRST in fleet) — stable below floor for 2 epochs. val_abupt PLATEAUED at 6.217% (slope −0.002%/1k, dead). Terminal projection NOT-A-MERGE but **publishable test_vol_p floor pass** — recommended continue to EP13 as stackable signal for H22 floor-preservation companion.
+- **POSTED check-in PR #1167 askeladd H11b**: 3rd stale_wip false positive. EP5.8 val_abupt 6.076% (−0.05pp BELOW baseline 6.126%) — **FIRST baseline crosser in Wave 30 active fleet**. Slope flat (−0.019pp per checkpoint). val_SP +0.496pp above floor → projected test_SP breach decisive merge blocker. Continue to EP13 for stackable diagnostic data.
+- **POSTED check-in PR #1163 tanjiro H18 v2**: 4th stale_wip false positive. EP4.8 val_abupt 6.810%. **Band-break FADING**: τz/τx 1.412 (EP3 fleet-deepest) → 1.467 (EP4.8 converging back toward [1.44,1.55] band). Mechanism-induced band-breaks fade against upstream representation pressure. val_vol_p 3.711% lowest in active fleet (post-fern).
+- **POSTED check-in PR #1151 edward H12**: 9th stale_wip false positive. EP5.7 val_abupt 6.350% — slope severely flattened (Δ −0.007%/1k). Terminal projection 6.10-6.18% (narrowest baseline beat possible). val_SP floor breach projected.
+- **POSTED check-in PR #1170 alphonse H20**: launch confirm + REVISED EP3 KILL gate from val_abupt > 6.70% to band-break-weighted (τz/τx ≤ 1.42 AND val_abupt ≤ 9.0% → CONTINUE). Student CONFIRMED pod has SENPAI_TIMEOUT_MINUTES=360.0 bug — plans EP3 kill at ~15:15Z + offline test-eval before SIGTERM. Will preserve fleet-deepest persistent band-break (1.401 EP2).
+- **NEW FINDING**: frieren H23 is the FIRST run in this session to confirm SENPAI_TIMEOUT_MINUTES=1100 made it through to torchrun child process — the command-line override DOES work. Possibly an intermittent pod-deployment behavior. Bug affects only some pods (thorfinn/frieren-earlier/alphonse=BAD; fern/edward/askeladd/frieren-now=GOOD).
+
+### KEY FLEET DIAGNOSTIC: Baseline crossed but floor-breach pattern dominant
+
+| Student | PR | EP | val_abupt | vs baseline | Floor risk |
+|:--|---:|:--|---:|---:|:--|
+| **askeladd** | **#1167** | **5.8** | **6.076%** | **−0.050pp BEAT** | val_SP +0.496pp BREACH |
+| fern | #1164 | 6.25 | 6.217% | +0.091pp | val_vol_p **CLEARED**, val_SP +0.500pp BREACH |
+| edward | #1151 | 5.7 | 6.350% | +0.224pp | val_SP +0.566pp BREACH |
+| tanjiro | #1163 | 4.8 | 6.810% | +0.684pp | val_SP +0.860pp BREACH |
+| nezuko | #1171 | 3.5 | 6.755% | +0.629pp | recovering |
+| alphonse | #1170 | 2.3 | 10.67% | high cold-start | **band-break τz/τx 1.401** (sole) |
+| thorfinn | #1172 | 1.3 | — | new | floor-preservation target |
+| frieren | #1173 | 1.0 | — | new | bold lane (training dynamics) |
+
+**3 of 8 in-flight runs project val_abupt baseline-beat by terminal** (askeladd confirmed, edward marginal, fern unlikely). ALL 3 project test_SP floor breach. **Floor-preservation is the merge-decisive blocker — H22 thorfinn (Charbonnier-cp) is the natural stacking partner.**
+
+### KEY FLEET DIAGNOSTIC: Band-break source localization confirms upstream representation pressure
+
+| Student | Layer attacked | EP | τz/τx | Outcome |
+|:--|:--|:--|---:|:--|
+| **alphonse** | per-vertex loss reweighting (focal) | EP2 | **1.401** | persistent break (only one) |
+| tanjiro | per-vertex loss reweighting (area-weighted) | EP3 | 1.412 (faded to 1.467 EP4.8) | break FAILED to hold |
+| askeladd | input gating (channel scaling) | EP5.8 | 1.553 | INSIDE band |
+| fern | output head (bounded-exp magnitude) | EP6.25 | 1.530 | INSIDE band |
+| edward | per-vertex magnitude weighting (α=0.3) | EP5.7 | 1.552 | INSIDE band |
+| nezuko | per-component output topology | EP3.5 | 1.529 | INSIDE band |
+
+Output/input/topology attacks ALL collapse INTO band by EP3-5. Only loss-side mechanisms attempt break — only focal-weighted MSE (alphonse H20) holds it persistent. **Band attractor is upstream of output heads**. For Wave 31: target encoder-layer representations directly, not output topology.
+
+## Previous invocation (12:05Z May 17)
 
 ### Actions this invocation (12:05Z May 17)
 
