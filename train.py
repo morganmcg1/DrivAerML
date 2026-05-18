@@ -138,6 +138,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    lambda_spectral: float = 0.0
+    spectral_hf_weight: float = 2.0
+    spectral_channels: str = "all"
     debug: bool = False
 
 
@@ -229,6 +232,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "lambda_spectral": (
+            "Weight for the streamwise spectral surface loss (H29 SSFL). "
+            "Sorts surface tokens by z, applies torch.fft.rfft along the "
+            "sorted-N axis, and computes a frequency-weighted MSE on the "
+            "FFT residuals with a linear bin weight 1.0 -> "
+            "--spectral-hf-weight from DC to Nyquist. At 0.0 the spectral "
+            "term is exactly zero and the baseline is recovered."
+        ),
+        "spectral_hf_weight": (
+            "Linear-ramp upper bound for the spectral surface loss bin "
+            "weight at the Nyquist frequency. 1.0 = flat (uniform across "
+            "bins, no high-frequency emphasis); >1.0 amplifies the "
+            "high-spatial-frequency gradient signal."
+        ),
+        "spectral_channels": (
+            "Which surface output channels receive the spectral loss: "
+            "'all' applies it to cp + 3-channel wall shear, 'wss' only to "
+            "wall shear (channels 1-3), 'cp' only to surface pressure "
+            "(channel 0)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -262,6 +285,102 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
             use_triton=False,
         )
     raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+
+
+SPECTRAL_CHANNELS_CHOICES = ("all", "wss", "cp")
+
+
+def parse_spectral_channels(spec: str) -> torch.Tensor | None:
+    """Build the per-channel mask for the spectral surface loss.
+
+    Returns ``None`` for the all-channels case (the spectral loss
+    applies to every surface output channel). Returns a length-4 bool
+    tensor selecting cp (channel 0) or the three wall-shear axes
+    (channels 1, 2, 3) for the other two choices. Surface targets are
+    laid out as [cp, tau_x, tau_y, tau_z].
+    """
+
+    spec = (spec or "all").strip().lower()
+    if spec == "all":
+        return None
+    if spec == "wss":
+        return torch.tensor([False, True, True, True], dtype=torch.bool)
+    if spec == "cp":
+        return torch.tensor([True, False, False, False], dtype=torch.bool)
+    raise ValueError(
+        f"--spectral-channels must be one of {SPECTRAL_CHANNELS_CHOICES}; got {spec!r}"
+    )
+
+
+def spectral_surface_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    surface_z: torch.Tensor,
+    *,
+    lambda_spectral: float,
+    hf_weight: float,
+    channel_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Streamwise spectral surface loss (H29 SSFL).
+
+    Sorts surface tokens along the streamwise (z) coordinate per case,
+    applies ``torch.fft.rfft`` along the sorted-N axis, and computes a
+    frequency-weighted MSE on the FFT residuals. The frequency weight
+    ramps linearly from 1.0 at DC to ``hf_weight`` at Nyquist, so high-
+    spatial-frequency content (separation events in streamwise
+    coordinates) receives amplified gradient.
+
+    Inputs are cast to fp32 before the FFT regardless of the upstream
+    autocast dtype: ``torch.fft.rfft`` does not support bf16 in PyTorch
+    2.x. Masked tokens are zero-padded before the FFT (no windowing) to
+    avoid leakage from the padding boundary while preserving the true
+    fore/aft signal of the car. At ``lambda_spectral == 0.0`` the
+    function returns an exact zero with no gradient contribution, so
+    the baseline is recovered bit-for-bit.
+    """
+
+    if lambda_spectral == 0.0:
+        return pred.new_zeros(())
+
+    # Surface-empty batches occur when the loader repeats a case to cover
+    # the larger volume-view count: the surface branch returns a zero-row
+    # tensor. ``torch.fft.rfft`` errors on N=0 (and the loss is identically
+    # zero anyway), so short-circuit and let the gradient stay connected.
+    if pred.shape[1] == 0:
+        return lambda_spectral * pred.float().sum() * 0.0
+
+    pred_f = pred.float()
+    target_f = target.float()
+    sort_idx = surface_z.argsort(dim=1).long()
+    _, _, C = pred_f.shape
+
+    idx = sort_idx.unsqueeze(-1).expand(-1, -1, C)
+    pred_s = pred_f.gather(1, idx)
+    tgt_s = target_f.gather(1, idx)
+    msk_s = mask.gather(1, sort_idx).to(dtype=pred_f.dtype).unsqueeze(-1)
+    pred_s = pred_s * msk_s
+    tgt_s = tgt_s * msk_s
+
+    # norm="ortho" makes Parseval exact (sum|x|^2 == sum|X|^2), so the spectral
+    # MSE is on the same scale as the time-domain MSE. Without it, the default
+    # "backward" norm scales |X|^2 by N (~65k surface tokens), and the spectral
+    # term would dwarf the base MSE by ~1000x at lambda=0.1. The ortho convention
+    # also matches the advisor's expected magnitude of ~0.001-1.0 for the
+    # mechanism check.
+    pf = torch.fft.rfft(pred_s, dim=1, norm="ortho")
+    tf = torch.fft.rfft(tgt_s, dim=1, norm="ortho")
+
+    n_bins = pf.shape[1]
+    w = torch.linspace(
+        1.0, hf_weight, n_bins, device=pf.device, dtype=pf.real.dtype
+    ).view(1, -1, 1)
+
+    diff = pf - tf
+    sq = diff.real.square() + diff.imag.square()
+    if channel_mask is not None:
+        sq = sq * channel_mask.to(device=sq.device, dtype=sq.dtype).view(1, 1, -1)
+    return lambda_spectral * (sq * w).mean()
 
 
 def parse_rff_init_sigmas(spec: str) -> list[float] | None:
@@ -321,6 +440,9 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    lambda_spectral: float = 0.0,
+    spectral_hf_weight: float = 2.0,
+    spectral_channel_mask: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -344,14 +466,26 @@ def train_loss(
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+    # Spectral loss runs outside the autocast scope because torch.fft.rfft
+    # does not support bf16 in PyTorch 2.x; spectral_surface_loss casts to fp32.
+    spectral_loss = spectral_surface_loss(
+        out["surface_preds"],
+        surface_target,
+        batch.surface_mask,
+        batch.surface_x[:, :, 2],
+        lambda_spectral=lambda_spectral,
+        hf_weight=spectral_hf_weight,
+        channel_mask=spectral_channel_mask,
+    )
+    loss = weighted_surface_loss + weighted_volume_loss + spectral_loss
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "spectral_loss": float(spectral_loss.detach().cpu().item()),
     }
 
 
@@ -712,6 +846,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         config = parse_args(argv)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
         vol_points_schedule = parse_vol_points_schedule(config.vol_points_schedule)
+        # Fail fast if --spectral-channels is invalid; the mask itself is rebuilt
+        # on-device after init_distributed configures the device.
+        parse_spectral_channels(config.spectral_channels)
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -758,6 +895,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         use_channel_weights = bool(
             (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
         )
+        spectral_channel_mask = parse_spectral_channels(config.spectral_channels)
+        if spectral_channel_mask is not None:
+            spectral_channel_mask = spectral_channel_mask.to(device)
         if config.compile_model:
             model = torch.compile(model)
         if state.enabled:
@@ -1030,6 +1170,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        lambda_spectral=config.lambda_spectral,
+                        spectral_hf_weight=config.spectral_hf_weight,
+                        spectral_channel_mask=spectral_channel_mask,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1213,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "spectral_loss" in batch_loss_metrics:
+                        train_log["train/spectral_loss"] = batch_loss_metrics["spectral_loss"]
+                        train_log["train/lambda_spectral"] = config.lambda_spectral
+                        train_log["train/spectral_hf_weight"] = config.spectral_hf_weight
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
