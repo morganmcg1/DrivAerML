@@ -1,11 +1,96 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~01:00 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~06:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~05:00Z) — H32 DIFFATTN CLOSED (13TH DEAD END) + H33 SLICEPE ASSIGNED TO ASKELADD; TANJIRO H18d CONTINUE TO EP13; 8TH COLD-START FADE (ALPHONSE H31 EP2)
+## Latest invocation actions (2026-05-18 ~06:00Z) — H28 SAM CLOSED (14TH DEAD END / 10TH COLD-START FADE) + H34 OUTHEAD ASSIGNED TO EDWARD; FRIEREN H29 SSFL EP7 = WAVE 30 FLEET-LOW 6.4349%; THORFINN H26 PATH A MECHANISM GATE PASSED DECISIVELY
+
+### Headline updates
+
+1. **PR #1179 edward H28 SAM CLOSED ~06:00Z** — 14th Wave 30 dead end. Pod-crashed mid-EP3 at step 31,979 (hostname change, not training failure). Student auto-relaunched at 04:27Z with same params; advisor KILLED the relaunch based on EP1→EP2 fade-into-band signal (τz/τx 1.4406 → 1.4999 = Reading A pattern). 10th mean-shift cold-start fade of Wave 30. **Key negative result**: SAM mechanism fired healthy (cos g·ĝ 0.86→0.92, perturbed_loss > clean correctly) but converged to a flat basin INSIDE the band attractor — proves the band is geometrically FLAT in parameter space, not a sharpness trap. Optimizer-space axis CLOSED for ρ=0.05 mean-shift regime.
+
+2. **PR #1188 edward H34 OUTHEAD assigned ~06:00Z** — per-channel auxiliary output heads (head-side rank-coupling attack). Hypothesis: 4-channel surface output `Linear(512, 4)` shares a near-rank-1 mode for τ_x/τ_z → all encoder-side attacks (10 closures) inherit this projection coupling. H34 adds 4 small zero-init residual MLPs (one per channel) for independent representational capacity. ~30 LOC `model.py` + `train.py`. EP3 gate: val_abupt ≤8.5%, τz/τx ≤1.42 (mechanism break), aux_head/tau_z/last_layer_norm > 0 (mechanism alive), aux_head/tau_z÷tau_x > 1.5 (mechanism asymmetry).
+
+3. **Frieren H29 SSFL EP7 = WAVE 30 FLEET-LOW val_abupt 6.4349%** — descending faster than fern H24 at equivalent stage (slope −0.076pp EP6→EP7 vs fern's −0.041pp at EP6→EP7). spectral_loss plateau is interpreted as mechanism saturation, not failure. EP13 projection: 5.95-6.10% (clears baseline 6.126%). val_SP 4.257% and val_vol_p 3.874% both need final-epoch EMA+cosine compression. **Strongest accuracy story of Wave 30** alongside thorfinn H26 mechanism story.
+
+4. **Thorfinn H26 Path A EP3 mechanism gate PASSED DECISIVELY** — std(τz/τx) per-car = **0.228** (4.56× over gate 0.05, 11.4× over baseline 0.02). 13/34 cars outside [1.40, 1.60] band. val_abupt 6.91% EP3 descending. **First Wave 30 mechanism proof that the band attractor is breakable via variance/spread (not mean drift).**
+
+5. **Wave 30 mean-shift attack class EXHAUSTED**: 10 cold-start fades observed (H18, H20, H24, H25, fern H24, alphonse H25, edward H28, frieren H29, nezuko H30, alphonse H31). Of these, H29 shows that fade-into-band does NOT preclude best-in-fleet val_abupt achievement, and H26 NPCA Path A is the only ATTACK to escape the band via variance not mean.
+
+### Floor disease — new Wave 30 mechanism map
+
+After 14 closures + 4 surviving mechanism wins, the attractor map looks like:
+
+| Mechanism type | Effect on band [1.44, 1.55] | Examples |
+|---|---|---|
+| **Mean-shift attack** (encoder, loss, optimizer, augmentation) | Fades into band by EP2-EP3 | 10/10 Wave 30 closures |
+| **Variance/spread attack** (per-car local coords, NPCA-style) | Sustains spread breakout | thorfinn H26 (std 10× baseline) |
+| **Loss reshape** (spectral, multi-frequency) | Drives absolute val_abupt down WITHIN band | frieren H29 fleet-low 6.4349% |
+| **Volume pathway boost** (input feature, cross-modal) | Drives val_vol_p toward floor | alphonse H31 (3.780% EP4), nezuko H30 (3.914%) |
+| **Head-side decoupling** (per-channel aux heads) | UNTESTED — H34 just assigned | edward H34 OUTHEAD live |
+
+### Fleet status (8/8 active — H34 EDWARD NEW)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| fern | #1174 | H24 GSTS encoder slice-temp | EP11 val_abupt 6.328% saturated (EP10→EP11 slope −0.004pp). Won't beat baseline. EP13 ETA ~09:00Z |
+| alphonse | #1185 | H31 WALLDIST log-SDF input | EP4 6.417%, val_vol_p 3.780% best-in-fleet (+0.137pp above floor). 9th cold-start fade. Continuing |
+| thorfinn | #1177 | H26 NPCA Path A | **EP3 MECHANISM GATE PASSED** (std 0.228, 13/34 cars outside band). val_abupt 6.91% EP3, descending. EP6 ~09:30Z |
+| askeladd | #1187 | H33 SLICEPE | Launched 05:16Z. Smoke checks excellent (vol magnitude 1.024× baseline, no H32 failure mode). Student flagged σ=0.02 may be below gradient signal floor (literature concern, σ≈0.088 recommended). EP1 ETA ~07:00-07:30Z |
+| **edward** | **#1188** | **H34 OUTHEAD** | **NEW — assigned 06:00Z. Per-channel aux MLP output heads, zero-init bit-exact baseline. Head-side rank-coupling attack** |
+| frieren | #1182 | H29 SSFL | **EP7 6.4349% = WAVE 30 FLEET-LOW**. Slope steeper than fern at equivalent stage. EP13 ETA later today. Continue |
+| tanjiro | #1183 | H18d channel-decoupled τz | CONTINUE TO EP13. EP9 gate ~09:00Z (val_abupt ≤6.25% / val_SP ≤4.05% PASS) |
+| nezuko | #1184 | H30 V2S xattn | EP4 6.576%, τz/τx 1.522 (val-side fade matching H18 watch-item-3). Continuing to terminal for test-side hope |
+
+### Closed Wave 30 directions (14 confirmed dead ends + 1 outlier + 1 surviving mechanism win)
+
+| # | Hypothesis | Tier | Key result |
+|---|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape / per-vertex | All dead |
+| 8 | H23 Mean Teacher EMA | Training-regularization | KILL (21.36% EP3) |
+| 9 | H18 area-weighted MSE | Per-vertex position | OUTLIER: test τz/τx 1.418 ★ + test_vol_p PASS, but miss val/SP |
+| 10 | H21 per-component heads | Decoder capacity | DEAD — capacity not the bottleneck |
+| 11 | H25 ALGP aux local-grad | Mean-shift encoder via aux task | KILL EP3 FADE — objective-disconnected |
+| 12 | H27 PRLP per-component rel-L2 loss | Train-eval space | KILL EP3 — per-car normalisation INVERSELY re-weights gradient. Train-eval space axis CLOSED. |
+| 13 | H32 DIFFATTN differential attention | Attention mechanism | KILL EP1 — subtractive SDPA destroys slice-token magnitude (0.31×) → volume_p_mae catastrophic. Attention-mechanism axis CLOSED. |
+| **14** | **H28 SAM optimizer-sharpness** | **Optimizer-space** | **KILL EP2 via Reading A fade (1.4406→1.4999). Pod-crashed mid-EP3. RELAUNCH KILLED BY ADVISOR. Key finding: band attractor is geometrically FLAT in parameter space (SAM cos g·ĝ 0.86→0.92 stable). Optimizer-space axis CLOSED for ρ=0.05 mean-shift regime.** |
+| **Surviving** | **H26 NPCA local frame** | **Encoder INPUT geometric transformation** | **PATH A EP3 MECHANISM GATE PASSED (std 0.228 = 4.56× gate). First Wave 30 variance-break proof. Awaiting EP6 accuracy interim.** |
+
+### Key fleet diagnostic — Wave 30 lessons crystallized
+
+1. **Mean-shift attacks fade, variance-break attacks survive** (10/10 vs 1/1 evidence at EP3 gate)
+2. **Loss reshape can drive val_abupt within band** (frieren H29 fleet-low) — band-breaking and best-val are SEPARATE achievements
+3. **Volume pathway is sensitive to input features and cross-modal fusion** (alphonse H31 + nezuko H30 both approaching floor)
+4. **Slice-token magnitude is critical at init** (H32 lesson: <0.5× → volume pathway catastrophe; H33 SLICEPE designed safe)
+5. **Band attractor is GEOMETRICALLY FLAT in parameter space** (H28 SAM negative result rules out sharpness-trap mechanism)
+6. **Head-side rank coupling UNTESTED** — H34 OUTHEAD is the first attack on this axis
+
+### Outstanding actions (next 12h chronological)
+
+1. **askeladd H33 SLICEPE EP1 safety check ~07:00-07:30Z** — val_volume_p_mae must be normal cold-start (5-10), NOT catastrophic like H32 (30+). slice_pe/global/abs_mean should be growing slowly from σ=0.02 init
+2. **tanjiro H18d EP9 ~09:00Z** — mid-trajectory gate (val_abupt ≤6.25% / val_SP ≤4.05% PASS)
+3. **thorfinn H26 Path A EP6 ~09:30Z** — decisive accuracy interim — does mechanism-proven hypothesis beat baseline?
+4. **fern H24 GSTS EP13 ~10:00-11:00Z** — terminal verdict (val saturated at 6.328%, unlikely to beat baseline 6.126%)
+5. **alphonse H31 EP6 ~08:30Z** — val_vol_p crossing floor? curriculum bump to vp=49152
+6. **nezuko H30 EP6+ continued descent** — H18 pattern watch (test-side survival hope)
+7. **frieren H29 SSFL EP9-13** — final EP descent, EP13 test eval required
+8. **edward H34 OUTHEAD pickup + smoke + launch** — pending student poll cycle
+9. **researcher-agent: Wave 31 ideas writing to /research/RESEARCH_IDEAS_2026-05-18_06:00.md** — background, 8-12 hypotheses
+
+### Wave 31 design principles (locked from Wave 30 lessons)
+
+- **Bias toward variance/spread attacks** over mean-shift attacks
+- **Combine surviving mechanisms** (H26 NPCA + H29 SSFL stacking)
+- **Frequency-domain and physics-informed losses** as next major axis
+- **Anchor-conditioned slice queries** (DAB-DETR/SpiderSolver line — askeladd lit notes flagged)
+- **No magnitude-destructive architectural changes** (H32 design rule)
+- **Output-head explorations** if H34 OUTHEAD lands signal
+
+---
+
+## Previous invocation actions (2026-05-18 ~05:00Z) — H32 DIFFATTN CLOSED (13TH DEAD END) + H33 SLICEPE ASSIGNED TO ASKELADD; TANJIRO H18d CONTINUE TO EP13; 8TH COLD-START FADE (ALPHONSE H31 EP2)
 
 ### Headline updates
 

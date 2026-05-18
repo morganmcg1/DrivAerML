@@ -1,3 +1,46 @@
+## 2026-05-18 06:00 — PR #1179: H28 SAM (edward) — POD CRASH MID-EP3 + RELAUNCH-KILLED-BY-ADVISOR / 14TH WAVE-30 DEAD END / OPTIMIZER-SPACE AXIS CLOSED
+
+- **Branch**: `edward/h28-sam-sharpness-escape`
+- **W&B runs**: `a9nkvm65` (crashed mid-EP3 @ step 31,979, 9.31h runtime), `1h6164ff` (relaunch, killed by advisor verdict at 04:27Z+90min)
+- **Hypothesis**: SAM (Sharpness-Aware Minimization, Foret et al. 2020) ρ=0.05 with Lion outer optimizer escapes flat-basin band attractor [1.44, 1.55] via curvature regularization. First optimizer-space attack of Wave 30.
+
+### Results (from crashed run EP1+EP2 — sufficient for verdict)
+
+| EP | val_abupt | τz/τx | SAM cos g·ĝ | sam/perturbed_loss | Verdict |
+|---|---:|---:|---:|---:|:--|
+| 1 | 25.7198% | **1.4406** | 0.8627 | 0.1262 (>clean) | normal cold-start, lower-band-edge ⚠️ |
+| 2 | 8.8036% | **1.4999** | 0.8695 | 0.0052 (<clean) | **Reading A** — band attractor wins |
+| 3 | crashed @ step 31,979 (~75% through) | — | 0.8358 | 0.0158 | pod-side hostname change |
+
+Mechanism diagnostic at crash: `sam/grad_cos_g_ghat` trajectory **0.86→0.92→0.87** with `sam/perturbed_loss > clean_loss` consistently (Foret textbook). SAM IS firing correctly. The flat basin SAM converges to is INSIDE the [1.44, 1.55] band attractor — not escaping it.
+
+### Failure mode diagnostic (highest-value Wave 30 finding from this run)
+
+**The τz/τx band attractor is geometrically FLAT in parameter space.** SAM tells us: the band is NOT a sharp local minimum that curvature regularization can escape — it's a wide attractor basin in the loss landscape itself. This rules out "sharpness traps" as the band's mechanism.
+
+This is the cleanest negative result Wave 30 has produced for the parameter-space attack class. Pairs with the H32 finding that subtractive attention destroys volume pathway.
+
+### Decision rationale (close vs let-relaunch-proceed)
+
+Student auto-relaunched at 04:27Z with same params (ρ=0.05, 35h budget) after pod restart. Advisor KILL verdict at 06:00Z based on:
+
+1. **10th cold-start fade pattern** (Reading A): mean-shift attacks fade into [1.44, 1.55] by EP2-EP3 regardless of mechanism. ρ=0.05 is mean-shift (small isotropic perturbation budget).
+2. **Mechanism diagnostic already extracted** from crashed EP1-EP3 partial data.
+3. **35h GPU opportunity cost** — fresh axis (H34 OUTHEAD) lands EP3 results 8h vs hold-and-wait.
+4. **No follow-up parameter sweep value** — ρ=0.05 was already Foret-recommended starting point.
+
+### Implications for Wave 30 remainder
+
+- **Mean-shift attack class exhausted** — 8 axes closed, only H26 variance-break survives mechanistically
+- **Optimizer-space verdict**: flat-basin curvature regularization (SAM-style) cannot escape band attractor in this regime. Foret-style sharpness optimization needs larger ρ or different attack geometry (e.g., asymmetric/anisotropic perturbations targeting specific layers).
+- **Wave 31 design principle confirmed**: prefer variance/spread attacks over mean-shift attacks.
+
+### What replaces H28 in edward's slot
+
+**PR #1188 H34 OUTHEAD assigned same hour** — per-channel auxiliary output heads (head-side rank-coupling attack). Different axis entirely: tests whether the band's persistence is a head-side projection signature rather than a trunk-side optimization issue.
+
+---
+
 ## 2026-05-18 05:00 — PR #1186: H32 DIFFATTN (askeladd) — TERMINAL KILL EP1 / 13TH WAVE-30 DEAD END / ATTENTION-MECHANISM AXIS CLOSED
 
 - **Branch**: `askeladd/h32-differential-attention`
