@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~12:30 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~12:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -34,14 +34,14 @@
 
 | Student | PR | H | Status | Latest val_abupt |
 |:--|---:|:--|:--|---:|
-| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING — group `wave31_h36_anchor_slice_queries`, mid-EP1 step ~7551, 8 ranks alive | — |
-| **frieren** | **#1190** | **H44 YAW-AUGMENTATION** | **RUNNING — z-axis yaw (option A confirmed), group `wave31_h44_yaw_augmentation`, mid-EP1 step 7551, 8 ranks tight (7547-7564)** | — |
-| alphonse | #1185 | H31 WALLDIST | **EP5.2 6.22% fleet-lead.** EP13 ~15-16Z | **6.22%** |
-| thorfinn | #1177 | H26 NPCA 18h | EP5.1 6.437%, variance mechanism. EP13 ~14:30Z | 6.437% |
-| askeladd | #1187 | H33 SLICEPE v2 | **EP3 6.871% MARGINAL** (kill bar 7.50% PASS, mech-positive 6.50% miss) — continue to EP6 ~14:50Z | 6.871% |
-| edward | #1188 | H34 OUTHEAD v2 | EP1 should have landed. Awaiting read | — |
-| nezuko | #1184 | H30 V2S xattn | EP5 6.42%, continuing | 6.42% |
-| fern | #1189 | H35 NPCA-SSFL-STACK | v2 pre-EP1 | — |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING — `wave31_h36_anchor_slice_queries`, mid-EP1 | — |
+| frieren | #1190 | H44 YAW-AUGMENTATION | RUNNING — z-axis yaw, `wave31_h44_yaw_augmentation`, mid-EP1 | — |
+| **alphonse** | **#1185** | **H31 WALLDIST** | **EP7-ish step 69136 val_abupt 6.176%, val_WSS 6.942%, val_VP 3.652% (0.009pp above floor). EP13 ~17-18Z** | **6.176%** |
+| thorfinn | #1177 | H26 NPCA 18h | EP7 step 67932 val_abupt 6.346%, val_WSS 7.170%, val_VP 3.750%. EP13 ~17:00Z | 6.346% |
+| askeladd | #1187 | H33 SLICEPE v2 | EP3 6.871% MARGINAL (passes kill bar 7.50%, misses mech-pos 6.50%) — continuing | 6.871% |
+| edward | #1188 | H34 OUTHEAD v2 | EP1 27.4%, EP2 7.83%, mid-EP3 step 26118 — EP3 verdict ~14:15Z | 7.830% (EP2) |
+| nezuko | #1184 | H30 V2S xattn | step 64140 val_abupt 6.369%, val_WSS 7.213%, val_VP 3.829% — EP6+ continuing | 6.369% |
+| fern | #1189 | H35 NPCA-SSFL-STACK | EP2 step 24553 val_abupt 7.805%, val_WSS 8.851% — mid-EP3 | 7.805% (EP2) |
 
 ### Research map (current)
 
