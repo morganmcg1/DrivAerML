@@ -1,11 +1,19 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~06:00 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~12:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~12:00Z) — TANJIRO H18D CLOSED EP13 (17TH WAVE 30 DE, CHANNEL-DECOUPLED AREA WEIGHT FALSIFIER: val_abupt 6.319%, τz/τx INVERSE ABOVE-BAND, test_SP FLOOR BREACH); TANJIRO REASSIGNED H36 ANCHOR-SLICE-QUERIES (PR #1191, DETR-LINE ARCHITECTURE ATTACK)
+## Latest invocation actions (2026-05-18 ~12:30Z) — FRIEREN H44 IMPLEMENTATION DEVIATION RESOLVED (z-axis yaw correct, PR template had coord-convention bug); H44 RUN HEALTHY MID-EP1 (step 7551, runtime 67min); ADVISOR TEMPLATE LESSON LOCKED (DrivAerML uses z=vertical, NOT y)
+
+### Headline updates (12:30Z)
+
+1. **PR #1190 frieren H44 IMPLEMENTATION DEVIATION RESOLVED.** Frieren detected PR template's `apply_yaw_augmentation` formula mixed (x, z) which is **pitch in DrivAerML coords, not yaw**. Empirical verification from run_1: x=streamwise (asym), **y=lateral mirror-symmetric ±1.01**, **z=vertical asym ground-to-roof**. Implementation correctly switched to rotation about z mixing (x↔y) for coords/normals and (tau_x↔tau_y) for targets. Mechanism preserved: per-rotation tau_x variance indirectly disrupts τz/τx band attractor (tau_x denominator varies even within same car). Cross-referenced alphonse PR #937 precedent (`Rz = [[cy,-sy,0],[sy,cy,0],[0,0,1]]`). Run health: group `wave31_h44_yaw_augmentation`, 8 ranks alive, rank 0 `6scw4nto` mid-EP1 step 7551/10864, all ranks tight (7547-7564 = no DDP divergence), `yaw_aug_theta_max=5` confirmed.
+
+2. **ADVISOR LESSON LOCKED — DrivAerML coordinate convention.** Saved to memory `reference_drivaerml_coords.md`: **z = vertical, NOT y**. Yaw = rotation about z mixing (x, y) and (tau_x, tau_y); pitch = rotation about y mixing (x, z) and (tau_x, tau_z); roll = rotation about x. All future geometric-augmentation / slice-position / coordinate-aware PR templates MUST explicitly name the axis in DrivAerML convention AND name channel columns being rotated. Cost on this round: ~1h frieren think-time + 2 PR comments to resolve.
+
+## Previous invocation actions (2026-05-18 ~12:00Z) — TANJIRO H18D CLOSED EP13 (17TH WAVE 30 DE, CHANNEL-DECOUPLED AREA WEIGHT FALSIFIER: val_abupt 6.319%, τz/τx INVERSE ABOVE-BAND, test_SP FLOOR BREACH); TANJIRO REASSIGNED H36 ANCHOR-SLICE-QUERIES (PR #1191, DETR-LINE ARCHITECTURE ATTACK)
 
 ### Headline updates (12:00Z)
 
@@ -26,8 +34,8 @@
 
 | Student | PR | H | Status | Latest val_abupt |
 |:--|---:|:--|:--|---:|
-| **tanjiro** | **#1191** | **H36 ANCHOR-SLICE-QUERIES** | **NEW — architecture-side variance-break. ~60 LOC model.py only. Pickup pending** | — |
-| frieren | #1190 | H44 YAW-AUGMENTATION | NEW — first data-aug attack. Pickup pending | — |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING — group `wave31_h36_anchor_slice_queries`, mid-EP1 step ~7551, 8 ranks alive | — |
+| **frieren** | **#1190** | **H44 YAW-AUGMENTATION** | **RUNNING — z-axis yaw (option A confirmed), group `wave31_h44_yaw_augmentation`, mid-EP1 step 7551, 8 ranks tight (7547-7564)** | — |
 | alphonse | #1185 | H31 WALLDIST | **EP5.2 6.22% fleet-lead.** EP13 ~15-16Z | **6.22%** |
 | thorfinn | #1177 | H26 NPCA 18h | EP5.1 6.437%, variance mechanism. EP13 ~14:30Z | 6.437% |
 | askeladd | #1187 | H33 SLICEPE v2 | EP3 verdict DUE ~13:30Z | — |
