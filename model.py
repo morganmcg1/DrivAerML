@@ -234,6 +234,7 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_slice_pe: bool = False,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -244,12 +245,20 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.use_slice_pe = use_slice_pe
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_fx = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_slice = LinearProjection(self.dim_head, num_slices)
         self.qkv = LinearProjection(self.dim_head, self.dim_head * 3, bias=False)
+        if use_slice_pe:
+            # H33 SLICEPE: learnable per-slice position embedding added before SDPA
+            # to give each slice token a stable identity independent of content routing.
+            self.slice_pe = nn.Parameter(
+                torch.zeros(1, self.num_heads, self.num_slices, self.dim_head)
+            )
+            nn.init.normal_(self.slice_pe, std=0.02)
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
         if use_qk_norm:
@@ -276,6 +285,8 @@ class TransolverAttention(nn.Module):
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+        if self.use_slice_pe:
+            slice_tokens = slice_tokens + self.slice_pe
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -303,6 +314,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_slice_pe: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -313,6 +325,7 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_slice_pe=use_slice_pe,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
@@ -336,6 +349,7 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_slice_pe: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,6 +361,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    use_slice_pe=use_slice_pe,
                 )
                 for _ in range(depth)
             ]
@@ -380,6 +395,7 @@ class SurfaceTransolver(nn.Module):
         rff_init_sigmas: list[float] | None = None,
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
+        use_slice_pe: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
     ):
@@ -394,6 +410,7 @@ class SurfaceTransolver(nn.Module):
         self.rff_init_sigmas = list(rff_init_sigmas) if rff_init_sigmas else None
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
+        self.use_slice_pe = use_slice_pe
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
@@ -472,6 +489,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_slice_pe=use_slice_pe,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:

@@ -102,6 +102,7 @@ class Config:
     rff_init_sigmas: str = ""
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
+    use_slice_pe: bool = False
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
@@ -294,6 +295,39 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_slice_pe_metrics(model: nn.Module) -> dict[str, float]:
+    """H33 SLICEPE: monitor learnable per-slice embedding growth & inter-slice spread."""
+    metrics: dict[str, float] = {}
+    backbone = getattr(model, "backbone", None)
+    if backbone is None:
+        return metrics
+    all_norms: list[float] = []
+    for layer_idx, block in enumerate(backbone.blocks):
+        attn = getattr(block, "attention", None)
+        if attn is None or not getattr(attn, "use_slice_pe", False):
+            continue
+        pe = attn.slice_pe.detach().float()  # (1, H, S, D)
+        prefix = f"slice_pe/layer_{layer_idx}"
+        metrics[f"{prefix}/abs_mean"] = float(pe.abs().mean().item())
+        metrics[f"{prefix}/std"] = float(pe.std().item())
+        # Per-slice L2 norm (avg over heads): how "loud" is each slice's identity?
+        slice_norm = pe.norm(dim=-1).mean(dim=1)  # (1, S)
+        metrics[f"{prefix}/slice_norm_mean"] = float(slice_norm.mean().item())
+        metrics[f"{prefix}/slice_norm_std"] = float(slice_norm.std().item())
+        all_norms.append(float(slice_norm.mean().item()))
+        # Inter-slice cosine spread: 1 - mean off-diagonal cosine (0=identical, 1=orthogonal)
+        flat = pe.squeeze(0).reshape(pe.shape[1], pe.shape[2], -1)  # (H, S, D)
+        norm = flat / (flat.norm(dim=-1, keepdim=True) + 1e-9)
+        cos = torch.einsum("hsd,htd->hst", norm, norm)  # (H, S, S)
+        S = cos.shape[-1]
+        eye = torch.eye(S, device=cos.device, dtype=cos.dtype).unsqueeze(0)
+        off_diag_mean = ((cos * (1 - eye)).sum(dim=(1, 2)) / (S * (S - 1))).mean()
+        metrics[f"{prefix}/inter_slice_cos_mean"] = float(off_diag_mean.item())
+    if all_norms:
+        metrics["slice_pe/global/slice_norm_mean"] = float(sum(all_norms) / len(all_norms))
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -307,6 +341,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         rff_init_sigmas=parse_rff_init_sigmas(config.rff_init_sigmas),
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
+        use_slice_pe=config.use_slice_pe,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
     )
 
@@ -1262,6 +1297,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_slice_pe_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
