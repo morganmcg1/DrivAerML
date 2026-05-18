@@ -234,6 +234,7 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_diff_attn: bool = False,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -244,12 +245,22 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.use_diff_attn = use_diff_attn
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_fx = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_slice = LinearProjection(self.dim_head, num_slices)
-        self.qkv = LinearProjection(self.dim_head, self.dim_head * 3, bias=False)
+        if use_diff_attn:
+            # DIFFATTN (Ye et al. 2024, arxiv:2410.05258): two parallel SDPA
+            # branches subtract to cancel the shared dominant attention mode.
+            # 6x projection produces (q1,k1,v1,q2,k2,v2) each of dim_head.
+            # Pseudocode form: sigmoid-bounded shared lambda, no subln/scale.
+            self.qkv = LinearProjection(self.dim_head, self.dim_head * 6, bias=False)
+            self.diff_lambda = nn.Parameter(torch.tensor(0.8))
+        else:
+            self.qkv = LinearProjection(self.dim_head, self.dim_head * 3, bias=False)
+            self.diff_lambda = None
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
         if use_qk_norm:
@@ -277,16 +288,25 @@ class TransolverAttention(nn.Module):
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         qkv = self.qkv(slice_tokens)
-        q, k, v = qkv.chunk(3, dim=-1)
-        if self.q_norm is not None:
-            q = self.q_norm(q)
-            k = self.k_norm(k)
-        out_slice = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            dropout_p=self.dropout if self.training else 0.0,
-        )
+        dp = self.dropout if self.training else 0.0
+        if self.use_diff_attn:
+            q1, k1, v1, q2, k2, v2 = qkv.chunk(6, dim=-1)
+            if self.q_norm is not None:
+                q1 = self.q_norm(q1)
+                k1 = self.k_norm(k1)
+                q2 = self.q_norm(q2)
+                k2 = self.k_norm(k2)
+            lam = torch.sigmoid(self.diff_lambda)
+            out_slice = (
+                F.scaled_dot_product_attention(q1, k1, v1, dropout_p=dp)
+                - lam * F.scaled_dot_product_attention(q2, k2, v2, dropout_p=dp)
+            )
+        else:
+            q, k, v = qkv.chunk(3, dim=-1)
+            if self.q_norm is not None:
+                q = self.q_norm(q)
+                k = self.k_norm(k)
+            out_slice = F.scaled_dot_product_attention(q, k, v, dropout_p=dp)
         out_x = torch.einsum("bhsc,bhns->bhnc", out_slice, slice_weights)
         out_x = out_x.permute(0, 2, 1, 3).contiguous().view(x.shape[0], x.shape[1], self.hidden_dim)
         out_x = _apply_token_mask(out_x, attn_mask)
@@ -303,6 +323,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_diff_attn: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -313,6 +334,7 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_diff_attn=use_diff_attn,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
@@ -336,6 +358,7 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_diff_attn: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,6 +370,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    use_diff_attn=use_diff_attn,
                 )
                 for _ in range(depth)
             ]
@@ -382,6 +406,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_diff_attn: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +421,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_diff_attn = use_diff_attn
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +498,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_diff_attn=use_diff_attn,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
