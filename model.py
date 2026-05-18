@@ -362,7 +362,17 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+        # Split surface head: linear cp head + deeper 2-layer MLP tau head.
+        # surface_y channel order is [cp, tau_x, tau_y, tau_z]; cp is index 0.
+        self.surface_cp_out = LinearProjection(n_hidden, 1)
+        self.surface_tau_out = nn.Sequential(
+            nn.Linear(n_hidden, 2 * n_hidden),
+            nn.GELU(),
+            nn.Linear(2 * n_hidden, 3),
+        )
+        # Near-zero init on the final tau layer for stable warmup.
+        nn.init.normal_(self.surface_tau_out[-1].weight, std=0.01)
+        nn.init.zeros_(self.surface_tau_out[-1].bias)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
@@ -435,7 +445,10 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            cp_preds = self.surface_cp_out(surface_hidden)
+            tau_preds = self.surface_tau_out(surface_hidden)
+            surface_preds = torch.cat([cp_preds, tau_preds], dim=-1)
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
