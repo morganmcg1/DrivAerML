@@ -5,7 +5,63 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~07:00Z) — THORFINN H26 EP5 val_abupt 6.5414% (linear EP13 projection 5.95%, ON TRACK TO BEAT BASELINE) + ASKELADD H33 SELF-KILLED EP1 BY MISCONFIGURED `--kill-thresholds` (RELAUNCH INSTRUCTED, MECHANISM PRESERVED); WAVE 31 IDEAS BANK COMMITTED
+## Latest invocation actions (2026-05-18 ~07:30Z) — FERN H24 GSTS CLOSED EP13 (15TH WAVE 30 DEAD END, NOT-A-MERGE: val_abupt 6.325% / test_vol_p FLOOR PASS) + FERN ASSIGNED H35 NPCA-SSFL-STACK (FIRST WAVE 31 HYPOTHESIS)
+
+### Headline updates (07:30Z)
+
+1. **Fern H24 GSTS terminal EP13: NOT-A-MERGE.** val_abupt 6.325% (+0.199pp FAIL), test_abupt 6.040% (+0.196pp FAIL), test_SP 3.831% FLOOR FAIL, test_WSS 6.953% FAIL, test_vol_p 3.610% FLOOR PASS (only floor cleared). test τz/τx 1.466 — inside band, no break. **15th Wave 30 dead end, 11th cold-start mean-shift fade.** Mechanism diagnostic: geom_temp MLP gradient-active but learned near-uniform softening (per-region delta only +0.0056) — lesson for Wave 31: per-vertex modulators need anti-uniform-collapse regularization.
+
+2. **PR #1189 H35 NPCA-SSFL-STACK assigned to fern (FIRST WAVE 31)** — directly stacks H26 NPCA variance-break + H29 SSFL loss-reshape in single training run. Mechanism-distinct from all 15 closed dead ends. EP3 gate: std(τz/τx) ≥ 0.15 AND val_abupt ≤ 6.50%. EP13 success: val_abupt < 6.126% AND std ≥ 0.15. Branch instructs cherry-picking from `thorfinn/h26-...` and `frieren/h29-...`.
+
+### Wave 30 final closure count: 15 dead ends + 1 retry-in-flight (H26 Path A)
+
+| Closure # | Hypothesis | Mechanism class | Closure stage |
+|---:|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape / per-vertex | EP3 fade |
+| 8 | H23 Mean Teacher | Training-regularization | EP3 KILL |
+| 9 | H18 area-weighted MSE | Per-vertex position | OUTLIER merged test-side |
+| 10 | H21 per-component heads | Decoder capacity | EP3 DEAD |
+| 11 | H25 ALGP | Aux head | EP3 KILL FADE |
+| 12 | H27 PRLP | Train-eval space | EP3 KILL |
+| 13 | H32 DIFFATTN | Attention mechanism | EP1 catastrophic |
+| 14 | H28 SAM | Optimizer | EP2 fade + crash, advisor KILL relaunch |
+| **15** | **H24 GSTS** | **Encoder slice-temp** | **EP13 NOT-A-MERGE (terminal)** |
+
+Pattern locked: **11/12 mean-shift attacks faded into [1.44, 1.55] by EP3.** Only H26 NPCA (variance-break) survives mechanism gate. Wave 31 design principle: bias variance/spread + loss-reshape over mean-shift.
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| **fern** | **#1189** | **H35 NPCA-SSFL-STACK** | **NEW — first Wave 31. Assigned 07:30Z. Cherry-pick from thorfinn H26 + frieren H29** |
+| alphonse | #1185 | H31 WALLDIST | EP4 6.417%, val_vol_p 3.780% best-in-fleet. EP6 ~08:30Z (vp=49152 bump) |
+| thorfinn | #1177 | H26 NPCA Path A | EP5 6.541%, linear EP13 5.95% (baseline-beat candidate). EP6 ~08:30Z |
+| askeladd | #1187 | H33 SLICEPE v2 | Relaunch instructed (corrected `--kill-thresholds`). v2 EP1 ~08:30Z |
+| edward | #1188 | H34 OUTHEAD | Pickup pending (assigned 06:00Z). EP3 ~16-17Z |
+| frieren | #1182 | H29 SSFL | EP7 6.4349% fleet-low. EP9-EP13 watch |
+| tanjiro | #1183 | H18d | EP8 6.3762% descent decelerating, τz/τx 1.647 above-band. CONTINUE TO EP13 ~14:25Z |
+| nezuko | #1184 | H30 V2S xattn | EP4 6.576%, continuing to terminal for test-side |
+
+### Outstanding actions (next 12h chronological)
+
+1. **alphonse H31 EP6 ~08:30Z** — val_vol_p floor-cross watch
+2. **thorfinn H26 EP6 ~08:30Z** — std(τz/τx) reading critical (mean drifted 1.525→1.547)
+3. **askeladd H33 v2 EP1 ~08:30Z** — relaunch safety check
+4. **tanjiro H18d EP9 ~09:00Z** — mid-trajectory gate verdict
+5. **fern H35 pickup + launch** — any time (cherry-pick implementation ~40 LOC)
+6. **askeladd H33 v2 EP3 ~13:30Z** — mechanism gate
+7. **edward H34 pickup + EP1 safety check** — any time
+8. **tanjiro H18d EP13 ~14:25Z** — terminal verdict (no-merge expected, test-side novelty)
+9. **thorfinn H26 EP13 ~14:30Z** — terminal verdict (BASELINE-BEAT CANDIDATE)
+10. **frieren H29 EP13 ~14-15Z** — terminal verdict (FLEET-LOW + test eval required)
+
+### Wave 31 hypothesis queue (idle students next)
+
+H35 (fern, ASSIGNED) → H42 NPCA-WARMSTART (when thorfinn H26 checkpoint available) → H41 NPCA-192-SLICES → H44 YAW-AUGMENTATION-NPCA → H36 ANCHOR-SLICE-QUERIES → H43 HEADS-DOUBLED → H37 WAVELET-SURFACE-LOSS
+
+---
+
+## Previous invocation actions (2026-05-18 ~07:00Z) — THORFINN H26 EP5 val_abupt 6.5414% (linear EP13 projection 5.95%, ON TRACK TO BEAT BASELINE) + ASKELADD H33 SELF-KILLED EP1 BY MISCONFIGURED `--kill-thresholds` (RELAUNCH INSTRUCTED, MECHANISM PRESERVED); WAVE 31 IDEAS BANK COMMITTED
 
 ### Headline updates (07:00Z)
 

@@ -1,3 +1,60 @@
+## 2026-05-18 07:30 — PR #1174: H24 GSTS (fern) — TERMINAL EP13 NOT-A-MERGE / 15TH WAVE-30 DEAD END / 11TH COLD-START MEAN-SHIFT FADE
+
+- **Branch**: `fern/h24-geometric-saliency-slice-temperature`
+- **W&B runs**: 8-rank DDP, rank0 `fpertdi4` (13/13 epochs, 866.65min wall-clock, 14.44h, EMA-best)
+- **Hypothesis**: Geometric-Saliency Slice-Temperature Sharpening (GSTS) — per-vertex slice-temperature modulation by local geometric saliency (curvature MLP), to force per-vertex specialization in slice attention.
+
+### Terminal results (rank0 `fpertdi4` EP13 EMA)
+
+| Metric | EP13 | Baseline / Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt** | **6.325%** | 6.126% | **+0.199pp** | **FAIL** |
+| test_abupt | 6.040% | 5.844% | +0.196pp | FAIL |
+| test_SP | 3.831% | 3.577% floor | +0.254pp | **FLOOR FAIL** |
+| test_vol_p | **3.610%** | 3.643% floor | **−0.033pp** | **FLOOR PASS** ★ |
+| test_WSS | 6.953% | 6.727% | +0.226pp | FAIL |
+| test τz/τx | 1.466 | break <1.42 | +0.04 inside band | **NO BREAK** |
+
+### Per-epoch trajectory (val)
+
+| EP | val_abupt | τz/τx | descent rate |
+|---:|---:|---:|---:|
+| 1 | 27.401% | 1.395 ★ (tied deepest Wave 30 EP1 break) | — |
+| 2 | 7.622% | 1.504 | −19.78pp |
+| 3 | 6.791% | 1.514 | −0.83pp |
+| 13 | 6.325% | 1.554 | −0.47pp total EP3→EP13 (saturating slope) |
+
+Monotone descent EP1→EP13, no overfit spike. EP1 τz/τx=1.395 was the deepest band-break signal in Wave 30 — but it faded to 1.504 by EP2 and crept upward to 1.554 by EP13. Classic cold-start fade pattern (11/12 mean-shift attacks now confirmed in Wave 30).
+
+### Mechanism diagnostic (preserved for Wave 31)
+
+- `geom_temp_std` settled at 1.7e-2 by EP6 — gradient-flow alive but uniform
+- MLP final-layer max_abs weight grew to 0.128 (from 0 at init) — gradients flowed through the slice-temp MLP
+- Per-region delta only +0.0056 between high-curvature and low-curvature regions (mean t_v = 0.759)
+- **Network learned a near-uniform global softening, NOT the per-vertex differentiation that the hypothesis required**
+
+**Lesson for Wave 31:** Any "learn a per-vertex modulator" approach needs explicit anti-uniform-collapse regularization (e.g., variance penalty on the modulator output, or contrastive auxiliary loss against geometric features). Lion + cosine LR + MSE objective biases toward uniform offsets.
+
+### test_vol_p floor PASS — pattern with cold-start hypotheses
+
+H24 is the **second consecutive cold-start hypothesis to preserve volume_pressure floor** (alphonse H31 currently at val_vol_p 3.780% approaching floor at EP4). Pattern: cold-start encoder-side modifications can preserve or improve volume_pressure even when surface τz/τx attack fails. Consistent with H31 WALLDIST's hypothesis that volume pathway is bottlenecked by input feature quality.
+
+### Decision
+
+NOT-A-MERGE confirmed:
+- val gate FAIL (+0.199pp above baseline)
+- test_SP / test_WSS floor FAIL
+- Only test_vol_p floor PASS (insufficient on its own)
+- No band break
+
+CLOSED as 15th Wave 30 dead end. Diagnostic preserved for Wave 31 design.
+
+### What replaces H24 in fern's slot
+
+**PR #1189 H35 NPCA-SSFL-STACK assigned same hour** — first Wave 31 hypothesis, directly tests whether H26 NPCA (variance-break) and H29 SSFL (loss-reshape) stack additively. Mechanism-distinct from all 15 closed Wave 30 dead ends.
+
+---
+
 ## 2026-05-18 06:00 — PR #1179: H28 SAM (edward) — POD CRASH MID-EP3 + RELAUNCH-KILLED-BY-ADVISOR / 14TH WAVE-30 DEAD END / OPTIMIZER-SPACE AXIS CLOSED
 
 - **Branch**: `edward/h28-sam-sharpness-escape`
