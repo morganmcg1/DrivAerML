@@ -1,3 +1,32 @@
+## 2026-05-18 15:30 — PR #1184: H30 V2S xattn — Volume-to-Surface Cross-Attention (nezuko) — TERMINAL EP12-PARTIAL-EP13 NOT-A-MERGE / 20TH WAVE-30 DEAD END / NO MECHANISM-CLASS WIN (band did not break on val or test)
+
+- **Branch**: `nezuko/h30-v2s-xattn`
+- **W&B runs**: 8-rank DDP, rank0 `zp494bph` (12 full epochs + ~6% EP13 before SENPAI_TIMEOUT_MINUTES=1100 budget exhaustion at 1011.49 min / 16.86h)
+- **Hypothesis**: Add a Volume-to-Surface cross-attention sublayer (reverse direction to existing S2V xattn) so surface decoder can read volume token representations, predicted to improve surface metrics and break τz/τx band attractor via H18's test-side survival pattern.
+- **Recipe**: `--use-vol-to-surf-xattn` (added flag) + standard 18h recipe `--epochs 13 --vp-schedule "0:16384:3:32768:6:49152:9:65536"`. ~30 LOC implementation: 1 nn.MultiheadAttention + 1 nn.LayerNorm sublayer with zero-init out_proj for bit-exact baseline recovery.
+- **Results table**:
+
+| Metric | val (EP12 EMA best) | test (EP12 EMA reload) | Baseline #972 test | Δ vs baseline test | Floor |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt** | **6.362%** | — | 6.126% val | **+0.236pp** ✗ FAIL merge gate | — |
+| test_abupt | — | 6.091% | 5.844% | +0.247pp ✗ regression | — |
+| test_SP | — | 3.866% | 3.577% (floor) | **+0.289pp** ✗ **FLOOR BREACH** | 3.577% |
+| test_vol_p | — | 3.781% | 3.643% (floor) | **+0.138pp** ✗ **FLOOR BREACH** | 3.643% |
+| test_WSS | — | 6.976% | 6.727% | +0.249pp ✗ regression | < 5.85% goal |
+| **val τz/τx** | **1.534** | — | — | inside band (+0.06 drift from EP1) | mech ≤1.42 |
+| **test τz/τx** | — | **1.462** | 1.473 / ~0.02 std | **INSIDE BAND** (−0.011pp ≈ baseline within noise) | mech mean ≤1.42 |
+
+- **Trajectory val_abupt EP1→EP12**: 28.295 → 7.595 → 6.808 → 6.576 → 6.500 → 6.448 → 6.416 → 6.392 → 6.375 → 6.369 → 6.364 → 6.362 (best). EP13 partial 6.363 = slight regression. Slope decelerated EP3→EP12 (−0.232 → −0.002 pp/EP), no cosine-LR-engagement acceleration.
+- **Trajectory τz/τx EP1→EP12**: **1.428** (deepest Wave 30 EP1 deflection from architectural-fusion path, tied with H25 ALGP) → 1.499 → 1.513 → 1.522 → 1.523 → 1.526 → 1.529 → 1.530 → 1.531 → — → — → 1.534. **10th cold-start fade in Wave 30.** Test 1.462 inside band attractor.
+- **V2S vs S2V weight diagnostics (EP9 peak)**: `surf_to_vol.out_proj.max_abs` 0.988 vs `vol_to_surf.out_proj.max_abs` 0.187 — **5.3× capacity asymmetry** in favor of forward (S2V) baseline direction. V2S grad/param ratio 2.2× higher than S2V (gradient flow OK, magnitude limited). **First Wave 30 quantitative measurement of architectural-fusion capacity asymmetry.** V2S found a narrow productive direction within supervised loss landscape, not a strong one.
+- **Mechanism analysis**: V2S xattn is **biting** (sublayer non-trivially contributing, zero-init shed) but **asymmetric vs S2V** (peak magnitude 5.3× smaller). EP1 break-signal 1.428 = 6th distinct mechanism axis producing EP1 deflection (joining encoder-input H25/H26/H31, loss-shape H10b/H29, regularization H23, per-vertex H18/H18d, attention H32). **Test-side survival pattern (H18 watch-item-3) explicitly did NOT replicate** — test τz/τx 1.462 fell INTO band attractor (within band [1.44, 1.55] and within statistical noise of baseline 1.473). Architectural cross-modal fusion via V2S xattn is **present but insufficient** to break the structural attractor.
+- **Key Wave 30 structural confirmation**: H30 V2S xattn closure + H26 + H31 + H18d + H29 + H25 + H32 + H28 + H24 (9 cold-start fades across 6+ mechanism axes) **confirm the surface decoder Linear(512, 4) projection's row-coupling is the structural cause of the τz/τx band attractor.** All Wave 31 surface decoder projection attacks now in-flight: H34 OUTHEAD (post-projection capacity), H45 CROSSCHAN-DEC (pre-projection representation), H46 SDORTH (projection weight init).
+- **What this preserves for Wave 31**: (a) V2S architecture preserved as optional flag for future stacks. (b) **V2S/S2V asymmetry diagnostic** (out_proj.max_abs comparison) adopted as canonical Wave 31 diagnostic for any cross-modal fusion sublayer. (c) Wave 31 follow-up suggestions: V2S with asymmetric init scale (let V2S grow faster), V2S with τz-only routing (concentrate limited capacity), V2S pre-training with isolated objective. (d) vp curriculum bump at EP9 (49152→65536) was POSITIVE for vol_p slope — preserve in Wave 31 18h recipes. (e) **NOT a Wave 31 priority**: V2S stacking with encoder-input augmentation (both axes don't address surface decoder structural attractor).
+- **Implementation excellence**: Per-epoch val + W&B diagnostics through 12 full epochs, V2S vs S2V weight magnitude tracked at every checkpoint, honest "mechanism-confirmed but test-side-fell-into-band" diagnosis, asymmetric-capacity insight first-of-Wave-30 documentation, 4 Wave 31 follow-up suggestions with risk-adjusted info value ratings, clean 1011.49 min < 1100 budget shutdown, best_checkpoint/source=ema correctly identified.
+- **Closure rationale**: val_abupt 6.362% saturates +0.236pp above baseline (slope decelerated to flat by EP12), BOTH test floors breached (test_SP +0.289pp, test_vol_p +0.138pp), test τz/τx stayed inside band — H18-style test-side survival did NOT replicate. No follow-up parameter variation would change merge outcome (5.3× V2S/S2V asymmetry is structural). **nezuko reassigned to H47 V-DEPTH (Volume Decoder Depth Bump, PR # TBD)** — first Wave 31 attack on volume DECODER interior capacity, untouched in Wave 30. Complements H26+H31 vol_p crossings from encoder-input axis.
+
+---
+
 ## 2026-05-18 14:30 — PR #1177: H26 NPCA local-frame projection (thorfinn) — TERMINAL EP13 NOT-A-MERGE / 19TH WAVE-30 DEAD END / 2ND TEST_VOL_P FLOOR CROSSING (CANONICAL MECHANISM WIN WITH TEST-SIDE GENERALIZATION)
 
 - **Branch**: `thorfinn/h26-normal-projected-coord-aug`

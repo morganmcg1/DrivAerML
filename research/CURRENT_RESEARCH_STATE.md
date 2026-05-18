@@ -1,11 +1,111 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~14:30 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~15:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~14:30Z) — THORFINN H26 NPCA CLOSED EP13 (19TH WAVE 30 DE, **2ND test_vol_p FLOOR CROSSING + CANONICAL MECHANISM WIN WITH TEST-SIDE GENERALIZATION**); THORFINN REASSIGNED H46 SDORTH (PR #1193, **SURFACE-DECODER INIT AXIS ATTACK** — smallest LOC attack on Wave 30 structural finding); WAVE 30 STRUCTURAL FINDING REFINED (surface decoder Linear(512,4) PROJECTION MEAN-PRESERVES τz/τx regardless of encoder representation diversity)
+## Latest invocation actions (2026-05-18 ~15:30Z) — NEZUKO H30 V2S XATTN CLOSED EP13 (20TH WAVE 30 DE, **NO mechanism-class win** but FIRST WAVE 30 QUANTITATIVE MEASUREMENT OF ARCHITECTURAL-FUSION ASYMMETRY: V2S out_proj.max_abs 0.187 vs S2V 0.988 = **5.3× S2V dominance**); NEZUKO REASSIGNED H47 V-DEPTH (PR #1194, **FIRST WAVE 31 ATTACK ON VOLUME DECODER INTERIOR CAPACITY** — complement to H31/H26 vol_p crossings); WAVE 30 NOW COMPLETE AT 20 DE + 2 MECHANISM WINS + 1 OUTLIER MERGED
+
+### Headline updates (15:30Z)
+
+1. **PR #1184 nezuko H30 V2S xattn CLOSED — 20th Wave 30 dead end, NO mechanism-class win.** Terminal: val_abupt 6.362% (FAIL +0.236pp), test_abupt 6.091% (FAIL +0.247pp), test_SP 3.866% **FLOOR BREACH** +0.289pp, test_vol_p 3.781% **FLOOR BREACH** +0.138pp, test_WSS 6.976% (+0.249pp regression). Test τz/τx 1.462 **STAYS INSIDE band attractor** — the H18 watch-item-3 hypothesis (val-side fade + test-side survival) did NOT replicate. EP1 τz/τx 1.428 was deepest Wave 30 EP1 deflection from architectural-fusion path but faded to band by test. **10th cold-start fade in Wave 30** (joining the architectural-fusion axis as the 6th distinct mechanism axis showing the same fade pattern).
+
+2. **Canonical V2S vs S2V asymmetry diagnostic adopted (NEW Wave 31 metric).** First Wave 30 quantitative measurement of architectural-fusion capacity asymmetry: forward-direction (S2V baseline) out_proj.max_abs 0.988 vs reverse-direction (V2S new) 0.187 — **5.3× S2V dominance**. The supervised loss landscape rewards S2V's information channel much more than V2S's. Adopted as canonical Wave 31 sublayer-biting diagnostic. Helps distinguish capacity-limited (narrow productive direction) vs information-limited (gradient flow weak) failures.
+
+3. **PR #1194 nezuko H47 V-DEPTH ASSIGNED — first Wave 31 attack on volume decoder interior capacity.** Adds 2 dedicated volume-only TransolverBlocks AFTER the shared trunk, BEFORE the `volume_out` projection. Zero-init residual output projections (mlp.fc2 + attn.out_proj) → bit-exact baseline at step 0. ~30 LOC model.py change, ~5M extra params. Mechanism rationale: H31 + H26 both crossed test_vol_p floor via ENCODER-INPUT enrichment (richer features into volume pathway). H47 tests the COMPLEMENT — deeper volume DECODER capacity to exploit those features further. EP3 binary mechanism gate (canonical V2S/S2V asymmetry diagnostic precedent from H30 closure): BOTH blocks' attn AND ffn out_proj max_abs > 0.05 (else KILL). Memory watch: vp=65536 may climb 74 GB → 85-90 GB. Target: test_vol_p ≤ 3.55%, comparison H31 3.488% + H26 3.608%.
+
+### Wave 30 closure tally — FINAL: 20 dead ends + 2 mechanism wins (H31 vol_p, H26 NPCA mean-preserved-std-spread + test generalization) + 1 outlier merged (H18)
+
+| Closure # | Hypothesis | Tier | Mechanism contribution |
+|---:|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape | none |
+| 8 | H23 Mean Teacher | Training-reg | none |
+| 9 | H18 area-weighted MSE | Per-vertex position | τz mean-shift artifact (merged test-side as outlier) |
+| 10 | H21 per-component heads | Decoder capacity | none |
+| 11 | H25 ALGP | Aux head | EP1 deflection only |
+| 12 | H27 PRLP | Train-eval space | none |
+| 13 | H32 DIFFATTN | Attention | none |
+| 14 | H28 SAM | Optimizer | none |
+| 15 | H24 GSTS | Encoder slice-temp | none |
+| 16 | H29 SSFL | Frequency loss | spectral_loss descended only |
+| 17 | H18d τz-only area | Channel-decoupled position | INVERSE band-break diagnostic |
+| 18 | H31 WALLDIST | Encoder-input feature | 🏆 1st test_vol_p floor crossing |
+| 19 | H26 NPCA | Encoder-input local-frame | 🏆🏆 2nd test_vol_p floor crossing + canonical mechanism win with test-side generalization (24/50 cars outside band) |
+| **20** | **H30 V2S xattn** | **Encoder-fusion (V→S)** | **EP1 deflection 1.428 (deepest Wave 30); faded to test 1.462 in band; NEW V2S/S2V 5.3× asymmetry diagnostic** |
+
+### Wave 30 structural conclusion (post-H30 — definitive)
+
+H30 V2S xattn triangulates with H31 + H26 + H18d (all closed today) into a unified Wave 30 finding:
+
+1. **Encoder-input axis** (H26/H31): CAN cross test_vol_p floor but CANNOT break test τz/τx band attractor (mean fixed at 1.46-1.47)
+2. **Encoder-fusion axis** (H30 V2S xattn): produces deepest EP1 break-signal in Wave 30 but fades fully and does not cross either floor
+3. **Loss-shape axis** (H10b/H11b/H12/H16/H16b/H20/H22/H23/H29/H18d): closes uniformly, never breaks the band on test
+4. **Output-head axis** (H21 per-component, H25 ALGP, H27 PRLP): closes uniformly
+5. **Optimizer axis** (H28 SAM, H24 GSTS): closes uniformly
+
+**The surface decoder Linear(512, 4) projection's row-coupling is the structural cause of the τz/τx band attractor.** Confirmed by 20 Wave 30 closures + 2 mechanism wins + 1 outlier merged. All Wave 31 attacks on surface decoder are now in-flight (H34 post-projection, H45 pre-projection, H46 weight init).
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| **nezuko** | **#1194** | **H47 V-DEPTH** | **NEW — volume decoder interior capacity, 2 vol-only blocks after trunk, zero-init residual. Pickup pending** | — |
+| thorfinn | #1193 | H46 SDORTH | NEW — surface decoder init axis attack, 3 LOC change. Pickup pending | — |
+| alphonse | #1192 | H45 ANCHOR-CROSSCHAN-DEC | NEW — first Wave 31 surface decoder structural attack (cross-channel attn before projection). Pickup pending | — |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING — `wave31_h36_anchor_slice_queries`, mid-EP1 | — |
+| frieren | #1190 | H44 YAW-AUGMENTATION | RUNNING — z-axis yaw, `wave31_h44_yaw_augmentation`, mid-EP1 | — |
+| askeladd | #1187 | H33 SLICEPE v2 | EP4 6.541% fleet-mid post-EP3, EP6 ETA ~16:30Z (stale_wip cleared 14:55Z) | 6.541% |
+| edward | #1188 | H34 OUTHEAD v2 | EP1 27.4%, EP2 7.83%, EP3 verdict ~14:15Z (long overdue, watch) | 7.830% (EP2) |
+| fern | #1189 | H35 NPCA-SSFL-STACK | EP2 step 24553 val_abupt 7.805% — mid-EP3 | 7.805% (EP2) |
+
+### Surface decoder attack matrix (Wave 31 — three orthogonal attacks on Linear(512,4) projection)
+
+| Hypothesis | Student | Axis | LOC | Mechanism class |
+|---|:--|:--|---:|:--|
+| H34 OUTHEAD | edward | POST-projection (capacity) | ~30 | per-channel MLP residual |
+| H45 CROSSCHAN-DEC | alphonse | PRE-projection (representation) | ~50 | cross-channel attention |
+| H46 SDORTH | thorfinn | PROJECTION WEIGHT INIT (initial condition) | 3 | orthogonal row init |
+
+### Volume pathway attack matrix (Wave 31 — orthogonal to surface decoder attacks)
+
+| Hypothesis | Student | Axis | Mechanism class |
+|---|:--|:--|:--|
+| H31 (closed) WALLDIST | alphonse | Encoder-input feature (log-SDF) | 🏆 1st test_vol_p floor crossing −0.155pp |
+| H26 (closed) NPCA | thorfinn | Encoder-input local-frame | 🏆🏆 2nd test_vol_p crossing −0.035pp + test generalization |
+| **H47 V-DEPTH** | **nezuko** | **Volume DECODER interior capacity** | **+2 vol-only TransolverBlocks after trunk (zero-init residual)** |
+| H35 NPCA-SSFL stack | fern | Encoder-input + frequency-loss stack | mechanism stacking experiment |
+
+H47 is the COMPLEMENT to H31/H26 — those enrich the input; H47 enriches the processing. Forms a clean 2x2 matrix: input-vs-decoder × surface-vs-volume pathway.
+
+### Wave 31 priority ranking (post H30 closure)
+
+1. **H46 SDORTH** (thorfinn) — cleanest single-variable test of Wave 30 structural finding; 3 LOC
+2. **H45 ANCHOR-CROSSCHAN-DEC** (alphonse) — surface decoder pre-projection axis; mechanism-class-novel
+3. **H47 V-DEPTH** (nezuko) — first Wave 31 attack on volume decoder; vol_p mechanism-positive axis (NEW)
+4. **H44 YAW-AUGMENTATION** (frieren) — first data-augmentation attack ever; orthogonal to all architectural attacks
+5. **H36 ANCHOR-SLICE-QUERIES** (tanjiro) — slice-query positional differentiation, sister to H33
+6. **H35 NPCA-SSFL-STACK** (fern) — first mechanism-combination experiment
+
+### Imminent decisions (next 4h)
+
+1. **askeladd H33 v2 EP6 ~16:30Z** — mechanism continuation gate (slipped from 14:50Z; current EP4 6.541%, slope −0.030 pp/1k steps)
+2. **edward H34 v2 EP3** — long overdue from 14:15Z; needs check (kill bar 9.5%, mech bar 8.5%)
+3. **alphonse H45 pickup** — surface decoder pre-projection attack
+4. **thorfinn H46 pickup** — smallest LOC Wave 31 attack (3 LOC)
+5. **nezuko H47 pickup** — volume decoder interior capacity (NEW)
+
+### V2S/S2V asymmetry diagnostic — NEW canonical Wave 31 metric
+
+Adopted from H30 closure: for any future architectural-fusion sublayer, track out_proj.max_abs comparison vs baseline path. Helps distinguish:
+- **Capacity-limited failure** (narrow productive direction, like H30 V2S) — grad/param ratio high, but max_abs low
+- **Information-limited failure** (gradient flow weak, sublayer never engages) — grad/param ratio low
+
+H47 V-DEPTH will use the same diagnostic — both blocks' attn AND ffn out_proj max_abs > 0.05 at EP3 = sublayer biting (else KILL = info-limited fade).
+
+---
+
+## Previous invocation actions (2026-05-18 ~14:30Z) — THORFINN H26 NPCA CLOSED EP13 (19TH WAVE 30 DE, **2ND test_vol_p FLOOR CROSSING + CANONICAL MECHANISM WIN WITH TEST-SIDE GENERALIZATION**); THORFINN REASSIGNED H46 SDORTH (PR #1193, **SURFACE-DECODER INIT AXIS ATTACK** — smallest LOC attack on Wave 30 structural finding); WAVE 30 STRUCTURAL FINDING REFINED (surface decoder Linear(512,4) PROJECTION MEAN-PRESERVES τz/τx regardless of encoder representation diversity)
 
 ### Headline updates (14:30Z)
 
