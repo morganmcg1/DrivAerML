@@ -25,6 +25,7 @@ from typing import Iterable
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
@@ -103,6 +104,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_surface_orth_init: bool = False
+    surface_orth_init_std: float = 0.02
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -276,6 +279,50 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_surface_proj_row_metrics(model: nn.Module) -> dict[str, float]:
+    """H46 SDORTH (Wave 31): row-structure diagnostic for the final surface
+    decoder Linear (the [surface_output_dim, n_hidden] projection that maps
+    backbone hidden states to [cp, tau_x, tau_y, tau_z]).
+
+    Reports pairwise off-diagonal cosine similarities + row norms so the
+    advisor can verify orthogonality was applied at init and track decay
+    under training.
+    """
+    metrics: dict[str, float] = {}
+    surface_out = getattr(model, "surface_out", None)
+    if surface_out is None:
+        return metrics
+    if isinstance(surface_out, nn.Sequential):
+        final_linear = None
+        for layer in reversed(surface_out):
+            if isinstance(layer, nn.Linear):
+                final_linear = layer
+                break
+    elif hasattr(surface_out, "project") and isinstance(surface_out.project, nn.Linear):
+        final_linear = surface_out.project
+    else:
+        final_linear = None
+    if final_linear is None:
+        return metrics
+    with torch.no_grad():
+        weight = final_linear.weight.detach().float()  # [out, in]
+        out_dim = weight.shape[0]
+        if out_dim < 2:
+            return metrics
+        rows = F.normalize(weight, dim=1)
+        gram = rows @ rows.T
+        off_diag_mask = ~torch.eye(out_dim, dtype=torch.bool, device=weight.device)
+        off_diag = gram[off_diag_mask]
+        row_norms = weight.norm(dim=1)
+        metrics["surface_proj_row/cos_mean_abs"] = float(off_diag.abs().mean().item())
+        metrics["surface_proj_row/cos_max_abs"] = float(off_diag.abs().max().item())
+        metrics["surface_proj_row/row_norm_mean"] = float(row_norms.mean().item())
+        metrics["surface_proj_row/row_norm_std"] = float(row_norms.std().item())
+        metrics["surface_proj_row/row_norm_min"] = float(row_norms.min().item())
+        metrics["surface_proj_row/row_norm_max"] = float(row_norms.max().item())
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +355,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_surface_orth_init=config.use_surface_orth_init,
+        surface_orth_init_std=config.surface_orth_init_std,
     )
 
 
@@ -883,6 +932,25 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            # H46 SDORTH: log surface decoder final-projection row structure at init
+            # so the orth-init invariant can be verified BEFORE training starts.
+            init_surface_proj_metrics = collect_surface_proj_row_metrics(base_model)
+            if init_surface_proj_metrics:
+                init_log = {f"init/{k}": v for k, v in init_surface_proj_metrics.items()}
+                init_log["init/use_surface_orth_init"] = float(config.use_surface_orth_init)
+                init_log["init/surface_orth_init_std"] = float(config.surface_orth_init_std)
+                wandb.log(init_log, step=0)
+                wandb.summary.update(init_log)
+                print(
+                    "[INIT surface_proj] cos_max_abs={:.6f} cos_mean_abs={:.6f} "
+                    "row_norm_mean={:.5f} row_norm_std={:.5f} (use_orth_init={})".format(
+                        init_surface_proj_metrics["surface_proj_row/cos_max_abs"],
+                        init_surface_proj_metrics["surface_proj_row/cos_mean_abs"],
+                        init_surface_proj_metrics["surface_proj_row/row_norm_mean"],
+                        init_surface_proj_metrics["surface_proj_row/row_norm_std"],
+                        config.use_surface_orth_init,
+                    )
+                )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1262,6 +1330,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                # H46 SDORTH: track final surface-projection row decorrelation drift.
+                surface_proj_metrics = collect_surface_proj_row_metrics(base_model)
+                for k, v in surface_proj_metrics.items():
+                    log_metrics[f"diag/{k}"] = v
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
