@@ -1,3 +1,35 @@
+## 2026-05-18 11:30 — PR #1182: H29 SSFL (frieren) — TERMINAL EP13 NOT-A-MERGE / 16TH WAVE-30 DEAD END / 1ST FREQUENCY-DOMAIN FALSIFIER / FLEET-LOW VAL
+
+- **Branch**: `frieren/h29-ssfl-streamwise-spectral`
+- **W&B runs**: 8-rank DDP, rank0 `3umsllbj` (13/13 epochs, 13.4h, EMA-best EP12), 7 other rank runs preserved
+- **Hypothesis**: Spectral Surface Loss with Streamwise Frequency Upweighting — sort surface tokens by streamwise z, apply rfft, weight high-frequency bins up to 2× via linear ramp on `|pred_fft - tgt_fft|²`. Mechanism premise: separation events are localized high-spatial-frequency in streamwise coordinates, MSE dilutes their gradient signal, upweighting should close the τz floor breach. F-principle (Xu et al. 2020) provides theoretical grounding.
+- **Recipe**: `--lambda-spectral 0.1 --spectral-hf-weight 2.0 --spectral-channels wss --lr 9e-5 --epochs 13 --vol-schedule "0:16384:3:32768:6:49152:9:65536"` (Arm A; Arm B not run since EP3 falsifier was decisive)
+- **Results table**:
+
+| Metric | val (EMA EP12) | full_val | test | Baseline #972 test | Δ vs baseline test |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt** | **6.3538%** ★ fleet-low | 6.3538% | 6.1578% | 5.844% | **+0.314pp** ✗ |
+| test_SP | — | 4.2085% | **3.8617%** | 3.577% (floor) | **+0.285pp** ✗ FLOOR BREACH |
+| test_WSS | — | 7.1619% | 7.0874% | 6.727% | **+0.360pp** ✗ |
+| test_WSS_x | — | 6.2850% | 6.2965% | — | — |
+| test_WSS_y | — | 7.7907% | 7.6871% | — | — |
+| test_WSS_z | — | 9.6269% | 9.1770% | — | streamwise dominant residual |
+| test_vol_p | — | 3.8581% | **3.7667%** | 3.643% (floor) | **+0.124pp** ✗ FLOOR BREACH |
+| τz/τx (val) | 1.532 | — | 1.458 | — | NEVER BROKE BAND |
+| spectral_loss EP1 | 0.0102 | — | — | — | — |
+| spectral_loss EP13 | 0.000109 | — | — | — | **−99%** mechanism alive |
+
+- **Trajectory EP1→EP12 val_abupt**: 30.4443 → 7.8913 → 7.0418 → 6.6493 → 6.5781 → 6.5107 → 6.4349 → 6.4040 → 6.3846 → 6.3607 → 6.3559 → **6.3538** (saturating); τz/τx 1.385 (cold-start break) → 1.484 (EP2 band re-entry) → 1.500 → ... → 1.532 (terminal, deep in band)
+- **EP3 falsifier verdict**: τz/τx target ≤ 1.42 NOT met (1.500 at EP3) — first frequency-domain attack confirms band is NOT spatial-frequency-mediated
+- **Conclusions**:
+  - **16th Wave 30 dead end. First frequency-domain falsifier.**
+  - Decisive negative on the spatial-frequency axis: spectral_loss descended cleanly 99% across 13 epochs while τz/τx stayed pinned in [1.484, 1.532]. Mechanism was alive, the hypothesis was wrong.
+  - **F-principle is NOT the cause of the band.** High-frequency upweighting does not change τz/τx ratio.
+  - **Loss-shape tier decisively closed.** Combined with H10b/H11b/H12/H16/H16b/H20/H22 (7 per-vertex loss-shape failures) + H23 (training-regularization) + H29 (frequency-domain), the entire loss-shape abstraction tier is falsified. **Only representation-tier (NPCA-class) and decoder-structure-tier remain promising.**
+  - **vol_p test floor breach is informative**: H29 only touches surface loss → spectral upweighting on τ drove decoder to over-allocate capacity to surface refinement, starving vol_p decoding. **Coupling diagnostic for stacked attacks** (fern H35 NPCA-SSFL-STACK should watch for this).
+  - **Wave 31 design implication**: bias toward representation/coordinate augmentation (NPCA-class) and decoder-structure-tier attacks. Stop targeting loss-shape axis.
+  - **Best-in-class implementation execution**: λ=0.0 baseline recovery, AMP/fp32 boundary correct, padding-zero-before-FFT preserved. The cleanest decisive negative we've gotten.
+
 ## 2026-05-18 07:30 — PR #1174: H24 GSTS (fern) — TERMINAL EP13 NOT-A-MERGE / 15TH WAVE-30 DEAD END / 11TH COLD-START MEAN-SHIFT FADE
 
 - **Branch**: `fern/h24-geometric-saliency-slice-temperature`
