@@ -5,19 +5,21 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~01:00Z) — H27 PRLP CLOSED (12TH DEAD END) + H32 DIFFATTN ASSIGNED TO ASKELADD; FERN H24 EP6 MARGINAL
+## Latest invocation actions (2026-05-18 ~05:00Z) — H32 DIFFATTN CLOSED (13TH DEAD END) + H33 SLICEPE ASSIGNED TO ASKELADD; TANJIRO H18d CONTINUE TO EP13; 8TH COLD-START FADE (ALPHONSE H31 EP2)
 
 ### Headline updates
 
-1. **PR #1178 askeladd H27 PRLP CLOSED ~00:28Z** — 12th Wave 30 dead end. EP3 KILL gate triggered: val_SP 4.546% ≥ 4.40% AND τz/τx 1.526 in-band. Val_abupt 7.098% FAIL +0.972pp. Critical diagnostic: EP2→EP3 train rel-L2 −23% vs val_SP only −10% (2.3× decoupling) — per-car normalisation inversely re-weights gradient by target magnitude. Train-eval space axis CLOSED.
+1. **PR #1186 askeladd H32 DIFFATTN CLOSED ~05:00Z** — 13th Wave 30 dead end. Both V1 (canonical paper) and V2 (minimal PR pseudocode) killed at EP1 (val_abupt ~28-30%, vol_p_mae 31-36). Failure mode diagnostic: subtractive SDPA at init destroys slice-token magnitude (0.31× baseline) → volume pathway catastrophic (no residual fallback for volume tokens). Surface/WSS metrics near-normal. Attention-mechanism axis CLOSED. Critical design rule for Wave 30 remainder: any modification that multiplies slice-token magnitude by <0.5× at init will break volume pathway.
 
-2. **PR #1186 askeladd H32 DIFFATTN assigned ~01:00Z** — Differential Attention (`A₁ − λ·A₂`) replaces single SDPA in `TransolverAttention.forward`. First hypothesis to attack the attention mechanism itself. Mechanistic hypothesis: τz/τx band attractor is caused partly by a shared noise floor in slice-token attention — the dominant mode routes in-band physics features to τz. Subtracting a second attention matrix cancels this shared mode. ~60 LOC `model.py` + ~10 LOC `train.py`/`build_model`. Paper: Microsoft Research 2024 (Differential Transformer, arxiv:2410.05258).
+2. **PR #1187 askeladd H33 SLICEPE assigned ~05:00Z** — learnable per-slice positional embedding `P ∈ R^{H × S × D_head}`, zero-init (σ=0.02), added to slice_tokens BEFORE SDPA. Directly safe from H32 failure mode (additive, small init, no magnitude destruction). Hypothesis: slice tokens lack explicit positional identity → band attractor's dominant mode can saturate all slices equally. With slice PE, model can route τz-specific physics to dedicated slices. ~15 LOC `model.py`. EP1 safety check: val_volume_p_mae must be normal cold-start range (5-10, not 30+).
 
-3. **Fern H24 GSTS EP6 val_abupt 6.4164% — MARGINAL** — descent decelerating sharply (0.83→0.25→0.08→0.047pp/ep). τz/τx 1.536 = 5th confirmed cold-start fade (H24 band-break thesis CLOSED). Mechanism stable (geom_temp_mean 0.711, stable) but not enough lever. **Key question: EP7 curriculum bump. If EP7 < 6.30%, continue to EP13. If ≥ 6.35%, kill.** EP7 val due ~02:00Z.
+3. **Tanjiro H18d #1183 CONTINUE TO EP13** — EP6 val_abupt 6.457% in marginal zone. Scenario B linear extrap → EP13 6.07% (clears baseline). EP9 mid-trajectory gate (~09:00Z): val_abupt ≤6.25% + val_SP ≤4.05% continue; >6.35%/>4.25% kill. Full test eval regardless at EP13.
 
-4. **PR #1177 thorfinn H26 NPCA** — SENT BACK 23:38Z for full 18h Path A retry from 23:58Z. STRONGEST unfinished hypothesis in Wave 30 (mechanism PROVEN, accuracy budget-cut only). EP3 ~04:43Z, EP6 ~09:30Z, EP13 ~17:38Z May 18.
+4. **8th cold-start fade confirmed: alphonse H31 WALLDIST EP2 τz/τx 1.529** (EP1 was 1.376 = deepest of Wave 30). EP3 ETA ~05:00-05:15Z.
 
-5. **frieren H29 EP1 val POSTED 22:31Z** with τz/τx 1.385 BELOW band attractor — EP3 gate ~02:30Z May 18.
+5. **Frieren H29 SSFL EP3 landed 6.6493%** — best absolute EP3 of Wave 30. Student verdict pending. spectral_loss=0 in summary raises mechanism-active question (flagged in check-in).
+
+6. **Thorfinn H26 Path A EP2 mechanism signal growing**: std(τz/τx) = 0.185 at EP2 (vs 0.092 EP1, approaching Path B's EP3 0.216). EP3 ~04:43Z decisive.
 
 ### Floor disease localization — REFINED after H26 mechanism proof
 
@@ -31,16 +33,16 @@ H26 has now produced the **first evidence that the τz/τx band attractor is enc
 
 | Student | PR | H | Status |
 |:--|---:|:--|:--|
-| fern | #1174 | H24 GSTS encoder slice-temp | **EP6 val_abupt 6.4164% MARGINAL** — τz/τx 1.536 = 5th cold-start fade, band-break thesis CLOSED. EP7 curriculum-bump gate ~02:00Z: if <6.30% continue, if ≥6.35% kill |
-| alphonse | #1185 | H31 WALLDIST log-SDF input channel | assigned 23:22Z, awaiting pickup. EP3 gate ~14:30Z May 18 |
-| thorfinn | #1177 | H26 NPCA full 18h retry | relaunched ~23:58Z May 17. Mechanism PROVEN (std 0.02→0.216, 10×). EP3 ~04:43Z, EP6 ~09:30Z May 18 |
-| **askeladd** | **#1186** | **H32 DIFFATTN differential attention** | **NEW — assigned 01:00Z May 18. Attacks attention mechanism itself. SDPA → A₁−λ·A₂. EP3 gate: τz/τx ≤1.42 AND val_abupt ≤8.5%** |
-| edward | #1179 | H28 SAM optimizer-sharpness | EP3 val just past due (was ~00:00Z, now ~01:00Z). Sam cos tightening 0.86→0.92 = flat-basin signal |
-| frieren | #1182 | H29 SSFL frequency-domain loss | EP1 τz/τx 1.385 BELOW band. EP3 gate ~02:30Z May 18 |
-| tanjiro | #1183 | H18d channel-decoupled τz-only area weight | EP1 τz/τx 1.634 ABOVE band (channel-coupling signal). EP3 ~01:31Z May 18 |
-| nezuko | #1184 | H30 V2S xattn cross-modal | assigned 21:50Z May 17, awaiting pickup |
+| fern | #1174 | H24 GSTS encoder slice-temp | EP7 val landing shortly (was 6.375% mid-EP7 at 01:53Z). 5th cold-start fade (τz/τx 1.543). Gate: if EP7 <6.30% continue, ≥6.35% kill |
+| alphonse | #1185 | H31 WALLDIST log-SDF input channel | EP2 landed: val_abupt 7.416%, τz/τx 1.529 = 8th cold-start fade (EP1 was 1.376). EP3 ETA ~05:00-05:15Z |
+| thorfinn | #1177 | H26 NPCA full 18h retry Path A | EP2 std 0.185 (mechanism growing). EP3 ~04:43Z decisive gate |
+| **askeladd** | **#1187** | **H33 SLICEPE learnable slice PE** | **NEW — assigned 05:00Z. Additive zero-init PE per slice. Safe from H32 volume_p_mae failure mode. EP1 safety check + EP3 gate** |
+| edward | #1179 | H28 SAM optimizer-sharpness | EP2 val 8.804%, EP3 imminent (~03:10-03:30Z). cos 0.87. Near 9.5% KILL threshold |
+| frieren | #1182 | H29 SSFL frequency-domain loss | **EP3 landed 6.6493% — BEST EP3 of Wave 30**. τz/τx 1.501 in band (fade). spectral_loss=0 concern flagged. Student verdict pending |
+| tanjiro | #1183 | H18d channel-decoupled τz-only area weight | EP6 6.457% marginal → **CONTINUE TO EP13** granted. EP9 gate ~09:00Z May 18. Mechanism locked: band-break is channel-coupled tied-budget effect |
+| nezuko | #1184 | H30 V2S xattn cross-modal | EP2 val 7.595%, τz/τx 1.500 (band drift from EP1 1.428). EP3 ~04:00Z |
 
-### Closed Wave 30 directions (12 confirmed dead ends + 1 outlier + 1 retry-in-flight)
+### Closed Wave 30 directions (13 confirmed dead ends + 1 outlier + 1 retry-in-flight)
 
 | # | Hypothesis | Tier | Key result |
 |---|---|---|:--|
@@ -49,8 +51,9 @@ H26 has now produced the **first evidence that the τz/τx band attractor is enc
 | 9 | H18 area-weighted MSE | Per-vertex position | OUTLIER: test τz/τx 1.418 ★ + test_vol_p PASS, but miss val/SP |
 | 10 | H21 per-component heads | Decoder capacity | DEAD — capacity not the bottleneck |
 | 11 | H25 ALGP aux local-grad | Mean-shift encoder via aux task | CRASHED + EP3 FADE — objective-disconnected |
-| **12** | **H27 PRLP per-component rel-L2 loss** | **Train-eval space** | **KILL EP3 — per-car normalisation INVERSELY re-weights gradient (train −23% vs val_SP −10% at EP3). Train-eval space axis CLOSED.** |
-| **Retry** | **H26 NPCA local frame** | **Encoder INPUT geometric transformation** | **PATH-A 18H RETRY IN-FLIGHT (relaunched ~23:58Z May 17). MECHANISM PROVEN (std 10×).** |
+| **12** | **H27 PRLP per-component rel-L2 loss** | **Train-eval space** | **KILL EP3 — per-car normalisation INVERSELY re-weights gradient. Train-eval space axis CLOSED.** |
+| **13** | **H32 DIFFATTN differential attention** | **Attention mechanism** | **KILL EP1 — subtractive SDPA destroys slice-token magnitude (0.31×) → volume_p_mae catastrophic. Attention-mechanism axis CLOSED. Design rule: no modification that reduces slice-token magnitude <0.5× at init.** |
+| **Retry** | **H26 NPCA local frame** | **Encoder INPUT geometric transformation** | **PATH-A 18H RETRY IN-FLIGHT. MECHANISM PROVEN (std 10×). EP3 ~04:43Z.** |
 
 ### Key fleet diagnostic refined after H26 mechanism proof
 
@@ -64,17 +67,18 @@ H26 has now produced the **first evidence that the τz/τx band attractor is enc
 
 ### Outstanding actions (next 12h chronological)
 
-1. **tanjiro H18d EP3 ~01:31Z May 18** — channel-decoupling τz_only diagnostic
-2. **fern H24 EP7 ~02:00Z May 18** — curriculum-bump gate (<6.30% continue, ≥6.35% kill)
-3. **frieren H29 EP3 ~02:30Z May 18** — frequency-domain mechanism gate
-4. **edward H28 EP3 ~01:00-03:00Z May 18** — SAM optimizer flat-basin gate (τz/τx ≤1.42 sustain?)
-5. **thorfinn H26 Path A EP3 ~04:43Z May 18** — full-budget accuracy test for mechanism-proven hypothesis
-6. **alphonse H31 WALLDIST pickup + launch** (any time; log-SDF 5th channel)
-7. **askeladd H32 DIFFATTN pickup + launch** (any time; differential attention ~60 LOC)
-8. **nezuko H30 V2S xattn pickup + launch** (any time)
-9. **thorfinn H26 Path A EP6 ~09:30Z May 18** — decisive interim for baseline-beating trajectory
+1. **thorfinn H26 Path A EP3 ~04:43Z May 18** — full-budget accuracy test for mechanism-proven hypothesis (std 0.185 at EP2, growing)
+2. **alphonse H31 WALLDIST EP3 ~05:00-05:15Z** — 8th cold-start fade in progress, EP3 decisive
+3. **nezuko H30 V2S EP3 ~04:00Z** — EP2 τz/τx 1.500 band drift (fade?)
+4. **frieren H29 SSFL student EP3 verdict** — 6.6493% best EP3 of Wave 30, mechanism question (spectral_loss=0?)
+5. **edward H28 SAM EP3 ~03:10-03:30Z** — 8.804% EP2, near KILL at 9.5%
+6. **fern H24 EP7 gate** — 6.375% mid-EP7, ep7 decisive
+7. **tanjiro H18d EP9 ~09:00Z** — mid-trajectory gate for CONTINUE-granted run
+8. **askeladd H33 SLICEPE pickup + launch** (any time; ~15 LOC, zero-init safe)
+9. **thorfinn H26 Path A EP6 ~09:30Z** — decisive interim for baseline-beating accuracy
+10. **tanjiro H18d EP13 ~14:25Z** — full terminal test eval
 
-**12 confirmed dead ends + 1 retry-in-flight. Plateau Protocol active. H26 NPCA is STRONGEST hypothesis in Wave 30 (mechanism proven, 18h retry in flight). H32 DIFFATTN opens FIRST attention-mechanism axis in Wave 30. H31 + H30 + H26 + H32 form active triad with attention-mechanism axis.**
+**13 confirmed dead ends + 1 retry-in-flight. Plateau Protocol active. Critical design rule established: slice-token magnitude must be preserved at init. H26 NPCA remains STRONGEST hypothesis (mechanism proven, full-budget in flight). H33 SLICEPE is safest novel architectural attack designed around DIFFATTN diagnostic.**
 
 ---
 

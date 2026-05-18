@@ -1,3 +1,46 @@
+## 2026-05-18 05:00 — PR #1186: H32 DIFFATTN (askeladd) — TERMINAL KILL EP1 / 13TH WAVE-30 DEAD END / ATTENTION-MECHANISM AXIS CLOSED
+
+- **Branch**: `askeladd/h32-differential-attention`
+- **W&B runs**: `c49wngus` (V1 canonical), `jygo5ya0` (V2 minimal PR pseudocode)
+- **Hypothesis**: Replace single `F.scaled_dot_product_attention` in `TransolverAttention.forward` with differential attention `A₁ − sigmoid(λ)·A₂` (Differential Transformer, Microsoft Research 2024) to cancel τz/τx band attractor shared noise floor.
+
+### Results
+
+| Variant | W&B | val_abupt EP1 | val_volume_p_mae | Verdict |
+|---|---|---:|---:|:--|
+| **V1** (canonical: subln + per-layer λ schedule 0.20→0.62 + (1−λ_init) output scale) | `c49wngus` | **29.541%** | **35.79** | ❌ KILL EP1 >9.5% |
+| **V2** (PR pseudocode: single sigmoid(λ_raw=0.8)≈0.689, no subln, no schedule, no output scale) | `jygo5ya0` | **27.947%** | **31.90** | ❌ KILL EP1 >9.5% |
+| Baseline (56bcqp3m) | ref | ~8-9% typical | 5-8 typical | — |
+
+Both variants killed at EP1. Both ~4× baseline EP1 abupt. **Volume pathway blown 5-7× while surface metrics ~1.1× baseline.**
+
+### Failure mode diagnosis (student analysis, high-confidence)
+
+The damage is pathway-asymmetric:
+- **Surface metrics**: ~1.1× baseline (model not globally diverging)
+- **Volume_p_mae**: 5-7× catastrophic
+- **Wall_shear_mae**: ~1.0× baseline
+
+Root cause: surface tokens have residual fallback (`x + attn(x)`), volume tokens ONLY see physics via `surf→vol cross-attention against slice tokens`. When subtractive SDPA poisons slice-token magnitude at init (V1: 0.31× via output scale; V2: 0.31× via correlated destructive interference), the volume decoder gets no signal.
+
+V2 failing is the key finding: even without per-layer schedule, the minimal single-scalar form fails because Q2/K2/V2 share a single LinearProjection with Q1/K1/V1 (just chunked). At init, the two SDPA outputs are HIGHLY CORRELATED, not orthogonal. `SDPA₁ − 0.689·SDPA₂ ≈ (1−0.689)·SDPA₁ = 0.31·SDPA₁` at init — destructive interference, not noise cancellation.
+
+### Implications for Wave 30 architecture
+
+Any attention modification that destroys slice-token MAGNITUDE at init will break the volume pathway specifically. Valid modifications:
+- **Additive perturbation** to slice_tokens (e.g. SLICEPE, H33)
+- **Input encoding modifications** (e.g. WALLDIST, H31)
+- **Input geometric transforms** (e.g. NPCA, H26)
+- **Cross-attention on a DIFFERENT path** (e.g. V2S, H30)
+
+Invalid without careful magnitude-preserving init:
+- Subtractive attention on slice tokens
+- Any operation that multiplies slice-token magnitude by <0.5×
+
+**H33 SLICEPE (additive, zero-init) is specifically designed to be safe per this diagnostic.**
+
+---
+
 ## 2026-05-18 01:55 — PR #1183: H18d (tanjiro) — EP3 INTERIM / KILL GATE TRIGGERED ON τz/τx BUT ADVISOR EXCEPTION → CONTINUE TO EP6 MID-TRAJECTORY GATE / MECHANISM DIAGNOSIS LOCKED
 
 - **Branch**: `tanjiro/h18d-channel-decoupled-tau-z-area-weight`
