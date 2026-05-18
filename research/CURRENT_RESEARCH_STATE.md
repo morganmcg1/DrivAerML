@@ -1,11 +1,76 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~21:25 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~22:18 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~21:25Z) — ASKELADD H33 SLICEPE CLOSED EP13-EMA (23RD WAVE 30 DE on merge dimension, 🏆 **4TH TEST_VOL_P FLOOR CROSSING −0.121pp + NOVEL L0-DOMINANCE STRUCTURAL INSIGHT**); ASKELADD REASSIGNED H50 COORDSLICE (PR #1198, **COORDINATE-CONDITIONED SLICE IDS / DAB-DETR ANALOGUE** — replaces H33's free-floating learnable PE with 3D-centroid-derived slice anchors); WAVE 31 PRIORITY SHIFT: test_SP becomes the binding gate (4 vol_p crossings via 3 mech classes vs 0 test_SP crossings beyond baseline)
+## Latest invocation actions (2026-05-18 ~22:18Z) — NEZUKO H47 V-DEPTH SENT BACK FOR FULL 18H RERUN (mechanism positive but 6h truncated; test_VP +0.151pp above floor at 20% budget — credible 5th vol_p floor crossing candidate at full budget); ALPHONSE H45 ANCHOR-CROSSCHAN-DEC mid-EP3 stale_wip CLEARED with **STRONG MECHANISM SIGNAL** (τz/τx out_weight_norm ratio 3.91 ≫ 1.3 mech gate; τy/τz channels loading 4-5× over cp/τx); FRIEREN H44 YAW-AUGMENTATION mid-EP6 stale_wip CLEARED with **CRITICAL VAL_VP SIGNAL** (val_VP 3.687% ALREADY BELOW baseline EP13 final 3.80%, descent continuing toward floor 3.643%); FLEET FULLY BOOKED (8/8 WIP, zero idle students)
+
+### Headline updates (22:18Z)
+
+1. **PR #1194 nezuko H47 V-DEPTH SENT BACK — mechanism unambiguously alive, 6h budget insufficient.** Terminal at mid-EP3 step 28,586 (≈63% through EP3) when 270-min training timeout fired. Per-block residual diagnostic: ALL 4 SUBLAYERS (block0+block1 × attn+ffn) 4-8× ABOVE the 0.05 KILL threshold by EP3, with monotonic growth EP1→EP3 (e.g. block1/ffn_fc2: 0.038 → 0.330 → 0.403). FFN > attn dominance (≈1.5×), block1 > block0 (productive paired asymmetry, H30 closure precedent). Best test_VP 3.794% at 20% budget is **only +0.151pp above floor 3.643%** — the closest of any non-merge-winning Wave 30/31 hypothesis. Send-back recipe: full 18h `SENPAI_TIMEOUT_MINUTES=1100 --epochs 13 --lr-cosine-t-max 13 --train-volume-points 65536 --vol-points-schedule "0:16384:3:32768:6:49152:9:65536"` with step-indexed kill thresholds at 10864/32594/65228 + EP6 val_abupt < 6.5% gate (H26 NPCA reference). VRAM safety: peak ~75-85GB projected at vp=65536 (within 97.9GB Blackwell PRO 6000).
+
+2. **PR #1192 alphonse H45 ANCHOR-CROSSCHAN-DEC mid-EP3 — STRONGEST cross-channel mechanism signal in Wave 31 to date.** Run `lhivsp6j` mid-EP3 step 28,756 (88% through EP3, heartbeat 0.2 min ago, 4.77h runtime). Per-channel out_weight_norm: cp=0.006, τx=0.006, τy=**0.030** (5.2× cp), τz=**0.023** (3.9× cp). **τz/τx ratio = 3.91 ≫ 1.3 mech gate** — module is loading up exactly on the WSS channels it was designed to correct. val_abupt 7.76% mid-EP3, converging on H26 NPCA's EP3 trajectory. EP3 gate landing ~22:30Z.
+
+3. **PR #1190 frieren H44 YAW-AUGMENTATION mid-EP6 — val_VP 3.687% ALREADY below baseline EP13 final (3.80%).** Run `6scw4nto` mid-EP6 step ~58,200 (10.35h runtime, heartbeat 0.2 min ago). **val_VP descent has front-loaded by ~7 epochs vs baseline**. Trajectory: 5.898 (EP2) → 4.064 (EP3, **−31%**) → 3.806 (EP4) → 3.738 (EP5) → 3.687 (mid-EP6). Distance to floor 3.643%: **0.044pp**. Combined with per-axis WSS finding (τz NOT touched by yaw rotation is now AHEAD of baseline by 0.131pp despite no direct mixing — NOVEL cross-channel rotational-prior regularization) and τz/τx mean ratio shift down 0.029 to 1.510 (stable mid-band, vs baseline EP6 1.539). **5th vol_p floor crossing candidate in flight, FIRST via data augmentation axis.** Continue to natural budget cutoff ~05:40Z May 19.
+
+### Fleet status — 8/8 WIP, ZERO idle students
+
+| Student | PR | H | Status @ 22:18Z | Latest val_abupt | Key signal |
+|:--|---:|:--|:--|---:|:--|
+| **alphonse** | **#1192** | H45 CROSSCHAN-DEC | 🔥 mid-EP3 step 28.7k, **mech-positive τz/τx out_norm ratio 3.91** | 7.760% (mid-EP3) | cross-channel module loading τy/τz 4-5× |
+| askeladd | #1198 | H50 COORDSLICE | NEW — DAB-DETR analogue. Pickup pending | — | — |
+| edward | #1196 | H48 TAU-Y-EQUALIZE | RUNNING — single-flag, ~3.5h runtime | — | — |
+| **frieren** | **#1190** | **H44 YAW-AUG** | 🔥 mid-EP6 step 58.2k, **val_VP 3.687% (0.044pp from floor)** | 6.422% (mid-EP6) | rotational-prior cross-channel regularization (τz ahead despite NOT rotated) |
+| nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING, mech-positive τz/τx std 0.155-0.188 | 6.779% (EP3) | encoder-side variance-class signal |
+| thorfinn | #1197 | H49 SDORTH-FULL | NEW — 13-ep H46 confirmation. Pickup pending | — | full-budget test of FIRST test τz/τx mean deflection 1.431 |
+| fern | #1189 | H35 NPCA-SSFL-STACK | RUNNING EP9-EP10+ (per 20:20Z snapshot fleet-peak std 0.2464, val_VP 3.738%) | 6.377% (EP7) | first mechanism-stacking experiment, fleet-peak std |
+
+### 4-way val_VP floor watch (next 8h)
+
+Four runs are within 0.20pp of the val_VP floor 3.643%:
+
+| Run | Latest val_VP | Δ to floor | EP / time | Trajectory |
+|---|---:|---:|:--|:--|
+| **frieren H44** | **3.687%** | **+0.044pp** | mid-EP6, ~22Z | descending, slope flattening |
+| fern H35 | 3.738% (EP7 snapshot) | +0.095pp | EP9-EP10 by 22Z | mech-stack, fleet-peak std |
+| nezuko H47 6h | 3.794% (terminal) | +0.151pp | mid-EP3 (truncated) | mechanism POS, full-budget rerun pending |
+| H26 NPCA (closed, merged) | 3.608% | −0.035pp | EP13 | already in BASELINE |
+| H31 WALLDIST (closed, merged) | 3.488% | −0.155pp | EP13 | already in BASELINE |
+
+**Frieren H44 is the most immediate candidate** to cross floor at terminal (close in time and value). Fern H35 trails by 0.05pp but has continued descent (was 3.738% at EP7, may be near floor at EP9+ now). Nezuko H47 needs the full-budget rerun to compete.
+
+### Imminent decisions (next 8h)
+
+1. **alphonse H45 EP3 gate ~22:30Z** — val_abupt + per-channel out_weight_norm + per-axis wall_shear ratio reading; if val_abupt < 7.2% AND τz/τx std ≥ 0.15 → high-priority continue
+2. **fern H35 EP9-EP10+** — CRITICAL val_VP floor watch (was 0.095pp from floor at EP7; if crossed, first NPCA-stacking mech-win)
+3. **edward H48 EP3-EP4** — single-flag τ-y-equalize mechanism gate
+4. **nezuko H47 18h rerun pickup confirmation** — wait for student to relaunch
+5. **askeladd H50 pickup confirmation** — coordinate-conditioned slice IDs
+6. **thorfinn H49 pickup confirmation** — full-budget H46 confirmation
+7. **frieren H44 EP9-EP10** — val_VP floor cross watch (currently +0.044pp above)
+8. **tanjiro H36 EP6+** — τz/τx std persistence + test_SP gate
+
+### Wave 31 priority ranking (post-22:18Z fleet sweep)
+
+1. **H44 YAW-AUGMENTATION** (frieren) — IN-FLIGHT, val_VP 0.044pp from floor at mid-EP6; novel rotational-prior cross-channel regularization
+2. **H35 NPCA-SSFL-STACK** (fern) — IN-FLIGHT, fleet-peak std 0.2464; if val_VP held at EP9+ → first stacking mech-win
+3. **H45 ANCHOR-CROSSCHAN-DEC** (alphonse) — IN-FLIGHT mid-EP3, strongest cross-channel out_weight_norm asymmetry (τz/τx 3.91)
+4. **H47 V-DEPTH** (nezuko) — sent back for full 18h, mechanism positive, decoder-depth axis FIRST
+5. **H49 SDORTH-FULL** (thorfinn) — full-budget H46 confirmation; could yield Wave 31's first single-model paper-facing breakthrough
+6. **H50 COORDSLICE** (askeladd, NEW) — DAB-DETR analogue, tests L0-dominance + better test_SP
+7. **H48 TAU-Y-EQUALIZE** (edward) — single-flag training-time test
+8. **H36 ANCHOR-SLICE-QUERIES** (tanjiro) — slice-query Q modulation
+
+### Time-tracking note
+
+Real-clock time of this invocation: 22:18Z. Previous logged invocation: 21:25Z. **Frieren H44** mid-EP6 reading is the most consequential development of the past 0.9h — val_VP descent has pushed past baseline-EP13 territory and is approaching the floor. Next ~3h will see alphonse H45 EP3 gate landing, fern H35 EP9-EP10 reading (likely the day's most critical floor watch), and possibly nezuko H47 18h rerun launch.
+
+---
+
+## Previous invocation actions (2026-05-18 ~21:25Z) — ASKELADD H33 SLICEPE CLOSED EP13-EMA (23RD WAVE 30 DE on merge dimension, 🏆 **4TH TEST_VOL_P FLOOR CROSSING −0.121pp + NOVEL L0-DOMINANCE STRUCTURAL INSIGHT**); ASKELADD REASSIGNED H50 COORDSLICE (PR #1198, **COORDINATE-CONDITIONED SLICE IDS / DAB-DETR ANALOGUE** — replaces H33's free-floating learnable PE with 3D-centroid-derived slice anchors); WAVE 31 PRIORITY SHIFT: test_SP becomes the binding gate (4 vol_p crossings via 3 mech classes vs 0 test_SP crossings beyond baseline)
 
 ### Headline updates (21:25Z)
 
