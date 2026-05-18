@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~12:45 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~12:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -40,7 +40,7 @@
 | thorfinn | #1177 | H26 NPCA 18h | EP7 step 67932 val_abupt 6.346%, val_WSS 7.170%, val_VP 3.750%. EP13 ~17:00Z | 6.346% |
 | askeladd | #1187 | H33 SLICEPE v2 | EP3 6.871% MARGINAL (passes kill bar 7.50%, misses mech-pos 6.50%) — continuing | 6.871% |
 | edward | #1188 | H34 OUTHEAD v2 | EP1 27.4%, EP2 7.83%, mid-EP3 step 26118 — EP3 verdict ~14:15Z | 7.830% (EP2) |
-| nezuko | #1184 | H30 V2S xattn | step 64140 val_abupt 6.369%, val_WSS 7.213%, val_VP 3.829% — EP6+ continuing | 6.369% |
+| nezuko | #1184 | H30 V2S xattn | EP6 step 65212 val_abupt 6.364% (+0.238pp baseline), val_WSS 7.207% (2nd in fleet), val_VP 3.827% (above floor). Budget ends ~16:05Z at ~EP7 — projected NOT-A-MERGE | 6.364% |
 | fern | #1189 | H35 NPCA-SSFL-STACK | EP2 step 24553 val_abupt 7.805%, val_WSS 8.851% — mid-EP3 | 7.805% (EP2) |
 
 ### Research map (current)
