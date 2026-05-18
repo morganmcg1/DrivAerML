@@ -382,6 +382,8 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_vol_deep: bool = False,
+        vol_deep_layers: int = 2,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +398,8 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_vol_deep = use_vol_deep
+        self.vol_deep_layers = int(vol_deep_layers) if use_vol_deep else 0
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +523,38 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H47 V-DEPTH (PR #1194): two dedicated volume-only transformer blocks
+        # inserted between the (optional) surface->volume cross-attention and the
+        # final volume head. Goal: give the volume decoder additional reasoning
+        # depth for volume_pressure. Each block's residual output projections
+        # (TransolverAttention.proj and UpActDownMlp.fc2) are zero-initialised
+        # so the new blocks are pure identity at step 0 -> bit-exact baseline
+        # recovery, and contribution magnitude can be tracked by W&B.
+        if use_vol_deep:
+            self.vol_deep_blocks = nn.ModuleList(
+                [
+                    TransformerBlock(
+                        hidden_dim=n_hidden,
+                        num_heads=n_head,
+                        mlp_expansion_factor=mlp_ratio,
+                        num_slices=slice_num,
+                        dropout=dropout,
+                        use_qk_norm=use_qk_norm,
+                    )
+                    for _ in range(self.vol_deep_layers)
+                ]
+            )
+            with torch.no_grad():
+                for block in self.vol_deep_blocks:
+                    block.attention.proj.project.weight.zero_()
+                    if block.attention.proj.project.bias is not None:
+                        block.attention.proj.project.bias.zero_()
+                    block.mlp.fc2.weight.zero_()
+                    if block.mlp.fc2.bias is not None:
+                        block.mlp.fc2.bias.zero_()
+        else:
+            self.vol_deep_blocks = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -619,6 +655,13 @@ class SurfaceTransolver(nn.Module):
             )
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
+            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        # H47 V-DEPTH: volume-only deep blocks. Zero-initialised residual
+        # output projections make the blocks identity at init.
+        if self.vol_deep_blocks is not None and volume_x is not None and volume_tokens > 0:
+            for block in self.vol_deep_blocks:
+                volume_hidden = block(volume_hidden, attn_mask=volume_mask)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
