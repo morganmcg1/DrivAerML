@@ -1,3 +1,34 @@
+## 2026-05-18 16:35 — PR #1188: H34 OUTHEAD — Per-Channel Auxiliary Output Heads (edward) — ADVISOR-KILLED MID-EP6 / MECHANISM FALSIFIED AT EP3 (ANTI-DIRECTION) / 21ST WAVE-30 DEAD END
+
+- **Branch**: `edward/h34-outhead`
+- **W&B runs**: 8-rank DDP, rank0 `iw2ommjz` (killed mid-EP6 step ~33800, 7.36h runtime). val_abupt descending 6.867% → 6.627% → 6.542% but mechanism falsified at EP3 — killed to free GPU for higher-value Wave 31 follow-up.
+- **Hypothesis**: Add a per-channel auxiliary residual MLP head for each of the 4 surface output channels {cp, τ_x, τ_y, τ_z} BEFORE the final `Linear(512, 4)` projection. Zero-init each head's last layer → bit-exact baseline at step 0. If the band attractor is set by head-side rank coupling, the per-channel residuals give τ_z and τ_x independent degrees of freedom to escape, with aux_head asymmetry (τ_z/τ_x abs_mean) > 1.5 as the mechanism signal.
+- **Terminal val trajectory (EP1→EP5, EP6 ~15% complete when killed)**:
+
+| EP | step | val_abupt | val_SP | val_VP | val_WSS | τz/τx |
+|--:|--:|--:|--:|--:|--:|--:|
+| 1 | 10,864 | 27.416% | 20.375% | 16.592% | 30.550% | 1.375 |
+| 2 | 21,729 | 7.830% | 5.227% | 4.634% | 8.858% | 1.489 |
+| 3 | 32,594 | 6.867% | 4.595% | 4.084% | 7.730% | **1.531** band-locked |
+| 4 | 43,459 | 6.627% | — | 3.991% | 7.435% | — |
+| 5 | 54,324 | 6.542% | — | 3.946% | 7.318% | — |
+
+- **Mechanism verdict at EP3 (binding gate)**:
+
+| Diagnostic | Predicted | Observed | Verdict |
+|---|---:|---:|:--|
+| τz/τx error ratio | ≤ 1.42 (break) | 1.531 | ✗ STUCK in [1.44, 1.55] band |
+| aux_head asymmetry τ_z/τ_x abs_mean | > 1.5 | **0.298** | ✗ **ANTI-DIRECTION** (τ_x 3.4× larger than τ_z) |
+| aux_head/tau_z/last_layer_norm | > 0 (growing) | 0.639 | partial (gradient flow OK but wrong direction) |
+| nonfinite_count | 0 | 0 | ✓ |
+
+- **Closure rationale**: The aux head asymmetry was decisively anti-direction. τ_x aux head grew 3.4× larger than τ_z, which is opposite of the rank-coupling hypothesis prediction. This means the per-channel residual capacity, instead of letting τ_z deviate from the shared mode, mainly flowed into τ_x — confirming the band attractor's stability is NOT from a head-side rank-1 coupling that the residual heads can break. The trunk-side / projection-init axis remains the structural cause (per the H45 + H46 attacks now in-flight).
+- **What this contributes to Wave 30 closure tally**: 21st dead end (post-H30 finalization at 20). The "21st" tag is retroactive — H34 was running parallel to H30 closure and is properly attributed to the same Wave 30 mechanism-axis sweep.
+- **What this preserves for Wave 31**: 
+  1. **Per-channel head capacity axis decisively closed**: surface decoder bottleneck is NOT a missing per-channel capacity. The H45 + H46 attacks on pre-projection and weight-init are the remaining surface decoder axes.
+  2. **τ_y over-weighting hypothesis adopted as H48**: anti-direction τ_x dominance suggests τ_x is gradient-favored over τ_z, which may stem from τ_y over-weighting (1.5×) crowding out τ_z's share of the surface loss gradient. Tested in H48 TAU-Y-EQUALIZE (PR #1196, single-flag `--tau-y-loss-weight 1.5 → 1.0`).
+  3. **EP3 falsifier worked as intended**: the binary asymmetry threshold cleanly rejected the head-side rank-coupling mechanism class. Adopted as canonical Wave 31 EP3 binary-falsifier pattern for capacity-class hypotheses.
+
 ## 2026-05-18 15:30 — PR #1184: H30 V2S xattn — Volume-to-Surface Cross-Attention (nezuko) — TERMINAL EP12-PARTIAL-EP13 NOT-A-MERGE / 20TH WAVE-30 DEAD END / NO MECHANISM-CLASS WIN (band did not break on val or test)
 
 - **Branch**: `nezuko/h30-v2s-xattn`
