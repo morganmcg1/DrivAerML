@@ -382,6 +382,8 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_surface_orth_init: bool = False,
+        surface_orth_init_std: float = 0.02,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +398,8 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_surface_orth_init = use_surface_orth_init
+        self.surface_orth_init_std = surface_orth_init_std
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -498,6 +502,26 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # H46 SDORTH (Wave 31): replace default trunc_normal(std=0.02) init of the
+        # final Linear in the surface decoder with orthogonal rows, rescaled to
+        # match trunc_normal magnitude exactly. Targets the [surface_output_dim, n_hidden]
+        # final projection — surface_out[-1] for aux_decoder_heads, surface_out.project
+        # for the LinearProjection branch.
+        if use_surface_orth_init:
+            if use_aux_decoder_heads:
+                final_linear = self.surface_out[-1]
+            else:
+                final_linear = self.surface_out.project
+            with torch.no_grad():
+                # gain = std * sqrt(fan_in) yields rows with expected L2 norm matching
+                # trunc_normal(std=surface_orth_init_std). For std=0.02, fan_in=512
+                # this is ~0.4525 (vs unit-norm gain=1.0).
+                fan_in = final_linear.weight.shape[1]
+                gain = surface_orth_init_std * (fan_in ** 0.5)
+                nn.init.orthogonal_(final_linear.weight, gain=gain)
+                if final_linear.bias is not None:
+                    final_linear.bias.zero_()
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).

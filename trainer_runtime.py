@@ -1060,6 +1060,54 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
     return merged
 
 
+def _tau_zx_ratio_stats(
+    case_sums_x: dict[str, list[float]],
+    case_sums_z: dict[str, list[float]],
+) -> dict[str, float]:
+    """H46 SDORTH (Wave 31): per-car tau_z/tau_x rel-L2 ratio diagnostic.
+
+    The historical attractor for this metric sits in [1.44, 1.55]. Tracking
+    mean/std/min/max + count-outside-band per epoch reveals whether an
+    intervention deflects the projection row coupling at the val level.
+    """
+    ratios: list[float] = []
+    for case_id, x_state in case_sums_x.items():
+        z_state = case_sums_z.get(case_id)
+        if z_state is None:
+            continue
+        x_err_sq, x_tgt_sq = x_state
+        z_err_sq, z_tgt_sq = z_state
+        if x_tgt_sq <= 0.0 or z_tgt_sq <= 0.0 or x_err_sq <= 0.0:
+            continue
+        x_rel = math.sqrt(x_err_sq / x_tgt_sq)
+        z_rel = math.sqrt(z_err_sq / z_tgt_sq)
+        if x_rel <= 0.0 or not math.isfinite(x_rel) or not math.isfinite(z_rel):
+            continue
+        ratios.append(z_rel / x_rel)
+    if not ratios:
+        return {
+            "tau_zx_ratio_mean": float("nan"),
+            "tau_zx_ratio_std": float("nan"),
+            "tau_zx_ratio_min": float("nan"),
+            "tau_zx_ratio_max": float("nan"),
+            "tau_zx_ratio_n_outside_band": 0.0,
+            "tau_zx_ratio_n_cars": 0.0,
+        }
+    n = len(ratios)
+    mean = sum(ratios) / n
+    var = sum((r - mean) ** 2 for r in ratios) / max(n - 1, 1) if n > 1 else 0.0
+    std = math.sqrt(var)
+    n_outside = sum(1 for r in ratios if r < 1.40 or r > 1.60)
+    return {
+        "tau_zx_ratio_mean": mean,
+        "tau_zx_ratio_std": std,
+        "tau_zx_ratio_min": min(ratios),
+        "tau_zx_ratio_max": max(ratios),
+        "tau_zx_ratio_n_outside_band": float(n_outside),
+        "tau_zx_ratio_n_cars": float(n),
+    }
+
+
 def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     surface_pressure_rel_l2, surface_cases = _rel_l2(accumulator.case_sums["surface_pressure"])
     wall_shear_rel_l2, wall_shear_cases = _rel_l2(accumulator.case_sums["wall_shear"])
@@ -1067,6 +1115,10 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     wall_shear_y_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_y"])
     wall_shear_z_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_z"])
     volume_pressure_rel_l2, volume_cases = _rel_l2(accumulator.case_sums["volume_pressure"])
+    tau_zx_stats = _tau_zx_ratio_stats(
+        accumulator.case_sums["wall_shear_x"],
+        accumulator.case_sums["wall_shear_z"],
+    )
     abupt_axis_mean_rel_l2 = _finite_mean(
         [
             surface_pressure_rel_l2,
@@ -1114,6 +1166,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "cases": max(surface_cases, wall_shear_cases, volume_cases),
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
+        **tau_zx_stats,
     }
 
 
