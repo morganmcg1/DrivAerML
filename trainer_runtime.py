@@ -837,6 +837,21 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def maybe_append_log_sdf(volume_x: torch.Tensor, use_log_sdf: bool) -> torch.Tensor:
+    """H31: append log(|sdf|+1e-3) as 5th channel for boundary-layer-distance feature.
+
+    DrivAerML volume SDF is positive-outside; the .abs() is a defensive wrap against
+    interpolation noise near zero. eps=1e-3 (1mm) gives a useful log range of
+    ~[-6.9, 4.4] across the [0, 80m] SDF span, with the viscous-sublayer regime
+    expanded relative to the linear far-field.
+    """
+    if not use_log_sdf:
+        return volume_x
+    sdf = volume_x[..., 3:4]
+    log_sdf = torch.log(sdf.abs() + 1e-3)
+    return torch.cat([volume_x, log_sdf], dim=-1)
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -960,16 +975,18 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    use_log_sdf_feature: bool = False,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
     volume_target_norm = transform.apply_volume(batch.volume_y)
+    volume_x = maybe_append_log_sdf(batch.volume_x, use_log_sdf_feature)
     eval_module = unwrap_model(model)
     with autocast_context(device, amp_mode):
         out = eval_module(
             surface_x=batch.surface_x,
             surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
+            volume_x=volume_x,
             volume_mask=batch.volume_mask,
         )
     surface_pred_norm = out["surface_preds"].float()
@@ -1126,6 +1143,7 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    use_log_sdf_feature: bool = False,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1137,6 +1155,7 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            use_log_sdf_feature=use_log_sdf_feature,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1471,7 +1490,14 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_log_sdf_feature=getattr(config, "use_log_sdf_feature", False),
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1491,7 +1517,14 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_log_sdf_feature=getattr(config, "use_log_sdf_feature", False),
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {

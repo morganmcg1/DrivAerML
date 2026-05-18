@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
-from data import DrivAerMLSurfaceDataset
+from data import DrivAerMLSurfaceDataset, VOLUME_X_DIM
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -55,6 +55,7 @@ from trainer_runtime import (
     loader_kwargs,
     make_loaders,
     masked_mse,
+    maybe_append_log_sdf,
     metric_namespace,
     weighted_channel_mse,
     parse_kill_thresholds,
@@ -103,6 +104,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_log_sdf_feature: bool = False  # H31: add log(|sdf|+1e-3) as 5th channel to volume_x
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -295,6 +297,9 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
 
 
 def build_model(config: Config) -> SurfaceTransolver:
+    # H31: VOLUME_X_DIM (4 = xyz + sdf) becomes 5 when --use-log-sdf-feature is set
+    # (appended log(|sdf|+1e-3) channel). volume_extra_dim adapts in SurfaceTransolver.
+    volume_input_dim = VOLUME_X_DIM + (1 if config.use_log_sdf_feature else 0)
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -308,6 +313,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        volume_input_dim=volume_input_dim,
     )
 
 
@@ -321,15 +327,17 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_log_sdf_feature: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    volume_x = maybe_append_log_sdf(batch.volume_x, use_log_sdf_feature)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
             surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
+            volume_x=volume_x,
             volume_mask=batch.volume_mask,
         )
         if surface_channel_weights is not None:
@@ -364,6 +372,8 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    use_log_sdf_feature: bool = False,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -376,11 +386,12 @@ def per_task_train_losses(
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    volume_x = maybe_append_log_sdf(batch.volume_x, use_log_sdf_feature)
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
             surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
+            volume_x=volume_x,
             volume_mask=batch.volume_mask,
         )
         surface_pred = out["surface_preds"]
@@ -939,7 +950,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model, batch, transform, device, config.amp_mode,
+                        use_log_sdf_feature=config.use_log_sdf_feature,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1030,6 +1042,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_log_sdf_feature=config.use_log_sdf_feature,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1233,6 +1246,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        use_log_sdf_feature=config.use_log_sdf_feature,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1247,6 +1261,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    use_log_sdf_feature=config.use_log_sdf_feature,
                 )
                 for name, loader in val_loaders.items()
             }
