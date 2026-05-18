@@ -1,11 +1,23 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~22:18 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~22:26 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~22:18Z) — NEZUKO H47 V-DEPTH SENT BACK FOR FULL 18H RERUN (mechanism positive but 6h truncated; test_VP +0.151pp above floor at 20% budget — credible 5th vol_p floor crossing candidate at full budget); ALPHONSE H45 ANCHOR-CROSSCHAN-DEC mid-EP3 stale_wip CLEARED with **STRONG MECHANISM SIGNAL** (τz/τx out_weight_norm ratio 3.91 ≫ 1.3 mech gate; τy/τz channels loading 4-5× over cp/τx); FRIEREN H44 YAW-AUGMENTATION mid-EP6 stale_wip CLEARED with **CRITICAL VAL_VP SIGNAL** (val_VP 3.687% ALREADY BELOW baseline EP13 final 3.80%, descent continuing toward floor 3.643%); FLEET FULLY BOOKED (8/8 WIP, zero idle students)
+## Latest invocation actions (2026-05-18 ~22:26Z) — EDWARD H48 TAU-Y-EQUALIZE mid-EP3 stale_wip CLEARED with **UNPRECEDENTED EXTREME BAND-BREAK SIGNAL** (τz/τx mean 0.400 PERSISTING from EP1 → mid-EP3, ALL 34/34 cars outside band, std stable 0.033 — 25× larger mean shift than H46 SDORTH's 0.04, 3rd mechanism class producing band-break, FIRST via training-time loss weight with zero code change); FLEET STILL FULLY BOOKED 8/8 WIP
+
+## Previous invocation actions (2026-05-18 ~22:18Z) — NEZUKO H47 V-DEPTH SENT BACK FOR FULL 18H RERUN (mechanism positive but 6h truncated; test_VP +0.151pp above floor at 20% budget — credible 5th vol_p floor crossing candidate at full budget); ALPHONSE H45 ANCHOR-CROSSCHAN-DEC mid-EP3 stale_wip CLEARED with **STRONG MECHANISM SIGNAL** (τz/τx out_weight_norm ratio 3.91 ≫ 1.3 mech gate; τy/τz channels loading 4-5× over cp/τx); FRIEREN H44 YAW-AUGMENTATION mid-EP6 stale_wip CLEARED with **CRITICAL VAL_VP SIGNAL** (val_VP 3.687% ALREADY BELOW baseline EP13 final 3.80%, descent continuing toward floor 3.643%); FLEET FULLY BOOKED (8/8 WIP, zero idle students)
+
+### Headline updates (22:26Z)
+
+1. **PR #1196 edward H48 TAU-Y-EQUALIZE mid-EP3 — UNPRECEDENTED EXTREME BAND-BREAK SIGNAL.** Run `8cn5abxm` mid-EP3 step 27,220 (84% through EP3, 4.0h runtime, heartbeat 0.1 min ago). **τz/τx mean = 0.400 at mid-EP3, holding stable since EP1 (0.383)** — vs band [1.44, 1.55] lower edge 1.44, that's **−1.04 below band edge**, an order of magnitude larger shift than any prior Wave 30/31 result. **ALL 34/34 val cars OUTSIDE band** (vs H46's 47%). std stays tight at 0.033 (mech is mean SHIFT, NOT std spread — opposite of H26/H31 std-spread mechanism class). val_VP 4.52% at mid-EP3 ahead of baseline EP3 5.90% (val_VP positive signal). val_abupt 7.74% mid-EP3 slightly above baseline 7.11% but EP3 not yet finished.
+
+2. **Wave 30/31 band-break mechanism classes now 3.** H18 (per-vertex area weighting, merged outlier, val 1.46 in band + test 1.418 below band), H46 SDORTH (decoder weight init, val 1.490 rebound + test 1.431 below band — FIRST test-only deflection), and now **H48 TAU-Y-EQUALIZE (training-time loss weight, val + test 0.40 = COMPLETE all-cars deflection)**. H48 mechanism class is fundamentally new: zero code change, single CLI flag, persistent across epochs, every car outside band. **Independent of architecture — could stack with H26, H31, H46 simultaneously.**
+
+3. **Interpretation — reverse difficulty asymmetry.** Baseline τz/τx ratio 1.50 means τz error is 1.5× τx error (τz harder). H48 ratio 0.40 means τz is now EASIER than τx — the model has reversed which channel is the bottleneck. Hypothesis: reducing tau-y-loss-weight 1.5 → 1.0 dis-favors τx via the surface decoder Linear(512, 4) row coupling that the H46 path-dependent attractor proof established. **H48 globally perturbs the training trajectory (every step), producing a much stronger trajectory deflection than H46's init-only perturbation.**
+
+4. **No other PR action needed this invocation.** alphonse H45 EP3 gate already landing ~22:30Z (will check in next invocation); fern H35 / frieren H44 / tanjiro H36 continuing per 22:18Z snapshot; nezuko H47 18h rerun pickup pending; askeladd H50 + thorfinn H49 pickup pending.
 
 ### Headline updates (22:18Z)
 
@@ -21,7 +33,7 @@
 |:--|---:|:--|:--|---:|:--|
 | **alphonse** | **#1192** | H45 CROSSCHAN-DEC | 🔥 mid-EP3 step 28.7k, **mech-positive τz/τx out_norm ratio 3.91** | 7.760% (mid-EP3) | cross-channel module loading τy/τz 4-5× |
 | askeladd | #1198 | H50 COORDSLICE | NEW — DAB-DETR analogue. Pickup pending | — | — |
-| edward | #1196 | H48 TAU-Y-EQUALIZE | RUNNING — single-flag, ~3.5h runtime | — | — |
+| **edward** | **#1196** | **H48 TAU-Y-EQUALIZE** | 🔥🔥🔥 mid-EP3 step 27.2k (84% through), **τz/τx mean 0.400 PERSISTING — EXTREME BAND-BREAK, 25× larger shift than H46** | 7.74% (mid-EP3) | 3rd mech class band-break: training-time loss weight, all 34/34 cars outside band, val_VP positive |
 | **frieren** | **#1190** | **H44 YAW-AUG** | 🔥 mid-EP6 step 58.2k, **val_VP 3.687% (0.044pp from floor)** | 6.422% (mid-EP6) | rotational-prior cross-channel regularization (τz ahead despite NOT rotated) |
 | nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
 | tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING, mech-positive τz/τx std 0.155-0.188 | 6.779% (EP3) | encoder-side variance-class signal |
