@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_per_channel_aux_heads: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_per_channel_aux_heads = use_per_channel_aux_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -498,6 +500,29 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        if use_per_channel_aux_heads:
+            # H34 OUTHEAD: per-channel auxiliary residual MLP heads.
+            # Each head outputs one scalar residual added to the corresponding
+            # column of surface_out's output. Last layer is zero-initialised so
+            # aux contribution at init is exactly 0 -> bit-exact baseline at
+            # step 0; gradients can grow the residuals if τ_z/τ_x rank-coupling
+            # in the shared surface_out projection is the bottleneck.
+            self.surface_aux_heads = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden // 2),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden // 2, 1),
+                )
+                for _ in range(self.surface_output_dim)
+            ])
+            for head in self.surface_aux_heads:
+                nn.init.kaiming_uniform_(head[0].weight, a=math.sqrt(5))
+                nn.init.zeros_(head[0].bias)
+                nn.init.zeros_(head[2].weight)
+                nn.init.zeros_(head[2].bias)
+        else:
+            self.surface_aux_heads = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -621,8 +646,16 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        surface_aux_out: torch.Tensor | None = None
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_pred = self.surface_out(surface_hidden)
+            if self.surface_aux_heads is not None:
+                # Per-channel residual corrections concatenated to [B, N, 4]
+                aux_outputs = [head(surface_hidden) for head in self.surface_aux_heads]
+                surface_aux = torch.cat(aux_outputs, dim=-1)
+                surface_aux_out = surface_aux * surface_mask.unsqueeze(-1)
+                surface_pred = surface_pred + surface_aux
+            surface_preds = surface_pred * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -639,4 +672,5 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "surface_aux_out": surface_aux_out,
         }

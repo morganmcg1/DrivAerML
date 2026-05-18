@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_per_channel_aux_heads: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_per_channel_aux_heads": (
+            "H34 OUTHEAD: add per-channel auxiliary residual MLP heads on "
+            "top of the shared surface_out projection. Each surface output "
+            "channel (cp, tau_x, tau_y, tau_z) gets its own 2-layer "
+            "Linear -> SiLU -> Linear residual head whose last layer is "
+            "zero-initialised, so the layer is identity at init and "
+            "preserves baseline at epoch 0. Tests whether the τz/τx band "
+            "attractor is head-side rank-coupling: independent residual "
+            "capacity per channel allows τ_z to break out of the [1.44, "
+            "1.55] band if the bottleneck is in the shared final projection."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +288,97 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+SURFACE_CHANNEL_NAMES = ("cp", "tau_x", "tau_y", "tau_z")
+
+
+def collect_aux_head_weight_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-channel auxiliary head weight diagnostics (H34 OUTHEAD).
+
+    Returns the L2 norm of the zero-initialised last layer's weight (and
+    bias) for each surface output channel. A norm > 0 means gradients have
+    flowed into the head and the aux residual is no longer identically
+    zero. Per-channel growth asymmetry is the head-side rank-coupling
+    mechanism signal.
+    """
+
+    heads = getattr(model, "surface_aux_heads", None)
+    if heads is None:
+        return {}
+    metrics: dict[str, float] = {}
+    for i, head in enumerate(heads):
+        name = SURFACE_CHANNEL_NAMES[i] if i < len(SURFACE_CHANNEL_NAMES) else f"ch{i}"
+        last_layer = head[2]
+        w = last_layer.weight.detach().float()
+        b = last_layer.bias.detach().float()
+        first_w = head[0].weight.detach().float()
+        metrics[f"aux_head/last_layer_weight_norm/{name}"] = float(w.norm().item())
+        metrics[f"aux_head/last_layer_bias_norm/{name}"] = float(b.norm().item())
+        metrics[f"aux_head/first_layer_weight_norm/{name}"] = float(first_w.norm().item())
+        metrics[f"aux_head/last_layer_abs_max/{name}"] = float(w.abs().max().item())
+    return metrics
+
+
+@torch.no_grad()
+def collect_aux_head_activation_metrics(
+    base_model: nn.Module,
+    loader,
+    device: torch.device,
+    amp_mode: str,
+    max_batches: int = 2,
+) -> dict[str, float]:
+    """Per-channel aux head output magnitude diagnostics (H34 OUTHEAD).
+
+    Runs up to ``max_batches`` forward passes through the (already DDP-
+    sharded) validation loader on the unwrapped base model and accumulates
+    the masked absolute-mean of the per-channel aux output residual.
+    Intended to be called from rank 0 only after the main distributed
+    evaluate_split has finished, so the unwrapped base_model carries the
+    EMA weights and DDP collectives are no longer in flight. Computes the
+    asymmetry ratio aux_tau_z / aux_tau_x as the head-side rank-coupling
+    mechanism signal: > 1 means τ_z residual is larger than τ_x.
+    """
+
+    if getattr(base_model, "surface_aux_heads", None) is None:
+        return {}
+    was_training = base_model.training
+    base_model.eval()
+    sums = torch.zeros(len(SURFACE_CHANNEL_NAMES), device=device, dtype=torch.float32)
+    counts = torch.zeros(len(SURFACE_CHANNEL_NAMES), device=device, dtype=torch.float32)
+    for i, batch in enumerate(loader):
+        if i >= max_batches:
+            break
+        batch = batch.to(device)
+        with autocast_context(device, amp_mode):
+            out = base_model(
+                surface_x=batch.surface_x,
+                surface_mask=batch.surface_mask,
+                volume_x=batch.volume_x,
+                volume_mask=batch.volume_mask,
+            )
+        aux = out.get("surface_aux_out")
+        if aux is None:
+            continue
+        mask = batch.surface_mask.unsqueeze(-1).to(aux.dtype)
+        n_pts = mask.sum().clamp(min=1.0).float()
+        per_channel_abs_sum = (aux.float().abs() * mask.float()).sum(dim=(0, 1))
+        sums += per_channel_abs_sum
+        counts += n_pts
+    if was_training:
+        base_model.train()
+    metrics: dict[str, float] = {}
+    abs_means: list[float] = []
+    for i, name in enumerate(SURFACE_CHANNEL_NAMES):
+        cnt = float(counts[i].item())
+        m = float((sums[i] / max(cnt, 1.0)).item()) if cnt > 0 else 0.0
+        metrics[f"aux_head/abs_mean/{name}"] = m
+        abs_means.append(m)
+    if abs_means[1] > 0.0:
+        metrics["aux_head/asymmetry_ratio"] = abs_means[3] / abs_means[1]
+    else:
+        metrics["aux_head/asymmetry_ratio"] = 0.0
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +411,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_per_channel_aux_heads=config.use_per_channel_aux_heads,
     )
 
 
@@ -1262,6 +1366,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_aux_head_weight_metrics(base_model))
+                if config.use_per_channel_aux_heads:
+                    log_metrics.update(
+                        collect_aux_head_activation_metrics(
+                            base_model,
+                            val_loaders["val_surface"],
+                            device,
+                            config.amp_mode,
+                            max_batches=2,
+                        )
+                    )
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
