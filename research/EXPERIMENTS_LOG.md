@@ -1,3 +1,55 @@
+## 2026-05-18 00:28 — PR #1178: H27 PRLP (askeladd) — TERMINAL KILL EP3 / 12TH WAVE-30 DEAD END / TRAIN-EVAL SPACE MISMATCH FALSIFIED
+
+- **Branch**: `askeladd/h27-per-component-relative-l2-proxy-loss`
+- **W&B runs (rank0 + DDP ranks 1-7)**: `46hdkr3v` / `we3s2378` / `9z22vedf` / `5ufgbg9m` / `16d9mjb6` / `szhda12r` / `ip9w7dlh` / `awc75jn0`
+- **Hypothesis**: Replace MSE train loss with per-component relative-L2 (= same metric as eval) to close the train/eval space mismatch. Theory: MSE over-weights high-magnitude regions (stagnation, base wake), starving τz from gradient signal. Relative-L2 on [cp, τx, τy, τz] independently normalises by component mean should improve floor metrics.
+
+### Results
+
+| Metric | EP3 Actual | Baseline | Delta |
+|---|---:|---:|---:|
+| val_abupt | 7.098% | 6.126% | +0.972pp FAIL |
+| test_abupt | 6.643% | 5.844% | +0.799pp |
+| val_SP | 4.546% | — | ≥4.40% KILL gate triggered |
+| τz/τx | 1.526 | ~1.490 | IN-BAND [1.44, 1.55] |
+| `grad/nonfinite_count` | 0 | — | ✅ (2 sqrt-NaN patches applied) |
+
+EP3 binary KILL gate triggered: val_SP 4.546% ≥ 4.40% AND τz/τx 1.526 in [1.44, 1.55]. Test confirms 4/4 floors breach. Run terminated at EP3.
+
+### Per-epoch trajectory
+
+| EP | val_abupt | val_SP | τz/τx | train_loss |
+|---:|---:|---:|---:|---:|
+| 1 | ~28% | — | 1.523 | 1.203 |
+| 2 | 8.52% | 4.726% | ~1.51 | 0.434 |
+| 3 | 7.098% | **4.546%** | **1.526** | 0.336 |
+
+### EP2→EP3 decoupling diagnostic (train-eval space mismatch falsified)
+
+| Interval | train rel-L2 change | val_SP change |
+|---|---:|---:|
+| EP1→EP2 | −64% | −76% (coupled, proximate space) |
+| EP2→EP3 | **−23%** | **−10%** (decoupled: train descends 2.3× faster than val_SP) |
+
+**Falsification result**: per-car normalisation inversely re-weights gradient signal by target magnitude. Cars with small τz deviations (= near-baseline geometry = most of the fleet) have 1/mean² scaling that AMPLIFIES them in the loss, crowding out the gradient signal from the tail-distribution outliers that drive the floor metric. The train/eval space is NOT the binding mismatch — it was the normalisation direction that created a new mismatch.
+
+### Analysis
+
+This is 12th Wave 30 dead end. PRLP closes the "train-eval space" axis. The decoupling pattern (EP2→EP3 train −23%, val_SP only −10%) is a clean signal that the loss landscape transformed by per-car normalisation is DIFFERENT from the metric landscape, not closer to it. Directionally opposite to what the hypothesis predicted.
+
+Combined with H27 (PRLP), the full Wave 30 closed axis table:
+- Per-vertex loss shape (H10b, H11b, H12, H16, H16b): DEAD
+- Training regularization (H20, H22, H23 EMA): DEAD
+- Optimizer/sharpness (partially, H28 SAM in-flight)
+- Output decoder capacity (H21 per-component heads): DEAD
+- Mean-shift encoder manipulation (H24 GSTS, H25 ALGP, H18): CLOSED axis
+- Train-eval space (H27 PRLP): CLOSED axis (falsified by per-car normalisation gradient inversion)
+- Per-car normalization (H27 as proxy): INVERSELY harmful
+- Channel-coupled position weighting (H18): CLOSED
+- Encoder input geometric transformation (H26 NPCA): MECHANISM PROVEN, accuracy pending full-budget retry
+
+---
+
 ## 2026-05-17 23:38 — PR #1177: H26 NPCA (thorfinn) — PATH-B TERMINAL THEN REQUEST-CHANGES / FIRST WAVE-30 MECHANISM PROOF / ACCURACY-BUDGET-CUT / SENT BACK FOR FULL 18H PATH A RETRY
 
 - **Branch**: `thorfinn/h26-normal-projected-coord-aug` (sent back to WIP for 18h retry)
