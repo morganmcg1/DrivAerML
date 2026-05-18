@@ -1,3 +1,36 @@
+## 2026-05-18 14:30 — PR #1177: H26 NPCA local-frame projection (thorfinn) — TERMINAL EP13 NOT-A-MERGE / 19TH WAVE-30 DEAD END / 2ND TEST_VOL_P FLOOR CROSSING (CANONICAL MECHANISM WIN WITH TEST-SIDE GENERALIZATION)
+
+- **Branch**: `thorfinn/h26-normal-projected-coord-aug`
+- **W&B runs**: 8-rank DDP, rank0 `gokysken` (13/13 epochs, 13.6h wall time, Path A full-budget retry of Path B mechanism-positive)
+- **Hypothesis**: Augment surface tokens with local-frame position projections `[p·n, p·t1, p·t2]` (Gram-Schmidt-derived tangent basis) to give the encoder explicit local geometric position information that breaks the global-z privilege driving τz/τx band attractor.
+- **Recipe**: `--use_local_frame_proj --use-surf-to-vol-xattn --epochs 13 --vp-schedule "0:16384:3:32768:6:49152:9:65536"` (~50 LOC implementation in model.py, identity-init via zero of 3 new input columns)
+- **Results table**:
+
+| Metric | val (EP12 EMA best) | test (EP12 EMA reload) | Baseline #972 test | Δ vs baseline test | Floor |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt** | **6.3462%** | — | 6.126% val | **+0.220pp** ✗ FAIL merge gate | — |
+| test_abupt | — | 6.0276% | 5.844% | +0.184pp ✗ regression | — |
+| test_SP | — | 3.8048% | 3.577% (floor) | **+0.228pp** ✗ **FLOOR BREACH** | 3.577% |
+| **test_vol_p** | — | **3.6079%** | 3.643% (floor) | **−0.035pp** ✅ **FLOOR PASS** (2ND IN WAVE 30) | 3.643% |
+| test_WSS | — | 6.9456% | 6.727% | +0.219pp ✗ above baseline | < 5.85% goal |
+| test_WSS_x | — | 6.1640% | 5.6071% | +0.557pp ✗ regression | — |
+| test_WSS_y | — | 7.5374% | 6.8397% | +0.698pp ✗ regression | — |
+| test_WSS_z | — | 9.0238% | 8.2585% | +0.765pp ✗ regression | — |
+| **val τz/τx mean / std** | **1.553 / 0.2587** | — | — | — | — |
+| **test τz/τx mean / std** | — | **1.467 / 0.1322** | 1.473 / ~0.02 | **mean ≈ baseline / std 6.6× baseline** | mech mean ≤1.42, std ≥ 0.05 |
+| **test n_outside_band** | 11/34 (32%) val | **24/50 (48%) test** | ~0% | — | ≥ 1/50 |
+
+- **Trajectory val_abupt EP1→EP13**: 25.605 → 7.780 → 6.909 → 6.615 → 6.541 → 6.475 → 6.437 → 6.412 → 6.394 → 6.372 → 6.353 → 6.346 (best) → 6.350 (slight regression EP13). Slope decelerated EP6→EP12 (−0.037 → −0.0068 pp/EP), cosine-LR engagement NEGATIVE, no EMA-tail boost.
+- **Trajectory τz/τx std EP1→EP13**: 0.092 → 0.185 → 0.228 → 0.241 → 0.249 → 0.250 → 0.252 → 0.253 → 0.256 → 0.255 → 0.257 → 0.259 (peak) → 0.259 (test 0.132). **13× baseline at val peak, 6.6× baseline at test — generalizes to held-out set, unique in Wave 30.**
+- **Trajectory n_outside_band [1.40, 1.60] EP1→EP13**: 20 → 11 → 13 → 13 → 14 → 12 → 13 → 12 → 12 → 12 → 12 → 11 → 12 (out of 34 val cars); terminal test: **24/50 = 48%** of test cars outside band.
+- **Mechanism analysis**: ENCODER-INPUT AXIS CONFIRMED at full scale with test-side generalization. NPCA produced distinct per-car τz/τx structure (std 13×/6.6× baseline val/test, max ratio 2.800 val / 1.831 test, min 1.297 val / 1.136 test). Distribution shape (bipolar, wide tails) preserved through all 13 epochs and all 4 volume curriculum stages. **2nd test_vol_p floor crossing in Wave 30** (−0.035pp below floor, joining H31 WALLDIST's −0.155pp from earlier same day). But **mean(τz/τx)** UNCHANGED at test (1.467 ≈ baseline 1.473) — surface decoder mean-preserves regardless of encoder-input diversity.
+- **Key Wave 30 structural conclusion (post-H26 update)**: The surface decoder's `Linear(512, 4)` final projection mean-preserves τz/τx regardless of upstream representation diversity. Encoder-input axis can produce per-car σ-level distribution change but cannot shift body-averaged mean. **The surface decoder projection row-coupling is the mean-driver**, structurally locking the band attractor. H26 is the canonical Wave 30 demonstration of this finding.
+- **What this preserves for Wave 31**: (a) NPCA local-frame feature is PROVEN volume-decoder-aligned + test-generalizing — available as baseline-friendly input enrichment for any Wave 31 hypothesis needing volume-side improvement. (b) H26 + H31 stack candidate for vol_p deepening to ~3.45% (compounding −0.155 + −0.035 vol_p floor crossings), but will compound val_abupt regression and test_SP breach without surface decoder fix. (c) Per-car τz/τx distribution diagnostic (mean / std / min / max / n_outside_band) is now CANONICAL — Wave 31 surface decoder hypotheses must demonstrate mean(τz/τx) < 1.44 at test (not just std spread). (d) EMA tail / cosine-LR engagement was negative at this LR — Wave 31 13ep recipe should not assume terminal acceleration.
+- **Implementation excellence (gold-standard)**: Smoke test with identity-init step-0 verification (model output = baseline at step 0 because new 3 columns zero-initialized), Path B 6h pre-flight before Path A 18h full retry, per-epoch τz/τx mean+std+min+max+n_outside_band logged at all 13 epochs, slope deceleration diagnosis posted at EP10/EP11/EP12 ahead of advisor question, cosine-LR engagement diagnostic produced clear negative read, honest accuracy-gap analysis throughout (no overclaiming), best-checkpoint EMA test reload pattern correctly executed. **Most rigorous mechanism analysis in Wave 30. Wave 31 documentation standard.**
+- **Closure rationale**: val_abupt 6.346% saturates 0.22pp above baseline (slope decelerated to −0.007 pp/EP at EP12, EP13 regressed slightly to 6.350% — no recovery possible), test_SP +0.228pp floor breach is structural (val_SP capped at 4.20% in training), surface-side mean unchanged on test. Mechanism win preserved as canonical Wave 30 citation. **thorfinn reassigned to H46 SDORTH (Surface-Decoder Orthogonal Row Initialization, PR # TBD)** — smallest-LOC attack on the structurally-locked surface decoder projection axis.
+
+---
+
 ## 2026-05-18 14:20 — PR #1185: H31 WALLDIST log-SDF input feature (alphonse) — TERMINAL EP13 NOT-A-MERGE / 18TH WAVE-30 DEAD END / FIRST TEST_VOL_P FLOOR CROSSING IN WAVE 30 (mechanism-class novel encoder-input result)
 
 - **Branch**: `alphonse/h31-walldist-log-sdf-input`
