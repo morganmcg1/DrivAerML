@@ -1,3 +1,32 @@
+## 2026-05-18 11:45 — PR #1183: H18d τz-only area weighting (tanjiro) — TERMINAL EP13 NOT-A-MERGE / 17TH WAVE-30 DEAD END / CHANNEL-DECOUPLED FALSIFIER OF "τz-SPECIFIC PHYSICS" / ONLY ABOVE-BAND VAL RUN IN WAVE 30
+
+- **Branch**: `tanjiro/h18d-channel-decoupled-tau-z-area-weight`
+- **W&B runs**: 8-rank DDP, rank0 `pp89ilpb` (13/13 epochs, 14.33h, best-checkpoint=EP13 EMA), 7 other rank runs preserved
+- **Hypothesis**: Channel-decoupled τz-only area weighting — apply per-vertex DR=7400× area weighting ONLY to τz output channel (not cp/τx/τy). Premise: H18's band-break (test τz/τx 1.418) was τz-specific physics, and isolating the area weight to τz alone should preserve the band-break while releasing cp/τx/τy from low-area starvation.
+- **Recipe**: `--area-weight-channels tau_z_only --use-area-weighted-loss --lr 9e-5 --epochs 13 --vol-points-schedule "0:16384:3:32768:6:49152:9:65536"` (10 LOC implementation change)
+- **Results table**:
+
+| Metric | val (EP13) | test (EP13 EMA) | Baseline #972 test | Δ vs baseline test | vs H18 (#1163) |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt** | **6.319%** | — | 6.126% val | **+0.193pp** ✗ | −0.250pp (better than H18) |
+| test_abupt | — | 6.182% | 5.844% | +0.338pp ✗ | −0.040pp |
+| test_SP | — | 3.856% | **3.577%** (floor) | **+0.279pp** ✗ FLOOR BREACH | partial recovery vs H18 3.916 |
+| test_vol_p | — | **3.637%** | **3.643%** (floor) | **−0.006pp ✓ marginal floor PASS** | +0.152pp vs H18 3.485 |
+| test_WSS | — | 7.126% | 6.727% goal | +0.399pp ✗ | −0.143pp (better than H18) |
+| **val τz/τx** | **1.633** | — | — | — | **INVERSE of H18's 1.418** |
+| test τz/τx | — | 1.528 | ~1.46 | +0.07 | INSIDE band (back to fleet attractor) |
+| Area weight DR | 7000-9000× | — | — | matches H18 spec | — |
+
+- **Trajectory val_abupt EP1→EP13**: 30.772 → 7.967 → 7.006 → 6.658 → 6.513 → 6.457 → 6.406 → 6.376 → 6.352 → 6.332 → 6.325 → 6.320 → **6.319** (saturating); τz/τx monotonically 1.634 → 1.748 (EP2) → 1.633 (EP13) — **ALWAYS ABOVE BAND on val (unique in Wave 30)**
+- **Conclusions**:
+  - **17th Wave 30 dead end. Position-based per-vertex area weighting decisively dead in BOTH directions of channel decoupling.**
+  - **Cleanest falsifier of "τz-specific physics" hypothesis**: H18's band-break (τz/τx 1.418) was NOT a τz-channel signal — it was a tied-loss-budget effect where area-starving cp/τx/τy *forced* the model to over-spend gradient on τz, producing 1.418 below-band as a budget-reallocation artifact.
+  - **Inverse mechanism demonstrated**: H18d decoupling released cp/τx/τy from starvation; τz drifted ABOVE band (1.633 val). The mirror-image of H18's coupling-induced tightening.
+  - **Train-eval space differential**: val τz/τx 1.633 → test τz/τx 1.528 (back inside band). Area weighting introduces a train-eval generalization mismatch — potentially useful in future stacking with H26 NPCA (variance-class, not position-class).
+  - **vol_p floor PASS preserved** (3.637%) — both H18 and H18d achieve floor PASS, suggesting area weighting on τz alone is sufficient to nudge vol_p down without channel coupling. **Useful diagnostic for vol_p mechanism**.
+  - **Implementation excellence**: 10 LOC change, smoke validated baseline recovery + channel composition, per-epoch trajectory logged cleanly, mechanism diagnosis posted ahead of advisor decisions.
+  - **Wave 31 implication**: stop attacking position-based per-vertex weighting (entire axis dead). The "tied-loss-budget" insight transfers to all future stacking ideas — channel coupling is the dominant lever, not per-channel physics.
+
 ## 2026-05-18 11:30 — PR #1182: H29 SSFL (frieren) — TERMINAL EP13 NOT-A-MERGE / 16TH WAVE-30 DEAD END / 1ST FREQUENCY-DOMAIN FALSIFIER / FLEET-LOW VAL
 
 - **Branch**: `frieren/h29-ssfl-streamwise-spectral`

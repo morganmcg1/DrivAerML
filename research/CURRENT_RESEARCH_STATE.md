@@ -5,7 +5,60 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~11:30Z) — FRIEREN H29 SSFL CLOSED EP13 (16TH WAVE 30 DE, 1ST FREQUENCY-DOMAIN FALSIFIER: val_abupt 6.3538% / τz/τx NEVER BROKE BAND / ALL TEST FLOORS BREACHED); FRIEREN REASSIGNED H44 YAW-AUGMENTATION (PR #1190, FIRST DATA-AUGMENTATION ATTACK IN HISTORY)
+## Latest invocation actions (2026-05-18 ~12:00Z) — TANJIRO H18D CLOSED EP13 (17TH WAVE 30 DE, CHANNEL-DECOUPLED AREA WEIGHT FALSIFIER: val_abupt 6.319%, τz/τx INVERSE ABOVE-BAND, test_SP FLOOR BREACH); TANJIRO REASSIGNED H36 ANCHOR-SLICE-QUERIES (PR #1191, DETR-LINE ARCHITECTURE ATTACK)
+
+### Headline updates (12:00Z)
+
+1. **PR #1183 tanjiro H18d CLOSED — 17th Wave 30 dead end.** Terminal EP13: val_abupt 6.319% (+0.193pp above baseline, per 05:05Z gate "val_abupt > 6.20% → not-a-merge"), test_SP 3.856% FLOOR BREACH, test_vol_p 3.637% marginal floor PASS, test_WSS 7.126% above goal. **τz/τx INVERSE signature**: val 1.633 (above band, only above-band run in Wave 30) → test 1.528 (back inside band). **Decisive channel-decoupled falsifier**: H18's band-break (1.418) was a tied-loss-budget artifact, NOT τz-physics. Decoupling τz-only released cp/τx/τy from starvation, τz drifted ABOVE band (mirror-image). **Per-vertex area weighting entire axis DEAD in both coupling directions (H18 coupled, H18d decoupled).**
+
+2. **PR #1191 tanjiro H36 ANCHOR-SLICE-QUERIES ASSIGNED.** First architecture-side spatial-awareness attack. Adds learned 3D anchor positions A ∈ R^{128×3} to slice queries: `q_s' = q_s + MLP_anchor(PE(A_s))`. Zero-init final MLP layer = bit-exact baseline at step 0. ~60 LOC model.py only. EP3 falsifier: std(τz/τx) ≥ 0.15 AND anchor diversity ≥ 0.10. Same mechanism class as H26 NPCA (variance-break) but from query-modulation side rather than coordinate-transform side. SpiderSolver/DAB-DETR theoretical precedent.
+
+### Wave 30 closure tally: 17 dead ends + 1 mechanism win (H26 NPCA) + 6 in-flight (Wave 30/31)
+
+| Tier | Count |
+|---|---:|
+| Loss-shape (all forms) | 9 |
+| Per-vertex position / training regularization | 5 |
+| Decoder capacity / aux heads / optimizer | 3 |
+| **TOTAL closures** | **17 + H18 merged test-side** |
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| **tanjiro** | **#1191** | **H36 ANCHOR-SLICE-QUERIES** | **NEW — architecture-side variance-break. ~60 LOC model.py only. Pickup pending** | — |
+| frieren | #1190 | H44 YAW-AUGMENTATION | NEW — first data-aug attack. Pickup pending | — |
+| alphonse | #1185 | H31 WALLDIST | **EP5.2 6.22% fleet-lead.** EP13 ~15-16Z | **6.22%** |
+| thorfinn | #1177 | H26 NPCA 18h | EP5.1 6.437%, variance mechanism. EP13 ~14:30Z | 6.437% |
+| askeladd | #1187 | H33 SLICEPE v2 | EP3 verdict DUE ~13:30Z | — |
+| edward | #1188 | H34 OUTHEAD v2 | EP1 should have landed. Awaiting read | — |
+| nezuko | #1184 | H30 V2S xattn | EP5 6.42%, continuing | 6.42% |
+| fern | #1189 | H35 NPCA-SSFL-STACK | v2 pre-EP1 | — |
+
+### Research map (current)
+
+**Closed tiers (never try again):**
+- All loss-shape forms: per-vertex, per-channel, frequency-domain (H29 SSFL), spatial
+- Per-vertex position weighting: both coupled (H18) and decoupled (H18d)
+- Training regularization (H23)
+- Optimizer-space (H28 SAM)
+
+**Open tiers (active attacks):**
+- **NPCA/coordinate-representation** (H26 thorfinn — only mechanism win; H35 fern stacking)
+- **Slice-query architecture** (H33 askeladd SLICEPE EP3 verdict IMMINENT; H36 tanjiro ANCHOR — more expressive)
+- **Data augmentation** (H44 frieren — first attack on this tier)
+- **Decoder structure** (H34 edward OUTHEAD; H30 nezuko V2S xattn)
+
+### Imminent decisions (next 4h)
+
+1. **askeladd H33 v2 EP3 ~13:30Z** — mechanism gate (τz/τx ≤ 1.42 + slice_pe spread ≥ 0.05). Critical: if H33 passes, H36 is HIGH priority complement; if fails, slice-query positional-encoding axis is narrowed.
+2. **thorfinn H26 EP13 ~14:30Z** — BASELINE-BEAT candidate (linear projection 5.95%)
+3. **tanjiro H18d EP13 ~14:25Z** — ALREADY COMPLETE (this invocation, closed)
+4. **alphonse H31 EP13 ~15-16Z** — fleet-lead, val_WSS-best
+
+---
+
+## Previous invocation actions (2026-05-18 ~11:30Z) — FRIEREN H29 SSFL CLOSED EP13 (16TH WAVE 30 DE, 1ST FREQUENCY-DOMAIN FALSIFIER: val_abupt 6.3538% / τz/τx NEVER BROKE BAND / ALL TEST FLOORS BREACHED); FRIEREN REASSIGNED H44 YAW-AUGMENTATION (PR #1190, FIRST DATA-AUGMENTATION ATTACK IN HISTORY)
 
 ### Headline updates (11:30Z)
 
