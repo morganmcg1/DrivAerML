@@ -680,6 +680,9 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        crosschan_residuals: torch.Tensor | None = None
+        crosschan_mask: torch.Tensor | None = None
+        crosschan_attn_weights: torch.Tensor | None = None
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
             if self.crosschan_attn is not None and surface_hidden.shape[1] > 0:
@@ -714,7 +717,10 @@ class SurfaceTransolver(nn.Module):
                 channel_residuals = channel_residuals.reshape(B, N, C)
                 channel_residuals = channel_residuals * surface_mask.unsqueeze(-1)
                 surface_preds = surface_preds + channel_residuals
-                self._last_crosschan_residuals = channel_residuals.detach()
+                crosschan_residuals = channel_residuals.detach()
+                crosschan_mask = surface_mask.detach()
+                self._last_crosschan_residuals = crosschan_residuals
+                self._last_crosschan_mask = crosschan_mask
                 # Diagnostic attention weights at eval only — need_weights=True
                 # forces the math backend which materializes the attention matrix.
                 if not self.training and (B * N) > 0:
@@ -727,10 +733,8 @@ class SurfaceTransolver(nn.Module):
                         need_weights=True,
                         average_attn_weights=True,
                     )
-                    self._last_crosschan_attn_weights = attn_weights.detach()
-                else:
-                    self._last_crosschan_attn_weights = None
-                self._last_crosschan_mask = surface_mask.detach()
+                    crosschan_attn_weights = attn_weights.detach()
+                self._last_crosschan_attn_weights = crosschan_attn_weights
             else:
                 self._last_crosschan_residuals = None
                 self._last_crosschan_attn_weights = None
@@ -754,4 +758,7 @@ class SurfaceTransolver(nn.Module):
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
+            "crosschan_residuals": crosschan_residuals,
+            "crosschan_mask": crosschan_mask,
+            "crosschan_attn_weights": crosschan_attn_weights,
         }

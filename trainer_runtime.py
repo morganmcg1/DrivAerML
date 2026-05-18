@@ -897,6 +897,9 @@ EVAL_KEYS = (
 )
 
 
+_CROSSCHAN_CHANNELS: tuple[str, ...] = ("cp", "tau_x", "tau_y", "tau_z")
+
+
 @dataclass
 class EvalAccumulator:
     surface_loss_sse: float = 0.0
@@ -910,6 +913,19 @@ class EvalAccumulator:
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
+    # Cross-channel decoder diagnostics (PR #1192). Plumbed through the forward
+    # output dict because instance-attribute side effects from forward() are
+    # not reliably observable across the DDP eval path.
+    crosschan_residual_abs_sum: list[float] = field(
+        default_factory=lambda: [0.0] * len(_CROSSCHAN_CHANNELS)
+    )
+    crosschan_residual_count: int = 0
+    crosschan_attn_entropy_sum: float = 0.0
+    crosschan_attn_entropy_count: int = 0
+    crosschan_attn_entropy_max: float = float("-inf")
+    crosschan_attn_entropy_min: float = float("inf")
+    crosschan_attn_diag_sum: float = 0.0
+    crosschan_attn_diag_count: int = 0
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -972,6 +988,7 @@ def accumulate_eval_batch(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+    _accumulate_crosschan_diag(accumulator, out)
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
@@ -1041,6 +1058,42 @@ def accumulate_eval_batch(
             )
 
 
+def _accumulate_crosschan_diag(
+    accumulator: EvalAccumulator, out: dict[str, torch.Tensor | None]
+) -> None:
+    residuals = out.get("crosschan_residuals")
+    mask = out.get("crosschan_mask")
+    if residuals is not None and mask is not None:
+        residuals_f = residuals.float()
+        mask_f = mask.float().unsqueeze(-1)
+        denom = float(mask_f.sum().detach().cpu().item())
+        if denom > 0.0:
+            per_channel_abs_sum = (residuals_f.abs() * mask_f).sum(dim=(0, 1))
+            per_channel_abs_sum_cpu = per_channel_abs_sum.detach().cpu().tolist()
+            for i, value in enumerate(per_channel_abs_sum_cpu):
+                if i < len(accumulator.crosschan_residual_abs_sum):
+                    accumulator.crosschan_residual_abs_sum[i] += float(value)
+            accumulator.crosschan_residual_count += int(denom)
+
+    attn_weights = out.get("crosschan_attn_weights")
+    if attn_weights is not None:
+        probs = attn_weights.float().clamp_min(1e-12)
+        entropy = -(probs * probs.log()).sum(dim=-1)  # [B*N, C]
+        accumulator.crosschan_attn_entropy_sum += float(entropy.sum().detach().cpu().item())
+        accumulator.crosschan_attn_entropy_count += int(entropy.numel())
+        accumulator.crosschan_attn_entropy_max = max(
+            accumulator.crosschan_attn_entropy_max,
+            float(entropy.max().detach().cpu().item()),
+        )
+        accumulator.crosschan_attn_entropy_min = min(
+            accumulator.crosschan_attn_entropy_min,
+            float(entropy.min().detach().cpu().item()),
+        )
+        diag = probs.diagonal(dim1=-2, dim2=-1)  # [B*N, C]
+        accumulator.crosschan_attn_diag_sum += float(diag.sum().detach().cpu().item())
+        accumulator.crosschan_attn_diag_count += int(diag.numel())
+
+
 def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccumulator:
     merged = EvalAccumulator()
     for accumulator in accumulators:
@@ -1057,6 +1110,21 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
                 state = merged.case_sums[key].setdefault(case_id, [0.0, 0.0])
                 state[0] += values[0]
                 state[1] += values[1]
+        for i, value in enumerate(accumulator.crosschan_residual_abs_sum):
+            if i < len(merged.crosschan_residual_abs_sum):
+                merged.crosschan_residual_abs_sum[i] += value
+        merged.crosschan_residual_count += accumulator.crosschan_residual_count
+        merged.crosschan_attn_entropy_sum += accumulator.crosschan_attn_entropy_sum
+        merged.crosschan_attn_entropy_count += accumulator.crosschan_attn_entropy_count
+        if accumulator.crosschan_attn_entropy_count > 0:
+            merged.crosschan_attn_entropy_max = max(
+                merged.crosschan_attn_entropy_max, accumulator.crosschan_attn_entropy_max
+            )
+            merged.crosschan_attn_entropy_min = min(
+                merged.crosschan_attn_entropy_min, accumulator.crosschan_attn_entropy_min
+            )
+        merged.crosschan_attn_diag_sum += accumulator.crosschan_attn_diag_sum
+        merged.crosschan_attn_diag_count += accumulator.crosschan_attn_diag_count
     return merged
 
 
@@ -1086,7 +1154,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     loss = (accumulator.surface_loss_sse + accumulator.volume_loss_sse) / max(
         accumulator.surface_loss_count + accumulator.volume_loss_count, 1
     )
-    return {
+    finalized: dict[str, float] = {
         "loss": loss,
         "surface_loss": accumulator.surface_loss_sse / max(accumulator.surface_loss_count, 1),
         "volume_loss": accumulator.volume_loss_sse / max(accumulator.volume_loss_count, 1),
@@ -1115,6 +1183,38 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
     }
+    crosschan_metrics = _finalize_crosschan_diagnostics(accumulator)
+    if crosschan_metrics:
+        finalized.update(crosschan_metrics)
+    return finalized
+
+
+def _finalize_crosschan_diagnostics(accumulator: EvalAccumulator) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    res_count = accumulator.crosschan_residual_count
+    if res_count > 0:
+        per_channel_mean: list[float] = []
+        for i, name in enumerate(_CROSSCHAN_CHANNELS):
+            mean_val = accumulator.crosschan_residual_abs_sum[i] / float(res_count)
+            metrics[f"crosschan/residual_abs_mean/{name}"] = mean_val
+            per_channel_mean.append(mean_val)
+        tau_x_mean = per_channel_mean[1]
+        tau_z_mean = per_channel_mean[3]
+        if tau_x_mean > 0.0:
+            metrics["crosschan/residual_asymmetry_ratio"] = tau_z_mean / tau_x_mean
+        else:
+            metrics["crosschan/residual_asymmetry_ratio"] = 0.0
+    if accumulator.crosschan_attn_entropy_count > 0:
+        metrics["crosschan/attn_entropy_mean"] = (
+            accumulator.crosschan_attn_entropy_sum / float(accumulator.crosschan_attn_entropy_count)
+        )
+        metrics["crosschan/attn_entropy_max"] = accumulator.crosschan_attn_entropy_max
+        metrics["crosschan/attn_entropy_min"] = accumulator.crosschan_attn_entropy_min
+    if accumulator.crosschan_attn_diag_count > 0:
+        metrics["crosschan/attn_diag_mean"] = (
+            accumulator.crosschan_attn_diag_sum / float(accumulator.crosschan_attn_diag_count)
+        )
+    return metrics
 
 
 @torch.no_grad()

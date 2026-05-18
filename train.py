@@ -1340,6 +1340,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
                 log_metrics.update(collect_crosschan_metrics(base_model))
+                # Promote eval-accumulated crosschan diagnostics to top-level
+                # (val_metrics ships them through accumulator plumbing because
+                # forward-side instance attributes are not reliably visible to
+                # the post-eval collect step in the DDP path).
+                for key, value in val_metrics["val_surface"].items():
+                    if key.startswith("crosschan/"):
+                        log_metrics[key] = value
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
