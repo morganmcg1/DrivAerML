@@ -5,7 +5,48 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~09:00Z) — EDWARD H34 OUTHEAD self-killed by `--kill-thresholds` step-prefix misconfig (RELAUNCH INSTRUCTED with step-indexed gates); ASKELADD H33 v2 self-corrected and HEALTHY at mid-EP2; HUMAN STATUS REPLY POSTED to issue #1056
+## Latest invocation actions (2026-05-18 ~09:30Z) — EDWARD H34 V2 LAUNCHED (corrected `--kill-thresholds`, step 3399 healthy); FERN H35 V2 LAUNCHED (after v1 self-kill, smoke crash fixes); TANJIRO H18D EP9 MARGINAL 6.325% (continuing to EP13); ASKELADD H33 V2 MID-EP2 healthy (EP1 τz/τx=1.432 + slice_pe DIFFERENTIATING); ISSUE #1056 WSS REPLY POSTED
+
+### Headline updates (09:30Z)
+
+1. **Edward H34 OUTHEAD v2 LIVE** — run `iw2ommjz`, step 3399, _runtime 0.52h, kill_thresholds correctly step-indexed (`32594:val_abupt<9.5,32594:val_SP<5.5`). EP1 val ETA ~10:30Z. Mechanism diagnostic at EP1: aux head asymmetry_ratio τz/τx (was 0.46 INVERTED on v1 — could be warmup-half-LR artifact). EP3 reading decisive.
+
+2. **Fern H35 NPCA-SSFL-STACK v2 LIVE** — run `7zkdf9xv`, step 467, _runtime 0.07h. Path to v2: smoke v1 (`m042d0nj`) crashed at step 5249 → smoke v2 (`uwkejqqf`) orthofix crashed at step 252 → main v1 (`cat0c0eb`) self-killed at EP1 (27.2% — same kill_thresholds pitfall) → v2 (`7zkdf9xv`) with correct step-indexed gate `25000:val_abupt<9.5`. First Wave 31 mechanism-stack experiment in-flight. EP1 val ETA ~11Z.
+
+3. **Tanjiro H18D EP9 landed: val_abupt 6.325% MARGINAL** (between PASS ≤6.25 and KILL >6.35). val_SP 4.072% also marginal. **CONTINUE TO EP13 per 05:05Z directive standing.** Critical data: **val_VP 3.648% AT test_vol_p floor (3.643%)** — H18 had val→test gap −0.158pp on vol_p, projecting test_vol_p ~3.49% solid floor PASS. **τz/τx 1.636 INVERSE signature** (above-band, only Wave 30 run that's bypassed the [1.44, 1.55] attractor entirely). EP13 projection 6.16-6.25% — knife-edge for sub-baseline; even if no merge, mechanism diagnostic is unique.
+
+4. **Askeladd H33 SLICEPE v2 HEALTHY mid-EP2** (run `u58fwoym`, step 15653, _runtime 2.31h). EP1 reading: **τz/τx = 1.432 — just under band lower edge** (strong cold-start break). **slice_pe DIFFERENTIATING layer-by-layer** (inter_slice_cos: L0=0.0026 → L4=0.0201, deeper layers more differentiated as hypothesis predicts). Strongest EP1 mechanism reading of Wave 30 (both surface τ-channel AND position-identity signals firing). EP3 verdict ~13:30Z — if τz/τx stays <1.42 with active slice_pe spread, H33 becomes Wave 30's second mechanism-positive (after H26 NPCA).
+
+5. **Issue #1056 WSS reply posted at 09:30Z** — Morgan complained "you haven't given a single WSS test metric here!!" Replied with explanation that test_WSS is only available at EP13 terminal + complete val_WSS table for 8 in-flight runs (best val_WSS: alphonse H31 WALLDIST 7.035%, frieren H29 SSFL 7.166%, nezuko H30 7.303%, thorfinn H26 7.305%). Committed to always including val_WSS + τz/τx ratio in future status updates.
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| fern | #1189 | H35 NPCA-SSFL-STACK | **v2 LIVE** step 467, kill_thresholds correct. EP1 ~11Z | — (pre-EP1) |
+| alphonse | #1185 | H31 WALLDIST | **FLEET-LEAD** EP5.2 6.22%, val_vol_p best-in-fleet. EP6-EP7 imminent | **6.22%** |
+| thorfinn | #1177 | H26 NPCA 18h | EP5.1 6.437% (consistent with prior 6.541% EP5 report). 6h screening run finished 6.97% | 6.437% |
+| askeladd | #1187 | H33 SLICEPE v2 | Mid-EP2 step 15653, τz/τx=1.432, slice_pe diff'ing. EP3 ~13:30Z | — (mid-EP2) |
+| edward | #1188 | H34 OUTHEAD v2 | **v2 LIVE** step 3399, kill_thresholds correct. EP1 ~10:30Z | — (pre-EP1) |
+| frieren | #1182 | H29 SSFL | EP6.2 6.36%, slope flat (saturating). EP9-EP13 watch | 6.36% |
+| tanjiro | #1183 | H18d | **EP9 6.325% MARGINAL**, val_VP 3.648% AT floor, τz/τx 1.636 INVERSE. EP13 ~14:25Z | 6.325% |
+| nezuko | #1184 | H30 V2S xattn | EP5.0 6.42%, continuing to terminal | 6.42% |
+
+### Critical near-term watch (next 6h chronological)
+
+1. **edward H34 v2 EP1 ~10:30Z** — safety + asymmetry_ratio re-read (was 0.46 INVERTED on v1)
+2. **fern H35 v2 EP1 ~11Z** — safety (need val_abupt < 35%, no nonfinites)
+3. **frieren H29 EP13 ~13Z** — terminal verdict, test eval, fleet-low candidate
+4. **askeladd H33 v2 EP3 ~13:30Z** — mechanism gate (slice_pe + τz/τx)
+5. **tanjiro H18d EP13 ~14:25Z** — terminal, val_abupt sub-baseline knife-edge
+6. **thorfinn H26 EP13 ~14:30Z** — terminal, BASELINE-BEAT candidate, std(τz/τx) critical
+7. **alphonse H31 EP13 ~15-16Z** — fleet-lead val_abupt, val_WSS-best run, terminal
+
+**Three baseline-beat candidates in this window: alphonse H31 (6.22% at EP5.2, slope strong), thorfinn H26 (6.437% EP5.1 + variance mechanism break), tanjiro H18d (knife-edge but only above-band τz/τx — orthogonal mechanism).**
+
+---
+
+## Previous invocation actions (2026-05-18 ~09:00Z) — EDWARD H34 OUTHEAD self-killed by `--kill-thresholds` step-prefix misconfig (RELAUNCH INSTRUCTED with step-indexed gates); ASKELADD H33 v2 self-corrected and HEALTHY at mid-EP2; HUMAN STATUS REPLY POSTED to issue #1056
 
 ### Headline updates (09:00Z)
 
