@@ -1,3 +1,33 @@
+## 2026-05-18 14:20 — PR #1185: H31 WALLDIST log-SDF input feature (alphonse) — TERMINAL EP13 NOT-A-MERGE / 18TH WAVE-30 DEAD END / FIRST TEST_VOL_P FLOOR CROSSING IN WAVE 30 (mechanism-class novel encoder-input result)
+
+- **Branch**: `alphonse/h31-walldist-log-sdf-input`
+- **W&B runs**: 8-rank DDP, rank0 `x54o3ang` (13/13 epochs, 842 min wall time, peak GPU 94.9 GiB)
+- **Hypothesis**: Add log-SDF feature `log(|sdf|+1e-3)` as a 5th volume input channel to give the encoder uniform sensitivity across boundary-layer regimes. Predicted to improve volume_pressure decoder first (short composition path) and surface τ_z second via S2V cross-attention transport.
+- **Recipe**: `--use-log-sdf-feature --use-surf-to-vol-xattn --epochs 13 --vp-schedule "0:16384:3:32768:6:49152:9:65536"` (12 LOC implementation change — smallest in Wave 30)
+- **Results table**:
+
+| Metric | val (EP13) | test (EP13 EMA) | Baseline #972 test | Δ vs baseline test | Floor |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt** | **6.1735%** | — | 6.126% val | **+0.0475pp** ✗ FAIL merge gate | — |
+| test_abupt | — | 5.9014% | 5.844% | +0.057pp ✗ regression | — |
+| test_SP | — | 3.7536% | 3.577% (floor) | **+0.177pp** ✗ **FLOOR BREACH** | 3.577% |
+| **test_vol_p** | — | **3.4880%** | 3.643% (floor) | **−0.155pp** ✅ **FLOOR PASS** (FIRST IN WAVE 30) | 3.643% |
+| test_WSS | — | 6.7994% | 6.727% | +0.072pp ✗ above baseline | < 5.85% goal |
+| test_WSS_x | — | 6.0224% | 5.6071% | +0.415pp ✗ regression | — |
+| test_WSS_y | — | 7.3933% | 6.8397% | +0.554pp ✗ regression | — |
+| test_WSS_z | — | 8.8500% | 8.2585% | +0.591pp ✗ regression | — |
+| **val τz/τx** | **1.567** | — | — | — | — |
+| **test τz/τx** | — | **1.470** | 1.473 | −0.003 (statistically identical to baseline) | mech ≤1.42 |
+
+- **Trajectory val_abupt EP1→EP13**: 25.813 → 7.416 → 6.679 → 6.417 → 6.364 → 6.300 → 6.259 → 6.223 → 6.197 → 6.187 → 6.186 → 6.176 → 6.174 (saturating fleet-lead); val_WSS 6.942% at EP6 was 0.27pp ahead of next-best fleet run.
+- **Trajectory val_VP EP3→EP13**: 4.030 → 3.893 → 3.829 → 3.770 → 3.720 → 3.702 → 3.685 → 3.663 → 3.660 → 3.659 → 3.652 → 3.650 → 3.652 (CROSSED 3.643 floor at EP12-13).
+- **Trajectory τz/τx EP1→EP13**: 1.376 → 1.536 → 1.541 → 1.550 → 1.557 → 1.562 → 1.563 → 1.567 → 1.565 → 1.567 → 1.567 → 1.567 → 1.567 (EP1 deepest band-deflection in Wave 30 history tied with H25, monotonically pulled back to attractor by EP4, drifts ABOVE band by EP7 and holds there).
+- **Mechanism analysis**: VOLUME SIDE CONFIRMED (first test_vol_p floor crossing, log-SDF gives encoder boundary-layer-regime uniformity that vol_p decoder reads directly via short composition path). SURFACE SIDE REJECTED (9th cold-start fade in Wave 30: EP1 τz/τx 1.376 → EP13 test 1.470 ≈ baseline 1.473). SP REGRESSION UNEXPECTED (val_SP capped at 4.16% in training but test_SP +0.177pp floor breach — changed volume encoder representation flows to cp head via S2V xattn in a way the baseline cp head can't decode as cleanly).
+- **Key Wave 30 structural conclusion**: H31 + H21 + H25 + H30 V2S + H26 NPCA now triangulate that **the τz/τx band attractor lives in the SURFACE DECODER residual representation, NOT in the encoder input space, NOT in the volume pathway, NOT in the loss formulation, NOT in the auxiliary head**. Encoder-input feature axis CAN crack the vol_p floor (H31 first proof) but CANNOT break the surface-side τz/τx band attractor on test. **9 cold-start fades across 5 mechanism axes (encoder/loss/optimizer/aux-head/regularization) prove the attractor is downstream of all of them.** Next attack class MUST target the surface decoder structure itself.
+- **What this preserves for Wave 31**: log-SDF feature is now PROVEN volume-decoder-aligned and available as a baseline-friendly modification for any Wave 31 stack needing volume-side improvement. H31+H30 V2S stack candidate conditional on H30 V2S terminal (currently projecting NOT-A-MERGE). pseudo-y+ feature (`log(|sdf|/nu)`) and other encoder-input enrichments documented as low-priority follow-ups.
+- **Implementation excellence**: 12 LOC total, offline test-eval script agreeing with in-training eval to 4 sig figs, dual-launch race incident handled cleanly (00:43Z orphan crashed within 3 min, no metric impact), per-epoch trajectory logged consistently, mechanism diagnosis posted ahead of advisor decision.
+- **Closure rationale**: val merge gate missed, test_SP floor breached, surface-side mechanism rejected — no follow-up parameter variation would change the merge outcome. Closed cleanly. alphonse reassigned to H45 ANCHOR-CROSSCHAN-DEC (Surface Decoder Cross-Channel Attention, first Wave 31 surface decoder structural attack).
+
 ## 2026-05-18 11:45 — PR #1183: H18d τz-only area weighting (tanjiro) — TERMINAL EP13 NOT-A-MERGE / 17TH WAVE-30 DEAD END / CHANNEL-DECOUPLED FALSIFIER OF "τz-SPECIFIC PHYSICS" / ONLY ABOVE-BAND VAL RUN IN WAVE 30
 
 - **Branch**: `tanjiro/h18d-channel-decoupled-tau-z-area-weight`

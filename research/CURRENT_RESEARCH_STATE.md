@@ -1,11 +1,89 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~12:50 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~14:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~12:30Z) — FRIEREN H44 IMPLEMENTATION DEVIATION RESOLVED (z-axis yaw correct, PR template had coord-convention bug); H44 RUN HEALTHY MID-EP1 (step 7551, runtime 67min); ADVISOR TEMPLATE LESSON LOCKED (DrivAerML uses z=vertical, NOT y)
+## Latest invocation actions (2026-05-18 ~14:20Z) — ALPHONSE H31 WALLDIST CLOSED EP13 (18TH WAVE 30 DE, **FIRST test_vol_p FLOOR CROSSING IN WAVE 30**); ALPHONSE REASSIGNED H45 ANCHOR-CROSSCHAN-DEC (PR #1192, **FIRST SURFACE-DECODER STRUCTURAL ATTACK** — missing axis after Wave 30 mechanism-class lock); WAVE 30 STRUCTURAL FINDING LOCKED (τz/τx ATTRACTOR LIVES IN SURFACE DECODER RESIDUAL — 9 cold-start fades across 5 mechanism axes)
+
+### Headline updates (14:20Z)
+
+1. **PR #1185 alphonse H31 CLOSED — 18th Wave 30 dead end with MECHANISM WIN.** Terminal: val_abupt 6.1735% (FAIL +0.0475pp), test_abupt 5.9014% (FAIL +0.057pp), test_SP 3.7536% **FLOOR BREACH** +0.177pp, test_vol_p 3.4880% **FLOOR PASS** −0.155pp ✅ **FIRST test_vol_p floor crossing in Wave 30 history**, test_WSS 6.799% (+0.072pp regression vs baseline). Volume side mechanism CONFIRMED: log-SDF gives encoder uniform sensitivity across boundary-layer regimes, vol decoder reads directly through short composition path. Surface side REJECTED: τz/τx 1.470 statistically identical to baseline 1.473 — 9th cold-start fade in Wave 30.
+
+2. **Wave 30 structural finding LOCKED.** After 18 closures + 1 mechanism-win (H26 NPCA EP3 only): **the [1.44, 1.55] τz/τx band attractor lives in the SURFACE DECODER's residual representation, NOT in any encoder-input/loss/optimizer/regularization/aux-head pathway.** Evidence: 9 cold-start fades (H18/H20/H24/H25/H26 Path B/H29/H30 V2S/H18d/H31) across 5 different mechanism axes. The next attack class MUST target surface decoder structure.
+
+3. **PR #1192 alphonse H45 ANCHOR-CROSSCHAN-DEC ASSIGNED — first Wave 31 surface-decoder structural attack.** Cross-channel attention OVER the 4 output dimensions {cp, τ_x, τ_y, τ_z} BEFORE the final `Linear(512, 4)` projection. Each channel becomes a query attending to others' representations. Zero-init final attention layer → bit-exact baseline at step 0. ~50 LOC model.py only. EP3 falsifier: val_abupt ≤ 7.0% AND τz/τx ≤ 1.45 with std ≥ 0.10 AND crosschan_residual_asymmetry_ratio > 1.5. Mechanism-class-novel: none of the 18 closed Wave 30 hypotheses or 5 in-flight runs attack the surface decoder's pre-projection representation. Theoretical motivation: if `Linear(512, 4)` rows are rank-coupled for τ_x and τ_z, decoupling-via-input-orthogonalization (NeRF/DETR/SpiderSolver pattern) lets each channel project from orthogonal vectors.
+
+### Wave 30 closure tally: 18 dead ends + 1 mechanism win (H26 NPCA EP3 only)
+
+| Closure # | Hypothesis | Tier | Mechanism contribution |
+|---:|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape | none |
+| 8 | H23 Mean Teacher | Training-reg | none |
+| 9 | H18 area-weighted MSE | Per-vertex position | τz mean-shift artifact (merged test-side as outlier) |
+| 10 | H21 per-component heads | Decoder capacity | none |
+| 11 | H25 ALGP | Aux head | EP1 deflection only |
+| 12 | H27 PRLP | Train-eval space | none |
+| 13 | H32 DIFFATTN | Attention | none |
+| 14 | H28 SAM | Optimizer | none |
+| 15 | H24 GSTS | Encoder slice-temp | none |
+| 16 | H29 SSFL | Frequency loss | spectral_loss descended only |
+| 17 | H18d τz-only area | Channel-decoupled position | INVERSE band-break diagnostic |
+| **18** | **H31 WALLDIST** | **Encoder-input feature** | **🏆 FIRST test_vol_p floor crossing** |
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| **alphonse** | **#1192** | **H45 ANCHOR-CROSSCHAN-DEC** | **NEW — first surface-decoder structural attack. Pickup pending** | — |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING — `wave31_h36_anchor_slice_queries`, mid-EP1 | — |
+| frieren | #1190 | H44 YAW-AUGMENTATION | RUNNING — z-axis yaw, `wave31_h44_yaw_augmentation`, mid-EP1 | — |
+| thorfinn | #1177 | H26 NPCA 18h | EP7 step 67932 val_abupt 6.346%, val_WSS 7.170%, val_VP 3.750%. EP13 ~17:00Z | 6.346% |
+| askeladd | #1187 | H33 SLICEPE v2 | EP3 6.871% MARGINAL — continuing to EP6 ~14:50Z | 6.871% |
+| edward | #1188 | H34 OUTHEAD v2 | EP1 27.4%, EP2 7.83%, mid-EP3 step 26118 — EP3 verdict ~14:15Z | 7.830% (EP2) |
+| nezuko | #1184 | H30 V2S xattn | EP6 step 65212 val_abupt 6.364%, projected NOT-A-MERGE. Budget ends ~16:05Z | 6.364% |
+| fern | #1189 | H35 NPCA-SSFL-STACK | EP2 step 24553 val_abupt 7.805% — mid-EP3 | 7.805% (EP2) |
+
+### Research map update (post H31 closure — Wave 30 structurally complete)
+
+**Closed mechanism axes (Wave 30 final):**
+- Loss-shape in ALL forms (spatial, per-vertex, per-channel, frequency-domain)
+- Per-vertex position weighting (coupled H18 + decoupled H18d)
+- Training regularization (H23)
+- Optimizer-space (H28 SAM)
+- Encoder slice-temp (H24)
+- Auxiliary head supervision (H25)
+- Decoder capacity / per-component split (H21)
+- Train-eval space alignment (H27)
+- Attention differentiation (H32 DIFFATTN)
+- **Encoder-input enrichment** (H31 — but proved this axis CAN move vol_p floor)
+
+**Open mechanism axes (Wave 31):**
+- **NPCA/coordinate-representation** (H26 mechanism win; H35 fern stacking)
+- **Slice-query architecture** (H33 askeladd SLICEPE; H36 tanjiro ANCHOR)
+- **Data augmentation** (H44 frieren — first attack on this tier)
+- **Decoder structure** (H34 edward OUTHEAD post-projection; H30 nezuko V2S xattn cross-stream)
+- **Surface decoder cross-channel structure** (H45 alphonse — NEW, the missing axis)
+
+### Wave 31 priority ranking (post H31 closure)
+
+1. **H45 ANCHOR-CROSSCHAN-DEC** (alphonse) — directly attacks the locked Wave 30 finding (surface decoder pre-projection axis); mechanism-class-novel
+2. **H44 YAW-AUGMENTATION** (frieren) — first data-augmentation attack ever; orthogonal to all architectural attacks
+3. **H36 ANCHOR-SLICE-QUERIES** (tanjiro) — slice-query positional differentiation, sister to H33
+4. **H35 NPCA-SSFL-STACK** (fern) — first mechanism-combination experiment
+
+### Imminent decisions (next 4h)
+
+1. **askeladd H33 v2 EP6 ~14:50Z** — mechanism continuation gate (mech-positive bar 6.50%)
+2. **edward H34 v2 EP3 ~14:15Z** — kill bar 9.5%, mech bar 8.5%
+3. **nezuko H30 V2S terminal ~16:05Z** — already projected NOT-A-MERGE
+4. **thorfinn H26 18h terminal ~17:00Z** — baseline-beat candidate
+5. **alphonse H45 pickup** — any time; first surface-decoder structural attack
+
+---
+
+## Previous invocation actions (2026-05-18 ~12:30Z) — FRIEREN H44 IMPLEMENTATION DEVIATION RESOLVED (z-axis yaw correct, PR template had coord-convention bug); H44 RUN HEALTHY MID-EP1 (step 7551, runtime 67min); ADVISOR TEMPLATE LESSON LOCKED (DrivAerML uses z=vertical, NOT y)
 
 ### Headline updates (12:30Z)
 
