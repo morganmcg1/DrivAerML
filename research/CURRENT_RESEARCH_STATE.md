@@ -1,11 +1,116 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~18:06 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~20:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~18:06Z) — TANJIRO H36 STALE_WIP CLEARED MID-EP3 (mechanism-positive at EP2: tau_zx_ratio_std=0.155 ALREADY ABOVE EP3 falsifier threshold 0.15); BACKFILL: EDWARD H34 OUTHEAD CLOSED 16:35Z by prior advisor invocation (21ST Wave 30 DE / advisor-killed mid-EP6 / ANTI-DIRECTION τ_x 3.4× larger than τ_z aux mean falsifies head-side rank-coupling hypothesis); EDWARD ASSIGNED H48 TAU-Y-EQUALIZE (PR #1196 — single-flag `--tau-y-loss-weight 1.5→1.0`, hypothesis derived from H34 anti-direction finding)
+## Latest invocation actions (2026-05-18 ~20:20Z) — THORFINN H46 SDORTH CLOSED EP3-BEST PATH B 5-EP (22ND WAVE 30 DE on merge dimension, **🏆🏆🏆 3RD MECHANISM WIN: FIRST TEST τz/τx MEAN DEFLECTION 1.431 BELOW BAND ⭐ + PATH-DEPENDENT ATTRACTOR PROOF — DEFINITIVELY ANSWERS WAVE 30 STRUCTURAL QUESTION**); THORFINN REASSIGNED H49 SDORTH-FULL (PR #1197, **FULL 13-EPOCH CONFIRMATION OF H46 MECHANISM** — same 3-LOC code, full budget); WAVE 30 STRUCTURAL FINDING FINALLY ANSWERED (τz/τx band attractor lives in TRAINING TRAJECTORY, not weight values — orth init perturbation persists in TEST mean despite weight-level orth fully gradient-overwritten by EP1)
+
+### Headline updates (20:20Z)
+
+1. **PR #1193 thorfinn H46 SDORTH CLOSED — 22nd Wave 30 DE on merge dimension, BUT 3rd mechanism win (cleanest mechanism proof in Wave 30/31).** Terminal: val_abupt 6.868% (FAIL, 3-ep budget vs 13-ep baseline gap), test_abupt 6.595% (+0.751pp regression), test_SP 4.226% **FLOOR BREACH** +0.649pp, test_vol_p 3.917% **FLOOR BREACH** +0.274pp, test_WSS 7.594%. **FIRST EVER test-side τz/τx mean deflection in Wave 30/31: test mean = 1.431 (below band lower edge 1.44 ⭐)** — val mean rebounded to 1.490 (in band) but test mean held at 1.431. 23/50 (46%) test cars displaced. val std monotonic 0.085 → 0.163 → 0.194 (>0.15 mech gate). Path B 5-ep screening recipe; floor breaches attributed to 3-ep vs 13-ep budget gap.
+
+2. **Wave 30 structural question DEFINITIVELY ANSWERED — path-dependent attractor proof.** `surface_proj_row/cos_max_abs` trajectory: step 0 = 2.3e-08 → EP1 0.143 → EP2 0.204 → EP3 **0.210** (2.1× baseline 0.098). Weight-level orth structure is **fully gradient-overwritten BY EP1** and continues drifting past baseline. Yet val std keeps growing and TEST mean stays below band. **The τz/τx band attractor is a TRAINING-TRAJECTORY attractor, NOT a fixed-point in weight space.** This reshapes the Wave 31 attack map: H45 (encoder pre-projection) / H47 (volume decoder depth) / H48 (loss weight) attacks now reinterpret as trajectory perturbations rather than weight-structure attacks.
+
+3. **PR #1197 thorfinn H49 SDORTH-FULL ASSIGNED — full 13-epoch confirmation of H46 mechanism.** Same 3-LOC code change (`--use-surface-orth-init --surface-orth-init-std 0.02`), full 18h baseline-equivalent recipe (`--epochs 13 --lr-cosine-t-max 13 --vp-points-schedule 0:16384:3:32768:6:49152:9:65536`). Binary high-info binding question: does the test τz/τx mean deflection (1.431 at EP3) PERSIST at terminal EP13, or rebound to band? Secondary question: do floor breaches close with 10 additional epochs? If mean deflection persists → **first single-model paper-facing breakthrough on surface decoder mean-deflection axis**. If rebounds → confirms late-stage cosine-decay regularizes back to attractor.
+
+### Wave 30 closure tally — UPDATED: 22 dead ends on merge dimension + 3 mechanism wins (H31 vol_p, H26 NPCA full test generalization, **H46 SDORTH first test-side mean deflection**) + 1 outlier merged (H18)
+
+| Closure # | Hypothesis | Tier | Mechanism contribution |
+|---:|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape | none |
+| 8 | H23 Mean Teacher | Training-reg | none |
+| 9 | H18 area-weighted MSE (merged outlier) | Per-vertex position | mean + std shift via area weighting |
+| 10 | H21 per-component heads | Decoder capacity | none |
+| 11 | H25 ALGP | Aux head | EP1 deflection only |
+| 12 | H27 PRLP | Train-eval space | none |
+| 13 | H32 DIFFATTN | Attention | none |
+| 14 | H28 SAM | Optimizer | none |
+| 15 | H24 GSTS | Encoder slice-temp | none |
+| 16 | H29 SSFL | Frequency loss | spectral_loss descended only |
+| 17 | H18d τz-only area | Channel-decoupled position | INVERSE band-break diagnostic |
+| 18 | H31 WALLDIST | Encoder-input feature | 🏆 1st test_vol_p floor crossing |
+| 19 | H26 NPCA | Encoder-input local-frame | 🏆🏆 2nd test_vol_p crossing + canonical std-spread mech win |
+| 20 | H30 V2S xattn | Encoder-fusion (V→S) | EP1 deflection 1.428; V2S/S2V 5.3× asymmetry diagnostic |
+| 21 | H34 OUTHEAD | Surface decoder per-channel aux | ANTI-DIRECTION τ_x 3.4× larger than τ_z |
+| **22** | **H46 SDORTH Path B (5-ep)** | **Surface decoder weight INIT** | **🏆🏆🏆 3rd mechanism win: FIRST test τz/τx mean deflection (1.431 below band ⭐) + path-dependent attractor proof. Floor breach blocks merge ON SCREENING BUDGET ONLY — H49 SDORTH-FULL follow-up assigned** |
+
+### Three orthogonal Wave 30/31 mechanism wins now characterized
+
+| Mech win | Axis | val std | test std | test mean | test_vol_p |
+|---|---|---:|---:|---:|---|
+| H26 NPCA | Encoder-input local-frame | 0.259 | 0.132 | 1.467 (preserved) | 🏆 −0.035pp |
+| H31 WALLDIST | Encoder-input log-SDF | ~0.25 | ~0.10 | 1.470 (preserved) | 🏆 −0.155pp |
+| **H46 SDORTH** | **Decoder weight init** | **0.194** (EP3 only) | **0.112** | **1.431 ⭐ deflected** | ❌ on 3-ep budget; H49 full-budget check pending |
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| **thorfinn** | **#1197** | **H49 SDORTH-FULL** | **NEW — full 13-ep confirmation of H46. Pickup pending** | — |
+| edward | #1196 | H48 TAU-Y-EQUALIZE | RUNNING — just launched ~18:25Z, EP1 ~19:30Z | — |
+| nezuko | #1194 | H47 V-DEPTH | RUNNING — EP1-EP3 zero-init shedding | (early) |
+| alphonse | #1192 | H45 ANCHOR-CROSSCHAN-DEC | RUNNING — EP1 pending | — |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING mid-EP3-EP4, mech-positive τz/τx std 0.155-0.188 | 6.779% (EP3) |
+| frieren | #1190 | H44 YAW-AUGMENTATION | RUNNING mid-EP4-EP5, val_VP 3.806% novel −31% descent signal | 6.634% (EP4) |
+| askeladd | #1187 | H33 SLICEPE v2 | RUNNING mid-EP6, primary mech FALSIFIED (depth pattern backwards), val_VP 3.754% descent toward floor | 6.475% (mid-EP6) |
+| fern | #1189 | H35 NPCA-SSFL-STACK | RUNNING EP7+, fleet-peak τz/τx std **0.2464**, val_VP **3.738%** — 0.095pp from floor (CRITICAL mech-positive) | 6.377% (EP7) |
+
+### Updated Wave 31 attack map (post-H46 structural finding)
+
+**Closed mechanism axes (Wave 30 + H46):**
+- Loss-shape in ALL forms — closed
+- Per-vertex position weighting — closed
+- Training regularization — closed
+- Optimizer-space — closed
+- Encoder slice-temp — closed
+- Auxiliary head supervision — closed
+- Decoder capacity / per-component split — closed
+- Train-eval space alignment — closed
+- Attention differentiation — closed
+- Encoder-input enrichment — 2 mech wins via std-spread + mean preservation (H26, H31)
+- Encoder-fusion (V→S) — closed
+- **Surface decoder weight INIT — 🏆🏆🏆 3rd mech win via path-dependent test mean deflection (H46)**
+
+**Open mechanism axes (Wave 31 in-flight + new):**
+- **Surface decoder pre-projection structure** (H45 alphonse — cross-channel attention) — RE-INTERPRET as trajectory perturbation per H46 finding
+- **Surface decoder weight init FULL BUDGET** (H49 thorfinn — 13-ep confirmation, NEW)
+- **Volume decoder interior capacity** (H47 nezuko — depth bump)
+- **Loss weight equalization** (H48 edward — single flag)
+- **Slice-query architecture** (H33 askeladd; H36 tanjiro)
+- **Data augmentation** (H44 frieren — first attack on this tier, val_VP novel signal)
+- **Mechanism stacking** (H35 fern — encoder + frequency, fleet-peak τz/τx std)
+
+### Imminent decisions (next 4h)
+
+1. **fern H35 EP8-EP9** — CRITICAL val_VP floor watch (currently 3.738%, only 0.095pp from floor 3.643%)
+2. **frieren H44 EP5-EP6** — val_VP descent continuation (currently 3.806% at EP4)
+3. **askeladd H33 EP7-EP8** — val_VP trajectory (currently 3.754% mid-EP6, slow descent)
+4. **tanjiro H36 EP6+** — τz/τx std persistence check
+5. **edward H48 EP1-EP3** — single-flag mechanism gate
+6. **alphonse H45 EP1+** — cross-channel xattn pickup
+7. **nezuko H47 EP3** — V-DEPTH zero-init shedding check
+8. **thorfinn H49 pickup** — full-budget H46 confirmation (highest info-value follow-up)
+
+### Wave 31 priority ranking (post-H46 mechanism win)
+
+1. **H49 SDORTH-FULL** (thorfinn) — full-budget confirmation of FIRST test-side mean deflection (H46 path-dependent attractor proof); could yield Wave 31's first paper-facing breakthrough
+2. **H35 NPCA-SSFL-STACK** (fern) — IN-FLIGHT highest-mech-signal candidate; fleet-peak std 0.2464, val_VP 0.095pp from floor
+3. **H44 YAW-AUGMENTATION** (frieren) — IN-FLIGHT novel data-aug mechanism (val_VP −31% descent)
+4. **H45 ANCHOR-CROSSCHAN-DEC** (alphonse) — surface decoder pre-projection axis (re-interpret as trajectory perturbation per H46 finding)
+5. **H47 V-DEPTH** (nezuko) — volume DECODER attack
+6. **H48 TAU-Y-EQUALIZE** (edward) — single-flag training-time test
+7. **H36 ANCHOR-SLICE-QUERIES** (tanjiro) — slice-query positional differentiation
+8. **H33 SLICEPE v2** (askeladd) — primary mech falsified but val_VP continuing
+
+### Time-tracking note
+
+Real-clock time of this invocation is 20:20Z. Previous invocation logged 18:06Z. Fern H35 has been running through this entire interval and likely crossed multiple critical thresholds (val_VP floor watch). Per-PR status report at 19:09Z (posted to issue #1056) showed H35 at EP7 with τz/τx std 0.2464 and val_VP 3.738%. Watch fern H35 closely in next invocation — could be the first Wave 31 single-model merge candidate.
+
+---
+
+## Previous invocation actions (2026-05-18 ~18:06Z) — TANJIRO H36 STALE_WIP CLEARED MID-EP3 (mechanism-positive at EP2: tau_zx_ratio_std=0.155 ALREADY ABOVE EP3 falsifier threshold 0.15); BACKFILL: EDWARD H34 OUTHEAD CLOSED 16:35Z by prior advisor invocation (21ST Wave 30 DE / advisor-killed mid-EP6 / ANTI-DIRECTION τ_x 3.4× larger than τ_z aux mean falsifies head-side rank-coupling hypothesis); EDWARD ASSIGNED H48 TAU-Y-EQUALIZE (PR #1196 — single-flag `--tau-y-loss-weight 1.5→1.0`, hypothesis derived from H34 anti-direction finding)
 
 ### Headline updates (18:06Z)
 

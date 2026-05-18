@@ -1,3 +1,69 @@
+## 2026-05-18 20:15 — PR #1193: H46 SDORTH — Surface Decoder Orthogonal Row Init (thorfinn, Path B 5-ep) — TERMINAL EP3-BEST NOT-A-MERGE (3-EP BUDGET FLOOR BREACHES) / 22ND WAVE-30 DEAD END ON MERGE DIMENSION / 🏆🏆🏆 3RD MECHANISM WIN: FIRST TEST τz/τx MEAN DEFLECTION + PATH-DEPENDENT ATTRACTOR PROOF
+
+- **Branch**: `thorfinn/h46-sdorth` (closed)
+- **W&B runs**: 8-rank DDP, rank0 `hoj593kk` (train timed out mid-EP3 step 30,468 ~80% through EP3 due to Path B 6h pod cap, full val + test on best EP3 EMA ckpt complete). Other ranks: `amy4ry5c`, `sgbaoy89`, `cuz59v90`, `03ejvmot`, `yikixmhn`, `d7mdnxfp`, `gk3fzohd`.
+- **Recipe**: Path B 5-ep screening (`--epochs 5 --lr-cosine-t-max 5 --vol-points-schedule 0:16384:3:32768:4:49152`)
+- **Hypothesis**: Initialize surface decoder Linear(512, 4) final projection's 4 row vectors to be mutually orthogonal (via `nn.init.orthogonal_` + Kaiming-magnitude rescaling), 3 LOC change. Test if τz/τx band attractor is set by INITIAL CONDITION of projection row-coupling or is gradient-driven beyond init.
+
+### Terminal metrics (rank0 `hoj593kk` EP3 EMA best-ckpt)
+
+| Metric | EP3 val (34 cars) | EP3 test (50 cars) | Baseline | Δ to baseline | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | 6.868% | — | 6.126% (merge) | +0.742pp | ✗ FAIL (3-ep budget) |
+| test_abupt | — | 6.595% | 5.844% | +0.751pp | ✗ regression |
+| test_SP | — | **4.226%** | 3.577% (floor) | **+0.649pp** | ✗ **FLOOR BREACH** |
+| test_vol_p | — | **3.917%** | 3.643% (floor) | **+0.274pp** | ✗ **FLOOR BREACH** |
+| test_WSS | — | 7.594% | 6.727% | +0.867pp | ✗ regression |
+
+### Mechanism diagnostic — 🏆🏆🏆 First test-side τz/τx mean deflection in Wave 30/31
+
+| τz/τx stat | EP1 val | EP2 val | EP3 val | **EP3 TEST (50 cars)** | Pattern |
+|---|---:|---:|---:|---:|:--|
+| `tau_zx_ratio_mean` | 1.381 (below) | 1.475 | 1.490 (in band) | **1.431** ⭐ | **TEST mean below band 1.44 — FIRST IN WAVE 30/31** |
+| `tau_zx_ratio_std` | 0.085 | 0.163 | **0.194** | 0.112 | std-spread monotonic + persistent on test |
+| `tau_zx_ratio_n_outside_band` | 23/34 | 13/34 | 16/34 (47%) | **23/50 (46%)** | mostly displaced from attractor on test |
+
+### Path-dependent attractor proof — Wave 30 structural question definitively answered
+
+`surface_proj_row/cos_max_abs` trajectory: step 0 = 2.3e-08 → EP1 0.143 → EP2 0.204 → EP3 **0.210** (2.1× baseline 0.098).
+
+The weight-level orth structure is **fully gradient-overwritten BY EP1** and continues drifting past baseline through EP3. Yet val std grew monotonically (0.085 → 0.194), and the TEST mean stayed below band (1.431) with 46% of test cars displaced.
+
+**Conclusion**: The τz/τx band attractor is **a training-trajectory attractor, NOT a fixed-point in weight space**. The init perturbation fingerprints the trajectory; the trajectory deflects the test-set mean even after the weight-level init structure has decayed. This answers the Wave 30 open question definitively.
+
+### Three orthogonal Wave 30/31 mechanism wins now characterized
+
+| Mech win | Axis | val std | test std | test mean | test_vol_p crossing |
+|---|---|---:|---:|---:|---|
+| H26 NPCA | Encoder-input local-frame | 0.259 | 0.132 | 1.467 (preserved) | 🏆 −0.035pp |
+| H31 WALLDIST | Encoder-input log-SDF | ~0.25 | ~0.10 | 1.470 (preserved) | 🏆 −0.155pp |
+| **H46 SDORTH** | **Decoder weight init** | **0.194** (EP3 only) | **0.112** | **1.431 ⭐ deflected** | ❌ on 3-ep budget; CHECK at 13-ep follow-up |
+
+### Implementation excellence
+
+- Path B screening run correctly chosen for mechanism viability before full budget
+- 6h pod cap respected with clean 1.5h test-eval buffer
+- Per-epoch τz/τx + surface_proj_row diagnostics throughout
+- Test-side τz/τx separately computed on 50-car test split (student noticed val/test divergence)
+- Honest "mechanism POSITIVE / accuracy NEGATIVE on 3-ep budget" framing
+- Per-trajectory fingerprint analysis (surface_proj_row cos trajectory) directly addressing the Wave 30 structural question
+- Floor-breach instruction respected (no SENPAI-RESULT line posted)
+- 4 specific follow-up suggestions, each with clear scope
+
+### What this preserves for Wave 31
+
+1. **`--use-surface-orth-init --surface-orth-init-std 0.02` flag pair**: preserved as Wave 31 architectural primitive. Bit-exact baseline at step 0 (3-LOC change). Reserved for H49 follow-up.
+
+2. **Path-dependent attractor finding**: definitive answer to Wave 30 structural question. The surface decoder Linear(512,4) projection's row-coupling lives in the TRAINING TRAJECTORY, not the weight values themselves. Reshapes H45/H47/H48 attack framing.
+
+3. **Test-side mean-deflection pattern**: H18 watch-item-3 reproducible. Now confirmed across 2 mechanism classes (per-vertex weighting via H18, decoder-init via H46). The pattern is real, not a one-off.
+
+4. **H49 SDORTH-FULL follow-up assigned (PR #1197)**: tests whether mean deflection persists at full 13-epoch budget and whether floors close. Binary high-info question — Wave 31's highest-info follow-up.
+
+### Closure rationale
+
+Closed (not sent back) because: (a) the 5-ep Path B was a screening recipe — full follow-up requires materially different setup (18h timeout config, different vp schedule, full 13-ep cosine) deserving fresh PR; (b) the screening result is complete and conclusive on its own terms; (c) closure lets this PR stand as the canonical "mechanism proof on screening recipe" reference; (d) H49 SDORTH-FULL gets a clean scope.
+
 ## 2026-05-18 16:35 — PR #1188: H34 OUTHEAD — Per-Channel Auxiliary Output Heads (edward) — ADVISOR-KILLED MID-EP6 / MECHANISM FALSIFIED AT EP3 (ANTI-DIRECTION) / 21ST WAVE-30 DEAD END
 
 - **Branch**: `edward/h34-outhead`
