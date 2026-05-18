@@ -5,7 +5,53 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~07:30Z) — FERN H24 GSTS CLOSED EP13 (15TH WAVE 30 DEAD END, NOT-A-MERGE: val_abupt 6.325% / test_vol_p FLOOR PASS) + FERN ASSIGNED H35 NPCA-SSFL-STACK (FIRST WAVE 31 HYPOTHESIS)
+## Latest invocation actions (2026-05-18 ~09:00Z) — EDWARD H34 OUTHEAD self-killed by `--kill-thresholds` step-prefix misconfig (RELAUNCH INSTRUCTED with step-indexed gates); ASKELADD H33 v2 self-corrected and HEALTHY at mid-EP2; HUMAN STATUS REPLY POSTED to issue #1056
+
+### Headline updates (09:00Z)
+
+1. **PR #1188 edward H34 OUTHEAD self-killed at EP1** by same `--kill-thresholds` syntax pitfall that hit askeladd #1187 earlier. EP1 metrics clean (val_abupt 26.78%, normal cold-start), aux heads grew correctly (cp 0.246, τx 0.218, τy 0.156, τz 0.101 — all >0, gradients flowing). **Asymmetry ratio τz/τx = 0.46 — INVERTED direction at EP1** (predicted >1.5 if head-side rank-coupling hypothesis right). Could be EP1 warmup artifact (only second half saw full LR) or genuine inverse signal. EP3 reading is decisive. Relaunch v2 instructions posted with step-indexed gates (`32594:val_abupt<9.5,32594:val_SP<5.5`).
+
+2. **Root cause locked: `--kill-thresholds` PREFIX IS GLOBAL STEP, NOT EPOCH.** Both H33 v1 and H34 v1 self-killed at EP1 because `1:val_abupt<9.5` means "from step 1 onward" (always-on, evaluated at first end-of-epoch val log at step 10864). Wave 30 lesson #8 locked. Memory saved at `feedback_kill_thresholds_step_indexed.md`. Correct step-indexed gates for 10864 steps/epoch recipe:
+   - EP3 binding gate: `32594:val_abupt<9.5,32594:val_SP<5.5`
+   - Optional EP1 cold-start fence (only for H32-style catastrophe detection): `10864:val_abupt<35,10864:val_vol_p_mae<60`
+
+3. **Askeladd H33 SLICEPE v2 SELF-CORRECTED and running healthy** — v2 run `u58fwoym` launched at 06:58Z, currently mid-EP2 at step 14598 (val_abupt 29.63%), no early-kill triggered. Askeladd updated the threshold syntax independently before my 07:04Z relaunch advice. EP3 verdict ETA ~13:30Z.
+
+4. **Human status reply posted to issue #1056** (Morgan asked at 07:44Z about tay/dl24 progress + timeout fix + longer-budget hand-off candidates). Reply at 07:50Z covered: timeout RESOLVED, Wave 30 tally (15 closures + 1 mechanism win H26 + 1 fleet-low H29), Wave 31 launched (H35 to fern), 3 dl24 hand-off candidates (H42 NPCA-WARMSTART top pick, H35 30-epoch variant, H41 NPCA-192-SLICES).
+
+### Fleet status (8/8 active, EP3/EP6 gate batch impending)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| fern | #1189 | H35 NPCA-SSFL-STACK | Assigned 07:30Z, pickup pending |
+| alphonse | #1185 | H31 WALLDIST | EP4 6.417%, val_vol_p 3.780% best-in-fleet. EP6 ~08:30Z (vp=49152) |
+| thorfinn | #1177 | H26 NPCA Path A | EP5 6.541%, linear EP13 5.95%. EP6 ~08:30Z (std reading critical) |
+| askeladd | #1187 | H33 SLICEPE v2 | Mid-EP2, run `u58fwoym`, healthy. EP3 verdict ~13:30Z |
+| **edward** | **#1188** | **H34 OUTHEAD** | **v1 self-killed EP1. RELAUNCH INSTRUCTED with corrected step-indexed `--kill-thresholds`. v2 EP1 ETA ~10:30Z** |
+| frieren | #1182 | H29 SSFL | EP7 6.4349% fleet-low. EP9-EP13 watch |
+| tanjiro | #1183 | H18d | EP8 6.376%, τz/τx 1.647 above-band. EP9 ~09:00Z |
+| nezuko | #1184 | H30 V2S xattn | EP4 6.576%, continuing to terminal |
+
+### Key lessons added to Wave 30 → 31 transfer
+
+7. **--kill-thresholds prefix is GLOBAL STEP, not epoch index** (lesson #8). Use step-indexed gates: 10864 = EP1 end, 32594 = EP3 end, 65228 = EP6 end. NEVER write `1:` or `3:` as "from EP1/EP3" gates. Saved as memory + propagated to advisor PR template defaults.
+
+### Outstanding actions (next 8h chronological)
+
+1. **alphonse H31 EP6 ~09:00Z** — val_vol_p floor-cross watch (vp=49152 curriculum)
+2. **thorfinn H26 EP6 ~09:00Z** — std(τz/τx) reading critical (mean drifted 1.525→1.547)
+3. **tanjiro H18d EP9 ~09:00Z** — mid-trajectory gate verdict
+4. **edward H34 v2 launch + EP1 ~10:30Z** — with corrected gates
+5. **askeladd H33 v2 EP3 ~13:30Z** — mechanism gate (slice_pe metrics critical)
+6. **tanjiro H18d EP13 ~14:25Z** — terminal verdict (no-merge expected, test-side novelty)
+7. **thorfinn H26 EP13 ~14:30Z** — terminal verdict (BASELINE-BEAT CANDIDATE, linear projection 5.95%)
+8. **frieren H29 EP13 ~14-15Z** — terminal verdict (FLEET-LOW + test eval required)
+9. **edward H34 v2 EP3 ~16-17Z** — asymmetry_ratio reading decisive
+10. **fern H35 pickup + launch** — any time (cherry-pick H26 + H29)
+
+---
+
+## Previous invocation actions (2026-05-18 ~07:30Z) — FERN H24 GSTS CLOSED EP13 (15TH WAVE 30 DEAD END, NOT-A-MERGE: val_abupt 6.325% / test_vol_p FLOOR PASS) + FERN ASSIGNED H35 NPCA-SSFL-STACK (FIRST WAVE 31 HYPOTHESIS)
 
 ### Headline updates (07:30Z)
 
