@@ -5,7 +5,68 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~06:00Z) — H28 SAM CLOSED (14TH DEAD END / 10TH COLD-START FADE) + H34 OUTHEAD ASSIGNED TO EDWARD; FRIEREN H29 SSFL EP7 = WAVE 30 FLEET-LOW 6.4349%; THORFINN H26 PATH A MECHANISM GATE PASSED DECISIVELY
+## Latest invocation actions (2026-05-18 ~07:00Z) — THORFINN H26 EP5 val_abupt 6.5414% (linear EP13 projection 5.95%, ON TRACK TO BEAT BASELINE) + ASKELADD H33 SELF-KILLED EP1 BY MISCONFIGURED `--kill-thresholds` (RELAUNCH INSTRUCTED, MECHANISM PRESERVED); WAVE 31 IDEAS BANK COMMITTED
+
+### Headline updates (07:00Z)
+
+1. **Thorfinn H26 Path A EP5 val_abupt 6.5414%** (W&B `gokysken` runtime 7.05h, step 43,813). Trajectory: EP3 6.91% → EP4 6.615% → EP5 6.541% (slope −0.074pp last epoch). **Linear projection EP13 = 5.95%, beats baseline 6.126% by 0.18pp**. τz/τx mean drifted up 1.525→1.540→1.547 (top of band) — std at EP4-5 NOT yet reported by student; this is the key remaining mechanism question. Stale_wip false positive #3 — check-in posted, run is fully healthy.
+
+2. **Askeladd H33 SLICEPE SELF-KILLED at EP1** by misconfigured `--kill-thresholds "1:val_abupt<9.5"` (active from step 1, when EP1 baseline cold-start val_abupt is 20-28%). **Mechanism is alive** — EP1 val_vol_p_mae = 31.46 vs baseline 32.86 (slightly BETTER, no H32-style failure). EP1 surface metrics +6-9pp slower than baseline, expected for additive PE. Relaunch instructed with corrected `--kill-thresholds "3:val_abupt<9.5,3:val_SP<5.5"` (active from EP3). Run-v2 ETA EP1 ~08:30Z, EP3 verdict ~13:30Z.
+
+3. **Wave 31 ideas bank committed** to `research/RESEARCH_IDEAS_2026-05-18_06:00.md` (researcher-agent delivered 11 mechanism-distinct candidates H35-H45). 4 immediate-assignment top picks: H35 NPCA-SSFL-STACK, H42 NPCA-WARMSTART, H41 NPCA-192-SLICES, H44 YAW-AUGMENTATION-NPCA — all build on H26 NPCA variance-break mechanism proof. Ready for student pickup as Wave 30 PRs close.
+
+### Wave 30 mechanism scoreboard @ 07:00Z
+
+| Hypothesis | Mechanism status | Accuracy status | EP13 projection |
+|---|:--|:--|---:|
+| **thorfinn H26 NPCA** | **MECHANISM PASSED** (EP3 std 0.228) | EP5 6.541%, slope −0.074 | **5.95% (linear, beats baseline)** |
+| **frieren H29 SSFL** | spectral_loss saturated EP6+ (intended) | EP7 6.4349% **fleet-low** | 5.95-6.10% (conservative−optimistic) |
+| **alphonse H31 WALLDIST** | volume pathway preserved | EP4 6.417%, val_vol_p 3.780% best-in-fleet | uncertain (val_vol_p approaching floor) |
+| **nezuko H30 V2S xattn** | volume_p improvement at EP4 | EP4 6.576% (val fade), H18 test-side hope | won't beat val baseline |
+| **tanjiro H18d** | mechanism locked (channel-decoupled) | EP6 6.457%, CONTINUE TO EP13 | 6.07% (Scenario B) |
+| **fern H24 GSTS** | encoder slice-temp saturated | EP11 6.328%, slope ~0 | 6.30-6.33% (won't beat) |
+| **askeladd H33 SLICEPE** | EP1 vol pathway intact (mechanism preserved) | RELAUNCHING v2 | EP3 verdict ~13:30Z |
+| **edward H34 OUTHEAD** | pickup pending (assigned 06:00Z) | not started | EP3 verdict ~16-17Z |
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status |
+|:--|---:|:--|:--|
+| fern | #1174 | H24 GSTS | EP11 6.328% saturated. EP13 ETA ~09:00Z |
+| alphonse | #1185 | H31 WALLDIST | EP4 6.417%, val_vol_p 3.780% best-in-fleet. Continuing |
+| **thorfinn** | **#1177** | **H26 NPCA Path A** | **EP5 6.541%, linear EP13 5.95%. Stale_wip false positive #3 — check-in posted 07:05Z. τz/τx std at EP4-5 KEY remaining diagnostic** |
+| **askeladd** | **#1187** | **H33 SLICEPE** | **SELF-KILLED EP1 by misconfigured `--kill-thresholds`. Mechanism preserved. RELAUNCHING with corrected `3:...` thresholds** |
+| edward | #1188 | H34 OUTHEAD | Pickup pending (assigned 06:00Z) |
+| frieren | #1182 | H29 SSFL | EP7 6.4349% fleet-low, ACK posted 06:00Z. EP9-EP13 watch |
+| tanjiro | #1183 | H18d | CONTINUE TO EP13. EP9 gate ~09:00Z |
+| nezuko | #1184 | H30 V2S xattn | EP4 6.576%, continuing to terminal for test-side |
+
+### Outstanding actions (next 12h chronological)
+
+1. **alphonse H31 EP6 ~08:30Z** — val_vol_p crossing floor? curriculum bump vp=49152
+2. **askeladd H33 SLICEPE EP1 v2 ~08:30Z** — safety check with corrected thresholds
+3. **tanjiro H18d EP9 ~09:00Z** — mid-trajectory gate (val_abupt ≤6.25% / val_SP ≤4.05% PASS)
+4. **fern H24 EP13 ~09:00-10:00Z** — terminal verdict
+5. **thorfinn H26 EP6 ~08:30Z** — vp=49152 curriculum bump; key std(τz/τx) reading
+6. **thorfinn H26 EP13 ~14:30Z** — terminal verdict (linear projection 5.95%, BASELINE-BEAT candidate)
+7. **frieren H29 EP13 ~14-15Z** — terminal verdict, test eval required
+8. **edward H34 OUTHEAD launch + EP1 safety check** — pickup any time
+9. **askeladd H33 EP3 v2 ~13:30Z** — mechanism gate verdict
+10. **Wave 31 student-pickup queue**: H35/H42/H41/H44 ready when Wave 30 PRs close
+
+### Key Wave 30 lessons (locked, unchanged from 06:00Z)
+
+1. Mean-shift attacks fade, variance-break attacks survive (10/10 vs 1/1 evidence)
+2. Loss reshape drives val_abupt within band (H29 fleet-low)
+3. Volume pathway sensitive to input features and cross-modal fusion (H30/H31)
+4. Slice-token magnitude critical at init (H32 design rule)
+5. Band attractor geometrically FLAT in parameter space (H28 SAM negative result)
+6. Head-side rank coupling UNTESTED (H34 OUTHEAD just assigned)
+7. **NEW: `--kill-thresholds` syntax pitfall**: `N:metric<value` activates at STEP N (or EPOCH N), NOT meaning "step N+1 onwards". EP3 survival gates must be set to N=3 (epoch-indexed) or step-equivalent for the kill-eval window to start at EP3, not EP1.
+
+---
+
+## Previous invocation actions (2026-05-18 ~06:00Z) — H28 SAM CLOSED (14TH DEAD END / 10TH COLD-START FADE) + H34 OUTHEAD ASSIGNED TO EDWARD; FRIEREN H29 SSFL EP7 = WAVE 30 FLEET-LOW 6.4349%; THORFINN H26 PATH A MECHANISM GATE PASSED DECISIVELY
 
 ### Headline updates
 
