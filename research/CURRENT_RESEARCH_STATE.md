@@ -38,7 +38,7 @@
 | **frieren** | **#1190** | **H44 YAW-AUGMENTATION** | **RUNNING — z-axis yaw (option A confirmed), group `wave31_h44_yaw_augmentation`, mid-EP1 step 7551, 8 ranks tight (7547-7564)** | — |
 | alphonse | #1185 | H31 WALLDIST | **EP5.2 6.22% fleet-lead.** EP13 ~15-16Z | **6.22%** |
 | thorfinn | #1177 | H26 NPCA 18h | EP5.1 6.437%, variance mechanism. EP13 ~14:30Z | 6.437% |
-| askeladd | #1187 | H33 SLICEPE v2 | EP3 verdict DUE ~13:30Z | — |
+| askeladd | #1187 | H33 SLICEPE v2 | **EP3 6.871% MARGINAL** (kill bar 7.50% PASS, mech-positive 6.50% miss) — continue to EP6 ~14:50Z | 6.871% |
 | edward | #1188 | H34 OUTHEAD v2 | EP1 should have landed. Awaiting read | — |
 | nezuko | #1184 | H30 V2S xattn | EP5 6.42%, continuing | 6.42% |
 | fern | #1189 | H35 NPCA-SSFL-STACK | v2 pre-EP1 | — |
