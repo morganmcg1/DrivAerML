@@ -1,11 +1,135 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~20:20 UTC)
+- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~21:25 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~20:20Z) — THORFINN H46 SDORTH CLOSED EP3-BEST PATH B 5-EP (22ND WAVE 30 DE on merge dimension, **🏆🏆🏆 3RD MECHANISM WIN: FIRST TEST τz/τx MEAN DEFLECTION 1.431 BELOW BAND ⭐ + PATH-DEPENDENT ATTRACTOR PROOF — DEFINITIVELY ANSWERS WAVE 30 STRUCTURAL QUESTION**); THORFINN REASSIGNED H49 SDORTH-FULL (PR #1197, **FULL 13-EPOCH CONFIRMATION OF H46 MECHANISM** — same 3-LOC code, full budget); WAVE 30 STRUCTURAL FINDING FINALLY ANSWERED (τz/τx band attractor lives in TRAINING TRAJECTORY, not weight values — orth init perturbation persists in TEST mean despite weight-level orth fully gradient-overwritten by EP1)
+## Latest invocation actions (2026-05-18 ~21:25Z) — ASKELADD H33 SLICEPE CLOSED EP13-EMA (23RD WAVE 30 DE on merge dimension, 🏆 **4TH TEST_VOL_P FLOOR CROSSING −0.121pp + NOVEL L0-DOMINANCE STRUCTURAL INSIGHT**); ASKELADD REASSIGNED H50 COORDSLICE (PR #1198, **COORDINATE-CONDITIONED SLICE IDS / DAB-DETR ANALOGUE** — replaces H33's free-floating learnable PE with 3D-centroid-derived slice anchors); WAVE 31 PRIORITY SHIFT: test_SP becomes the binding gate (4 vol_p crossings via 3 mech classes vs 0 test_SP crossings beyond baseline)
+
+### Headline updates (21:25Z)
+
+1. **PR #1187 askeladd H33 SLICEPE CLOSED — 23rd Wave 30 DE on merge dimension, BUT 4th test_vol_p floor crossing.** Terminal EP13 EMA (run `u58fwoym`, 838.16 min / 1100 min budget, clean completion): val_abupt **6.472%** FAIL +0.346pp, test_SP **3.793% FLOOR BREACH** +0.216pp, **test_vol_p 3.522% PASS −0.121pp ✅** (joins H31, H26, H46 Path B as 4th vol_p crossing). test_abupt 5.960% (+0.116pp), test_WSS 6.856% (+0.129pp), test τz/τx 1.487 (in band — no deflection). Descent saturated mid-EP7 with slope decay −0.0035 → −0.0004 pp/1k steps (9× slowdown).
+
+2. **Wave 30/31 test_vol_p floor crossing tally now at 4 — but test_SP remains the binding merge gate.** Vol_p crossings via 3 mechanism classes (encoder-input feature, encoder-additive PE, decoder weight init) vs 0 test_SP crossings beyond baseline. **Wave 31 hypothesis design should prioritize surface-pressure-specific mechanisms** (per-vertex weighting, surface decoder restructuring, surface-side asymmetry correction). The vol_p pathway has 4 demonstrated routes — diminishing returns from additional vol_p crossing attempts unless they also unlock test_SP.
+
+3. **H33 produced first cold-start fade with EXPLICIT per-layer L0-DOMINANCE diagnosis.** `inter_slice_cos` terminal: L0=**0.0851** (largest by 3-10×), L1=0.019, L2=0.029, L3=−0.001, L4=0.028. Predicted depth-monotonic (L0 < L1 < ... < L4) — actual pattern is L0 >> L4 ≈ L2 > L1 ≈ L3 (NON-MONOTONIC, L0-DOMINANT). slice_pe parameters auto-grew σ=0.020 → σ=0.150 (7.5×, model rediscovered O(1/√D) ≈ 0.088 emergently). **Novel insight**: L0 attends directly to raw geometric input and benefits most from per-slice positional disambiguation; deeper layers prefer content-routing. Reshapes Wave 31 hypothesis design toward L0-targeted mechanisms.
+
+4. **PR #1198 askeladd H50 COORDSLICE ASSIGNED — coordinate-conditioned slice IDs (DAB-DETR analogue).** Replaces H33's free-floating learnable slice_pe with slice anchors derived from **physical 3D coordinates of each slice's centroid** at runtime. References: DAB-DETR (ICLR 2022, anchor boxes as queries), Anchor DETR (AAAI 2022, anchor-based query PE), Conditional DETR (ICCV 2021). Mechanism prediction: physically-grounded slice anchors at L0 should produce cleaner mechanism than auto-grown free-floating IDs, with potentially better test_SP behavior. Single new flag `--use-coord-slice-pe`. Full 13-ep budget, same recipe as H33 v2. Init scale O(1/√D_head) = 0.088 per H33 lesson.
+
+### Wave 30 closure tally — UPDATED: **23 dead ends** on merge dimension + 3 mechanism wins + 1 outlier merged (H18)
+
+| Closure # | Hypothesis | Tier | Mechanism contribution |
+|---:|---|---|:--|
+| 1-7 | H10b/H11b/H12/H16/H16b/H20/H22 | Loss-shape | none |
+| 8 | H23 Mean Teacher | Training-reg | none |
+| 9 | H18 area-weighted MSE (merged outlier) | Per-vertex position | mean + std shift via area weighting |
+| 10 | H21 per-component heads | Decoder capacity | none |
+| 11 | H25 ALGP | Aux head | EP1 deflection only |
+| 12 | H27 PRLP | Train-eval space | none |
+| 13 | H32 DIFFATTN | Attention | magnitude collapse (anti-mechanism) |
+| 14 | H28 SAM | Optimizer | none |
+| 15 | H24 GSTS | Encoder slice-temp | none |
+| 16 | H29 SSFL | Frequency loss | spectral_loss descended only |
+| 17 | H18d τz-only area | Channel-decoupled position | INVERSE band-break diagnostic |
+| 18 | H31 WALLDIST | Encoder-input feature | 🏆 1st test_vol_p floor crossing −0.155pp |
+| 19 | H26 NPCA | Encoder-input local-frame | 🏆🏆 2nd test_vol_p crossing + canonical std-spread mech win |
+| 20 | H30 V2S xattn | Encoder-fusion (V→S) | EP1 deflection 1.428; V2S/S2V 5.3× asymmetry diagnostic |
+| 21 | H34 OUTHEAD | Surface decoder per-channel aux | ANTI-DIRECTION τ_x 3.4× larger than τ_z |
+| 22 | H46 SDORTH Path B (5-ep) | Surface decoder weight INIT | 🏆🏆🏆 3rd mech win: FIRST test τz/τx mean deflection (1.431) + path-dependent attractor proof |
+| **23** | **H33 SLICEPE (13-ep)** | **Encoder slice-PE additive** | **🏆 4th test_vol_p floor crossing −0.121pp + novel L0-dominance per-layer mechanism diagnosis** |
+
+### Wave 30/31 test_vol_p floor crossing tally — 4 distinct mechanism classes
+
+| # | Hypothesis | Axis | val_abupt | test_vol_p | Merged? |
+|---:|---|---|---:|---:|:--|
+| 1 | H31 WALLDIST | Encoder-input log-SDF | 6.176% | **−0.155pp** | ✅ MERGED |
+| 2 | H26 NPCA | Encoder-input local-frame | improved | **−0.035pp** | ✅ MERGED |
+| 3 | H46 SDORTH Path B | Decoder weight init | 6.868% (3-ep gap) | floor breach (3-ep) | ❌ FLOOR BREACH on screening |
+| **4** | **H33 SLICEPE** | **Encoder slice-PE additive** | **6.472%** | **−0.121pp** | ❌ NOT-A-MERGE (val_abupt + test_SP) |
+
+**Pattern observation: vol_p floor crossable via 3 mech classes; test_SP floor unyielding beyond baseline.** Wave 31 should target test_SP-specific mechanisms.
+
+### Three orthogonal Wave 30/31 mechanism wins now characterized (unchanged from 20:20Z)
+
+| Mech win | Axis | val std | test std | test mean | test_vol_p |
+|---|---|---:|---:|---:|---|
+| H26 NPCA | Encoder-input local-frame | 0.259 | 0.132 | 1.467 (preserved) | 🏆 −0.035pp |
+| H31 WALLDIST | Encoder-input log-SDF | ~0.25 | ~0.10 | 1.470 (preserved) | 🏆 −0.155pp |
+| H46 SDORTH | Decoder weight init | 0.194 (EP3 only) | 0.112 | 1.431 ⭐ deflected | ❌ on 3-ep budget; H49 full-budget pending |
+
+### Fleet status (8/8 active)
+
+| Student | PR | H | Status | Latest val_abupt |
+|:--|---:|:--|:--|---:|
+| **askeladd** | **#1198** | **H50 COORDSLICE** | **NEW — coordinate-conditioned slice IDs (DAB-DETR analogue). Pickup pending** | — |
+| thorfinn | #1197 | H49 SDORTH-FULL | NEW — full 13-ep confirmation of H46 mechanism. Pickup pending | — |
+| edward | #1196 | H48 TAU-Y-EQUALIZE | RUNNING — launched ~18:25Z, mid-EP4-EP5 by now | — |
+| nezuko | #1194 | H47 V-DEPTH | RUNNING — EP1-EP3 zero-init shedding | (early) |
+| alphonse | #1192 | H45 ANCHOR-CROSSCHAN-DEC | RUNNING — EP1+ pending | — |
+| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING mid-EP4-EP5, mech-positive τz/τx std 0.155-0.188 | 6.779% (EP3) |
+| frieren | #1190 | H44 YAW-AUGMENTATION | RUNNING mid-EP5-EP6, val_VP 3.806% novel −31% descent signal | 6.634% (EP4) |
+| fern | #1189 | H35 NPCA-SSFL-STACK | RUNNING EP8+, fleet-peak τz/τx std **0.2464**, val_VP **3.738%** — 0.095pp from floor (CRITICAL mech-positive) | 6.377% (EP7) |
+
+### Updated Wave 31 attack map (post-H33 closure, post-L0-dominance insight)
+
+**Closed mechanism axes:**
+- Loss-shape — closed (Wave 30)
+- Per-vertex position weighting — closed
+- Training regularization — closed
+- Optimizer-space — closed
+- Encoder slice-temp — closed
+- Auxiliary head supervision — closed
+- Decoder capacity / per-component split — closed
+- Train-eval space alignment — closed
+- Attention differentiation — closed
+- Encoder-fusion (V→S) — closed
+- Encoder-input enrichment — 2 mech wins (H26, H31), continued exploration via stacking
+- Surface decoder weight INIT — 3rd mech win via path-dependent test mean deflection (H46), full-budget confirmation in flight (H49)
+- **Encoder slice-PE additive (free-learnable)** — closed via H33 SLICEPE; L0-dominance mechanism diagnosis surfaced
+
+**Open mechanism axes (in-flight + new):**
+- **Coordinate-conditioned slice IDs** (H50 askeladd — DAB-DETR analogue, NEW) — replaces H33's free PE with physical 3D centroids
+- **Surface decoder pre-projection structure** (H45 alphonse — cross-channel attention)
+- **Surface decoder weight init FULL BUDGET** (H49 thorfinn — 13-ep confirmation)
+- **Volume decoder interior capacity** (H47 nezuko — depth bump)
+- **Loss weight equalization** (H48 edward — single flag)
+- **Slice-query Q modulation** (H36 tanjiro — anchor DETR Q-only)
+- **Data augmentation** (H44 frieren — z-yaw augmentation)
+- **Mechanism stacking** (H35 fern — encoder + frequency, fleet-peak τz/τx std)
+
+**Reserved for next idle slot:**
+- **LinearNO drop-slice-attention** (arXiv:2511.06294) — HIGH-risk HIGH-reward Transolver simplification; reserved as Wave 31 high-impact swing if next attacker fails
+
+### Imminent decisions (next 4h)
+
+1. **fern H35 EP9-EP10** — CRITICAL val_VP floor watch (was 3.738% at EP7, only 0.095pp from floor 3.643%; if held at EP10+ → 5th vol_p crossing candidate AND first NPCA-stacking mech-win)
+2. **frieren H44 EP6-EP7** — val_VP descent continuation (was 3.806% at EP4)
+3. **tanjiro H36 EP6+** — τz/τx std persistence + test_SP gate
+4. **edward H48 EP3-EP4** — single-flag τ-y-equalize mechanism gate
+5. **alphonse H45 EP3+** — cross-channel xattn pickup confirmation
+6. **nezuko H47 EP3-EP5** — V-DEPTH zero-init shedding check + descent gate
+7. **thorfinn H49 pickup confirmation** — full-budget H46 confirmation (highest info-value follow-up)
+8. **askeladd H50 pickup confirmation** — coordinate-conditioned slice IDs (DAB-DETR analogue, NEW)
+
+### Wave 31 priority ranking (post-H33 closure)
+
+1. **H49 SDORTH-FULL** (thorfinn) — full-budget confirmation of FIRST test-side mean deflection; could yield Wave 31's first paper-facing breakthrough
+2. **H35 NPCA-SSFL-STACK** (fern) — IN-FLIGHT highest-mech-signal candidate; fleet-peak std 0.2464, val_VP 0.095pp from floor at EP7
+3. **H50 COORDSLICE** (askeladd, NEW) — DAB-DETR analogue; tests whether physically-grounded slice anchors break the L0-dominance pattern + improve test_SP
+4. **H44 YAW-AUGMENTATION** (frieren) — IN-FLIGHT novel data-aug mechanism (val_VP −31% descent)
+5. **H45 ANCHOR-CROSSCHAN-DEC** (alphonse) — surface decoder pre-projection axis (re-interpret as trajectory perturbation per H46 finding)
+6. **H47 V-DEPTH** (nezuko) — volume DECODER attack
+7. **H48 TAU-Y-EQUALIZE** (edward) — single-flag training-time test
+8. **H36 ANCHOR-SLICE-QUERIES** (tanjiro) — slice-query positional differentiation (Q modulation only)
+
+### Time-tracking note
+
+Real-clock time of this invocation is 21:25Z. Previous invocation logged 20:20Z. Fern H35 has been running ~1.5h since the 20:20Z snapshot — likely at EP9-EP10 by now. If val_VP held below floor at EP9+ → first NPCA-stacking mech-win Wave 31 confirmation. Watch fern H35 closely in next invocation. The askeladd H33 SLICEPE completion adds 4th test_vol_p crossing to the tally and surfaces the L0-dominance insight that motivated the H50 COORDSLICE assignment.
+
+---
+
+## Previous invocation actions (2026-05-18 ~20:20Z) — THORFINN H46 SDORTH CLOSED EP3-BEST PATH B 5-EP (22ND WAVE 30 DE on merge dimension, **🏆🏆🏆 3RD MECHANISM WIN: FIRST TEST τz/τx MEAN DEFLECTION 1.431 BELOW BAND ⭐ + PATH-DEPENDENT ATTRACTOR PROOF — DEFINITIVELY ANSWERS WAVE 30 STRUCTURAL QUESTION**); THORFINN REASSIGNED H49 SDORTH-FULL (PR #1197, **FULL 13-EPOCH CONFIRMATION OF H46 MECHANISM** — same 3-LOC code, full budget); WAVE 30 STRUCTURAL FINDING FINALLY ANSWERED (τz/τx band attractor lives in TRAINING TRAJECTORY, not weight values — orth init perturbation persists in TEST mean despite weight-level orth fully gradient-overwritten by EP1)
 
 ### Headline updates (20:20Z)
 

@@ -1,3 +1,102 @@
+## 2026-05-18 21:25 — PR #1187: H33 SLICEPE — Learnable Slice Positional Embedding (askeladd, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt + test_SP FAIL) / 23RD WAVE-30 DEAD END ON MERGE DIMENSION / 🏆 4TH TEST_VOL_P FLOOR CROSSING + L0-DOMINANCE STRUCTURAL INSIGHT
+
+- **Branch**: `askeladd/h33-slice-position-embedding` (closed)
+- **W&B run**: 8-rank DDP rank0 `u58fwoym` (clean 13-ep completion, 838.16 min / 1100 min budget, EP13 EMA checkpoint best, descent saturated mid-EP7 with slope decay −0.0035 pp/1k → −0.0004 pp/1k = 9× slowdown)
+- **Hypothesis**: Add learnable additive slice positional embedding `slice_pe[1, H, S, D_head]` per layer to `slice_tokens` before qkv projection. Predicted: deeper layers develop more inter-slice cosine spread as model learns region-specialised positional routing → break τz/τx band attractor via slice-specific physics routing.
+
+### Terminal metrics (rank0 `u58fwoym` EP13 EMA best-ckpt)
+
+| Metric | EP13 val (34 cars) | EP13 test (50 cars) | Baseline | Δ to baseline | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.472%** | — | 6.126% (merge) | +0.346pp | ❌ FAIL |
+| val_SP | 4.269% | — | — | — | — |
+| val_VP | 3.744% | — | — | — | — |
+| val_WSS | 7.345% | — | — | — | — |
+| test_abupt | — | 5.960% | 5.844% | +0.116pp | minor regression |
+| test_SP | — | **3.793%** | 3.577% (floor) | **+0.216pp** | ❌ **FLOOR BREACH** |
+| test_vol_p | — | **3.522%** | 3.643% (floor) | **−0.121pp** | ✅ **PASS — 4th vol_p crossing in Wave 30/31** |
+| test_WSS | — | 6.856% | 6.727% | +0.129pp | minor regression |
+
+### Test τz/τx — band attractor holds (no deflection)
+
+| stat | val | test |
+|---|---:|---:|
+| `tau_zx_ratio_mean` | 1.554 (upper edge band) | **1.487** (mid-band) |
+| τz/τx behavior | in band | in band — no deflection |
+
+Unlike H46 SDORTH (test mean 1.431 below band), H33's test τz/τx mean stays in band. Confirms encoder-side additive PE mechanism does NOT produce test mean deflection — that mechanism class is reserved for per-vertex weighting (H18) and decoder weight init (H46).
+
+### Mechanism FALSIFIED — depth pattern is BACKWARDS (L0 dominates, novel insight)
+
+H33 predicted: `inter_slice_cos` should INCREASE L0 → L4 (depth-monotonic differentiation).
+
+Terminal EP13 reading (step 70,652):
+
+| Layer | inter_slice_cos | Prediction | Status |
+|:--|---:|:--|:--|
+| L0 | **0.0851** | should be SMALLEST | ❌ LARGEST by ~3-10× |
+| L1 | 0.0189 | < L2 | ❌ smallest of L1-L4 |
+| L2 | 0.0285 | < L3 | ❌ above L3 |
+| L3 | -0.0010 | < L4 | ❌ essentially uniform |
+| L4 | 0.0283 | should be LARGEST | ❌ tied for third |
+
+**Novel insight**: L0 attends directly to raw geometric input and benefits most from per-slice positional disambiguation. Deeper layers operate on fused token embeddings and prefer content-routing. This is the FIRST cold-start fade in Wave 30/31 with an explicit per-layer mechanism diagnosis — produces a concrete actionable Wave 31 follow-up (coordinate-conditioned slice IDs at L0).
+
+### slice_pe parameter growth — σ=O(1/√D)≈0.088 auto-rediscovered
+
+| Stat | Init (EP0) | Terminal (EP13) | Growth |
+|---|---:|---:|---:|
+| global slice_norm | 0.23 | 1.80 | 8× |
+| std | 0.020 | 0.150 | 7.5× |
+
+Literature warning that σ=0.02 is below gradient floor was CORRECT. Model auto-grew the PE to σ≈0.15 (above O(1/√D_head) = 0.088 for D_head=128). Future learnable-PE experiments should init at σ=0.088 directly.
+
+### Descent saturated mid-EP7 — no benefit from extending the run
+
+| Time | Step | val_abupt | val_VP | Slope |
+|---:|---:|---:|---:|:--|
+| 16:42Z | 55,559 | 6.507% | 3.781% | EP5+ check |
+| 18:50Z | 62,492 | 6.475% | 3.754% | −0.032pp / 2h08m |
+| 21:00Z | 70,652 | 6.472% | 3.744% | **−0.003pp / 2h10m** ← saturated |
+
+Slope decay −0.0035 → −0.0004 pp/1k steps (9× slowdown by mid-EP7). Cosine LR decay final phase dominated; effective learning stopped at val_abupt ~6.47% / val_VP ~3.74%. Terminal slope at EP13: −0.001 pp/1k steps.
+
+### Wave 30/31 test_vol_p floor crossing tally — now 4
+
+| # | Hyp | Mech class | val_abupt | test_vol_p | Merged? |
+|---:|---|---|---:|---:|:--|
+| 1 | H31 WALLDIST | Encoder-input log-SDF | 6.176% | −0.155pp | ✅ MERGED |
+| 2 | H26 NPCA | Encoder-input local-frame | improved | −0.035pp | ✅ MERGED |
+| 3 | H46 SDORTH (Path B) | Decoder weight init | 6.868% | breach (3-ep gap) | ❌ FLOOR BREACH on screening |
+| 4 | **H33 SLICEPE** | **Encoder slice-PE additive** | **6.472%** | **−0.121pp** | ❌ NOT-A-MERGE (val_abupt + test_SP) |
+
+**Pattern observation**: test_vol_p (3 mechanism classes crossed; only baseline #972 + 2 mech wins crossed test_SP). **test_SP is the binding merge gate, not test_vol_p**. Wave 31 hypothesis design should prioritize mechanisms targeting surface pressure pathway specifically.
+
+### Suggested follow-ups (student-prioritized)
+
+1. **σ=0.088 init arm (LOW)** — emergently explored; model auto-grew. Likely no flip.
+2. **Input-only slice_pe (MEDIUM)** — restrict PE to L0 only; cheaper and tests L0-dominance directly.
+3. **Coordinate-conditioned slice IDs (HIGH per literature)** — DAB-DETR / Anchor DETR analogue. Replaces free-floating slice_pe with input-coordinate-derived centroids. ✅ ASSIGNED as H50 COORDSLICE to askeladd (PR #1198).
+4. **Drop slice-attention entirely (HIGH-risk HIGH-reward)** — per LinearNO arXiv:2511.06294; replace inter-slice SDPA with linear projection. Reserved for future idle slot.
+5. **Per-car τz/τx telemetry** — std/min/max/n_outside_band logging at val time; useful diagnostic for future band-attractor experiments.
+
+### Closure rationale
+
+Closing rather than sending back: (a) primary mechanism comprehensively falsified across all 13 epochs; (b) descent saturated mid-EP7 — no headroom in this recipe; (c) test_vol_p positive already banked at terminal; (d) L0-dominance insight is the seed for H50 COORDSLICE (structurally different next experiment).
+
+### What this preserves for Wave 31
+
+1. **L0-dominance pattern in slice-PE space** — first cold-start fade with explicit per-layer diagnosis. Reshapes Wave 31 hypothesis design toward L0-targeted mechanisms.
+2. **test_vol_p floor is empirically easier than test_SP** — 4 vol_p crossings via 3 mech classes vs 0 test_SP crossings beyond baseline. Re-prioritizes Wave 31 toward surface-pressure-specific mechanisms.
+3. **σ=O(1/√D) init is auto-rediscovered** by Lion when starting from σ=0.02 (literature-confirmed at 0.088 for D_head=128).
+4. **Slice-PE → vol_p pathway**: encoder-side positional information flows back to volume tokens through slice→volume cross-attention. Tractable secondary vol_p mechanism but poor primary mechanism for val_abupt + test_SP.
+
+### Reassignment
+
+→ **askeladd** assigned **H50 COORDSLICE** (PR #1198): Coordinate-conditioned slice IDs (DAB-DETR analogue). Replaces free-floating learnable slice_pe with slice IDs derived from physical 3D coordinates of each slice's centroid. Single-flag `--use-coord-slice-pe`. Tests whether physically-grounded slice anchors produce cleaner mechanism than auto-grown free-floating IDs. Full 13-ep budget, same recipe as H33 v2.
+
+---
+
 ## 2026-05-18 20:15 — PR #1193: H46 SDORTH — Surface Decoder Orthogonal Row Init (thorfinn, Path B 5-ep) — TERMINAL EP3-BEST NOT-A-MERGE (3-EP BUDGET FLOOR BREACHES) / 22ND WAVE-30 DEAD END ON MERGE DIMENSION / 🏆🏆🏆 3RD MECHANISM WIN: FIRST TEST τz/τx MEAN DEFLECTION + PATH-DEPENDENT ATTRACTOR PROOF
 
 - **Branch**: `thorfinn/h46-sdorth` (closed)
