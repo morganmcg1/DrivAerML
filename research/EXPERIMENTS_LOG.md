@@ -1,3 +1,41 @@
+## 2026-05-18 01:55 — PR #1183: H18d (tanjiro) — EP3 INTERIM / KILL GATE TRIGGERED ON τz/τx BUT ADVISOR EXCEPTION → CONTINUE TO EP6 MID-TRAJECTORY GATE / MECHANISM DIAGNOSIS LOCKED
+
+- **Branch**: `tanjiro/h18d-channel-decoupled-tau-z-area-weight`
+- **W&B run**: `pp89ilpb`
+- **Hypothesis**: Channel-decoupled τ_z-only area weighting — isolate whether H18's band-break (τz/τx 1.418 ★) is τ_z-specific physics or a tied-loss-budget effect across channels.
+
+### EP3 Results
+
+| Metric | EP3 H18d | EP3 H18 (ref) | Gate | Verdict |
+|---|---:|---:|---|---|
+| val_abupt | 7.006% | 7.787% | ≤7.5 | ✅ PASS (-0.78pp vs H18, BEST in H18-family) |
+| val_SP | 4.495% | 5.033% | ≤4.50 | ✅ PASS (knife-edge, -0.54pp vs H18) |
+| val_vol_p | 3.919% | — | informational | tracking |
+| τz/τx | **1.669** | **1.412** | ≤1.42 PASS / >1.50 KILL | ❌ **KILL** (+0.257 vs H18) |
+
+### Mechanism diagnosis (LOCKED — high-value experimental result)
+
+**H18's band-break was NOT τ_z-channel physics — it was a tied-loss-budget effect.** Channel-decoupling (τ_z-only area weighting, cp/τ_x/τ_y at baseline) eliminates the cross-channel pressure that drove τ_z down on horizontal panels in H18. Specifically:
+- H18 area-weighted ALL 4 channels → starved cp/τ_x/τ_y → forced gradient onto τ_z → "broke" band attractor
+- H18d area-weighted ONLY τ_z → cp/τ_x/τ_y normal weight → no forced redistribution → band attractor reverts
+
+**Implication**: Position-based per-vertex area weighting is decisively closed as an axis across all variants. H18's win was a coincidental side-effect of channel-coupled loss budget redistribution, NOT a discovery about τ_z geometry.
+
+### Advisor exception decision
+
+KILL gate technically triggered (τz/τx > 1.50), but val_abupt 7.006% is the BEST EP3 result of any H18-family attempt, and val_SP recovery (5.033%→4.495%) confirmed the channel-decoupling SP-recovery hypothesis. EP13 trajectory extrapolation: val_abupt 5.5-6.0% possible (would beat baseline 6.126%).
+
+**CONTINUE granted with strict EP6 mid-trajectory gate (~06:10Z May 18):**
+- val_abupt ≤ 6.40% AND val_SP ≤ 4.10% → continue to EP13
+- val_abupt > 6.60% OR val_SP > 4.40% → kill
+- Marginal zone → advisor decision
+
+### Linked W&B run state at posting time
+- Heartbeat 01:44Z, all 8 ranks alive, 0 nonfinites, val slopes all negative
+- best_checkpoint EMA = EP3 (currently selecting EP3 model)
+
+---
+
 ## 2026-05-18 00:28 — PR #1178: H27 PRLP (askeladd) — TERMINAL KILL EP3 / 12TH WAVE-30 DEAD END / TRAIN-EVAL SPACE MISMATCH FALSIFIED
 
 - **Branch**: `askeladd/h27-per-component-relative-l2-proxy-loss`
