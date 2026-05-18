@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_crosschan_decoder: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_crosschan_decoder": (
+            "Enable H45 cross-channel surface decoder attention (PR #1192). "
+            "Self-attention over the 4 surface output channels {cp, tau_x, "
+            "tau_y, tau_z} just before the final projection. Each channel "
+            "develops its own residual representation (hidden + channel "
+            "offset) and self-attends across the 4 channels, then projects "
+            "to a per-channel scalar residual that is added to the baseline "
+            "surface_out output. Zero-init crosschan_out -> bit-exact "
+            "baseline at step 0. Tests the rank-coupling-escape hypothesis "
+            "for the [1.44, 1.55] tau_z/tau_x band attractor."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -294,6 +306,70 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_crosschan_metrics(model: nn.Module) -> dict[str, float]:
+    """H45 cross-channel decoder observability (PR #1192).
+
+    Logged whenever `use_crosschan_decoder=True`:
+      - crosschan/query_embed_norm/{cp,tau_x,tau_y,tau_z}: per-channel offset norm
+      - crosschan/out_weight_norm: shared output projection weight norm
+      - crosschan/residual_abs_mean/{cp,tau_x,tau_y,tau_z}: per-channel residual
+        magnitude (snapshot of last forward pass, masked to valid surface points)
+      - crosschan/residual_asymmetry_ratio: ratio of tau_z residual mean to tau_x
+        residual mean (mechanism diagnostic; >1.5 = asymmetric escape, ~1.0 =
+        symmetric collapse)
+      - crosschan/attn_entropy_mean: average entropy of 4-way attention weights
+        per channel-query (high = channels attending broadly, low = collapsed)
+    """
+
+    metrics: dict[str, float] = {}
+    if getattr(model, "crosschan_attn", None) is None:
+        return metrics
+
+    channel_names = ["cp", "tau_x", "tau_y", "tau_z"]
+    query_embed = model.crosschan_query_embed.detach().float()
+    out_weight = model.crosschan_out_weight.detach().float()  # [C, Dc]
+    out_bias = model.crosschan_out_bias.detach().float()  # [C]
+    metrics["crosschan/out_weight_norm"] = float(out_weight.norm().item())
+    for i, name in enumerate(channel_names):
+        metrics[f"crosschan/query_embed_norm/{name}"] = float(
+            query_embed[0, i].norm().item()
+        )
+        metrics[f"crosschan/out_weight_norm/{name}"] = float(out_weight[i].norm().item())
+        metrics[f"crosschan/out_bias/{name}"] = float(out_bias[i].item())
+
+    residuals = getattr(model, "_last_crosschan_residuals", None)
+    mask = getattr(model, "_last_crosschan_mask", None)
+    if residuals is not None and mask is not None:
+        residuals_f = residuals.float()
+        mask_f = mask.float().unsqueeze(-1)
+        denom = mask_f.sum().clamp_min(1.0)
+        per_channel_abs_mean = (residuals_f.abs() * mask_f).sum(dim=(0, 1)) / denom
+        for i, name in enumerate(channel_names):
+            metrics[f"crosschan/residual_abs_mean/{name}"] = float(
+                per_channel_abs_mean[i].item()
+            )
+        tau_x_mean = float(per_channel_abs_mean[1].item())
+        tau_z_mean = float(per_channel_abs_mean[3].item())
+        if tau_x_mean > 0:
+            metrics["crosschan/residual_asymmetry_ratio"] = tau_z_mean / tau_x_mean
+        else:
+            metrics["crosschan/residual_asymmetry_ratio"] = 0.0
+
+    attn_weights = getattr(model, "_last_crosschan_attn_weights", None)
+    if attn_weights is not None:
+        # attn_weights: [B*N, num_queries=4, num_keys=4] after average_attn_weights
+        probs = attn_weights.float().clamp_min(1e-12)
+        entropy = -(probs * probs.log()).sum(dim=-1)  # [B*N, 4]
+        metrics["crosschan/attn_entropy_mean"] = float(entropy.mean().item())
+        metrics["crosschan/attn_entropy_max"] = float(entropy.max().item())
+        metrics["crosschan/attn_entropy_min"] = float(entropy.min().item())
+        # Diagonal mass: how much each channel attends to itself vs others.
+        diag = probs.diagonal(dim1=-2, dim2=-1)  # [B*N, 4]
+        metrics["crosschan/attn_diag_mean"] = float(diag.mean().item())
+
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -308,6 +384,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_crosschan_decoder=config.use_crosschan_decoder,
     )
 
 
@@ -773,7 +850,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_crosschan_decoder:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1262,6 +1339,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_crosschan_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

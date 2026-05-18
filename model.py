@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_crosschan_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_crosschan_decoder = use_crosschan_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,63 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H45 cross-channel decoder attention (PR #1192). Self-attention over
+        # the 4 surface output channels {cp, tau_x, tau_y, tau_z} just BEFORE
+        # the final projection — each channel develops its own residual
+        # representation that the projection then maps. Tests the
+        # rank-coupling-escape hypothesis at the surface decoder level.
+        #
+        # Deviation from PR-as-written: PR used surface_hidden_normed as a
+        # single K/V (L_k=1), which makes softmax degenerate to 1.0 and yields
+        # identical residuals across all 4 channels — see PR comment for the
+        # math. Fix: build per-channel representations (hidden + channel
+        # offset) and self-attend across the 4 channels so each Q_i actually
+        # attends to 4 distinct K/V. crosschan_out is zero-init -> identity at
+        # step 0. We also down-project to crosschan_dim=128 before attention
+        # to keep [B*N, C, D] intermediates within the 80 GB budget at
+        # B=4, N=65536; this changes param overhead from ~3.4M (PR estimate)
+        # down to ~0.34M (~2% of baseline) which is fine because the
+        # information bottleneck is C=4 channels, not D-dim hidden state.
+        if use_crosschan_decoder:
+            crosschan_dim = max(64, n_hidden // 4)  # 128 when n_hidden=512
+            self.crosschan_dim = crosschan_dim
+            self.crosschan_down = nn.Linear(n_hidden, crosschan_dim)
+            self.crosschan_attn = nn.MultiheadAttention(
+                embed_dim=crosschan_dim,
+                num_heads=4,
+                dropout=0.0,
+                batch_first=True,
+            )
+            self.crosschan_query_embed = nn.Parameter(
+                torch.zeros(1, self.surface_output_dim, crosschan_dim)
+            )
+            # std=1.0 (DETR-style): channel offset embeddings dominate the
+            # shared hidden_down term in q_proj/k_proj output, giving 4 channels
+            # distinct attention patterns at init. Smaller std=0.02-0.3 leaves
+            # attention uniform (entropy ~ log(4)).
+            nn.init.normal_(self.crosschan_query_embed, std=1.0)
+            # Per-channel output projection: each channel gets its own
+            # Linear(Dc, 1). With shared crosschan_attn outputs and a SHARED
+            # output projection, per-channel residual variation is bounded by
+            # the (small) channel-wise variation in attended representations.
+            # Per-channel projections amplify the mechanism: even if
+            # attended[v, c] is similar across c, distinct weight vectors
+            # W_c produce strongly channel-distinct residuals. Zero-init
+            # weights/biases preserve bit-exact baseline at step 0.
+            self.crosschan_out_weight = nn.Parameter(
+                torch.zeros(self.surface_output_dim, crosschan_dim)
+            )
+            self.crosschan_out_bias = nn.Parameter(
+                torch.zeros(self.surface_output_dim)
+            )
+        else:
+            self.crosschan_dim = 0
+            self.crosschan_down = None
+            self.crosschan_attn = None
+            self.crosschan_query_embed = None
+            self.crosschan_out_weight = None
+            self.crosschan_out_bias = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -623,9 +682,65 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.crosschan_attn is not None and surface_hidden.shape[1] > 0:
+                B, N, _ = surface_hidden.shape
+                C = self.surface_output_dim
+                Dc = self.crosschan_dim
+                # Project to lower-dim subspace for crosschan attention to keep
+                # [B*N, C, Dc] intermediates small.
+                hidden_down = self.crosschan_down(surface_hidden)
+                # Per-channel representations: shared vertex repr + channel offset.
+                channel_repr = (
+                    hidden_down.unsqueeze(2).expand(-1, -1, C, -1)
+                    + self.crosschan_query_embed
+                ).reshape(B * N, C, Dc)
+                # Flash backend rejects B*N=262144 with "invalid argument" —
+                # force mem_efficient backend which handles large batch sizes.
+                with torch.backends.cuda.sdp_kernel(
+                    enable_flash=False, enable_mem_efficient=True, enable_math=True
+                ):
+                    attended, _ = self.crosschan_attn(
+                        channel_repr,
+                        channel_repr,
+                        channel_repr,
+                        need_weights=False,
+                    )
+                # Per-channel output projection: residual[v, c] =
+                #   crosschan_out_weight[c] · attended[v, c] + crosschan_out_bias[c]
+                # Implemented as elementwise product + sum across the Dc dim.
+                channel_residuals = (
+                    attended * self.crosschan_out_weight.unsqueeze(0)
+                ).sum(dim=-1) + self.crosschan_out_bias  # [B*N, C]
+                channel_residuals = channel_residuals.reshape(B, N, C)
+                channel_residuals = channel_residuals * surface_mask.unsqueeze(-1)
+                surface_preds = surface_preds + channel_residuals
+                self._last_crosschan_residuals = channel_residuals.detach()
+                # Diagnostic attention weights at eval only — need_weights=True
+                # forces the math backend which materializes the attention matrix.
+                if not self.training and (B * N) > 0:
+                    sample_n = min(512, B * N)
+                    sample_repr = channel_repr[:sample_n]
+                    _, attn_weights = self.crosschan_attn(
+                        sample_repr,
+                        sample_repr,
+                        sample_repr,
+                        need_weights=True,
+                        average_attn_weights=True,
+                    )
+                    self._last_crosschan_attn_weights = attn_weights.detach()
+                else:
+                    self._last_crosschan_attn_weights = None
+                self._last_crosschan_mask = surface_mask.detach()
+            else:
+                self._last_crosschan_residuals = None
+                self._last_crosschan_attn_weights = None
+                self._last_crosschan_mask = None
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+            self._last_crosschan_residuals = None
+            self._last_crosschan_attn_weights = None
+            self._last_crosschan_mask = None
 
         if volume_x is not None:
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
