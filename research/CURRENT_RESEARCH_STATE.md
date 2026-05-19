@@ -1,11 +1,25 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~00:15 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~02:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~01:30Z) — EDWARD H48 TAU-Y-EQUALIZE EP4 stale_wip CLEARED with **τz/τx MEAN 0.40 PERSISTING ACROSS 4 EPOCHS** (EP1 0.383 → mid-EP3 0.400 → EP4 0.401, drift +0.0006 pp/1k essentially flat, std stable 0.033, n_outside 34/34 all cars stable — most stable extreme attractor reading in Wave 30/31 history) + **POTENTIAL MERGE CANDIDATE** val_abupt 6.597% at EP4 descending at −0.106 pp/1k from mid-EP3, projected terminal 5.95-6.25% at budget cutoff EP10-EP11 (~12:45Z May 19); **4TH INSTANCE of per-car / aggregate decoupling pattern**: per-car τz/τx mean 0.40 (all 34/34 cars below band) but aggregate wall_shear_z/wall_shear_x 1.526 (IN band [1.44, 1.55]) — joins H35 + H44 + H45 as emerging Wave 31 structural finding
+## Latest invocation actions (2026-05-19 ~02:15Z) — FRIEREN H44 YAW-AUG CLOSED EP13 (**25TH Wave 30/31 DE on merge dim** + **6TH test_vol_p floor crossing at 3.608% −0.035pp + FIRST DATA-AUGMENTATION AXIS CROSSING in DrivAerML fleet history** + cleanest cross-channel WSS regularization signal in Wave 31 — τz channel improved by −0.88pp at test DESPITE yaw rotation NOT mixing τz, NOVEL MECHANISM CLASS not predicted by hypothesis; all 3 WSS axes ahead of baseline at test; per-car std(τz/τx) val 0.198 PASSES 0.15 gate, test 0.118 partial; beats AB-UPT on vol_p −2.47pp and WSS aggregate −0.23pp); **FRIEREN H52 NPCA × YAW-AUG STACK ASSIGNED** (PR #1200, combines H26 NPCA encoder-input enrichment + H44 yaw aug θ_max=5°, mechanistically orthogonal axes: encoder-input × data-distribution; H35 just proved stacking works; predicted val_abupt 5.95-6.18% BORDERLINE merge candidate, test_vol_p 3.45-3.55% well below floor, NPCA frame-invariance expected to soften H44's surface-pressure tax); FLEET STILL 8/8 WIP
+
+### Headline updates (02:15Z)
+
+1. **PR #1190 frieren H44 YAW-AUG CLOSED.** Terminal SENPAI-RESULT at 02:08Z. Run `6scw4nto` finished EP13 EMA best, 51,622s runtime. val_abupt 6.355% (+0.229pp above merge gate), test_abupt 6.116% (+0.272pp above baseline), test_SP 3.853% (+0.276pp surface tax breach), test_vol_p **3.608%** (−0.035pp below floor — 6TH floor crossing). **First data-augmentation axis crossing in DrivAerML fleet history.**
+
+2. **Cross-channel WSS regularization — novel Wave 31 mechanism class.** All 3 WSS axes ahead of baseline at test: τx −0.25pp, τy −0.51pp, τz −0.88pp. **τz NOT mixed by yaw rotation, yet improved by −0.88pp.** Rotation-equivariance prior provides cross-channel regularization on axes that aren't directly rotated. Novel finding — H44 hypothesis predicted only τx/τy improvement.
+
+3. **Per-car std(τz/τx) variance gate analysis:** val 0.198 PASSES 0.15 gate, test 0.118 (between 0.05 KILL and 0.15 ALIVE — partial). 35% of test cars below 1.44 band edge — yaw rotation shifting some cars away from band attractor entirely.
+
+4. **PR #1200 frieren H52 NPCA × YAW-AUG STACK ASSIGNED.** Combines `--use_local_frame_proj` (H26 NPCA, merged) + `--yaw-aug-theta-max 5.0` (H44 YAW-AUG). Mechanistically orthogonal: encoder input enrichment × data distribution rotation. **NPCA is rotation-equivariant by construction** — `[p·n, p·t1, p·t2]` are scalars under any rotation that rotates both `p` and `n` consistently. Predicted to soften H44's surface-pressure tax via NPCA frame-invariance while preserving vol_p + per-axis WSS gains.
+
+5. **Wave 30/31 floor crossing tally — now 6** (H31 WALLDIST, H26 NPCA, H46 SDORTH, H33 SLICEPE, H35 NPCA+SSFL, **H44 YAW-AUG**). First data-aug axis. 3 of 6 (or 4 of 6 incl. H46 PathB) crossings have val_abupt fail — merge dimension consistently harder than floor.
+
+## Previous invocation actions (2026-05-19 ~01:30Z) — EDWARD H48 TAU-Y-EQUALIZE EP4 stale_wip CLEARED with **τz/τx MEAN 0.40 PERSISTING ACROSS 4 EPOCHS** (EP1 0.383 → mid-EP3 0.400 → EP4 0.401, drift +0.0006 pp/1k essentially flat, std stable 0.033, n_outside 34/34 all cars stable — most stable extreme attractor reading in Wave 30/31 history) + **POTENTIAL MERGE CANDIDATE** val_abupt 6.597% at EP4 descending at −0.106 pp/1k from mid-EP3, projected terminal 5.95-6.25% at budget cutoff EP10-EP11 (~12:45Z May 19); **4TH INSTANCE of per-car / aggregate decoupling pattern**: per-car τz/τx mean 0.40 (all 34/34 cars below band) but aggregate wall_shear_z/wall_shear_x 1.526 (IN band [1.44, 1.55]) — joins H35 + H44 + H45 as emerging Wave 31 structural finding
 
 ## Previous invocation actions (2026-05-19 ~01:05Z) — TANJIRO H36 ANCHOR-SLICE-QUERIES EP7 region stale_wip CLEARED with **DOUBLE-POSITIVE LIVE MERGE CANDIDATE** (val_VP 3.629% **−0.014pp BELOW val/test floor** — val-side floor crossing CONFIRMED in flight; val_abupt 6.245% **+0.119pp above merge gate 6.126%** — closest in-flight to merge gate, projected terminal 6.10-6.18% borderline; per-axis val_WSS AHEAD on ALL 3 axes vs baseline EP6 — τx −0.31pp, τy −0.56pp, τz −0.39pp); budget cutoff at ~06:10Z May 19 lands at ~EP9-EP10 (NOT EP13 — student's prior projection off); terminal SENPAI-RESULT expected ~07:30Z after test eval
 

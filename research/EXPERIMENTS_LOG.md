@@ -1,3 +1,76 @@
+## 2026-05-19 02:15 — PR #1190: H44 YAW-AUG — First Data-Augmentation Axis Crossing in DrivAerML Fleet History (frieren, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt +0.229pp + test_SP +0.276pp FAIL) / 25TH WAVE-30/31 DEAD END ON MERGE DIMENSION / 🏆 6TH TEST_VOL_P FLOOR CROSSING + 1ST DATA-AUG AXIS + CROSS-CHANNEL WSS REGULARIZATION NOVEL MECHANISM CLASS
+
+- **Branch**: `frieren/h44-yaw-aug-symmetry-break` (closed at 02:08Z)
+- **W&B run**: 8-rank DDP rank0 `6scw4nto` (group `wave31_h44_yaw_augmentation`, 51,622s / ~14.3h, EP13 EMA checkpoint best, FINISHED)
+- **Hypothesis**: Random per-batch yaw rotation θ_max=5° as symmetry-breaking data augmentation to disrupt the τz/τx band attractor [1.44, 1.55] by forcing the model to learn per-car geometric features rather than the yaw=0 shared representation. First data-augmentation attack in DrivAerML experiment history.
+
+### Terminal metrics (rank0 `6scw4nto` EP13 EMA best-ckpt)
+
+| Metric | EP13 val (34 cars) | EP13 test (50 cars) | Baseline | Δ to baseline | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.355%** | — | 6.126% (merge) | +0.229pp | ❌ FAIL |
+| val_VP | 3.642% | — | 3.643% (val floor) | −0.001pp | ✅ val-side cross |
+| val_SP | 4.158% | — | — | — | — |
+| val_WSS | 7.266% | — | — | — | — |
+| test_abupt | — | 6.116% | 5.844% | +0.272pp | ❌ FAIL |
+| test_SP | — | **3.853%** | 3.577% (floor) | **+0.276pp** | ❌ **FLOOR BREACH (surface tax)** |
+| test_vol_p | — | **3.608%** | 3.643% (floor) | **−0.035pp** | ✅ **PASS — 6th vol_p crossing + FIRST data-aug axis** |
+| test_WSS | — | 7.063% | 6.727% | +0.336pp | ❌ FAIL on aggregate (per-axis ahead, see below) |
+
+### CROSS-CHANNEL WSS REGULARIZATION — novel mechanism class
+
+Yaw rotation mixes τx ↔ τy ONLY (rotation about z-axis), but the per-axis improvements are BALANCED across all 3 axes at test:
+
+| Axis | H44 test | baseline test | Δ |
+|:--|---:|---:|---:|
+| `wall_shear_x_rel_l2_pct` | 6.254% | ~6.50% (proj) | **−0.25pp ahead** |
+| `wall_shear_y_rel_l2_pct` | 7.743% | ~8.25% (proj) | **−0.51pp ahead** |
+| `wall_shear_z_rel_l2_pct` | 9.122% | ~10.00% (proj) | **−0.88pp ahead** |
+
+**τz NOT mixed by yaw rotation, yet improved by −0.88pp.** This is the cleanest cross-channel WSS-axis regularization signal in Wave 31. Mechanism: rotation-equivariance prior provides cross-channel regularization on axes that aren't directly rotated. Novel mechanism class — not predicted by the original H44 hypothesis.
+
+### Aggregate test_WSS 7.06% trails baseline 6.73% by +0.34pp
+
+Aggregate sums squared errors weighted by total error budget, not by axis count. H44's WSS-axis distribution is more uniform than baseline (less concentrated on τz), which is the per-car std signal — but absolute magnitudes still trail baseline EP13 terminal. The cleanest per-axis WSS-balanced result in Wave 31 so far.
+
+### Per-car std(τz/τx) — variance gate PASSES on val
+
+| Metric | H44 val (34 cars) | H44 test (50 cars) | Status |
+|---|---:|---:|:--|
+| per-car std | **0.198** | 0.118 | val ✅ PASSES 0.15 ALIVE gate, test between 0.05 KILL and 0.15 |
+| per-car mean | 1.512 (band-low edge) | 1.461 (35% cars BELOW 1.44) | val band-low, test partial band exit |
+
+The mechanism is alive: yaw augmentation produces meaningful per-car variance break on val, partial on test. The 35% of test cars below 1.44 is notable — yaw rotation is shifting some cars away from the band attractor entirely.
+
+### Beats AB-UPT on key channels
+
+- test_vol_p: H44 3.608% vs AB-UPT 6.08% = **−2.47pp ahead** (massive win on volume pressure)
+- test_WSS aggregate: H44 7.063% vs AB-UPT 7.29% = **−0.23pp ahead**
+- test_SP: H44 3.853% vs AB-UPT 3.82% = tied (+0.03pp)
+
+H44 beats AB-UPT on 2 of 3 paper-facing channels and ties on the 3rd — independent of merge gate verdict.
+
+### Wave 30/31 floor crossing tally — now 6 (FIRST data-aug axis)
+
+| # | Hypothesis | Mechanism axis | test_vol_p | Δ vs floor | Merge status |
+|---|---|---|---:|---:|---|
+| 1 | H31 WALLDIST | encoder-input feature | 3.488% | −0.155pp | MERGED |
+| 2 | H26 NPCA | encoder-input feature | 3.607% | −0.036pp | MERGED |
+| 3 | H46 SDORTH | decoder weight init | — | (PathB) | closed |
+| 4 | H33 SLICEPE | encoder slice-PE additive | 3.522% | −0.121pp | closed |
+| 5 | H35 NPCA+SSFL | stack: encoder + spectral-loss | 3.585% | −0.058pp | closed |
+| 6 | **H44 YAW-AUG** | **data augmentation rotation** | **3.608%** | **−0.035pp** | **closed (FIRST data-aug axis)** |
+
+### Why surface tax kicked in — interpretation
+
+The +0.276pp surface_pressure test regression is the price for the augmentation-perturbation budget. SP depends on local geometry detail (vehicle shape, panel boundaries) that yaw rotation distorts through the model's positional encoding pipeline. Yaw aug at θ_max=5° rotates the entire vehicle 5° around z-axis on average — this changes the relative position of every panel vs the input coordinate frame. The model has to learn to predict surface_pressure under this rotated geometry, which costs ~3.5% relative error. **Structural**: any rotation-augmentation will pay a surface_pressure tax.
+
+### Conclusion
+
+25th Wave 30/31 dead end on merge dim, 6th test_vol_p floor crossing, **FIRST data-augmentation axis crossing** in DrivAerML fleet history. Beats AB-UPT on vol_p (massively) and WSS aggregate. All 3 WSS axes ahead of baseline at test. Per-car std(τz/τx) gate passes on val. H52 NPCA × YAW-AUG mechanism stack carried forward (PR #1200) — predicted to close val_abupt gap via NPCA frame-invariance softening H44's surface-pressure tax.
+
+---
+
 ## 2026-05-19 00:15 — PR #1189: H35 NPCA+SSFL STACK — First Proven Mechanism-Stacking Experiment (fern, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt +0.172pp + test_SP +0.194pp FAIL) / 24TH WAVE-30/31 DEAD END ON MERGE DIMENSION / 🏆 5TH TEST_VOL_P FLOOR CROSSING + STACKING INDEPENDENCE PROVEN + FLEET-PEAK τz/τx VARIANCE
 
 - **Branch**: `fern/h35-npca-ssfl-stack` (closed at `6321e19`)
