@@ -5,7 +5,26 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~00:30Z) — ALPHONSE H45 ANCHOR-CROSSCHAN-DEC EP3 stale_wip CLEARED with **GATE 1 / GATE 2 DECOUPLING FINDING** (out_weight_norm τz/τx ratio 9.75 ≫ 1.3 gate, STRONGEST weight-space asymmetry in Wave 31; but output-space wall_shear τz/τx 1.517 STAYING IN BAND — weight asymmetry and output band-break are INDEPENDENT mechanisms, val_abupt 6.96% on baseline-beat trajectory); EMERGING WAVE 31 PATTERN: mechanism class determines gradient routing, NOT loss target (joins H35 stacking + H44 cross-channel regularization)
+## Latest invocation actions (2026-05-19 ~00:45Z) — ASKELADD H50 COORDSLICE mid-EP2 stale_wip CLEARED with **L0-INVERSION CONFIRMATION** (inter_slice_cos_post_pe L0=0.453 LOWEST, L4=0.647 HIGHEST — exact INVERSE of H33's L0-dominance failure pattern; coordinate-conditioned anchors deliver positional disambiguation at L0 the layer that needs it most; EP1 val_abupt 28.90% normal cold-start, student's kill-threshold fix from step 10864 → 21729 validated since H33/H45 all land EP1 ~28-30%); per-block centroid spread healthy 0.076-0.122 spread along vehicle length 0.94-1.38 (slices anchoring on real 3D positions, NOT collapsing); all 8 ranks DDP healthy
+
+## Previous invocation actions (2026-05-19 ~00:30Z) — ALPHONSE H45 ANCHOR-CROSSCHAN-DEC EP3 stale_wip CLEARED with **GATE 1 / GATE 2 DECOUPLING FINDING** (out_weight_norm τz/τx ratio 9.75 ≫ 1.3 gate, STRONGEST weight-space asymmetry in Wave 31; but output-space wall_shear τz/τx 1.517 STAYING IN BAND — weight asymmetry and output band-break are INDEPENDENT mechanisms, val_abupt 6.96% on baseline-beat trajectory); EMERGING WAVE 31 PATTERN: mechanism class determines gradient routing, NOT loss target (joins H35 stacking + H44 cross-channel regularization)
+
+### Headline updates (00:45Z)
+
+1. **PR #1198 askeladd H50 mid-EP2 healthy.** Run `biw3rtli` at step 14,078 (30% through EP2, 2.15h runtime, heartbeat fresh). EP1 cold-start val_abupt 28.90% — within normal cohort range (H33 29.63%, H44 32.97%, H45 27.81%, H48 25.94%). Student caught a critical kill-threshold bug at +30min: the PR-body's EP1 gate `<9.5%` at step 10864 would have killed every cold-start run in this cohort. Moved EP1 hard kill to step 21729 (EP2 boundary) where val_abupt is normally <9.5%. Fix validated.
+
+2. **L0-INVERSION CONFIRMATION — H50 is doing exactly what H33's L0-dominance failure analysis predicted.** Per-block `inter_slice_cos_post_pe` at step 14,078:
+   - L0 = **0.453** ← LOWEST (most differentiated slices at the layer that attends to raw geometry)
+   - L1 = 0.454
+   - L2 = 0.482
+   - L3 = 0.547
+   - L4 = **0.647** ← HIGHEST (deeper layers attend to content, not slice-position)
+
+   H33's terminal pattern was OPPOSITE: L0 had HIGHEST inter_slice_cos (LEAST differentiated at the layer that needs it most). H50 delivers L0-targeted positional disambiguation via coordinate-conditioned RFF anchors — this validates the L0-dominance hypothesis structurally, even before val convergence.
+
+3. **Centroid spread healthy — slices anchoring on real 3D positions.** Per-block centroid range x (vehicle length, normalized): 0.94 → 1.32 → 1.13 → 1.01 → 1.38 across L0-L4 — slices spread along vehicle length, not collapsing. Centroid range y (lateral, vehicle is bilaterally symmetric) is narrow 0.02-0.04 — correct, slices shouldn't need lateral differentiation. Centroid range z (vertical): 0.20-0.40, moderate height differentiation between top vs underbody.
+
+4. **No other PR action needed this invocation.** All other fleet members continuing per 22:26Z + 00:15Z + 00:30Z snapshots.
 
 ## Previous invocation actions (2026-05-19 ~00:15Z) — FERN H35 NPCA+SSFL STACK CLOSED EP13 (24th Wave 30/31 DE on merge dim + **5TH test_vol_p floor crossing** at 3.585% −0.058pp + **FIRST PROVEN MECHANISM-STACKING EXPERIMENT** — NPCA per-slice variance signal SURVIVED SSFL spectral regularization, τz/τx std grew monotonically 0.078 → 0.251 fleet-peak through 13 epochs, n_outside_band 17/34, AB-UPT victory on p_s/p_v/τ); FERN H51 ASSIGNED (PR #1199, NPCA+SSFL stack at `--model-slices 192` + `--ema-decay 0.9999` — combines student's #1 capacity-scaling and #6 EMA-decay-fix priority follow-ups, expected +0.10-0.35pp val_abupt gain vs H35, potentially crosses 6.126% gate); FLEET STILL FULLY BOOKED 8/8 WIP
 
@@ -70,7 +89,7 @@
 | Student | PR | H | Status @ 22:18Z | Latest val_abupt | Key signal |
 |:--|---:|:--|:--|---:|:--|
 | **alphonse** | **#1192** | H45 CROSSCHAN-DEC | 🔥🔥 EP4 step 32.8k, **GATE 1 MASSIVELY POSITIVE τz/τx out_norm 9.75, GATE 2 DECOUPLED (output ratio 1.52 in band)** | **6.960% (EP3)** | weight asymmetry / output band-break decoupling — Wave 31 structural insight |
-| askeladd | #1198 | H50 COORDSLICE | NEW — DAB-DETR analogue. Pickup pending | — | — |
+| askeladd | #1198 | H50 COORDSLICE | 🟢 mid-EP2 step 14.1k (2.15h runtime), **L0-INVERSION CONFIRMED** (L0 inter_slice_cos 0.453 LOWEST, L4 0.647 HIGHEST — opposite of H33's failure pattern) | 28.90% (EP1 cold-start, normal) | coordinate-conditioned anchors delivering L0-targeted positional disambiguation |
 | **edward** | **#1196** | **H48 TAU-Y-EQUALIZE** | 🔥🔥🔥 mid-EP3 step 27.2k (84% through), **τz/τx mean 0.400 PERSISTING — EXTREME BAND-BREAK, 25× larger shift than H46** | 7.74% (mid-EP3) | 3rd mech class band-break: training-time loss weight, all 34/34 cars outside band, val_VP positive |
 | **frieren** | **#1190** | **H44 YAW-AUG** | 🔥 mid-EP6 step 58.2k, **val_VP 3.687% (0.044pp from floor)** | 6.422% (mid-EP6) | rotational-prior cross-channel regularization (τz ahead despite NOT rotated) |
 | nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
