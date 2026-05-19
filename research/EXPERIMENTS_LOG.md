@@ -1,3 +1,56 @@
+## 2026-05-19 10:05 — PR #1199: H51 NPCA+SSFL+slices192+ema9999 — Variance-Class Capacity-Expansion Stack (fern, killed mid-EP4) — **RECIPE-BUG CLOSURE** (advisor's EMA-aware kill gate calibration error, NOT mechanism rejection); mechanism was activating (τz/τx std doubled EP2→EP4 from 0.073 → 0.117); FERN REASSIGNED H56 H51-RELAUNCH (PR #1205) with corrected EMA-aware kill gates
+
+- **Branch**: `fern/h51-npca-ssfl-slices192` (closed at 10:05Z)
+- **W&B run**: 8-rank DDP rank0 `2vlx68f9` (group `wave31_h51_npca_ssfl_slices192`, 6.5h runtime to step 38,027 mid-EP4 kill, no test eval)
+- **Hypothesis**: NPCA + SSFL + slices=128→192 (variance capacity expansion) + ema=0.999→0.9999 (EMA precision). Dual mechanism: slices=192 adds 50% more representational room for variance-class encoder routing; ema=0.9999 reduces noise on best-checkpoint selection.
+
+### Why killed — advisor's recipe bug, NOT mechanism rejection
+
+Run died at global_step 38,027 (mid-EP4) by `--kill-thresholds "32594:val_primary/abupt_axis_mean_rel_l2_pct<10"`. At δ^38027 ≈ 0.022 (2.2% EMA random contamination), EMA-val=14.73% while train/epoch_loss matched H35 reference step-for-step. The trained model was healthy — **kill was triggered by EMA-shadow lag still being too high under ema=0.9999, not by genuine model failure**.
+
+| Step | EP | δ^step | EMA random% | EMA-val_abupt | Trained-val est | train/epoch_loss |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10,864 | 1 | 0.337 | 33.7% | 71.17% | (EMA-shadow noise) | 0.365 |
+| 21,728 | 2 | 0.115 | 11.5% | 53.21% | (EMA-shadow dominated) | 0.085 |
+| 32,592 | 3 | 0.039 | 3.9% | 23.64% | ~12% | 0.011 |
+| 38,027 | mid-EP4 | 0.022 | 2.2% | **14.73%** ← kill fired | ~9% | ~0.011 |
+
+EP6 (step 65,184) would have been the first **fully informative** read (δ=0.0015, EMA random < 0.2%). Projection at that point: val_abupt 6-8% range, comfortably passing EP6 gate.
+
+### Mechanism trajectory — variance-class signal ACTIVATING (not rejected)
+
+| Step | EP | τz/τx mean | τz/τx std | n_outside_band |
+|---:|:--|---:|---:|:--|
+| 10,864 | EP1 | 1.3225 | 0.0931 | 27/34 |
+| 21,728 | EP2 | 1.2635 | 0.0726 | 34/34 (saturated) |
+| 32,592 | EP3 | 1.2968 | 0.0827 | 31/34 |
+| 38,027 | mid-EP4 | **1.3402** | **0.1167** | **27/34** |
+| H35 EP6 ref (target) | EP6 | — | 0.251 fleet peak | 17/34 |
+
+**Std doubled EP2→EP4 (0.073 → 0.117)** with mean drifting back toward band-edge 1.44 — variance-class expansion signature predicted by the slices=192 capacity-room arm. n_outside dropped from saturated 34/34 → 27/34 = some cars returning into band while overall variance grows → slices=192 routing variance across more cars instead of locking everyone at extreme ratios. Trajectory was on track to enter H35's variance-class regime (target std 0.15-0.20 at EP6 → 0.25 at EP13).
+
+### Structural findings (7 recipe-bug patterns now catalogued)
+
+Fern's diagnostic rigor surfaced TWO new advisor recipe-bug patterns:
+
+**Pattern #6 (NEW)** — kill-threshold step values must be exact `epoch × steps_per_epoch`. I had been using 32,594 / 65,228 (off by +2 / +44 from actual 32,592 / 65,184) across multiple Wave 30/31 PRs. The +2 was a copy-paste artifact from a config with different batch_size/grad_accum. Memory entry `feedback_kill_thresholds_step_indexed.md` corrected.
+
+**Pattern #7 (NEW)** — `--validation-every 1` triggers mid-epoch mini-validations, NOT only at epoch boundaries. The kill-threshold check at step ≥ N fires at the first validation past N — which can be a mid-epoch mini-validation. H51's kill at step 38,027 (mid-EP4 mini-validation) confirmed this. Either suppress mid-epoch validations or design threshold step values defensively.
+
+| # | Pattern | First confirmed in |
+|---|---|---|
+| 1 | Flag existence + format (hyphen vs underscore) | frieren H52 #1200 |
+| 2 | Step-indexed thresholds (N: prefix is global_step) | askeladd H33 #1187, edward H34 #1188 |
+| 3 | EMA-step δ^N composition | fern H51 #1199 |
+| 4 | lr-warmup-aware EP1 thresholds | (multiple) |
+| 5 | SENPAI-RESULT angle-bracket placeholders break JSON parse | alphonse H45 #1192 + edward H48 #1196 |
+| 6 | Kill-threshold step = actual epoch × steps_per_epoch (NEW) | **fern H51 #1199** |
+| 7 | Mid-epoch mini-validation cadence interaction (NEW) | **fern H51 #1199** |
+
+### Disposition
+
+PR closed at 10:05Z. Fern reassigned to **H56 H51-RELAUNCH** (PR #1205) — exact same recipe with corrected EMA-aware kill gates: `32592:abupt<25` (catastrophic-only EP3) + `43456:abupt<15` (EP4 intermediate) + `65184:abupt<7.0,SP<5.0` (EP6 binding, original spec intent). W&B run `2vlx68f9` preserved for variance-class activation mechanism analysis.
+
 ## 2026-05-19 08:55 — PR #1196: H48 TAU-Y-EQUALIZE — Static τ_y Loss-Weight Reduction (edward, 13-ep full) — TERMINAL EP13-EMA CLOSED (val_abupt 6.485% +35.9bp FAIL + test_abupt 6.167% +32.3bp FAIL) / MECHANISM-POSITIVE NULL — MOST EXTREME single-mechanism band-attractor break in Wave 30/31 history (per-car τz/τx mean 0.401, 25× more extreme than H46 SDORTH); MEAN-SHIFT CLASS confirmed as 5th mechanism-class observation
 
 - **Branch**: `edward/h48-tau-y-equalize` (closed at 08:55Z)

@@ -1,11 +1,35 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~08:55 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~10:05 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~08:55Z) — PR #1196 H48 TAU-Y-EQUALIZE TERMINAL CLOSED (mechanism-positive null, val_abupt 6.485% / test_abupt 6.167% FAIL by 35.9/32.3 bp; MOST EXTREME mean-shift attractor break in W30/31 history — per-car τz/τx mean 0.401 = 25× more extreme than H46 SDORTH; **MEAN-SHIFT CLASS** now 5th observed mechanism class) + EDWARD REASSIGNED H55 TAU-Z-LOSS-CURRICULUM (PR #1204, mechanism-class-novel time-varying loss weight, front-load τ_z 5.0→2.0 by EP6, hold through EP13)
+## Latest invocation actions (2026-05-19 ~10:05Z) — PR #1199 H51 NPCA+SSFL+slices192+ema9999 CLOSED as **RECIPE-BUG CLOSURE** (advisor's fault: EMA-aware kill gate calibration error + kill-threshold step alignment off-by-2; mechanism was activating — τz/τx std doubled EP2→EP4 0.073→0.117; killed mid-EP4 by stale gate <10% under ema=0.9999 EMA-shadow lag) + FERN REASSIGNED H56 H51-RELAUNCH (PR #1205, exact same recipe with corrected EMA-aware kill gates 32592:abupt<25 / 43456:abupt<15 / 65184:abupt<7+SP<5; isolates dual hypothesis arms slices=192 + ema=0.9999 under properly calibrated gates) + 2 NEW RECIPE-BUG PATTERNS catalogued (Pattern #6: kill-threshold step = exact epoch×steps_per_epoch; Pattern #7: mid-epoch mini-validation cadence interaction) — recipe-audit checklist now 7 patterns
+
+### Headline updates (10:05Z)
+
+1. **PR #1199 fern H51 CLOSED as recipe-bug closure** ([close comment 4486642972](https://github.com/morganmcg1/DrivAerML/pull/1199#issuecomment-4486642972)). 6.5h run died mid-EP4 step 38,027 by my too-tight EP3 gate `<10%` under ema=0.9999. **Trained model was healthy** (train/epoch_loss matched H35 step-for-step). **Variance-class mechanism was activating** (std EP2→EP4 doubled 0.073 → 0.117). The kill was a **recipe bug, not a hypothesis failure**. W&B run `2vlx68f9` preserved as variance-class activation reference.
+
+2. **PR #1205 fern H56 H51-RELAUNCH assigned** — exact same recipe (NPCA + SSFL + slices=192 + ema=0.9999) with EMA-aware kill gates per fern's HIGH priority follow-up suggestion. Step values corrected to exact `epoch × 10,864` boundaries: EP3 32,592 / EP4 43,456 / EP6 65,184 (not the off-by-+2 / +44 values I had been quoting). New gate schedule: EP3 catastrophic-only `<25%`, EP4 intermediate `<15%`, EP6 binding `<7.0% + SP<5.0%` (original spec intent). First fully informative read at EP6 with δ^step=0.0015.
+
+3. **2 NEW recipe-bug patterns catalogued** (now 7 total): (#6) kill-threshold step must equal exact `epoch × steps_per_epoch`, NOT memorized constants from prior recipes that had different config. (#7) `--validation-every 1` fires mid-epoch mini-validations — kill-threshold check at step ≥ N triggers at the FIRST validation past N, which can be a mid-epoch mini-validation. Memory entry `feedback_kill_thresholds_step_indexed.md` corrected.
+
+4. **Wave 31 status** — 8/8 WIP, 0 idle, 0 review-ready after H56 assignment:
+   - **H47 nezuko (PR #1194)** — STRONGEST MERGE CANDIDATE; EP6 val_abupt 6.357% (only +0.230pp above merge gate). Terminal expected ~17:00Z, projected 6.10-6.15%.
+   - **H52 frieren (PR #1200)** — mid-EP4 step 43,747 last check (09:35Z); val_abupt 6.901% descending; mechanism ALIVE (std 0.154 crossed threshold at EP3); +0.27pp gap to H44 shape tightening. EP6 gate ~14:00Z under revised pace.
+   - **H50 askeladd, H53 tanjiro, H49 thorfinn** in-flight at various stages.
+   - **H54 alphonse SURFACE-DEEP** (PR #1203, assigned 08:25Z) — mirror of H47 V-DEPTH on surface decoder side; EP1 read ~10:00Z.
+   - **H55 edward TAU-Z-LOSS-CURRICULUM** (PR #1204, assigned 08:55Z) — time-varying loss weight curriculum, mechanism-class-novel; EP1 read ~10:30Z.
+   - **H56 fern H51-RELAUNCH** (PR #1205, assigned 10:05Z) — variance-class capacity expansion under corrected gates; EP1 read ~11:30Z.
+
+5. **Strategic notes**:
+   - **Recipe-audit checklist now 7 patterns** — pre-flight every new assignment with: (1) flag existence + format, (2) step-indexed thresholds, (3) EMA δ^N composition, (4) lr-warmup-aware EP1, (5) SENPAI-RESULT placeholder format, (6) step = exact epoch×steps_per_epoch, (7) mid-epoch mini-validation.
+   - **Per-car / aggregate decoupling** (H48 finding) — instrument all future PRs to report both per-car τz/τx AND aggregate WSS_z/WSS_x ratio; the aggregate is what drives val_abupt.
+   - **Mechanism-class taxonomy** — avoid stacking mean-shift mechanisms (H48-style) in Wave 32; stack variance-class (H35, H56) + shared-capacity-class (H47, H54 if alive) instead.
+   - **H56 mechanism prediction**: by EP6 (first fully informative read), τz/τx std target 0.15-0.20 and val_abupt target 6.0-7.0%; if both achieved, this is the second variance-class merge candidate in Wave 31 (alongside H47 V-DEPTH).
+
+## Previous invocation actions (2026-05-19 ~08:55Z) — PR #1196 H48 TAU-Y-EQUALIZE TERMINAL CLOSED (mechanism-positive null, val_abupt 6.485% / test_abupt 6.167% FAIL by 35.9/32.3 bp; MOST EXTREME mean-shift attractor break in W30/31 history — per-car τz/τx mean 0.401 = 25× more extreme than H46 SDORTH; **MEAN-SHIFT CLASS** now 5th observed mechanism class) + EDWARD REASSIGNED H55 TAU-Z-LOSS-CURRICULUM (PR #1204, mechanism-class-novel time-varying loss weight, front-load τ_z 5.0→2.0 by EP6, hold through EP13)
 
 ### Headline updates (08:55Z)
 
