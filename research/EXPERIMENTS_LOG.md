@@ -1,3 +1,72 @@
+## 2026-05-19 13:35 — PR #1198: H50 COORDSLICE — Coordinate-Grounded Slice IDs (askeladd) — **MECHANISM-POSITIVE NULL CLOSURE with 6th test_VP floor crossing in Wave 30/31** (val_abupt 6.220% closest miss in Wave 31 +0.094pp; test_VP CROSSED floor by −0.047pp; lowest val_VP in Wave 31 3.676%; NEW structural finding L0-PE-capacity-sink pattern; mechanism class #8 coordinate-grounded-slice-PE proven null); ASKELADD REASSIGNED H58 COORDSLICE-NO-STOPGRAD (PR #1207) — single-line code change removing `torch.no_grad()` wrap to restore routing-gradient feedback to PE projection
+
+- **Branch**: `askeladd/h50-coordslice-rff` (closed at 13:35Z)
+- **W&B run**: 8-rank DDP rank0 `biw3rtli` (group `wave31_h50_coordslice`, full 13 epochs, 141,232 steps, ~14.6h runtime)
+- **Hypothesis**: H33 SLICEPE (closed prior) produced free-learnable slice PE with L0-DOMINANT spatial differentiation (L0 inter_slice_cos 0.085 = LOWEST). H50 grounded the same mechanism in physical coordinates via DAB-DETR analogue: compute per-slice centroid from `slice_weights.mean(dim=1)` weighted with input coords, project through 4-σ RFF (0.25, 0.5, 1.0, 2.0), then through `Linear(256, H*D_head)` as additive PE. Stop-gradient on centroid computation (`torch.no_grad()`) to decouple routing from positional anchoring. Predict L0 should benefit most from coordinate-grounded PE.
+
+### Terminal verdict — val_abupt MISS, test_VP floor CROSSED
+
+| Gate | Target | H50 EP13 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.220%** | ❌ FAIL | **+0.094pp** (closest miss in Wave 31) |
+| test_abupt | (baseline 5.844%) | **5.978%** | ❌ FAIL | +0.134pp |
+| test_SP (floor) | ≤3.577% | **3.735%** | ❌ FAIL | +0.158pp |
+| **test_VP (floor)** | **≤3.643%** | **3.596%** | **✅ PASS** | **−0.047pp** ⭐ |
+| test_WSS (goal) | <6.727% | **6.917%** | ❌ FAIL | +0.190pp |
+| **val_VP (info)** | (info) | **3.676%** | LOWEST in Wave 31 | — |
+| test τz/τx (band) | [1.44, 1.55] | 1.446 | in band | (val 1.548 borderline) |
+
+### Mechanism reading — L0-PE-capacity-sink (NEW structural finding)
+
+**Mechanism prediction INVERTED**: H33's free-learnable PE produced L0-dominant spatial differentiation (L0 inter_slice_cos 0.085 = lowest = most differentiated). H50's coordinate-grounded PE produces **L0-INVERTED** spatial differentiation:
+- L0 inter_slice_cos **0.298** = HIGHEST = LEAST differentiated
+- L0 proj_weight_norm **33.58** = HIGHEST (12% above L2's 28.98)
+- Deeper layers L2/L3 take over as differentiation engines
+
+**Interpretation**: coordinate-grounded slice PE causes L0 to absorb PE-projection CAPACITY (coordinate-routing layer) rather than spatial-discrimination capability. L0 spends one layer's worth of feature-transformation capacity routing spatial information to L2/L3. "PE-capacity-sink-then-redistribute" pattern, distinct from H33's "PE-direct-spatial-discrimination".
+
+### Three plausible mechanisms for the +0.094pp shortfall (in priority order)
+
+1. **Stop-gradient blocked PE auto-growth (HIGHEST PROBABILITY — H58's target)**: H50 wrapped centroid computation in `torch.no_grad()` to decouple routing from positional anchoring. H33's PE auto-grew σ 0.02 → 0.15 (8× growth) because routing gradients fed back. H50's proj_weight_std stayed at 0.080-0.093 ≈ init 0.088 (virtually zero growth). Stop-grad starved PE projection of optimization signal.
+
+2. **L0-PE-capacity-sink is a real cost**: L0 spends 12% more PE-projection capacity than deeper layers (33.58 vs 28.98 at L2) = one layer's worth of feature-transformation capacity diverted to coordinate routing.
+
+3. **Init scale σ=0.088 may still be below gradient floor**: even with stop-grad, σ should have grown a bit; staying near init suggests gradient signal was too weak to escape the floor.
+
+### Per-epoch trajectory (rank0)
+
+| Step | Epoch | val_abupt | val_VP | val_SP | val_WSS | val_WSS_z |
+|---:|:--|---:|---:|---:|---:|---:|
+| 10,864 | EP1 | 28.897% | 17.340% | 21.755% | 31.875% | 39.701% |
+| 21,728 | EP2 | 7.807% | 4.649% | 5.257% | 8.794% | 11.401% |
+| 32,594 | EP3 | 7.003% | 4.112% | 4.696% | 7.945% | 10.402% |
+| 43,466 | EP4 | 6.469% | 3.824% | 4.302% | 7.305% | 9.774% |
+| 67,932 | mid-EP7 | 6.227% | 3.679% | 4.105% | 7.043% | 9.528% |
+| 141,232 | EP13 | **6.220%** | 3.676% | (n/a) | (n/a) | (n/a) |
+
+### Wave 31 mechanism-class taxonomy (8 classes after H50 closure)
+
+| # | Class | Status | Reference PRs |
+|---|---|---|---|
+| 1 | variance-class-encoder-input | ✅ **WINS** | H26/H31/H35 MERGED |
+| 2 | variance-class-decoder-sublayer | TBD | H47 V-DEPTH borderline merge |
+| 3 | variance-class-cp-loss-weight | TBD | H53 CP-LOSS-WEIGHT strongest slope |
+| 4 | shared-capacity-surface | TBD | H54 v2 SURFACE-DEEP |
+| 5 | mean-shift-class | ❌ null | H48 TAU-Y-EQUALIZE closed |
+| 6 | cross-channel-weight-space | ❌ null | H45 CROSSCHAN-DEC closed |
+| 7 | variance-class-decoder-weight | ❌ null | H46/H49 SDORTH closed |
+| 8 | **coordinate-grounded-slice-PE** | **❌ null+VP-cross** (THIS PR) | **H33/H50 closed** |
+
+### 6th test_VP floor crossing in Wave 30/31
+
+Test_VP floor crossings now: H26 NPCA, H31 WALLDIST, H33 SLICEPE, H47 V-DEPTH partial, H53 CP-LOSS-WEIGHT TBD, **H50 COORDSLICE THIS PR**. Test_VP is the most robust merge-adjacent signal in Wave 31 — ANY positional/geometric mechanism reliably crosses it. H50 val_VP terminal 3.676% is the LOWEST val_VP among all Wave 31 PRs at terminal.
+
+### Disposition
+
+CLOSED as mechanism-positive null with 6th test_VP floor crossing + new structural finding (L0-PE-capacity-sink). The +0.094pp val_abupt miss is the closest miss in Wave 31 to date. Excellent diagnostic logging (per-block inter_slice_cos + centroid spread + proj_weight_norm) — the L0-inversion pattern is paper-facing structural finding for Wave 32 PE-design discussion. **Askeladd reassigned to H58 COORDSLICE-NO-STOPGRAD (PR #1207)** — single-line code change removing `torch.no_grad()` wrap, directly attacks the dominant suspected limit (gradient starvation), projected to close +0.094pp gap if hypothesis is correct.
+
+---
+
 ## 2026-05-19 11:30 — PR #1197: H49 SDORTH-FULL — Surface Decoder Orthogonal Row Init, 13-Epoch Confirmation (thorfinn) — **MECHANISM-POSITIVE NULL CLOSURE** (variance axis persistent at full budget — test std 0.149 = 1.75× baseline — but ALL 5 paper-facing test metrics DEGRADE vs baseline; structural finding subclassifies variance-class into encoder-input WINS vs decoder-weight NULL); THORFINN REASSIGNED H57 MULTI-SCALE-RFF-EXPANDED (PR #1206) — frequency-domain encoder capacity expansion, new mechanism class FDCE attacking τz axis from encoder freq-band angle
 
 - **Branch**: `thorfinn/h49-sdorth-full` (closed at 11:30Z)

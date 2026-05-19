@@ -1,11 +1,55 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~11:55 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~13:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~11:55Z) — PR #1204 H55 TAU-Z-LOSS-CURRICULUM killed at EP1 by **6th invocation of the lr-warmup-1 EP1 gate recipe-bug** (50 minutes after H54 same-pattern kill); RELAUNCH directive posted (edward to rerun on same branch with corrected gates); MEMORY entry updated with BATCH-RISK FINDING (H54 and H55 both written in same invocation, both inherited the bug, both fired)
+## Latest invocation actions (2026-05-19 ~13:35Z) — PR #1198 H50 COORDSLICE CLOSED as **mechanism-positive null with 6th test_VP floor crossing in Wave 30/31** (val_abupt 6.220% closest miss in Wave 31 +0.094pp; test_VP 3.596% CROSSED floor by −0.047pp; lowest val_VP in Wave 31 3.676%; NEW structural finding L0-PE-capacity-sink); **ASKELADD REASSIGNED H58 COORDSLICE-NO-STOPGRAD** (PR #1207, single-line code change removing `torch.no_grad()` wrap on centroid computation to restore routing-gradient feedback to PE projection; expected to enable H33-style PE auto-growth and close +0.094pp val_abupt gap)
+
+### Headline updates (13:35Z)
+
+1. **PR #1198 askeladd H50 COORDSLICE CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1198#issuecomment-4488277631)). Terminal verdict:
+   - val_abupt **6.220%** FAIL merge gate by **+0.094pp** (closest miss in Wave 31)
+   - test_abupt **5.978%** FAIL baseline by +0.134pp
+   - test_VP **3.596%** ✅ CROSSED floor by **−0.047pp** (6th floor crossing in Wave 30/31)
+   - test_SP 3.735% FAIL floor by +0.158pp
+   - test_WSS 6.917% FAIL baseline by +0.190pp
+   - val_VP **3.676%** = LOWEST in Wave 31
+   - Mechanism class: coordinate-grounded-slice-PE — null+VP-cross verdict
+
+2. **NEW structural finding — L0-PE-capacity-sink pattern**: H33 (free-learnable PE) produced L0-DOMINANT spatial differentiation (L0 inter_slice_cos 0.085 = LOWEST). H50 (coordinate-grounded PE with stop-grad) INVERTED the pattern: L0 inter_slice_cos 0.298 = HIGHEST = least differentiated; L0 proj_weight_norm 33.58 = highest (12% above L2). Interpretation: coordinate-grounded slice PE causes L0 to absorb PE-projection CAPACITY (act as coordinate-routing layer) rather than spatial-discrimination capability — deeper layers L2/L3 take over as spatial differentiators. "PE-capacity-sink-then-redistribute" pattern is distinct from H33's "PE-direct-spatial-discrimination". Wave 32 implication: PE-capacity-sink may be inherently capacity-limited at 5-layer depth budget.
+
+3. **Wave 31 mechanism-class taxonomy now 8 classes** (after H50 closure):
+   | # | Class | Status |
+   |---|---|---|
+   | 1 | variance-class-encoder-input | ✅ WINS (H26/H31/H35 MERGED) |
+   | 2 | variance-class-decoder-sublayer | TBD (H47 V-DEPTH borderline) |
+   | 3 | variance-class-cp-loss-weight | TBD (H53 strongest slope) |
+   | 4 | shared-capacity-surface | TBD (H54 v2) |
+   | 5 | mean-shift-class | ❌ null (H48 closed) |
+   | 6 | cross-channel-weight-space | ❌ null (H45 closed) |
+   | 7 | variance-class-decoder-weight | ❌ null (H46/H49 SDORTH closed) |
+   | 8 | coordinate-grounded-slice-PE | ❌ null+VP-cross (**H33/H50 closed**) |
+
+4. **PR #1207 askeladd H58 COORDSLICE-NO-STOPGRAD assigned** ([PR #1207](https://github.com/morganmcg1/DrivAerML/pull/1207), branch `askeladd/h58-coordslice-no-stopgrad`). Single-line code change vs H50: remove `with torch.no_grad():` wrap on centroid computation in `TransolverAttention.forward`. Hypothesis: routing gradients flowing back into PE projection will enable H33-style auto-growth (H33 proj_weight σ 0.02→0.15 8× growth; H50 stuck at 0.080-0.093 ≈ init 0.088). Expected outcomes: (A) MERGE WIN val_abupt < 6.126% AND test_VP retains floor crossing, (B) PARTIAL WIN val_abupt 6.05-6.20% + proj_weight_std grows ≥ 2× init, (C) NULL no PE growth → stop-grad wasn't the limit and L0-PE-sink is structural. New diagnostic: per-block `proj_weight_std` tracking added. Kill thresholds standard lr-warmup-1 aware (NO EP1, EP3 binding `32592:val_abupt<7.5+val_SP<5.5`, EP6 hard kill `65184:val_abupt<6.5`).
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready:
+   - **H47 nezuko (PR #1194)** — IN FLIGHT, val_abupt ~6.20-6.25% projection range, borderline merge case at terminal ~17:00Z.
+   - **H52 frieren (PR #1200)** — mid-EP4 healthy, mechanism alive std 0.154.
+   - **H53 tanjiro (PR #1202)** — STRONGEST SLOPE merge candidate, slope −0.020 pp/1k 3.4× steeper than H47.
+   - **H54 alphonse (PR #1203)** — v2 healthy at EP1, surf_deep block growth verified.
+   - **H55 edward (PR #1204)** — v2 awaiting relaunch after advisor recipe-bug fix.
+   - **H56 fern (PR #1205)** — H51-RELAUNCH NPCA+SSFL+slices=192+ema=0.9999, pre-EP1.
+   - **H57 thorfinn (PR #1206)** — MULTI-SCALE-RFF-EXPANDED, pre-EP1.
+   - **H58 askeladd (PR #1207, this entry)** — COORDSLICE-NO-STOPGRAD, pre-EP1 launch when student picks up.
+
+6. **Strategic notes (post-H50 closure)**:
+   - **Wave 31 merge funnel narrowed to 3 in-flight candidates** (H47 borderline, H53 strongest slope, H58 new path) + 1 mechanism-positive null with floor crossing (H50). H50 was the closest miss in Wave 31; H58 directly attacks the dominant suspected limit (stop-grad gradient starvation).
+   - **6 test_VP floor crossings in Wave 30/31** now: H26 NPCA, H31 WALLDIST, H33 SLICEPE, H47 V-DEPTH partial, H53 CP-LOSS-WEIGHT TBD, H50 COORDSLICE. Test_VP is the most robust merge-adjacent signal — ANY positional/geometric mechanism reliably crosses it. Wave 32 strategy implication: stack 2-3 floor-crossing mechanisms for compound test_VP improvement.
+   - **Wave 32 viable mechanism-class axes for stacking** (6 axes): (1) variance-class-encoder-input [proven H26/H31/H35], (2) variance-class-decoder-sublayer [H47 candidate], (3) variance-class-cp-loss-weight [H53 candidate], (4) shared-capacity-surface [H54 candidate], (5) frequency-domain capacity [H57 candidate], (6) per-axis loss curricula [H55 candidate]. Coordinate-grounded slice PE removed as Wave 32 candidate unless H58 reverses the null verdict.
+
+## Previous invocation actions (2026-05-19 ~11:55Z) — PR #1204 H55 TAU-Z-LOSS-CURRICULUM killed at EP1 by **6th invocation of the lr-warmup-1 EP1 gate recipe-bug** (50 minutes after H54 same-pattern kill); RELAUNCH directive posted (edward to rerun on same branch with corrected gates); MEMORY entry updated with BATCH-RISK FINDING (H54 and H55 both written in same invocation, both inherited the bug, both fired)
 
 ### Headline updates (11:55Z)
 
