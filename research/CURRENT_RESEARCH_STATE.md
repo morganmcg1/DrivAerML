@@ -1,11 +1,37 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~11:30 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~11:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~11:30Z) — PR #1197 H49 SDORTH-FULL CLOSED as **mechanism-positive null with structural finding** (test mean deflection failed binding gate, all 5 paper-facing metrics DEGRADE vs baseline); THORFINN REASSIGNED H57 MULTI-SCALE-RFF-EXPANDED (PR #1206, encoder freq-band expansion 5σ→8σ / 4 octaves → 7 octaves, mechanism-class FDCE new, recipe-only change, attacks τz axis from encoder side)
+## Latest invocation actions (2026-05-19 ~11:55Z) — PR #1204 H55 TAU-Z-LOSS-CURRICULUM killed at EP1 by **6th invocation of the lr-warmup-1 EP1 gate recipe-bug** (50 minutes after H54 same-pattern kill); RELAUNCH directive posted (edward to rerun on same branch with corrected gates); MEMORY entry updated with BATCH-RISK FINDING (H54 and H55 both written in same invocation, both inherited the bug, both fired)
+
+### Headline updates (11:55Z)
+
+1. **PR #1204 edward H55 TAU-Z-LOSS-CURRICULUM v1 killed at EP1** (run `cq1dkiau`, killed at step 10864 with val_abupt 26.35% > 10% gate). Edward's diagnosis sharp: compared to H48 baseline EP1=25.94% (same recipe minus curriculum) — 0.41pp gap is within noise. The τz curriculum is NOT damaging training at EP1; the kill was 100% due to my miscalibrated gate. Curriculum firing correctly (`train/tau_z_loss_weight_curriculum` 5.000→4.500 linear decay verified). 6th invocation of this exact pattern — H54 (PR #1203) was killed 50 min earlier by the same bug at 11:05Z.
+
+2. **Relaunch directive posted to PR #1204** ([comment 4488115172](https://github.com/morganmcg1/DrivAerML/pull/1204#issuecomment-4488115172)) — edward to relaunch on the same branch `edward/h55-tau-z-loss-curriculum` with corrected `--kill-thresholds "32592:val_primary/abupt_axis_mean_rel_l2_pct<7.5,32592:val_primary/surface_pressure_rel_l2_pct<5.5,65184:val_primary/abupt_axis_mean_rel_l2_pct<6.5"`. NO EP1 gate (lr-warmup-1 makes EP1 too noisy). EP3 binding + EP6 intermediate. No code changes needed.
+
+3. **Memory entry `feedback_ep_thresholds_recipe_dependent.md` updated** with BATCH-RISK FINDING: when writing multiple PR bodies in a single invocation, ALL of them inherit the same recipe-bug until one fires. H54 (08:25Z) and H55 (08:55Z) both written before H54's kill alerted me to the bug. Mitigation: pre-flight each PR body separately against memory before pushing assignment commit.
+
+4. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (H54 v2 awaiting relaunch, H55 v2 awaiting relaunch, both same advisor recipe-bug pattern):
+   - **H50 askeladd (PR #1198)** — STRONGEST POSITION; val_abupt **6.227% at EP6.25** (+0.100pp above merge gate), val_VP **3.679%** (+0.036pp above floor — IMMINENT crossing). Terminal ~14:45-15:00Z. **First likely merge of Wave 31**.
+   - **H53 tanjiro (PR #1202)** — STRONGEST SLOPE; val_abupt **6.268% at EP4.8**, slope **−0.020 pp/1k** (3.4× steeper than H47, 3.9× steeper than H50). val_VP 3.671% +0.028pp above floor (TIGHTEST). Terminal projection 5.83-6.10% range = strong merge case.
+   - **H47 nezuko (PR #1194)** — val_abupt 6.283% at step 62,492, slope decelerating to −0.0041 pp/1k. Terminal ~17:00Z, borderline merge case.
+   - **H52 frieren (PR #1200)** — mid-EP4 healthy, mechanism alive std 0.154.
+   - **H33 askeladd (PR #1187)** — wait, askeladd is H50 above. Let me restate: H50 askeladd is the COORDSLICE run (PR #1198). The H33 PR was the older SLICEPE one (#1187) — askeladd was reassigned to H50.
+   - **H54 alphonse (PR #1203)** — code correct, v1 killed by my recipe-bug 11:05Z, v2 awaiting relaunch.
+   - **H55 edward (PR #1204, THIS ENTRY)** — code correct, v1 killed by my recipe-bug 11:12Z, v2 awaiting relaunch.
+   - **H56 fern (PR #1205)** — H51-RELAUNCH NPCA+SSFL+slices=192+ema=0.9999, pre-EP1.
+   - **H57 thorfinn (PR #1206)** — MULTI-SCALE-RFF-EXPANDED, pre-EP1.
+
+5. **Strategic notes**:
+   - **Recipe-bug pattern catalog now 9 items** with #4 (lr-warmup-aware EP1 thresholds) firing TWICE in this invocation cycle (H54 + H55). Pattern #4 has now fired 6 times since 2026-05-15. Memory entry exists; failure mode is batch-writing assignments without pre-flighting each one.
+   - **Wave 31 has 3 active merge candidates** progressing to terminal (H47, H50, H53) with orthogonal mechanism classes. If 2+ merge, Wave 32 has a 2-3-way stacking opportunity.
+   - **H55 v2 expected behavior**: τz curriculum should produce reduced test_WSS_z by ≥0.3pp from baseline ~9.5%. EP3 reading should show val_abupt 6.5-7.0% (similar to H48 baseline at EP3) and val_WSS_z 9.5-10.0%; if val_WSS_z is lower than baseline at EP3, mechanism is alive.
+
+## Previous invocation actions (2026-05-19 ~11:30Z) — PR #1197 H49 SDORTH-FULL CLOSED as **mechanism-positive null with structural finding** (test mean deflection failed binding gate, all 5 paper-facing metrics DEGRADE vs baseline); THORFINN REASSIGNED H57 MULTI-SCALE-RFF-EXPANDED (PR #1206, encoder freq-band expansion 5σ→8σ / 4 octaves → 7 octaves, mechanism-class FDCE new, recipe-only change, attacks τz axis from encoder side)
 
 ### Headline updates (11:30Z)
 
