@@ -1360,17 +1360,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema is not None:
                 ema.store(base_model)
                 ema.copy_to(base_model)
-            # H61: hold the runtime slice temperature at the current
-            # training-time value (current_slice_tau) for the EMA val pass.
-            # This matches the advisor's spec ("pass compute_slice_temperature
-            # on each forward call") and avoids a train-val temperature
-            # mismatch in EP1-EP5. Capture per-block slice-attention entropy
-            # across this pass; with DDP8 each rank sees ~1/8 of val cases so
-            # the logged stat is rank-local, not globally reduced.
+            # H61: pin the runtime slice temperature to `slice_temperature_end`
+            # (the curriculum endpoint, default 1.0) for the EMA val pass so
+            # val_abupt is measured at the deployed-temperature routing,
+            # directly apples-to-apples with the H47/H48/H35 references that
+            # never saw a curriculum. Per-block slice-attention entropy is
+            # captured at this same temperature; with DDP8 each rank sees
+            # ~1/8 of val cases so the logged stat is rank-local, not
+            # globally reduced.
             reset_slice_entropy_stats(base_model)
             set_slice_temperature_runtime(
                 base_model,
-                current_slice_tau,
+                config.slice_temperature_end,
                 capture_entropy=True,
             )
             val_metrics = {
@@ -1385,7 +1386,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for name, loader in val_loaders.items()
             }
             slice_entropy_metrics = collect_slice_entropy_metrics(base_model)
-            set_slice_temperature_runtime(base_model, current_slice_tau, capture_entropy=False)
+            set_slice_temperature_runtime(base_model, 1.0, capture_entropy=False)
 
             if state.is_main:
                 if raw_val_metrics is not None:
