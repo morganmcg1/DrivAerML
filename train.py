@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_anchor_slice_queries: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_anchor_slice_queries": (
+            "Enable H36 Anchor-Conditioned Slice Queries (DAB-DETR line). "
+            "Injects S learnable 3D anchor positions (one per slice) into the "
+            "Transolver slice queries via an RFF + MLP modulator shared "
+            "across backbone layers. The MLP final layer is zero-initialised "
+            "so step 0 is bit-exact with the baseline. Anchors are "
+            "initialised on a uniform grid over the DrivAerML surface "
+            "bounding box."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,7 +318,16 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_anchor_slice_queries=config.use_anchor_slice_queries,
     )
+
+
+def collect_anchor_metrics(model: nn.Module) -> dict[str, float]:
+    fn = getattr(model, "anchor_telemetry", None)
+    if fn is None:
+        return {}
+    metrics = fn()
+    return metrics or {}
 
 
 def train_loss(
@@ -1262,6 +1281,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_anchor_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

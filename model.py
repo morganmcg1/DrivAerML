@@ -226,6 +226,119 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class AnchorSliceModulator(nn.Module):
+    """Learned 3D anchor positions that modulate slice queries via positional encoding.
+
+    Each of S slices owns a learnable anchor A_s in R^3 (raw DrivAerML surface
+    coordinates). The anchor is encoded via a sigma-ladder RFF and passed
+    through a 2-layer MLP whose output is ADDED to the slice query vector
+    inside TransolverAttention (DAB-DETR style anchor-to-query injection).
+    Zero-init on the final MLP layer means the modulator outputs 0 at step 0,
+    so a freshly constructed model is bit-exact with the baseline before any
+    training updates have moved the anchor parameters or MLP weights.
+
+    The modulator is instantiated once on the SurfaceTransolver and the same
+    output is passed to every backbone layer so the anchor matrix learns
+    globally rather than per-layer.
+    """
+
+    def __init__(
+        self,
+        n_slices: int,
+        hidden_dim: int,
+        num_heads: int,
+        n_rff: int = 16,
+        rff_sigmas: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        anchor_bounds: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = (
+            (-0.5, 3.9),
+            (-1.0, 1.0),
+            (-0.3, 1.2),
+        ),
+    ):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.n_slices = n_slices
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.anchor_bounds = tuple(tuple(float(b) for b in pair) for pair in anchor_bounds)
+        self.rff_sigmas = tuple(float(s) for s in rff_sigmas)
+        self.n_rff = int(n_rff)
+
+        self.anchors = nn.Parameter(torch.zeros(n_slices, 3))
+        self._init_anchors_grid()
+
+        rff_dim = 2 * self.n_rff * len(self.rff_sigmas)
+        Bs = [torch.randn(3, self.n_rff) * (1.0 / s) for s in self.rff_sigmas]
+        self.register_buffer("rff_B", torch.cat(Bs, dim=-1))
+
+        self.mlp = nn.Sequential(
+            nn.Linear(rff_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        nn.init.trunc_normal_(self.mlp[0].weight, std=0.02)
+        nn.init.zeros_(self.mlp[0].bias)
+        nn.init.zeros_(self.mlp[2].weight)
+        nn.init.zeros_(self.mlp[2].bias)
+
+    def _init_anchors_grid(self) -> None:
+        n = self.n_slices
+        (xmin, xmax), (ymin, ymax), (zmin, zmax) = self.anchor_bounds
+        nx, ny, nz = self._choose_grid_dims(n, (xmax - xmin, ymax - ymin, zmax - zmin))
+        xs = torch.linspace(xmin, xmax, nx)
+        ys = torch.linspace(ymin, ymax, ny)
+        zs = torch.linspace(zmin, zmax, nz)
+        grid = torch.stack(torch.meshgrid(xs, ys, zs, indexing="ij"), dim=-1).reshape(-1, 3)
+        with torch.no_grad():
+            self.anchors.copy_(grid[:n])
+
+    @staticmethod
+    def _choose_grid_dims(n: int, extents: tuple[float, float, float]) -> tuple[int, int, int]:
+        """Pick (nx, ny, nz) for an anchor grid in a bbox of given extents.
+
+        Prefers low-waste factorings (nx*ny*nz close to n) first, then picks the
+        factoring with closest density per axis (aspect-ratio matching). The
+        waste tier is n // 8 — zero waste wins by default for clean factorings
+        like 128 = 8*4*4, and only fall back to wasteful aspect-matched grids
+        when no clean factoring is close.
+        """
+        ex, ey, ez = (max(e, 1e-6) for e in extents)
+        candidates: list[tuple[int, float, int, int, int]] = []
+        for nx in range(1, n + 1):
+            for ny in range(1, n + 1):
+                if nx * ny > n:
+                    break
+                nz = int(math.ceil(n / (nx * ny)))
+                total = nx * ny * nz
+                if total < n:
+                    continue
+                waste = total - n
+                ratio_x, ratio_y, ratio_z = nx / ex, ny / ey, nz / ez
+                avg = (ratio_x + ratio_y + ratio_z) / 3.0
+                spread = (
+                    (ratio_x - avg) ** 2 + (ratio_y - avg) ** 2 + (ratio_z - avg) ** 2
+                )
+                candidates.append((waste, spread, nx, ny, nz))
+        if not candidates:
+            k = int(math.ceil(n ** (1.0 / 3.0)))
+            return k, k, k
+        min_waste = min(c[0] for c in candidates)
+        threshold = min_waste + max(1, n // 8)
+        filtered = [c for c in candidates if c[0] <= threshold]
+        filtered.sort(key=lambda c: (c[1], c[0]))
+        _, _, nx, ny, nz = filtered[0]
+        return nx, ny, nz
+
+    def forward(self) -> torch.Tensor:
+        proj = self.anchors @ self.rff_B.to(dtype=self.anchors.dtype)
+        rff = torch.cat([proj.sin(), proj.cos()], dim=-1)
+        mod = self.mlp(rff)
+        mod = mod.view(self.n_slices, self.num_heads, self.dim_head)
+        return mod.permute(1, 0, 2).contiguous()
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -274,13 +387,20 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        anchor_mod: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
             q = self.q_norm(q)
             k = self.k_norm(k)
+        if anchor_mod is not None:
+            q = q + anchor_mod.to(dtype=q.dtype).unsqueeze(0)
         out_slice = F.scaled_dot_product_attention(
             q,
             k,
@@ -317,9 +437,14 @@ class TransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        anchor_mod: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, anchor_mod=anchor_mod)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -352,9 +477,14 @@ class Transformer(nn.Module):
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        anchor_mod: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, anchor_mod=anchor_mod)
         return x
 
 
@@ -382,6 +512,14 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_anchor_slice_queries: bool = False,
+        anchor_n_rff: int = 16,
+        anchor_rff_sigmas: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0),
+        anchor_bounds: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = (
+            (-0.5, 3.9),
+            (-1.0, 1.0),
+            (-0.3, 1.2),
+        ),
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +534,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_anchor_slice_queries = use_anchor_slice_queries
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -473,6 +612,17 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
         )
+        if use_anchor_slice_queries:
+            self.anchor_modulator = AnchorSliceModulator(
+                n_slices=slice_num,
+                hidden_dim=n_hidden,
+                num_heads=n_head,
+                n_rff=anchor_n_rff,
+                rff_sigmas=tuple(anchor_rff_sigmas),
+                anchor_bounds=anchor_bounds,
+            )
+        else:
+            self.anchor_modulator = None
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
@@ -595,7 +745,8 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        anchor_mod = self.anchor_modulator() if self.anchor_modulator is not None else None
+        hidden = self.backbone(hidden, attn_mask=attn_mask, anchor_mod=anchor_mod)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
@@ -640,3 +791,28 @@ class SurfaceTransolver(nn.Module):
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+
+    def anchor_telemetry(self) -> dict[str, float]:
+        if self.anchor_modulator is None:
+            return {}
+        with torch.no_grad():
+            A = self.anchor_modulator.anchors.detach()
+            n = A.shape[0]
+            if n < 2:
+                return {}
+            dist = torch.cdist(A, A)
+            mask = ~torch.eye(n, dtype=torch.bool, device=A.device)
+            non_diag = dist[mask]
+            mod = self.anchor_modulator().detach()
+            return {
+                "model/anchor_pairwise_dist_mean": float(non_diag.mean().item()),
+                "model/anchor_pairwise_dist_std": float(non_diag.std().item()),
+                "model/anchor_pairwise_dist_min": float(non_diag.min().item()),
+                "model/anchor_pairwise_dist_max": float(non_diag.max().item()),
+                "model/anchor_x_range": float((A[:, 0].max() - A[:, 0].min()).item()),
+                "model/anchor_y_range": float((A[:, 1].max() - A[:, 1].min()).item()),
+                "model/anchor_z_range": float((A[:, 2].max() - A[:, 2].min()).item()),
+                "model/anchor_mod_abs_mean": float(mod.abs().mean().item()),
+                "model/anchor_mod_abs_max": float(mod.abs().max().item()),
+                "model/anchor_mod_rms": float(mod.float().pow(2).mean().sqrt().item()),
+            }
