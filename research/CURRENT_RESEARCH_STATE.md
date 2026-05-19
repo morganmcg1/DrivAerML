@@ -1,11 +1,30 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~02:50 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~03:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~02:50Z) — TANJIRO H53 RE-ASSIGNED ON CORRECT BRANCH (PR #1201 closed because branch was `dl24-tanjiro/h53-cp-loss-weight` which is dl24-prefix and would not be picked up by our tanjiro's student-polling on `tanjiro/...` branches; recreated as PR #1202 on `tanjiro/h53-cp-loss-weight` with refined single-arm 18h DDP-8 recipe `--cp-loss-weight 2.0` — clean orthogonal-arm discipline avoids compounding with H48's parallel `--tau-y-loss-weight 1.0` test; EP3 SP gate <4.7%, EP6 SP gate <4.3%, terminal target SP ≤3.577%); H36 ANCHOR-SLICE-QUERIES EXPERIMENTS_LOG entry added (full 26th DE writeup: 3rd variance-class confirmation + DEEPEST vol_p crossing −0.165pp + anchor sparsity finding max ~66× mean + val/test variance divergence 0.195→0.140 = variance-class overfits to training distribution); FLEET 8/8 WIP
+## Latest invocation actions (2026-05-19 ~03:15Z) — FERN H51 SENT BACK (EMA-AWARE THRESHOLD FIX) + H50 ASKELADD CHECK-IN (EP3 LAGGING) + ISSUE #1056 CORRECTION POSTED
+
+### Headline updates (03:15Z)
+
+1. **PR #1199 fern H51 NPCA+SSFL-SLICES192 — SENT BACK to status:wip with adjusted EMA-aware kill thresholds.** Fern correctly diagnosed that the H51 recipe I assigned at 00:15Z had a critical bug: kill threshold `10864:val_primary/abupt_axis_mean_rel_l2_pct<9.5` is incompatible with `--ema-decay 0.9999`. Math: δ^10864 = 0.337 → at EP1 the EMA shadow is 34% initial random weights + 66% trained → val_abupt 72.18% guaranteed → falsely kills run before mechanism evaluates. The student killed 2 runs and posted a clean diagnosis with three options. **Approved option 1** with relaxed thresholds: drop EP1 gate (no informative signal possible under ema=0.9999); EP3 abupt<10% + SP<6% (3.8% initial contamination remaining); EP6 abupt<7% + SP<5% (EMA caught up); EP13 verdict on val_abupt vs 6.126% merge gate. Preserves dual-hypothesis isolation (slices=128→192 capacity expansion × ema=0.999→0.9999 cosine window). Filed as **Wave 31 recipe-bug pattern**: when EMA-decay deviates from 0.999 baseline, step-indexed kill thresholds need recalibration based on δ^step composition.
+
+2. **PR #1198 askeladd H50 COORDSLICE EP3 check-in posted.** Run `biw3rtli` at step 30,008 (76% through EP3, 4.57h runtime, heartbeat fresh). Hard kill gates pass (val_abupt 7.807% < 9.5%, val_SP 5.257% < 5.5%). ⚠️ **val_abupt LAGGING EP3 cohort by ~0.85pp** (H33 6.94%, H45 6.96%, H44 similar → H50 7.807%). 🟢 **MECHANISM SHIFTED: Block 2 NOW DOMINATES SPATIAL DIFFERENTIATION** — at mid-EP2 the pattern was L0-INVERSION (L0=0.453 LOWEST, L4=0.647 HIGHEST); at EP3 it has shifted to Block 2 = NEW LOWEST inter_slice_cos 0.093 with centroid_range_x 15.88 (2-4× wider than other blocks). The model is dynamically choosing WHERE to do spatial differentiation, not having it imposed by depth — novel Wave 31 emergent behavior (5th instance of mechanism-class emergent observation). EP6 gate at step 65,228 (~10:15Z) is make-or-break: val_abupt > 6.5% would kill.
+
+3. **Issue #1056 correction posted.** A parallel check-human-issues invocation posted an incorrect "overnight update" claiming H44 was "MERGED WINNER" (it was CLOSED, NOT-A-MERGE) with wrong val_abupt 7.166% (actual 6.355%) and claiming H36 was a "LIVE CANDIDATE" (it was CLOSED at 02:33Z). Posted correction with accurate state: 3 dead ends in Wave 31 (H35, H44, H36), 3 vol_p crossings (5th/6th/7th), 0 merges. test_SP remains 0/7 crossings — binding gate unyielding. **Reminder**: trust verbatim PR state over fork summaries.
+
+4. **Active research-direction implications restated to human team:**
+   - test_SP is the binding gate (0 crossings in 26 attempts). H53 PR #1202 (cp-channel up-weighting via `--cp-loss-weight 2.0`) is the first targeted SP attack — uses same single-flag lever as H48 TAU-Y-EQUALIZE's τz/τx breakthrough.
+   - Variance-class mechanisms hit a ceiling (H26/H35/H36 show val→test divergence: val std 0.195+ → test std 0.118-0.140); H48's mean-shift mechanism is more stable across the val→test gap (34/34 cars persistence).
+   - Mechanism-stacking is proven (H35 NPCA+SSFL → H52 NPCA×YAW-AUG, H53 + H44 follow-up).
+
+5. **Test_WSS gap to Transolver-3 SOTA: −0.877pp to go.** Baseline test_WSS 6.727%, SOTA target 5.85%. All in-flight runs (H48, H45, H50, H52, H53) need to compound improvements to close the gap.
+
+6. **Fleet 8/8 WIP**, but fern's H51 about to relaunch with corrected thresholds — temporary 7/8 active until fern relaunches.
+
+## Previous invocation actions (2026-05-19 ~02:50Z) — TANJIRO H53 RE-ASSIGNED ON CORRECT BRANCH (PR #1201 closed because branch was `dl24-tanjiro/h53-cp-loss-weight` which is dl24-prefix and would not be picked up by our tanjiro's student-polling on `tanjiro/...` branches; recreated as PR #1202 on `tanjiro/h53-cp-loss-weight` with refined single-arm 18h DDP-8 recipe `--cp-loss-weight 2.0` — clean orthogonal-arm discipline avoids compounding with H48's parallel `--tau-y-loss-weight 1.0` test; EP3 SP gate <4.7%, EP6 SP gate <4.3%, terminal target SP ≤3.577%); H36 ANCHOR-SLICE-QUERIES EXPERIMENTS_LOG entry added (full 26th DE writeup: 3rd variance-class confirmation + DEEPEST vol_p crossing −0.165pp + anchor sparsity finding max ~66× mean + val/test variance divergence 0.195→0.140 = variance-class overfits to training distribution); FLEET 8/8 WIP
 
 ### Headline updates (02:50Z)
 
