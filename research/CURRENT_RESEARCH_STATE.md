@@ -5,7 +5,36 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~07:00Z) — ISSUE #1056 ADVISOR RESPONSE POSTED (test_SP definition + test_WSS status + promising Wave 31 runs)
+## Latest invocation actions (2026-05-19 ~07:35Z) — FERN H51 NPCA+SSFL-SLICES192 EP2 MID-EP3-LEG CHECK-IN: **UNEXPECTED MECHANISM REGIME SHIFT** (variance-class hypothesis → mean-shift observation, EMA-shadow caveat at EP2)
+
+### Headline updates (07:35Z)
+
+1. **PR #1199 fern H51 EP2 check-in posted** ([comment 4485498426](https://github.com/morganmcg1/DrivAerML/pull/1199#issuecomment-4485498426)). Run `2vlx68f9` healthy at step 25,962 (18.4% through 141,232-step budget, 4.22h runtime, heartbeat fresh 07:30Z, nonfinite=0). **EP2 val_abupt 53.21% is EMA-shadow-dominated** under ema=0.9999 — δ^21728=0.115 means 11.5% of EMA weights are still initial-random. **NOT yet informative** for trajectory comparison. EP3 read at step 32,594 (~08:30Z, δ=0.038) is the first informative checkpoint; EP6 (δ=0.0015) is the first fully informative read. Stale_wip was the known long-jobs 2h-no-commits false positive.
+
+2. **UNEXPECTED MECHANISM REGIME SHIFT** — H51 hypothesis predicted variance-class expansion (slices=128→192 → +50% variance room → std grows toward 0.15 ALIVE threshold). Actual EP2 observation:
+   - **EP1 → EP2**: τz/τx mean 1.3225 → **1.2635** (mean dropped −0.059, BELOW band edge 1.44)
+   - **EP1 → EP2**: τz/τx std 0.0931 → **0.0726** (std **COMPRESSED** −0.020, not expanded)
+   - **EP1 → EP2**: n_outside 27/34 → **34/34** (saturated to 100% cars outside band)
+   This is **MEAN-SHIFT behavior (H48-like)**, NOT variance-class behavior (H35-like). EMA-shadow contamination at EP2 means the class may still flip toward variance once EMA catches up — EP3 will tell. If continued mean-shift, H51 is producing a mechanism class orthogonal to its original hypothesis.
+
+3. **Wave 31 mechanism-class taxonomy (updated)**:
+   - **variance-class** (H35 NPCA+SSFL ref: std 0.251 EP6 peak): H52 NPCA×YAW activating (std 0.1498 EP2 +75%), H47 V-DEPTH sublayer mechanism (different metric class — direct activation magnitude)
+   - **mean-shift class** (H48 TAU-Y-EQUALIZE: mean 0.40 band-break flat): **H51 NPCA+SSFL+slices192 emerging** (mean 1.2635 below band, std compressed, n_outside saturated)
+   - **shift+compression** (new sub-class candidate H51): may need EP6 first-fully-informative read to confirm
+
+4. **Hard kill gates trending PASS** for H51 despite EMA-shadow contamination: EP3 gates (val_abupt<10% AND val_SP<6%) generous-by-design for δ=0.038 contamination. All trending strong PASS by step 32,594 firing time.
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** All 4 human issues (#1056, #285, #252, #618) checked — no new responses required, all previous ADVISOR replies are the most-recent activity. Active runs in priority by next check-in:
+   - **H52 frieren EP3** ~07:50Z (step 32,594) — mechanism ALIVE threshold (std crossing 0.15)
+   - **H53 tanjiro EP3** ~08:20Z (step 32,594) — SP-gate strong PASS expected
+   - **H51 fern EP3** ~08:30Z (step 32,594) — FIRST informative read, mechanism class confirmation
+   - **H50 askeladd EP6** ~10:15Z — make-or-break
+   - **H47 nezuko EP6** ~10:30Z — MERGE CANDIDATE strengthening
+   - **H48 edward terminal** ~12:45Z
+   - **H47 nezuko terminal** ~17:00Z
+   - **H53 tanjiro terminal** ~22:30Z
+
+## Previous invocation actions (2026-05-19 ~07:00Z) — ISSUE #1056 ADVISOR RESPONSE POSTED (test_SP definition + test_WSS status + promising Wave 31 runs)
 
 ### Headline updates (07:00Z)
 
