@@ -1,11 +1,48 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~13:35 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~15:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~13:35Z) — PR #1198 H50 COORDSLICE CLOSED as **mechanism-positive null with 6th test_VP floor crossing in Wave 30/31** (val_abupt 6.220% closest miss in Wave 31 +0.094pp; test_VP 3.596% CROSSED floor by −0.047pp; lowest val_VP in Wave 31 3.676%; NEW structural finding L0-PE-capacity-sink); **ASKELADD REASSIGNED H58 COORDSLICE-NO-STOPGRAD** (PR #1207, single-line code change removing `torch.no_grad()` wrap on centroid computation to restore routing-gradient feedback to PE projection; expected to enable H33-style PE auto-growth and close +0.094pp val_abupt gap)
+## Latest invocation actions (2026-05-19 ~15:45Z) — PR #1194 H47 V-DEPTH terminal CLOSED as **mechanism-positive null with test_VP +0.010pp NEAR-MISS on floor + LR-decay confound** (tightest H47-family vol_p floor approach; 4 sublayer norms 5-14× above EP3 KILL threshold; block1>block0 productive asymmetry confirmed canonical Wave 31 signature; val_abupt plateau dominated by LR-decay — terminal LR 2.5% of peak); **NEZUKO REASSIGNED H59 V-DEPTH-LR-EXTENDED** (PR #1208, single-flag change `--lr-cosine-t-max 25` instead of 13, keeps terminal LR at ~70-80% peak to test plateau hypothesis directly)
+
+### Headline updates (15:45Z)
+
+1. **PR #1194 nezuko H47 V-DEPTH CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1194#issuecomment-4489485448)). Terminal verdict:
+   - val_abupt **6.273%** FAIL merge gate by +0.147pp
+   - test_abupt **6.049%** FAIL baseline by +0.205pp
+   - test_VP **3.6533%** ❌ NEAR-MISS floor by **+0.010pp** (7th vol_p floor approach in Wave 30/31)
+   - test_SP **3.769%** FAIL floor by +0.192pp
+   - test_WSS **6.993%** FAIL baseline by +0.266pp
+   - Mechanism class: variance-class-decoder-sublayer — status reserved as "mech-positive null with LR-decay confound"
+
+2. **Mechanism diagnostic STRONGLY POSITIVE** (canonical Wave 31 signature):
+   - All 4 sublayers in both vol_deep blocks 5-14× above EP3 KILL threshold (0.05)
+   - Productive block1 > block0 asymmetry confirmed (b1.ffn norm 75.32 vs b0.ffn norm 65.26 = 1.25× ratio)
+   - FFN dominates over attn (norm 65-75 vs 27-34, ~2.4× larger) — depth-bump is primarily expressivity, not attention-mixing
+   - Pattern mirrors H30 V2S asymmetric-fusion productive signature
+
+3. **LR-decay confound diagnosis**: H47's val_abupt slope collapsed 30× from EP3→EP4 (−0.034 pp/1k at 90% peak LR) to EP6→terminal (−0.0011 pp/1k at 2.5% peak LR). Cosine cycle completed within actual 70k-step training window NOT the nominal 141,232-step 13-epoch plan. Terminal LR 2.29e-6 = 2.5% of peak. **Plateau is overwhelmingly LR-decay artifact**, not depth-budget expressivity limit.
+
+4. **PR #1208 nezuko H59 V-DEPTH-LR-EXTENDED assigned** ([PR #1208](https://github.com/morganmcg1/DrivAerML/pull/1208), branch `nezuko/h59-vdepth-lr-extended`). Single-flag change vs H47: `--lr-cosine-t-max 25` instead of 13. Stretches cosine cycle so within actual ~70k-step training window, cosine completes only ~28% (instead of 100%), keeping terminal LR at ~70-80% of peak instead of 2.5%. Direct test of nezuko's LR-decay-as-confound hypothesis. Expected outcomes: (A) MERGE WIN val_abupt < 6.126% AND test_VP < 3.643%, (B) PARTIAL WIN improvement on H47 + test_VP cross floor, (C) NULL depth at 2-block/5-trunk is truly expressivity-limited. New diagnostic: `train/lr_fraction_of_peak` + `train/cosine_progress` per step. Kill thresholds standard lr-warmup-1 aware (NO EP1, EP3 binding 32592:val_abupt<7.5+val_SP<5.5, EP6 hard kill 65184:val_abupt<6.5).
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready:
+   - **H52 frieren (PR #1200)** — mid-EP4 healthy, mechanism alive
+   - **H53 tanjiro (PR #1202)** — **STRONGEST MERGE CANDIDATE**, projected merge at budget cut ~17:50Z (val_abupt projection 6.075% MERGE WIN by 0.051pp slack)
+   - **H54 v2 alphonse (PR #1203)** — EP2 healthy, surf_deep diagnostic pending
+   - **H55 v2 edward (PR #1204)** — EP2 τz curriculum mechanism alive (−0.164pp val_WSS_z vs H48 baseline)
+   - **H56 fern (PR #1205)** — H51-RELAUNCH NPCA+SSFL+slices=192+ema=0.9999, early
+   - **H57 thorfinn (PR #1206)** — EP2 FDCE cold-start advantage carrying (−0.078pp val_abupt vs H48)
+   - **H58 askeladd (PR #1207)** — COORDSLICE-NO-STOPGRAD, pre-EP1
+   - **H59 nezuko (PR #1208, this entry)** — V-DEPTH-LR-EXTENDED, pre-EP1 launch when student picks up
+
+6. **Strategic notes (post-H47 closure)**:
+   - **Wave 31 active merge candidates** narrow to 4 in-flight: H53 (strongest slope, projected merge), H54 v2 (SURFACE-DEEP mirror of H47), H57 (FDCE mech-alive on τz), H59 (LR-fix variant of H47). H47 itself closed; H50 closed.
+   - **7 test_VP floor approaches in Wave 30/31** now: H26 (cross MERGED), H31 (cross MERGED), H33 (cross CLOSED), H47 (NEAR-MISS +0.010pp), H50 (cross CLOSED), H53 (projected cross), H58 (TBD). Test_VP is the most fragile-but-reliable merge-adjacent signal.
+   - **LR-decay diagnostic added to Wave 31 canonical**: future PRs should log `train/lr_fraction_of_peak` to distinguish "LR decay artifact" from "true expressivity limit" plateaus. If H59 confirms LR-fix unlocks H47 mechanism, Wave 32 budget allocation may shift toward extended-cosine recipes for all in-flight architectural mechanisms.
+
+## Previous invocation actions (2026-05-19 ~13:35Z) — PR #1198 H50 COORDSLICE CLOSED as **mechanism-positive null with 6th test_VP floor crossing in Wave 30/31** (val_abupt 6.220% closest miss in Wave 31 +0.094pp; test_VP 3.596% CROSSED floor by −0.047pp; lowest val_VP in Wave 31 3.676%; NEW structural finding L0-PE-capacity-sink); **ASKELADD REASSIGNED H58 COORDSLICE-NO-STOPGRAD** (PR #1207, single-line code change removing `torch.no_grad()` wrap on centroid computation to restore routing-gradient feedback to PE projection; expected to enable H33-style PE auto-growth and close +0.094pp val_abupt gap)
 
 ### Headline updates (13:35Z)
 

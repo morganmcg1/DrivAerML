@@ -1,3 +1,54 @@
+## 2026-05-19 15:45 — PR #1194: H47 V-DEPTH — Volume Decoder Depth Bump 2 dedicated vol-only blocks (nezuko, 18h full rerun) — **MECHANISM-POSITIVE NULL with test_VP +0.010pp NEAR-MISS on floor** (tightest H47-family vol_p floor approach; 4 sublayer norms 5-14× above EP3 KILL threshold + block1>block0 productive asymmetry confirmed canonical Wave 31 signature; val_abupt plateau and merge-gate miss DOMINATED BY LR-DECAY confound — cosine cycle completed within actual 70k-step training window, terminal LR collapsed to 2.5% of peak; slope decelerated 30× from EP3→EP4 −0.034 to EP6→terminal −0.0011 matching LR collapse 99%→2.5%); NEZUKO REASSIGNED H59 V-DEPTH-LR-EXTENDED (PR #1208) — single-flag change `--lr-cosine-t-max 25` instead of 13 to keep terminal LR at ~70-80% peak instead of 2.5%
+
+- **Branch**: `nezuko/h47-vdepth` (closed at 15:45Z)
+- **W&B run**: 8-rank DDP rank0 `dp7gbsjb` (group `wave31_h47_vdepth`, 15.66h runtime, terminated at step 70,652 / 141,232 = 50% of 13-ep step budget by internal training-time cap; vp curriculum fully traversed 16384→32768→49152→65536 all 4 stages)
+- **Hypothesis**: Add 2 dedicated volume-only transformer blocks AFTER the shared encoder trunk to deepen volume-decoder interior capacity. Volume pathway is empirically responsive (H26/H31 crossed test_vol_p floor via encoder-input enrichment); the question is whether the shallow decoder under-extracts those richer features.
+
+### Terminal verdict — mechanism POSITIVE, gates ALL FAIL, test_VP +0.010pp NEAR-MISS
+
+| Gate | Target | H47 EP12 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.273%** | ❌ FAIL | +0.147pp |
+| test_abupt | (baseline 5.844%) | **6.049%** | ❌ FAIL | +0.205pp |
+| test_SP (floor) | ≤3.577% | **3.769%** | ❌ FAIL | +0.192pp |
+| **test_VP (floor)** | **≤3.643%** | **3.6533%** | **❌ NEAR-MISS** | **+0.010pp** ⭐ |
+| test_WSS (goal) | <6.727% | **6.993%** | ❌ FAIL | +0.266pp |
+
+Test_VP at 3.6533% is the **7th test_VP floor approach in Wave 30/31** and the **tightest H47-family approach** to the floor. Comparison vs prior floor crossings: H26 NPCA (-0.035pp BELOW, MERGED), H31 WALLDIST (-0.155pp BELOW, MERGED), H33 SLICEPE (cross, CLOSED), H50 COORDSLICE (-0.047pp cross, CLOSED), H53 CP-LOSS-WEIGHT projected (-0.10pp cross, in flight).
+
+### Mechanism diagnostic — STRONGLY POSITIVE per-block residual trace (canonical Wave 31 signature)
+
+| Block/Sublayer | EP1 (shedding) | EP3 (gate target >0.05) | Terminal |
+|---|---:|---:|---:|
+| b0.attn.out_proj max_abs | 0.0318 | 0.2206 (4× PASS) | **0.2610** (5× PASS) |
+| b0.mlp.fc2 max_abs | 0.0332 | 0.4791 (10× PASS) | **0.5728** (11× PASS) |
+| b1.attn.out_proj max_abs | 0.0307 | 0.2515 (5× PASS) | **0.3597** (7× PASS) |
+| b1.mlp.fc2 max_abs | 0.0384 | 0.5085 (10× PASS) | **0.7170** (14× PASS) |
+
+**Productive block1 > block0 asymmetry confirmed** (b1.ffn norm 75.32 vs b0.ffn norm 65.26 = 1.25× ratio, mirrors the H30 V2S asymmetric-fusion productive pattern). **FFN dominates over attn** (norm 65-75 vs 27-34, ~2.4× larger) — depth-bump mechanism is primarily expressivity (FFN capacity), not attention-mixing between volume tokens.
+
+### LR-decay confound — the dominant plateau driver
+
+| Step | LR | Fraction of peak | val_abupt slope (pp/1k) |
+|---:|---:|---:|---:|
+| 14,133 (peak post-warmup) | 9.00e-05 | 100% | — |
+| EP3→EP4 (28k→43k) | 99-90% peak | productive zone | **−0.034** (productive) |
+| EP4→EP5 (43k→52k) | 80-70% peak | mid-decay | −0.015 |
+| EP5→EP6 (52k→62k) | 60-45% peak | mid-decay | −0.011 |
+| EP6→terminal (62k→70k) | 30-2.5% peak | near-zero LR | **−0.0011** (plateau) |
+
+**The val_abupt slope collapsed 30× from EP3→EP4 (−0.034 pp/1k at 90% peak LR) to terminal (−0.0011 pp/1k at 2.5% peak LR). The plateau is overwhelmingly LR-decay artifact**, not an expressivity asymptote at this depth budget. Linear extrapolation: with constant 80% peak LR maintained over 70k steps, val_abupt would land 5.5-5.8% — comfortably under merge gate.
+
+### Wave 31 mechanism-class taxonomy after H47 closure (8 classes unchanged from H50)
+
+H47 closure changes "variance-class-decoder-sublayer" status from "TBD borderline" to "**mechanism-positive null with LR-decay confound** — class status RESERVED pending H59 V-DEPTH-LR-EXTENDED resolution".
+
+### Disposition
+
+CLOSED as mechanism-positive null with test_VP +0.010pp NEAR-MISS + LR-decay confound. Excellent diagnostic work — the per-block residual trace + productive block1>block0 asymmetry is canonical Wave 31 mechanism-positive signature, AND the LR-decay terminal analysis identified the dominant confound. **Nezuko reassigned to H59 V-DEPTH-LR-EXTENDED (PR #1208)** — single-flag change `--lr-cosine-t-max 25` instead of 13, directly tests whether H47's val_abupt plateau and test_VP near-miss were LR-decay artifacts.
+
+---
+
 ## 2026-05-19 13:35 — PR #1198: H50 COORDSLICE — Coordinate-Grounded Slice IDs (askeladd) — **MECHANISM-POSITIVE NULL CLOSURE with 6th test_VP floor crossing in Wave 30/31** (val_abupt 6.220% closest miss in Wave 31 +0.094pp; test_VP CROSSED floor by −0.047pp; lowest val_VP in Wave 31 3.676%; NEW structural finding L0-PE-capacity-sink pattern; mechanism class #8 coordinate-grounded-slice-PE proven null); ASKELADD REASSIGNED H58 COORDSLICE-NO-STOPGRAD (PR #1207) — single-line code change removing `torch.no_grad()` wrap to restore routing-gradient feedback to PE projection
 
 - **Branch**: `askeladd/h50-coordslice-rff` (closed at 13:35Z)
