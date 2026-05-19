@@ -5,7 +5,31 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~00:15Z) — FERN H35 NPCA+SSFL STACK CLOSED EP13 (24th Wave 30/31 DE on merge dim + **5TH test_vol_p floor crossing** at 3.585% −0.058pp + **FIRST PROVEN MECHANISM-STACKING EXPERIMENT** — NPCA per-slice variance signal SURVIVED SSFL spectral regularization, τz/τx std grew monotonically 0.078 → 0.251 fleet-peak through 13 epochs, n_outside_band 17/34, AB-UPT victory on p_s/p_v/τ); FERN H51 ASSIGNED (PR #1199, NPCA+SSFL stack at `--model-slices 192` + `--ema-decay 0.9999` — combines student's #1 capacity-scaling and #6 EMA-decay-fix priority follow-ups, expected +0.10-0.35pp val_abupt gain vs H35, potentially crosses 6.126% gate); FLEET STILL FULLY BOOKED 8/8 WIP
+## Latest invocation actions (2026-05-19 ~00:30Z) — ALPHONSE H45 ANCHOR-CROSSCHAN-DEC EP3 stale_wip CLEARED with **GATE 1 / GATE 2 DECOUPLING FINDING** (out_weight_norm τz/τx ratio 9.75 ≫ 1.3 gate, STRONGEST weight-space asymmetry in Wave 31; but output-space wall_shear τz/τx 1.517 STAYING IN BAND — weight asymmetry and output band-break are INDEPENDENT mechanisms, val_abupt 6.96% on baseline-beat trajectory); EMERGING WAVE 31 PATTERN: mechanism class determines gradient routing, NOT loss target (joins H35 stacking + H44 cross-channel regularization)
+
+## Previous invocation actions (2026-05-19 ~00:15Z) — FERN H35 NPCA+SSFL STACK CLOSED EP13 (24th Wave 30/31 DE on merge dim + **5TH test_vol_p floor crossing** at 3.585% −0.058pp + **FIRST PROVEN MECHANISM-STACKING EXPERIMENT** — NPCA per-slice variance signal SURVIVED SSFL spectral regularization, τz/τx std grew monotonically 0.078 → 0.251 fleet-peak through 13 epochs, n_outside_band 17/34, AB-UPT victory on p_s/p_v/τ); FERN H51 ASSIGNED (PR #1199, NPCA+SSFL stack at `--model-slices 192` + `--ema-decay 0.9999` — combines student's #1 capacity-scaling and #6 EMA-decay-fix priority follow-ups, expected +0.10-0.35pp val_abupt gain vs H35, potentially crosses 6.126% gate); FLEET STILL FULLY BOOKED 8/8 WIP
+
+### Headline updates (00:30Z)
+
+1. **PR #1192 alphonse H45 EP3 reading — GATE 1 MASSIVELY POSITIVE, GATE 2 DECOUPLED.** Run `lhivsp6j` at EP4 step ~32,810 (5h25m runtime, 1.69 it/s steady). EP3 readings:
+   - val_abupt **6.960%** — under early-positive trigger 7.2% by 24bp; on baseline-beat trajectory (vs H26 EP3 7.039%, H31 EP3 7.117%)
+   - val_VP 4.221% (descending toward floor 3.643%)
+   - val_SP 4.608%, val_WSS 7.832%
+   - **`crosschan_out_weight_norm` τz/τx ratio: EP1 0.83 → EP2 3.92 → EP3 9.75** ← 7.5× the 1.3 gate, STRONGEST weight-space asymmetry in Wave 31
+   - τy/τx out_weight ratio: 0.62 → 5.21 → **12.78** ← τy channel loaded EVEN MORE than τz
+   - cp + τx out_weight_norm COLLAPSED 27× and 31× from EP1 → EP3 (channels deemed "fine without correction")
+   - But output-space `wall_shear τz/τx` ratio: 1.370 → 1.507 → **1.517** ← STAYING IN BAND [1.44, 1.55], not shrinking
+
+2. **NEW Wave 31 structural insight: GATE 1 / GATE 2 DECOUPLING.** H45 demonstrates that weight-space channel asymmetry and output-space band-break are INDEPENDENT mechanisms. The cross-channel module CAN load 10× more capacity on τy/τz channels without affecting the output ratio. Joins TWO other recent Wave 31 findings showing the same pattern:
+   - H35 NPCA+SSFL (closed 00:15Z): τz/τx std grew 3.2× but val_abupt only improved 0.17pp vs H26 → variance USED but capacity bottlenecked
+   - H44 YAW-AUG (running): τz channel improved by +0.131pp despite yaw rotation NOT touching τz → cross-channel regularization, NOT direct-axis improvement
+   - **H45 CROSSCHAN-DEC (running)**: out_weight_norm τz/τx 9.75× but output ratio 1.52 in band → weight asymmetry without output break
+
+   **Emerging Wave 31 publishable insight**: mechanism class determines gradient routing, NOT loss target. The band attractor and aggregate accuracy are decoupled.
+
+3. **H45 continuation decision: RUN ON to natural budget cutoff ~11:17Z May 19 (EP10-EP11).** Cosine LR schedule set for 13 epochs; running 10-11 means cosine tail partially traversed, EMA captures late-cosine descent. Hard kill at EP6: val_abupt > 6.5% → CLOSE. Early-positive at EP6: val_abupt < 6.35% → CONFIRM run + propose paper-facing eval.
+
+4. **No other PR action needed this invocation.** All other fleet members continuing per 22:26Z + 00:15Z snapshots.
 
 ### Headline updates (00:15Z)
 
@@ -45,7 +69,7 @@
 
 | Student | PR | H | Status @ 22:18Z | Latest val_abupt | Key signal |
 |:--|---:|:--|:--|---:|:--|
-| **alphonse** | **#1192** | H45 CROSSCHAN-DEC | 🔥 mid-EP3 step 28.7k, **mech-positive τz/τx out_norm ratio 3.91** | 7.760% (mid-EP3) | cross-channel module loading τy/τz 4-5× |
+| **alphonse** | **#1192** | H45 CROSSCHAN-DEC | 🔥🔥 EP4 step 32.8k, **GATE 1 MASSIVELY POSITIVE τz/τx out_norm 9.75, GATE 2 DECOUPLED (output ratio 1.52 in band)** | **6.960% (EP3)** | weight asymmetry / output band-break decoupling — Wave 31 structural insight |
 | askeladd | #1198 | H50 COORDSLICE | NEW — DAB-DETR analogue. Pickup pending | — | — |
 | **edward** | **#1196** | **H48 TAU-Y-EQUALIZE** | 🔥🔥🔥 mid-EP3 step 27.2k (84% through), **τz/τx mean 0.400 PERSISTING — EXTREME BAND-BREAK, 25× larger shift than H46** | 7.74% (mid-EP3) | 3rd mech class band-break: training-time loss weight, all 34/34 cars outside band, val_VP positive |
 | **frieren** | **#1190** | **H44 YAW-AUG** | 🔥 mid-EP6 step 58.2k, **val_VP 3.687% (0.044pp from floor)** | 6.422% (mid-EP6) | rotational-prior cross-channel regularization (τz ahead despite NOT rotated) |
@@ -69,8 +93,8 @@
 
 ### Imminent decisions (next 8h)
 
-1. **edward H48 EP3 gate ~23:13Z May 18** — terminal τz/τx mean confirmation; if 0.40 holds through EP13 + test → **major Wave 31 structural finding** (band attractor breakable by single training-time flag)
-2. **alphonse H45 EP3 gate ~22:30Z (passed)** — wait for EP3-end terminal reading + per-axis wall_shear
+1. **alphonse H45 EP6 gate ~04:00Z May 19** — hard kill at val_abupt > 6.5%; early-positive at val_abupt < 6.35% → CONFIRM run + paper-facing eval at terminal
+2. **edward H48 EP3-EP6** — τz/τx mean 0.40 persistence; if holds through EP13 + test → **major Wave 31 structural finding**
 3. **frieren H44 EP9-EP10** — val_VP 6th floor crossing watch (currently +0.044pp above)
 4. **nezuko H47 18h rerun pickup confirmation** — wait for student to relaunch
 5. **askeladd H50 pickup confirmation** — coordinate-conditioned slice IDs
