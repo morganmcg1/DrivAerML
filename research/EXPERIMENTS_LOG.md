@@ -1,3 +1,62 @@
+## 2026-05-19 08:55 — PR #1196: H48 TAU-Y-EQUALIZE — Static τ_y Loss-Weight Reduction (edward, 13-ep full) — TERMINAL EP13-EMA CLOSED (val_abupt 6.485% +35.9bp FAIL + test_abupt 6.167% +32.3bp FAIL) / MECHANISM-POSITIVE NULL — MOST EXTREME single-mechanism band-attractor break in Wave 30/31 history (per-car τz/τx mean 0.401, 25× more extreme than H46 SDORTH); MEAN-SHIFT CLASS confirmed as 5th mechanism-class observation
+
+- **Branch**: `edward/h48-tau-y-equalize` (closed at 08:55Z)
+- **W&B run**: 8-rank DDP rank0 `8cn5abxm` (group `wave31_h48_tau_y_equalize`, 14.85h runtime to step 70,652 EP13 natural completion, EP10 EMA checkpoint best)
+- **Hypothesis**: Reduce τ_y loss weight 1.5 → 1.0 to free gradient capacity for τ_z convergence into the [1.44, 1.55] band attractor. Mechanism class: static channel reweight.
+
+### Terminal metrics (rank0 `8cn5abxm` EP10 EMA best-ckpt)
+
+| Metric | H48 EP10 EMA | Baseline (PR #972) | Δ to baseline | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt | **6.485%** | 6.126% (merge) | **+0.359pp** | ❌ merge gate FAIL |
+| val_VP | 3.803% | 3.643% floor | +0.160pp | binding gate fail |
+| val_SP | 4.277% | 3.577% floor | +0.700pp | binding gate fail |
+| val_WSS | 7.351% | 6.727% | +0.624pp | above baseline |
+| test_abupt | **6.167%** | 5.844% | **+0.323pp** | ❌ test merge gate fail |
+| test_VP | **3.671%** | 3.643% floor | **+0.028pp** | **near-tie at floor** |
+| test_SP | 3.898% | 3.577% floor | +0.321pp | binding gate fail |
+| test_WSS | 7.113% | 6.727% | +0.386pp | above baseline |
+| test_WSS_z | 9.173% | 8.916% | +0.257pp | above baseline |
+
+### MEAN-SHIFT MECHANISM — Most Extreme Band-Break in Wave 30/31
+
+| Set | mean(τz/τx) | std(τz/τx) | n_outside [1.44, 1.55] | Distance below band |
+|---|---:|---:|---:|---:|
+| val (full_val, 34 cars) | **0.401** | 0.033 | **34/34 (100%)** | **−1.04** |
+| test (full_test, 50 cars) | **0.420** | 0.040 | **50/50 (100%)** | −1.02 |
+| Baseline #972 val | 1.496 | 0.085 | 0/34 (in band) | — |
+| H46 SDORTH (prior most-extreme) | ~1.40 | 0.194 | partial | −0.04 |
+
+H48 is **25× more extreme** in mean-shift direction than the prior record (H46 SDORTH). Std stays compressed (0.033, far below the 0.15 ALIVE variance threshold) — pure mean-shift class, no variance spread component.
+
+### Per-Axis WSS Hardness INVERTED vs Hypothesis
+
+| Axis | H48 EP10 val | Baseline expectation | Direction |
+|---|---:|:--|:--|
+| `wall_shear_x` | **6.437% (easiest)** | middle | τ_x became EASIEST |
+| `wall_shear_y` | 8.011% (middle) | middle | τ_y unchanged |
+| `wall_shear_z` | **9.899% (hardest)** | easiest | τ_z became HARDEST |
+
+Hypothesis predicted: τ_y weight reduction frees gradient capacity → τ_z convergence improves toward [1.44, 1.55] band. **Actual**: gradient capacity redirected to τ_x (NOT τ_z) → τ_x became easiest channel, τ_z became hardest. Per-car mean ratio settled at 0.40 (low-τz / high-τx attractor). Opposite direction of hypothesis.
+
+### STRUCTURAL FINDING — Per-Car / Aggregate Decoupling
+
+Aggregate WSS_z/WSS_x ratio (1.538 val, 1.456 test) remained within the [1.44, 1.55] band even when per-car ratios were extreme (mean 0.40). The val_abupt convergence ceiling depends on something other than per-car τz/τx — the aggregate channel is what drives val_abupt. Per-car / aggregate decoupling is the underlying signal pattern.
+
+### Wave 30/31 mechanism-class taxonomy — 5 observed classes
+
+| Class | Wave 31 examples | Result pattern |
+|---|---|---|
+| Variance-class (encoder) | H35 NPCA+SSFL (ref std 0.251 EP6 peak), H52 NPCA×YAW activating | mechanism alive |
+| **Mean-shift class** | **H48 TAU-Y-EQUALIZE (this entry — confirmed 25× extreme)** | **mechanism alive, val null** |
+| Variance-class (decoder sublayer) | H47 V-DEPTH (sublayer +26-57%, EP6 6.357% merge candidate) | mechanism alive, **val LIVE** |
+| Cross-channel (weight-space) | H45 CROSSCHAN-DEC (weight ratio 24×, val null) | mechanism alive, val null |
+| Shared-capacity (surface) | H54 SURFACE-DEEP (alphonse PR #1203, assigned) | TBD |
+
+### Disposition
+
+PR closed at 08:55Z. Edward reassigned to **H55 TAU-Z-LOSS-CURRICULUM** (PR #1204) — mechanism-class-novel time-varying loss weight curriculum (front-load τ_z weight 5.0 → 2.0 by EP6, hold through EP13). Direct attack on the test_WSS_z gap from the opposite direction of H48: instead of relaxing τ_y, front-load τ_z early. W&B run `8cn5abxm` preserved for cross-experiment mean-shift class analysis.
+
 ## 2026-05-19 08:25 — PR #1192: H45 ANCHOR-CROSSCHAN-DEC — Surface Decoder Cross-Channel Attention (alphonse, 13-ep full) — TERMINAL EP13-EMA CLOSED (val_abupt 6.3523% +22.6bp FAIL + test_abupt 6.0751% +23.1bp FAIL) / MECHANISM-POSITIVE NULL — weight-space rank-decoupling 18.6× threshold but val null — STRUCTURAL FINDING (band attractor is NOT in surface decoder pre-projection cross-channel structure)
 
 - **Branch**: `alphonse/h45-crosschan-dec` (closed at 08:25Z)

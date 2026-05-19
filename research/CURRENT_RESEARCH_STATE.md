@@ -1,11 +1,32 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~07:00 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~08:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~08:25Z) — PR #1192 H45 CROSSCHAN-DEC CLOSED (mechanism-positive null, val_abupt 6.3523% / test_abupt 6.0751% FAIL by 22.6/23.1 bp) + ALPHONSE REASSIGNED H54 SURFACE-DEEP (#1203, mirror of H47 V-DEPTH on surface decoder) + H47 EP6 STRONG (val_abupt 6.357% only +0.230pp above merge gate)
+## Latest invocation actions (2026-05-19 ~08:55Z) — PR #1196 H48 TAU-Y-EQUALIZE TERMINAL CLOSED (mechanism-positive null, val_abupt 6.485% / test_abupt 6.167% FAIL by 35.9/32.3 bp; MOST EXTREME mean-shift attractor break in W30/31 history — per-car τz/τx mean 0.401 = 25× more extreme than H46 SDORTH; **MEAN-SHIFT CLASS** now 5th observed mechanism class) + EDWARD REASSIGNED H55 TAU-Z-LOSS-CURRICULUM (PR #1204, mechanism-class-novel time-varying loss weight, front-load τ_z 5.0→2.0 by EP6, hold through EP13)
+
+### Headline updates (08:55Z)
+
+1. **PR #1196 edward H48 TAU-Y-EQUALIZE CLOSED** ([close comment 4486160052](https://github.com/morganmcg1/DrivAerML/pull/1196#issuecomment-4486160052)). Terminal EP10 EMA best-ckpt: val_abupt **6.485%** fails merge gate 6.126% by 0.359pp; test_abupt **6.167%** fails baseline 5.844% by 0.323pp. Test_VP 3.671% near-tie at floor (+0.028pp). All other binding gates fail (val_SP +0.700pp, test_SP +0.321pp). **MEAN-SHIFT MECHANISM EXTREME**: per-car τz/τx mean **0.401** val / **0.420** test (−1.04 / −1.02 below [1.44, 1.55] band lower edge), n_outside 34/34 val + 50/50 test — 25× more extreme than H46 SDORTH's prior record (−0.04). Per-axis WSS hardness **INVERTED vs hypothesis**: τ_x became EASIEST (6.437% val_WSS_x) and τ_z became HARDEST (9.899% val_WSS_z); model redirected gradient capacity to τ_x not τ_z when τ_y was loosened. STRUCTURAL FINDING: aggregate WSS_z/WSS_x ratio stayed in band (1.538 val) even when per-car ratios extreme — **per-car / aggregate decoupling** is the underlying signal pattern; val_abupt depends on aggregate channel not per-car. **Mean-shift class formally cemented as 5th mechanism-class observation** alongside variance-class encoder, variance-class decoder sublayer, cross-channel weight-space, shared-capacity surface.
+
+2. **PR #1204 edward H55 TAU-Z-LOSS-CURRICULUM assigned** ([PR #1204](https://github.com/morganmcg1/DrivAerML/pull/1204), branch `edward/h55-tau-z-loss-curriculum`). **Mechanism class: time-varying loss weight curriculum (NEW)**, distinct from H48 static τ_y reduction, H53 static cp upweight, and existing GradNorm dynamic balancing. Attacks the test_WSS_z gap from the opposite direction of H48: instead of *relaxing* τ_y statically, **front-load τ_z early** in training (high attention to τ_z patterns during the high-LR backbone-shaping phase EP1-3), then linearly decay to standard 2.0 by EP6 end (step 65228), hold through EP13. Conceptually a learning-rate warmup on loss-weight space. Schedule values: start=5.0, end=2.0, decay_steps=65228 (EP6 end on the standard 13-ep 18h recipe). Edward needs to add 3 new flags: `--tau-z-loss-weight-start`, `--tau-z-loss-weight-end`, `--tau-z-loss-weight-decay-steps`, and per-step modify `surface_channel_weights[3]` (τ_z slot, train.py:754) with linear interpolation. EP3 binding gate val_abupt<7.5%; EP1 elevated kill threshold val_abupt<10% (high tau_z front-load may temporarily elevate abupt).
+
+3. **Memory entry filed** at `feedback_senpai_result_template_placeholders.md`. BOTH alphonse (#1192 H45) and edward (#1196 H48) independently flagged the same issue this invocation cycle: my advisor check-in SENPAI-RESULT template lines containing `<best_val_abupt>` angle-bracket placeholders broke the student's `mark_ready_for_review` JSON parse guard. Same recipe-bug pattern, second confirmation in one invocation. Memory now lists 5 recipe-audit patterns: (1) flag existence+format, (2) step-indexed thresholds, (3) EMA-step δ^N composition, (4) lr-warmup-aware EP1 thresholds, (5) SENPAI-RESULT template placeholders. Going forward: replace angle-bracket placeholders with concrete numeric placeholders (`"value":0`) or use prose to describe the template instead of pasting a code-block scaffold.
+
+4. **Wave 31 status** — 8/8 WIP, 0 idle, 0 review-ready:
+   - **H47 nezuko EP6** read at 08:20Z showed val_abupt 6.357% (+0.230pp above merge gate). Slope EP5→EP6 −0.0118 pp/1k projects terminal at 6.10-6.15%. **Strongest merge candidate of Wave 31**. Next check-in EP7-EP8.
+   - **H54 alphonse** (assigned 08:25Z) — earliest mechanism diagnostic ~1.6h after pickup (mirror of H47 V-DEPTH on surface decoder side).
+   - **H55 edward** (assigned 08:55Z) — earliest informative read EP1 end ~1.5h after pickup; mechanism diagnostic per-axis WSS at EP3 firing (step 32594).
+   - **H50 askeladd**, **H51 fern**, **H52 frieren**, **H53 tanjiro**, **H49 thorfinn** in-flight (various stages).
+
+5. **Strategic notes for next invocations**:
+   - **H47 V-DEPTH terminal** expected ~17:00Z — if it crosses merge gate, it becomes Wave 31's first merge.
+   - **Mean-shift class avoidance**: don't stack mean-shift mechanisms in Wave 32 — they produce stable equilibria far from band but val null. Stack variance-class (H35-style) and shared-capacity-class (H47 V-DEPTH, H54 SURFACE-DEEP if it lives) mechanisms.
+   - **Per-car / aggregate decoupling** is the new signal pattern to instrument: future PRs should report both per-car τz/τx and aggregate WSS_z/WSS_x ratio, since the aggregate is what drives val_abupt.
+
+## Previous invocation actions (2026-05-19 ~08:25Z) — PR #1192 H45 CROSSCHAN-DEC CLOSED (mechanism-positive null, val_abupt 6.3523% / test_abupt 6.0751% FAIL by 22.6/23.1 bp) + ALPHONSE REASSIGNED H54 SURFACE-DEEP (#1203, mirror of H47 V-DEPTH on surface decoder) + H47 EP6 STRONG (val_abupt 6.357% only +0.230pp above merge gate)
 
 ### Headline updates (08:25Z)
 
