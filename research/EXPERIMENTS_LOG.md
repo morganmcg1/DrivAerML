@@ -1,3 +1,61 @@
+## 2026-05-19 11:30 — PR #1197: H49 SDORTH-FULL — Surface Decoder Orthogonal Row Init, 13-Epoch Confirmation (thorfinn) — **MECHANISM-POSITIVE NULL CLOSURE** (variance axis persistent at full budget — test std 0.149 = 1.75× baseline — but ALL 5 paper-facing test metrics DEGRADE vs baseline; structural finding subclassifies variance-class into encoder-input WINS vs decoder-weight NULL); THORFINN REASSIGNED H57 MULTI-SCALE-RFF-EXPANDED (PR #1206) — frequency-domain encoder capacity expansion, new mechanism class FDCE attacking τz axis from encoder freq-band angle
+
+- **Branch**: `thorfinn/h49-sdorth-full` (closed at 11:30Z)
+- **W&B run**: 8-rank DDP rank0 `qij8mah1` (group `wave31_h49_sdorth_full`, 14h runtime, full 13 epochs, 70,652 steps — no timeout cut)
+- **Hypothesis**: H46 SDORTH (PR #1193, closed 5-ep screening) produced the most important Wave 30/31 structural finding: τz/τx band attractor lives in TRAINING TRAJECTORY, not weight values themselves. H46 EP3-test produced τz/τx mean 1.431 ⭐ — FIRST test-side mean deflection below band [1.44, 1.55] lower edge. H49 binding question: does the test mean deflection PERSIST at full 13-ep terminal, or does extended cosine training re-magnetize the mean into the band attractor?
+
+### Terminal verdict — outcome (B) confirmed, mechanism does NOT translate
+
+| Gate | Target | H49 EP13 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.221%** | ❌ FAIL | +0.095pp |
+| test_abupt | (baseline 5.844%) | **6.080%** | ❌ FAIL | +0.236pp |
+| test_SP (floor) | ≤3.577% | **3.861%** | ❌ FAIL | +0.284pp |
+| test_VP (floor) | ≤3.643% | **3.662%** | ❌ FAIL | +0.019pp (close, but other axes degrade) |
+| test_WSS (goal) | <6.727% | **6.981%** | ❌ FAIL | +0.254pp |
+| **test τz/τx mean (binding)** | **<1.44** | **1.480** | **❌ FAIL** | (back in [1.44,1.55] attractor) |
+| test τz/τx std (mech) | >0.10 | **0.149** | ✅ PASS | 1.75× baseline ⭐ |
+
+### Mechanism reading
+
+**EP1 deflection IS reproducible** (val mean 1.373, 62% cars outside band — STRONGER than H46 EP3-test 1.431 read). Cosine-schedule-dependent: under H49's gradual 13-ep cosine, val mean drifts monotonically EP2→EP8 (1.495 → 1.524 → 1.535 → 1.545 → 1.550 → 1.556 → 1.559) and plateaus at band cap 1.559 for 5 consecutive epochs (EP8-EP12). Late-stage cosine decay does NOT re-deflect mean downward. **H46's EP3-test 1.431 was a transient mid-training value** captured before full attractor re-magnetization.
+
+**Per-axis WSS at terminal (test)**:
+- τx: 6.173% (easiest)
+- τy: 7.570%
+- **τz: 9.132%** (hardest — 50% gap above τx, persists across all Wave 31 PRs)
+
+H49 variance spread (test std 0.149 across 50 cars, 48% outside band) does NOT translate into τz reduction. Pattern is **consistent across H46/H47/H48/H49/H53**: per-car heterogeneity (band attractor break) does not move the per-axis WSS magnitude.
+
+### Structural finding — variance-class subclassification
+
+**Variance-class mechanism is now subclassified into two sub-classes:**
+
+- **Variance-class-encoder-input** — **WINS** (H26 NPCA, H31 WALLDIST, H35 NPCA+SSFL — all MERGED). Encoder feature variance translates into lower test error.
+- **Variance-class-decoder-weight** — **NULL at translation** (H46/H49 SDORTH). Decoder weight init variance produces persistent variance signature (test std 1.75× baseline) but ALL 5 paper-facing axes DEGRADE.
+
+**Hypothesis**: encoder-input variance creates per-token signal heterogeneity that the downstream model CAN aggregate into lower per-car loss; decoder-weight variance creates output heterogeneity that BYPASSES the model's aggregation capacity and produces per-car ratio dispersion without improving the per-car loss surface.
+
+**For Wave 32**: drop test-mean-deflection axis from attack map. Focus on (a) encoder-input variance, (b) decoder-sublayer depth (H47 proven borderline), (c) per-axis loss curricula (H55 in flight).
+
+### Wave 31 mechanism-class taxonomy (7 classes after H49 closure)
+
+| # | Class | Status | Reference PRs |
+|---|---|---|---|
+| 1 | variance-class-encoder-input | ✅ **WINS** | H26/H31/H35 MERGED |
+| 2 | variance-class-decoder-sublayer | TBD | H47 V-DEPTH borderline merge |
+| 3 | variance-class-cp-loss-weight | TBD | H53 second merge candidate |
+| 4 | shared-capacity-surface | TBD | H54 SURFACE-DEEP relaunching |
+| 5 | mean-shift-class | ❌ null | H48 TAU-Y-EQUALIZE closed |
+| 6 | cross-channel-weight-space | ❌ null | H45 CROSSCHAN-DEC closed |
+| 7 | **variance-class-decoder-weight** | **❌ null** (THIS PR) | **H46/H49 SDORTH closed** |
+
+### Disposition
+
+CLOSED as mechanism-positive null with structural finding (variance-class subclassification: encoder-input WINS vs decoder-weight NULL). Excellent diagnostic work + cleanly executed full-budget run (14h, no timeout cut). Mechanism diagnostic logging from PR #1193 (`tau_zx_ratio_*` + `surface_proj_row/cos_*`) retained as standard Wave 32 telemetry. Thorfinn reassigned to H57 MULTI-SCALE-RFF-EXPANDED (PR #1206) — encoder frequency-band expansion (5 sigmas → 8 sigmas, 4 octaves → 7 octaves), recipe-only change, new mechanism class FDCE attacking τz axis from encoder side.
+
+---
+
 ## 2026-05-19 10:05 — PR #1199: H51 NPCA+SSFL+slices192+ema9999 — Variance-Class Capacity-Expansion Stack (fern, killed mid-EP4) — **RECIPE-BUG CLOSURE** (advisor's EMA-aware kill gate calibration error, NOT mechanism rejection); mechanism was activating (τz/τx std doubled EP2→EP4 from 0.073 → 0.117); FERN REASSIGNED H56 H51-RELAUNCH (PR #1205) with corrected EMA-aware kill gates
 
 - **Branch**: `fern/h51-npca-ssfl-slices192` (closed at 10:05Z)

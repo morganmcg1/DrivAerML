@@ -1,11 +1,50 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~11:05 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~11:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~11:05Z) — PR #1203 H54 SURFACE-DEEP killed at EP1 by **8th recipe-bug** (5th invocation of EP1-gate-too-tight-under-lr-warmup-1 pattern); RELAUNCH directive posted, alphonse to rerun on same branch with corrected gates (no new PR; code is correct)
+## Latest invocation actions (2026-05-19 ~11:30Z) — PR #1197 H49 SDORTH-FULL CLOSED as **mechanism-positive null with structural finding** (test mean deflection failed binding gate, all 5 paper-facing metrics DEGRADE vs baseline); THORFINN REASSIGNED H57 MULTI-SCALE-RFF-EXPANDED (PR #1206, encoder freq-band expansion 5σ→8σ / 4 octaves → 7 octaves, mechanism-class FDCE new, recipe-only change, attacks τz axis from encoder side)
+
+### Headline updates (11:30Z)
+
+1. **PR #1197 thorfinn H49 SDORTH-FULL CLOSED** ([close comment 4487236446](https://github.com/morganmcg1/DrivAerML/pull/1197#issuecomment-4487236446)). 14h full 13-ep run, no timeout cut. Terminal verdict: val_abupt **6.221%** FAIL merge gate 6.126% by +0.095pp; test_abupt **6.080%** FAIL baseline 5.844% by +0.236pp; test_SP 3.861% FAIL floor by +0.284pp; test_VP 3.662% FAIL floor by +0.019pp (close); test_WSS 6.981% FAIL baseline by +0.254pp; **binding test τz/τx mean 1.480 FAIL binding gate <1.44** (back in [1.44, 1.55] band attractor). The H46 EP3-test 1.431 reading was a TRANSIENT mid-training value; H49's gradual 13-ep cosine gives the attractor enough anneal time to re-magnetize the mean.
+
+2. **Structural finding — variance-class subclassification** (most important takeaway): the variance-class mechanism splits into TWO sub-classes:
+   - **Variance-class-encoder-input — WINS** (H26 NPCA, H31 WALLDIST, H35 NPCA+SSFL — all MERGED). Encoder feature variance translates into lower test error.
+   - **Variance-class-decoder-weight — NULL at translation** (H46/H49 SDORTH). Decoder weight init variance produces persistent variance signature (test std 1.75× baseline, 48% cars outside band) but ALL 5 paper-facing axes DEGRADE.
+   - Hypothesis: encoder-input variance creates per-token signal heterogeneity that the model CAN aggregate; decoder-weight variance creates output heterogeneity that bypasses the aggregation capacity and only produces per-car ratio dispersion.
+
+3. **Wave 31 mechanism-class taxonomy after H49 closure (7 classes)**:
+   | # | Class | Status |
+   |---|---|---|
+   | 1 | variance-class-encoder-input | ✅ WINS (H26/H31/H35 MERGED) |
+   | 2 | variance-class-decoder-sublayer | TBD (H47 V-DEPTH borderline merge) |
+   | 3 | variance-class-cp-loss-weight | TBD (H53 second merge candidate) |
+   | 4 | shared-capacity-surface | TBD (H54 relaunching) |
+   | 5 | mean-shift-class | ❌ null (H48 closed) |
+   | 6 | cross-channel-weight-space | ❌ null (H45 closed) |
+   | 7 | variance-class-decoder-weight | ❌ null (**H49 closed THIS PR**) |
+
+4. **PR #1206 thorfinn H57 MULTI-SCALE-RFF-EXPANDED assigned** ([PR #1206](https://github.com/morganmcg1/DrivAerML/pull/1206), branch `thorfinn/h57-multiscale-rff-expanded`). **Mechanism class: frequency-domain capacity expansion (FDCE) — NEW**, attacking the τz axis from the encoder side. Recipe change: `--rff-init-sigmas` from `"0.25,0.5,1.0,2.0,4.0"` (5 sigmas, 4 octaves) to `"0.125,0.25,0.5,1.0,2.0,4.0,8.0,16.0"` (8 sigmas, 7 octaves). Pure recipe change, no model.py edits expected (pre-flight smoke check required before full launch in case shape mismatch). Pre-flight aware: NO EP1 gate (lr-warmup-1); EP3 binding `32592:val_abupt<7.5 + val_SP<5.5`; EP6 hard kill `65184:val_abupt<6.5`. Binding mechanism gate: test_WSS_z reduction by ≥0.3pp from baseline ~9.5%. Mechanism orthogonality: all 7 in-flight Wave 31 PRs attack different axes (slice PE / NPCA aug / loss weight / decoder depth / τz curriculum / NPCA stack / nothing on encoder freq band).
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H57 thorfinn assignment):
+   - **H47 nezuko (PR #1194)** — STRONGEST MERGE CANDIDATE; latest val_abupt 6.309% at step 56,147 (+0.183pp above merge gate). Slope decelerating −0.0118 → −0.0058 pp/1k. Borderline merge case at terminal.
+   - **H53 tanjiro (PR #1202)** — SECOND MERGE CANDIDATE; EP4 val_abupt 6.433%, val_SP 4.149% fleet-leading, val_VP 3.787% tightest +0.144pp above floor. Mechanism orthogonal to H47.
+   - **H52 frieren (PR #1200)** — mid-EP4 healthy, mechanism ALIVE std 0.154.
+   - **H33 askeladd (PR #1187)** — mid-EP6 SLICEPE v2, primary mech falsified at this point but val_VP descent continues.
+   - **H54 alphonse (PR #1203)** — code correct, v1 killed by my recipe-bug at EP1; v2 launching with corrected gates.
+   - **H55 edward (PR #1204)** — TAU-Z-LOSS-CURRICULUM, pre-EP1.
+   - **H56 fern (PR #1205)** — H51-RELAUNCH NPCA+SSFL+slices=192+ema=0.9999, pre-EP1.
+   - **H57 thorfinn (PR #1206, this entry)** — MULTI-SCALE-RFF-EXPANDED, EP1 launch when student picks up.
+
+6. **Strategic notes (post-H49 structural finding)**:
+   - **Wave 32 attack-map narrowing**: drop test-mean-deflection axis (H46/H49 transient signal, not a Wave 32 binding target). Drop decoder-weight variance perturbation (mechanism-positive null at translation). Focus on (a) encoder-input variance [proven], (b) encoder freq-band [H57 new], (c) decoder-sublayer depth [H47 proven borderline], (d) per-axis loss curricula [H55 in flight], (e) loss-weight reallocation [H53 in flight].
+   - **τz remains the dominant bottleneck** across all Wave 31 PRs (test_WSS_z 9.0-9.9% vs τx 6.1-6.5%, 50% gap unchanged). H55 attacks τz from loss side; H57 attacks τz from encoder freq-band side — orthogonal mechanisms, may stack in Wave 32.
+   - **Three-mechanism Wave 32 stack candidate**: H35 (encoder feature variance) + H47 (decoder sublayer depth) + H57 (encoder freq-band) — three orthogonal mechanism classes; all could land additively if H47 and H57 each cross merge gate.
+
+## Previous invocation actions (2026-05-19 ~11:05Z) — PR #1203 H54 SURFACE-DEEP killed at EP1 by **8th recipe-bug** (5th invocation of EP1-gate-too-tight-under-lr-warmup-1 pattern); RELAUNCH directive posted, alphonse to rerun on same branch with corrected gates (no new PR; code is correct)
 
 ### Headline updates (11:05Z)
 
