@@ -1,11 +1,73 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~16:20 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~16:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~16:20Z) — PR #1205 H56 H51-RELAUNCH CLOSED as **9th advisor recipe-bug + STRONGEST WAVE 31 MECHANISM SIGNAL** (EP3 EMA-val 25.30% killed by my gate `<25.0%` by 0.30pp; mathematical floor is 25.07% at random_pred_floor ≈ 100% — gate set INSIDE the math floor; τ_zx_ratio_std doubled in ONE epoch EP2→EP3 0.0554→0.1384 already exceeds H51 mid-EP4 by 18.3%; slope ACCELERATING −1.31 → −2.52 pp/1k); **FERN REASSIGNED H60 H56-RELAUNCH-DROP-EP3** (PR #1209, only EP6 binding gate retained, EP3+EP4 dropped as structurally uninformative under ema=0.9999); memory entry `feedback_ema_aware_kill_thresholds.md` corrected with empirical random_pred_floor ≈ 100%
+## Latest invocation actions (2026-05-19 ~16:55Z) — PR #1200 H52 NPCA × YAW-AUG terminal CLOSED as **mechanism-positive null with STRUCTURAL FINDING on orthogonal-mechanism non-compounding** (val_abupt 6.479% +0.353pp above merge gate; test_VP 3.735% no floor crossing +0.092pp above floor; test_WSS 7.108% +0.381pp above baseline; std 0.2044 IDENTICAL to H44 YAW-AUG standalone — predicted compound 0.25-0.35 FALSIFIED — mechanism-class orthogonality does NOT guarantee additive compounding; val/test variance divergence reconfirmed (val 0.204 vs test 0.129); WSS_z hardest axis 9.03% test pattern); **FRIEREN REASSIGNED H61 SLICE-TEMP-CURRICULUM** (PR #1210, mechanism-class-novel attention-temperature scheduling τ_slice anneals 1.5→1.0 over EP1-6, no prior Wave 31 experiment in this class)
+
+### Headline updates (16:55Z)
+
+1. **PR #1200 frieren H52 NPCA × YAW-AUG CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1200#issuecomment-4490144189)). Terminal verdict:
+   - val_abupt **6.479%** FAIL merge gate by +0.353pp
+   - test_abupt **6.155%** FAIL baseline by +0.311pp
+   - test_VP **3.735%** ❌ NO CROSSING (+0.092pp above floor; close but no cigar)
+   - test_SP 3.900% FAIL floor by +0.323pp
+   - test_WSS 7.108% FAIL baseline by +0.381pp
+   - Mechanism: variance saturated at 0.2044 = H44 YAW-AUG standalone amplitude
+
+2. **KEY STRUCTURAL FINDING — orthogonal-mechanism stacking does NOT additively compound**:
+   - First direct mechanism-stack test in Wave 31
+   - H44 YAW-AUG standalone: std ~0.198
+   - H52 NPCA × YAW-AUG stack: std 0.2044 (identical within noise)
+   - Predicted compound (PR body): std 0.25-0.35 — FALSIFIED by −0.05 to −0.15
+   - **Implication for Wave 32**: stacks must be empirically validated, not assumed from individual mechanism wins. Cannot pick two merged mechanisms and assume compound effect.
+
+3. **Val/test variance divergence (3rd Wave 31 observation)**: val std 0.2044 vs test std 0.1288 — variance signal is partly val-specific. H35 and H51 also showed this pattern. Implication: variance-class merge gates set on val-side metrics may not transfer to test.
+
+4. **WSS_z hardest axis pattern reconfirmed (5th Wave 31 observation)**: test WSS_z 9.028% vs WSS_x 6.360% (1.42× ratio). Wave 32 candidates should specifically attack WSS_z.
+
+5. **PR #1210 frieren H61 SLICE-TEMP-CURRICULUM assigned** ([PR #1210](https://github.com/morganmcg1/DrivAerML/pull/1210), branch `frieren/h61-slice-temp-curriculum`). Mechanism-class-novel attention-temperature scheduling:
+   - Add learnable temperature `τ_slice(t)` that anneals 1.5 → 1.0 over EP1-6, holds 1.0 EP6-13
+   - Modify slice-softmax in TransolverAttention: `softmax(logits / τ_slice)` instead of `softmax(logits)`
+   - Mechanism: smoother attention early (warm/diffuse routing) → sharpens late (specialized routing). Gumbel-softmax / simulated-annealing intuition.
+   - No prior Wave 31 experiment in attention-temperature class (10 classes in flight, 0 attention-pattern)
+   - Standalone test, conservative recipe baseline (lr-warmup-1, ema=0.999, 13-ep, slices=128, NO NPCA/SSFL)
+   - Three falsifiable outcomes: (A) MERGE WIN val_abupt<6.126% AND test_VP<3.643%, (B) PARTIAL terminal val_abupt below H48 6.485% by ≥0.10pp but no merge cross, (C) NULL within ±0.10pp of H48 baseline
+   - New diagnostic: per-block slice-attention entropy `H(slice_softmax)` per validation epoch
+
+6. **Wave 31 mechanism-class taxonomy now 11 classes** (after H52 closure + H61 assignment):
+   1. variance-class-encoder-input — MERGED (H26/H31/H35)
+   2. variance-class-decoder-sublayer — null+LR-confound (H47), in flight (H59)
+   3. variance-class-cp-loss-weight — in flight (H53 strongest projected merge)
+   4. shared-capacity-surface — in flight (H54 v2)
+   5. mean-shift-class — null (H48)
+   6. cross-channel-weight-space — null (H45)
+   7. variance-class-decoder-weight — null (H46/H49)
+   8. coordinate-grounded-slice-PE — null+VP-cross (H33/H50), in flight (H58)
+   9. frequency-domain-capacity / FDCE — in flight (H57)
+   10. ema-aware-variance-stack — in flight (H60 strongest mech signal)
+   11. **NEW — attention-temperature-curriculum — in flight (H61)**
+   - Plus derived class: **mechanism-stack-non-compounding** (H52 finding)
+
+7. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H52 closure + H61 assignment):
+   - **H53 tanjiro (PR #1202)** — **STRONGEST MERGE CANDIDATE** at EP6 val_abupt 6.191% (only +0.065pp above merge gate); projected merge ~17:50Z
+   - **H54 v2 alphonse (PR #1203)** — EP2 healthy
+   - **H55 v2 edward (PR #1204)** — EP2 τz curriculum mechanism alive
+   - **H57 thorfinn (PR #1206)** — EP2 FDCE cold-start advantage carrying
+   - **H58 askeladd (PR #1207)** — mid-EP2 healthy, EP3 binding gate ETA ~21:30Z
+   - **H59 nezuko (PR #1208)** — pre-EP1
+   - **H60 fern (PR #1209)** — pre-EP1 (strongest mech signal in Wave 31, ema=0.9999 stack)
+   - **H61 frieren (PR #1210, this entry)** — pre-launch, awaiting student pickup
+
+8. **Strategic notes (post-H52 closure)**:
+   - **Wave 32 stack-candidate strategy revised** by H52 finding. Cannot assume merged-mechanism compounding. Need empirical stack tests for each candidate pair (H35 NPCA × H53 CP-LOSS, H35 × H58 PE-fix if those merge, etc.).
+   - **5 active merge candidates** in Wave 31: H53 (projected merge first), H54 v2 (surface mirror), H57 (FDCE), H59 (LR-fix V-DEPTH), H60 (strongest mech signal). H58 + H61 also in flight as mechanism-class-novel tests.
+   - **WSS_z attack** is highest-priority Wave 32 design constraint after 5 confirmations of WSS_z hardness. Candidates: per-axis loss curriculum, decoder-side per-axis projection, frequency-band capacity for WSS_z specifically.
+   - **val/test variance divergence** suggests merge gates on val-side metrics need test-side confirmation before declaring mechanism dead.
+
+## Previous invocation actions (2026-05-19 ~16:20Z) — PR #1205 H56 H51-RELAUNCH CLOSED as **9th advisor recipe-bug + STRONGEST WAVE 31 MECHANISM SIGNAL** (EP3 EMA-val 25.30% killed by my gate `<25.0%` by 0.30pp; mathematical floor is 25.07% at random_pred_floor ≈ 100% — gate set INSIDE the math floor; τ_zx_ratio_std doubled in ONE epoch EP2→EP3 0.0554→0.1384 already exceeds H51 mid-EP4 by 18.3%; slope ACCELERATING −1.31 → −2.52 pp/1k); **FERN REASSIGNED H60 H56-RELAUNCH-DROP-EP3** (PR #1209, only EP6 binding gate retained, EP3+EP4 dropped as structurally uninformative under ema=0.9999); memory entry `feedback_ema_aware_kill_thresholds.md` corrected with empirical random_pred_floor ≈ 100%
 
 ### Headline updates (16:20Z)
 

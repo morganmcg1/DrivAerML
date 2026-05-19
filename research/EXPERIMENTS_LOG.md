@@ -1,3 +1,65 @@
+## 2026-05-19 16:55 — PR #1200: H52 NPCA × YAW-AUG mechanism stacking — variance-break × symmetry-breaking (frieren, 13-ep terminal) — **MECHANISM-POSITIVE NULL with STRUCTURAL FINDING on orthogonal-mechanism non-compounding**
+
+- **Branch**: `frieren/h52-npca-yaw-stack` (closed at 16:55Z)
+- **W&B run**: rank0 `3u4i7oy6` (group `wave31_h52_npca_yaw_stack`, 14.00h runtime, 13-ep natural completion at step 70,664; best EMA checkpoint = EP13)
+- **Hypothesis**: Compound H26 NPCA (variance-class encoder-input) with H44 YAW-AUG (symmetry-class data augmentation) — mechanism-class orthogonal → predicted compound variance std 0.25-0.35, val_abupt 5.95-6.18% (potential merge).
+
+### Terminal verdict — clear NULL on val_abupt, NO floor crossings
+
+| Gate | Target | H52 EP13 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.479%** | ❌ FAIL | +0.353pp |
+| test_abupt | (baseline 5.844%) | **6.155%** | ❌ FAIL | +0.311pp |
+| test_SP (floor) | ≤3.577% | **3.900%** | ❌ FAIL | +0.323pp |
+| test_VP (floor) | ≤3.643% | **3.735%** | ❌ NO CROSSING | +0.092pp (close) |
+| test_WSS (goal) | <6.727% | **7.108%** | ❌ FAIL | +0.381pp |
+
+### KEY STRUCTURAL FINDING — orthogonal-mechanism stacking does NOT additively compound
+
+First direct mechanism-stacking test in Wave 31:
+- **H44 YAW-AUG standalone (closed 02:08Z)**: EP13 std ~0.198, n_outside_band 14/34
+- **H52 NPCA × YAW-AUG stack (this PR)**: EP13 std **0.2044**, n_outside_band 16/34
+- **PR body predicted compound**: std 0.25-0.35
+
+**Result identical to YAW-AUG standalone within noise.** The NPCA encoder-input enrichment did NOT add to the variance signal beyond YAW-AUG alone produces. **Mechanism-class orthogonality (different attack axes) does NOT guarantee additive compounding.**
+
+This finding constrains Wave 32 stack design: **stacks must be empirically validated, not assumed from individual-mechanism wins.**
+
+### Val/test variance divergence — variance signal partly val-specific
+
+| Split | std | n_outside_band |
+|---|---:|---:|
+| val (34 cars) | **0.2044** | 16/34 |
+| test (50 cars) | **0.1288** | 28/50 |
+
+3rd Wave 30/31 experiment to show val/test variance divergence (H35, H51 also). Val cars likely include geometry outliers; test split more central. Implication: variance-class merge gates set on val-side metrics may not transfer to test.
+
+### Per-axis WSS — Wave 31 canonical pattern reconfirmed
+
+| Axis | Test (50 cars) | Val (34 cars) | Δ (test−val) |
+|---|---:|---:|---:|
+| WSS_x | 6.360% | 6.445% | −0.085pp |
+| WSS_y | 7.753% | 7.969% | −0.216pp |
+| **WSS_z** | **9.028%** | **9.915%** | **−0.887pp** |
+
+5th Wave 31 experiment confirming WSS_z is hardest axis on both val AND test. Wave 32 mechanism candidates should specifically attack WSS_z.
+
+### Cosine-tail slope decay (LR-decay confound, mirrors H47 pattern)
+
+| Window | val_abupt slope (pp/1k) |
+|---|---:|
+| EP9→EP10 | −0.0173 |
+| EP10→EP11 | −0.0078 (halved) |
+| EP11→EP12 | −0.0040 (halved again) |
+
+Same LR-decay confound H47 diagnosed. Terminal LR ~2-3% of peak. H52 mechanism could not break free of this attractor.
+
+### Disposition
+
+CLOSED as mechanism-positive null with structural finding about orthogonal-mechanism non-compounding. **FRIEREN REASSIGNED H61 SLICE-TEMP-CURRICULUM (PR #1210)** — mechanism-class-novel attention-temperature scheduling (τ_slice anneals 1.5→1.0 over EP1-6, holds 1.0 EP6-13). No prior Wave 31 experiment in this class. Standalone single-mechanism test, conservative recipe baseline (slices=128, ema=0.999, no NPCA/SSFL).
+
+---
+
 ## 2026-05-19 16:20 — PR #1205: H56 H51-RELAUNCH NPCA+SSFL+slices192+ema9999 with EMA-aware kill gates (fern, killed EP3 step 32,592) — **9TH ADVISOR RECIPE-BUG CLOSURE: EP3 gate `<25.0%` set 0.30pp inside math floor (random_pred_floor ≈ 100% NOT 7-22%); MECHANISM POSITIVE STRONGEST WAVE 31 SIGNAL: τ_zx_ratio_std doubled in ONE epoch EP2→EP3 0.0554→0.1384 already exceeds H51 mid-EP4 0.117 by 18.3%; slope ACCELERATING −1.31 pp/1k EP1→EP2 → −2.52 pp/1k EP2→EP3; train/epoch_loss 0.01129 matches H35 reference shape; FERN REASSIGNED H60 H56-RELAUNCH-DROP-EP3 PR #1209**
 
 - **Branch**: `fern/h56-h51-relaunch-ema-aware-gates` (closed at 16:20Z)
