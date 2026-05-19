@@ -1,11 +1,35 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~10:05 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~11:05 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~10:05Z) — PR #1199 H51 NPCA+SSFL+slices192+ema9999 CLOSED as **RECIPE-BUG CLOSURE** (advisor's fault: EMA-aware kill gate calibration error + kill-threshold step alignment off-by-2; mechanism was activating — τz/τx std doubled EP2→EP4 0.073→0.117; killed mid-EP4 by stale gate <10% under ema=0.9999 EMA-shadow lag) + FERN REASSIGNED H56 H51-RELAUNCH (PR #1205, exact same recipe with corrected EMA-aware kill gates 32592:abupt<25 / 43456:abupt<15 / 65184:abupt<7+SP<5; isolates dual hypothesis arms slices=192 + ema=0.9999 under properly calibrated gates) + 2 NEW RECIPE-BUG PATTERNS catalogued (Pattern #6: kill-threshold step = exact epoch×steps_per_epoch; Pattern #7: mid-epoch mini-validation cadence interaction) — recipe-audit checklist now 7 patterns
+## Latest invocation actions (2026-05-19 ~11:05Z) — PR #1203 H54 SURFACE-DEEP killed at EP1 by **8th recipe-bug** (5th invocation of EP1-gate-too-tight-under-lr-warmup-1 pattern); RELAUNCH directive posted, alphonse to rerun on same branch with corrected gates (no new PR; code is correct)
+
+### Headline updates (11:05Z)
+
+1. **PR #1203 H54 SURFACE-DEEP killed at EP1** (run `lmhzak2l`, group `wave31_h54_surface_deep`, 2.0h runtime, finished at step 10,864 with val_abupt=28.49% > 9.5% gate). **Advisor's recipe-bug**: I wrote `10864:val_primary/abupt_axis_mean_rel_l2_pct<9.5` in the PR body. Under `--lr-warmup-epochs 1`, EP1 cold-start val_abupt is structurally guaranteed to land 25-35% — any gate value below ~35 will false-kill a healthy run. **Alphonse's implementation (commit `8c6bd64`) was correct** — surf_deep_blocks with zero-init residuals, identity-at-init bit-exact baseline, 8-rank DDP synchronous, nonfinite=0. Only the gate value was wrong.
+
+2. **Relaunch directive posted to PR #1203** ([comment 4487132006](https://github.com/morganmcg1/DrivAerML/pull/1203#issuecomment-4487132006)) — alphonse to relaunch on the same branch with corrected `--kill-thresholds "32592:val_primary/abupt_axis_mean_rel_l2_pct<7.5,32592:val_primary/surface_pressure_rel_l2_pct<5.5,65184:val_primary/abupt_axis_mean_rel_l2_pct<6.5"`. NO EP1 gate (lr-warmup-1 makes EP1 too noisy). EP3 binding + EP6 intermediate. No code changes needed — same `alphonse/h54-surface-decoder-depth` branch.
+
+3. **Memory entry `feedback_ep_thresholds_recipe_dependent.md` updated** with RED-FLAG PATTERN section: if a `--kill-thresholds` spec contains `10864:val_abupt<N` for N < 30 under `--lr-warmup-epochs 1`, that's a recipe-bug. Added pre-flight checklist for future PR body kill threshold specs. This is the 5th invocation of this exact pattern (askeladd H33, edward H34, nezuko #1113, alphonse H54, plus one prior). The memory has existed since 2026-05-15; failure mode is not consulting it when writing new PR bodies.
+
+4. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready:
+   - **H47 nezuko (PR #1194)** — STRONGEST MERGE CANDIDATE; latest val_abupt 6.309% at step 56,147 (+0.183pp above merge gate). Slope decelerating from −0.0118 → −0.0058 pp/1k. Borderline merge case at terminal (conservative 6.25% / most-likely 6.05-6.18% / optimistic 5.82%).
+   - **H53 tanjiro (PR #1202)** — SECOND MERGE CANDIDATE; EP4 val_abupt 6.433% (+0.307pp above merge gate, tied with H47), val_SP 4.149% fleet-leading, val_VP 3.787% tightest in fleet (+0.144pp above floor). Mechanism orthogonal to H47.
+   - **H52 frieren (PR #1200)** — mid-EP4 step 43,747 last check (09:35Z); val_abupt 6.901% descending; mechanism ALIVE (std 0.154 just past threshold at EP3).
+   - **H50 askeladd, H49 thorfinn** — in-flight at various stages.
+   - **H54 alphonse (PR #1203, this entry)** — code correct, awaiting relaunch with fixed gates; v2 EP1 launch ~12:00-12:30Z.
+   - **H55 edward (PR #1204)** — TAU-Z-LOSS-CURRICULUM, assigned 08:55Z. EP1 read ~10:30Z (still pre-EP1 from alphonse's pace pattern).
+   - **H56 fern (PR #1205)** — H51-RELAUNCH, assigned 10:05Z. EP1 read ~11:30Z.
+
+5. **Strategic notes**:
+   - **Recipe-bug pattern catalog now 8 items**: (1) flag existence + format, (2) step-indexed thresholds, (3) EMA δ^N composition, (4) lr-warmup-aware EP1 thresholds (RECURRING), (5) SENPAI-RESULT placeholder format, (6) step = exact epoch×steps_per_epoch, (7) mid-epoch mini-validation cadence, (8) (pending if pattern #4 re-fires).
+   - **H47 vs H53 stacking thesis**: both tied on val_abupt at EP4; if both close to terminal val_abupt < 6.126%, they stack additively in Wave 32 (architectural depth + loss-weight reallocation, orthogonal mechanisms).
+   - **H54 v2 expected behavior**: surf_deep block norms should grow EP2→EP3 mirroring H47's vol_deep growth (+26-57% across attn_proj and ffn_fc2); val_abupt should land 6.5-7.0% at EP3 if mechanism is alive on surface side.
+
+## Previous invocation actions (2026-05-19 ~10:05Z) — PR #1199 H51 NPCA+SSFL+slices192+ema9999 CLOSED as **RECIPE-BUG CLOSURE** (advisor's fault: EMA-aware kill gate calibration error + kill-threshold step alignment off-by-2; mechanism was activating — τz/τx std doubled EP2→EP4 0.073→0.117; killed mid-EP4 by stale gate <10% under ema=0.9999 EMA-shadow lag) + FERN REASSIGNED H56 H51-RELAUNCH (PR #1205, exact same recipe with corrected EMA-aware kill gates 32592:abupt<25 / 43456:abupt<15 / 65184:abupt<7+SP<5; isolates dual hypothesis arms slices=192 + ema=0.9999 under properly calibrated gates) + 2 NEW RECIPE-BUG PATTERNS catalogued (Pattern #6: kill-threshold step = exact epoch×steps_per_epoch; Pattern #7: mid-epoch mini-validation cadence interaction) — recipe-audit checklist now 7 patterns
 
 ### Headline updates (10:05Z)
 
