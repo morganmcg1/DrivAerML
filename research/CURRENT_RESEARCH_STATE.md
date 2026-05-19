@@ -5,7 +5,23 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~00:45Z) — ASKELADD H50 COORDSLICE mid-EP2 stale_wip CLEARED with **L0-INVERSION CONFIRMATION** (inter_slice_cos_post_pe L0=0.453 LOWEST, L4=0.647 HIGHEST — exact INVERSE of H33's L0-dominance failure pattern; coordinate-conditioned anchors deliver positional disambiguation at L0 the layer that needs it most; EP1 val_abupt 28.90% normal cold-start, student's kill-threshold fix from step 10864 → 21729 validated since H33/H45 all land EP1 ~28-30%); per-block centroid spread healthy 0.076-0.122 spread along vehicle length 0.94-1.38 (slices anchoring on real 3D positions, NOT collapsing); all 8 ranks DDP healthy
+## Latest invocation actions (2026-05-19 ~01:05Z) — TANJIRO H36 ANCHOR-SLICE-QUERIES EP7 region stale_wip CLEARED with **DOUBLE-POSITIVE LIVE MERGE CANDIDATE** (val_VP 3.629% **−0.014pp BELOW val/test floor** — val-side floor crossing CONFIRMED in flight; val_abupt 6.245% **+0.119pp above merge gate 6.126%** — closest in-flight to merge gate, projected terminal 6.10-6.18% borderline; per-axis val_WSS AHEAD on ALL 3 axes vs baseline EP6 — τx −0.31pp, τy −0.56pp, τz −0.39pp); budget cutoff at ~06:10Z May 19 lands at ~EP9-EP10 (NOT EP13 — student's prior projection off); terminal SENPAI-RESULT expected ~07:30Z after test eval
+
+## Previous invocation actions (2026-05-19 ~00:45Z) — ASKELADD H50 COORDSLICE mid-EP2 stale_wip CLEARED with **L0-INVERSION CONFIRMATION** (inter_slice_cos_post_pe L0=0.453 LOWEST, L4=0.647 HIGHEST — exact INVERSE of H33's L0-dominance failure pattern; coordinate-conditioned anchors deliver positional disambiguation at L0 the layer that needs it most; EP1 val_abupt 28.90% normal cold-start, student's kill-threshold fix from step 10864 → 21729 validated since H33/H45 all land EP1 ~28-30%); per-block centroid spread healthy 0.076-0.122 spread along vehicle length 0.94-1.38 (slices anchoring on real 3D positions, NOT collapsing); all 8 ranks DDP healthy
+
+### Headline updates (01:05Z)
+
+1. **PR #1191 tanjiro H36 EP7 region — LIVE MERGE CANDIDATE.** Run `vu93lzgc` at step 67,932 (EP6→EP7 region, 13.16h runtime, heartbeat fresh). Two converging positive signals:
+   - **val_VP 3.629%** ← BELOW val-side floor 3.643% by 0.014pp (val floor crossing CONFIRMED in flight)
+   - **val_abupt 6.245%** ← +0.119pp above merge gate 6.126%, descending at −0.013 to −0.030 per validation
+   - **Projected terminal val_abupt: 6.10-6.18% at budget cutoff** (~EP9-EP10) — BORDERLINE merge candidate
+   - val_VP slope sequence: stall mid-EP6 then REACTIVATED 3.682 → 3.661 → 3.650 → 3.629 (cosine compression catching up)
+
+2. **Per-axis val_WSS AHEAD on ALL 3 axes vs baseline EP6.** τx −0.313pp, τy −0.564pp, τz −0.391pp. The encoder-side anchor-slice-query mechanism delivering BALANCED improvement across all wall_shear axes simultaneously. No band-break (mean stays at 1.534 in [1.44, 1.55]) but per-axis errors are smaller. Aggregate val_WSS 7.083% projects to 6.85-6.95% at terminal (better than baseline EP6 7.43%, slightly worse than baseline terminal 6.727%).
+
+3. **Budget reality check — EP9-EP10 cap, NOT EP13.** Run started 11:50:20Z May 18. 1100min cutoff at **06:10Z May 19** (~5h09min remaining). At observed 1.85 it/s, lands at step ~102,200 = mid-EP10 (EP10 ends 108,640). Student's earlier EP13 ETA ~01:00Z was off — actual pace ~30% slower than projected.
+
+4. **No other PR action needed this invocation.** All other fleet members continuing per 22:26Z + 00:15Z + 00:30Z + 00:45Z snapshots.
 
 ## Previous invocation actions (2026-05-19 ~00:30Z) — ALPHONSE H45 ANCHOR-CROSSCHAN-DEC EP3 stale_wip CLEARED with **GATE 1 / GATE 2 DECOUPLING FINDING** (out_weight_norm τz/τx ratio 9.75 ≫ 1.3 gate, STRONGEST weight-space asymmetry in Wave 31; but output-space wall_shear τz/τx 1.517 STAYING IN BAND — weight asymmetry and output band-break are INDEPENDENT mechanisms, val_abupt 6.96% on baseline-beat trajectory); EMERGING WAVE 31 PATTERN: mechanism class determines gradient routing, NOT loss target (joins H35 stacking + H44 cross-channel regularization)
 
@@ -93,7 +109,7 @@
 | **edward** | **#1196** | **H48 TAU-Y-EQUALIZE** | 🔥🔥🔥 mid-EP3 step 27.2k (84% through), **τz/τx mean 0.400 PERSISTING — EXTREME BAND-BREAK, 25× larger shift than H46** | 7.74% (mid-EP3) | 3rd mech class band-break: training-time loss weight, all 34/34 cars outside band, val_VP positive |
 | **frieren** | **#1190** | **H44 YAW-AUG** | 🔥 mid-EP6 step 58.2k, **val_VP 3.687% (0.044pp from floor)** | 6.422% (mid-EP6) | rotational-prior cross-channel regularization (τz ahead despite NOT rotated) |
 | nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
-| tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING, mech-positive τz/τx std 0.155-0.188 | 6.779% (EP3) | encoder-side variance-class signal |
+| **tanjiro** | **#1191** | **H36 ANCHOR-SLICE-QUERIES** | 🔥🔥 EP7 step 67.9k (13.16h runtime), **LIVE MERGE CANDIDATE: val_VP 3.629% BELOW floor, val_abupt 6.245% +0.12pp above gate, projected terminal 6.10-6.18%** | **6.245% (EP7)** | per-axis WSS AHEAD on ALL 3 axes; budget cutoff ~06:10Z lands at EP9-EP10 |
 | thorfinn | #1197 | H49 SDORTH-FULL | NEW — 13-ep H46 confirmation. Pickup pending | — | full-budget test of FIRST test τz/τx mean deflection 1.431 |
 | fern | #1199 | H51 NPCA-SSFL-SLICES192 | NEW — H35 closure follow-up: slices=128→192 + ema-decay=0.999→0.9999. Pickup pending | — | use the 2.3× variance room H35 created (n_out_band 17/34) |
 
@@ -107,19 +123,20 @@
 | 4 | H33 SLICEPE | encoder slice-PE additive | 3.522% | −0.121pp | closed |
 | 5 | **H35 NPCA+SSFL** | **stack: encoder + spectral-loss** | **3.585%** | **−0.058pp** | **closed 00:15Z** |
 | in flight | frieren H44 YAW-AUG | data augmentation rotation | 3.687% mid-EP6 | +0.044pp | continuing to EP10-EP11 by 05:40Z |
+| **in flight** | **tanjiro H36 ANCHOR-SLICE-QUERIES** | **anchor query modulation** | **3.629% EP7 (val side)** | **−0.014pp BELOW val floor** | **terminal at budget cutoff ~06:10Z** |
 
-3 of 5 closed crossings have val_abupt FAIL on merge dim — vol_p floor is easier than the abupt meta-aggregate. Frieren H44 candidate 6th crossing if val_VP slope holds through EP9-EP10 (vp curriculum bump to 65536 at EP9).
+3 of 5 closed crossings have val_abupt FAIL on merge dim — vol_p floor is easier than the abupt meta-aggregate. **TWO in-flight candidates simultaneously**: tanjiro H36 has CROSSED the val-side floor at 3.629% AND is closest to merge gate at 6.245%. Frieren H44 is 0.044pp above floor at mid-EP6, descending. Both terminals expected within 4-5h window.
 
 ### Imminent decisions (next 8h)
 
-1. **alphonse H45 EP6 gate ~04:00Z May 19** — hard kill at val_abupt > 6.5%; early-positive at val_abupt < 6.35% → CONFIRM run + paper-facing eval at terminal
-2. **edward H48 EP3-EP6** — τz/τx mean 0.40 persistence; if holds through EP13 + test → **major Wave 31 structural finding**
-3. **frieren H44 EP9-EP10** — val_VP 6th floor crossing watch (currently +0.044pp above)
-4. **nezuko H47 18h rerun pickup confirmation** — wait for student to relaunch
-5. **askeladd H50 pickup confirmation** — coordinate-conditioned slice IDs
-6. **thorfinn H49 pickup confirmation** — full-budget H46 confirmation
-7. **fern H51 pickup confirmation** — slices=192 + ema-decay=0.9999 (capacity expansion + EMA fix)
-8. **tanjiro H36 EP6+** — τz/τx std persistence + test_SP gate
+1. **tanjiro H36 terminal SENPAI-RESULT ~07:30Z May 19** — **LIVE MERGE CANDIDATE** val_abupt 6.245% +0.12pp above gate, val_VP 3.629% below val floor, descending; budget cutoff ~06:10Z + test eval
+2. **frieren H44 terminal SENPAI-RESULT ~05:40Z May 19** — 6th vol_p floor crossing watch, currently +0.044pp above
+3. **alphonse H45 EP6 gate ~04:00Z May 19** — hard kill at val_abupt > 6.5%; early-positive at val_abupt < 6.35% → CONFIRM run + paper-facing eval at terminal
+4. **edward H48 EP3-EP6** — τz/τx mean 0.40 persistence; if holds through EP13 + test → **major Wave 31 structural finding**
+5. **askeladd H50 EP3 gate ~04:30Z** — first val_abupt under merge-gate-trajectory check + L0 inter_slice_cos decrease
+6. **nezuko H47 18h rerun pickup confirmation** — wait for student to relaunch
+7. **thorfinn H49 pickup confirmation** — full-budget H46 confirmation
+8. **fern H51 pickup confirmation** — slices=192 + ema-decay=0.9999 (capacity expansion + EMA fix)
 
 ### Wave 31 priority ranking (post-00:15Z fleet sweep)
 
