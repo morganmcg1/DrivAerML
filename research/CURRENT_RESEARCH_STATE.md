@@ -5,7 +5,39 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~07:35Z) — FERN H51 NPCA+SSFL-SLICES192 EP2 MID-EP3-LEG CHECK-IN: **UNEXPECTED MECHANISM REGIME SHIFT** (variance-class hypothesis → mean-shift observation, EMA-shadow caveat at EP2)
+## Latest invocation actions (2026-05-19 ~07:55Z) — NEZUKO H47 V-DEPTH EP5 CHECK-IN: **MERGE CANDIDATE STRENGTHENING** (val_abupt 6.421% — only +0.295pp above merge gate 6.126%, monotonic descent EP3→EP4→EP5, EP6 fires ~08:15Z make-or-break early-merge signal)
+
+### Headline updates (07:55Z)
+
+1. **PR #1194 nezuko H47 V-DEPTH EP5 check-in posted** ([comment 4485662935](https://github.com/morganmcg1/DrivAerML/pull/1194#issuecomment-4485662935)). Run `dp7gbsjb` healthy at step 46,738 (33.1% through budget, 8.20h runtime, heartbeat fresh 07:51Z, nonfinite=0, mid-EP6 leg 2,159 steps before EP6 boundary 48,897). **MONOTONIC DESCENT EP3→EP4→EP5: val_abupt 6.784% → 6.511% → 6.421%**. EP5 sits inside EP6 gate (val_abupt<6.5%) by 0.079pp and **only +0.295pp above merge gate 6.126%**. Slope EP4→EP5 = −0.017 pp/1k steps; if continues through EP6 (5,435 steps), projected val_abupt 6.33% — already crossing EP6 gate cleanly. Terminal projection 5.9-6.1% range straddles merge gate.
+
+2. **MERGE CANDIDATE STRENGTHENING**: H47 is the **first Wave 31 PR with realistic early-merge crossover trajectory**. EP6 reading at ~08:15Z is the critical signal:
+   - If val_abupt ≤ 6.126% at EP6: H47 crosses merge gate before terminal — would justify early-confirmation discussion at EP9 (~12:00Z) or EP13 (~17:00Z)
+   - If 6.13-6.30%: standard 13-epoch trajectory, terminal determines merge eligibility
+   - Worst case: descent stalls and terminal lands ~6.2-6.4% — close but no merge
+
+3. **Secondary metrics also descending**:
+   - val_SP: 4.507% → 4.270% → 4.196% (only +0.62pp above test_SP floor 3.577%)
+   - val_vol_p: 4.035% → 3.976% → 3.955% (only +0.31pp above test_vol_p floor 3.643%) — the architectural target of volume-decoder-depth is tightening as predicted
+   - val_WSS aggregate: 7.658% → 7.346% → 7.234% (+0.51pp above test_WSS baseline 6.727%; τz still draining residual at 9.65%)
+
+4. **Wave 31 fleet status updated leaderboard at EP3-EP5 read window**:
+   - val_abupt (lowest = best): **H47 EP5 6.421% (LEADING by ~1.3pp)**; cohort H53 EP2 7.674%, H50 EP2 7.807%, H52 EP2 8.480%
+   - val_SP (lowest = best): H53 EP2 4.898%, **H47 EP5 4.196% (LEADING)**, H52 EP2 5.79%
+   - val_vol_p: **H47 EP5 3.955% (LEADING, closest to floor)**, H53 EP2 4.648%, H52 EP2 4.89%
+   - H47 is now sweep-leading on all 3 primary metrics at the EP5 read
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Active runs in priority by next check-in:
+   - **H52 frieren EP3** ~07:50Z (step 32,594) — mechanism ALIVE threshold (NOW firing — next check-in window)
+   - **H53 tanjiro EP3** ~08:20Z (step 32,594) — SP-gate strong PASS expected
+   - **H51 fern EP3** ~08:30Z (step 32,594) — FIRST informative read, mechanism class confirmation
+   - **H47 nezuko EP6** ~08:15Z (step 48,897) — **MERGE-GATE-CROSSOVER decision point**
+   - **H50 askeladd EP6** ~10:15Z — make-or-break
+   - **H48 edward terminal** ~12:45Z
+   - **H47 nezuko terminal** ~17:00Z
+   - **H53 tanjiro terminal** ~22:30Z
+
+## Previous invocation actions (2026-05-19 ~07:35Z) — FERN H51 NPCA+SSFL-SLICES192 EP2 MID-EP3-LEG CHECK-IN: **UNEXPECTED MECHANISM REGIME SHIFT** (variance-class hypothesis → mean-shift observation, EMA-shadow caveat at EP2)
 
 ### Headline updates (07:35Z)
 
