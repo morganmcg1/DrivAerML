@@ -1,11 +1,37 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~05:45 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~06:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~05:45Z) — NEZUKO H47 V-DEPTH EP3 GATE STRONG PASS CHECK-IN (val_abupt 6.784% LEADING WAVE 31 EP3 COHORT + MECHANISM GROWING 4-10× ABOVE FLOOR — POTENTIAL MERGE CANDIDATE)
+## Latest invocation actions (2026-05-19 ~06:15Z) — FRIEREN H52 NPCA × YAW-AUG EP2 CHECK-IN (val_abupt 8.48% lagging cohort BUT mechanism std +75% EP1→EP2 fleet-leading rate) + 4TH RECIPE-BUG ACKNOWLEDGED (underscore vs hyphen)
+
+### Headline updates (06:15Z)
+
+1. **PR #1200 frieren H52 NPCA × YAW-AUG STACK EP2 check-in posted.** Run `3u4i7oy6` healthy at step 27,249 (4.04h runtime, mid-EP3 leg, heartbeat fresh 06:11Z, nonfinite=0). **EP2 val_abupt 8.48% LAGGING fleet cohort by 0.67-0.87pp** (vs H47 EP2 7.615% + H50 EP2 7.807%) — consistent with H44 standalone YAW-AUG's cold-start tax pattern (~+0.5-0.8pp behind at EP2/EP3 then closes gap by terminal). val_SP 5.79% borderline at gate <5.5%. **MECHANISM SIGNAL FLEET-LEADING ACTIVATION RATE**: τz/τx std 0.0855 → **0.1498** (+75% in one epoch), approaching 0.15 ALIVE threshold; mean 1.4247 → 1.4447 (slight band-break growth); n_outside 12→13/34. If std crosses 0.15 by EP3, H52 enters variance-class ALIVE regime — earliest in Wave 31 fleet history (H35 needed EP6 for fleet-peak std 0.251, H46 SDORTH PathB never reached 0.15 at EP3).
+
+2. **4th recipe-bug acknowledgment.** Frieren silently caught and corrected another flag-format bug at H52 launch: I wrote `--use_local_frame_proj` (underscores) in the PR body but the actual argparse declares `--use-local-frame-proj` (hyphens). Argparse converts hyphens to underscores for the attribute name but requires the original hyphen form at command-line. Frieren also noted in the PR body that NPCA was on PR #1177 (closed-not-merged), not on tay as my body claimed — required cherry-pick from `thorfinn/h26-normal-projected-coord-aug`. Updated `feedback_audit_flags_in_recipe.md` memory with both patterns: underscore-vs-hyphen and stale-branch flag references.
+
+3. **Wave 31 recipe-bug pattern tally (this invocation cycle): 4 bugs caught by 3 students.**
+   - Nezuko H47: EP1 kill threshold `<9.5` was wrong (preempt-killed run, saved 18h slot)
+   - Fern H51 #1: EMA-aware threshold (δ^step composition not accounted for under ema=0.9999)
+   - Fern H51 #2: phantom `--use-spectral-loss` flag (doesn't exist in argparse)
+   - Frieren H52: `--use_local_frame_proj` (underscores) vs `--use-local-frame-proj` (hyphens) + stale "on tay" claim
+   - All 4 caught BEFORE wasting 18h GPU. Recipe-audit checklist now 4 patterns deep + 2 sub-patterns: flag existence, format conventions, branch presence, step-indexed thresholds, EMA-step δ^N composition, lr-warmup-aware EP1 thresholds.
+
+4. **Wave 31 mechanism stacking continues**: H52 NPCA × YAW combined stack is producing FASTEST variance-class activation in fleet history at EP2 (+75% std growth in one epoch). This is exactly the prediction from H35 stacking thesis: combine NPCA's variance-class encoder enrichment with YAW's training-time symmetry-break and the signals SHOULD compound. EP3 std read (~07:50Z) will confirm if mechanism has crossed ALIVE threshold.
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Active runs in priority by next check-in:
+   - **H51 fern EP3** ~08:30Z (step 32,594) — gate decision point under EMA-aware thresholds
+   - **H52 frieren EP3** ~07:50Z (step 32,594) — mechanism ALIVE threshold check
+   - **H50 askeladd EP6** ~10:15Z (step 65,228) — make-or-break gate at 6.5%
+   - **H47 nezuko EP6** ~10:30Z (step 65,228) — MERGE CANDIDATE trajectory
+   - **H48 edward terminal** ~12:45Z — likely structural finding (τz/τx mean 0.40 band-break)
+   - **H47 nezuko terminal** ~17:00Z
+   - **H49/H45/H52/H51/H53 terminals** 14:00-20:00Z range
+
+## Previous invocation actions (2026-05-19 ~05:45Z) — NEZUKO H47 V-DEPTH EP3 GATE STRONG PASS CHECK-IN (val_abupt 6.784% LEADING WAVE 31 EP3 COHORT + MECHANISM GROWING 4-10× ABOVE FLOOR — POTENTIAL MERGE CANDIDATE)
 
 ### Headline updates (05:45Z)
 
