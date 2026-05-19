@@ -1,3 +1,53 @@
+## 2026-05-19 18:00 — PR #1202: H53 CP-LOSS-WEIGHT — cp_loss_weight 1.0→2.0 surface-pressure channel up-weighting (tanjiro, 13-ep terminal) — **MECHANISM-POSITIVE NULL with val_VP FLOOR CROSS + first Wave 31 AB-UPT public-ref test_SP beat + LR-decay confound**
+
+- **Branch**: `tanjiro/h53-cp-loss-weight` (closed at 18:00Z)
+- **W&B run**: rank0 `u187bw3a` (group `wave31_h53_cp_loss_weight`, ~14h runtime, terminal step 70,652 ≈ 50% of nominal 141,232-step 13-ep plan)
+- **Hypothesis**: 2× cp_loss_weight should produce fleet-leading val_SP descent and reduce test_SP gap on AB-UPT competitive axis. Mechanism class: variance-class-cp-loss-weight (novel — first Wave 31 in this class).
+
+### Terminal verdict — NEAR-MISS on merge gate, val_VP FLOOR CROSS, first AB-UPT public-ref beat
+
+| Gate | Target | H53 EP13 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.181%** | ❌ NEAR-MISS | +0.055pp (7th NEAR-MISS in Wave 30/31) |
+| test_abupt | (baseline 5.844%) | **6.052%** | ❌ FAIL | +0.208pp |
+| test_SP (floor) | ≤3.577% | **3.793%** | ❌ FAIL | +0.216pp |
+| **val_VP (floor)** | **≤3.643%** | **3.610%** | **✅ PASS** | **−0.033pp** ⭐ first Wave 31 val_VP cross |
+| **test_VP (floor)** | **≤3.643%** | **3.665%** | **❌ CLOSE MISS** | **+0.022pp** (8th VP floor approach in Wave 30/31) |
+| test_WSS (goal) | <6.727% | **6.978%** | ❌ FAIL | +0.251pp |
+
+### NEW STRUCTURAL FINDING — first Wave 31 AB-UPT public-reference test_SP beat
+
+H53 **test_SP 3.793% beats AB-UPT public reference 3.82% by −0.027pp** — first in fleet. Adjacent metrics also beat AB-UPT public:
+- test_VP 3.665% beats AB-UPT 6.08% by −2.415pp
+- test_WSS aggregate 6.978% beats AB-UPT 7.29% by −0.312pp
+
+Structural signal: mechanism-class-cp-loss-weight is competitive with strongest public reference baseline on surface AND volume pressure axes, even though it does not cross internal merge gate.
+
+### Cosine-tail LR-decay confound (3rd Wave 31 case after H47, H52)
+
+| Window | Steps | val_abupt slope (pp/1k) | LR fraction peak |
+|---|---:|---:|---:|
+| EP4→EP4.5 | 5,435 | −0.015 | 90-80% |
+| EP4.5→EP4.8 | 3,625 | −0.023 | 80% |
+| EP4.8→EP5.5 | 7,250 | −0.008 | 70-50% |
+| EP5.5→EP5.8 | 2,720 | −0.005 | 50% |
+| EP5.8→EP6.5 | 8,006 | **−0.0016** | 30-15% |
+| EP6.5→terminal | 15,338 | **~0 (cosine tail flat)** | <5% |
+
+Same canonical Wave 31 LR-decay-confound pattern (H47 / H52). Mechanism activated correctly during high-LR productive zone, plateaued in cosine tail.
+
+### Wave 31 mechanism-class taxonomy update
+
+After H53 closure:
+- **variance-class-cp-loss-weight**: mechanism-positive null with val_VP floor cross + AB-UPT test_SP beat → **DEFERRED pending H62 LR-fix variant**
+- 11-class taxonomy now: 4 proven null (mean-shift / cross-channel-weight-space / variance-class-decoder-weight / coordinate-grounded-slice-PE) + variance-class-cp-loss-weight DEFERRED + 6 in flight
+
+### Disposition
+
+CLOSED as mechanism-positive null with notable per-axis floor cross + LR-decay confound. **TANJIRO REASSIGNED H62 CP-LOSS-WEIGHT-LR-EXTENDED (PR #1211)** — single-flag change vs H53 (`--lr-cosine-t-max 25` instead of 13) to isolate LR-decay-as-plateau-cause from mechanism-class-cp-loss-weight saturation. Parallel LR-fix test with H59 V-DEPTH-LR-EXTENDED (nezuko). If both H59 and H62 produce merge-relevant improvements, LR-decay confound becomes a confirmed systematic issue affecting all cosine-13ep recipes in Wave 31.
+
+---
+
 ## 2026-05-19 16:55 — PR #1200: H52 NPCA × YAW-AUG mechanism stacking — variance-break × symmetry-breaking (frieren, 13-ep terminal) — **MECHANISM-POSITIVE NULL with STRUCTURAL FINDING on orthogonal-mechanism non-compounding**
 
 - **Branch**: `frieren/h52-npca-yaw-stack` (closed at 16:55Z)

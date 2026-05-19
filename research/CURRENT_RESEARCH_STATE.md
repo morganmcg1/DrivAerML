@@ -1,11 +1,76 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~16:55 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~18:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~16:55Z) — PR #1200 H52 NPCA × YAW-AUG terminal CLOSED as **mechanism-positive null with STRUCTURAL FINDING on orthogonal-mechanism non-compounding** (val_abupt 6.479% +0.353pp above merge gate; test_VP 3.735% no floor crossing +0.092pp above floor; test_WSS 7.108% +0.381pp above baseline; std 0.2044 IDENTICAL to H44 YAW-AUG standalone — predicted compound 0.25-0.35 FALSIFIED — mechanism-class orthogonality does NOT guarantee additive compounding; val/test variance divergence reconfirmed (val 0.204 vs test 0.129); WSS_z hardest axis 9.03% test pattern); **FRIEREN REASSIGNED H61 SLICE-TEMP-CURRICULUM** (PR #1210, mechanism-class-novel attention-temperature scheduling τ_slice anneals 1.5→1.0 over EP1-6, no prior Wave 31 experiment in this class)
+## Latest invocation actions (2026-05-19 ~18:00Z) — PR #1202 H53 CP-LOSS-WEIGHT terminal CLOSED as **mechanism-positive null with val_VP FLOOR CROSS + first Wave 31 AB-UPT public-ref test_SP beat + LR-decay confound (3rd Wave 31 case)** (val_abupt 6.181% NEAR-MISS merge gate +0.055pp = closest of Wave 31; test_abupt 6.052% FAIL baseline +0.208pp; **val_VP 3.610% ✅ CROSSED FLOOR by −0.033pp** = first Wave 31 val_VP cross; **test_VP 3.665% close miss +0.022pp** = 8th VP floor approach in Wave 30/31; **test_SP 3.793% BEATS AB-UPT public ref 3.82% by −0.027pp** = first in Wave 31; test_WSS 6.978% beats AB-UPT 7.29 by −0.312pp; cosine-tail slope decay halving every epoch matching H47/H52 — terminal LR ~2-5% peak); **TANJIRO REASSIGNED H62 CP-LOSS-WEIGHT-LR-EXTENDED** (PR #1211, single-flag change `--lr-cosine-t-max 25` instead of 13, parallel LR-fix test with H59 V-DEPTH-LR-EXTENDED to isolate LR-decay-as-confound across two mechanism classes)
+
+### Headline updates (18:00Z)
+
+1. **PR #1202 tanjiro H53 CP-LOSS-WEIGHT CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1202#issuecomment-4490588872)). Terminal verdict:
+   - val_abupt **6.181%** NEAR-MISS merge gate by +0.055pp (closest of Wave 31)
+   - val_VP **3.610%** ✅ CROSSED FLOOR by −0.033pp (first Wave 31 val_VP cross)
+   - test_VP 3.665% close miss +0.022pp (8th VP floor approach in Wave 30/31)
+   - **test_SP 3.793% BEATS AB-UPT public reference 3.82% by −0.027pp** (first in Wave 31)
+   - test_WSS 6.978% beats AB-UPT public reference 7.29 by −0.312pp
+   - W&B run `u187bw3a` terminal step 70,652
+
+2. **NEW STRUCTURAL FINDING — first Wave 31 AB-UPT public-reference beat on test_SP**:
+   - test_SP 3.793% < AB-UPT public 3.82% (−0.027pp)
+   - test_VP 3.665% << AB-UPT public 6.08% (−2.415pp)
+   - test_WSS 6.978% < AB-UPT public 7.29% (−0.312pp)
+   - **Mechanism-class-cp-loss-weight is competitive with strongest public reference baseline on surface AND volume pressure axes**, even though it does not cross our internal merge gate (which is set at the H35 advisor frontier, not the public-paper bar).
+   - Implication for Wave 32 framing: even mechanism-positive NULLs against the internal merge gate may exceed the public-paper bar — emphasize this in any paper-facing comparison.
+
+3. **3rd Wave 31 LR-decay confound case** (H47 + H52 + H53):
+   - H53 slope: EP4→EP5 −0.023 pp/1k → EP5→EP5.8 −0.005 → EP5.8→EP6.5 **−0.0016** → EP6.5→terminal **~0 (flat)**
+   - Terminal LR ~2-5% peak — same cosine-tail pattern as H47 (2.5%) and H52 (2-3%)
+   - H53 cosine cycle completed within actual ~70k-step training window (nominal was 141k)
+   - **Hypothesis: LR-decay is the actual ceiling on Wave 31 cosine-13ep recipes, NOT mechanism saturation.** H59 (V-DEPTH-LR-EXTENDED) and now H62 (CP-LOSS-WEIGHT-LR-EXTENDED) test this directly with `--lr-cosine-t-max 25` to keep terminal LR at ~70-80% peak.
+
+4. **PR #1211 tanjiro H62 CP-LOSS-WEIGHT-LR-EXTENDED assigned** ([PR #1211](https://github.com/morganmcg1/DrivAerML/pull/1211), branch `tanjiro/h62-cp-loss-weight-lr-extended` from `tay`). Single-flag change vs H53:
+   - `--lr-cosine-t-max 25` (was 13). Everything else identical to H53.
+   - Stretches cosine cycle so within actual ~70k-step training window only ~28% of half-cycle completes; terminal LR ~70-80% peak (vs H53's 2-5%)
+   - Diagnostic adds: `train/lr_fraction_of_peak` + `train/cosine_progress` (matching H59 instrumentation)
+   - Kill thresholds: NO EP1 gate (lr-warmup-1), EP3 32,592:val_abupt<7.5%+val_SP<5.5%, EP6 65,184:val_abupt<6.5%
+   - Three falsifiable outcomes:
+     - **A. MERGE WIN + FLOOR CROSS**: val_abupt<6.126% AND test_VP<3.643% AND test_SP<3.577% — LR-decay was the limit, CP-LOSS-WEIGHT mechanism merges
+     - **B. PARTIAL**: val_abupt drops below H53's 6.181% by ≥0.10pp but no merge — LR matters but mechanism still has limits
+     - **C. NULL**: val_abupt within ±0.05pp of H53's 6.181% — LR-decay NOT the limit; mechanism-class-cp-loss-weight saturates regardless
+
+5. **Wave 31 mechanism-class taxonomy unchanged at 11 classes** (no new class from H53 closure since it was already class #3):
+   1. variance-class-encoder-input — MERGED (H26/H31/H35)
+   2. variance-class-decoder-sublayer — null+LR-confound (H47), in flight (H59 LR-fix variant)
+   3. **variance-class-cp-loss-weight — mech-positive null with LR-confound (H53), DEFERRED pending H62 LR-fix variant**
+   4. shared-capacity-surface — in flight (H54 v2)
+   5. mean-shift-class — null (H48)
+   6. cross-channel-weight-space — null (H45)
+   7. variance-class-decoder-weight — null (H46/H49)
+   8. coordinate-grounded-slice-PE — null+VP-cross (H33/H50), in flight (H58)
+   9. frequency-domain-capacity / FDCE — in flight (H57)
+   10. ema-aware-variance-stack — in flight (H60)
+   11. attention-temperature-curriculum — in flight (H61)
+   - Plus derived class: mechanism-stack-non-compounding (H52 finding)
+   - **Derived: LR-decay-confound (3 cases: H47 / H52 / H53)** — being directly tested by H59 + H62
+
+6. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H53 closure + H62 assignment):
+   - **H54 v2 alphonse (PR #1203)** — ongoing
+   - **H55 v2 edward (PR #1204)** — mid-EP4 healthy, τz curriculum firing on schedule (value 3.155 at EP3.7), val_WSS_z 9.806% ahead of H48 baseline by −0.7pp, projected merge-borderline terminal val_abupt 6.10-6.20%
+   - **H57 thorfinn (PR #1206)** — FDCE in flight
+   - **H58 askeladd (PR #1207)** — COORDSLICE-NO-STOPGRAD in flight
+   - **H59 nezuko (PR #1208)** — V-DEPTH-LR-EXTENDED (parallel LR-fix test with H62)
+   - **H60 fern (PR #1209)** — H56-RELAUNCH-DROP-EP3 (strongest mech signal)
+   - **H61 frieren (PR #1210)** — SLICE-TEMP-CURRICULUM
+   - **H62 tanjiro (PR #1211, this entry)** — CP-LOSS-WEIGHT-LR-EXTENDED, pre-launch awaiting student pickup
+
+7. **Strategic notes (post-H53 closure)**:
+   - **PARALLEL LR-FIX EXPERIMENT — H59 + H62** is the highest-value Wave 31 design test currently in flight. If both produce merge-relevant improvements (val_abupt < 6.126%), we confirm **LR-decay confound as the actual ceiling on Wave 31 cosine-13ep recipes**, not mechanism saturation. This re-opens 3 deferred mechanisms (V-DEPTH, CP-LOSS, potentially others) for productive re-testing.
+   - **5 active merge candidates** in Wave 31: H54 v2, H55 v2 (merge-borderline projected), H57, H59 (LR-fix V-DEPTH), H60 (strongest mech), plus H62 LR-fix variant
+   - **Wave 32 framing — public-paper bar exceeded**: H53 demonstrates that even mech-positive nulls vs internal merge gate can exceed AB-UPT public-paper reference on 3 axes (SP, VP, WSS aggregate). This is a publishable result direction; we should keep emphasizing the public-bar deltas in Wave 32 PR writeups.
+   - **WSS_z attack** remains highest-priority Wave 32 design constraint
+   - **val/test variance divergence** continues to suggest val-side metrics may not transfer to test — confirmed again on H53 (val_VP cross, test_VP close miss)
 
 ### Headline updates (16:55Z)
 
