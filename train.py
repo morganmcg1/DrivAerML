@@ -103,6 +103,8 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_surf_deep: bool = False
+    surf_deep_num_blocks: int = 2
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +231,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_surf_deep": (
+            "H54 SURFACE-DEEP (PR #1203): insert dedicated surface-only "
+            "transformer blocks between the shared backbone (and any "
+            "surf->vol cross-attention) and the final surface output head. "
+            "Each block's TransolverAttention.proj and UpActDownMlp.fc2 are "
+            "zero-initialised so the inserted stack is identity at step 0 "
+            "(bit-exact baseline recovery). Mirror of H47 V-DEPTH on the "
+            "surface decoder side. Block count controlled by "
+            "--surf-deep-num-blocks."
+        ),
+        "surf_deep_num_blocks": (
+            "Number of dedicated surface-only TransformerBlocks added when "
+            "--use-surf-deep is enabled. Default 2."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +292,35 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_surf_deep_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-block residual contribution diagnostic for H54 SURFACE-DEEP (PR #1203).
+
+    Mirrors the H47 V-DEPTH (PR #1194) diagnostic on the surface decoder side.
+    For each surface-only deep block, log the magnitude of the two residual
+    output projections that were zero-initialised at construction:
+      * ``attention.proj.project`` -- the slice-attention output back to the
+        residual stream.
+      * ``mlp.fc2`` -- the FFN down-projection back to the residual stream.
+
+    Both grow from 0 (init) as the block starts contributing. EP3 KILL gate
+    requires growing surf_deep block norms (mechanism alive); flat = mechanism
+    dead.
+    """
+    metrics: dict[str, float] = {}
+    blocks = getattr(model, "surf_deep_blocks", None)
+    if blocks is None:
+        return metrics
+    for i, block in enumerate(blocks):
+        attn_w = block.attention.proj.project.weight.detach().float()
+        ffn_w = block.mlp.fc2.weight.detach().float()
+        prefix = f"diag/surf_deep_block{i}"
+        metrics[f"{prefix}/attn_proj_max_abs"] = float(attn_w.abs().max().item())
+        metrics[f"{prefix}/attn_proj_global_norm"] = float(attn_w.norm().item())
+        metrics[f"{prefix}/ffn_fc2_max_abs"] = float(ffn_w.abs().max().item())
+        metrics[f"{prefix}/ffn_fc2_global_norm"] = float(ffn_w.norm().item())
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +353,8 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_surf_deep=config.use_surf_deep,
+        surf_deep_num_blocks=config.surf_deep_num_blocks,
     )
 
 
@@ -773,7 +820,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_surf_deep:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1262,6 +1309,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_surf_deep_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
