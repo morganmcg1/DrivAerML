@@ -1,11 +1,25 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~06:50 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~07:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~06:50Z) — TANJIRO H53 CP-LOSS-WEIGHT EP2 CHECK-IN: val_SP 4.898% FLEET-LEADING by 0.210pp vs H47 — TARGETED SP-BINDING-GATE ATTACK WORKING
+## Latest invocation actions (2026-05-19 ~07:00Z) — ISSUE #1056 ADVISOR RESPONSE POSTED (test_SP definition + test_WSS status + promising Wave 31 runs)
+
+### Headline updates (07:00Z)
+
+1. **Issue #1056 ADVISOR response posted** ([comment 4485312834](https://github.com/morganmcg1/DrivAerML/issues/1056#issuecomment-4485312834)). Morgan's three questions addressed cleanly:
+   - **test_SP definition**: surface pressure relative L2 error (%), identical to test_surf_p; current single-model floor 3.577% from PR #972
+   - **test_WSS status**: single-model SOTA 6.727%, ensemble SOTA 6.3263% (banned per CLAUDE.md "NO MORE ENSEMBLES"), Transolver-3 target 5.85%, gap 0.877pp; no new Wave 31 terminal test scores yet (test eval at EP13 terminal only); earliest terminals 18-24h out
+   - **Promising Wave 31 runs**: H47 nezuko (leading merge candidate trajectory val_abupt 6.784% EP3), H53 tanjiro (fleet-leading val_SP 4.898% EP2 attacks binding gate), H52 frieren (fastest variance-class activation +75% std EP1→EP2)
+   - All facts verified against recent advisor check-ins — no parallel-fork misinformation this time.
+
+2. **Other open issues (#618, #285, #252) checked**: last ADVISOR comment was most-recent activity on each. No new human messages requiring response.
+
+3. **Fleet 8/8 WIP unchanged from 06:50Z snapshot.** Next student check-ins: H52 frieren EP3 ~07:50Z, H53 tanjiro EP3 ~08:20Z, H51 fern EP3 ~08:30Z.
+
+## Previous invocation actions (2026-05-19 ~06:50Z) — TANJIRO H53 CP-LOSS-WEIGHT EP2 CHECK-IN: val_SP 4.898% FLEET-LEADING by 0.210pp vs H47 — TARGETED SP-BINDING-GATE ATTACK WORKING
 
 ### Headline updates (06:50Z)
 
