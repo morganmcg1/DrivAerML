@@ -1,11 +1,37 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~06:15 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~06:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~06:15Z) — FRIEREN H52 NPCA × YAW-AUG EP2 CHECK-IN (val_abupt 8.48% lagging cohort BUT mechanism std +75% EP1→EP2 fleet-leading rate) + 4TH RECIPE-BUG ACKNOWLEDGED (underscore vs hyphen)
+## Latest invocation actions (2026-05-19 ~06:50Z) — TANJIRO H53 CP-LOSS-WEIGHT EP2 CHECK-IN: val_SP 4.898% FLEET-LEADING by 0.210pp vs H47 — TARGETED SP-BINDING-GATE ATTACK WORKING
+
+### Headline updates (06:50Z)
+
+1. **PR #1202 tanjiro H53 CP-LOSS-WEIGHT EP2 check-in posted.** Run `u187bw3a` healthy at step 22,381 (3.32h runtime, EP2 cleared into EP3 leg, heartbeat fresh 06:48Z, nonfinite=0, throughput accelerated 1.63 → 1.87 it/s). **EP2 val_SP 4.898% is FLEET-LEADING by 0.210pp vs H47 (5.108%) and by 0.892pp vs H52 (5.79%)** — the targeted attack on the test_SP binding gate (0/7 vol_p crossings in Wave 31 fleet have ever crossed test_SP floor 3.577%) is producing the expected accelerated surface-pressure descent. EP2 val_abupt 7.674% is competitive mid-pack (H47 7.615%, H50 7.807%, H52 8.480%). Both EP3 kill gates already inside at EP2: val_abupt 7.674<9.5 AND val_SP 4.898<5.5. `loss/cp_loss_weight=2.0` and `train/cp_loss_weight=2.0` verified in W&B summary. EP3 gate fires ~08:20Z May 19.
+
+2. **H53 hypothesis structurally validated**: doubling cp-channel gradient budget (cp loss weight 1.0→2.0, channels [cp=2, τx=1, τy=1.5, τz=2]) is producing precisely the accelerated surface-pressure descent the hypothesis predicted. val_SP slope EP1→EP2: −1.769 pp/1k steps. If margin holds or widens through EP3-EP6, H53 has a real shot at the test_SP binding gate (3.577% floor).
+
+3. **Wave 31 mechanism orthogonality**: H53 (cp-channel loss-weight redirection) and H47 (volume-decoder depth) are mechanistically orthogonal — H53 attacks the SP binding gate while H47 attacks the val_abupt merge gate. Both are fleet-leading on their respective primary metrics at EP2-EP3. If both merge cleanly, **the two could stack additively in a Wave 32 follow-up** (H53's cp-channel mechanism + H47's vol-deep architecture).
+
+4. **Updated EP2 fleet leaderboard** (Wave 31 active runs that reached EP2):
+   - **val_abupt**: H47 7.615% > H53 7.674% > H50 7.807% > H52 8.480%
+   - **val_SP**: H53 4.898% > H47 5.108% > H52 5.79% (THE binding gate)
+   - **val_vol_p**: H47 4.035% (EP3 read) > H53 4.648% (EP2) > H52 4.89% (EP2)
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Active runs in priority by next check-in:
+   - **H52 frieren EP3** ~07:50Z (step 32,594) — mechanism std ALIVE threshold check
+   - **H53 tanjiro EP3** ~08:20Z (step 32,594) — SP gate watch
+   - **H51 fern EP3** ~08:30Z (step 32,594) — gate decision under EMA-aware thresholds
+   - **H50 askeladd EP6** ~10:15Z (step 65,228) — MAKE-OR-BREAK at 6.5%
+   - **H47 nezuko EP6** ~10:30Z (step 65,228) — MERGE CANDIDATE trajectory
+   - **H53 tanjiro EP6** ~12:30Z — SP descent confirmation
+   - **H48 edward terminal** ~12:45Z — structural finding writeup
+   - **H47 nezuko terminal** ~17:00Z
+   - **H53 tanjiro terminal** ~22:30Z
+
+## Previous invocation actions (2026-05-19 ~06:15Z) — FRIEREN H52 NPCA × YAW-AUG EP2 CHECK-IN (val_abupt 8.48% lagging cohort BUT mechanism std +75% EP1→EP2 fleet-leading rate) + 4TH RECIPE-BUG ACKNOWLEDGED (underscore vs hyphen)
 
 ### Headline updates (06:15Z)
 
