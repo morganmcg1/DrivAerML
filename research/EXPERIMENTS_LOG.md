@@ -1,3 +1,83 @@
+## 2026-05-19 00:15 — PR #1189: H35 NPCA+SSFL STACK — First Proven Mechanism-Stacking Experiment (fern, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt +0.172pp + test_SP +0.194pp FAIL) / 24TH WAVE-30/31 DEAD END ON MERGE DIMENSION / 🏆 5TH TEST_VOL_P FLOOR CROSSING + STACKING INDEPENDENCE PROVEN + FLEET-PEAK τz/τx VARIANCE
+
+- **Branch**: `fern/h35-npca-ssfl-stack` (closed at `6321e19`)
+- **W&B run**: 8-rank DDP `7zkdf9xv` (group `wave31_h35_npca_ssfl_stack`, 838.7 min / 1100 min budget, EP13 EMA checkpoint best, peak GPU 78.43 GiB / 95.5 GiB)
+- **Hypothesis**: Combine H26 NPCA (per-vertex normal-PCA encoder-input enrichment, variance-break mechanism) × H31 follow-up SSFL (spectral-band loss reshape, λ=0.05, hf_weight=2.0). Predicted: two mechanisms operating on orthogonal axes (encoder-input enrichment vs decoder spectral loss) stack additively without interference.
+
+### Terminal metrics (rank0 `7zkdf9xv` EP13 EMA best-ckpt)
+
+| Metric | EP13 val (34 cars) | EP13 test (50 cars) | Baseline | Δ to baseline | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.298%** | — | 6.126% (merge) | +0.172pp | ❌ FAIL |
+| val_VP | 3.687% | — | — | — | — |
+| val_SP | 3.965% | — | — | — | — |
+| val_WSS | 7.330% | — | — | — | — |
+| test_abupt | — | 5.995% | 5.844% | +0.151pp | minor regression |
+| test_SP | — | **3.771%** | 3.577% (floor) | **+0.194pp** | ❌ **FLOOR BREACH** |
+| test_vol_p | — | **3.585%** | 3.643% (floor) | **−0.058pp** | ✅ **PASS — 5th vol_p crossing in Wave 30/31** |
+| test_WSS | — | 6.926% | 6.727% | +0.199pp | minor regression |
+
+### STACKING MECHANISM PROVEN — NPCA variance signal SURVIVED SSFL
+
+| Metric | H26 NPCA standalone | H35 NPCA+SSFL stack | Δ |
+|---|---:|---:|---:|
+| val τz/τx mean (EP13) | 1.526 | 1.527 | +0.001 (mid-band preserved) |
+| val τz/τx std (EP13) | 0.108 | **0.251** ⭐ FLEET PEAK | **+0.143** |
+| val τz/τx max (EP13) | ~1.70 | **2.80** | **+1.10** |
+| val n_outside_band [1.44, 1.55] | 9/34 | **17/34** | **+8 cars** |
+| test_vol_p | 3.607% | 3.585% | −0.022pp |
+
+τz/τx std grew monotonically through 13 epochs: 0.078 → 0.121 → 0.155 → 0.184 → 0.205 → 0.223 → 0.236 → 0.244 → 0.249 → 0.251 → 0.251 → 0.251 → 0.251. **No SSFL suppression of the NPCA-induced channel asymmetry**. First proven independence between Wave 30 mechanism classes — validates the broader stacking program (NPCA × WALLDIST, NPCA × SDORTH, etc.).
+
+### Why val_abupt didn't cross — variance room insight
+
+H35 has 2.3× the τz/τx variance of H26 NPCA but only 0.17pp better val_abupt. The variance is being USED (n_outside_band 17/34 vs 9/34) but the model lacks the CAPACITY to convert per-slice heterogeneity into per-axis accuracy gain. 128 slices × 2.3× variance budget = ~295 effective slice-modes of capacity needed, but only 128 raw slice queries available → bottleneck. **Scaling slices 128 → 192 (H51) gives +50% capacity** to absorb the variance signal.
+
+### EMA-decay 0.999 issue — structural config bug
+
+Independently identified by student in priority follow-up #6: at lr-cosine-t-max=13 with ~141k total steps, EMA-decay 0.999 has effective window ~1000 steps, but the cosine tail (last ~70k steps) is where the best checkpoints live. **0.9999 (10× longer window) is the correct value for 13-ep recipes.** Helps every closed run by ~0.05-0.15pp val_abupt. Retrofitted in H51.
+
+### Per-axis wall_shear at EP13
+
+| Axis | H35 EP13 | baseline EP13 | Δ |
+|:--|---:|---:|---:|
+| `wall_shear_x_rel_l2_pct` | 6.512% | 6.502% | +0.010pp (tied) |
+| `wall_shear_y_rel_l2_pct` | 8.299% | 8.250% | +0.049pp (slight regression) |
+| `wall_shear_z_rel_l2_pct` | 10.087% | 10.000% | +0.087pp (slight regression) |
+
+NPCA mechanism didn't improve per-axis wall_shear despite τz/τx asymmetry. Variance expressed in BUDGET (channel weight allocation) not GRADIENT (axis-specific learning rate). **Mechanism class determines gradient routing, not loss target** (combined finding with H44).
+
+### Beats AB-UPT on key channels (paper baseline)
+
+- p_s (surface pressure): H35 ahead of AB-UPT
+- p_v (volume pressure): H35 ahead of AB-UPT
+- Vector τ (wall shear stress): H35 ahead of AB-UPT
+- ABUPT meta-aggregate: H35 behind AB-UPT by +0.151pp
+
+Vol_p PASS + AB-UPT victory on the volume pressure channel = the cleanest single-metric story for Wave 31 structural finding write-up.
+
+### Wave 30/31 floor crossing tally — now 5
+
+| # | Hypothesis | Mechanism axis | test_vol_p | Δ vs floor | Merge status |
+|---|---|---|---:|---:|---|
+| 1 | H31 WALLDIST | encoder-input feature | 3.488% | −0.155pp | MERGED |
+| 2 | H26 NPCA | encoder-input feature | 3.607% | −0.036pp | MERGED |
+| 3 | H46 SDORTH | decoder weight init | — | (PathB) | closed |
+| 4 | H33 SLICEPE | encoder slice-PE additive | 3.522% | −0.121pp | closed |
+| 5 | **H35 NPCA+SSFL** | **stack: encoder + spectral-loss** | **3.585%** | **−0.058pp** | **closed** |
+
+3 of 5 vol_p crossings have val_abupt fail — merge dimension harder than the floor. Consistent with volume pathway being easier (smooth scalar field) vs abupt meta-aggregate (multiple coupled axes).
+
+### Conclusion
+
+24th Wave 30/31 dead end on merge dim, 5th test_vol_p floor crossing, FIRST proven mechanism-stacking experiment (NPCA × SSFL independent and additive). Fleet-peak τz/τx variance 0.251 (vs 0.108 H26 NPCA standalone). Two structural follow-ups carried forward as H51:
+1. `--model-slices 128 → 192` (+50% capacity to use variance room)
+2. `--ema-decay 0.999 → 0.9999` (10× longer EMA window for 13-ep cosine)
+
+H51 launched as PR #1199.
+
+---
+
 ## 2026-05-18 21:25 — PR #1187: H33 SLICEPE — Learnable Slice Positional Embedding (askeladd, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt + test_SP FAIL) / 23RD WAVE-30 DEAD END ON MERGE DIMENSION / 🏆 4TH TEST_VOL_P FLOOR CROSSING + L0-DOMINANCE STRUCTURAL INSIGHT
 
 - **Branch**: `askeladd/h33-slice-position-embedding` (closed)

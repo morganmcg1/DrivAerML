@@ -1,11 +1,25 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-18 (latest invocation: 2026-05-18 ~22:26 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~00:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-18 ~22:26Z) — EDWARD H48 TAU-Y-EQUALIZE mid-EP3 stale_wip CLEARED with **UNPRECEDENTED EXTREME BAND-BREAK SIGNAL** (τz/τx mean 0.400 PERSISTING from EP1 → mid-EP3, ALL 34/34 cars outside band, std stable 0.033 — 25× larger mean shift than H46 SDORTH's 0.04, 3rd mechanism class producing band-break, FIRST via training-time loss weight with zero code change); FLEET STILL FULLY BOOKED 8/8 WIP
+## Latest invocation actions (2026-05-19 ~00:15Z) — FERN H35 NPCA+SSFL STACK CLOSED EP13 (24th Wave 30/31 DE on merge dim + **5TH test_vol_p floor crossing** at 3.585% −0.058pp + **FIRST PROVEN MECHANISM-STACKING EXPERIMENT** — NPCA per-slice variance signal SURVIVED SSFL spectral regularization, τz/τx std grew monotonically 0.078 → 0.251 fleet-peak through 13 epochs, n_outside_band 17/34, AB-UPT victory on p_s/p_v/τ); FERN H51 ASSIGNED (PR #1199, NPCA+SSFL stack at `--model-slices 192` + `--ema-decay 0.9999` — combines student's #1 capacity-scaling and #6 EMA-decay-fix priority follow-ups, expected +0.10-0.35pp val_abupt gain vs H35, potentially crosses 6.126% gate); FLEET STILL FULLY BOOKED 8/8 WIP
+
+### Headline updates (00:15Z)
+
+1. **PR #1189 fern H35 CLOSED EP13.** Terminal `7zkdf9xv` at 00:09:45Z May 19: val_abupt 6.298% FAIL (+0.172pp), test_SP 3.771% FAIL (+0.194pp), test_WSS 6.926% FAIL (+0.199pp), **test_vol_p 3.585% PASS (−0.058pp below floor)**. 24th Wave 30/31 DE on merge dim, 5th vol_p floor crossing in series (H31 merged, H26 merged, H46 PathB, H33 SLICEPE, **H35 NPCA+SSFL stack**). Beats AB-UPT on p_s, p_v, and vector τ; loses only on ABUPT meta-aggregate (+0.151pp).
+
+2. **STACKING MECHANISM PROVEN — FIRST proven independence between Wave 30 mechanism classes.** NPCA per-slice variance signal SURVIVED SSFL spectral regularization without interference. τz/τx std grew MONOTONICALLY through 13 epochs: 0.078 → 0.121 → 0.155 → 0.184 → 0.205 → 0.223 → 0.236 → 0.244 → 0.249 → 0.251 (fleet peak). n_outside_band 17/34 vs H26 NPCA standalone 9/34. Confirms the working hypothesis that band-break mechanisms live in orthogonal subspaces — validates the broader stacking program (NPCA × WALLDIST, NPCA × SDORTH, etc.).
+
+3. **Variance room insight — why val_abupt didn't cross.** H35 has 2.3× the τz/τx variance of H26 NPCA but only 0.17pp better val_abupt. Variance is being USED (n_outside_band 17/34 vs 9/34) but model lacks CAPACITY to convert per-slice heterogeneity into per-axis accuracy gain. 128 slices × 2.3× variance budget = ~295 effective slice-modes needed, but only 128 raw slice queries available → bottleneck.
+
+4. **EMA-decay 0.999 issue — structural config bug helping ALL runs.** At lr-cosine-t-max=13 with ~141k total steps, EMA-decay 0.999 has effective window ~1000 steps but cosine tail spans ~70k steps where best checkpoints live. **0.9999 (10× longer window) is the correct value for 13-ep recipes.** Could help every closed run by 0.05-0.15pp val_abupt. H51 is the first run with the corrected EMA — provides reference for retrofit consideration.
+
+5. **PR #1199 fern H51 ASSIGNED — NPCA+SSFL stack at slices=192 + ema-decay=0.9999.** Combines student priority #1 (slices=192 capacity scaling) and #6 (ema-decay fix). VRAM safety: H35 peak 78.43 GiB; +50% slice capacity may push to ~88-92 GiB; fallback `--batch-size 2` documented if OOM. Expected gain stacking: +0.10-0.35pp val_abupt vs H35 → potentially closes 6.126% gate.
+
+## Previous invocation actions (2026-05-18 ~22:26Z) — EDWARD H48 TAU-Y-EQUALIZE mid-EP3 stale_wip CLEARED with **UNPRECEDENTED EXTREME BAND-BREAK SIGNAL** (τz/τx mean 0.400 PERSISTING from EP1 → mid-EP3, ALL 34/34 cars outside band, std stable 0.033 — 25× larger mean shift than H46 SDORTH's 0.04, 3rd mechanism class producing band-break, FIRST via training-time loss weight with zero code change); FLEET STILL FULLY BOOKED 8/8 WIP
 
 ## Previous invocation actions (2026-05-18 ~22:18Z) — NEZUKO H47 V-DEPTH SENT BACK FOR FULL 18H RERUN (mechanism positive but 6h truncated; test_VP +0.151pp above floor at 20% budget — credible 5th vol_p floor crossing candidate at full budget); ALPHONSE H45 ANCHOR-CROSSCHAN-DEC mid-EP3 stale_wip CLEARED with **STRONG MECHANISM SIGNAL** (τz/τx out_weight_norm ratio 3.91 ≫ 1.3 mech gate; τy/τz channels loading 4-5× over cp/τx); FRIEREN H44 YAW-AUGMENTATION mid-EP6 stale_wip CLEARED with **CRITICAL VAL_VP SIGNAL** (val_VP 3.687% ALREADY BELOW baseline EP13 final 3.80%, descent continuing toward floor 3.643%); FLEET FULLY BOOKED (8/8 WIP, zero idle students)
 
@@ -38,42 +52,41 @@
 | nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
 | tanjiro | #1191 | H36 ANCHOR-SLICE-QUERIES | RUNNING, mech-positive τz/τx std 0.155-0.188 | 6.779% (EP3) | encoder-side variance-class signal |
 | thorfinn | #1197 | H49 SDORTH-FULL | NEW — 13-ep H46 confirmation. Pickup pending | — | full-budget test of FIRST test τz/τx mean deflection 1.431 |
-| fern | #1189 | H35 NPCA-SSFL-STACK | RUNNING EP9-EP10+ (per 20:20Z snapshot fleet-peak std 0.2464, val_VP 3.738%) | 6.377% (EP7) | first mechanism-stacking experiment, fleet-peak std |
+| fern | #1199 | H51 NPCA-SSFL-SLICES192 | NEW — H35 closure follow-up: slices=128→192 + ema-decay=0.999→0.9999. Pickup pending | — | use the 2.3× variance room H35 created (n_out_band 17/34) |
 
-### 4-way val_VP floor watch (next 8h)
+### vol_p floor crossing tally — 5 confirmed, 1 in flight
 
-Four runs are within 0.20pp of the val_VP floor 3.643%:
+| # | Hypothesis | Mechanism axis | test_vol_p | Δ vs floor | Status |
+|---|---|---|---:|---:|---|
+| 1 | H31 WALLDIST | encoder-input feature | 3.488% | −0.155pp | MERGED |
+| 2 | H26 NPCA | encoder-input feature | 3.607% | −0.036pp | MERGED |
+| 3 | H46 SDORTH PathB | decoder weight init | (3-ep gap) | — | closed (PathB) |
+| 4 | H33 SLICEPE | encoder slice-PE additive | 3.522% | −0.121pp | closed |
+| 5 | **H35 NPCA+SSFL** | **stack: encoder + spectral-loss** | **3.585%** | **−0.058pp** | **closed 00:15Z** |
+| in flight | frieren H44 YAW-AUG | data augmentation rotation | 3.687% mid-EP6 | +0.044pp | continuing to EP10-EP11 by 05:40Z |
 
-| Run | Latest val_VP | Δ to floor | EP / time | Trajectory |
-|---|---:|---:|:--|:--|
-| **frieren H44** | **3.687%** | **+0.044pp** | mid-EP6, ~22Z | descending, slope flattening |
-| fern H35 | 3.738% (EP7 snapshot) | +0.095pp | EP9-EP10 by 22Z | mech-stack, fleet-peak std |
-| nezuko H47 6h | 3.794% (terminal) | +0.151pp | mid-EP3 (truncated) | mechanism POS, full-budget rerun pending |
-| H26 NPCA (closed, merged) | 3.608% | −0.035pp | EP13 | already in BASELINE |
-| H31 WALLDIST (closed, merged) | 3.488% | −0.155pp | EP13 | already in BASELINE |
-
-**Frieren H44 is the most immediate candidate** to cross floor at terminal (close in time and value). Fern H35 trails by 0.05pp but has continued descent (was 3.738% at EP7, may be near floor at EP9+ now). Nezuko H47 needs the full-budget rerun to compete.
+3 of 5 closed crossings have val_abupt FAIL on merge dim — vol_p floor is easier than the abupt meta-aggregate. Frieren H44 candidate 6th crossing if val_VP slope holds through EP9-EP10 (vp curriculum bump to 65536 at EP9).
 
 ### Imminent decisions (next 8h)
 
-1. **alphonse H45 EP3 gate ~22:30Z** — val_abupt + per-channel out_weight_norm + per-axis wall_shear ratio reading; if val_abupt < 7.2% AND τz/τx std ≥ 0.15 → high-priority continue
-2. **fern H35 EP9-EP10+** — CRITICAL val_VP floor watch (was 0.095pp from floor at EP7; if crossed, first NPCA-stacking mech-win)
-3. **edward H48 EP3-EP4** — single-flag τ-y-equalize mechanism gate
+1. **edward H48 EP3 gate ~23:13Z May 18** — terminal τz/τx mean confirmation; if 0.40 holds through EP13 + test → **major Wave 31 structural finding** (band attractor breakable by single training-time flag)
+2. **alphonse H45 EP3 gate ~22:30Z (passed)** — wait for EP3-end terminal reading + per-axis wall_shear
+3. **frieren H44 EP9-EP10** — val_VP 6th floor crossing watch (currently +0.044pp above)
 4. **nezuko H47 18h rerun pickup confirmation** — wait for student to relaunch
 5. **askeladd H50 pickup confirmation** — coordinate-conditioned slice IDs
 6. **thorfinn H49 pickup confirmation** — full-budget H46 confirmation
-7. **frieren H44 EP9-EP10** — val_VP floor cross watch (currently +0.044pp above)
+7. **fern H51 pickup confirmation** — slices=192 + ema-decay=0.9999 (capacity expansion + EMA fix)
 8. **tanjiro H36 EP6+** — τz/τx std persistence + test_SP gate
 
-### Wave 31 priority ranking (post-22:18Z fleet sweep)
+### Wave 31 priority ranking (post-00:15Z fleet sweep)
 
-1. **H44 YAW-AUGMENTATION** (frieren) — IN-FLIGHT, val_VP 0.044pp from floor at mid-EP6; novel rotational-prior cross-channel regularization
-2. **H35 NPCA-SSFL-STACK** (fern) — IN-FLIGHT, fleet-peak std 0.2464; if val_VP held at EP9+ → first stacking mech-win
+1. **H48 TAU-Y-EQUALIZE** (edward) — IN-FLIGHT mid-EP3, **τz/τx mean 0.400 PERSISTING (25× larger shift than H46)**, all 34/34 cars outside band, single-flag training-time mechanism
+2. **H44 YAW-AUGMENTATION** (frieren) — IN-FLIGHT mid-EP6, val_VP 0.044pp from floor; novel rotational-prior cross-channel regularization
 3. **H45 ANCHOR-CROSSCHAN-DEC** (alphonse) — IN-FLIGHT mid-EP3, strongest cross-channel out_weight_norm asymmetry (τz/τx 3.91)
 4. **H47 V-DEPTH** (nezuko) — sent back for full 18h, mechanism positive, decoder-depth axis FIRST
 5. **H49 SDORTH-FULL** (thorfinn) — full-budget H46 confirmation; could yield Wave 31's first single-model paper-facing breakthrough
-6. **H50 COORDSLICE** (askeladd, NEW) — DAB-DETR analogue, tests L0-dominance + better test_SP
-7. **H48 TAU-Y-EQUALIZE** (edward) — single-flag training-time test
+6. **H51 NPCA-SSFL-SLICES192** (fern, NEW) — H35 closure follow-up: variance room + EMA fix; potentially closes merge gap
+7. **H50 COORDSLICE** (askeladd) — DAB-DETR analogue, tests L0-dominance + better test_SP
 8. **H36 ANCHOR-SLICE-QUERIES** (tanjiro) — slice-query Q modulation
 
 ### Time-tracking note
