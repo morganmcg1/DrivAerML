@@ -33,7 +33,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import DrivAerMLSurfaceDataset
-from model import SurfaceTransolver
+from model import SurfaceTransolver, TransolverAttention
 from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
@@ -138,6 +138,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    slice_temperature_start: float = 1.0
+    slice_temperature_end: float = 1.0
+    slice_temperature_decay_steps: int = 0
     debug: bool = False
 
 
@@ -220,6 +223,28 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "slice_temperature_start": (
+            "H61 slice-attention temperature curriculum: starting value of "
+            "the runtime softmax temperature applied on top of the learnable "
+            "per-head temperature in TransolverAttention. Logits are divided "
+            "by max(slice_temperature_runtime, 1e-6) before softmax. Values "
+            ">1 produce a warmer (more diffuse) routing distribution; the "
+            "default 1.0 is byte-equal to baseline. The temperature linearly "
+            "decays from `start` to `end` over `decay_steps` global optimizer "
+            "steps, then holds at `end` for the rest of training."
+        ),
+        "slice_temperature_end": (
+            "H61 slice-attention temperature curriculum: terminal value held "
+            "for global_step >= slice_temperature_decay_steps. Default 1.0 "
+            "matches baseline. See --slice-temperature-start."
+        ),
+        "slice_temperature_decay_steps": (
+            "H61 slice-attention temperature curriculum: number of global "
+            "optimizer steps over which the temperature linearly decays from "
+            "`start` to `end`. Set to 0 (default) to disable the curriculum "
+            "and hold at `end` for the whole run. Recommended for the H61 "
+            "spec: 65184 (end of EP6 at 13-epoch DDP8 budget)."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -274,6 +299,90 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     if any(s <= 0.0 for s in sigmas):
         raise ValueError(f"--rff-init-sigmas must be positive: {spec!r}")
     return sigmas
+
+
+def compute_slice_temperature(
+    global_step: int,
+    *,
+    start: float,
+    end: float,
+    decay_steps: int,
+) -> float:
+    """H61 curriculum: linear decay from `start` at step 0 to `end` at
+    step `decay_steps`, then hold at `end`. When `decay_steps <= 0` or
+    start == end, returns `end` (curriculum disabled / no-op)."""
+
+    if decay_steps <= 0 or start == end:
+        return float(end)
+    if global_step >= decay_steps:
+        return float(end)
+    progress = float(global_step) / float(decay_steps)
+    return float(start) + (float(end) - float(start)) * progress
+
+
+def set_slice_temperature_runtime(
+    base_model: nn.Module,
+    value: float,
+    *,
+    capture_entropy: bool | None = None,
+) -> None:
+    """Set the runtime slice-softmax temperature on every TransolverAttention
+    submodule. If `capture_entropy` is provided, also toggles the per-block
+    slice-attention entropy capture flag."""
+
+    for module in base_model.modules():
+        if isinstance(module, TransolverAttention):
+            module.slice_temperature_runtime = float(value)
+            if capture_entropy is not None:
+                module.capture_slice_entropy = bool(capture_entropy)
+
+
+def reset_slice_entropy_stats(base_model: nn.Module) -> None:
+    for module in base_model.modules():
+        if isinstance(module, TransolverAttention):
+            module.reset_slice_entropy_stats()
+
+
+def collect_slice_entropy_metrics(base_model: nn.Module) -> dict[str, float]:
+    """Read per-block mean slice-attention entropy from each TransolverAttention.
+    Returns `diag/slice_attn_entropy_block{i}` (entropy in nats) and
+    `diag/slice_n_eff_block{i}` (= exp(H), the effective number of active
+    slices). Uniform upper bound at num_slices=S is log(S) nats / N_eff=S."""
+
+    metrics: dict[str, float] = {}
+    block_idx = 0
+    entropies: list[float] = []
+    for module in base_model.modules():
+        if isinstance(module, TransolverAttention):
+            ent = module.mean_slice_entropy
+            metrics[f"diag/slice_attn_entropy_block{block_idx}"] = ent
+            metrics[f"diag/slice_n_eff_block{block_idx}"] = float(math.exp(ent))
+            entropies.append(ent)
+            block_idx += 1
+    if entropies:
+        mean_entropy = sum(entropies) / float(len(entropies))
+        metrics["diag/slice_attn_entropy_mean"] = mean_entropy
+        metrics["diag/slice_n_eff_mean"] = float(math.exp(mean_entropy))
+    return metrics
+
+
+def collect_slice_learnable_temperature_metrics(base_model: nn.Module) -> dict[str, float]:
+    """Per-block stats of the learnable per-head temperature in
+    TransolverAttention. Diagnoses whether the gradient is auto-adjusting
+    `self.temperature` to compensate for the runtime curriculum — a known
+    failure mode of fixed-endpoint temperature annealing."""
+
+    metrics: dict[str, float] = {}
+    block_idx = 0
+    for module in base_model.modules():
+        if isinstance(module, TransolverAttention):
+            t = module.temperature.detach().float().flatten()
+            metrics[f"diag/slice_learn_temp_block{block_idx}_mean"] = float(t.mean().item())
+            metrics[f"diag/slice_learn_temp_block{block_idx}_std"] = float(t.std().item()) if t.numel() > 1 else 0.0
+            metrics[f"diag/slice_learn_temp_block{block_idx}_min"] = float(t.min().item())
+            metrics[f"diag/slice_learn_temp_block{block_idx}_max"] = float(t.max().item())
+            block_idx += 1
+    return metrics
 
 
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
@@ -936,6 +1045,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                # H61: set the runtime slice-softmax temperature for this
+                # forward. `global_step` is the pre-increment value, so step 0
+                # uses `start` and `decay_steps` (exclusive) is the first step
+                # at which `end` applies.
+                current_slice_tau = compute_slice_temperature(
+                    global_step,
+                    start=config.slice_temperature_start,
+                    end=config.slice_temperature_end,
+                    decay_steps=config.slice_temperature_decay_steps,
+                )
+                set_slice_temperature_runtime(base_model, current_slice_tau)
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
@@ -1056,6 +1176,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
+                    "train/slice_temperature": current_slice_tau,
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
@@ -1239,6 +1360,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             if ema is not None:
                 ema.store(base_model)
                 ema.copy_to(base_model)
+            # H61: hold the runtime slice temperature at the current
+            # training-time value (current_slice_tau) for the EMA val pass.
+            # This matches the advisor's spec ("pass compute_slice_temperature
+            # on each forward call") and avoids a train-val temperature
+            # mismatch in EP1-EP5. Capture per-block slice-attention entropy
+            # across this pass; with DDP8 each rank sees ~1/8 of val cases so
+            # the logged stat is rank-local, not globally reduced.
+            reset_slice_entropy_stats(base_model)
+            set_slice_temperature_runtime(
+                base_model,
+                current_slice_tau,
+                capture_entropy=True,
+            )
             val_metrics = {
                 name: evaluate_split(
                     model,
@@ -1250,6 +1384,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 )
                 for name, loader in val_loaders.items()
             }
+            slice_entropy_metrics = collect_slice_entropy_metrics(base_model)
+            set_slice_temperature_runtime(base_model, current_slice_tau, capture_entropy=False)
 
             if state.is_main:
                 if raw_val_metrics is not None:
@@ -1262,6 +1398,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(slice_entropy_metrics)
+                log_metrics.update(collect_slice_learnable_temperature_metrics(base_model))
+                log_metrics["train/slice_temperature_at_val"] = current_slice_tau
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
