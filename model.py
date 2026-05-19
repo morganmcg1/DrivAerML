@@ -259,12 +259,63 @@ class TransolverAttention(nn.Module):
             self.q_norm = None
             self.k_norm = None
 
+        # H61 slice-temperature curriculum hook. `slice_temperature_runtime`
+        # is a runtime-modulated multiplier on the softmax temperature; the
+        # effective temperature is `self.temperature * slice_temperature_runtime`.
+        # At runtime=1.0 the math is byte-equal to baseline. Set externally
+        # per training step (see train.py:set_slice_temperature_runtime).
+        self.slice_temperature_runtime: float = 1.0
+        # Optional per-block slice-attention entropy diagnostic. When
+        # `capture_slice_entropy=True`, each forward accumulates batch-summed
+        # entropy + token-count into the two buffers; mean_slice_entropy
+        # returns the ratio. Reset via reset_slice_entropy_stats().
+        self.capture_slice_entropy: bool = False
+        self.register_buffer(
+            "_slice_entropy_sum", torch.zeros((), dtype=torch.float32), persistent=False
+        )
+        self.register_buffer(
+            "_slice_entropy_count", torch.zeros((), dtype=torch.float32), persistent=False
+        )
+
+    def reset_slice_entropy_stats(self) -> None:
+        self._slice_entropy_sum.zero_()
+        self._slice_entropy_count.zero_()
+
+    @property
+    def mean_slice_entropy(self) -> float:
+        count = float(self._slice_entropy_count.item())
+        if count <= 0.0:
+            return 0.0
+        return float(self._slice_entropy_sum.item()) / count
+
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
+        # H61 curriculum: divide logits by an additional runtime temperature.
+        # At runtime=1.0 this branch is skipped → byte-equal to baseline.
+        if self.slice_temperature_runtime != 1.0:
+            slice_logits = slice_logits / max(self.slice_temperature_runtime, 1e-6)
         slice_weights = F.softmax(slice_logits, dim=-1)
+        if self.capture_slice_entropy:
+            with torch.no_grad():
+                # slice_weights shape: (B, num_heads, N, num_slices). Entropy
+                # of the per-point routing distribution, in nats. Mask masked
+                # tokens out of the average so padded rows don't bias the stat.
+                ent_per_point = -(slice_weights * (slice_weights + 1e-9).log()).sum(dim=-1)
+                if attn_mask is not None:
+                    mask = attn_mask[:, None, :].to(device=ent_per_point.device, dtype=ent_per_point.dtype)
+                    weighted = ent_per_point * mask
+                    self._slice_entropy_sum.add_(weighted.sum().to(torch.float32))
+                    self._slice_entropy_count.add_(
+                        (mask.sum() * float(ent_per_point.shape[1])).to(torch.float32)
+                    )
+                else:
+                    self._slice_entropy_sum.add_(ent_per_point.sum().to(torch.float32))
+                    self._slice_entropy_count.add_(
+                        torch.tensor(float(ent_per_point.numel()), device=ent_per_point.device, dtype=torch.float32)
+                    )
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
                 device=slice_weights.device,
