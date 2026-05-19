@@ -1,11 +1,38 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~05:25 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~05:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~05:25Z) — FERN H51 v3 EP1 CHECK-IN (EMA-AWARE THRESHOLD DROP VALIDATED + 2ND RECIPE-BUG ACKNOWLEDGED — PHANTOM `--use-spectral-loss` FLAG)
+## Latest invocation actions (2026-05-19 ~05:45Z) — NEZUKO H47 V-DEPTH EP3 GATE STRONG PASS CHECK-IN (val_abupt 6.784% LEADING WAVE 31 EP3 COHORT + MECHANISM GROWING 4-10× ABOVE FLOOR — POTENTIAL MERGE CANDIDATE)
+
+### Headline updates (05:45Z)
+
+1. **PR #1194 nezuko H47 V-DEPTH EP3 gate check-in posted.** Run `dp7gbsjb` healthy at step 36,771 (6h02m runtime, EP4 leg, heartbeat fresh 05:39Z, nonfinite=0). **EP3 validation completed at step 32,592 with both gates PASS with margin**: val_abupt **6.784%** (gate <7.5%, PASS by 0.72pp) and val_SP **4.507%** (gate <5.5%, PASS by 0.99pp). All 4 mechanism sublayers PASS kill gate strongly and GREW from EP2 to EP3: vol_deep_block0 attn_proj 0.171→0.221 (+29%), ffn_fc2 0.305→0.479 (+57%), vol_deep_block1 attn_proj 0.191→0.252 (+32%), ffn_fc2 0.404→0.509 (+26%). Volume decoder depth bump is doing meaningful nonlinear computation, not just routing. FFN dominance over attn persists (0.48/0.51 vs 0.22/0.25). Stale_wip is the 2h-no-commits long-jobs false positive.
+
+2. **H47 LEADING Wave 31 EP3 cohort** by 0.15-0.18pp:
+   - H47 V-DEPTH EP3 6.784% (leader, this run)
+   - H33 SLICEPE EP3 6.94% (merged baseline reference)
+   - H45 ANCHOR-CROSSCHAN-DEC EP3 6.96% (running, alphonse)
+   - H44 YAW-AUG EP3 ~7.0% (closed at 02:15Z, terminal val_abupt 6.355% FAIL +0.229pp above gate)
+   - H50 COORDSLICE EP3 7.807% step 30,008 (running, askeladd, lagging 1.02pp)
+
+3. **MERGE CANDIDATE trajectory**: slope EP2→EP3 −0.094 pp/1k steps. Projecting:
+   - EP6 (step 65,228) ~10:30Z May 19: val_abupt 6.3-6.5% projected → likely PASS gate <6.5%
+   - EP13 terminal (step 141,232) ~17:00Z May 19: val_abupt **5.6-6.0% projected** → potentially CROSSES merge gate 6.126%
+   - With cosine compression in EP7-EP13 + typical 1.5-2pp terminal-vs-EP3 compression, H47 has a real shot at the merge gate.
+
+4. **Test_SP / test_vol_p / test_WSS targets at terminal**: H47's volume-decoder depth bump primarily targets vol_p (currently 4.035% descending toward floor 3.643%). val_SP at 4.507% is descending but still 0.93pp above test_SP floor 3.577% — test_SP gap may remain. val_WSS aggregate 7.658% above baseline 6.727% by 0.93pp — Wall_shear axes lagging in absolute terms (especially τz 10.156%, still draining cold-start residual).
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Active runs in priority order by next check-in:
+   - **H47 nezuko** (THIS) — EP3 PASS, EP6 ~10:30Z, terminal ~17:00Z
+   - **H48 edward** — mid-EP9 plateau at 6.508%, terminal ~12:45Z
+   - **H50 askeladd** — EP3 7.807% lagging, EP6 gate ~10:15Z (make-or-break)
+   - **H51 fern** — EP1 71.17% as predicted, EP3 ~08:30Z next
+   - **H52 frieren, H53 tanjiro, H49 thorfinn, H45 alphonse** — terminals 14:00-18:00Z
+
+## Previous invocation actions (2026-05-19 ~05:25Z) — FERN H51 v3 EP1 CHECK-IN (EMA-AWARE THRESHOLD DROP VALIDATED + 2ND RECIPE-BUG ACKNOWLEDGED — PHANTOM `--use-spectral-loss` FLAG)
 
 ### Headline updates (05:25Z)
 
