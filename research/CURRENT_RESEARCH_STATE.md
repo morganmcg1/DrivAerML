@@ -1,11 +1,29 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~03:35 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~03:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~03:35Z) — NEZUKO H47 V-DEPTH EP2 CHECK-IN (HEALTHY, FLEET-LEADING EP2 + STRONG MECHANISM SIGNAL) + 2ND WAVE 31 RECIPE-BUG ACKNOWLEDGMENT
+## Latest invocation actions (2026-05-19 ~03:50Z) — EDWARD H48 TAU-Y-EQUALIZE MID-EP9 CHECK-IN (val_abupt PLATEAUED 6.508% × 3 — mechanism HELD 9 EPOCHS — likely structural finding > merge candidate)
+
+### Headline updates (03:50Z)
+
+1. **PR #1196 edward H48 TAU-Y-EQUALIZE mid-EP9 check-in posted.** Run `8cn5abxm` healthy at step 58,599 (10.4h runtime, mid-EP9, heartbeat fresh). All hard kill gates pass. **val_abupt PLATEAUED at 6.508% across 3 consecutive validations** (EP7 → EP8 → mid-EP9, slope −0.007 pp/1k → 0.000 pp/1k). EP13 terminal projection 6.40-6.50% (+30-40bps above merge gate 6.126%) — likely closing as **structural finding > merge candidate**. **MECHANISM HELD 9 EPOCHS**: τz/τx mean 0.4009 unchanged from EP1 (drift +0.018 over 47,735 steps = +0.0006 pp/1k = statistically flat), 34/34 cars persistently outside band [1.44, 1.55], std 0.0328. Most stable extreme attractor reading in Wave 30/31 history. Decision: continue to natural budget cutoff (~12:45Z May 19) — structural finding deserves full terminal trace regardless of merge probability; cosine compression EP10-EP13 may bend val_abupt by 0.05-0.15pp giving 5-15% merge probability; test eval at best EMA ckpt is the decision point (val→test gap could compress or expand).
+
+2. **H48 will be the FIRST training-time-only band-break demonstration** in Wave 30/31. Single `--tau-y-loss-weight` flag change, zero code modification. Independent of merge outcome, this opens "mechanism × baseline-architecture" stacking experiments (H48 + H26 NPCA + H31 WALLDIST simultaneously).
+
+3. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Survey confirms all students assigned, no human messages requiring response. Next student check-ins expected:
+   - **H47 nezuko EP3** ~05:00Z (step 32,594) — currently fleet-leading val_abupt 7.615% at EP2
+   - **H50 askeladd EP6** ~10:15Z (step 65,228) — currently lagging cohort 0.85pp val_abupt 7.807%
+   - **H48 edward EP12/13** terminal ~12:45Z — likely structural finding writeup, possible merge
+   - **H51 fern, H52 frieren, H53 tanjiro, H49 thorfinn, H45 alphonse**: terminal landings 14:00-18:00Z range based on launch times
+
+4. **Wave 31 binding-gate intelligence:** test_SP 0/7 vol_p crossings — remains unyielding. H48's mean-shift mechanism (vs H35/H36's variance-class mechanisms which show val→test divergence) is the most cleanly-stacked novel mechanism in flight, but val_abupt plateau suggests it alone won't close merge gate. Composition with NPCA / WALLDIST may be required.
+
+5. **Test_WSS gap to Transolver-3 SOTA: −0.877pp to go.** Baseline test_WSS 6.727%, SOTA target 5.85%. H48 alone unlikely to close gap (val_WSS plateauing 7.375%, +0.65pp above baseline). H52 NPCA×YAW-AUG + H53 CP-LOSS-WEIGHT + H47 V-DEPTH remain the strongest WSS-targeting bets.
+
+## Previous invocation actions (2026-05-19 ~03:35Z) — NEZUKO H47 V-DEPTH EP2 CHECK-IN (HEALTHY, FLEET-LEADING EP2 + STRONG MECHANISM SIGNAL) + 2ND WAVE 31 RECIPE-BUG ACKNOWLEDGMENT
 
 ### Headline updates (03:35Z)
 
