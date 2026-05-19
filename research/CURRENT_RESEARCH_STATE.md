@@ -1,11 +1,58 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~15:45 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~16:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~15:45Z) — PR #1194 H47 V-DEPTH terminal CLOSED as **mechanism-positive null with test_VP +0.010pp NEAR-MISS on floor + LR-decay confound** (tightest H47-family vol_p floor approach; 4 sublayer norms 5-14× above EP3 KILL threshold; block1>block0 productive asymmetry confirmed canonical Wave 31 signature; val_abupt plateau dominated by LR-decay — terminal LR 2.5% of peak); **NEZUKO REASSIGNED H59 V-DEPTH-LR-EXTENDED** (PR #1208, single-flag change `--lr-cosine-t-max 25` instead of 13, keeps terminal LR at ~70-80% peak to test plateau hypothesis directly)
+## Latest invocation actions (2026-05-19 ~16:20Z) — PR #1205 H56 H51-RELAUNCH CLOSED as **9th advisor recipe-bug + STRONGEST WAVE 31 MECHANISM SIGNAL** (EP3 EMA-val 25.30% killed by my gate `<25.0%` by 0.30pp; mathematical floor is 25.07% at random_pred_floor ≈ 100% — gate set INSIDE the math floor; τ_zx_ratio_std doubled in ONE epoch EP2→EP3 0.0554→0.1384 already exceeds H51 mid-EP4 by 18.3%; slope ACCELERATING −1.31 → −2.52 pp/1k); **FERN REASSIGNED H60 H56-RELAUNCH-DROP-EP3** (PR #1209, only EP6 binding gate retained, EP3+EP4 dropped as structurally uninformative under ema=0.9999); memory entry `feedback_ema_aware_kill_thresholds.md` corrected with empirical random_pred_floor ≈ 100%
+
+### Headline updates (16:20Z)
+
+1. **PR #1205 fern H56 H51-RELAUNCH CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1205#issuecomment-4489554574)). Killed at EP3 step 32,592:
+   - EP3 EMA-val_abupt **25.30%** vs my gate `<25.0%` = **0.30pp over** (1.2% above threshold)
+   - 5.31h GPU runtime wasted on advisor recipe-bug
+   - **MECHANISM POSITIVE — STRONGEST Wave 31 variance-class signal observed**
+
+2. **9TH ADVISOR RECIPE-BUG (NEW CLASS: random_pred_floor underestimated)**:
+   - Memory entry assumed `random_pred_floor ≈ 7-22%` (initial EMA shadow predicts at trained-end quality)
+   - H51 + H56 data prove `random_pred_floor ≈ 100%` (random predictions vs ground truth give ~1.0 rel L2)
+   - Corrected math: EP3 EMA-val_floor = trained_val + δ^32592·(100% − trained_val) = 22% + 0.0394·78% = **25.07%**
+   - H56 read 25.30% — 0.23pp over the math floor (i.e., perfectly consistent with healthy trajectory)
+   - Memory entry rewritten: drop EP3+EP4 gates entirely under ema=0.9999, only EP6 binding informative
+
+3. **Mechanism diagnostic — STRONGEST Wave 31 signal**:
+   - τ_zx_ratio_std: EP1 0.075 → EP2 0.055 → EP3 **0.1384** (+150% in ONE epoch)
+   - H51 ref took TWO epochs to reach 0.117 at mid-EP4; H56 EP3 (one epoch earlier) at 0.1384 exceeds by 18.3%
+   - H35 fleet-peak ref std 0.251 at EP13 — H56 reached 55% of fleet-peak in 3 epochs vs H35's 13 epochs
+   - train/epoch_loss 0.01129 at EP3 matches H35 reference shape exactly
+   - Slope ACCELERATING: EP1→EP2 −1.31 pp/1k → EP2→EP3 −2.52 pp/1k (val_abupt)
+   - Per-axis WSS hardness y > z > x preserved (matches H35/H51 reference shape exactly)
+
+4. **PR #1209 fern H60 H56-RELAUNCH-DROP-EP3 assigned** ([PR #1209](https://github.com/morganmcg1/DrivAerML/pull/1209), branch `fern/h60-h56-relaunch-drop-ep3` from H56 tip with NPCA+SSFL cherry-picks already in place). Recipe IDENTICAL to H56 except:
+   - `--kill-thresholds` reduced to **ONLY EP6 binding** (val_abupt<7.0% + val_SP<5.0% at step 65,184)
+   - EP3 gate dropped entirely (structural floor ~25.9% makes any tight gate false-kill)
+   - EP4 gate dropped (math floor ~23% also structurally insufficient)
+   - First informative read at EP6 (δ=0.0015 ≈ clean)
+   - Three falsifiable outcomes: (A) MERGE WIN + FLOOR CROSS — variance-class strongest mech merge first time, (B) PARTIAL — mech strong but doesn't cross merge, (C) NULL — mech saturates short of H35
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H56 closure + H60 assignment):
+   - **H52 frieren (PR #1200)** — mid-EP4 healthy, mechanism alive
+   - **H53 tanjiro (PR #1202)** — **STRONGEST MERGE CANDIDATE**, projected merge ~17:50Z (val_abupt projection 6.075% MERGE WIN by 0.051pp slack)
+   - **H54 v2 alphonse (PR #1203)** — EP2 healthy, surf_deep diagnostic pending
+   - **H55 v2 edward (PR #1204)** — EP2 τz curriculum mechanism alive
+   - **H57 thorfinn (PR #1206)** — EP2 FDCE cold-start advantage carrying
+   - **H58 askeladd (PR #1207)** — COORDSLICE-NO-STOPGRAD, pre-EP1
+   - **H59 nezuko (PR #1208)** — V-DEPTH-LR-EXTENDED, pre-EP1
+   - **H60 fern (PR #1209, this entry)** — H56-RELAUNCH-DROP-EP3, pre-launch (student picks up next poll)
+
+6. **Strategic notes (post-H56 closure)**:
+   - **5 active merge candidates** in flight: H53 (strongest projected merge ~17:50Z), H54 v2 (SURFACE-DEEP mirror of H47), H57 (FDCE), H59 (LR-fix V-DEPTH variant), **H60 (strongest mechanism signal in Wave 31, ema=0.9999 stack)**
+   - H60 will be the **first ema=0.9999 stack to potentially reach EP6 binding read** (H51+H56 both killed prematurely by advisor gates). If H60 crosses merge gate, opens Wave 32 stack candidates: H60 (ema=0.9999) + H53 (CP-LOSS) + H57 (FDCE) as 3-mechanism stack.
+   - **Total advisor recipe-bug cost on H51 stack: 10.81h GPU runtime** (H51 5.5h + H56 5.31h) sacrificed to mis-calibrated EP3 gates. H60 corrects by dropping the gate entirely.
+   - **Memory `feedback_ema_aware_kill_thresholds.md` corrected** — future ema=0.9999 PRs will skip EP3+EP4 gates by default.
+
+## Previous invocation actions (2026-05-19 ~15:45Z) — PR #1194 H47 V-DEPTH terminal CLOSED as **mechanism-positive null with test_VP +0.010pp NEAR-MISS on floor + LR-decay confound** (tightest H47-family vol_p floor approach; 4 sublayer norms 5-14× above EP3 KILL threshold; block1>block0 productive asymmetry confirmed canonical Wave 31 signature; val_abupt plateau dominated by LR-decay — terminal LR 2.5% of peak); **NEZUKO REASSIGNED H59 V-DEPTH-LR-EXTENDED** (PR #1208, single-flag change `--lr-cosine-t-max 25` instead of 13, keeps terminal LR at ~70-80% peak to test plateau hypothesis directly)
 
 ### Headline updates (15:45Z)
 

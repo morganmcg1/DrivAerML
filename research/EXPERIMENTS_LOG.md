@@ -1,3 +1,75 @@
+## 2026-05-19 16:20 — PR #1205: H56 H51-RELAUNCH NPCA+SSFL+slices192+ema9999 with EMA-aware kill gates (fern, killed EP3 step 32,592) — **9TH ADVISOR RECIPE-BUG CLOSURE: EP3 gate `<25.0%` set 0.30pp inside math floor (random_pred_floor ≈ 100% NOT 7-22%); MECHANISM POSITIVE STRONGEST WAVE 31 SIGNAL: τ_zx_ratio_std doubled in ONE epoch EP2→EP3 0.0554→0.1384 already exceeds H51 mid-EP4 0.117 by 18.3%; slope ACCELERATING −1.31 pp/1k EP1→EP2 → −2.52 pp/1k EP2→EP3; train/epoch_loss 0.01129 matches H35 reference shape; FERN REASSIGNED H60 H56-RELAUNCH-DROP-EP3 PR #1209**
+
+- **Branch**: `fern/h56-h51-relaunch-ema-aware-gates` (closed at 16:20Z)
+- **W&B run**: `mgor7bk7` (group `wave31_h56_h51_relaunch`, 5.31h runtime, killed at step 32,592 by `val_primary/abupt_axis_mean_rel_l2_pct=25.3038 did not satisfy <25.0` — over by 0.30pp / 1.2% above threshold)
+- **Hypothesis**: Same as H51 (PR #1199 closed as recipe-bug closure) — NPCA + SSFL + slices=192 + ema=0.9999 stack — relaunched with EMA-aware kill gates accounting for δ^step contamination.
+
+### Kill trigger — gate set 0.30pp inside the mathematical floor
+
+Empirical EMA-val_floor at EP3 step 32,592 with ema=0.9999:
+```
+EMA-val_floor = trained_val + δ^32592 · (random_pred_floor − trained_val)
+              = 22% + 0.0394 · (100% − 22%)
+              = 22% + 3.07%
+              = 25.07%
+```
+My gate `<25.0%` was set 0.07pp BELOW the math floor. H56 read 25.30% — only 0.23pp over the math prediction. **Random_pred_floor for rel_l2_pct metrics is ~100% (random predictions vs ground truth give ~1.0 rel L2), NOT the 7-22% my prior memory entry assumed.**
+
+### Full validation trajectory (EMA-shadow contaminated)
+
+| EP | step | δ^step | val_abupt | val_SP | val_VP | val_WSS | WSS_x | WSS_y | WSS_z |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10,864 | 0.337 | 66.93% | 49.26% | 59.47% | 68.89% | 59.34% | 87.25% | 79.32% |
+| 2 | 21,728 | 0.115 | 52.68% | 40.53% | 39.42% | 56.12% | 48.34% | 71.70% | 63.40% |
+| 3 | 32,592 | 0.039 | **25.30%** | 17.40% | 17.38% | 28.45% | 24.71% | 37.14% | 29.88% |
+
+### Slopes — ACCELERATING (strongest Wave 31 signal)
+
+| Window | val_abupt slope | val_WSS slope |
+|---|---:|---:|
+| EP1→EP2 | −1.31 pp/1k | similar |
+| **EP2→EP3** | **−2.52 pp/1k** | WSS_y −3.18 pp/1k, WSS_z −3.08 pp/1k, WSS_x −2.18 pp/1k |
+
+**Slope is accelerating (not decelerating).** Per-axis WSS hardness y > z > x preserved throughout — matches H35/H51 reference shape exactly.
+
+### Mechanism diagnostic — variance-class signal at STRONGEST in Wave 31
+
+| Metric | EP1 | EP2 | **EP3** | EP2→EP3 Δ | H51 ref EP4 |
+|---|---:|---:|---:|---:|---:|
+| `tau_zx_ratio_mean` | 1.3373 | 1.3118 | 1.2179 | −0.0939 | — |
+| `tau_zx_ratio_std` | 0.0751 | 0.0554 | **0.1384** | **+0.0830 (+150%)** | 0.117 (mid-EP4) |
+| `tau_zx_ratio_n_outside_band` | 28/34 | 32/34 | 31/34 | −1 | — |
+| `tau_zx_ratio_min/max` | 1.192/1.496 | 1.176/1.420 | **1.049/1.573** | spread WIDENED both sides | — |
+
+**H56 EP3 std 0.1384 ALREADY EXCEEDS H51 mid-EP4 std 0.117 by 18.3%, one epoch earlier.** H35 fleet-peak ref std is 0.251 at EP13 — H56 reached 55% of fleet-peak in 3 epochs vs H35's 13 epochs.
+
+### Trained-side health (NO EMA-shadow on train loss)
+
+| Metric | EP1 | EP2 | EP3 |
+|---|---:|---:|---:|
+| `train/epoch_loss` | 0.3587 | 0.0760 | **0.01129** |
+| `train/base_mse_loss` (EP-end) | — | — | 0.00781-0.00914 across ranks |
+| `train/spectral_loss` (SSFL active) | active | active | active |
+
+train/epoch_loss 0.01129 at EP3 matches H35 reference shape exactly for early-epoch NPCA+SSFL learning.
+
+### Recipe-bug class — 2nd consecutive kill of H51 stack by misset gate
+
+| Recipe | EP3 gate | EP3 EMA-val | Margin | Outcome |
+|---|---|---:|---:|---|
+| H51 v3 (PR #1199) | `<10.0%` | 23.64% | −13.64pp | KILLED mid-EP4 step 38,027 (5.5h wasted) |
+| H56 (this PR #1205) | `<25.0%` | **25.30%** | **−0.30pp** | KILLED at EP3 end step 32,592 (5.31h wasted) |
+
+Total: **10.81h GPU runtime sacrificed to advisor mis-calibrated EP3 gates** on the strongest mechanism signal in Wave 31.
+
+### Disposition
+
+CLOSED as 9th advisor recipe-bug. **MECHANISM POSITIVE — strongest variance-class signal in Wave 31.** Fern reassigned to H60 H56-RELAUNCH-DROP-EP3 (PR #1209) with **only the EP6 binding gate** retained (val_abupt<7.0% + val_SP<5.0% at step 65,184). Drop EP3 + EP4 gates entirely because EMA-shadow contamination at those steps is structural (math floor 23-26%), not informative.
+
+Memory updated: `feedback_ema_aware_kill_thresholds.md` now reflects empirical random_pred_floor ≈ 100% and recommends drop-all-gates-except-EP6 for ema=0.9999 stacks.
+
+---
+
 ## 2026-05-19 15:45 — PR #1194: H47 V-DEPTH — Volume Decoder Depth Bump 2 dedicated vol-only blocks (nezuko, 18h full rerun) — **MECHANISM-POSITIVE NULL with test_VP +0.010pp NEAR-MISS on floor** (tightest H47-family vol_p floor approach; 4 sublayer norms 5-14× above EP3 KILL threshold + block1>block0 productive asymmetry confirmed canonical Wave 31 signature; val_abupt plateau and merge-gate miss DOMINATED BY LR-DECAY confound — cosine cycle completed within actual 70k-step training window, terminal LR collapsed to 2.5% of peak; slope decelerated 30× from EP3→EP4 −0.034 to EP6→terminal −0.0011 matching LR collapse 99%→2.5%); NEZUKO REASSIGNED H59 V-DEPTH-LR-EXTENDED (PR #1208) — single-flag change `--lr-cosine-t-max 25` instead of 13 to keep terminal LR at ~70-80% peak instead of 2.5%
 
 - **Branch**: `nezuko/h47-vdepth` (closed at 15:45Z)
