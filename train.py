@@ -138,6 +138,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_coord_slice_pe: bool = False
+    coord_slice_pe_rff_features: int = 32
+    coord_slice_pe_init_scale: float = 0.088
     debug: bool = False
 
 
@@ -294,6 +297,57 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
+def collect_coord_slice_pe_metrics(model: nn.Module) -> dict[str, float]:
+    """Log coord-slice PE diagnostics per Transformer block.
+
+    Static metrics: per-layer coord_pe_proj weight/bias statistics.
+    Dynamic metrics (captured during last val forward): slice_centroid
+    distribution (mean/std/range per axis, across-slice spread) and
+    inter_slice_cos on the post-PE slice_tokens (mechanism diagnostic
+    aligned with H33's pattern for direct comparison).
+    """
+    metrics: dict[str, float] = {}
+    backbone = getattr(model, "backbone", None)
+    if backbone is None:
+        return metrics
+    blocks = getattr(backbone, "blocks", None)
+    if blocks is None:
+        return metrics
+    all_inter_slice_cos: list[float] = []
+    for i, block in enumerate(blocks):
+        attn = getattr(block, "attention", None)
+        if attn is None:
+            continue
+        proj = getattr(attn, "coord_pe_proj", None)
+        if proj is None:
+            continue
+        w = proj.weight.detach().float()
+        metrics[f"coord_slice_pe/block_{i}/proj_weight_norm"] = float(w.norm().item())
+        metrics[f"coord_slice_pe/block_{i}/proj_weight_std"] = float(w.std().item())
+        b = proj.bias.detach().float()
+        metrics[f"coord_slice_pe/block_{i}/proj_bias_norm"] = float(b.norm().item())
+        centroids = getattr(attn, "_last_slice_centroids", None)
+        if centroids is not None:
+            c = centroids.float()  # [B, S, 3]
+            for axis_i, axis in enumerate(("x", "y", "z")):
+                ca = c[..., axis_i]
+                metrics[f"coord_slice_pe/block_{i}/centroid_mean_{axis}"] = float(ca.mean().item())
+                metrics[f"coord_slice_pe/block_{i}/centroid_std_{axis}"] = float(ca.std().item())
+                metrics[f"coord_slice_pe/block_{i}/centroid_range_{axis}"] = float(
+                    (ca.max() - ca.min()).item()
+                )
+            metrics[f"coord_slice_pe/block_{i}/centroid_spread"] = float(c.std(dim=1).mean().item())
+        isc = getattr(attn, "_last_inter_slice_cos", None)
+        if isc is not None:
+            metrics[f"coord_slice_pe/block_{i}/inter_slice_cos_post_pe"] = float(isc)
+            all_inter_slice_cos.append(float(isc))
+    if all_inter_slice_cos:
+        metrics["coord_slice_pe/global/inter_slice_cos_mean"] = float(
+            sum(all_inter_slice_cos) / len(all_inter_slice_cos)
+        )
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -308,6 +362,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_coord_slice_pe=config.use_coord_slice_pe,
+        coord_slice_pe_rff_features=config.coord_slice_pe_rff_features,
+        coord_slice_pe_init_scale=config.coord_slice_pe_init_scale,
     )
 
 
@@ -1262,6 +1319,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_coord_slice_pe_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
