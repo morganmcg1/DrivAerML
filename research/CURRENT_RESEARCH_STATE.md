@@ -1,11 +1,32 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~03:15 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~03:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~03:15Z) — FERN H51 SENT BACK (EMA-AWARE THRESHOLD FIX) + H50 ASKELADD CHECK-IN (EP3 LAGGING) + ISSUE #1056 CORRECTION POSTED
+## Latest invocation actions (2026-05-19 ~03:35Z) — NEZUKO H47 V-DEPTH EP2 CHECK-IN (HEALTHY, FLEET-LEADING EP2 + STRONG MECHANISM SIGNAL) + 2ND WAVE 31 RECIPE-BUG ACKNOWLEDGMENT
+
+### Headline updates (03:35Z)
+
+1. **PR #1194 nezuko H47 V-DEPTH EP2 check-in posted.** Run `dp7gbsjb` (relaunched 23:35Z after preemptive kill of `8d1dzmqk`) is healthy at step 24,820 (17.6% through 141,232-step budget, 3h55m runtime, heartbeat fresh, nonfinite=0). **val_abupt 7.615% at EP2 boundary LEADING fleet** — beats H50 COORDSLICE which sits at 7.807% at step 30,008 (7,700 steps later). val_SP 5.108% already inside EP3 gate <5.5%; val_vol_p 4.354% descending toward floor 3.643%. **MECHANISM STRONGLY ACTIVE**: all 4 vol_deep_block{0,1} sublayer max_abs values 6-8× above EP3 kill floor 0.05 (`diag/vol_deep_block0/attn_proj` 0.171, `ffn_fc2` 0.305, `vol_deep_block1/attn_proj` 0.191, `ffn_fc2` 0.404). FFN dominating attn in both blocks suggests volume-decoder depth doing meaningful nonlinear computation, not just routing. Stale_wip is known long-jobs false positive — student-committed next check-in at EP3 gate ~05:00Z May 19.
+
+2. **2nd Wave 31 recipe-bug acknowledgment (companion to H51 EMA fix).** Nezuko caught and preemptively fixed a broken EP1 kill threshold I'd embedded in the recipe: `10864:val_abupt<9.5` would have guaranteed a false kill on a healthy mechanism (every 13-ep cosine-warmup run lands 25-30% val_abupt at EP1). The student killed `8d1dzmqk` at 71% through EP1 (~45min compute discarded) to save the 18h slot, citing PR Step 8 spec `<30`, H30 V2S 28.30%, H47 6h 25.43% as precedents. Now run `dp7gbsjb` passed EP1 cleanly with val_abupt 27.28%. **Pattern**: copying step-indexed kill thresholds across PRs without precedent-checking against actual EP1/3/6 reads from the matching recipe = recipe bug. Same pattern as fern's H51 EMA-aware fix earlier this invocation. Both caught by students before doomed run.
+
+3. **Fleet 8/8 WIP**, all students confirmed active. Active runs trajectory snapshot:
+   - **askeladd H50 COORDSLICE** (EP3 step 30,008): val_abupt 7.807% lagging cohort, Block 2 dominance emergent — EP6 gate at step 65,228 make-or-break (~10:15Z May 19)
+   - **nezuko H47 V-DEPTH** (EP2 step 24,820): val_abupt 7.615% LEADING fleet, mechanism strong — EP3 gate at step 32,594 (~05:00Z May 19)
+   - **edward H48 TAU-Y-EQUALIZE** (EP4): val_abupt 6.597% descending −0.106 pp/1k, τz/τx mean 0.40 persisting all 34/34 cars — potential merge candidate at terminal ~12:45Z May 19
+   - **fern H51 NPCA+SSFL-SLICES192** (relaunching): EMA-aware kill thresholds applied, terminal ~17:00Z May 19+
+   - **frieren H52 NPCA×YAW-AUG** (assigned at 02:15Z): combines `--use_local_frame_proj` + `--yaw-aug-theta-max 5.0`, expected EP6 ~10:00Z May 19+
+   - **tanjiro H53 CP-LOSS-WEIGHT** (assigned at 02:50Z): single-arm `--cp-loss-weight 2.0` SP-binding-gate attack, expected EP6 ~10:00Z May 19+
+   - **alphonse, edward, thorfinn**: in-flight per prior snapshots
+
+4. **Wave 31 binding-gate intelligence remains the same:** test_SP 0/7 vol_p crossings — surface pressure remains the unyielding gate. H53 is the dedicated attack. H47 v-depth's volume-decoder capacity bump targets vol_p (not SP), so even a clean EP6 gate pass leaves SP merge-gate question open at terminal.
+
+5. **Test_WSS gap to Transolver-3 SOTA: −0.877pp to go.** Baseline test_WSS 6.727%, SOTA target 5.85%. All in-flight runs (H48, H45, H50, H47, H52, H53, H51) need to compound improvements to close the gap.
+
+## Previous invocation actions (2026-05-19 ~03:15Z) — FERN H51 SENT BACK (EMA-AWARE THRESHOLD FIX) + H50 ASKELADD CHECK-IN (EP3 LAGGING) + ISSUE #1056 CORRECTION POSTED
 
 ### Headline updates (03:15Z)
 
