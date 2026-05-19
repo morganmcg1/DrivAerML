@@ -1,11 +1,37 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~03:50 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~05:25 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~03:50Z) — EDWARD H48 TAU-Y-EQUALIZE MID-EP9 CHECK-IN (val_abupt PLATEAUED 6.508% × 3 — mechanism HELD 9 EPOCHS — likely structural finding > merge candidate)
+## Latest invocation actions (2026-05-19 ~05:25Z) — FERN H51 v3 EP1 CHECK-IN (EMA-AWARE THRESHOLD DROP VALIDATED + 2ND RECIPE-BUG ACKNOWLEDGED — PHANTOM `--use-spectral-loss` FLAG)
+
+### Headline updates (05:25Z)
+
+1. **PR #1199 fern H51 NPCA+SSFL-SLICES192 v3 EP1 check-in posted.** Run `2vlx68f9` (launched 03:17:39Z May 19 with corrected EMA-aware thresholds + spectral-loss flag stripped) is HEALTHY at step 12,828 (9.1% through budget, 2h4m runtime, heartbeat fresh 05:20Z, nonfinite=0). **EP1 validation completed at step 10,864 with val_abupt 71.17%** — EXACTLY what the δ^10864=0.337 math predicted (≥70% guaranteed under EMA shadow contamination). **The gate-drop decision is structurally validated by actual run.** Had the original H35-copied `10864:val_abupt<9.5` threshold remained, the run would have false-killed at EP1 despite a healthy model.
+
+2. **STRONG early mechanism signal**: `tau_zx_ratio_n_outside_band 27/34` already at EP1 — for context, H35 NPCA+SSFL (the H51 mechanism reference) hit `n_outside_band 17/34` at EP6 (cohort baseline). H51 at EP1 is already ahead of H35's EP6 reference by 10 cars (~80% of cars producing per-car ratios outside [1.44, 1.55] band attractor). EMA-shadow noise caveat applies at EP1, but EP3 persistence would confirm fleet-leading variance-class mechanism.
+
+3. **2nd Wave 31 recipe-bug acknowledged on same PR.** Fern caught a SECOND recipe-bug: `--use-spectral-loss` flag does not exist in `train.py` argparse — spectral loss is enabled implicitly when `--lambda-spectral` is nonzero (train.py:486-494). The v2 relaunch crashed with `train.py: error: unrecognized arguments: --use-spectral-loss`. Fern stripped the flag for v3 — confirmed the original H35 reference run was also missing it. Two recipe bugs in one PR = root cause: I copied H35's recipe without auditing each flag against the current `target/train.py` argparse. Filed as **3rd Wave 31 recipe-bug pattern**: flag existence audit (companion to EMA-aware thresholds and EP-warmup-aware thresholds). New memory entry written: `feedback_audit_flags_in_recipe.md`.
+
+4. **Recipe-audit checklist now 4 patterns deep:**
+   - Flag existence (this PR — phantom `--use-spectral-loss`)
+   - Step-indexed kill thresholds correctly map to global_step boundaries (no `step>=` prefix confusion)
+   - EMA-step δ^N composition matches kill-threshold sensitivity (when `--ema-decay != 0.999`)
+   - `--lr-warmup-epochs` aware EP1 threshold (warmup=1 recipes land val_abupt ~33% at EP1)
+
+   Going forward I will walk down all 4 checks for every PR I assign. Three of these patterns were caught by students this invocation (fern EMA + flag, nezuko EP-warmup).
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Survey confirms all students assigned, no human messages requiring response. Next student check-ins expected:
+   - **H47 nezuko EP3** ~05:00-06:00Z (step 32,594) — overdue, no comment yet but no stale flag
+   - **H51 fern EP3** ~08:30Z (step 32,594) — gate decision point
+   - **H50 askeladd EP6** ~10:15Z (step 65,228) — make-or-break gate at 6.5% val_abupt
+   - **H48 edward terminal** ~12:45Z — likely structural finding, possible borderline merge
+   - **H51 fern EP6** ~14:50Z (step 65,228)
+   - **H52/H53/H49/H45 terminals** 14:00-18:00Z range
+
+## Previous invocation actions (2026-05-19 ~03:50Z) — EDWARD H48 TAU-Y-EQUALIZE MID-EP9 CHECK-IN (val_abupt PLATEAUED 6.508% × 3 — mechanism HELD 9 EPOCHS — likely structural finding > merge candidate)
 
 ### Headline updates (03:50Z)
 
