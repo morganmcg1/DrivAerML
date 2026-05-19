@@ -5,7 +5,31 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~08:10Z) — EDWARD H48 TAU-Y-EQUALIZE EP12 CHECK-IN: **PLATEAU CONFIRMED — TERMINAL ~7 MIN AWAY, NO MERGE** (best val_abupt 6.485% at EP10 fails merge gate 6.126% by 0.359pp; first Wave 31 example of MEAN-SHIFT MECHANISM CLASS finding)
+## Latest invocation actions (2026-05-19 ~08:25Z) — PR #1192 H45 CROSSCHAN-DEC CLOSED (mechanism-positive null, val_abupt 6.3523% / test_abupt 6.0751% FAIL by 22.6/23.1 bp) + ALPHONSE REASSIGNED H54 SURFACE-DEEP (#1203, mirror of H47 V-DEPTH on surface decoder) + H47 EP6 STRONG (val_abupt 6.357% only +0.230pp above merge gate)
+
+### Headline updates (08:25Z)
+
+1. **PR #1192 alphonse H45 CROSSCHAN-DEC CLOSED** ([close comment 4486017957](https://github.com/morganmcg1/DrivAerML/pull/1192#issuecomment-4486017957)). Terminal val_abupt 6.3523% fails merge gate 6.126% by 22.6 bp; test_abupt 6.0751% fails baseline 5.844% by 23.1 bp. **MECHANISM-POSITIVE NULL**: weight-space rank-decoupling (τz/τx out_weight_norm) peaked at 24.16 (18.6× the 1.3 PASS threshold) but val space didn't translate. Structural finding logged in EXPERIMENTS_LOG.md: band attractor is NOT in surface decoder pre-projection cross-channel structure.
+
+2. **PR #1203 alphonse H54 SURFACE-DEEP assigned** — mirror of H47 V-DEPTH (in-flight merge candidate) on the surface decoder side. Add 2 dedicated transformer blocks before `surface_out` projection. Mechanism-class-novel vs H21 (per-channel split) and H45 (cross-channel attention). The H45 mechanism-positive null narrows the search: capacity expansion BEFORE the projection (shared-capacity-class) is the natural next axis on the surface side. Mechanism orthogonality with H47 — if both merge, they stack additively in Wave 32. Recipe identical to H47 V-DEPTH with `--use-surf-deep --surf-deep-num-blocks 2`. EP3 gate val_abupt<7.5% AND val_SP<5.5% AND surf_deep block norms growing.
+
+3. **H47 V-DEPTH EP6 strong read** (concurrent with this invocation, queried 08:20Z): val_abupt **6.357%** (down from EP5 6.421%, descent of 0.064pp); val_SP **4.148%**; val_vol_p **3.932%**. **Only +0.230pp above merge gate 6.126%**. Step 50,941 in EP7 leg. Slope EP5→EP6 = −0.0118 pp/1k. Trajectory continues to support merge-candidate-at-terminal-EP13 hypothesis (terminal projection 6.1-6.3% range; if EP7-EP13 keeps even half the EP5→EP6 slope, terminal lands ~6.10-6.15%).
+
+4. **H48 TAU-Y-EQUALIZE near terminal** (~10 min from invocation start) — plateau confirmed at 6.485%, fails merge gate by 0.359pp, will close as mean-shift mechanism class structural finding.
+
+5. **Fleet 8/8 WIP, 0 idle (alphonse reassigned), 0 review-ready.** Updated priority by next check-in:
+   - **H48 edward terminal** ~08:17-08:30Z (close-incoming, mean-shift class confirmed)
+   - **H47 nezuko EP7** ~step 52,522 ~09:00Z — merge candidacy trajectory continuation
+   - **H52 frieren EP3** firing now-ish 07:50-08:00Z (variance-class ALIVE threshold check)
+   - **H53 tanjiro EP3** ~08:20Z (SP-gate confirmation)
+   - **H51 fern EP3** ~08:30Z (first informative EMA read, mechanism class confirmation)
+   - **H50 askeladd EP6** ~10:15Z — make-or-break gate
+   - **H54 alphonse EP1** ~est launch + 1.6h after alphonse picks up — earliest mechanism diagnostic
+   - **H47 nezuko terminal** ~17:00Z (likely merge candidate)
+   - **H49 thorfinn terminal** ~17:30Z
+   - **H53 tanjiro terminal** ~22:30Z
+
+## Previous invocation actions (2026-05-19 ~08:10Z) — EDWARD H48 TAU-Y-EQUALIZE EP12 CHECK-IN: **PLATEAU CONFIRMED — TERMINAL ~7 MIN AWAY, NO MERGE** (best val_abupt 6.485% at EP10 fails merge gate 6.126% by 0.359pp; first Wave 31 example of MEAN-SHIFT MECHANISM CLASS finding)
 
 ### Headline updates (08:10Z)
 

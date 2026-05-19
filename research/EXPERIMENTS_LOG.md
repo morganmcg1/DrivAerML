@@ -1,3 +1,51 @@
+## 2026-05-19 08:25 — PR #1192: H45 ANCHOR-CROSSCHAN-DEC — Surface Decoder Cross-Channel Attention (alphonse, 13-ep full) — TERMINAL EP13-EMA CLOSED (val_abupt 6.3523% +22.6bp FAIL + test_abupt 6.0751% +23.1bp FAIL) / MECHANISM-POSITIVE NULL — weight-space rank-decoupling 18.6× threshold but val null — STRUCTURAL FINDING (band attractor is NOT in surface decoder pre-projection cross-channel structure)
+
+- **Branch**: `alphonse/h45-crosschan-dec` (closed at 08:25Z)
+- **W&B run**: 8-rank DDP rank0 `lhivsp6j` (group `wave31_h45_crosschan_dec`, 916.3 min / ~15.3h, natural EP13 completion, EP13 EMA checkpoint best, ~3.4M extra params / +6.5% overhead)
+- **Hypothesis**: Insert cross-channel attention layer over 4 output dimensions (cp, τx, τy, τz) BEFORE the final surface_out projection. Each channel becomes a query attending to the others' representations via MultiheadAttention. Zero-init → bit-exact baseline at init. Tests whether the [1.44, 1.55] τz/τx band attractor lives in the surface decoder pre-projection rank-coupling.
+
+### Terminal metrics (rank0 `lhivsp6j` EP13 EMA best-ckpt)
+
+| Metric | EP13 val (34 cars) | EP13 test (50 cars) | Baseline (PR #972) | Δ to baseline | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.3523%** | — | 6.126% (merge) | +22.6 bp | ❌ FAIL |
+| val_SP | 4.1331% | — | 3.577% floor | +55.6 bp | ❌ binding gate fail |
+| val_vol_p | 3.7906% | — | 3.643% floor | +14.8 bp | tight but above floor |
+| val_WSS | 7.2012% | — | 6.727% | +47.4 bp | above baseline |
+| test_abupt | — | 6.0751% | 5.844% | +23.1 bp | ❌ FAIL |
+| test_SP | — | 3.8488% | 3.577% | +27.2 bp | above floor |
+| test_vol_p | — | 3.7074% | 3.643% | +6.4 bp | tight but above floor |
+| test_WSS | — | 6.9821% | 6.727% | +25.5 bp | above baseline |
+| test wsz/wsx | — | 1.454 | 1.473 | −1.9 bp | ✅ slight band-edge approach (not load-bearing) |
+
+### MECHANISM-POSITIVE NULL — weight-space rank-decoupling fired but val null
+
+| step | trainer EP | cp norm | τx norm | τy norm | τz norm | **τz/τx out_weight_norm** |
+|---:|:--|---:|---:|---:|---:|---:|
+| 10,864 | EP1 | 0.0779 | 0.0679 | 0.0418 | 0.0563 | 0.83 (sub-symmetric) |
+| 32,594 | EP3 | 0.00287 | 0.00217 | 0.02772 | 0.02114 | **9.75 (PASS gate 1.3)** |
+| 43,466 | EP5 | 0.00193 | 0.00125 | 0.02754 | 0.02180 | **17.37** |
+| **52,528** | **EP7** | 0.00135 | 0.00092 | 0.02851 | 0.02225 | **24.16 ← PEAK (18.6× gate)** |
+| 70,652 | EP13 | (sustained 9-24× across EP7-EP13) | | | | strongly mechanism-positive |
+
+**Structural finding**: weight-space rank-decoupling at the surface decoder projection IS achievable but does NOT drive val-space τz/τx band-attractor escape. The band attractor is **downstream of** the projection-matrix rank coupling — it lives in the shared surface_hidden representation BEFORE the projection, or in the encoder feature space that produces surface_hidden, or in the per-vertex loss formulation. Cross-channel attention residual escape mechanism is insufficient for val improvement.
+
+### Wave 30/31 mechanism-class taxonomy update
+
+H45 adds the 5th mechanism class observation:
+
+| Class | Examples | Result |
+|---|---|---|
+| Variance-class (encoder) | H35 NPCA+SSFL (ref std 0.251 EP6 peak), H52 NPCA×YAW activating | mechanism alive |
+| Mean-shift class | H48 TAU-Y-EQUALIZE (mean 0.401 plateau 6.485%) | mechanism alive, val null |
+| Variance-class (decoder sublayer) | H47 V-DEPTH (sublayer +26-57%, EP6 6.357% merge candidate) | mechanism alive, **val LIVE** |
+| Cross-channel (weight-space) | **H45 CROSSCHAN-DEC (weight ratio 24×)** | mechanism alive, **val null** |
+| Shared-capacity (NEW, assigned alphonse H54) | H54 SURFACE-DEEP — surface decoder depth bump mirror of H47 | TBD |
+
+### Disposition
+
+PR closed at 08:25Z. Alphonse reassigned to H54 SURFACE-DEEP (PR #1203) — mirror of H47 V-DEPTH on the surface decoder side. The mechanism-positive null on H45 narrows the search: capacity expansion BEFORE the projection (shared-capacity-class) is the natural next axis to test on the surface side.
+
 ## 2026-05-19 02:33 — PR #1191: H36 ANCHOR-SLICE-QUERIES — Deepest vol_p Floor Crossing in Wave 31 History (tanjiro, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt +0.112pp MISS + test_SP +0.140pp FLOOR BREACH) / 26TH WAVE-30/31 DEAD END ON MERGE DIMENSION / 🏆 7TH TEST_VOL_P FLOOR CROSSING (−0.165pp DEEPEST in Wave 31) + 3RD VARIANCE-CLASS MECHANISM CONFIRMATION (with H26 NPCA, H35 NPCA+SSFL)
 
 - **Branch**: `tanjiro/h36-anchor-slice-queries` (closed at 02:33Z)
