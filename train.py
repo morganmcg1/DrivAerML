@@ -18,7 +18,7 @@ import gc
 import math
 import os
 import time
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -138,6 +138,7 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    yaw_aug_theta_max: float = 0.0
     debug: bool = False
 
 
@@ -220,6 +221,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "yaw_aug_theta_max": (
+            "Random yaw augmentation: max rotation angle (degrees) about the "
+            "z (vertical) axis. Applied per-item per-batch during training "
+            "only; rotates surface/volume xyz, surface normals, and vector "
+            "wall-shear targets (tau_x, tau_y) consistently. 0.0 disables "
+            "augmentation (exact baseline)."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -292,6 +300,55 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
             metrics[f"{prefix}/freq_axis_{axis}_mean"] = float(log_freq[axis].mean().item())
             metrics[f"{prefix}/freq_axis_{axis}_std"] = float(log_freq[axis].std().item())
     return metrics
+
+
+def apply_yaw_augmentation(batch, theta_max_deg: float, training: bool):
+    """Random yaw rotation about the z (vertical) axis.
+
+    DrivAerML convention: x=streamwise, y=lateral (mean=0, mirror-symmetric),
+    z=vertical (ground to roof). Yaw is rotation about z, so it mixes the
+    (x, y) components of position, normals, and vector wall-shear targets;
+    surface_x[:,:,6] (area), volume_x[:,:,3] (sdf), surface_y[:,:,0] (cp), and
+    surface_y[:,:,3] (tau_z) are scalars / z-components and pass through.
+
+    Per-item theta ~ U[-theta_max, +theta_max] drawn fresh each step.
+    """
+    if not training or theta_max_deg <= 0.0:
+        return batch
+
+    B = batch.surface_x.shape[0]
+    device = batch.surface_x.device
+    theta_max = theta_max_deg * math.pi / 180.0
+    theta = (torch.rand(B, device=device) * 2.0 - 1.0) * theta_max  # [B]
+    cos_t = torch.cos(theta).view(B, 1, 1).to(batch.surface_x.dtype)
+    sin_t = torch.sin(theta).view(B, 1, 1).to(batch.surface_x.dtype)
+
+    def rot_xy(v: torch.Tensor) -> torch.Tensor:
+        # x' = x cos - y sin, y' = x sin + y cos (rotation about +z)
+        out = v.clone()
+        x = v[..., 0:1]
+        y = v[..., 1:2]
+        out[..., 0:1] = x * cos_t - y * sin_t
+        out[..., 1:2] = x * sin_t + y * cos_t
+        return out
+
+    surface_x = batch.surface_x.clone()
+    surface_x[:, :, 0:3] = rot_xy(batch.surface_x[:, :, 0:3])
+    if surface_x.shape[-1] >= 6:
+        surface_x[:, :, 3:6] = rot_xy(batch.surface_x[:, :, 3:6])
+
+    volume_x = batch.volume_x.clone()
+    volume_x[:, :, 0:3] = rot_xy(batch.volume_x[:, :, 0:3])
+
+    cos_t_y = cos_t.to(batch.surface_y.dtype)
+    sin_t_y = sin_t.to(batch.surface_y.dtype)
+    surface_y = batch.surface_y.clone()
+    tau_x = batch.surface_y[:, :, 1:2]
+    tau_y = batch.surface_y[:, :, 2:3]
+    surface_y[:, :, 1:2] = tau_x * cos_t_y - tau_y * sin_t_y
+    surface_y[:, :, 2:3] = tau_x * sin_t_y + tau_y * cos_t_y
+
+    return replace(batch, surface_x=surface_x, surface_y=surface_y, volume_x=volume_x)
 
 
 def build_model(config: Config) -> SurfaceTransolver:
@@ -936,6 +993,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                 leave=False,
                 disable=not state.is_main,
             ):
+                if config.yaw_aug_theta_max > 0.0:
+                    batch = batch.to(device)
+                    batch = apply_yaw_augmentation(
+                        batch, config.yaw_aug_theta_max, training=True
+                    )
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
