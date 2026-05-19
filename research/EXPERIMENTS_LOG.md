@@ -1,3 +1,85 @@
+## 2026-05-19 02:33 — PR #1191: H36 ANCHOR-SLICE-QUERIES — Deepest vol_p Floor Crossing in Wave 31 History (tanjiro, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt +0.112pp MISS + test_SP +0.140pp FLOOR BREACH) / 26TH WAVE-30/31 DEAD END ON MERGE DIMENSION / 🏆 7TH TEST_VOL_P FLOOR CROSSING (−0.165pp DEEPEST in Wave 31) + 3RD VARIANCE-CLASS MECHANISM CONFIRMATION (with H26 NPCA, H35 NPCA+SSFL)
+
+- **Branch**: `tanjiro/h36-anchor-slice-queries` (closed at 02:33Z)
+- **W&B run**: 8-rank DDP rank0 `vu93lzgc` (group `wave31_h36_anchor_slice_queries`, 839.6 min / ~14.0h, natural EP13 completion, EP13 EMA checkpoint best, peak GPU 82.6 GB / 80.5%)
+- **Hypothesis**: Add learnable 3D anchor positions A ∈ R^{S×3} to each slice query: `q_s' = q_s + MLP_anchor(PE(A_s))`. Each anchor learns to specialize to a spatial region (windshield, A-pillar, underbody, wake), forcing per-slice geometry-specific τz/τx representations. DAB-DETR-style query modulation.
+
+### Terminal metrics (rank0 `vu93lzgc` EP13 EMA best-ckpt)
+
+| Metric | EP13 val (34 cars) | EP13 test (50 cars) | Baseline | Δ to baseline | Verdict |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.2379%** | — | 6.126% (merge) | +0.112pp | ❌ FAIL |
+| val_VP | 3.6174% | — | — | — | — |
+| val_SP | 4.1067% | — | — | — | — |
+| val_WSS | 7.0779% | — | — | — | — |
+| test_abupt | — | 5.9045% | 5.844% | +0.061pp | minor regression |
+| test_SP | — | **3.7169%** | 3.577% (floor) | **+0.140pp** | ❌ **FLOOR BREACH (binding gate)** |
+| test_vol_p | — | **3.4780%** | 3.643% (floor) | **−0.165pp** | ✅ **PASS — 7TH vol_p crossing + DEEPEST in Wave 31** |
+| test_WSS | — | 6.8146% | 6.727% | +0.087pp | minor regression |
+
+### DEEPEST vol_p crossing in Wave 31 history
+
+H36's −0.165pp below floor beats H31 WALLDIST's previous record of −0.155pp by 0.010pp. Volume pathway specialization via anchor-conditioned slice queries delivered the strongest single-axis vol_p improvement to date.
+
+### VARIANCE-CLASS MECHANISM — 3rd confirmation in Wave 31
+
+| Metric | H26 NPCA | H35 NPCA+SSFL | **H36 ANCHOR-SLICE** |
+|---|---:|---:|---:|
+| val τz/τx mean (EP13) | 1.526 | 1.527 | **1.547** (band-high edge) |
+| val τz/τx std (EP13) | 0.108 | 0.251 fleet-peak | **0.195** |
+| test τz/τx std | 0.132 | — | **0.140** |
+| val n_outside_band | 9/34 | 17/34 | **15/34** |
+| test n_outside_band | 24/50 | — | **23/50 (46%)** |
+| test_vol_p | 3.607% | 3.585% | **3.478%** (deepest) |
+| Verdict | merged | closed | closed |
+
+H36 is the 3rd variance-class confirmation: per-car spread increases (val 0.195 = ~6.5× baseline ~0.03), but mean stays band-high (1.547 just inside upper edge). Same structural ceiling as H26/H35: variance class produces per-car spread WITHOUT translating into per-axis L2 reduction. test_abupt regresses +0.06pp despite the mechanism alive.
+
+### Anchor mechanism vital signs
+
+- `anchor_pairwise_dist_mean` grew 2.142 (EP1) → 2.193 (EP13) — anchors spread across full DrivAerML canonical bbox (x=4.68, y=2.32, z=2.08), NO COLLAPSE
+- `anchor_mod_abs_mean = 5.27`, `anchor_mod_abs_max = 348.76`, `anchor_mod_rms = 14.46` — distributed activity with 1-2 slots producing very large directional bias (max ~66× mean = ANCHOR SPARSITY)
+- `weight_param/anchors/{mean,std,min,max} = 0.665 / 1.180 / −1.168 / 3.995` — drifted from grid centroid x≈1.7, still inside DrivAerML envelope
+- `nonfinite_count = 0` across all anchor modules through 14h training
+- Anchor grad `mean_abs = 1.28e-5`, `max_abs = 2.36e-4` (well-behaved)
+
+### Anchor sparsity — possible SP regression mechanism
+
+`anchor_mod_abs_max 348.76` while `anchor_mod_abs_mean 5.27` = max is ~66× mean. A small number of anchors are dominating the modulation signal. This may be what drives the SP channel regression — a few high-magnitude anchors collapsing the surface pressure routing capacity in those cars. **An anchor norm clamp or per-anchor L2 penalty would be the natural follow-up** (student suggestion #4).
+
+### val/test variance mechanism divergence — variance class overfits to training distribution
+
+val τz/τx std 0.195 vs test 0.140 = +0.055pp gap. The variance mechanism partially overfits to the training cars' specialization patterns. This is DISTINCT from H48's mean-shift mechanism where per-car τz/τx mean 0.40 held stable across all 34/34 val cars (and projects to all 50 test cars at terminal). **Mean-shift mechanisms generalize better than variance-class mechanisms** — emerging Wave 31 structural insight.
+
+### Beats AB-UPT on 3 of 4 paper-facing channels
+
+- test_SP: H36 3.717% vs AB-UPT 3.82% = **−0.10pp ahead**
+- test_vol_p: H36 3.478% vs AB-UPT 6.08% = **−2.60pp ahead** (massive volume win)
+- test_WSS aggregate: H36 6.815% vs AB-UPT 7.29% = **−0.48pp ahead**
+- test_abupt: not reported by AB-UPT
+
+But per-axis WSS comparison fails: H36 τx 6.03% vs AB-UPT 5.35% (+0.68pp), H36 τy 7.41% vs AB-UPT 3.65% (+3.76pp), H36 τz 8.89% vs AB-UPT 3.63% (+5.27pp). The per-axis WSS gap is a structural feature of our fleet baseline (#972), not the H36 mechanism.
+
+### Wave 30/31 floor crossing tally — now 7 (DEEPEST yet)
+
+| # | Hypothesis | Mechanism axis | test_vol_p | Δ vs floor | Merge status |
+|---|---|---|---:|---:|---|
+| 1 | H31 WALLDIST | encoder-input feature | 3.488% | −0.155pp | MERGED |
+| 2 | H26 NPCA | encoder-input feature | 3.607% | −0.036pp | MERGED |
+| 3 | H46 SDORTH | decoder weight init | — | (PathB) | closed |
+| 4 | H33 SLICEPE | encoder slice-PE additive | 3.522% | −0.121pp | closed |
+| 5 | H35 NPCA+SSFL | stack: encoder + spectral-loss | 3.585% | −0.058pp | closed |
+| 6 | H44 YAW-AUG | data augmentation rotation | 3.608% | −0.035pp | closed |
+| 7 | **H36 ANCHOR-SLICE-QUERIES** | **anchor query modulation** | **3.478%** | **−0.165pp ⭐ DEEPEST** | **closed** |
+
+**5 of 7 closed crossings have val_abupt FAIL; 6 of 7 have test_SP FLOOR BREACH.** test_SP remains 0/7 crossings — **SP is the binding unsolved gate.**
+
+### Conclusion
+
+26th Wave 30/31 dead end on merge dim, 7th test_vol_p floor crossing (DEEPEST in Wave 31 at −0.165pp), 3rd variance-class mechanism confirmation. Anchor sparsity (max ~66× mean) and val/test variance divergence (0.195 → 0.140) emerge as new Wave 31 mechanism class observations. H53 CP-LOSS-WEIGHT carried forward to attack test_SP binding gate (PR #1202).
+
+---
+
 ## 2026-05-19 02:15 — PR #1190: H44 YAW-AUG — First Data-Augmentation Axis Crossing in DrivAerML Fleet History (frieren, 13-ep full) — TERMINAL EP13-EMA NOT-A-MERGE (val_abupt +0.229pp + test_SP +0.276pp FAIL) / 25TH WAVE-30/31 DEAD END ON MERGE DIMENSION / 🏆 6TH TEST_VOL_P FLOOR CROSSING + 1ST DATA-AUG AXIS + CROSS-CHANNEL WSS REGULARIZATION NOVEL MECHANISM CLASS
 
 - **Branch**: `frieren/h44-yaw-aug-symmetry-break` (closed at 02:08Z)

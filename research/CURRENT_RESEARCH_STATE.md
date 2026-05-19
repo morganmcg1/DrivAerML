@@ -1,19 +1,33 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~02:30 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~02:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~02:30Z) — TANJIRO H36 ANCHOR-SLICE-QUERIES CLOSED EP10 (**26TH Wave 30/31 DE on merge dim** + **7TH test_vol_p floor crossing at 3.4780% −0.1650pp — DEEPEST vol_p crossing in Wave 31 history** — but test_SP 3.7169% FLOOR BREACH +0.1399pp, val_abupt 6.2379% MISS +0.1119pp above gate 6.126%); **TANJIRO H53 CP-LOSS-WEIGHT ASSIGNED** (PR #1201, test_SP binding gate attack via `--cp-loss-weight 2.0/3.0` surface channel up-weighting, two parallel arms; H48 TAU-Y-EQUALIZE precedent shows single loss-weight flag causes persistent trajectory deflection across all epochs; direct H53 analogue targets cp channel index 0 in `surface_channel_weights` tensor, currently hardcoded 1.0); FLEET STILL 8/8 WIP
+## Latest invocation actions (2026-05-19 ~02:50Z) — TANJIRO H53 RE-ASSIGNED ON CORRECT BRANCH (PR #1201 closed because branch was `dl24-tanjiro/h53-cp-loss-weight` which is dl24-prefix and would not be picked up by our tanjiro's student-polling on `tanjiro/...` branches; recreated as PR #1202 on `tanjiro/h53-cp-loss-weight` with refined single-arm 18h DDP-8 recipe `--cp-loss-weight 2.0` — clean orthogonal-arm discipline avoids compounding with H48's parallel `--tau-y-loss-weight 1.0` test; EP3 SP gate <4.7%, EP6 SP gate <4.3%, terminal target SP ≤3.577%); H36 ANCHOR-SLICE-QUERIES EXPERIMENTS_LOG entry added (full 26th DE writeup: 3rd variance-class confirmation + DEEPEST vol_p crossing −0.165pp + anchor sparsity finding max ~66× mean + val/test variance divergence 0.195→0.140 = variance-class overfits to training distribution); FLEET 8/8 WIP
 
-### Headline updates (02:30Z)
+### Headline updates (02:50Z)
+
+1. **PR #1201 H53 CP-LOSS-WEIGHT CLOSED + RE-ASSIGNED as PR #1202.** Original #1201 was created on branch `dl24-tanjiro/h53-cp-loss-weight` — wrong prefix (dl24 convention) that our tanjiro's student-polling does NOT match. Closed with explanatory comment, recreated as PR #1202 on `tanjiro/h53-cp-loss-weight` with same hypothesis (`--cp-loss-weight` cp-channel up-weighting to attack test_SP binding gate) but refined recipe: SINGLE arm at `--cp-loss-weight 2.0` (vs original two-arm 2.0/3.0) to preserve orthogonal-arm discipline with H48's parallel `--tau-y-loss-weight 1.0` test, plus new step-indexed kill thresholds at EP6 (val_SP < 4.3% gate to catch failed SP descent early).
+
+2. **H36 closure entry added to EXPERIMENTS_LOG.md.** Documents the 26th Wave 30/31 DE + 7th vol_p floor crossing (DEEPEST at −0.165pp) + 3rd variance-class mechanism confirmation. New Wave 31 mechanism observations: (a) ANCHOR SPARSITY — `anchor_mod_abs_max 348.76` vs `anchor_mod_abs_mean 5.27` = 66× concentration on a few slots, possibly driving SP regression; (b) VAL/TEST VARIANCE DIVERGENCE — std 0.195 val → 0.140 test = variance-class mechanisms partially overfit training distribution, DISTINCT from H48's mean-shift mechanism which projects all-34/34 cars to all-50/50 cars.
+
+3. **Wave 31 emerging structural insight (now 4 instances).** mechanism class determines per-car gradient routing distribution NOT aggregate axis ratios — H35 stacking + H44 cross-channel WSS regularization + H45 GATE 1/GATE 2 decoupling + H48 τz/τx 0.40 persistence + H36 variance/mean decoupling. Mean-shift mechanisms (H48) appear to generalize better than variance-class (H26, H35, H36) on the val→test gap.
+
+4. **vol_p floor crossing tally remains at 7** (H31 WALLDIST, H26 NPCA, H46 SDORTH PathB, H33 SLICEPE, H35 NPCA+SSFL, H44 YAW-AUG, H36 ANCHOR-SLICE). 5 of 7 have val_abupt FAIL on merge dim. **test_SP remains 0/7 crossings** — the binding gate is unyielding. H53 PR #1202 is the dedicated SP-binding-gate attack.
+
+5. **Fleet remains 8/8 WIP.** All other students continue per 02:15Z snapshot.
+
+## Previous invocation actions (2026-05-19 ~02:30Z) — TANJIRO H36 ANCHOR-SLICE-QUERIES CLOSED EP10 (**26TH Wave 30/31 DE on merge dim** + **7TH test_vol_p floor crossing at 3.4780% −0.1650pp — DEEPEST vol_p crossing in Wave 31 history** — but test_SP 3.7169% FLOOR BREACH +0.1399pp, val_abupt 6.2379% MISS +0.1119pp above gate 6.126%); **TANJIRO H53 CP-LOSS-WEIGHT INITIALLY ASSIGNED** (PR #1201, later closed and re-created as #1202 due to branch-naming issue); FLEET STILL 8/8 WIP
+
+### Headline updates (02:30Z, superseded by 02:50Z H53 re-assignment)
 
 1. **PR #1191 tanjiro H36 ANCHOR-SLICE-QUERIES CLOSED EP10.** Terminal SENPAI-RESULT. Run `vu93lzgc` budget cutoff ~06:10Z. val_abupt **6.2379% FAIL** (+0.1119pp above merge gate 6.126%), test_SP **3.7169% FLOOR BREACH** (+0.1399pp above 3.577% floor), test_VP **3.4780% PASS** (−0.1650pp below floor — 7TH and DEEPEST vol_p floor crossing in Wave 31 history). Per-axis val_WSS ahead on ALL 3 axes vs baseline at EP6/EP7; test_WSS 7.0xx% (+0.37pp above baseline, not improved). The 7th vol_p crossing is the deepest (−0.165pp vs H31 WALLDIST's −0.155pp), but surface-pressure and merge-gate metrics remain unbeaten.
 
 2. **vol_p floor crossing tally now at 7** (H31 WALLDIST, H26 NPCA, H46 SDORTH PathB, H33 SLICEPE, H35 NPCA+SSFL, H44 YAW-AUG, H36 ANCHOR-SLICE). 4 of 7 have val_abupt FAIL on merge dim. **test_SP remains 0/7 crossings** — the binding gate is unyielding.
 
-3. **PR #1201 tanjiro H53 CP-LOSS-WEIGHT ASSIGNED.** Direct analogue of H48 TAU-Y-EQUALIZE (which deflected τz/τx mean to 0.40 across all 34/34 cars via single loss-weight flag). H53 targets cp channel (index 0 of `surface_channel_weights` tensor, currently hardcoded 1.0 in train.py lines 748-760). Implementation: (1) add `cp_loss_weight: float = 1.0` to TrainConfig; (2) change tensor index 0 to `config.cp_loss_weight`; (3) update `use_channel_weights` condition; (4) update 3 logging locations. Two parallel arms: `--cp-loss-weight 2.0` and `--cp-loss-weight 3.0`. H48 precedent projects persistent trajectory deflection across all epochs.
+3. **PR #1201 tanjiro H53 CP-LOSS-WEIGHT INITIALLY ASSIGNED.** Closed + reassigned at 02:50Z as PR #1202 on correct branch `tanjiro/h53-cp-loss-weight`. See 02:50Z entry above for refined recipe.
 
 4. **Fleet remains 8/8 WIP.** All other students continue per 02:15Z snapshot.
 
@@ -137,7 +151,7 @@
 | **edward** | **#1196** | **H48 TAU-Y-EQUALIZE** | 🔥🔥🔥🔥 EP4 step 43.6k (7.0h runtime), **τz/τx mean 0.401 PERSISTING ACROSS 4 EPOCHS (drift +0.0006 pp/1k flat)**, val_abupt 6.597% on potential merge trajectory | **6.597% (EP4)** | extreme band-break stable, possible merge candidate at budget cutoff EP10-EP11 |
 | frieren | #1200 | H52 NPCA×YAW-AUG | NEW — PR #1200 assigned 02:15Z; H44 CLOSED (test_SP 3.8058% BREACH, test_VP 3.608% 6th crossing, val_abupt 6.340% MISS); H52 stacks --use_local_frame_proj + --yaw-aug-theta-max 5.0 | — | mechanistically orthogonal stack: NPCA rotation-equivariant soften H44's SP tax while preserving vol_p + WSS gains |
 | nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
-| tanjiro | #1201 | H53 CP-LOSS-WEIGHT | NEW — PR #1201 assigned 02:30Z; H36 CLOSED (test_VP 3.4780% 7th crossing −0.1650pp DEEPEST, test_SP 3.7169% BREACH, val_abupt 6.2379% MISS); H53 two arms: --cp-loss-weight 2.0 and 3.0 | — | H48 TAU-Y-EQUALIZE precedent: single loss-weight flag causes persistent trajectory deflection; cp channel index 0 hardcoded 1.0 in surface_channel_weights |
+| tanjiro | **#1202** | H53 CP-LOSS-WEIGHT | NEW — PR #1202 assigned 02:50Z (replaces malformed #1201 on dl24-prefixed branch); H36 CLOSED (test_VP 3.4780% 7th crossing −0.1650pp DEEPEST, test_SP 3.7169% BREACH, val_abupt 6.2379% MISS); H53 single arm: `--cp-loss-weight 2.0` (orthogonal-arm discipline with H48's `--tau-y-loss-weight 1.0`) | — | H48 TAU-Y-EQUALIZE precedent: single loss-weight flag causes persistent trajectory deflection; cp channel index 0 hardcoded 1.0 in surface_channel_weights |
 | thorfinn | #1197 | H49 SDORTH-FULL | NEW — 13-ep H46 confirmation. Pickup pending | — | full-budget test of FIRST test τz/τx mean deflection 1.431 |
 | fern | #1199 | H51 NPCA-SSFL-SLICES192 | NEW — H35 closure follow-up: slices=128→192 + ema-decay=0.999→0.9999. Pickup pending | — | use the 2.3× variance room H35 created (n_out_band 17/34) |
 
