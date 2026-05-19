@@ -1261,6 +1261,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
+                val_surface_metrics = val_metrics["val_surface"]
+                if "tau_zx_ratio_mean" in val_surface_metrics:
+                    log_metrics["mechanism/tau_zx_ratio_mean"] = val_surface_metrics["tau_zx_ratio_mean"]
+                    log_metrics["mechanism/tau_zx_ratio_std"] = val_surface_metrics["tau_zx_ratio_std"]
+                    log_metrics["mechanism/n_outside_band_1.44_1.55"] = val_surface_metrics["tau_zx_n_outside_band"]
+                    log_metrics["mechanism/tau_zx_ratio_cars"] = val_surface_metrics["tau_zx_ratio_cars"]
                 log_metrics.update(collect_string_sep_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(

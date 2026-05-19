@@ -910,6 +910,9 @@ class EvalAccumulator:
     case_sums: dict[str, dict[str, list[float]]] = field(
         default_factory=lambda: {key: {} for key in EVAL_KEYS}
     )
+    tau_pred_abs_case: dict[str, dict[str, list[float]]] = field(
+        default_factory=lambda: {"x": {}, "y": {}, "z": {}}
+    )
 
 
 def _masked_sse_count(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> tuple[float, int]:
@@ -935,6 +938,21 @@ def _accumulate_case_rel_l2(
     state = store.setdefault(case_id, [0.0, 0.0])
     state[0] += error_sq
     state[1] += target_sq
+
+
+def _accumulate_case_abs_sum(
+    store: dict[str, list[float]],
+    *,
+    case_id: str,
+    values: torch.Tensor,
+) -> None:
+    if values.numel() == 0:
+        return
+    abs_sum = float(values.float().abs().sum().detach().cpu().item())
+    count = float(values.numel())
+    state = store.setdefault(case_id, [0.0, 0.0])
+    state[0] += abs_sum
+    state[1] += count
 
 
 def _rel_l2(store: dict[str, list[float]]) -> tuple[float, float]:
@@ -1031,6 +1049,11 @@ def accumulate_eval_batch(
                     pred=surface_pred_valid[:, channel : channel + 1],
                     target=surface_target_valid[:, channel : channel + 1],
                 )
+                _accumulate_case_abs_sum(
+                    accumulator.tau_pred_abs_case[axis],
+                    case_id=case_id,
+                    values=surface_pred_valid[:, channel],
+                )
         volume_valid = batch.volume_mask[case_idx].bool()
         if bool(volume_valid.any()):
             _accumulate_case_rel_l2(
@@ -1057,6 +1080,12 @@ def merge_eval_accumulators(accumulators: Iterable[EvalAccumulator]) -> EvalAccu
                 state = merged.case_sums[key].setdefault(case_id, [0.0, 0.0])
                 state[0] += values[0]
                 state[1] += values[1]
+        for axis, axis_store in accumulator.tau_pred_abs_case.items():
+            merged_axis = merged.tau_pred_abs_case.setdefault(axis, {})
+            for case_id, values in axis_store.items():
+                state = merged_axis.setdefault(case_id, [0.0, 0.0])
+                state[0] += values[0]
+                state[1] += values[1]
     return merged
 
 
@@ -1067,6 +1096,7 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
     wall_shear_y_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_y"])
     wall_shear_z_rel_l2, _ = _rel_l2(accumulator.case_sums["wall_shear_z"])
     volume_pressure_rel_l2, volume_cases = _rel_l2(accumulator.case_sums["volume_pressure"])
+    tau_pred_ratio_stats = _tau_pred_ratio_stats(accumulator.tau_pred_abs_case)
     abupt_axis_mean_rel_l2 = _finite_mean(
         [
             surface_pressure_rel_l2,
@@ -1114,6 +1144,48 @@ def finalize_eval_accumulator(accumulator: EvalAccumulator) -> dict[str, float]:
         "cases": max(surface_cases, wall_shear_cases, volume_cases),
         "surface_cases": surface_cases,
         "volume_cases": volume_cases,
+        **tau_pred_ratio_stats,
+    }
+
+
+def _tau_pred_ratio_stats(
+    tau_pred_abs_case: dict[str, dict[str, list[float]]],
+) -> dict[str, float]:
+    tau_x_case = tau_pred_abs_case.get("x", {})
+    tau_z_case = tau_pred_abs_case.get("z", {})
+    ratios: list[float] = []
+    for case_id, x_state in tau_x_case.items():
+        z_state = tau_z_case.get(case_id)
+        if z_state is None:
+            continue
+        x_sum, x_count = x_state
+        z_sum, z_count = z_state
+        if x_count <= 0.0 or z_count <= 0.0:
+            continue
+        x_mean_abs = x_sum / x_count
+        z_mean_abs = z_sum / z_count
+        if not math.isfinite(x_mean_abs) or x_mean_abs <= 0.0:
+            continue
+        if not math.isfinite(z_mean_abs):
+            continue
+        ratios.append(z_mean_abs / x_mean_abs)
+    n_cars = len(ratios)
+    if n_cars == 0:
+        return {
+            "tau_zx_ratio_mean": float("nan"),
+            "tau_zx_ratio_std": float("nan"),
+            "tau_zx_n_outside_band": 0.0,
+            "tau_zx_ratio_cars": 0.0,
+        }
+    mean = sum(ratios) / n_cars
+    var = sum((r - mean) ** 2 for r in ratios) / n_cars
+    std = math.sqrt(var)
+    n_outside = sum(1 for r in ratios if (r < 1.44 or r > 1.55))
+    return {
+        "tau_zx_ratio_mean": float(mean),
+        "tau_zx_ratio_std": float(std),
+        "tau_zx_n_outside_band": float(n_outside),
+        "tau_zx_ratio_cars": float(n_cars),
     }
 
 
@@ -1371,6 +1443,7 @@ def define_wandb_metrics() -> None:
         "train/weight_type/*",
         "train/weight_hist/*",
         "train/weight_hist_param/*",
+        "mechanism/*",
         "lr",
     ):
         wandb.define_metric(metric_prefix, step_metric="global_step")
@@ -1480,6 +1553,12 @@ def run_final_evaluation(
     }
     for split_name, metrics in full_val_metrics.items():
         full_val_log.update(metric_namespace("full_val", split_name, metrics))
+    full_val_surface = full_val_metrics["val_surface"]
+    if "tau_zx_ratio_mean" in full_val_surface:
+        full_val_log["mechanism/full_val_tau_zx_ratio_mean"] = full_val_surface["tau_zx_ratio_mean"]
+        full_val_log["mechanism/full_val_tau_zx_ratio_std"] = full_val_surface["tau_zx_ratio_std"]
+        full_val_log["mechanism/full_val_n_outside_band_1.44_1.55"] = full_val_surface["tau_zx_n_outside_band"]
+        full_val_log["mechanism/full_val_tau_zx_ratio_cars"] = full_val_surface["tau_zx_ratio_cars"]
     try:
         assert_required_finite_metrics(full_val_log, "full_val_primary")
     except RuntimeError as exc:
@@ -1500,6 +1579,12 @@ def run_final_evaluation(
     }
     for split_name, metrics in test_metrics.items():
         test_log.update(metric_namespace("test", split_name, metrics))
+    test_surface_metrics = test_metrics["test_surface"]
+    if "tau_zx_ratio_mean" in test_surface_metrics:
+        test_log["mechanism/test_tau_zx_ratio_mean"] = test_surface_metrics["tau_zx_ratio_mean"]
+        test_log["mechanism/test_tau_zx_ratio_std"] = test_surface_metrics["tau_zx_ratio_std"]
+        test_log["mechanism/test_n_outside_band_1.44_1.55"] = test_surface_metrics["tau_zx_n_outside_band"]
+        test_log["mechanism/test_tau_zx_ratio_cars"] = test_surface_metrics["tau_zx_ratio_cars"]
     try:
         assert_required_finite_metrics(test_log, "test_primary")
     except RuntimeError as exc:
