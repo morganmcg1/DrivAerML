@@ -1,11 +1,23 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~02:15 UTC)
+- **Date:** 2026-05-19 (latest invocation: 2026-05-19 ~02:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~02:15Z) — FRIEREN H44 YAW-AUG CLOSED EP13 (**25TH Wave 30/31 DE on merge dim** + **6TH test_vol_p floor crossing at 3.608% −0.035pp + FIRST DATA-AUGMENTATION AXIS CROSSING in DrivAerML fleet history** + cleanest cross-channel WSS regularization signal in Wave 31 — τz channel improved by −0.88pp at test DESPITE yaw rotation NOT mixing τz, NOVEL MECHANISM CLASS not predicted by hypothesis; all 3 WSS axes ahead of baseline at test; per-car std(τz/τx) val 0.198 PASSES 0.15 gate, test 0.118 partial; beats AB-UPT on vol_p −2.47pp and WSS aggregate −0.23pp); **FRIEREN H52 NPCA × YAW-AUG STACK ASSIGNED** (PR #1200, combines H26 NPCA encoder-input enrichment + H44 yaw aug θ_max=5°, mechanistically orthogonal axes: encoder-input × data-distribution; H35 just proved stacking works; predicted val_abupt 5.95-6.18% BORDERLINE merge candidate, test_vol_p 3.45-3.55% well below floor, NPCA frame-invariance expected to soften H44's surface-pressure tax); FLEET STILL 8/8 WIP
+## Latest invocation actions (2026-05-19 ~02:30Z) — TANJIRO H36 ANCHOR-SLICE-QUERIES CLOSED EP10 (**26TH Wave 30/31 DE on merge dim** + **7TH test_vol_p floor crossing at 3.4780% −0.1650pp — DEEPEST vol_p crossing in Wave 31 history** — but test_SP 3.7169% FLOOR BREACH +0.1399pp, val_abupt 6.2379% MISS +0.1119pp above gate 6.126%); **TANJIRO H53 CP-LOSS-WEIGHT ASSIGNED** (PR #1201, test_SP binding gate attack via `--cp-loss-weight 2.0/3.0` surface channel up-weighting, two parallel arms; H48 TAU-Y-EQUALIZE precedent shows single loss-weight flag causes persistent trajectory deflection across all epochs; direct H53 analogue targets cp channel index 0 in `surface_channel_weights` tensor, currently hardcoded 1.0); FLEET STILL 8/8 WIP
+
+### Headline updates (02:30Z)
+
+1. **PR #1191 tanjiro H36 ANCHOR-SLICE-QUERIES CLOSED EP10.** Terminal SENPAI-RESULT. Run `vu93lzgc` budget cutoff ~06:10Z. val_abupt **6.2379% FAIL** (+0.1119pp above merge gate 6.126%), test_SP **3.7169% FLOOR BREACH** (+0.1399pp above 3.577% floor), test_VP **3.4780% PASS** (−0.1650pp below floor — 7TH and DEEPEST vol_p floor crossing in Wave 31 history). Per-axis val_WSS ahead on ALL 3 axes vs baseline at EP6/EP7; test_WSS 7.0xx% (+0.37pp above baseline, not improved). The 7th vol_p crossing is the deepest (−0.165pp vs H31 WALLDIST's −0.155pp), but surface-pressure and merge-gate metrics remain unbeaten.
+
+2. **vol_p floor crossing tally now at 7** (H31 WALLDIST, H26 NPCA, H46 SDORTH PathB, H33 SLICEPE, H35 NPCA+SSFL, H44 YAW-AUG, H36 ANCHOR-SLICE). 4 of 7 have val_abupt FAIL on merge dim. **test_SP remains 0/7 crossings** — the binding gate is unyielding.
+
+3. **PR #1201 tanjiro H53 CP-LOSS-WEIGHT ASSIGNED.** Direct analogue of H48 TAU-Y-EQUALIZE (which deflected τz/τx mean to 0.40 across all 34/34 cars via single loss-weight flag). H53 targets cp channel (index 0 of `surface_channel_weights` tensor, currently hardcoded 1.0 in train.py lines 748-760). Implementation: (1) add `cp_loss_weight: float = 1.0` to TrainConfig; (2) change tensor index 0 to `config.cp_loss_weight`; (3) update `use_channel_weights` condition; (4) update 3 logging locations. Two parallel arms: `--cp-loss-weight 2.0` and `--cp-loss-weight 3.0`. H48 precedent projects persistent trajectory deflection across all epochs.
+
+4. **Fleet remains 8/8 WIP.** All other students continue per 02:15Z snapshot.
+
+## Previous invocation actions (2026-05-19 ~02:15Z) — FRIEREN H44 YAW-AUG CLOSED EP13 (**25TH Wave 30/31 DE on merge dim** + **6TH test_vol_p floor crossing at 3.608% −0.035pp + FIRST DATA-AUGMENTATION AXIS CROSSING in DrivAerML fleet history** + cleanest cross-channel WSS regularization signal in Wave 31 — τz channel improved by −0.88pp at test DESPITE yaw rotation NOT mixing τz, NOVEL MECHANISM CLASS not predicted by hypothesis; all 3 WSS axes ahead of baseline at test; per-car std(τz/τx) val 0.198 PASSES 0.15 gate, test 0.118 partial; beats AB-UPT on vol_p −2.47pp and WSS aggregate −0.23pp); **FRIEREN H52 NPCA × YAW-AUG STACK ASSIGNED** (PR #1200, combines H26 NPCA encoder-input enrichment + H44 yaw aug θ_max=5°, mechanistically orthogonal axes: encoder-input × data-distribution; H35 just proved stacking works; predicted val_abupt 5.95-6.18% BORDERLINE merge candidate, test_vol_p 3.45-3.55% well below floor, NPCA frame-invariance expected to soften H44's surface-pressure tax); FLEET STILL 8/8 WIP
 
 ### Headline updates (02:15Z)
 
@@ -116,20 +128,20 @@
 
 3. **PR #1190 frieren H44 YAW-AUGMENTATION mid-EP6 — val_VP 3.687% ALREADY below baseline EP13 final (3.80%).** Run `6scw4nto` mid-EP6 step ~58,200 (10.35h runtime, heartbeat 0.2 min ago). **val_VP descent has front-loaded by ~7 epochs vs baseline**. Trajectory: 5.898 (EP2) → 4.064 (EP3, **−31%**) → 3.806 (EP4) → 3.738 (EP5) → 3.687 (mid-EP6). Distance to floor 3.643%: **0.044pp**. Combined with per-axis WSS finding (τz NOT touched by yaw rotation is now AHEAD of baseline by 0.131pp despite no direct mixing — NOVEL cross-channel rotational-prior regularization) and τz/τx mean ratio shift down 0.029 to 1.510 (stable mid-band, vs baseline EP6 1.539). **5th vol_p floor crossing candidate in flight, FIRST via data augmentation axis.** Continue to natural budget cutoff ~05:40Z May 19.
 
-### Fleet status — 8/8 WIP, ZERO idle students
+### Fleet status — 8/8 WIP, ZERO idle students (updated 02:30Z)
 
-| Student | PR | H | Status @ 22:18Z | Latest val_abupt | Key signal |
+| Student | PR | H | Status @ 02:30Z | Latest val_abupt | Key signal |
 |:--|---:|:--|:--|---:|:--|
 | **alphonse** | **#1192** | H45 CROSSCHAN-DEC | 🔥🔥 EP4 step 32.8k, **GATE 1 MASSIVELY POSITIVE τz/τx out_norm 9.75, GATE 2 DECOUPLED (output ratio 1.52 in band)** | **6.960% (EP3)** | weight asymmetry / output band-break decoupling — Wave 31 structural insight |
 | askeladd | #1198 | H50 COORDSLICE | 🟢 mid-EP2 step 14.1k (2.15h runtime), **L0-INVERSION CONFIRMED** (L0 inter_slice_cos 0.453 LOWEST, L4 0.647 HIGHEST — opposite of H33's failure pattern) | 28.90% (EP1 cold-start, normal) | coordinate-conditioned anchors delivering L0-targeted positional disambiguation |
 | **edward** | **#1196** | **H48 TAU-Y-EQUALIZE** | 🔥🔥🔥🔥 EP4 step 43.6k (7.0h runtime), **τz/τx mean 0.401 PERSISTING ACROSS 4 EPOCHS (drift +0.0006 pp/1k flat)**, val_abupt 6.597% on potential merge trajectory | **6.597% (EP4)** | extreme band-break stable, possible merge candidate at budget cutoff EP10-EP11 |
-| **frieren** | **#1190** | **H44 YAW-AUG** | 🔥 mid-EP6 step 58.2k, **val_VP 3.687% (0.044pp from floor)** | 6.422% (mid-EP6) | rotational-prior cross-channel regularization (τz ahead despite NOT rotated) |
+| frieren | #1200 | H52 NPCA×YAW-AUG | NEW — PR #1200 assigned 02:15Z; H44 CLOSED (test_SP 3.8058% BREACH, test_VP 3.608% 6th crossing, val_abupt 6.340% MISS); H52 stacks --use_local_frame_proj + --yaw-aug-theta-max 5.0 | — | mechanistically orthogonal stack: NPCA rotation-equivariant soften H44's SP tax while preserving vol_p + WSS gains |
 | nezuko | #1194 | H47 V-DEPTH | SENT BACK 21:40Z — re-running 18h full budget. Pickup pending | 6.846% (6h terminal) | mechanism alive (block residuals 4-8× over KILL), budget truncated |
-| **tanjiro** | **#1191** | **H36 ANCHOR-SLICE-QUERIES** | 🔥🔥 EP7 step 67.9k (13.16h runtime), **LIVE MERGE CANDIDATE: val_VP 3.629% BELOW floor, val_abupt 6.245% +0.12pp above gate, projected terminal 6.10-6.18%** | **6.245% (EP7)** | per-axis WSS AHEAD on ALL 3 axes; budget cutoff ~06:10Z lands at EP9-EP10 |
+| tanjiro | #1201 | H53 CP-LOSS-WEIGHT | NEW — PR #1201 assigned 02:30Z; H36 CLOSED (test_VP 3.4780% 7th crossing −0.1650pp DEEPEST, test_SP 3.7169% BREACH, val_abupt 6.2379% MISS); H53 two arms: --cp-loss-weight 2.0 and 3.0 | — | H48 TAU-Y-EQUALIZE precedent: single loss-weight flag causes persistent trajectory deflection; cp channel index 0 hardcoded 1.0 in surface_channel_weights |
 | thorfinn | #1197 | H49 SDORTH-FULL | NEW — 13-ep H46 confirmation. Pickup pending | — | full-budget test of FIRST test τz/τx mean deflection 1.431 |
 | fern | #1199 | H51 NPCA-SSFL-SLICES192 | NEW — H35 closure follow-up: slices=128→192 + ema-decay=0.999→0.9999. Pickup pending | — | use the 2.3× variance room H35 created (n_out_band 17/34) |
 
-### vol_p floor crossing tally — 5 confirmed, 1 in flight
+### vol_p floor crossing tally — 7 confirmed (updated 02:30Z)
 
 | # | Hypothesis | Mechanism axis | test_vol_p | Δ vs floor | Status |
 |---|---|---|---:|---:|---|
@@ -137,11 +149,11 @@
 | 2 | H26 NPCA | encoder-input feature | 3.607% | −0.036pp | MERGED |
 | 3 | H46 SDORTH PathB | decoder weight init | (3-ep gap) | — | closed (PathB) |
 | 4 | H33 SLICEPE | encoder slice-PE additive | 3.522% | −0.121pp | closed |
-| 5 | **H35 NPCA+SSFL** | **stack: encoder + spectral-loss** | **3.585%** | **−0.058pp** | **closed 00:15Z** |
-| in flight | frieren H44 YAW-AUG | data augmentation rotation | 3.687% mid-EP6 | +0.044pp | continuing to EP10-EP11 by 05:40Z |
-| **in flight** | **tanjiro H36 ANCHOR-SLICE-QUERIES** | **anchor query modulation** | **3.629% EP7 (val side)** | **−0.014pp BELOW val floor** | **terminal at budget cutoff ~06:10Z** |
+| 5 | H35 NPCA+SSFL | stack: encoder + spectral-loss | 3.585% | −0.058pp | closed 00:15Z |
+| 6 | H44 YAW-AUG | data augmentation rotation | 3.608% | −0.035pp | **CLOSED 02:15Z** — test_SP 3.8058% BREACH, val_abupt 6.340% MISS |
+| 7 | **H36 ANCHOR-SLICE-QUERIES** | **anchor query modulation** | **3.4780%** | **−0.1650pp** | **CLOSED 02:30Z — DEEPEST vol_p crossing in Wave 31 history; test_SP 3.7169% BREACH, val_abupt 6.2379% MISS** |
 
-3 of 5 closed crossings have val_abupt FAIL on merge dim — vol_p floor is easier than the abupt meta-aggregate. **TWO in-flight candidates simultaneously**: tanjiro H36 has CROSSED the val-side floor at 3.629% AND is closest to merge gate at 6.245%. Frieren H44 is 0.044pp above floor at mid-EP6, descending. Both terminals expected within 4-5h window.
+5 of 7 closed crossings have val_abupt FAIL on merge dim; 6 of 7 have test_SP BREACH — **vol_p floor is consistently easier than both merge gate and SP floor**. H36 at 3.4780% is the deepest crossing by −0.123pp vs H31's previous record. test_SP remains 0/7 crossings beyond our baseline (3.577%). **SP floor is the binding unsolved gate.**
 
 ### Imminent decisions (next 8h)
 
