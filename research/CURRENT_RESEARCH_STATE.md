@@ -5,7 +5,36 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-19 ~07:55Z) — NEZUKO H47 V-DEPTH EP5 CHECK-IN: **MERGE CANDIDATE STRENGTHENING** (val_abupt 6.421% — only +0.295pp above merge gate 6.126%, monotonic descent EP3→EP4→EP5, EP6 fires ~08:15Z make-or-break early-merge signal)
+## Latest invocation actions (2026-05-19 ~08:10Z) — EDWARD H48 TAU-Y-EQUALIZE EP12 CHECK-IN: **PLATEAU CONFIRMED — TERMINAL ~7 MIN AWAY, NO MERGE** (best val_abupt 6.485% at EP10 fails merge gate 6.126% by 0.359pp; first Wave 31 example of MEAN-SHIFT MECHANISM CLASS finding)
+
+### Headline updates (08:10Z)
+
+1. **PR #1196 edward H48 EP12 check-in posted** ([comment 4485746788](https://github.com/morganmcg1/DrivAerML/pull/1196#issuecomment-4485746788)). Run `8cn5abxm` healthy at step 69,855 (mid-EP13 leg, 13.74h runtime, heartbeat fresh 08:10Z, nonfinite=0). **PLATEAU FIRMLY ESTABLISHED**: val_abupt is in 6.485-6.508% band across EP7→EP12 (a 0.023pp range over 6 epochs). Best val_abupt = 6.485% at EP10 (step 62,501) — **fails merge gate 6.126% by 0.359pp**. EP10→EP12 slight uptick (+0.003pp val_abupt, +0.007pp val_SP) is the standard mild-overfitting signal. EP13 terminal at step 70,636 expected ~08:17Z (~7 min away).
+
+2. **Best metrics at EP9-EP10 (likely best EMA ckpt for test eval)**:
+   - val_abupt: 6.485% (EP10) — merge gate fail by 0.359pp
+   - val_SP: 4.277% (EP9-EP10) — +0.70pp above test_SP floor 3.577% (binding gate fail)
+   - val_vol_p: 3.802% (EP9) — +0.16pp above test_vol_p floor 3.643% (tight but not crossing)
+   - val_WSS: 7.351% (EP10-EP11) — +0.62pp above baseline 6.727%
+
+3. **Structural finding: MEAN-SHIFT mechanism class established (cross-experiment value)**:
+   - H48 confirmed as first Wave 31 example of mean-shift mechanism class: τz/τx mean stuck at 0.401 (below band [1.44, 1.55]) with std 0.033 compressed and n_outside 34/34 across all reported epochs
+   - **Key Wave 31 mechanism-class taxonomy point**: mean-shift mechanisms produce stable equilibria that don't translate to val_abupt headroom, while variance-class mechanisms (H35 NPCA+SSFL ref, H47 V-DEPTH sublayer growth, H52 NPCA×YAW activating, H35 ALIVE-class) do
+   - Cross-experiment finding worth flagging in Wave 32 stacking proposals — avoid stacking with other mean-shift mechanisms
+
+4. **PR outcome decision**: Will close after terminal SENPAI-RESULT with test metrics. The structural mechanism finding is the valuable artifact, not a metric win. Closing reason: "Plateau confirmed at EP7+ — best val_abupt 6.485% fails merge gate 6.126% by 0.359pp; first Wave 31 confirmation of mean-shift mechanism class (τz/τx mean 0.401 stable below band, std compressed); taxonomy finding to inform Wave 32 stacking proposals."
+
+5. **Fleet 8/8 WIP, 0 idle, 0 review-ready.** Active runs in priority by next check-in:
+   - **H48 edward terminal** ~08:17Z (step 70,636) — terminal SENPAI-RESULT incoming, will close PR
+   - **H47 nezuko EP6** ~08:15Z (step 48,897) — MERGE-GATE-CROSSOVER decision (concurrent firing)
+   - **H52 frieren EP3** ~07:50-08:00Z (firing now) — std ALIVE threshold check
+   - **H53 tanjiro EP3** ~08:20Z — SP-gate confirmation
+   - **H51 fern EP3** ~08:30Z — first informative EMA read
+   - **H50 askeladd EP6** ~10:15Z — make-or-break
+   - **H47 nezuko terminal** ~17:00Z — likely merge candidate
+   - **H53 tanjiro terminal** ~22:30Z
+
+## Previous invocation actions (2026-05-19 ~07:55Z) — NEZUKO H47 V-DEPTH EP5 CHECK-IN: **MERGE CANDIDATE STRENGTHENING** (val_abupt 6.421% — only +0.295pp above merge gate 6.126%, monotonic descent EP3→EP4→EP5, EP6 fires ~08:15Z make-or-break early-merge signal)
 
 ### Headline updates (07:55Z)
 
