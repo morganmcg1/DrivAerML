@@ -322,8 +322,12 @@ def collect_coord_slice_pe_metrics(model: nn.Module) -> dict[str, float]:
         if proj is None:
             continue
         w = proj.weight.detach().float()
+        w_std = float(w.std().item())
         metrics[f"coord_slice_pe/block_{i}/proj_weight_norm"] = float(w.norm().item())
-        metrics[f"coord_slice_pe/block_{i}/proj_weight_std"] = float(w.std().item())
+        metrics[f"coord_slice_pe/block_{i}/proj_weight_std"] = w_std
+        # H58 binding mechanism gate: per-block proj_weight_std in PR-body namespace.
+        # Target: terminal > 0.18 vs init 0.088 (H33 auto-grew 8x; H50 stop-grad stayed ~init).
+        metrics[f"diag/coord_pe_proj_block{i}/weight_std"] = w_std
         b = proj.bias.detach().float()
         metrics[f"coord_slice_pe/block_{i}/proj_bias_norm"] = float(b.norm().item())
         centroids = getattr(attn, "_last_slice_centroids", None)

@@ -344,19 +344,16 @@ class TransolverAttention(nn.Module):
     ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
         if self.use_coord_slice_pe and coords is not None:
-            # Stop-grad on centroid computation: avoids routing absorption /
-            # softmax polarization where the model would game slice_weights to
-            # position centroids rather than route content. Gradient flows
-            # only to coord_pe_proj.weight via the differentiable Linear.
-            with torch.no_grad():
-                # slice_weights: [B, H, N, S] — average over heads to get per-token slice probs
-                slice_weights_mean = slice_weights.mean(dim=1)  # [B, N, S]
-                # Normalise per slice so centroids are proper weighted means
-                slice_norm = slice_weights_mean.sum(dim=1, keepdim=True) + 1e-5  # [B, 1, S]
-                # Weighted average of 3D coords → slice centroids
-                slice_centroids = torch.einsum("bnc,bns->bsc", coords, slice_weights_mean) / slice_norm.transpose(1, 2)  # [B, S, 3]
-                coord_rff = self.coord_pe_rff(slice_centroids)  # [B, S, rff_features * 2 * 4]
-            coord_pe = self.coord_pe_proj(coord_rff)  # [B, S, num_heads * D_head] — grad flows to .weight
+            # H58: routing gradients flow back into PE projection via centroid
+            # computation. H50 wrapped this in torch.no_grad(), starving the PE
+            # projection of optimization signal (proj_weight_std stuck at init).
+            # Allowing grad flow lets the projection learn discriminative
+            # coordinate-routing structure, restoring H33-style PE auto-growth.
+            slice_weights_mean = slice_weights.mean(dim=1)  # [B, N, S]
+            slice_norm = slice_weights_mean.sum(dim=1, keepdim=True) + 1e-5  # [B, 1, S]
+            slice_centroids = torch.einsum("bnc,bns->bsc", coords, slice_weights_mean) / slice_norm.transpose(1, 2)  # [B, S, 3]
+            coord_rff = self.coord_pe_rff(slice_centroids)  # [B, S, rff_features * 2 * 4]
+            coord_pe = self.coord_pe_proj(coord_rff)  # [B, S, num_heads * D_head]
             B_size, S_size = slice_centroids.shape[:2]
             coord_pe = coord_pe.view(B_size, S_size, self.num_heads, self.dim_head).permute(0, 2, 1, 3)  # [B, H, S, D_head]
             slice_tokens = slice_tokens + coord_pe
