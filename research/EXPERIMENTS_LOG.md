@@ -8,6 +8,21 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-20 11:30 UTC — PR #1220 CLOSED (misconfig + relaunch stall) → PR #1226 (H24-v2 with corrected CLI)
+
+- **Sequence:**
+  - 07:16Z fern launched `dl24-fern/H24-clamp015-peraxis-rank0..7` (run `5dp7s3nz`) on PR #1220.
+  - 07:45Z misconfig detected by config comparison across H21/H22/H23 — PR #1220 body omitted `--train-surface-points 65000 --eval-surface-points 65536 --train-volume-points 65000 --eval-volume-points 65536` overrides. Fern inherited train.py defaults (65536/16384), producing `train_views=347657` (4× more) and `total_estimated_steps=1303740` (4× more). Projected runtime 43h vs 22.5h timeout.
+  - 10:05Z ADVISOR comment posted on PR #1220 with corrected CLI and instruction to kill `5dp7s3nz`.
+  - 11:30Z: 1.5h after advisor comment, fern's student loop had NOT acted. Old run still active at step 126k/1303k. No new W&B runs with H24-clamp015-peraxis-v2 group. No new commits on fern's PR branch.
+  - 11:30Z PR #1220 CLOSED with explanatory comment.
+  - 11:35Z PR #1226 created with corrected CLI as H24-v2 reassignment.
+- **Decision:** Close+reassign was more decisive than waiting another iteration. Fern's student loop will detect the closed PR → mark idle → pick up #1226 on next poll. Old run `5dp7s3nz` will be killed by the loop transition.
+- **Mechanism preserved:** H24-v2 has identical hypothesis (clamp=0.15 + per-axis τ "1.0,1.2,1.5"). Only the reproduce command was corrected.
+- **Process lesson:** Researcher-agent-generated PR bodies do NOT inherit the project's required CLI overrides — every auto-generated DrivAerML PR must be grep-validated for `--train-surface-points`, `--train-volume-points` against the H19 reference command (PR #1180) before students pick them up. Memory record [[drivaerml-train-points-override]] saved.
+
+---
+
 ## 2026-05-20 07:10 UTC — H24 ASSIGNMENT RECONCILIATION: PR #1219 (clamp=0.10) superseded by PR #1220 (clamp=0.15 + per-axis τ compound)
 
 - **Original assignment (my design):** PR #1219 `[dl24-fern] WSS H24: H19 + clamp=0.10 — soft gradient floor ablation midpoint` — a single-variable clamp ablation between H21 (0.15) and H19 (0.05) defaults.

@@ -1,5 +1,6 @@
 # SENPAI Research State
-- 2026-05-20 09:55 UTC — **EP3 WAVE UPDATE: H22 ⭐ and H23 ⭐ BOTH BEAT H19 EP3 val_wss; H21 SOFT-FLAGGED (within bounds); H24 DETECTED MISCONFIG — sent back to fern for relaunch with corrected `--train-*-points 65000` flags.** All 4 students still occupied. H22 projects to test_vol_p ~3.83% (vs floor 3.643%) if EP3 trajectory holds — could be wave's contract winner candidate.
+- 2026-05-20 11:55 UTC — **EP6 WAVE READOUT: H22 ⭐ and H23 ⭐ confirmed beating H19 (val_wss −0.006pp / −0.040pp), H21 vol_p mechanism dominant (−0.382pp val_vol_p vs H19) at +0.107pp wss cost. PR #1220 (H24-OLD misconfigured) CLOSED; H24-v2 reassigned as PR #1226 — fern will pick up after killing run `5dp7s3nz`.** All 4 students remain occupied through wave completion.
+- 2026-05-20 09:55 UTC — EP3 wave update: H22/H23 both beat H19 EP3 val_wss; H21 soft-flagged but clamp engaged. H24-OLD detected misconfigured (4× more views/epoch).
 - 2026-05-20 07:00 UTC — H19 IS WAVE'S FIRST test_wss + test_abupt SOTA-BEAT (PR #1180 frieren `r5eigmer`). 4 PRs closed in prior pass. H21-H24 dispatched.
 
 ## Human Research Directive (Issue #1056 — 2026-05-14, re-confirmed Morgan check-in 2026-05-19 19:50Z)
@@ -52,26 +53,26 @@
 
 6. **The vol_p floor breach is now SMALL (+0.136pp on H19)** — 4× smaller than H10b. Adding clamp=0.15 on top of H19 should close the remaining gap by 3× more vol_p gradient mass.
 
-## Active Experiments (2026-05-20 09:55 UTC — EP3 reports landed for 3/4)
+## Active Experiments (2026-05-20 11:55 UTC — EP6 readout; EP10 ETA ~14:30Z)
 
-| Student | PR | Hypothesis | EP3 val_wss vs H19 | EP3 status |
-|---------|-----|-----------|-------------------:|-----------|
-| **dl24-frieren** | **#1216** | H21: H19 + clamp=0.15 | **7.589 (+0.20pp)** | SOFT-FLAG, clamp engaged, continue |
-| **dl24-nezuko** | **#1217** | H22: H19 + vol_p MAE_aux=0.05 | **7.293 (−0.10pp) ⭐** | BEATS H19, MAE_aux mechanism confirmed |
-| **dl24-tanjiro** | **#1218** | H23: H19 + Charb on τ_y | **7.321 (−0.07pp) ⭐** | BEATS H19, direct τ_y improvement |
-| **dl24-fern** | **#1220** | H24: H19 + clamp=0.15 + per-axis τ | n/a (regime misconfig) | **RELAUNCH** — PR body missing `--train-*-points 65000` overrides; current run hits 4× more steps/epoch (43h projected vs 22.5h timeout) |
+| Student | PR | Hypothesis | EP6 val_wss vs H19 EP6 (7.152) | EP6 val_vol_p vs H19 EP6 (4.415) | Status |
+|---------|-----|-----------|------------------------------:|---------------------------------:|--------|
+| **dl24-frieren** | **#1216** | H21: H19 + clamp=0.15 | 7.259 (+0.107pp) | **4.033 (−0.382pp) ⭐⭐** | Clamp dominant, vol_p crushing H19, wss cost large but expected |
+| **dl24-nezuko** | **#1217** | H22: H19 + vol_p MAE_aux=0.05 | **7.146 (−0.006pp) ⭐** | **4.214 (−0.201pp) ⭐** | BOTH wss AND vol_p beat H19 — best dual mechanism |
+| **dl24-tanjiro** | **#1218** | H23: H19 + Charb on τ_y | **7.112 (−0.040pp) ⭐** | 4.490 (+0.075pp) | wss-direct via τ_y, vol_p slight regression |
+| **dl24-fern** | **#1226** (was #1220) | H24-v2: H19 + clamp=0.15 + per-axis τ "1.0,1.2,1.5" | n/a — relaunch pending | n/a | PR #1220 CLOSED 11:30Z (misconfig + stalled relaunch); fresh #1226 with corrected CLI; old run `5dp7s3nz` to be killed by fern student loop |
 
-**EP3 read-out (2026-05-20 09:30Z):**
+**EP6 read-out (2026-05-20 11:55Z) — wave now well past EP3 with clearer trajectories:**
 
-1. **MAE_aux IS THE WAVE'S BREAKTHROUGH MECHANISM (H22).** Provides −0.244pp vol_p improvement at EP3 by feeding L1 gradient external to GradNorm budget, while w_vol_p still collapses to ~0.057 floor. The PR-predicted "w_vol_p stays high" hypothesis was WRONG (it does collapse), but the additive L1 outside the budget IS the load-bearing mechanism. Projects vol_p ~3.83% at EP19 (still above floor but huge improvement).
+1. **H21 (clamp=0.15) is the vol_p MECHANISM WINNER.** At EP6 val_vol_p=4.033% vs H19=4.415% (−0.382pp = 8.7% relative improvement). The clamp is producing predicted asymmetric tradeoff: w_vol_p pinned at 0.15 (vs collapse to 0.057 in H19), τ_z weight =1.74 (lower than H19's 1.85), wss cost +0.107pp. Vol_p val→test gap is ~+0.42pp on H19 → H21 projects test_vol_p ≈ 3.6%, AT OR UNDER the 3.643% floor. If wss cost stays at +0.1pp, terminal test_wss ≈ 6.73% (≈ tied with SOTA 6.727, NOT improving on H19's wss). **Sole-mechanism contract winner trajectory.**
 
-2. **H23 confirms per-axis Charb extension works (−0.068pp val_wss).** Direct τ_y improvement (val_τ_y −0.084pp) shows the mechanism is τ_y axis-specific, not just budget reshuffling. τ_z STILL improves despite budget split — additive landscape effect.
+2. **H22 (MAE_aux=0.05) is the DUAL-METRIC WINNER.** EP6 val_wss=7.146 (−0.006pp vs H19, essentially break-even) AND val_vol_p=4.214 (−0.201pp). w_vol_p still collapsed to ~0.057 floor (PR-predicted "w stays high" hypothesis WRONG) — the L1 aux gradient is **additive outside the GradNorm budget**. This is the wave's first "free improvement" — beats H19 on BOTH primary metrics simultaneously.
 
-3. **H21 EP3 clamp cost (+0.20pp val_wss) larger than predicted.** Clamp engaged perfectly (w_vol_p pinned at 0.15 since step 15k), but the vol_p improvement vs H19 only opens up in mid-late epochs once H19's collapse takes effect. H21's payoff projected EP10+.
+3. **H23 (Charb on τ_y) is the WSS-DIRECT WINNER.** EP6 val_wss=7.112 (−0.040pp), driven by val_τ_y=7.748 (−0.038pp vs H19 7.786). Compared to H10b's curvature+Charb_τz mechanism, H23 extends per-axis Charbonnier to a second highest-error axis. Vol_p regression +0.075pp (mild). If H23's mechanism stacks cleanly with H21's clamp, H25-H28 (Charb on multiple axes) become valuable.
 
-4. **H24 setup is broken — relaunching.** Researcher-agent's auto-generated PR command omitted `--train-surface-points 65000 --eval-surface-points 65536 --train-volume-points 65000 --eval-volume-points 65536` flags that H21/H22/H23 sibling PRs include. Fern was running with `train_volume_points=16384` (4× smaller) and `train_views=347657` (4× more), producing a 43h projected runtime vs 22.5h timeout. Comment posted on #1220 with full corrected command.
+4. **H24-v2 (#1226) relaunched cleanly.** PR #1220 closed 11:30Z (fern's student loop did not act on the 10:05Z relaunch comment after 1.5h; old run `5dp7s3nz` was still active at step 126k/1303k, 43h projected). Fresh PR #1226 with corrected CLI (4 `--*-surface/volume-points` flags added) + new wandb-group `H24-clamp015-peraxis-v2`. Fern's student loop should detect closed PR → mark idle → pick up #1226 on next poll. Compound mechanism still high-VP slot.
 
-**PR #1219 history:** Original H24 design was clamp=0.10 (ablation midpoint). Morgan merged the assignment commit at 06:56Z (#1219), making fern briefly idle. Researcher-agent then created the compound H24 (#1220 at 07:06Z); fern's compound run was misconfigured and is being relaunched as H24-v2.
+**PR #1219 history:** Original H24 design was clamp=0.10 (ablation midpoint). Morgan merged the assignment commit at 06:56Z (#1219), making fern briefly idle. Researcher-agent then created the compound H24 (#1220 at 07:06Z); fern's compound run was misconfigured. PR #1220 closed 2026-05-20T11:30Z and replaced by #1226 (compound H24-v2, same hypothesis, corrected CLI).
 
 ## Next-wave queue (researcher-agent designs, ordered by expected value)
 
