@@ -71,6 +71,44 @@ class RFFEncoding(nn.Module):
         return torch.cat([proj.sin(), proj.cos()], dim=-1)
 
 
+class MultiSigmaRFFEncoding(nn.Module):
+    """Multi-sigma Gaussian random Fourier features for 3D coordinate encoding.
+
+    Encodes ``in_dim``-dimensional coordinates using ``len(sigmas)`` independent
+    RFF banks at different length scales, concatenated along the feature dim.
+    Output dimension is ``2 * num_features * len(sigmas)`` (sin + cos per bank).
+
+    All projection matrices are registered as non-trainable buffers so they
+    travel with the model across devices and DDP ranks.
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        num_features: int = 32,
+        sigmas: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0),
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_features = num_features
+        self.sigmas = sigmas
+        for i, sigma in enumerate(sigmas):
+            self.register_buffer(f"B_{i}", torch.randn(in_dim, num_features) * sigma)
+
+    @property
+    def output_dim(self) -> int:
+        return 2 * self.num_features * len(self.sigmas)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        parts: list[torch.Tensor] = []
+        for i in range(len(self.sigmas)):
+            B = getattr(self, f"B_{i}").to(dtype=x.dtype)
+            proj = 2.0 * math.pi * (x @ B)
+            parts.append(proj.sin())
+            parts.append(proj.cos())
+        return torch.cat(parts, dim=-1)
+
+
 class StringSeparableEncoding(nn.Module):
     """STRING-separable positional encoding.
 
@@ -234,6 +272,9 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_coord_slice_pe: bool = False,
+        coord_slice_pe_rff_features: int = 32,
+        coord_slice_pe_init_scale: float = 0.088,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -244,6 +285,7 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.use_coord_slice_pe = use_coord_slice_pe
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -258,6 +300,26 @@ class TransolverAttention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
+
+        if use_coord_slice_pe:
+            # Multi-sigma RFF encoding of 3D slice centroids → additive PE for slice tokens.
+            # Uses 4 sigmas covering sub-car (0.25m) to full-car (2.0m) length scales.
+            self.coord_pe_rff = MultiSigmaRFFEncoding(
+                in_dim=3,
+                num_features=coord_slice_pe_rff_features,
+                sigmas=(0.25, 0.5, 1.0, 2.0),
+            )
+            rff_out_dim = self.coord_pe_rff.output_dim  # 2 * rff_features * 4 sigmas
+            # Project from RFF space to per-head D_head additive PE: [B,S,rff_out] → [B,S,H*D_head]
+            self.coord_pe_proj = nn.Linear(rff_out_dim, num_heads * self.dim_head)
+            # Init at small scale (O(1/sqrt(D_head)) per H33 lesson; avoids sub-gradient-floor init)
+            with torch.no_grad():
+                w_std = self.coord_pe_proj.weight.std().clamp(min=1e-8)
+                self.coord_pe_proj.weight.mul_(coord_slice_pe_init_scale / w_std)
+                nn.init.zeros_(self.coord_pe_proj.bias)
+        else:
+            self.coord_pe_rff = None
+            self.coord_pe_proj = None
 
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
@@ -274,8 +336,39 @@ class TransolverAttention(nn.Module):
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
         return slice_tokens, slice_weights
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+        if self.use_coord_slice_pe and coords is not None:
+            # H58: routing gradients flow back into PE projection via centroid
+            # computation. H50 wrapped this in torch.no_grad(), starving the PE
+            # projection of optimization signal (proj_weight_std stuck at init).
+            # Allowing grad flow lets the projection learn discriminative
+            # coordinate-routing structure, restoring H33-style PE auto-growth.
+            slice_weights_mean = slice_weights.mean(dim=1)  # [B, N, S]
+            slice_norm = slice_weights_mean.sum(dim=1, keepdim=True) + 1e-5  # [B, 1, S]
+            slice_centroids = torch.einsum("bnc,bns->bsc", coords, slice_weights_mean) / slice_norm.transpose(1, 2)  # [B, S, 3]
+            coord_rff = self.coord_pe_rff(slice_centroids)  # [B, S, rff_features * 2 * 4]
+            coord_pe = self.coord_pe_proj(coord_rff)  # [B, S, num_heads * D_head]
+            B_size, S_size = slice_centroids.shape[:2]
+            coord_pe = coord_pe.view(B_size, S_size, self.num_heads, self.dim_head).permute(0, 2, 1, 3)  # [B, H, S, D_head]
+            slice_tokens = slice_tokens + coord_pe
+            if not self.training:
+                # Stash diagnostics for val-time logging via collect_coord_slice_pe_metrics
+                with torch.no_grad():
+                    self._last_slice_centroids = slice_centroids.detach()  # [B, S, 3]
+                    flat = slice_tokens.detach()  # [B, H, S, D_head] — post-PE input to qkv
+                    fnorm = flat / (flat.norm(dim=-1, keepdim=True) + 1e-9)
+                    cos = torch.einsum("bhsd,bhtd->bhst", fnorm, fnorm)  # [B, H, S, S]
+                    S_dim = cos.shape[-1]
+                    eye = torch.eye(S_dim, device=cos.device, dtype=cos.dtype).unsqueeze(0).unsqueeze(0)
+                    off_diag_sum = (cos * (1.0 - eye)).sum(dim=(-2, -1))
+                    off_diag_mean = (off_diag_sum / (S_dim * (S_dim - 1))).mean()
+                    self._last_inter_slice_cos = float(off_diag_mean.item())
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
@@ -303,6 +396,9 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_coord_slice_pe: bool = False,
+        coord_slice_pe_rff_features: int = 32,
+        coord_slice_pe_init_scale: float = 0.088,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -313,13 +409,21 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_coord_slice_pe=use_coord_slice_pe,
+            coord_slice_pe_rff_features=coord_slice_pe_rff_features,
+            coord_slice_pe_init_scale=coord_slice_pe_init_scale,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, coords=coords)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -336,6 +440,9 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_coord_slice_pe: bool = False,
+        coord_slice_pe_rff_features: int = 32,
+        coord_slice_pe_init_scale: float = 0.088,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,14 +454,22 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    use_coord_slice_pe=use_coord_slice_pe,
+                    coord_slice_pe_rff_features=coord_slice_pe_rff_features,
+                    coord_slice_pe_init_scale=coord_slice_pe_init_scale,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        coords: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, coords=coords)
         return x
 
 
@@ -382,6 +497,9 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_coord_slice_pe: bool = False,
+        coord_slice_pe_rff_features: int = 32,
+        coord_slice_pe_init_scale: float = 0.088,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +514,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_coord_slice_pe = use_coord_slice_pe
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +591,9 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_coord_slice_pe=use_coord_slice_pe,
+            coord_slice_pe_rff_features=coord_slice_pe_rff_features,
+            coord_slice_pe_init_scale=coord_slice_pe_init_scale,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
@@ -562,6 +684,7 @@ class SurfaceTransolver(nn.Module):
 
         tokens: list[torch.Tensor] = []
         masks: list[torch.Tensor] = []
+        coords_list: list[torch.Tensor] = []
         surface_tokens = 0
         volume_tokens = 0
 
@@ -578,6 +701,8 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(surface_mask)
+            if self.use_coord_slice_pe:
+                coords_list.append(surface_x[:, :, : self.space_dim])
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
@@ -592,10 +717,19 @@ class SurfaceTransolver(nn.Module):
                 )
             )
             masks.append(volume_mask)
+            if self.use_coord_slice_pe:
+                coords_list.append(volume_x[:, :, : self.space_dim])
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        # Build concatenated coords tensor in the same token order as the hidden states.
+        # Pad masked-out tokens to zero so they don't skew slice centroids.
+        if self.use_coord_slice_pe and coords_list:
+            coords = torch.cat(coords_list, dim=1)  # [B, N_surf+N_vol, 3]
+            coords = coords * attn_mask.unsqueeze(-1).to(dtype=coords.dtype)
+        else:
+            coords = None
+        hidden = self.backbone(hidden, attn_mask=attn_mask, coords=coords)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
