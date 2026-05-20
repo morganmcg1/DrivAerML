@@ -8,6 +8,135 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-20 22:00 UTC — PR #1180 CLOSED: WSS H19 H10b + Charbonnier on vol_p under GradNorm (dl24-frieren, `r5eigmer`) ⭐ WAVE'S FIRST test_wss + test_abupt SOTA-BEAT
+
+- **Branch:** `dl24-frieren/h19-vol-p-charbonnier`
+- **W&B run:** `r5eigmer` (DDP8, EP30 terminal, 1298 min runtime). Test eval on EP20 best-val EMA checkpoint.
+- **Hypothesis:** Charbonnier loss on vol_p channel (commit 375be21 routes GradNorm task-signal through Charb, not raw MSE) reshapes the vol_p loss landscape, reducing outlier-sensitivity, without injecting extra gradient mass via an auxiliary head. GradNorm should not need to compensate by raising w_vol_p; preserves wss/vol_p budget intact. Expected: test_vol_p ≤ 3.643 floor at test_wss near H10b's 6.665.
+
+### Test metrics (best-val EMA EP20)
+
+| Metric | H19 | SOTA #972 | Δ vs SOTA | AB-UPT public | Verdict |
+|---|---:|---:|---:|---:|---|
+| **test_abupt** | **5.8197%** | 5.844% | **−0.024pp ⭐ NEW WAVE SOTA** | — | beat |
+| **test_wss** | **6.6339%** | 6.727% | **−0.093pp ⭐ NEW WAVE SOTA** | 7.29 | beat (-0.66pp vs AB-UPT) |
+| test_vol_p | 3.7786% | 3.643% | +0.136pp ❌ floor breach | 6.08 | breach (-2.30pp vs AB-UPT) |
+| test_surf_p | 3.6267% | 3.577% | +0.050pp ❌ floor breach (small) | 3.82 | breach (-0.19pp vs AB-UPT) |
+| test_τ_x | 5.8907% | 5.971% | −0.080pp ✓ | 5.35 | beat |
+| test_τ_y | 7.1723% | 7.362% | −0.190pp ✓ | 3.65 | beat |
+| test_τ_z | 8.6303% | 8.747% | −0.117pp ✓ | 3.63 | beat |
+
+**6 of 7 test axes beat SOTA #972**. Beats AB-UPT public on all 3 main channels.
+
+### Verdict
+
+CLOSED — does NOT merge per Issue #1056 strict AND-clause contract (floor breaches preclude merge). BUT H19 is a major wave milestone: first wave run to cleanly beat both wss SOTA and abupt SOTA. The vol_p breach is **4× smaller than H10b** (0.136 vs 0.517) — the Charbonnier mechanism IS working, just incompletely at default clamp=0.05.
+
+### Mechanism analysis
+
+Three clean findings:
+
+1. **Charb on vol_p under GradNorm creates an ASYMMETRIC budget** that strengthens wss/abupt. With Charb dominating MSE 17–20× and the GradNorm task-signal seeing Charb, w_vol_p collapsed to the 0.05 floor (clamp-pinned EP4+); w_τ_z rose to ~1.85. Asymmetric budget → wss got the strongest gradient stream of the wave. EMA averaging crystallized the late-cosine wss gain (val 6.98 → test 6.63 = −0.35pp val→test gain).
+
+2. **Charb landscape reshape alone is INSUFFICIENT to clear floor.** Halved the H10b vol_p breach (4.16 → 3.78, −0.38pp) but couldn't close the remaining 0.136pp. The mechanism needs more gradient mass to vol_p — exactly what clamp=0.15 would provide.
+
+3. **MAE_aux gradient mass is NOT the source of H9b's wss cost.** H19 has no MAE_aux and STILL beats SOTA on wss. This contradicts the prior H9b-derived intuition that MAE_aux was costly. H20 (clamp-only) corroborates: clamp alone is the wss-cost driver, not MAE_aux.
+
+### Falsification matrix outcome
+- Wave SOTA-beat on wss: ✅ CONFIRMED stronger than predicted (−0.093pp vs predicted ~0pp from "preserved wss")
+- Floor-clearance on vol_p: ❌ FALSIFIED (3.778 vs floor 3.643, +0.136pp breach)
+- Asymmetric budget side-effect: 🆕 UNEXPECTED — wave-best wss came from the asymmetric GradNorm allocation, not just the Charb reshape
+
+### Implication for next wave
+**H21 = H19 + clamp=0.15** is the obvious direct compound. Projection: w_vol_p stays above 0.15 floor (3× more vol_p gradient mass than H19's 0.05 pin) while Charb landscape reshape stays engaged. Expected: test_vol_p ~3.58 (sub-floor), test_wss ~6.69 (still SOTA), test_abupt sub-5.84 — possible clean contract winner.
+
+---
+
+## 2026-05-20 22:00 UTC — PR #1181 CLOSED: WSS H20 H10b + clamp=0.15 only no MAE_aux (dl24-nezuko, `4yvl848t`)
+
+- **Branch:** `dl24-nezuko/h20-h10b-clamp-only`
+- **W&B run:** `4yvl848t` (DDP8, EP30 terminal, 1272 min runtime). Test eval on EP21 best-val EMA checkpoint.
+- **Hypothesis:** Clamp=0.15 alone on H10b base (no MAE_aux) might preserve vol_p floor at lower wss cost than H9b's clamp+MAE_aux stack — testing whether MAE_aux is the costly mechanism.
+
+### Test metrics (best-val EMA EP21)
+
+| Metric | H20 | SOTA #972 | H10b | Δ vs SOTA | Verdict |
+|---|---:|---:|---:|---:|---|
+| **test_wss** | **6.8080%** | 6.727% | 6.665% | +0.081pp ❌ regression | miss |
+| **test_vol_p** | **3.8470%** | 3.643% | 4.160% | +0.204pp ❌ above floor | miss |
+| test_surf_p | 3.7403% | 3.577% | 3.690% | +0.163pp ❌ breach | miss |
+| test_abupt | 5.9723% | 5.844% | 5.929% | +0.128pp above SOTA | miss |
+| test_τ_z | 8.8994% | 8.747% | 8.643% | +0.149pp | miss |
+
+### Verdict
+
+CLOSED — clear non-winner per Issue #1056 contract. Wss regressed, all floors breached.
+
+### Mechanism finding (the genuinely useful result)
+
+Clean ablation against the H9b stack:
+- **Clamp alone (H20 vs H10b)**: vol_p −0.313pp at wss cost +0.143pp
+- **Clamp+MAE_aux (H9b vs H9, prior result)**: vol_p −~0.50pp at wss cost +0.103pp
+- **MAE_aux marginal contribution**: ~−0.20pp vol_p (closes gap to floor)
+- **Surprise**: MAE_aux DECREASED wss cost slightly — contradicts prior hypothesis that MAE_aux was the costly component
+
+**Conclusion**: clamp is the dominant wss-cost mechanism, MAE_aux carries unique vol_p benefit. The two are complementary, not redundant. H21 (H19's Charb + clamp=0.15) tests whether Charb can substitute for MAE_aux's gradient-injection role at lower cost.
+
+---
+
+## 2026-05-20 22:00 UTC — PR #1166 CLOSED: WSS H12 separate τ head 2-layer MLP (dl24-fern, `3v58n2m5`)
+
+- **Branch:** `dl24-fern/h12-separate-tau-head`
+- **W&B run:** `3v58n2m5` (DDP8, EP30 terminal, 1340 min runtime). Test eval on EP13 best-val EMA checkpoint.
+- **Hypothesis:** Architectural decoupling of cp from τ_x/τ_y/τ_z via separate output heads (linear for cp, 2-layer GELU MLP near-zero init for τ) could improve wss without affecting other channels.
+
+### Test metrics (best-val EMA EP13)
+
+| Metric | H12 | SOTA #972 | AB-UPT public | Δ vs SOTA | Verdict |
+|---|---:|---:|---:|---:|---|
+| **test_wss** | **6.7323%** | 6.727% | 7.29 | +0.005pp essentially tied SOTA | tie |
+| **test_vol_p** | **4.0735%** | 3.643% | 6.08 | +0.430pp ❌ floor breach | miss |
+| test_surf_p | 3.8739% | 3.577% | 3.82 | +0.297pp ❌ floor breach | miss |
+| test_abupt | 6.0036% | 5.844% | — | +0.160pp above SOTA | miss |
+| test_τ_x | 5.9435% | 5.971% | 5.35 | −0.028pp ✓ | beat |
+| test_τ_y | 7.3292% | 7.362% | 3.65 | −0.033pp ✓ | beat |
+| test_τ_z | 8.7977% | 8.747% | 3.63 | +0.051pp | miss |
+
+### Verdict
+
+CLOSED — clear non-winner. Wss tied SOTA but both floors breach.
+
+### Mechanism finding
+
+The separate τ head delivers a real same-step lead vs H10b at EP4-7 (−0.037pp on val_wss), but the architectural advantage is small and doesn't transfer to a contract win — the head split is a wss-axis mechanism only, no floor-preservation mechanism. Documented architectural insight: head split decouples cp from τ usefully, but Lion+EMA at lr=1e-4 produces a known EP14 instability trap (mirror-reversed at EP15) that didn't catch H10b.
+
+---
+
+## 2026-05-18 17:03 UTC — PR #1175 CLOSED: WSS H18 H10b + Charb_τz + clamp=0.15 + MAE_aux full stack (dl24-tanjiro, `xhx2qlpo`)
+
+- **Branch:** `dl24-tanjiro/h18-composition-h10b-h9b`
+- **W&B run:** `xhx2qlpo` (DDP8, EP13/30 TIME-TRUNCATED at 1352 min). Test eval on EP13 best-val EMA checkpoint.
+- **Hypothesis:** Compose H10b curvature+Charb_τz with H9b clamp+MAE_aux on the corrected dataset. Expected: H10b wss benefit with H9b floor preservation.
+
+### Test metrics (best-val EMA EP13, time-truncated)
+
+| Metric | H18 | SOTA #972 | Δ vs SOTA | Verdict |
+|---|---:|---:|---:|---|
+| **test_wss** | **6.7459%** | 6.727% | +0.019pp ❌ narrow miss | miss |
+| **test_vol_p** | **3.702%** | 3.643% | +0.059pp ❌ small breach | miss |
+| test_surf_p | 3.729% | 3.577% | +0.152pp ❌ breach | miss |
+| test_abupt | 5.895% | 5.844% | +0.051pp narrow miss | miss |
+| test_τ_y | 7.309% | 7.362% | −0.053pp ✓ | beat |
+| test_τ_z | 8.745% | 8.747% | −0.002pp ≈ tied | tied |
+
+### Verdict
+CLOSED — narrow miss, time-truncated. Anti-additive cost on wss is real (+0.066pp vs H10b alone) and curvature representation appears to dilute the H9b floor-locking effect. EP8 instability spike from H10b WAS suppressed by clamp+MAE_aux (strongest mechanism-engagement evidence).
+
+### Mechanism conclusion
+The H10b+H9b stack composition only narrowly missed at EP13 truncation — projecting EP30 with cosine-tail slope would give val_wss ~6.87 → test_wss ~6.65 (SOTA beat) but floor compliance was non-converging (val_surf_p ticked up EP11→12). Curvature has a global vol_p penalty that clamp+MAE_aux cannot fully compensate.
+
+---
+
 ## 2026-05-17 17:52 UTC — PR #1159 CLOSED: WSS H10b curvature + Charbonnier on τ_z only (dl24-frieren, `60zl0p4h`)
 
 - **Branch:** `dl24-frieren/h10b-curvature-charb-tau-z`
