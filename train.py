@@ -360,21 +360,43 @@ def train_loss(
             volume_mask=batch.volume_mask,
         )
         if tau_z_loss_type == "charbonnier":
-            # Surface channels are [cp=0, tau_x=1, tau_y=2, tau_z=3]. Run MSE
-            # on the first 3 channels and Charbonnier on tau_z. Recombine with
-            # the original masked_mse reduction (sum / valid_points * n_channels)
-            # so when tau_z_loss_weight=1.0 the total loss budget matches the
-            # 4-channel MSE baseline exactly.
+            # Surface channels are [cp=0, tau_x=1, tau_y=2, tau_z=3]. Replace
+            # MSE on tau_z with Charbonnier while preserving weighted_channel_mse's
+            # reduction (sum_over_entries / valid_points * n_channels) and its
+            # per-channel weighting. surface_channel_weights = [1, 1, tau_y_w,
+            # tau_z_w] is the same vector consumed by the MSE path's
+            # weighted_channel_mse — using it here gives true sibling parity
+            # with H68: only the loss curvature on tau_z differs.
             preds = out["surface_preds"]
-            loss_sp_tauxy = masked_mse(preds[..., 0:3], surface_target[..., 0:3], batch.surface_mask)
+            mask_dev = batch.surface_mask.to(device=preds.device, dtype=preds.dtype).unsqueeze(-1)
+            valid_points = mask_dev.sum()
+            if surface_channel_weights is not None:
+                ch_weights = surface_channel_weights.to(device=preds.device, dtype=preds.dtype)
+            else:
+                ch_weights = torch.tensor(
+                    [1.0, 1.0, 1.0, tau_z_loss_weight],
+                    device=preds.device,
+                    dtype=preds.dtype,
+                )
+            # MSE on channels 0-2 (cp, tau_x, tau_y) with their per-channel weights.
+            sq_err_3 = (preds[..., 0:3] - surface_target[..., 0:3]).square()
+            weighted_3 = sq_err_3 * ch_weights[0:3] * mask_dev
+            # Charbonnier on channel 3 (tau_z) with its per-channel weight.
+            delta_z = preds[..., 3:4] - surface_target[..., 3:4]
+            charb_z = torch.sqrt(delta_z * delta_z + charbonnier_eps * charbonnier_eps) - charbonnier_eps
+            weighted_z = charb_z * ch_weights[3:4] * mask_dev
+            denom = (valid_points * float(preds.shape[-1])).clamp_min(1.0)
+            if bool(valid_points.detach().cpu().item() > 0):
+                surface_loss = (weighted_3.sum() + weighted_z.sum()) / denom
+            else:
+                surface_loss = preds.sum() * 0.0
+            # Diagnostics: tau_z Charbonnier vs same-batch MSE (per-channel mean,
+            # unweighted) so the outlier-compression trajectory is directly
+            # comparable across runs regardless of tau_z_loss_weight.
+            loss_tauz_mse = masked_mse(preds[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
             loss_tauz_charb = masked_charbonnier(
                 preds[..., 3:4], surface_target[..., 3:4], batch.surface_mask, eps=charbonnier_eps
             )
-            surface_loss = (3.0 * loss_sp_tauxy + tau_z_loss_weight * loss_tauz_charb) / (
-                3.0 + tau_z_loss_weight
-            )
-            # Diagnostic only: same-batch MSE on tau_z for engagement ratio.
-            loss_tauz_mse = masked_mse(preds[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
             extra_metrics["tau_z_loss_diag/char_loss"] = float(loss_tauz_charb.detach().cpu().item())
             extra_metrics["tau_z_loss_diag/mse_loss"] = float(loss_tauz_mse.detach().cpu().item())
             mse_val = float(loss_tauz_mse.detach().cpu().item())
