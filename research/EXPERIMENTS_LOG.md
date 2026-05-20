@@ -1,3 +1,56 @@
+## 2026-05-20 21:20 — PR #1222: H68 CHARBONNIER-VOL-P (nezuko, CLOSED) — **OUTCOME D NEGATIVE — killed EP6 step 65222 — ROOT CAUSE: recipe execution deviation (`--volume-loss-weight 1.0` vs advisor-specified 0.5), technique NOT falsified**
+
+- **Branch**: `nezuko/h68-charbonnier-vol-p` (closed at 21:20Z)
+- **W&B run**: `6mm00t4k` (killed at step 65222 EP6, 785 min wall-time)
+- **Hypothesis**: Cross-pollinate dl24 H19 Charbonnier loss on vol_p to tay. Replace `masked_mse` for volume_preds with `masked_charbonnier(eps=1e-3)`. Expected: outlier-suppression on vol_p helps generalisation.
+
+### Terminal metrics (at EP6 kill point)
+
+| Metric | H68 EP6 | Baseline #972 | Status |
+|---|---:|---:|:--|
+| val_abupt | **6.822%** | 6.126% | ❌ killed +0.322pp above EP6 gate (6.5%) |
+| val_VP | 4.146% | 3.798% | — |
+| val_SP | 4.574% | 3.577% | — |
+| val_WSS | 7.646% | 6.727% | — |
+
+*No test eval — killed at EP6.*
+
+### Results commentary — recipe execution deviation, NOT technique failure
+
+**ROOT CAUSE: `--volume-loss-weight 1.0` deviation from advisor-specified `0.5`**
+
+Student used weight=1.0 for "H59 substrate parity" but PR body specified 0.5 (verbatim dl24 H19 recipe). Key consequence: Charbonnier(eps=1e-3) operates in L1-regime for our vol_p error distribution (std ~0.022 >> eps=1e-3), producing per-element losses **18× larger than MSE** at terminal. With weight=1.0, effective vol_p contribution = 18× MSE_baseline_budget. Surface heads starved from step 1.
+
+Student's `vol_loss_diag/char_over_mse` time series (KEY evidence):
+| Step | char/mse | Comment |
+|---|---:|---|
+| ~249 | 0.67× | Cold start, large errors → char SMALLER than mse (L1 vs L2) |
+| ~16,500 | **6.4×** | Early EP2, typical errors now < eps elbow |
+| ~32,752 | **13.5×** | EP3 |
+| ~49,005 | **17.4×** | EP4-5 |
+| ~65,009 | **18.4×** | Terminal |
+
+**EP1 cold-start 28.04%** (normal: 15-25%) is the smoking gun — surface heads were starved from step 1.
+
+### Implementation was correct — code preserved for H77
+
+Student shipped:
+- `masked_charbonnier(pred, target, mask, eps)` in `trainer_runtime.py` — math verified
+- `--vol-loss-type {mse,charbonnier}`, `--charbonnier-eps` flags in `train.py`
+- Full `vol_loss_diag/` diagnostic suite
+
+**Code is correct. Recipe was the failure.** `nezuko/h68-charbonnier-vol-p` branch preserved for cherry-pick.
+
+### Mech class status
+
+Loss-curvature-shape class NOT exhausted. dl24 H19 used `--volume-loss-weight 0.5` knowing Charbonnier's L1-scale magnitude shift. H68 tested the WRONG composition. H77 tests the verbatim recipe.
+
+### Follow-up
+
+**H77 CHARBONNIER-VOL-P-WEIGHT-FIX (PR #1233)**: Single-flag change `--volume-loss-weight 1.0 → 0.5`. Everything else from H68 identical. Verbatim dl24 H19 recipe replication.
+
+---
+
 ## 2026-05-20 20:35 — PR #1215: H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED (askeladd, CLOSED) — **OUTCOME C NULL WITH REGRESSION on val_abupt + 6th test_VP FLOOR CROSS (3.628%) — encoder-PE class FULLY EXHAUSTED on LR-axis**
 
 - **Branch**: `askeladd/h66-coordslice-no-stopgrad-lr-extended` (closed at 20:35Z)

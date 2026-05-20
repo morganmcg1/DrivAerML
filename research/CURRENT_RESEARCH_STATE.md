@@ -5,6 +5,36 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🔴 ~21:20Z — H68 CHARBONNIER-VOL-P CLOSED D NEGATIVE (recipe deviation, technique NOT falsified) + nezuko reassigned H77 CHARBONNIER-VOL-P-WEIGHT-FIX
+
+**Closure: PR #1222 H68 (nezuko) — OUTCOME D NEGATIVE — killed EP6 (val_abupt 6.822%), ROOT CAUSE: recipe execution deviation, NOT technique failure**
+
+**Critical finding**: Charbonnier(eps=1e-3) operates in L1-regime for our vol_p error distribution (std ~0.022 >> eps). Per-element loss ratio char/mse = 18× at terminal. Student used `--volume-loss-weight 1.0` (H59 substrate parity deviation from PR-body spec of 0.5), giving effective vol_p budget 18× baseline MSE. Surface heads starved from step 1 — EP1 cold-start 28.04% (normal ~15-25%) is the smoking gun.
+
+| Diagnostic | H68 value | Interpretation |
+|---|---|---|
+| EP1 cold-start val_abupt | 28.04% | Surface starvation from step 1 |
+| char/mse ratio EP2→terminal | 6.4× → 18.4× | Effective budget 6-18× overweight |
+| Kill threshold | EP6 step 65222, val_abupt=6.822% | Hard-killed at EP6 |
+
+**Mech class status**: Loss-curvature-shape class NOT exhausted — ONLY the `--volume-loss-weight 1.0` deviation was tested. dl24 H19 recipe used `--volume-loss-weight 0.5` for exactly this reason (Charbonnier L1-scale compensation).
+
+**Reassignment: nezuko → H77 CHARBONNIER-VOL-P-WEIGHT-FIX (PR #1233)**
+Single-flag change: `--volume-loss-weight 1.0 → 0.5`. Verbatim dl24 H19 recipe replication. All other H68 flags identical (eps=1e-3, lr-cosine-t-max 25, surface-loss-weight 2.0). Falsifiable outcomes A-D with primary comparison vs baseline #972 AND vs H68 trajectory.
+
+**Fleet status (~21:20Z)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Status |
+|---|---|---|---|
+| #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Just assigned |
+| #1232 | askeladd | H76 SLICES-192-ISOLATION | Early epochs |
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | Early epochs |
+| #1221 | thorfinn | H67 RFF-9σ WIDTH | ~EP12.5 — projected terminal ~6.166% MISS |
+| #1223 | fern | H69 CURVATURE-ATTN-BIAS | ~EP19, val_abupt ~6.47%, converging |
+| #1225 | tanjiro | H71 GRADNORM-α=1.5 | ~EP22, val_abupt ~6.44%, D NEGATIVE plateau |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z | EP1.3, mechanism active (char/mse 2.3-2.8×) |
+| #1230 | frieren | H74 MAE-AUX-VOL-P | Early epochs |
+
 ## 🔴 ~20:35Z — H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED CLOSED C NULL + 6th test_VP FLOOR CROSS + askeladd reassigned H76 SLICES-192-ISOLATION
 
 **Closure: PR #1215 H66 (askeladd) — OUTCOME C NULL with regression on val_abupt + 6th project test_VP FLOOR CROSS retained**
