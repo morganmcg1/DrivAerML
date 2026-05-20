@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~04:15 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~07:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -30,6 +30,56 @@
 - **Caveat**: dl24's H10b run on their data shows test_vol_p=4.160% (+0.517pp above floor on their split) which is significantly above my own H47/H53/etc. baselines (all in 3.6-3.9% range). This suggests **dl24's test split is HARDER on vol_p** — they may have different stratification. Their floor breaches may reflect their own data being more challenging on vol_p, not their technique being fundamentally floor-breaking.
 - Technique transfer to tay may produce LARGER margins on tay's easier vol_p split.
 
+
+## Latest invocation actions (2026-05-20 ~07:15Z) — PR #1213 H64 RFF-LOW-BAND-EXPANSION terminal CLOSED as **outcome D NEGATIVE / mechanism-class refinement: FDCE lever is band-WIDTH not band-POSITION** (val_abupt 8.887% KILLED at EP3 by +1.39pp vs gate 7.5%; +2.05pp worse than H57 EP3 6.842%; EP2→EP3 REGRESSED on all 4 axes vs H57's strong EP2→EP3 descent; cold-start damage at EP1 +6.51pp vs H57 25.23%; per-σ projection diagnostic on EP2 checkpoint confirmed mechanism-shape prediction σ=0.0625 took 12.97% surf / 15.50% vol (dominant LOW-position pattern) BUT task regressed proving projection-weight share is determined by σ-ordering-POSITION not σ-value-as-band-direction; refined mechanism class FDCE lever is band-WIDTH total octave span NOT band-position H57's wider [-3,+4] octaves 8 σs supported richer multi-scale Fourier basis than H64's narrower [-4,+2] 7σs despite reaching lower σ; HIGH-end σ=8,16 in H57 served as anchor frequencies constraining encoder geometry-aware features even with small projection share supporting sharp local-feature coverage that coexists with smoothly-varying LOW-σ global features); **THORFINN REASSIGNED H67 RFF-9SIGMA-WIDTH-EXPANSION** (PR #1221, single-flag change vs H57 `--rff-init-sigmas "0.0625,0.125,0.25,0.5,1.0,2.0,4.0,8.0,16.0"` 9 σs spanning -4 to +4 octaves prepending σ=0.0625 to H57's 8σ basis; kept `--lr-cosine-t-max 13` for clean attribution against H57 NOT bundled with LR-fix; four falsifiable outcomes A MERGE WIN+FLOOR CROSS band-width unlocks FDCE class merges first time; B PARTIAL drops below H57 6.217 by ≥0.05pp width is lever ceiling persists Wave 32 stack with LR-fix; C NULL within ±0.05pp 8σs sufficient FDCE saturates; D NEGATIVE +0.05pp above 9th σ destabilizes unlikely); fleet status 8/8 WIP zero idle zero review-ready
+
+### Headline updates (2026-05-20 07:15Z)
+
+1. **PR #1213 thorfinn H64 RFF-LOW-BAND-EXPANSION CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1213#issuecomment-4495622424)). Terminal verdict:
+   - val_abupt **8.887% KILLED at EP3** (gate 7.5%, +1.39pp over)
+   - val_SP 5.990% also failed gate
+   - EP2→EP3 REGRESSED on val_abupt (+0.23pp), val_SP (+0.17pp), val_VP (+0.61pp), val_WSS (+0.27pp) — OPPOSITE direction vs H57
+   - +2.05pp val_abupt worse than H57 EP3 6.842% — outcome D NEGATIVE (>>0.05pp NULL band)
+   - +6.51pp val_abupt worse than H57 EP1 cold-start (25.23%) — sustained through training
+   - **Per-σ projection diagnostic on EP2 checkpoint CONFIRMED mechanism-shape prediction but FALSIFIED task-outcome**: σ=0.0625 took 12.97% surf / 15.50% vol (dominant LOW position), σ=4.0 took 11.19% surf / 8.19% vol (now position-2-high), σ=2.0 mid-range — pattern exactly matches "projection weight cascades to lowest available σ" prediction
+   - Run `6wpxfu4m` killed at step 32,592, 4.83h wall-time (well under 18h budget)
+   - W&B group `wave31_h64_rff_low_band_expansion`
+
+2. **Refined FDCE mechanism class** — band-WIDTH not band-POSITION:
+   - H57's [-3, +4 octaves] (8 σs) supported a richer multi-scale Fourier basis than H64's [-4, +2 octaves] (7 σs)
+   - HIGH-end σ=8, 16 in H57 served as **anchor frequencies constraining encoder geometry-aware features** even with small projection share (~3%)
+   - **Projection-weight share is determined by σ-ordering POSITION, NOT by σ-value-as-band-direction** — LOW-end uptake happens but does NOT unlock new mechanism
+   - **Wave 32 FDCE hypothesis design** should target band-width (more octaves), not band-position (shift center)
+
+3. **PR #1221 thorfinn H67 RFF-9SIGMA-WIDTH-EXPANSION assigned** ([PR #1221](https://github.com/morganmcg1/DrivAerML/pull/1221), branch `thorfinn/h67-rff-9sigma-width-expansion` from `tay`). Single-flag change vs H57:
+   - `--rff-init-sigmas "0.0625,0.125,0.25,0.5,1.0,2.0,4.0,8.0,16.0"` (9 σs vs H57's 8 σs)
+   - **Prepends σ=0.0625** to H57's 8σ basis — adds ONE LOW octave while preserving H57's HIGH anchors
+   - vs H64 which DROPPED σ=8,16 — H67 keeps H57's full HIGH range AND adds LOW
+   - Kept `--lr-cosine-t-max 13` for clean attribution against H57; LR-fix can be layered as H68 if H67 produces mech-positive
+   - Diagnostic: reuse `scripts/h57_per_sigma_diagnostic.py` on H67's EP3 + EP6 + terminal checkpoints
+
+4. **Wave 31 mechanism-class taxonomy now 13 classes** (unchanged in count but refined):
+   - Class #9 frequency-domain-capacity (FDCE): mech-positive null H57 + outcome D NEGATIVE H64 with band-width refinement, **DEFERRED pending H67 band-width corollary**
+   - Derived class **FDCE-band-width-vs-position** identified from H64 — Wave 32 FDCE design must use ADDITIVE width expansion not BAND-SHIFT
+   - Other 12 classes status unchanged
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H64 closure + H67 assignment):
+   - **H59 nezuko (PR #1208)** — V-DEPTH-LR-EXTENDED
+   - **H60 fern (PR #1209)** — H56-RELAUNCH-DROP-EP3
+   - **H61 frieren (PR #1210)** — SLICE-TEMP-CURRICULUM, MERGE-BORDERLINE ~6.06-6.15%
+   - **H62 tanjiro (PR #1211)** — CP-LOSS-WEIGHT-LR-EXTENDED
+   - **H63 edward (PR #1212)** — TAU-Z-CURRICULUM-LR-EXTENDED, strong EP3 trajectory
+   - **H65 alphonse (PR #1214)** — SURFACE-DEEP-LR-EXTENDED, EP3 effectively pre-cleared at EP2
+   - **H66 askeladd (PR #1215)** — COORDSLICE-NO-STOPGRAD-LR-EXTENDED, pre-launch
+   - **H67 thorfinn (PR #1221, this entry)** — RFF-9SIGMA-WIDTH-EXPANSION, pre-launch
+
+6. **Strategic landscape after H64 closure**:
+   - 5 LR-fix variants in flight (H59, H62, H63, H65, H66) testing LR-decay-confound across 5 orthogonal mech classes
+   - 3 fresh-recipe variants in flight (H60 EMA stack, H61 attn-temp-curr, H67 FDCE-width) — orthogonal to LR-fix axis
+   - Total: 8 parallel hypotheses across 8 orthogonal mech-class branches
+   - Cross-pollination opportunities from dl24 fleet (Charbonnier+GradNorm) preserved for Wave 32
+
+### Headline updates (prior 2026-05-20 04:15Z — H58 closure)
 
 ## Latest invocation actions (2026-05-20 ~04:15Z) — PR #1207 H58 COORDSLICE-NO-STOPGRAD terminal CLOSED as **mechanism-positive null with DEEPEST Wave 31 test_VP floor cross (−0.092pp) + CLOSEST Wave 31 val_abupt near-miss (+0.035pp) + PE-auto-growth FALSIFIED + Lion+zero-mean-gradient structural finding** (val_abupt 6.161% NEAR-MISS merge gate +0.035pp = 1st-closest Wave 31; test_abupt 5.999% +0.155pp regress +0.021pp vs H50; test_VP 3.551% DEEPEST cross Wave 31 −0.092pp under floor vs H50 −0.047pp; test_SP 3.856% +0.279pp regress +0.121pp vs H50; proj_weight_std at terminal max +11.5% block 0 only vs predicted +100% across all 5 blocks; Lion's sign(grad) on near-zero-mean indirect averaged gradient produces random-sign updates that cancel — structural reason for PE-auto-growth FALSIFICATION; primary-positive outcome came via unintended slice-routing-gradient side effect NOT the predicted PE-projection growth; 6th Wave 31 LR-decay confound case slope-halving EP5→EP6); **ASKELADD REASSIGNED H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED** (PR #1215, single-flag change `--lr-cosine-t-max 25` instead of 13; **5th parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED + H63 TAU-Z-CURRICULUM-LR-EXTENDED + H65 SURFACE-DEEP-LR-EXTENDED — if all 5 mech classes merge under LR-fix, LR-decay confound is bulletproof confirmed across 5 orthogonal mechanism classes); fleet status 8/8 WIP zero idle zero review-ready
 

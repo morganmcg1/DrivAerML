@@ -1,3 +1,91 @@
+## 2026-05-20 07:15 — PR #1213: H64 RFF-LOW-BAND-EXPANSION — drop σ={8.0,16.0} HIGH-end, add σ=0.0625 LOW-end (thorfinn, EP3 KILLED) — **OUTCOME D NEGATIVE / MECHANISM-CLASS REFINEMENT: FDCE lever is band-WIDTH not band-POSITION**
+
+- **Branch**: `thorfinn/h64-rff-low-band-expansion` (closed at 07:15Z)
+- **W&B run**: rank0 `6wpxfu4m` (group `wave31_h64_rff_low_band_expansion`, 4.83h wall-time, KILLED at step 32,592 = EP3 end by kill_threshold)
+- **Hypothesis**: H57's per-σ projection diagnostic showed σ=0.125 (lowest available) took 11.79% surface / 18.47% volume share (highest LOW uptake) while σ=16 took only 3.14%/2.30% (minimal HIGH uptake). H57 hypothesized LOW-end is the binding direction. H64 tested by shifting band LOW (drop σ={8,16}, add σ=0.0625) keeping 7 σs spanning -4 to +2 octaves. Mechanism class: frequency-domain-capacity-low-tilted (derived from H57 FDCE class).
+
+### Terminal verdict — KILLED at EP3 outcome D NEGATIVE
+
+| Gate | Target | H64 EP3 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt | <7.5% (EP3 kill) | **8.887%** | ❌ **KILLED +1.39pp** | terminal not reached |
+| val_SP | <5.5% (EP3 kill) | **5.990%** | ❌ also FAILED gate | — |
+| val_VP | (no gate) | 6.203% | (no gate at this step) | — |
+| val_abupt vs H57 EP3 (6.842%) | — | 8.887% | +2.05pp worse | OUTCOME D NEGATIVE |
+
+### Validation trajectory — EP2→EP3 regression confirmed outcome D
+
+| EP | step | val_abupt | val_SP | val_VP | val_WSS | Slope (pp/1k) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10,864 | **31.74%** | 25.80% | 18.46% | 34.86% | — (cold-start) |
+| 2 | 21,728 | **8.66%** | 5.82% | 5.59% | 9.65% | −2.122 (improving) |
+| 3 | 32,592 | **8.89%** | 5.99% | 6.20% | 9.92% | **+0.0212** ⬆ REGRESSING |
+
+**EP2→EP3 regression on ALL primary axes**:
+- val_abupt: 8.66% → 8.89% = **+0.23pp WORSE** (vs H57 EP2→EP3 ~−1.5pp BETTER)
+- val_VP: 5.59% → 6.20% = +0.61pp worse
+- val_WSS: 9.65% → 9.92% = +0.27pp worse
+
+This is the OPPOSITE of H57's mid-training trajectory and triggered the EP3 kill.
+
+### Head-to-head vs H57 (same recipe, only `--rff-init-sigmas` changed)
+
+| EP | H64 (low-tilted 7σ) | H57 (wide-span 8σ) | Δ H64 vs H57 |
+|---:|---:|---:|---:|
+| 1 val_abupt | 31.74% | 25.23% | **+6.51pp worse cold-start** |
+| 2 val_abupt | 8.66% | ~7.7% (interp) | ~+0.96pp worse |
+| **3 val_abupt** | **8.89%** | **6.84%** | **+2.05pp worse** |
+| 3 val_SP | 5.99% | ~4.6% | +1.4pp worse |
+
+H64 uniformly worse than H57 across every checkpoint. Cold-start damage at EP1 persisted through EP3 and started to widen (EP2→EP3 regression).
+
+### KEY MECHANISM REFINEMENT — per-σ projection diagnostic on EP2 checkpoint confirmed prediction-shape-but-falsified-outcome
+
+Student's offline `scripts/h57_per_sigma_diagnostic.py` on `outputs/drivaerml/run-6wpxfu4m/checkpoint.pt` (epoch=2):
+
+**Surface encoder:**
+
+| σ | learned freq | std | proj W L2/col | proj frac | H57 EP3 reference |
+|---:|---:|---:|---:|---:|---|
+| **0.0625 (new LOW)** | 0.0584 | 0.0067 | 0.7488 | **12.97%** | — (not in H57) |
+| 0.125 | 0.1188 | 0.0186 | 0.7344 | 12.48% | 11.79% (H57 LOW) |
+| 0.250 | 0.2812 | 0.0129 | 1.0169 | 15.95% | (normal) |
+| 0.500 | 0.5083 | 0.0169 | 1.0938 | **18.45%** | (normal) |
+| 1.000 | 1.0081 | 0.0395 | 1.0881 | 18.26% | (normal) |
+| 2.000 | 1.9934 | 0.0712 | 0.8331 | 10.70% | (normal) |
+| 4.000 | 3.9410 | 0.2123 | 0.8518 | **11.19%** | (normal — was position-3-high in 8σ basis) |
+
+**Diagnostic verdict**: σ=0.0625 attracted 12.97% surface + 15.50% volume — matching the predicted "LOW-position cascades to lowest available σ" pattern almost exactly. The mechanism *shape* is confirmed. **BUT the task regressed +2.05pp.** Conclusion: **projection-weight share is determined by σ-ordering POSITION, not by σ-VALUE-as-band-direction**. The LOW-end uptake happens, but it does NOT unlock new mechanism.
+
+### Refined mechanism class — band-WIDTH not band-POSITION
+
+**FDCE (frequency-domain-capacity-expansion) lever is band-WIDTH (total octave span), NOT band-position (specific σ values).** H57's [-3, +4 octaves] (8 σs) supported a richer multi-scale Fourier basis than H64's [-4, +2 octaves] (7 σs narrower span despite reaching lower). The HIGH-end (σ=8, 16) in H57 served as **anchor frequencies constraining encoder geometry-aware features** even with small projection share — likely supporting sharp local-feature coverage that coexists with smoothly-varying LOW-σ global features.
+
+This is structurally important: the H57 close note tentatively classified the LOW-end as binding; H64 falsifies that and replaces with band-width refinement.
+
+### Wave 31 ranking at H64 closure (unchanged — H64 below mech-positive runs)
+
+| Run | Mech class | val_abupt | Disposition |
+|---:|:--|---:|:--|
+| H58 | encoder-PE-no-stopgrad | 6.161% | closed (closest NEAR-MISS) |
+| H47 | decoder-depth | 6.143% | closed → H59 LR-fix |
+| H53 | loss-weight | 6.181% | closed → H62 LR-fix |
+| H57 | frequency-domain-capacity (8σ) | 6.217% | closed → H64 (this) |
+| H50 | encoder-PE-stopgrad | 6.220% | closed → H58 |
+| H54v2 | shared-cap-surface | 6.248% | closed → H65 LR-fix |
+| H55v2 | tau-z-curriculum | 6.249% | closed → H63 LR-fix |
+| **H64** | **frequency-domain-capacity-low-tilted** | **8.887% (EP3 kill)** | **closed — outcome D / mech-class refined** |
+
+### Disposition
+
+CLOSED as outcome D NEGATIVE with mechanism-class refinement on FDCE class (band-WIDTH not band-POSITION). Excellent execution by thorfinn — per-σ projection diagnostic on EP2 checkpoint under EP3 kill pressure cleanly falsified the original LOW-binds hypothesis AND produced a refined mechanism understanding worth more than a positive null.
+
+**THORFINN REASSIGNED H67 RFF-9SIGMA-WIDTH-EXPANSION** (PR #1221) — single-flag change vs H57: `--rff-init-sigmas "0.0625,0.125,0.25,0.5,1.0,2.0,4.0,8.0,16.0"` (9 σs spanning -4 to +4 octaves, prepending σ=0.0625 to H57's 8σ basis). Tests band-WIDTH-not-position refinement directly. Kept `--lr-cosine-t-max 13` for clean attribution against H57 — LR-fix can be layered as H68 if H67 produces mech-positive. Four falsifiable outcomes: A. MERGE WIN + FLOOR CROSS (band-width unlocks merge); B. PARTIAL val_abupt drops below H57 6.217 by ≥0.05pp (width is lever, ceiling persists, stack with LR-fix); C. NULL within ±0.05pp H57 6.217 (8 σs sufficient, FDCE saturates); D. NEGATIVE +0.05pp above H57 6.217 (9th σ destabilizes, unlikely).
+
+Close comment: https://github.com/morganmcg1/DrivAerML/pull/1213#issuecomment-4495622424
+
+---
+
 ## 2026-05-20 04:15 — PR #1207: H58 COORDSLICE-NO-STOPGRAD — restore routing-gradient feedback by removing `torch.no_grad()` wrap on centroid computation (askeladd, EP13 terminal best EMA ckpt EP12) — **MECHANISM-POSITIVE NULL with DEEPEST Wave 31 test_VP floor cross (−0.092pp) + CLOSEST Wave 31 val_abupt near-miss (+0.035pp) + PE-auto-growth FALSIFIED + KEY STRUCTURAL FINDING on Lion+zero-mean-gradient sign-cancellation**
 
 - **Branch**: `askeladd/h58-coordslice-no-stopgrad` (closed at 04:15Z)
