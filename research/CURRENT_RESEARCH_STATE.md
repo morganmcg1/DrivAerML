@@ -1,9 +1,24 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~07:15 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~07:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🚀 07:40Z — WAVE 32 OFFICIALLY STARTED (cross-pollination launch)
+
+Closed PRs #1208 (H59 V-DEPTH-LR-EXTENDED) and #1209 (H60 H56-RELAUNCH-DROP-EP3) as mechanism-positive nulls. Both closures produced strong structural findings:
+
+- **H59 closure**: V-DEPTH plateau is **architecture-bound, not LR-decay-bound** (slope decayed despite LR retained 56-90% peak through EP6-EP13). First Wave 31 mech-class where LR-fix did NOT produce val_abupt merge improvement, but produced clean test-channel improvements (test_VP −0.091pp = first depth-class floor cross). Decomposition: ~50% architecture-bound + ~50% LR-decay-confound. New EP8+ channel role specialization observation (b0 sparse high-mag, b1 structured norms) is Wave 32 hypothesis seed for asymmetric V-DEPTH blocks.
+- **H60 closure**: **First observed val→test mechanism inversion on tay**. val tau_zx_ratio_std 0.229 (strongest Wave 31 single-model signal, +66% above H56-EP3 fleet-peak) collapsed to test 0.133. Critical finding — 34-case val split has structural τ_z/τ_x ratio polarization that single-mechanism amplification can exploit at val but NOT at test. All future mech evaluations should be checked on test_primary channels separately, not just val_abupt.
+
+**Reassignments (Wave 32 cross-pollination launch)**:
+- **nezuko → H68 CHARBONNIER-VOL-P (PR #1222)** — Single-flag test of Charbonnier loss on volume pressure component (dl24 H19 innovation). New mech class on tay: loss-curvature-shape. LR-fix substrate `--lr-cosine-t-max 25`. Logs per-sample loss histogram + grad-norm diagnostic.
+- **fern → H69 CURVATURE-ATTENTION-BIAS (PR #1223)** — Single-flag test of learnable attention bias proportional to local surface curvature (dl24 H10b foundation). New mech class on tay: attention-spatial-prior. Geometric mechanism — robust to val→test distribution shift (addresses H60 finding). Directly targets WSS_z binding axis. LR-fix substrate. Logs per-block curvature_alpha trajectory + bias contribution magnitude.
+
+**Wave 32 design principle**: Single-mechanism single-flag tests on LR-extended substrate. Compose mech-positive results only AFTER LR-fix validation. Cross-pollinate from dl24's parallel fleet successes but apply caveats about dataset split differences.
+
+**Fleet status (07:40Z)**: 8/8 WIP. 5 LR-fix triangulation tests in flight (H62/H63/H65/H66/H67) + 1 attention-temperature-curriculum (H61 frieren MERGE-BORDERLINE projected) + 2 Wave 32 cross-pollination launches (H68/H69). Zero idle.
 
 ## ⭐ Cross-pollination intelligence from dl24 fleet (2026-05-20 06:46Z, Issue #1056 comment)
 

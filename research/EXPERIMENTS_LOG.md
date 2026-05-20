@@ -1,3 +1,86 @@
+## 2026-05-20 07:35 — PR #1209: H60 H56-RELAUNCH-DROP-EP3 — ema-aware-variance-stack with strongest val variance signal in Wave 31 (fern, CLOSED) — **MECHANISM-POSITIVE NULL + KEY STRUCTURAL FINDING: val→test mechanism inversion**
+
+- **Branch**: `fern/h60-h56-relaunch-drop-ep3` (closed at 07:35Z)
+- **W&B run**: terminal SENPAI-RESULT in PR
+- **Hypothesis**: H56 was killed at EP3 by mis-calibrated EP3 gate (mechanism was actively building, mathematically inside random_pred_floor at ema=0.9999). H60 relaunch from H56 tip with EP3+EP4 gates dropped, only EP6 binding gate retained. Test whether NPCA+SSFL+slices192+ema9999 variance-class stack crosses merge gate when allowed to run terminal.
+
+### Terminal verdict — close + reassign
+
+| Axis | H60 | Gate/Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt (merge gate) | 6.328% | 6.126% | +0.202pp | ❌ MISS |
+| test_abupt (paper-facing) | 6.084% | 5.844% | +0.240pp | ❌ MISS |
+| test_VP (floor) | 3.702% | 3.643% | +0.059pp | ❌ NEAR-TIE FAIL |
+| test_SP (floor) | 3.836% | 3.577% | +0.259pp | ❌ MISS |
+| test_WSS (goal) | 6.990% | 6.727% | +0.263pp | ❌ MISS |
+| test_VP vs AB-UPT ref 6.08% | — | 3.702% | **−2.378pp ✓** | beats public reference |
+| test_WSS vs AB-UPT ref 7.29% | — | 6.990% | **−0.300pp ✓** | beats public reference |
+
+### KEY STRUCTURAL FINDING — val→test variance-class mechanism inversion
+
+Per-axis tau_zx_ratio diagnostic on full_val (34 cases) vs test_primary (50 cases):
+
+| Diagnostic | val | test | val→test Δ |
+|---|---:|---:|---:|
+| tau_zx_ratio_std | **0.2292** ⭐ | **0.1325** | −42.2% |
+| tau_zx_ratio_mean | 1.5576 | 1.4676 | −5.8% |
+| tau_zx_ratio_max | 2.6804 | 1.7563 | −34.5% |
+| n_outside_band ([1.44, 1.55]) | 12/34 (35.3%) | 27/50 (54.0%) | +18.7pp |
+
+**val tau_zx_ratio_std = 0.229 = +66% above H56-EP3 fleet-peak (0.138) = strongest single-model variance signal Wave 31 history. But test collapses to 0.133 — essentially H56's killed-at-EP3 value.** The H35 fleet-peak (0.251) was almost reached on val (−0.022 short) but test never went near it.
+
+Per-axis WSS pattern reproduces y-dominant on test (WSS_y 7.628%, WSS_z 9.062%, WSS_x 6.191%) — same allocation pattern as 7-epoch val descent — but variance-class amplification didn't transfer. Strong evidence the 34-case val split has structural τ_z/τ_x ratio polarization that single-mechanism amplification can exploit at val but NOT at test. **First observed val→test mechanism inversion on tay.**
+
+### Disposition: CLOSE + fern reassigned to H69 CURVATURE-ATTENTION-BIAS PR #1223
+
+Wave 32 cross-pollination start. Curvature attention bias is the foundation mechanism in dl24's H10b → H19 stack (their parallel-fleet SOTA-beat candidate). Geometric-input attention prior is naturally invariant across val/test split structure (addresses H60's mechanism-inversion finding) and directly targets WSS_z binding axis. Single-flag test on LR-fix substrate `--lr-cosine-t-max 25`.
+
+---
+
+## 2026-05-20 07:30 — PR #1208: H59 V-DEPTH-LR-EXTENDED — Test H47 plateau as LR-decay artifact (nezuko, CLOSED) — **MECHANISM-POSITIVE PARTIAL WIN + KEY STRUCTURAL FINDING: V-DEPTH plateau is ARCHITECTURE-BOUND, not LR-decay-bound**
+
+- **Branch**: `nezuko/h59-v-depth-lr-extended` (closed at 07:30Z)
+- **W&B run**: terminal SENPAI-RESULT in PR
+- **Hypothesis**: H47 V-DEPTH (variance-class-decoder-sublayer) plateaued at val_abupt 6.273%. Wave 31 LR-decay-confound observed in 5 cases (H47/H52/H53/H55v2/H54v2) with slope halving every epoch as LR drops below 50% peak. Test if extending cosine T_max from 13 → 25 keeps LR higher through terminal and unlocks the plateau.
+
+### Terminal verdict — close + reassign
+
+| Axis | H59 | Gate/Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt (merge gate) | **6.282%** | 6.126% | +0.156pp | ❌ MISS — reproduces H47 |
+| test_abupt (paper-facing) | **6.012%** | 5.844% | +0.168pp | ❌ MISS — **−0.036pp BEAT H47** |
+| **test_VP** (floor) | **3.5525%** | 3.643% | **−0.091pp** | ✅ **CROSS — first Wave 31 depth-class floor cross** ⭐ |
+| test_SP (floor) | 3.786% | 3.577% | +0.209pp | ❌ MISS |
+| test_WSS (goal) | 6.947% | 6.727% | +0.220pp | ❌ MISS — **−0.047pp BEAT H47** |
+| full_val_VP | 3.696% | (H47: 3.815%) | **−0.161pp BEAT H47** ⭐ | strongest val-side mech signal |
+
+### KEY STRUCTURAL FINDING — V-DEPTH plateau is ARCHITECTURE-BOUND, not LR-decay-bound
+
+Slope-decomposition: val_abupt slope monotonically decayed from −0.053 pp/1k (EP3→4) to −0.0017 pp/1k (EP12→13) **despite LR retained at 56-90% peak throughout EP6→EP13** (terminal LR fraction 0.556 vs H47's 0.025). The LR extension worked exactly as designed but did NOT unlock additional val_abupt descent below 6.28%.
+
+**Decomposition of H47 plateau**:
+- ~50% architecture-bound (val ceiling at 6.28% regardless of LR schedule)
+- ~50% LR-decay-confound (test_VP −0.10pp, test_abupt −0.04pp, test_WSS −0.05pp improvements vs H47 — generalization, not training-fit)
+
+**V-DEPTH class is the FIRST mech-class where LR-fix did NOT produce merge-relevant val_abupt improvement** but test channels DID improve cleanly. Critical Wave 32 design implication: LR-fix variants need separate evaluation on val (training-fit) and test (generalization) — V-DEPTH is architecture-bound at val, LR-decay-bound at test.
+
+### EP8+ channel role specialization (new mechanistic observation)
+
+Terminal vol_deep block diagnostics:
+
+| Block | attn_proj norm | attn_proj max | ffn_fc2 norm | ffn_fc2 max |
+|---|---:|---:|---:|---:|
+| block0 | ~30.8 | ~0.57 | ~70.7 | **~0.85** ⚠ |
+| block1 | **~35.2** | ~0.38 | **~73.7** | ~0.66 |
+
+block0 took sparse high-magnitude updates; block1 carried structured-norm representation. **This is a NEW mechanistic observation that did NOT occur in H47** (whose LR-decay didn't keep training in the high-LR specialization regime long enough). Wave 32 hypothesis seed: explicit asymmetric block roles in V-DEPTH stacks (different init, different LR, different objective allocation) could break the 6.28% architectural ceiling.
+
+### Disposition: CLOSE + nezuko reassigned to H68 CHARBONNIER-VOL-P PR #1222
+
+Wave 32 cross-pollination start. Charbonnier loss on volume pressure is the dl24 H19 innovation (their parallel-fleet SOTA-beat candidate). Loss-curvature-shape is a fresh mechanism class on tay (no prior Wave 31 test). Single-flag test on LR-fix substrate `--lr-cosine-t-max 25`.
+
+---
+
 ## 2026-05-20 07:15 — PR #1213: H64 RFF-LOW-BAND-EXPANSION — drop σ={8.0,16.0} HIGH-end, add σ=0.0625 LOW-end (thorfinn, EP3 KILLED) — **OUTCOME D NEGATIVE / MECHANISM-CLASS REFINEMENT: FDCE lever is band-WIDTH not band-POSITION**
 
 - **Branch**: `thorfinn/h64-rff-low-band-expansion` (closed at 07:15Z)
