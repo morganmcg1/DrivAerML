@@ -5,6 +5,26 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🔄 11:10Z — H63 EP6 PASS borderline merge candidate + H66/H67/H69/H70 healthy progression + **H71 GradNorm reframed: ALREADY IN BASELINE α=0.5**
+
+Significant taxonomy refinement from tanjiro's H71 pre-flight discovery: **GradNorm is already in baseline #972** via `--use-gradnorm --gradnorm-alpha 0.5`. The PR #1225 framing ("loss-balancing-dynamic = new mech class on tay") is stale. Trajectory: PR #649 α=1.5 EP3=7.41%, PR #758 α=2.0/3.0 (diagnostic-useful, closed), PR #555 α=1.0 **MERGED 2026-05-04**, PR #942 α=1.5 full-mode CLOSED NEGATIVE (budget overflow + weights converged 0.91-1.11). Current baseline #972 α=0.5 (tuned DOWN from 1.0). H71 reframed: tests α=1.5 sweep position (3× restoring force vs current α=0.5) on legacy lr-13 substrate. Reference shifts from "H53 static-weight" to "current #972 GradNorm-α=0.5 baseline". Confirmed `ema_proxy` mode is correct (`--gradnorm-mode full` would bust budget per PR #942 corroboration). tanjiro proceeding with launch.
+
+**Wave 32 mech-class taxonomy update**: removed `loss-balancing-dynamic` as a "new mech class on tay" — it's been in baseline since PR #555. Class #15 reclassified as `gradnorm-alpha-sweep-position`. H71 outcome interpretation:
+- A MERGE WIN val_abupt < 6.126: α=1.5 dominates α=0.5 (rare given baseline tuned downward)
+- B PARTIAL drops below 6.126 by 0.05pp+ but no merge: α is productive lever
+- C NULL ±0.05pp of baseline: α saturated at 0.5 (PR #942 finding-consistent)
+- D NEGATIVE +0.05pp regression: α=0.5 was already optimal (most likely given trajectory)
+
+**Other in-flight progression (11:10Z)**:
+- **H63 (PR #1212) edward TAU-Z-CURRICULUM-LR-EXTENDED EP6 PASS** at 11:04Z: val_abupt 6.467% < 6.5% gate (+0.033pp margin); +0.078pp vs H55 v2 EP6 6.389%; EP5→EP6 slope −0.048pp/ep (still descending). Student projection: terminal ~6.13% if slope sustains (merge gate territory). Terminal ETA ~16:30Z. **Borderline merge candidate**.
+- **H66 (PR #1215) askeladd COORDSLICE-NO-STOPGRAD-LR-EXTENDED EP3 PASS** at 10:30Z: val_abupt 7.329% < 7.5% gate; +0.427pp above H58 EP3 6.902% (LR-fix substrate produces noisier early descent as expected). Narrowing-gap pattern (EP1 +1.37pp → EP3 +0.43pp) consistent with hypothesis. EP6 key read ~17:30Z.
+- **H67 (PR #1221) thorfinn RFF-9SIGMA-WIDTH-EXPANSION EP2 update**: cold-start gap closed to +0.034pp behind H57 (was +1.279pp at EP1). **τ_x/τ_y BETTER than H57** at EP2 (−0.031/−0.034pp), τ_z marginally behind (+0.056pp). Strongest early signal that band-width-not-position refinement is correct. Per-σ projection diagnostic planned at EP3 (~12:14Z).
+- **H68 (PR #1222) nezuko CHARBONNIER-VOL-P early-EP2**: healthy, training at peak LR, no NaN/Inf. EP3 read ~13:00Z.
+- **H69 (PR #1223) fern CURVATURE-ATTENTION-BIAS v2 relaunch** at 9:56Z: bug fix for kNN bottleneck (1.28 s/it → 0.562 s/it via subsampled-reference kNN M=4096). Identity-at-init parity 5e-7 (FP noise), gradient flow nonzero on all 5 blocks. SENPAI_TIMEOUT_MINUTES=1500 (25h) authorized. New `--curvature-ref-size 4096` CLI flag.
+- **H70 (PR #1224) frieren SLICE-TEMP-LR-EXTENDED EP1 read**: launched 08:46Z, EP1 val_abupt 33.596% (−1.24pp vs H61), val_WSS 36.354% (−1.91pp vs H61), val_VP +1.61pp (expected trade-off from slower curriculum sharpening). slice_temperature 1.4445 matches predicted 1.448. **Strongest single early signal of LR-fix productivity in Wave 32 set**.
+
+**Fleet status (11:10Z)**: 8/8 WIP, zero idle, zero review-ready. All gates passed where checked. H63 terminal in ~5.5h. Next major reads: H66 EP6 (~17:30Z), H65 EP6 (~14:00Z), H68/H70 EP3 (~13-14:30Z).
+
 ## 🚀 08:40Z — WAVE 31 LR-DECAY-CONFOUND FALSIFIED PER-CLASS (H62 D NEGATIVE) + H61 mech-positive partial closed + WAVE 32 cross-pollination expanded
 
 Two more closures + reassignments at 08:35Z:
