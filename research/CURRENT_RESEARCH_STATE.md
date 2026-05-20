@@ -5,6 +5,43 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🔴 ~20:35Z — H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED CLOSED C NULL + 6th test_VP FLOOR CROSS + askeladd reassigned H76 SLICES-192-ISOLATION
+
+**Closure: PR #1215 H66 (askeladd) — OUTCOME C NULL with regression on val_abupt + 6th project test_VP FLOOR CROSS retained**
+
+| Metric | H66 terminal | H58 ref | Baseline #972 | Status |
+|---|---:|---:|---:|:--|
+| val_abupt | 6.3814% | 6.161% | 6.126% (gate) | ❌ MISS +0.220pp vs H58 |
+| test_VP | **3.628%** | 3.551% | 3.643% (floor) | ✅ **6th FLOOR CROSS** |
+| test_SP | 3.852% | 3.856% | 3.577% (floor) | ❌ above floor |
+| test_abupt | 6.086% | 5.999% | 5.844% | — |
+| test_WSS | 7.021% | 6.906% | 6.727% | ❌ above goal |
+
+**KEY FINDING**: H66 gap vs H58 is **parallel-shifted (+0.20-0.24pp throughout run)** despite 3-5× higher LR through EP6-EP13. Slope matched. **Lion+zero-mean-gradient sign-cancellation is magnitude-independent** — even 56% peak LR at terminal cannot unlock PE-proj growth. proj_weight_std max growth: +0.011 (H66) vs +0.010 (H58 terminal) — effectively identical.
+
+**Encoder-PE-no-stopgrad class FULLY EXHAUSTED**: LR-schedule is neutral for this class. Class is now in "structural ceiling" category (joins V-DEPTH architecture-bound, shared-capacity-surface architecture-bound, τz-curr LR-axis-exhausted). Future encoder-PE work requires mixed-optimizer (AdamW on PE-proj), direct-QK-multiplied PE architecture, or init-scale ablation.
+
+**Wave 31 LR-fix campaign 6/6 closed — ALL C NULL or D NEGATIVE on val_abupt**. LR-decay confound is class-specific, not universal. H75 pure-baseline-LR-extended control (alphonse, just launched) will resolve whether LR-fix alone helps test generalization universally.
+
+**Reassignment: askeladd → H76 SLICES-192-ISOLATION (PR #1232)**
+
+First clean isolation of `--model-slices 128 → 192`. Prior slices=192 tests bundled 4 components (H51 recipe-bug killed, H60 C NULL +0.202pp compound). H76 single-flag delta from baseline #972. Tests whether slice-attention geometric resolution is the binding capacity limit across all Wave 31 C NULL closures (every mech class shares slices=128 — could be a common ceiling). Memory budget safe: H65 slices=128 used 85.5GB; slices=256 hit 99.5GB ceiling; slices=192 predicted ~89-93GB.
+
+**Fleet status (~20:37Z)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Val_abupt | Status |
+|---|---|---|---|---|
+| #1232 | askeladd | H76 SLICES-192-ISOLATION | — | Just launched |
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | — | Just launched (control) |
+| #1221 | thorfinn | H67 RFF-9σ WIDTH | 6.183% EP12 | IN-FLIGHT — projected ~6.166% terminal MISS |
+| #1222 | nezuko | H68 CHARBONNIER-VOL-P | 6.827% EP22 | IN-FLIGHT — D NEGATIVE trajectory |
+| #1223 | fern | H69 CURVATURE-ATTN-BIAS | 6.489% EP18.75 | IN-FLIGHT — ABOVE GATE, converging |
+| #1225 | tanjiro | H71 GRADNORM-α=1.5 | 6.439% EP22 | IN-FLIGHT — ABOVE GATE plateau |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z | — | Early epochs |
+| #1230 | frieren | H74 MAE-AUX-VOL-P | — | Early epochs |
+
+**Issue #1056**: Human asked for daily update at 20:16Z — prior loop responded at 20:21Z with fleet status and LR-decay confound discovery. No new directives.
+
 ## 🔴 ~19:45Z — H65 SURFACE-DEEP-LR-EXTENDED CLOSED C NULL + test_VP FLOOR CROSS + alphonse reassigned H75 PURE-BASELINE-LR-EXTENDED control
 
 **Closure: PR #1214 H65 (alphonse) — OUTCOME C NULL on val_abupt + mech-positive test side with 5th test_VP floor cross**

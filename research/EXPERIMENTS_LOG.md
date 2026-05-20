@@ -1,3 +1,51 @@
+## 2026-05-20 20:35 — PR #1215: H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED (askeladd, CLOSED) — **OUTCOME C NULL WITH REGRESSION on val_abupt + 6th test_VP FLOOR CROSS (3.628%) — encoder-PE class FULLY EXHAUSTED on LR-axis**
+
+- **Branch**: `askeladd/h66-coordslice-no-stopgrad-lr-extended` (closed at 20:35Z)
+- **W&B run**: `bdbt67as` (13/13 epochs, 882.7 min = 14.7h wall-time)
+- **Hypothesis**: H58 COORDSLICE-NO-STOPGRAD plateaued at val_abupt 6.161% due to LR-decay confound. Test if `--lr-cosine-t-max 13 → 25` preserves 56% peak LR at terminal and enables continued descent.
+
+### Terminal metrics
+
+| Metric | H66 terminal | H58 ref | Baseline #972 | Δ vs H58 | Status |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.3814%** | 6.161% | 6.126% (gate) | **+0.220pp WORSE** | ❌ C NULL with regression |
+| test_VP | **3.628%** | 3.551% | 3.643% (floor) | +0.077pp | ✅ **6th FLOOR CROSS** |
+| test_SP | 3.852% | 3.856% | 3.577% (floor) | −0.004pp | ❌ above floor |
+| test_abupt | 6.086% | 5.999% | 5.844% | +0.087pp | — |
+| test_WSS | 7.021% | 6.906% | 6.727% | +0.115pp | ❌ above goal |
+| val_WSS_z | 9.760% | — | — | — | — |
+
+### Results commentary
+
+**Formally C NULL with regression**: H66 val_abupt 6.381% vs H58's 6.161% = +0.220pp WORSE despite 3-5× higher LR through EP6-EP13. Merge gate (6.126%) missed by +0.255pp.
+
+**KEY FINDING — Lion+zero-mean-gradient sign-cancellation is LR-magnitude-independent**: The H66 vs H58 trajectory is a parallel-shifted constant gap +0.20-0.24pp from EP4 onward. Despite H66 retaining 91-56% peak LR through EP6-EP13 vs H58's 14-0%, the slopes are MATCHED (H66 EP6→EP13: −0.0094 pp/1k; H58: −0.0086 pp/1k). The encoder-PE-no-stopgrad mechanism that generates tiny indirect gradients through softmax+routing is washed out by Lion's sign update at ANY LR magnitude tested.
+
+**proj_weight_std evidence** (askeladd's excellent diagnostic):
+- H66 EP9 max block0 std: 0.0987 vs H58 terminal 0.0981 — virtually identical +0.011 growth from init 0.088
+- More LR → same PE-proj growth → sign cancellation dominates
+
+**6th test_VP floor cross**: 3.628% < 3.643% floor by −0.015pp. Shallower than H58's 3.551% best. test_VP floor crosses now: H26 merged, H53, H55v2, H57, H59, H65, H66 (7 total across models).
+
+### Class disposition update
+
+| Class | LR-fix result | Structural reason |
+|---|---|---|
+| **encoder-PE-no-stopgrad (H58→H66)** | **C NULL +0.220pp REGRESS** | **Lion sign-cancellation magnitude-neutral** |
+| V-DEPTH | C NULL test✅ | Architecture-bound at val |
+| shared-cap-surface | C NULL test✅ | Architecture-bound at val |
+| τz-curr | C NULL test✅ | LR-axis exhausted |
+| CP-loss-weight | D NEGATIVE | LR-fix destabilizes |
+| slice-temp-curr | D NEGATIVE killed | LR-fix destabilizes |
+
+**Wave 31 LR-fix campaign: 6/6 closed, ALL C NULL or D NEGATIVE on val_abupt**. LR-fix benefit is class-specific and primarily test-side not val-side.
+
+### Follow-up assigned
+
+**H76 SLICES-192-ISOLATION (PR #1232)**: askeladd takes baseline #972, single-flag delta `--model-slices 128 → 192`. Pure slice-attention capacity scaling isolation. Prior slices=192 tests bundled 4 components (H51 killed, H60 C NULL). H76 fills the missing isolation experiment. Tests whether slice-attention geometric resolution is the shared ceiling across all Wave 31 single-model C NULL results.
+
+---
+
 ## 2026-05-20 19:45 — PR #1214: H65 SURFACE-DEEP-LR-EXTENDED (alphonse, CLOSED) — **OUTCOME C NULL on val_abupt + MECH-POSITIVE test side with 5th test_VP FLOOR CROSS**
 
 - **Branch**: `alphonse/h65-surface-deep-lr-extended` (closed at 19:45Z)
