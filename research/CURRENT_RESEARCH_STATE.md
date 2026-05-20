@@ -5,6 +5,31 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🚀 08:40Z — WAVE 31 LR-DECAY-CONFOUND FALSIFIED PER-CLASS (H62 D NEGATIVE) + H61 mech-positive partial closed + WAVE 32 cross-pollination expanded
+
+Two more closures + reassignments at 08:35Z:
+
+- **PR #1211 H62 CP-LOSS-WEIGHT-LR-EXTENDED (tanjiro)**: **OUTCOME D NEGATIVE confirmed**. val_abupt 6.397% (+0.216pp WORSE than H53 parent on EVERY axis). Matched-step trajectory diagnosis (H62 vs H53) showed higher LR retention through EP7-10 (86.5%→55.6% peak vs 56.7%→2.5% peak) made it MONOTONICALLY worse, gap stabilized at +0.24pp. **Refined LR-decay-confound hypothesis**: LR-decay is NOT a uniform confound — it's PRODUCTIVE for loss-weight-rebalancing classes (CP-LOSS-WEIGHT needs gradient magnitudes to shrink for weight equilibrium to settle). Wave 31 LR-fix triangulation now functions as **mech-class differentiation diagnostic**, not just confound isolation. tanjiro → H71 GRADNORM (loss-balancing-dynamic class, dl24 H19 cross-pollination, STAYS on `--lr-cosine-t-max 13`).
+- **PR #1210 H61 SLICE-TEMP-CURRICULUM (frieren)**: B PARTIAL outcome. val_abupt 6.341% misses merge gate, BUT **first Wave 31 lr-cosine-t-max=13 test_VP floor cross** (test_VP 3.6315%, −0.012pp under floor). 7th confirmed LR-decay-confound case (slope halved every epoch). **Curriculum-complete-then-plateau finding**: τ reached 1.0 at EP6 but residual slope already at ~−0.011 pp/1k. Mech class #14 (attention-routing-temperature-curriculum) confirmed mech-positive. frieren → H70 SLICE-TEMP-LR-EXTENDED (LR-fix variant, curriculum stretched to EP12 to match `--lr-cosine-t-max 25`).
+
+**Updated Wave 31 LR-fix triangulation table** (now 6 mech classes):
+
+| Mech class | Parent | LR-fix variant | Disposition |
+|---|---|---|---|
+| variance-class-decoder-sublayer (V-DEPTH) | H47 | H59 closed | val=tied, test=better — architecture-bound at val |
+| **variance-class-cp-loss-weight** | H53 | **H62 closed** | **WORSE on all axes — LR needed AS PART of mechanism** |
+| variance-class-time-varying-loss (tau-z-curr) | H55v2 | H63 in flight | TBD |
+| shared-capacity-surface | H54v2 | H65 in flight | TBD |
+| coordinate-grounded-slice-PE | H58 | H66 in flight | TBD |
+| attention-routing-temperature-curriculum | H61 | H70 just launched | TBD |
+
+**Refined Wave 32 design principle**: LR-fix is NOT a uniform improvement. Compose mech-positive results with the LR substrate that matches each mech class's productive direction:
+- Variance/capacity classes (V-DEPTH, V-DEPTH variants): use **LR-extended** for test improvements
+- Loss-weight-rebalancing classes (CP-LOSS, GradNorm, etc.): use **LR-decay** (legacy `--lr-cosine-t-max 13`)
+- Encoder-PE classes: LR-fix variants TBD pending H63/H65/H66 closures
+
+**Fleet status (08:40Z)**: 8/8 WIP, zero idle. 4 LR-fix triangulation tests still in flight (H63/H65/H66/H67) + 4 Wave 32 cross-pollination/follow-up tests (H68/H69/H70/H71). 
+
 ## 🚀 07:40Z — WAVE 32 OFFICIALLY STARTED (cross-pollination launch)
 
 Closed PRs #1208 (H59 V-DEPTH-LR-EXTENDED) and #1209 (H60 H56-RELAUNCH-DROP-EP3) as mechanism-positive nulls. Both closures produced strong structural findings:

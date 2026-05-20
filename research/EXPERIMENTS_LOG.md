@@ -1,3 +1,96 @@
+## 2026-05-20 08:35 — PR #1211: H62 CP-LOSS-WEIGHT-LR-EXTENDED (tanjiro, CLOSED) — **OUTCOME D NEGATIVE: LR-fix actively HURTS CP-LOSS-WEIGHT class — first Wave 31 LR-fix variant to FALSIFY confound hypothesis on its mech class**
+
+- **Branch**: `tanjiro/h62-cp-loss-weight-lr-extended` (closed at 08:35Z)
+- **W&B run**: `cw4a7zf2` (state=finished, runtime 14.32h)
+- **Hypothesis**: H53 plateaued at val_abupt 6.181% with LR-decay slope-halving pattern. Test if `--lr-cosine-t-max 13 → 25` LR-extension unlocks CP-LOSS-WEIGHT class merge.
+
+### Terminal verdict — close + reassign
+
+| Axis | H62 | H53 (parent) | Δ vs H53 | Gate/Floor | Verdict |
+|---|---:|---:|---:|---:|:--|
+| **val_abupt** (merge gate) | **6.397%** | 6.181% | **+0.216pp WORSE** | 6.126% | ❌ MISS (+0.271pp vs gate) |
+| test_abupt | 6.121% | 6.052% | +0.069pp WORSE | 5.844% | ❌ MISS |
+| test_VP (floor) | 3.760% | 3.665% | +0.095pp WORSE | 3.643% | ❌ MISS |
+| test_SP (floor) | 3.835% | 3.793% | +0.042pp WORSE | 3.577% | ❌ MISS |
+| test_WSS | 7.052% | 6.978% | +0.074pp WORSE | 6.727% | ❌ MISS |
+
+**H62 STRICTLY WORSE than H53 on EVERY paper-facing axis.** Outcome D NEGATIVE confirmed.
+
+### KEY STRUCTURAL FINDING — CP-LOSS-WEIGHT class is NOT LR-decay-bound (LR-extension actively HURTS)
+
+Matched-step trajectory (H62 vs H53):
+
+| EP | H62 LR%peak | H53 LR%peak | ΔLR | H62 val_abupt | H53 val_abupt | Δ |
+|---:|---:|---:|---:|---:|---:|---:|
+| 7 | 86.5% | 56.7% | +29.8 | 6.476% | 6.268% | +0.208pp |
+| 8 | 82.1% | 44.6% | +37.5 | 6.465% | 6.228% | +0.237pp |
+| 9 | 77.0% | 33.0% | +44.0 | 6.448% | 6.208% | +0.240pp |
+| 10 | 71.6% | 22.5% | +49.1 | 6.434% | (extrap 6.20%) | ~+0.24pp |
+| terminal | 55.6% | 2.5% | +53.1 | **6.397%** | **6.181%** | **+0.216pp** |
+
+**Higher LR retention through training MAKES IT WORSE.** Gap stabilized at +0.24pp through EP7-10, never recovered. **Refined mechanism**: loss-weight-rebalancing classes need LR DECAY as PART OF the mechanism. The gradient magnitudes need to shrink for the weight rebalancing to settle into the new equilibrium. Extending LR keeps gradients too large to converge.
+
+### Implication for Wave 31 LR-decay-confound hypothesis
+
+Class-by-class refinement:
+
+| Mech class | LR-fix variant | Disposition |
+|---|---|---|
+| V-DEPTH (H47→H59) | val=tied, test=better | Architecture-bound at val, LR-bound at test |
+| **CP-LOSS-WEIGHT (H53→H62)** | **WORSE on all axes** | **LR-fix ACTIVELY DESTABILIZES — class needs LR DECAY** |
+| TAU-Z-CURR (H55v2→H63) | in flight | TBD |
+| SURFACE-DEEP (H54v2→H65) | in flight | TBD |
+| COORDSLICE (H58→H66) | in flight | TBD |
+| Attention-temp (H61→H70) | just launched | TBD |
+
+H62 is **first Wave 31 single-mechanism LR-fix variant to produce OUTCOME D NEGATIVE**. LR-decay-confound is now refined from "systematic Wave 31 ceiling" to "confound for SOME mech classes, productive for OTHERS". The 5 parallel LR-fix runs serve as a **mech-class differentiation diagnostic**, not just confound isolation.
+
+### Disposition: CLOSE + tanjiro reassigned to H71 GRADNORM PR #1225
+
+Wave 32 cross-pollination launch. GradNorm dynamic per-task loss balancing (Chen et al. 2018) — new mech class on tay (loss-balancing-dynamic). dl24 H19 SOTA-beat innovation. Replaces hand-tuned static weights (tau_z=2.0, surface=2.0, etc.) with rate-adaptive learnable weights. Composes orthogonally with FDCE / variance-class / attention-spatial-prior. **Critical**: stays on `--lr-cosine-t-max 13` (legacy substrate) per H62 D NEGATIVE finding — loss-rebalancing classes need LR decay.
+
+---
+
+## 2026-05-20 08:25 — PR #1210: H61 SLICE-TEMP-CURRICULUM (frieren, CLOSED) — **MECHANISM-POSITIVE B PARTIAL + first Wave 31 lr-cosine-t-max=13 test_VP floor cross + 7th confirmed LR-decay-confound case**
+
+- **Branch**: `frieren/h61-slice-temp-curriculum` (closed at 08:25Z)
+- **W&B run**: `oymgwjfv` (terminal at best_epoch=13)
+- **Hypothesis**: Scheduled slice-attention temperature τ=1.5→1.0 over EP1-6 (linear decay), then hold τ=1.0 EP6-13. Warm/diffuse routing early, sharp/competitive routing late (Gumbel-softmax-style annealing). Novel mech class #14: attention-routing-temperature-curriculum.
+
+### Terminal verdict — close + reassign
+
+| Axis | H61 | Gate/Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt (merge gate) | 6.341% | 6.126% | +0.215pp | ❌ MISS |
+| test_abupt (baseline) | 6.004% | 5.844% | +0.160pp | ❌ MISS |
+| **test_VP** (floor) | **3.6315%** | 3.643% | **−0.012pp** | ⭐ **CROSS — first Wave 31 lr-13 floor cross** |
+| test_SP (floor) | 3.777% | 3.577% | +0.200pp | ❌ MISS |
+| test_WSS | 6.921% | 6.727% | +0.194pp | ❌ MISS |
+| val_abupt vs H48 (same recipe) | 6.341% | 6.485% | **−0.144pp** | ✅ **B PARTIAL bucket per PR prediction** |
+
+### KEY STRUCTURAL FINDING — 7th LR-decay confound case + curriculum-complete-then-plateau
+
+Slope-by-epoch trajectory:
+
+| EP | step | curriculum τ | val_abupt | slope (pp/1k) |
+|---:|---:|---:|---:|---:|
+| 1 | 10,864 | 1.46 | 34.84% | (cold-start) |
+| 2 | 21,729 | 1.36 | 8.704% | −2.405 |
+| 3 | 32,594 | 1.25 | 7.423% | −0.118 |
+| 4 | 43,466 | 1.17 | 6.823% | −0.040 |
+| 6.0 | 65,212 | **1.00** | 6.345% | −0.011 |
+| **terminal** | **70,652** | **1.00** | **6.341%** | **~0** |
+
+Slope halved every epoch (−2.40 → −0.118 → −0.040 → −0.011 → ~0) — **canonical 7th LR-decay-confound case** (joins H47/H52/H53/H54v2/H55v2/H58/H59). Curriculum complete at step 65,212 (τ=1.0) but residual slope already collapsed to ~−0.011. **Curriculum-complete-then-plateau**: model couldn't exploit sharpened routing at low LR.
+
+Per-axis WSS test pattern preserved: x=6.16%, y=7.49%, z=8.97% (z>y>x). WSS_z still binding.
+
+### Disposition: CLOSE + frieren reassigned to H70 SLICE-TEMP-LR-EXTENDED PR #1224
+
+H61 lands B PARTIAL with first lr-cosine-t-max=13 test_VP floor cross. Mechanism class #14 (attention-routing-temperature-curriculum) confirmed mech-positive. LR-fix variant H70 stretches curriculum decay to 130,368 steps (EP12, matching `--lr-cosine-t-max 25`). 6th class in LR-fix triangulation alongside H59/H62/H63/H65/H66.
+
+---
+
 ## 2026-05-20 07:35 — PR #1209: H60 H56-RELAUNCH-DROP-EP3 — ema-aware-variance-stack with strongest val variance signal in Wave 31 (fern, CLOSED) — **MECHANISM-POSITIVE NULL + KEY STRUCTURAL FINDING: val→test mechanism inversion**
 
 - **Branch**: `fern/h60-h56-relaunch-drop-ep3` (closed at 07:35Z)
