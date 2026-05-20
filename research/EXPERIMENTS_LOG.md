@@ -1,3 +1,50 @@
+## 2026-05-20 19:45 — PR #1214: H65 SURFACE-DEEP-LR-EXTENDED (alphonse, CLOSED) — **OUTCOME C NULL on val_abupt + MECH-POSITIVE test side with 5th test_VP FLOOR CROSS**
+
+- **Branch**: `alphonse/h65-surface-deep-lr-extended` (closed at 19:45Z)
+- **W&B run**: `quvb4mb1` (13/13 epochs, 987.3 min = 16.46h wall-time)
+- **Hypothesis**: H54 v2 SURFACE-DEEP (surf_deep 2 blocks) plateaued at val_abupt ~6.248% due to LR-decay confound — slope collapsed from −0.03pp/ep EP5→6 to ~0 EP8+. Test if `--lr-cosine-t-max 13 → 25` unlocks continued descent by preserving 55% peak LR at terminal.
+
+### Terminal metrics
+
+| Metric | H65 terminal | Baseline #972 | H54 v2 ref | Δ vs H54 v2 | Status |
+|---|---:|---:|---:|---:|:--|
+| val_abupt | **6.2345%** | 6.126% | 6.248% | −0.014pp | ❌ C NULL (within ±0.05pp) |
+| val_VP | 3.718% | 3.798% | 3.699% | +0.019pp | — |
+| val_SP | 4.056% | 3.577% | 4.071% | −0.015pp | — |
+| val_WSS | 7.055% | 6.727% | — | — | — |
+| test_abupt | **5.926%** | 5.844% | 6.042% | **−0.116pp** ✅ | BEAT H54 v2 |
+| **test_VP** | **3.588%** | 3.643% (floor) | 3.693% | **−0.105pp** ✅ | **5th FLOOR CROSS** |
+| test_SP | 3.687% | 3.577% (floor) | 3.803% | −0.116pp ✅ | above floor |
+| test_WSS | 6.836% | 6.727% | 6.954% | **−0.118pp** ✅ | misses baseline |
+| test_WSS_z | **8.866%** | 8.916% | 9.016% | **−0.150pp** ✅ | direction-correct |
+
+### Results commentary
+
+**Formally C NULL on val_abupt** — H65 terminates at 6.2345%, only −0.014pp better than H54 v2 (6.248%) which is within the ±0.05pp noise band. Merge gate (6.126%) missed by +0.108pp. Outcome matches H59 V-DEPTH (C NULL val, mech-positive test) pattern.
+
+**Mech-positive on test side**: H65 beats H54 v2 by −0.105 to −0.150pp across ALL test metrics. **test_VP 3.588% crosses the 3.643% floor by −0.055pp** — the 5th project test_VP floor cross after H26 merged, H53, H55v2, H57 with 2 crosses. This is the strongest test-side signal from any single-mech LR-fix variant.
+
+**KEY STRUCTURAL FINDING**: Surf_deep mechanism was STILL IN PRODUCTIVE GROWTH at EP13 terminal (block0/block1 ffn_fc2 norms +0.218/+0.257 per_1k_steps positive slope). Mechanism didn't saturate — the val_abupt ~6.23% ceiling is architecture-bound (same as H47 V-DEPTH 6.28% ceiling), NOT mechanism-capacity-bound.
+
+**LR-fix trajectory verified**: LR retained 55% peak at terminal vs H54 v2 ~0%. The late-epoch productive descent EP12→EP13 (−0.017pp) absent in H54 v2 (plateaued at ~0 descent EP9+) confirms LR-fix substrate was functional. The mechanism continued growing under preserved LR.
+
+**Class assignment**: shared-capacity-surface joins V-DEPTH in "architecture-bound at val, LR-bound at test" category. Both classes benefit from LR-fix on test channels but cannot crack val_abupt gate regardless of LR schedule.
+
+### Mechanistic analysis
+
+Surf_deep block norms (block0/block1 ffn_fc2 + attn_proj) all positive slope at terminal:
+- block0 ffn_fc2 global_norm: +0.218 per_1k_steps (still growing EP13)
+- block1 ffn_fc2 global_norm: +0.257 per_1k_steps (growing at terminal)
+- block0/block1 attn_proj global_norm: +0.180/+0.188 (growing)
+
+This is mechanistically novel: the architecture-ceiling is not from mechanism saturation but from the val evaluation space (34-case val set) being uncorrelated with where surf_deep capacity adds value. Test set (50 cases, 11k views) sees the benefit; val doesn't.
+
+### Follow-up assigned
+
+**H75 PURE-BASELINE-LR-EXTENDED (PR #1231)**: alphonse takes baseline #972 exact config, single-flag change `--lr-cosine-t-max 13 → 25`. ZERO mechanism changes. This is the missing control experiment to resolve whether LR-fix's test improvements are mechanism-dependent or universally LR-induced. Three falsifiable outcomes.
+
+---
+
 ## 2026-05-20 13:25 — PR #1224: H70 SLICE-TEMP-CURRICULUM-LR-EXTENDED (frieren, CLOSED) — **OUTCOME D NEGATIVE: 2nd Wave 32 LR-fix variant to FALSIFY confound hypothesis — class-differentiation principle now binding**
 
 - **Branch**: `frieren/h70-slice-temp-lr-extended` (closed at 13:25Z)

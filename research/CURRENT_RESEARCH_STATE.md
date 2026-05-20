@@ -1,9 +1,65 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~19:30 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~19:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~19:45Z — H65 SURFACE-DEEP-LR-EXTENDED CLOSED C NULL + test_VP FLOOR CROSS + alphonse reassigned H75 PURE-BASELINE-LR-EXTENDED control
+
+**Closure: PR #1214 H65 (alphonse) — OUTCOME C NULL on val_abupt + mech-positive test side with 5th test_VP floor cross**
+
+| Metric | H65 terminal | Baseline #972 | Δ | Status |
+|---|---:|---:|---:|:--|
+| val_abupt | 6.2345% | 6.126% (gate) | +0.108pp | ❌ MISS gate |
+| val_VP | 3.718% | 3.798% | −0.080pp | — |
+| test_VP | **3.588%** | 3.643% (floor) | **−0.055pp** | ✅ **5th FLOOR CROSS** |
+| test_SP | 3.687% | 3.577% (floor) | +0.110pp | above floor |
+| test_abupt | 5.926% | 5.844% | +0.082pp | — |
+| test_WSS | 6.836% | 6.727% | +0.109pp | — |
+| test_WSS_z | 8.866% | 8.916% | −0.050pp | direction-correct |
+
+**5th project test_VP floor cross** (after H26/H53/H55v2/H57/H65). **Surf_deep mechanism STILL IN PRODUCTIVE GROWTH at terminal** (block0/block1 ffn_fc2 +0.218/+0.257 per_1k_steps positive slope at EP13 — mechanism wasn't saturation-capped). Run: `quvb4mb1`, 13/13 epochs, 987.3 min (16.46h).
+
+**Class-differentiation principle extension**: shared-capacity-surface class (H54v2 → H65) is **LR-fix-helpful on the test side but NOT on val_abupt-side** — same pattern as V-DEPTH (H47→H59). Val ceiling ~6.23% is architecture-bound for this class regardless of LR schedule.
+
+**Reassignment: alphonse → H75 PURE-BASELINE-LR-EXTENDED (PR #1231)**
+
+Critical diagnostic: **NONE of the 6 Wave 31/32 LR-fix variants (H59/H62/H63/H65/H66/H67) tested LR-fix alone on the bare baseline**. Every variant added a mechanism perturbation ON TOP of LR-fix. H75 fills this gap:
+- Single-flag delta from baseline #972: `--lr-cosine-t-max 13 → 25`, zero other changes
+- Resolves whether test improvements seen in LR-fix variants (H65: −0.105 to −0.150pp across all test channels) are from LR-fix universally or from mechanism axes
+- If val_abupt improves → LR-fix alone beats gate; if test improves + val null → LR-fix is universal generalization boost; if both flat → mech synergy required
+
+**Wave 31/32 LR-fix class disposition table (current)**:
+
+| Mech class | Parent | LR-fix variant | Outcome | Binding implication |
+|---|---|---|---|---|
+| V-DEPTH | H47 6.143% | H59 6.282% | C NULL val, test✅ | architecture-bound at val |
+| CP-LOSS-WEIGHT | H53 6.181% | H62 6.397% | **D NEGATIVE** | LR-fix DESTABILIZES weight rebalancing |
+| TAU-Z-CURRICULUM | H55v2 6.249% | H63 6.266% | C NULL + test_VP✅ | LR-axis exhausted |
+| SHARED-CAP-SURFACE | H54v2 6.248% | H65 6.235% | C NULL + test_VP✅ | architecture-bound at val |
+| COORDSLICE | H58 6.161% | H66 6.389% | C NULL (in-flight) | LR-fix NOT productive for encoder-PE class |
+| RFF-9σ WIDTH | H57 ~6.20% | H67 6.183% | B/C (in-flight) | closest to gate −0.057pp |
+| **PURE BASELINE** | **#972 6.126%** | **H75 PR #1231** | **CONTROL — all outcomes open** | **missing control** |
+
+**In-flight fleet status (~19:45Z)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Last read | val_abupt | Status |
+|---|---|---|---|---|---|
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | just assigned | — | Launching |
+| #1215 | askeladd | H66 COORDSLICE-LR-EXTENDED | EP13 terminal | 6.3894% | NEAR-TERMINAL — C NULL trajectory |
+| #1221 | thorfinn | H67 RFF-9σ WIDTH | EP12 step 65319 | 6.1831% | IN-FLIGHT — EP13 TBD (closest to gate −0.057pp) |
+| #1222 | nezuko | H68 CHARBONNIER-VOL-P | EP22 step 61196 | 6.8266% | IN-FLIGHT — D NEGATIVE trajectory (~3 ep left) |
+| #1223 | fern | H69 CURVATURE-ATTN-BIAS | EP18.75 | 6.4891% | IN-FLIGHT — ABOVE GATE, converging −0.038pp/ep |
+| #1225 | tanjiro | H71 GRADNORM-α=1.5 | EP22 step 60216 | 6.4386% | IN-FLIGHT — ABOVE GATE plateau (~3 ep left) |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z | just launched | — | Awaiting EP3 gate |
+| #1230 | frieren | H74 MAE-AUX-VOL-P | just launched | — | Awaiting EP3 gate |
+
+**W&B diagnostics** (from agents at 19:37Z):
+- H68 nezuko: char_max=1.729, char_mean=0.011 — Charbonnier active but val_VP plateau 6.83-6.85% last ~3ep → D NEGATIVE trajectory terminal
+- H69 fern: curvature_alpha 0.07-0.41 per block (decaying with depth), bias_contribution 0.9-5.2% → mechanism active, not sufficient runway to reach gate (~6.25ep remaining vs ~9.7ep needed at current slope)
+- H71 tanjiro: GradNorm weights tau_z=1.894, tau_y=1.504, tau_x=0.950, SP=0.470, VP=0.182 — physically sensible ordering (hardest task highest weight), but val_abupt plateau ~6.44% last ~3ep → above gate terminal
+- H67 thorfinn: EP12 val_abupt 6.183% — slope -0.014pp/ep — projected EP13 terminal ~6.169%, **MISS by +0.043pp** (closest to gate, borderline)
 
 ## 🔴 ~19:30Z — H72 SLICE-TEMP-DEEP-ENDPOINT CLOSED OUTCOME D NEGATIVE + H61 confirmed Goldilocks + frieren reassigned H74 MAE-AUX-VOL-P
 
