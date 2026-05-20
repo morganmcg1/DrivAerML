@@ -5,6 +5,32 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## ⭐ Cross-pollination intelligence from dl24 fleet (2026-05-20 06:46Z, Issue #1056 comment)
+
+**dl24 H19 (PR #1180, frieren, run `r5eigmer`) — single-model SOTA-beat on test_wss + test_abupt simultaneously** (on dl24's parallel dataset `drivaerml-long-20260504`, NOT on my data root — direct number comparison invalid but technique stack is highly relevant):
+
+| Metric | dl24 H19 | claimed Δ vs #972 ref | Floor status |
+|---|---:|---:|:--|
+| test_abupt | **5.8197%** | −0.024pp ⭐ | — |
+| test_wss | **6.6339%** | −0.093pp ⭐ | — |
+| test_vol_p | 3.7786% | +0.136pp | ❌ above 3.643% floor |
+| test_surf_p | 3.6267% | +0.050pp | ❌ above 3.577% floor |
+
+**dl24 winning technique stack** (cross-pollination candidates for tay Wave 32):
+1. **H10b machinery base**: curvature attention bias + Charbonnier loss on tau_z (foundation)
+2. **+ Charbonnier loss on vol_p** (the dl24 H19 innovation — reshapes loss landscape to favor wss)
+3. **+ GradNorm loss balancing** (dynamic per-task weighting)
+4. **+ clamp=0.15** (planned for dl24 H21, expected to reduce vol_p breach 4×)
+
+**dl24 not merging H19** per #1056 floor contract — but they're asking the human team to consider relaxing floor constraints when test_wss AND test_abupt both clearly beat SOTA. NOT my call to make.
+
+**Implications for tay Wave 32 planning** (acted on when current 8/8 WIP cycle terminates):
+- **Charbonnier loss on vol_p + GradNorm** is now empirically validated as a test_wss-improving technique (on dl24's data). High-priority Wave 32 candidate IF it composes with my Lion+lr-cosine-t-max-25 substrate.
+- **Curvature attention bias** (H5/H10b family) is the foundation — I have NOT yet tested this class on tay. Worth a dedicated Wave 32 hypothesis.
+- **Caveat**: dl24's H10b run on their data shows test_vol_p=4.160% (+0.517pp above floor on their split) which is significantly above my own H47/H53/etc. baselines (all in 3.6-3.9% range). This suggests **dl24's test split is HARDER on vol_p** — they may have different stratification. Their floor breaches may reflect their own data being more challenging on vol_p, not their technique being fundamentally floor-breaking.
+- Technique transfer to tay may produce LARGER margins on tay's easier vol_p split.
+
+
 ## Latest invocation actions (2026-05-20 ~04:15Z) — PR #1207 H58 COORDSLICE-NO-STOPGRAD terminal CLOSED as **mechanism-positive null with DEEPEST Wave 31 test_VP floor cross (−0.092pp) + CLOSEST Wave 31 val_abupt near-miss (+0.035pp) + PE-auto-growth FALSIFIED + Lion+zero-mean-gradient structural finding** (val_abupt 6.161% NEAR-MISS merge gate +0.035pp = 1st-closest Wave 31; test_abupt 5.999% +0.155pp regress +0.021pp vs H50; test_VP 3.551% DEEPEST cross Wave 31 −0.092pp under floor vs H50 −0.047pp; test_SP 3.856% +0.279pp regress +0.121pp vs H50; proj_weight_std at terminal max +11.5% block 0 only vs predicted +100% across all 5 blocks; Lion's sign(grad) on near-zero-mean indirect averaged gradient produces random-sign updates that cancel — structural reason for PE-auto-growth FALSIFICATION; primary-positive outcome came via unintended slice-routing-gradient side effect NOT the predicted PE-projection growth; 6th Wave 31 LR-decay confound case slope-halving EP5→EP6); **ASKELADD REASSIGNED H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED** (PR #1215, single-flag change `--lr-cosine-t-max 25` instead of 13; **5th parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED + H63 TAU-Z-CURRICULUM-LR-EXTENDED + H65 SURFACE-DEEP-LR-EXTENDED — if all 5 mech classes merge under LR-fix, LR-decay confound is bulletproof confirmed across 5 orthogonal mechanism classes); fleet status 8/8 WIP zero idle zero review-ready
 
 ### Headline updates (2026-05-20 04:15Z)
