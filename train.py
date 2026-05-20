@@ -108,6 +108,7 @@ class Config:
     curvature_attn_per_head: bool = False
     curvature_knn_k: int = 16
     curvature_chunk_size: int = 256
+    curvature_ref_size: int = 4096
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -263,6 +264,11 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "values reduce peak memory at the cost of more launches. Only "
             "used when --use-curvature-attn-bias is set."
         ),
+        "curvature_ref_size": (
+            "If > 0 and < N, run kNN against a uniformly random subset of this "
+            "many reference points instead of all N surface points. Cuts the "
+            "cdist+topk cost by N/ref_size. Set to 0 to disable subsampling."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -347,6 +353,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         curvature_attn_per_head=config.curvature_attn_per_head,
         curvature_knn_k=config.curvature_knn_k,
         curvature_chunk_size=config.curvature_chunk_size,
+        curvature_ref_size=(config.curvature_ref_size if config.curvature_ref_size > 0 else None),
     )
 
 

@@ -28,6 +28,7 @@ def compute_normal_variance_curvature(
     *,
     k: int = 16,
     chunk_size: int = 256,
+    ref_size: int | None = None,
 ) -> torch.Tensor:
     """Per-point curvature proxy: mean of (1 - cos(angle(n_i, n_j))) over k-NN.
 
@@ -37,6 +38,9 @@ def compute_normal_variance_curvature(
         mask:      [B, N] bool/float mask of valid (non-padded) points
         k:         number of nearest neighbours (excludes self)
         chunk_size: query-side chunk for the pairwise distance pass
+        ref_size: when set and < N, do kNN against a uniformly-random subset of
+            ref_size points instead of all N. Cuts cdist+topk cost by N/ref_size.
+            Same reference set is shared across the batch within a forward.
 
     Returns:
         kappa: [B, N] float tensor in [0, 2], zero at masked positions.
@@ -54,7 +58,19 @@ def compute_normal_variance_curvature(
     positions_safe = torch.where(valid.unsqueeze(-1), positions, large)
     normals_safe = torch.where(valid.unsqueeze(-1), normals, torch.zeros_like(normals))
 
-    k_eff = max(1, min(k, N - 1)) if N > 1 else 1
+    use_refs = ref_size is not None and ref_size < N
+    if use_refs:
+        ref_idx_1d = torch.randperm(N, device=device)[:ref_size]
+        ref_pos = positions_safe.index_select(1, ref_idx_1d)
+        ref_normals = normals_safe.index_select(1, ref_idx_1d)
+        M = ref_size
+    else:
+        ref_idx_1d = None
+        ref_pos = positions_safe
+        ref_normals = normals_safe
+        M = N
+
+    k_eff = max(1, min(k, M - 1)) if M > 1 else 1
     kappa = positions.new_zeros(B, N)
 
     batch_idx = torch.arange(B, device=device).view(B, 1, 1)
@@ -63,24 +79,23 @@ def compute_normal_variance_curvature(
         end = min(start + chunk_size, N)
         m = end - start
         q_pos = positions_safe[:, start:end]
-        # cdist: [B, m, N]
-        dist = torch.cdist(q_pos, positions_safe)
-        # Add a tiny penalty to self so that valid points exclude themselves cleanly.
-        # The query points appear at indices [start:end] in positions_safe. Build a mask
-        # of self-positions and bump their distance to be larger than any real neighbour.
-        # (We do this rather than relying on argmin selecting self, because invalid
-        # queries already sit at distance 0 to themselves through the safe-positions
-        # trick — they'll be skipped via the kappa*valid multiplication at the end.)
-        col_idx = torch.arange(start, end, device=device).view(1, m, 1)
-        all_idx = torch.arange(N, device=device).view(1, 1, N)
-        self_mask = col_idx.eq(all_idx)
+        # cdist: [B, m, M]
+        dist = torch.cdist(q_pos, ref_pos)
+        # Mask self-position so the query never picks itself as its own neighbour.
+        col_idx = torch.arange(start, end, device=device)
+        if use_refs:
+            # self when ref_idx_1d == query_global_idx
+            self_mask = ref_idx_1d.view(1, 1, -1).eq(col_idx.view(1, -1, 1))
+        else:
+            all_idx = torch.arange(N, device=device).view(1, 1, N)
+            self_mask = col_idx.view(1, -1, 1).eq(all_idx)
         dist = dist.masked_fill(self_mask, large.item())
         # topk smallest distances → indices [B, m, k_eff]
         _, idx = torch.topk(dist, k=k_eff, dim=-1, largest=False)
         # Gather neighbour normals via advanced indexing.
         # batch_idx: [B,1,1]; idx: [B, m, k_eff]
         # Result: [B, m, k_eff, 3]
-        neighbour_normals = normals_safe[batch_idx.expand(B, m, k_eff), idx]
+        neighbour_normals = ref_normals[batch_idx.expand(B, m, k_eff), idx]
         chunk_normals = normals_safe[:, start:end].unsqueeze(2)  # [B, m, 1, 3]
         cos_sim = (chunk_normals * neighbour_normals).sum(dim=-1)  # [B, m, k_eff]
         chunk_kappa = (1.0 - cos_sim).mean(dim=-1).clamp(min=0.0, max=2.0)
@@ -552,6 +567,7 @@ class SurfaceTransolver(nn.Module):
         curvature_attn_per_head: bool = False,
         curvature_knn_k: int = 16,
         curvature_chunk_size: int = 256,
+        curvature_ref_size: int | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -571,6 +587,7 @@ class SurfaceTransolver(nn.Module):
         self.curvature_attn_per_head = curvature_attn_per_head
         self.curvature_knn_k = int(curvature_knn_k)
         self.curvature_chunk_size = int(curvature_chunk_size)
+        self.curvature_ref_size = int(curvature_ref_size) if curvature_ref_size else None
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -785,6 +802,7 @@ class SurfaceTransolver(nn.Module):
                 surface_mask.to(dtype=torch.bool),
                 k=self.curvature_knn_k,
                 chunk_size=self.curvature_chunk_size,
+                ref_size=self.curvature_ref_size,
             ).to(dtype=hidden.dtype)
             if volume_tokens > 0:
                 volume_kappa = hidden.new_zeros(volume_x.shape[0], volume_tokens)
