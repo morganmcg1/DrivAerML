@@ -51,6 +51,7 @@ from trainer_runtime import (
     init_wandb_run,
     is_valid_primary_metric,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     parse_kill_thresholds,
@@ -139,6 +140,7 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    vol_p_aux_mae_weight: float = 0.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -349,6 +351,7 @@ def train_loss(
     wss_charbonnier_axes: str = "all",
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
+    vol_p_aux_mae_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -475,12 +478,29 @@ def train_loss(
             }
         else:
             vol_p_charb_metrics = {}
+        # H22 (H9b mechanism on H19 base): vol_p MAE auxiliary — direct L1
+        # vol_p signal added AFTER the GradNorm-weighted task sum and the
+        # Charbonnier additive term, bypassing GradNorm rate balancing.
+        # GradNorm's task_losses[4] carries the Charb tensor (H19), so the
+        # MAE_aux is out-of-budget gradient mass on top of the reshape.
+        vol_p_mae_aux_val = 0.0
+        vol_p_mae_aux_weighted_val = 0.0
+        if vol_p_aux_mae_weight > 0.0:
+            vol_p_mae = masked_mean(
+                (out["volume_preds"] - volume_target).abs(),
+                batch.volume_mask,
+            )
+            loss = loss + vol_p_aux_mae_weight * vol_p_mae
+            vol_p_mae_aux_val = float(vol_p_mae.detach().cpu().item())
+            vol_p_mae_aux_weighted_val = vol_p_aux_mae_weight * vol_p_mae_aux_val
     metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "vol_p_mae_aux": vol_p_mae_aux_val,
+        "vol_p_mae_aux_weighted": vol_p_mae_aux_weighted_val,
     }
     metrics.update(charb_metrics)
     metrics.update(vol_p_charb_metrics)
@@ -729,6 +749,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     wss_charbonnier_axes=config.wss_charbonnier_axes,
                     vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
+                    vol_p_aux_mae_weight=config.vol_p_aux_mae_weight,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -832,6 +853,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 "train/loss_vol_p_charb_to_mse_ratio": vol_p_ratio_to_mse,
                                 "train/loss_vol_p_charb_weighted_to_mse_ratio": vol_p_weighted_ratio,
                             }
+                        )
+                    if config.vol_p_aux_mae_weight > 0.0:
+                        train_log["train/vol_p_mae_aux"] = batch_loss_metrics[
+                            "vol_p_mae_aux"
+                        ]
+                        train_log["train/vol_p_mae_aux_weighted"] = batch_loss_metrics[
+                            "vol_p_mae_aux_weighted"
+                        ]
+                        train_log["train/vol_p_aux_mae_weight"] = (
+                            config.vol_p_aux_mae_weight
                         )
                 if config.use_y_symmetry_aug and aug_log:
                     bs = max(1, aug_log.get("batch_size", 0))
