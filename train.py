@@ -103,6 +103,11 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_curvature_attn_bias: bool = False
+    curvature_attn_init: float = 0.0
+    curvature_attn_per_head: bool = False
+    curvature_knn_k: int = 16
+    curvature_chunk_size: int = 256
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +234,35 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_curvature_attn_bias": (
+            "Enable curvature-conditioned attention bias in each backbone "
+            "TransolverAttention block (PR #1223, H69). A learnable scalar "
+            "alpha per block (or per head, with --curvature-attn-per-head) "
+            "adds alpha * (|kappa_q| + |kappa_k|) to the slice-level "
+            "pre-softmax attention scores, where kappa is a per-token "
+            "curvature proxy computed from the kNN normal-variance of the "
+            "input surface normals. Volume tokens contribute zero curvature. "
+            "Identity-at-init when --curvature-attn-init 0.0."
+        ),
+        "curvature_attn_init": (
+            "Initial value of the learnable curvature bias scalar(s). 0.0 "
+            "gives identity-at-init (baseline behaviour at step 0)."
+        ),
+        "curvature_attn_per_head": (
+            "If set, learn one curvature bias scalar per attention head per "
+            "block; otherwise one scalar per block. Per-head is a follow-up "
+            "if the per-block scalar learns meaningfully non-zero."
+        ),
+        "curvature_knn_k": (
+            "Number of nearest neighbours used to compute the per-point "
+            "curvature proxy (mean of (1 - cos(angle(n_i, n_j))) over kNN). "
+            "Only used when --use-curvature-attn-bias is set."
+        ),
+        "curvature_chunk_size": (
+            "Query-side chunk size for the kNN normal-variance pass. Lower "
+            "values reduce peak memory at the cost of more launches. Only "
+            "used when --use-curvature-attn-bias is set."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,7 +342,45 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_curvature_attn_bias=config.use_curvature_attn_bias,
+        curvature_attn_init=config.curvature_attn_init,
+        curvature_attn_per_head=config.curvature_attn_per_head,
+        curvature_knn_k=config.curvature_knn_k,
+        curvature_chunk_size=config.curvature_chunk_size,
     )
+
+
+def collect_curvature_diagnostics(model: nn.Module) -> dict[str, float]:
+    """Per-block alpha trajectory and bias magnitude for H69."""
+    metrics: dict[str, float] = {}
+    if not getattr(model, "use_curvature_attn_bias", False):
+        return metrics
+    blocks = getattr(getattr(model, "backbone", None), "blocks", None)
+    if blocks is None:
+        return metrics
+    for i, block in enumerate(blocks):
+        attn = getattr(block, "attention", None)
+        alpha = getattr(attn, "curvature_alpha", None)
+        if attn is None or alpha is None:
+            continue
+        alpha_d = alpha.detach().float()
+        if alpha_d.ndim == 0:
+            metrics[f"diag/curvature_alpha_block{i}"] = float(alpha_d.item())
+        else:
+            for h in range(alpha_d.numel()):
+                metrics[f"diag/curvature_alpha_block{i}_head{h}"] = float(alpha_d[h].item())
+            metrics[f"diag/curvature_alpha_block{i}_mean"] = float(alpha_d.mean().item())
+            metrics[f"diag/curvature_alpha_block{i}_std"] = float(alpha_d.std(unbiased=False).item())
+        bias_buf = getattr(attn, "_diag_curvature_bias_abs_mean", None)
+        score_buf = getattr(attn, "_diag_curvature_scores_abs_mean", None)
+        if bias_buf is not None and score_buf is not None:
+            bias_mag = float(bias_buf.detach().float().item())
+            score_mag = float(score_buf.detach().float().item())
+            metrics[f"diag/curvature_bias_abs_mean_block{i}"] = bias_mag
+            metrics[f"diag/curvature_scores_abs_mean_block{i}"] = score_mag
+            if score_mag > 1e-12:
+                metrics[f"diag/curvature_bias_contribution_block{i}"] = bias_mag / score_mag
+    return metrics
 
 
 def train_loss(
@@ -1049,10 +1121,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                     and config.weight_log_every > 0
                     and global_step % config.weight_log_every == 0
                 )
+                lr_peak = float(config.lr) if config.lr > 0.0 else 1.0
+                lr_fraction_of_peak = current_lr / lr_peak if lr_peak > 0.0 else 0.0
+                cosine_t_max = (
+                    config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
+                )
+                cosine_progress = (
+                    max(0.0, float(epoch - max(0, config.lr_warmup_epochs)))
+                    / max(1.0, float(cosine_t_max))
+                )
                 train_log: dict[str, object] = {
                     "global_step": global_step,
                     "train/lr": current_lr,
                     "lr": current_lr,
+                    "train/lr_fraction_of_peak": lr_fraction_of_peak,
+                    "train/cosine_progress": cosine_progress,
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
@@ -1126,6 +1209,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        if (
+                            config.use_curvature_attn_bias
+                            and should_log_model_telemetry
+                            and config.gradient_log_every > 0
+                            and global_step % config.gradient_log_every == 0
+                        ):
+                            train_log.update(collect_curvature_diagnostics(base_model))
 
                 train_log.update(
                     train_slope_tracker.update(
@@ -1262,6 +1352,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_curvature_diagnostics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

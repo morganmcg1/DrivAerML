@@ -16,6 +16,81 @@ from data import SURFACE_X_DIM, SURFACE_Y_DIM, VOLUME_X_DIM, VOLUME_Y_DIM
 
 
 # ---------------------------------------------------------------------------
+# H69 curvature feature (kNN normal variance proxy)
+# ---------------------------------------------------------------------------
+
+
+@torch._dynamo.disable
+def compute_normal_variance_curvature(
+    positions: torch.Tensor,
+    normals: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    k: int = 16,
+    chunk_size: int = 256,
+) -> torch.Tensor:
+    """Per-point curvature proxy: mean of (1 - cos(angle(n_i, n_j))) over k-NN.
+
+    Args:
+        positions: [B, N, 3] surface positions
+        normals:   [B, N, 3] surface normals (assumed unit vectors)
+        mask:      [B, N] bool/float mask of valid (non-padded) points
+        k:         number of nearest neighbours (excludes self)
+        chunk_size: query-side chunk for the pairwise distance pass
+
+    Returns:
+        kappa: [B, N] float tensor in [0, 2], zero at masked positions.
+    """
+    B, N, _ = positions.shape
+    device = positions.device
+    dtype = positions.dtype
+
+    if N == 0:
+        return positions.new_zeros(B, 0)
+
+    valid = mask.to(device=device, dtype=torch.bool)
+    # Push invalid points far away so they're never chosen as neighbours.
+    large = positions.new_full((), 1e9)
+    positions_safe = torch.where(valid.unsqueeze(-1), positions, large)
+    normals_safe = torch.where(valid.unsqueeze(-1), normals, torch.zeros_like(normals))
+
+    k_eff = max(1, min(k, N - 1)) if N > 1 else 1
+    kappa = positions.new_zeros(B, N)
+
+    batch_idx = torch.arange(B, device=device).view(B, 1, 1)
+
+    for start in range(0, N, chunk_size):
+        end = min(start + chunk_size, N)
+        m = end - start
+        q_pos = positions_safe[:, start:end]
+        # cdist: [B, m, N]
+        dist = torch.cdist(q_pos, positions_safe)
+        # Add a tiny penalty to self so that valid points exclude themselves cleanly.
+        # The query points appear at indices [start:end] in positions_safe. Build a mask
+        # of self-positions and bump their distance to be larger than any real neighbour.
+        # (We do this rather than relying on argmin selecting self, because invalid
+        # queries already sit at distance 0 to themselves through the safe-positions
+        # trick — they'll be skipped via the kappa*valid multiplication at the end.)
+        col_idx = torch.arange(start, end, device=device).view(1, m, 1)
+        all_idx = torch.arange(N, device=device).view(1, 1, N)
+        self_mask = col_idx.eq(all_idx)
+        dist = dist.masked_fill(self_mask, large.item())
+        # topk smallest distances → indices [B, m, k_eff]
+        _, idx = torch.topk(dist, k=k_eff, dim=-1, largest=False)
+        # Gather neighbour normals via advanced indexing.
+        # batch_idx: [B,1,1]; idx: [B, m, k_eff]
+        # Result: [B, m, k_eff, 3]
+        neighbour_normals = normals_safe[batch_idx.expand(B, m, k_eff), idx]
+        chunk_normals = normals_safe[:, start:end].unsqueeze(2)  # [B, m, 1, 3]
+        cos_sim = (chunk_normals * neighbour_normals).sum(dim=-1)  # [B, m, k_eff]
+        chunk_kappa = (1.0 - cos_sim).mean(dim=-1).clamp(min=0.0, max=2.0)
+        kappa[:, start:end] = chunk_kappa.to(dtype=dtype)
+
+    kappa = kappa * valid.to(dtype=dtype)
+    return kappa
+
+
+# ---------------------------------------------------------------------------
 # Model
 # ---------------------------------------------------------------------------
 
@@ -234,6 +309,9 @@ class TransolverAttention(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_curvature_attn_bias: bool = False,
+        curvature_attn_init: float = 0.0,
+        curvature_attn_per_head: bool = False,
     ):
         super().__init__()
         if hidden_dim % num_heads != 0:
@@ -244,6 +322,8 @@ class TransolverAttention(nn.Module):
         self.num_slices = num_slices
         self.dropout = dropout
         self.use_qk_norm = use_qk_norm
+        self.use_curvature_attn_bias = use_curvature_attn_bias
+        self.curvature_attn_per_head = curvature_attn_per_head
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
@@ -259,7 +339,29 @@ class TransolverAttention(nn.Module):
             self.q_norm = None
             self.k_norm = None
 
-    def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        if use_curvature_attn_bias:
+            shape = (num_heads,) if curvature_attn_per_head else ()
+            self.curvature_alpha = nn.Parameter(torch.full(shape, float(curvature_attn_init)))
+            # Detached diagnostics buffers (overwritten each forward).
+            self.register_buffer(
+                "_diag_curvature_bias_abs_mean",
+                torch.zeros((), dtype=torch.float32),
+                persistent=False,
+            )
+            self.register_buffer(
+                "_diag_curvature_scores_abs_mean",
+                torch.zeros((), dtype=torch.float32),
+                persistent=False,
+            )
+        else:
+            self.curvature_alpha = None
+
+    def create_slices(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        kappa: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
@@ -272,21 +374,62 @@ class TransolverAttention(nn.Module):
             )
         slice_norm = slice_weights.sum(dim=2, keepdim=False).unsqueeze(-1)
         slice_tokens = torch.einsum("bhnc,bhns->bhsc", fx_mid, slice_weights) / (slice_norm + 1e-5)
-        return slice_tokens, slice_weights
+        slice_kappa: torch.Tensor | None = None
+        if kappa is not None:
+            # kappa: [B, N] -> aggregate to per-head, per-slice via routing weights.
+            kappa_cast = kappa.to(device=slice_weights.device, dtype=slice_weights.dtype)
+            slice_kappa_num = torch.einsum("bhns,bn->bhs", slice_weights, kappa_cast)
+            slice_kappa = slice_kappa_num / (slice_norm.squeeze(-1) + 1e-5)
+        return slice_tokens, slice_weights, slice_kappa
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
-        slice_tokens, slice_weights = self.create_slices(x, attn_mask=attn_mask)
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        kappa: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        use_bias = (
+            self.use_curvature_attn_bias
+            and self.curvature_alpha is not None
+            and kappa is not None
+        )
+        slice_tokens, slice_weights, slice_kappa = self.create_slices(
+            x, attn_mask=attn_mask, kappa=kappa if use_bias else None
+        )
         qkv = self.qkv(slice_tokens)
         q, k, v = qkv.chunk(3, dim=-1)
         if self.q_norm is not None:
             q = self.q_norm(q)
             k = self.k_norm(k)
-        out_slice = F.scaled_dot_product_attention(
-            q,
-            k,
-            v,
-            dropout_p=self.dropout if self.training else 0.0,
-        )
+        if use_bias and slice_kappa is not None:
+            # Manual attention so we can add the curvature bias before softmax.
+            # Slice tokens are small (S=num_slices, typically 128) so this is cheap.
+            scale = 1.0 / math.sqrt(self.dim_head)
+            scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # [B, H, S, S]
+            kappa_abs = slice_kappa.abs()  # [B, H, S]
+            if self.curvature_attn_per_head:
+                alpha = self.curvature_alpha.to(dtype=scores.dtype).view(1, self.num_heads, 1, 1)
+            else:
+                alpha = self.curvature_alpha.to(dtype=scores.dtype)
+            bias = alpha * (kappa_abs.unsqueeze(-1) + kappa_abs.unsqueeze(-2))  # [B, H, S, S]
+            with torch.no_grad():
+                self._diag_curvature_bias_abs_mean.copy_(
+                    bias.detach().float().abs().mean()
+                )
+                self._diag_curvature_scores_abs_mean.copy_(
+                    scores.detach().float().abs().mean()
+                )
+            attn = F.softmax(scores + bias, dim=-1)
+            if self.training and self.dropout > 0.0:
+                attn = F.dropout(attn, p=self.dropout, training=True)
+            out_slice = torch.matmul(attn, v)
+        else:
+            out_slice = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                dropout_p=self.dropout if self.training else 0.0,
+            )
         out_x = torch.einsum("bhsc,bhns->bhnc", out_slice, slice_weights)
         out_x = out_x.permute(0, 2, 1, 3).contiguous().view(x.shape[0], x.shape[1], self.hidden_dim)
         out_x = _apply_token_mask(out_x, attn_mask)
@@ -303,6 +446,9 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_curvature_attn_bias: bool = False,
+        curvature_attn_init: float = 0.0,
+        curvature_attn_per_head: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -313,13 +459,21 @@ class TransformerBlock(nn.Module):
             num_slices=num_slices,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_curvature_attn_bias=use_curvature_attn_bias,
+            curvature_attn_init=curvature_attn_init,
+            curvature_attn_per_head=curvature_attn_per_head,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        kappa: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.attention(self.norm1(x), attn_mask=attn_mask, kappa=kappa)
         x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
@@ -336,6 +490,9 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_curvature_attn_bias: bool = False,
+        curvature_attn_init: float = 0.0,
+        curvature_attn_per_head: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,14 +504,22 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    use_curvature_attn_bias=use_curvature_attn_bias,
+                    curvature_attn_init=curvature_attn_init,
+                    curvature_attn_per_head=curvature_attn_per_head,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        kappa: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(x, attn_mask=attn_mask, kappa=kappa)
         return x
 
 
@@ -382,6 +547,11 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_curvature_attn_bias: bool = False,
+        curvature_attn_init: float = 0.0,
+        curvature_attn_per_head: bool = False,
+        curvature_knn_k: int = 16,
+        curvature_chunk_size: int = 256,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +566,11 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_curvature_attn_bias = use_curvature_attn_bias
+        self.curvature_attn_init = float(curvature_attn_init)
+        self.curvature_attn_per_head = curvature_attn_per_head
+        self.curvature_knn_k = int(curvature_knn_k)
+        self.curvature_chunk_size = int(curvature_chunk_size)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +647,9 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_curvature_attn_bias=use_curvature_attn_bias,
+            curvature_attn_init=curvature_attn_init,
+            curvature_attn_per_head=curvature_attn_per_head,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
@@ -595,7 +773,27 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+        kappa_full: torch.Tensor | None = None
+        if self.use_curvature_attn_bias and surface_x is not None and surface_tokens > 0:
+            # Per-point curvature proxy from surface positions + normals (input dims 0:3, 3:6).
+            # Volume points (no normals) contribute zero curvature.
+            surface_positions = surface_x[..., : self.space_dim]
+            surface_normals = surface_x[..., self.space_dim : self.space_dim + 3]
+            surface_kappa = compute_normal_variance_curvature(
+                surface_positions.detach(),
+                surface_normals.detach(),
+                surface_mask.to(dtype=torch.bool),
+                k=self.curvature_knn_k,
+                chunk_size=self.curvature_chunk_size,
+            ).to(dtype=hidden.dtype)
+            if volume_tokens > 0:
+                volume_kappa = hidden.new_zeros(volume_x.shape[0], volume_tokens)
+                kappa_full = torch.cat([surface_kappa, volume_kappa], dim=1)
+            else:
+                kappa_full = surface_kappa
+        elif self.use_curvature_attn_bias and volume_tokens > 0:
+            kappa_full = hidden.new_zeros(volume_x.shape[0], volume_tokens)
+        hidden = self.backbone(hidden, attn_mask=attn_mask, kappa=kappa_full)
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
