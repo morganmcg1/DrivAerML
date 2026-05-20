@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_charbonnier,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -85,6 +86,8 @@ class Config:
     validation_every: int = 1
     surface_loss_weight: float = 1.0
     volume_loss_weight: float = 1.0
+    vol_loss_type: str = "mse"
+    charbonnier_eps: float = 1e-3
     manifest: str = "data/split_manifest.json"
     data_root: str = ""
     output_dir: str = "outputs/drivaerml"
@@ -229,6 +232,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "vol_loss_type": (
+            "Loss function for volume_pressure target. 'mse' (default) is "
+            "masked squared error. 'charbonnier' is "
+            "sqrt((pred-target)^2 + eps^2) - eps, which transitions smoothly "
+            "from quadratic for small errors to linear for large errors, "
+            "bounding outlier-driven gradient magnitude. Cross-pollinated "
+            "from dl24 H19 (PR #1180). Surface loss is unaffected."
+        ),
+        "charbonnier_eps": (
+            "Epsilon (smoothing constant) for Charbonnier loss. Applied as "
+            "sqrt((pred-target)^2 + eps^2) - eps. Smaller eps approaches "
+            "L1 behaviour; larger eps approaches MSE behaviour. Default "
+            "1e-3 matches dl24 H19. Only used when --vol-loss-type=charbonnier."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -240,7 +257,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    config = Config(**vars(namespace))
+    if config.vol_loss_type not in {"mse", "charbonnier"}:
+        raise ValueError(
+            f"--vol-loss-type must be one of {{'mse', 'charbonnier'}}; got "
+            f"{config.vol_loss_type!r}"
+        )
+    if config.charbonnier_eps <= 0.0:
+        raise ValueError(
+            f"--charbonnier-eps must be positive; got {config.charbonnier_eps}"
+        )
+    return config
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -321,6 +348,11 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_loss_type: str = "mse",
+    charbonnier_eps: float = 1e-3,
+    retain_volume_grad: bool = False,
+    vol_loss_diag: dict[str, float] | None = None,
+    volume_pred_out: dict | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -341,7 +373,25 @@ def train_loss(
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        volume_preds = out["volume_preds"]
+        if retain_volume_grad and volume_preds.requires_grad:
+            volume_preds.retain_grad()
+        if volume_pred_out is not None:
+            volume_pred_out["volume_preds"] = volume_preds
+        if vol_loss_type == "charbonnier":
+            volume_loss = masked_charbonnier(
+                volume_preds, volume_target, batch.volume_mask, eps=charbonnier_eps
+            )
+            if vol_loss_diag is not None:
+                _populate_vol_loss_diag(
+                    volume_preds, volume_target, batch.volume_mask, charbonnier_eps, vol_loss_diag
+                )
+        else:
+            volume_loss = masked_mse(volume_preds, volume_target, batch.volume_mask)
+            if vol_loss_diag is not None:
+                _populate_vol_loss_diag(
+                    volume_preds, volume_target, batch.volume_mask, None, vol_loss_diag
+                )
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -353,6 +403,45 @@ def train_loss(
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+
+
+def _populate_vol_loss_diag(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    charbonnier_eps: float | None,
+    diag: dict[str, float],
+) -> None:
+    """Fill ``diag`` with per-element loss-distribution stats over masked entries.
+
+    Always logs the MSE per-element distribution; when ``charbonnier_eps`` is
+    provided also logs the Charbonnier per-element distribution alongside it
+    so both shapes are comparable in the W&B stream.
+    """
+    with torch.no_grad():
+        flat_mask = mask.to(device=pred.device, dtype=torch.bool)
+        if not bool(flat_mask.any()):
+            return
+        sq = (pred - target).square()
+        per_elt_mse = sq[flat_mask].float().reshape(-1)
+        diag["vol_loss_diag/mse_mean"] = float(per_elt_mse.mean().item())
+        diag["vol_loss_diag/mse_std"] = float(per_elt_mse.std(unbiased=False).item())
+        diag["vol_loss_diag/mse_max"] = float(per_elt_mse.max().item())
+        q = torch.tensor([0.5, 0.9, 0.99], device=per_elt_mse.device)
+        quantiles = torch.quantile(per_elt_mse, q)
+        diag["vol_loss_diag/mse_p50"] = float(quantiles[0].item())
+        diag["vol_loss_diag/mse_p90"] = float(quantiles[1].item())
+        diag["vol_loss_diag/mse_p99"] = float(quantiles[2].item())
+        if charbonnier_eps is not None:
+            char = torch.sqrt(sq + charbonnier_eps * charbonnier_eps) - charbonnier_eps
+            per_elt_char = char[flat_mask].float().reshape(-1)
+            diag["vol_loss_diag/char_mean"] = float(per_elt_char.mean().item())
+            diag["vol_loss_diag/char_std"] = float(per_elt_char.std(unbiased=False).item())
+            diag["vol_loss_diag/char_max"] = float(per_elt_char.max().item())
+            cq = torch.quantile(per_elt_char, q)
+            diag["vol_loss_diag/char_p50"] = float(cq[0].item())
+            diag["vol_loss_diag/char_p90"] = float(cq[1].item())
+            diag["vol_loss_diag/char_p99"] = float(cq[2].item())
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -937,6 +1026,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                vol_loss_diag: dict[str, float] = {}
+                volume_pred_holder: dict = {}
+                will_log_vol_diag = (
+                    balancer is None
+                    and config.gradient_log_every > 0
+                    and ((global_step + 1) % config.gradient_log_every == 0)
+                )
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
                         model, batch, transform, device, config.amp_mode
@@ -1030,6 +1126,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_loss_type=config.vol_loss_type,
+                        charbonnier_eps=config.charbonnier_eps,
+                        retain_volume_grad=will_log_vol_diag,
+                        vol_loss_diag=vol_loss_diag if will_log_vol_diag else None,
+                        volume_pred_out=volume_pred_holder if will_log_vol_diag else None,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1049,10 +1150,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                     and config.weight_log_every > 0
                     and global_step % config.weight_log_every == 0
                 )
+                peak_lr = config.lr if config.lr > 0.0 else 1.0
+                lr_fraction_of_peak = current_lr / peak_lr if peak_lr != 0 else 0.0
+                warmup_e = max(0, config.lr_warmup_epochs)
+                cosine_t_max = (
+                    config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
+                )
+                cosine_progress = max(0.0, float(epoch - warmup_e)) / float(max(1, cosine_t_max))
+                cosine_progress = min(1.0, cosine_progress)
                 train_log: dict[str, object] = {
                     "global_step": global_step,
                     "train/lr": current_lr,
                     "lr": current_lr,
+                    "train/lr_fraction_of_peak": lr_fraction_of_peak,
+                    "train/cosine_progress": cosine_progress,
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
@@ -1072,11 +1183,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
+                if vol_loss_diag:
+                    train_log.update(vol_loss_diag)
 
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     loss.backward()
+                    if (
+                        will_log_vol_diag
+                        and "volume_preds" in volume_pred_holder
+                        and volume_pred_holder["volume_preds"].grad is not None
+                    ):
+                        vp_grad = volume_pred_holder["volume_preds"].grad.detach().float()
+                        vp_grad_norm = float(vp_grad.norm().item())
+                        vp_grad_max = float(vp_grad.abs().max().item())
+                        train_log["train/vol_p_grad/l2_norm"] = vp_grad_norm
+                        train_log["train/vol_p_grad/max_abs"] = vp_grad_max
+                        if vp_grad.numel() > 0:
+                            train_log["train/vol_p_grad/mean_abs"] = float(vp_grad.abs().mean().item())
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
