@@ -837,6 +837,18 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_charbonnier(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    eps: float = 1e-3,
+) -> torch.Tensor:
+    """Charbonnier loss with token-mask; matches masked_mse signature and reduction."""
+    sq = (pred - target).square()
+    err = torch.sqrt(sq + eps * eps) - eps
+    return masked_mean(err, mask)
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
