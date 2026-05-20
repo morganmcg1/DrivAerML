@@ -1,9 +1,56 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~17:10 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~19:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~19:30Z — H72 SLICE-TEMP-DEEP-ENDPOINT CLOSED OUTCOME D NEGATIVE + H61 confirmed Goldilocks + frieren reassigned H74 MAE-AUX-VOL-P
+
+**Closure: PR #1228 H72 (frieren) — OUTCOME D NEGATIVE +5.46pp auto-killed at EP3**
+
+| Channel | H72 EP3 | Gate | H61 EP3 ref | Δ | Verdict |
+|---|---:|:--|---:|---:|:--|
+| val_abupt | 11.803% | <7.5% ❌ | 7.423% | +4.38pp | GATE FAILED |
+| val_SP | 7.945% | <5.5% ❌ | 4.962% | +2.98pp | GATE FAILED |
+| val_VP | 9.200% | — | 4.510% | +4.69pp | — |
+| val_WSS | 12.740% | — | 8.364% | +4.38pp | — |
+
+**Over-sparsification mech-failure attribution**: Block 2 entropy crossed binding 0.485 threshold at EP2 (one epoch earlier than PR Risk #2 predicted) and SUSTAINED through EP3. n_eff_mean = 2.56 (vs H61 6.52) confirmed saturating-softmax gradient-flow failure. Pace-mismatch root cause: τ(EP1=10,864) = 1.333 → curriculum committed slice routing during LR warmup before optimizer stabilized → no recovery once n_eff dropped below ~5.
+
+**H61 confirmed Goldilocks parameter point — class-differentiation principle EXTENDED**:
+
+Wave 32 mech-failure table now has 3 cases of routing/weighting-curriculum class single-axis collapse:
+
+| PR | Variation from H61 | Outcome | Mechanism |
+|---|---|---|---|
+| H62 (tanjiro) | CP-loss-weight + LR-extended | D NEGATIVE +0.216pp | LR-fix destabilizes weight rebalancing |
+| H70 (frieren) | slice-temp + LR-extended | D NEGATIVE +2.298pp | LR-fix + curriculum stretching → late-block sparsification |
+| **H72 (frieren)** | **slice-temp-deep + legacy substrate** | **D NEGATIVE +5.46pp** | **Over-sparsification before LR warmup completes** |
+
+**Binding policy update**: NO MORE single-axis variants on slice-temperature-curriculum class. Class is exhausted under single-axis search. Future re-attack requires joint sweeps over co-tuned manifold (τ_start, τ_end, decay_steps, lr_warmup, lr_cosine_t_max). Given 3 wasted runs in Wave 32, cost-benefit recommends abandoning class for now.
+
+**Reassignment**: frieren → **H74 MAE-AUX-VOL-P (PR #1230)**. Single-flag `--vol-p-aux-mae-weight 0.05` on legacy `--lr-cosine-t-max 13` substrate. Adds L1 auxiliary loss on top of MSE on vol_p (out-of-budget gradient mass). Cross-pollination from dl24 H22 (PR #1217). **Fresh mech class on tay: loss-L1-injection** — orthogonal to all in-flight Charbonnier variants (H68 vol_p, H73 τ_z) which REPLACE MSE rather than ADD. Composable with H68 in Wave 33 if both mech-positive.
+
+**Wave 32 mech-class × axis grid (current)**:
+
+| | vol_p axis | τ_z axis | other |
+|---|---|---|---|
+| **loss-curve-replacement (Charbonnier)** | H68 nezuko (mech-positive null trajectory) | H73 edward (just launched) | — |
+| **loss-L1-injection (MAE_aux)** | **H74 frieren (just assigned)** | TBD if H73 mech-positive | — |
+| **dynamic loss balancing (GradNorm α-sweep)** | covered by H71 (α=1.5 sweep position) | covered by H71 | covered by H71 |
+| **attention spatial prior** | — | — | H69 fern (curvature attn bias) |
+| **encoder-PE / FDCE band-width** | — | — | H67 thorfinn (RFF-9σ MERGE CANDIDATE) |
+
+**Fleet status (~19:30Z)**: 8/8 WIP, zero idle. In-flight:
+- H65 (PR #1214) alphonse: SURFACE-DEEP-LR-EXTENDED — EP6 6.254% B PARTIAL trajectory, terminal ~21:13Z
+- H66 (PR #1215) askeladd: COORDSLICE-NO-STOPGRAD-LR-EXTENDED — EP6 6.403% C NULL trajectory, terminal ~21:30Z
+- H67 (PR #1221) thorfinn: RFF-9SIGMA-WIDTH-EXPANSION — EP5.4 6.246% **MERGE CANDIDATE**, terminal ETA ~03:00Z
+- H68 (PR #1222) nezuko: CHARBONNIER-VOL-P — late-EP5/EP6, val_VP plateau (mech-positive null trajectory), EP6 decisive ~18:31Z
+- H69 (PR #1223) fern: CURVATURE-ATTENTION-BIAS v2 — EP3 PASSED, curvature_alpha broadening, EP6 ~17:00Z
+- H71 (PR #1225) tanjiro: GRADNORM-α=1.5 — weights stabilized 0.28-1.84, EP6 ~17:30Z (D NEGATIVE preliminary)
+- H73 (PR #1229) edward: CHARBONNIER-TAU-Z — just assigned, awaiting launch
+- **H74 (PR #1230) frieren: MAE-AUX-VOL-P — just assigned**
 
 ## ✅ ~17:10Z — H63 TAU-Z-CURRICULUM-LR-EXTENDED CLOSED C NULL + test_VP FLOOR CROSS + edward reassigned H73 CHARBONNIER-TAU-Z
 

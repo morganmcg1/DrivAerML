@@ -219,6 +219,34 @@ Wave 32 cross-pollination start. Charbonnier loss on volume pressure is the dl24
 
 ---
 
+## 2026-05-20 19:30 — PR #1228: H72 SLICE-TEMP-DEEP-ENDPOINT (frieren, EP3 auto-killed) — **OUTCOME D NEGATIVE / H61 CONFIRMED GOLDILOCKS PARAMETER POINT — 3rd Wave 32 single-axis-collapse on routing/weighting-curriculum class**
+
+- **Branch**: frieren/h72-slice-temp-deep-endpoint
+- **W&B run**: vzfdqj4w (rank0, group wave32_h72_slice_temp_deep_endpoint)
+- **Hypothesis**: H61 slice-temp curriculum mech-positive B PARTIAL is limited by τ_end=1.0 → pushing τ_end=1.0→0.5 deepens sharpening + tests whether the routing class has more headroom in the deeper-temperature regime. Legacy lr-cosine-t-max=13 substrate. Single-flag change `--slice-temperature-end 0.5` vs H61.
+
+| Channel | H72 EP3 | Gate | H61 EP3 ref | Δ vs H61 | Verdict |
+|---|---:|:--|---:|---:|:--|
+| val_abupt | 11.803% | <7.5% ❌ | 7.423% | +4.38pp | **GATE FAILED — auto-killed** |
+| val_SP | 7.945% | <5.5% ❌ | 4.962% | +2.98pp | GATE FAILED |
+| val_VP | 9.200% | — | 4.510% | +4.69pp | — |
+| val_WSS | 12.740% | — | 8.364% | +4.38pp | — |
+
+**Mechanism-failure attribution**: Block 2 entropy crossed binding threshold 0.485 = 0.10 × log(128) at EP2 (step 21,729) — **one epoch earlier than PR Risk #2 predicted** — and SUSTAINED through EP3 with n_eff_mean = 2.51 (vs H61 5.27). All 5 blocks below H61 entropy at EP3; mean n_eff at 48% of H61. Saturating-softmax gradient-flow failure mode confirmed: model could not redistribute mass to less-committed slices because gradient signal was lost.
+
+**Pace-mismatch root cause finding (key structural attribution)**: τ-curriculum at EP1 (step 10,864) was already 1.333 vs H61's 1.417 at same step. The 2× faster descent through the same τ-range committed slice routing during LR warmup before optimization stabilized. n_eff_mean = 68 at EP1 (vs H61's 103, a 34% reduction) confirmed pre-warmup commitment. By EP3 step 32,592, H72 had reached H61's terminal τ=1.0 value but in half the steps.
+
+**Commentary**: H61 (τ_start=1.5, τ_end=1.0, decay=65184, lr-cosine-t-max=13) confirmed as Goldilocks parameter point — both LR substrate AND τ-endpoint axes are co-tuned. Single-axis perturbations cause mechanism collapse from different failure modes:
+- LR-axis perturbation (H70 LR-extended): D NEGATIVE +2.298pp via late-block sparsification
+- Endpoint-axis perturbation (H72 τ_end=0.5): D NEGATIVE +5.46pp via pre-warmup over-sparsification
+- Combined with H62 CP-loss-weight + LR-extended: D NEGATIVE +0.216pp via weight rebalancing destabilization
+
+**Binding Wave 32+ design policy update**: NO MORE single-axis variants on slice-temperature-curriculum class (class exhausted). Future re-attack requires joint sweeps over co-tuned manifold. Given 3 wasted runs in Wave 32 on this class, cost-benefit recommends abandoning class for now in favor of orthogonal mechanism explorations.
+
+**Wall-clock**: 5h before auto-kill (efficient early termination, vs 18h budget). Duplicate launch detected + SIGTERM'd at 14:24Z (~9 min half-throughput during contention).
+
+---
+
 ## 2026-05-20 17:00 — PR #1212: H63 TAU-Z-CURRICULUM-LR-EXTENDED (edward, 13-ep terminal) — **OUTCOME C NULL + test_VP FLOOR CROSS + τz-curriculum LR-axis EXHAUSTED**
 
 - **Branch**: edward/h63-tau-z-curriculum-lr-extended
