@@ -1,11 +1,59 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~02:00 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~02:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-20 ~02:00Z) — PR #1206 H57 MULTI-SCALE-RFF-EXPANDED terminal CLOSED as **mechanism-positive null with test_VP FLOOR CROSS on BOTH val+test (first of Wave 31) + strict beat vs H48 same-recipe peer on all 7 paper-facing axes + KEY FALSIFIED HYPOTHESIS** (val_abupt 6.217% NEAR-MISS merge gate +0.091pp = 2nd-closest of Wave 31; **test_VP 3.610% ✅ CROSSED FLOOR by −0.033pp + val_VP 3.612% ✅ CROSSED FLOOR by −0.031pp**, first Wave 31 case with BOTH val and test cross; H57's "τz needs higher frequencies" hypothesis FALSIFIED by per-σ projection diagnostic — LOW σ=0.125 attracted 11.79% surface/18.47% volume weight while HIGH σ=16 only 3.14%/2.30%; H57 strict beat H48 same-recipe peer on all 7 axes −0.026 to −0.199pp = FDCE confirmed as NEW mechanism class); **THORFINN REASSIGNED H64 RFF-LOW-BAND-EXPANSION** (PR #1213, single-flag change vs H57 `--rff-init-sigmas "0.0625,0.125,0.25,0.5,1.0,2.0,4.0"` — drop σ={8,16} minimal-uptake, add σ=0.0625 one octave below H57's new low — tests low-end-binds-FDCE direct corollary)
+## Latest invocation actions (2026-05-20 ~02:15Z) — PR #1203 H54 v2 SURFACE-DEEP terminal CLOSED as **mechanism-positive null with surf_deep blocks ×9-18 sublayer growth ALIVE + marginal -4.5bp improvement vs H47 V-DEPTH same-pattern peer + 5th Wave 31 LR-decay confound case** (val_abupt 6.248% NEAR-MISS merge gate +0.122pp = 10th NEAR-MISS Wave 30/31; test_abupt 6.042% +0.198pp; both surf_deep blocks fully alive with ×9-18 growth EP1→EP12 on attn_proj + ffn_fc2 mirroring H47-style mechanism; clean monotonic descent EP3→EP12; class-level finding decoder-side depth-bump is real reproducible mech class on BOTH surface and volume sides but sub-baseline alone at this recipe; slope quartered EP8→EP9 from -2.9 to -0.8 bp/ep matching canonical LR-decay-confound pattern across H47/H52/H53/H55v2/H54v2); **ALPHONSE REASSIGNED H65 SURFACE-DEEP-LR-EXTENDED** (PR #1214, single-flag change `--lr-cosine-t-max 25` instead of 13; **4th parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED + H63 TAU-Z-CURRICULUM-LR-EXTENDED — if all four mech classes merge under LR-fix, LR-decay confound is bulletproof confirmed across 4 orthogonal mechanism classes)
+
+### Headline updates (2026-05-20 02:15Z)
+
+1. **PR #1203 alphonse H54 v2 SURFACE-DEEP CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1203#issuecomment-4494034286)). Terminal verdict:
+   - val_abupt **6.248%** NEAR-MISS merge gate by +0.122pp (10th NEAR-MISS in Wave 30/31)
+   - test_abupt **6.042%** FAIL baseline by +0.198pp
+   - test_VP 3.693% (+0.050pp NEAR-MISS floor), val_VP 3.699% (+0.056pp NEAR-MISS)
+   - test_SP 3.803% FAIL floor by +0.226pp
+   - test_WSS_z 9.016% +0.100pp vs baseline 8.916%
+   - **Surf_deep blocks ALIVE ×9-18 growth** (block0 ffn_fc2 5.6→68.2 = ×12.1, block1 ffn_fc2 7.6→70.4 = ×9.2) — mechanism fully integrated, smooth identity-at-init zero-init release
+   - **-4.5bp val_abupt better than H47 V-DEPTH** (volume-side mirror) — confirms decoder-side depth-bump as reproducible mech class on BOTH surface and volume sides
+   - W&B run `apbnjinz` terminal step 65,833 (~mid-EP12 wall-time cutoff at 891 train min)
+
+2. **5th Wave 31 LR-decay confound case** (H47 + H52 + H53 + H55 v2 + H54 v2):
+   - H54 v2 slope: EP6→EP7 -3.7 bp/ep → EP7→EP8 -2.9 bp/ep → EP8→EP9 **-0.8 bp/ep** (slope quartered) → EP11→EP12 mid -0.32 bp/ep
+   - Terminal LR ~2-4% peak — slope quarters as LR drops below 50% peak (same shape as 4 prior cases)
+   - **Now testing on FOUR mechanism classes in parallel: H59 V-DEPTH, H62 CP-LOSS, H63 TAU-Z-CURR, H65 SURFACE-DEEP**. If all four LR-fix variants merge, hypothesis bulletproof confirmed across 4 orthogonal mech classes.
+
+3. **PR #1214 alphonse H65 SURFACE-DEEP-LR-EXTENDED assigned** ([PR #1214](https://github.com/morganmcg1/DrivAerML/pull/1214), branch `alphonse/h65-surface-deep-lr-extended` from `tay`). Single-flag change vs H54 v2:
+   - `--lr-cosine-t-max 25` (was 13). Everything else identical to H54 v2 (including `--use-surf-deep --surf-deep-num-blocks 2`)
+   - Stretches cosine cycle so within actual ~70k-step training window only ~28% of half-cycle completes; terminal LR ~70-80% peak (vs H54 v2's 2-4%)
+   - Diagnostic adds: `train/lr_fraction_of_peak` + `train/cosine_progress` (matching H59/H62/H63 instrumentation)
+   - Keep H54 v2's surf_deep_block{0,1} mechanism diagnostics for cross-comparison
+   - Kill thresholds same as H54 v2: NO EP1 gate, EP3 32,592:val_abupt<7.5%+val_SP<5.5%, EP6 65,184:val_abupt<6.5%
+   - Three falsifiable outcomes:
+     - **A. MERGE WIN + FLOOR CROSS**: val_abupt<6.126% AND test_VP<3.643% AND test_SP<3.577% — LR-decay was the limit, shared-capacity-surface merges first time
+     - **B. PARTIAL**: val_abupt drops below H54 v2's 6.248% by ≥0.10pp but no merge — LR matters but mechanism still has limits
+     - **C. NULL**: val_abupt within ±0.05pp of H54 v2's 6.248% — LR-decay NOT the limit; mech-class-shared-capacity-surface saturates regardless
+
+4. **Wave 31 mechanism-class taxonomy unchanged at 13 classes** (shared-capacity-surface class #4 status updated from "in flight" to "mech-positive null DEFERRED pending H65 LR-fix variant"):
+   - Class #4: **shared-capacity-surface — mech-positive null with surf_deep ×9-18 growth (H54 v2 closed), DEFERRED pending H65 LR-fix variant**
+   - Derived class: LR-decay-confound now **5 cases** (H47/H52/H53/H55v2/H54v2) — being directly tested by H59 + H62 + H63 + H65 (4 parallel LR-fix variants)
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H54 v2 closure + H65 assignment):
+   - **H58 askeladd (PR #1207)** — **STRONGEST IN-FLIGHT MERGE CANDIDATE** projected terminal 5.99-6.15% LIKELY MERGE WIN
+   - **H59 nezuko (PR #1208)** — V-DEPTH-LR-EXTENDED (1st parallel LR-fix test)
+   - **H60 fern (PR #1209)** — H56-RELAUNCH-DROP-EP3 (strongest mech signal)
+   - **H61 frieren (PR #1210)** — SLICE-TEMP-CURRICULUM, EP4 trailing, projected outcome B PARTIAL
+   - **H62 tanjiro (PR #1211)** — CP-LOSS-WEIGHT-LR-EXTENDED (2nd parallel LR-fix test)
+   - **H63 edward (PR #1212)** — TAU-Z-CURRICULUM-LR-EXTENDED (3rd parallel LR-fix test)
+   - **H64 thorfinn (PR #1213)** — RFF-LOW-BAND-EXPANSION (low-end-binds-FDCE test)
+   - **H65 alphonse (PR #1214, this entry)** — SURFACE-DEEP-LR-EXTENDED (4th parallel LR-fix test), pre-launch
+
+6. **Strategic notes (post-H54 v2 closure)**:
+   - **4 PARALLEL LR-FIX TESTS NOW IN FLIGHT — H59 + H62 + H63 + H65**. Coverage now spans 4 orthogonal mechanism classes (variance-class-decoder-sublayer / variance-class-cp-loss-weight / variance-class-time-varying-loss / shared-capacity-surface). If all 4 merge under `--lr-cosine-t-max 25`, LR-decay-confound is bulletproof systemic Wave 31 ceiling.
+   - **Wave 32 H47+H54 stack candidate** now well-grounded: both depth-bump mirrors confirmed mech-positive null on disjoint parameter blocks (surf_deep vs vol_deep) targeting disjoint loss axes (val_SP vs val_VP). Wave 32 design constraint: stack should pair with LR-extended substrate if LR-fix triangulation succeeds.
+   - **H58 the night's strongest projected merge** at ~17:00Z May 20.
+   - **4 mech-positive nulls clustered in NEAR-MISS zone of Wave 31**: H53 (+0.055pp), H50 (+0.094pp), H57 (+0.091pp), H54 v2 (+0.122pp). The merge gate at 6.126% is being approached from multiple orthogonal mechanism classes — strongly suggests an LR-decay-induced ceiling that 1-2 individual mech wins alone won't crack.
 
 ### Headline updates (2026-05-20 02:00Z)
 

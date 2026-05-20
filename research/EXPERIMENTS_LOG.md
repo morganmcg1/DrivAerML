@@ -1,3 +1,75 @@
+## 2026-05-20 02:15 — PR #1203: H54 v2 SURFACE-DEEP — 2 dedicated transformer blocks on surface decoder side mirror of H47 V-DEPTH (alphonse, EP12 mid forced terminal) — **MECHANISM-POSITIVE NULL with surf_deep ×9-18 sublayer growth + marginal -4.5bp better than H47 V-DEPTH peer + 5th Wave 31 LR-decay confound case**
+
+- **Branch**: `alphonse/h54-surface-decoder-depth` (closed at 02:15Z)
+- **W&B run**: rank0 `apbnjinz` (group `wave31_h54_surface_deep`, 913 min wall-time within 980 min budget, EP12 forced mid-epoch terminal at step 65,833)
+- **Hypothesis**: mirror H47 V-DEPTH on the surface side — add 2 dedicated transformer blocks (with zero-init residuals for identity-at-init) before surface_out projection, with prediction that surface decoder shared-capacity expansion would target val_SP + val_WSS_z asymmetry. Mechanism class: shared-capacity-surface (novel — first Wave 31 in this class).
+
+### Terminal verdict — NEAR-MISS on merge gate, surf_deep blocks ALIVE, -4.5bp better than H47 same-pattern peer
+
+| Gate | Target | H54 v2 EP12 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.248%** | ❌ NEAR-MISS | +0.122pp (10th NEAR-MISS Wave 30/31) |
+| test_abupt | (baseline 5.844%) | **6.042%** | ❌ FAIL | +0.198pp |
+| test_SP (floor) | ≤3.577% | 3.803% | ❌ FAIL | +0.226pp |
+| val_VP (floor) | ≤3.643% | 3.699% | ❌ NEAR-MISS | +0.056pp |
+| test_VP (floor) | ≤3.643% | 3.693% | ❌ NEAR-MISS | +0.050pp |
+| test_WSS_z (mech) | ~8.916% | 9.016% | ❌ NEAR-MISS | +0.100pp |
+| test_WSS (goal) | <6.727% | 6.954% | ❌ FAIL | +0.227pp |
+
+### KEY STRUCTURAL FINDING — decoder-side depth-bump is mech-positive null on BOTH sides
+
+| Run | Side | val_abupt | test_abupt | Mech alive? | Verdict |
+|---:|:--|---:|---:|:--|:--|
+| H47 V-DEPTH | Volume | 6.293% | 6.049% | ✅ ×26-57% sublayer growth | mech-positive null |
+| **H54 v2 SURFACE-DEEP** | **Surface** | **6.248%** | **6.042%** | **✅ ×9-18 sublayer growth** | **mech-positive null** |
+
+**Class-level finding: decoder-side depth-bump is REAL reproducible mech class but sub-baseline alone at this recipe configuration.** H54 v2 is marginally better than H47 (-4.5bp val_abupt, -0.7bp test_abupt) — the depth-bump mechanism replicates across decoder sides with a small consistent uplift on the surface side. Wave 32 H47+H54 stack candidate is now well-grounded (both confirmed mech-positive on disjoint parameter blocks targeting disjoint loss axes).
+
+### Mechanism evidence — surf_deep blocks fully integrated
+
+| Diagnostic | EP1 (step 10864) | EP12 (terminal) | EP1→EP12 |
+|---|---:|---:|---:|
+| block0/attn_proj global_norm | 2.253 | **32.513** | ×14.4 growth |
+| block0/ffn_fc2 global_norm | 5.636 | **68.160** | ×12.1 growth |
+| block1/attn_proj global_norm | 3.015 | **33.659** | ×11.2 growth |
+| block1/ffn_fc2 global_norm | 7.639 | **70.374** | ×9.2 growth |
+
+All 8 diagnostics (attn_proj + ffn_fc2 norm + max_abs across both blocks) show ×9-18 growth from EP1 to EP12. Mechanism mirrors H47 V-DEPTH's healthy profile at comparable magnitude (H47 EP3 b0.ffn=0.479, H54 v2 EP12 b0.ffn=0.515 same operating range). **Depth-bump on surface side adds productive nonlinear computation, identity-at-init zero-init released cleanly.**
+
+### Per-EP slope decay — 5th Wave 31 LR-decay confound case
+
+| Window | Slope (val_abupt) | Status |
+|---|---:|:--|
+| EP6→EP7 | -3.7 bp/ep | productive |
+| EP7→EP8 | -2.9 bp/ep | productive |
+| **EP8→EP9** | **-0.8 bp/ep** | ⬇ slope quartered (LR fraction ~25% peak) |
+| EP9→EP10 | -0.8 bp/ep | LR-tail plateau |
+| EP10→EP11 | -0.8 bp/ep | LR-tail plateau |
+| EP11→EP12 (mid) | -0.32 bp/ep | terminal LR ~2-4% peak |
+
+**Slope quarters as LR drops below 50% peak — 5th Wave 31 LR-decay-confound case after H47/H52/H53/H55v2.** Mechanism (surf_deep blocks) fully alive through EP12 (sublayer growth steady), but LR-budget exhausts before val_abupt can clear merge gate.
+
+### Wave 31 NEAR-MISS clustering (4 cases at 6.18-6.25%)
+
+| PR | Mech class | val_abupt | Δ vs gate |
+|---:|:--|---:|---:|
+| H53 | variance-class-cp-loss-weight | 6.181% | +0.055pp |
+| H50 | coordinate-grounded-slice-PE | 6.220% | +0.094pp |
+| H57 | frequency-domain-capacity | 6.217% | +0.091pp |
+| **H54 v2** | **shared-capacity-surface** | **6.248%** | **+0.122pp** |
+
+Strongly suggests systematic LR-decay ceiling — 4 orthogonal mechanism classes all clustered in narrow NEAR-MISS zone.
+
+### Disposition
+
+CLOSED as mech-positive null with surf_deep blocks ALIVE + 4-decoder-side-depth-bump class-level finding + 5th Wave 31 LR-decay confound case. Excellent execution + analysis.
+
+**ALPHONSE REASSIGNED H65 SURFACE-DEEP-LR-EXTENDED** (PR #1214) — single-flag change vs H54 v2 = `--lr-cosine-t-max 25` instead of `13`. **4th parallel LR-fix test alongside H59 (nezuko, PR #1208), H62 (tanjiro, PR #1211), H63 (edward, PR #1212)**. If all 4 LR-fix variants merge or substantially improve across 4 orthogonal mechanism classes, LR-decay-confound is bulletproof confirmed as systematic Wave 31 ceiling.
+
+Close comment: https://github.com/morganmcg1/DrivAerML/pull/1203#issuecomment-4494034286
+
+---
+
 ## 2026-05-20 02:00 — PR #1206: H57 MULTI-SCALE-RFF-EXPANDED — wider freq band (8 sigmas 0.125→16) in string-separable position encoding (thorfinn, 13-ep terminal) — **MECHANISM-POSITIVE NULL with test_VP FLOOR CROSS on BOTH val+test + H48 same-recipe strict beat 7 axes + KEY FALSIFIED HYPOTHESIS (LOW end is binding, not HIGH)**
 
 - **Branch**: `thorfinn/h57-rff-expanded-13ep` (closed at 02:00Z)
