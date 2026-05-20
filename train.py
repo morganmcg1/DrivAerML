@@ -132,6 +132,13 @@ class Config:
     use_gradnorm: bool = False
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
+    gradnorm_min_w_vol_p: float = 0.0
+    use_curvature_attention_bias: bool = False
+    wss_charbonnier_weight: float = 0.0
+    wss_charbonnier_eps: float = 1e-3
+    wss_charbonnier_axes: str = "all"
+    vol_p_charbonnier_weight: float = 0.0
+    vol_p_charbonnier_eps: float = 1e-3
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -145,16 +152,29 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "a logged W&B key exactly, for example "
             "'500:train/loss<5,2000:val_primary/abupt_axis_mean_rel_l2_pct<25'."
         ),
+        "wss_charbonnier_axes": (
+            "Which WSS channels the supplementary Charbonnier loss applies to. "
+            "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b). "
+            "Comma-separated subsets of {x,y,z} also supported, e.g. 'y,z' (H23)."
+        ),
     }
+    choices_text: dict[str, list[str]] = {}
     for field in fields(Config):
         value = getattr(defaults, field.name)
         arg_name = f"--{field.name.replace('_', '-')}"
         help_value = help_text.get(field.name)
+        choices = choices_text.get(field.name)
         if isinstance(value, bool):
             parser.add_argument(arg_name, action="store_true", default=value, help=help_value)
             parser.add_argument(f"--no-{field.name.replace('_', '-')}", action="store_false", dest=field.name)
         else:
-            parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
+            parser.add_argument(
+                arg_name,
+                type=type(value),
+                default=value,
+                help=help_value,
+                choices=choices,
+            )
     namespace = parser.parse_args(argv)
     return Config(**vars(namespace))
 
@@ -224,6 +244,62 @@ def per_channel_masked_mse(
     return weighted.sum(dim=(0, 1)) / denom  # [C]
 
 
+def parse_wss_charbonnier_axes(spec: str) -> list[int]:
+    """Resolve the WSS Charbonnier axes selector to integer axis indices.
+
+    Accepted forms:
+    - "all" -> [0, 1, 2] (tau_x, tau_y, tau_z)
+    - "z"   -> [2]       (H10b)
+    - "y,z" -> [1, 2]    (H23)
+    - any comma-separated subset of {"x", "y", "z"} in any order.
+
+    Returns the sorted unique list of axis indices (0=x, 1=y, 2=z).
+    """
+    if spec is None:
+        raise ValueError("wss_charbonnier_axes spec is None")
+    normalised = spec.strip().lower()
+    if not normalised:
+        raise ValueError("wss_charbonnier_axes spec is empty")
+    if normalised == "all":
+        return [0, 1, 2]
+    name_to_idx = {"x": 0, "y": 1, "z": 2}
+    parts = [p.strip() for p in normalised.split(",") if p.strip()]
+    if not parts:
+        raise ValueError(
+            f"wss_charbonnier_axes spec '{spec}' has no axis names"
+        )
+    indices: set[int] = set()
+    for part in parts:
+        if part not in name_to_idx:
+            raise ValueError(
+                f"Unknown WSS Charbonnier axis '{part}' in spec '{spec}'. "
+                "Use 'all', 'x', 'y', 'z' or a comma-separated subset like 'y,z'."
+            )
+        indices.add(name_to_idx[part])
+    return sorted(indices)
+
+
+def masked_charbonnier(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    eps: float = 1e-3,
+) -> torch.Tensor:
+    """Masked Charbonnier (pseudo-Huber) loss: ``sqrt(eps^2 + (pred-target)^2) - eps``.
+
+    Averaged over masked spatial points and channels, matching the convention
+    used by :func:`masked_mse`. Differentiable everywhere, gradient bounded by 1
+    in magnitude — robust to outliers compared with squared error.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    delta = pred - target
+    values = torch.sqrt(eps * eps + delta * delta) - eps  # [B, N, C]
+    weighted = values * mask_f
+    n_pts = mask_f.sum().clamp_min(1.0)
+    n_ch = float(pred.shape[-1])
+    return weighted.sum() / (n_pts * n_ch)
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -235,6 +311,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_kind=config.model_pe,
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
+        use_curvature_attention_bias=config.use_curvature_attention_bias,
     )
 
 
@@ -301,8 +378,17 @@ def train_loss(
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
     gradnorm_weights: GradNormWeights | None = None,
+    wss_charbonnier_weight: float = 0.0,
+    wss_charbonnier_eps: float = 1e-3,
+    wss_charbonnier_axes: str = "all",
+    vol_p_charbonnier_weight: float = 0.0,
+    vol_p_charbonnier_eps: float = 1e-3,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
+    surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
+    if surface_curvature is not None:
+        surface_curvature = surface_curvature.to(device)
+        setattr(batch, "surface_curvature", surface_curvature)
     if use_y_symmetry_aug:
         flip_mask = apply_y_symmetry_aug(batch, y_symmetry_aug_prob)
         if aug_log is not None:
@@ -310,22 +396,54 @@ def train_loss(
             aug_log["batch_size"] = int(flip_mask.shape[0])
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    forward_kwargs: dict[str, torch.Tensor] = dict(
+        surface_x=batch.surface_x,
+        surface_mask=batch.surface_mask,
+        volume_x=batch.volume_x,
+        volume_mask=batch.volume_mask,
+    )
+    if surface_curvature is not None:
+        forward_kwargs["surface_curvature"] = surface_curvature
     with autocast_context(device, amp_mode):
-        out = model(
-            surface_x=batch.surface_x,
-            surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
-            volume_mask=batch.volume_mask,
-        )
+        out = model(**forward_kwargs)
         surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # H19 advisor fix: pre-compute Charbonnier on vol_p so it can be
+        # passed to GradNorm as the vol_p task signal (the L0 anchor and
+        # per-task gradient norms need to reflect the reshaped Charb
+        # landscape, otherwise the H19 mechanism is invisible to the
+        # dynamic-weight balancing — root cause flagged in run i4zt1zrl).
+        if vol_p_charbonnier_weight > 0.0:
+            pred_vol_p = out["volume_preds"]  # [B, N_vol, 1]
+            target_vol_p = volume_target
+            loss_vol_p_charb = masked_charbonnier(
+                pred_vol_p,
+                target_vol_p,
+                batch.volume_mask,
+                eps=vol_p_charbonnier_eps,
+            )
+            loss_vol_p_mse_diag = masked_mse(
+                pred_vol_p, target_vol_p, batch.volume_mask
+            )
+        else:
+            loss_vol_p_charb = None
+            loss_vol_p_mse_diag = None
         if gradnorm_weights is not None:
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
             )  # [4]: cp, tau_x, tau_y, tau_z
-            volume_per_ch = per_channel_masked_mse(
-                out["volume_preds"], volume_target, batch.volume_mask
-            )  # [1]: vol_p
+            if loss_vol_p_charb is not None:
+                # H19 advisor fix: vol_p slot carries the Charbonnier tensor
+                # so GradNorm's L0 anchor and per-task gradient norms reflect
+                # the reshape. The Charb contribution to the total loss is
+                # now w_vol_p * Charb_vol_p via the weighted sum below —
+                # adding a separate `vol_p_charb_weight * Charb` term would
+                # double-count.
+                volume_per_ch = loss_vol_p_charb.unsqueeze(0)  # [1]
+            else:
+                volume_per_ch = per_channel_masked_mse(
+                    out["volume_preds"], volume_target, batch.volume_mask
+                )  # [1]: vol_p MSE
             task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
             w_detached = gradnorm_weights.weights.detach()
             loss = (w_detached * task_losses).sum()
@@ -337,13 +455,89 @@ def train_loss(
             weighted_volume_loss = volume_loss_weight * volume_loss
             loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        # H10b/H23: Supplementary Charbonnier (pseudo-Huber) on WSS channels.
+        # Channels 1-3 of surface_preds/target are tau_x, tau_y, tau_z (idx 0 is cp).
+        # Axes selector accepts "all" (= x,y,z), "z" (H10b), and comma-separated
+        # subsets such as "y,z" (H23). The aggregate Charb term added to the loss
+        # is the mean over the selected channels; per-axis Charb/MSE metrics are
+        # logged so we can compare τ_y vs τ_z landscape dynamics directly.
+        if wss_charbonnier_weight > 0.0:
+            axes_idx = parse_wss_charbonnier_axes(wss_charbonnier_axes)
+            channel_slice_idx = [a + 1 for a in axes_idx]  # tau_x/y/z at idx 1/2/3
+            pred_wss = out["surface_preds"][..., channel_slice_idx]
+            target_wss = surface_target[..., channel_slice_idx]
+            loss_wss_charb = masked_charbonnier(
+                pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
+            )
+            loss_wss_mse_diag = masked_mse(pred_wss, target_wss, batch.surface_mask)
+            loss = loss + wss_charbonnier_weight * loss_wss_charb
+            charb_metrics = {
+                "loss_wss_charb_unweighted": float(
+                    loss_wss_charb.detach().cpu().item()
+                ),
+                "loss_wss_charb_weighted": float(
+                    (wss_charbonnier_weight * loss_wss_charb).detach().cpu().item()
+                ),
+                "loss_wss_charb_target_mse": float(
+                    loss_wss_mse_diag.detach().cpu().item()
+                ),
+            }
+            # Per-axis Charb / MSE diagnostic. Cheap (small tensors, indexed) and
+            # critical for H23: we need to see τ_y vs τ_z ratios independently.
+            axis_names = {0: "tau_x", 1: "tau_y", 2: "tau_z"}
+            for axis_index in axes_idx:
+                ch = axis_index + 1
+                pred_axis = out["surface_preds"][..., ch : ch + 1]
+                target_axis = surface_target[..., ch : ch + 1]
+                axis_charb = masked_charbonnier(
+                    pred_axis,
+                    target_axis,
+                    batch.surface_mask,
+                    eps=wss_charbonnier_eps,
+                )
+                axis_mse = masked_mse(pred_axis, target_axis, batch.surface_mask)
+                axis_charb_v = float(axis_charb.detach().cpu().item())
+                axis_mse_v = float(axis_mse.detach().cpu().item())
+                key = axis_names[axis_index]
+                charb_metrics[f"loss_{key}_charb_unweighted"] = axis_charb_v
+                charb_metrics[f"loss_{key}_charb_target_mse"] = axis_mse_v
+                if axis_mse_v > 0.0:
+                    charb_metrics[f"loss_{key}_charb_to_mse_ratio"] = (
+                        axis_charb_v / axis_mse_v
+                    )
+        else:
+            charb_metrics = {}
+        # H19: vol_p Charbonnier — under GradNorm, the Charb tensor is already
+        # in task_losses[4] above, contributing w_vol_p * Charb_vol_p to the
+        # weighted sum. Adding an extra additive term would double-count.
+        # Without GradNorm we fall back to the additive form (loss += w * Charb)
+        # so the mechanism still fires.
+        if loss_vol_p_charb is not None:
+            if gradnorm_weights is None:
+                loss = loss + vol_p_charbonnier_weight * loss_vol_p_charb
+            vol_p_charb_metrics = {
+                "loss_vol_p_charb_unweighted": float(
+                    loss_vol_p_charb.detach().cpu().item()
+                ),
+                "loss_vol_p_charb_weighted": float(
+                    (vol_p_charbonnier_weight * loss_vol_p_charb).detach().cpu().item()
+                ),
+                "loss_vol_p_charb_target_mse": float(
+                    loss_vol_p_mse_diag.detach().cpu().item()
+                ),
+            }
+        else:
+            vol_p_charb_metrics = {}
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
-    }, task_losses
+    }
+    metrics.update(charb_metrics)
+    metrics.update(vol_p_charb_metrics)
+    return loss, metrics, task_losses
 
 
 def run_eval_only(config: Config, state) -> None:
@@ -583,6 +777,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
                     gradnorm_weights=gradnorm_weights,
+                    wss_charbonnier_weight=config.wss_charbonnier_weight,
+                    wss_charbonnier_eps=config.wss_charbonnier_eps,
+                    wss_charbonnier_axes=config.wss_charbonnier_axes,
+                    vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
+                    vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -634,6 +833,87 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                         }
                     )
+                    if "loss_wss_charb_unweighted" in batch_loss_metrics:
+                        # H10b/H23 diagnostics: aggregate Charb (across selected
+                        # axes) plus per-axis breakdown so H23 (τ_y+τ_z) can be
+                        # compared directly against H19 (τ_z only).
+                        wss_axes_resolved = parse_wss_charbonnier_axes(
+                            config.wss_charbonnier_axes
+                        )
+                        axes_suffix = "".join(
+                            {0: "x", 1: "y", 2: "z"}[i] for i in wss_axes_resolved
+                        )
+                        # Use legacy "tau_z" label when the axes set is exactly {z}
+                        # so historical dashboards keep working; otherwise tag the
+                        # subset (e.g. "tau_yz", "wss" for all).
+                        if wss_axes_resolved == [2]:
+                            wss_axes_label = "tau_z"
+                        elif wss_axes_resolved == [0, 1, 2]:
+                            wss_axes_label = "wss"
+                        else:
+                            wss_axes_label = f"tau_{axes_suffix}"
+                        target_mse = batch_loss_metrics["loss_wss_charb_target_mse"]
+                        charb_unw = batch_loss_metrics["loss_wss_charb_unweighted"]
+                        charb_w = batch_loss_metrics["loss_wss_charb_weighted"]
+                        ratio_to_mse = (
+                            charb_unw / target_mse
+                            if target_mse > 1e-12
+                            else float("nan")
+                        )
+                        weighted_ratio = (
+                            charb_w / target_mse
+                            if target_mse > 1e-12
+                            else float("nan")
+                        )
+                        train_log.update(
+                            {
+                                f"train/loss_{wss_axes_label}_mse": target_mse,
+                                f"train/loss_{wss_axes_label}_charb_unweighted": charb_unw,
+                                f"train/loss_{wss_axes_label}_charb_weighted": charb_w,
+                                f"train/loss_{wss_axes_label}_charb_to_mse_ratio": ratio_to_mse,
+                                f"train/loss_{wss_axes_label}_charb_weighted_to_mse_ratio": weighted_ratio,
+                            }
+                        )
+                        # Per-axis Charb/MSE — emitted whenever ≥1 axis is active,
+                        # always under the axis-specific key so a τ_y curve in H23
+                        # is named the same key as a hypothetical τ_y-only future run.
+                        for axis_key in ("tau_x", "tau_y", "tau_z"):
+                            axis_unw_k = f"loss_{axis_key}_charb_unweighted"
+                            axis_mse_k = f"loss_{axis_key}_charb_target_mse"
+                            if axis_unw_k in batch_loss_metrics:
+                                axis_unw = batch_loss_metrics[axis_unw_k]
+                                axis_mse = batch_loss_metrics[axis_mse_k]
+                                train_log[f"train/loss_{axis_key}_charb_unweighted"] = (
+                                    axis_unw
+                                )
+                                train_log[f"train/loss_{axis_key}_mse"] = axis_mse
+                                if axis_mse > 1e-12:
+                                    train_log[
+                                        f"train/loss_{axis_key}_charb_to_mse_ratio"
+                                    ] = (axis_unw / axis_mse)
+                    if "loss_vol_p_charb_unweighted" in batch_loss_metrics:
+                        vol_p_target_mse = batch_loss_metrics["loss_vol_p_charb_target_mse"]
+                        vol_p_charb_unw = batch_loss_metrics["loss_vol_p_charb_unweighted"]
+                        vol_p_charb_w = batch_loss_metrics["loss_vol_p_charb_weighted"]
+                        vol_p_ratio_to_mse = (
+                            vol_p_charb_unw / vol_p_target_mse
+                            if vol_p_target_mse > 1e-12
+                            else float("nan")
+                        )
+                        vol_p_weighted_ratio = (
+                            vol_p_charb_w / vol_p_target_mse
+                            if vol_p_target_mse > 1e-12
+                            else float("nan")
+                        )
+                        train_log.update(
+                            {
+                                "train/loss_vol_p_mse": vol_p_target_mse,
+                                "train/loss_vol_p_charb_unweighted": vol_p_charb_unw,
+                                "train/loss_vol_p_charb_weighted": vol_p_charb_w,
+                                "train/loss_vol_p_charb_to_mse_ratio": vol_p_ratio_to_mse,
+                                "train/loss_vol_p_charb_weighted_to_mse_ratio": vol_p_weighted_ratio,
+                            }
+                        )
                 if config.use_y_symmetry_aug and aug_log:
                     bs = max(1, aug_log.get("batch_size", 0))
                     train_log["train/aug/y_symmetry_flip_rate"] = (
@@ -706,6 +986,32 @@ def main(argv: Iterable[str] | None = None) -> None:
                                     float(gradnorm_n_tasks)
                                 )
                                 gradnorm_weights.log_weights.data.copy_(lw_norm)
+                                # H9: hard floor on vol_p task weight to prevent
+                                # GradNorm starvation (root cause of vol_p breach
+                                # in H1/H2/H3/H5). Indices: cp, tau_x, tau_y,
+                                # tau_z, vol_p.
+                                w_vol_p_clamp_active = False
+                                if config.gradnorm_min_w_vol_p > 0.0:
+                                    w_curr = gradnorm_weights.weights.detach()
+                                    vol_p_idx = 4
+                                    min_w = config.gradnorm_min_w_vol_p
+                                    if w_curr[vol_p_idx].item() < min_w:
+                                        w_vol_p_clamp_active = True
+                                        other_idx = torch.tensor(
+                                            [0, 1, 2, 3], device=w_curr.device
+                                        )
+                                        deficit = min_w - w_curr[vol_p_idx].item()
+                                        other_sum = w_curr[other_idx].sum().item()
+                                        scale = max(
+                                            (other_sum - deficit) / max(other_sum, 1e-12),
+                                            0.01,
+                                        )
+                                        new_w = w_curr.clone()
+                                        new_w[vol_p_idx] = min_w
+                                        new_w[other_idx] = w_curr[other_idx] * scale
+                                        gradnorm_weights.log_weights.data.copy_(
+                                            new_w.clamp_min(1e-12).log()
+                                        )
                                 # DDP: average log_weights across ranks for sync
                                 if state.enabled:
                                     torch.distributed.all_reduce(
@@ -739,6 +1045,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 gradnorm_log["gradnorm/G_bar"] = float(
                                     G_bar.detach().cpu().item()
                                 )
+                                if config.gradnorm_min_w_vol_p > 0.0:
+                                    gradnorm_log["gradnorm/w_vol_p_clamp_active"] = float(
+                                        w_vol_p_clamp_active
+                                    )
+                                    gradnorm_log["gradnorm/min_w_vol_p"] = float(
+                                        config.gradnorm_min_w_vol_p
+                                    )
                     if gradnorm_log:
                         train_log.update(gradnorm_log)
                     loss.backward()
