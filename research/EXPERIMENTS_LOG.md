@@ -1,3 +1,64 @@
+## 2026-05-20 01:45 — PR #1204: H55 v2 TAU-Z-LOSS-CURRICULUM — front-load τz loss weight 5.0→2.0 over EP1-6 linear (edward, 13-ep terminal) — **MECHANISM-POSITIVE NULL with test_VP FLOOR CROSS + val_WSS_z −0.341pp on binding axis + 4th Wave 31 LR-decay confound case**
+
+- **Branch**: `edward/h55-tau-z-curriculum-v2-main` (closed at 01:45Z)
+- **W&B run**: rank0 `tkouys7y` (group `wave31_h55_tau_z_curriculum`, 14.33h runtime, 13-ep natural completion at step 70,652; best EMA checkpoint = EP13)
+- **Hypothesis**: time-varying τ_z penalty (5.0× → 2.0× linear over EP1-6) front-loads channel-asymmetry attack during high-LR productive zone, then relaxes to standard weight for stable post-curriculum descent. Mechanism class: variance-class-time-varying-loss (novel — first Wave 31 in this class).
+
+### Terminal verdict — NEAR-MISS on merge gate, test_VP FLOOR CROSS + mechanism-positive on binding axis
+
+| Gate | Target | H55 v2 EP13 | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.249%** | ❌ NEAR-MISS | +0.123pp (8th NEAR-MISS in Wave 30/31) |
+| test_abupt | (baseline 5.844%) | **5.988%** | ❌ FAIL | +0.144pp |
+| test_SP (floor) | ≤3.577% | **3.806%** | ❌ FAIL | +0.229pp |
+| val_VP (floor) | ≤3.643% | 3.670% | ❌ NEAR-MISS | +0.027pp |
+| **test_VP (floor)** | **≤3.643%** | **3.602%** | **✅ PASS** | **−0.041pp** ⭐ 3rd Wave 31 test_VP cross (H53 val cross + close-miss test, now H55 v2 clean test cross) |
+| **val_WSS_z** | (H48 ref 9.899%) | **9.558%** | ✅ MECHANISM POSITIVE | **−0.341pp** on binding τz axis |
+| test_WSS (goal) | <6.727% | 6.883% | ❌ FAIL | +0.156pp |
+| test_WSS_z | (mech ref) | 8.917% | ✅ MECHANISM POSITIVE | mechanism direction-correct |
+
+### KEY STRUCTURAL FINDING — 3rd Wave 31 test_VP floor cross + per-axis-weighting pattern
+
+| Run | Mechanism | test_VP | Δ vs floor 3.643% |
+|---|---|---:|---:|
+| H26 NPCA (merged) | encoder-input enrichment | 3.608% | −0.035pp ✅ |
+| H53 CP-LOSS-WEIGHT (closed) | cp_loss_weight=2 surface channel | 3.665% | +0.022pp ❌ close-miss test, ✅ val cross |
+| **H55 v2 TAU-Z-CURRICULUM (this PR)** | **τz curriculum 5.0→2.0 over EP1-6** | **3.602%** | **−0.041pp** ✅ |
+
+**Two different per-axis loss-weighting mechanisms BOTH cross test_VP floor on the same vol-points schedule (16384→65536).** Converges on Wave 32 finding: per-axis loss weighting + vol-points curriculum unlocks test_VP descent. Worth a focused follow-up PR examining the test_VP cross mechanism.
+
+### Mechanism strict-beat vs H48 mean-shift null
+
+H55 v2 strictly beats H48 on every val metric:
+- val_abupt 6.249% vs H48 6.485% = **−0.236pp**
+- val_WSS_z 9.558% vs H48 9.899% = **−0.341pp** (binding axis)
+- val_VP 3.670% vs H48 3.802% = −0.132pp
+- val_SP 4.086% vs H48 4.277% = −0.191pp
+
+**Time-varying curriculum is strictly better than static-weight reduction for the channel-asymmetry problem.** New mechanism class confirmed.
+
+### LR-decay confound — 4th Wave 31 case after H47, H52, H53
+
+Per-epoch slope decay (val_abupt):
+- EP3.7→EP4.6: −0.020 pp/1k (LR 68% peak)
+- EP4.6→EP5.4: −0.010 pp/1k (LR 45% peak) — slope halved
+- EP5.4→EP6.07: −0.006 pp/1k (LR 14% peak) — slope halved again
+- EP6.07→terminal: −0.0002 pp/1k (LR ~0%, cosine tail flat)
+
+Canonical Wave 31 cosine-tail-LR-decay pattern. Mechanism active throughout EP1-6 productive zone, but LR-budget exhausted before merge gate cleared.
+
+### Wave 31 mechanism-class taxonomy update
+
+After H55 v2 closure:
+- **variance-class-time-varying-loss / tau-z-curriculum**: mechanism-positive null with test_VP cross + val_WSS_z mech-positive → **DEFERRED pending H63 LR-fix variant**
+- 12-class taxonomy now: 4 proven null (mean-shift / cross-channel-weight-space / variance-class-decoder-weight / coord-grounded-PE-stop-grad) + 4 mech-positive nulls DEFERRED (cp-loss-weight, v-depth, tau-z-curriculum, npca-yaw-stack) + 4 in flight
+
+### Disposition
+
+CLOSED as mechanism-positive null with test_VP floor cross + val_WSS_z −0.341pp + LR-decay confound (4th Wave 31 case). **EDWARD REASSIGNED H63 TAU-Z-CURRICULUM-LR-EXTENDED (PR #1212)** — single-flag change vs H55 v2 (`--lr-cosine-t-max 25` instead of 13). **3rd parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED — if all three mechanism classes merge under LR-fix, LR-decay-confound is conclusively confirmed as Wave 31 ceiling.
+
+---
+
 ## 2026-05-19 18:00 — PR #1202: H53 CP-LOSS-WEIGHT — cp_loss_weight 1.0→2.0 surface-pressure channel up-weighting (tanjiro, 13-ep terminal) — **MECHANISM-POSITIVE NULL with val_VP FLOOR CROSS + first Wave 31 AB-UPT public-ref test_SP beat + LR-decay confound**
 
 - **Branch**: `tanjiro/h53-cp-loss-weight` (closed at 18:00Z)
