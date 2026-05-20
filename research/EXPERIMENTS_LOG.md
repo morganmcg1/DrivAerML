@@ -219,6 +219,34 @@ Wave 32 cross-pollination start. Charbonnier loss on volume pressure is the dl24
 
 ---
 
+## 2026-05-20 17:00 — PR #1212: H63 TAU-Z-CURRICULUM-LR-EXTENDED (edward, 13-ep terminal) — **OUTCOME C NULL + test_VP FLOOR CROSS + τz-curriculum LR-axis EXHAUSTED**
+
+- **Branch**: edward/h63-tau-z-curriculum-lr-extended
+- **W&B run**: (edward's terminal run on LR-extended substrate)
+- **Hypothesis**: τz-loss-curriculum (H55v2, mech-positive) is limited by LR-decay artifact — extending `--lr-cosine-t-max 13 → 25` should allow curriculum to operate in high-LR regime and improve terminal val_abupt below H55v2's 6.249%.
+
+| Channel | H63 terminal | Gate/Floor | H55v2 ref | Δ vs ref | Verdict |
+|---|---:|:--|---:|---:|:--|
+| val_abupt | 6.266% | <6.126% ❌ | 6.249% | +0.017pp | **C NULL** |
+| test_VP | **3.583%** | <3.643% ✅ | 3.602% | **−0.019pp** | ✅ FLOOR CROSS |
+| test_SP | 3.839% | <3.577% ❌ | 3.806% | +0.033pp | above floor |
+| test_abupt | 6.035% | — | 5.988% | +0.047pp | — |
+| test_WSS | 6.933% | — | 6.883% | +0.050pp | — |
+
+**Late-epoch slope comparison**:
+| Run | EP6 val_abupt | EP13 val_abupt | Avg slope (pp/ep) | LR fraction at terminal |
+|---|---:|---:|---:|---:|
+| H55v2 | 6.389% | 6.249% | −0.020 | ~0% |
+| H63 | 6.467% | 6.266% | **−0.029 (45% steeper)** | **59.8%** |
+
+**Commentary**: C NULL assigned per four-outcome contract (terminal val_abupt within ±0.05pp of H55v2). LR-fix substrate WAS productive at schedule level (45% steeper late-epoch slope confirmed), but EP6 deficit (+0.078pp from noisier descent under peak LR) only partially closed. **Key structural finding: τz-curriculum class SATURATES at val_abupt ~6.25% regardless of LR schedule** — the mechanism binds on the curriculum-schedule axis, not the LR axis. LR-fix is not the lever for this class.
+
+The test_VP floor cross (3.583% < 3.643%) is the binding positive byproduct — deeper than H55v2's 3.602%, confirming τz-curriculum produces robust test_VP floor crosses under both LR substrates. This consolidates the test_VP floor-cross pattern across 5 mech classes.
+
+**Class-specific saturation finding binding for Wave 32**: τz-curriculum added to "LR-axis-exhausted" category. Future LR-fix variants on this class = wasted compute. Next experiment on τz axis: H73 CHARBONNIER-TAU-Z (PR #1229) — attacks the same axis via **loss-function shape** (orthogonal lever).
+
+---
+
 ## 2026-05-20 07:15 — PR #1213: H64 RFF-LOW-BAND-EXPANSION — drop σ={8.0,16.0} HIGH-end, add σ=0.0625 LOW-end (thorfinn, EP3 KILLED) — **OUTCOME D NEGATIVE / MECHANISM-CLASS REFINEMENT: FDCE lever is band-WIDTH not band-POSITION**
 
 - **Branch**: `thorfinn/h64-rff-low-band-expansion` (closed at 07:15Z)

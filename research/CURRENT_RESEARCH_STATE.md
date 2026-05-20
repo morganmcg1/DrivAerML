@@ -1,9 +1,50 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~13:40 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~17:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ✅ ~17:10Z — H63 TAU-Z-CURRICULUM-LR-EXTENDED CLOSED C NULL + test_VP FLOOR CROSS + edward reassigned H73 CHARBONNIER-TAU-Z
+
+**Closure: PR #1212 H63 (edward) — OUTCOME C NULL + test_VP floor cross preserved**
+
+| Channel | H63 terminal | Gate/Floor | H55v2 ref | Δ vs ref | Verdict |
+|---|---:|:--|---:|---:|:--|
+| val_abupt | 6.266% | <6.126% merge ❌ | 6.249% | +0.017pp | **C NULL** (within ±0.05pp noise) |
+| test_VP | **3.583%** | <3.643% floor ✅ | 3.602% | **−0.019pp deeper** | ✅ FLOOR CROSS |
+| test_SP | 3.839% | <3.577% floor ❌ | 3.806% | +0.033pp | above floor |
+| test_abupt | 6.035% | — | 5.988% | +0.047pp | — |
+| test_WSS | 6.933% | — | 6.883% | +0.050pp | — |
+
+**Key structural finding — LR-axis exhausted for τz-curriculum class**: H63 late-epoch slope was **45% steeper** than H55v2 (−0.029 vs −0.020 pp/ep), confirming the LR-fix substrate WAS productive at the schedule level. But the τz-curriculum mechanism saturates at val_abupt ~6.25% regardless of LR schedule — the +0.078pp deficit at EP6 only partially closed by faster late-epoch slope. Terminal lands +0.017pp above H55v2 = within noise band.
+
+**Class-differentiation principle update**: τz-curriculum added to "LR-axis-exhausted" category (joins V-DEPTH architecture-bound class). Future LR-fix variants on τz-curriculum class = wasted compute.
+
+**Updated Wave 31 LR-fix per-class disposition table**:
+
+| Mech class | Parent | LR-fix variant | Outcome | Disposition |
+|---|---|---|---|---|
+| variance-class-decoder-sublayer (V-DEPTH) | H47 6.126% | H59 6.282% | partial | architecture-bound at val, LR-bound at test |
+| variance-class-cp-loss-weight | H53 6.181% | H62 6.397% | **D NEGATIVE +0.216pp** | LR-fix ACTIVELY DESTABILIZES |
+| **variance-class-time-varying-loss (τz-curr)** | **H55v2 6.249%** | **H63 6.266%** | **C NULL +0.017pp** | **LR-axis EXHAUSTED — mech saturates regardless** |
+| attention-routing-temperature-curriculum | H61 6.341% | H70 8.639% killed | **D NEGATIVE +2.298pp** | LR-fix ACTIVELY DESTABILIZES |
+| shared-capacity-surface | H54v2 | H65 in-flight | TBD | — |
+| coordinate-grounded-slice-PE | H58 | H66 in-flight | TBD | — |
+
+**test_VP floor cross consolidation**: τz-curriculum produces robust test_VP floor crosses under both LR substrates (H55v2 3.602%, H63 3.583%). Pattern now confirmed across 5 mech classes: V-DEPTH, CP-LOSS-WEIGHT, τz-curriculum, attention-temp-curriculum, SURFACE-DEEP.
+
+**Reassignment**: edward → **H73 CHARBONNIER-TAU-Z (PR #1229)**. Single-flag `--tau-z-loss-type charbonnier --charbonnier-eps 1e-3` on LR-extended substrate `--lr-cosine-t-max 25` (per Wave 32 loss-curvature-shape class design). Attacks τz axis from a fundamentally different angle than H63: **loss-function shape** (loss-curvature-shape mech class) vs loss scheduling. Parallel sibling to H68 (nezuko, vol_p variant). Both tests are single-axis isolations to attribute the Charbonnier mechanism direction per axis.
+
+**Fleet status (~17:10Z)**: 8/8 WIP, zero idle. In-flight:
+- H65 (PR #1214) alphonse: SURFACE-DEEP-LR-EXTENDED — EP6 merge-watch
+- H66 (PR #1215) askeladd: COORDSLICE-NO-STOPGRAD-LR-EXTENDED — EP5-6 slope confirms LR-fix NOT productive for encoder-PE class; terminal watch
+- H67 (PR #1221) thorfinn: RFF-9SIGMA-WIDTH-EXPANSION — EP6 read ~17:13Z
+- H68 (PR #1222) nezuko: CHARBONNIER-VOL-P — mid-EP5, val_VP concerning (+0.52pp above floor); EP6 decisive read ~17:30Z
+- H69 (PR #1223) fern: CURVATURE-ATTENTION-BIAS v2 — EP3 PASSED, curvature_alpha broadening to blocks 1-3; EP6 ~17:00Z
+- H71 (PR #1225) tanjiro: GRADNORM-α=1.5 — weights stabilized 0.28-1.84 (3.4× wider than baseline); EP6 ~17:30Z
+- H72 (PR #1228) frieren: SLICE-TEMP-DEEP-ENDPOINT — just launched ~13:40Z
+- **H73 (PR #1229) edward: CHARBONNIER-TAU-Z — just assigned**
 
 ## 🔴 13:40Z — H70 SLICE-TEMP-LR-EXTENDED CLOSED OUTCOME D NEGATIVE + class-differentiation principle binding + frieren reassigned H72 SLICE-TEMP-DEEP-ENDPOINT
 
