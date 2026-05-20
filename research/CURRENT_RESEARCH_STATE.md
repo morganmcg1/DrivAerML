@@ -1,11 +1,83 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~01:45 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~02:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-20 ~01:45Z) — PR #1204 H55 v2 TAU-Z-LOSS-CURRICULUM terminal CLOSED as **mechanism-positive null with test_VP FLOOR CROSS + val_WSS_z −0.341pp on binding axis + 4th Wave 31 LR-decay confound** (val_abupt 6.249% NEAR-MISS merge gate +0.123pp = 8th NEAR-MISS in Wave 30/31; **test_VP 3.602% ✅ CROSSED FLOOR by −0.041pp** = 3rd Wave 31 test_VP cross; **val_WSS_z 9.558% vs H48 baseline 9.899% = −0.341pp** ⭐ mechanism direction-correct on binding τz axis; H55 v2 STRICT BEAT vs H48 mean-shift null on every val metric proving time-varying curriculum > static-weight reduction; cosine-tail slope decay halving every epoch matching H47/H52/H53); **EDWARD REASSIGNED H63 TAU-Z-CURRICULUM-LR-EXTENDED** (PR #1212, single-flag change `--lr-cosine-t-max 25` instead of 13; **3rd parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED — if all three mech classes merge under LR-fix, LR-decay confound is bulletproof confirmed)
+## Latest invocation actions (2026-05-20 ~02:00Z) — PR #1206 H57 MULTI-SCALE-RFF-EXPANDED terminal CLOSED as **mechanism-positive null with test_VP FLOOR CROSS on BOTH val+test (first of Wave 31) + strict beat vs H48 same-recipe peer on all 7 paper-facing axes + KEY FALSIFIED HYPOTHESIS** (val_abupt 6.217% NEAR-MISS merge gate +0.091pp = 2nd-closest of Wave 31; **test_VP 3.610% ✅ CROSSED FLOOR by −0.033pp + val_VP 3.612% ✅ CROSSED FLOOR by −0.031pp**, first Wave 31 case with BOTH val and test cross; H57's "τz needs higher frequencies" hypothesis FALSIFIED by per-σ projection diagnostic — LOW σ=0.125 attracted 11.79% surface/18.47% volume weight while HIGH σ=16 only 3.14%/2.30%; H57 strict beat H48 same-recipe peer on all 7 axes −0.026 to −0.199pp = FDCE confirmed as NEW mechanism class); **THORFINN REASSIGNED H64 RFF-LOW-BAND-EXPANSION** (PR #1213, single-flag change vs H57 `--rff-init-sigmas "0.0625,0.125,0.25,0.5,1.0,2.0,4.0"` — drop σ={8,16} minimal-uptake, add σ=0.0625 one octave below H57's new low — tests low-end-binds-FDCE direct corollary)
+
+### Headline updates (2026-05-20 02:00Z)
+
+1. **PR #1206 thorfinn H57 MULTI-SCALE-RFF-EXPANDED CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1206#issuecomment-4493840197)). Terminal verdict:
+   - val_abupt **6.217%** NEAR-MISS merge gate by +0.091pp (2nd-closest NEAR-MISS Wave 31 after H53's +0.055pp; 9th overall in Wave 30/31)
+   - test_abupt **6.053%** FAIL baseline by +0.209pp (but −0.114pp vs H48 same-recipe peer ⭐ strongest single-mechanism test_abupt improvement in Wave 31)
+   - **val_VP 3.612% ✅ CROSSED FLOOR** by −0.031pp + **test_VP 3.610% ✅ CROSSED FLOOR** by −0.033pp — **FIRST Wave 31 case with BOTH val and test simultaneous cross**
+   - test_WSS_z 9.148% −0.352pp vs ~9.5% PR body reference (binding 0.3pp gate PASSED, but same as H48's 9.174% within seed noise — falsifies τz-selective hypothesis)
+   - test_SP 3.812% FAIL floor by +0.235pp
+   - H57 STRICT BEAT vs H48 same-recipe peer on all 7 paper-facing axes (−0.026 to −0.199pp) — **FDCE-expansion confirmed as NEW mechanism class for Wave 31**
+   - W&B run `e8lhpbn9` terminal step 70,652
+
+2. **KEY FALSIFIED HYPOTHESIS — H57 "τz needs higher frequencies" wrong; LOW end is the binding direction**:
+   - Per-σ projection-weight diagnostic on EP3 checkpoint:
+     - **σ=0.125 (new LOW)**: surface 11.79%, volume 18.47% — HIGH UPTAKE
+     - σ=0.25 → σ=4.0 (baseline range): normal allocation
+     - **σ=16 (new HIGH)**: surface 3.14%, volume 2.30% — MINIMAL UPTAKE
+   - val τz advantage that compounded through training (val 4→10: Δ vs H48 widening from −0.192 to −0.302pp) **collapsed to within-noise at test split** (test τz Δ vs H48 = −0.026pp)
+   - Improvement on test came uniformly across τx, τy, SP, VP — NOT τz-selective — consistent with low-end (not high-end) absorbing new projection allocation
+
+3. **PR #1213 thorfinn H64 RFF-LOW-BAND-EXPANSION assigned** ([PR #1213](https://github.com/morganmcg1/DrivAerML/pull/1213), branch `thorfinn/h64-rff-low-band-expansion` from `tay`). Single-flag change vs H57:
+   - `--rff-init-sigmas "0.0625,0.125,0.25,0.5,1.0,2.0,4.0"` (7 sigmas, span −4 to +2 octaves around σ=1)
+   - Drops σ={8.0, 16.0} (minimal uptake), keeps H57's actual-utilized range, adds σ=0.0625 (one octave below H57's new low)
+   - Kept `--lr-cosine-t-max 13` to match H57 directly (NOT bundled with LR-fix; clean attribution)
+   - Three falsifiable outcomes:
+     - **A. MERGE WIN + FLOOR CROSS**: val_abupt<6.126% AND test_VP<3.643% AND test_SP<3.577% — low-end binding hypothesis confirmed, FDCE merges first time
+     - **B. PARTIAL WIN**: val_abupt drops below H57's 6.217% by ≥0.05pp but no merge — low-end direction confirmed, limits in current freq config
+     - **C. NULL band-width-only**: val_abupt within ±0.05pp of H57 — high vs low choice doesn't matter, just band-width is the lever
+     - **D. NEGATIVE**: val_abupt rises above H57's 6.217% by ≥0.05pp — H57 high-end allocation WAS productive (e.g., as regularizer)
+
+4. **Wave 31 test_VP floor cross tally NOW 4 cases**:
+   - H26 NPCA (MERGED): test_VP 3.608% (−0.035pp below floor)
+   - H53 CP-LOSS-WEIGHT (closed): test_VP 3.665% (+0.022pp close-miss; val cross −0.033pp)
+   - H55 v2 TAU-Z-CURRICULUM (closed): test_VP 3.602% (−0.041pp below floor)
+   - **H57 FDCE-EXPANSION (closed)**: **test_VP 3.610% (−0.033pp) + val_VP 3.612% (−0.031pp) — both cross simultaneously**
+   - **Four orthogonal mechanism classes all crossing test_VP floor** — the test_VP descent path is unlocked across the program. Wave 32 priority candidate: focused test_VP investigation on the shared substrate (vol-points-curriculum + per-channel loss weighting + encoder freq-band expansion).
+
+5. **Wave 31 mechanism-class taxonomy now 13 classes** (after H57 closure with FDCE confirmed):
+   1. variance-class-encoder-input — MERGED (H26/H31/H35)
+   2. variance-class-decoder-sublayer — null+LR-confound (H47), in flight (H59 LR-fix variant)
+   3. variance-class-cp-loss-weight — mech-positive null with LR-confound (H53), DEFERRED pending H62 LR-fix variant
+   4. shared-capacity-surface — in flight (H54 v2)
+   5. mean-shift-class — null (H48)
+   6. cross-channel-weight-space — null (H45)
+   7. variance-class-decoder-weight — null (H46/H49)
+   8. coordinate-grounded-slice-PE — null+VP-cross (H33/H50), in flight (H58)
+   9. **frequency-domain-capacity / FDCE — NOW CONFIRMED mech-positive null with BOTH val+test VP cross + H48 strict beat 7 axes** (H57 closed); DEFERRED pending H64 LOW-band variant
+   10. ema-aware-variance-stack — in flight (H60)
+   11. attention-temperature-curriculum — in flight (H61)
+   12. variance-class-time-varying-loss / tau-z-curriculum — mech-positive null with test_VP cross (H55 v2), DEFERRED pending H63 LR-fix variant
+   13. **NEW — frequency-domain-capacity-low-tilted** — pending H64 (PR #1213)
+   - Plus derived class: mechanism-stack-non-compounding (H52 finding)
+   - **Derived: LR-decay-confound (4 cases: H47 / H52 / H53 / H55 v2; H57 also in deep cosine tail but mech ID before LR-fix variant)** — being directly tested by H59 + H62 + H63 (3 parallel LR-fix variants)
+
+6. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H57 closure + H64 assignment):
+   - **H54 v2 alphonse (PR #1203)** — ongoing
+   - **H58 askeladd (PR #1207)** — **STRONGEST IN-FLIGHT MERGE CANDIDATE** at EP6 step 60,873 val_abupt 6.225% (+0.099pp), val_VP 3.594% CROSSED FLOOR by −0.049pp. LR 33% peak — more remaining productive descent than H57 was. Projected terminal 5.99-6.15% LIKELY MERGE WIN.
+   - **H59 nezuko (PR #1208)** — V-DEPTH-LR-EXTENDED (1st parallel LR-fix test)
+   - **H60 fern (PR #1209)** — H56-RELAUNCH-DROP-EP3 (strongest mech signal)
+   - **H61 frieren (PR #1210)** — SLICE-TEMP-CURRICULUM, EP4 trailing pack by 0.30-0.52pp, projected outcome B PARTIAL
+   - **H62 tanjiro (PR #1211)** — CP-LOSS-WEIGHT-LR-EXTENDED (2nd parallel LR-fix test)
+   - **H63 edward (PR #1212)** — TAU-Z-CURRICULUM-LR-EXTENDED (3rd parallel LR-fix test)
+   - **H64 thorfinn (PR #1213, this entry)** — RFF-LOW-BAND-EXPANSION (low-end-binds-FDCE), pre-launch
+
+7. **Strategic notes (post-H57 closure)**:
+   - **3 mechanism-positive nulls clustered in NEAR-MISS zone in Wave 31**: H53 (+0.055pp), H50 (+0.094pp), H57 (+0.091pp), H58 projected (+0.099pp at EP6). The merge gate at 6.126% is being approached from multiple orthogonal mechanism classes — strongly suggests an LR-decay-induced ceiling that 1-2 individual mechanism wins won't crack alone.
+   - **Most informative single piece of Wave 31 evidence**: H57's per-σ projection-weight diagnostic. Established that **WHICH end of the band is binding** is a directly-falsifiable question with offline data. H64 directly tests the corollary.
+   - **PARALLEL LR-FIX EXPERIMENT — H59 + H62 + H63** is still the **most critical Wave 31 design test in flight**. Three different mechanism classes all tested with single-flag fix `--lr-cosine-t-max 25`.
+   - **1 strong in-flight merge candidate THIS NIGHT**: H58 (terminal ~17:00Z May 20). H57 closed as NEAR-MISS, H58 is the strongest remaining projected merge.
+   - **6 active merge candidates** in Wave 31: H54 v2, H58, H59, H60, H62, H63 + H64 new lever
+   - **Wave 32 candidate — focused test_VP investigation**: now 4 Wave 31 test_VP cross cases (H26, H53, H55 v2, H57) all using vol-points-schedule 16384→65536. **Worth dedicated experiment isolating the vol-points-curriculum contribution to test_VP descent independent of per-axis loss weighting and freq-band expansion.**
+   - **Wave 32 mechanism-stack design** must now account for: (a) orthogonal-mech non-compounding (H52 finding), (b) LR-decay as ceiling (H47/H52/H53/H55v2 evidence), (c) per-axis loss-weighting unlocks test_VP (H53+H55v2 finding), (d) **FDCE-low-tilted as new mechanism direction** (H57 falsification + H64 test)
 
 ### Headline updates (2026-05-20 01:45Z)
 

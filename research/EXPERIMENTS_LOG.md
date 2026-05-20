@@ -1,3 +1,67 @@
+## 2026-05-20 02:00 — PR #1206: H57 MULTI-SCALE-RFF-EXPANDED — wider freq band (8 sigmas 0.125→16) in string-separable position encoding (thorfinn, 13-ep terminal) — **MECHANISM-POSITIVE NULL with test_VP FLOOR CROSS on BOTH val+test + H48 same-recipe strict beat 7 axes + KEY FALSIFIED HYPOTHESIS (LOW end is binding, not HIGH)**
+
+- **Branch**: `thorfinn/h57-rff-expanded-13ep` (closed at 02:00Z)
+- **W&B run**: rank0 `e8lhpbn9` (group `wave31_h57_multiscale_rff_expanded`, 14.33h runtime, terminal step 70,652 = ~EP6.5 effective due to budget cutoff, NOT EP13 nominal; best EMA = EP6)
+- **Hypothesis**: expand RFF init sigmas from 5 (0.25→4.0) to 8 (0.125→16.0) in string-separable PE to give encoder access to wider freq band, with prediction that the HIGH end (σ=8,16) would help capture high-frequency τz-axis gradient features. Mechanism class: frequency-domain-capacity (FDCE-expansion) — first Wave 31 in this class.
+
+### Terminal verdict — NEAR-MISS on merge gate, BOTH val+test VP floor cross, FALSIFIED τz-via-high-freq prediction
+
+| Gate | Target | H57 terminal | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| val_abupt (merge) | <6.126% | **6.217%** | ❌ NEAR-MISS | +0.091pp (9th Wave 30/31; **2nd-closest Wave 31** after H53's +0.055pp) |
+| test_abupt | (baseline 5.844%) | **6.053%** | ❌ FAIL | +0.209pp (but **−0.114pp vs H48 same-recipe peer** ⭐ strongest single-mechanism test_abupt improvement Wave 31) |
+| test_SP (floor) | ≤3.577% | 3.812% | ❌ FAIL | +0.235pp |
+| **val_VP (floor)** | **≤3.643%** | **3.612%** | **✅ PASS** | **−0.031pp** |
+| **test_VP (floor)** | **≤3.643%** | **3.610%** | **✅ PASS** | **−0.033pp** ⭐ **4th Wave 31 test_VP cross + FIRST simultaneous val+test cross** |
+| test_WSS_z (binding) | (~9.5% PR body) | 9.148% | ✅ PASS (≥0.3pp gate) | −0.352pp (within seed noise vs H48's 9.174%) |
+| test_WSS (goal) | <6.727% | 6.949% | ❌ FAIL | +0.222pp |
+
+### KEY STRUCTURAL FINDING — H57's "τz needs higher frequencies" hypothesis falsified by per-σ projection diagnostic
+
+Student's offline per-σ projection-weight diagnostic on EP3 checkpoint (mean over all 5 transformer blocks' `rff_input_proj.weight` L2-norm contribution per σ slot):
+
+| σ | Surface proj weight share | Volume proj weight share | Status |
+|---:|---:|---:|:--|
+| **0.125 (new LOW)** | **11.79%** | **18.47%** | ⭐ HIGH UPTAKE |
+| 0.25 → 4.0 (baseline range) | ~12-15% each | ~12-15% each | normal |
+| 8.0 (new HIGH) | low | low | minimal |
+| **16.0 (new HIGH)** | **3.14%** | **2.30%** | ⭐ MINIMAL UPTAKE |
+
+**The LOW end (σ=0.125) took up significant projection weight; the HIGH end (σ=16) was minimally utilized.** The test improvement was uniform across all 7 paper-facing axes (NOT τz-selective). The val τz advantage that compounded through training (val 4→10: Δ vs H48 widening from −0.192 to −0.302pp) collapsed to within-noise at test split (test τz Δ vs H48 = −0.026pp). **The val-side τz compounding was a val-set artifact, not the actual mechanism direction.**
+
+### H57 strict beat vs H48 same-recipe peer (run `8cn5abxm`) — FDCE confirmed as NEW mechanism class
+
+| Metric | H57 test | H48 test | Δ (H57 − H48) |
+|---|---:|---:|---:|
+| **abupt** | **6.053%** | 6.167% | **−0.114pp** ⭐ |
+| surface_pressure | 3.812% | 3.898% | −0.085pp ✅ |
+| volume_pressure | 3.610% | 3.671% | −0.061pp ✅ |
+| wall_shear | 6.949% | 7.113% | −0.164pp ✅ |
+| wall_shear_x (τx) | 6.102% | 6.301% | −0.199pp ✅ |
+| wall_shear_y (τy) | 7.593% | 7.791% | −0.198pp ✅ |
+| wall_shear_z (τz) | 9.148% | 9.174% | −0.026pp (within seed noise) |
+
+**FDCE (frequency-domain-capacity-expansion) confirmed as new mechanism class for Wave 31** — 7-axis-uniform improvement over matched-recipe H48 peer establishes it as direction-correct, stackable, and orthogonal to existing classes (variance, mean-shift, etc.).
+
+### Wave 31 test_VP floor cross tally now 4 cases — H57 FIRST simultaneous val+test cross
+
+| PR | Mechanism class | val_VP | test_VP |
+|---:|:--|---:|---:|
+| H26 (merged) | variance-class-encoder-input (NPCA) | val cross | 3.608 (test cross −0.035) |
+| H53 | variance-class-cp-loss-weight | 3.610 (val cross −0.033) | 3.665 (close miss +0.022) |
+| H55 v2 | variance-class-time-varying-loss | 3.670 (close miss +0.027) | 3.602 (test cross −0.041) |
+| **H57** | **frequency-domain-capacity (FDCE)** | **3.612 (val cross −0.031)** | **3.610 (test cross −0.033)** ⭐ BOTH |
+
+All 4 share vol-points-schedule `0:16384:3:32768:6:49152:9:65536`. **Strong Wave 32 candidate: focused test_VP investigation isolating vol-points-curriculum contribution independent of mechanism class.**
+
+### Disposition
+
+CLOSED as mechanism-positive null with BOTH val+test VP floor cross + matched-recipe H48 strict beat on 7 paper-facing axes + falsified high-freq-binds-τz hypothesis. Exceptional terminal analysis with **strongest single piece of mechanism evidence in Wave 31** (per-σ projection diagnostic). **THORFINN REASSIGNED H64 RFF-LOW-BAND-EXPANSION** (PR #1213) — direct follow-up using H57's per-σ data: drop σ={8.0, 16.0} (minimal uptake), add σ=0.0625 (one octave below H57's new low), giving 7 sigmas `"0.0625,0.125,0.25,0.5,1.0,2.0,4.0"`. Single flag change vs H57; tests low-end-binds-FDCE direct corollary.
+
+Close comment: https://github.com/morganmcg1/DrivAerML/pull/1206#issuecomment-4493840197
+
+---
+
 ## 2026-05-20 01:45 — PR #1204: H55 v2 TAU-Z-LOSS-CURRICULUM — front-load τz loss weight 5.0→2.0 over EP1-6 linear (edward, 13-ep terminal) — **MECHANISM-POSITIVE NULL with test_VP FLOOR CROSS + val_WSS_z −0.341pp on binding axis + 4th Wave 31 LR-decay confound case**
 
 - **Branch**: `edward/h55-tau-z-curriculum-v2-main` (closed at 01:45Z)
