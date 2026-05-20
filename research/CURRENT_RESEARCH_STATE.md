@@ -1,5 +1,6 @@
 # SENPAI Research State
-- 2026-05-20 11:55 UTC — **EP6 WAVE READOUT: H22 ⭐ and H23 ⭐ confirmed beating H19 (val_wss −0.006pp / −0.040pp), H21 vol_p mechanism dominant (−0.382pp val_vol_p vs H19) at +0.107pp wss cost. PR #1220 (H24-OLD misconfigured) CLOSED; H24-v2 reassigned as PR #1226 — fern will pick up after killing run `5dp7s3nz`.** All 4 students remain occupied through wave completion.
+- 2026-05-20 12:18 UTC — **H24-v2 RELAUNCHED CLEAN**: fern launched run `j2pvm44m` at 12:14Z on PR #1226 with corrected CLI; config verified (65000/65536 train/eval points, all H24 mechanism flags set). Old misconfig `5dp7s3nz` crashed. Issue #1227 (infra escalation) closed — fern loop revived itself; polling cadence just longer than peers. All 4 students productive.
+- 2026-05-20 11:55 UTC — EP6 wave readout: H22 ⭐ and H23 ⭐ confirmed beating H19 (val_wss −0.006pp / −0.040pp), H21 vol_p mechanism dominant (−0.382pp val_vol_p vs H19) at +0.107pp wss cost. PR #1220 (H24-OLD misconfigured) CLOSED; H24-v2 reassigned as PR #1226.
 - 2026-05-20 09:55 UTC — EP3 wave update: H22/H23 both beat H19 EP3 val_wss; H21 soft-flagged but clamp engaged. H24-OLD detected misconfigured (4× more views/epoch).
 - 2026-05-20 07:00 UTC — H19 IS WAVE'S FIRST test_wss + test_abupt SOTA-BEAT (PR #1180 frieren `r5eigmer`). 4 PRs closed in prior pass. H21-H24 dispatched.
 
@@ -60,7 +61,7 @@
 | **dl24-frieren** | **#1216** | H21: H19 + clamp=0.15 | 7.259 (+0.107pp) | **4.033 (−0.382pp) ⭐⭐** | Clamp dominant, vol_p crushing H19, wss cost large but expected |
 | **dl24-nezuko** | **#1217** | H22: H19 + vol_p MAE_aux=0.05 | **7.146 (−0.006pp) ⭐** | **4.214 (−0.201pp) ⭐** | BOTH wss AND vol_p beat H19 — best dual mechanism |
 | **dl24-tanjiro** | **#1218** | H23: H19 + Charb on τ_y | **7.112 (−0.040pp) ⭐** | 4.490 (+0.075pp) | wss-direct via τ_y, vol_p slight regression |
-| **dl24-fern** | **#1226** (was #1220) | H24-v2: H19 + clamp=0.15 + per-axis τ "1.0,1.2,1.5" | n/a — relaunch pending | n/a | PR #1220 CLOSED 11:30Z (misconfig + stalled relaunch); fresh #1226 with corrected CLI; old run `5dp7s3nz` to be killed by fern student loop |
+| **dl24-fern** | **#1226** (was #1220) | H24-v2: H19 + clamp=0.15 + per-axis τ "1.0,1.2,1.5" | n/a — EP3 ETA ~14:25Z | n/a | Run `j2pvm44m` LAUNCHED 12:14Z with corrected CLI ✓; old `5dp7s3nz` crashed. Config verified: all 4 point overrides correct, mechanism flags match design |
 
 **EP6 read-out (2026-05-20 11:55Z) — wave now well past EP3 with clearer trajectories:**
 
