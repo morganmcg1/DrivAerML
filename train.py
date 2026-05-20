@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_charbonnier,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -105,6 +106,8 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    tau_z_loss_type: str = "mse"
+    charbonnier_eps: float = 1e-3
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -220,6 +223,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "tau_z_loss_type": (
+            "Loss function for the τ_z surface channel (channel 3 of the "
+            "4-channel surface target [cp, tau_x, tau_y, tau_z]). 'mse' = "
+            "standard masked MSE on all 4 channels jointly (default). "
+            "'charbonnier' = split path: MSE on channels [cp, tau_x, tau_y] "
+            "and pseudo-Huber sqrt((pred-target)^2 + eps^2) - eps on tau_z. "
+            "Recombined as (3 * loss_mse_other + tau_z_loss_weight * "
+            "loss_charb_tauz) / (3 + tau_z_loss_weight), which preserves the "
+            "baseline total loss magnitude when tau_z_loss_weight=1.0 and "
+            "only changes the per-sample gradient shape on tau_z."
+        ),
+        "charbonnier_eps": (
+            "Charbonnier transition eps. Residuals |r| << eps behave "
+            "quadratically (L2-like); |r| >> eps behave linearly (L1-like) "
+            "with gradient magnitude bounded by 1. For z-score normalized "
+            "targets (sigma=1), eps=1e-3 puts the transition far below "
+            "typical residual magnitudes, so most of training is in the "
+            "L1-bounded-gradient regime. Only used when "
+            "--tau-z-loss-type=charbonnier."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -321,10 +344,14 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    tau_z_loss_type: str = "mse",
+    tau_z_loss_weight: float = 1.0,
+    charbonnier_eps: float = 1e-3,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    extra_metrics: dict[str, float] = {}
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -332,7 +359,30 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        if tau_z_loss_type == "charbonnier":
+            # Surface channels are [cp=0, tau_x=1, tau_y=2, tau_z=3]. Run MSE
+            # on the first 3 channels and Charbonnier on tau_z. Recombine with
+            # the original masked_mse reduction (sum / valid_points * n_channels)
+            # so when tau_z_loss_weight=1.0 the total loss budget matches the
+            # 4-channel MSE baseline exactly.
+            preds = out["surface_preds"]
+            loss_sp_tauxy = masked_mse(preds[..., 0:3], surface_target[..., 0:3], batch.surface_mask)
+            loss_tauz_charb = masked_charbonnier(
+                preds[..., 3:4], surface_target[..., 3:4], batch.surface_mask, eps=charbonnier_eps
+            )
+            surface_loss = (3.0 * loss_sp_tauxy + tau_z_loss_weight * loss_tauz_charb) / (
+                3.0 + tau_z_loss_weight
+            )
+            # Diagnostic only: same-batch MSE on tau_z for engagement ratio.
+            loss_tauz_mse = masked_mse(preds[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+            extra_metrics["tau_z_loss_diag/char_loss"] = float(loss_tauz_charb.detach().cpu().item())
+            extra_metrics["tau_z_loss_diag/mse_loss"] = float(loss_tauz_mse.detach().cpu().item())
+            mse_val = float(loss_tauz_mse.detach().cpu().item())
+            char_val = float(loss_tauz_charb.detach().cpu().item())
+            extra_metrics["tau_z_loss_diag/char_over_mse"] = (
+                char_val / mse_val if mse_val > 1e-12 else 0.0
+            )
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
                 out["surface_preds"],
                 surface_target,
@@ -346,13 +396,15 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(extra_metrics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -883,6 +935,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/tau_z_loss_type"] = config.tau_z_loss_type
+            wandb.summary["loss/charbonnier_eps"] = config.charbonnier_eps
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1084,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        tau_z_loss_type=config.tau_z_loss_type,
+                        tau_z_loss_weight=config.tau_z_loss_weight,
+                        charbonnier_eps=config.charbonnier_eps,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1127,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for diag_key in (
+                        "tau_z_loss_diag/char_loss",
+                        "tau_z_loss_diag/mse_loss",
+                        "tau_z_loss_diag/char_over_mse",
+                    ):
+                        if diag_key in batch_loss_metrics:
+                            train_log[f"train/{diag_key}"] = batch_loss_metrics[diag_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

@@ -837,6 +837,33 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_charbonnier(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    eps: float = 1e-3,
+) -> torch.Tensor:
+    """Charbonnier (pseudo-Huber) loss with a [B, N] token mask.
+
+    charbonnier(r) = sqrt(r^2 + eps^2) - eps; gradient magnitude is bounded
+    by 1 for large |r| (robust to outliers vs MSE) while staying smooth and
+    quadratic near r = 0. Reduction mirrors ``masked_mse``: divides by
+    (valid points) * (num channels) so the per-channel mean is preserved
+    when this is composed with channel-split MSE in surface losses.
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
+    delta = pred - target
+    values = torch.sqrt(delta * delta + eps * eps) - eps
+    weighted = values * mask_f
+    valid_points = mask_f.sum()
+    denom = (valid_points * pred.shape[-1]).clamp_min(1.0)
+    if bool(valid_points.detach().cpu().item() > 0):
+        return weighted.sum() / denom
+    return pred.sum() * 0.0
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
