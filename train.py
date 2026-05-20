@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_mean,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -105,6 +106,7 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    vol_p_aux_mae_weight: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -220,6 +222,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "(matches Run 1 behavior). Recommended 0.7 for soft "
             "redistribution. Unused in mode='full'."
         ),
+        "vol_p_aux_mae_weight": (
+            "Weight alpha for vol_p MAE auxiliary loss term added on top of "
+            "MSE: loss += alpha * masked_mean(|pred_vp - target_vp|). The "
+            "auxiliary L1 term provides a non-vanishing gradient signal that "
+            "is NOT subject to --volume-loss-weight rebalancing. Default 0.0 "
+            "= dormant / backward-compat. dl24 H22 default = 0.05."
+        ),
         "use_surf_to_vol_xattn": (
             "Enable surface->volume cross-attention (PR #823). After the "
             "shared Transolver backbone, a single nn.MultiheadAttention "
@@ -321,6 +330,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    vol_p_aux_mae_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -346,12 +356,26 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
+
+        vol_p_mae_aux_val = 0.0
+        vol_p_mae_aux_weighted_val = 0.0
+        if vol_p_aux_mae_weight > 0.0:
+            vol_p_mae = masked_mean(
+                (out["volume_preds"] - volume_target).abs(),
+                batch.volume_mask,
+            )
+            weighted_vol_p_mae = vol_p_aux_mae_weight * vol_p_mae
+            loss = loss + weighted_vol_p_mae
+            vol_p_mae_aux_val = float(vol_p_mae.detach().cpu().item())
+            vol_p_mae_aux_weighted_val = float(weighted_vol_p_mae.detach().cpu().item())
     return loss, {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "vol_p_mae_aux": vol_p_mae_aux_val,
+        "vol_p_mae_aux_weighted": vol_p_mae_aux_weighted_val,
     }
 
 
@@ -883,6 +907,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/vol_p_aux_mae_weight"] = config.vol_p_aux_mae_weight
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1055,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        vol_p_aux_mae_weight=config.vol_p_aux_mae_weight,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1096,10 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if config.vol_p_aux_mae_weight > 0.0:
+                        train_log["train/vol_p_mae_aux"] = batch_loss_metrics["vol_p_mae_aux"]
+                        train_log["train/vol_p_mae_aux_weighted"] = batch_loss_metrics["vol_p_mae_aux_weighted"]
+                        train_log["train/vol_p_aux_mae_weight"] = config.vol_p_aux_mae_weight
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
