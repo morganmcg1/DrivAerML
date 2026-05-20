@@ -1,3 +1,45 @@
+## 2026-05-20 21:55 — PR #1221: H67 RFF-9σ-WIDTH-EXPANSION (thorfinn, CLOSED) — **OUTCOME C NULL on val_abupt (B PARTIAL boundary)**
+
+- **Branch**: `thorfinn/h67-rff-9sigma-width-expansion` (closed at 21:55Z)
+- **W&B run**: `47o8883g` (EP13 terminal step 70,652, 14.13h)
+- **Hypothesis**: Add σ=0.0625 to H57's 8σ RFF basis (0.125-16) for 9-octave coverage. Test whether wider bandwidth at LOW-frequency end improves long-wavelength surface features (curvature, large-scale flow patterns). Substrate: LR-fix `--lr-cosine-t-max 25` (Wave 31 LR-fix campaign).
+
+### Terminal metrics (EP13, EMA-best ckpt)
+
+| Metric | **H67** | H57 (#1206) | H58 (#1207) | baseline #972 | gate/floor | Δ vs gate/floor |
+|---|---:|---:|---:|---:|---:|---:|
+| val_abupt | **6.1746%** | 6.217% | 6.171% | 6.126% | <6.126% | **MISS +0.049pp** |
+| val_VP | 3.649% | 3.612% | 3.604% | 3.566% | (3.643% floor) | NEAR-MISS +0.006pp |
+| val_SP | 4.076% | — | — | 3.534% | — | — |
+| val_WSS | 6.993% | — | — | 6.679% | — | — |
+| test_abupt | **6.046%** | 6.053% | — | 5.844% | — | +0.202pp vs baseline |
+| test_VP | 3.666% | 3.610% | 3.660% | ≤3.643% | floor | **MISS +0.023pp** (no floor cross) |
+| test_SP | 3.860% | 3.812% | — | ≤3.577% | floor | MISS +0.283pp |
+| **test_WSS** | **6.933%** | 6.949% | — | <6.727% (goal) | — | −0.016pp ✅ (still +0.206pp above goal) |
+| test τx WSS | 6.130% | — | — | — | — | — |
+| test τy WSS | 7.537% | — | — | — | — | — |
+| test τz WSS | **9.036%** | — | — | — | — | (hardest axis) |
+
+### Results commentary — mech-positive but undersized, closest-to-gate Wave 31 LR-fix result
+
+**Closest-to-gate result of entire Wave 31 LR-fix campaign.** Beats H57 by −0.042pp on val_abupt (just 0.008pp shy of B PARTIAL ≥0.05pp threshold). RFF-bandwidth-expansion (add σ=0.0625 to H57's 8σ basis) is **mech-positive but undersized**.
+
+**Mech-class binding update**: RFF-band-WIDTH (H64→H67) joins **architecture-bound-at-val LR-bound-at-test** category alongside V-DEPTH (H47→H59) and shared-cap-surface (H54v2→H65). H67 distinguished from those two by being **LR-NEUTRAL at test** (no floor cross) — wider RFF basis doesn't synergize with LR-fix on test side either, unlike V-DEPTH/surf-deep where LR-fix dropped test_VP through floor.
+
+Note H66 (encoder-PE-no-stopgrad) ALSO C NULL on val_abupt at 6.381% (+0.220pp WORSE than H58 parent despite 3-5× higher LR) — confirmed Lion+sign-cancellation makes mean-zero PE-proj gradients LR-magnitude-neutral. H67 doesn't share this collapse mode (RFF basis is NOT mean-zero gradient), but lacks H65/H66's test-side dividend because the bandwidth-expansion mechanism is genuinely orthogonal to LR-decay-truncation effect.
+
+### Project test_VP floor cross tally (no change after H67)
+
+H67 does NOT add to floor-cross count. Running total remains **6 floor crosses** (H26 NPCA merged, H53, H55v2, H57, H59, H65, H66). H67 is the **first Wave 31 LR-fix exhaustion variant without a test_VP floor cross**.
+
+### Closure verdict & next direction
+
+**C NULL** with **no test floor cross** and **mech-positive but undersized** trajectory. Bandwidth-expansion direction exhausted on LR-fix substrate — extending RFF further (σ=0.03125 low or σ=32 high) unlikely to recover +0.049pp gap.
+
+**Reassignment: thorfinn → H78 LION-BETA1-MOMENTUM-EXPANSION (PR #1234)** — plateau-protocol optimizer-momentum-tier escalation: single-flag `--lion-beta1 0.9 → 0.95` on PURE baseline #972 substrate. Lion β1/β2 = only major optimizer axis untouched in entire fleet history. β1=0.95 doubles effective momentum window 10→20 steps, smoothing gradient noise in late-tail descent. Orthogonal to LR-magnitude (H75 alphonse control), loss-curvature (H73/H74/H77), routing (H76), attention-mech (H69), and loss-balancing (H71) axes in flight.
+
+---
+
 ## 2026-05-20 21:20 — PR #1222: H68 CHARBONNIER-VOL-P (nezuko, CLOSED) — **OUTCOME D NEGATIVE — killed EP6 step 65222 — ROOT CAUSE: recipe execution deviation (`--volume-loss-weight 1.0` vs advisor-specified 0.5), technique NOT falsified**
 
 - **Branch**: `nezuko/h68-charbonnier-vol-p` (closed at 21:20Z)

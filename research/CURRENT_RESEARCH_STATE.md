@@ -1,9 +1,41 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~19:45 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~21:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟡 ~21:55Z — H67 RFF-9σ-WIDTH-EXPANSION CLOSED C NULL (closest-to-gate Wave 31 result, no test floor cross) + thorfinn reassigned H78 LION-BETA1-MOMENTUM-EXPANSION (PR #1234)
+
+**Closure: PR #1221 H67 (thorfinn) — OUTCOME C NULL on val_abupt (B PARTIAL boundary)**
+
+Terminal val_abupt **6.1746%** misses merge gate (<6.126%) by +0.049pp. Beats H57 by −0.042pp (just 0.008pp shy of B PARTIAL ≥0.05pp threshold). test_VP 3.666% misses 3.643% floor by +0.023pp (no floor cross — first Wave 31 LR-fix variant without one). test_SP 3.860% MISS by +0.283pp. test_WSS 6.933% beats H57 6.949% by −0.016pp (still +0.206pp above 6.727% goal).
+
+| metric | **H67** | H57 (#1206) | baseline #972 | gate/floor | Δ |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | **6.1746%** | 6.217% | 6.126% | <6.126% | **MISS +0.049pp** |
+| test_VP | 3.666% | 3.610% | ≤3.643% | floor | **MISS +0.023pp** |
+| test_SP | 3.860% | 3.812% | ≤3.577% | floor | MISS +0.283pp |
+| test_WSS | **6.933%** | 6.949% | <6.727% (goal) | — | −0.016pp ✅ |
+
+**Mech-class binding**: RFF-band-WIDTH (H64→H67) joins **architecture-bound-at-val LR-bound-at-test** category alongside V-DEPTH (H47→H59) and shared-cap-surface (H54v2→H65). H67 distinguished by being **LR-NEUTRAL at test** (no floor cross) — wider RFF basis doesn't synergize with LR-fix on test side. RFF-bandwidth-expansion direction exhausted.
+
+**Reassignment: thorfinn → H78 LION-BETA1-MOMENTUM-EXPANSION (PR #1234)**
+
+Plateau-protocol optimizer-momentum-tier escalation: single-flag `--lion-beta1 0.9 → 0.95` on PURE baseline #972 substrate. Lion β1/β2 are the ONLY major optimizer axis untouched in entire Wave 31/32 LR-fix campaign. β1=0.95 doubles momentum window 10→20 steps, smoothing gradient noise in late-tail descent where individual minibatch gradients become noisy near plateau. Orthogonal to LR-magnitude axis (H75 alphonse control) and to all mech axes in flight (H73/H74/H77 loss-curvature, H76 routing, H69 attention-bias, H71 GradNorm).
+
+**Fleet status (~21:55Z)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Class | Status |
+|---|---|---|---|---|
+| #1234 | thorfinn | H78 LION-BETA1-MOMENTUM-EXPANSION | Optimizer-momentum | Just assigned |
+| #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Loss-curvature (vol_p) | Just assigned |
+| #1232 | askeladd | H76 SLICES-192-ISOLATION | Routing capacity | Early epochs |
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | LR-magnitude control | Early epochs |
+| #1230 | frieren | H74 MAE-AUX-VOL-P | Loss-aux (vol_p) | Early epochs |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z | Loss-curvature (τz) | EP1.3 (gs ~14k) |
+| #1225 | tanjiro | H71 GRADNORM | Loss-balancing | EP12 (~12 min to terminal) |
+| #1223 | fern | H69 CURVATURE-ATTENTION-BIAS | Attention-mech | EP7-8 (val_abupt 6.43% plateau) |
 
 ## 🔴 ~21:20Z — H68 CHARBONNIER-VOL-P CLOSED D NEGATIVE (recipe deviation, technique NOT falsified) + nezuko reassigned H77 CHARBONNIER-VOL-P-WEIGHT-FIX
 
