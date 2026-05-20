@@ -1,3 +1,48 @@
+## 2026-05-20 13:25 — PR #1224: H70 SLICE-TEMP-CURRICULUM-LR-EXTENDED (frieren, CLOSED) — **OUTCOME D NEGATIVE: 2nd Wave 32 LR-fix variant to FALSIFY confound hypothesis — class-differentiation principle now binding**
+
+- **Branch**: `frieren/h70-slice-temp-lr-extended` (closed at 13:25Z)
+- **W&B run**: `b67zr8xy` (killed at EP3 step 32,592, ~4.6h wall-time)
+- **Hypothesis**: H61 mech-positive B PARTIAL (val_abupt 6.341%) plateaued via curriculum-complete-then-LR-decay pattern. Test if `--lr-cosine-t-max 13 → 25` + `--slice-temperature-decay-steps 65184 → 130368` (stretch curriculum to match LR-extension) unlocks the attention-routing-temperature class.
+
+### Terminal verdict — close + reassign
+
+| Channel | H70 EP3 | EP3 gate | H61 EP3 ref | Δ | Verdict |
+|---|---:|:--|---:|---:|:--|
+| **val_abupt** | **8.6387%** | <7.5 ❌ | 7.4232 | **+1.216pp WORSE** | KILLED |
+| val_SP | 5.7910% | <5.5 ❌ | 4.9618 | +0.829pp | KILLED |
+| val_VP | 5.6658% | — | 4.5095 | +1.156pp | — |
+| val_WSS | 9.6481% | — | 8.3641 | +1.284pp | — |
+| WSS_z | 12.2171% | — | 10.8996 | +1.318pp | — |
+
+**Outcome D NEGATIVE confirmed per PR's four-outcome contract**: val_abupt > H61 by ≥0.05pp satisfied **24× over**.
+
+### KEY STRUCTURAL FINDING — class-differentiation principle now binding
+
+Wave 32 LR-fix triangulation has now produced TWO D NEGATIVE outcomes on routing/weighting-curriculum classes (H62 CP-LOSS-WEIGHT + H70 ATTENTION-TEMP). Refined principle:
+
+**Mechanism classes that depend on progressive sharpening of a routing/weighting distribution (CP loss weights, attention temperature, slice-temperature decay) need LR-decay as a co-dependent ingredient of productive dynamics.** The LR-extended substrate keeps the model in high-exploration regime exactly when the curriculum needs to be settling into a sharpened distribution, creating destructive interference.
+
+### Three structural sub-findings
+
+1. **EP1 cold-start advantage misleading** — H70 was −1.24pp better than H61 at EP1 but lost ground rapidly EP2 onward. Cosine-progress signal at EP3 was only 0.040 (4%), so we were barely past warmup. The "LR-fix at cold-start" advantage doesn't translate to peak-LR steady-state.
+
+2. **Class signature preserved** — z-dominant per-axis WSS (z>y>x), sparsified routing trajectory (n_eff_mean 102→6 over EP1-3) — match H61's fingerprint. Mechanism is operating in same axis-allocation regime; just operating WORSE. Rules out mechanism-class-failure (the class is real and works) and confirms LR-substrate-incompatibility.
+
+3. **Block 0 inversion** — H70 EP3 had block 0 BROADER routing (n_eff 17.8) than blocks 1-4 (~6). H61 EP1 fingerprint had block 0 SPARSEST. Stretched curriculum + peak LR pushes later blocks into over-sparsification while keeping block 0 broader — new mech failure mode unique to LR-extended substrate.
+
+### Wave 32 design policy update (binding)
+
+From now on, **no cross-pollination LR-fix variants on routing/weighting-curriculum classes** (CP-LOSS H62 done, ATTENTION-TEMP H70 done, anything operating on softmax-temperature/loss-weight). LR-fix variants reserved for:
+- Architecture-modification classes: V-DEPTH (H59 partial), SURFACE-DEEP (H65 in-flight), variance-class-encoder-input (already merged)
+- Geometric-prior classes: CURVATURE-ATTN-BIAS (H69 in-flight)
+- Encoder-PE classes: COORDSLICE-PE (H66 in-flight)
+
+### Reassignment
+
+**frieren → H72 SLICE-TEMP-DEEP-ENDPOINT (PR #1228)** — single-flag change vs H61 mech-positive B PARTIAL parent: `--slice-temperature-end 0.5` (instead of 1.0, doubles logit scale at curriculum end). Keeps all other H61 flags: `--lr-cosine-t-max 13` (legacy LR-decay substrate), `--slice-temperature-start 1.5`, `--slice-temperature-decay-steps 65184`. Tests **deeper sharpening** as the orthogonal axis to LR-substrate variation. Over-sparsification risk diagnostic: `diag/slice_n_eff_mean` < 5 at EP3-6.
+
+---
+
 ## 2026-05-20 08:35 — PR #1211: H62 CP-LOSS-WEIGHT-LR-EXTENDED (tanjiro, CLOSED) — **OUTCOME D NEGATIVE: LR-fix actively HURTS CP-LOSS-WEIGHT class — first Wave 31 LR-fix variant to FALSIFY confound hypothesis on its mech class**
 
 - **Branch**: `tanjiro/h62-cp-loss-weight-lr-extended` (closed at 08:35Z)

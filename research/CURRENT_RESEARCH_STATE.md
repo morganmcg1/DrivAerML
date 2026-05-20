@@ -1,9 +1,42 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~07:40 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~13:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 13:40Z — H70 SLICE-TEMP-LR-EXTENDED CLOSED OUTCOME D NEGATIVE + class-differentiation principle binding + frieren reassigned H72 SLICE-TEMP-DEEP-ENDPOINT
+
+**Closure**: PR #1224 H70 SLICE-TEMP-CURRICULUM-LR-EXTENDED (frieren) closed as **OUTCOME D NEGATIVE +2.298pp**. EP3 val_abupt 8.6387% (gate 7.5%, killed by 24× margin), val_SP 5.7910% (gate 5.5%, also failed). vs H61 EP3 7.4232% reference, +1.216pp WORSE. EP1 cold-start advantage (−1.24pp better than H61) misleadingly suggested LR-fix productivity, but EP2→EP3 trajectory inverted — LR-fix + curriculum-stretching ACTIVELY HURTS the attention-routing-temperature class.
+
+**2nd Wave 32 D NEGATIVE on routing/weighting-curriculum classes** (after H62 CP-LOSS-WEIGHT D NEGATIVE). Class-differentiation principle now binding:
+
+| Mech class | Parent | LR-fix variant | Outcome |
+|---|---|---|---|
+| variance-class-cp-loss-weight | H53 6.181% | H62 6.397% | **D NEGATIVE +0.216pp** |
+| variance-class-decoder-sublayer (V-DEPTH) | H47 6.126% | H59 6.282% | partial — architecture-bound at val, test improved |
+| variance-class-time-varying-loss (tau-z-curr) | H55v2 6.249% | H63 ~6.30% TBD | in-flight, merge-watch |
+| shared-capacity-surface | H54v2 ~6.45% | H65 6.319% mid-EP5 | in-flight, merge-watch |
+| coordinate-grounded-slice-PE | H58 6.161% | H66 ~6.40% TBD | in-flight |
+| **attention-routing-temperature-curriculum** | **H61 6.341%** | **H70 8.639% killed** | **D NEGATIVE +2.298pp** |
+
+**Class-differentiation principle (binding)**: mechanism classes that depend on *progressive sharpening of a routing/weighting distribution* (CP loss weights, attention temperature, slice-temperature decay) need LR-decay as a **co-dependent ingredient** of productive dynamics. The LR-extended substrate keeps the model in high-exploration regime exactly when the curriculum needs to be *settling into a sharpened distribution*, creating destructive interference. From now on, **no cross-pollination LR-fix variants on routing/weighting-curriculum classes**. LR-fix variants reserved for architecture-modification + geometric-prior + encoder-PE classes.
+
+**Key structural findings from H70 closure**:
+1. **EP1 cold-start advantage misleading**: LR-fix at cold-start (−1.24pp) doesn't translate to peak-LR steady-state regression.
+2. **Class signature preserved**: z-dominant per-axis WSS + sparsified routing trajectory match H61's fingerprint. Mech is operating in same regime, just operating WORSE. Rules out mech-class-failure hypothesis, confirms LR-substrate-incompatibility.
+3. **Block 0 inversion**: H70 EP3 had block 0 BROADER routing (n_eff 17.8) than blocks 1-4 (~6). H61 EP1 had block 0 SPARSEST. Stretched curriculum + peak LR pushes later blocks into over-sparsification while keeping block 0 broader — new mech failure mode.
+
+**Reassignment**: frieren → **H72 SLICE-TEMP-DEEP-ENDPOINT (PR #1228)**. Single-flag change vs H61 mech-positive B PARTIAL parent: `--slice-temperature-end 0.5` instead of `1.0` (doubles logit scale at curriculum end → twice as peaked routing). Keeps all other H61 flags: `--lr-cosine-t-max 13` (legacy LR-decay substrate that empirically works for routing-curriculum classes), `--slice-temperature-start 1.5`, `--slice-temperature-decay-steps 65184` (EP6 boundary, NOT stretched). Tests **deeper sharpening** as the orthogonal axis to LR-substrate variation. Inherits H61 implementation commits (0496551 + 1a09b9e). Risk diagnostic: `diag/slice_n_eff_mean` < 5 at EP3-6 → over-sparsification warning. Four falsifiable outcomes A/B/C/D per PR body.
+
+**Fleet status (13:40Z)**: 8/8 WIP, zero idle. H72 just launched. Other in-flight from 11:10Z update:
+- H63 (PR #1212) edward: terminal ETA ~16:30Z, **MERGE-WATCH** (val_abupt at step 60,756 = 6.325%, slope sustained from EP6 6.467%)
+- H65 (PR #1214) alphonse: EP6 read ~16:00Z merge-watch
+- H66 (PR #1215) askeladd: EP6 read ~16:00Z
+- H67 (PR #1221) thorfinn: EP3 PASS w/ per-σ band-width-not-position confirmation, EP6 ~17:13Z
+- H68 (PR #1222) nezuko: EP3 read ~13:35Z window
+- H69 (PR #1223) fern: v2 relaunch w/ kNN fix, curvature_alpha activated (block 0 α=0.233 at mid-EP2)
+- H71 (PR #1225) tanjiro: GradNorm α=1.5 healthy mid-EP3, dynamic weights spreading 0.39-1.76 (4.5× wider than PR #942 full mode)
 
 ## 🔄 11:10Z — H63 EP6 PASS borderline merge candidate + H66/H67/H69/H70 healthy progression + **H71 GradNorm reframed: ALREADY IN BASELINE α=0.5**
 
