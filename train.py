@@ -105,6 +105,9 @@ class Config:
     use_surf_to_vol_xattn: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    tau_z_loss_weight_start: float = 5.0
+    tau_z_loss_weight_end: float = 2.0
+    tau_z_loss_weight_decay_steps: int = 0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -755,8 +758,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             device=device,
             dtype=torch.float32,
         )
+        # H55: τz curriculum forces use_channel_weights=True even when
+        # tau_z_loss_weight matches its default — the curriculum-computed
+        # value (typically 5.0→2.0) is what actually drives the loss, and the
+        # pass-through must be enabled from step 0.
+        tau_z_curriculum_active = config.tau_z_loss_weight_decay_steps > 0
         use_channel_weights = bool(
-            (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
+            (config.tau_y_loss_weight != 1.0)
+            or (config.tau_z_loss_weight != 1.0)
+            or tau_z_curriculum_active
         )
         if config.compile_model:
             model = torch.compile(model)
@@ -852,6 +862,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if tau_z_curriculum_active:
+                print(
+                    f"tau_z loss-weight curriculum: linear "
+                    f"{config.tau_z_loss_weight_start}->"
+                    f"{config.tau_z_loss_weight_end} over "
+                    f"{config.tau_z_loss_weight_decay_steps} steps, "
+                    f"then held at {config.tau_z_loss_weight_end}"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +901,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/tau_z_loss_weight_start"] = config.tau_z_loss_weight_start
+            wandb.summary["loss/tau_z_loss_weight_end"] = config.tau_z_loss_weight_end
+            wandb.summary["loss/tau_z_loss_weight_decay_steps"] = config.tau_z_loss_weight_decay_steps
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -937,6 +958,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 gradnorm_metrics: dict[str, float] = {}
+                # Default τz weight for the log line below; the non-gradnorm
+                # branch overwrites this with the curriculum value.
+                current_tau_z = config.tau_z_loss_weight
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
                         model, batch, transform, device, config.amp_mode
@@ -1021,6 +1045,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if gradnorm_loss_tensor is not None:
                         gradnorm_metrics["gradnorm/loss"] = float(gradnorm_loss_tensor.cpu().item())
                 else:
+                    # H55: linear τz loss-weight curriculum. global_step is 0
+                    # at the first batch and is incremented after this call,
+                    # so at step=0 progress=0 → current_tau_z=start; once
+                    # global_step >= decay_steps progress=1 → current_tau_z=end.
+                    current_tau_z = config.tau_z_loss_weight
+                    if tau_z_curriculum_active:
+                        progress = min(
+                            1.0, global_step / config.tau_z_loss_weight_decay_steps
+                        )
+                        current_tau_z = (
+                            config.tau_z_loss_weight_start * (1.0 - progress)
+                            + config.tau_z_loss_weight_end * progress
+                        )
+                        surface_channel_weights[3] = current_tau_z
                     loss, batch_loss_metrics = train_loss(
                         model,
                         batch,
@@ -1068,6 +1106,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
+                            "train/tau_z_loss_weight_curriculum": current_tau_z,
                         }
                     )
                 if gradnorm_metrics:
