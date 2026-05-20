@@ -51,32 +51,41 @@
 
 6. **The vol_p floor breach is now SMALL (+0.136pp on H19)** — 4× smaller than H10b. Adding clamp=0.15 on top of H19 should close the remaining gap by 3× more vol_p gradient mass.
 
-## Active Experiments (2026-05-20 22:30 UTC — all 4 students dispatched)
+## Active Experiments (2026-05-20 07:10 UTC — all 4 students dispatched, bootstrapping)
 
 | Student | PR | Hypothesis | Key change vs H19 | Priority |
 |---------|-----|-----------|-------------------|----------|
 | **dl24-frieren** | **#1216** | **H21: H19 + clamp=0.15** | `--gradnorm-min-w-vol-p 0.15` | **HIGHEST** — direct vol_p floor fix |
 | **dl24-nezuko** | **#1217** | **H22: H19 + vol_p MAE_aux=0.05** | `--vol-p-aux-mae-weight 0.05` | HIGH — orthogonal floor-fix via L1 |
 | **dl24-tanjiro** | **#1218** | **H23: H19 + Charb on τ_y** | `--wss-charbonnier-axes y,z` | HIGH — wss amplification |
-| **dl24-fern** | **#1219** | **H24: H19 + clamp=0.10** | `--gradnorm-min-w-vol-p 0.10` | MEDIUM — ablation midpoint |
+| **dl24-fern** | **#1220** | **H24: H19 + clamp=0.15 + per-axis τ** | `--gradnorm-min-w-vol-p 0.15 --wss-axis-weights "1.0,1.2,1.5"` | HIGH — compound floor+wss attack |
 
 **Design logic:** H21-H24 form a systematic ablation of the two dimensions blocking H19 from being a contract winner:
-- **Axis 1 — vol_p gradient mass**: H24 (clamp=0.10) < H22 (MAE_aux) < H21 (clamp=0.15)
-- **Axis 2 — wss amplification**: H23 (Charb_τy in addition to τz)
+- **Axis 1 — vol_p gradient mass**: H22 (MAE_aux solo, no clamp) | H21 (clamp=0.15 solo) | H24 (clamp=0.15 + per-axis)
+- **Axis 2 — wss amplification**: H23 (Charb_τy in addition to τz), H24 (per-axis weights stacked on H21)
 
-H21 is the most direct path to a contract winner (H9b's clamp at 3× gradient mass closes the 0.136pp breach).
+H21 is the most direct path to a contract winner (H9b's clamp at 3× gradient mass closes the 0.136pp breach). H24 is the fallback compound bet: if H21 closes vol_p but at ~+0.14pp wss cost, per-axis τ weights (validated H11b −0.245pp) should net out wss below H19's 6.634% while preserving the floor lock.
 
-## Potential follow-on directions (post H21 evaluation)
+**PR #1219 history:** Original H24 design was clamp=0.10 (ablation midpoint). Morgan merged the assignment commit at 06:56Z (#1219), making fern briefly idle. Researcher-agent then created the compound H24 (#1220 at 07:06Z), which fern picked up at 07:07Z. Accepted as canonical — the compound design is more decisive (one of {H21 alone, H21+per-axis} should be the contract winner), and clamp=0.10 ablation can be queued if H21 alone barely misses.
 
-1. **H22 = H19 + lighter clamp=0.10** — if H21 costs too much wss, softer clamp may keep more budget on wss while still pulling vol_p down partway
-2. **H23 = H19 + Charb on τ_y AND τ_z** — extends the wss-axis mechanism (student's H18 follow-up suggestion); may compound wss benefit
-3. **H24 = H19 + vol_p decoder LR multiplier** — orthogonal: decouple encoder gradient budget from decoder fit (student's #2 suggestion)
-4. **H25 = pure additive Charb-on-vol_p (no GradNorm task-signal swap)** — diagnostic to test whether H19's win came from "Charb under GradNorm" (load-bearing) or "additive Charb on vol_p" (diagnostic-only)
-5. **LR cosine extension** — tay fleet noticed `--lr-cosine-t-max 25` instead of 13 may stretch the productive learning window; worth testing on top of the H21 stack if H21 lands close
-6. **PCGrad / CAGrad gradient surgery** — explicit multi-task gradient conflict resolution as alternative to GradNorm
-7. **Physics-informed regularization** — incompressibility constraint on vol_p predictions, pressure-Poisson residual penalty
-8. **Distillation from an ensemble teacher** — Issue #1056 forbids ensembles AS PRIMARY, but distilling ensemble outputs into a single-model student is allowed and could close the floor gap
-9. **Volume decoder capacity expansion** — H18's "curvature has global vol_p penalty" finding suggests representational bottleneck; testing 2-layer MLP on vol_p head could help
+## Next-wave queue (researcher-agent designs, ordered by expected value)
+
+From `RESEARCH_IDEAS_2026-05-20_22:00.md`, post H21-H24 results:
+
+1. **H25 = H21 + Charb on τ_x (`--wss-charbonnier-axes xz`)** — multi-axis Charb expansion on floor-safe stack
+2. **H26 = H21 + Charb ε=1e-4 on vol_p** — sharper sub-quadratic regime, may organically raise w_vol_p under GradNorm
+3. **H27 = H21 + cosine T_max=25** — 5-epoch LR plateau at end for fine-tune extraction
+4. **H28 = H21 + Charb on yz (`--wss-charbonnier-axes yz`)** — Charb on the two highest-error WSS axes (τ_y=7.36%, τ_z=8.75%)
+5. **H29 = IMTL-G replacement of GradNorm** — gradient-surgery approach, bypasses Charb loss-magnitude distortion entirely (requires implementation; reserve for plateau trigger)
+6. **H30 = H19 + Charb vol_p weight 0.05→0.10** — organic GradNorm fix (raises apparent vol_p task difficulty without clamp)
+7. **H31 = H19 + GradNorm α=0.5→1.0** — sharper gradient normalization; risk: may amplify Charb distortion in wrong direction
+
+**Alternative tier-shift directions (if H21-H28 wave plateaus):**
+
+- **Physics-informed regularization** — incompressibility constraint on vol_p predictions, pressure-Poisson residual penalty
+- **Distillation from ensemble teacher** — Issue #1056 forbids ensembles AS PRIMARY, but ensemble-distillation into a single-model student is allowed
+- **Volume decoder capacity expansion** — H18's "curvature has global vol_p penalty" finding suggests representational bottleneck; testing 2-layer MLP on vol_p head
+- **PCGrad / CAGrad gradient surgery** — multi-task gradient conflict resolution alternatives to GradNorm
 
 ## Key uncertainties to resolve next
 
@@ -90,4 +99,4 @@ H21 is the most direct path to a contract winner (H9b's clamp at 3× gradient ma
 - BASELINE.md — the locked contract metrics (PR #972)
 - H19 PR #1180 (closed) — wave-milestone result with detailed mechanism analysis
 - H18 PR #1175 (closed) — three-way comparison data and EP8 spike suppression finding
-- Researcher-agent output (running, ETA ~15min) — `/workspace/senpai/target/research/RESEARCH_IDEAS_2026-05-20_22:00.md`
+- `RESEARCH_IDEAS_2026-05-20_22:00.md` — full H21-H31 researcher-agent design briefs with decision tree and stop conditions

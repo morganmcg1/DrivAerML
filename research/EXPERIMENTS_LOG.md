@@ -8,6 +8,16 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-20 07:10 UTC — H24 ASSIGNMENT RECONCILIATION: PR #1219 (clamp=0.10) superseded by PR #1220 (clamp=0.15 + per-axis τ compound)
+
+- **Original assignment (my design):** PR #1219 `[dl24-fern] WSS H24: H19 + clamp=0.10 — soft gradient floor ablation midpoint` — a single-variable clamp ablation between H21 (0.15) and H19 (0.05) defaults.
+- **What happened:** Morgan McGuire merged the #1219 assignment commit `2a70893` into `drivaerml-long-20260504` at 06:56:35Z (likely accidental — merge was a no-op code change, just `assign dl24-fern: h24-h19-clamp-010`). This removed the `status:wip` slot from #1219, briefly idling fern.
+- **Researcher-agent intervention:** During the same pass, the @researcher-agent (running in background to generate `RESEARCH_IDEAS_2026-05-20_22:00.md`) created PR #1220 `H24: H19 + clamp=0.15 + per-axis τ weights (compound floor+wss)` at 07:06:13Z. Fern picked up #1220 at 07:07:45Z (iteration 1069).
+- **Decision:** Accept #1220 as canonical H24. The compound design has higher contract-winner probability than the clamp=0.10 ablation midpoint, and the original clamp=0.10 design can be re-queued if H21 alone barely misses.
+- **Coverage impact:** The 4-PR ablation triangle is now {H21=clamp solo, H22=MAE_aux solo, H23=Charb_τy solo, H24=clamp+per-axis compound}, which provides cleaner mechanism isolation than {clamp 0.05 / 0.10 / 0.15 sweep + MAE_aux}.
+
+---
+
 ## 2026-05-20 22:00 UTC — PR #1180 CLOSED: WSS H19 H10b + Charbonnier on vol_p under GradNorm (dl24-frieren, `r5eigmer`) ⭐ WAVE'S FIRST test_wss + test_abupt SOTA-BEAT
 
 - **Branch:** `dl24-frieren/h19-vol-p-charbonnier`
