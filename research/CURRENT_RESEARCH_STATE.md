@@ -1,9 +1,51 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~21:55 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~23:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~23:35Z — H71 GRADNORM-DYNAMIC-LOSS-BALANCING CLOSED D NEGATIVE (clean falsification) + tanjiro reassigned H79 DROPOUT-INTRODUCTION (PR #1235)
+
+**Closure: PR #1225 H71 (tanjiro) — OUTCOME D NEGATIVE on all test metrics**
+
+Terminal val_abupt **6.4044%** (MISS gate by +0.279pp), test_abupt **6.130%** (vs baseline 5.844%, +0.286pp). EP13 clean terminal at 14.36h, no NaN/crashes.
+
+| Metric | **H71** | Baseline #972 | Δ | AB-UPT ref | vs AB-UPT |
+|---|---:|---:|---:|---:|---:|
+| test_abupt | **6.130%** | 5.844% | +0.286 ❌ | — | — |
+| test_SP | 3.916% | 3.577% | +0.339 ❌ | — | — |
+| test_VP | 3.867% | 3.643% (floor) | +0.224 ❌ | 6.08 | −2.21 ✅ |
+| test_WSS | 7.002% | 6.727% (goal) | +0.275 ❌ | 7.29 | −0.29 ✅ |
+| test τz_WSS | **9.091%** | — | — | **3.63** | **+5.46 (binding)** |
+
+**Mechanism-engagement-but-outcome-D-NEG signal (clean falsification)**: GradNorm engaged exactly as designed — vol_p weight drained to floor 0.187, τz weight escalated to 1.897 (10× ratio τz:vol_p). Yet outcome WORSE on τz. **Loss-balancing class FALSIFIED on val_abupt for this benchmark** — re-weighting cannot break the τz architectural ceiling because the ceiling is representation-bound, not capacity-bound.
+
+**Wave 32 single-axis-collapse table** (now 4 entries):
+
+| H | Class | LR | Outcome | Failure mode |
+|---|---|---|---|---|
+| H62 | CP-loss-weight | LR-fix | D NEG +0.216pp | Destabilizes optimizer |
+| H70 | Slice-temp-curr | LR-fix | D NEG +2.298pp | Pace mismatch |
+| H72 | Slice-temp-deep-endpoint | legacy | D NEG +5.46pp | Over-sparsification |
+| **H71** | **GradNorm-dynamic-balance** | **legacy** | **D NEG +0.279pp** | **Capacity misallocation away from τz** |
+
+**Reassignment: tanjiro → H79 DROPOUT-INTRODUCTION (PR #1235)**
+
+**FIRST-EVER dropout test on this model** (`--model-dropout 0.0 → 0.1`). Current `model_dropout=0.0` is load-bearing across ENTIRE fleet history — we've explored loss reformulation, capacity scaling, routing, encoder bandwidth, LR schedule, optimizer, and dynamic balancing, but NEVER tested any regularization technique. Train loss converges ~0.009 (tiny) while val/test plateau at 6.15-6.40% — classical overfitting signature on 34-case val set. Plateau-protocol-tier regularization escalation. Orthogonal to all 7 other in-flight axes.
+
+**Fleet status (~23:35Z)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Class | Status |
+|---|---|---|---|---|
+| #1235 | tanjiro | H79 DROPOUT-INTRODUCTION | Regularization (NEW) | Just assigned |
+| #1234 | thorfinn | H78 LION-BETA1-MOMENTUM | Optimizer momentum | Early |
+| #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Loss-curvature (vol_p) | Early |
+| #1232 | askeladd | H76 SLICES-192-ISOLATION | Routing capacity | EP1+ |
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | LR-magnitude control | Early |
+| #1230 | frieren | H74 MAE-AUX-VOL-P | Loss-aux (vol_p) | mid-EP2 (3h elapsed) |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z | Loss-curvature (τz) | EP1.3+ |
+| #1223 | fern | H69 CURVATURE-ATTENTION-BIAS | Attention-mech | EP7-8 (C NULL projected) |
 
 ## 🟡 ~21:55Z — H67 RFF-9σ-WIDTH-EXPANSION CLOSED C NULL (closest-to-gate Wave 31 result, no test floor cross) + thorfinn reassigned H78 LION-BETA1-MOMENTUM-EXPANSION (PR #1234)
 

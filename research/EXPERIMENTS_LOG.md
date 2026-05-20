@@ -1,3 +1,67 @@
+## 2026-05-20 23:35 — PR #1225: H71 GRADNORM-DYNAMIC-LOSS-BALANCING (tanjiro, CLOSED) — **OUTCOME D NEGATIVE on all test metrics — clean mechanism-falsification (mech engaged but outcome regressed)**
+
+- **Branch**: `tanjiro/h71-gradnorm-dynamic-loss-balancing` (closed at 23:35Z)
+- **W&B run**: `hfind9uf` (EP13 terminal step 70,652, 14.36h)
+- **Hypothesis**: Dynamic per-task loss weight balancing via GradNorm-EMA-proxy with α=1.5. Each of {vol_p, SP, τx, τy, τz} gets its weight adjusted based on EMA of recent loss values — easier (lower-loss) tasks drain, harder (higher-loss) tasks escalate. Floor=0.20.
+
+### Terminal metrics (EP13, EMA-best ckpt)
+
+| Metric | **H71** | Baseline #972 | Δ vs baseline | AB-UPT ref | vs AB-UPT |
+|---|---:|---:|---:|---:|---:|
+| val_abupt | **6.4044%** | 6.126% | **+0.279pp ❌** | — | — |
+| val_VP | 3.979% | 3.566% | +0.413 | — | — |
+| val_SP | 4.265% | 3.534% | +0.731 | — | — |
+| val_WSS | 7.182% | 6.679% | +0.503 | — | — |
+| **test_abupt** | **6.130%** | 5.844% | **+0.286 ❌** | — | — |
+| test_SP | 3.916% | 3.577% (floor) | +0.339 ❌ | 3.82 | +0.10 |
+| test_VP | 3.867% | 3.643% (floor) | +0.224 ❌ | 6.08 | **−2.21 ✅** |
+| test_WSS | 7.002% | 6.727% (goal) | +0.275 ❌ | 7.29 | −0.29 ✅ |
+| test τx_WSS | 6.236% | — | — | 5.35 | +0.89 |
+| test τy_WSS | 7.537% | — | — | 3.65 | +3.89 |
+| **test τz_WSS** | **9.091%** | — | — | **3.63** | **+5.46 (binding axis)** |
+
+### Mechanism engagement (terminal GradNorm weights)
+
+| Task | weight | ema_loss | Δ vs uniform 1.0 |
+|---|---:|---:|---:|
+| vol_p | **0.187** (at floor 0.20) | 9.39e-4 | **−81%** drained |
+| SP | 0.465 | 9.13e-4 | −54% drained |
+| τx | 0.949 | 1.50e-3 | −5% near-uniform |
+| τy | 1.500 | 2.02e-3 | +50% escalated |
+| **τz** | **1.897** | 2.31e-3 | **+90% maximally-escalated** |
+
+τz received ~10× more weight than vol_p, exactly as GradNorm theory predicted.
+
+### Results commentary — clean falsification of dynamic-loss-balancing class on val_abupt
+
+**Mechanism engaged AS DESIGNED but outcome WORSE on every metric.** This is the cleanest possible falsification signal:
+
+1. GradNorm computed loss-EMA per task correctly (logged values shown above)
+2. Reweighted inversely correctly (vol_p down, τz up)
+3. Total reweighting magnitude is large (~10× ratio)
+4. **Yet test τz_WSS = 9.091% is WORSE than any prior Wave 31/32 closure**
+
+**Interpretation**: The architectural ceiling on τz is NOT capacity-bound. The model literally cannot represent τz better given the current parameter budget, regardless of how hard we push it via loss weights. Re-weighting moved capacity AWAY from where it was already working (vol_p, SP) but the gained τz capacity didn't translate to better predictions because the ceiling is **representation-bound** (PE/embedding/decoder architecture limitations for this axis).
+
+**Mech-class binding update**: Dynamic-loss-balancing class FALSIFIED. Adding to Wave 32 single-axis-collapse table:
+
+| H | Class | LR | Outcome | Failure mode |
+|---|---|---|---|---|
+| H62 | CP-loss-weight | LR-fix | D NEG +0.216pp | Destabilizes optimizer |
+| H70 | Slice-temp-curr | LR-fix | D NEG +2.298pp | Pace mismatch |
+| H72 | Slice-temp-deep-endpoint | legacy | D NEG +5.46pp | Over-sparsification |
+| **H71** | **GradNorm-dynamic-balance** | **legacy** | **D NEG +0.279pp** | **Capacity misallocation away from τz** |
+
+### Notable AB-UPT comparison
+
+H71 beats AB-UPT reference on test_VP (−2.21pp better) and test_WSS aggregate (−0.29pp better), but loses catastrophically on the per-axis WSS breakdown — τz +5.46pp vs AB-UPT, τy +3.89pp. **Our model has a clear coordinate-axis bias** with monotonic worsening x→y→z on WSS axes.
+
+### Closure verdict & next direction
+
+**D NEGATIVE** on every test metric. Closing without merge. Tanjiro reassigned **H79 DROPOUT-INTRODUCTION (PR #1235)** — single-flag `--model-dropout 0.0 → 0.1` on PURE baseline #972 substrate. **FIRST-EVER dropout test on this model**. Current `model_dropout=0.0` has been load-bearing across the entire fleet history; train loss converges to ~0.009 (small) while val/test plateau at 6.15-6.40% (large gap) = classical overfitting signature on 34-case val set. Plateau-protocol-tier regularization escalation. Orthogonal to all in-flight axes (loss-reformulation H73/H74/H77, routing H76, attention-mech H69, optimizer H78).
+
+---
+
 ## 2026-05-20 21:55 — PR #1221: H67 RFF-9σ-WIDTH-EXPANSION (thorfinn, CLOSED) — **OUTCOME C NULL on val_abupt (B PARTIAL boundary)**
 
 - **Branch**: `thorfinn/h67-rff-9sigma-width-expansion` (closed at 21:55Z)
