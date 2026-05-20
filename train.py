@@ -1169,14 +1169,28 @@ def main(argv: Iterable[str] | None = None) -> None:
                     and config.weight_log_every > 0
                     and global_step % config.weight_log_every == 0
                 )
+                cosine_t_max_epochs = (
+                    config.lr_cosine_t_max if config.lr_cosine_t_max > 0 else max_epochs
+                )
+                cosine_progress_epoch = max(0, epoch - config.lr_warmup_epochs)
                 train_log: dict[str, object] = {
                     "global_step": global_step,
                     "train/lr": current_lr,
                     "lr": current_lr,
+                    "train/lr_fraction_of_peak": float(current_lr / config.lr) if config.lr > 0 else 0.0,
+                    "train/cosine_progress": float(cosine_progress_epoch / max(1, cosine_t_max_epochs)),
                     "train/vol_points": float(current_train_vol_points),
                     "train/step_skipped": 1.0 if skip_step else 0.0,
                     "train/nonfinite_loss": 1.0 if loss_is_nonfinite else 0.0,
                     "train/slice_temperature": current_slice_tau,
+                    "train/slice_temperature_curriculum_done": (
+                        1.0
+                        if (
+                            config.slice_temperature_decay_steps > 0
+                            and global_step >= config.slice_temperature_decay_steps
+                        )
+                        else 0.0
+                    ),
                 }
                 if not loss_is_nonfinite:
                     train_log.update(
