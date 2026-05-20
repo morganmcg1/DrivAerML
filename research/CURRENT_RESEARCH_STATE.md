@@ -51,18 +51,20 @@
 
 6. **The vol_p floor breach is now SMALL (+0.136pp on H19)** — 4× smaller than H10b. Adding clamp=0.15 on top of H19 should close the remaining gap by 3× more vol_p gradient mass.
 
-## Active Experiments (none — all 4 students idle, awaiting next-wave dispatch)
+## Active Experiments (2026-05-20 22:30 UTC — all 4 students dispatched)
 
-All 4 students (frieren, nezuko, tanjiro, fern) idle as of 2026-05-20 22:00Z.
+| Student | PR | Hypothesis | Key change vs H19 | Priority |
+|---------|-----|-----------|-------------------|----------|
+| **dl24-frieren** | **#1216** | **H21: H19 + clamp=0.15** | `--gradnorm-min-w-vol-p 0.15` | **HIGHEST** — direct vol_p floor fix |
+| **dl24-nezuko** | **#1217** | **H22: H19 + vol_p MAE_aux=0.05** | `--vol-p-aux-mae-weight 0.05` | HIGH — orthogonal floor-fix via L1 |
+| **dl24-tanjiro** | **#1218** | **H23: H19 + Charb on τ_y** | `--wss-charbonnier-axes y,z` | HIGH — wss amplification |
+| **dl24-fern** | **#1219** | **H24: H19 + clamp=0.10** | `--gradnorm-min-w-vol-p 0.10` | MEDIUM — ablation midpoint |
 
-## Immediate next assignments (4 idle students)
+**Design logic:** H21-H24 form a systematic ablation of the two dimensions blocking H19 from being a contract winner:
+- **Axis 1 — vol_p gradient mass**: H24 (clamp=0.10) < H22 (MAE_aux) < H21 (clamp=0.15)
+- **Axis 2 — wss amplification**: H23 (Charb_τy in addition to τz)
 
-| Priority | Hypothesis | Student | Mechanism |
-|----------|-----------|---------|-----------|
-| **#1** | **H21: H19 + clamp=0.15** | dl24-frieren | Direct compound of wave's best wss-mechanism (H19) with floor-grad-mass clamp (H9b). Tests whether vol_p floor can be cleared by adding gradient mass on top of Charb landscape reshape. |
-| **#2** | TBD (researcher-agent generating) | dl24-nezuko | Orthogonal floor-preservation path |
-| **#3** | TBD (researcher-agent generating) | dl24-tanjiro | Possibly H19 + Charb on τ_y compound wss benefit |
-| **#4** | TBD (researcher-agent generating) | dl24-fern | Fresh literature-driven mechanism |
+H21 is the most direct path to a contract winner (H9b's clamp at 3× gradient mass closes the 0.136pp breach).
 
 ## Potential follow-on directions (post H21 evaluation)
 
