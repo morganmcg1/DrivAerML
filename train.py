@@ -139,6 +139,7 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    wss_axis_weights: str = ""
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -155,6 +156,12 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "wss_charbonnier_axes": (
             "Which WSS channels the supplementary Charbonnier loss applies to. "
             "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b)."
+        ),
+        "wss_axis_weights": (
+            "Per-axis WSS τ-loss multipliers as 'a,b,c' for τ_x,τ_y,τ_z. "
+            "Empty string disables (all axes weight 1.0). Applied to the "
+            "per-channel task losses BEFORE GradNorm uses them, so axis "
+            "amplification flows through to gradient-mass routing."
         ),
     }
     choices_text = {
@@ -210,6 +217,24 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
         return None
     sigmas = [float(s) for s in spec.split(",") if s.strip()]
     return sigmas or None
+
+
+def parse_wss_axis_weights(spec: str) -> list[float] | None:
+    """Parse 'a,b,c' per-axis τ-loss multipliers. Empty/blank disables."""
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    parts = [s.strip() for s in spec.split(",") if s.strip()]
+    if len(parts) != 3:
+        raise ValueError(
+            f"--wss-axis-weights expects 3 comma-separated floats (τ_x,τ_y,τ_z); got {parts!r}"
+        )
+    weights = [float(p) for p in parts]
+    if any(w < 0.0 for w in weights):
+        raise ValueError(
+            f"--wss-axis-weights must be non-negative; got {weights!r}"
+        )
+    return weights
 
 
 class GradNormWeights(nn.Module):
@@ -349,6 +374,7 @@ def train_loss(
     wss_charbonnier_axes: str = "all",
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
+    wss_axis_weights: list[float] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -398,6 +424,18 @@ def train_loss(
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
             )  # [4]: cp, tau_x, tau_y, tau_z
+            # H11b/H24: per-axis τ multipliers applied BEFORE GradNorm so axis
+            # amplification routes through gradient-mass balancing. cp slot
+            # (idx 0) is untouched. Scales surface_per_ch[1:4] by [a,b,c].
+            if wss_axis_weights is not None:
+                axis_w = torch.tensor(
+                    wss_axis_weights,
+                    device=surface_per_ch.device,
+                    dtype=surface_per_ch.dtype,
+                )
+                surface_per_ch = torch.cat(
+                    [surface_per_ch[:1], surface_per_ch[1:4] * axis_w]
+                )
             if loss_vol_p_charb is not None:
                 # H19 advisor fix: vol_p slot carries the Charbonnier tensor
                 # so GradNorm's L0 anchor and per-task gradient norms reflect
@@ -581,6 +619,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         if config.seed >= 0:
             seed_everything(config.seed)
         kill_thresholds = parse_kill_thresholds(config.kill_thresholds)
+        parsed_wss_axis_weights = parse_wss_axis_weights(config.wss_axis_weights)
+        if parsed_wss_axis_weights is not None and state.is_main:
+            print(
+                f"WSS axis weights ENABLED: τ_x={parsed_wss_axis_weights[0]}, "
+                f"τ_y={parsed_wss_axis_weights[1]}, τ_z={parsed_wss_axis_weights[2]}"
+            )
         requested_epochs = config.epochs
         if os.environ.get("SENPAI_MAX_EPOCHS"):
             requested_epochs = min(requested_epochs, int(os.environ["SENPAI_MAX_EPOCHS"]))
@@ -653,6 +697,15 @@ def main(argv: Iterable[str] | None = None) -> None:
         )
         if state.is_main:
             pe_class = type(base_model.pos_embed).__name__
+            wss_axis_w_log = (
+                {
+                    "wss_axis_w_tau_x": parsed_wss_axis_weights[0],
+                    "wss_axis_w_tau_y": parsed_wss_axis_weights[1],
+                    "wss_axis_w_tau_z": parsed_wss_axis_weights[2],
+                }
+                if parsed_wss_axis_weights is not None
+                else {}
+            )
             run.config.update(
                 {
                     "pe_class": pe_class,
@@ -665,6 +718,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     "pe_source_run_ki2q9ko9": (
                         config.model_pe == "string_multisigma"
                     ),
+                    **wss_axis_w_log,
                 },
                 allow_val_change=True,
             )
@@ -729,6 +783,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     wss_charbonnier_axes=config.wss_charbonnier_axes,
                     vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
+                    wss_axis_weights=parsed_wss_axis_weights,
                 )
                 if (
                     config.use_y_symmetry_aug
