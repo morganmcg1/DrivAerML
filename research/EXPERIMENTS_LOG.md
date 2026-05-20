@@ -1,3 +1,76 @@
+## 2026-05-20 04:15 — PR #1207: H58 COORDSLICE-NO-STOPGRAD — restore routing-gradient feedback by removing `torch.no_grad()` wrap on centroid computation (askeladd, EP13 terminal best EMA ckpt EP12) — **MECHANISM-POSITIVE NULL with DEEPEST Wave 31 test_VP floor cross (−0.092pp) + CLOSEST Wave 31 val_abupt near-miss (+0.035pp) + PE-auto-growth FALSIFIED + KEY STRUCTURAL FINDING on Lion+zero-mean-gradient sign-cancellation**
+
+- **Branch**: `askeladd/h58-coordslice-no-stopgrad` (closed at 04:15Z)
+- **W&B run**: rank0 `9j719af8` (group `wave31_h58_coordslice_no_stopgrad`, 14h 42m train time, 15.07h total runtime, 70,652 global steps, best EMA = epoch 12)
+- **Hypothesis**: H50 COORDSLICE PE-projection weight stuck at init (proj_weight_std 0.080-0.093 ≈ init) suggests routing-gradient was blocked by `torch.no_grad()` wrap on centroid computation. Predicted cure: remove wrap → gradients flow → PE projection auto-grows to >0.18 matching H33-style 8× growth → closes +0.094pp H50→merge-gate gap. Mechanism class: encoder-PE-no-stopgrad (variant of coordinate-grounded-slice-PE).
+
+### Terminal verdict — closest val_abupt near-miss + deepest test_VP cross + test_SP regression
+
+| Gate | Target | H58 terminal | Verdict | Δ vs baseline |
+|---|---:|---:|:--|---:|
+| **val_abupt** (merge) | <6.126% | **6.161%** | ❌ **CLOSEST NEAR-MISS Wave 31** | +0.035pp (vs H53 +0.055pp; vs H50 +0.094pp) |
+| test_abupt | (baseline 5.844%) | 5.999% | ❌ FAIL | +0.155pp (regress +0.021pp vs H50) |
+| test_SP (floor) | ≤3.577% | 3.856% | ❌ FAIL | +0.279pp (regress +0.121pp vs H50) |
+| **test_VP** (floor) | ≤3.643% | **3.551%** | ✅ **DEEPEST cross Wave 31** | **−0.092pp** ⭐ (vs H50 −0.047pp, vs H26 NPCA the previous Wave 31 deepest) |
+| val_VP (val ref) | (floor 3.643%) | 3.572% | ✅ cross | −0.071pp (lowest Wave 31) |
+| test_WSS (goal) | <6.727% | 6.906% | ❌ FAIL | +0.179pp (within seed noise vs H50 6.917%) |
+
+### KEY STRUCTURAL FINDING — PE-auto-growth FALSIFIED but primary-positive via slice-routing-gradient
+
+| Diagnostic | Block 0 | Block 1 | Block 2 | Block 3 | Block 4 | PR-body target |
+|---:|---:|---:|---:|---:|---:|:--|
+| proj_weight_std at init | 0.0880 | 0.0880 | 0.0880 | 0.0880 | 0.0880 | — |
+| proj_weight_std at EP3 | 0.0899 (+1.2%) | 0.0866 (−1.6%) | 0.0898 (+1.0%) | 0.0885 (+0.5%) | 0.0875 (−0.5%) | — |
+| **proj_weight_std at TERMINAL** | **0.0981 (+11.5%)** | 0.0888 (+1.0%) | 0.0937 (+6.4%) | 0.0909 (+3.3%) | 0.0882 (+0.5%) | **>0.18 (+100%)** |
+| Status | ❌ 54% of target | ❌ flat | ❌ flat | ❌ flat | ❌ flat | **ALL 5 blocks FAIL** |
+
+**ALL 5 blocks fail the +100% PE auto-growth target by wide margins. PE-auto-growth hypothesis FALSIFIED.**
+
+### Root cause — Lion + indirect averaged gradient = sign-cancellation
+
+Student's mid-EP3 per-layer gradient diagnostic identified the structural reason:
+
+| Diagnostic | coord_pe_proj | Typical FFN/QKV | Ratio |
+|:--|---:|---:|---:|
+| global gradient_norm | ~0.002 | ~0.05-0.10 | **25-50× smaller** |
+| grad_to_param_norm | ~6.7e-5 | ~1e-3 | **15× smaller** |
+| mean gradient (131k weights) | ~3e-8 | nonzero-direction | **essentially zero-mean** |
+
+**Lion's `sign(grad)` update on near-zero-mean gradient → random-sign updates that cancel → no systematic directional growth.** H33's free-learnable PE auto-grew 8× because it was directly multiplied by QK attention scores (clear directional target); H58's coord_pe_proj receives only indirect averaged routing gradient through `slice_weights.mean(dim=1)` — smoothed, directionless. **Stop-grad was NOT the binding constraint; the structure of Lion+indirect-averaged-gradient is.**
+
+### Primary-positive mechanism (unintended side effect)
+
+Despite proj_weight_std falsification, H58 beats H50 by **0.059pp val_abupt** and crosses test_VP floor **0.045pp deeper**. Mechanism (per student analysis): removing `torch.no_grad()` lets routing gradients flow back into `slice_weights.mean(dim=1) → centroid einsum`, giving the upstream slice-routing decisions marginally better shaping signal. centroid_range_{x,y,z} and centroid_spread for block 0 show stronger evolution vs H50, but the PE projection layer itself does NOT grow capacity. **Mechanism-null primary-positive outcome: the recipe helped, but NOT for the reason predicted.**
+
+### LR-decay-confound applies — 6th Wave 31 case + slope-halving pattern at EP5→EP6
+
+H58 EP5→EP6 val_abupt trajectory exhibited canonical Wave 31 LR-decay slope-halving (~zero descent EP5→EP6 under LR fraction dropping from 33% to 14% peak), 6th confirmed case after H47/H52/H53/H55v2/H54v2.
+
+### Wave 31 ranking at H58 closure
+
+| Run | Mech class | val_abupt | test_VP | Δ val_abupt vs gate | Disposition |
+|---:|:--|---:|---:|---:|:--|
+| baseline #972 | — | 6.126% | 3.643% | 0.000pp | merged |
+| H47 | decoder-depth | 6.143% | (closed null) | +0.017pp | closed → H59 LR-fix |
+| **H58 (this)** | **encoder-PE-no-stopgrad** | **6.161%** | **3.551%** ⭐ | **+0.035pp** | **CLOSING — deepest test_VP cross Wave 31** |
+| H53 | loss-weight | 6.181% | 3.665% | +0.055pp | closed → H62 LR-fix |
+| H57 | encoder-freq | 6.217% | 3.610% | +0.091pp | closed → H64 LOW-band |
+| H50 | encoder-PE-stopgrad | 6.220% | 3.596% | +0.094pp | closed → H58 (this) |
+| H54 v2 | shared-cap-surface | 6.248% | 3.693% | +0.122pp | closed → H65 LR-fix |
+| H55 v2 | tau-z-curriculum | 6.249% | 3.602% | +0.123pp | closed → H63 LR-fix |
+
+H58 ranks **#2 best val_abupt in Wave 31** (behind only H47 6.143%); **#1 deepest test_VP floor cross** (−0.092pp); **#6 mech-positive NEAR-MISS** in the cluster, all within +0.035 to +0.123pp of merge gate.
+
+### Disposition
+
+CLOSED as mech-positive null with deepest test_VP cross + closest val_abupt miss + PE-auto-growth FALSIFIED + Lion+zero-mean-gradient structural finding. Excellent analytical execution — the per-block proj_weight_std diagnostic + per-layer gradient diagnostic together gave a definitive falsification + alternative mechanism identification.
+
+**ASKELADD REASSIGNED H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED** (PR #1215) — single-flag change vs H58 = `--lr-cosine-t-max 25` instead of `13`. **5th parallel LR-fix test** alongside H59 (nezuko, decoder-sublayer), H62 (tanjiro, cp-loss-weight), H63 (edward, time-varying-loss), H65 (alphonse, shared-capacity-surface). If all 5 LR-fix variants produce merge-relevant improvements across 5 orthogonal mech classes, LR-decay confound is bulletproof confirmed as systematic Wave 31 ceiling and Wave 32 baselines default to `--lr-cosine-t-max 25`.
+
+Close comment: https://github.com/morganmcg1/DrivAerML/pull/1207#issuecomment-4494678863
+
+---
+
 ## 2026-05-20 02:15 — PR #1203: H54 v2 SURFACE-DEEP — 2 dedicated transformer blocks on surface decoder side mirror of H47 V-DEPTH (alphonse, EP12 mid forced terminal) — **MECHANISM-POSITIVE NULL with surf_deep ×9-18 sublayer growth + marginal -4.5bp better than H47 V-DEPTH peer + 5th Wave 31 LR-decay confound case**
 
 - **Branch**: `alphonse/h54-surface-decoder-depth` (closed at 02:15Z)

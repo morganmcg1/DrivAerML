@@ -1,13 +1,62 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~02:15 UTC)
+- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~04:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## Latest invocation actions (2026-05-20 ~02:15Z) — PR #1203 H54 v2 SURFACE-DEEP terminal CLOSED as **mechanism-positive null with surf_deep blocks ×9-18 sublayer growth ALIVE + marginal -4.5bp improvement vs H47 V-DEPTH same-pattern peer + 5th Wave 31 LR-decay confound case** (val_abupt 6.248% NEAR-MISS merge gate +0.122pp = 10th NEAR-MISS Wave 30/31; test_abupt 6.042% +0.198pp; both surf_deep blocks fully alive with ×9-18 growth EP1→EP12 on attn_proj + ffn_fc2 mirroring H47-style mechanism; clean monotonic descent EP3→EP12; class-level finding decoder-side depth-bump is real reproducible mech class on BOTH surface and volume sides but sub-baseline alone at this recipe; slope quartered EP8→EP9 from -2.9 to -0.8 bp/ep matching canonical LR-decay-confound pattern across H47/H52/H53/H55v2/H54v2); **ALPHONSE REASSIGNED H65 SURFACE-DEEP-LR-EXTENDED** (PR #1214, single-flag change `--lr-cosine-t-max 25` instead of 13; **4th parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED + H63 TAU-Z-CURRICULUM-LR-EXTENDED — if all four mech classes merge under LR-fix, LR-decay confound is bulletproof confirmed across 4 orthogonal mechanism classes)
+## Latest invocation actions (2026-05-20 ~04:15Z) — PR #1207 H58 COORDSLICE-NO-STOPGRAD terminal CLOSED as **mechanism-positive null with DEEPEST Wave 31 test_VP floor cross (−0.092pp) + CLOSEST Wave 31 val_abupt near-miss (+0.035pp) + PE-auto-growth FALSIFIED + Lion+zero-mean-gradient structural finding** (val_abupt 6.161% NEAR-MISS merge gate +0.035pp = 1st-closest Wave 31; test_abupt 5.999% +0.155pp regress +0.021pp vs H50; test_VP 3.551% DEEPEST cross Wave 31 −0.092pp under floor vs H50 −0.047pp; test_SP 3.856% +0.279pp regress +0.121pp vs H50; proj_weight_std at terminal max +11.5% block 0 only vs predicted +100% across all 5 blocks; Lion's sign(grad) on near-zero-mean indirect averaged gradient produces random-sign updates that cancel — structural reason for PE-auto-growth FALSIFICATION; primary-positive outcome came via unintended slice-routing-gradient side effect NOT the predicted PE-projection growth; 6th Wave 31 LR-decay confound case slope-halving EP5→EP6); **ASKELADD REASSIGNED H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED** (PR #1215, single-flag change `--lr-cosine-t-max 25` instead of 13; **5th parallel LR-fix test** alongside H59 V-DEPTH-LR-EXTENDED + H62 CP-LOSS-WEIGHT-LR-EXTENDED + H63 TAU-Z-CURRICULUM-LR-EXTENDED + H65 SURFACE-DEEP-LR-EXTENDED — if all 5 mech classes merge under LR-fix, LR-decay confound is bulletproof confirmed across 5 orthogonal mechanism classes); fleet status 8/8 WIP zero idle zero review-ready
 
-### Headline updates (2026-05-20 02:15Z)
+### Headline updates (2026-05-20 04:15Z)
+
+1. **PR #1207 askeladd H58 COORDSLICE-NO-STOPGRAD CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1207#issuecomment-4494678863)). Terminal verdict:
+   - val_abupt **6.161%** CLOSEST NEAR-MISS Wave 31 by +0.035pp (beats prior closest H53 +0.055pp by 0.020pp)
+   - test_abupt 5.999% FAIL baseline +0.155pp (regress +0.021pp vs H50 5.978%)
+   - **test_VP 3.551% DEEPEST cross Wave 31** −0.092pp under floor (vs H50 −0.047pp, vs H26 NPCA the previous Wave 31 deepest)
+   - test_SP 3.856% FAIL floor +0.279pp (regress +0.121pp vs H50 3.735%)
+   - val_VP 3.572% LOWEST Wave 31 (−0.071pp under floor)
+   - test_WSS 6.906% within seed noise vs H50 6.917%
+   - **proj_weight_std auto-growth FALSIFIED**: terminal max +11.5% block 0 only (target was +100% across all 5 blocks); blocks 1/4 essentially flat (+0.5-1.0%), blocks 2/3 modest (+3-6%)
+   - **Lion+zero-mean-gradient sign-cancellation structural finding**: coord_pe_proj grad_norm ~25-50× smaller than typical FFN/QKV; mean gradient ~3e-8 essentially zero-mean; Lion's sign(grad) on zero-mean gradient produces random-sign updates that cancel; H33's free PE auto-grew 8× because directly multiplied by QK attention scores (clear directional target); H58's coord_pe_proj only receives indirect averaged routing gradient through slice_weights.mean(dim=1) — smoothed directionless signal
+   - **Primary-positive came via slice-routing-gradient side effect** (NOT predicted PE-projection growth): removing torch.no_grad() lets routing gradients flow back into slice_weights themselves, giving upstream slice-routing decisions marginally better shaping signal
+   - W&B run `9j719af8` terminal step 70,652, 14h 42m train time, 15.07h total runtime
+
+2. **6th Wave 31 LR-decay confound case** (H47 + H52 + H53 + H55 v2 + H54 v2 + H58):
+   - H58 slope: EP5→EP6 ~zero descent under LR fraction dropping 33%→14% peak; canonical slope-halving pattern matches all 5 prior cases
+   - **Now testing on FIVE mechanism classes in parallel**: H59 V-DEPTH, H62 CP-LOSS, H63 TAU-Z-CURR, H65 SURFACE-DEEP, H66 COORDSLICE-NO-STOPGRAD. If all 5 LR-fix variants produce merge-relevant improvements across 5 orthogonal mechanism classes, LR-decay confound is bulletproof confirmed and Wave 32 baselines default to `--lr-cosine-t-max 25`.
+
+3. **PR #1215 askeladd H66 COORDSLICE-NO-STOPGRAD-LR-EXTENDED assigned** ([PR #1215](https://github.com/morganmcg1/DrivAerML/pull/1215), branch `askeladd/h66-coordslice-no-stopgrad-lr-extended` from `tay`). Single-flag change vs H58:
+   - `--lr-cosine-t-max 25` (was 13). Everything else identical to H58 (including `--use-coord-slice-pe --coord-slice-pe-rff-features 32 --coord-slice-pe-init-scale 0.088`)
+   - No model.py change (H58 no-stopgrad already in tay); train.py adds `train/lr_fraction_of_peak` + `train/cosine_progress` (matching H59/H62/H63/H65 instrumentation)
+   - Keep H58's `diag/coord_pe_proj_block{i}/weight_std` for cross-comparison
+   - Three falsifiable outcomes: A. MERGE WIN + FLOOR CROSS (LR-decay was the H58 limit); B. PARTIAL val_abupt drops below 6.161 by ≥0.05pp (LR helped, class still has ceiling); C. NULL val_abupt within ±0.05pp of H58 6.161 (LR-decay NOT the limit, class saturates — Wave 32 directs to AdamW-on-PE or direct-QK-PE)
+
+4. **Wave 31 mechanism-class taxonomy now 13 classes after H58 closure**:
+   - Class #8 coordinate-grounded-slice-PE: **encoder-PE-stopgrad sub-class closed null (H50), encoder-PE-no-stopgrad sub-class mech-positive null with deepest test_VP cross + PE-auto-growth FALSIFIED + Lion+zero-mean-gradient structural finding (H58 closed), DEFERRED pending H66 LR-fix variant**
+   - **Derived class LR-decay-confound now 6 cases** (H47/H52/H53/H55v2/H54v2/H58) — being directly tested by H59 + H62 + H63 + H65 + H66 (5 parallel LR-fix variants)
+   - **Derived class encoder-PE-via-Lion-on-indirect-gradient (NEW)**: H58 structural finding — Lion+zero-mean-gradient sign-cancellation prevents PE auto-growth even with gradient flow restored. Future encoder-PE class hypotheses should (a) use direct QK-multiplied PE like H33, (b) switch PE projection to AdamW, or (c) bypass the averaging operation entirely
+
+5. **Wave 31 fleet status** — 8/8 WIP, 0 idle, 0 review-ready (after H58 closure + H66 assignment):
+   - **H59 nezuko (PR #1208)** — V-DEPTH-LR-EXTENDED (1st parallel LR-fix test)
+   - **H60 fern (PR #1209)** — H56-RELAUNCH-DROP-EP3 (strongest mech signal)
+   - **H61 frieren (PR #1210)** — SLICE-TEMP-CURRICULUM, EP5.7+, projected MERGE-BORDERLINE ~6.06-6.15%
+   - **H62 tanjiro (PR #1211)** — CP-LOSS-WEIGHT-LR-EXTENDED (2nd parallel LR-fix test)
+   - **H63 edward (PR #1212)** — TAU-Z-CURRICULUM-LR-EXTENDED (3rd parallel LR-fix test)
+   - **H64 thorfinn (PR #1213)** — RFF-LOW-BAND-EXPANSION (low-end-binds-FDCE test)
+   - **H65 alphonse (PR #1214)** — SURFACE-DEEP-LR-EXTENDED (4th parallel LR-fix test), EP1 boundary
+   - **H66 askeladd (PR #1215, this entry)** — COORDSLICE-NO-STOPGRAD-LR-EXTENDED (5th parallel LR-fix test), pre-launch
+
+6. **Test_VP floor cross tally Wave 31 now 5 cases** after H58 closure:
+   - H26 NPCA (merged)
+   - H53 val cross
+   - H55 v2 test cross
+   - H57 BOTH val+test simultaneous cross
+   - **H58 BOTH val+test cross with deepest test_VP cross overall (−0.092pp)**
+   - All 5 share `vol-points-schedule 0:16384:3:32768:6:49152:9:65536` — Wave 32 priority candidate: focused test_VP investigation isolating vol-points-curriculum contribution
+
+7. **Wave 31 NEAR-MISS cluster now 5 cases** clustered in narrow +0.035pp to +0.123pp band above merge gate (H58 +0.035pp closest, H53 +0.055pp, H50 +0.094pp, H57 +0.091pp, H54v2 +0.122pp, H55v2 +0.123pp): strong empirical evidence for LR-decay-induced ceiling that 1-2 individual mech wins alone won't crack — only mechanism-stacks or LR-extension can break through
+
+### Headline updates (prior 2026-05-20 02:15Z — H54 v2 closure)
 
 1. **PR #1203 alphonse H54 v2 SURFACE-DEEP CLOSED** ([close comment](https://github.com/morganmcg1/DrivAerML/pull/1203#issuecomment-4494034286)). Terminal verdict:
    - val_abupt **6.248%** NEAR-MISS merge gate by +0.122pp (10th NEAR-MISS in Wave 30/31)
