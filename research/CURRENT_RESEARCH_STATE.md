@@ -1,9 +1,56 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~17:30 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~20:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟢 ~20:55Z (2026-05-21) — Cross-fleet snapshot pre-terminal: H82 alphonse in-flight LEADER 6.3005% but slope DECELERATING into geometric decay; H87 tanjiro HOTTEST slope and overtakes at common steps
+
+**No PR action required.** Fleet 8/8 WIP, zero idle. Wave 32 entering terminal window. All 8 student pods healthy.
+
+**Current in-flight leaderboard (latest val_abupt for each, descending recency)**:
+
+| Run | Mech | Step | val_abupt | val_SP | val_VP | val_WSS | EP |
+|---|---|---:|---:|---:|---:|---:|---:|
+| **H82 alphonse** | wd=1e-3 | 56,154 | **6.3005%** | 4.117 | 3.615 | 7.194 | 7+ |
+| H81 frieren | β2=0.999 | 56,154 | 6.5326% | 4.249 | 3.816 | 7.454 | 7+ |
+| H83 nezuko | grad_clip=1.0 | 52,528 | 6.3441% | 4.169 | 3.735 | 7.189 | 7 |
+| H84 askeladd | rff=32 | 48,902 | 6.3485% | 4.224 | 3.793 | 7.147 | 6 |
+| H85 thorfinn | lr=1.2e-4 | 48,902 | 6.4833% | 4.247 | 3.849 | 7.335 | 6 |
+| H86 edward | mlp_ratio=6 | 43,466 | 6.5513% | 4.363 | 3.943 | 7.374 | 5 |
+| H87 tanjiro | surf_loss=1.5 | 38,030 | **6.4067%** (HOTTEST SLOPE) | 4.260 | 3.763 | 7.247 | 4 |
+| H88 fern | heads=8 | 10,864 | 25.7994% (EP1 warmup) | — | — | — | 1 |
+
+**H82 slope structurally decelerating** — runs at later step counts but EP6→EP7 slope flattened from −0.0127 pp/1k → −0.0055 pp/1k (cosine LR drying out). Projected terminal under continued deceleration: **~6.26-6.29%** (MISSES merge gate 6.126% by +0.13-0.17pp).
+
+**H87 leads at common steps**:
+- step 32,594: H87 6.722 vs H82 6.764 (H87 ahead −0.042pp)
+- step 38,030: H87 6.407 vs H82 6.499 (H87 ahead **−0.092pp**)
+
+If H87's slope holds with typical fleet decay, projected terminal **~6.13-6.20%** = borderline A WIN / C NULL. The dl24 H26 cross-pollination mechanism (surface_loss_weight=1.5) is transferring cleanly to tay's substrate.
+
+**Test floor projection (consistent across leaders)**: val_SP 4.12-4.27% at EP6/7 → test_SP ~4.07-4.22% (BREACH floor 3.577 by +0.49-0.64pp). Same H80 closure pattern: **test_SP plateau will likely block all 6 in-flight A WIN candidates from being mergeable** — paper-positive on val_abupt but blocked by AND-gate on test floors.
+
+**Expected B PARTIAL outcomes (best case)**: H82, H87 may land paper-positive val_abupt + test_VP/test_WSS improvements but fail test_SP floor. None of the in-flight Wave 32 variants are positioned to break test_SP plateau (consistent with H80 analysis that SP ceiling is architectural/surface-decoder-bound NOT optimizer/regularization-bound).
+
+**Terminals expected in next ~12h** (in W&B runtime order):
+- H82 alphonse: ~01-02:00Z 2026-05-22 (~3h from now)
+- H81 frieren: ~01:30Z 2026-05-22
+- H84 askeladd: ~03:00Z 2026-05-22
+- H83 nezuko: ~03:30Z 2026-05-22
+- H85 thorfinn: ~04:00Z 2026-05-22
+- H86 edward: ~04:30Z 2026-05-22
+- H87 tanjiro: ~05:30Z 2026-05-22
+- H88 fern: ~10:00Z 2026-05-22
+
+**Wave 33 brainstorm seeds** (architectural/representation, not optimizer/regularization):
+- Surface-decoder capacity expansion (deeper SP-specific MLP head)
+- Surface-positional-encoding refinement (per-axis frequency bands, Tancik scale tuning)
+- --eval-raw-vs-ema diagnostic flag (verify EMA composition vs raw weights at terminal)
+- dl24 cross-pollination follow-ups (H21 7.090 val_wss leader on dl24's substrate)
+- Geometry augmentation (yaw rotation invariance about z-axis only per DrivAerML coord convention)
+- Bold architectural pivot: surface-tokens as separate stream from volume-tokens with explicit cross-attention bottleneck
 
 ## 🔴 ~17:30Z (2026-05-21) — H80 EMA-DECAY-EXTENSION CLOSED D NEGATIVE (val_abupt 6.298% MISS gate +0.172pp, test_SP +0.353pp + test_VP +0.059pp CROSSED floors) + fern reassigned H88 MODEL-HEADS-EXPANSION (PR #1248)
 
