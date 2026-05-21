@@ -395,9 +395,14 @@ def train_loss(
             loss_vol_p_charb = None
             loss_vol_p_mse_diag = None
         if gradnorm_weights is not None:
+            # H26: scale per-task losses by surface_loss_weight / volume_loss_weight
+            # BEFORE concatenation. L0 (captured from task_losses on the first
+            # step) absorbs the scaling so r-ratios cancel; the lever then acts
+            # through gradient magnitudes (c_per_task / G_bar) and the total
+            # backward signal, not through r-renormalisation.
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
-            )  # [4]: cp, tau_x, tau_y, tau_z
+            ) * surface_loss_weight  # [4]: cp, tau_x, tau_y, tau_z
             if loss_vol_p_charb is not None:
                 # H19 advisor fix: vol_p slot carries the Charbonnier tensor
                 # so GradNorm's L0 anchor and per-task gradient norms reflect
@@ -405,11 +410,11 @@ def train_loss(
                 # now w_vol_p * Charb_vol_p via the weighted sum below —
                 # adding a separate `vol_p_charb_weight * Charb` term would
                 # double-count.
-                volume_per_ch = loss_vol_p_charb.unsqueeze(0)  # [1]
+                volume_per_ch = loss_vol_p_charb.unsqueeze(0) * volume_loss_weight  # [1]
             else:
                 volume_per_ch = per_channel_masked_mse(
                     out["volume_preds"], volume_target, batch.volume_mask
-                )  # [1]: vol_p MSE
+                ) * volume_loss_weight  # [1]: vol_p MSE
             task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
             w_detached = gradnorm_weights.weights.detach()
             loss = (w_detached * task_losses).sum()
