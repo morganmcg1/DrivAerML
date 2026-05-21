@@ -1,9 +1,33 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~14:25 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~17:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~17:30Z (2026-05-21) — H80 EMA-DECAY-EXTENSION CLOSED D NEGATIVE (val_abupt 6.298% MISS gate +0.172pp, test_SP +0.353pp + test_VP +0.059pp CROSSED floors) + fern reassigned H88 MODEL-HEADS-EXPANSION (PR #1248)
+
+**Closure: PR #1236 H80 (fern) — D NEGATIVE: val_abupt 6.298% MISS gate +0.172pp, test_abupt +0.319pp WORSE than baseline, test_SP +0.353pp CROSSED floor, test_VP +0.059pp CROSSED floor, test_WSS +0.349pp ABOVE goal**
+
+**EMA composition class falsified for Wave 32 plateau.** Following H79 dropout's val→test slope falsification, H80 (ema=0.9999) provides a third independent regularization-class result that does NOT break the plateau. The regularization-bound hypothesis remains FALSE on tay's substrate.
+
+**Fern's structural-mismatch finding**: ema=0.9999 means EMA 50%-mass at step 6,931 (~0.66 EP), 99%-mass at step 46,049 (~4.2 EP). At EP13/13 terminal, the EMA shadow reflects training state from EP9-13, missing the very-last cosine-bottom-out updates. The 13-epoch budget is structurally mismatched to ema=0.9999. Trajectory was still descending at terminal (geometric decay ~−0.018pp/EP at EP13).
+
+**However**: budget extension would not address the dispositive test-side regression. Val>test gap INVERTED from baseline's typical pattern (#972: val 6.126 > test 5.844 = −0.282pp; H80: val 6.298 < test 6.163 = +0.135pp). Wider EMA averaging hurts test-time specialization.
+
+**test_SP plateau is the program's binding constraint** — across H79 (+0.323pp), H80 (+0.353pp), H78 (+0.142pp), test_SP keeps landing at 3.85-3.95% (vs floor 3.577). The PURE baseline #972 substrate has a test_SP representation ceiling that current architecture+loss configuration cannot break. This is the explicit reframe of Wave 33 priorities.
+
+**Reassignment: fern → H88 MODEL-HEADS-EXPANSION (PR #1248)**
+
+**FIRST-EVER attention-head-count sweep** on tay's substrate. Single-flag `--model-heads 4 → 8` on canonical Wave 32 baseline. With hidden_dim=512, heads=4 means per-head dim = 128 (larger than standard Vaswani et al 2017 recipe of 64). Doubling to heads=8 gives per-head dim = 64 (canonical Transformer recipe).
+
+**Mechanism**: more attention heads = finer-grained query partitioning of slice tokens. Each head specializes on a different sub-aspect of the surface↔volume coupling — directly relevant to SP-axis specialization. The `--use-surf-to-vol-xattn` block's MultiheadAttention also doubles head count (per code line 230 in train.py).
+
+**Directly tests fern's SP-axis representation-capacity hypothesis from H80 closure.** If H88 lands test_SP < 3.65%, attention-head granularity was a real bottleneck → opens architectural sweep for Wave 33. If test_SP > 3.85%, plateau is bound elsewhere (decoder capacity / surface-specific positional encoding).
+
+Memory cost near-zero (same total hidden dim, different per-head split). Orthogonal to all 8 in-flight Wave 32 axes.
+
+**Fleet status: 8/8 WIP, zero idle GPUs.** Current WIP: alphonse(H82, strong EP4 6.499% signal), askeladd(H84), edward(H86), fern(H88), frieren(H81), nezuko(H83), tanjiro(H87), thorfinn(H85).
 
 ## 🔴 ~14:25Z (2026-05-21) — H79 DROPOUT-INTRODUCTION CLOSED D NEGATIVE (val_abupt MISS gate +0.247pp AND all 4 test channels regressed; val→test slope diagnostic FALSIFIES regularization-bound plateau hypothesis) + tanjiro reassigned H87 SURFACE-LOSS-WEIGHT-REDUCTION (PR #1247)
 

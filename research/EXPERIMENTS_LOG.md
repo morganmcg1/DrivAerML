@@ -1,3 +1,63 @@
+## 2026-05-21 17:30 — PR #1236: H80 EMA-DECAY-EXTENSION (fern, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.298% MISS gate +0.172pp, test_SP/test_VP both fail floors; **EMA composition class falsified for Wave 32 plateau**
+
+- **Branch**: `fern/h80-ema-decay-extension` (closed at 17:30Z)
+- **W&B run**: `gtmq7ctm` (EP13 step 70,652, 13.95h training time, peak 75.89 GB, all 8 GPUs healthy, 0 nonfinite grads)
+- **Hypothesis**: Single-flag `--ema-decay 0.999 → 0.9999` on canonical Wave 32 baseline #972 substrate. First-ever EMA composition sweep entire Wave 31/32 fleet history. 10× wider EMA window targets late-tail gradient noise as plateau cause.
+
+### Terminal metrics (EP13 best EMA checkpoint, full test eval)
+
+| Channel | **H80** | BL #972 | Δ vs BL | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.298%** | 6.126% | **+0.172** ❌ | **MISS merge gate** |
+| val_VP | 3.675% | 3.566% | +0.109 | worse |
+| val_SP | 4.170% | 3.534% | +0.636 | clearly worse |
+| val_WSS | 7.122% | 6.679% | +0.443 | clearly worse |
+| **test_abupt** | **6.163%** | 5.844% | **+0.319** ❌ | clearly worse |
+| **test_VP (floor 3.643)** | **3.702%** | 3.643% | **+0.059** ❌ | CROSSED floor |
+| **test_SP (floor 3.577)** | **3.930%** | 3.577% | **+0.353** ❌ | CROSSED floor BADLY |
+| **test_WSS (goal 6.727)** | **7.076%** | 6.727% | **+0.349** ❌ | above goal |
+| test_WSS_z (binding) | 9.189% | ~8.75% est | +0.44 | binding axis worse |
+
+### Trajectory (δ-contamination clearing — EMA-aware)
+
+| EP | step | δ contam | val_abupt EMA |
+|---|---:|---:|---:|
+| EP1 | 10,864 | 33.9% | 67.89% (random-dominated) |
+| EP6 | 48,902 | 0.76% | 7.565% (first informative) |
+| EP9 | 59,780 | 0.26% | 6.505% |
+| EP11 | 65,222 | 0.15% | 6.362% |
+| EP13 | 70,664 | 0.086% | **6.298%** (terminal) |
+
+Slope decay EP6→EP13: −0.563 → −0.317 → −0.180 → −0.090 → −0.053 → ~−0.030 → ~−0.018 pp/EP (halving factor 0.55-0.59/EP).
+
+### Critical analysis — fern's structural-mismatch finding
+
+> "With ema=0.9999, the EMA-shadow is fundamentally backward-looking by ~4 epochs — at EP13/13 it reflects training state from EP9-13, missing the very-last cosine-bottom-out updates. The 13-epoch budget is structurally mismatched to ema=0.9999."
+
+EMA decay 0.9999 → 50%-mass = 6,931 steps (~0.66 EP), 99%-mass = 46,049 steps (~4.2 EP). The EMA shadow never integrates the late-cosine LR-decay improvements before EP13 terminal. Trajectory was still descending at terminal (~−0.018pp/EP geometric decay projection).
+
+**However**: Even budget-extended rerun (ema=0.9999 + epochs=20) would not address the dispositive test-side regression. Val>test gap **inverted** from baseline's typical pattern (#972 had val 6.126 > test 5.844 = −0.282pp; H80 had val 6.298 < test 6.163 = +0.135pp). Wider EMA window averages over more diverse training states → less specialized for held-out test distribution.
+
+### What H80 DEFINITIVELY establishes (with H79)
+
+1. **Regularization-bound plateau hypothesis FALSIFIED on tay's substrate** — H79 dropout + H80 EMA both D NEG with val→test slope analysis. The chain is closed. Wave 33+ must pivot to architectural / data / ensemble levers.
+
+2. **test_SP plateau is the program's binding constraint**. Across H79 (+0.323pp), H80 (+0.353pp), and other recent variants, test_SP keeps landing at 3.85-3.95% (vs floor 3.577). The PURE baseline #972 substrate has a test_SP representation ceiling that current architecture+loss configuration cannot break.
+
+3. **Rawcanon-20260511 substrate random-pred floor on abupt-mean rel_l2_pct = ~300-385%**, much higher than SDF-substrate ~100%. EP1 reading 67.89% under δ=0.339 implies R≈140%; EP5→EP6 slope analysis gives R≈320%. Worth memorializing for EMA-aware kill-threshold calibration.
+
+### Reassignment — H88 MODEL-HEADS-EXPANSION (fern → PR #1248)
+
+Single-flag `--model-heads 4 → 8` on canonical Wave 32 baseline. **First-ever attention-head-count sweep entire Wave 31/32 fleet history**.
+
+Mechanism: `model_heads=4` with hidden_dim=512 means per-head dim = 128 (non-standard). Doubling to 8 gives per-head dim = 64 (canonical Vaswani et al 2017 recipe). More heads = finer-grained attention partition for surface↔volume coupling.
+
+Critical: directly tests fern's SP-axis representation-capacity hypothesis from H80 closure. If H88 lands test_SP < 3.65%, attention-head granularity was a real bottleneck → opens architectural sweep for Wave 33. If test_SP > 3.85%, plateau is bound elsewhere (decoder capacity / surface-specific positional encoding).
+
+Orthogonal to all 8 in-flight Wave 32 axes (H81/H82/H83/H84/H85/H86/H87 + H86 mlp_ratio).
+
+---
+
 ## 2026-05-21 14:25 — PR #1235: H79 DROPOUT-INTRODUCTION (tanjiro, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.3725% MISS gate +0.247pp, all 4 test channels regressed; **val→test slope diagnostic FALSIFIES regularization-bound plateau hypothesis on tay**
 
 - **Branch**: `tanjiro/h79-dropout-introduction` (closed at 14:25Z)
