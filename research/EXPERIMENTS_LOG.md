@@ -1,3 +1,71 @@
+## 2026-05-21 12:00 — PR #1233: H77 CHARBONNIER-VOL-P-WEIGHT-FIX (nezuko, CLOSED) — **OUTCOME D NEGATIVE on val AND all 4 test channels** (clean execution; H68 starvation pathology fixed but underlying Charbonnier-vol_p technique net-negative on tay split)
+
+- **Branch**: `nezuko/h77-charbonnier-vol-p-weight-fix` (closed at 12:00Z)
+- **W&B run**: `qfwysjwu` (EP13 terminal step 70,652, 14.0h training time, all 8 ranks healthy throughout)
+- **Hypothesis**: Apply Charbonnier-vol_p (ε=1e-3) loss with the CORRECT `--volume-loss-weight 0.5` per dl24 H19 verbatim recipe — H68 was killed at EP6 with starvation pathology because weight was set to 1.0 (which over-emphasized the larger Charbonnier-magnitude vol_p budget vs surface). H77 tests whether the recipe-fix alone resolves the starvation AND beats baseline.
+
+### Terminal metrics (EP13 best, EMA checkpoint, full test eval inline)
+
+| Channel | **H77** | BL #972 ref | Δ vs BL #972 | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.335%** | 6.126% | **+0.209** ❌ | MISS gate |
+| val_VP | 3.838% | 3.798% | +0.040 | ~neutral |
+| val_SP | 4.179% | — | — | — |
+| val_WSS | 7.154% | — | — | — |
+| **test_abupt** | **6.260%** | 5.844% | **+0.416** ❌ | regression |
+| **test_VP (floor 3.643)** | **3.866%** | 3.643% | **+0.223** ❌ | MISS floor |
+| **test_SP (floor 3.577)** | **4.028%** | 3.577% | **+0.451** ❌ | MISS floor |
+| test_WSS (goal 6.727) | **7.155%** | 6.727% | **+0.428** ❌ | regression |
+
+### Attribution analysis — H68 → H77 progression
+
+| Diagnostic | H68 EP6 (killed) | **H77 EP13 (terminal)** | Interpretation |
+|---|---|---|---|
+| char/mse ratio | 18.4× (runaway) | **16-18× (stable plateau)** | ✅ recipe fix works |
+| val_abupt at EP6 | 6.822% | 6.451% | ✅ −0.371pp better than H68 |
+| Surface starvation? | YES (vol_p budget too large) | NO (surface ~0.0085 > volume ~0.0058) | ✅ fixed |
+| Final val_abupt | n/a (killed) | **6.335%** | ❌ still misses gate by +0.209pp |
+| Final test_abupt | n/a (killed) | **6.260%** | ❌ +0.416pp vs baseline |
+
+**The Charbonnier-vol_p (ε=1e-3) loss family is REPRESENTATIONALLY DIFFERENT from MSE on this dataset's vol_p split.** Charbonnier's robust-Huber smoothing down-weights large per-point errors via √(x²+ε²); on a dataset where vol_p errors have heavy-tailed distribution, MSE was already capturing the signal — the robust-loss formulation introduces implicit regularization that costs ~0.21pp val_abupt and ~0.42pp test_abupt.
+
+### H75 LR-fix interaction (recently confirmed)
+
+H77 used `--lr-cosine-t-max 25` (LR-fix substrate). H75 D REG just confirmed LR-fix is NET NEG on pure baseline. H77 inherits some of that LR-fix tax. A cleaner H77-followup would test Charbonnier-vol_p on `--lr-cosine-t-max 13` substrate to isolate technique-tax from LR-fix-tax. **Wave 33 deprioritized** since H68 + H77 already establish the technique as net-negative on this dataset.
+
+### Per-epoch trajectory (clean monotonic descent, smooth)
+
+| EP | step | val_abupt | val_VP | val_SP | val_WSS |
+|---|---:|---:|---:|---:|---:|
+| EP1 | 10,864 | 26.95% | ~16% | ~20% | ~30% |
+| EP3 | 32,594 | 6.92% | 4.05% | 4.62% | 7.85% |
+| EP6 | 48,902 | 6.451% | — | — | — |
+| EP9 | 59,780 | 6.376% | — | — | — |
+| EP10 | 62,501 | 6.350% | — | — | — |
+| EP11 | 65,222 | 6.344% | — | — | — |
+| **EP13** | **70,652** | **6.335%** | **3.838%** | **4.179%** | **7.154%** |
+
+EP9→EP11 slope: −0.002 pp/1k (effectively plateaued well above merge gate). Slope decay signature matches H78's late-cosine pattern but at significantly higher absolute val_abupt.
+
+### Wave 32 loss-reformulation class closure pattern
+
+Three of four Wave 32 loss-reformulation experiments now D NEG:
+- H68 Charbonnier-vol_p (weight=1.0 bug) — D NEG (starvation pathology)
+- H74 MAE-aux-vol_p — D NEG (L1/MSE ratio anti-pattern, cross-axis collateral)
+- **H77 Charbonnier-vol_p (weight=0.5 fix)** — D NEG (representationally different from MSE)
+- H73 Charbonnier-τz — in flight (edward)
+
+The loss-reformulation class is exhausted on vol_p axis. Wave 33 should NOT pursue vol_p loss-family variants (asymmetric, robust, L1-aux, etc.) — focus instead on optimizer-momentum (H78 winner), regularization (H79/H82), EMA composition (H80), Lion-buffer (H81), and gradient-control (H83 new) axes.
+
+### Followups noted (filed for Wave 33 if substrate changes)
+
+- H77-NO-LR-FIX: Charbonnier-vol_p (weight=0.5) on lr-cosine-t-max=13 substrate to isolate technique-tax from LR-fix-tax
+- H77-DIFFERENT-EPS: Charbonnier ε sweep (1e-2, 1e-4) — but D NEG result suggests technique-class limit, not eps-tuning issue
+
+Nezuko reassigned **H83 GRAD-CLIP-EXPANSION** (PR #1243) — single-flag `--grad-clip-norm 0.5 → 1.0` (Lion paper default). First-ever gradient-clipping sweep in entire Wave 31/32 fleet. Plateau-protocol Tier 2 optimization-control axis. With Lion's sign-update, clip controls what signal enters momentum buffer — distinct from H78's β1 (momentum decay rate) and H81's β2 (momentum buffer EMA). Orthogonal to all 7 in-flight axes.
+
+---
+
 ## 2026-05-21 10:50 — PR #1231: H75 PURE-BASELINE-LR-EXTENDED (alphonse, CLOSED) — **OUTCOME D REGRESSION on val AND test** (cleanest Wave 31/32 LR-fix attribution: --lr-cosine-t-max 25 is NOT universal, only mech-class-conditional)
 
 - **Branch**: `alphonse/h75-pure-baseline-lr-extended` (closed at 10:50Z)

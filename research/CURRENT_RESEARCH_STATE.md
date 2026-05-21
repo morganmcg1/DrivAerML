@@ -1,9 +1,27 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~10:50 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~12:00Z (2026-05-21) — H77 CHARBONNIER-VOL-P-WEIGHT-FIX CLOSED D NEGATIVE (loss-reformulation class exhausted: 3/4 D NEG) + nezuko reassigned H83 GRAD-CLIP-EXPANSION (PR #1243)
+
+**Closure: PR #1233 H77 (nezuko) — D NEGATIVE on val (+0.209pp MISS gate) AND ALL 4 test channels regress (test_abupt +0.416pp, test_VP +0.223pp MISS floor, test_SP +0.451pp MISS floor, test_WSS +0.428pp)**
+
+H77 cleanly avoided H68's vol_p starvation pathology — char/mse stable in 16-18× band throughout vs H68's runaway to 18.4× at higher absolute scale, surface budget always larger than volume — but the underlying Charbonnier-vol_p (ε=1e-3) technique is representationally different from MSE on this dataset and net-negative.
+
+**Loss-reformulation class on Wave 32 closure pattern (3/4 D NEG)**:
+- H68 Charbonnier-vol_p (weight=1.0 bug) — D NEG (starvation)
+- H74 MAE-aux-vol_p — D NEG (L1/MSE ratio anti-pattern, cross-axis collateral)
+- **H77 Charbonnier-vol_p (weight=0.5 fix)** — D NEG (representationally different from MSE)
+- H73 Charbonnier-τz — in flight (edward, mid-EP)
+
+**Strategic implication for Wave 33**: Loss-reformulation class on vol_p axis is EXHAUSTED. Do NOT pursue vol_p loss-family variants (asymmetric, robust, L1-aux, eps-tuning). Focus future capacity on the productive axes: optimizer-momentum (H78 LOCKED winner), regularization (H79/H82), EMA composition (H80), Lion-buffer (H81), and gradient-control (H83 new).
+
+**Reassignment: nezuko → H83 GRAD-CLIP-EXPANSION (PR #1243)**
+
+**FIRST-EVER gradient-clipping sweep** in entire Wave 31/32 fleet history. Single-flag `--grad-clip-norm 0.5 → 1.0` (Lion paper default) on PURE baseline #972 substrate. Plateau-protocol Tier 2 optimization-control axis. With Lion's sign-update mechanism, clip controls what signal enters the momentum buffer — distinct from H78's β1 (momentum decay rate) and H81's β2 (momentum buffer EMA decay). Slope-flattening signature across Wave 32 (H77 EP11 slope −0.002 pp/1k, H78 EP10 −0.0036 pp/1k) suggests possible momentum-buffer signal starvation from tight clipping. Orthogonal to all 7 in-flight axes.
 
 ## 🔴 ~10:50Z (2026-05-21) — H75 PURE-BASELINE-LR-EXTENDED CLOSED D REGRESSION (definitive LR-fix attribution: NOT universal) + alphonse reassigned H82 WEIGHT-DECAY-EXPANSION (PR #1242)
 
@@ -71,16 +89,16 @@ H78 thorfinn (Lion β1 0.9→0.95) has been clearing the merge gate since EP6, w
 
 Worst-case projection 6.0606% (already clears gate). Test-side cushion: val_VP 3.526% (0.117pp below test_VP floor, comfortable cross expected). val_SP 3.995% above floor (typical val-test gap small), test_SP expected ~3.7-3.8% (above floor 3.577% — expected, secondary). test_WSS val 6.873%, expected test ~6.85-6.95% (above project goal 6.727% but better than H67's 6.933%).
 
-**Fleet status (~10:50Z 2026-05-21)**: 8/8 WIP, zero idle
+**Fleet status (~12:00Z 2026-05-21)**: 8/8 WIP, zero idle
 
-| PR | Student | Experiment | Class | Status @ ~10:50Z |
+| PR | Student | Experiment | Class | Status @ ~12:00Z |
 |---|---|---|---|---|
-| **#1234** | **thorfinn** | **H78 LION-BETA1-MOMENTUM** | **Optimizer momentum** | **EP10 6.061% A WIN LOCKED, terminal ~12:24Z** |
-| #1242 | alphonse | H82 WEIGHT-DECAY-EXPANSION (NEW) | Regularization (param-side) | Just assigned |
-| #1240 | frieren | H81 LION-BETA2-EXPANSION (NEW) | Optimizer momentum | Just assigned |
+| **#1234** | **thorfinn** | **H78 LION-BETA1-MOMENTUM** | **Optimizer momentum** | **EP11 6.057% A WIN LOCKED, terminal ~12:24Z (~25 min away)** |
+| #1243 | nezuko | H83 GRAD-CLIP-EXPANSION (NEW) | Optimization-control | Just assigned |
+| #1242 | alphonse | H82 WEIGHT-DECAY-EXPANSION | Regularization (param-side) | Just assigned |
+| #1240 | frieren | H81 LION-BETA2-EXPANSION | Optimizer momentum | Just assigned |
 | #1236 | fern | H80 EMA-DECAY-EXTENSION | EMA composition | EP5 (EMA-shadow trajectory healthy, EP6 first informative) |
 | #1235 | tanjiro | H79 DROPOUT-INTRODUCTION | Regularization (activation-side) | EP8 6.512% (descending, dropout sig confirmed) |
-| #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Loss-curvature (vol_p) | Mid-EP — pending |
 | #1232 | askeladd | H76 SLICES-192-ISOLATION | Routing capacity | Mid-EP — pending |
 | #1229 | edward | H73 CHARBONNIER-TAU-Z | Loss-curvature (τz) | Mid-EP — pending |
 
