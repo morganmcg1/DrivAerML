@@ -1,9 +1,39 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:35 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟡 ~12:45Z (2026-05-21) — H78 LION-β1-MOMENTUM-EXPANSION CLOSED B PARTIAL (cleanest val_abupt A WIN of Wave 32 but test_SP MISS floor blocks merge) + thorfinn reassigned H85 LR-MAGNITUDE-EXPANSION (PR #1245)
+
+**Closure: PR #1234 H78 (thorfinn) — B PARTIAL: val_abupt 6.0570% CLEARS merge gate by −0.069pp (cleanest Wave 32 win, A WIN on val gate) BUT test_SP 3.7190% MISSES floor by +0.142pp (blocks merge per AND-gate contract); test_VP 3.4685% CROSSES floor by −0.175pp (DEEPEST WAVE 31/32 test_VP CROSS)**
+
+H78 is the **most informative single-flag result of entire Wave 32 to date**:
+- val_abupt 6.0570% (best EP11) — cleanest A WIN of Wave 32, first single-flag delta to clear merge gate cleanly
+- test_VP 3.4685% — deepest test_VP cross of ANY single-mech or compound variant in Wave 31/32 (beats H76 −0.095, H59 −0.091, H65 −0.055)
+- test_SP 3.7190% — MISSES floor by +0.142pp (blocks merge)
+- test_WSS 6.8304% (+0.103pp above goal)
+- test_abupt 5.9033% (+0.059pp val→test slope flip)
+
+**β1 mechanism CONFIRMED** as first real Lion-side lever in entire Wave 31/32. Mechanism characterized: 20-step direction window damps EP1 cold-start (+6.46pp slower), compresses descent EP2-EP8 (~2 epochs faster), penetrates late-tail plateau (11/12 epochs set new best), cosine bottom-out at EP11 confirmed.
+
+**Head-specific gradient-smoothing tradeoff DOCUMENTED**:
+- VP head wins decisively (spatially-smooth gradients benefit from wider momentum integration)
+- SP head loses (high-frequency near-wall variations lose detail from over-smoothing)
+- WSS head val-improves but test-regresses (val→test slope inversion)
+
+**Why CLOSE not MERGE**: Per CLAUDE.md "Test floors: test_VP ≤ 3.643% AND test_SP ≤ 3.577%" AND-gate, H78 misses test_SP. Per program.md "do not hide regressions behind a single averaged number", merging would lock-in test_SP 3.719 as new baseline = paper-facing regression from current SOTA 3.577. Despite val_abupt CLEAR, the test-side is net-negative on 3 of 4 axes.
+
+**Reassignment: thorfinn → H85 LR-MAGNITUDE-EXPANSION (PR #1245)**
+
+**FIRST-EVER LR magnitude sweep** in entire Wave 31/32 fleet history. Single-flag `--lr 9e-5 → 1.2e-4` (+33%) on PURE baseline #972 substrate. LR has been load-bearing at 9e-5 across the ENTIRE campaign — never tested whether this is the sweet spot or if we're under-tuned. Lion paper (Chen et al 2023) recommends `--lr 3e-4` default — our 9e-5 is at 30% of recommended range. H85 takes a conservative 33% step toward Lion's range without going all the way to 3e-4 (which risks Lion sign-update overshoot at bs=4).
+
+**H85 completes Wave 32 Tier-2 plateau-protocol axis coverage**: loss reformulation (H68/H73/H74/H77), capacity (H76/H84), optimizer momentum (H78/H81), regularization (H79/H82), EMA composition (H80), gradient control (H83), LR magnitude (H85). Every canonical Tier-2 optimization-control axis is now under empirical test.
+
+Orthogonal to all 7 other in-flight Wave 32 axes (H73 Charbonnier-τz, H79 dropout, H80 EMA, H81 β2, H82 weight_decay, H83 grad-clip, H84 RFF).
+
+**Fleet status: 8/8 WIP, zero idle GPUs.** New WIP: alphonse(H82), askeladd(H84), edward(H73), fern(H80), frieren(H81), nezuko(H83), tanjiro(H79), thorfinn(H85).
 
 ## 🟡 ~12:30Z (2026-05-21) — H76 SLICES-192-ISOLATION CLOSED B PARTIAL (paper-positive test_VP cross −0.095pp, deepest in Wave 31/32) + askeladd reassigned H84 RFF-NUM-FEATURES-EXPANSION (PR #1244)
 

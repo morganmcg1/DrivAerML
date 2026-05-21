@@ -1,3 +1,89 @@
+## 2026-05-21 12:45 — PR #1234: H78 LION-BETA1-MOMENTUM-EXPANSION (thorfinn, CLOSED) — **OUTCOME B PARTIAL** — val_abupt A WIN cleared by −0.069pp (cleanest Wave 32 val gate) BUT test_SP MISS floor +0.142pp blocks merge; test_VP CROSSES BY −0.175pp (DEEPEST IN ENTIRE WAVE 31/32)
+
+- **Branch**: `thorfinn/h78-lion-beta1-momentum-expansion` (closed at 12:45Z)
+- **W&B run**: `9if9s43r` (EP13 step 70,652, 13.96h training time, all 8 ranks finished, peak 83.8 GB)
+- **Hypothesis**: Single-flag `--lion-beta1 0.9 → 0.95` on PURE baseline #972 substrate. First-ever Lion momentum-direction sweep in entire Wave 31/32. β1 controls direction-smoothing window (~10→20 steps).
+
+### Terminal metrics (EP11 best EMA checkpoint, full test eval inline)
+
+| Channel | **H78** | BL #972 ref | Δ vs BL #972 | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.0570%** | 6.126% | **−0.069** ✅ | **CLEARS merge gate** |
+| val_VP | 3.520% | 3.798% | **−0.278** ✅ | deep val_VP improvement |
+| val_SP | 3.993% | ~3.80% est | +0.19 | regression |
+| val_WSS | 6.870% | ~6.94% est | −0.07 | mild improvement |
+| **test_abupt** | **5.9033%** | 5.844% | **+0.059** | ⚠️ val→test slope flip |
+| **test_VP (floor 3.643)** | **3.4685%** | 3.643% | **−0.175** ✅ | **DEEPEST WAVE 31/32 test_VP CROSS** |
+| **test_SP (floor 3.577)** | **3.7190%** | 3.577% | **+0.142** ❌ | **MISSES floor (blocks merge)** |
+| test_WSS (goal 6.727) | 6.8304% | 6.727% | +0.103 ❌ | above goal |
+| test_WSS_x | 6.073% | — | — | — |
+| test_WSS_y | 7.393% | — | — | — |
+| test_WSS_z (binding) | 8.863% | ~8.75% est | +0.11 | binding axis still hardest |
+
+### Comparison to AB-UPT public reference (per program.md)
+
+| Target | AB-UPT | H78 | Δ vs SOTA |
+|---|---:|---:|---:|
+| test_SP / p_s | 3.76 | 3.719 | ✅ beats SOTA by −0.041 |
+| test_VP / p_v | 6.08 | **3.469** | ✅✅ **crushes SOTA by −2.611** |
+| test_WSS / tau | 7.29 | 6.830 | ✅ beats SOTA by −0.460 |
+| test_WSS_z / tau_z | 3.63 | 8.863 | ❌ +5.23 above (binding axis far from SOTA) |
+
+### Per-epoch trajectory (cleanest Wave 32 monotonic descent, EP11 bottom)
+
+| EP | step | val_abupt | val_SP | val_VP | val_WSS | Δ_abupt | slope/1K |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| EP1 | 10,864 | 26.95 | 19.79 | 14.42 | 30.66 | — | (warmup) |
+| EP3 | 32,594 | 6.482 | 4.324 | 3.745 | 7.345 | −0.667 | −0.0613 |
+| EP6 | 48,902 | 6.131 | 4.069 | 3.581 | 6.940 | −0.0554 | −0.0102 |
+| EP9 | 59,780 | 6.070 | 4.007 | 3.536 | 6.879 | −0.0123 | −0.00338 |
+| **EP11** | **65,222** | **6.0570** | **3.9932** | **3.5195** | **6.8703** | **−0.0036** | **−0.00132** |
+| EP12 | 67,943 | 6.0575 | 3.9924 | 3.5214 | 6.8706 | +0.0005 | +0.00017 (flat) |
+| EP13 | 70,652 | 6.0619 | 3.9931 | 3.5302 | 6.8804 | +0.0044 | (cosine bottom rebound) |
+
+EP11 was global val_abupt best; EP12/13 plateaued and rebounded slightly (true cosine bottom-out). EMA-best (EP11) used for test eval. 11/12 epochs set new best_checkpoint — strongest sustained descent of any Wave 32 experiment.
+
+### Mechanism characterization (H78 is the most informative single-flag result of Wave 32)
+
+**β1 0.9→0.95 worked exactly as theory predicted:**
+1. **EP1 cold-start damped**: 26.95% vs baseline 20.49% (+6.46pp slower at EP1) — 20-step momentum window damps initial gradient direction signal as theory predicts
+2. **EP2 onward overshot baseline**: EP4 6.243% ≈ baseline EP6 6.312% (gradient-EMA integration compresses descent by ~2 epochs)
+3. **Late-tail plateau penetration**: 11/12 val gates set new best; descent continued past baseline's EP8-9 saturation point
+4. **Cosine bottom-out at EP11**: monotonic slope decay then flatlines (EP11→EP12 +0.0005) then rebounds (EP12→EP13 +0.0044) — true cosine descent exhaustion
+
+**Head-specific gradient-smoothing tradeoff DOCUMENTED**:
+- VP head wins decisively (test_VP -0.175pp DEEPEST WAVE 31/32) — volume-pressure gradients are spatially smooth, benefits from wider momentum integration
+- SP head loses (test_SP +0.142pp MISS floor) — surface-pressure has high-frequency near-wall variations, over-smoothing loses detail signal
+- WSS head val-improves but test-regresses — val→test slope inversion suggests overfitting to val WSS distribution via smoother trajectory
+
+### Why CLOSE not MERGE — per program.md strict contract
+
+Per CLAUDE.md "Test floors: test_VP ≤ 3.643% **AND** test_SP ≤ 3.577%" — AND-gate. H78 misses test_SP by +0.142pp → not mergeable. Per program.md "do not hide regressions behind a single averaged number" — test_abupt regresses (+0.059pp) and 3 of 4 test channels regress despite val_abupt improvement. Merging H78 would lock-in test_SP 3.719 as new baseline = paper-facing regression from current SOTA 3.577.
+
+### Wave 32 test_VP floor-crossers — H78 takes top position
+
+| H | Substrate | LR-fix? | val_abupt | test_VP | Δ floor | Notes |
+|---|---|---|---:|---:|---:|---|
+| H26 (merged baseline #972) | base | no | 6.126% | 3.643% | floor | — |
+| H59 (#1206) | V-DEPTH + LR-fix | yes | 6.282% | 3.552% | −0.091 | val MISS, multi-flag |
+| H65 (#1214) | SURF-DEEP + LR-fix | yes | 6.234% | 3.588% | −0.055 | val MISS, multi-flag |
+| H76 (#1232) | SLICES-192 NO LR-fix | NO | 6.293% | 3.548% | −0.095 | val MISS, single-flag |
+| **H78 (#1234)** | **β1=0.95 NO LR-fix** | **NO** | **6.057%** | **3.469%** | **−0.175** | **val CLEAR + test_SP MISS, single-flag** |
+
+H78 is the **deepest test_VP floor cross of any Wave 31/32 variant** (compound or single-flag) — AND achieves val_abupt CLEAR. Two paper-facing positives. The merge block is solely test_SP.
+
+### Strategic implications
+
+1. **β1 axis CONFIRMED** as first real Lion-side lever in Wave 31/32 history. Mechanism characterized for both val (helps) and test (mixed head-specific tradeoff).
+2. **β1=0.92 mid-point** (student's #1 suggestion) PARKED for Wave 33 — would investigate test_SP cost curve, but H81 β2 axis needs to land first for Lion characterization completeness.
+3. **β1=0.95 + axis-X composition** is the natural Wave 33 strategy — pair with an axis that recovers test_SP (e.g., dropout if H79 is positive, or weight_decay if H82 is positive, or future loss-weight rebalance).
+4. **val→test slope inversion is now a documented pattern** across Wave 32 (H74, H75, H76, H78). The 34-case val split may be too small to reliably reflect test generalization in the 6.0-6.3% val_abupt range. Multi-seed confirmation would clarify.
+5. **Loss-reformulation class still exhausted** (H68, H74, H77 D NEG; H73 in flight) — H78 confirms optimizer-momentum is the productive axis class for Wave 32+.
+
+Thorfinn reassigned **H85 LR-MAGNITUDE-EXPANSION** (PR #1245) — single-flag `--lr 9e-5 → 1.2e-4` (+33% LR). **First-ever LR magnitude sweep in entire Wave 31/32 fleet** (LR has been load-bearing at 9e-5 across the entire campaign). Lion paper recommends 3e-4 default — our 9e-5 is at 30% of recommended range. Plateau-protocol Tier-2 optimization-step-size axis, **completing Tier-2 axis coverage**: loss reformulation (H68/H73/H74/H77), capacity (H76/H84), optimizer momentum (H78/H81), regularization (H79/H82), EMA composition (H80), gradient control (H83), and now LR magnitude (H85). Orthogonal to all 7 other in-flight axes.
+
+---
+
 ## 2026-05-21 12:30 — PR #1232: H76 SLICES-192-ISOLATION (askeladd, CLOSED) — **OUTCOME B PARTIAL (paper-positive)** — val_abupt MISS gate +0.167pp BUT test_VP CROSSES FLOOR by −0.095pp (deepest Wave 31/32 test_VP cross of any single-mech variant)
 
 - **Branch**: `askeladd/h76-slices-192-isolation` (closed at 12:30Z)
