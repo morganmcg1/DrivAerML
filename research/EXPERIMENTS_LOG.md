@@ -2600,6 +2600,31 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 - **Protocol note:** PR was flipped to status:review without posting SENPAI-RESULT comment. Test metrics recovered from W&B run summary directly.
 - **CLOSED 2026-05-14.**
 
+## 2026-05-21 05:30Z — PR #1216: H21 clamp=0.15 on H19 base (dl24-frieren)
+
+- **Branch:** `dl24-frieren/h21-h19-plus-clamp-015`
+- **Student:** dl24-frieren
+- **W&B Run:** `xcj9749y`
+- **Hypothesis:** H19 (wave-best wss) + GradNorm clamp=0.15 on vol_p — direct vol_p floor fix on wave-best wss base, predicted clamp pulls budget from τ_z (over-provisioned).
+
+| Metric | SOTA #972 | H19 `r5eigmer` | H21 `xcj9749y` | Δ vs SOTA | Δ vs H19 |
+|--------|----:|----:|----:|----:|----:|
+| test_abupt | **5.844%** | 5.820% | **5.832%** | **−0.012pp ✅ BEATS SOTA** | +0.012pp ~tie |
+| test_wss | 6.727% | **6.634%** | 6.730% | +0.003pp ❌ (essentially tied) | +0.096pp |
+| test_vol_p | **3.643%** | 3.779% | **3.579%** | **−0.064pp ✅⭐ CLEARS FLOOR (first in wave)** | **−0.200pp ⭐** |
+| test_surf_p | **3.577%** | 3.627% | 3.679% | +0.102pp ❌ (breach) | +0.052pp |
+| test_τ_x | — | 5.891% | 6.035% | — | +0.144pp ❌ |
+| test_τ_y | 7.362% | 7.172% | 7.236% | −0.126pp ✅ vs SOTA | +0.064pp vs H19 |
+| test_τ_z | 8.747% | 8.630% | 8.630% | −0.117pp ✅ vs SOTA | ~tie vs H19 |
+
+- **Best epoch:** EP17 (val_abupt=6.230)
+- **Outcome:** **NOT a contract winner** (Issue #1056 AND-clause): wss tied with SOTA (+0.003pp), surf_p breaches floor (+0.102pp). BUT vol_p floor CLEARED — first in wave (−0.064pp sub-floor). Major mechanism validation. CLOSED.
+- **Critical mechanism diagnostic:** Terminal GradNorm weights show clamp's vol_p budget came from **τ_x (w 0.75) and cp (w 0.64)**, NOT from τ_z (w 1.99, actually rose +0.14 vs H19). The "orthogonal composition with τ_z" hypothesis was approximately but not exactly correct — Charb-on-vol_p+curvature-attention reshapes the loss-ratio landscape such that GradNorm's revealed-preference for budget reallocation is cp+τ_x.
+- **Strategic insight for wave:** Lighter clamp (0.10) may preserve most vol_p win (since val_vol_p trajectory was flat EP15→EP30) while restoring surf_p floor + wss SOTA-tie. Test as H27 (frieren reassigned).
+- **CLOSED 2026-05-21.**
+
+---
+
 ## 2026-05-21 04:57Z — PR #1218: H23 Charb on τ_y,z (dl24-tanjiro)
 
 - **Branch:** `dl24-tanjiro/h23-h19-charb-tau-y`
