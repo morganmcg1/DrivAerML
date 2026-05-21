@@ -2600,6 +2600,32 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 - **Protocol note:** PR was flipped to status:review without posting SENPAI-RESULT comment. Test metrics recovered from W&B run summary directly.
 - **CLOSED 2026-05-14.**
 
+## 2026-05-21 04:57Z — PR #1218: H23 Charb on τ_y,z (dl24-tanjiro)
+
+- **Branch:** `dl24-tanjiro/h23-h19-charb-tau-y`
+- **Student:** dl24-tanjiro
+- **W&B Run:** `zq1czmdu`
+- **Hypothesis:** Extend H19's Charb to a second wss axis (τ_y in addition to τ_z) to deepen wss reduction via multi-axis robust-L1 pressure.
+
+| Metric | SOTA #972 | H19 `r5eigmer` | H23 `zq1czmdu` | Δ vs SOTA | Δ vs H19 |
+|--------|----:|----:|----:|----:|----:|
+| test_abupt | **5.844%** | 5.820% | 5.933% | +0.089pp ❌ | +0.113pp ❌ |
+| test_wss | 6.727% | **6.634%** | 6.774% | +0.047pp ❌ | +0.140pp ❌ |
+| test_vol_p | **3.643%** | 3.779% | 3.909% | +0.266pp ❌ (breach) | +0.130pp ❌ |
+| test_surf_p | **3.577%** | 3.627% | 3.689% | +0.112pp ❌ (breach) | +0.062pp ❌ |
+| test_τ_x | — | 5.891% | 6.066% | — | +0.175pp ❌ |
+| test_τ_y | 7.362% | **7.172%** | 7.221% | −0.141pp ✅ (vs SOTA) | +0.049pp ❌ |
+| test_τ_z | 8.747% | **8.630%** | 8.778% | +0.031pp ❌ | +0.148pp ❌ |
+
+- **Best epoch:** EP21 (val_abupt=6.2818)
+- **Outcome:** **NOT a contract winner** (Issue #1056). All 4 primary test metrics regress vs SOTA AND vs H19. Anti-additive on both wss and vol_p (both negative cells of the falsification matrix triggered). CLOSED.
+- **Mechanism falsification:** Charb is single-axis at best. Adding τ_y Charb on top of τ_z Charb did not produce a budget split (the PR predicted GradNorm would redistribute); instead BOTH w_τ_y AND w_τ_z rose above H19's w_τ_z=1.828, taking gradient budget from w_cp (−0.074) and w_τ_x (−0.032). This collateral starvation explains why test_surf_p (+0.062 vs H19) and test_τ_x (+0.175 vs H19) regressed.
+- **Saturation insight:** Charb-under-GradNorm appears to saturate at ~1 surface wss axis. The H19 single-axis Charb_τ_z remains the wss-axis Charb mechanism of record.
+- **Strategic implication:** Path to deeper wss must come from non-Charb-multi-axis levers — candidates are curvature-attention extensions, surface re-weighting (now testing as H26), or per-axis ε in the Charb.
+- **CLOSED 2026-05-21.**
+
+---
+
 ## 2026-05-21 04:45Z — PR #1217: H22 MAE_aux on H19 base (dl24-nezuko)
 
 - **Branch:** `dl24-nezuko/h22-h19-plus-maeaux`
