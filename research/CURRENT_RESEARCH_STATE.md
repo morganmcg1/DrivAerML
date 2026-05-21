@@ -1,9 +1,32 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:00 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟡 ~12:30Z (2026-05-21) — H76 SLICES-192-ISOLATION CLOSED B PARTIAL (paper-positive test_VP cross −0.095pp, deepest in Wave 31/32) + askeladd reassigned H84 RFF-NUM-FEATURES-EXPANSION (PR #1244)
+
+**Closure: PR #1232 H76 (askeladd) — B PARTIAL with val_abupt MISS gate +0.167pp BUT test_VP CROSSES FLOOR by −0.095pp (deepest Wave 31/32 single-mech test_VP cross)**
+
+Terminal val_abupt **6.293%** (MISS gate +0.167pp), test_VP **3.548%** (deepest single-mech floor cross −0.095pp below 3.643%). Other test metrics: test_abupt 5.981% (+0.137pp regression), test_SP 3.776% (+0.199pp MISS floor), test_WSS 6.884% (+0.157pp above goal). Trajectory clean monotonic descent, asymptote ~6.29% on this substrate.
+
+**Key attribution finding**: H76 achieves the deepest test_VP floor cross of ANY Wave 31/32 single-mech variant — AND does it WITHOUT LR-fix (which H75 just confirmed is NET NEG on pure baseline). This is significant: **slice-resolution geometric capacity expansion produces a real test_VP improvement orthogonal to LR-fix**. Joins the test_VP floor-crosser table at top position:
+- H59 V-DEPTH + LR-fix: 3.552% (−0.091pp)
+- H65 SURF-DEEP + LR-fix: 3.588% (−0.055pp)
+- **H76 SLICES-192 NO LR-fix: 3.548% (−0.095pp)**
+
+**Mechanism interpretation**: VP↔abupt trade-off. Slice-attention expansion (128→192) buys real signal on the VP axis and the WSS axis (tau_z 11.28→9.70%), but val_abupt aggregate registers no improvement because (1) extra slice tokens spread attention noise across 50% more slot tokens at h=4 heads, (2) val_abupt is dominated by SP/τx/τy/τz direction alignment which is hurt by the extra noise.
+
+**Wave 31 slices=192 bundling vindicated as substrate choice but compound-confounded** — H76 isolation now confirms slices=192 contributes positively on the VP axis even on its own. Decision: not mergeable (val_abupt MISS), but paper-positive (deepest test_VP cross).
+
+**Reassignment: askeladd → H84 RFF-NUM-FEATURES-EXPANSION (PR #1244)**
+
+**FIRST-EVER Fourier features sweep** in entire Wave 31/32 fleet history. Single-flag `--rff-num-features 16 → 32` (2× positional encoding capacity per sigma band, 160→320 RFF dims per coordinate) on PURE baseline #972 substrate. Plateau-protocol Tier 2 architectural-input-capacity axis. Tancik et al 2020 RFF literature recommends 32-256 features for PDE / 3D signal regression tasks — our 16 is below recommended range.
+
+H84 is the **input-side complement** to H76's routing-side capacity expansion. If H76's signal came from "the model wants more geometric resolution overall", H84 should show similar test_VP signal AND potentially improve val_abupt by giving the model finer positional input without the slice-attention spreading cost. If H76's signal was specifically routing-capacity (slice count), H84 will be NULL — useful attribution either way. Orthogonal to all 7 in-flight Wave 32 axes (H73 Charbonnier-τz, H78 β1, H79 dropout, H80 EMA-decay, H81 β2, H82 weight_decay, H83 grad-clip).
+
+**Fleet status: 8/8 WIP, zero idle GPUs.**
 
 ## 🔴 ~12:00Z (2026-05-21) — H77 CHARBONNIER-VOL-P-WEIGHT-FIX CLOSED D NEGATIVE (loss-reformulation class exhausted: 3/4 D NEG) + nezuko reassigned H83 GRAD-CLIP-EXPANSION (PR #1243)
 

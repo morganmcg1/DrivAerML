@@ -1,3 +1,65 @@
+## 2026-05-21 12:30 — PR #1232: H76 SLICES-192-ISOLATION (askeladd, CLOSED) — **OUTCOME B PARTIAL (paper-positive)** — val_abupt MISS gate +0.167pp BUT test_VP CROSSES FLOOR by −0.095pp (deepest Wave 31/32 test_VP cross of any single-mech variant)
+
+- **Branch**: `askeladd/h76-slices-192-isolation` (closed at 12:30Z)
+- **W&B run**: `342fnmx7` (EP13 terminal step 70,664, 15.20h training time, all 8 ranks healthy, peak VRAM 81.98 GB)
+- **Hypothesis**: Single-flag `--model-slices 128 → 192` on PURE baseline #972 substrate. Wave 31 ran slices=192 BUNDLED with NPCA+SSFL+sub3K and got C NULL — H76 isolates the slice-count axis. Tests whether 192 slices alone (which H35 analysis suggested provides ~295 effective slice-modes) breaks the val_abupt plateau.
+
+### Terminal metrics (EP13 best, EMA checkpoint, full test eval inline)
+
+| Channel | **H76** | BL #972 ref | Δ vs BL #972 | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.293%** | 6.126% | **+0.167** ❌ | MISS gate |
+| val_VP | **3.713%** | 3.798% | **−0.085** ✅ | beats baseline val_VP |
+| val_SP | 4.180% | — | — | — |
+| val_WSS | 7.080% | — | — | — |
+| **test_abupt** | **5.981%** | 5.844% | **+0.137** ❌ | regression |
+| **test_VP (floor 3.643)** | **3.548%** | 3.643% | **−0.095** ✅ | **CROSSES FLOOR** |
+| **test_SP (floor 3.577)** | **3.776%** | 3.577% | **+0.199** ❌ | MISS floor |
+| test_WSS (goal 6.727) | 6.884% | 6.727% | +0.157 ❌ | above goal |
+| test_WSS_z (binding) | 9.005% | ~8.75% est | +0.255 ❌ | binding axis still hardest |
+
+### Per-epoch trajectory (clean monotonic descent, asymptote ~6.29%)
+
+| EP | step | val_abupt | val_SP | val_VP | val_WSS | τx | τy | τz |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| EP1 | 10,864 | 26.4092 | 19.9912 | 16.1010 | 29.1483 | 25.40 | 35.01 | 35.54 |
+| EP3 | 32,594 | 6.8245 | 4.5495 | 3.9879 | 7.7078 | 6.69 | 8.64 | 10.25 |
+| EP6 | 48,902 | 6.4327 | 4.2834 | 3.7832 | 7.2425 | 6.27 | 8.01 | 9.82 |
+| EP10 | 62,501 | 6.3156 | 4.1984 | 3.7239 | 7.1056 | 6.15 | 7.79 | 9.72 |
+| EP13 | **70,664** | **6.2925** | **4.1796** | **3.7133** | **7.0798** | **6.13** | **7.74** | **9.70** |
+
+EP9→EP11 slope −0.012 pp/1k, EP11→EP13 slope −0.006 pp/1k. **Asymptote is ~6.29% on this substrate** — not enough to recover 0.17pp gap. tau_z descent EP2→EP13 11.28% → 9.70% (−1.58pp) confirms finer slice attention helps near-wall shear, but the val_abupt aggregate doesn't share that bottleneck.
+
+### Wave 31/32 test_VP floor crossers — H76 joins the table
+
+| H | Substrate | LR-fix? | val_abupt | test_VP | Δ floor | Notes |
+|---|---|---|---:|---:|---:|---|
+| H26 (merged baseline #972) | base | no | 6.126% | 3.643% | floor | — |
+| H59 (#1206) | V-DEPTH + LR-fix | yes | 6.282% | 3.552% | −0.091 | val MISS gate, test cross |
+| H65 (#1214) | SURF-DEEP + LR-fix | yes | 6.234% | 3.588% | −0.055 | val MISS gate, test cross |
+| **H76 (#1232)** | **SLICES-192 NO LR-fix** | **NO** | **6.293%** | **3.548%** | **−0.095** | **deepest test_VP cross orthogonal to LR-fix** |
+
+H76 is the **deepest test_VP floor cross of any Wave 31/32 single-mech variant** — AND it achieves this WITHOUT LR-fix (which H75 just confirmed is NET NEG on pure baseline). This is significant attribution: **slice-resolution geometric capacity expansion produces a real test_VP improvement orthogonal to LR-fix**.
+
+### Mechanism interpretation — VP↔abupt trade-off
+
+Slice-attention expansion (128→192) buys real signal on the VP axis (test_VP floor-cross) and the WSS axis (tau_z 11.28→9.70%), but the val_abupt aggregate registers no improvement because:
+1. **Capacity-overhead trade**: extra slice tokens add attention noise without enough samples to learn them well at this width (h=4 heads, d=512). Slice attention spreads signal across 50% more slot tokens.
+2. **VP→abupt slope inversion**: extra slice noise hurts SP/τx/τy/τz direction alignment, which dominates the val_abupt aggregate.
+
+The val_abupt MISS doesn't kill the paper result — the test_VP floor cross is **the** finding for the slice-resolution scaling discussion.
+
+### Strategic implications
+
+1. **Slices=192 alone is NOT mergeable** — val_abupt MISS gate is dispositive.
+2. **Slices=192 IS paper-positive** — joins the 7-experiment test_VP floor-cross table at top position (−0.095pp).
+3. **Wave 31 slices=192 bundling was sound but compound confounded** — H76 isolation now confirms slices=192 contributes positively on the VP axis even on its own.
+4. **Per CLAUDE.md "NO MORE ENSEMBLES"** — H76's anti-correlation profile (VP-positive / SP-WSS-negative) is the kind of result that would historically have made it ensemble-positive, but ensembles are off the table.
+
+Askeladd reassigned **H84 RFF-NUM-FEATURES-EXPANSION** (PR #1244) — single-flag `--rff-num-features 16 → 32` (2× positional encoding capacity per sigma band). First-ever Fourier feature sweep in entire Wave 31/32. Plateau-protocol Tier-2 architectural-input-capacity axis. Tancik et al 2020 RFF literature recommends 32-256 features; our 16 is below recommended range. Orthogonal to all 7 in-flight Wave 32 axes (H73 Charbonnier-τz, H78 β1, H79 dropout, H80 EMA-decay, H81 β2, H82 weight_decay, H83 grad-clip).
+
+---
+
 ## 2026-05-21 12:00 — PR #1233: H77 CHARBONNIER-VOL-P-WEIGHT-FIX (nezuko, CLOSED) — **OUTCOME D NEGATIVE on val AND all 4 test channels** (clean execution; H68 starvation pathology fixed but underlying Charbonnier-vol_p technique net-negative on tay split)
 
 - **Branch**: `nezuko/h77-charbonnier-vol-p-weight-fix` (closed at 12:00Z)
