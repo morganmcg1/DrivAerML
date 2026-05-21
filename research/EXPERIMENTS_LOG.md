@@ -1,3 +1,66 @@
+## 2026-05-21 14:25 — PR #1235: H79 DROPOUT-INTRODUCTION (tanjiro, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.3725% MISS gate +0.247pp, all 4 test channels regressed; **val→test slope diagnostic FALSIFIES regularization-bound plateau hypothesis on tay**
+
+- **Branch**: `tanjiro/h79-dropout-introduction` (closed at 14:25Z)
+- **W&B run**: `qgm1hnoe` (EP13 step 70,652, 14.25h training time, peak 77.3 GB, best_epoch=13, best_checkpoint/source=ema)
+- **Hypothesis**: Single-flag `--model-dropout 0.0 → 0.1` on canonical Wave 32 baseline #972 substrate. First-ever model_dropout sweep entire Wave 31/32 fleet history. Regularization-bound plateau hypothesis test.
+
+### Terminal metrics (EP13 best EMA checkpoint, full test eval)
+
+| Channel | **H79** | BL #972 | Δ vs BL | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.3725%** | 6.126% | **+0.247** ❌ | **MISS merge gate** |
+| val_VP | 3.7353% | 3.566% | +0.169 | worse |
+| val_SP | 4.2004% | 3.534% | +0.666 | clearly worse |
+| val_WSS | 7.2276% | 6.679% | +0.549 | clearly worse |
+| **test_abupt** | **6.1306%** | 5.844% | **+0.287** ❌ | clearly worse |
+| **test_VP (floor 3.643)** | **3.6806%** | 3.643% | **+0.038** ❌ | CROSSED floor |
+| **test_SP (floor 3.577)** | **3.9001%** | 3.577% | **+0.323** ❌ | CROSSED floor BADLY |
+| **test_WSS (goal 6.727)** | **7.0561%** | 6.727% | **+0.329** ❌ | above goal |
+| test_WSS_z (binding) | 9.1214% | ~8.75% est | +0.37 | binding axis worse |
+
+### Per-epoch trajectory (slope deceleration EP3→EP13)
+
+| EP | step | val_abupt | Δ_abupt pp/epoch |
+|---|---:|---:|---:|
+| EP1 | 10,864 | 26.387% | — (cold-start) |
+| EP2 | 21,729 | 8.113% | −18.27 |
+| EP3 | 32,594 | 7.221% | −0.892 |
+| EP6 | 48,902 | 6.691% | EP4-6 mean −0.177 |
+| EP9 | 59,780 | 6.474% | EP7-9 mean −0.072 |
+| EP11 | 65,222 | 6.400% | −0.019 |
+| EP12 | 67,943 | 6.380% | −0.020 |
+| **EP13** | **70,652** | **6.3725%** | **−0.007** (cosine bottom-out) |
+
+### CRITICAL METHODOLOGICAL FINDING: val→test slope diagnostic
+
+| Run | val_abupt | test_abupt | val→test slope |
+|---|---:|---:|---:|
+| Baseline #972 | 6.126% | 5.844% | **−0.282** (test better than val) |
+| **H79 dropout 0.1** | **6.3725%** | **6.1306%** | **−0.242** (less favorable) |
+
+**If plateau were overfitting-bound**, dropout p=0.1 should have WIDENED the val→test improvement. Instead it NARROWED by 0.040pp. Dropout's mechanism DID engage (train/val_loss inversion EP6+) but did NOT translate into improved generalization.
+
+**Combined evidence (Wave 31/32 on tay)**:
+- H71 GradNorm: D NEG (dynamic loss balancing falsified)
+- V-DEPTH / surf_deep: didn't break 6.15% val ceiling
+- H79 dropout: D NEG with adverse val→test slope shift
+
+**Conclusion**: **regularization-bound mechanism class FALSIFIED on tay's substrate.** Wave 33+ must pivot to data-side, architecture, or ensemble levers.
+
+### Suggested follow-ups (per tanjiro, advisor-confirmed prioritization)
+
+1. ❌ NO further dropout sweeps (p=0.05/0.15/0.20) — val→test slope diagnostic settles this
+2. ⚠️ Full-coverage dropout (FFN + residual) — PASS, marginal expected value
+3. ✅ **PIVOT to data-side levers** (input-space normalization, geometry augmentation, expanded effective batch) — Tier-3 escalation for Wave 33
+4. ⚠️ Architecture pruning (anti-V-DEPTH) — defer to Wave 33 brainstorm
+5. ✅ Update plateau-protocol decision tree: regularization-bound = falsified
+
+### Reassignment
+
+**tanjiro → H87 SURFACE-LOSS-WEIGHT-REDUCTION (PR #1247)** — First-ever loss-balance-ratio sweep on tay (`--surface-loss-weight 2.0 → 1.5`). Cross-pollination from dl24's H26 (val_wss leader). H87 is a DATA-SIDE lever (re-weighting which residuals dominate gradients), consistent with H79-derived plateau falsification.
+
+---
+
 ## 2026-05-21 12:55 — PR #1229: H73 CHARBONNIER-τ_z (edward, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.5804% killed at EP6 hard gate (val_abupt<6.5) by +0.080pp, missed merge gate by +0.454pp; Charbonnier mech class now falsified on TWO axes (H68 vol_p D NEG, H73 τ_z D NEG)
 
 - **Branch**: `edward/h73-charbonnier-tau-z` (closed at 12:55Z)

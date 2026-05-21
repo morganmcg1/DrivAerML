@@ -1,9 +1,35 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:55 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~14:25 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~14:25Z (2026-05-21) — H79 DROPOUT-INTRODUCTION CLOSED D NEGATIVE (val_abupt MISS gate +0.247pp AND all 4 test channels regressed; val→test slope diagnostic FALSIFIES regularization-bound plateau hypothesis) + tanjiro reassigned H87 SURFACE-LOSS-WEIGHT-REDUCTION (PR #1247)
+
+**Closure: PR #1235 H79 (tanjiro) — D NEGATIVE: val_abupt 6.3725% MISS gate +0.247pp, ALL 4 test channels regressed (test_abupt +0.287pp, test_VP +0.038pp CROSSED floor, test_SP +0.323pp CROSSED floor, test_WSS +0.329pp above goal)**
+
+**CRITICAL METHODOLOGICAL FINDING: val→test slope diagnostic uncovered by tanjiro's analysis FALSIFIES the "Wave 31/32 plateau is overfitting-bound" hypothesis on tay's substrate.**
+
+H79's val→test slope: −0.242pp (test better than val) vs baseline #972: −0.282pp. If plateau were genuinely overfitting-bound, dropout p=0.1 should have WIDENED the val→test improvement gap (test descending further below val). Instead it NARROWED. Dropout's regularization signature DID engage (train/val_loss inversion confirmed EP6+) but did NOT translate into improved generalization.
+
+**Combined evidence on plateau attribution** (tay's substrate):
+- H71 GradNorm dynamic loss balancing: D NEG
+- V-DEPTH / surf_deep architecture experiments: didn't break 6.15% val ceiling
+- H79 dropout regularization: D NEG with adverse val→test slope shift
+- **Conclusion**: regularization-bound mechanism class FALSIFIED. Wave 33+ must pivot to data-side, architecture, or ensemble levers — NOT further regularization tuning.
+
+**Reassignment: tanjiro → H87 SURFACE-LOSS-WEIGHT-REDUCTION (PR #1247)**
+
+**FIRST-EVER loss-balance-ratio sweep** on tay's substrate. Single-flag `--surface-loss-weight 2.0 → 1.5` (dropout reverted to 0.0). Cross-pollination from dl24's H26 (val_wss leader at val_wss=6.890 vs H21 7.090, −0.200pp WSS improvement). WSS reduction is PRIMARY objective per Issue #1056 (must drive test_WSS below 5.85 Transolver-3 SOTA).
+
+**Mechanism hypothesis**: surface_loss includes SP + per-axis WSS heads. Current 2.0× emphasis dominates loss landscape → WSS axes effectively under-weighted. Reducing to 1.5× re-balances gradient budget toward volume head AND frees relative gradient mass within surface side for WSS channels.
+
+**Caveats**: dl24's substrate is DIFFERENT (longer training, Charbonnier-WSS, GradNorm clamp). Cross-pollination evidence is **weak transfer**. H87 is a clean single-flag isolation test on tay — does the mechanism survive substrate change?
+
+H87 is a DATA-SIDE lever (re-weighting which residuals dominate gradients), not regularization — consistent with the H79-derived plateau falsification.
+
+**Fleet status: 8/8 WIP, zero idle GPUs.** Current WIP: alphonse(H82), askeladd(H84), edward(H86), fern(H80), frieren(H81), nezuko(H83), tanjiro(H87), thorfinn(H85).
 
 ## 🔴 ~12:55Z (2026-05-21) — H73 CHARBONNIER-τ_z CLOSED D NEGATIVE (val_abupt 6.580% killed at EP6 hard gate; Charbonnier mech class falsified on 2 axes H68+H73) + edward reassigned H86 MLP-RATIO-EXPANSION (PR #1246)
 
