@@ -8,6 +8,42 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-21 10:30 UTC — PR #1226 CLOSED: H24-v2 falsified (per-axis τ "1.0,1.2,1.5" backfires on WSS-z)
+
+- **Branch:** `dl24-fern/h24-v2-clamp015-peraxis`
+- **Run:** `j2pvm44m` (21.7h, EP30 terminal)
+- **Hypothesis:** H19 + clamp=0.15 (H21's mechanism) + per-axis τ weights "1.0,1.2,1.5" — boost τ_z gradient through the clamp's stabilized GradNorm budget to push WSS-z harder.
+
+**Test results (corrected split `rawcanon_20260511`):**
+
+| Metric | Value | vs SOTA #972 | vs H21 reference | vs H19 reference |
+|--------|------:|-------------:|-----------------:|-----------------:|
+| test_abupt | 5.94 | +0.096 regress | +0.108 regress | +0.120 regress |
+| test_wss | 6.81 | +0.083 regress | +0.080 regress | +0.176 regress |
+| test_vol_p | 3.71 | **+0.067 BREACH** ❌ | +0.131 regress | −0.069 (improvement) |
+| test_surf_p | 3.73 | **+0.153 BREACH** ❌ | +0.051 regress | +0.103 regress |
+
+**Wall shear axis components (W&B):**
+- test_τ_x = 6.05 (vs H19 5.971, **+0.08 regress**)
+- test_τ_y = 7.32 (vs H19 7.362, −0.04 marginal improvement)
+- test_τ_z = **8.88** (vs H19 8.747, **+0.13 REGRESS — opposite of intent**) ❌
+
+**Best-val checkpoint:** EP19 (selection metric val_primary/abupt_axis_mean_rel_l2_pct = 6.163, EMA source).
+
+**Mechanism diagnosis:**
+- **Counterintuitive result:** Per-axis weights "1.0, 1.2, 1.5" pushing τ_z harder produced WORSE τ_z (8.88 vs 8.747). The intent was the opposite.
+- **Why it backfires under GradNorm:** Static per-axis weights interact nonlinearly with GradNorm budget reallocation. Boosting τ_z's raw loss by 1.5× makes GradNorm see τ_z's relative training rate as needing LESS boost (it's already "loud"), so w_τ_z gets reduced in budget allocation. The static boost and dynamic GradNorm reweighting CANCEL OUT or even invert the intended effect.
+- **Comparison to H21 (clamp=0.15, no per-axis):** H21's GradNorm freely allocated budget to τ_z (w_τ_z = 1.99), achieving test_τ_z = 8.63 (H19's value). H24-v2's per-axis pre-weight broke this dynamic.
+- **Vol_p sub-floor signal preserved:** test_vol_p = 3.71 still beats H19's 3.779 by 0.069pp, confirming the clamp=0.15 mechanism remains effective for vol_p. The per-axis weights damaged the clamp's wss-side benefit, not its vol_p-side benefit.
+
+**Conclusion:** Per-axis τ weights as designed are a dead-end mechanism under GradNorm. Future per-axis interventions should either (a) bypass GradNorm entirely on the per-axis terms or (b) modify GradNorm's reference rates rather than pre-applying weights.
+
+**Process notes:**
+- Fern student loop was auth-stale (401, 168h-old creds) at terminal landing; canonical SENPAI-RESULT was posted manually from W&B by ADVISOR.
+- Fern is now idle; assigning H28 (Plateau Protocol on H19 reference) per Morgan's Issue #1056 directive.
+
+---
+
 ## 2026-05-20 11:30 UTC — PR #1220 CLOSED (misconfig + relaunch stall) → PR #1226 (H24-v2 with corrected CLI)
 
 - **Sequence:**
