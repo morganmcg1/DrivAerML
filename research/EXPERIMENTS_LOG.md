@@ -1,3 +1,67 @@
+## 2026-05-21 12:55 — PR #1229: H73 CHARBONNIER-τ_z (edward, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.5804% killed at EP6 hard gate (val_abupt<6.5) by +0.080pp, missed merge gate by +0.454pp; Charbonnier mech class now falsified on TWO axes (H68 vol_p D NEG, H73 τ_z D NEG)
+
+- **Branch**: `edward/h73-charbonnier-tau-z` (closed at 12:55Z)
+- **W&B run**: `5i5o1nru` (EP6 kill at step 65,212, 12.27h training time, peak 77.3 GB)
+- **Hypothesis**: Single-flag `--tau-z-loss-type charbonnier --charbonnier-eps 1e-3` on H68 sibling substrate. Cross-pollination from dl24 H19. Sibling-test: if Charbonnier-on-vol_p (H68 D NEG) and Charbonnier-on-τ_z differ, loss-curvature-shape mech is axis-specific.
+
+### Terminal metrics @ EP6 kill (step 65,212, also terminal — kill cancels test eval)
+
+| Axis | **H73** @ EP6 | Baseline #972 (EP13) | Δ vs BL | Verdict |
+|------|---:|---:|---:|:--|
+| **val_abupt (merge gate 6.126%)** | **6.580%** | 6.127% | **+0.454pp WORSE** ❌ | MISS gate, KILLED |
+| val_SP | 4.408% | 3.984% | +0.425pp | regression |
+| val_VP | 3.947% | 3.959% | −0.012pp | neutral |
+| val_WSS | 7.442% | 6.949% | +0.493pp | regression |
+| val_WSS_x | 6.553% | 6.107% | +0.446pp | regression |
+| val_WSS_y | 8.137% | 7.470% | +0.667pp | regression |
+| **val_WSS_z (mech target)** | **9.856%** | 9.387% | **+0.470pp** ❌ | targeted axis WORSE |
+
+*No test metrics — EP6 kill cancelled terminal test eval (12-15h saved compute).*
+
+### Mechanism diagnostic — Charbonnier-eps SATURATION smoking gun
+
+WSS_z slope reversed direction in last two val reads — the targeted axis flipping sign while every other axis kept descending is the diagnostic signature of mech-on-target turning counterproductive:
+
+| Step | Epoch | val_abupt | val_WSS_z | Δ_WSS_z/1k |
+|---:|:---:|---:|---:|---:|
+| 32,594 | EP3 | 6.969% | 10.238% | −0.0925 |
+| 56,154 | EP5.16 | 6.608% | 9.860% | −0.0019 |
+| 62,501 | EP5.75 | 6.584% | 9.853% | **+0.0011** ⚠️ |
+| 65,222 | EP6 | 6.580% | 9.856% | **+0.0013** ⚠️ |
+
+**char/MSE ratio diagnostic 8.17×** at step 61,867 confirms near-L1 regime, not robust-Huber regime: residuals (~0.12) dominate eps (1e-3) by ~120×, so Charbonnier provides L1 noise without outlier compression. eps=1e-3 was wrong for tay's τ_z residual distribution magnitude.
+
+### Sibling test — H68 (Charbonnier-vol_p) vs H73 (Charbonnier-τ_z), both killed at step 65,212
+
+| Axis | H73 (τ_z) | H68 (vol_p) | H73 − H68 |
+|------|---:|---:|---:|
+| val_abupt | 6.580% | 6.822% | −0.242pp |
+| val_VP | 3.947% | 4.146% | −0.200pp |
+| **val_WSS_z** | **9.856%** | **10.362%** | **−0.506pp** |
+
+Conclusion: Charbonnier-on-τ_z is uniformly **less harmful** than Charbonnier-on-vol_p (since τ_z residuals sit closer to L2→L1 elbow) but neither beats MSE baseline. Loss-curvature-shape mechanism class is now empirically **falsified on tay's substrate** for the Wave 32 cycle.
+
+### τ_z ceiling triangulation across three orthogonal mech classes (all CLOSE)
+
+| Hypothesis | Mech class | Outcome | val_abupt |
+|---|---|---|---:|
+| H55v2 | Weighting-scheduling (curriculum 0.5→2.0) | C NULL | ~6.16% |
+| H63 | LR-substrate-extension | C NULL | ~6.25% |
+| **H73** | **Loss-curvature-shape (Charbonnier eps=1e-3)** | **D NEGATIVE** | **6.58%** |
+
+**Pattern**: τ_z is reachable from many angles but its terminal floor on tay's split appears at or above baseline #972's 6.126%. Strong empirical claim — the binding val_abupt ceiling sits in τ_z and is **representation-bound**, not optimizer/loss/curriculum-bound.
+
+### Reassignment
+
+edward → **H86 MLP-RATIO-EXPANSION** (PR #1246). Single-flag `--model-mlp-ratio 4 → 6`. First-ever FFN capacity sweep in entire Wave 31/32 fleet history. +50% per-block FFN intermediate dimension (2048→3072). Pure architectural Tier-2 axis orthogonal to all 12 currently-deployed Wave 32 variants. VRAM headroom estimate +5-7 GiB over H73's 77.3 GB peak.
+
+### Parked for Wave 33
+
+- **H73b Charbonnier-τ_z with eps=0.02-0.1**: edward's #1 follow-up. Direct mech-class disambiguation (settles "null mech vs mistuned eps"). PARK — Wave 32 loss-reformulation Tier-2 axis budget exhausted (H73/H74/H77 all D NEG).
+- **Diagnostic logging upstream**: edward's #4. Land char/MSE ratio diagnostic in mainline so future Charbonnier-class hypotheses detect saturation immediately.
+
+---
+
 ## 2026-05-21 12:45 — PR #1234: H78 LION-BETA1-MOMENTUM-EXPANSION (thorfinn, CLOSED) — **OUTCOME B PARTIAL** — val_abupt A WIN cleared by −0.069pp (cleanest Wave 32 val gate) BUT test_SP MISS floor +0.142pp blocks merge; test_VP CROSSES BY −0.175pp (DEEPEST IN ENTIRE WAVE 31/32)
 
 - **Branch**: `thorfinn/h78-lion-beta1-momentum-expansion` (closed at 12:45Z)

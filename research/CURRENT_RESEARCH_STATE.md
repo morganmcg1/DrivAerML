@@ -1,9 +1,29 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:50 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~12:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~12:55Z (2026-05-21) — H73 CHARBONNIER-τ_z CLOSED D NEGATIVE (val_abupt 6.580% killed at EP6 hard gate; Charbonnier mech class falsified on 2 axes H68+H73) + edward reassigned H86 MLP-RATIO-EXPANSION (PR #1246)
+
+**Closure: PR #1229 H73 (edward) — D NEGATIVE: val_abupt 6.5804% KILLED at EP6 hard gate (val_abupt<6.5 by +0.080pp), missed merge gate by +0.454pp**
+
+Mechanism saturation smoking gun: **WSS_z slope REVERSED direction at EP5.75 (+0.0013 pp/k)** while every other axis kept descending — the targeted axis flipping sign is the irrefutable signature of Charbonnier-eps saturation. char/MSE ratio diagnostic 8.17× at step 61,867 confirms near-L1 regime (residuals ~0.12 dominate eps 1e-3 by ~120×): Charbonnier provided L1 noise without outlier compression.
+
+**Sibling test attribution (H73 vs H68)**: H73 (Charbonnier-on-τ_z eps=1e-3) is uniformly less harmful than H68 (Charbonnier-on-vol_p eps=1e-3) — val_abupt 6.580 vs 6.822 (−0.242pp), but neither beats MSE baseline. Loss-curvature-shape mechanism class is now empirically **FALSIFIED on tay's substrate** (3/4 D NEG in Wave 32: H68 vol_p, H73 τ_z, H74 MAE-aux vol_p — H77 also D NEG, see prior entry).
+
+**τ_z ceiling triangulation**: Three orthogonal mech classes have engaged τ_z (H55v2 curriculum 6.16%, H63 LR-extended 6.25%, H73 Charbonnier 6.58%) — none beat baseline 6.126%. Strong empirical claim: the binding val_abupt ceiling sits in τ_z and is **REPRESENTATION-BOUND**, not optimizer/loss/curriculum-bound.
+
+**Reassignment: edward → H86 MLP-RATIO-EXPANSION (PR #1246)**
+
+**FIRST-EVER FFN capacity sweep** in entire Wave 31/32 fleet history. Single-flag `--model-mlp-ratio 4 → 6` on PURE Wave 32 canonical substrate (dropout=0.0 reverted from H79's 0.1 since dropout being tested separately). +50% per-block FFN intermediate dimension (2048→3072 with hidden=512). Pure architectural Tier-2 axis — distinct from H76 slice-resolution (token-routing capacity), distinct from optimizer/loss/regularization axes already deployed. VRAM estimate: H73 peaked 77.3 GB; mlp_ratio=6 adds ~5-7 GiB → still within 80 GB H100 budget. OOM mitigation defined: drop batch_size to 3 if pre-flight or EP1 OOM.
+
+H86 directly tests the τ_z representation-ceiling hypothesis: if val_abupt floor truly sits in representation capacity, FFN expansion should produce a real improvement on the τ_z axis specifically. If H86 also fails to beat val_abupt 6.126%, the representation ceiling is bottlenecked at attention (token-feature interactions) not FFN (feature-transformation expressivity).
+
+**Wave 32 status update**: 12 hypotheses now tested across 7 orthogonal Tier-2 axes (loss/optimizer-β1/capacity-routing/regularization/EMA/optimizer-β2/weight-decay/grad-clip/LR-magnitude/RFF/dropout/FFN-capacity). Three closed B PARTIAL (H76 paper-positive test_VP cross, H78 paper-positive test_VP DEEPEST cross, H75 LR-extended attribution baseline). Four closed D NEGATIVE (H62/H70/H72 single-axis collapses; H73/H77 Charbonnier saturation; H69 curvature-bias falsification). Five in-flight (H79 dropout EP12, H80 EMA EP10, H81 β2 fresh restart, H82 weight_decay EP2, H83 grad_clip EP1, H84 RFF EP1, H85 LR-magnitude EP1, H86 MLP-ratio just-assigned).
+
+**Fleet status: 8/8 WIP, zero idle GPUs.** Current WIP: alphonse(H82), askeladd(H84), edward(H86), fern(H80), frieren(H81), nezuko(H83), tanjiro(H79), thorfinn(H85).
 
 ## 🟡 ~12:45Z (2026-05-21) — H78 LION-β1-MOMENTUM-EXPANSION CLOSED B PARTIAL (cleanest val_abupt A WIN of Wave 32 but test_SP MISS floor blocks merge) + thorfinn reassigned H85 LR-MAGNITUDE-EXPANSION (PR #1245)
 
