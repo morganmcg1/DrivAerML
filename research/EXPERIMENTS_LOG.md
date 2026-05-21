@@ -1,3 +1,61 @@
+## 2026-05-21 02:35 — PR #1223: H69 CURVATURE-ATTENTION-BIAS (fern, CLOSED) — **OUTCOME D NEGATIVE on every paper-facing axis vs H66 substrate twin**
+
+- **Branch**: `fern/h69-curvature-attention-bias-v2` (closed at 02:35Z)
+- **W&B run**: `wc9afk2u` (EP13 terminal step 70,664, ~15.0h)
+- **Hypothesis**: Add learnable per-block bias to attention proportional to local surface curvature, with curvature signal pre-computed at input. Cross-pollinated from dl24 H10b. Predicted disproportionate improvement on WSS_z axis (binding metric).
+
+### Terminal metrics (EP13 best, evaluated from best-validation-checkpoint)
+
+| Axis | **H69** | Baseline #972 | H66 substrate twin `bdbt67as` | Δ vs baseline | Δ vs H66 |
+|---|---:|---:|---:|:---:|:---:|
+| val_abupt | **6.384%** | 6.126% | 6.381% | +0.258 ❌ | +0.003 (tie) |
+| val_VP | 3.804% | 3.566% | — | +0.238 | — |
+| val_SP | 4.183% | 3.534% | — | +0.649 | — |
+| val_WSS | 7.213% | 6.679% | — | +0.534 | — |
+| test_abupt | **6.183%** | 5.844% | 6.086% | +0.339 ❌ | **+0.097 ❌** |
+| test_SP (floor 3.577) | 3.946% | 3.577% | 3.852% | +0.369 ❌ | +0.094 ❌ |
+| test_VP (floor 3.643) | 3.770% | 3.643% | 3.628% | +0.127 ❌ | +0.142 ❌ |
+| test_WSS (goal 6.727) | 7.092% | 6.727% | 7.021% | +0.365 ❌ | +0.071 ❌ |
+| test_WSS_x | 6.285% | — | 6.231% | — | +0.054 ❌ |
+| test_WSS_y | 7.719% | — | 7.666% | — | +0.053 ❌ |
+| **test_WSS_z (binding)** | **9.196%** | ~8.750% | 9.055% | +0.446 ❌ | **+0.141 ❌** |
+
+### Mech engagement (block-level alpha values from W&B)
+
+| Block | alpha (learnable scalar) | bias_abs_mean | bias_contribution | alpha grad norm |
+|---|---:|---:|---:|---:|
+| B0 (input-near) | **0.454** | 0.126 | **2.0%** | ~2e-6 |
+| B1 | 0.215 | 0.083 | 2.6% | ~2e-6 |
+| B2 | 0.081 | 0.033 | 0.9% | ~1e-6 |
+| B3 | 0.150 | 0.041 | 1.0% | ~3e-6 |
+| **B4 (output-near)** | **0.071** | 0.021 | **0.5%** | ~1e-6 |
+
+Mech ENGAGED but front-loaded usage pattern — alpha grad norms ~1-4e-6 = learnable bias effectively CONVERGED. Curvature bias is naturally most useful for input/early feature extraction (B0/B1 = 4.6% combined contribution) and ESSENTIALLY DEAD at output (B4 = 0.5%). 
+
+### Results commentary — clean falsification, wrong tier of intervention
+
+**H69 underperforms H66 (substrate twin without curvature bias) on EVERY paper-facing test axis.** The hypothesis predicted disproportionate WSS_z improvement; instead WSS_z is the axis with the LARGEST regression (+0.141pp vs H66).
+
+**Interpretation**: Curvature is naturally an early/intermediate feature gate, not an output-tier refinement signal. The model learned to use curvature for input feature extraction (where it has 2% bias contribution in B0) and ignored it at output (0.5% in B4) — exactly the opposite of what was needed for WSS_z attack. **Curvature-attention-bias class is the WRONG TIER of intervention for τz architectural ceiling.**
+
+### Mech-class binding update
+
+Wave 32 single-axis-collapse table (now 5 entries):
+
+| H | Class | LR | Outcome | Failure mode |
+|---|---|---|---|---|
+| H62 | CP-loss-weight | LR-fix | D NEG +0.216pp | Destabilizes optimizer |
+| H70 | Slice-temp-curr | LR-fix | D NEG +2.298pp | Pace mismatch |
+| H72 | Slice-temp-deep-endpoint | legacy | D NEG +5.46pp | Over-sparsification |
+| H71 | GradNorm dynamic-balance | legacy | D NEG +0.279pp | Capacity misallocation away from τz |
+| **H69** | **Curvature-attention-bias** | **legacy** | **D NEG +0.258pp** | **Front-loaded usage, wrong tier for τz attack** |
+
+### Closure verdict & next direction
+
+**D NEGATIVE** on every test axis vs both baseline and H66 substrate twin. Closing without merge. Fern reassigned **H80 EMA-DECAY-EXTENSION (PR #1236)** — single-flag `--ema-decay 0.999 → 0.9999` on PURE baseline #972 substrate. **FIRST-EVER EMA composition sweep** in entire Wave 31/32 — ema_decay=0.999 has been load-bearing across every prior experiment. Slower EMA = 10× more smoothing = eval-time EMA captures ~4 epochs of training history vs only last ~700 steps at ema=0.999. EP1 kill DROPPED per `feedback_ema_aware_kill_thresholds.md`. Plateau-protocol-tier EMA-composition escalation. Orthogonal to all 7 in-flight axes.
+
+---
+
 ## 2026-05-20 23:35 — PR #1225: H71 GRADNORM-DYNAMIC-LOSS-BALANCING (tanjiro, CLOSED) — **OUTCOME D NEGATIVE on all test metrics — clean mechanism-falsification (mech engaged but outcome regressed)**
 
 - **Branch**: `tanjiro/h71-gradnorm-dynamic-loss-balancing` (closed at 23:35Z)

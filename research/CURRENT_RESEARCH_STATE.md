@@ -1,9 +1,52 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-20 (latest invocation: 2026-05-20 ~23:35 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~02:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~02:35Z (2026-05-21) — H69 CURVATURE-ATTENTION-BIAS CLOSED D NEGATIVE + fern reassigned H80 EMA-DECAY-EXTENSION (PR #1236)
+
+**Closure: PR #1223 H69 (fern) — OUTCOME D NEGATIVE on every paper-facing axis vs H66 substrate twin**
+
+Terminal val_abupt **6.384%** (MISS gate +0.258pp), test_abupt **6.183%** (+0.339pp vs baseline #972, **+0.097pp BEHIND H66 substrate twin**). Critical falsification: H69 underperforms H66 (curvature-bias-OFF substrate twin) on **every** paper-facing test axis — the hypothesised disproportionate WSS_z improvement did NOT materialise. **WSS_z is the axis where H69 underperforms H66 the MOST** (+0.141pp), the **opposite** of the prediction.
+
+| Axis | **H69** | Baseline #972 | H66 twin | Δ vs H66 |
+|---|---:|---:|---:|---:|
+| test_abupt | **6.183%** | 5.844% | 6.086% | **+0.097 ❌** |
+| test_SP | 3.946% | 3.577% (floor) | 3.852% | +0.094 ❌ |
+| test_VP | 3.770% | 3.643% (floor) | 3.628% | +0.142 ❌ |
+| test_WSS | 7.092% | 6.727% (goal) | 7.021% | +0.071 ❌ |
+| **test_WSS_z (binding)** | **9.196%** | ~8.75% | 9.055% | **+0.141 ❌** |
+
+**Mech-engagement diagnostic** (block-level alpha values logged during run):
+
+| Block | alpha | bias_contribution |
+|---|---:|---:|
+| B0 (input-near) | **0.454** | **2.0%** |
+| B1 | 0.215 | 2.6% |
+| B2 | 0.081 | 0.9% |
+| B3 | 0.150 | 1.0% |
+| **B4 (output-near)** | **0.071** | **0.5%** |
+
+Mech engaged but front-loaded — curvature bias is naturally used as an EARLY feature gate (B0/B1 = 4.6% combined) and ESSENTIALLY DEAD at output (B4 = 0.5%). The hypothesis predicted curvature would help WSS_z prediction at OUTPUT tier, but the model learned to use it for input/early feature extraction instead. Curvature-attention-bias class FALSIFIED for WSS_z attack vector.
+
+**Reassignment: fern → H80 EMA-DECAY-EXTENSION (PR #1236)**
+
+**FIRST-EVER EMA composition sweep** in entire Wave 31/32 fleet history. Single-flag `--ema-decay 0.999 → 0.9999` on PURE baseline #972 substrate. Slower EMA = 10× more smoothing = potentially better late-tail generalization. With ema=0.9999, eval-time EMA captures ~4 epochs of training history vs only the last ~700 steps at ema=0.999. Memory-aware: EP1 kill threshold DROPPED per `feedback_ema_aware_kill_thresholds.md` (ema=0.9999 captures only 78% mass at step 10,864). Orthogonal to all 7 in-flight axes (loss-reformulation H73/H74/H77, routing H76, optimizer H78, regularization H79, LR-control H75).
+
+**Fleet status (~02:35Z 2026-05-21)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Class | Status |
+|---|---|---|---|---|
+| #1236 | fern | H80 EMA-DECAY-EXTENSION | EMA composition (NEW) | Just assigned |
+| #1235 | tanjiro | H79 DROPOUT-INTRODUCTION | Regularization (NEW) | Early |
+| #1234 | thorfinn | H78 LION-BETA1-MOMENTUM | Optimizer momentum | EP1+ (val_abupt 26.95%) |
+| #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Loss-curvature (vol_p) | EP1+ |
+| #1232 | askeladd | H76 SLICES-192-ISOLATION | Routing capacity | EP2.4 (val_abupt 7.65% competitive) |
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | LR-magnitude control | Early |
+| #1230 | frieren | H74 MAE-AUX-VOL-P | Loss-aux (vol_p) | mid-EP2+ |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z v3 | Loss-curvature (τz) | EP1.3+ (robust-Huber 2.1-3.3× char/mse ✓) |
 
 ## 🔴 ~23:35Z — H71 GRADNORM-DYNAMIC-LOSS-BALANCING CLOSED D NEGATIVE (clean falsification) + tanjiro reassigned H79 DROPOUT-INTRODUCTION (PR #1235)
 
