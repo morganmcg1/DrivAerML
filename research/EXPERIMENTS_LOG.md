@@ -2600,6 +2600,29 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 - **Protocol note:** PR was flipped to status:review without posting SENPAI-RESULT comment. Test metrics recovered from W&B run summary directly.
 - **CLOSED 2026-05-14.**
 
+## 2026-05-21 04:45Z — PR #1217: H22 MAE_aux on H19 base (dl24-nezuko)
+
+- **Branch:** `dl24-nezuko/h22-h19-plus-maeaux`
+- **Student:** dl24-nezuko
+- **W&B Run:** `rlgxm0r3`
+- **Hypothesis:** H19 (wave-best wss) + vol_p MAE_aux=0.05 — L1 auxiliary loss on vol_p injected additively outside GradNorm budget to lift vol_p floor while preserving H19's wss gains.
+
+| Metric | SOTA #972 (`zxnhtagj`) | H19 `r5eigmer` (wave-best wss) | H22 `rlgxm0r3` | Δ vs SOTA |
+|--------|----:|----:|----:|----:|
+| test_abupt | **5.844%** | 5.820% | 5.872% | +0.028pp ❌ |
+| test_wss | 6.727% | **6.634%** | 6.681% | **−0.046pp ✅ (beats SOTA)** |
+| test_vol_p | **3.643%** (floor) | 3.779% | 3.800% | +0.157pp ❌ (breach) |
+| test_surf_p | **3.577%** (floor) | 3.627% | 3.736% | +0.159pp ❌ (breach) |
+| test_wss_x | — | — | 5.933% | — |
+| test_wss_y | — | — | 7.238% | — |
+| test_wss_z | — | — | 8.654% | — |
+
+- **Best epoch:** EP15 (val_abupt=6.2963)
+- **Outcome:** **NOT a contract winner** (Issue #1056). test_wss marginally beats SOTA but both vol_p and surf_p breach their #1056 floors. CLOSED.
+- **Mechanism falsification:** MAE_aux and Charb on vol_p are functionally near-equivalent L1 signals; they do NOT compose multiplicatively on the H19 Charb base. GradNorm's w_vol_p collapsed to 0.05 floor by EP3 despite MAE_aux (same outcome as H19 alone). The L1 landscape on vol_p was already saturated by H19's Charb; adding MAE_aux only introduced interference cost on the other axes (wss/surf_p/abupt all regressed vs H19).
+- **Key constraint for future design:** MAE_aux is useful only on MSE-base vol_p (H9 family). Do NOT combine MAE_aux with Charb-base vol_p.
+- **CLOSED 2026-05-21.**
+
 ---
 
 ## 2026-05-14 20:16Z — PR #1086: EMA(0.999) on SDF α=0.25 stack (dl24-tanjiro)
