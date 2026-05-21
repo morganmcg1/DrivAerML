@@ -1,3 +1,73 @@
+## 2026-05-21 10:25 — PR #1230: H74 MAE-AUX-VOL-P (frieren, CLOSED) — **OUTCOME D NEGATIVE on all 5 paper-facing test axes** (cross-axis collateral damage; mech engaged but α=0.05 too strong late-train)
+
+- **Branch**: `frieren/h74-mae-aux-vol-p` (closed at 10:25Z)
+- **W&B run**: `hzlwf8ep` (EP13 terminal step 70,664, ~14.7h, run state finished)
+- **Hypothesis**: Add L1 (MAE) auxiliary loss term on `vol_p` channel with weight α=0.05, cross-pollinated from dl24 H22. L1 provides non-vanishing gradient signal as MSE shrinks quadratically through the cosine schedule's tail, enabling continued vol_p descent in the late-cosine plateau where the test_VP floor 3.643% is binding.
+
+### Terminal metrics (EP13 best validation checkpoint, full test eval)
+
+| Axis | **H74** | Baseline #972 | Δ vs baseline | Verdict |
+|---|---:|---:|---:|:---|
+| **val_abupt (merge gate)** | **6.2639%** | 6.126% | **+0.138** | MISS gate |
+| val_VP | 3.6268% | 3.798% | **−0.171** | beats baseline val_VP |
+| val_SP | 4.141% | — | — | — |
+| val_WSS | 7.095% | — | — | — |
+| test_abupt | **6.1172%** | 5.844% | +0.273 | regression |
+| **test_VP (floor 3.643)** | **3.6690%** | 3.643% | **+0.026** ❌ | does NOT cross floor |
+| **test_SP (floor 3.577)** | **3.8742%** | 3.577% | +0.297 ❌ | regression |
+| test_WSS (goal 6.727) | **7.0492%** | 6.727% | +0.322 ❌ | regression |
+| test_WSS_x | 6.255% | — | — | — |
+| test_WSS_y | 7.673% | — | — | — |
+| test_WSS_z | 9.115% | — | — | — |
+
+**Key contradiction**: val_VP crossed below baseline test_VP floor 3.643% on the val side (3.627%), but the val→test slope inverted for test_VP, putting it at 3.669%. Other axes (SP, WSS) had val→test slope worsening too, but starting from higher val readings → larger absolute test regressions.
+
+### Per-epoch trajectory (clean monotonic descent, no anomalies)
+
+| Epoch | step | val_abupt | val_SP | val_VP | val_WSS |
+|---|---:|---:|---:|---:|---:|
+| EP1 | 10,864 | 26.555 | 19.936 | 15.862 | 29.539 |
+| EP2 | 21,729 | 7.883 | 5.230 | 4.565 | 8.919 |
+| EP3 | 32,594 | 7.136 | 4.873 | 4.010 | 8.091 |
+| EP6 | 48,902 | 6.451 | 4.259 | 3.743 | 7.308 |
+| EP9 | 59,780 | 6.315 | 4.170 | 3.664 | 7.151 |
+| EP11 | 65,222 | 6.272 | 4.149 | 3.636 | 7.100 |
+| **EP13** | **70,664** | **6.264** | **4.141** | **3.627** | **7.095** |
+
+### MAE_aux mechanism engagement (student's diagnostic)
+
+| Diagnostic | EP1 | EP3 | EP7 | EP13 |
+|---|---:|---:|---:|---:|
+| `train/vol_p_mae_aux` (raw L1) | 0.0317 | 0.0200 | 0.0142 | **0.01151** |
+| `train/vol_p_mae_aux_weighted` (α=0.05·L1) | 0.00158 | 0.00100 | 0.00071 | **0.000576** |
+| `train/volume_loss` (MSE) | ~0.75 | 0.00130 | 0.00060 | smaller |
+| **ratio `mae_aux_w / vol_loss`** | 0.21% | 77% | **117%** | continued climbing |
+
+The MAE_aux **did engage as designed** — raw L1 dropped monotonically 64% from EP1→EP13. But the ratio crossed the PR-body 30% anti-pattern guard at EP3, hit 117% by EP7, kept climbing — making L1 the dominant vol_p gradient term in the late-cosine tail.
+
+### Attribution analysis (advisor judgement)
+
+The cross-axis cost is the dominant failure mode. The vol_p axis itself moved minimally (test_VP +0.026pp vs baseline) while test_SP +0.297pp and test_WSS +0.322pp regressed substantially. The α=0.05 L1 term destabilized the OTHER axes by competing with the MSE objective's adaptive scale, with the L1 term effectively *growing in magnitude* through training as MSE shrank quadratically.
+
+**Mech-class conclusions:**
+1. **L1/MSE ratio late-train anti-pattern is real**: α-tuning for L1-aux on MSE-dominated losses must account for quadratic-vs-linear descent asymmetry. Static α=0.05 → late-train L1 dominance regardless of intent.
+2. **Cross-axis cost dominates loss-reformulation class on Wave 32**: not floor-binding, not capacity-binding, but per-axis-trade-off binding.
+3. **Val_VP cross-floor without test_VP cross-floor**: val→test slope is axis-dependent and reformulation can flip the slope sign.
+
+### Wave 32 single-axis-collapse table now 6 entries
+
+H74 joins H62, H70, H72, H71, H69 in the table of "mechanism engaged as designed but pays in another axis." Loss-reformulation class (Charbonnier-vol_p H68, Charbonnier-τz H73 in-flight, Charbonnier-vol_p-weight-fix H77 in-flight, MAE-aux H74) all show this cross-axis cost pattern.
+
+### Followups deprioritized (filed in research_state for Wave 33 if H78 merges)
+
+- H74-A: α=0.01 or α=0.025 (lower magnitude, may stay below 30% ratio band through EP13)
+- H74-B: schedule α(t) with cosine decay matching MSE/L1 asymmetry
+- H74-C: MAE_aux on ALL channels not just vol_p (per student's suggested follow-up — universal robust-loss boost)
+
+frieren reassigned **H81 LION-BETA2-EXPANSION** (PR #1240) — single-flag `--lion-beta2 0.99→0.999` on PURE baseline #972 substrate. First-ever Lion β2 sweep in entire Wave 31/32 fleet history. Orthogonal to H78's β1 change (β1 smooths *direction*, β2 expands *momentum buffer history* 10× from ~100→~1000 steps).
+
+---
+
 ## 2026-05-21 02:35 — PR #1223: H69 CURVATURE-ATTENTION-BIAS (fern, CLOSED) — **OUTCOME D NEGATIVE on every paper-facing axis vs H66 substrate twin**
 
 - **Branch**: `fern/h69-curvature-attention-bias-v2` (closed at 02:35Z)

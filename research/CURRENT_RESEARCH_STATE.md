@@ -1,9 +1,73 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~02:35 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~10:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟢 ~10:30Z (2026-05-21) — H74 MAE-AUX-VOL-P CLOSED D NEGATIVE + frieren reassigned H81 LION-BETA2-EXPANSION (PR #1240) + H78 LION-BETA1 LOCKED AS WAVE 32 MERGE WINNER (terminal ~12:24Z)
+
+**Closure: PR #1230 H74 (frieren) — D NEGATIVE on all 5 paper-facing test axes (cross-axis collateral damage; mech engaged but α=0.05 too strong late-train)**
+
+Terminal val_abupt **6.264%** (MISS gate +0.138pp), test_abupt **6.117%** (+0.273pp vs baseline #972). Critical pattern: val_VP 3.627% DID cross below baseline test_VP floor 3.643% on val side, but test_VP 3.669% on test side did NOT — val→test slope inverted for test_VP, +0.04pp slope. Other axes worse: test_SP +0.297pp, test_WSS +0.322pp regression.
+
+| Axis | **H74** | Baseline #972 | Δ vs baseline | Verdict |
+|---|---:|---:|---:|:--|
+| val_abupt (merge gate) | 6.264% | 6.126% | +0.138 | MISS gate |
+| val_VP | 3.627% | 3.798% | **−0.171** | beats baseline val_VP |
+| test_VP (floor 3.643) | 3.669% | 3.643% | +0.026 ❌ | does NOT cross floor |
+| test_SP (floor 3.577) | 3.874% | 3.577% | +0.297 ❌ | regression |
+| test_WSS (goal 6.727) | 7.049% | 6.727% | +0.322 ❌ | regression |
+
+**Mech engaged as designed but cross-axis cost dominates**: train/vol_p_mae_aux raw L1 dropped 64% EP1→EP13 (monotonic), but the ratio `mae_aux_weighted/vol_loss` crossed 30% anti-pattern guard at EP3, hit **117% by EP7**, kept climbing. With MSE shrinking quadratically and L1 shrinking linearly, the α=0.05 L1 term was effectively *growing in dominance* through training. vol_p axis barely moved (+0.026pp) while test_SP and test_WSS paid the regularization tax (+0.297pp, +0.322pp).
+
+**Wave 32 single-axis-collapse table now 6 entries** (H62 H70 H72 H71 H69 H74) — pattern: mechanism engages on its target axis but trips secondary axes. Loss-reformulation class (Charbonnier-vol_p H68, Charbonnier-τz H73, Charbonnier-vol_p-fix H77, MAE-aux H74) all show cross-axis cost.
+
+**Reassignment: frieren → H81 LION-BETA2-EXPANSION (PR #1240)**
+
+**FIRST-EVER Lion β2 sweep** in entire Wave 31/32 fleet history. Single-flag `--lion-beta2 0.99 → 0.999` on PURE baseline #972 substrate. β2 expansion increases the *momentum buffer EMA window* 10× (~100→~1000 steps). Distinct from H78's β1 change which expanded the *direction-smoothing window* 10→20 steps. β1 smooths "which direction to step", β2 expands "how long gradient history accumulates into the buffer".
+
+Why H81 matters NOW: H78 is the **locked Wave 32 winner** (val_abupt 6.0606% at EP10, margin widening, terminal ~12:24Z). H81 completes the Lion characterization on the other momentum axis. Once both axes are characterized, Wave 33 can run β1=0.95 + β2=0.999 **composition** with confident attribution.
+
+**H78 — Wave 32 Merge Winner Locked**
+
+H78 thorfinn (Lion β1 0.9→0.95) has been clearing the merge gate since EP6, with margin steadily widening:
+- EP6: val_abupt 6.131% (−0.005 margin)
+- EP10: val_abupt **6.0606%** (−0.066 margin, widening)
+- Slope EP9→EP10 held at −0.00348 pp/1K
+- Terminal expected ~12:24Z May 21, ~2h from now
+
+Worst-case projection 6.0606% (already clears gate). Test-side cushion: val_VP 3.526% (0.117pp below test_VP floor, comfortable cross expected). val_SP 3.995% above floor (typical val-test gap small), test_SP expected ~3.7-3.8% (above floor 3.577% — expected, secondary). test_WSS val 6.873%, expected test ~6.85-6.95% (above project goal 6.727% but better than H67's 6.933%).
+
+**Fleet status (~10:30Z 2026-05-21)**: 8/8 WIP, zero idle
+
+| PR | Student | Experiment | Class | Status @ ~10:20Z |
+|---|---|---|---|---|
+| **#1234** | **thorfinn** | **H78 LION-BETA1-MOMENTUM** | **Optimizer momentum** | **EP10 6.061% A WIN LOCKED, terminal ~12:24Z** |
+| #1240 | frieren | H81 LION-BETA2-EXPANSION (NEW) | Optimizer momentum | Just assigned |
+| #1236 | fern | H80 EMA-DECAY-EXTENSION | EMA composition | EP5 (EMA-shadow trajectory healthy, EP6 first informative) |
+| #1235 | tanjiro | H79 DROPOUT-INTRODUCTION | Regularization | EP8 6.512% (descending, dropout sig confirmed) |
+| #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Loss-curvature (vol_p) | Mid-EP — pending |
+| #1232 | askeladd | H76 SLICES-192-ISOLATION | Routing capacity | Mid-EP — pending |
+| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | LR-magnitude control | Mid-EP — pending |
+| #1229 | edward | H73 CHARBONNIER-TAU-Z | Loss-curvature (τz) | Mid-EP — pending |
+
+### Current research focus (post-H78-merge)
+
+The Wave 32 single-axis-collapse table has 6 entries. The plateau-protocol's Tier 2 escalation has produced its FIRST WIN via **Lion β1 momentum-window expansion**. This is the most important structural finding of Wave 32 — momentum-side tuning had been **completely untouched** through Wave 31 LR-fix campaign and the first half of Wave 32.
+
+**Next research directions (Wave 33 priorities after H78 merges):**
+
+1. **β1+β2 composition test**: If H81 shows B PARTIAL or better, run β1=0.95 + β2=0.999 composition on H78 substrate. Could push val_abupt below 6.0%.
+2. **Higher β1 sweep**: β1=0.97, β1=0.99 on H78 substrate. β1=0.95 may not be saturating point.
+3. **Substrate handoff**: H78 becomes the new baseline #972 successor. All mech-class re-runs (H77, H74-A) should be re-tested on H78 substrate to see if they unlock on the smoother-momentum substrate.
+4. **Regularization × momentum interaction**: H79 dropout × H78 β1=0.95 may compose well (both target generalization on overfitting signature).
+5. **EMA-decay × Lion β2 composition**: H80 (model EMA 0.9999) and H81 (Lion β2 0.999) both expand averaging windows but on different aspects (post-step model weights vs gradient buffer). Composition test if both show standalone value.
+
+**Deprioritized followups (filed for if Wave 33 picks them up):**
+- H74-A: α=0.01 or α=0.025 (lower MAE-aux magnitude)
+- H74-B: schedule α(t) cosine decay matching MSE/L1 asymmetry
+- H74-C: MAE_aux on ALL channels (universal robust-loss boost)
 
 ## 🔴 ~02:35Z (2026-05-21) — H69 CURVATURE-ATTENTION-BIAS CLOSED D NEGATIVE + fern reassigned H80 EMA-DECAY-EXTENSION (PR #1236)
 
