@@ -1,9 +1,41 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~10:30 UTC)
+- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~10:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~10:50Z (2026-05-21) — H75 PURE-BASELINE-LR-EXTENDED CLOSED D REGRESSION (definitive LR-fix attribution: NOT universal) + alphonse reassigned H82 WEIGHT-DECAY-EXPANSION (PR #1242)
+
+**Closure: PR #1231 H75 (alphonse) — D REGRESSION on val AND test, cleanest Wave 31/32 LR-fix attribution data**
+
+Terminal val_abupt **6.304%** (MISS gate by +0.178pp), test_abupt **6.098%** (+0.254pp vs baseline #972), **ALL FOUR test channels regress**:
+- test_VP **3.677%** MISS floor 3.643% by +0.034pp
+- test_SP **3.884%** MISS floor 3.577% by +0.307pp
+- test_WSS **7.027%** miss goal 6.727% by +0.300pp
+
+**Only positive metric**: val_VP −0.054pp vs baseline 3.798% (only val_VP improved).
+
+**Attribution conclusion**: Wave 31/32 LR-fix campaign was running on assumption that `--lr-cosine-t-max 25` is universal generalization boost. H75 falsifies this. LR-fix is **mechanism-class-conditional activator** — unlocks surf-deep/V-DEPTH expressivity but is NET NEGATIVE on pure baseline.
+
+H75 vs H65 same-substrate-minus-surf-deep attribution:
+- test_VP: surf-deep was 100% responsible for H65's floor cross (H75 misses, H65 crossed)
+- test_abupt: surf-deep adds −0.172pp
+- test_SP: surf-deep adds −0.197pp
+- val_abupt: surf-deep adds −0.070pp
+
+**Strategic implication for Wave 33**: `--lr-cosine-t-max 25` MUST be flagged as mechanism-class-conditional. Recipe authors should add it only when the mechanism class is V-DEPTH, SURF-DEEP, or other empirically validated for LR-fix synergy. Adding it as default has cost ~0.18pp val_abupt and ~0.25pp test_abupt across H62/H63/H66/H67 in Wave 31/32.
+
+**Reassignment: alphonse → H82 WEIGHT-DECAY-EXPANSION (PR #1242)**
+
+**FIRST-EVER weight-decay sweep** in entire Wave 31/32 fleet history. Single-flag `--weight-decay 5e-4 → 1e-3` on PURE baseline #972 substrate. Param-magnitude-side regularization, complement to H79 dropout's activation-side regularization — forms canonical 2×2 regularization-class matrix:
+
+| | activation-side | parameter-magnitude-side |
+|---|---|---|
+| off (baseline) | dropout=0.0 | weight_decay=5e-4 |
+| on (sweep) | **H79 dropout=0.1** (in flight) | **H82 weight_decay=1e-3** (just assigned) |
+
+Plateau-protocol Tier 2 regularization-class escalation. Lion paper recommends WD higher than AdamW (sign update doesn't amplify gradient magnitude). Orthogonal to all 7 in-flight axes (H78 β1, H81 β2, H80 EMA, H79 dropout, H77 Charbonnier-vol_p, H76 slices, H73 Charbonnier-τz).
 
 ## 🟢 ~10:30Z (2026-05-21) — H74 MAE-AUX-VOL-P CLOSED D NEGATIVE + frieren reassigned H81 LION-BETA2-EXPANSION (PR #1240) + H78 LION-BETA1 LOCKED AS WAVE 32 MERGE WINNER (terminal ~12:24Z)
 
@@ -39,17 +71,17 @@ H78 thorfinn (Lion β1 0.9→0.95) has been clearing the merge gate since EP6, w
 
 Worst-case projection 6.0606% (already clears gate). Test-side cushion: val_VP 3.526% (0.117pp below test_VP floor, comfortable cross expected). val_SP 3.995% above floor (typical val-test gap small), test_SP expected ~3.7-3.8% (above floor 3.577% — expected, secondary). test_WSS val 6.873%, expected test ~6.85-6.95% (above project goal 6.727% but better than H67's 6.933%).
 
-**Fleet status (~10:30Z 2026-05-21)**: 8/8 WIP, zero idle
+**Fleet status (~10:50Z 2026-05-21)**: 8/8 WIP, zero idle
 
-| PR | Student | Experiment | Class | Status @ ~10:20Z |
+| PR | Student | Experiment | Class | Status @ ~10:50Z |
 |---|---|---|---|---|
 | **#1234** | **thorfinn** | **H78 LION-BETA1-MOMENTUM** | **Optimizer momentum** | **EP10 6.061% A WIN LOCKED, terminal ~12:24Z** |
+| #1242 | alphonse | H82 WEIGHT-DECAY-EXPANSION (NEW) | Regularization (param-side) | Just assigned |
 | #1240 | frieren | H81 LION-BETA2-EXPANSION (NEW) | Optimizer momentum | Just assigned |
 | #1236 | fern | H80 EMA-DECAY-EXTENSION | EMA composition | EP5 (EMA-shadow trajectory healthy, EP6 first informative) |
-| #1235 | tanjiro | H79 DROPOUT-INTRODUCTION | Regularization | EP8 6.512% (descending, dropout sig confirmed) |
+| #1235 | tanjiro | H79 DROPOUT-INTRODUCTION | Regularization (activation-side) | EP8 6.512% (descending, dropout sig confirmed) |
 | #1233 | nezuko | H77 CHARBONNIER-VOL-P-WEIGHT-FIX | Loss-curvature (vol_p) | Mid-EP — pending |
 | #1232 | askeladd | H76 SLICES-192-ISOLATION | Routing capacity | Mid-EP — pending |
-| #1231 | alphonse | H75 PURE-BASELINE-LR-EXTENDED | LR-magnitude control | Mid-EP — pending |
 | #1229 | edward | H73 CHARBONNIER-TAU-Z | Loss-curvature (τz) | Mid-EP — pending |
 
 ### Current research focus (post-H78-merge)

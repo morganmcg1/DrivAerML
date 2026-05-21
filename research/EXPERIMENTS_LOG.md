@@ -1,3 +1,71 @@
+## 2026-05-21 10:50 — PR #1231: H75 PURE-BASELINE-LR-EXTENDED (alphonse, CLOSED) — **OUTCOME D REGRESSION on val AND test** (cleanest Wave 31/32 LR-fix attribution: --lr-cosine-t-max 25 is NOT universal, only mech-class-conditional)
+
+- **Branch**: `alphonse/h75-pure-baseline-lr-extended` (closed at 10:50Z)
+- **W&B run**: `vokzc49z` (EP13 terminal step 70,664, ~14.0h training time)
+- **Hypothesis**: Take exact baseline #972 config and change ONLY `--lr-cosine-t-max 13 → 25`. Zero other changes. The missing CONTROL experiment for the entire Wave 31/32 LR-fix campaign — answers whether LR-fix universally benefits generalization or synergizes with specific mechanisms.
+
+### Terminal metrics (EP13 best, EMA checkpoint, full test eval inline)
+
+| Channel | **H75** | BL #972 ref | Δ vs BL #972 | H65 ref (LR-fix + surf-deep) | Δ vs H65 |
+|---|---:|---:|---:|---:|---:|
+| **val_abupt (gate)** | **6.304%** | 6.126% | **+0.178** ❌ | 6.234% | +0.069 ❌ |
+| val_VP | **3.744%** | 3.798% | **−0.054** ✅ | — | — |
+| val_SP | 4.158% | ~3.80% | ~+0.36 ❌ | — | — |
+| val_WSS | 7.130% | — | — | — | — |
+| **test_abupt** | **6.098%** | 5.844% | **+0.254** ❌ | 5.926% | +0.172 ❌ |
+| **test_VP (floor 3.643)** | **3.677%** | 3.643% | **+0.034** ❌ | 3.588% | +0.089 ❌ |
+| **test_SP (floor 3.577)** | **3.884%** | 3.577% | **+0.307** ❌ | 3.687% | +0.197 ❌ |
+| **test_WSS (goal 6.727)** | **7.027%** | 6.727% | **+0.300** ❌ | 6.836% | +0.191 ❌ |
+
+### Per-epoch trajectory (clean monotonic descent, no anomalies)
+
+| EP | step | val_abupt | val_VP | val_SP | val_WSS | τx | τy | τz |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| EP1 | 10,864 | 26.954 | 15.632 | 20.564 | 29.904 | 26.162 | 35.074 | 37.340 |
+| EP3 | 32,594 | 6.816 | 3.957 | 4.521 | 7.725 | 6.741 | 8.652 | 10.208 |
+| EP6 | 48,902 | 6.440 | 3.833 | 4.263 | 7.273 | 6.358 | 8.015 | 9.732 |
+| EP10 | 62,501 | 6.338 | 3.776 | 4.183 | 7.164 | 6.280 | 7.819 | 9.631 |
+| EP13 | **70,664** | **6.304** | **3.744** | **4.158** | **7.130** | **6.253** | **7.753** | **9.610** |
+
+### Attribution conclusion — definitive Wave 31/32 LR-fix campaign answer
+
+**H75 vs H65 (same LR-fix substrate, minus surf-deep mechanism)** — isolates surf-deep's contribution to H65's test wins:
+- val_abupt: surf-deep adds −0.070pp improvement on LR-fix substrate
+- test_abupt: surf-deep adds −0.172pp test improvement
+- **test_VP: surf-deep was 100% responsible for H65's test_VP floor cross** (H75 misses floor, H65 crossed it)
+- test_SP: surf-deep adds −0.197pp test_SP improvement
+
+The Wave 31/32 LR-fix campaign assumption was that `--lr-cosine-t-max 25` provides universal generalization benefit. **H75 falsifies this assumption.** LR-fix is a *mechanism-class-conditional activator* — it unlocks specific mechanism's expressivity (especially surf-deep's surface-head depth) but is NET NEGATIVE on the pure baseline.
+
+### Strategic implication for Wave 33 recipe authoring
+
+`--lr-cosine-t-max 25` MUST be flagged as mechanism-class-conditional, NOT a default. Recipe authors should add it only when the mechanism class is one of:
+- V-DEPTH (decoder depth expansion) — H47/H57/H59 series
+- SURF-DEEP (surface-head depth expansion) — H54/H65 series
+- Possibly other not-yet-tested mechanism classes that benefit from extended cosine descent
+
+Adding LR-fix as a "free generalization improvement" was the implicit assumption that drove H62/H63/H64/H66/H67 — H75 shows this assumption costs us ~0.18pp val_abupt and ~0.25pp test_abupt vs pure baseline + mechanism if the mechanism wouldn't benefit from LR-fix.
+
+### Single bright spot: val_VP −0.054pp
+
+The only positive metric is **val_VP** (3.744% vs 3.798% baseline, −5.4bp). This confirms LR-fix DOES help the val_VP optimization landscape — but the improvement is dominated by val_SP/val_WSS regressions in aggregate val_abupt, AND val→test slope inverts the val_VP win on test side (test_VP misses floor by +0.034pp).
+
+### Wave 31/32 LR-fix retrospective table
+
+| H | Class | LR-fix? | Mechanism on top? | val_abupt | test_VP floor cross | Outcome |
+|---|---|---|---|---:|---|---|
+| H47 (pre-W31) | V-DEPTH | no | yes | baseline | no | — |
+| H57 (#1206) | V-DEPTH | yes | yes | 6.217% | (val) | C NULL, mech-pos test |
+| H59 (#1206) | V-DEPTH | yes | yes | 6.282% | ✅ 3.552% | C NULL, surf-deep-style test cross |
+| H65 (#1214) | SURF-DEEP | yes | yes | 6.234% | ✅ 3.588% | C NULL, test_VP cross |
+| H66 (#1215) | COORDSLICE | yes | yes | ~6.39% | no | C NULL |
+| H67 (#1221) | RFF-9σ-WIDTH | yes | yes | 6.175% | no | closest C NULL, no test cross |
+| **H75 (#1231)** | **none (CONTROL)** | **yes** | **no** | **6.304%** | **no** | **D REG ❌** |
+
+Alphonse reassigned **H82 WEIGHT-DECAY-EXPANSION** (PR #1242) — single-flag `--weight-decay 5e-4 → 1e-3` on PURE baseline #972 substrate. First-ever weight-decay sweep in entire Wave 31/32 fleet. Param-magnitude-side regularization complement to H79 dropout's activation-side regularization (forms 2×2 regularization-class matrix). Plateau-protocol Tier 2 regularization escalation. Orthogonal to all 7 in-flight axes (H78 β1, H81 β2, H80 EMA, H79 dropout, H77 Charbonnier-vol_p, H76 slices, H73 Charbonnier-τz).
+
+---
+
 ## 2026-05-21 10:25 — PR #1230: H74 MAE-AUX-VOL-P (frieren, CLOSED) — **OUTCOME D NEGATIVE on all 5 paper-facing test axes** (cross-axis collateral damage; mech engaged but α=0.05 too strong late-train)
 
 - **Branch**: `frieren/h74-mae-aux-vol-p` (closed at 10:25Z)
