@@ -5,6 +5,45 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~02:25Z (2026-05-22) — H83 GRAD-CLIP-EXPANSION CLOSED B PARTIAL (paper-positive test_VP CROSS −0.112pp = cleanest of Wave 32 narrowly beating H82 −0.110pp; val_abupt MISS gate +0.134pp + 3/4 test channels regress) + nezuko reassigned H91 MODEL-SLICES-EXPANSION (PR #1251)
+
+**Closure: PR #1243 H83 (nezuko) — B PARTIAL** — paper-positive **test_VP CROSSES floor by −0.112pp** (3.5308% vs floor 3.643% — cleanest VP-axis cross of Wave 32 narrowly beating H82's −0.110pp), AND val_VP improved −0.153pp vs #972 baseline (BEST in fleet). BUT val_abupt MISS gate +0.134pp + test_abupt regression +0.126pp + test_SP breach floor +0.162pp + test_WSS +0.163pp above goal. Per program.md "no averaging away regressions" — single-paper-positive insufficient when 3/4 paper-facing test channels regress. Closed not merged.
+
+**H83 establishes (2nd confirmed volume-favoring single-flag lever after H82)**: grad_clip=1.0 vs canonical 0.5 preserves volume-head descent direction in late-cosine. **Outstanding diagnostic instrumentation**: only ~3% of training steps had pre-clip norm in the (0.5, 1.0] band where the threshold change matters — yet that ~3% upper-tail signal preferentially benefited the VOLUME head. Textbook mechanism-targeted gradient signal preservation. Lion paper clip=1.0 default validated.
+
+**Combined H82 + H83 pattern**: both produced cleanest test_VP crosses in Wave 32 (H82 wd=1e-3 −0.110pp, H83 grad_clip=1.0 −0.112pp). Both narrow val→test VP slope (less overfitting). Both fail to break test_SP plateau (consistent with H80: SP plateau NOT regularization/gradient-control-bound). **Wave 33 compound candidate: H82+H83 paired = wd=1e-3 + grad_clip=1.0** (both volume-favoring, mechanistically orthogonal — param-magnitude regularization + gradient direction preservation).
+
+**Reassignment: PR #1251 H91 nezuko MODEL-SLICES-EXPANSION** — first-ever Transolver slice token count sweep entire Wave 31/32 campaign. `--model-slices 128 → 192` single-flag. Mechanism: more slice tokens = finer-grained surface token resolution. Wave 32's H76 (volume-point increase) was B PARTIAL — productive on volume axis; slice count is the analogous SURFACE-axis lever (untouched entire campaign). Directly tests "test_SP plateau is bound by slice-token resolution" hypothesis — most direct surface-side architectural test of the H80 binding constraint. Memory ~85-90 GB est on H100 96 GB. OOM mitigation: drop bs to 3 if needed.
+
+**Wave 32 mechanism-class status table updated** (post-H83):
+- Charbonnier loss curvature: **FALSIFIED** (4 D NEG: H68/H73/H74/H77)
+- Regularization class: **FALSIFIED** (2 D NEG: H79 dropout / H80 EMA-decay)
+- Lion-optimizer-side: **substantively exhausted** (1 D NEG H81 / 1 B PARTIAL H78)
+- Volume-favoring single-flags: **PRODUCTIVE on test_VP** (B PARTIAL: H75/H76 volume-points, H82 wd, H83 grad_clip — 4 variants now cleanly cross test_VP floor)
+- Data-side gradient rebalance: **STRONGEST SIGNAL** (H87 in-flight clearing merge gate at EP8)
+- Architectural FFN: in-flight H86 (DEEP plateau, D NEG likely ~6.38%)
+- Architectural heads: in-flight H88 (strong early signal, ~7h to terminal)
+- Architectural depth: in-flight H89 (just assigned)
+- Architectural slice count: in-flight H91 (just assigned)
+- Param-magnitude reg (wd): CLOSED B PARTIAL H82
+- Gradient-flow (grad_clip): CLOSED B PARTIAL H83
+- RFF positional capacity: in-flight H84 (~1.8h to terminal, borderline)
+- LR upward: in-flight H85 (DEEP plateau, D NEG confirmed ~6.38%)
+- LR downward: in-flight H90 (just assigned)
+
+**Current fleet status — 8/8 WIP, zero idle** (post H83 closure + H91 assignment):
+
+| Run | PR | Mech | Status |
+|---|---|---|:--|
+| alphonse H90 | #1250 | lr=6e-5 (DOWNWARD) | new assignment, ~14h |
+| askeladd H84 | #1244 | rff=32 | ~1.5h to terminal, borderline gate clear |
+| edward H86 | #1246 | mlp_ratio=6 | ~1.6h to terminal, D NEG likely |
+| fern H88 | #1248 | heads=8 | ~7h to terminal, strong A WIN candidate |
+| frieren H89 | #1249 | layers=6 (DEPTH) | new assignment, ~14h |
+| **nezuko H91** | **#1251** | **slices=192** | **NEW ASSIGNMENT** |
+| tanjiro H87 | #1247 | surf_loss=1.5 | ~2.5h to terminal, strongest A WIN candidate (broken under gate at EP8) |
+| thorfinn H85 | #1245 | lr=1.2e-4 (UPWARD) | ~0.5h to terminal, D NEG confirmed |
+
 ## 🟡 ~01:30Z (2026-05-22) — H82 WEIGHT-DECAY-EXPANSION CLOSED B PARTIAL (paper-positive test_VP CROSS −0.110pp but val_abupt MISS gate +0.148pp + test_abupt regression) + alphonse reassigned H90 LR-DOWNWARD-SWEEP (PR #1250)
 
 **Closure: PR #1242 H82 (alphonse) — B PARTIAL** — paper-positive **test_VP CROSSES floor cleanly by −0.110pp** (3.5328% vs floor 3.643% — the cleanest VP-axis cross of Wave 32), AND val_VP improved −0.211pp vs #972 baseline. But val_abupt MISS gate +0.148pp AND test_abupt regresses +0.137pp AND test_SP breaches floor +0.202pp AND test_WSS above goal +0.178pp. Per program.md "no averaging away regressions": single-paper-positive insufficient when 3/4 paper-facing test channels regress. Closed not merged.

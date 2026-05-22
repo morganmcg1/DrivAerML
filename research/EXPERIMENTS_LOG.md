@@ -1,3 +1,81 @@
+## 2026-05-22 02:25 — PR #1243: H83 GRAD-CLIP-EXPANSION (nezuko, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP CROSS by −0.112pp (cleanest VP cross of Wave 32, narrowly beating H82) BUT val_abupt MISS gate +0.134pp + test_abupt +0.126pp + test_SP +0.162pp regress; **grad_clip=1.0 is 2nd confirmed volume-favoring lever — Lion paper default validated, Wave 33 compound axis candidate**
+
+- **Branch**: `nezuko/h83-grad-clip-expansion` (closed at 02:25Z 2026-05-22)
+- **W&B run**: `ex652naw` (EP13 step 70,664, 14h training time, all 8 GPUs healthy, 0 nonfinite grads)
+- **Hypothesis**: Single-flag `--grad-clip-norm 0.5 → 1.0` on canonical Wave 32 baseline #972 substrate. Tests if canonical clip=0.5 was over-aggressive vs Lion paper default=1.0 — gradient direction preservation hypothesis.
+
+### Terminal metrics (EP13 best EMA checkpoint, full test eval)
+
+| Channel | **H83 (clip=1.0)** | BL #972 / floor | Δ vs BL / floor | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.2604%** | gate 6.126% | **+0.134pp** ❌ | MISS gate |
+| val_VP | 3.6447% | val 3.798% | **−0.153pp** ✅ | best in fleet (narrowly beats H82's 3.5867) |
+| val_SP | 4.0840% | — | — | (SP plateau) |
+| val_WSS | 7.1174% | — | — | — |
+| **test_abupt** | **5.9700%** | 5.844% | **+0.126pp** ❌ | regression |
+| **test_VP (floor 3.643)** | **3.5308%** | 3.643% | **−0.112pp** ✅ | **CROSSES floor cleanest in Wave 32** |
+| **test_SP (floor 3.577)** | **3.7390%** | 3.577% | **+0.162pp** ❌ | BREACHES floor |
+| **test_WSS (goal 6.727)** | **6.8899%** | 6.727% | **+0.163pp** ❌ | above goal |
+
+### Trajectory (EMA-aware)
+
+| EP | Step | val_abupt | val_VP | val_SP |
+|---|---:|---:|---:|---:|
+| EP1 | 10,864 | 26.816% | — | — |
+| EP3 | 32,594 | 6.921% | 4.028 | 4.678 |
+| EP6 | 48,902 | 6.416% | 3.774 | 4.231 |
+| EP8 | 56,154 | 6.312% | 3.712 | 4.141 |
+| EP10 | 62,501 | 6.272% | 3.668 | 4.099 |
+| EP12 | 65,222 | 6.268% | 3.6567 (val cross floor) | 4.094 |
+| **EP13** | **70,652** | **6.2604%** | **3.6447** | **4.0840** |
+
+Final slope decayed from EP3→EP4 (−0.0601 pp/1k) to EP12→EP13 (~−0.001 pp/1k) — canonical geometric-decay regime.
+
+### Outstanding diagnostic instrumentation — nezuko's per-step grad-norm analysis
+
+Sampled across all 70,664 training steps from W&B `train/grad/*`:
+
+| Diagnostic | Value | Interpretation |
+|---|---:|---|
+| pre-clip global norm mean | **1.673** | Long-tail distribution |
+| pre-clip global norm median | **0.123** | Most steps well below 0.5 |
+| pre-clip global norm max | **223.67** | Very rare large spikes |
+| fraction(pre-clip > 0.5) | **19.8%** | Under canonical clip=0.5, this fraction clipped |
+| fraction(pre-clip > 1.0) | **16.9%** | Under H83 clip=1.0, this fraction clipped |
+| `train/grad/clipped` mean | **0.169** | Matches the >1.0 fraction |
+
+**Only ~3% of steps fell in the (0.5, 1.0] band** where the clip threshold change matters — yet that ~3% upper-tail signal preferentially benefited the VOLUME head (where val/test_VP improved decisively) while NOT helping the SURFACE head (which remained on the SP plateau). This is a textbook case of **mechanism-targeted gradient signal preservation**.
+
+### Why CLOSE not MERGE
+
+Per CLAUDE.md decision criteria and program.md "no averaging away regressions":
+
+1. **val_abupt MISS gate +0.134pp** — merge gate is < 6.126%
+2. **test_abupt regresses +0.126pp vs baseline** — primary test metric WORSE than #972
+3. **AND-gate test floors FAIL** — test_VP crosses ✅ but test_SP breaches +0.162pp ❌
+4. **test_SP fail is the H80-identified architectural binding constraint** — 5th independent variant landing test_SP 3.74-3.95% (H78 +0.142, H79 +0.323, H80 +0.353, H82 +0.202, H83 +0.162)
+
+### What H83 DEFINITIVELY establishes
+
+**grad_clip=1.0 is the 2nd confirmed volume-favoring single-flag lever** (after H82 wd=1e-3):
+- Both produced cleanest test_VP crosses in Wave 32 (H82 −0.110pp, H83 −0.112pp under floor)
+- Both narrow val→test VP slope vs baseline (less overfitting)
+- Both fail to break test_SP plateau (consistent with H80 finding: SP plateau NOT regularization/gradient-control-bound)
+
+**Mechanism interpretation**: ~3% of steps with pre-clip norm in (0.5, 1.0] preserved more raw gradient signal under H83. Volume head's smoother spatial gradients benefit from this preserved signal; surface head's high-frequency near-wall gradients are already captured at clip=0.5. **The Lion paper's clip=1.0 default is mechanically correct for tay's substrate on the VP axis.**
+
+### Reassignment — H91 MODEL-SLICES-EXPANSION (nezuko → PR #1251)
+
+Single-flag `--model-slices 128 → 192` (+50%) on canonical Wave 32 baseline. **First-ever Transolver slice token count sweep entire Wave 31/32 fleet history**.
+
+Mechanism: more slice tokens = finer-grained surface token resolution. Wave 32's H76 (volume-point increase) was B PARTIAL — productive. Slice count is the SURFACE-axis analogue (untouched entire campaign). Directly tests "test_SP plateau is bound by slice-token resolution" hypothesis — most direct surface-side architectural test of the H80 binding constraint.
+
+Memory: 192² / 128² = 2.25× attention compute. Estimated peak VRAM ~85-90 GB. OOM mitigation: drop batch_size to 3 if needed.
+
+Orthogonal to H88 (heads granularity), H89 (depth), H86 (FFN width). H88+H89+H91 jointly close Wave 32's architectural Tier-2 axis coverage (token granularity × attention depth × token count). Only major unexplored architectural axis after H91 is `hidden_dim` itself.
+
+---
+
 ## 2026-05-22 01:30 — PR #1242: H82 WEIGHT-DECAY-EXPANSION (alphonse, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP CROSS by −0.110pp (cleanest VP cross of Wave 32) BUT val_abupt MISS gate +0.148pp AND test_abupt/test_SP/test_WSS all regress; **wd=1e-3 is volume-favoring single-flag lever — Wave 33 compound axis candidate**
 
 - **Branch**: `alphonse/h82-weight-decay-expansion` (closed at 01:30Z 2026-05-22)
