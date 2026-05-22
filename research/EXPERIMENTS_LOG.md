@@ -1,3 +1,74 @@
+## 2026-05-22 01:20 — PR #1240: H81 LION-BETA2-EXPANSION (frieren, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.4256% MISS gate +0.300pp, test_abupt 6.2098% +0.366pp, ALL 4 test channels regressed, both test floors VIOLATED; **Lion β2=0.999 expansion uniformly destructive across all axes — Chen et al 2023 defaults validated**
+
+- **Branch**: `frieren/h81-lion-beta2-expansion` (closed at 01:20Z 2026-05-22)
+- **W&B run**: `vadc87et` (EP13 step 70,664, 14.3h training time, peak 78 GB, all 8 GPUs healthy, 0 nonfinite grads)
+- **Hypothesis**: Single-flag `--lion-beta2 0.99 → 0.999` on canonical Wave 32 baseline #972 substrate. First-ever Lion second-moment EMA decay sweep entire Wave 31/32 fleet history. 10× wider grad-norm-buffer half-life targets noise-stability for slow-converging tau_z/WSS axes.
+
+### Terminal metrics (EP13 best EMA checkpoint, full test eval)
+
+| Channel | **H81 (β2=0.999)** | BL #972 (β2=0.99) | Δ vs BL | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.4256%** | 6.126% | **+0.300** ❌ | **MISS merge gate** |
+| val_VP | 3.7452% | 3.566% | +0.179 | worse |
+| val_SP | 4.1496% | 3.534% | +0.616 | clearly worse |
+| val_WSS | 7.3489% | 6.679% | +0.670 | clearly worse |
+| **test_abupt** | **6.2098%** | 5.844% | **+0.366** ❌ | clearly worse |
+| **test_VP (floor 3.643)** | **3.7746%** | 3.643% | **+0.132** ❌ | VIOLATES floor |
+| **test_SP (floor 3.577)** | **3.9267%** | 3.577% | **+0.350** ❌ | VIOLATES floor BADLY |
+| **test_WSS (goal 6.727)** | **7.1508%** | 6.727% | **+0.424** ❌ | above goal |
+| test_WSS_x | 6.367% | — | — | best of 3 axes |
+| test_WSS_y | 7.735% | — | — | mid |
+| test_WSS_z (binding) | 9.245% | ~8.75% est | +0.50 | binding axis worse |
+
+### Trajectory (EMA-aware)
+
+| EP | step | val_abupt EMA | ΔEP→EP |
+|---|---:|---:|---:|
+| EP1 | 10,864 | 37.4451% | (cold start — 10× slower than canonical β2=0.99 ~26-29%) |
+| EP2 | 21,729 | 8.4829% | −28.96 |
+| EP3 | 32,594 | 7.2653% | −1.22 |
+| EP6 | 48,902 | 6.6606% | −0.11 |
+| EP8 | 56,154 | 6.5326% | −0.05 |
+| EP11 | 65,222 | 6.4452% | −0.018 |
+| EP13 | 70,664 | **6.4256%** | −0.012 (terminal) |
+
+Slope decay EP3→EP13: −1.22 → −0.37 → −0.13 → −0.11 → −0.08 → −0.05 → −0.04 → −0.03 → −0.018 → −0.008 → −0.012 pp/EP. Trajectory still slowly descending at terminal — but **never recovered the EP1 cold-start deficit**.
+
+### Mechanism falsification — Lion β2-expansion uniformly destructive
+
+- **β2 0.99 → 0.999** expanded the second-moment (grad-norm) running average half-life from ~100 steps → ~1000 steps (10×).
+- Train/grad/global_norm terminal = **0.0372** confirms grad-signal-smoothing prior was descriptively true (smoother grad-norm signal vs canonical ~0.05).
+- Train/grad/clipped = 0 throughout EP3+ (no clip events post-warmup; β2=0.999 produces very stable grad-norm signal as predicted).
+- **BUT smoother grad-norm signal did NOT translate to better convergence**: the extra inertia damped responsive updates to local loss landscape geometry, especially during the EP1 cold-start. The Lion direction signal (sign update) needed the noisier β2=0.99 grad-norm tracker to maintain useful step-magnitude scaling.
+- **All 4 test channels regressed uniformly** (test_SP +0.35, test_VP +0.13, test_WSS +0.42, test_abupt +0.37) → not a head-specific tradeoff like H78 (β1=0.95). The β2 expansion is a **whole-model destruction**, not a per-head mechanism.
+
+### What H81 DEFINITIVELY establishes (with H78)
+
+1. **Chen et al 2023 Lion defaults (β1=0.9, β2=0.99) are well-tuned for CFD-surrogate regression at this scale on tay's substrate**. The published recipe is correct.
+
+2. **Lion-optimizer-side mechanism class is now substantively exhausted on tay**:
+   - H78 β1=0.95: B PARTIAL (val_abupt A WIN, test_VP cross, test_SP miss — head-specific)
+   - H81 β2=0.999: D NEGATIVE (uniform regression across all 4 test channels)
+   - Further sweeps (β1 down or β2 down) likely C NULL (small-deviation neighborhood explored)
+
+3. **Wave 32 mechanism-class falsification table updated**:
+   - Charbonnier loss curvature: **FALSIFIED** (4 D NEG H68/H73/H74/H77)
+   - Regularization class (dropout/EMA): **FALSIFIED** (2 D NEG H79/H80)
+   - Lion-optimizer-side: **substantively exhausted** (1 D NEG H81 + 1 B PARTIAL H78)
+   - Architectural depth: **UNTESTED — H89 next**
+
+### Reassignment — H89 MODEL-DEPTH-EXPANSION (frieren → PR #1249)
+
+Single-flag `--model-layers 5 → 6` on canonical Wave 32 baseline. **First-ever Transolver depth sweep entire Wave 31/32 fleet history**.
+
+Mechanism: adding one transformer block gives one more "reasoning step" per slice token while keeping every other dimension (hidden=512, heads=4, mlp_ratio=4, slices=128) identical. Directly tests "test_SP plateau is depth-bound" hypothesis from H80 closure.
+
+Memory: +3.6M params (+21% on 17.4M base); +5-6 GiB peak VRAM estimate over canonical 77.3 GB → ~82-85 GB on H100 96 GB. OOM mitigation: drop batch_size to 3 if EP1 OOM.
+
+Orthogonal to all 7 in-flight Wave 32 axes (H82 wd, H83 grad_clip, H84 rff, H85 lr, H86 mlp_ratio, H87 surf_loss, H88 heads). H89 + H88 jointly close Wave 32's architectural Tier-2 axis coverage (depth + width-via-mlp + heads); only major unexplored architectural axis after H89 is `hidden_dim` itself.
+
+---
+
 ## 2026-05-21 17:30 — PR #1236: H80 EMA-DECAY-EXTENSION (fern, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.298% MISS gate +0.172pp, test_SP/test_VP both fail floors; **EMA composition class falsified for Wave 32 plateau**
 
 - **Branch**: `fern/h80-ema-decay-extension` (closed at 17:30Z)

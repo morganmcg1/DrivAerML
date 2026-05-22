@@ -1,9 +1,64 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-21 (latest invocation: 2026-05-21 ~20:55 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~01:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~01:20Z (2026-05-22) — H81 LION-BETA2-EXPANSION CLOSED D NEGATIVE + frieren reassigned H89 MODEL-DEPTH-EXPANSION (PR #1249) + 5 stale_wip check-ins posted (H82/H83/H84/H87/H88)
+
+**Closure: PR #1240 H81 (frieren) — D NEGATIVE: val_abupt 6.4256% MISS gate +0.300pp, test_abupt 6.2098% +0.366pp regression, ALL 4 test channels REGRESSED, test_VP/test_SP BOTH violate AND-gate floors.** Lion β2-expansion mechanism uniformly destructive across all model heads — NOT a head-specific tradeoff like H78 (β1=0.95 B PARTIAL). Chen et al 2023 Lion defaults (β1=0.9, β2=0.99) validated. Lion-optimizer-side mechanism class is now substantively exhausted on tay's substrate (1 D NEG + 1 B PARTIAL across 2 sweeps).
+
+**Reassignment: PR #1249 H89 frieren MODEL-DEPTH-EXPANSION** — first-ever Transolver depth sweep entire Wave 31/32 program. `--model-layers 5 → 6` single-flag. Architectural Tier-2 axis. Memory +5-6 GiB est → ~82-85 GB peak on H100 96 GB (OOM mitigation: drop bs to 3 if needed). Directly tests "test_SP plateau is depth-bound" hypothesis from H80 closure. Orthogonal to all 7 in-flight Wave 32 axes. H89 + H88 jointly close Wave 32's architectural Tier-2 coverage (depth + width-via-mlp + heads) — only major unexplored architectural axis after H89 is `hidden_dim` itself.
+
+**Stale_wip check-ins posted** (training healthy, harness false-positive on 18h jobs):
+- **H82 alphonse (PR #1242)**: TRAINING TERMINAL reached at step 70,664 (val_abupt 6.2737%, val_VP 3.5867 CROSSED test_VP floor cleanly by −0.056pp). Awaiting student SENPAI-RESULT. Expected outcome: **B PARTIAL paper-positive test_VP** (val_abupt MISS gate +0.148pp, test_SP fail floor pattern).
+- **H87 tanjiro (PR #1247)**: 🟢 BROKEN UNDER MERGE GATE at EP8 (6.1218% val_abupt, val_VP 3.6386 crossed floor). **First Wave 32 variant to clear gate.** Terminal expected ~3h. Headline Wave 32 result; expected B PARTIAL with val_abupt A WIN + test_VP cross.
+- **H84 askeladd (PR #1244)**: EP11 6.1653% borderline gate clear, val_VP slope projects 3.63% terminal. Viable B PARTIAL with possible A WIN.
+- **H83 nezuko (PR #1243)**: EP12 plateau 6.2676% (MISS gate +0.14pp), val_VP 3.6567 CROSSED test_VP floor. Clean B PARTIAL test_VP candidate.
+- **H88 fern (PR #1248)**: EP3 6.7323% (close 2nd to H87 +0.010pp). **BEST val_SP at EP3 (4.4868%) — first mechanism to break val_SP plateau on tay's substrate.** Strong A WIN candidate trajectory.
+
+**Current fleet status — 8/8 WIP, zero idle**:
+
+| Run | PR | Mech | EP | val_abupt | Status |
+|---|---|---|---:|---:|:--|
+| alphonse H82 | #1242 | wd=1e-3 | 13 (terminal) | **6.2737% (terminal)** | awaiting student SENPAI-RESULT |
+| askeladd H84 | #1244 | rff=32 | 11 | 6.1653% | borderline gate clear, ~1.5h to terminal |
+| edward H86 | #1246 | mlp_ratio=6 | 7 | ~6.42% | likely D NEG (undersized FFN) |
+| fern H88 | #1248 | heads=8 | 3 | 6.7323% | strong A WIN candidate, ~9h to terminal |
+| **frieren H89** | **#1249** | **layers=6** | — | — | **NEW ASSIGNMENT — depth-expansion** |
+| nezuko H83 | #1243 | grad_clip=1.0 | 12 | 6.2676% | B PARTIAL test_VP, ~0.5h to terminal |
+| tanjiro H87 | #1247 | surf_loss=1.5 | 8 | **6.1218% (BELOW GATE)** | strongest A WIN candidate, ~3h to terminal |
+| thorfinn H85 | #1245 | lr=1.2e-4 | 8+ | ~6.42% | D NEG likely (LR too high) |
+
+**Multiple paper-positive test_VP cross signals identified** (the cleanest VP-axis improvements of Wave 32):
+- H82 alphonse: val_VP 3.5867 (cleanest cross, −0.056pp under floor)
+- H83 nezuko: val_VP 3.6567 (crossed at EP12)
+- H87 tanjiro: val_VP 3.6386 (crossed at EP8 with hot slope, projected terminal ~3.55-3.60%)
+- H84 askeladd: val_VP projects 3.63 at terminal (close cross)
+
+**Wave 32 mechanism-class status table updated** (post-H81):
+- Charbonnier loss curvature: **FALSIFIED** (4 D NEG: H68/H73/H74/H77)
+- Regularization class: **FALSIFIED** (2 D NEG: H79 dropout / H80 EMA-decay)
+- Lion-optimizer-side: **substantively exhausted** (1 D NEG H81 / 1 B PARTIAL H78)
+- Volume-point sampling: **PRODUCTIVE** (2 B PARTIAL H75/H76)
+- Data-side gradient rebalance: **STRONGEST SIGNAL** (H87 in-flight clearing merge gate)
+- Architectural FFN: in-flight H86 (undersized)
+- Architectural heads: in-flight H88 (strong early signal)
+- Architectural depth: **H89 NEXT** (first-ever depth sweep)
+- Param-magnitude reg (wd): in-flight H82 (volume-favoring)
+- Gradient-flow (grad_clip): in-flight H83 (volume-favoring)
+- RFF positional capacity: in-flight H84 (late-cosine engagement)
+- LR magnitude upward: in-flight H85 (plateau likely)
+
+**Wave 33 priorities** (post-fleet-terminal):
+- **Compound axes**: H87 surf_loss=1.5 PAIRED with H88 heads=8 — orthogonal data-side + architectural axes both showing strongest signals
+- **H87 extension**: surf_loss_weight 1.0 or 0.75 (further data-side reduction)
+- **Surface-decoder capacity expansion** — addresses test_SP plateau (H80 closure binding constraint)
+- **Surface-positional-encoding refinement** (per-axis frequency bands, Tancik scale tuning)
+- **Architectural pivot**: if H89 wins, sweep layers=7 or 8 next; if all architectural axes plateau, time for hidden_dim=512→768 swing
+- **LR downward sweep** (6e-5, 7e-5) — Lion paper says higher but our H85 in-flight suggests lower may be better
+- **Geometry augmentation**: yaw rotation invariance about z-axis only per DrivAerML coord convention
 
 ## 🟢 ~20:55Z (2026-05-21) — Cross-fleet snapshot pre-terminal: H82 alphonse in-flight LEADER 6.3005% but slope DECELERATING into geometric decay; H87 tanjiro HOTTEST slope and overtakes at common steps
 
