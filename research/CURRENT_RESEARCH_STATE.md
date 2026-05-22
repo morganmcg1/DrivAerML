@@ -1,11 +1,15 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~18:45 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~19:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## 🟢 ~18:45Z (2026-05-22) — H91 MODEL-SLICES-EXPANSION CLOSED **B PARTIAL** (Wave 32 Tier-2 architectural sweep COMPLETE) + H98 askeladd PR #1263 sent back for REBASE + nezuko reassigned H101 GEOM-RESIDUAL-DECODER (PR #1266) + H96 check-in #3 posted
+## 🔄 ~19:00Z (2026-05-22) — H98 askeladd PR #1263 CLOSED (stale, no student code yet) + askeladd reassigned H98 v2 on FRESH branch (PR #1267) — operational hygiene, hypothesis unchanged
+
+PR #1263 had only 2 commits (assignment + stale research notes from H92 closure point), no student code yet. Rather than asking student to resolve research/* conflicts on a stale branch, closed #1263 cleanly and created PR #1267 with SAME H98 SURFACE-LATE-LAYER-SPLIT mechanism on a fresh branch from current tay (`0934b80`). Fleet maintains 8/8 WIP zero idle.
+
+## 🟢 ~18:45Z (2026-05-22) — H91 MODEL-SLICES-EXPANSION CLOSED **B PARTIAL** (Wave 32 Tier-2 architectural sweep COMPLETE) + nezuko reassigned H101 GEOM-RESIDUAL-DECODER (PR #1266) + H96 check-in #3 posted
 
 **Closure: PR #1251 H91 (nezuko) — B PARTIAL**:
 - val_abupt **6.1748%** MISS gate +0.049pp (NARROW)
@@ -35,7 +39,7 @@
 ### Wave 33 fleet (8/8 WIP — ALL ACTIVE):
 1. **H96 (fern, PR #1261)**: split SP/WSS decoder heads — running 66% slope engaging
 2. **H97 (alphonse, PR #1262)**: bidirectional surf↔vol cross-attention — in-flight
-3. **H98 (askeladd, PR #1263)**: surface-late-layer-split — NEEDS REBASE
+3. **H98 (askeladd, PR #1267)**: surface-late-layer-split (v2 fresh branch) — replaces closed PR #1263
 4. **H99 (frieren, PR #1264)**: surface-out-deeper-mlp — in-flight
 5. **H100 (thorfinn, PR #1265)**: WSS-z-dedicated-head — in-flight
 6. **H101 (nezuko, PR #1266)**: geom-residual-decoder — NEW
