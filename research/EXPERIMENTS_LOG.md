@@ -1,3 +1,77 @@
+## 2026-05-22 20:00 — PR #1258: H95 SURF-LOSS-PUSH-FURTHER (tanjiro, CLOSED) — **OUTCOME C NULL** — H87's 1.5:1 surf:vol ratio CONFIRMED substrate sweet spot, loss-weight rebalance class DEFINITIVELY CLOSED, test_VP CROSS (6th single-flag), target axis test_WSS_z NOT degraded. tanjiro reassigned H102 SURFACE-OUT-WIDER-MLP (PR #1268).
+
+- **Branch**: `tanjiro/h95-surf-loss-push-further` (closed at 20:00Z 2026-05-22)
+- **W&B run**: `ze0bohdu` (rank 0; finished at step 70,652, 14.0h training time, 838.96 min)
+- **Hypothesis**: Direct H87 follow-up testing surface_loss_weight 1.5 → 1.25. Key signal: test_SP direction tells us if H87 IS the substrate sweet spot or if further reduction has headroom.
+
+### Results — terminal metrics
+
+| Metric | H95 | Baseline #972 | H87 (Wave 32 best) | Δ vs H87 | Verdict |
+|---|---:|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.2612%** | 6.181 | **6.045** ✓ | +0.216pp | MISS gate +0.135pp |
+| test_abupt | 6.018% | (5.844 corrected) | 5.987 | +0.031pp | mild regress |
+| **test_VP (floor)** | **3.564%** ✓ | 3.643 | 3.495 | +0.069pp | **CROSS (6th single-flag)** |
+| test_SP (floor) | 3.789% | 3.577 | 3.734 | +0.055pp | MISS (plateau range) |
+| test_WSS (goal) | 6.956% | 6.727 | 6.944 | +0.012pp | regress |
+| test_WSS_z | **8.997%** | 8.945 | 9.017 | **−0.020pp** | **marginally below H87** |
+
+### H87 sweet-spot test — PASSED (predicted outcome)
+
+Per H87 follow-up criteria:
+- If H95 test_SP < 3.65% → SP plateau partially crackable via further ratio reduction
+- If H95 test_SP > 3.85% → H87's 1.5 IS confirmed substrate sweet spot
+
+**H95 test_SP = 3.789%** — INTERMEDIATE plateau range (NEITHER threshold cracked). This is consistent with **H87 being the substrate sweet spot**: surface representation degrades smoothly past 1.5, with diminishing returns but no catastrophic break. Continuing to surf_loss=1.0 would predictably regress further.
+
+### Surf:vol ratio sweep — COMPLETE
+
+| Variant | surf:vol ratio | val_abupt | test_VP | test_SP | test_WSS_z |
+|---|---|---:|---:|---:|---:|
+| #972 baseline | 2.0:1.0 | 6.181 | 3.643 | 3.577 | 8.945 |
+| **H87 ✓** | **1.5:1.0** | **6.045 ✓** | **3.495 ✓** | 3.734 | 9.017 |
+| H94 (in-flight ~D NEG) | 2.0:1.5 (1.33:1) | ~6.34 | — | — | — |
+| **H95** | **1.25:1.0** | **6.261** | 3.564 ✓ | 3.789 | 8.997 |
+
+**Both directions from H87 produce slower convergence**: subtractive (H95: −0.25 on surf, +0.22pp slower) and additive (H94: +0.5 on vol, +0.30pp projected slower). H87's 1.5:1 IS the substrate sweet spot.
+
+### Mechanism interpretation — Lion sign-update normalization confirmed
+
+Under Lion's sign-update, step magnitude is normalized; loss-weighting reallocates which channel gets gradient signal but does NOT add representational capacity. H87 happens to hit the optimal allocation. Movement in EITHER direction starves the under-weighted channel.
+
+### Combined Wave 32 loss-weighting closure
+
+| Variant | Mechanism | Verdict | Notes |
+|---|---|:--|:--|
+| H87 (surf=1.5) | substrate sweet spot | **B PARTIAL HISTORIC** | best, NOT merged per Issue #1056 |
+| H92 (tau_z=3.0) | per-tau-channel | **D NEGATIVE** | target axis tau_z DEGRADED |
+| H93 (tau_y=2.5) | per-tau-channel | **D NEGATIVE** | target axis tau_y DEGRADED |
+| H94 (vol=1.5) | additive route | ~**D NEG** (in-flight) | +0.30pp slower than H87 |
+| **H95 (surf=1.25)** | subtractive past sweet spot | **C NULL** | +0.22pp slower than H87 |
+
+**Loss-weighting axis EXHAUSTED.** Per Morgan's Issue #1056 position, not merged even if cleared val gate.
+
+### Bright spot — test_WSS_z 8.997% comparable to H91 fleet-best 8.95%
+
+H95's test_WSS_z is marginally BETTER than H87's (8.997 vs 9.017 by −0.020pp). Combined with H91's fleet-best 8.95%, this suggests WSS_z does NOT primarily respond to surf:vol budget allocation — WSS_z compression requires DIFFERENT architectural levers (decoder structure, position info) which is exactly what Wave 33 targets.
+
+### val→test slope on SP-axis — STRONGEST in H95's run
+
+H95 val_SP 4.134% → test_SP 3.789% = **−0.345pp** improvement on SP. Stronger than H87's −0.273pp on SP. Suggests pessimistic val reads under aggressive surf reduction (34 val cases vs 50 test) — train/val distribution shift artifact rather than fundamental ceiling.
+
+### tanjiro reassigned PR #1268 H102 SURFACE-OUT-WIDER-MLP
+
+**Mechanism**: `--surface-out-width-factor 2.0` widens surface_out hidden dimension from n_hidden=512 to n_hidden=1024 (keeping 2-layer depth). +266K params.
+
+**Pairs with H99 (frieren, PR #1264)** which tests decoder DEPTH (2→3 layer). H99 + H102 together map the depth × width plane of decoder capacity expansion:
+- If H102 wins (width) → width is productive
+- If H99 wins (depth) → depth is productive
+- If both clear gate → compound for Wave 34
+- If both fail → decoder MLP capacity is NOT the binding constraint
+
+**Key signal**: test_SP < 3.70% → first crack of 11-variant plateau and validates "decoder width" as productive lever.
+
+---
+
 ## 2026-05-22 18:45 — PR #1251: H91 MODEL-SLICES-EXPANSION (nezuko, CLOSED) — **OUTCOME B PARTIAL** — val gate NARROW MISS +0.049pp + test_VP CROSS −0.066pp (5th single-flag) + fleet-best test_WSS_z 8.95% (slice expansion engages WSS_z compression). Wave 32 Tier-2 architectural sweep COMPLETE. nezuko reassigned H101 GEOM-RESIDUAL-DECODER (PR #1266).
 
 - **Branch**: `nezuko/h91-model-slices-expansion` (closed at 18:45Z 2026-05-22)

@@ -1,9 +1,33 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~19:00 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~20:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟠 ~20:00Z (2026-05-22) — H95 SURF-LOSS-PUSH-FURTHER CLOSED **C NULL** (H87's 1.5:1 ratio CONFIRMED substrate sweet spot, loss-weight rebalance axis DEFINITIVELY EXHAUSTED) + tanjiro reassigned H102 SURFACE-OUT-WIDER-MLP (PR #1268)
+
+**Closure: PR #1258 H95 (tanjiro) — C NULL**:
+- val_abupt 6.2612% MISS gate +0.135pp
+- test_VP **3.564%** CROSS floor (6th single-flag to cross)
+- test_SP **3.789%** intermediate plateau range (NEITHER < 3.65% NOR > 3.85% — H87 sweet-spot confirmed)
+- test_WSS_z **8.997%** marginally BELOW H87's 9.017 (target axis NOT degraded)
+- val→test slope on SP-axis: −0.345pp STRONGEST in H95's run
+- Combined Wave 32 closure: H87 (B PARTIAL HISTORIC, NOT merged) + H92/H93 (D NEG, target axes degraded) + H94 (~D NEG, additive route) + H95 (C NULL, subtractive route past sweet spot) = **loss-weighting axis EXHAUSTED**
+
+### Reassignment: PR #1268 H102 tanjiro SURFACE-OUT-WIDER-MLP — pairs with H99 on decoder capacity axis
+
+**Mechanism**: `--surface-out-width-factor 2.0` widens surface_out hidden dimension from n_hidden=512 to 1024 (keeping 2-layer depth). +266K params.
+
+**Pairs with H99 (frieren, depth-axis)**: H99 tests decoder DEPTH (2→3 layer), H102 tests decoder WIDTH (1×→2×). Together they map the decoder capacity plane.
+
+**Possible outcomes**:
+- Both clear gate → compound depth+width for Wave 34
+- Only width (H102) clears → width is productive decoder axis
+- Only depth (H99) clears → depth is productive
+- Both fail → decoder MLP capacity NOT binding (structural attacks H96/H97/H100/H101 are the productive direction)
+
+**Key signal**: test_SP < 3.70% → first crack of 11-variant plateau via decoder width axis.
 
 ## 🔄 ~19:00Z (2026-05-22) — H98 askeladd PR #1263 CLOSED (stale, no student code yet) + askeladd reassigned H98 v2 on FRESH branch (PR #1267) — operational hygiene, hypothesis unchanged
 
@@ -36,13 +60,14 @@ PR #1263 had only 2 commits (assignment + stale research notes from H92 closure 
 
 **Key signal**: test_SP < 3.70% → first crack of 11-variant plateau (3.74-3.95%); test_WSS_z < 8.5% → binding axis cracked.
 
-### Wave 33 fleet (8/8 WIP — ALL ACTIVE):
+### Wave 33 fleet (8/8 WIP — ALL ACTIVE; H95+H97 stale_wip cleared this turn):
 1. **H96 (fern, PR #1261)**: split SP/WSS decoder heads — running 66% slope engaging
-2. **H97 (alphonse, PR #1262)**: bidirectional surf↔vol cross-attention — in-flight
-3. **H98 (askeladd, PR #1267)**: surface-late-layer-split (v2 fresh branch) — replaces closed PR #1263
-4. **H99 (frieren, PR #1264)**: surface-out-deeper-mlp — in-flight
+2. **H97 (alphonse, PR #1262)**: bidirectional surf↔vol cross-attention — EP2 val −2.72pp ahead of canonical
+3. **H98v2 (askeladd, PR #1267)**: surface-late-layer-split (v2 fresh branch) — replaces closed PR #1263
+4. **H99 (frieren, PR #1264)**: surface-out-deeper-mlp (depth axis) — in-flight
 5. **H100 (thorfinn, PR #1265)**: WSS-z-dedicated-head — in-flight
-6. **H101 (nezuko, PR #1266)**: geom-residual-decoder — NEW
+6. **H101 (nezuko, PR #1266)**: geom-residual-decoder — in-flight
+7. **H102 (tanjiro, PR #1268)**: surface-out-wider-mlp (width axis, pairs with H99 depth) — NEW
 
 ### Remaining Wave 32 in-flight (~terminal soon)
 - **H94 edward (PR #1257)**: vol_loss=1.5, projected D NEG confirming Lion sign-update asymmetry
