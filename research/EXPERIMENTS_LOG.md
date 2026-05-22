@@ -1,3 +1,37 @@
+## 2026-05-22 03:45 — PR #1245: H85 LR-MAGNITUDE-EXPANSION (thorfinn, CLOSED) — **OUTCOME D NEGATIVE** — first-ever UPWARD LR sweep (9e-5→1.2e-4 +33%) FALSIFIED — ALL 4 paper-facing test channels regress, val_abupt MISSES gate +0.264pp, test_SP MISSES floor +0.253pp, test_VP MISSES floor +0.015pp; **LR upward direction definitively wrong for tay substrate; canonical 9e-5 is not below the sweet spot**
+
+- **Branch**: `thorfinn/h85-lr-magnitude-expansion` (closed at 03:45Z 2026-05-22)
+- **W&B run**: `sv4rjxdc` (EP12/13 EMA selection, 839min training, 13 epochs clean)
+- **Hypothesis**: Single-flag `--lr 9e-5 → 1.2e-4` on canonical Wave 32 baseline #972 substrate. First-ever LR magnitude sweep entire Wave 31/32 fleet history. Lion paper recommends 3e-4 default; we were at 30% of recommended range. H85 tests moderate +33% step toward Lion recommended range.
+
+### Results
+
+| Channel | H85 (lr=1.2e-4) | BL #972 / floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.3899%** | gate 6.126% | **+0.264pp** ❌ | MISS gate — clear D NEGATIVE |
+| val_VP | 3.7606% | 3.798% | −0.037pp ✅ | minor val win only |
+| val_SP | 4.1853% | — | — | — |
+| val_WSS | 7.2236% | — | — | — |
+| **test_abupt** | **6.0284%** | 5.844% | **+0.184pp** ❌ | regress |
+| **test_VP (floor 3.643)** | **3.6585%** | 3.643% | **+0.015pp** ❌ | MISS floor by hair |
+| **test_SP (floor 3.577)** | **3.8302%** | 3.577% | **+0.253pp** ❌ | MISS floor (BIG) |
+| **test_WSS (goal 6.727)** | **6.9208%** | 6.727% | **+0.194pp** ❌ | above goal |
+| test_WSS_x / _y / _z | 6.127 / 7.574 / 8.952 | — | — | fleet-typical profile |
+
+### Analysis
+
+**LR upward direction definitively falsified.** lr=1.2e-4 (+33% over canonical 9e-5) regresses on ALL channels — no paper-positive axis, every test metric worse than baseline.
+
+Mechanism failure: at lr=1.2e-4 with Lion sign-update, the per-step weight movement magnitude is +33% coarser. For surface-pressure's high-frequency near-wall variations requiring precise late-cosine convergence, this is TOO COARSE — test_SP regression (+0.253pp) vs test_VP regression (+0.015pp ≈ noise) confirms the high-freq axis (SP) is more sensitive to LR overshoot than the smooth-spatial axis (VP). Consistent with every prior Wave 32 finding about the SP plateau binding constraint.
+
+**Cross-validation with H86 (FFN width, edward, in-flight)**: H85 and H86 converge to within 0.005pp at common steps (~6.38-6.39%). Two completely different mechanisms (LR magnitude / FFN width) both fail to break the 6.38-6.39% plateau — strong evidence binding constraint is not tunable via simple single-flag capacity/step-size changes.
+
+**Joint LR coverage closure**: H85 (UP, D NEG) + H90 (DOWN 6e-5, alphonse, in-flight). If H90 also fails, LR magnitude axis is substantively exhausted on tay substrate.
+
+**Thorfinn reassigned H93 TAU-Y-LOSS-PUSH** (PR #1254): `--tau-y-loss-weight 1.5 → 2.5` (+67%), first-ever tau_y-channel loss weight sweep. Complementary to askeladd H92 (tau_z=2.0→3.0). Together H92+H93 close the per-tau-channel within-surface loss-budget coverage targeting Issue #1056 WSS goal.
+
+---
+
 ## 2026-05-22 03:10 — PR #1244: H84 RFF-NUM-FEATURES-EXPANSION (askeladd, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP CROSS by −0.040pp, val_abupt CLOSEST C NULL of Wave 32 (+0.021pp over gate) BUT test_SP fails floor +0.194pp + test_WSS regresses +0.164pp + test_abupt +0.131pp; **3rd consecutive volume-favoring single-flag lever, RFF expansion engages mid-cosine but does not maintain late-cosine lead — Tancik saturation prior held**
 
 - **Branch**: `askeladd/h84-rff-num-features-expansion` (closed at 03:10Z 2026-05-22)

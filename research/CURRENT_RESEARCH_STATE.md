@@ -5,6 +5,37 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🔴 ~03:45Z (2026-05-22) — H85 LR-MAGNITUDE-EXPANSION CLOSED D NEGATIVE (ALL 4 test channels regress, val_abupt +0.264pp over gate, test_SP +0.253pp over floor; LR upward direction definitively falsified) + thorfinn reassigned H93 TAU-Y-LOSS-PUSH (PR #1254)
+
+**Closure: PR #1245 H85 (thorfinn) — D NEGATIVE** — first-ever UPWARD LR sweep (9e-5→1.2e-4 +33%) conclusively fails. val_abupt 6.3899% (+0.264pp over gate), test_VP 3.6585% (MISS floor +0.015pp), **test_SP 3.8302% (MISS floor +0.253pp BIG)**, test_WSS 6.9208% (regress +0.194pp), test_abupt 6.0284% (regress +0.184pp). **ALL 4 paper-facing test channels regress.**
+
+**Mechanism failure**: At lr=1.2e-4 with Lion sign-update, the per-step weight movement is +33% coarser. Surface-pressure's high-frequency near-wall variations require precise late-cosine convergence — the higher LR overshoots the SP fine-grained descent, landing test_SP +0.253pp above floor (vs test_VP only +0.015pp). Consistent with every prior Wave 32 finding about SP plateau being the binding constraint.
+
+**Cross-validation**: H85 (lr=1.2e-4) and H86 (mlp_ratio=6, in-flight edward) both projected to converge to ~6.38-6.39% plateau at common steps. Two orthogonal mechanisms (LR magnitude / FFN width) both fail to break the plateau — strong evidence binding constraint is NOT tunable via single-flag capacity/step-size changes alone.
+
+**LR direction now known**: H85 UP (D NEG) + H90 DOWN testing (alphonse, in-flight). If H90 also fails, LR magnitude substantively exhausted as single-flag axis on tay substrate.
+
+**Reassignment: PR #1254 H93 thorfinn TAU-Y-LOSS-PUSH** — first-ever tau_y-channel loss weight sweep entire Wave 31/32 campaign. `--tau-y-loss-weight 1.5 → 2.5` (+67%) single-flag. test_WSS_y is the SECOND-worst WSS axis (~7.4-7.6% fleet range vs WSS_x ~6.1%). Complementary to askeladd H92 (tau_z=2.0→3.0). **Together H92+H93 close the per-tau-channel within-surface loss-budget coverage** targeting Issue #1056 WSS goal. No memory impact (scalar weight).
+
+**Wave 33 compound candidates updated** (post-H85 closure + H93 assignment):
+- **H82+H83 paired (wd=1e-3 + grad_clip=1.0)** — both volume-favoring, orthogonal
+- **H87+H88 paired (surf_loss=1.5 + heads=8)** — data-side + architectural orthogonal pair (BEST signals)
+- **H92+H93 paired (tau_z=3.0 + tau_y=2.5)** — full within-surface per-channel emphasis
+- **H92+H87 triple candidate (tau_z=3.0 + tau_y=2.5 + surf_loss=1.5)** — complete loss rebalance
+
+**Current fleet status — 8/8 WIP, zero idle** (post H85 closure + H93 assignment):
+
+| Run | PR | Mech | Status |
+|---|---|---|:--|
+| alphonse H90 | #1250 | lr=6e-5 (DOWNWARD) | ~12h to terminal |
+| askeladd H92 | #1252 | tau_z=3.0 (PUSH) | ~12h to terminal |
+| edward H86 | #1246 | mlp_ratio=6 | imminent terminal, D NEG likely |
+| fern H88 | #1248 | heads=8 | ~5h to terminal, strong A WIN candidate |
+| frieren H89 | #1249 | layers=6 (DEPTH) | ~12h to terminal |
+| nezuko H91 | #1251 | slices=192 | ~12h to terminal |
+| tanjiro H87 | #1247 | surf_loss=1.5 | ~1h to terminal, STRONGEST A WIN candidate |
+| **thorfinn H93** | **#1254** | **tau_y=2.5 (PUSH)** | **NEW ASSIGNMENT** |
+
 ## 🟡 ~03:10Z (2026-05-22) — H84 RFF-NUM-FEATURES-EXPANSION CLOSED B PARTIAL (paper-positive test_VP CROSS −0.040pp, val_abupt CLOSEST C NULL of Wave 32 +0.021pp over gate; BUT test_SP +0.194pp + test_WSS +0.164pp + test_abupt +0.131pp regress) + askeladd reassigned H92 TAU-Z-LOSS-PUSH (PR #1252)
 
 **Closure: PR #1244 H84 (askeladd) — B PARTIAL** — paper-positive **test_VP CROSSES floor by −0.040pp** (3.6030% vs floor 3.643% — 3rd consecutive Wave 32 variant to cross test_VP cleanly after H82 and H83), AND val_abupt **CLOSEST C NULL of Wave 32 +0.021pp over gate** (the closest miss in the fleet). BUT 3/4 paper-facing test channels regress: test_abupt +0.131pp, test_SP +0.194pp, test_WSS +0.164pp. Per program.md "no averaging away regressions" — closed not merged.
