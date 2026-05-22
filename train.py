@@ -139,6 +139,10 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    use_geometry_xattn: bool = False
+    geometry_xattn_anchors: int = 512
+    geometry_xattn_neighbors: int = 32
+    geometry_xattn_heads: int = 4
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -266,6 +270,38 @@ def masked_charbonnier(
     return weighted.sum() / (n_pts * n_ch)
 
 
+def collect_geo_xattn_metrics(base_model: SurfaceTransolver) -> dict[str, float]:
+    """Collect GALE geometry-xattn diagnostics: per-block gate values, bank stats."""
+    metrics: dict[str, float] = {}
+    if not getattr(base_model, "use_geometry_xattn", False):
+        return metrics
+    backbone = getattr(base_model, "backbone", None)
+    if backbone is None:
+        return metrics
+    gate_vals: list[float] = []
+    for i, block in enumerate(backbone.blocks):
+        geo_xattn = getattr(block, "geo_xattn", None)
+        if geo_xattn is None:
+            continue
+        gate = torch.sigmoid(geo_xattn.gate).detach().float().mean().item()
+        metrics[f"geo_xattn/gate_block{i}"] = gate
+        gate_vals.append(gate)
+    if gate_vals:
+        metrics["geo_xattn/gate_mean"] = sum(gate_vals) / len(gate_vals)
+        metrics["geo_xattn/gate_min"] = min(gate_vals)
+        metrics["geo_xattn/gate_max"] = max(gate_vals)
+    geo_bank = getattr(base_model, "_last_geo_bank", None)
+    if geo_bank is not None:
+        bank_f = geo_bank.detach().float()
+        anchor_norms = bank_f.norm(dim=-1)  # [B, K]
+        metrics["geo_xattn/bank_norm"] = float(anchor_norms.mean().item())
+        metrics["geo_xattn/bank_norm_std"] = float(anchor_norms.std().item())
+        metrics["geo_xattn/n_active_anchors"] = float(
+            (anchor_norms > 1e-3).float().sum(dim=-1).mean().item()
+        )
+    return metrics
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -278,6 +314,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
+        use_geometry_xattn=config.use_geometry_xattn,
+        geometry_xattn_anchors=config.geometry_xattn_anchors,
+        geometry_xattn_neighbors=config.geometry_xattn_neighbors,
+        geometry_xattn_heads=config.geometry_xattn_heads,
     )
 
 
@@ -1023,10 +1063,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             if should_log_weights
                             else {}
                         )
+                        geo_xattn_metrics = (
+                            collect_geo_xattn_metrics(base_model)
+                            if should_log_gradients and config.use_geometry_xattn
+                            else {}
+                        )
                         train_loss_sum += float(loss.detach().cpu().item())
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        train_log.update(geo_xattn_metrics)
 
                 if skip_step:
                     nonfinite_skip_count += 1

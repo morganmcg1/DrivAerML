@@ -260,6 +260,69 @@ class TransolverAttention(nn.Module):
         return _apply_token_mask(out_x, attn_mask)
 
 
+class GeometryCrossAttention(nn.Module):
+    """Gated cross-attention from tokens to a fixed geometry context bank.
+
+    GALE H33 / GeoTransolver (arxiv 2505.12558). Each TransformerBlock can
+    optionally re-query a persistent geometry bank produced by
+    ``GeometryContextBank``. Pre-norms are applied to both query and bank
+    sides; a learnable per-block scalar gate (sigmoid-bounded) controls the
+    residual contribution. SDPA is used for bf16 stability, matching the
+    pattern in :class:`TransolverAttention`.
+    """
+
+    def __init__(self, hidden_dim: int, num_heads: int = 4, dropout: float = 0.0):
+        super().__init__()
+        if hidden_dim % num_heads != 0:
+            raise ValueError("hidden_dim must be divisible by num_heads")
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.dim_head = hidden_dim // num_heads
+        self.dropout = dropout
+        self.norm_q = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.norm_kv = nn.LayerNorm(hidden_dim, eps=1e-6)
+        self.q_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.kv_proj = LinearProjection(hidden_dim, hidden_dim * 2)
+        self.out_proj = LinearProjection(hidden_dim, hidden_dim)
+        self.proj_dropout = nn.Dropout(dropout)
+        # Init at 0 -> sigmoid(0) = 0.5 mix (per PR spec); gate is learnable.
+        self.gate = nn.Parameter(torch.zeros(1))
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        geo_bank: torch.Tensor,
+        query_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, _ = x.shape
+        _, K, _ = geo_bank.shape
+        q_in = self.norm_q(x)
+        kv_in = self.norm_kv(geo_bank)
+        q = (
+            self.q_proj(q_in)
+            .view(B, N, self.num_heads, self.dim_head)
+            .permute(0, 2, 1, 3)
+        )
+        kv = (
+            self.kv_proj(kv_in)
+            .view(B, K, self.num_heads, 2 * self.dim_head)
+            .permute(0, 2, 1, 3)
+        )
+        k, v = kv.chunk(2, dim=-1)
+        attn_out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        attn_out = attn_out.permute(0, 2, 1, 3).contiguous().view(B, N, self.hidden_dim)
+        attn_out = self.proj_dropout(self.out_proj(attn_out))
+        if query_mask is not None:
+            attn_out = attn_out * query_mask.unsqueeze(-1).to(dtype=attn_out.dtype)
+        gate_val = torch.sigmoid(self.gate).to(dtype=attn_out.dtype)
+        return x + gate_val * attn_out
+
+
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -268,6 +331,8 @@ class TransformerBlock(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_geo_xattn: bool = False,
+        geo_xattn_heads: int = 4,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -280,11 +345,28 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.use_geo_xattn = use_geo_xattn
+        self.geo_xattn: GeometryCrossAttention | None = None
+        if use_geo_xattn:
+            self.geo_xattn = GeometryCrossAttention(
+                hidden_dim=hidden_dim,
+                num_heads=geo_xattn_heads,
+                dropout=dropout,
+            )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        geo_bank: torch.Tensor | None = None,
+        geo_query_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
         x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
         x = _apply_token_mask(x, attn_mask)
+        if self.geo_xattn is not None and geo_bank is not None:
+            x = self.geo_xattn(x, geo_bank, query_mask=geo_query_mask)
+            x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
         x = _apply_token_mask(x, attn_mask)
         return x
@@ -299,6 +381,8 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_geo_xattn: bool = False,
+        geo_xattn_heads: int = 4,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -309,15 +393,99 @@ class Transformer(nn.Module):
                     mlp_expansion_factor=mlp_expansion_factor,
                     num_slices=num_slices,
                     dropout=dropout,
+                    use_geo_xattn=use_geo_xattn,
+                    geo_xattn_heads=geo_xattn_heads,
                 )
                 for _ in range(depth)
             ]
         )
 
-    def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        geo_bank: torch.Tensor | None = None,
+        geo_query_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         for block in self.blocks:
-            x = block(x, attn_mask=attn_mask)
+            x = block(
+                x,
+                attn_mask=attn_mask,
+                geo_bank=geo_bank,
+                geo_query_mask=geo_query_mask,
+            )
         return x
+
+
+class GeometryContextBank(nn.Module):
+    """Encode surface geometry into K context tokens for persistent cross-attention.
+
+    GALE H33 / GeoTransolver (arxiv 2505.12558). K anchor points are selected
+    by fixed-stride sampling from the surface; each anchor pools features
+    from its KNN neighborhood via max-pooling over (encoded surface feature +
+    relative-position encoding). Output ``[B, K, D]`` is computed once per
+    forward pass and shared across all Transformer blocks via
+    :class:`GeometryCrossAttention`.
+
+    All distance/sort math is run in fp32 internally for stability; the
+    output is returned in fp32 and the cross-attention layer casts to the
+    activation dtype as needed.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        n_anchors: int = 512,
+        n_neighbors: int = 32,
+        feature_dim: int = SURFACE_X_DIM,
+    ):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.n_anchors = n_anchors
+        self.n_neighbors = n_neighbors
+        self.feature_dim = feature_dim
+        self.geom_encode = MLP(
+            input_dim=feature_dim, hidden_dim=hidden_dim, output_dim=hidden_dim
+        )
+        self.rel_pos_encode = MLP(
+            input_dim=3, hidden_dim=hidden_dim, output_dim=hidden_dim
+        )
+        self.norm = nn.LayerNorm(hidden_dim, eps=1e-6)
+
+    def forward(
+        self,
+        surface_x: torch.Tensor,
+        surface_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        B, N, _ = surface_x.shape
+        K = min(self.n_anchors, N)
+        n_neighbors = min(self.n_neighbors, N)
+        feats = self.geom_encode(surface_x)  # [B, N, D]
+        if surface_mask is not None:
+            feats = feats * surface_mask.unsqueeze(-1).to(dtype=feats.dtype)
+        # Fixed-stride anchor sampling. With B=1 and N=65000 the padded region
+        # is empty so stride sampling stays inside valid points.
+        stride = max(1, N // K)
+        anchor_idx = torch.arange(0, N, stride, device=surface_x.device)[:K]
+        pts_xyz = surface_x[..., :3].float()
+        anchor_xyz = pts_xyz[:, anchor_idx]
+        anchor_feats = feats[:, anchor_idx]
+        # KNN in fp32 for numerical stability under bf16 autocast.
+        dists = torch.cdist(anchor_xyz, pts_xyz)  # [B, K, N]
+        _, knn_idx = dists.topk(n_neighbors, dim=-1, largest=False)
+        idx_feats = knn_idx.unsqueeze(-1).expand(-1, -1, -1, feats.shape[-1])
+        neighbor_feats = torch.gather(
+            feats.unsqueeze(1).expand(-1, K, -1, -1), 2, idx_feats
+        )
+        idx_xyz = knn_idx.unsqueeze(-1).expand(-1, -1, -1, 3)
+        neighbor_xyz = torch.gather(
+            pts_xyz.unsqueeze(1).expand(-1, K, -1, -1), 2, idx_xyz
+        )
+        rel_pos = (neighbor_xyz - anchor_xyz.unsqueeze(2)).to(dtype=feats.dtype)
+        rel_pos_feats = self.rel_pos_encode(rel_pos)
+        combined = neighbor_feats + rel_pos_feats
+        pooled, _ = combined.max(dim=2)
+        return self.norm(anchor_feats + pooled)
 
 
 class SurfaceTransolver(nn.Module):
@@ -342,6 +510,10 @@ class SurfaceTransolver(nn.Module):
         pe_init_sigmas: list[float] | None = None,
         use_curvature_attention_bias: bool = False,
         curvature_dim: int = 3,
+        use_geometry_xattn: bool = False,
+        geometry_xattn_anchors: int = 512,
+        geometry_xattn_neighbors: int = 32,
+        geometry_xattn_heads: int = 4,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +526,10 @@ class SurfaceTransolver(nn.Module):
         self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
         self.use_curvature_attention_bias = use_curvature_attention_bias
         self.curvature_dim = curvature_dim
+        self.use_geometry_xattn = use_geometry_xattn
+        self.geometry_xattn_anchors = geometry_xattn_anchors
+        self.geometry_xattn_neighbors = geometry_xattn_neighbors
+        self.geometry_xattn_heads = geometry_xattn_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -388,6 +564,14 @@ class SurfaceTransolver(nn.Module):
                 hidden_dim=n_hidden,
                 curvature_dim=curvature_dim,
             )
+        self.geometry_bank_encoder: GeometryContextBank | None = None
+        if use_geometry_xattn:
+            self.geometry_bank_encoder = GeometryContextBank(
+                hidden_dim=n_hidden,
+                n_anchors=geometry_xattn_anchors,
+                n_neighbors=geometry_xattn_neighbors,
+                feature_dim=surface_input_dim,
+            )
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -395,6 +579,8 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            use_geo_xattn=use_geometry_xattn,
+            geo_xattn_heads=geometry_xattn_heads,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
@@ -469,7 +655,28 @@ class SurfaceTransolver(nn.Module):
 
         attn_mask = torch.cat(masks, dim=1)
         hidden = _apply_token_mask(torch.cat(tokens, dim=1), attn_mask)
-        hidden = self.backbone(hidden, attn_mask=attn_mask)
+
+        geo_bank: torch.Tensor | None = None
+        geo_query_mask: torch.Tensor | None = None
+        if (
+            self.geometry_bank_encoder is not None
+            and surface_x is not None
+            and surface_tokens > 0
+        ):
+            geo_bank = self.geometry_bank_encoder(surface_x, surface_mask)
+            geo_bank = geo_bank.to(dtype=hidden.dtype)
+            geo_query_mask = torch.zeros_like(attn_mask, dtype=hidden.dtype)
+            geo_query_mask[:, :surface_tokens] = surface_mask.to(dtype=hidden.dtype)
+            # Cache for diagnostic logging (bank norm / active anchors).
+            # Stored as a Python attribute (not a buffer) so DDP does not sync it.
+            self._last_geo_bank = geo_bank.detach()
+
+        hidden = self.backbone(
+            hidden,
+            attn_mask=attn_mask,
+            geo_bank=geo_bank,
+            geo_query_mask=geo_query_mask,
+        )
         hidden = _apply_token_mask(hidden, attn_mask)
         hidden_norm = _apply_token_mask(self.norm(hidden), attn_mask)
 
