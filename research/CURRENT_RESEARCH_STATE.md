@@ -5,6 +5,35 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~03:10Z (2026-05-22) — H84 RFF-NUM-FEATURES-EXPANSION CLOSED B PARTIAL (paper-positive test_VP CROSS −0.040pp, val_abupt CLOSEST C NULL of Wave 32 +0.021pp over gate; BUT test_SP +0.194pp + test_WSS +0.164pp + test_abupt +0.131pp regress) + askeladd reassigned H92 TAU-Z-LOSS-PUSH (PR #1252)
+
+**Closure: PR #1244 H84 (askeladd) — B PARTIAL** — paper-positive **test_VP CROSSES floor by −0.040pp** (3.6030% vs floor 3.643% — 3rd consecutive Wave 32 variant to cross test_VP cleanly after H82 and H83), AND val_abupt **CLOSEST C NULL of Wave 32 +0.021pp over gate** (the closest miss in the fleet). BUT 3/4 paper-facing test channels regress: test_abupt +0.131pp, test_SP +0.194pp, test_WSS +0.164pp. Per program.md "no averaging away regressions" — closed not merged.
+
+**H84 establishes (4th confirmed volume-favoring single-flag lever)**: RFF positional-encoding capacity expansion (16→32 Fourier features) engaged productively in mid-cosine — EP6-EP8 fleet-leading lead over H82 by −0.072pp at step 56,154. But EP8→EP13 saw only −0.20pp/5EP descent (vs EP4→EP6's −0.18pp/2EP rapid mid-cosine). **Tancik saturation curve confirmed at rff=32 on tay substrate** — adding 32→64 likely adds cold-start tax without late-cosine benefit (diminishing returns).
+
+**Wave 32 volume-favoring pattern CONFIRMED across 4 mechanisms**: H75/H76 (vol-points), H82 (wd=1e-3), H83 (grad_clip=1.0), H84 (rff=32). All cleanly cross test_VP floor. **6 single-flag variants now cleanly fail test_SP floor** (3.74-3.95% range): H78, H79, H80, H82, H83, H84. Wave 32 has DEFINITIVELY established that VP-axis improvement is reliably achievable via diverse single-flag mechanisms, but **SP-axis plateau is the campaign-binding constraint and is NOT broken by any single-flag mechanism tested so far** — validates H80's architectural-bound hypothesis.
+
+**Reassignment: PR #1252 H92 askeladd TAU-Z-LOSS-PUSH** — first-ever per-tau-channel loss weight sweep entire Wave 31/32 campaign. `--tau-z-loss-weight 2.0 → 3.0` (+50%) single-flag. test_WSS_z is consistently the worst axis across the fleet (8.93-9.66% range vs canonical mean tau_x 6.12-6.37%). Issue #1056 stretch goal (test_WSS < 5.85) is mathematically dominated by reducing tau_z. Per-channel-within-bucket rebalancing has never been tested entire campaign. **H87 tests surface↔volume balance; H92 tests within-surface (tau_z emphasis) balance** — together they characterize the full per-channel loss budget landscape. No memory impact (scalar weights).
+
+**Wave 33 compound candidates updated** (post-H84 closure):
+- **H82+H83 paired (wd=1e-3 + grad_clip=1.0)** — both volume-favoring, orthogonal (param-magnitude + gradient direction)
+- **H87+H88 paired (surf_loss=1.5 + heads=8)** — data-side + architectural orthogonal pair (best signals)
+- **H82+H84 paired (wd=1e-3 + rff=32)** — 2 volume-favoring, orthogonal (regularization + positional encoding)
+- **H92+H87 paired (tau_z=3.0 + surf_loss=1.5)** — full per-channel loss budget rebalance
+
+**Current fleet status — 8/8 WIP, zero idle** (post H84 closure + H92 assignment):
+
+| Run | PR | Mech | Status |
+|---|---|---|:--|
+| alphonse H90 | #1250 | lr=6e-5 (DOWNWARD) | ~12h to terminal |
+| **askeladd H92** | **#1252** | **tau_z=3.0 (PUSH)** | **NEW ASSIGNMENT** |
+| edward H86 | #1246 | mlp_ratio=6 | ~0.5h to terminal, D NEG likely |
+| fern H88 | #1248 | heads=8 | ~6h to terminal, strong A WIN candidate |
+| frieren H89 | #1249 | layers=6 (DEPTH) | ~12h to terminal |
+| nezuko H91 | #1251 | slices=192 | ~12h to terminal |
+| tanjiro H87 | #1247 | surf_loss=1.5 | ~1.5h to terminal, strongest A WIN candidate (broken under gate at EP8) |
+| thorfinn H85 | #1245 | lr=1.2e-4 (UPWARD) | terminal soon, D NEG confirmed |
+
 ## 🟡 ~02:25Z (2026-05-22) — H83 GRAD-CLIP-EXPANSION CLOSED B PARTIAL (paper-positive test_VP CROSS −0.112pp = cleanest of Wave 32 narrowly beating H82 −0.110pp; val_abupt MISS gate +0.134pp + 3/4 test channels regress) + nezuko reassigned H91 MODEL-SLICES-EXPANSION (PR #1251)
 
 **Closure: PR #1243 H83 (nezuko) — B PARTIAL** — paper-positive **test_VP CROSSES floor by −0.112pp** (3.5308% vs floor 3.643% — cleanest VP-axis cross of Wave 32 narrowly beating H82's −0.110pp), AND val_VP improved −0.153pp vs #972 baseline (BEST in fleet). BUT val_abupt MISS gate +0.134pp + test_abupt regression +0.126pp + test_SP breach floor +0.162pp + test_WSS +0.163pp above goal. Per program.md "no averaging away regressions" — single-paper-positive insufficient when 3/4 paper-facing test channels regress. Closed not merged.

@@ -1,3 +1,82 @@
+## 2026-05-22 03:10 — PR #1244: H84 RFF-NUM-FEATURES-EXPANSION (askeladd, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP CROSS by −0.040pp, val_abupt CLOSEST C NULL of Wave 32 (+0.021pp over gate) BUT test_SP fails floor +0.194pp + test_WSS regresses +0.164pp + test_abupt +0.131pp; **3rd consecutive volume-favoring single-flag lever, RFF expansion engages mid-cosine but does not maintain late-cosine lead — Tancik saturation prior held**
+
+- **Branch**: `askeladd/h84-rff-num-features-expansion` (closed at 03:10Z 2026-05-22)
+- **W&B run**: `qhd8xc4b` (EP13 step 70,664, 14.02h training time, peak 84.09 GB, all 8 GPUs healthy)
+- **Hypothesis**: Single-flag `--rff-num-features 16 → 32` on canonical Wave 32 baseline #972 substrate. First-ever RFF Fourier-features positional-encoding capacity sweep entire Wave 31/32 fleet history.
+
+### Terminal metrics (EP13 best EMA checkpoint, full test eval)
+
+| Channel | **H84 (rff=32)** | BL #972 / floor | Δ vs BL / floor | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.1470%** | gate 6.126% | **+0.021pp** ⚠️ | **CLOSEST C NULL of Wave 32 — fails gate by hair** |
+| val_VP | 3.6830% | — | — | — |
+| val_SP | 4.0778% | — | — | — |
+| val_WSS | 6.9310% | — | — | — |
+| **test_abupt** | **5.9748%** | 5.844% | **+0.131pp** ❌ | regression |
+| **test_VP (floor 3.643)** | **3.6030%** | 3.643% | **−0.040pp** ✅ | **CROSSES floor (3rd consecutive Wave 32)** |
+| **test_SP (floor 3.577)** | **3.7707%** | 3.577% | **+0.194pp** ❌ | BREACHES floor |
+| **test_WSS (goal 6.727)** | **6.8905%** | 6.727% | **+0.164pp** ❌ | above goal |
+| test_WSS_x | 6.138% | — | — | best axis |
+| test_WSS_y | 7.430% | — | — | mid |
+| test_WSS_z | 8.933% | — | — | binding axis still worst (consistent fleet pattern) |
+
+### Trajectory (EMA-aware)
+
+| EP | Step | val_abupt | Slope pp/1k |
+|---|---:|---:|---:|
+| EP1 | 10,864 | 29.149% | (cold start +0.5pp over canonical) |
+| EP4 | 38,030 | 6.532% | −0.051 |
+| EP6 | 48,902 | 6.349% | −0.015 |
+| EP8 | 56,154 | 6.229% | −0.013 (LEADER at common steps over H82 by −0.072pp) |
+| EP11 | 65,222 | 6.1653% | — |
+| **EP13** | **70,664** | **6.1470%** | terminal slope −1.166e-3 pp/1k |
+
+EP4→EP6 saw −0.18pp/2EP rapid mid-cosine descent. EP8→EP13 saw only −0.20pp/5EP. **RFF capacity engaged in mid-cosine but extracted all available benefit before late-cosine** — Tancik saturation curve confirmed at rff=32 on tay substrate.
+
+### Why CLOSE not MERGE
+
+Per CLAUDE.md decision criteria and program.md "no averaging away regressions":
+
+1. **val_abupt MISS gate +0.021pp** — closest miss of Wave 32, but still above 6.126% threshold
+2. **test_abupt regresses +0.131pp vs baseline** — primary test metric WORSE than #972
+3. **AND-gate test floors FAIL** — test_VP CROSSES ✅ but test_SP breaches +0.194pp ❌
+4. **test_SP fail is the H80-identified architectural binding constraint** — 6th independent variant landing test_SP 3.74-3.95% (H78 +0.142, H79 +0.323, H80 +0.353, H82 +0.202, H83 +0.162, H84 +0.194)
+5. **test_WSS regresses +0.164pp** — moving AWAY from Issue #1056 goal (5.85)
+
+### What H84 DEFINITIVELY establishes
+
+**4th confirmed volume-favoring single-flag lever** of Wave 32 (after H75/H76 volume-points, H82 wd, H83 grad_clip). RFF positional encoding capacity expansion engaged productively in mid-cosine (EP6-EP8 fleet-leading lead) but **did not maintain lead into late-cosine**.
+
+**Mechanism interpretation (consistent with hypothesis)**:
+- Doubling Fourier features helped smooth-spatial fields (volume pressure → test_VP CROSS ✅)
+- Did NOT help high-frequency near-wall fields (surface pressure → test_SP +0.194pp ❌)
+- Did NOT help WSS axes (test_WSS_z still 8.93%)
+
+The "32 is at the bottom of Tancik recommended range" prior held. **At rff=32 we are sub-merge by 0.021pp — adding 32→64 likely adds cold-start tax without late-cosine benefit (diminishing returns on saturating Tancik curve).**
+
+### Wave 32 volume-favoring pattern CONFIRMED across 4 mechanisms
+
+| Variant | Mech | test_VP | Δ vs floor 3.643 |
+|---|---|---:|---:|
+| H82 | wd=1e-3 | 3.5328% | −0.110pp |
+| H83 | grad_clip=1.0 | 3.5308% | −0.112pp |
+| H84 | rff=32 | 3.6030% | −0.040pp |
+| H75/H76 | vol-points (B PARTIAL prior) | — | — |
+
+**6 single-flag variants now cleanly fail test_SP floor** (3.74-3.95% range). Wave 32 has DEFINITIVELY established that VP-axis improvement is reliably achievable via diverse single-flag mechanisms, but **SP-axis plateau is the campaign-binding constraint and is NOT broken by any single-flag mechanism tested so far** — validates H80's architectural-bound hypothesis.
+
+### Reassignment — H92 TAU-Z-LOSS-PUSH (askeladd → PR #1252)
+
+Single-flag `--tau-z-loss-weight 2.0 → 3.0` (+50%) on canonical Wave 32 baseline. **First-ever per-tau-channel loss weight sweep entire Wave 31/32 fleet**.
+
+Mechanism: **test_WSS_z is consistently the worst axis across the entire fleet** (8.93-9.66% range vs canonical mean tau_x of 6.12-6.37%). Issue #1056 stretch goal (test_WSS < 5.85) is mathematically dominated by reducing tau_z. Pushing tau_z loss weight higher gives more gradient signal to the tau_z output head per training step — direct data-side gradient-budget reallocation specifically toward the binding axis.
+
+**Per-channel-within-bucket rebalancing has never been tested** entire campaign. H87 tests surface↔volume balance (in-flight, strongest val_abupt signal); H92 tests within-surface (tau_z emphasis) balance. Together they characterize the full per-channel loss budget landscape.
+
+No memory impact (loss weights are scalars). Orthogonal to all 7 in-flight Wave 32 axes (architectural H88/H89/H91, LR H85/H90, FFN H86, data-side H87).
+
+---
+
 ## 2026-05-22 02:25 — PR #1243: H83 GRAD-CLIP-EXPANSION (nezuko, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP CROSS by −0.112pp (cleanest VP cross of Wave 32, narrowly beating H82) BUT val_abupt MISS gate +0.134pp + test_abupt +0.126pp + test_SP +0.162pp regress; **grad_clip=1.0 is 2nd confirmed volume-favoring lever — Lion paper default validated, Wave 33 compound axis candidate**
 
 - **Branch**: `nezuko/h83-grad-clip-expansion` (closed at 02:25Z 2026-05-22)
