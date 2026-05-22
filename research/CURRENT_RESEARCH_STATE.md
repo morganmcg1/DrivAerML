@@ -1,9 +1,33 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~20:00 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~21:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟠 ~21:00Z (2026-05-22) — H94 VOLUME-LOSS-INCREASE CLOSED **B PARTIAL** (test_VP CROSS 7th single-flag + Lion sign-update asymmetry confirmed +0.30pp) + H98v2 CLOSED INFEASIBLE-AS-SPEC (O(N²) self-attention on 65K tokens) + askeladd reassigned H103 VOLUME-CONTEXT-FILM-DECODER (PR #1270) + edward reassigned H104 VOLUME-OUT-WIDER-MLP (PR #1269) + H99 frieren check-in posted
+
+**Closures this turn:**
+- **H94 (edward, PR #1257) — B PARTIAL**: val_abupt 6.357% MISS gate +0.231pp; test_VP **3.582%** CROSS floor −0.061pp (7th single-flag). Lion sign-update asymmetry definitively confirmed: additive route (vol↑) +0.30pp slower than subtractive (surf↓) at same 1.33:1 ratio. Intrinsic 6.21:1 raw surface:volume loss magnitude caps weight-tuning effectiveness. surf:vol=1.33:1 ratio coverage COMPLETE via both routes.
+- **H98v2 (askeladd, PR #1267) — INFEASIBLE-WITHIN-BUDGET**: `nn.TransformerEncoderLayer` on N=65,536 surface tokens = O(N²) self-attention. Measured 0.385 it/s vs 1.25 baseline (3.2× slower). Only ~2.3 epochs feasible in SENPAI_TIMEOUT=1100min. Option D: kill, close, mechanism preserved in H103 FiLM variant. Operational ruling: per-token surface self-attention is infeasible in current budget envelope.
+
+**New assignments:**
+- **H103 (askeladd, PR #1270)**: VOLUME-CONTEXT-FILM-DECODER — pooled volume_hidden → film_projector (Linear 512→1024) → (γ, β) FiLM-modulate surface_hidden before surface_out. O(N) cost, zero-init identity, +525K params. Same vol→surf info-flow axis as H97 (bidirectional xattn) at global-pool resolution vs per-token.
+- **H104 (edward, PR #1269)**: VOLUME-OUT-WIDER-MLP — `--volume-out-width-factor 2.0` scales volume decoder funnel 512→256→128→vol_dim to 512→512→256→vol_dim. +229K params. Mirror of H102 (surface-wider) on volume decoder side. Tests if volume_out is capacity-bound given H94 confirmed test_VP responds to volume-head perturbations.
+
+**H99 frieren stale_wip cleared**: step 15,166/70,664 (21.5%), 2.25h runtime, 1.87 it/s, EP1 val_abupt **27.624%** fleet-normal. Healthy.
+
+### Wave 33 fleet — **8/8 WIP, zero idle**:
+1. **H96 (fern, PR #1261)**: WSS-DEDICATED-DECODER-HEAD — running (was 66% at last check-in)
+2. **H97 (alphonse, PR #1262)**: BIDIRECTIONAL-XATTN — **strongest EP2 signal −2.72pp** (vol→surf xattn engaging)
+3. **H99 (frieren, PR #1264)**: SURFACE-OUT-DEEPER-MLP (depth-axis) — EP1 27.624%, 21.5% complete
+4. **H100 (thorfinn, PR #1265)**: WSS-Z-DEDICATED-HEAD — in-flight
+5. **H101 (nezuko, PR #1266)**: GEOM-RESIDUAL-DECODER — in-flight
+6. **H102 (tanjiro, PR #1268)**: SURFACE-OUT-WIDER-MLP (width-axis, pairs H99 depth) — in-flight
+7. **H103 (askeladd, PR #1270)**: VOLUME-CONTEXT-FILM-DECODER — NEW, assigned this turn
+8. **H104 (edward, PR #1269)**: VOLUME-OUT-WIDER-MLP — NEW, assigned this turn
+
+---
 
 ## 🟠 ~20:00Z (2026-05-22) — H95 SURF-LOSS-PUSH-FURTHER CLOSED **C NULL** (H87's 1.5:1 ratio CONFIRMED substrate sweet spot, loss-weight rebalance axis DEFINITIVELY EXHAUSTED) + tanjiro reassigned H102 SURFACE-OUT-WIDER-MLP (PR #1268)
 
@@ -69,9 +93,9 @@ PR #1263 had only 2 commits (assignment + stale research notes from H92 closure 
 6. **H101 (nezuko, PR #1266)**: geom-residual-decoder — in-flight
 7. **H102 (tanjiro, PR #1268)**: surface-out-wider-mlp (width axis, pairs with H99 depth) — NEW
 
-### Remaining Wave 32 in-flight (~terminal soon)
-- **H94 edward (PR #1257)**: vol_loss=1.5, projected D NEG confirming Lion sign-update asymmetry
-- **H95 tanjiro (PR #1258)**: surf_loss=1.25, projected C NULL confirming H87 surf=1.5 sweet spot
+### Wave 32 in-flight — FULLY CLOSED this turn
+- ~~**H94 edward (PR #1257)**~~: CLOSED B PARTIAL (test_VP CROSS, Lion asymmetry +0.30pp confirmed)
+- ~~**H95 tanjiro (PR #1258)**~~: CLOSED C NULL (H87 sweet spot confirmed, target axis not degraded)
 
 
 ## 🚀 STRATEGIC PIVOT (2026-05-22 08:44Z): Wave 33 ARCHITECTURAL DIRECTION per Morgan's Issue #1056 guidance

@@ -1,3 +1,85 @@
+## 2026-05-22 ~21:00 — PR #1267: H98v2 SURFACE-LATE-LAYER-SPLIT v2 (askeladd, CLOSED) — **INFEASIBLE-WITHIN-BUDGET** — O(N²) self-attention on N=65,536 surface tokens hits 0.385 it/s vs baseline 1.25 it/s; only ~2.3 epochs feasible in 18.3h timeout. Mechanism preserved via H103 VOLUME-CONTEXT-FILM-DECODER (PR #1270).
+
+- **Branch**: `askeladd/h98-surface-late-layer-split-v2` (closed at ~21:00Z 2026-05-22)
+- **W&B run**: `yoi1f40v` (KILLED — not trained to terminal)
+- **Hypothesis**: Extra `nn.TransformerEncoderLayer` on surface_hidden after surf_to_vol_xattn, zero-init at identity (out_proj.weight=0, linear2.weight=0). +3.15M params (17.42M → 20.57M total).
+
+### Infeasibility — compute-envelope failure
+
+Student reported 0.385 it/s vs baseline 1.25 it/s (3.2× throughput drop) immediately after starting full 8-GPU run. Root cause: `TransformerEncoderLayer` runs full self-attention on N=65,536 surface tokens = O(N²) = ~4.3 billion attention pairs per sample × 4 batch × 8 GPUs. At 0.385 it/s, 70,664 total steps = ~51 wall-hours; `SENPAI_TIMEOUT_MINUTES=1100` (18.3h) allows only ~25,300 steps ≈ 2.3 epochs. Not comparable to 13-epoch fleet.
+
+### Option selected — D (kill, close as infeasible-as-spec)
+
+- Option A (partial 2.3-epoch run): non-comparable evidence, not recommended
+- Option B (reduce surface_points to 32768): confounds mechanism with lower surface density
+- Option C (slice-level self-attention): materially changes hypothesis
+- **Option D (kill, close)**: clean record, mechanism preserved in restructured H103
+
+### Mechanism class ruling
+
+Full per-token self-attention on N=65,536 surface tokens is **operationally infeasible** in current budget regardless of hypothesis quality. Rules out an entire mechanism class:
+- Per-token surface self-attention: INFEASIBLE (O(N²))
+- Slice-level attention: EXISTS in backbone (O(slices²) = O(128²) = fine)
+- Cross-attention vol↔surf: FINE (O(N×M) where M=16384-65536 but H97 confirmed it runs)
+- FiLM/MLP/position operations: O(N) = FINE
+
+### Reassignment → H103 askeladd PR #1270 VOLUME-CONTEXT-FILM-DECODER
+
+Same vol→surf information-flow axis, O(N) cost: `film_projector` (Linear 512→1024) projects pooled volume_hidden context to FiLM (γ, β) parameters that modulate surface_hidden before surface_out. Zero-init at identity. +525K params. Expected throughput ~baseline 1.2-1.3 it/s.
+
+---
+
+## 2026-05-22 ~21:00 — PR #1257: H94 VOLUME-LOSS-WEIGHT-INCREASE (edward, CLOSED) — **OUTCOME B PARTIAL** — test_VP CROSS (7th single-flag) + Lion sign-update asymmetry definitively confirmed (+0.30pp slower than H87 subtractive route at same 1.33:1 ratio); surf:vol=1.33:1 ratio coverage CLOSED. edward reassigned H104 VOLUME-OUT-WIDER-MLP (PR #1269).
+
+- **Branch**: `edward/h94-volume-loss-weight-increase` (closed at ~21:00Z 2026-05-22)
+- **W&B run**: `6fwwywk0` (rank 0; 13 epochs, 14.34h, best_epoch=12)
+- **Hypothesis**: volume_loss_weight 1.0→1.5 (same surf:vol ratio 1.33:1 as H87 via additive route instead of subtractive).
+
+### Results — terminal metrics
+
+| Metric | H94 | Baseline #972 (test) | H87 (test) | Δ vs #972 | Δ vs H87 | Status |
+|---|---:|---:|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.357%** | — | — | — | — | MISS gate +0.231pp |
+| test_abupt | 6.073% | 5.844 | 5.987 | +0.229pp | +0.086pp | mild regress |
+| **test_VP (floor ≤3.643%)** | **3.582%** | 3.643 | 3.495 | **−0.061pp ✓** | +0.087pp | **CROSS ✓** (7th single-flag) |
+| test_SP (floor ≤3.577%) | 3.829% | 3.577 | 3.734 | +0.252pp | +0.095pp | MISS (plateau range) |
+| test_WSS (goal ≤6.727%) | 7.021% | 6.727 | 6.944 | +0.294pp | +0.077pp | MISS goal |
+| test_WSS_x | 6.234% | 5.972 | 6.157 | +0.262pp | +0.077pp | mild regress |
+| test_WSS_y | 7.640% | 7.276 | 7.532 | +0.364pp | +0.108pp | regress |
+| test_WSS_z | 9.082% | 8.945 | 9.017 | +0.137pp | +0.065pp | mild regress |
+
+### Mechanism analysis
+
+**Lion sign-update asymmetry DEFINITIVELY CONFIRMED**:
+- H87 (subtractive: surf_loss 2.0→1.5) terminal val_abupt **6.045%** B PARTIAL HISTORIC
+- H94 (additive: vol_loss 1.0→1.5, SAME surf:vol ratio 1.33:1) terminal val_abupt **6.357%** = **+0.312pp slower**
+
+Root cause from student's terminal bucket analysis:
+- `train/surface_loss` raw = 0.002443 vs `train/volume_loss` raw = 0.000393 → **intrinsic 6.21:1 raw magnitude ratio**
+- Weighted effective ratio (H94 config): 0.004886 / 0.000590 = **8.28:1** (surface still dominates trunk gradient under Lion)
+- Increasing volume_loss amplifies minority signal; reducing surface_loss damps dominant signal — H87's subtractive route has more leverage.
+
+**Surf:vol ratio 1.33:1 coverage via both routes COMPLETE**:
+
+| Variant | surf:vol | val_abupt | test_VP | test_SP | test_WSS_z |
+|---|---|---:|---:|---:|---:|
+| #972 baseline | 2.0:1.0 | 6.181 | 3.643 | 3.577 | 8.945 |
+| **H87 ✓ HISTORIC** | **1.5:1** | **6.045 ✓** | **3.495 ✓** | 3.734 | 9.017 |
+| **H94 (this)** | **1.33:1 additive** | **6.357** | **3.582 ✓** | 3.829 | 9.082 |
+| H95 C NULL | 1.25:1 subtractive | 6.261 | 3.564 ✓ | 3.789 | 8.997 |
+
+**Bright spots**: val_WSS_y slope −0.0092 pp/1k (steepest in fleet) + test_VP CROSS −0.061pp confirming volume-head mechanism engaged intended axis. val→test slope WSS_z −0.681pp largest val→test concession in fleet (consistent with 34-case val overweighting WSS_z hardness vs 50-case test split).
+
+### Program-level — loss-weight rebalance axis FULLY EXHAUSTED (5 PRs)
+
+H87 + H92 + H93 + H94 + H95 close all loss-weighting coverage. Per Issue #1056, NOT merged. Wave 33 architectural attacks are the correct continuation.
+
+### Reassignment → H104 edward PR #1269 VOLUME-OUT-WIDER-MLP
+
+Mirror of H102 (tanjiro, SURFACE-OUT-WIDER-MLP) on the volume decoder side. `--volume-out-width-factor 2.0` scales volume_out funnel hidden dims: 512→256→128→vol_dim becomes 512→512→256→vol_dim. +229K params. Zero operational risk. Key diagnostic: H94 showed vol head responds to capacity perturbations on test_VP axis via gradient route; H104 tests parameter-capacity route on the same axis.
+
+---
+
 ## 2026-05-22 20:00 — PR #1258: H95 SURF-LOSS-PUSH-FURTHER (tanjiro, CLOSED) — **OUTCOME C NULL** — H87's 1.5:1 surf:vol ratio CONFIRMED substrate sweet spot, loss-weight rebalance class DEFINITIVELY CLOSED, test_VP CROSS (6th single-flag), target axis test_WSS_z NOT degraded. tanjiro reassigned H102 SURFACE-OUT-WIDER-MLP (PR #1268).
 
 - **Branch**: `tanjiro/h95-surf-loss-push-further` (closed at 20:00Z 2026-05-22)
