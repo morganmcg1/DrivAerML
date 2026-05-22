@@ -8,6 +8,71 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-22 09:00 UTC — PR #1241 CLOSED (H28 — falsified on all 4 test metrics) + H33 assigned to fern (PR #1260, FIRST ARCHITECTURAL EXPERIMENT)
+
+Fern's H28 finished cleanly at EP30 (run `83iayezy`, state=finished). All 4 test metrics regress vs H19 — extended cosine `T_max=60` on H19 base is fully falsified.
+
+### H28 terminal (test_primary/*):
+
+| Metric | H28 test | H19 reference | Δ vs H19 | Floor (#1056) | Status |
+|---|---:|---:|---:|---:|---|
+| wss | **6.7329** | 6.6339 | +0.0991 | (target <5.85) | REGRESSION |
+| vol_p | **3.9564** | 3.779 | +0.1774 | ≤3.643 | BREACH +0.314 |
+| surf_p | **3.7515** | 3.627 | +0.1245 | ≤3.577 | BREACH +0.175 |
+| abupt | **5.9386** | 5.820 | +0.1186 | (target <5.85) | REGRESSION |
+
+Val terminal: val_wss=6.827, val_vol_p=4.038, val_surf_p=4.019, val_abupt=6.136.
+
+### Mechanism — what extended cosine actually did
+
+The EP10 mid-trajectory gate looked promising (val_wss 6.897 vs H19 7.044, −0.147pp ahead). But the late-training phase tells the real story:
+
+| Phase | LR | val_wss | What happened |
+|---|---:|---:|---|
+| EP10 (mid) | 9.46e-5 | 6.897 | Faster convergence, ahead of H19 by 0.15pp |
+| EP15-30 (late) | 8e-5 → 5e-5 | ~6.83 | Plateaued, never closed surface-feature gap |
+| Test gap | — | +0.10pp val→test on wss | Late-training LR too high for fine surface features |
+
+The longer LR runway never broke the surf_p floor (it stayed 0.12pp above H19's own surf_p of 3.627). Holding LR higher into the late-training surface refinement window appears to have **prevented** the surface decoder from settling onto narrow optima — opposite of intended mechanism.
+
+### Plateau-Protocol diagnosis: 5+ consecutive scalar tweaks failed to break surf_p
+
+| Hypothesis | Mechanism | Outcome |
+|---|---|---|
+| H21 | `--gradnorm-clamp 0.15` | vol_p ✓, surf_p ✗ |
+| H27 | `--gradnorm-clamp 0.10` | strictly inferior to H26 partial |
+| H26 | `--surface-loss-weight 1.5` | abupt ⭐ but vol_p+surf_p breach |
+| H30 | `--gradnorm-clamp 0.20` (tighter) | cross-task starvation, EP6 abort |
+| H28 | `--lr-cosine-t-max 60` (extended) | ALL 4 FAILED |
+
+None of these add **geometric information** to the encoder. The bottleneck is **encoder representation**, not loss/optimization shape.
+
+### H33 dispatch — first architectural experiment in Wave 33
+
+Per researcher-agent's `RESEARCH_IDEAS_2026-05-22_0850.md` (Idea A), assigned fern **GALE-Transolver: persistent geometry cross-attention at every layer** (PR #1260).
+
+**Mechanism**: A `GeometryContextBank` encodes surface_x (xyz+normals+area) into K=512 anchor tokens via FPS-stride + KNN max-pooling. Each Transolver block adds a `GeometryCrossAttention` sublayer between physics-attention and MLP, with a learned per-block sigmoid gate (init 0.5). Surface tokens query the bank; volume tokens skipped via query mask.
+
+**Direct DrivAerML evidence**: GeoTransolver (arxiv 2505.12558, 2025) reports on the **same benchmark**:
+- surf_p = 2.86% (clears 3.577 floor by 0.72pp ⭐⭐⭐)
+- wss = 4.90% (clears Transolver-3 target 5.85 by 0.95pp)
+- vol_p = 3.09% (clears 3.643 floor by 0.55pp)
+
+Only known method to clear all three floors simultaneously. ~200-300 LoC, 4-6 hours implementation.
+
+**EP6 gate**: val_wss ≤ 7.00, val_surf_p ≤ 4.05, `geo_xattn/gate_mean > 0.05` (must move off init), no NaN/Inf.
+
+**Falsification**: If gate stays at 0.50 with no surf_p gain → mechanism dead; if surf_p > 4.20 at EP6 → geometry xattn is actively hurting (catastrophic). Either outcome is informative.
+
+**Predicted outcome (60-70% scaling of GeoTransolver numbers)**:
+- test_wss: 6.10-6.40 (clears H19 by 0.2-0.5pp; clears Transolver-3 5.85 at upper bound)
+- test_surf_p: 3.30-3.50 (breaks floor first time in wave)
+- test_vol_p: 3.40-3.55 (clears floor with margin)
+
+PR #1241 closed (https://github.com/morganmcg1/DrivAerML/pull/1241#issuecomment-4517218478). H33 PR #1260 assigned to fern.
+
+---
+
 ## 2026-05-22 08:15 UTC — PR #1255 CLOSED (H30 — falsified at EP6) + H32 assigned to tanjiro (PR #1259)
 
 Tanjiro aborted H30 at EP6 with terminal `SENPAI-RESULT` (run `ofehmi7q`). The hypothesis "tighter `w_vol_p` clamp restores vol_p floor while retaining H26's wss gain" was cleanly falsified:
