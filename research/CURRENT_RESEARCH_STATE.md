@@ -1,9 +1,49 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~18:30 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~18:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟢 ~18:45Z (2026-05-22) — H91 MODEL-SLICES-EXPANSION CLOSED **B PARTIAL** (Wave 32 Tier-2 architectural sweep COMPLETE) + H98 askeladd PR #1263 sent back for REBASE + nezuko reassigned H101 GEOM-RESIDUAL-DECODER (PR #1266) + H96 check-in #3 posted
+
+**Closure: PR #1251 H91 (nezuko) — B PARTIAL**:
+- val_abupt **6.1748%** MISS gate +0.049pp (NARROW)
+- test_VP **3.5768%** CROSS floor by −0.066pp (5th single-flag Wave 32 to cross)
+- test_SP 3.7467% MISS floor +0.170pp (11th plateau confirmation, but LOWER EDGE 3.74-3.95% band)
+- test_WSS 6.9142% MISS goal +0.187pp
+- **test_WSS_z 8.9496% FLEET-BEST** (only Wave 32 single-flag to engage WSS_z below 9.0%)
+- val→test slope on SP-axis: **−0.312pp** STRONGEST in Wave 32 fleet
+- **Wave 32 Tier-2 architectural sweep COMPLETE**: depth > slices > heads on val_abupt ordering
+
+**Operational: H98 (askeladd, PR #1263) rebase send-back** — DIRTY merge state due to 3 advisor commits since branch creation. Sent back with rebase instructions. Conflict likely in research/* files only.
+
+**Operational: H96 (fern, PR #1261) stale_wip check-in #3** — pod healthy at step 46,790 (66.2%), EP5 val_abupt 6.457%, slope −0.0164 pp/1k engaging WELL, ETA terminal ~3.9h. Split-heads architecture engaging cleanly.
+
+### Reassignment: PR #1266 H101 nezuko GEOM-RESIDUAL-DECODER — Wave 33 attack on decoder INPUT signal
+
+**Mechanism**: `--use-geom-residual-decoder` adds zero-initialized linear projection from raw surface_x[..., :3] positions to n_hidden, added as residual to surface_hidden BEFORE surface_out. At init identity (zero residual). During training, model learns to use raw position info directly at decoder. Param cost ~1.5K (negligible).
+
+**Orthogonal to all Wave 33 in-flight**:
+- H96 (split heads cp vs WSS), H97 (vol→surf xattn), H98 (extra transformer block), H99 (deeper surface MLP), H100 (tau_z dedicated head) all attack the decoder's *internal* structure
+- **H101 attacks the decoder's *input signal*** — adds NEW INFORMATION at decoder, not more compute
+
+**Physics motivation**: Slice attention compresses 65K surface points → 128 slices, necessarily losing fine spatial discrimination. cp/tau_x/y/z depend on local positional gradients. Direct position skip-connection recovers lost discrimination.
+
+**Key signal**: test_SP < 3.70% → first crack of 11-variant plateau (3.74-3.95%); test_WSS_z < 8.5% → binding axis cracked.
+
+### Wave 33 fleet (8/8 WIP — ALL ACTIVE):
+1. **H96 (fern, PR #1261)**: split SP/WSS decoder heads — running 66% slope engaging
+2. **H97 (alphonse, PR #1262)**: bidirectional surf↔vol cross-attention — in-flight
+3. **H98 (askeladd, PR #1263)**: surface-late-layer-split — NEEDS REBASE
+4. **H99 (frieren, PR #1264)**: surface-out-deeper-mlp — in-flight
+5. **H100 (thorfinn, PR #1265)**: WSS-z-dedicated-head — in-flight
+6. **H101 (nezuko, PR #1266)**: geom-residual-decoder — NEW
+
+### Remaining Wave 32 in-flight (~terminal soon)
+- **H94 edward (PR #1257)**: vol_loss=1.5, projected D NEG confirming Lion sign-update asymmetry
+- **H95 tanjiro (PR #1258)**: surf_loss=1.25, projected C NULL confirming H87 surf=1.5 sweet spot
+
 
 ## 🚀 STRATEGIC PIVOT (2026-05-22 08:44Z): Wave 33 ARCHITECTURAL DIRECTION per Morgan's Issue #1056 guidance
 

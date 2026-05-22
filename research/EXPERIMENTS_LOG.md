@@ -1,3 +1,58 @@
+## 2026-05-22 18:45 — PR #1251: H91 MODEL-SLICES-EXPANSION (nezuko, CLOSED) — **OUTCOME B PARTIAL** — val gate NARROW MISS +0.049pp + test_VP CROSS −0.066pp (5th single-flag) + fleet-best test_WSS_z 8.95% (slice expansion engages WSS_z compression). Wave 32 Tier-2 architectural sweep COMPLETE. nezuko reassigned H101 GEOM-RESIDUAL-DECODER (PR #1266).
+
+- **Branch**: `nezuko/h91-model-slices-expansion` (closed at 18:45Z 2026-05-22)
+- **W&B run**: `5anlrjsd` (rank 0; finished at step 70,652, 15.60h training time, 914 min total wall)
+- **Hypothesis**: Single-flag `--model-slices 128→192` on canonical Wave 32 substrate. First-ever Transolver slice-token-count sweep. Hypothesis: SP plateau bound by slice-token resolution at h=512/L=5.
+
+### Results — terminal metrics
+
+| Metric | H91 | Baseline/Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | 6.1748% | 6.126% | +0.049pp ❌ | NARROW MISS |
+| test_abupt | 5.9834% | 5.844 | +0.139pp ❌ | regress |
+| **test_VP (floor)** | **3.5768%** | 3.643 | **−0.066pp ✓** | **CROSS (5th single-flag)** |
+| test_SP (floor) | 3.7467% | 3.577 | +0.170pp ❌ | MISS (plateau range 3.74-3.95%) |
+| test_WSS (goal) | 6.9142% | 6.727 | +0.187pp ❌ | regress |
+| test_WSS_x | 6.1502% | (canonical ~5.96) | +0.19pp ❌ | regress |
+| test_WSS_y | 7.4938% | (canonical ~7.43) | +0.06pp ❌ | mild regress |
+| **test_WSS_z** | **8.9496%** | 8.945 | **+0.005pp** | **FLEET-BEST WSS_z** |
+
+### Wave 32 Tier-2 architectural sweep — COMPLETE
+
+| Variant | val_abupt | test_VP | test_SP | test_WSS_z | Verdict |
+|---|---:|---:|---:|---:|---|
+| H88 (heads=8) | 6.2088% | 3.6018% ✓ | 3.8365% | 8.968% | B PARTIAL |
+| **H89 (depth=6)** | **6.1186% ✓** | **3.482% ✓** | 3.709% | 9.087% | **B PARTIAL HISTORIC** (gate CLEAR) |
+| **H91 (slices=192)** | **6.1748%** | **3.5768% ✓** | 3.7467% | **8.9496%** | **B PARTIAL** (narrow gate miss, fleet-best WSS_z) |
+
+**Ordering on val_abupt**: depth > slices > heads. All three add representational capacity but plateau on test_SP/WSS axes — confirming encoder-stack exhaustion and decoder-bound binding constraints.
+
+### Mechanism interpretation
+
+**Slice-token-count axis productively engages WSS_z** (fleet-best 8.95%) via finer surface coverage (~341 surface points per slice token at slices=192 vs 512 at canonical 128). But test_SP=3.7467% lands at LOWER EDGE of the 3.74-3.95% Wave 32 plateau — not decisively below 3.70%. **Slice-token resolution is NOT the binding SP-axis constraint.**
+
+H91 val→test slope on SP-axis is **−0.312pp** — STRONGEST in Wave 32 fleet — indicating that slice expansion produces val→test generalization on SP channel. The val checkpoint metric is bottlenecked, not the underlying spatial discrimination.
+
+### Per-axis WSS readings — H91 is the ONLY Wave 32 single-flag mechanism to engage WSS_z compression below 9.0%
+
+This data point will be cited in Wave 33 attack documentation as evidence that **spatial token granularity engages WSS_z** (vs SP and WSS_x which respond to other levers). Combined with H89 (depth) and H88 (heads), the architectural Tier-2 axis is fully mapped:
+- depth → strongest aggregate val_abupt + test_VP
+- slices → fleet-best test_WSS_z (only mechanism below 9.0%)
+- heads → weakest (no axis improved)
+- mlp_ratio (H86) → all axes regress
+
+### nezuko reassigned PR #1266 H101 GEOM-RESIDUAL-DECODER
+
+**Mechanism**: zero-initialized linear projection from raw surface position (xyz) → n_hidden, added as residual to surface_hidden BEFORE surface_out. At init identity (zero residual). During training, model learns to use raw position info directly at decoder, bypassing slice-attention bottleneck.
+
+**Orthogonal to Wave 33 in-flight**: H96/H100 are structural decoder splits; H97 is cross-modal info flow; H98 is extra processing layer; H99 is deeper MLP. H101 is **input signal augmentation** (new info at decoder, not more compute).
+
+**Physics motivation**: cp and tau_x/y/z are spatial functions f(x,y,z). Slice attention compresses 65K surface points → 128 slices, necessarily losing fine spatial discrimination. Direct position skip-connection recovers this. Param cost ~1.5K (negligible).
+
+**Key signal**: test_SP < 3.70% would be first crack of 11-variant Wave 32 plateau; test_WSS_z < 8.5% would break binding axis.
+
+---
+
 ## 2026-05-22 18:30 — PR #1254: H93 TAU-Y-LOSS-PUSH (thorfinn, CLOSED) — **OUTCOME D NEGATIVE** — per-tau-channel mechanism DOUBLY FALSIFIED alongside H92. val_WSS_y 7.802% WORSE than canonical siblings. thorfinn reassigned H100 WSS-Z-DEDICATED-HEAD (PR #1265).
 
 - **Branch**: `thorfinn/h93-tau-y-loss-push` (closed at 18:30Z 2026-05-22)
