@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~16:16 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~17:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -46,10 +46,49 @@ These are architecturally clean hypotheses that **add representational capacity 
 - If test_SP also improves → cross-validation that the plateau is BOTH decoder-shared-trunk AND backbone
 
 ### Wave 33 architectural candidates queue (in priority order):
-1. **H96 (fern, in-flight EP3)**: split SP/WSS decoder heads — first attack
-2. **H97 (alphonse, NEW PR #1262)**: bidirectional surf↔vol cross-attention — second attack
-3. **H98 (next idle)**: WSS-to-SP cross-attention — third attack
-4. **H99 (next idle)**: compound H96 + H97 if both produce signal
+1. **H96 (fern, PR #1261, in-flight)**: split SP/WSS decoder heads — first attack
+2. **H97 (alphonse, PR #1262, in-flight)**: bidirectional surf↔vol cross-attention — second attack
+3. **H98 (askeladd, PR #1263, NEW)**: surface-late-layer-split — one extra surface-only TransformerEncoderLayer post-backbone, identity at init — third attack
+4. **H99 (next idle)**: compound H96 + H97 if both produce signal, OR WSS-to-SP cross-attention (depends on H96 architecture being available)
+
+**Per-tau-channel loss-weight class CLOSED (2026-05-22 17:50Z):** H92 (tau_z=3.0 D NEG, PR #1252) + H93 (tau_y=2.5, thorfinn in-flight PR #1254) together falsify per-channel loss reweighting under Lion. test_WSS_z is architecture-bound.
+
+## 🟡 ~17:50Z (2026-05-22) — H92 TAU-Z-LOSS-PUSH CLOSED **D NEGATIVE** (askeladd) — per-tau-channel loss-weight class DEFINITIVELY CLOSED + askeladd reassigned H98 SURFACE-LATE-LAYER-SPLIT (PR #1263)
+
+**Closure: PR #1252 H92 (askeladd) — D NEGATIVE**:
+- val_abupt 6.3235% MISS gate +0.198pp
+- test_VP 3.5629% CROSS floor −0.080pp ✓ (incidental, only channel)
+- test_SP 3.8335% MISS floor +0.257pp
+- test_WSS 7.0405% REGRESS +0.314pp
+- **test_WSS_z 9.051% vs hypothesis target <8.5% — FAILED**
+- **val_WSS_z 9.601% = WORSE than ALL canonical-recipe siblings** (H88/H89/H91 all 9.48-9.50%)
+
+**Mechanism falsification:** Under Lion sign-update, per-channel loss-weight reallocates gradient ratio but does NOT add representational capacity. The 50% stronger tau_z signal failed to compress val_WSS_z below canonical-recipe baselines — it degraded it. **Per-tau-channel reweighting is architecture-irrelevant under Lion sign-update.**
+
+**Combined with H93 (tau_y=2.5, thorfinn in-flight), per-tau-channel loss-weight class is CLOSED.**
+
+### Reassignment: PR #1263 H98 askeladd SURFACE-LATE-LAYER-SPLIT
+
+`--use-surface-extra-block` (new flag) — adds one extra `TransformerEncoderLayer` applied ONLY to `surface_hidden` after the shared L=5 backbone, before `surface_out`. Volume tokens skip this extra block entirely. Identity at init via zero-init out_proj + linear2.
+
+**Mechanism**: late-stage surface specialization — the added block can refine surface representations with surface-only attention patterns, decoupled from volume-domain interference. Orthogonal to H96 (decoder-head separation) and H97 (bidirectional xattn topology).
+
+**Key signal at terminal**:
+- test_WSS_z < 8.5% → binding axis first crack via surface-specialization
+- test_SP < 3.577% → first mechanism to crack 10-variant test_SP plateau
+
+### Current fleet status — 8/8 WIP, zero idle (post H92 closure + H98 assignment):
+
+| Run | PR | Mech | Status |
+|---|---|---|:--|
+| alphonse H97 | #1262 | bidirectional xattn (NEW Wave 33) | in-flight |
+| **askeladd H98** | **#1263** | **surface-late-layer-split (NEW Wave 33)** | **NEW ASSIGNMENT** |
+| edward H94 | #1257 | vol_loss=1.5 | in-flight |
+| fern H96 | #1261 | WSS-dedicated-decoder-head (Wave 33) | in-flight |
+| frieren H89 | #1249 | layers=6 | in-flight |
+| nezuko H91 | #1251 | slices=192 | in-flight |
+| tanjiro H95 | #1258 | surf_loss=1.25 | in-flight |
+| thorfinn H93 | #1254 | tau_y=2.5 (PUSH) | in-flight |
 
 ## 🔴 ~16:16Z (2026-05-22) — H90 LR-DOWNWARD-SWEEP CLOSED **D NEGATIVE** (alphonse) + alphonse reassigned H97 BIDIRECTIONAL-XATTN (PR #1262)
 

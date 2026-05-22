@@ -1,3 +1,47 @@
+## 2026-05-22 17:50 — PR #1252: H92 TAU-Z-LOSS-PUSH (askeladd, CLOSED) — **OUTCOME D NEGATIVE** — mechanism FALSIFIED: per-tau-channel loss-weight class closed definitively. test_WSS_z WORSE than all canonical-recipe siblings. askeladd reassigned H98 SURFACE-LATE-LAYER-SPLIT (PR #1263).
+
+- **Branch**: `askeladd/h92-tau-z-loss-push` (closed at 17:50Z 2026-05-22)
+- **W&B run**: `or56xz4x` (rank 0; finished at step 70,652, 13.97h training time, EP12 EMA best)
+- **Hypothesis**: Single-flag `--tau-z-loss-weight 2.0→3.0` (+50%) on canonical Wave 32 substrate. First-ever per-tau-channel loss weight sweep. Hypothesis: stronger gradient signal on binding WSS_z axis would preferentially compress test_WSS_z < 8.5%.
+
+### Results
+
+| Metric | H92 | Baseline #972 / floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | 6.3235% | 6.126% | +0.198pp ❌ | MISS gate |
+| **test_abupt** | 6.0723% | 5.844% | +0.228pp ❌ | regress |
+| **test_VP (floor)** | 3.5629% | 3.643% | **−0.080pp ✓** | CROSS (incidental) |
+| **test_SP (floor)** | 3.8335% | 3.577% | +0.257pp ❌ | BREACH |
+| **test_WSS (goal)** | 7.0405% | 6.727% | +0.314pp ❌ | REGRESS above goal |
+| test_WSS_x | 6.275% | ~6.1% | — | neutral |
+| test_WSS_y | 7.639% | ~7.4% | — | neutral |
+| **test_WSS_z (binding)** | **9.051%** | ~8.96% | +0.09pp ❌ | **FAILED — should be <8.5%** |
+
+### Per-WSS-axis cross-sibling comparison (val_WSS_z, canonical tau_z=2.0 siblings)
+
+| Variant | tau_z weight | val_WSS_z | test_WSS_z |
+|---|---|---:|---:|
+| H88 (heads=8) | 2.0 | 9.493% | 9.498% |
+| H89 (depth=6) | 2.0 | ~9.50% | ~9.50% |
+| H91 (slices=192) | 2.0 | 9.485% | ~9.5% |
+| **H92 (tau_z=3.0)** | **3.0** | **9.601%** | **9.051%** |
+
+**H92 val_WSS_z is WORSE than ALL canonical-recipe siblings.** The tau_z weight change actually DEGRADED val WSS_z while providing only marginal test improvement.
+
+### Mechanism Falsification
+
+**Per-tau-channel loss-weight class DEFINITIVELY CLOSED.** Under Lion sign-update, per-channel loss-weight scales gradient ratio entering the surface head, but Lion normalizes step magnitude to ±lr. The 50% stronger tau_z signal does NOT add representational capacity — it merely redistributes budget within existing capacity. Combined with H93 (tau_y=2.5, thorfinn PR #1254, in-flight), this class is closed regardless of H93 outcome.
+
+**Program-level finding:** test_WSS_z (fleet range 8.93-9.66% across H78-H92) is **ARCHITECTURE-BOUND, not loss-budget-bound.** The productive direction is architectural separation of WSS prediction (H96 split-heads, H97 bidirectional xattn, H98 surface-late-layer-split).
+
+**Incidental test_VP CROSS (3.5629%)**: joins H75/H76/H82/H83/H84 as 5th single-flag to cross test_VP floor. Volume-favoring pattern consistent. Not a merge candidate (AND-gate fails on 3/4 paper-facing channels).
+
+### Reassignment
+
+- askeladd → **Wave 33 H98: SURFACE-LATE-LAYER-SPLIT** (PR #1263) — adds one extra TransformerEncoderLayer applied only to surface tokens between shared backbone and surface decoder head. Identity at init (zero-init out_proj + linear2). Tests late-stage surface specialization as WSS binding axis mechanism. Orthogonal to H96 (decoder-head separation) and H97 (bidirectional xattn).
+
+---
+
 ## 2026-05-22 16:16 — PR #1250: H90 LR-DOWNWARD-SWEEP (alphonse, CLOSED) — **OUTCOME D NEGATIVE** — all 4 paper-facing test channels regress, val_abupt misses gate +0.193pp. Closes LR-magnitude sweep class: canonical lr=9e-5 confirmed substrate sweet spot.
 
 - **Branch**: `alphonse/h90-lr-downward-sweep` (closed at 16:16Z 2026-05-22)
