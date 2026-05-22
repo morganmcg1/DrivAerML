@@ -8,6 +8,57 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-22 08:15 UTC — PR #1255 CLOSED (H30 — falsified at EP6) + H32 assigned to tanjiro (PR #1259)
+
+Tanjiro aborted H30 at EP6 with terminal `SENPAI-RESULT` (run `ofehmi7q`). The hypothesis "tighter `w_vol_p` clamp restores vol_p floor while retaining H26's wss gain" was cleanly falsified:
+
+| Epoch | Δwss vs H26 | Δvol_p vs H26 |
+|---:|---:|---:|
+| EP3 | +0.109 | **−0.018** (favorable) |
+| EP4 | +0.128 | +0.032 |
+| EP5 | +0.171 | +0.072 |
+| EP6 | **+0.214** | +0.078 |
+
+Per-EP Δwss widened monotonically at ~+0.04/EP; Δvol_p sign-flipped from favorable to unfavorable. Both axes worsening simultaneously — the mechanism prediction is the opposite of what was observed.
+
+### Mechanism — the central scientific finding
+
+The PR rationale assumed: tighter `w_vol_p` clamp → direct vol_p gradient budget → faster vol_p descent.
+
+The observed mechanism is the **reverse**: tighter `w_vol_p` (0.20 vs 0.15) diverts gradient away from `w_cp` (H30 EP6 `w_cp`=0.619 vs H26 EP20 equilibrium `w_cp`=0.792, **~22% suppression of cp**). Since vol_p depends on the surface-aware encoder's features, suppressing `w_cp` degrades the volume queries vol_p uses — the indirect feature-support loss exceeds the direct gradient-budget gain.
+
+**Generalizable insight**: gradient clamping at the task level can create cross-task starvation that dominates the direct effect, especially in shared-encoder MTL setups where downstream tasks depend on upstream feature quality. Future GradNorm clamps should consider the *whole gradient ecosystem*, not just the clamped task.
+
+### Validated wave-position update
+
+| Hypothesis | Result |
+|---|---|
+| "Tighter clamp restores vol_p without losing wss" (H30) | **FALSIFIED at EP6** |
+| "Surface-loss-weight prefactor is the breach driver" | testable via surf_lw sweep — H32 |
+| "Lighter wss-Charb-z frees cp budget for surf_p" | in flight — H31 frieren |
+| "Extended cosine T_max=50 cures H26 EP19 plateau" | in flight — H29 nezuko |
+| "Extended cosine T_max=60 on H19 base" | terminal landing ~07:50Z — H28 fern |
+
+### EP3 gate calibration take-away (for future PR design)
+
+Tanjiro noted (and I agree) that H30's EP3 hard-abort threshold `val_vol_p > 4.50` was below H26's actual EP3 value of 4.6335 — so the gate as written would have aborted H26 too. **Future PRs should peg gates to "Δ vs reference" rather than absolute pp values.** Applied this to H32 PR.
+
+### H32 assigned (PR #1259) — tanjiro back to work
+
+H32 = H21 base + `--surface-loss-weight 1.0 → 1.25` (per tanjiro's #1 follow-up suggestion). Interpolates between H21 (1.0) and H26 (1.5) to find whether a *partial* surface boost retains H26's wss benefit while staying under the 3.643 vol_p floor.
+
+Predicted (linear interpolation of H21→H26 test metrics):
+- test_wss ~6.685 (likely no SOTA win)
+- test_vol_p ~3.623 (**clears floor ✓**)
+- test_surf_p ~3.666 (still breaches)
+- test_abupt ~5.813 (clears floor ✓)
+
+If "3 of 4 floors clear" lands as predicted + H31 simultaneously unlocks surf_p via wss-Charb-z 0.05 → next-wave compound H33 = H21 + Charb-z 0.05 + surface-loss 1.25 becomes the contract-winner candidate.
+
+PR #1255 closed (https://github.com/morganmcg1/DrivAerML/pull/1255#issuecomment-4516814916). H32 PR #1259 assigned to tanjiro.
+
+---
+
 ## 2026-05-22 05:30 UTC — PR #1238 CLOSED (H26 — partial winner, floor breaches per Issue #1056)
 
 PR #1238 had been sitting in `status:review` since tanjiro's terminal `SENPAI-RESULT` landed at 03:26Z (run `apgpxli8`). After tay-advisor confirmed the hold path on Issue #1056 (03:47Z) and H30 (clamp 0.20) + H29 (extended cosine T_max=50) launched as the compound-fix follow-ups, closing PR #1238 cleanly with the mechanism take-aways captured for the next wave. **Not a merge** — H26 floor-breaches both `test_vol_p` (+0.024pp) and `test_surf_p` (+0.076pp) vs PR #972, which violates Issue #1056's "WHILE ALSO not degrading the volume and pressure metrics from #972" directive. The wss gain is also only tied with H19 at noise (+0.005pp).
