@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_split_surface_heads: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_split_surface_heads": (
+            "H96 (PR #1261): split the shared 2-layer surface decoder MLP "
+            "into two parallel task-specific 2-layer MLP heads — one for "
+            "surface_pressure (1 channel, smooth scalar field) and one for "
+            "wall_shear_stress (3 channels, near-wall directional gradient "
+            "field). The shared Transolver backbone still produces a single "
+            "surface_hidden tensor; only the final decoder MLP splits. Both "
+            "heads use _init_linear (trunc_normal). Adds ~263K params and "
+            "no DDP graph changes. Requires --use-aux-decoder-heads (default)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_split_surface_heads=config.use_split_surface_heads,
     )
 
 
@@ -342,6 +354,16 @@ def train_loss(
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+        # Per-head decomposition (H96 diagnostic): unweighted MSE on cp vs WSS
+        # slices so we can detect per-head gradient-budget drift when the
+        # decoder is split. Cheap (~2 extra masked_mse calls) and logged
+        # unconditionally so fleet-wide comparisons stay apples-to-apples.
+        surface_loss_cp = masked_mse(
+            out["surface_preds"][..., 0:1], surface_target[..., 0:1], batch.surface_mask
+        )
+        surface_loss_wss = masked_mse(
+            out["surface_preds"][..., 1:4], surface_target[..., 1:4], batch.surface_mask
+        )
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
@@ -352,6 +374,8 @@ def train_loss(
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+        "surface_loss_cp": float(surface_loss_cp.detach().cpu().item()),
+        "surface_loss_wss": float(surface_loss_wss.detach().cpu().item()),
     }
 
 
@@ -1066,6 +1090,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/volume_loss": batch_loss_metrics["volume_loss"],
                             "train/surface_loss_weighted": batch_loss_metrics["surface_loss_weighted"],
                             "train/volume_loss_weighted": batch_loss_metrics["volume_loss_weighted"],
+                            "train/surface_loss_cp": batch_loss_metrics["surface_loss_cp"],
+                            "train/surface_loss_wss": batch_loss_metrics["surface_loss_wss"],
                             "train/tau_y_loss_weight": config.tau_y_loss_weight,
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }

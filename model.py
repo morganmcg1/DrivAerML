@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_split_surface_heads: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_split_surface_heads = use_split_surface_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -481,12 +483,35 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
-            self.surface_out.apply(_init_linear)
+            if use_split_surface_heads:
+                # H96: split surface_pressure (1 ch) and wall_shear_stress (3 ch)
+                # into two parallel 2-layer MLP trunks. Backbone produces shared
+                # surface_hidden; only the FINAL decoder MLP splits per-task.
+                # Standard _init_linear on both heads (no zero-init): Lion sign
+                # update is undefined on a zero output and would burn early steps
+                # escaping the zero manifold.
+                self.surface_pressure_head = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, 1),
+                )
+                self.surface_wss_head = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, 3),
+                )
+                self.surface_pressure_head.apply(_init_linear)
+                self.surface_wss_head.apply(_init_linear)
+                self.surface_out = None
+            else:
+                self.surface_out = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, self.surface_output_dim),
+                )
+                self.surface_out.apply(_init_linear)
+                self.surface_pressure_head = None
+                self.surface_wss_head = None
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),
                 nn.SiLU(),
@@ -496,7 +521,14 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
+            if use_split_surface_heads:
+                raise ValueError(
+                    "use_split_surface_heads requires use_aux_decoder_heads=True "
+                    "(split heads are defined as MLPs, not LinearProjection)."
+                )
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.surface_pressure_head = None
+            self.surface_wss_head = None
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
@@ -622,7 +654,12 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.surface_pressure_head is not None:
+                cp_pred = self.surface_pressure_head(surface_hidden)
+                wss_pred = self.surface_wss_head(surface_hidden)
+                surface_preds = torch.cat([cp_pred, wss_pred], dim=-1) * surface_mask.unsqueeze(-1)
+            else:
+                surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
