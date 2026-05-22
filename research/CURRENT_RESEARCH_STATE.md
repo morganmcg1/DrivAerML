@@ -1,9 +1,55 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~01:20 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~09:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🚀 STRATEGIC PIVOT (2026-05-22 08:44Z): Wave 33 ARCHITECTURAL DIRECTION per Morgan's Issue #1056 guidance
+
+Morgan + advisor consensus on Issue #1056: **loss-weighting alone is NOT a permanent structural win** — it reallocates gradient budget but does not add representational capacity. H87 (the strongest single-flag mechanism in Wave 32) will NOT be merged due to test_SP MISS + test_WSS regress.
+
+**Wave 33 architectural attacks** (now the primary research direction):
+1. **Dedicated WSS output head** (separate decoder trunk) — `H96 fern` first attack
+2. **Cross-attention between WSS head and surface geometry tokens** (boundary-layer-aware routing)
+3. **WSS-to-SP cross-attention** (adverse-pressure-gradient → flow-separation physics)
+
+These are architecturally clean hypotheses that **add representational capacity rather than reshuffling budget**. The H88 closure result (test_WSS all 3 axes regressed +0.13-0.22pp) confirms that wall_shear prediction is limited by the SHARED decoder MLP, not by attention granularity.
+
+## 🟡 ~09:10Z (2026-05-22) — H88 MODEL-HEADS-EXPANSION CLOSED **B PARTIAL** (test_VP cross −0.041pp but 3/4 paper-facing channels regress, test_SP +0.260pp confirms 9th plateau variant) + fern reassigned H96 WSS-DEDICATED-DECODER-HEAD (PR #1261) — **first Wave 33 architectural attack**
+
+**Closure: PR #1248 H88 (fern) — B PARTIAL**:
+- val_abupt 6.2088% MISS gate +0.083pp
+- test_abupt 5.9987% regress vs baseline +0.155pp
+- test_VP **3.6018%** CROSSES floor by −0.041pp ✓ (1 of 4)
+- test_SP 3.8365% MISS floor +0.260pp (9th variant confirming plateau)
+- test_WSS **6.8888%** regress +0.161pp; per-axis WSS_x/y/z ALL regress +0.13/+0.21/+0.22pp
+- **Capacity expansion via existing-module width-scaling now falsified across 3 axes**: H85 (LR), H86 (mlp_ratio), H88 (heads) all D NEG or B PARTIAL test_VP-only
+- EP3 val_SP=4.4868% WAS fleet-best mid-cosine SP signal — but did NOT survive late-cosine, reverted under shared-decoder bottleneck
+- **Mechanism finding**: WSS prediction is DECODER-SHARED-TRUNK bound, not attention-capacity bound
+
+### Reassignment: PR #1261 H96 fern WSS-DEDICATED-DECODER-HEAD — first Wave 33 architectural attack
+
+`--use-split-surface-heads` (new flag) — splits `self.surface_out` shared 2-layer MLP into two parallel dedicated heads:
+- `self.surface_pressure_head`: outputs cp (1 channel)
+- `self.surface_wss_head`: outputs tau_x/y/z (3 channels)
+- Each gets own 2-layer MLP trunk with n_hidden=512
+- Memory cost ~+263K params (~0.03% of model)
+- Concatenates back to [B, N, 4] for downstream contract
+
+**Mechanism hypothesis**: SP (normal stress) and WSS (tangential velocity gradient) have fundamentally different spatial structure. Current shared MLP bottlenecks WSS-specific expressivity. Splitting decoders adds capacity SEPARATION (not capacity expansion) — same total params with TASK-SPECIFIC trunks.
+
+**Key signal at terminal**: 
+- test_WSS < 6.727% → FIRST mechanism to crack WSS goal on tay = MAJOR finding, opens full Wave 33 WSS sweep
+- test_WSS_z < 8.5% → binding axis broken via decoder separation
+- If test_WSS improves but test_SP doesn't → confirms WSS-specific decoder is the lever (Morgan's hypothesis correct)
+- If test_SP also improves → cross-validation that the plateau is BOTH decoder-shared-trunk AND backbone
+
+### Wave 33 architectural candidates queue (in priority order):
+1. **H96 (fern, NEW)**: split SP/WSS decoder heads — first attack
+2. **H97 (next idle)**: WSS-to-geometry cross-attention — second attack
+3. **H98 (next idle)**: WSS-to-SP cross-attention — third attack
+4. **H99 (next idle)**: compound H96 + H97 if both close A WIN
 
 ## 🟢 ~04:35Z (2026-05-22) — H87 SURFACE-LOSS-WEIGHT-REDUCTION CLOSED **B PARTIAL — HISTORIC: FIRST WAVE 32 VAL GATE CLEAR** (val_abupt 6.045% beats gate −0.081pp + test_VP 3.495% cleanest cross −0.148pp; but test_SP +0.157pp + test_abupt +0.143pp + test_WSS +0.217pp = AND-gate fails) + H86 MLP-RATIO-EXPANSION CLOSED D NEGATIVE (val_abupt 6.3635% MISS gate +0.238pp, mlp_ratio class falsified) + edward reassigned H94 VOL-LOSS-INCREASE (PR #1257) + tanjiro reassigned H95 SURF-LOSS-PUSH-FURTHER (PR #1258)
 

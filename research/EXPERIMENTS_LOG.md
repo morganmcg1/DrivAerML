@@ -1,3 +1,39 @@
+## 2026-05-22 09:10 — PR #1248: H88 MODEL-HEADS-EXPANSION (fern, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP cross −0.041pp but 3/4 paper-facing test channels regress and binding test_SP plateau holds (+0.260pp miss). Capacity expansion via attention head granularity FALSIFIED.
+
+- **Branch**: `fern/h88-model-heads-expansion` (closed at 09:10Z 2026-05-22)
+- **W&B run**: `gjoa1fm4` (rank 0; finished cleanly at step 70,664, 16.3h training time)
+- **Hypothesis**: Single-flag `--model-heads 4 → 8` on canonical Wave 32 baseline #972 substrate. First-ever attention head count sweep.
+
+### Results
+
+| Channel | **H88 (heads=8)** | BL #972 / floor | Δ vs BL / floor | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | 6.2088% | gate 6.126% | +0.083pp ❌ | MISS gate |
+| **test_abupt** | 5.9987% | 5.844% | +0.155pp ❌ | regress |
+| **test_VP (floor 3.643)** | **3.6018%** | 3.643% | **−0.041pp** ✅ | **CROSSES floor** |
+| **test_SP (floor 3.577)** | 3.8365% | 3.577% | +0.260pp ❌ | MISS floor (plateau range) |
+| **test_WSS (goal 6.727)** | 6.8888% | 6.727% | +0.161pp ❌ | above goal |
+| test_WSS_x / _y / _z | 6.103 / 7.484 / 8.968 | 5.975 / 7.274 / 8.753 | +0.128 / +0.210 / +0.215 | ALL axes regress |
+
+### Analysis — head granularity FALSIFIED as standalone lever
+
+**EP3 val_SP signal was fleet-best**: val_SP=4.4868% at step 32,594 — THE strongest mid-cosine SP signal in the campaign. **But the gain did NOT survive late-cosine**: terminal val_SP 4.1376% landed in fleet-typical range, test_SP 3.8365% missed floor by +0.260pp.
+
+**Mechanism reading**: more attention heads add per-head diversity (mid-cosine engagement on SP axis) but cannot escape the H80 architectural-bound on test_SP plateau within the current shared-decoder design. Conclusion: head-granularity expansion engages mid-cosine but late-cosine reverts under shared-decoder bottleneck.
+
+**Capacity expansion via existing-module width-scaling is now falsified across 3 independent axes**:
+- H85 (LR=1.2e-4): D NEG
+- H86 (mlp_ratio=6): D NEG
+- H88 (heads=8): B PARTIAL test_VP-only
+
+**9th independent variant confirms test_SP plateau** in 3.74-3.95% range vs floor 3.577. Cross-variant data: H78 +0.142, H79 +0.323, H80 +0.353, H82 +0.202, H83 +0.162, H84 +0.194, H86 +0.358, H87 +0.157, H88 +0.260. **The plateau is a STRUCTURAL bound under the current SHARED decoder architecture, not a hyperparameter-tunable threshold.**
+
+**Per-axis WSS reading**: H88 did not help any WSS axis — all 3 regressed by +0.13-0.22pp. **This is the key data point that motivates the next direction**: WSS prediction quality is decoder-shared-trunk bound, not attention-capacity bound.
+
+**fern reassigned H96 WSS-DEDICATED-DECODER-HEAD** (PR #1261): per Morgan's Issue #1056 guidance, Wave 33 enters the architectural separation phase — split `self.surface_out` into dedicated SP head (1 ch) + dedicated WSS head (3 ch), each with own 2-layer MLP trunk. First attack on the WSS-specific decoder hypothesis.
+
+---
+
 ## 2026-05-22 04:35 — PR #1247: H87 SURFACE-LOSS-WEIGHT-REDUCTION (tanjiro, CLOSED) — **OUTCOME B PARTIAL** — **HISTORIC: FIRST Wave 32 variant to clear val_abupt merge gate AND cleanest test_VP cross in fleet** — but AND-gate test_SP miss +0.157pp + test_abupt regress + test_WSS regress vs goal, so does NOT meet merge criterion
 
 - **Branch**: `tanjiro/h87-surface-loss-weight-reduction` (closed at 04:35Z 2026-05-22)
