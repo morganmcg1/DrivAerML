@@ -381,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_vol_to_surf_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
     ):
         super().__init__()
@@ -395,6 +396,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_vol_to_surf_xattn = use_vol_to_surf_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
@@ -519,6 +521,27 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Volume->surface cross-attention (PR #1262, H97): mirror of the
+        # surf_to_vol module — surface hidden states (Q) attend to volume
+        # hidden states (K/V) so the surface decoder can see downstream
+        # flow context (recirculation, wake vortices) that drives SP and WSS
+        # in separation regions. Both xattn modules read from pre-xattn
+        # hidden states (parallel, not sequential) — see forward(). Zero-init
+        # out_proj weight+bias so the layer is identity at epoch 0.
+        if use_vol_to_surf_xattn:
+            self.vol_to_surf_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=n_head,
+                batch_first=True,
+                dropout=dropout,
+            )
+            self.vol_to_surf_xattn_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            nn.init.zeros_(self.vol_to_surf_xattn.out_proj.weight)
+            nn.init.zeros_(self.vol_to_surf_xattn.out_proj.bias)
+        else:
+            self.vol_to_surf_xattn = None
+            self.vol_to_surf_xattn_norm = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -605,21 +628,38 @@ class SurfaceTransolver(nn.Module):
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
         if (
-            self.surf_to_vol_xattn is not None
+            (self.surf_to_vol_xattn is not None or self.vol_to_surf_xattn is not None)
             and surface_x is not None
             and volume_x is not None
             and surface_tokens > 0
             and volume_tokens > 0
         ):
-            xattn_out, _ = self.surf_to_vol_xattn(
-                query=volume_hidden,
-                key=surface_hidden,
-                value=surface_hidden,
-                need_weights=False,
-            )
-            xattn_out = _apply_token_mask(xattn_out, volume_mask)
-            volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
-            volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+            # Capture pre-xattn states so both modules read identical inputs
+            # (parallel application, not sequential — avoids ordering artifact).
+            surf_pre = surface_hidden
+            vol_pre = volume_hidden
+
+            if self.surf_to_vol_xattn is not None:
+                xattn_vol, _ = self.surf_to_vol_xattn(
+                    query=vol_pre,
+                    key=surf_pre,
+                    value=surf_pre,
+                    need_weights=False,
+                )
+                xattn_vol = _apply_token_mask(xattn_vol, volume_mask)
+                volume_hidden = self.surf_to_vol_xattn_norm(vol_pre + xattn_vol)
+                volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+            if self.vol_to_surf_xattn is not None:
+                xattn_surf, _ = self.vol_to_surf_xattn(
+                    query=surf_pre,
+                    key=vol_pre,
+                    value=vol_pre,
+                    need_weights=False,
+                )
+                xattn_surf = _apply_token_mask(xattn_surf, surface_mask)
+                surface_hidden = self.vol_to_surf_xattn_norm(surf_pre + xattn_surf)
+                surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
