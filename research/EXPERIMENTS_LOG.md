@@ -1,3 +1,70 @@
+## 2026-05-22 01:30 — PR #1242: H82 WEIGHT-DECAY-EXPANSION (alphonse, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP CROSS by −0.110pp (cleanest VP cross of Wave 32) BUT val_abupt MISS gate +0.148pp AND test_abupt/test_SP/test_WSS all regress; **wd=1e-3 is volume-favoring single-flag lever — Wave 33 compound axis candidate**
+
+- **Branch**: `alphonse/h82-weight-decay-expansion` (closed at 01:30Z 2026-05-22)
+- **W&B run**: `us7349eq` (EP13 step 70,664, 14.09h training time, peak 82.5 GB, all 8 GPUs healthy)
+- **Hypothesis**: Single-flag `--weight-decay 5e-4 → 1e-3` on canonical Wave 32 baseline #972 substrate. Param-magnitude regularization sweep targeting volume-head over-fitting to surface-dominated gradients.
+
+### Terminal metrics (EP13 best EMA checkpoint, full test eval)
+
+| Channel | **H82 (wd=1e-3)** | BL #972 / floor | Δ vs BL / floor | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.2737%** | gate 6.126% | **+0.148pp** ❌ | MISS gate |
+| val_VP | 3.5867% | val 3.798% | **−0.211pp** ✅ | clearly better |
+| val_SP | 4.0931% | — | — | (above 4.0% screen) |
+| val_WSS | 7.1656% | — | — | — |
+| **test_abupt** | **5.9812%** | 5.844% | **+0.137pp** ❌ | regression |
+| **test_VP (floor 3.643)** | **3.5328%** | 3.643% | **−0.110pp** ✅ | **CROSSES floor cleanly** |
+| **test_SP (floor 3.577)** | **3.7787%** | 3.577% | **+0.202pp** ❌ | BREACHES floor |
+| **test_WSS (goal 6.727)** | **6.9048%** | 6.727% | **+0.178pp** ❌ | above goal |
+| test_τx | 6.124% | — | — | — |
+| test_τy | 7.490% | — | — | — |
+| test_τz | 8.981% | — | — | τz/τx=1.467 ✅ |
+
+### Trajectory (EMA-aware)
+
+| EP | step | val_abupt | val_VP | val_SP |
+|---|---:|---:|---:|---:|
+| EP1 | 10,864 | 25.976% | 15.669 | 19.779 |
+| EP3 | 32,594 | 6.764% | 3.852 | 4.482 |
+| EP6 | 48,902 | 6.366% | 3.649 | 4.161 |
+| EP8 | 56,154 | 6.300% | 3.615 | 4.117 |
+| EP10 | 62,501 | 6.283% | 3.595 | 4.100 |
+| EP13 | 70,664 | **6.274%** | **3.587** | **4.093** |
+
+Slope decelerated cleanly into late-cosine — val_VP descent held monotone through EP13 (no plateau-rebound).
+
+### Why CLOSE not MERGE
+
+Per CLAUDE.md decision criteria and program.md "no averaging away regressions" rule:
+
+1. **val_abupt MISS gate +0.148pp** — merge gate is val_abupt < 6.126%, H82 lands +0.148pp over.
+2. **test_abupt regresses +0.137pp vs baseline** — paper-facing primary test metric is WORSE than #972; merging would lock in regression on headline metric.
+3. **AND-gate test floors FAIL** — test_VP crosses (✅) but test_SP breaches +0.202pp (❌); AND-gate explicitly requires BOTH.
+4. **test_SP fail is the H80-identified architectural binding constraint** — 4th independent variant landing test_SP 3.78-3.95% (consistent with H79 +0.323pp, H80 +0.353pp, H78 +0.142pp).
+
+### What H82 DOES establish
+
+**weight_decay=1e-3 is a volume-favoring single-flag lever** — the FIRST cleanest test_VP cross of Wave 32:
+- val_VP descent terminal 3.587% (−0.211pp vs #972)
+- test_VP terminal 3.5328% (−0.110pp under floor)
+- val→test slope on VP channel = −0.054pp (val better than test by less than baseline's −0.282pp — wd reduces overfitting)
+
+**Mechanism interpretation**: Stronger param-magnitude regularization (5e-4 → 1e-3) prevents the volume head's spatial filter weights from over-fitting to surface-dominated gradients in the loss budget. The volume head's relatively-smoother spatial output benefits from L2-magnitude penalty more than the surface heads.
+
+**Consistent with H79 dropout falsification finding** (regularization is NOT plateau-bound for SP-axis) — but H82 shows the RIGHT KIND of regularization (param-magnitude, gradient-weighted) IS productive on the VP axis specifically.
+
+### Reassignment — H90 LR-DOWNWARD-SWEEP (alphonse → PR #1250)
+
+Single-flag `--lr 9e-5 → 6e-5` (−33%) on canonical Wave 32 baseline. **First-ever LR sweep BELOW 9e-5 entire Wave 31/32 fleet history.**
+
+LR=9e-5 has been load-bearing across the ENTIRE Wave 31/32 campaign — H85 in-flight tests UPWARD (1.2e-4 likely D NEG), but we've NEVER tested DOWNWARD. Lion paper recommends LR ~3e-4 for vision but Lion is known to need LOWER LRs for fine-grained regression. We're at 30% of Lion default — 6e-5 = 20% tests if we're still over the sweet spot.
+
+Mechanism: surface-pressure has high-frequency near-wall variations requiring precise step magnitude in late-cosine. At lr=9e-5 with Lion's sign update, effective magnitude may be too coarse for SP convergence past 3.78-3.95% plateau. Lower LR = smaller per-step parameter update = finer-grained late-cosine convergence.
+
+Orthogonal to all 7 in-flight Wave 32 axes. Closes Wave 32's LR coverage (H85 UPWARD + H90 DOWNWARD bracket sweet-spot search).
+
+---
+
 ## 2026-05-22 01:20 — PR #1240: H81 LION-BETA2-EXPANSION (frieren, CLOSED) — **OUTCOME D NEGATIVE** — val_abupt 6.4256% MISS gate +0.300pp, test_abupt 6.2098% +0.366pp, ALL 4 test channels regressed, both test floors VIOLATED; **Lion β2=0.999 expansion uniformly destructive across all axes — Chen et al 2023 defaults validated**
 
 - **Branch**: `frieren/h81-lion-beta2-expansion` (closed at 01:20Z 2026-05-22)

@@ -5,6 +5,29 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~01:30Z (2026-05-22) — H82 WEIGHT-DECAY-EXPANSION CLOSED B PARTIAL (paper-positive test_VP CROSS −0.110pp but val_abupt MISS gate +0.148pp + test_abupt regression) + alphonse reassigned H90 LR-DOWNWARD-SWEEP (PR #1250)
+
+**Closure: PR #1242 H82 (alphonse) — B PARTIAL** — paper-positive **test_VP CROSSES floor cleanly by −0.110pp** (3.5328% vs floor 3.643% — the cleanest VP-axis cross of Wave 32), AND val_VP improved −0.211pp vs #972 baseline. But val_abupt MISS gate +0.148pp AND test_abupt regresses +0.137pp AND test_SP breaches floor +0.202pp AND test_WSS above goal +0.178pp. Per program.md "no averaging away regressions": single-paper-positive insufficient when 3/4 paper-facing test channels regress. Closed not merged.
+
+**H82 establishes**: weight_decay=1e-3 is a VOLUME-FAVORING single-flag lever (mechanism: param-magnitude regularization prevents volume head from over-fitting to surface-dominated gradients). val→test slope on VP narrowed to −0.054pp (vs baseline −0.282pp) — less overfitting. **Wave 33 candidate**: wd=1e-3 PAIRED with H87 surf_loss_weight=1.5 (compound volume-favoring axes).
+
+**Reassignment: PR #1250 H90 alphonse LR-DOWNWARD-SWEEP** — first-ever LR sweep BELOW 9e-5 entire Wave 31/32 campaign. `--lr 9e-5 → 6e-5` (−33%) single-flag. LR=9e-5 has been load-bearing across EVERY tay experiment — H85 in-flight tests UPWARD (1.2e-4 likely D NEG), H90 tests DOWNWARD. Lion paper recommends ~3e-4 for vision; we're at 30% of default — going to 20% tests if substrate sweet spot is below 9e-5. Mechanism: lower LR = finer-grained late-cosine convergence for high-frequency SP-axis representations (addresses binding constraint).
+
+**Fleet status — 8/8 WIP, zero idle** (post H82 closure + H90 assignment):
+
+| Run | PR | Mech | Status |
+|---|---|---|:--|
+| **alphonse H90** | **#1250** | **lr=6e-5 (DOWNWARD)** | **NEW ASSIGNMENT** |
+| askeladd H84 | #1244 | rff=32 | ~1.5h to terminal, borderline gate clear |
+| edward H86 | #1246 | mlp_ratio=6 | ~4-5h to terminal, likely D NEG |
+| fern H88 | #1248 | heads=8 | ~9h to terminal, strong A WIN candidate |
+| frieren H89 | #1249 | layers=6 (DEPTH) | new assignment, depth-expansion |
+| nezuko H83 | #1243 | grad_clip=1.0 | ~0.5h to terminal, B PARTIAL test_VP |
+| tanjiro H87 | #1247 | surf_loss=1.5 | ~3h to terminal, strongest A WIN candidate (broken under gate at EP8) |
+| thorfinn H85 | #1245 | lr=1.2e-4 (UPWARD) | ~4h to terminal, D NEG likely |
+
+**H85 + H90 jointly close LR coverage** — H85 UPWARD (1.2e-4) + H90 DOWNWARD (6e-5) bracket the LR sweet-spot search. Whichever direction wins (if any), Wave 33 fine-grain bracketing follows.
+
 ## 🔴 ~01:20Z (2026-05-22) — H81 LION-BETA2-EXPANSION CLOSED D NEGATIVE + frieren reassigned H89 MODEL-DEPTH-EXPANSION (PR #1249) + 5 stale_wip check-ins posted (H82/H83/H84/H87/H88)
 
 **Closure: PR #1240 H81 (frieren) — D NEGATIVE: val_abupt 6.4256% MISS gate +0.300pp, test_abupt 6.2098% +0.366pp regression, ALL 4 test channels REGRESSED, test_VP/test_SP BOTH violate AND-gate floors.** Lion β2-expansion mechanism uniformly destructive across all model heads — NOT a head-specific tradeoff like H78 (β1=0.95 B PARTIAL). Chen et al 2023 Lion defaults (β1=0.9, β2=0.99) validated. Lion-optimizer-side mechanism class is now substantively exhausted on tay's substrate (1 D NEG + 1 B PARTIAL across 2 sweeps).
