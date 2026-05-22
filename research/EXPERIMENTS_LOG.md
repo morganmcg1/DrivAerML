@@ -1,3 +1,66 @@
+## 2026-05-22 04:35 — PR #1247: H87 SURFACE-LOSS-WEIGHT-REDUCTION (tanjiro, CLOSED) — **OUTCOME B PARTIAL** — **HISTORIC: FIRST Wave 32 variant to clear val_abupt merge gate AND cleanest test_VP cross in fleet** — but AND-gate test_SP miss +0.157pp + test_abupt regress + test_WSS regress vs goal, so does NOT meet merge criterion
+
+- **Branch**: `tanjiro/h87-surface-loss-weight-reduction` (closed at 04:35Z 2026-05-22)
+- **W&B run**: `jpspxktf` (rank 0; finished cleanly at step 70,666, 14.33h training time)
+- **Hypothesis**: Single-flag `--surface-loss-weight 2.0 → 1.5` on canonical Wave 32 baseline #972 substrate. First-ever surface_loss_weight reduction sweep on tay (dl24 H26 cross-pollination).
+
+### Results — historic Wave 32 milestone
+
+| Channel | **H87 (surf_loss=1.5)** | BL #972 / floor | Δ vs BL / floor | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.045%** | gate 6.126% | **−0.081pp** ✅ | **CLEARS gate — FIRST Wave 32 variant** |
+| val_VP | 3.580% | — | — | — |
+| val_SP | 4.007% | — | — | — |
+| val_WSS | 6.838% | — | — | — |
+| **test_abupt** | 5.987% | 5.844% | +0.143pp ❌ | regress (primary test metric) |
+| **test_VP (floor 3.643)** | **3.495%** | 3.643% | **−0.148pp** ✅ | **CROSSES floor — cleanest in fleet** |
+| **test_SP (floor 3.577)** | 3.734% | 3.577% | +0.157pp ❌ | MISS floor (smallest of any Wave 32 SP miss) |
+| **test_WSS (goal 6.727)** | 6.944% | 6.727% | +0.217pp ❌ | above goal |
+| test_WSS_x / _y / _z | 6.157 / 7.532 / 9.017 | — | — | fleet-typical |
+
+### Analysis — strongest signal in Wave 32
+
+**val_abupt 6.045% is the NEW BEST val_abupt on tay's substrate**, beating gate by −0.081pp. **test_VP 3.495% is the CLEANEST test_VP cross of the entire Wave 32 fleet**, beating floor by −0.148pp. The mechanism (surface_loss_weight reduction → surf:vol gradient ratio 2:1 → 1.5:1) is the **strongest single-flag axis in the entire Wave 32 campaign**.
+
+**AND-gate verdict**: 2/3 conditions met (val_abupt clears gate, test_VP crosses floor) — closest the campaign has come to A WIN. But test_SP misses by +0.157pp (the H80-identified architectural binding constraint) and primary test metric test_abupt regresses by +0.143pp.
+
+**dl24 H26 cross-pollination findings**:
+- VP-axis benefit IS substrate-portable: dl24 H26 also crossed test_VP cleanly
+- abupt/WSS benefits are NOT substrate-portable: dl24 H26 reported abupt −0.050pp WIN and WSS −0.088pp WIN; tay H87 saw abupt +0.143pp REGRESS and WSS +0.217pp REGRESS
+- This is important program-level data for paper claims about substrate-distinction
+
+**7 variants now confirm test_SP plateau** (3.74-3.95% range vs floor 3.577): H78 +0.142, H79 +0.323, H80 +0.353, H82 +0.202, H83 +0.162, H84 +0.194, H86 +0.358, H87 +0.157 — H87 lowest of the plateau. **Validates H80's architectural-bound hypothesis but suggests SP plateau may be partially crackable under compound mechanisms.**
+
+**Tanjiro reassigned H95 SURF-LOSS-PUSH-FURTHER** (PR #1258): direct H87 follow-up — `--surface-loss-weight 1.5 → 1.25`. Tests whether productive direction has more headroom or whether 1.5 is the substrate sweet spot.
+
+---
+
+## 2026-05-22 04:30 — PR #1246: H86 MLP-RATIO-EXPANSION (edward, CLOSED) — **OUTCOME D NEGATIVE** — FFN-width expansion (mlp_ratio 4→6) falsified; converges to within 0.026pp of H85 — two orthogonal mechanisms (LR / FFN) both fail to break the 6.38-6.39% late-cosine plateau
+
+- **Branch**: `edward/h86-mlp-ratio-expansion` (closed at 04:30Z 2026-05-22)
+- **W&B run**: `m6g3rgh0` (finished cleanly at step 70,664, 14.95h training time, peak 89.59 GiB)
+- **Hypothesis**: Single-flag `--model-mlp-ratio 4 → 6` (+50% per-block FFN intermediate dim). First-ever FFN capacity sweep on tay.
+
+### Results
+
+| Channel | H86 (mlp_ratio=6) | BL #972 / floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.3635%** | gate 6.126% | **+0.238pp** ❌ | MISS gate |
+| **test_abupt** | 6.142% | 5.844% | +0.298pp ❌ | regress |
+| **test_VP (floor 3.643)** | 3.727% | 3.643% | +0.084pp ❌ | MISS floor |
+| **test_SP (floor 3.577)** | 3.935% | 3.577% | +0.358pp ❌ | MISS floor (worst of fleet) |
+| **test_WSS (goal 6.727)** | 7.057% | 6.727% | +0.330pp ❌ | above goal |
+
+### Analysis
+
+FFN-width expansion engaged productively in mid-cosine (fleet-leading EP5-EP7 slope −0.0184 pp/1k) but late-cosine LR decay drained the additional capacity's contribution. Late-cosine slope flattened to −0.0029 pp/1k = DEEP plateau at ~6.40%. **Single-flag FFN-width expansion is falsified on tay's 13-epoch substrate.**
+
+**Cross-validation with H85**: H85 (lr=1.2e-4 D NEG, 6.3899%) and H86 (mlp_ratio=6 D NEG, 6.3635%) converged within 0.026pp. **Two orthogonal mechanisms — LR magnitude and FFN width — both fail to break the 6.38-6.39% plateau.** Strong evidence binding constraint is not single-flag-tunable.
+
+**Edward reassigned H94 VOLUME-LOSS-WEIGHT-INCREASE** (PR #1257): `--volume-loss-weight 1.0 → 1.5`, complementary to H87 surface_loss reduction. Together with H87 they characterize both directions of surf:vol gradient-budget rebalancing.
+
+---
+
 ## 2026-05-22 03:45 — PR #1245: H85 LR-MAGNITUDE-EXPANSION (thorfinn, CLOSED) — **OUTCOME D NEGATIVE** — first-ever UPWARD LR sweep (9e-5→1.2e-4 +33%) FALSIFIED — ALL 4 paper-facing test channels regress, val_abupt MISSES gate +0.264pp, test_SP MISSES floor +0.253pp, test_VP MISSES floor +0.015pp; **LR upward direction definitively wrong for tay substrate; canonical 9e-5 is not below the sweet spot**
 
 - **Branch**: `thorfinn/h85-lr-magnitude-expansion` (closed at 03:45Z 2026-05-22)

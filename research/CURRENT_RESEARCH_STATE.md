@@ -5,6 +5,49 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟢 ~04:35Z (2026-05-22) — H87 SURFACE-LOSS-WEIGHT-REDUCTION CLOSED **B PARTIAL — HISTORIC: FIRST WAVE 32 VAL GATE CLEAR** (val_abupt 6.045% beats gate −0.081pp + test_VP 3.495% cleanest cross −0.148pp; but test_SP +0.157pp + test_abupt +0.143pp + test_WSS +0.217pp = AND-gate fails) + H86 MLP-RATIO-EXPANSION CLOSED D NEGATIVE (val_abupt 6.3635% MISS gate +0.238pp, mlp_ratio class falsified) + edward reassigned H94 VOL-LOSS-INCREASE (PR #1257) + tanjiro reassigned H95 SURF-LOSS-PUSH-FURTHER (PR #1258)
+
+### HEADLINE: H87 is the **strongest single-flag signal of the entire Wave 32 campaign**
+
+**Closure: PR #1247 H87 (tanjiro) — B PARTIAL — historic milestone**:
+- val_abupt **6.045%** = NEW BEST val on tay (beats gate by −0.081pp, FIRST Wave 32 variant to do so)
+- test_VP **3.495%** = CLEANEST test_VP cross of fleet (−0.148pp vs floor 3.643)
+- test_SP **3.734%** = MISS floor by +0.157pp (smallest SP miss of Wave 32's 8 variants)
+- test_WSS 6.944%, test_abupt 5.987% = regress vs baseline
+- 2/3 AND-gate conditions met — closest the campaign has come to merge candidate
+- Per AND-gate doctrine: test_SP fail = NOT MERGE (H80 architectural binding constraint)
+- dl24 cross-pollination findings: VP-axis benefit IS substrate-portable; abupt/WSS benefits are NOT
+
+**Closure: PR #1246 H86 (edward) — D NEGATIVE**:
+- val_abupt 6.3635% (MISS gate +0.238pp), ALL 4 test channels regress
+- FFN-width expansion (mlp_ratio 4→6) FALSIFIED on tay
+- H85 (lr D NEG 6.3899%) + H86 (mlp_ratio D NEG 6.3635%) converge within 0.026pp = 6.38-6.39% plateau not single-flag-tunable
+
+### Reassignment: PR #1257 H94 edward VOL-LOSS-INCREASE
+`--volume-loss-weight 1.0 → 1.5` — orthogonal mechanism to H87. Tests surf:vol ratio 2:1.5 = 1.33:1 (bisects canonical 2:1 and H87's 1.5:1). If H94 also clears gate, fits curve to identify optimum.
+
+### Reassignment: PR #1258 H95 tanjiro SURF-LOSS-PUSH-FURTHER
+`--surface-loss-weight 1.5 → 1.25` direct H87 follow-up. Tests whether productive direction has more headroom. Key signal: if H95 test_SP < 3.65, surface plateau partially crackable; if > 3.85, H87's 1.5 IS the sweet spot.
+
+### Wave 33 candidates (updated, with H87 as anchor):
+- **H94 (edward, NEW)**: vol_loss=1.5 — orthogonal direction
+- **H95 (tanjiro, NEW)**: surf_loss=1.25 — direct H87 follow-up
+- **Compound H87+H88** (surf_loss=1.5 + heads=8): if H88 lands B PARTIAL or A WIN, this is the strongest compound candidate
+- **Triple H87+H92+H93** (surf_loss=1.5 + tau_z=3.0 + tau_y=2.5): complete loss budget rebalance
+
+### Current fleet status — 8/8 WIP, zero idle (post H86+H87 closure + H94+H95 assignment):
+
+| Run | PR | Mech | Status |
+|---|---|---|:--|
+| alphonse H90 | #1250 | lr=6e-5 (DOWNWARD) | ~9h to terminal |
+| askeladd H92 | #1252 | tau_z=3.0 (PUSH) | ~12h to terminal |
+| **edward H94** | **#1257** | **vol_loss=1.5 (INCREASE)** | **NEW ASSIGNMENT** |
+| fern H88 | #1248 | heads=8 | ~5h to terminal, strong A WIN candidate |
+| frieren H89 | #1249 | layers=6 (DEPTH) | ~10h to terminal |
+| nezuko H91 | #1251 | slices=192 | ~10h to terminal |
+| **tanjiro H95** | **#1258** | **surf_loss=1.25 (PUSH)** | **NEW ASSIGNMENT** |
+| thorfinn H93 | #1254 | tau_y=2.5 (PUSH) | ~13h to terminal |
+
 ## 🔴 ~03:45Z (2026-05-22) — H85 LR-MAGNITUDE-EXPANSION CLOSED D NEGATIVE (ALL 4 test channels regress, val_abupt +0.264pp over gate, test_SP +0.253pp over floor; LR upward direction definitively falsified) + thorfinn reassigned H93 TAU-Y-LOSS-PUSH (PR #1254)
 
 **Closure: PR #1245 H85 (thorfinn) — D NEGATIVE** — first-ever UPWARD LR sweep (9e-5→1.2e-4 +33%) conclusively fails. val_abupt 6.3899% (+0.264pp over gate), test_VP 3.6585% (MISS floor +0.015pp), **test_SP 3.8302% (MISS floor +0.253pp BIG)**, test_WSS 6.9208% (regress +0.194pp), test_abupt 6.0284% (regress +0.184pp). **ALL 4 paper-facing test channels regress.**
