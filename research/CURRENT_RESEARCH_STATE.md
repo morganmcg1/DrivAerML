@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~18:05 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~18:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -71,6 +71,33 @@ These are architecturally clean hypotheses that **add representational capacity 
 
 ### Reassignment: PR #1263 H98 askeladd SURFACE-LATE-LAYER-SPLIT (already assigned, in-flight)
 Single extra `TransformerEncoderLayer` on surface tokens only, post-backbone, identity at init.
+
+## 🔴 ~18:30Z (2026-05-22) — H93 TAU-Y-LOSS-PUSH CLOSED **D NEGATIVE** + thorfinn reassigned H100 WSS-Z-DEDICATED-HEAD (PR #1265)
+
+**Closure: PR #1254 H93 (thorfinn) — D NEGATIVE**:
+- val_abupt 6.3235% MISS gate +0.198pp; test_WSS 7.041% REGRESS +0.314pp
+- **val_WSS_y 7.802% WORSE than ALL canonical siblings** (7.63-7.71 range) — 67% stronger gradient DEGRADED target axis
+- **Per-tau-channel loss-weight class DEFINITIVELY CLOSED** with H92+H93:
+  - H92 (tau_z=3.0 D NEG): tau_z target axis degraded
+  - H93 (tau_y=2.5 D NEG): tau_y target axis degraded, stronger weight = larger degradation
+  - Lion sign-update normalizes step magnitude → budget reallocation cannot add representational capacity
+
+**Stale_wip cleared on H91 (nezuko, B PARTIAL HISTORIC projected), H94 (edward, ~terminal D NEG), H95 (tanjiro, ~terminal C NULL)**
+
+### Wave 33 fleet (8/8 WIP — ALL ACTIVE):
+1. **H96 (fern, PR #1261)**: split SP/WSS decoder heads — in-flight
+2. **H97 (alphonse, PR #1262)**: bidirectional surf↔vol cross-attention — in-flight
+3. **H98 (askeladd, PR #1263)**: surface-late-layer-split — in-flight
+4. **H99 (frieren, PR #1264)**: surface-out-deeper-mlp — in-flight
+5. **H100 (thorfinn, PR #1265)**: WSS-z-dedicated-head — NEW
+
+### Reassignment: PR #1265 H100 thorfinn WSS-Z-DEDICATED-HEAD
+`--use-wss-z-dedicated-head` — splits `surface_out` 4-ch → `surface_main_out` 3ch (cp+tau_x+tau_y) + `surface_wss_z_out` 1ch (tau_z). +262K params. Architectural version of H93's per-tau-channel intuition — representational capacity separation vs gradient budget reallocation. Key signal: test_WSS_z < 8.5% → binding axis cracked.
+
+### Remaining Wave 32 in-flight (~terminal soon)
+- **H91 nezuko**: slices=192, val_abupt projected ~6.17% B PARTIAL HISTORIC
+- **H94 edward**: vol_loss=1.5, projected D NEG confirming Lion sign-update asymmetry  
+- **H95 tanjiro**: surf_loss=1.25, projected C NULL confirming H87 surf=1.5 sweet spot
 4. **H99 (next idle)**: compound H96 + H97 if both produce signal, OR WSS-to-SP cross-attention (depends on H96 architecture being available)
 
 **Per-tau-channel loss-weight class CLOSED (2026-05-22 17:50Z):** H92 (tau_z=3.0 D NEG, PR #1252) + H93 (tau_y=2.5, thorfinn in-flight PR #1254) together falsify per-channel loss reweighting under Lion. test_WSS_z is architecture-bound.

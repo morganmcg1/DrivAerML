@@ -1,3 +1,28 @@
+## 2026-05-22 18:30 — PR #1254: H93 TAU-Y-LOSS-PUSH (thorfinn, CLOSED) — **OUTCOME D NEGATIVE** — per-tau-channel mechanism DOUBLY FALSIFIED alongside H92. val_WSS_y 7.802% WORSE than canonical siblings. thorfinn reassigned H100 WSS-Z-DEDICATED-HEAD (PR #1265).
+
+- **Branch**: `thorfinn/h93-tau-y-loss-push` (closed at 18:30Z 2026-05-22)
+- **W&B run**: `ch6u4yy0` (rank 0; finished at step 70,664, 13.97h)
+- **Hypothesis**: `--tau-y-loss-weight 1.5→2.5` (+67%) first-ever tau_y channel sweep. Hypothesis: stronger gradient on tau_y axis would compress val_WSS_y below canonical sibling range.
+
+### Results
+
+| Metric | H93 | Baseline/Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | 6.3235% | 6.126% | +0.198pp ❌ | MISS gate |
+| test_abupt | 6.072% | 5.844 | +0.228pp ❌ | regress |
+| test_VP (floor) | 3.5629% | 3.643 | **−0.080pp ✓** | CROSS (incidental) |
+| test_SP (floor) | 3.8335% | 3.577 | +0.257pp ❌ | MISS |
+| test_WSS (goal) | 7.0405% | 6.727 | +0.314pp ❌ | REGRESS |
+| **val_WSS_y (target)** | **7.802%** | canonical 7.63-7.71 | **WORSE** ❌ | **TARGET AXIS DEGRADED** |
+
+### Mechanism falsification
+
+**67% stronger gradient on tau_y produced WORSE target axis** (7.802% vs canonical 7.63-7.71%). Combined with H92 (50% on tau_z, also WORSE), the per-tau-channel loss-weight class is DEFINITIVELY CLOSED. Lion sign-update normalizes step magnitude — budget reallocation adds no representational capacity. Over-rebalancing penalty scales with weight increase magnitude.
+
+**thorfinn reassigned H100 WSS-Z-DEDICATED-HEAD** (PR #1265): architectural version of the same per-channel intuition — gives tau_z its own dedicated 2-layer MLP decoder (`--use-wss-z-dedicated-head`), testing representational capacity separation instead of gradient budget reallocation.
+
+---
+
 ## 2026-05-22 18:05 — PR #1249: H89 MODEL-DEPTH-EXPANSION (frieren, CLOSED) — **OUTCOME B PARTIAL HISTORIC** — FIRST Wave 32 architectural-class val gate clear (val_abupt 6.1186% clears gate −0.007pp) + deepest test_VP cross in fleet (−0.161pp). AND-gate fails on test_SP/WSS. frieren reassigned H99 SURFACE-OUT-DEEPER-MLP (PR #1264).
 
 - **Branch**: `frieren/h89-model-depth-expansion` (closed at 18:05Z 2026-05-22)
