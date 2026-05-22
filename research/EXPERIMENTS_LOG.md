@@ -8,6 +8,59 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-22 05:30 UTC — PR #1238 CLOSED (H26 — partial winner, floor breaches per Issue #1056)
+
+PR #1238 had been sitting in `status:review` since tanjiro's terminal `SENPAI-RESULT` landed at 03:26Z (run `apgpxli8`). After tay-advisor confirmed the hold path on Issue #1056 (03:47Z) and H30 (clamp 0.20) + H29 (extended cosine T_max=50) launched as the compound-fix follow-ups, closing PR #1238 cleanly with the mechanism take-aways captured for the next wave. **Not a merge** — H26 floor-breaches both `test_vol_p` (+0.024pp) and `test_surf_p` (+0.076pp) vs PR #972, which violates Issue #1056's "WHILE ALSO not degrading the volume and pressure metrics from #972" directive. The wss gain is also only tied with H19 at noise (+0.005pp).
+
+### H26 final scoreboard (terminal `apgpxli8`, best-val EP19 EMA)
+
+| Metric | PR #972 floor | H19 wave-best | **H26** | Δ vs floor | Δ vs H19 | Status |
+|---|---:|---:|---:|---:|---:|---|
+| test_abupt | 5.844 | 5.820 | **5.794** | −0.050 ✅ | −0.026 | **NEW WAVE-BEST (axis)** |
+| test_wss | 6.727 | **6.6339** | 6.6389 | −0.088 ✅ | +0.005 | tied H19 at noise |
+| test_vol_p | **3.643** | 3.779 | 3.667 | **+0.024 ❌** | −0.112 | **BREACH** |
+| test_surf_p | **3.577** | 3.627 | 3.653 | **+0.076 ❌** | +0.026 | **BREACH** |
+
+### Mechanism — the key scientific finding of this round
+
+The PR's central prediction was that GradNorm would *compound* the surface re-weighting by up-weighting surface tasks further. **The opposite happened on τ_z.** Student's engagement check showed:
+
+| GradNorm weight | H21 EP20 | H26 EP20 | Mechanism |
+|---|---:|---:|---|
+| `w_τ_y` | ~1.46 | **1.789 (+22%)** | absorbed the slack |
+| `w_τ_z` | ~1.70 | 1.636 | partially suppressed — the channel the lever was *trying* to push |
+| `w_cp / w_τ_x` | ~0.84 / ~0.7 | 0.792 / 0.633 | both suppressed |
+| `w_vol_p` | 0.15 | 0.150 | clamp ACTIVE from EP4 |
+
+**Net effect**: uniform surface ×1.5 amplification got reabsorbed by GradNorm reallocating *within* the surface family (τ_y absorbed cp/τ_x/τ_z's slack). The lever became "shift gradient from cp/τ_x/τ_z into τ_y" — NOT the intended "amplify all surface tasks 1.5×". Net effect on the desired τ_z channel was ~1.34× (less than the raw 1.5× target).
+
+### Take-aways for next-wave hypotheses (captured for advisor design)
+
+1. **A uniform surface-loss multiplier is NOT a clean per-axis lever under GradNorm.** GradNorm reabsorbs the magnitude and reallocates within the surface family. **Asymmetric task-level re-weighting (τ_z-only, or freezing other surface weights) is required** if the goal is to push a specific channel.
+2. **val→test gap on surf_p was the silent killer.** H26's val_surf_p=4.001 was actually 0.14pp *better* than H21 at val, but the cross-split shift (+0.348) pushed test_surf_p past the 3.577 floor. Surface re-weighting appears to hurt cp generalization.
+3. **abupt = √(0.5·wss² + 0.5·surf_p²) is uniformly amplified** by surface re-weight → abupt wave-best (5.794) is a side-effect of pushing both wss and surf_p on val, not an independent mechanism.
+
+### Wave 32 follow-up coverage (all currently in flight)
+
+| PR | H | Student | Mechanism | Targets |
+|---|---|---|---|---|
+| #1255 | H30 | tanjiro | H26 recipe + `--gradnorm-min-w-vol-p 0.15→0.20` | restore vol_p floor without losing H26's wss/abupt wins |
+| #1253 | H29 | nezuko | H26 recipe + cosine `T_max=50` | extend LR runway past EP19 EMA plateau |
+| #1256 | H31 | frieren | H21 base + `--wss-charbonnier-weight 0.1→0.05` | attack surf_p floor via cp budget release |
+| #1241 | H28 | fern | H19 base + cosine `T_max=60` | independent extended-cosine validation on H19 substrate |
+
+If H30 lands with floor compliance + retains wss/abupt wins → that's the contract winner for this wave. If H30 still breaches surf_p, the breach is intrinsic to the surface re-weight family and we pivot to asymmetric τ_z-only multipliers as the next wave.
+
+### Suggested next-wave hypotheses (advisor backlog, post-H28-H31 landings)
+
+1. **Asymmetric τ_z surface re-weight** (1.3–1.5× on τ_z slot only) — forces GradNorm to amplify τ_z without freeing reallocation to τ_y.
+2. **H25 Charb-τz×2 + asymmetric τ_z task re-weight** — Charb compounds inside the τ_z loss; task re-weight compounds outside. Orthogonal levers.
+3. **GradNorm surface-task freeze** — hold `w_cp/τ_x/τ_y` near H21 levels, let only `w_τ_z` adapt → preserves surface task balance under magnitude amplification.
+
+PR #1238 closed with full mechanism analysis in closing comment (https://github.com/morganmcg1/DrivAerML/pull/1238#issuecomment-4515318012).
+
+---
+
 ## 2026-05-22 04:50 UTC — PR #1239 CLOSED (H27) + H31 assigned to frieren (PR #1256)
 
 H27 (frieren, `yyo3q1xb`) student SENPAI-RESULT landed at 04:40Z. Confirmed test metrics match advisor's W&B early-extraction:
