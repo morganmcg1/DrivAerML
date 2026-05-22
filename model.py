@@ -364,7 +364,13 @@ class TransformerBlock(nn.Module):
         x = _apply_token_mask(x, attn_mask)
         x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
         x = _apply_token_mask(x, attn_mask)
-        if self.geo_xattn is not None and geo_bank is not None:
+        # H33 GALE: when use_geo_xattn=True, always run geo_xattn so the
+        # autograd graph stays identical across iterations and ranks. The
+        # caller guarantees geo_bank is not None whenever self.geo_xattn is.
+        if self.geo_xattn is not None:
+            assert geo_bank is not None, (
+                "geo_bank must be provided when geo_xattn is enabled"
+            )
             x = self.geo_xattn(x, geo_bank, query_mask=geo_query_mask)
             x = _apply_token_mask(x, attn_mask)
         x = x + self.mlp(self.norm2(x))
@@ -658,15 +664,22 @@ class SurfaceTransolver(nn.Module):
 
         geo_bank: torch.Tensor | None = None
         geo_query_mask: torch.Tensor | None = None
-        if (
-            self.geometry_bank_encoder is not None
-            and surface_x is not None
-            and surface_tokens > 0
-        ):
-            geo_bank = self.geometry_bank_encoder(surface_x, surface_mask)
+        if self.geometry_bank_encoder is not None:
+            # H33 GALE: always build geo_bank when the encoder exists. This
+            # keeps the DDP autograd graph identical across all ranks and
+            # iterations, even if a future code path were to pass surface_x=None.
+            if surface_x is not None and surface_tokens > 0:
+                geo_bank = self.geometry_bank_encoder(surface_x, surface_mask)
+            else:
+                B = hidden.shape[0]
+                K = self.geometry_xattn_anchors
+                geo_bank = hidden.new_zeros(B, K, hidden.shape[-1])
             geo_bank = geo_bank.to(dtype=hidden.dtype)
             geo_query_mask = torch.zeros_like(attn_mask, dtype=hidden.dtype)
-            geo_query_mask[:, :surface_tokens] = surface_mask.to(dtype=hidden.dtype)
+            if surface_tokens > 0 and surface_mask is not None:
+                geo_query_mask[:, :surface_tokens] = surface_mask.to(
+                    dtype=hidden.dtype
+                )
             # Cache for diagnostic logging (bank norm / active anchors).
             # Stored as a Python attribute (not a buffer) so DDP does not sync it.
             self._last_geo_bank = geo_bank.detach()

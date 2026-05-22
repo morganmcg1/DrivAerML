@@ -649,6 +649,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             ddp_kwargs = {}
             if device.type == "cuda":
                 ddp_kwargs = {"device_ids": [state.local_rank], "output_device": state.local_rank}
+            # H33 GALE: bf16 autocast can cause some grads to be downcast to 0
+            # and skipped from DDP's allreduce on certain ranks, leading to
+            # SeqNum mismatch (observed at first step of 8-rank launch). Setting
+            # find_unused_parameters=True forces DDP into single-bucket mode so
+            # every rank emits the same collective sequence regardless of data.
+            if getattr(config, "use_geometry_xattn", False):
+                ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
         if state.is_main:
