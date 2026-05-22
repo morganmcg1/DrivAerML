@@ -381,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_surface_late_layer: bool = False,
         use_aux_decoder_heads: bool = True,
     ):
         super().__init__()
@@ -395,6 +396,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_surface_late_layer = use_surface_late_layer
         self.use_aux_decoder_heads = use_aux_decoder_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
@@ -498,6 +500,32 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # H98: SURFACE-LATE-LAYER-SPLIT (PR #1267). Extra TransformerEncoderLayer
+        # applied only to surface_hidden AFTER the shared backbone AND the
+        # surf_to_vol_xattn, immediately before the surface decoder head. Volume
+        # pathway untouched; volume's xattn query reads the raw post-backbone
+        # surface representation so late-stage refinement is decoupled from
+        # volume optimization. Identity at init via zero-init of MHA out_proj
+        # and FFN linear2 (the two residual sublayer outputs) so the block
+        # contributes nothing at step 0. norm_first=True matches the backbone's
+        # pre-LN style.
+        if use_surface_late_layer:
+            self.surface_late_layer = nn.TransformerEncoderLayer(
+                d_model=n_hidden,
+                nhead=n_head,
+                dim_feedforward=int(n_hidden * mlp_ratio),
+                dropout=0.0,
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            )
+            nn.init.zeros_(self.surface_late_layer.linear2.weight)
+            nn.init.zeros_(self.surface_late_layer.linear2.bias)
+            nn.init.zeros_(self.surface_late_layer.self_attn.out_proj.weight)
+            nn.init.zeros_(self.surface_late_layer.self_attn.out_proj.bias)
+        else:
+            self.surface_late_layer = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -622,6 +650,16 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
+            if self.surface_late_layer is not None and surface_tokens > 0:
+                # H98: late-stage surface refinement, applied AFTER surf_to_vol_xattn
+                # so volume reads the raw post-backbone surface. src_key_padding_mask
+                # is True for padded positions (1.0 = valid in surface_mask, 0.0 =
+                # padded), so they don't contribute to attention.
+                src_key_padding_mask = ~surface_mask.bool()
+                surface_hidden = self.surface_late_layer(
+                    surface_hidden, src_key_padding_mask=src_key_padding_mask
+                )
+                surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]

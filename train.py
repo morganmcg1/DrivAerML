@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_surface_late_layer: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_surface_late_layer": (
+            "H98 (PR #1267): Append one extra nn.TransformerEncoderLayer "
+            "applied only to surface tokens AFTER the shared backbone AND "
+            "the surf_to_vol_xattn, immediately before the surface decoder "
+            "head. Volume pathway is unaffected (volume's xattn query reads "
+            "the raw post-backbone surface). Pre-LN style (norm_first=True) "
+            "matches the backbone; d_model follows --model-hidden-dim, nhead "
+            "--model-heads, ff --model-hidden-dim*--model-mlp-ratio, "
+            "dropout=0.0. Zero-init of MHA out_proj and FFN linear2 makes "
+            "the block identity at init (preserves baseline at epoch 0). "
+            "Targets the architecture-bound test_WSS_z (binding axis ~9 pct) "
+            "and the 11-variant test_SP plateau by giving surface tokens "
+            "late-stage self-attention decoupled from volume optimization."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +323,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_surface_late_layer=config.use_surface_late_layer,
     )
 
 
@@ -779,6 +795,19 @@ def main(argv: Iterable[str] | None = None) -> None:
         base_model = unwrap_model(model)
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+            if getattr(base_model, "surface_late_layer", None) is not None:
+                # H98 identity-at-init verification: zero-init of MHA out_proj +
+                # FFN linear2 makes the residual sublayer outputs all-zero, so
+                # the TransformerEncoderLayer is a no-op at step 0.
+                late = base_model.surface_late_layer
+                late_param_count = sum(p.numel() for p in late.parameters())
+                init_out_proj_norm = float(late.self_attn.out_proj.weight.detach().norm().item())
+                init_linear2_norm = float(late.linear2.weight.detach().norm().item())
+                print(
+                    f"H98 surface_late_layer: +{late_param_count / 1e6:.2f}M params; "
+                    f"init self_attn.out_proj.weight.norm={init_out_proj_norm:.6e}; "
+                    f"init linear2.weight.norm={init_linear2_norm:.6e}"
+                )
 
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
@@ -1368,6 +1397,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             global_step=global_step,
             total_minutes=total_minutes,
         )
+        if getattr(base_model, "surface_late_layer", None) is not None:
+            # H98 post-training norms: track how much the model learned to use
+            # the late layer relative to identity-at-init (both norms start at 0).
+            late = base_model.surface_late_layer
+            final_out_proj_norm = float(late.self_attn.out_proj.weight.detach().norm().item())
+            final_linear2_norm = float(late.linear2.weight.detach().norm().item())
+            print(
+                f"H98 surface_late_layer final: "
+                f"self_attn.out_proj.weight.norm={final_out_proj_norm:.6e}; "
+                f"linear2.weight.norm={final_linear2_norm:.6e}"
+            )
+            wandb.summary.update(
+                {
+                    "h98/surface_late_layer/final_out_proj_norm": final_out_proj_norm,
+                    "h98/surface_late_layer/final_linear2_norm": final_linear2_norm,
+                }
+            )
         wandb.finish()
     finally:
         cleanup_distributed(state)
