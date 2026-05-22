@@ -8,6 +8,30 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-22 04:50 UTC — PR #1239 CLOSED (H27) + H31 assigned to frieren (PR #1256)
+
+H27 (frieren, `yyo3q1xb`) student SENPAI-RESULT landed at 04:40Z. Confirmed test metrics match advisor's W&B early-extraction:
+
+| Metric | H27 | floor/SOTA | vs H26 (`apgpxli8`) |
+|---|---:|---:|---:|
+| test_wss | 6.6704 ⭐ | 6.727 (−0.057pp beats SOTA) | 6.6389 (H26 wins by 0.032pp) |
+| test_abupt | 5.8396 ⭐ | 5.844 (−0.004pp marginal) | 5.7940 (H26 wins by 0.046pp) |
+| test_vol_p | 3.7079 | 3.643 (+0.065 breach) | 3.6665 (H26 wins by 0.041pp) |
+| test_surf_p | 3.6903 | 3.577 (+0.113 breach) | 3.6532 (H26 wins by 0.037pp) |
+
+**H27 strictly inferior to H26 on all 4 metrics.** PR #1239 closed with explanatory comment referencing the student's terminal analysis. Lighter clamp (0.10) is the wrong axis for the contract: it trades H21's sub-floor vol_p win for a smaller wss gain than H26's surface-loss-weight 1.5× path. Student's late-training GradNorm diagnostic confirmed w_τx dividend (+0.16 at EP10) decayed to −0.04 by EP26, while w_cp ramped to +0.09 above H21 — the clamp shifts WHICH late-training task wins redistribution, not the final allocation.
+
+**H31 (frieren, PR #1256):** H21 base + `--wss-charbonnier-weight 0.1 → 0.05` (single-flag change).
+
+Hypothesis: H21's surf_p breach (+0.102pp vs H19's +0.050pp) is partly Charb-τz over-shaping consuming cp's GradNorm budget. Lightening Charb-z weight should let GradNorm rebalance toward natural MSE-like surface block ratios, freeing budget for cp and improving surf_p. Falsifiable predictions:
+- Surf_p UNLOCK: test_surf_p ≤ 3.62 → Charb-z is the surf_p starver; opens multi-axis Charb tuning.
+- Wss starvation: test_wss > 6.80 → Charb-z load-bearing for wss; cannot lighten.
+- No-op: surf_p ≈ 3.67-3.70 AND wss ≈ 6.71-6.75 → Charb-z budget-neutral; surf_p problem is elsewhere.
+
+Diversifies from H29 (H26+cosine T_max=50, running) and H30 (H26+clamp=0.20, running). Probes the H21 line orthogonally to the clamp tuning H27 closed off.
+
+---
+
 ## 2026-05-22 03:30 UTC — H25/H26/H27 EP30 TERMINAL LANDING (Wave 32 dl24 fleet)
 
 Three-PR mechanism-isolation wave on the H21 substrate (clamp=0.15 + GradNorm). One full falsification, one **partial-winner held for human decision**, one strict-regression. Combined evidence quadrant: surface-loss-weight (H26) is the only Wave 32 dl24 lever that moves wss SOTA forward.
