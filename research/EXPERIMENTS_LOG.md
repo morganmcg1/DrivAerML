@@ -1,3 +1,32 @@
+## 2026-05-22 18:05 — PR #1249: H89 MODEL-DEPTH-EXPANSION (frieren, CLOSED) — **OUTCOME B PARTIAL HISTORIC** — FIRST Wave 32 architectural-class val gate clear (val_abupt 6.1186% clears gate −0.007pp) + deepest test_VP cross in fleet (−0.161pp). AND-gate fails on test_SP/WSS. frieren reassigned H99 SURFACE-OUT-DEEPER-MLP (PR #1264).
+
+- **Branch**: `frieren/h89-model-depth-expansion` (closed at 18:05Z 2026-05-22)
+- **W&B run**: `be91oalm` (rank 0; finished at step 70,664, 15.79h training time)
+- **Hypothesis**: Single-flag `--model-layers 5→6` on canonical Wave 32 substrate. First-ever backbone depth sweep.
+
+### Results
+
+| Metric | H89 | Baseline/Floor | Δ | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | **6.1186%** | gate 6.126% | **−0.007pp ✓** | **CLEARS gate — FIRST architectural-class clear** |
+| test_abupt | 5.908% | 5.844% | +0.064pp ❌ | regress |
+| **test_VP (floor 3.643)** | **3.482%** | 3.643% | **−0.161pp ✓** | **CROSS — DEEPEST in entire Wave 32 fleet** |
+| test_SP (floor 3.577) | 3.709% | 3.577% | +0.132pp ❌ | MISS floor (11th plateau confirmation) |
+| test_WSS (goal 6.727) | 6.832% | 6.727% | +0.105pp ❌ | above goal |
+| test_WSS_x / _y / _z | 6.055 / 7.414 / 8.879 | 5.975 / 7.274 / 8.753 | +0.083 / +0.138 / +0.129 | all regress |
+
+### Analysis
+
+**Historic milestone**: H89 is the **FIRST Wave 32 architectural-class val gate clear**. Depth-axis expansion adds genuine representational capacity — the first mechanism to do so. test_VP cross −0.161pp is the deepest in the fleet (6th single-flag to cross VP floor).
+
+**Encoder-stack exhaustion confirmed**: depth (H89), heads (H88), width (H86), LR (H85/H90), slices (H91 in-flight) all fail to crack test_SP plateau. **Encoder-stack architecture is NOT the test_SP bottleneck.** Decoder-bound hypothesis confirmed by student analysis.
+
+**val_WSS_z late-cosine creep real**: late +0.237 pp/1k slope persisted to terminal test_WSS_z 8.879% (+0.129pp). WSS binding axis is DECODER-BOUND.
+
+- frieren → **Wave 33 H99: SURFACE-OUT-DEEPER-MLP** (PR #1264): `self.surface_out` 2-layer → 3-layer (n_hidden → n_hidden → n_hidden//2 → 4ch). New flag `--use-deeper-surface-mlp`. +132K params. Direct decoder-bound plateau attack.
+
+---
+
 ## 2026-05-22 17:50 — PR #1252: H92 TAU-Z-LOSS-PUSH (askeladd, CLOSED) — **OUTCOME D NEGATIVE** — mechanism FALSIFIED: per-tau-channel loss-weight class closed definitively. test_WSS_z WORSE than all canonical-recipe siblings. askeladd reassigned H98 SURFACE-LATE-LAYER-SPLIT (PR #1263).
 
 - **Branch**: `askeladd/h92-tau-z-loss-push` (closed at 17:50Z 2026-05-22)

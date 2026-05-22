@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~17:50 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~18:05 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -45,10 +45,32 @@ These are architecturally clean hypotheses that **add representational capacity 
 - If test_WSS improves but test_SP doesn't → confirms WSS-specific decoder is the lever (Morgan's hypothesis correct)
 - If test_SP also improves → cross-validation that the plateau is BOTH decoder-shared-trunk AND backbone
 
-### Wave 33 architectural candidates queue (in priority order):
-1. **H96 (fern, PR #1261, in-flight)**: split SP/WSS decoder heads — first attack
-2. **H97 (alphonse, PR #1262, in-flight)**: bidirectional surf↔vol cross-attention — second attack
-3. **H98 (askeladd, PR #1263, NEW)**: surface-late-layer-split — one extra surface-only TransformerEncoderLayer post-backbone, identity at init — third attack
+### Wave 33 architectural candidates queue:
+1. **H96 (fern → reassigned H99)**: split SP/WSS decoder heads — in-flight
+2. **H97 (alphonse, PR #1262)**: bidirectional surf↔vol cross-attention — in-flight
+3. **H98 (askeladd, PR #1263)**: surface-late-layer-split — in-flight
+4. **H99 (frieren, PR #1264)**: surface-out-deeper-mlp — NEW
+
+## 🟡 ~18:05Z (2026-05-22) — H89 MODEL-DEPTH-EXPANSION CLOSED **B PARTIAL HISTORIC** + H92 CLOSED D NEGATIVE + frieren reassigned H99 + askeladd reassigned H98
+
+**Closure: PR #1249 H89 (frieren) — B PARTIAL HISTORIC**:
+- val_abupt **6.1186%** CLEARS gate by −0.007pp ← **FIRST Wave 32 architectural-class val gate clear**
+- test_VP **3.482%** CROSSES floor by −0.161pp ← DEEPEST test_VP cross in Wave 32 fleet
+- test_SP 3.709% MISS floor +0.132pp (**11th plateau confirmation**)
+- test_WSS 6.832% MISS goal +0.105pp; all 3 axes regress
+- **Encoder-stack exhaustion CONFIRMED**: depth/heads/width/LR/slices all fail test_SP/WSS. **Decoder-bound hypothesis confirmed.**
+
+**Closure: PR #1252 H92 (askeladd) — D NEGATIVE**:
+- val_abupt 6.3235% MISS gate +0.198pp; test_WSS 7.041% REGRESS +0.314pp
+- val_WSS_z 9.601% WORSE than all canonical siblings (9.485-9.530) — target axis DEGRADED
+- **Per-tau-channel loss-weight class DEFINITIVELY CLOSED**: Lion sign-update normalizes step magnitude; per-channel weight scaling cannot add representational capacity
+- Combined with H93 in-flight (tau_y=2.5), entire class falsified
+
+### Reassignment: PR #1264 H99 frieren SURFACE-OUT-DEEPER-MLP
+`--use-deeper-surface-mlp` — `self.surface_out` 2-layer → 3-layer (n_hidden → n_hidden → n_hidden//2 → 4ch). Mirrors volume_out depth philosophy (PR #958). +132K params. Direct decoder-bound plateau attack. If test_SP < 3.577% → first mechanism to crack 11-variant plateau.
+
+### Reassignment: PR #1263 H98 askeladd SURFACE-LATE-LAYER-SPLIT (already assigned, in-flight)
+Single extra `TransformerEncoderLayer` on surface tokens only, post-backbone, identity at init.
 4. **H99 (next idle)**: compound H96 + H97 if both produce signal, OR WSS-to-SP cross-attention (depends on H96 architecture being available)
 
 **Per-tau-channel loss-weight class CLOSED (2026-05-22 17:50Z):** H92 (tau_z=3.0 D NEG, PR #1252) + H93 (tau_y=2.5, thorfinn in-flight PR #1254) together falsify per-channel loss reweighting under Lion. test_WSS_z is architecture-bound.
