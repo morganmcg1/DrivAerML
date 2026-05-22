@@ -8,6 +8,44 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-22 03:30 UTC — H25/H26/H27 EP30 TERMINAL LANDING (Wave 32 dl24 fleet)
+
+Three-PR mechanism-isolation wave on the H21 substrate (clamp=0.15 + GradNorm). One full falsification, one **partial-winner held for human decision**, one strict-regression. Combined evidence quadrant: surface-loss-weight (H26) is the only Wave 32 dl24 lever that moves wss SOTA forward.
+
+### Wave 32 dl24 terminal summary
+
+| PR | H | Student | Run | Hypothesis (Δ vs H21) | test_wss | test_vol_p | test_surf_p | test_abupt | Verdict |
+|---|---|---|---|---|---:|---:|---:|---:|---|
+| #1237 | H25 | nezuko | `xjbz1v84` | + Charb-τz weight 2× | 6.834 | 3.676 | 3.760 | 5.971 | **CLOSED — all 4 floors fail** |
+| #1238 | H26 | tanjiro | `apgpxli8` | + surface-loss-weight 1.5 | **6.6389** ⭐ | 3.6665 ❌ | 3.6532 ❌ | **5.7940** ⭐ | **PARTIAL — held for #1056 decision** |
+| #1239 | H27 | frieren | `yyo3q1xb` | + lighter clamp (0.10) | 6.6704 ⭐ | 3.7079 ❌ | 3.6903 ❌ | 5.8396 ⭐ | partial, strictly inferior to H26 |
+
+vs Issue #1056 floors (test_vol_p ≤ 3.643, test_surf_p ≤ 3.577, test_wss < 5.85, test_abupt ≤ 5.844):
+
+- **H26**: wss/abupt SOTA (−0.088pp wss, −0.050pp abupt) but vol_p breach +0.024pp, surf_p breach +0.076pp. Strict AND-clause fails → posted to Issue #1056 asking Morgan for explicit merge decision.
+- **H27**: wss/abupt SOTA (−0.057pp wss, −0.004pp abupt) but vol_p breach +0.065pp, surf_p breach +0.113pp. Pressure breaches are LARGER than H26's on both axes → H27 is strictly inferior to H26 in this quadrant. If Morgan rejects H26 partial, H27 also fails the same way (worse).
+- **H25**: All 4 floors breached. Static Charb-τz×2 falsified the "push wss harder via amplified raw loss" hypothesis. Same failure mechanism as H24-v2: GradNorm interprets the amplified loss as already-loud → reallocates AWAY from τ_z (terminal w_τz=1.645 ≈ H21, but w_τ_x rose to 0.966 vs H21 0.75). test_wss_z worsened by +0.33pp — the very axis we tried to push. Confirms anti-additive quadrant for static loss boosts under GradNorm.
+
+### Mechanism take-aways
+
+1. **Surface-loss-weight 1.5× (H26) is the most efficient single lever** to push wss + abupt forward on the H21 substrate. The mechanism amplifies both surface_pressure AND surface_wss tasks pre-GradNorm symmetrically; GradNorm renormalizes but redistributes within the surface block (terminal w_τ_y rose to 1.789 from H21's ~1.46, w_τ_z went DOWN slightly). Net effect: surface block gets ~1.34× the gradient mass of H21 with the same downstream renormalization.
+2. **H21's "sub-floor vol_p lock" was fragile.** H21 ended at test_vol_p=3.579 (sub-floor, locked by clamp=0.15 + 0.05 default w_vol_p reference). H26's surface-loss-weight redistribution eroded that lock (+0.088pp vs H21), pushing vol_p back above the 3.643 floor. H27's lighter clamp ALSO erodes the lock from the other direction (+0.129pp vs H21). Both directions of perturbation on H21's vol_p balance break the floor.
+3. **The "amplify static τ_z loss" path is anti-additive.** H24-v2 and H25 both confirm: static loss multipliers on a per-task term within a GradNorm-renormalized loss INVERT the intended task budget reallocation. The static boost makes GradNorm see the boosted task as "already loud" → it shrinks that task's GradNorm weight. Net: the budget shifts to OTHER axes (typically w_τ_x in our experiments). Future per-axis interventions should modify GradNorm's reference rates OR bypass GradNorm entirely, not pre-apply static weights to the raw loss.
+4. **Wave 32 dl24 winners both BEAT wss SOTA in single-axis isolation** — H26 by −0.088pp and H27 by −0.057pp — but **NEITHER clears the Issue #1056 AND-clause**. Both arms break the pressure floors. The path forward is either (a) wait for Morgan's H26 partial-winner decision OR (b) find a mechanism that pushes wss without redistributing budget away from vol_p (e.g. clamp 0.20 on top of surface-loss-weight 1.5 — H30 tanjiro, PR #1255).
+
+### H26 GradNorm terminal state (mechanism diagnostic, `apgpxli8`)
+
+The surface×1.5 amplification did NOT amplify τ_z (as we hoped); it shifted budget INTO w_τ_y (+0.33 vs H21). The wss SOTA win is mostly via τ_y improvement, not τ_z. Asymmetric per-axis τ re-weighting (e.g. pushing only τ_z) remains an open direction — but the H25 falsification shows static loss boosts do not deliver it under GradNorm.
+
+### Follow-ups assigned
+
+- **H29 (nezuko, PR #1253):** H26 recipe + extended cosine T_max=30→50 — cure H26's EP19 plateau (cosine bottoms at EP20 in H26's 30-epoch schedule, leaving EP20-30 in near-frozen LR). Single lever from H26. Launched `cwzs551m` at 03:29Z May 22.
+- **H30 (tanjiro, PR #1255):** H26 recipe + clamp 0.15→0.20 — directly restore vol_p floor on top of H26's wss gains. Tightening the floor protects vol_p budget against surface-loss redistribution. Tests "vol_p clamp is independent from surface-loss block" hypothesis. Tanjiro pod picked up the branch at 03:37Z May 22.
+
+H28 (fern) still running on the H19 base + extended cosine T_max=60 — strictly inferior to H26 at all matched epochs (EP15: H28=6.852 vs H26=6.811). Likely partial winner like H26 but with worse wss numbers; running to terminal for diagnostic completeness.
+
+---
+
 ## 2026-05-21 10:30 UTC — PR #1226 CLOSED: H24-v2 falsified (per-axis τ "1.0,1.2,1.5" backfires on WSS-z)
 
 - **Branch:** `dl24-fern/h24-v2-clamp015-peraxis`
