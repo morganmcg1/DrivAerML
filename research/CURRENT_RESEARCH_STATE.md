@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~09:10 UTC)
+- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~16:16 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -46,10 +46,30 @@ These are architecturally clean hypotheses that **add representational capacity 
 - If test_SP also improves → cross-validation that the plateau is BOTH decoder-shared-trunk AND backbone
 
 ### Wave 33 architectural candidates queue (in priority order):
-1. **H96 (fern, NEW)**: split SP/WSS decoder heads — first attack
-2. **H97 (next idle)**: WSS-to-geometry cross-attention — second attack
+1. **H96 (fern, in-flight EP3)**: split SP/WSS decoder heads — first attack
+2. **H97 (alphonse, NEW PR #1262)**: bidirectional surf↔vol cross-attention — second attack
 3. **H98 (next idle)**: WSS-to-SP cross-attention — third attack
-4. **H99 (next idle)**: compound H96 + H97 if both close A WIN
+4. **H99 (next idle)**: compound H96 + H97 if both produce signal
+
+## 🔴 ~16:16Z (2026-05-22) — H90 LR-DOWNWARD-SWEEP CLOSED **D NEGATIVE** (alphonse) + alphonse reassigned H97 BIDIRECTIONAL-XATTN (PR #1262)
+
+**Closure: PR #1250 H90 (alphonse) — D NEGATIVE**:
+- val_abupt 6.319% MISS gate +0.193pp
+- test_abupt 6.063% REGRESS vs baseline +0.219pp
+- test_VP 3.659% MISS floor +0.016pp
+- test_SP 3.817% MISS floor +0.240pp (**10th plateau confirmation** at 3.78-3.95% range)
+- test_WSS 6.986% REGRESS vs goal +0.259pp
+- WSS_z val→test gap = −0.640pp (deepest divergence channel — binding test-set constraint)
+- **LR magnitude class CLOSED**: H85 UP D NEG + H90 DOWN D NEG = both arms falsified. **Canonical lr=9e-5 locked as substrate sweet spot**. No further LR sweeps warranted.
+
+### Reassignment: PR #1262 H97 alphonse BIDIRECTIONAL-XATTN
+`--use-vol-to-surf-xattn` (new flag) — adds `vol_to_surf_xattn` MultiheadAttention module mirroring existing `surf_to_vol_xattn`. Surface hidden states query volume hidden states after backbone. Both xattn directions run in parallel on pre-xattn hidden states.
+
+**Mechanism**: surface predictions (SP, WSS) cannot currently see volume flow context. Adding vol→surf coupling gives surface decoder heads access to downstream volume pressure field — key for separation/recirculation regions where SP and WSS are determined by adverse pressure gradient patterns.
+
+**Physical motivation**: surface pressure CP and wall shear stress WSS in separation regions depend on downstream pressure recovery (volume flow). Asymmetric current coupling (vol reads surf) misses the reverse: surf reads vol.
+
+**Key signal at terminal**: test_SP < 3.577% would be FIRST mechanism to crack SP plateau across 10 independent variants (H78-H90). Vol→surf coupling is first architectural addition that gives surface decoder access to volume context.
 
 ## 🟢 ~04:35Z (2026-05-22) — H87 SURFACE-LOSS-WEIGHT-REDUCTION CLOSED **B PARTIAL — HISTORIC: FIRST WAVE 32 VAL GATE CLEAR** (val_abupt 6.045% beats gate −0.081pp + test_VP 3.495% cleanest cross −0.148pp; but test_SP +0.157pp + test_abupt +0.143pp + test_WSS +0.217pp = AND-gate fails) + H86 MLP-RATIO-EXPANSION CLOSED D NEGATIVE (val_abupt 6.3635% MISS gate +0.238pp, mlp_ratio class falsified) + edward reassigned H94 VOL-LOSS-INCREASE (PR #1257) + tanjiro reassigned H95 SURF-LOSS-PUSH-FURTHER (PR #1258)
 

@@ -1,3 +1,34 @@
+## 2026-05-22 16:16 — PR #1250: H90 LR-DOWNWARD-SWEEP (alphonse, CLOSED) — **OUTCOME D NEGATIVE** — all 4 paper-facing test channels regress, val_abupt misses gate +0.193pp. Closes LR-magnitude sweep class: canonical lr=9e-5 confirmed substrate sweet spot.
+
+- **Branch**: `alphonse/h90-lr-downward-sweep` (closed at 16:16Z 2026-05-22)
+- **W&B run**: `sj41hrg2` (rank 0; finished at step 70,652, 14.0h training time)
+- **Hypothesis**: Single-flag `--lr 9e-5 → 6e-5` (−33%) on canonical Wave 32 baseline. First-ever LR sweep BELOW canonical. Together with H85 (lr=1.2e-4 UP, D NEG) closes the LR magnitude sweep class.
+
+### Results
+
+| Channel | **H90 (lr=6e-5)** | BL #972 / floor | Δ vs BL / floor | Verdict |
+|---|---:|---:|---:|:--|
+| **val_abupt (gate)** | 6.319% | gate 6.126% | +0.193pp ❌ | MISS gate |
+| **test_abupt** | 6.063% | 5.844% | +0.219pp ❌ | regress |
+| **test_VP (floor 3.643)** | 3.659% | 3.643% | +0.016pp ❌ | MISS floor (narrow) |
+| **test_SP (floor 3.577)** | 3.817% | 3.577% | +0.240pp ❌ | MISS floor (plateau range, 10th confirmation) |
+| **test_WSS (goal 6.727)** | 6.986% | 6.727% | +0.259pp ❌ | above goal |
+| test_WSS_x / _y / _z | 6.205 / 7.587 / 9.048 | — | — | all axes regress |
+
+### Analysis — LR-magnitude class CLOSED
+
+**Both sweep arms miss merge gate**: H85 UP (+33%) val=6.390% D NEG, H90 DOWN (−33%) val=6.319% D NEG. Canonical 9e-5 is confirmed substrate sweet spot — neither direction yields improvement. **LR-magnitude class FULLY CHARACTERIZED, no further LR sweeps warranted on tay.**
+
+**val→test gap on abupt slightly tighter** under lower LR: −0.255pp (H90) vs −0.282pp (baseline), consistent with finer-grained per-step Lion updates producing less overfitting. But +0.027pp improvement far too small to recover the +0.193pp val gate gap.
+
+**WSS_z val→test gap is −0.640pp** (largest of all channels), deepest divergence between val and test confirming WSS_z is the binding test-set constraint.
+
+**test_SP 10th plateau confirmation**: 3.78-3.95% range (H90 = 3.817%) across H78/H79/H80/H82/H83/H84/H86/H87/H88/H90.
+
+**alphonse reassigned H97 BIDIRECTIONAL-XATTN** (PR #1262): second Wave 33 architectural attack — adds `vol_to_surf_xattn` mirroring existing `surf_to_vol_xattn`. Surface decoder heads get access to volume flow context for the first time.
+
+---
+
 ## 2026-05-22 09:10 — PR #1248: H88 MODEL-HEADS-EXPANSION (fern, CLOSED) — **OUTCOME B PARTIAL** — paper-positive test_VP cross −0.041pp but 3/4 paper-facing test channels regress and binding test_SP plateau holds (+0.260pp miss). Capacity expansion via attention head granularity FALSIFIED.
 
 - **Branch**: `fern/h88-model-heads-expansion` (closed at 09:10Z 2026-05-22)
