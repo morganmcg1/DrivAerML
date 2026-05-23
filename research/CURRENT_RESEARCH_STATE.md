@@ -5,6 +5,56 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~11:30Z (2026-05-23) — H103 CLOSED **C NULL** (val MISS +0.224pp, all 3 floors miss, test_VP near-miss +0.014pp; **GLOBAL vs LOCAL PATHWAY ANSWER — LOCAL WINS** via direct H97/H101 vs H103 head-to-head, FiLM class CLOSED for Wave 34, 12th SP plateau confirmation) + askeladd reassigned **H111 LAYERSCALE-IN-BACKBONE** (PR #1282) **NEW MECHANISM CLASS — REGULARIZATION** strategy-tier shift per Plateau Protocol; learnable per-channel γ_attn, γ_mlp ∈ R^512 per TransformerBlock residual branch, init γ=1.0 identity, 5,120 params (0.029% overhead), CaiT-style; γ histogram per block is co-equal diagnostic deliverable
+
+**H103 CLOSURE — FiLM-class verdict:**
+- val_abupt **6.350%** MISS gate +0.224pp; test_abupt 6.060% regresses canonical +0.216pp
+- test_VP 3.657% near-miss +0.014pp (would cross at slightly better val); test_SP 3.820% **12th plateau confirmation**; test_WSS 6.982% miss +0.255pp; test_WSS_z 9.022% regress +0.077pp
+- FiLM mechanism **engaged** (γ row norm grew from zero-init to 39.9, max_abs 0.62 — non-trivial modulation) but signal insufficient
+- O(N) cost confirmed (1.86 it/s, throughput-neutral with canonical)
+- +540K params (largest single-axis cost in fleet after H97's +1M)
+
+**🔴 DEFINITIVE GLOBAL vs LOCAL PATHWAY ANSWER — LOCAL WINS:**
+
+H97 (per-token xattn) beats H103 (global FiLM) on **every channel** at 2× param cost. H101 (info-residual at decoder INPUT, +3K) beats H103 on every channel at **180× cheaper**. The productive vol→surf info pathway is **decoder INPUT (info-residual class)**, NOT **decoder feature modulation (FiLM class)**. FiLM mechanism class **DEFINITIVELY CLOSED** for Wave 34 — will not appear in compound staging.
+
+**12th SP plateau — Bayes-optimal hypothesis strengthening:**
+H103 test_SP 3.820% extends the plateau to **12 consecutive Wave 32+33 mechanisms** in 3.70-3.95% range vs floor 3.577%. Plateau survives WIDTH (H102), DEPTH (H99), INFO-AT-INPUT (H101), BIDIR-XATTN (H97), FILM (H103), TASK-HEAD (H92/93/96/100), plus 7 other variants. If H108 + H110 also miss SP, Wave 35 must pivot SP from "mechanism gap" to **data representation / loss reformulation** tier.
+
+**New assignment: PR #1282 H111 askeladd LAYERSCALE-IN-BACKBONE**:
+- Strategy tier shift per Plateau Protocol — first **REGULARIZATION-class** mechanism in Wave 33/34 (different class from all other in-flight Wave 33 + H110 compound)
+- Mechanism: add `nn.Parameter(torch.ones(hidden_dim))` for γ_attn and γ_mlp to each TransformerBlock; multiply elementwise on residual branches BEFORE add: `x = x + γ_attn * attention(norm1(x))` and `x = x + γ_mlp * mlp(norm2(x))`
+- Init γ=1.0 → exact identity at step 0; optimizer can drive each channel up (amplify) or down (suppress/prune); canonical weight_decay=5e-4 (Lion) trends γ toward 0 unless gradient pressure resists
+- Params: 2 × 512 × 5 = **5,120 params** (0.029% of total 17.4M)
+- Reference: CaiT (Touvron et al. 2021) — +0.3-0.5pp ImageNet top-1 at near-zero overhead
+- **Diagnostic deliverable**: γ histograms per block at terminal; mechanism engaged iff some channels diverge from 1.0
+- Orthogonal to all other in-flight mechanisms → potential Wave 35 compound candidate
+
+**Wave 33+34 fleet after H111 assignment — 8/8 WIP zero idle:**
+1. **H104 edward (PR #1269)**: vol-width +229K — in-flight (best val_VP 3.606% at checkpoint)
+2. **H105 fern (PR #1271)**: surf-normals +2K — late-mid-cosine (~71.6%, val 6.435%, terminal ~5h)
+3. **H106 frieren (PR #1276)**: vol-info-residual +2.5K — in-flight
+4. **H107 thorfinn (PR #1277)**: surf-global-context +262K — in-flight
+5. **H108 nezuko (PR #1278)**: parallel-MLP residual +265K — in-flight
+6. **H109 alphonse (PR #1279)**: backbone-skip +263K — in-flight (just kicked off)
+7. **H110 tanjiro (PR #1280)**: Wave 34 compound H102+H101 +268K — in-flight (just kicked off)
+8. **H111 askeladd (PR #1282) NEW**: LayerScale-in-backbone +5K — JUST ASSIGNED
+
+**Updated mechanism class ranking (after H103 closure):**
+1. **WIDTH** (H102 LEADER val 6.118% gate clear — strongest single mechanism of Wave 33)
+2. **INFO-AT-INPUT** (H101 +3K extreme efficiency; H105 normals late-mid; H106 vol-xyz in-flight)
+3. **BIDIR-XATTN** (H97 B PARTIAL +1M — confirmed but cost-ineffective + val-overfit)
+4. **SELF-CONTEXT** (H107 in-flight)
+5. **DECODER ENSEMBLE / PARALLEL-MLP** (H108 in-flight)
+6. **ENCODER-SKIP / BACKBONE-BYPASS** (H109 in-flight)
+7. **REGULARIZATION** (H111 LayerScale — NEW CLASS, just launched)
+8. **WAVE 34 COMPOUNDS** (H110 H102+H101 in-flight — first compound)
+9. ~~DEPTH~~ (H99 C NULL — definitively inferior to width)
+10. ~~TASK-HEAD~~ (H92/H93/H96/H100 all NEG — CLOSED)
+11. ~~FILM~~ (H103 C NULL — global-pool feature modulation CLOSED)
+
+---
+
 ## 🟢 ~11:00Z (2026-05-23) — **WAVE 34 LAUNCHED** — H102 CLOSED **B PARTIAL** (val gate CLEARED −0.008pp but test_SP 11th plateau + test_WSS regress → AND-gate FAILS 2/3 → NOT MERGED; WIDTH DEFINITIVELY DOMINATES DEPTH on every channel) + tanjiro reassigned **H110 WAVE 34 COMPOUND H102+H101** (PR #1280) FIRST WAVE 34 LAUNCH width+info-positions +268K predicted val < 6.10% possible test_SP plateau crack
 
 **H102 CLOSURE — Key findings:**

@@ -1,3 +1,82 @@
+## 2026-05-23 ~11:30 — PR #1270: H103 VOLUME-CONTEXT-FILM-DECODER (askeladd, CLOSED) — **C NULL** (val MISS +0.224pp, all 3 floors miss, test_VP near-miss +0.014pp; FiLM mechanism engaged but global-pool signal insufficient; **GLOBAL vs LOCAL pathway question definitively answered: LOCAL wins**; FiLM class CLOSED for Wave 34)
+
+- **Branch**: `askeladd/h103-volume-context-film-decoder` (closed at ~11:30Z 2026-05-23)
+- **W&B run**: `lqpbqy67` (rank 0), 13 epochs completed, runtime 14.45h, throughput 1.86 it/s (O(N) confirmed).
+- **Hypothesis**: Pool `volume_hidden` to scalar context → predict (γ, β) → modulate `surface_hidden` via affine FiLM transform before `surface_out`. Tests whether vol→surf info via cheap O(N) global modulation is competitive with O(N²) per-token cross-attention (H97). +540K params (`film_projector` Linear 512→1024).
+
+### Terminal results
+
+| Channel | Validation (EP13 EMA best-ckpt) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.350%** ❌ | **6.060%** | 5.844% | **+0.216pp MISS gate +0.224pp** |
+| surface_pressure | 4.165% | 3.820% | 3.577 (floor) | **+0.243pp MISS floor — 12th plateau confirmation** |
+| volume_pressure | 3.743% | 3.657% | 3.643 (floor) | **+0.014pp NEAR-MISS** (would have crossed at marginally better val) |
+| wall_shear | 7.203% | 6.982% | 6.727 (goal) | **+0.255pp MISS goal** |
+| wall_shear_x | 6.313% | 6.202% | — | +0.240pp regress |
+| wall_shear_y | 7.822% | 7.600% | — | +0.165pp regress |
+| wall_shear_z | 9.708% | 9.022% | 8.945 (canonical test) | **+0.077pp REGRESS on binding axis** |
+
+- Gate: val_abupt 6.350% **MISS gate 6.126% by +0.224pp**.
+- Test AND-gate: **FAILS 3/3** (test_VP near-miss +0.014pp, test_SP miss +0.243pp, test_WSS miss +0.255pp).
+- val→test slope: abupt −0.290pp (≈ canonical −0.282), WSS_z **−0.686pp** (very steep, but starts from val 9.708 which is well above canonical val 9.601).
+
+### Mechanism diagnostic — FiLM engaged but signal insufficient
+
+FiLM γ row norm grew from **zero-init** to **39.9 at terminal** (max_abs 0.62, mean_abs 0.060). β row norm 27.6. The optimizer found and applied a meaningful FiLM transform. But the asymptote isn't competitive: every surface token receives the SAME (γ, β) since the modulation source is a single global mean-pool of `volume_hidden`. FiLM cannot add spatial discrimination, only globally shift/scale `surface_hidden` — largely redundant with what LayerNorm already does inside the backbone.
+
+### 🔴 DEFINITIVE GLOBAL vs LOCAL PATHWAY ANSWER — LOCAL WINS
+
+Direct head-to-head — both H97 and H103 target vol→surf info pathway:
+
+| Metric | H97 alphonse (per-token xattn, +1M) | H103 askeladd (global FiLM, +540K) | H103 − H97 |
+|---|---:|---:|---:|
+| val_abupt | 6.204 | 6.350 | **+0.146** |
+| test_abupt | 5.989 | 6.060 | **+0.071** |
+| test_VP | 3.654 | 3.657 | +0.003 |
+| test_WSS | 6.887 | 6.982 | +0.095 |
+| test_WSS_z | 8.937 | 9.022 | +0.085 |
+
+H97 wins on **every channel** at 2× the param cost. Param efficiency vs H101 (info-residual at decoder input, +3K):
+
+| Mechanism | Δ Params | val_abupt | test_VP | test_WSS_z |
+|---|---:|---:|---:|---:|
+| H101 nezuko (geom-residual at decoder INPUT) | +3K | 6.213 | **3.514** ✓ CROSS | 8.946 |
+| H103 askeladd (FiLM at decoder feature MODULATION) | +540K | 6.350 | 3.657 ❌ | 9.022 |
+| H101 vs H103 | **180× cheaper** | **−0.137pp** | **−0.143pp better** | **−0.076pp better** |
+
+**H101 is 180× cheaper AND better on every channel.** The productive vol→surf info pathway is **decoder INPUT (info-residual class)**, NOT **decoder feature modulation (FiLM class)**.
+
+### Mechanism class verdict — FiLM CLOSED for Wave 34
+
+FiLM mechanism class **DEFINITIVELY CLOSED** for Wave 34 — will not appear in compound staging. Cumulative Wave 33 mechanism class state:
+- ✅ WIDTH (H102) — strongest single-axis decoder mechanism
+- ✅ INFO-AT-INPUT (H101) — most cost-efficient
+- ✅ BIDIR-XATTN (H97) — works but cost-ineffective
+- 🔴 FILM (H103) — closed, global-pool insufficient
+- 🔴 DEPTH (H99), TASK-HEAD (H92,93,96,100) — closed
+- ⏳ SELF-CONTEXT (H107), DECODER-ENSEMBLE (H108), ENCODER-SKIP (H109), VOL-WIDTH (H104), VOL-INFO-RESIDUAL (H106), SURF-NORMALS (H105) — Wave 33 in-flight
+- 🆕 COMPOUND (H110 = H102+H101) — Wave 34 launched
+- 🆕 REGULARIZATION (H111 = LayerScale-in-backbone) — askeladd reassigned, **NEW CLASS**
+
+### 12th SP plateau confirmation — strengthening Bayes-optimal hypothesis
+
+H103 test_SP 3.820% extends the test_SP plateau to **12 consecutive Wave 32+33 mechanisms** in 3.70-3.95% range vs floor 3.577% (canonical). The plateau survives:
+- WIDTH (H102): 3.724
+- DEPTH (H99): 3.804
+- INFO-AT-INPUT (H101): 3.706
+- BIDIR-XATTN (H97): 3.781
+- FILM (H103): 3.820
+- TASK-HEAD (H92, H93, H96, H100): 3.79-3.95
+- Plus 7 other mechanism variants
+
+If H108 (parallel-MLP residual) and H110 (compound H102+H101) cannot crack SP, the "SP is a dataset-distribution Bayes-optimal limit" hypothesis gains very strong support, and Wave 35+ should pivot test_SP from "mechanism gap" to "data representation / loss reformulation" tier.
+
+### Reassignment
+
+askeladd → **H111 LAYERSCALE-IN-BACKBONE** (PR #1282). Strategy tier shift per Plateau Protocol — first **REGULARIZATION-class** mechanism in Wave 33/34. Adds learnable per-channel γ_attn, γ_mlp ∈ R^512 to each TransformerBlock residual branch (5,120 params, 0.029% overhead). Init γ=1.0 (identity at init). Reference: CaiT (Touvron et al. 2021) +0.3-0.5pp ImageNet at near-zero overhead. Mechanism diagnostic (γ histograms per block) is co-equal deliverable with metric outcome — answers "does the optimizer find a per-channel residual rescaling that improves convergence/generalization on this dataset?"
+
+---
+
 ## 2026-05-23 ~11:00 — PR #1268: H102 SURFACE-OUT-WIDER-MLP (tanjiro, CLOSED) — **B PARTIAL** (val gate CLEARED −0.008pp, test_VP CROSSED −0.100pp; test_SP 11th plateau + test_WSS regress → NOT MERGEABLE, AND-gate fails 2/3 test floors; WIDTH AXIS DEFINITIVELY DOMINATES DEPTH)
 
 - **Branch**: `tanjiro/h102-surface-out-wider-mlp` (closed at ~11:00Z 2026-05-23)
