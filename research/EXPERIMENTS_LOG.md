@@ -8,6 +8,69 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-23 10:37 UTC — PR #1272 CLOSED (H34 nezuko — Ada-Temp Slices mechanism ALIVE but ineffective at delivering wss gains; third Wave 33 architectural arm with this pattern; reassigned to **H38 surf-p Charbonnier** to attack the wave-wide pressure floor)
+
+H34 nezuko EP10 verdict: val_wss=7.062, gate criterion val_wss ≤ 6.95 MISS by +0.112pp. Closed at EP10.1 per the EP10 gate criterion. Run `ai7wkvov` was healthy throughout, mechanism strong, but trajectory does not reach gate.
+
+### H34 EP10 val trajectory (vs gates):
+
+| Metric | EP6 | EP7 | EP8 | EP9 | EP10 | Δ EP6→EP10 | Gate (EP10) | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| **val_wss** | 7.127 | 7.100 | 7.080 | 7.079 | **7.062** | −0.065 | ≤ 6.95 | **MISS +0.112pp** ❌ |
+| val_vol_p | 4.056 | 4.023 | 4.013 | 4.015 | 4.001 | −0.055 | < 4.50 | PASS |
+| val_surf_p | 4.180 | 4.158 | 4.154 | 4.153 | 4.147 | −0.033 | < 4.30 | PASS |
+| val_abupt | 6.385 | 6.352 | 6.336 | 6.332 | 6.316 | −0.069 | < 6.40 | PASS |
+
+Decelerating trajectory (Δ per EP: −0.027 → −0.020 → −0.001 → −0.017pp). Geometric decay then slight cosine LR re-acceleration but not enough to recover +0.112pp in remaining 20 EPs.
+
+### Terminal projection (NOT a contract winner)
+
+Applying val→test gaps: H21-class (−0.36) and H32-class (−0.40):
+
+| Metric | H34 projected terminal | vs SOTA 972 | vs wave-best |
+|---|---:|---|---|
+| test_wss | **6.66–6.71** | beats by 0.02–0.07pp | worse than H33's 6.679, H32's 6.691 |
+| test_vol_p | 3.66–3.69 | **BREACH +0.02–0.05** ❌ | similar to H32/H33 |
+| test_surf_p | 3.69–3.72 | **BREACH +0.11–0.14** ❌ | similar to H32/H33 |
+| test_abupt | 5.84–5.87 | tied | similar to H21 |
+
+### Mechanism IS ALIVE — the diagnostic value (load-bearing)
+
+γ trajectory at EP10:
+
+| Layer | γ_mean | γ_std | Verdict |
+|---|---:|---:|---|
+| 0 | 0.699 | 0.307 | ⭐ |
+| 1 | 0.765 | 0.313 | ⭐ |
+| 2 | 0.861 | 0.323 | ⭐ |
+| 3 | 0.976 | 0.334 | ⭐ |
+| 4 | 1.032 | 0.373 | ⭐ |
+| 5 | 1.052 | 0.376 | ⭐ |
+
+All 6 layers monotonic depth-graded on BOTH γ_mean (0.70→1.05) AND γ_std (0.31→0.38). Global γ_std=0.343 — strongest mechanism signal of Wave 33's architectural arms.
+
+GradNorm at EP10: w_cp=0.62, w_τ_x=0.99, w_τ_y=1.43, **w_τ_z=1.83**, w_vol_p=0.15 (clamped). **Same loss-surface as H21/H32** — ada-temp does NOT reshape GradNorm-driven allocation. The per-point softmax temperature operates on attention only, not on gradient budgets, and the wave's wss-axis is GradNorm-budget-constrained.
+
+### Strategic finding: third architectural arm with "alive-but-ineffective" pattern
+
+| Arm | Mechanism | test_wss | vs SOTA | Floor breaches |
+|---|---|---:|---:|---:|
+| **H33** GALE-Transolver | K=512 anchor bank, surface-only mask | **6.679** | beats by 0.048 | 3 (sp, vp, ab) |
+| **H32** surf_lw=1.25 | uniform surface-axis boost | **6.691** | beats by 0.036 | 2 (sp, vp) |
+| **H34** Ada-Temp Slices | per-point γ softmax temp | ~6.70 projected | beats by ~0.02 | 2 (sp, vp) projected |
+
+**Wave 33 architectural arms all converge on the same pattern**: mechanism activates as designed, val_wss descends, but test_wss tops out at 6.66–6.70 (just better than SOTA 6.727) while pressure floors uniformly breach. The wave's bottleneck is **structurally pressure-axis-limited under wss expansion**.
+
+Cross-confirmation: tay fleet's H102 (SURFACE-OUT-WIDER-MLP, +266K params) at 94.78% complete projects test_WSS ~6.66 with test_SP ~3.85 (NOT clearing 3.577 floor across 11+ tay variants). **The surf_p plateau is wave-wide, not architecture-specific.**
+
+### Reassignment
+
+**PR #1281 H38**: symmetric surf-p Charbonnier (mirror of validated vol_p Charbonnier mechanism). First explicit pressure-axis-protection experiment of Wave 33 — attacks the surf_p floor (3.577) using the same loss-shape lever that produced sub-floor vol_p in H21 (3.579). H21 base + new `--surf-p-charbonnier-weight 0.1` flag (~15-25 LoC).
+
+W&B run: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/ai7wkvov. Closed at advisor comment 4525078762.
+
+---
+
 ## 2026-05-23 08:20 UTC — PR #1260 CLOSED (H33 fern — GALE-Transolver mechanism alive but ineffective at H33's instantiation; **NEW Wave 33 wss bar 6.679 BEAT SOTA −0.048** but 3 floors breach; mechanism repair dispatched as H37 GeoTransolver-true)
 
 H33 fern ran 18/30 EP via SENPAI_TIMEOUT graceful cutoff (1282 min, 21.37h walltime). Best EMA-val at EP13. Test from best-val-EMA checkpoint per advisor 07:00Z directive.
