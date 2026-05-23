@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_surface_global_context_residual: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_surface_global_context_residual": (
+            "Wave 33 H107: add zero-init Linear(n_hidden, n_hidden) "
+            "projection of the mask-aware mean-pooled surface_hidden, "
+            "broadcast as an additive residual to per-token surface_hidden "
+            "BEFORE self.surface_out. Identity at init (weight and bias "
+            "zero) so baseline is preserved at step 0. NEW mechanism class "
+            "self-context-at-decoder: lets the per-token surface decoder "
+            "consume global surface context (flow regime, body geometry) "
+            "that is otherwise lost between slice compression and the "
+            "per-point output head. Different from H103 (FiLM volume-pool "
+            "multiplicative) and H101/H105 (raw input features at input)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_surface_global_context_residual=config.use_surface_global_context_residual,
     )
 
 
@@ -773,7 +787,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # H107 surface_global_context_proj is gated on surface_hidden
+            # being non-empty (N_S > 0); volume-only views (N_S = 0) skip
+            # the residual, leaving the projection's params with no
+            # gradient. Same DDP unused-param hazard as the surf->vol
+            # xattn above, so the same find_unused_parameters fix applies.
+            if config.use_surf_to_vol_xattn or config.use_surface_global_context_residual:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

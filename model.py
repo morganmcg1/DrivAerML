@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_surface_global_context_residual: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_surface_global_context_residual = use_surface_global_context_residual
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,22 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Wave 33 H107: zero-init Linear(n_hidden, n_hidden) projection of the
+        # mask-aware mean-pooled surface_hidden, broadcast as an additive
+        # residual to per-token surface_hidden BEFORE self.surface_out.
+        # Identity at init (zero weight and bias) so baseline is preserved
+        # at step 0; model learns to consume global surface context
+        # (flow regime, body geometry summary) at the per-token decoder.
+        # NEW mechanism class: self-context-at-decoder. Different from H103
+        # (FiLM, volume-pool, multiplicative) and from H101/H105 (raw input
+        # features, info-at-input). Source = surface self-pool, combine = add.
+        if use_surface_global_context_residual:
+            self.surface_global_context_proj = nn.Linear(n_hidden, n_hidden, bias=True)
+            nn.init.zeros_(self.surface_global_context_proj.weight)
+            nn.init.zeros_(self.surface_global_context_proj.bias)
+        else:
+            self.surface_global_context_proj = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -622,6 +640,18 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
+            # Wave 33 H107: inject mask-aware mean-pooled surface_hidden as
+            # a zero-init additive residual broadcast to per-token
+            # surface_hidden. Identity at step 0; lets the per-token
+            # decoder consume global surface context (flow regime, body
+            # geometry summary) that is otherwise lost between slice
+            # compression and the per-point output head.
+            if self.surface_global_context_proj is not None and surface_hidden.shape[1] > 0:
+                mask_f = surface_mask.unsqueeze(-1).to(surface_hidden.dtype)
+                mask_sum = mask_f.sum(dim=1).clamp(min=1.0)
+                pooled = (surface_hidden * mask_f).sum(dim=1) / mask_sum
+                context_residual = self.surface_global_context_proj(pooled).unsqueeze(1)
+                surface_hidden = surface_hidden + context_residual
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
