@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_film_decoder: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_film_decoder": (
+            "Enable FiLM conditioning of the surface decoder by a pooled "
+            "volume context (PR #1270 / H103). After the shared backbone "
+            "(and any surf->vol xattn), the masked mean of volume_hidden "
+            "is projected to (gamma, beta) via a single Linear(n_hidden, "
+            "2*n_hidden) and applied as surface_hidden = (1+gamma) * "
+            "surface_hidden + beta before surface_out. Zero-init of the "
+            "projector keeps the layer identity at init. O(N_surface) cost."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_film_decoder=config.use_film_decoder,
     )
 
 
@@ -773,7 +784,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_film_decoder:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

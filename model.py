@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_film_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_film_decoder = use_film_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -498,6 +500,18 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # FiLM decoder (PR #1270 / H103): pooled volume context modulates the
+        # surface decoder via a learned affine transform. Zero-init both weight
+        # and bias so that gamma=0 and beta=0 at step 0 — the modulation
+        # `(1 + gamma) * surface_hidden + beta` reduces to identity, preserving
+        # the canonical baseline at init.
+        if self.use_film_decoder:
+            self.film_projector = nn.Linear(n_hidden, 2 * n_hidden)
+            nn.init.zeros_(self.film_projector.weight)
+            nn.init.zeros_(self.film_projector.bias)
+        else:
+            self.film_projector = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -620,6 +634,27 @@ class SurfaceTransolver(nn.Module):
             xattn_out = _apply_token_mask(xattn_out, volume_mask)
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
+
+        # FiLM conditioning (PR #1270 / H103): modulate surface_hidden with a
+        # learned affine transform whose (gamma, beta) come from the pooled
+        # volume context. Cost is O(N_surface) — one masked mean over volume
+        # tokens plus a broadcast multiply-add. Identity at step 0 via zero-init
+        # of film_projector.
+        if (
+            self.film_projector is not None
+            and surface_x is not None
+            and volume_x is not None
+            and surface_tokens > 0
+            and volume_tokens > 0
+        ):
+            vol_mask_f = volume_mask.to(dtype=volume_hidden.dtype).unsqueeze(-1)
+            vol_sum = (volume_hidden * vol_mask_f).sum(dim=1)
+            vol_count = vol_mask_f.sum(dim=1).clamp(min=1.0)
+            vol_ctx = vol_sum / vol_count  # (B, n_hidden)
+            film_params = self.film_projector(vol_ctx)  # (B, 2*n_hidden)
+            gamma, beta = film_params.chunk(2, dim=-1)  # each (B, n_hidden)
+            surface_hidden = (1 + gamma.unsqueeze(1)) * surface_hidden + beta.unsqueeze(1)
+            surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
