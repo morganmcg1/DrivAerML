@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        volume_out_width_factor: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.volume_out_width_factor = volume_out_width_factor
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -487,12 +489,17 @@ class SurfaceTransolver(nn.Module):
                 nn.Linear(n_hidden, self.surface_output_dim),
             )
             self.surface_out.apply(_init_linear)
+            # H104: parameterize volume_out hidden dims by volume_out_width_factor.
+            # At factor=1.0 byte-identical to canonical (256, 128); at 2.0 widens
+            # to (512, 256) (+229K params).
+            vol_hidden_1 = int(n_hidden * volume_out_width_factor // 2)
+            vol_hidden_2 = int(n_hidden * volume_out_width_factor // 4)
             self.volume_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden // 2),
+                nn.Linear(n_hidden, vol_hidden_1),
                 nn.SiLU(),
-                nn.Linear(n_hidden // 2, n_hidden // 4),
+                nn.Linear(vol_hidden_1, vol_hidden_2),
                 nn.SiLU(),
-                nn.Linear(n_hidden // 4, self.volume_output_dim),
+                nn.Linear(vol_hidden_2, self.volume_output_dim),
             )
             self.volume_out.apply(_init_linear)
         else:
