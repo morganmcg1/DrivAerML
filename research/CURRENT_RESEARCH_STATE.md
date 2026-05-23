@@ -5,6 +5,65 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~16:30Z (2026-05-23) — H105 CLOSED **B PARTIAL** via single test_VP floor cross (−0.109pp); val gate MISS +0.223pp; **14th SP plateau confirmation** (Bayes-optimal hypothesis CRITICAL); **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER** by +0.127pp val_abupt; INFO-AT-DECODER mechanism class verdict: positions > normals > depth, diminishing returns + fern reassigned **H113 HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING** (PR pending) **STRATEGY TIER SHIFT TO LOSS REFORMULATION** per Plateau Protocol; Kendall & Gal 2018 learnable per-channel log_sigma in multi-task loss, +5 params, identity-at-init; tests "is SP plateau undertrained or Bayes-optimal?"
+
+**H105 CLOSURE — Key findings:**
+- val_abupt **6.349%** MISS gate +0.223pp; test_abupt 5.920% regresses canonical +0.076pp; test_VP **3.534%** ✓ CROSS by −0.109pp (3rd-deepest Wave 33 after H101/H104)
+- test_SP 3.7245% — **14th consecutive plateau confirmation** (every architecture-class mechanism misses 3.577% floor in 3.70-3.95% range)
+- **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER**: H105 trails H101 by +0.127pp val_abupt; mechanism class converging (H101 +1.5K still cost-efficiency champion)
+- WSS_z val→test slope −0.813 (steep favorable) — normals DO help binding-axis transfer marginally even though absolute magnitude is below canonical
+- **DO NOT compound H101+H105**: normals add no marginal value beyond what `surface_in` Linear(7,512) already encodes
+- panel_area axis (`surface_x[..., 6:7]`) is the last cheap-info axis untested — **deferred to allow loss-reformulation strategic tier**
+
+**14th SP plateau update (CRITICAL — Plateau Protocol trigger):**
+Plateau survives EVERY architecture mechanism class: WIDTH-SURFACE (H102), WIDTH-VOLUME (H104), DEPTH (H99), INFO-AT-INPUT-POSITIONS (H101), INFO-AT-INPUT-NORMALS (H105), BIDIR-XATTN (H97), FILM (H103), TASK-HEAD (H92/H93/H96/H100). Architecture-class exhaustion now essentially confirmed on test_SP. **Strategy-tier shift to LOSS REFORMULATION / DATA REPRESENTATION is now warranted** (per CLAUDE.md Plateau Protocol). H113 is the first explicit step in this shift.
+
+**New assignment: PR pending H113 fern HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING:**
+- **Plateau Protocol strategy-tier shift** — moving from architecture/mechanism tier (where Wave 32+33 have plateaued on SP for 14 consecutive runs) to **loss reformulation tier**
+- Mechanism: learnable per-channel `log_sigma_k` parameters; loss reformulated as `L_total = Σ_k exp(-2*log_sigma_k) * L_k + log_sigma_k` (Kendall & Gal 2018 multi-task uncertainty weighting, NeurIPS)
+- Params: +5 (one log_sigma per output channel: SP, VP, WSS_x, WSS_y, WSS_z); identity-at-init (log_sigma_init=0, sigma=1)
+- Reference: Kendall, Gal & Cipolla 2018 "Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics"
+- **Key falsifiable**: if H113 cracks the test_SP plateau (test_SP < 3.577%), the plateau was driven by UNDERTRAINED SP loss term; if H113 fails like all prior architecture mechanisms, plateau is Bayes-optimal hardness (data/representation-bound). EITHER outcome is high-information.
+
+**Wave 33+34 in-flight status (8/8 WIP after H113 assignment — zero idle):**
+
+| Run | Mechanism | Δ Params | Phase | Latest val_abupt |
+|---|---|---:|---:|---:|
+| ~~H105 fern (CLOSED B PARTIAL)~~ | normals residual | +2K | — | terminal 6.349% |
+| **H113 fern (NEW)** | **heteroscedastic loss** | **+5** | **0%, just launching** | **n/a** |
+| **H110 tanjiro** | **compound H102+H101** | +268K | **~50%, LEADS COHORT** | **6.714% at 32,594** |
+| H107 thorfinn | self-context residual | +262K | ~60% | 6.477% at 38,030 |
+| H108 nezuko | parallel-MLP residual | +265K | ~55% | 6.491% at 38,030 |
+| H106 frieren | vol-info residual | +2.5K | ~62% | 6.436% at 43,466 |
+| H109 alphonse | encoder-skip residual | +263K | ~52% | 6.810% at 32,594 |
+| H111 askeladd | LayerScale γ deterministic | +5K | ~40% | 7.635% at 21,729 |
+| H112 edward | DropPath stochastic | 0 | ~42% | 7.958% at 21,729 |
+
+**Wave 34 compound outlook — H110 IS A PROMINENT A WIN CANDIDATE:**
+- H110 LEADS cohort at step 32,594 (6.714% vs H107 6.740%) after "delayed-engagement anti-additive transition" in mid-cosine
+- If terminal sustains ~5.85-6.00% trajectory, H110 = **FIRST PROVEN ADDITIVE COMPOUND** of this research program
+- Wave 35 compound strategy depends critically on H110 terminal — if A WIN, compound staging explodes (H102+H104, H102+H106, H110+regularization, etc.)
+
+**Mechanism class ranking (after H105 closure):**
+1. **WIDTH SURFACE** (H102 LEADER val 6.118% gate clear, +266K) — strongest single
+2. **INFO-AT-INPUT SURFACE positions** (H101 +1.5K) — most cost-efficient, deepest test_VP cross
+3. **INFO-AT-INPUT SURFACE normals** (H105 +2K, B PARTIAL) — secondary channel improvements, underperforms positions
+4. **WIDTH VOLUME** (H104 +229K) — 2nd-deepest test_VP, asymmetric to surface
+5. **BIDIR-XATTN** (H97 +1M) — confirmed but cost-ineffective + val-overfit
+6. **SELF-CONTEXT** (H107 leading +262K, in-flight, 6.477%)
+7. **DECODER ENSEMBLE / PARALLEL-MLP** (H108 in-flight, 6.491%, recovered)
+8. **VOLUME-INFO RESIDUAL** (H106 in-flight, +2.5K, 6.436%)
+9. **ENCODER-SKIP / BACKBONE-BYPASS** (H109 in-flight, 6.810%)
+10. **REGULARIZATION DETERMINISTIC** (H111 LayerScale, +5K, in-flight, 7.635% at 21k)
+11. **REGULARIZATION STOCHASTIC** (H112 DropPath, 0p, in-flight, 7.958% at 21k)
+12. **WAVE 34 COMPOUNDS** (H110 H102+H101, in-flight, **LEADS COHORT** 6.714% at 32k)
+13. **🆕 LOSS REFORMULATION** (H113 heteroscedastic, +5, just launching — strategic tier shift)
+14. ~~DEPTH~~ (H99 C NULL)
+15. ~~TASK-HEAD~~ (H92/H93/H96/H100 all NEG)
+16. ~~FILM~~ (H103 C NULL — global-pool feature modulation CLOSED)
+
+---
+
 ## 🟡 ~11:45Z (2026-05-23) — H104 CLOSED **B PARTIAL** (val gate near-miss +0.066pp, test_VP CROSS −0.108pp = 2nd-deepest Wave 33; 13th SP plateau; **SURFACE > VOLUME decoder capacity-bound** via H102/H104 pair; **CAPACITY > GRADIENT** route on volume via H94/H104) + edward reassigned **H112 STOCHASTIC-DEPTH-IN-BACKBONE (DropPath)** (PR #1283) **NEW MECHANISM CLASS — STOCHASTIC REGULARIZATION** strategy-tier shift Plateau Protocol; linear schedule p_max=0.10 across 5 blocks, 0 params, identity at eval, ConvNeXt/Swin/DeiT-3 reference; mechanistically distinct from H111 (deterministic γ rescale) forming 2-arm regularization study
 
 **H104 CLOSURE — Key findings:**

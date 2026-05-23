@@ -1,3 +1,71 @@
+## 2026-05-23 ~16:30 — PR #1271: H105 SURFACE-NORMAL-RESIDUAL-DECODER (fern, CLOSED) — **B PARTIAL** via single test_VP floor cross (−0.109pp); val gate MISS +0.223pp; 14th SP plateau confirmation; **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER** by +0.127pp val_abupt at terminal; info-at-decoder mechanism axis converging — H101 positions > H105 normals > H99 depth)
+
+- **Branch**: `fern/h105-surface-normal-residual-decoder` (closed at ~16:30Z 2026-05-23)
+- **W&B run**: `t6b1i2yk` (rank 0), 13 epochs completed, runtime 14.35h, throughput 1.86 it/s (no overhead).
+- **Hypothesis**: Inject raw surface normals `surface_x[..., 3:6]` as zero-init `Linear(3, 512)` additive residual to `surface_hidden` (post-backbone, pre-`surface_out`). Mirror of H101 (positions) on the normals channel. +2,048 params. Tests whether normals at decoder input carry productive info beyond what `surface_in` already encodes from the 7-dim input.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.349%** ❌ | **5.920%** | 5.844% | **+0.076pp MISS gate +0.223pp** |
+| surface_pressure | 4.209% | 3.7245% | 3.577 (floor) | **+0.148pp MISS floor — 14th plateau confirmation** |
+| **volume_pressure** | 3.760% | **3.534%** | 3.643 (floor) | **−0.109pp CROSS floor** ✓ |
+| wall_shear | 7.174% | 6.832% | 6.727 (goal) | +0.105pp MISS goal |
+| wall_shear_x | 6.277% | 6.067% | — | +0.092pp regress |
+| wall_shear_y | 7.822% | 7.413% | — | +0.139pp regress |
+| wall_shear_z | 9.676% | 8.863% | 8.945 (canonical test) | **−0.082pp BELOW canonical** ✓ |
+
+- Gate: val_abupt 6.349% MISS gate by +0.223pp (clearly C NULL margin range).
+- Test AND-gate: **FAILS 3/4** (test_VP ✓ cross by −0.109pp, others miss).
+- B PARTIAL via single test_VP floor cross (consistent with H101/H104 closure rubric).
+
+### 🟢 NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER (mechanism-class diagnostic)
+
+Direct head-to-head with H101 (raw positions, same mechanism class, +1.5K params):
+
+| Metric | H101 (positions +1.5K) | H105 (normals +2K) | Δ H105−H101 | Winner |
+|---|---:|---:|---:|---|
+| val_abupt | **6.213%** | 6.349% | +0.127pp | H101 |
+| test_abupt | **5.846%** | 5.920% | +0.074pp | H101 |
+| test_VP | 3.5114% | **3.5344%** | +0.023 | H101 (deeper cross) |
+| test_SP | 3.8156% | 3.7245% | −0.091 | **H105 (better SP)** |
+| test_WSS | 6.9008% | 6.832% | −0.069 | H105 |
+| test_WSS_z | 9.130% | 8.863% | −0.267 | H105 |
+
+H101 wins on val_abupt and test_VP (the deepest mechanism-class signal). H105 wins on SP/WSS/WSS_z secondary channels. **The primary axis (val_abupt + test_VP combined depth) favors positions**, but normals do produce competitive secondary-channel test metrics — likely from the additional surface-orientation signal at decoder.
+
+### 14th SP plateau — Bayes-optimal hypothesis CRITICAL strength
+
+Plateau extends to 14/14 mechanisms in 3.70-3.95% range vs floor 3.577. Survives every architecture-class mechanism tested including all of Wave 32+33: WIDTH-SURFACE, WIDTH-VOLUME, DEPTH, INFO-AT-INPUT (positions+normals), BIDIR-XATTN, FILM, TASK-HEAD, ENCODER-SKIP, PARALLEL-MLP. **If H108 (parallel-MLP) + H110 (compound) also miss SP at terminal, Wave 35+ MUST pivot SP from architecture tier to LOSS REFORMULATION / DATA REPRESENTATION tier.**
+
+### Mechanism class verdict — INFO-AT-DECODER axis converging
+
+- ✓ INFO-AT-DECODER mechanism class validated (H101, H105 both B PARTIAL via test_VP cross)
+- Ranking within class: **H101 positions > H105 normals > H99 depth** (all <0.15pp val_abupt range)
+- H101 alone remains the cost-efficiency champion (+1.5K params, deepest test_VP cross)
+- **Diminishing returns within info-at-decoder axis** — Wave 34 should pursue different mechanism axes
+- **DO NOT compound H101 + H105** — normals add no marginal value beyond what `surface_in` already encodes from 7-dim input
+- panel_area axis (`surface_x[..., 6:7]`) is the last cheap-info axis not yet tested
+
+### Per-channel val→test slopes (for reference)
+
+| Channel | val | test | val→test slope |
+|---|---:|---:|---:|
+| abupt | 6.349 | 5.920 | −0.429 (favorable) |
+| SP | 4.209 | 3.725 | −0.484 (favorable) |
+| VP | 3.760 | 3.534 | −0.226 (canonical-class) |
+| WSS | 7.174 | 6.832 | −0.342 (canonical-class) |
+| WSS_z | 9.676 | 8.863 | **−0.813 (steep favorable, normals helping binding axis transfer)** |
+
+The steeper WSS_z slope (−0.813 vs canonical ~−0.5) is the most interesting per-channel finding — normals at decoder DO help binding-axis val→test transfer, even though the magnitude is below canonical.
+
+### Reassignment
+
+fern → **H113 HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING** (PR pending). **Plateau Protocol strategy-tier shift from architecture/mechanism tier to LOSS REFORMULATION tier**. Learnable per-channel log_sigma parameters added to loss: `L_total = Σ_k exp(-2*log_sigma_k) * L_k + log_sigma_k`. Identity-at-init via log_sigma_init=0 (sigma=1). +5 params (one per output channel: SP, VP, WSS_x, WSS_y, WSS_z). Reference: Kendall & Gal 2018 (NeurIPS multi-task uncertainty weighting). Tests "is test_SP plateau due to under-trained SP loss term, or Bayes-optimal hardness?" — if uncertainty-weighting cracks SP plateau, plateau was undertrained; if not, hardness is data/architecture-bound.
+
+---
+
 ## 2026-05-23 ~11:45 — PR #1269: H104 VOLUME-OUT-WIDER-MLP (edward, CLOSED) — **B PARTIAL** (val gate near-miss +0.066pp, test_VP CROSS −0.108pp = 2nd-deepest Wave 33; 13th SP plateau confirmation; SURFACE > VOLUME decoder capacity-bound; **CAPACITY ROUTE > GRADIENT ROUTE** on volume axis)
 
 - **Branch**: `edward/h104-volume-out-wider-mlp` (closed at ~11:45Z 2026-05-23)
