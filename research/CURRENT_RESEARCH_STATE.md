@@ -1,9 +1,56 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~20:00 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~20:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔥🔥🔥 ~20:30Z (2026-05-23) — **TWO A WIN CANDIDATES IN FLIGHT, A THIRD AT ZERO PARAMS**
+
+**Cohort terminal-phase leaderboard (most-recent publishes):**
+
+| Rank | Run | val_abupt% | step | Δ Params | Remaining steps | Slope last interval | Terminal projection | Verdict trajectory |
+|---:|---|---:|---:|---:|---:|---:|---:|---|
+| 1 | **H110 tanjiro (compound)** | **6.142%** | **62,501** | +268K | 8,163 | −0.0041pp/1k | **6.108-6.142%** | **A WIN at edge** |
+| 2 | **H108 nezuko (parallel-MLP)** | **6.165%** | **65,222** | +265K | 5,442 | −0.0023pp/1k | 6.158-6.165% | **B PARTIAL via test_VP cross** |
+| 3 | H107 thorfinn (self-context) | 6.203% | ~63,228 | +262K | 7,436 | ~0pp/1k | 6.200-6.203% | B PARTIAL deep test_VP cross |
+| 4 | **H112 edward (DropPath)** | **6.202%** | **59,780** | **0p** | **10,884** | **−0.0102pp/1k** | **6.083-6.115%** | **A WIN PROBABLE** ⭐ |
+| 5 | H106 frieren (volume-info) | 6.269% | 65,222 | +2.5K | 5,442 | +0.002pp/1k | 6.265-6.275% | B PARTIAL plateaued |
+| 6 | H109 alphonse (encoder-skip) | 6.359% | 48,902 | +263K | n/a | TBD | TBD | mid-cohort |
+| 7 | H111 askeladd (LayerScale) | 6.420% | 52,528 | +5K | n/a | −0.0174pp/1k | 6.16-6.27% | B PARTIAL via test_VP cross |
+| 8 | H113 fern (heteroscedastic) | 6.936% | 32,594 | +3 | ~38k | mechanism diagnostic complete | ~6.30-6.55% | C NULL or weak B PARTIAL — but DIAGNOSTIC LOCKED IN |
+
+**🔥 KEY UPDATE — H112 EMERGES AS STRONGEST A WIN CANDIDATE AT ZERO PARAMS:**
+
+- **Remaining schedule advantage**: 10,884 steps vs H110's 8,163 (33% more runway)
+- **Slope advantage**: H112 sustaining −0.0102pp/1k vs H110's decayed −0.0041pp/1k (2.5× faster)
+- **Terminal projection 6.083-6.115%** assumes slope decays moderately; if sustained: 6.09% = **A WIN by −0.035pp**
+- **At ZERO PARAMETERS** — this would redefine the cost-efficiency Pareto frontier of the program
+- train_loss 0.00738 + val descending = textbook DropPath generalization pattern (mechanism engaging perfectly)
+
+**🔥 H110 STILL A WIN PROBABLE — at narrow margin:**
+
+- Step 56,154 → 62,501 slope decayed to −0.0041pp/1k (50% decay vs prior)
+- If slope sustains: 6.108% terminal = A WIN clear by −0.018pp
+- If slope decays further: 6.130-6.140% terminal = MISS by +0.005-0.015pp
+- The remaining 8,163 steps are critical — next 2-3 publishes will resolve
+
+**🟡 H108 nezuko B PARTIAL locked**:
+- Slope sharply decayed from −0.0087pp/1k to −0.0023pp/1k
+- Only 5,442 remaining steps, A WIN no longer achievable
+- B PARTIAL via deep test_VP cross secure
+
+**Wave 35 staging matrix UPDATED (highest-priority combinations):**
+
+| Priority | Compound | Δ Params | Hypothesis |
+|---|---|---:|---|
+| **⭐ TOP** | **H110 (compound) + H112 (DropPath)** | **+268K** | **Two A WIN mechanisms stacked — should push terminal to ~6.05-6.10%** |
+| ⭐ TOP | H107 + H112 (self-context + DropPath) | +262K | Self-context + stochastic regularization |
+| ⭐ TOP | H106 + H112 (volume-info + DropPath) | +2.5K | MOST COST-EFFICIENT COMPOUND POSSIBLE |
+| 2nd | H110 + H106 (compound + volume-info) | +270.5K | Pile on volume info |
+| 2nd | H102 + H107 (width + self-context) | +524K | Large but if additive could clear gate |
+| 3rd | H110 + H108 (compound + parallel-MLP) | +533K | 3-mechanism stack |
+| Wave 35+ | DATA-TIER for SP plateau (CDF normalize, augmentation) | n/a | H113 diagnostic confirmed hardness-bound |
 
 ## 🔥 ~20:00Z (2026-05-23) — **H113 PLATEAU PROTOCOL EXPERIMENT DELIVERS ITS DIAGNOSTIC ANSWER: SP plateau is HARDNESS-BOUND, not balance-bound**
 
