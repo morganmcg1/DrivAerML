@@ -141,6 +141,8 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     surf_p_charbonnier_weight: float = 0.0
     surf_p_charbonnier_eps: float = 1e-3
+    surf_p_loss: str = "mse"
+    surf_p_cauchy_scale: float = 0.3
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -158,9 +160,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "Which WSS channels the supplementary Charbonnier loss applies to. "
             "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b)."
         ),
+        "surf_p_loss": (
+            "cp channel loss form: 'mse' (canonical H21) or 'cauchy' (H40 bounded "
+            "redescending M-estimator). 'cauchy' is mutually exclusive with "
+            "--surf-p-charbonnier-weight>0."
+        ),
+        "surf_p_cauchy_scale": (
+            "Cauchy scale parameter c in normalized cp units; influence function "
+            "r/(1+(r/c)^2) peaks at |r|=c and redescends for |r|>>c (H40)."
+        ),
     }
     choices_text = {
         "wss_charbonnier_axes": ["all", "z"],
+        "surf_p_loss": ["mse", "cauchy"],
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -268,6 +280,30 @@ def masked_charbonnier(
     return weighted.sum() / (n_pts * n_ch)
 
 
+def masked_cauchy(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    scale: float = 0.3,
+) -> torch.Tensor:
+    """Masked Cauchy / Lorentzian loss: ``log(1 + (r/c)^2)``.
+
+    Bounded redescending M-estimator (Barron 2019 alpha=0 case, arXiv:1701.03077).
+    Influence function ``r / (1 + (r/c)^2)`` is quadratic for ``|r| << c``,
+    peaks at ``|r| = c``, then redescends toward zero for ``|r| >> c`` —
+    large outlier residuals are soft-capped rather than amplified.
+    Averaged over masked spatial points and channels, matching the convention
+    used by :func:`masked_mse`.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    delta = pred - target
+    values = torch.log1p((delta / scale) ** 2)  # [B, N, C]
+    weighted = values * mask_f
+    n_pts = mask_f.sum().clamp_min(1.0)
+    n_ch = float(pred.shape[-1])
+    return weighted.sum() / (n_pts * n_ch)
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -353,6 +389,8 @@ def train_loss(
     vol_p_charbonnier_eps: float = 1e-3,
     surf_p_charbonnier_weight: float = 0.0,
     surf_p_charbonnier_eps: float = 1e-3,
+    surf_p_loss: str = "mse",
+    surf_p_cauchy_scale: float = 0.3,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -416,6 +454,30 @@ def train_loss(
         else:
             loss_surf_p_charb = None
             loss_surf_p_mse_diag = None
+        # H40: pre-compute Cauchy on cp so it can be passed to GradNorm as the
+        # cp task signal — mirrors the H38 Charbonnier-in-task_losses pattern
+        # but uses a bounded redescending M-estimator instead of a linear-tail
+        # one. Mutually exclusive with surf_p_charbonnier_weight>0.
+        if surf_p_loss == "cauchy":
+            if loss_surf_p_charb is not None:
+                raise ValueError(
+                    "--surf-p-loss=cauchy is mutually exclusive with "
+                    "--surf-p-charbonnier-weight>0 (both replace cp slot)"
+                )
+            pred_surf_p_cauchy = out["surface_preds"][..., 0:1]
+            target_surf_p_cauchy = surface_target[..., 0:1]
+            loss_surf_p_cauchy = masked_cauchy(
+                pred_surf_p_cauchy,
+                target_surf_p_cauchy,
+                batch.surface_mask,
+                scale=surf_p_cauchy_scale,
+            )
+            loss_surf_p_cauchy_mse_diag = masked_mse(
+                pred_surf_p_cauchy, target_surf_p_cauchy, batch.surface_mask
+            )
+        else:
+            loss_surf_p_cauchy = None
+            loss_surf_p_cauchy_mse_diag = None
         if gradnorm_weights is not None:
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
@@ -427,6 +489,14 @@ def train_loss(
                 # `surf_p_charb_weight * Charb` term would double-count.
                 surface_per_ch = torch.cat(
                     [loss_surf_p_charb.unsqueeze(0), surface_per_ch[1:]]
+                )
+            elif loss_surf_p_cauchy is not None:
+                # H40: cp slot carries the Cauchy tensor — bounded redescending
+                # M-estimator (Barron 2019 alpha=0). GradNorm sees the Cauchy
+                # task_loss directly so its L0 anchor and per-task gradients
+                # reflect the actual loss landscape rather than an MSE proxy.
+                surface_per_ch = torch.cat(
+                    [loss_surf_p_cauchy.unsqueeze(0), surface_per_ch[1:]]
                 )
             if loss_vol_p_charb is not None:
                 # H19 advisor fix: vol_p slot carries the Charbonnier tensor
@@ -524,6 +594,25 @@ def train_loss(
             }
         else:
             surf_p_charb_metrics = {}
+        # H40: surf_p (cp) Cauchy — under GradNorm, the Cauchy tensor is
+        # already in task_losses[0] above (no extra additive term). Without
+        # GradNorm fall back to additive with unit weight so the mechanism
+        # still fires (cp slot stays Cauchy rather than silently degrading
+        # to the surface MSE that `loss` was built from).
+        if loss_surf_p_cauchy is not None:
+            if gradnorm_weights is None:
+                loss = loss + loss_surf_p_cauchy
+            surf_p_cauchy_metrics = {
+                "loss_surf_p_cauchy_unweighted": float(
+                    loss_surf_p_cauchy.detach().cpu().item()
+                ),
+                "loss_surf_p_cauchy_target_mse": float(
+                    loss_surf_p_cauchy_mse_diag.detach().cpu().item()
+                ),
+                "surf_p_cauchy_scale": float(surf_p_cauchy_scale),
+            }
+        else:
+            surf_p_cauchy_metrics = {}
     metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
@@ -534,6 +623,7 @@ def train_loss(
     metrics.update(charb_metrics)
     metrics.update(vol_p_charb_metrics)
     metrics.update(surf_p_charb_metrics)
+    metrics.update(surf_p_cauchy_metrics)
     return loss, metrics, task_losses
 
 
@@ -781,6 +871,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
                     surf_p_charbonnier_weight=config.surf_p_charbonnier_weight,
                     surf_p_charbonnier_eps=config.surf_p_charbonnier_eps,
+                    surf_p_loss=config.surf_p_loss,
+                    surf_p_cauchy_scale=config.surf_p_cauchy_scale,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -906,6 +998,34 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 "train/loss_surf_p_charb_weighted": sp_charb_w,
                                 "train/loss_surf_p_charb_to_mse_ratio": sp_ratio_to_mse,
                                 "train/loss_surf_p_charb_weighted_to_mse_ratio": sp_weighted_ratio,
+                            }
+                        )
+                    if "loss_surf_p_cauchy_unweighted" in batch_loss_metrics:
+                        # H40 engagement metrics: Cauchy on cp. PR predicts
+                        # unweighted Cauchy in [0.05, 0.30] at EP1; ratio to
+                        # MSE diagnoses whether scale c is well-matched to
+                        # the cp residual distribution (ratio ~1 means c is
+                        # in the quadratic regime; ratio << 1 means c is too
+                        # tight and Cauchy is saturating to log(1+1) regions).
+                        sp_cauchy_target_mse = batch_loss_metrics[
+                            "loss_surf_p_cauchy_target_mse"
+                        ]
+                        sp_cauchy_unw = batch_loss_metrics[
+                            "loss_surf_p_cauchy_unweighted"
+                        ]
+                        sp_cauchy_ratio_to_mse = (
+                            sp_cauchy_unw / sp_cauchy_target_mse
+                            if sp_cauchy_target_mse > 1e-12
+                            else float("nan")
+                        )
+                        train_log.update(
+                            {
+                                "train/loss_surf_p_mse": sp_cauchy_target_mse,
+                                "train/loss_surf_p_cauchy_unweighted": sp_cauchy_unw,
+                                "train/loss_surf_p_cauchy_to_mse_ratio": sp_cauchy_ratio_to_mse,
+                                "train/surf_p_cauchy_scale": batch_loss_metrics[
+                                    "surf_p_cauchy_scale"
+                                ],
                             }
                         )
                 if config.use_y_symmetry_aug and aug_log:
