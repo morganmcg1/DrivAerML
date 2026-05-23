@@ -1,9 +1,51 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-22 (latest invocation: 2026-05-22 ~21:00 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~00:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟠 ~00:35Z (2026-05-23) — Wave 33 fleet mid/late-cosine snapshot + H99 stale_wip false positive cleared (check-in #3 posted)
+
+**Fleet snapshot — 8/8 WIP, zero idle:**
+```
+PR    Student    Step      %     val_abupt  val_SP   val_VP   val_WSS  WSS_x  WSS_y  WSS_z  slope/1k
+1261  fern       69,261   98.0    6.2878    4.142    3.700    7.121   6.216  7.777  9.604  −0.001  (TERMINAL imminent — likely C NULL)
+1262  alphonse   41,854   59.2    6.4753    4.255    3.777    7.352   6.420  8.159  9.765  −0.056  (BIDIR-XATTN mid-cosine LEADER)
+1265  thorfinn   38,550   54.6    6.5423    4.277    3.829    7.435   6.502  8.186  9.917  −0.053  (WSS_z DEDICATED HEAD)
+1264  frieren    40,834   57.8    6.6366    4.384    3.900    7.514   6.560  8.284 10.055  −0.072  (DEEPER MLP — strongest mid-cos slope)
+1266  nezuko     36,488   51.6    6.8509    4.554    4.012    7.756   6.773  8.612 10.304  −0.075  (GEOM-RESIDUAL +1.5K params)
+1268  tanjiro    30,652   43.4    7.5792    5.074    4.488    8.533   7.381  9.826 11.127  −1.892  (SURFACE-WIDER ramping)
+1269  edward     27,751   39.3    7.7563    5.200    4.552    8.742   7.566 10.022 11.443  −1.917  (VOLUME-WIDER ramping)
+1270  askeladd   27,850   39.4    8.1205    5.439    4.825    9.174   8.013 10.463 11.863  −2.086  (FiLM VOL→SURF ramping)
+```
+
+**Emerging program-level finding — DECODER BOTTLENECK IS INFORMATIONAL, NOT CAPACITY-BOUND:**
+- H97 (bidir-xattn, +1M params), H99 (deeper MLP, +250K), H100 (dedicated head, +260K), H101 (geom residual, **+1.5K**) all converge in 6.47–6.85% val_abupt band at similar mid-cosine phases
+- Param costs vary 660× across cluster but val_abupt spread is only 0.38pp
+- H101's +1.5K param geom-residual achieves comparable performance to H97's +1M param bidirectional cross-attention → **new information at decoder input matters far more than capacity inside decoder**
+- H102/H103/H104 still in late-cosine ramp — verdict pending EP9+ inflection (~step 50k+)
+
+**H96 fern verdict (preliminary at 98%):**
+- val_abupt 6.288% MISS gate +0.162pp; slope flatlined to −0.001/1k
+- val_WSS_x **6.216% improvement** over canonical 6.332 (axis-specific win)
+- val_WSS_y/z 7.777 / 9.604 marginally worse than canonical
+- Split SP+WSS decoder heads → axis-specific improvement only on WSS_x
+- Likely **C NULL** terminal verdict (axis trade-off, no aggregate improvement)
+
+**H99 stale_wip false positive cleared:** pod healthy 9d Running, step 40,834 active progress, slope −0.072/1k engaging. Stale_wip is harness-side mid-cosine epoch boundary publish lag (pattern matches H100/H101/H102 same false-positive). Check-in #3 posted PR #1264.
+
+**Anticipated terminal sequence (next 1-10h):**
+1. H96 fern (~30 min): likely C NULL closure
+2. H97 alphonse (~5h): B PARTIAL / A WIN candidate (bidir-xattn slope sustaining)
+3. H100 thorfinn (~6h): B PARTIAL / A WIN — WSS_z dedicated head trajectory
+4. H99 frieren (~5h): B PARTIAL — depth axis productive
+5. H101 nezuko (~7h): A WIN candidate — +1.5K param tour de force if it clears
+6. H102/H103/H104 (~10h): mid-cosine, verdict deferred
+
+**Wave 34 staging (if H101 + H97 both clear gate):** compound geom-residual (+1.5K params, info axis) + bidir-xattn (vol→surf, info axis) — both attack decoder INPUT signal at different scales (global pool vs per-token). Should be additive if H101 finding holds.
+
+---
 
 ## 🟠 ~21:00Z (2026-05-22) — H94 VOLUME-LOSS-INCREASE CLOSED **B PARTIAL** (test_VP CROSS 7th single-flag + Lion sign-update asymmetry confirmed +0.30pp) + H98v2 CLOSED INFEASIBLE-AS-SPEC (O(N²) self-attention on 65K tokens) + askeladd reassigned H103 VOLUME-CONTEXT-FILM-DECODER (PR #1270) + edward reassigned H104 VOLUME-OUT-WIDER-MLP (PR #1269) + H99 frieren check-in posted
 
