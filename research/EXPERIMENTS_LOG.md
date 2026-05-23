@@ -1,3 +1,69 @@
+## 2026-05-23 ~11:45 — PR #1269: H104 VOLUME-OUT-WIDER-MLP (edward, CLOSED) — **B PARTIAL** (val gate near-miss +0.066pp, test_VP CROSS −0.108pp = 2nd-deepest Wave 33; 13th SP plateau confirmation; SURFACE > VOLUME decoder capacity-bound; **CAPACITY ROUTE > GRADIENT ROUTE** on volume axis)
+
+- **Branch**: `edward/h104-volume-out-wider-mlp` (closed at ~11:45Z 2026-05-23)
+- **W&B run**: `xiddgcgu` (rank 0), 13 epochs completed, runtime 14.0h (840.6 min), all 70,652 steps.
+- **Hypothesis**: Widen `volume_out` MLP hidden layers 1× → 2× (`volume_out_width_factor=2.0`). Mirror of H102 (tanjiro, surface-side). Tests whether volume decoder is WIDTH-bound symmetrically to surface. +229K params (volume_out funnel widening).
+
+### Terminal results
+
+| Channel | Validation (EP13 EMA best-ckpt) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.1919%** ❌ | **6.0131%** | 5.844% | **+0.169pp MISS gate +0.066pp** (narrow) |
+| surface_pressure | 4.0931% | 3.8211% | 3.577 (floor) | **+0.244pp MISS floor — 13th plateau confirmation** |
+| **volume_pressure** | 3.6025% | **3.5348%** | 3.643 (floor) | **−0.108pp CROSS floor** ✓ (2nd-deepest Wave 33 cross) |
+| wall_shear | 7.0232% | 6.9641% | 6.727 (goal) | +0.237pp MISS goal |
+| wall_shear_x | 6.1453% | 6.2123% | — | +0.250pp regress |
+| wall_shear_y | 7.6173% | 7.4830% | — | +0.048pp narrow miss |
+| wall_shear_z | 9.5012% | 9.0142% | 8.945 (canonical test) | +0.069pp regress narrow |
+
+- Gate: val_abupt 6.1919% MISS gate by +0.066pp (borderline A WIN territory).
+- Test AND-gate: **FAILS 3/4** (test_VP ✓ cross by −0.108pp, others miss).
+- Per-channel val→test slopes: abupt −0.179, SP −0.272, VP −0.068, WSS −0.059, WSS_x +0.067 REVERSE (minor), WSS_y −0.134, WSS_z **−0.487pp** (steep favorable).
+
+### 🟢 SURFACE > VOLUME decoder capacity-bound — paired diagnostic with H102
+
+Direct head-to-head (both decoder-width experiments at matched ~250K-cost):
+
+| Metric | H102 surface (+266K) | H104 volume (+229K) | Δ H104−H102 | Winner |
+|---|---:|---:|---:|---|
+| val_abupt | **6.1183%** ✓ gate clear | 6.1919% | +0.073 | H102 |
+| test_abupt | **5.9395%** | 6.0131% | +0.074 | H102 |
+| test_VP | 3.5432% | **3.5348%** | −0.008 | tied (H104 nominal) |
+| test_SP | **3.7242%** | 3.8211% | +0.097 | H102 |
+| test_WSS | **6.8584%** | 6.9641% | +0.106 | H102 |
+| test_WSS_z | **8.8889%** | 9.0142% | +0.125 | H102 |
+
+H102 wins 5/6 metrics. H104 wins ONLY on test_VP (its directly-targeted axis). **Surface decoder is more capacity-bound than volume** — architectural attribution: `surface_out` 4 channels share a single 512-hidden bottleneck (widening gives each ~2× substrate); `volume_out` is a 3-stage funnel to 1 channel (already over-parameterized).
+
+### 🟢 CAPACITY ROUTE > GRADIENT ROUTE on volume axis (H94 vs H104)
+
+Direct comparison: H94 (vol_loss_weight 1.0→1.5, B PARTIAL) vs H104 (vol_width 1×→2×, B PARTIAL) — same volume-pressure target axis, different attack route.
+
+| Metric | H94 (vol_loss=1.5) | H104 (vol_width=2.0) | Δ |
+|---|---:|---:|---:|
+| val_abupt | 6.357% | **6.1919%** | **−0.165pp** ✓ |
+| test_VP | 3.582% | **3.5348%** | **−0.047pp deeper cross** ✓ |
+| test_SP | 3.834% | 3.8211% | −0.013pp |
+| test_WSS_z | 9.051% | 9.0142% | −0.037pp |
+
+H104 strictly dominates H94 on every axis. **Parameter-capacity route beats gradient-reweighting route on volume head.** Generalizes: for binding axes that respond to capacity, prefer "more substrate" over "more gradient signal".
+
+### 13th SP plateau — Bayes-optimal hypothesis very strong
+
+Plateau extended to 13/13 mechanisms in 3.70-3.95% range vs floor 3.577. Survives every architecture-class mechanism tested. If H108 (parallel-MLP) + H110 (compound) also fail to crack SP, Wave 35+ must pivot test_SP from "mechanism gap" to **loss reformulation / data representation tier**.
+
+### Mechanism class verdict
+
+- ✓ WIDTH-VOLUME validated (H104) — symmetric productivity to WIDTH-SURFACE (H102)
+- BUT — volume capacity transfers less to other channels than surface capacity does (volume_out is already over-parameterized for 1-channel regression)
+- H102+H104 compound is a strong Wave 34 candidate (symmetric decoder widening, +495K total)
+
+### Reassignment
+
+edward → **H112 STOCHASTIC-DEPTH-IN-BACKBONE (DropPath)** (PR #1283). Strategy tier shift per Plateau Protocol — second **regularization-class** mechanism in Wave 33 (paired with H111 LayerScale). Linear schedule p=0 at block 0 → p=0.10 at block 4 across 5-block backbone. Each TransformerBlock's attn and mlp residual branches independently dropped with probability `p_block` during training (rescaled by 1/keep_prob when kept); full residuals at eval. 0 params, identity at eval. Reference: ConvNeXt, Swin, DeiT-3. Mechanistically distinct from H111: H111 = deterministic learnable γ rescale; H112 = stochastic per-step branch drop. Pair forms 2-arm regularization study.
+
+---
+
 ## 2026-05-23 ~11:30 — PR #1270: H103 VOLUME-CONTEXT-FILM-DECODER (askeladd, CLOSED) — **C NULL** (val MISS +0.224pp, all 3 floors miss, test_VP near-miss +0.014pp; FiLM mechanism engaged but global-pool signal insufficient; **GLOBAL vs LOCAL pathway question definitively answered: LOCAL wins**; FiLM class CLOSED for Wave 34)
 
 - **Branch**: `askeladd/h103-volume-context-film-decoder` (closed at ~11:30Z 2026-05-23)

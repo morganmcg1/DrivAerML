@@ -5,6 +5,63 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~11:45Z (2026-05-23) — H104 CLOSED **B PARTIAL** (val gate near-miss +0.066pp, test_VP CROSS −0.108pp = 2nd-deepest Wave 33; 13th SP plateau; **SURFACE > VOLUME decoder capacity-bound** via H102/H104 pair; **CAPACITY > GRADIENT** route on volume via H94/H104) + edward reassigned **H112 STOCHASTIC-DEPTH-IN-BACKBONE (DropPath)** (PR #1283) **NEW MECHANISM CLASS — STOCHASTIC REGULARIZATION** strategy-tier shift Plateau Protocol; linear schedule p_max=0.10 across 5 blocks, 0 params, identity at eval, ConvNeXt/Swin/DeiT-3 reference; mechanistically distinct from H111 (deterministic γ rescale) forming 2-arm regularization study
+
+**H104 CLOSURE — Key findings:**
+- val_abupt **6.1919%** MISS gate +0.066pp (narrow miss); test_VP **3.5348%** ✓ CROSS by −0.108pp (2nd-deepest Wave 33, behind only H101 +3K at 3.5114)
+- test_SP 3.8211% — **13th consecutive plateau confirmation** (Wave 32+33 mechanisms 3.70-3.95% range vs floor 3.577)
+- test_WSS_z 9.014% +0.069pp regress; test_WSS 6.964% miss; test_abupt 6.013% regresses canonical +0.169pp
+- +229K params; **SURFACE > VOLUME decoder capacity-bound** (H102 wins 5/6 metrics in paired diagnostic; volume_out 3-stage funnel-to-1ch is already over-parameterized)
+- **CAPACITY ROUTE > GRADIENT ROUTE** on volume axis: H104 (vol_width 2.0) strictly dominates H94 (vol_loss_weight 1.5) on every channel
+- **NOT MERGED**: AND-gate fails 3/4 + test_abupt regresses primary
+
+**13th SP plateau update (CRITICAL):**
+Plateau survives every architecture-class mechanism. Architecture exhaustion is essentially complete on test_SP. If H108 (parallel-MLP) + H110 (compound) also miss SP, Wave 35+ must pivot SP from "mechanism gap" to **loss reformulation / data representation tier** (heteroscedastic loss, GradNorm, point augmentation).
+
+**Updated Wave 34 compound priorities (H104 confirmed candidate):**
+
+| Compound | Mechanisms | Δ Params | Status |
+|---|---|---:|---|
+| **H110** (in-flight) | H102 + H101 (surf-width + geom-residual) | +268K | TOP priority |
+| H113 candidate | H102 + H104 (surf-width + vol-width = symmetric decoder) | +495K | strongest test_VP candidate, defer until H110 lands |
+| H114 candidate | H104 + H101 (vol-width + geom-residual = bilateral cheap) | +231K | defer |
+| H115 candidate | H102 + H104 + H101 (triple) | +498K | strongest expected; defer until H110+H113 land |
+
+**New assignment: PR #1283 H112 edward STOCHASTIC-DEPTH-IN-BACKBONE (DropPath)**:
+- Strategy-tier shift per Plateau Protocol — second **regularization-class** mechanism (paired with H111)
+- Mechanism: Linear schedule p_attn = p_mlp = 0 at block 0 → 0.10 at block 4 across 5-block backbone. Each TransformerBlock's residual branch independently dropped with probability `p_block` during training (1/keep_prob rescaling when kept); full residuals at eval.
+- Params: 0 (no learnable params; identity at eval)
+- Reference: Huang et al. 2016, refined for transformers in ConvNeXt (Liu et al. 2022), Swin (Liu et al. 2021), DeiT-3
+- Mechanistically distinct from H111: H111 deterministic γ rescale + learnable; H112 stochastic per-step drop + non-learnable
+- **Key falsifiable**: H111+H112 outcomes together answer "is regularization productive on this task?" Both succeed → Wave 35 compound; both fail → regularization class CLOSED
+
+**Wave 33+34 fleet after H112 assignment — 8/8 WIP zero idle:**
+1. **H105 fern (PR #1271)**: surf-normals +2K — late-cosine (~71.6%, val 6.435%, terminal ~3-4h)
+2. **H106 frieren (PR #1276)**: vol-info-residual +2.5K — in-flight
+3. **H107 thorfinn (PR #1277)**: surf-global-context +262K — in-flight
+4. **H108 nezuko (PR #1278)**: parallel-MLP residual +265K — in-flight
+5. **H109 alphonse (PR #1279)**: backbone-skip +263K — in-flight
+6. **H110 tanjiro (PR #1280)**: Wave 34 compound H102+H101 +268K — in-flight
+7. **H111 askeladd (PR #1282)**: LayerScale-in-backbone +5K — in-flight (just kicked off)
+8. **H112 edward (PR #1283) NEW**: DropPath stochastic depth, 0 params — JUST ASSIGNED
+
+**Mechanism class ranking (after H103 + H104 closures):**
+1. **WIDTH SURFACE** (H102 LEADER val 6.118% gate clear, +266K) — strongest single
+2. **INFO-AT-INPUT SURFACE** (H101 +3K) — most cost-efficient, deepest test_VP cross
+3. **WIDTH VOLUME** (H104 +229K) — 2nd-deepest test_VP, asymmetric to surface
+4. **BIDIR-XATTN** (H97 +1M) — confirmed but cost-ineffective + val-overfit
+5. **SELF-CONTEXT** (H107 in-flight)
+6. **DECODER ENSEMBLE / PARALLEL-MLP** (H108 in-flight)
+7. **ENCODER-SKIP / BACKBONE-BYPASS** (H109 in-flight)
+8. **REGULARIZATION DETERMINISTIC** (H111 LayerScale, in-flight)
+9. **REGULARIZATION STOCHASTIC** (H112 DropPath, just launched — NEW CLASS)
+10. **WAVE 34 COMPOUNDS** (H110 H102+H101, first compound)
+11. ~~DEPTH~~ (H99 C NULL — definitively inferior to width)
+12. ~~TASK-HEAD~~ (H92/H93/H96/H100 all NEG — CLOSED)
+13. ~~FILM~~ (H103 C NULL — global-pool feature modulation CLOSED)
+
+---
+
 ## 🟡 ~11:30Z (2026-05-23) — H103 CLOSED **C NULL** (val MISS +0.224pp, all 3 floors miss, test_VP near-miss +0.014pp; **GLOBAL vs LOCAL PATHWAY ANSWER — LOCAL WINS** via direct H97/H101 vs H103 head-to-head, FiLM class CLOSED for Wave 34, 12th SP plateau confirmation) + askeladd reassigned **H111 LAYERSCALE-IN-BACKBONE** (PR #1282) **NEW MECHANISM CLASS — REGULARIZATION** strategy-tier shift per Plateau Protocol; learnable per-channel γ_attn, γ_mlp ∈ R^512 per TransformerBlock residual branch, init γ=1.0 identity, 5,120 params (0.029% overhead), CaiT-style; γ histogram per block is co-equal diagnostic deliverable
 
 **H103 CLOSURE — FiLM-class verdict:**
