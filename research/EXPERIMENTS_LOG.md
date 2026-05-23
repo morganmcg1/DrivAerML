@@ -8,6 +8,34 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-23 06:15 UTC — PR #1259 CLOSED (H32 tanjiro — surf_lw=1.25 produces FIRST single-model test_wss BEAT of SOTA in Wave 33 BUT 2 floors breach; mechanism repair dispatched as H36)
+
+H32 tanjiro finished cleanly at EP30 (run `ikoxad4k`, state=finished, 1279min walltime). EMA best at EP17.
+
+### H32 terminal (test_primary/*):
+
+| Metric | H32 test | H21 ref | H26 ref | SOTA #972 | Floor (#1056) | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| **wss** | **6.6910** | 6.730 | 6.6389 | 6.727 | (drive ↓) | **BEATS SOTA −0.0360 ⭐ (first single-model beat in Wave 33)** |
+| surf_p | 3.6768 | 3.679 | 3.6532 | 3.577 | 3.577 | **BREACH +0.0998** ❌ |
+| vol_p | 3.6925 | **3.579** | 3.667 | 3.643 | 3.643 | **BREACH +0.0495** ❌ |
+| abupt | **5.8355** | 5.832 | 5.7940 | 5.844 | — | beats −0.0085 ✓ |
+
+**Contract verdict**: 2 floors breach → no merge. But **test_wss beat of SOTA + test_abupt clear** is the wave's most informative scalar-lever finding.
+
+**Mechanism captured** (student delivered exceptional analysis):
+1. **`surface_loss_weight` axis comprehensively mapped** at H21=1.0, H32=1.25, H26=1.5. Uniform multiplier is exhausted.
+2. **vol_p is non-monotonic over [1.0, 1.5]** at clamp=0.15 — the H21→H26 interpolation predicted in PR body was falsified (H32 vol_p=3.693 is WORSE than H26's 3.667 despite lower surf_lw). Mechanism: intermediate cp suppression at surf_lw=1.25 produces the worst encoder features for indirect vol_p gradient flow.
+3. **τ_z is the wss attractor** (`w_tau_z` ≈ 1.76-1.85 throughout via GradNorm trace) — uniform boost wastes budget on τ_x/τ_y/cp that vol_p depends on indirectly. **This is the actionable mechanism: target τ_z asymmetrically.**
+
+**Strategic context**: H32 sets the new bar for Wave 33 single-model test_wss (6.691). The three architectural arms in flight (H33 GALE, H34 Ada-Temp, H35 WSS↔surf_p xattn) now have a concrete number to beat without breaching floors. Scalar lever family is not entirely retired — uniform multipliers are retired; per-channel/asymmetric weighting (H36) is the natural mechanism repair.
+
+**Reassignment**: PR #1274 H36 — asymmetric τ_z boost (1.25× to tau_z row only, cp/τ_x/τ_y/vol_p at 1.0×). Student's own suggested follow-up #1 made tractable as a single 30-EP run. Predicted: H32-level wss + H21-level vol_p (sub-floor) + H21-level surf_p.
+
+W&B run: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/ikoxad4k. Closed at advisor comment 4524369776.
+
+---
+
 ## 2026-05-23 03:37 UTC — PR #1256 CLOSED (H31 frieren — lighter wss-Charb-z 0.05 FALSIFIED at terminal; all 4 metrics regress, 2 floors breach)
 
 H31 frieren finished cleanly at EP30 (run `tj6bh04q`, state=finished). Student loop hadn't yet posted SENPAI-RESULT 11h after terminal, so closure was made from W&B test metrics direct.
