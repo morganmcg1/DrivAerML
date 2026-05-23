@@ -8,6 +8,29 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-23 03:37 UTC — PR #1256 CLOSED (H31 frieren — lighter wss-Charb-z 0.05 FALSIFIED at terminal; all 4 metrics regress, 2 floors breach)
+
+H31 frieren finished cleanly at EP30 (run `tj6bh04q`, state=finished). Student loop hadn't yet posted SENPAI-RESULT 11h after terminal, so closure was made from W&B test metrics direct.
+
+### H31 terminal (test_primary/*):
+
+| Metric | H31 test | SOTA #972 ref | Δ vs SOTA | Floor (#1056) | Status |
+|---|---:|---:|---:|---:|---|
+| wss | **6.845** | 6.727 | +0.118pp | (target <5.85) | regression |
+| surf_p | **3.773** | 3.577 | +0.196pp | 3.577 | **BREACH +0.196** ❌ |
+| vol_p | **3.708** | 3.643 | +0.065pp | 3.643 | BREACH +0.065 ❌ |
+| abupt | **5.964** | 5.844 | +0.120pp | — | regression |
+
+**Verdict**: Hypothesis FALSIFIED. Lighter `wss-charbonnier-weight=0.05` (down from H21's 0.1) does NOT free `w_cp` GradNorm budget for surf_p as hypothesized — it does the mirror. Reduced Charb-z penalty → GradNorm sees less τ_z drift correction needed → budget reallocates UPSTREAM into already-converging wss heads, NOT toward cp/vol_p. Result: surf_p floor breach widens monotonically (EP3=+0.04 → EP15=+0.043 → EP30=+0.20pp) and vol_p slope FLIPS POSITIVE at EP15 (+0.009pp/EP) while H21 continues to descend (−0.010pp/EP).
+
+**Mechanism captured**: PR #1216's choice of `wss-charbonnier-weight=0.1` is the *correct* tightness for the H21 lever family. Combined with H29's earlier closure (extended cosine on H26 base falsified), **the "lighten existing scalar levers" family is now fully RULED OUT** for Wave 32+. Architectural pivot (Wave 33 = H33 GALE / H34 Ada-Temp Slices / H35 WSS↔surf_p xattn) is the only path forward.
+
+**Student diagnostic quality**: exceptional. EP15 vol_p slope-flip detection (+0.009pp/EP vs H21 −0.010pp/EP) was the cleanest possible falsification signal at mid-run. The student's per-EP drift slope table (vol_p Δ widening +0.10 → +0.11 → +0.13 → +0.14 → +0.17 over EP12-15) saved the wave from waiting until terminal for the verdict.
+
+W&B run: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/tj6bh04q. Closed at advisor comment 4524048303 with reassignment to **H35 Wave 33 Idea C — WSS↔surf_p bidirectional cross-attention** (Morgan's 08:50Z architectural directive, PR #1273).
+
+---
+
 ## 2026-05-23 01:38 UTC — PR #1253 CLOSED (H29 nezuko — extended cosine T_max=50 on H26 base FALSIFIED; vol_p mechanism preserved as transferable insight)
 
 H29 nezuko finished cleanly at EP30 (run `6acyrua4`, state=finished, ~21.3h walltime). Best epoch=20 (val_primary/abupt selection).
