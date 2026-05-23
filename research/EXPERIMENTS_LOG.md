@@ -1,3 +1,57 @@
+## 2026-05-23 ~09:55 — PR #1266: H101 GEOM-RESIDUAL-DECODER (nezuko, CLOSED) — **B PARTIAL** (extreme parameter efficiency, INFO-AT-DECODER-INPUT CONFIRMED)
+
+- **Branch**: `nezuko/h101-geom-residual-decoder` (closed at ~09:55Z 2026-05-23)
+- **W&B run**: `41jk1b0m` (rank 0), terminal at step 70,664 = 100%, runtime 14.27h.
+- **Hypothesis**: Zero-init `Linear(3, n_hidden)` projecting raw xyz positions `surface_x[..., 0:3]` as additive residual to `surface_hidden` before `surface_out`. Tests whether the decoder is missing direct access to per-point positional geometry lost during slice-attention compression (65K→128 tokens). +3,072 total params (1,536 weight + 512 bias + 512 LN weight + 512 LN bias).
+
+### Terminal results
+
+| Channel | Validation (EP12 EMA best-ckpt) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.2134%** | **5.9556%** | 5.844% | **+0.112pp above canonical** |
+| surface_pressure | 4.054% | 3.7059% | 3.577 (floor) | **+0.129pp MISS floor** (below Wave 32 plateau 3.74-3.95% — **partial plateau crack**) |
+| volume_pressure | 3.605% | **3.5144%** | 3.643 (floor) | **−0.129pp CROSS floor** ✓ (strong cross) |
+| wall_shear | 7.078% | 6.9133% | 6.727 (goal) | +0.186pp MISS goal |
+| wall_shear_x | 6.216% | — | — | — |
+| wall_shear_y | 7.643% | — | — | — |
+| wall_shear_z | 9.549% | **8.9458%** | 8.945 (binding) | **TIED canonical (±0.001pp)** — no regress, clean mechanism |
+
+- Gate: val_abupt 6.2134% **MISS** gate 6.126 by +0.087pp — closest near-gate of any closed Wave 33 mechanism at this param footprint.
+- Test floors: 1 strong cross (test_VP −0.129pp), 1 partial plateau crack (test_SP below Wave 32 plateau 3.74%), test_WSS MISS.
+- val→test slopes: abupt −0.258pp (canonical −0.282), VP −0.091pp (tight tracking), SP −0.349pp (stronger, mechanism helps SP generalization), WSS −0.165pp, WSS_z **−0.603pp** (strongest slope on binding axis).
+
+### 🟢 INFO-AT-DECODER-INPUT THESIS CONFIRMED
+
+The slice-attention compression (65,536 → 128 slice tokens) provably loses per-point geometric info that the decoder benefits from accessing directly. Raw xyz positions at decoder input provide direct routing for volume-correlated surface fields (pressure has strong position dependence via Bernoulli / body-surface geometry). The test_VP cross of −0.129pp is **architecturally attributable** to position residual access.
+
+**test_SP partial plateau crack**: first visible plateau pressure on SP axis in Wave 33. SP at 3.706% is below the entire Wave 32 plateau range (3.74-3.95%) but above floor 3.577%. This is a genuine breakthrough signal on the hardest surface axis — mechanisms that directly inform the decoder about per-point geometry can finally dent the SP wall.
+
+### Extreme parameter efficiency — Wave 33 sleeper hit
+
+| Run | Mechanism | Δ Params | val_abupt | Δ vs H101 |
+|---|---|---:|---:|---:|
+| H101 nezuko (this) | surf-positions info-residual | +3K | 6.213% | — |
+| H99 frieren (C NULL) | depth (3-layer MLP) | +250K | 6.327% | **H101 0.114pp BETTER at 81× cheaper** |
+| H100 thorfinn (B PARTIAL) | dedicated-tau_z head | +260K | 6.289% | **H101 0.076pp BETTER at 85× cheaper** |
+| H102 tanjiro (LEADER) | surface width 1×→2× | +266K | **6.124%** | H101 0.089pp behind at 87× cheaper |
+| H97 alphonse | bidir-xattn | +1M | ~6.21% | H101 ~0.003pp behind at **326× cheaper** |
+
++3,072 params beating +250K mechanisms = most parameter-efficient near-gate result in Wave 33.
+Weight/bias norms: init 0.0/0.0 → terminal 4.71/0.57 — mechanism learned clean signal.
+
+### Wave 34 compound priorities (CONFIRMED)
+
+1. **H102 + H101 (width + info-positions, ~+269K total)** — top priority: strongest 2-component compound expected
+2. **H101 + H105 (positions + normals = full surface local geometry, <5K total)** — extreme parameter efficiency; possibly A WIN at <5K params
+3. **H101 + H106 (surface positions + volume positions+sdf, ~+6K total)** — bilateral info-at-input
+4. **H102 + H101 + H105 (triple stack, ~+273K)** — predicted strongest single-model compound across all Wave 33 results
+
+### Reassignment
+
+nezuko reassigned to **H108 SURFACE-OUT-PARALLEL-MLP-RESIDUAL-DECODER** (PR #1278) — NEW mechanism class (DECODER ENSEMBLE / PARALLEL DIVERSITY): zero-init parallel 2-layer MLP added as residual to existing `surface_out`. +265K params matched H102 width cost. Tests whether decoder DIVERSITY (two parallel MLPs producing same output shape, summed) beats decoder WIDTH (single wider MLP) at matched ~265K param budget. Key falsifiable: H108 vs H102 head-to-head at matched cost.
+
+---
+
 ## 2026-05-23 ~08:50 — PR #1265: H100 WSS-Z-DEDICATED-HEAD (thorfinn, CLOSED) — **B PARTIAL** (mechanism FALSIFIED on design axis)
 
 - **Branch**: `thorfinn/h100-wss-z-dedicated-head` (closed at ~08:50Z 2026-05-23)

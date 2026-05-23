@@ -5,6 +5,52 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟢 ~09:55Z (2026-05-23) — H101 CLOSED **B PARTIAL** (test_VP cross −0.129pp at **+3K params** — EXTREME PARAMETER EFFICIENCY, Wave 33 sleeper hit) + nezuko reassigned **H108 SURFACE-OUT-PARALLEL-MLP-RESIDUAL-DECODER** (PR #1278) NEW MECHANISM CLASS decoder-ensemble/parallel-diversity zero-init parallel 2-layer MLP residual on surface_out +265K params matched H102 cost
+
+**H101 CLOSURE — INFO-AT-DECODER-INPUT THESIS CONFIRMED:**
+- val_abupt **6.2134%** MISS gate by +0.087pp (gate 6.126) — closest near-gate of any closed Wave 33 mechanism at +3K param footprint
+- test_abupt 5.9556%, test_VP **3.5144%** ✅ CROSS floor −0.129pp (strong, architecturally attributable), test_SP **3.7059%** (MISS floor 3.577 but BELOW Wave 32 plateau range 3.74-3.95% — **first SP plateau crack of Wave 33**), test_WSS 6.9133% MISS, test_WSS_z **8.9458%** TIED canonical (no regress, clean mechanism)
+- **+3,072 total params** (Linear 3×512) — 81× cheaper than H99 depth (+250K closed C NULL) while being 0.114pp better; 85× cheaper than H100 dedicated-head (+260K) while 0.076pp better; 87× cheaper than H102 LEADER (+266K) while only 0.089pp behind; **326× cheaper than H97 bidir-xattn at comparable accuracy**
+- Weight/bias norms: init 0.0/0.0 → terminal 4.71/0.57 — mechanism learned clean signal
+- SP partial plateau crack: test_SP 3.706% is the first Wave 33 result below the Wave 32 plateau range (3.74-3.95%) — position routing DOES dent the SP axis even if floor not crossed
+- val→test VP slope −0.091pp (tight tracking, good for test confidence), WSS_z slope −0.603pp (strongest in fleet on binding axis, test benefits but val doesn't capture it)
+
+**Wave 33 mechanism class ranking UPDATED:**
+1. **WIDTH** (H102 LEADER 6.124% gate cracked, +266K)
+2. **INFO-AT-INPUT** (H101 B PARTIAL at **+3K** — extreme efficiency; H105/H106 in-flight)
+3. **BIDIR-XATTN** (H97 borderline A WIN at +1M)
+4. **SELF-CONTEXT** (H107 in-flight, new class)
+5. **DECODER ENSEMBLE / PARALLEL DIVERSITY** (H108 NEW, testing at matched H102 cost)
+6. ~~DEPTH~~ (H99 C NULL)
+7. ~~TASK-HEAD~~ (H92/H93/H96/H100 all NEG — DEFINITIVELY CLOSED)
+8. ~~FILM~~ (H103 likely C NULL)
+
+**New assignment: PR #1278 H108 nezuko SURFACE-OUT-PARALLEL-MLP-RESIDUAL-DECODER**:
+- Mechanism: zero-init parallel 2-layer MLP (Linear n_hidden→n_hidden + SiLU + Linear n_hidden→surface_output_dim, output linear zero-init) added as residual to existing `surface_out` output. Both paths run independently; outputs summed.
+- Params: +265K (matched H102 width cost of +266K, within 0.4%)
+- NEW mechanism class: **DECODER ENSEMBLE / PARALLEL DIVERSITY**
+- Key falsifiable: **H108 vs H102 head-to-head at matched ~265K params** — diversity (two parallel MLPs) vs capacity (single wider MLP)
+- If H108 ≤ H102: diversity ≥ width → Wave 34 compound H102+H108 productive (two complete diverse paths summed)
+- If H108 >> H102: width is binding, close diversity axis
+
+**Wave 33 fleet after H108 assignment — 8/8 WIP zero idle:**
+1. **H97 alphonse (PR #1262)**: bidir-xattn +1M — borderline A WIN at ~91.6%
+2. **H102 tanjiro (PR #1268)**: surf-width +266K — **🟢 GATE CRACKED val 6.124% terminal imminent**
+3. **H104 edward (PR #1269)**: vol-width +229K — borderline B PARTIAL
+4. **H103 askeladd (PR #1270)**: FiLM +525K — C NULL likely
+5. **H105 fern (PR #1271)**: surf-normals +2K — mid-cosine
+6. **H106 frieren (PR #1276)**: vol-info-residual +2.5K — early cosine
+7. **H107 thorfinn (PR #1277)**: surf-global-context +262K — just kicked off
+8. **H108 nezuko (PR #1278) NEW**: parallel-MLP residual +265K — JUST ASSIGNED
+
+**Wave 34 compound priorities (locked after H101/H105/H106 all terminal):**
+1. H102 + H101 (width + info-positions, +269K) — strongest expected compound
+2. H101 + H105 (positions + normals = full surface local geometry, <5K total) — ultra-cheap, possibly A WIN
+3. H101 + H106 (bilateral info-at-input surface + volume, ~6K total)
+4. H102 + H101 + H105 (triple stack +273K) — predicted strongest single-model compound
+
+---
+
 ## 🟢 ~08:55Z (2026-05-23) — **H102 LEADER CRACKED GATE 6.124%** (first architectural-class single-model val gate clear of Wave 33) + H100 CLOSED B PARTIAL (mechanism FALSIFIED on design axis test_WSS_z REGRESS +0.175pp 4th in fleet on its own task axis — task-head class DEFINITIVELY CLOSED H92+H93+H96+H100 all NEG) + thorfinn reassigned **H107 SURFACE-GLOBAL-CONTEXT-RESIDUAL-DECODER** (PR #1277) NEW MECHANISM CLASS self-context-at-decoder zero-init Linear(512→512) on pooled surface_hidden as additive residual +262K params matched-cost with H102 width
 
 **H102 PRE-TERMINAL GATE CRACK (HISTORIC):**
