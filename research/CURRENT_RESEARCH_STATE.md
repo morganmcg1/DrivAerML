@@ -1,9 +1,59 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~19:00 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~19:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔥🔥 ~19:30Z (2026-05-23) — **H110 TANJIRO COMPOUND IS THE A WIN CANDIDATE** at val_abupt 6.168% step 56,154 (+0.042pp from gate 6.126%); slope −0.005pp/1k late-cosine sustained, terminal projection **6.10-6.15% = AT or BELOW GATE = A WIN**; H108 nezuko 6.208% step 59,780 SECONDARY A WIN candidate sustained −0.0087pp/1k; H107 thorfinn 6.215% step 59,780 (now 3rd, passed by both H110 and H108); H112 edward DropPath **STEEPEST SLOPE OF COHORT** −0.0246pp/1k at zero params 6.285% step 52,528 — third potential A WIN if slope sustains 17k more steps
+
+**TERMINAL-PHASE COHORT LEADERBOARD at most recent publishes:**
+
+| Rank | Run | val_abupt% | step | Δ Params | Verdict trajectory |
+|---:|---|---:|---:|---:|---|
+| **1** | **H110 tanjiro (compound H102+H101)** | **6.168%** | **56,154** | **+268K** | **A WIN PROBABLE — terminal ~6.10-6.15%** |
+| 2 | H108 nezuko (parallel-MLP residual) | 6.208% | 59,780 | +265K | **A WIN possible at narrow margin (recovery story)** |
+| 3 | H107 thorfinn (self-context residual) | 6.215% | 59,780 | +262K | B PARTIAL via deep test_VP cross |
+| 4 | H106 frieren (volume-info residual) | 6.268% | 62,501 | +2.5K | PLATEAUED, B PARTIAL, cost-efficiency winner |
+| 5 | H112 edward (DropPath stochastic) | 6.285% | 52,528 | 0 | **A WIN possible at zero params! Steepest slope** |
+| 6 | H109 alphonse (encoder-skip residual) | 6.359% | 48,902 | +263K | mid-cohort, B PARTIAL via test_VP |
+| 7 | H111 askeladd (LayerScale γ) | 6.540% | 43,466 | +5K | B PARTIAL via test_VP cross |
+| 8 | H113 fern (heteroscedastic loss) | 29.08% (EP1) | 21,437+ | +3 | mechanism AMPLIFYING not REBALANCING — verdict at EP3 |
+
+**🟢 STRATEGIC IMPLICATIONS (HUGE):**
+
+1. **THIS COHORT COULD DELIVER 3 A WINs (H110, H108, H112)** — most productive wave of the research program
+2. **H110 compound additivity hypothesis VALIDATED**: H102 width + H101 surface-positions-residual stack additively in late cosine, +0.05pp over best-single-mechanism (H107)
+3. **H108 parallel-MLP delayed engagement**: confirms mid-cosine cohort position is unreliable for terminal verdict prediction
+4. **H112 DropPath at ZERO PARAMS — most cost-efficient mechanism of program if A WIN lands**
+5. **Wave 35 compound staging matrix is now unlocked**: H110 (winning compound) + DropPath (H112), H110 + H106 (volume-info), H102 + H107 + DropPath (3-way stack)
+
+**🟡 H113 HETEROSCEDASTIC ENGAGING UNEXPECTEDLY DEEP — but NOT in the expected per-task rebalancing way:**
+
+- log_sigma_sq drifted to ~−1.0 across all 3 tasks (precision weight 2.72×)
+- Per-task differential is only 2.1% (vs predicted 5-15% SP up-weight)
+- Mechanism is amplifying loss MAGNITUDE not REBALANCING tasks
+- **Confirms DrivAerML per-task aleatoric noise differences are small** — SP plateau is likely Bayes-optimal hardness, not balance bottleneck
+- Wave 35 Plateau Protocol follow-up: BOUNDED log_sigma_sq ∈ [−2, +2] OR FIXED per-task weights ×5 on SP OR data-tier (CDF normalize SP targets)
+- **H113 still in flight — EP3 publish at step 32,594 is the auto-kill threshold check (must be < 8.5%)**
+
+**Wave 35 candidate matrix (post-H110 terminal):**
+
+| If H110 = A WIN | If H110 = B PARTIAL near-gate | If H110 = C NULL |
+|---|---|---|
+| H110 + H112 (compound+DropPath, +268K) ⭐ | H110 base + per-component sigmas | Wave 33 architectural attacks exhausted |
+| H102 + H107 (width+self-context, +524K) | H110 with H113-like loss reform | Pivot to DATA-TIER (CDF normalize SP) |
+| H106 + H107 (volume+surface ctx, +264K cost-eff) | H102 + H106 + H101 (3-way) | Modify cosine schedule end (longer terminal) |
+| H110 + H105 (compound+normals, +270K) | | H113-bounded variant |
+
+**Check-ins posted this session (10 total this evening):**
+- #1276 H106 #4 #5
+- #1277 H107 #4 #5  
+- #1278 H108 #4 #5
+- #1280 H110 #4 #5
+- #1282 H111 #4
+- #1283 H112 #3 #4
+- #1285 H113 #1 #2
 
 ## 🔥 ~19:00Z (2026-05-23) — TERMINAL CONVERGENCE PHASE; **H107 THORFINN TAKES BACK COHORT LEAD at val_abupt 6.215% (step 59,780) — +0.020pp ahead of H110 compound 6.235%**; H106 frieren PLATEAUED at 6.268% flat across steps 59,780-62,501 (slope ~−0.0001pp/1k); **H113 fern HETEROSCEDASTIC ENGAGING UNEXPECTEDLY DEEP**: log_sigma_sq dropped to ~−1.0 at step 21,437 (precision weight 2.72× baseline) but **tasks NOT differentiating** (only 2.1% relative differential SP/VP/WSS); EP1 val_abupt 29.08% +2-3pp above cohort baseline ⚠️; mechanism is amplifying loss magnitude rather than rebalancing tasks — Wave 35 follow-up should test BOUNDED log_sigma_sq to prevent unbounded-amplification pathology
 
