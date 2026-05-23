@@ -1,3 +1,47 @@
+## 2026-05-23 ~07:40 — PR #1264: H99 SURFACE-OUT-DEEPER-MLP (frieren, CLOSED) — **C NULL**
+
+- **Branch**: `frieren/h99-surface-out-deeper-mlp` (closed at ~07:40Z 2026-05-23)
+- **W&B run**: `fgxhka8k` (rank 0), terminal at step 70,652 / 70,664 = 100%, runtime 14.35h.
+- **Hypothesis**: Surface decoder is depth-bound, not width-bound — change `surface_out` from 2-layer MLP `(n_hidden → n_hidden → output_dim)` to 3-layer `(n_hidden → n_hidden → n_hidden//2 → output_dim)` with SiLU. +132K params (~+250K effective footprint with init slack).
+
+### Terminal results
+
+| Channel | Validation (EP13 best EMA) | Test | Canonical (test) | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.3266%** | **6.0693%** | 5.844% | **+0.225pp regress** |
+| surface_pressure | 4.147% | 3.804% | 3.577 (floor) | +0.227pp MISS floor |
+| volume_pressure | 3.698% | **3.637%** | 3.643 (floor) | −0.006pp marginal cross (noise) |
+| wall_shear | 7.181% | 7.009% | 6.727 (goal) | +0.282pp MISS goal |
+| wall_shear_x | 6.291% | 6.230% | 5.83 | +0.40pp regress |
+| wall_shear_y | 7.761% | 7.588% | 7.10 | +0.49pp regress |
+| wall_shear_z | **9.736%** | **9.088%** | 9.83 | **−0.74pp IMPROVEMENT on binding axis** |
+
+- Gate: val_abupt 6.3266% **MISS** gate 6.126 by +0.20pp.
+- Test floors: only test_VP marginal cross (−0.006pp = noise); test_SP +0.227pp MISS, test_WSS +0.282pp MISS goal.
+- val→test slope: −0.258pp (within canonical −0.282pp).
+
+### Mechanism reading — DEPTH AXIS PRODUCTIVE BUT INFERIOR TO WIDTH
+
+- 3-layer MLP trained stably (zero restarts, 1.87 it/s throughput-neutral)
+- Mid-cosine slope was strong (−1.83pp/1k val_abupt at step 29k), made H99 a top-4 mid-cosine entry
+- Late-cosine deceleration was SHARPER than width-axis H102 — H102 at 84.6% phase (val 6.18%) is ~0.17pp ahead of H99 at 94.5% phase (val 6.33%)
+- Extra depth adds compositional capacity that the surface decoder doesn't fully exploit; width adds parallel feature-mixing that scales better at matched param cost
+- **test_WSS_z = 9.088%** — −0.74pp improvement on the binding axis (best non-merged single-model result for this axis), but test_WSS_x and test_WSS_y both regress so overall test_WSS misses
+
+### Wave 33 finding — surface decoder MLP capacity axes
+
+- **width@right-place (H102, +266K)**: productive, fleet LEADER, val 6.18% at 84.6% (~6.15% terminal projection)
+- **depth (H99, +250K)**: productive in mid-cosine, decelerates harder in late-cosine, terminal val 6.327% MISS gate by +0.20pp
+- **split-task heads (H96, +263K)**: D NEG, regresses on val + target test axis
+- **mlp_ratio inside shared decoder (H86, +600K)**: D NEG (earlier wave)
+- **Mechanism class ranking confirmed**: width > info-residual > depth > task-head > FiLM > mlp_ratio-shared > split-head
+
+### Verdict and reassignment
+
+C NULL — clean execution but inductive bias of depth is suboptimal for shared decoder. frieren reassigned to **H106 VOLUME-GEOM-RESIDUAL-DECODER** (PR #1276) — mirror of H101 to the volume side, testing whether info-at-decoder-input thesis generalizes from surface to volume.
+
+---
+
 ## 2026-05-23 ~01:30 — PR #1261: H96 WSS-DEDICATED-DECODER-HEAD (fern, CLOSED) — **D NEGATIVE**
 
 - **Branch**: `fern/h96-wss-dedicated-decoder-head` (closed at ~01:30Z 2026-05-23)

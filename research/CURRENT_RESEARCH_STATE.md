@@ -1,9 +1,39 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~06:50 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~07:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟣 ~07:45Z (2026-05-23) — H99 SURFACE-OUT-DEEPER-MLP CLOSED **C NULL** (val_abupt 6.327% MISS gate +0.20pp, depth axis inferior to width at matched 250K param cost) + frieren reassigned **H106 VOLUME-GEOM-RESIDUAL-DECODER** (PR #1276) zero-init Linear(4→512) on volume_x[..., 0:4]=xyz+sdf injecting residual to volume_hidden — completes the **info-at-decoder-input 3-axis sweep** with H101 (surface positions) + H105 (surface normals) + H106 (volume positions+sdf)
+
+**Closure: PR #1264 H99 (frieren) — C NULL**:
+- val_abupt **6.3266%** MISS gate by +0.20pp
+- test_abupt 6.0693% (val→test slope −0.258pp, canonical)
+- test_VP 3.637% marginal cross (−0.006pp = noise), test_SP 3.804% MISS +0.227pp, test_WSS 7.009% MISS goal +0.282pp
+- **test_WSS_z 9.088%** −0.74pp IMPROVEMENT on binding axis BUT test_WSS_x and test_WSS_y both regress so overall WSS misses
+- Mechanism reading: depth (H99) trains stably but late-cosine deceleration is sharper than width (H102 LEADER ~0.17pp ahead at matched 250K params footprint)
+- Wave 33 ranking confirmed: **width > info-residual > depth > task-head > FiLM > mlp_ratio-shared > split-head**
+
+**New assignment: PR #1276 H106 frieren VOLUME-GEOM-RESIDUAL-DECODER**:
+- Mechanism: zero-init Linear(VOLUME_X_DIM=4, n_hidden=512) projecting `volume_x[..., 0:4]` (xyz + sdf) → residual to volume_hidden after surf→vol xattn, before volume_out
+- Params: +2,560 (negligible)
+- Identity at init (zero-weight + zero-bias) → minimum-disruption A/B test
+- **Closes info-at-decoder-input 3-axis sweep**: H101 (surf positions) + H105 (surf normals) + H106 (vol positions+sdf)
+- Physics: SDF is canonical volume-side signal (boundary-layer regime, pressure gradient)
+- Wave 34 compound priority: if H101 + H106 both clear → **bilateral info-at-input** (surface + volume) at < +5K total params
+
+### Wave 33 fleet — 8/8 WIP after H106 assignment:
+1. **H97 alphonse (PR #1262)**: bidir-xattn +1M — borderline A WIN at 91.6% (val 6.211%, terminal projection ~6.18-6.20%)
+2. **H100 thorfinn (PR #1265)**: wss_z dedicated head +260K — B PARTIAL likely at 92.3% (val 6.298%)
+3. **H101 nezuko (PR #1266)**: geom-residual positions +1.5K — borderline A WIN at 90.8% (val 6.231%, projection ~6.16-6.21%, most parameter-efficient)
+4. **H102 tanjiro (PR #1268)**: surface-wider +266K — **A WIN trajectory FLEET LEADER** at 84.6% (val 6.176%, projection ~6.15%)
+5. **H103 askeladd (PR #1270)**: FiLM +525K — C NULL likely at 82.1% (val 6.440%)
+6. **H104 edward (PR #1269)**: volume-wider +229K — borderline A WIN at 82.2% (val 6.243%)
+7. **H105 fern (PR #1271)**: surface-normals-residual +2K — mid-cosine 56.4% (val 6.565%, matched-phase tied with H101)
+8. **H106 frieren (PR #1276) NEW**: volume-geom-residual +2.5K — JUST ASSIGNED
+
+**Terminal sequence next 1-2h:** H100 → H101 → H97 → H102 → H104 → H103 (all in late-cosine). H105 ~5h ETA. H106 ~14h ETA from kickoff.
 
 ## 🔵 ~06:50Z (2026-05-23) — Wave 33 fleet pre-terminal snapshot: H102 LEADER **6.1755%** (0.05pp from gate) + H97/H101/H104 all <6.25%, A WIN ZONE EXPANDING + H100 dedicated-head finishing FOURTH on val_WSS_z (refuting task-head hypothesis) + H99 frontier terminal in ~0.5h
 
