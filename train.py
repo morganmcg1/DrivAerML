@@ -139,6 +139,10 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    use_wss_cp_xattn: bool = False
+    wss_cp_xattn_heads: int = 4
+    wss_cp_xattn_entropy_n_sample: int = 256
+    wss_cp_xattn_telemetry_every: int = 50
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -278,6 +282,10 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
+        use_wss_cp_xattn=config.use_wss_cp_xattn,
+        wss_cp_xattn_heads=config.wss_cp_xattn_heads,
+        wss_cp_xattn_entropy_n_sample=config.wss_cp_xattn_entropy_n_sample,
+        wss_cp_xattn_telemetry_every=config.wss_cp_xattn_telemetry_every,
     )
 
 
@@ -484,6 +492,14 @@ def train_loss(
     }
     metrics.update(charb_metrics)
     metrics.update(vol_p_charb_metrics)
+    for xattn_key in (
+        "xattn_head_cos_sim",
+        "xattn_wss_to_cp_entropy",
+        "xattn_cp_to_wss_entropy",
+        "xattn_log_n_keys",
+    ):
+        if xattn_key in out:
+            metrics[xattn_key] = float(out[xattn_key].detach().cpu().item())
     return loss, metrics, task_losses
 
 
@@ -831,6 +847,38 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 "train/loss_vol_p_charb_weighted": vol_p_charb_w,
                                 "train/loss_vol_p_charb_to_mse_ratio": vol_p_ratio_to_mse,
                                 "train/loss_vol_p_charb_weighted_to_mse_ratio": vol_p_weighted_ratio,
+                            }
+                        )
+                    # H35 xattn telemetry — surfaced from the model's
+                    # forward(). head_cos_sim logs every train step; entropy
+                    # logs every `wss_cp_xattn_telemetry_every` steps.
+                    if "xattn_head_cos_sim" in batch_loss_metrics:
+                        train_log["train/xattn/head_cos_sim"] = batch_loss_metrics[
+                            "xattn_head_cos_sim"
+                        ]
+                    if "xattn_wss_to_cp_entropy" in batch_loss_metrics:
+                        wss_cp_ent = batch_loss_metrics["xattn_wss_to_cp_entropy"]
+                        cp_wss_ent = batch_loss_metrics["xattn_cp_to_wss_entropy"]
+                        log_n_keys = batch_loss_metrics.get(
+                            "xattn_log_n_keys", float("nan")
+                        )
+                        ent_norm = (
+                            wss_cp_ent / log_n_keys
+                            if log_n_keys and log_n_keys > 1e-9
+                            else float("nan")
+                        )
+                        cp_wss_ent_norm = (
+                            cp_wss_ent / log_n_keys
+                            if log_n_keys and log_n_keys > 1e-9
+                            else float("nan")
+                        )
+                        train_log.update(
+                            {
+                                "train/xattn/wss_to_cp_entropy": wss_cp_ent,
+                                "train/xattn/cp_to_wss_entropy": cp_wss_ent,
+                                "train/xattn/log_n_keys": log_n_keys,
+                                "train/xattn/wss_to_cp_entropy_norm": ent_norm,
+                                "train/xattn/cp_to_wss_entropy_norm": cp_wss_ent_norm,
                             }
                         )
                 if config.use_y_symmetry_aug and aug_log:

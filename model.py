@@ -342,6 +342,10 @@ class SurfaceTransolver(nn.Module):
         pe_init_sigmas: list[float] | None = None,
         use_curvature_attention_bias: bool = False,
         curvature_dim: int = 3,
+        use_wss_cp_xattn: bool = False,
+        wss_cp_xattn_heads: int = 4,
+        wss_cp_xattn_entropy_n_sample: int = 256,
+        wss_cp_xattn_telemetry_every: int = 50,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -397,8 +401,47 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # H35 Wave 33 Idea C — bidirectional WSS<->surf_p decoder cross-attention.
+        # Replaces the single shared surface_out projection with two independent
+        # heads coupled by a single bidirectional cross-attention step.
+        self.use_wss_cp_xattn = use_wss_cp_xattn
+        self.wss_cp_xattn_heads = wss_cp_xattn_heads
+        self.wss_cp_xattn_entropy_n_sample = wss_cp_xattn_entropy_n_sample
+        self.wss_cp_xattn_telemetry_every = wss_cp_xattn_telemetry_every
+        self.register_buffer(
+            "_xattn_step_count", torch.zeros((), dtype=torch.long), persistent=False
+        )
+        if use_wss_cp_xattn:
+            self.wss_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.cp_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            self.wss_to_cp_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=wss_cp_xattn_heads,
+                batch_first=True,
+                bias=True,
+            )
+            self.cp_to_wss_xattn = nn.MultiheadAttention(
+                embed_dim=n_hidden,
+                num_heads=wss_cp_xattn_heads,
+                batch_first=True,
+                bias=True,
+            )
+            # Zero-init the output projection so the cross-attention starts as a
+            # no-op residual passthrough — matches the CurvatureAttentionBias
+            # convention and the LLaMA-Adapter zero-init pattern. Both heads
+            # therefore equal the shared backbone output at step 0; any
+            # divergence is acquired through gradient descent.
+            nn.init.zeros_(self.wss_to_cp_xattn.out_proj.weight)
+            nn.init.zeros_(self.wss_to_cp_xattn.out_proj.bias)
+            nn.init.zeros_(self.cp_to_wss_xattn.out_proj.weight)
+            nn.init.zeros_(self.cp_to_wss_xattn.out_proj.bias)
+            self.wss_head = LinearProjection(n_hidden, 3)
+            self.cp_head = LinearProjection(n_hidden, 1)
+            self.surface_out: nn.Module | None = None
+        else:
+            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
 
     def _encode_group(
         self,
@@ -478,8 +521,15 @@ class SurfaceTransolver(nn.Module):
         cursor += surface_tokens
         volume_hidden = hidden_norm[:, cursor : cursor + volume_tokens]
 
+        xattn_telemetry: dict[str, torch.Tensor] = {}
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.use_wss_cp_xattn:
+                surface_preds, xattn_telemetry = self._wss_cp_xattn_decode(
+                    surface_hidden=surface_hidden,
+                    surface_mask=surface_mask,
+                )
+            else:
+                surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -490,10 +540,173 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if xattn_telemetry:
+            out.update(xattn_telemetry)
+        return out
+
+    def _wss_cp_xattn_decode(
+        self,
+        *,
+        surface_hidden: torch.Tensor,
+        surface_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Bidirectional WSS<->surf_p decoder cross-attention (Wave 33 Idea C).
+
+        ``surface_hidden`` is the post-backbone, post-norm surface stream
+        ``[B, N_s, D]``. Two independent LayerNorms project it into a WSS
+        stream and a cp stream; a single bidirectional cross-attention step
+        couples them via residual additions; independent linear heads then
+        produce ``cp_pred [B, N_s, 1]`` and ``wss_pred [B, N_s, 3]``.
+
+        The PR's literal design uses ``nn.MultiheadAttention(num_heads=4,
+        batch_first=True)`` per direction. We call them with
+        ``need_weights=False`` so PyTorch can dispatch to flash-attention and
+        avoid materialising an ``N_s x N_s`` attention matrix (catastrophic at
+        ``N_s = 65k``). Attention entropy telemetry is computed manually on a
+        downsampled subset of queries via the MHA's projection weights.
+
+        Returns ``(surface_preds, xattn_telemetry)`` where ``surface_preds``
+        preserves the model contract ``surface_preds[..., 0]=cp,
+        surface_preds[..., 1:4]=wss``.
+        """
+        h_wss_pre = self.wss_norm(surface_hidden)
+        h_cp_pre = self.cp_norm(surface_hidden)
+
+        kp_mask = ~surface_mask.bool() if surface_mask is not None else None
+        kp_mask_for_mha = None
+        if kp_mask is not None and kp_mask.any():
+            kp_mask_for_mha = kp_mask
+
+        # wss queries from cp (residual)
+        h_wss_aug, _ = self.wss_to_cp_xattn(
+            query=h_wss_pre,
+            key=h_cp_pre,
+            value=h_cp_pre,
+            key_padding_mask=kp_mask_for_mha,
+            need_weights=False,
+        )
+        h_wss = h_wss_pre + h_wss_aug
+
+        # cp queries from updated h_wss (re-normalised via wss_norm)
+        h_wss_renorm = self.wss_norm(h_wss)
+        h_cp_aug, _ = self.cp_to_wss_xattn(
+            query=h_cp_pre,
+            key=h_wss_renorm,
+            value=h_wss_renorm,
+            key_padding_mask=kp_mask_for_mha,
+            need_weights=False,
+        )
+        h_cp = h_cp_pre + h_cp_aug
+
+        wss_pred = self.wss_head(h_wss)
+        cp_pred = self.cp_head(h_cp)
+        surface_preds = torch.cat([cp_pred, wss_pred], dim=-1)
+        surface_preds = surface_preds * surface_mask.unsqueeze(-1).to(surface_preds.dtype)
+
+        xattn_telemetry: dict[str, torch.Tensor] = {}
+        if self.training:
+            with torch.no_grad():
+                step = int(self._xattn_step_count.item())
+                self._xattn_step_count += 1
+                # head_cos_sim is cheap — log every step on rank 0
+                mask_f = surface_mask.unsqueeze(-1).to(dtype=h_wss.dtype)
+                h_wss_masked = h_wss * mask_f
+                h_cp_masked = h_cp * mask_f
+                cos_per_token = F.cosine_similarity(h_wss_masked, h_cp_masked, dim=-1)
+                cos_per_token = cos_per_token * surface_mask.to(dtype=cos_per_token.dtype)
+                denom = surface_mask.to(dtype=cos_per_token.dtype).sum().clamp_min(1.0)
+                xattn_telemetry["xattn_head_cos_sim"] = (
+                    cos_per_token.sum() / denom
+                ).to(dtype=torch.float32)
+
+                if self.wss_cp_xattn_telemetry_every > 0 and (
+                    step % self.wss_cp_xattn_telemetry_every == 0
+                ):
+                    wss_to_cp_entropy, log_n_keys = self._xattn_entropy_subset(
+                        q_pre=h_wss_pre,
+                        kv_pre=h_cp_pre,
+                        mha=self.wss_to_cp_xattn,
+                        key_padding_mask=kp_mask,
+                        surface_mask=surface_mask,
+                    )
+                    cp_to_wss_entropy, _ = self._xattn_entropy_subset(
+                        q_pre=h_cp_pre,
+                        kv_pre=h_wss_renorm,
+                        mha=self.cp_to_wss_xattn,
+                        key_padding_mask=kp_mask,
+                        surface_mask=surface_mask,
+                    )
+                    xattn_telemetry["xattn_wss_to_cp_entropy"] = wss_to_cp_entropy.to(
+                        dtype=torch.float32
+                    )
+                    xattn_telemetry["xattn_cp_to_wss_entropy"] = cp_to_wss_entropy.to(
+                        dtype=torch.float32
+                    )
+                    xattn_telemetry["xattn_log_n_keys"] = log_n_keys.to(
+                        dtype=torch.float32
+                    )
+
+        return surface_preds, xattn_telemetry
+
+    def _xattn_entropy_subset(
+        self,
+        *,
+        q_pre: torch.Tensor,
+        kv_pre: torch.Tensor,
+        mha: nn.MultiheadAttention,
+        key_padding_mask: torch.Tensor | None,
+        surface_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compute per-step attention entropy on a downsampled query subset.
+
+        Returns ``(mean_entropy, log_n_keys)`` where ``log_n_keys`` is the log
+        of the per-batch-element effective key count (i.e. the uniform-attention
+        entropy upper bound), so the gate ``entropy < 0.85 * log_n_keys`` can
+        be evaluated downstream from the logged values.
+
+        Avoids materialising the full ``N_s x N_s`` attention matrix by
+        sampling ``n_sample`` query positions (default 256) and projecting only
+        the sampled queries through ``mha.in_proj_weight``.
+        """
+        B, N, D = q_pre.shape
+        H = mha.num_heads
+        head_dim = D // H
+        n_sample = min(self.wss_cp_xattn_entropy_n_sample, N)
+
+        if n_sample <= 0 or N <= 0:
+            zero = q_pre.new_zeros(())
+            return zero, zero
+
+        idx = torch.randperm(N, device=q_pre.device)[:n_sample]
+        q_sub = q_pre[:, idx, :]  # [B, n_sample, D]
+
+        in_w = mha.in_proj_weight  # [3D, D]
+        in_b = mha.in_proj_bias  # [3D]
+        w_q, w_k, _ = in_w.split(D, dim=0)
+        b_q, b_k, _ = in_b.split(D, dim=0)
+
+        q_proj = F.linear(q_sub, w_q, b_q).to(dtype=torch.float32)
+        k_proj = F.linear(kv_pre, w_k, b_k).to(dtype=torch.float32)
+        q_proj = q_proj.view(B, n_sample, H, head_dim).transpose(1, 2)
+        k_proj = k_proj.view(B, N, H, head_dim).transpose(1, 2)
+
+        scores = (q_proj @ k_proj.transpose(-1, -2)) / math.sqrt(head_dim)
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(
+                key_padding_mask[:, None, None, :], float("-inf")
+            )
+        attn = F.softmax(scores, dim=-1)
+        entropy_per_query = -(attn * (attn + 1e-9).log()).sum(dim=-1)
+        mean_entropy = entropy_per_query.mean()
+
+        n_keys_per_batch = surface_mask.to(dtype=torch.float32).sum(dim=-1).clamp_min(1.0)
+        log_n_keys = n_keys_per_batch.log().mean()
+
+        return mean_entropy, log_n_keys
