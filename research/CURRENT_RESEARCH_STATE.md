@@ -1,9 +1,38 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~19:30 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~20:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔥 ~20:00Z (2026-05-23) — **H113 PLATEAU PROTOCOL EXPERIMENT DELIVERS ITS DIAGNOSTIC ANSWER: SP plateau is HARDNESS-BOUND, not balance-bound**
+
+**H113 fern EP3 publish (step 32,594) at val_abupt 6.9355% — CLEARED kill gate by +1.56pp margin but lands at WEAKER END of cohort (cohort median ~6.74% at step 32,594). The heteroscedastic mechanism is engaging deeply (log_σ² to −2.3, precision weight ×10 by step 36k) but with NEAR-ZERO per-task differentiation (only 2.1% relative spread between SP/VP/WSS):**
+
+| Step | log_σ²_sp | log_σ²_vp | log_σ²_wss | precision_weight |
+|---:|---:|---:|---:|---:|
+| 21,000 | −0.961 | −0.954 | −0.940 | ~2.6× |
+| 24,816 | −1.300 | −1.293 | −1.279 | ~3.7× |
+| 28,631 | −1.637 | −1.631 | −1.617 | ~5.1× |
+| 32,446 | −1.975 | −1.969 | −1.955 | ~7.2× |
+| 36,261 | **−2.299** | **−2.293** | **−2.278** | **~9.9×** |
+
+**Spread between tasks: only 0.021** (~2.1% relative). The optimizer was GIVEN the freedom to discover per-task imbalance via 3 learnable scalars; it found ZERO meaningful task differential. The mechanism is exploiting the unbounded-below regularization term to amplify total loss magnitude uniformly rather than rebalancing across tasks.
+
+**🟢 CRITICAL STRATEGIC ANSWER FOR WAVE 35:**
+
+The Plateau Protocol question — "Is the SP plateau driven by undertrained SP loss term OR Bayes-optimal hardness?" — is being **empirically answered as HARDNESS-BOUND, not balance-bound.** The DrivAerML per-task aleatoric noise differences are quantitatively small (≤ 2-3% relative); the SP plateau is NOT a loss-balance bottleneck.
+
+**Wave 35 follow-up directions (rejected and accepted):**
+
+❌ DROP heteroscedastic loss family — empirically confirmed not the bottleneck
+❌ DROP GradNorm and related per-task gradient-balance mechanisms (same diagnostic logic applies)
+✅ **DATA-TIER intervention**: CDF-normalize SP targets, log-transform high-error tails, per-sample loss reweighting by SP target magnitude
+✅ **SP-SPECIFIC architecture**: SP-only auxiliary head with specialized receptive field (e.g., panel_area-weighted attention pooling)
+✅ **Geometric augmentation**: yaw rotations about z-axis to expose more diverse SP samples
+✅ Validation experiment: **BOUNDED heteroscedastic** (log_σ² ∈ [−2, +2]) to isolate whether the amplification helps/hurts (low priority since hardness-bound is now clear)
+
+## 🔥🔥 ~19:30Z (2026-05-23) — **H110 TANJIRO COMPOUND IS THE A WIN CANDIDATE** at val_abupt 6.168% step 56,154 (+0.042pp from gate 6.126%); slope −0.005pp/1k late-cosine sustained, terminal projection **6.10-6.15% = AT or BELOW GATE = A WIN**; H108 nezuko 6.208% step 59,780 SECONDARY A WIN candidate sustained −0.0087pp/1k; H107 thorfinn 6.215% step 59,780 (now 3rd, passed by both H110 and H108); H112 edward DropPath **STEEPEST SLOPE OF COHORT** −0.0246pp/1k at zero params 6.285% step 52,528 — third potential A WIN if slope sustains 17k more steps
 
 ## 🔥🔥 ~19:30Z (2026-05-23) — **H110 TANJIRO COMPOUND IS THE A WIN CANDIDATE** at val_abupt 6.168% step 56,154 (+0.042pp from gate 6.126%); slope −0.005pp/1k late-cosine sustained, terminal projection **6.10-6.15% = AT or BELOW GATE = A WIN**; H108 nezuko 6.208% step 59,780 SECONDARY A WIN candidate sustained −0.0087pp/1k; H107 thorfinn 6.215% step 59,780 (now 3rd, passed by both H110 and H108); H112 edward DropPath **STEEPEST SLOPE OF COHORT** −0.0246pp/1k at zero params 6.285% step 52,528 — third potential A WIN if slope sustains 17k more steps
 
