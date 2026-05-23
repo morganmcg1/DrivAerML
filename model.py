@@ -410,9 +410,10 @@ class SurfaceTransolver(nn.Module):
         self.wss_cp_xattn_heads = wss_cp_xattn_heads
         self.wss_cp_xattn_entropy_n_sample = wss_cp_xattn_entropy_n_sample
         self.wss_cp_xattn_telemetry_every = wss_cp_xattn_telemetry_every
-        self.register_buffer(
-            "_xattn_step_count", torch.zeros((), dtype=torch.long), persistent=False
-        )
+        # CPU-side step counter — using a Python int instead of a buffer avoids
+        # a GPU↔CPU sync (`.item()`) on every training step, which was
+        # serialising DDP overlap and dominating step time at N_s=65k.
+        self._xattn_step_count: int = 0
         if use_wss_cp_xattn:
             self.wss_norm = nn.LayerNorm(n_hidden, eps=1e-6)
             self.cp_norm = nn.LayerNorm(n_hidden, eps=1e-6)
@@ -612,10 +613,14 @@ class SurfaceTransolver(nn.Module):
 
         xattn_telemetry: dict[str, torch.Tensor] = {}
         if self.training:
+            step = self._xattn_step_count
+            self._xattn_step_count += 1
+            log_entropy = (
+                self.wss_cp_xattn_telemetry_every > 0
+                and step % self.wss_cp_xattn_telemetry_every == 0
+            )
             with torch.no_grad():
-                step = int(self._xattn_step_count.item())
-                self._xattn_step_count += 1
-                # head_cos_sim is cheap — log every step on rank 0
+                # head_cos_sim is cheap — log every step (tensor only, no .item())
                 mask_f = surface_mask.unsqueeze(-1).to(dtype=h_wss.dtype)
                 h_wss_masked = h_wss * mask_f
                 h_cp_masked = h_cp * mask_f
@@ -626,9 +631,7 @@ class SurfaceTransolver(nn.Module):
                     cos_per_token.sum() / denom
                 ).to(dtype=torch.float32)
 
-                if self.wss_cp_xattn_telemetry_every > 0 and (
-                    step % self.wss_cp_xattn_telemetry_every == 0
-                ):
+                if log_entropy:
                     wss_to_cp_entropy, log_n_keys = self._xattn_entropy_subset(
                         q_pre=h_wss_pre,
                         kv_pre=h_cp_pre,
