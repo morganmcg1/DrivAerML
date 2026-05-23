@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_volume_geom_residual_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_volume_geom_residual_decoder = use_volume_geom_residual_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,22 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Wave 33 H106: zero-init Linear(volume_input_dim=4, n_hidden) projection
+        # of raw volume input features (volume_x[..., 0:4] = xyz + sdf) added as
+        # a residual to volume_hidden BEFORE self.volume_out. Identity at init
+        # so baseline is preserved at step 0; model learns to inject explicit
+        # geometric info (positions + signed distance) directly at the volume
+        # decoder during training. Mirror of H101 (surface positions) and H105
+        # (surface normals); extends info-at-decoder-input thesis to volume side.
+        # SDF is the canonical volume-side physics signal (boundary-layer regime,
+        # pressure gradient).
+        if use_volume_geom_residual_decoder:
+            self.volume_geom_residual_proj = nn.Linear(self.volume_input_dim, n_hidden, bias=True)
+            nn.init.zeros_(self.volume_geom_residual_proj.weight)
+            nn.init.zeros_(self.volume_geom_residual_proj.bias)
+        else:
+            self.volume_geom_residual_proj = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -628,6 +646,13 @@ class SurfaceTransolver(nn.Module):
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
 
         if volume_x is not None:
+            # Wave 33 H106: inject raw volume input features (xyz + sdf) as a
+            # zero-init residual at decoder input. Identity at step 0; model
+            # learns to use explicit geometric info bypassing slice-attention
+            # compression bottleneck. Volume mask is applied to volume_preds
+            # below, so masked-out points have no downstream effect.
+            if self.volume_geom_residual_proj is not None and volume_x.shape[1] > 0:
+                volume_hidden = volume_hidden + self.volume_geom_residual_proj(volume_x)
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
         else:
             batch_size = surface_x.shape[0]
