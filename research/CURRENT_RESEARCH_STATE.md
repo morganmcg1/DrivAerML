@@ -7,7 +7,7 @@
 
 ## 🟡 ~16:30Z (2026-05-23) — H105 CLOSED **B PARTIAL** via single test_VP floor cross (−0.109pp); val gate MISS +0.223pp; **14th SP plateau confirmation** (Bayes-optimal hypothesis CRITICAL); **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER** by +0.127pp val_abupt; INFO-AT-DECODER mechanism class verdict: positions > normals > depth, diminishing returns + fern reassigned **H113 HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING** (PR pending) **STRATEGY TIER SHIFT TO LOSS REFORMULATION** per Plateau Protocol; Kendall & Gal 2018 learnable per-channel log_sigma in multi-task loss, +5 params, identity-at-init; tests "is SP plateau undertrained or Bayes-optimal?"
 
-**H105 CLOSURE — Key findings:**
+**H105 CLOSURE — Key findings (PR #1271 closed B PARTIAL):**
 - val_abupt **6.349%** MISS gate +0.223pp; test_abupt 5.920% regresses canonical +0.076pp; test_VP **3.534%** ✓ CROSS by −0.109pp (3rd-deepest Wave 33 after H101/H104)
 - test_SP 3.7245% — **14th consecutive plateau confirmation** (every architecture-class mechanism misses 3.577% floor in 3.70-3.95% range)
 - **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER**: H105 trails H101 by +0.127pp val_abupt; mechanism class converging (H101 +1.5K still cost-efficiency champion)
@@ -18,7 +18,7 @@
 **14th SP plateau update (CRITICAL — Plateau Protocol trigger):**
 Plateau survives EVERY architecture mechanism class: WIDTH-SURFACE (H102), WIDTH-VOLUME (H104), DEPTH (H99), INFO-AT-INPUT-POSITIONS (H101), INFO-AT-INPUT-NORMALS (H105), BIDIR-XATTN (H97), FILM (H103), TASK-HEAD (H92/H93/H96/H100). Architecture-class exhaustion now essentially confirmed on test_SP. **Strategy-tier shift to LOSS REFORMULATION / DATA REPRESENTATION is now warranted** (per CLAUDE.md Plateau Protocol). H113 is the first explicit step in this shift.
 
-**New assignment: PR pending H113 fern HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING:**
+**New assignment: PR #1285 H113 fern HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING:**
 - **Plateau Protocol strategy-tier shift** — moving from architecture/mechanism tier (where Wave 32+33 have plateaued on SP for 14 consecutive runs) to **loss reformulation tier**
 - Mechanism: learnable per-channel `log_sigma_k` parameters; loss reformulated as `L_total = Σ_k exp(-2*log_sigma_k) * L_k + log_sigma_k` (Kendall & Gal 2018 multi-task uncertainty weighting, NeurIPS)
 - Params: +5 (one log_sigma per output channel: SP, VP, WSS_x, WSS_y, WSS_z); identity-at-init (log_sigma_init=0, sigma=1)
@@ -30,7 +30,7 @@ Plateau survives EVERY architecture mechanism class: WIDTH-SURFACE (H102), WIDTH
 | Run | Mechanism | Δ Params | Phase | Latest val_abupt |
 |---|---|---:|---:|---:|
 | ~~H105 fern (CLOSED B PARTIAL)~~ | normals residual | +2K | — | terminal 6.349% |
-| **H113 fern (NEW)** | **heteroscedastic loss** | **+5** | **0%, just launching** | **n/a** |
+| **H113 fern (NEW PR #1285)** | **heteroscedastic loss (Kendall&Gal 2018)** | **+3** | **just assigned** | **n/a** |
 | **H110 tanjiro** | **compound H102+H101** | +268K | **~50%, LEADS COHORT** | **6.714% at 32,594** |
 | H107 thorfinn | self-context residual | +262K | ~60% | 6.477% at 38,030 |
 | H108 nezuko | parallel-MLP residual | +265K | ~55% | 6.491% at 38,030 |
