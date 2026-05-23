@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    surface_out_width_factor: float = 1.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "surface_out_width_factor": (
+            "Width multiplier for the surface_out MLP hidden layer (PR "
+            "#1268 H102). At 1.0 (canonical) the surface decoder is "
+            "Linear(n_hidden, n_hidden) -> SiLU -> Linear(n_hidden, "
+            "surf_dim). At 2.0 the hidden dim is widened to "
+            "2*n_hidden to test whether the test_SP/WSS plateau is bound "
+            "by insufficient nonlinear capacity in the surface decoder. "
+            "Pairs with H99 (PR #1264) which attacks the depth axis "
+            "(2-layer -> 3-layer)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        surface_out_width_factor=config.surface_out_width_factor,
     )
 
 
