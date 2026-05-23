@@ -1,3 +1,56 @@
+## 2026-05-23 ~08:50 — PR #1265: H100 WSS-Z-DEDICATED-HEAD (thorfinn, CLOSED) — **B PARTIAL** (mechanism FALSIFIED on design axis)
+
+- **Branch**: `thorfinn/h100-wss-z-dedicated-head` (closed at ~08:50Z 2026-05-23)
+- **W&B run**: `zop8yn2z` (rank 0), terminal at step 70,652 / 70,664 = 100%, runtime 14.44h.
+- **Hypothesis**: Split surface_out 4ch into surface_main_out 3ch (cp+tau_x+tau_y) + surface_wss_z_out 1ch (tau_z). Architectural per-tau-channel separation tests whether the binding axis test_WSS_z is responsive to dedicated decoder representation. +262K params.
+
+### Terminal results
+
+| Channel | Validation (EP12 EMA) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.2891%** | **5.9379%** | 5.844% | **+0.094pp regress** |
+| surface_pressure | 4.113% | 3.712% | 3.577 (floor) | **+0.135pp MISS floor** |
+| volume_pressure | 3.687% | **3.5114%** | 3.643 (floor) | **−0.132pp CROSS floor** ✓ |
+| wall_shear | 7.151% | 6.867% | 6.727 (goal) | +0.140pp MISS goal |
+| wall_shear_x | 6.280% | 6.099% | — | — |
+| wall_shear_y | 7.682% | 7.439% | — | — |
+| wall_shear_z | **9.685%** | **8.928%** | 8.753 (binding) | **+0.175pp REGRESS design axis** |
+
+- Gate: val_abupt 6.2891% **MISS** gate 6.126 by +0.163pp.
+- Test floors: 1 cross (test_VP −0.132pp strong), 2 MISS (test_SP +0.135pp, test_WSS +0.140pp).
+- val→test slope: −0.351pp (deeper than canonical −0.282pp).
+
+### 🔴 Mechanism FALSIFICATION on design axis
+
+The dedicated `surface_wss_z_out` head engaged mid-cosine (slope val_WSS_z = −2.92pp/1k was fleet-best, advisor flagged in check-in #2). But terminal head-to-head against fleet siblings:
+
+| Run | Mechanism | val_WSS_z |
+|---|---|---:|
+| H102 tanjiro | surface-wider (general) | **9.528%** ✓ best |
+| H97 alphonse | bidir-xattn (general) | 9.540% |
+| H104 edward | volume-wider (general) | 9.606% |
+| **H100 (this)** | **dedicated tau_z head (specific)** | **9.685%** ❌ 4th |
+
+**Three non-task-specific mechanisms each beat H100 on the very axis H100 was designed to crack.** test_WSS_z = 8.928% REGRESSES from canonical 8.753 by +0.175pp.
+
+### Wave 33 mechanism class TASK-HEAD DEFINITIVELY CLOSED
+
+- H92 tau_z loss-weight D NEG (loss-budget falsified on z)
+- H93 tau_y loss-weight D NEG (loss-budget falsified on y)
+- H96 split-decoder-heads D NEG (decoder capacity allocation falsified)
+- H100 dedicated-tau_z-head B PARTIAL — mechanism falsified on its target axis
+- **All 4 task-specific mechanisms NEGATIVE on their target axes** — task-head class will NOT appear in Wave 34 compound staging
+
+### test_VP cross attribution
+
+The −0.132pp test_VP cross is NOT directly attributable to the dedicated head (volume decoder untouched). Likely general training stability (cleaner gradient routes) or EMA epoch-12 checkpoint happening to be VP-strong. **Incidental cross, not architectural.**
+
+### Reassignment
+
+thorfinn reassigned to **H107 SURFACE-GLOBAL-CONTEXT-RESIDUAL-DECODER** (PR #1277) — NEW mechanism class (self-context-at-decoder via globally-pooled surface_hidden additive residual). +262K params matched-cost with H102 width. Tests whether per-token decoder needs access to global surface context that slice-tokens encode but don't directly expose.
+
+---
+
 ## 2026-05-23 ~07:40 — PR #1264: H99 SURFACE-OUT-DEEPER-MLP (frieren, CLOSED) — **C NULL**
 
 - **Branch**: `frieren/h99-surface-out-deeper-mlp` (closed at ~07:40Z 2026-05-23)

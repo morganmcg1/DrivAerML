@@ -1,9 +1,56 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~07:45 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~08:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟢 ~08:55Z (2026-05-23) — **H102 LEADER CRACKED GATE 6.124%** (first architectural-class single-model val gate clear of Wave 33) + H100 CLOSED B PARTIAL (mechanism FALSIFIED on design axis test_WSS_z REGRESS +0.175pp 4th in fleet on its own task axis — task-head class DEFINITIVELY CLOSED H92+H93+H96+H100 all NEG) + thorfinn reassigned **H107 SURFACE-GLOBAL-CONTEXT-RESIDUAL-DECODER** (PR #1277) NEW MECHANISM CLASS self-context-at-decoder zero-init Linear(512→512) on pooled surface_hidden as additive residual +262K params matched-cost with H102 width
+
+**H102 PRE-TERMINAL GATE CRACK (HISTORIC):**
+- val_abupt **6.124%** at step 66,975 / 70,664 (94.8%, ~0.7h ETA to terminal)
+- val_VP **3.615%** BELOW floor 3.643 by 0.028pp → test_VP CROSS projected ✓
+- val_WSS 6.937% → test_WSS ~6.66 — possible CROSS goal 6.727 by ~0.07pp (binding axis crack candidate!)
+- val_WSS_z 9.403% → test_WSS_z ~8.76 — close to or below current best 8.753 binding axis
+- test_SP likely above floor 3.577 by ~0.27pp (11-variant plateau still expected)
+- **Verdict trajectory: A WIN (if test_SP cross) OR B PARTIAL (test_VP + test_WSS cross, test_SP miss)**
+- +266K params surface_out hidden 1×→2× — 4× cheaper than H97 bidir-xattn (+1M) at superior result
+
+**H100 CLOSURE — Task-head class DEFINITIVELY closed:**
+- val_abupt 6.2891% MISS +0.163pp, test_VP 3.5114% CROSS (−0.132pp), test_WSS_z 8.9275% REGRESS +0.175pp on design axis
+- **4th in fleet on its OWN task axis** — beat by 3 non-task-specific mechanisms (H102 width, H97 xattn, H104 vol-width)
+- Wave 33 task-head class closure roster: H92 (tau_z loss-weight D NEG) + H93 (tau_y loss-weight D NEG) + H96 (split-decoder-heads D NEG) + H100 (dedicated-tau_z-head B PARTIAL with mechanism FALSIFIED)
+- test_VP cross is INCIDENTAL (volume decoder untouched), not architecturally attributable to dedicated head
+
+**New assignment: PR #1277 H107 thorfinn SURFACE-GLOBAL-CONTEXT-RESIDUAL-DECODER**:
+- Mechanism: zero-init Linear(n_hidden=512, n_hidden=512) projecting globally mean-pooled surface_hidden → additive residual broadcast to per-token surface_hidden before surface_out
+- Params: +262K (matched cost with H102 width)
+- Identity at init → minimum-disruption A/B test
+- **NEW mechanism class**: SELF-CONTEXT-AT-DECODER (orthogonal to all 8 currently-in-flight Wave 33 mechanisms)
+- Different from H103 FiLM (multiplicative + volume-pooled): H107 is additive + surface-self-pooled
+- Different from H101/H105/H106 info-at-input: H107 is context-at-decoder-internal-state, not raw input features
+- Predicted axis impact: **test_SP** (plateau crack candidate — surface pressure has strong global dependence)
+
+### Wave 33 fleet — 8/8 WIP after H107 assignment:
+1. **H97 alphonse (PR #1262)**: bidir-xattn +1M — borderline A WIN at 91.6% (val 6.211%)
+2. **H101 nezuko (PR #1266)**: surf-info-positions +1.5K — borderline A WIN at 90.8% (val 6.231%, cheapest)
+3. **H102 tanjiro (PR #1268)**: surf-width +266K — **🟢 GATE CRACKED val 6.124% A WIN trajectory** (LEADER, ~0.7h to terminal)
+4. **H103 askeladd (PR #1270)**: FiLM +525K — C NULL likely at 92.6% (val 6.361%)
+5. **H104 edward (PR #1269)**: vol-width +229K — borderline B PARTIAL at 92.8% (val 6.196%, best val_VP 3.606%)
+6. **H105 fern (PR #1271)**: surf-normals +2K — mid-cosine 56.4% (val 6.565%)
+7. **H106 frieren (PR #1276)**: vol-info-residual +2.5K — just kicked off
+8. **H107 thorfinn (PR #1277) NEW**: surf-global-context +262K — JUST ASSIGNED (new mechanism class)
+
+**Terminal sequence next 1h:** H102 ~09:00Z (A WIN/B PARTIAL imminent, baseline-changing merge candidate), H103 ~09:00Z, H104 ~09:00Z, then H97/H101 ~30-90 min after.
+
+**Mechanism class ranking confirmed (Wave 33):**
+1. **WIDTH** (H102 LEADER 6.124% **gate cracked**, H104 borderline)
+2. **INFO-AT-INPUT** (H101 borderline A WIN at +1.5K, H105/H106 in-flight)
+3. **BIDIR-XATTN** (H97 borderline A WIN at +1M, expensive but works)
+4. **SELF-CONTEXT** (H107 — NEW, testing)
+5. ~~DEPTH~~ (H99 C NULL)
+6. ~~TASK-HEAD~~ (H92/H93/H96/H100 all NEG — DEFINITIVELY CLOSED)
+7. ~~FILM~~ (H103 likely C NULL)
 
 ## 🟣 ~07:45Z (2026-05-23) — H99 SURFACE-OUT-DEEPER-MLP CLOSED **C NULL** (val_abupt 6.327% MISS gate +0.20pp, depth axis inferior to width at matched 250K param cost) + frieren reassigned **H106 VOLUME-GEOM-RESIDUAL-DECODER** (PR #1276) zero-init Linear(4→512) on volume_x[..., 0:4]=xyz+sdf injecting residual to volume_hidden — completes the **info-at-decoder-input 3-axis sweep** with H101 (surface positions) + H105 (surface normals) + H106 (volume positions+sdf)
 
