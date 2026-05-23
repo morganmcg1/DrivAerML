@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -15,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -30,6 +32,13 @@ from data import (
     VOLUME_Y_DIM,
     load_data,
     pad_collate,
+)
+from data.loader import (
+    DEFAULT_MANIFEST,
+    DrivAerMLCase,
+    DrivAerMLCaseStore,
+    DrivAerMLSurfaceDataset,
+    _load_npy_rows,
 )
 
 
@@ -229,10 +238,134 @@ def resolve_num_workers(config) -> int:
     return min(4, os.cpu_count() or 4)
 
 
+CURVATURE_CACHE_FILENAME = "surface_curvature_proxy_k16_v1.npy"
+CURVATURE_STATS_FILENAME = "curvature_proxy_stats_k16_v1.json"
+CURVATURE_DIM = 3
+
+
+def load_curvature_stats(stats_path: str | Path | None = None) -> dict[str, list[float]]:
+    """Load train-split curvature mean/std for z-score normalisation."""
+
+    if stats_path is None:
+        stats_path = Path(__file__).resolve().parent / CURVATURE_STATS_FILENAME
+    stats_path = Path(stats_path)
+    if not stats_path.exists():
+        raise FileNotFoundError(
+            f"Curvature stats missing: {stats_path}. Run "
+            f"`python -m scripts.precompute_curvature_proxy` before training."
+        )
+    with stats_path.open() as f:
+        stats = json.load(f)
+    return stats
+
+
+class CurvatureAugmentedCaseStore(DrivAerMLCaseStore):
+    """Case store that loads pre-computed curvature proxy alongside each case.
+
+    Reads ``surface_curvature_proxy_k16_v1.npy`` of shape ``(V, 3)`` from each
+    case directory and z-scores it with the dataset-level mean/std cached in
+    ``curvature_proxy_stats_k16_v1.json``. The normalised curvature is stored
+    in ``case.metadata["surface_curvature"]`` as a ``torch.Tensor`` of shape
+    ``(N_loaded_surface, 3)`` so the collate function can pad and attach it
+    to the batch without changing ``SurfaceBatch``'s schema.
+    """
+
+    def __init__(
+        self,
+        manifest_path: str | Path = DEFAULT_MANIFEST,
+        root: str | Path | None = None,
+        *,
+        stats: dict[str, list[float]] | None = None,
+    ):
+        super().__init__(manifest_path=manifest_path, root=root)
+        if stats is None:
+            stats = load_curvature_stats()
+        mean = np.asarray(stats["mean"], dtype=np.float32)
+        std = np.asarray(stats["std"], dtype=np.float32)
+        if mean.shape != (CURVATURE_DIM,) or std.shape != (CURVATURE_DIM,):
+            raise ValueError(
+                f"Curvature stats must have {CURVATURE_DIM} channels; got "
+                f"mean={mean.shape}, std={std.shape}"
+            )
+        self._curv_mean = mean
+        self._curv_std = np.maximum(std, 1e-6).astype(np.float32)
+        self.curvature_stats = stats
+
+    def load_case(
+        self,
+        case_id: str,
+        *,
+        surface_rows: np.ndarray | None = None,
+        volume_rows: np.ndarray | None = None,
+    ) -> DrivAerMLCase:
+        case = super().load_case(
+            case_id,
+            surface_rows=surface_rows,
+            volume_rows=volume_rows,
+        )
+        case_dir = self.root / case_id
+        cache_path = case_dir / CURVATURE_CACHE_FILENAME
+        if not cache_path.exists():
+            raise FileNotFoundError(
+                f"Curvature cache missing for {case_id}: {cache_path}. Run "
+                "`python -m scripts.precompute_curvature_proxy` first."
+            )
+        curv = _load_npy_rows(cache_path, surface_rows)
+        if curv.shape[0] != case.surface_x.shape[0]:
+            raise RuntimeError(
+                f"Curvature row count mismatch for {case_id}: curv={curv.shape[0]} "
+                f"vs surface={case.surface_x.shape[0]}"
+            )
+        if curv.shape[-1] != CURVATURE_DIM:
+            raise RuntimeError(
+                f"Curvature channel count mismatch for {case_id}: {curv.shape[-1]} "
+                f"vs expected {CURVATURE_DIM}"
+            )
+        curv_norm = (curv - self._curv_mean) / self._curv_std
+        metadata = dict(case.metadata)
+        metadata["surface_curvature"] = torch.from_numpy(
+            np.ascontiguousarray(curv_norm.astype(np.float32))
+        )
+        metadata["surface_curvature_dim"] = int(CURVATURE_DIM)
+        return DrivAerMLCase(
+            case_id=case.case_id,
+            surface_x=case.surface_x,
+            surface_y=case.surface_y,
+            volume_x=case.volume_x,
+            volume_y=case.volume_y,
+            metadata=metadata,
+        )
+
+
+def curvature_pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
+    """Variant of ``pad_collate`` that also pads and attaches surface curvature.
+
+    The curvature tensor is attached as a new ``surface_curvature`` attribute on
+    the returned ``SurfaceBatch`` (the dataclass is not frozen, so attribute
+    assignment works). Padded rows are zero — which is the post-normalisation
+    "neutral" value because the dataset mean is subtracted.
+    """
+
+    batch = pad_collate(samples)
+    if not samples or "surface_curvature" not in samples[0].metadata:
+        return batch
+    batch_size = len(samples)
+    max_surface_n = batch.surface_x.shape[1]
+    curv_dim = int(samples[0].metadata.get("surface_curvature_dim", CURVATURE_DIM))
+    curvature = torch.zeros(batch_size, max_surface_n, curv_dim, dtype=torch.float32)
+    for i, sample in enumerate(samples):
+        c = sample.metadata["surface_curvature"]
+        n = c.shape[0]
+        curvature[i, :n] = c
+    setattr(batch, "surface_curvature", curvature)
+    return batch
+
+
 def loader_kwargs(config) -> dict[str, object]:
     num_workers = resolve_num_workers(config)
+    use_curvature = getattr(config, "use_curvature_attention_bias", False)
     kwargs: dict[str, object] = {
-        "collate_fn": pad_collate,
+        "collate_fn": curvature_pad_collate if use_curvature else pad_collate,
         "num_workers": num_workers,
         "pin_memory": config.pin_memory and torch.cuda.is_available(),
     }
@@ -274,6 +407,12 @@ def full_eval_loaders_from(
     }
 
 
+def _swap_dataset_store(ds, store: DrivAerMLCaseStore) -> None:
+    """Replace the case store on a ``DrivAerMLSurfaceDataset`` in place."""
+
+    ds.store = store
+
+
 def make_loaders(
     config,
     distributed_state: DistributedState | None = None,
@@ -287,6 +426,18 @@ def make_loaders(
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
     )
+    if getattr(config, "use_curvature_attention_bias", False):
+        curv_stats = load_curvature_stats()
+        curv_store = CurvatureAugmentedCaseStore(
+            manifest_path=config.manifest,
+            root=config.data_root or None,
+            stats=curv_stats,
+        )
+        _swap_dataset_store(train_ds, curv_store)
+        for ds in val_splits.values():
+            _swap_dataset_store(ds, curv_store)
+        for ds in test_splits.values():
+            _swap_dataset_store(ds, curv_store)
     train_sampler = None
     train_shuffle = True
     if distributed_state is not None and distributed_state.enabled:
@@ -927,17 +1078,24 @@ def accumulate_eval_batch(
     device: torch.device,
     amp_mode: str,
 ) -> None:
+    surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
+    if surface_curvature is not None:
+        surface_curvature = surface_curvature.to(device)
+        setattr(batch, "surface_curvature", surface_curvature)
     surface_target_norm = transform.apply_surface(batch.surface_y)
     volume_target_norm = transform.apply_volume(batch.volume_y)
     eval_module = unwrap_model(model)
+    forward_kwargs: dict[str, torch.Tensor] = dict(
+        surface_x=batch.surface_x,
+        surface_mask=batch.surface_mask,
+        volume_x=batch.volume_x,
+        volume_mask=batch.volume_mask,
+    )
+    if surface_curvature is not None:
+        forward_kwargs["surface_curvature"] = surface_curvature
     with autocast_context(device, amp_mode):
-        out = eval_module(
-            surface_x=batch.surface_x,
-            surface_mask=batch.surface_mask,
-            volume_x=batch.volume_x,
-            volume_mask=batch.volume_mask,
-        )
+        out = eval_module(**forward_kwargs)
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
