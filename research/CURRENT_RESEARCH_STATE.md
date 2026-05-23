@@ -1,9 +1,43 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~08:55 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~16:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🟢 ~16:55Z (2026-05-23) — Fleet refresh: **H107 thorfinn emerges as NON-COMPOUND COHORT LEADER at step 52,528 (val_abupt 6.254%, +0.128pp from gate), self-context-residual the strongest single-mechanism of Wave 33+34** in flight; H110 tanjiro compound holds 6.309% at step 43,466 still strong A WIN candidate; H106 frieren COST-EFFICIENCY LEADER at +2.5K params landing 6.327% (parity within +0.073pp of H107 at 105× the cost); H113 fern restart healthy (initial 8-rank crash recovered, run `v5m2w16v` at step 5,459+ with log_sigma_sq drifting textbook-correctly: sp=−0.025 < vp=−0.018 < wss=−0.018, SP getting highest precision weight as predicted)
+
+**Live fleet leaderboard at most recent publishes (8/8 RUNNING, zero idle):**
+
+| Rank | Run | val_abupt% | step | Δ Params | Slope last interval (pp/1k) |
+|---:|---|---:|---:|---:|---:|
+| **1** | **H107 thorfinn** (self-context residual) | **6.254%** | 52,528 | +262K | −0.064 strong |
+| 2 | H110 tanjiro compound (H102+H101) | 6.309% | 43,466 | +268K | −0.018 decelerating |
+| 3 | H108 nezuko (parallel-MLP residual) | 6.324% | 48,902 | +265K | TBD |
+| 4 | H106 frieren (volume-info residual) | 6.327% | 52,528 | +2.5K | −0.044 moderate |
+| 5 | H109 alphonse (encoder-skip residual) | 6.431% | 43,466 | +263K | TBD |
+| 6 | H112 edward (DropPath stochastic) | 6.598% | 38,030 | 0 | TBD |
+| 7 | H111 askeladd (LayerScale γ) | 6.651% | 38,030 | +5K | TBD |
+| 8 | H113 fern (heteroscedastic loss) | pre-EP1 | 5,459 | +3 | n/a |
+
+**Critical new findings since last update:**
+- **H107 self-context-residual is the BEST NON-COMPOUND single mechanism of Wave 33+34** at 6.254%, only +0.128pp from val gate; A WIN possible if late-cosine slope sustains
+- **H106 cost-efficiency story HARDENING**: +2.5K params delivers within +0.073pp of H107 +262K — **105× cost-efficiency advantage**, becoming candidate for permanent infrastructure regardless of A/B/C verdict
+- **H110 compound slope decelerating** (−0.018pp/1k from 38,030→43,466 vs H110's earlier −0.057pp/1k from 32,594→38,030): compound additivity hypothesis weakening in late cosine; still in A WIN consideration but margin shrinking
+- **H113 LOSS REFORMULATION CONFIRMED ENGAGING**: log_sigma_sq drifts in textbook Kendall&Gal direction (lowest sigma → highest precision weight on SP, the lowest-noise task). Mechanism is doing its job at 10% training completion. First Plateau Protocol experiment now live and healthy
+- **Initial H113 crash diagnosed via restart**: full-8-rank crash at runtime 0.01h (likely DDP parameter registration or numerical-instability at exp(-log_sigma_sq) init), fern handled recovery, run is now stable
+
+**Strategic implications:**
+- If H107 lands terminal <6.20% (gate clear or near-miss), Wave 35 should COMPOUND H107 + H102 (width+self-context) and H107 + H106 (self-context + volume-info)
+- H106 cost-efficiency advantage suggests Wave 35 should explore COMPACT-INFO RESIDUAL family: panel_area-residual, geom-feature-residual, normal-curvature-residual
+- H113 outcome at EP1 will reveal whether loss-balancing is the bottleneck; if SP precision weight grows AND SP loss drops faster than baseline, the SP plateau was undertrained (not Bayes-optimal)
+
+**Check-ins posted this loop:**
+- #1276 H106 check-in #4 (step 52,528 publish, cost-efficiency leader, B PARTIAL test_VP cross probable)
+- #1277 H107 check-in #4 (cohort LEADER, +0.128pp from gate, A WIN candidate)
+- #1285 H113 check-in #1 (post-restart, log_sigma_sq engaging textbook-correctly)
+
+---
 
 ## 🟡 ~16:30Z (2026-05-23) — H105 CLOSED **B PARTIAL** via single test_VP floor cross (−0.109pp); val gate MISS +0.223pp; **14th SP plateau confirmation** (Bayes-optimal hypothesis CRITICAL); **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER** by +0.127pp val_abupt; INFO-AT-DECODER mechanism class verdict: positions > normals > depth, diminishing returns + fern reassigned **H113 HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING** (PR pending) **STRATEGY TIER SHIFT TO LOSS REFORMULATION** per Plateau Protocol; Kendall & Gal 2018 learnable per-channel log_sigma in multi-task loss, +5 params, identity-at-init; tests "is SP plateau undertrained or Bayes-optimal?"
 
