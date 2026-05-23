@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_wss_z_dedicated_head: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,13 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_wss_z_dedicated_head": (
+            "Dedicate a separate 2-layer MLP head to the tau_z output "
+            "channel (PR #1265 / H100). Splits the shared 4-channel "
+            "self.surface_out into surface_main_out (cp, tau_x, tau_y) "
+            "and surface_wss_z_out (tau_z) and concatenates them back to "
+            "the [B, N, 4] downstream contract. Adds ~262K params."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +316,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_wss_z_dedicated_head=config.use_wss_z_dedicated_head,
     )
 
 
