@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_geom_residual_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_geom_residual_decoder = use_geom_residual_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,19 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # H101: zero-init geometric residual projection from raw xyz position
+        # into n_hidden, added to surface_hidden before surface_out. Identity
+        # at init (zero residual). During training, the decoder learns to
+        # recover spatial discrimination lost in the 128-slice bottleneck.
+        if use_geom_residual_decoder:
+            self.geom_residual_proj = nn.Linear(space_dim, n_hidden)
+            nn.init.zeros_(self.geom_residual_proj.weight)
+            nn.init.zeros_(self.geom_residual_proj.bias)
+            self.geom_residual_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        else:
+            self.geom_residual_proj = None
+            self.geom_residual_norm = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -622,6 +637,12 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
+            if self.use_geom_residual_decoder:
+                surface_xyz = surface_x[..., : self.space_dim]
+                geom_residual = self.geom_residual_proj(surface_xyz)
+                geom_residual = _apply_token_mask(geom_residual, surface_mask)
+                surface_hidden = self.geom_residual_norm(surface_hidden + geom_residual)
+                surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]

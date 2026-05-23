@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_geom_residual_decoder: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_geom_residual_decoder": (
+            "Enable zero-init geometric residual projection at the surface "
+            "decoder (H101). Adds a Linear(3, n_hidden) projection from raw "
+            "surface xyz positions, applied as a residual to surface_hidden "
+            "before surface_out, followed by LayerNorm. Both weight and bias "
+            "are zero-initialised so the residual is identity at init. "
+            "Restores fine-grained spatial discrimination lost in the "
+            "slice-attention bottleneck (128 slices for ~10^6 surface points). "
+            "Adds ~1.5K params (3*n_hidden + n_hidden + 2*n_hidden LayerNorm)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +319,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_geom_residual_decoder=config.use_geom_residual_decoder,
     )
 
 
@@ -748,6 +760,17 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())
+        if config.use_geom_residual_decoder and state.is_main:
+            proj = model.geom_residual_proj
+            w_norm = float(proj.weight.detach().float().norm().item())
+            b_norm = float(proj.bias.detach().float().norm().item())
+            geom_params = sum(p.numel() for p in proj.parameters()) + sum(
+                p.numel() for p in model.geom_residual_norm.parameters()
+            )
+            print(
+                f"H101 geom_residual_proj at init: weight_norm={w_norm:.6e} "
+                f"bias_norm={b_norm:.6e} extra_params={geom_params}"
+            )
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
         surface_channel_weights = torch.tensor(
@@ -773,7 +796,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            if config.use_surf_to_vol_xattn or config.use_geom_residual_decoder:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
@@ -1321,6 +1344,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         total_minutes = (time.time() - train_start) / 60.0
         if state.is_main:
             print(f"\nTraining done in {total_minutes:.1f} min")
+            if config.use_geom_residual_decoder:
+                proj = base_model.geom_residual_proj
+                w_norm = float(proj.weight.detach().float().norm().item())
+                b_norm = float(proj.bias.detach().float().norm().item())
+                print(
+                    f"H101 geom_residual_proj at end: weight_norm={w_norm:.6e} "
+                    f"bias_norm={b_norm:.6e}"
+                )
+                wandb.summary.update(
+                    {
+                        "geom_residual_proj/weight_norm_end": w_norm,
+                        "geom_residual_proj/bias_norm_end": b_norm,
+                    }
+                )
 
         if early_stop_reason is not None:
             wandb.summary.update(
