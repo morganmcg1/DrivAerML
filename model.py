@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_normal_residual_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_normal_residual_decoder = use_normal_residual_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,21 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Wave 33 H105: zero-init Linear(3, n_hidden) projection of raw
+        # surface normals (surface_x[..., 3:6]) added as a residual to
+        # surface_hidden BEFORE self.surface_out. Identity at init so
+        # baseline is preserved at step 0; model learns to inject explicit
+        # normal information directly at the decoder during training.
+        # Mirror of H101 (positions) with WSS-physics-direct content:
+        # tau = mu (du_tangential / dn), so n is the differential operator
+        # argument.
+        if use_normal_residual_decoder:
+            self.normal_residual_proj = nn.Linear(3, n_hidden, bias=True)
+            nn.init.zeros_(self.normal_residual_proj.weight)
+            nn.init.zeros_(self.normal_residual_proj.bias)
+        else:
+            self.normal_residual_proj = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -622,6 +639,15 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
+            # Wave 33 H105: inject raw surface normals as zero-init residual
+            # at decoder input. Identity at step 0; model learns to use
+            # explicit normal info bypassing slice-attention compression
+            # bottleneck. Surface mask is applied to surface_preds below,
+            # so masked-out points have no downstream effect.
+            if self.normal_residual_proj is not None and surface_x.shape[1] > 0:
+                surface_hidden = surface_hidden + self.normal_residual_proj(
+                    surface_x[..., 3:6]
+                )
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
