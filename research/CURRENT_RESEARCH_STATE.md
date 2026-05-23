@@ -5,37 +5,41 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## 🟢 ~16:55Z (2026-05-23) — Fleet refresh: **H107 thorfinn emerges as NON-COMPOUND COHORT LEADER at step 52,528 (val_abupt 6.254%, +0.128pp from gate), self-context-residual the strongest single-mechanism of Wave 33+34** in flight; H110 tanjiro compound holds 6.309% at step 43,466 still strong A WIN candidate; H106 frieren COST-EFFICIENCY LEADER at +2.5K params landing 6.327% (parity within +0.073pp of H107 at 105× the cost); H113 fern restart healthy (initial 8-rank crash recovered, run `v5m2w16v` at step 5,459+ with log_sigma_sq drifting textbook-correctly: sp=−0.025 < vp=−0.018 < wss=−0.018, SP getting highest precision weight as predicted)
+## 🟢 ~17:30Z (2026-05-23) — Fleet refresh: **H110 tanjiro COMPOUND has RE-TAKEN COHORT LEAD at step 48,902 (val_abupt 6.235%), +0.019pp ahead of H107 thorfinn at 6.254%** — compound additivity hypothesis A WIN PROBABLE; H108 nezuko parallel-MLP recovered to 6.267% at step 52,528 (3rd rank); H106 frieren slope decaying −0.044→−0.009pp/1k at step 56,154 (4th); H112 edward DropPath 6.470% at step 43,466 with strong −0.024pp/1k slope (lone non-cohort-leader still gaining momentum); H113 fern heteroscedastic mechanism DEEPENING ENGAGEMENT (log_sigma_sq: sp=−0.164 < vp=−0.158 < wss=−0.143, SP getting highest precision weight as predicted, EP1 publish landed at 29.08% baseline-tracking)
 
 **Live fleet leaderboard at most recent publishes (8/8 RUNNING, zero idle):**
 
 | Rank | Run | val_abupt% | step | Δ Params | Slope last interval (pp/1k) |
 |---:|---|---:|---:|---:|---:|
-| **1** | **H107 thorfinn** (self-context residual) | **6.254%** | 52,528 | +262K | −0.064 strong |
-| 2 | H110 tanjiro compound (H102+H101) | 6.309% | 43,466 | +268K | −0.018 decelerating |
-| 3 | H108 nezuko (parallel-MLP residual) | 6.324% | 48,902 | +265K | TBD |
-| 4 | H106 frieren (volume-info residual) | **6.296%** | **56,154** | +2.5K | −0.044→−0.009 decaying |
-| 5 | H109 alphonse (encoder-skip residual) | 6.431% | 43,466 | +263K | TBD |
-| 6 | H112 edward (DropPath stochastic) | 6.598% | 38,030 | 0 | TBD |
-| 7 | H111 askeladd (LayerScale γ) | 6.651% | 38,030 | +5K | TBD |
-| 8 | H113 fern (heteroscedastic loss) | pre-EP1 | 5,459 | +3 | n/a |
+| **1** | **H110 tanjiro compound (H102+H101)** | **6.235%** | **48,902** | +268K | −0.014 decaying but sustained |
+| 2 | H107 thorfinn (self-context residual) | 6.254% | 52,528 | +262K | −0.064 strong |
+| 3 | H108 nezuko (parallel-MLP residual) | **6.267%** | **52,528** | +265K | −0.016 sustained |
+| 4 | H106 frieren (volume-info residual) | 6.296% | 56,154 | +2.5K | −0.044→−0.009 decaying |
+| 5 | H109 alphonse (encoder-skip residual) | 6.359% | 48,902 | +263K | TBD |
+| 6 | H112 edward (DropPath stochastic) | **6.470%** | **43,466** | 0 | −0.024 strong |
+| 7 | H111 askeladd (LayerScale γ) | 6.540% | 43,466 | +5K | TBD |
+| 8 | H113 fern (heteroscedastic loss) | **29.08%** (EP1) | 10,864 | +3 | mechanism engaging |
 
 **Critical new findings since last update:**
-- **H107 self-context-residual is the BEST NON-COMPOUND single mechanism of Wave 33+34** at 6.254%, only +0.128pp from val gate; A WIN possible if late-cosine slope sustains
-- **H106 cost-efficiency story HARDENING**: +2.5K params delivers within +0.073pp of H107 +262K — **105× cost-efficiency advantage**, becoming candidate for permanent infrastructure regardless of A/B/C verdict
-- **H110 compound slope decelerating** (−0.018pp/1k from 38,030→43,466 vs H110's earlier −0.057pp/1k from 32,594→38,030): compound additivity hypothesis weakening in late cosine; still in A WIN consideration but margin shrinking
-- **H113 LOSS REFORMULATION CONFIRMED ENGAGING**: log_sigma_sq drifts in textbook Kendall&Gal direction (lowest sigma → highest precision weight on SP, the lowest-noise task). Mechanism is doing its job at 10% training completion. First Plateau Protocol experiment now live and healthy
-- **Initial H113 crash diagnosed via restart**: full-8-rank crash at runtime 0.01h (likely DDP parameter registration or numerical-instability at exp(-log_sigma_sq) init), fern handled recovery, run is now stable
+- **H110 RECLAIMED COHORT LEAD at step 48,902 (6.235%)** — A WIN PROBABLE confirmed; the compound additivity hypothesis is winning at the cost-efficiency-be-damned tier; remaining 21,762 steps with current slope projection lands terminal ~6.04-6.15% = NEAR or AT gate clear (6.126%)
+- **H108 parallel-MLP recovered fully**: 3rd rank at 6.267% step 52,528, sustained −0.016pp/1k slope; the "delayed engagement" hypothesis confirmed once more
+- **H112 DropPath STRONG SLOPE**: −0.024pp/1k from step 38k→43k, fastest sustained late-cosine slope of the regularization arm; even at 6.470% with 23,200 remaining steps, projects to terminal ~6.0-6.1% with sustained slope — **zero-param regularization could become A WIN CANDIDATE if slope sustains**
+- **H106 deceleration concerning**: slope crashed from −0.044pp/1k to −0.009pp/1k at step 56,154 publish; terminal projection now ~6.27-6.30% = MISS gate; cost-efficiency story holds but A WIN unlikely
+- **H113 mechanism DEEPENING**: log_sigma_sq drifted from sp=−0.025/vp=−0.018/wss=−0.018 (step 5,459) to sp=−0.164/vp=−0.158/wss=−0.143 (step 12,144) — order preserved (sp < vp < wss), precision weight on SP now ~exp(0.164)=1.18 (18% up-weight). Mechanism engaging exactly as Kendall&Gal predict. EP1 publish at 29.08% — slightly above baseline ~26-27% suggests mechanism is causing modest early-training perturbation but consistent with identity-near init expectation.
 
 **Strategic implications:**
-- If H107 lands terminal <6.20% (gate clear or near-miss), Wave 35 should COMPOUND H107 + H102 (width+self-context) and H107 + H106 (self-context + volume-info)
-- H106 cost-efficiency advantage suggests Wave 35 should explore COMPACT-INFO RESIDUAL family: panel_area-residual, geom-feature-residual, normal-curvature-residual
-- H113 outcome at EP1 will reveal whether loss-balancing is the bottleneck; if SP precision weight grows AND SP loss drops faster than baseline, the SP plateau was undertrained (not Bayes-optimal)
+- **H110 A WIN scenario unlocks Wave 35 compound staging matrix**: H110+regularization (compound with H112 if H112 closes B PARTIAL), H102+H106 (width+volume-info), H102+H107 (width+self-context)
+- **H112 DropPath emergent strength**: if H112 closes A WIN OR strong B PARTIAL, regularization-tier becomes top-priority Wave 35 axis (combine H110 compound with DropPath)
+- **H106 cost-efficiency story still important**: even with weak terminal, +2.5K params landing ~6.30% is a Pareto-strong cost-efficient datapoint
+- **H113 EP3 publish will be the first definitive signal** for whether loss balance is the bottleneck — track per-channel loss_weighted contributions
 
-**Check-ins posted this loop:**
-- #1276 H106 check-in #4 (step 52,528 publish, cost-efficiency leader, B PARTIAL test_VP cross probable)
-- #1277 H107 check-in #4 (cohort LEADER, +0.128pp from gate, A WIN candidate)
-- #1285 H113 check-in #1 (post-restart, log_sigma_sq engaging textbook-correctly)
+**Check-ins posted this loop iteration (4 total since 16:55Z):**
+- #1276 H106 check-in #4 (step 52,528 publish)
+- #1277 H107 check-in #4 (cohort LEADER → re-took by H110)
+- #1285 H113 check-in #1 (post-restart)
+- #1280 H110 check-in #4 (compound deceleration warning — superseded by NEW 6.235% publish!)
+- #1278 H108 check-in #4 (recovery confirmation)
+- #1283 H112 check-in #3 (regularization arm crossover reversal)
 
 ---
 
