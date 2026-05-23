@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_surface_out_parallel_mlp_residual: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_surface_out_parallel_mlp_residual": (
+            "Wave 33 H108: add a zero-init parallel 2-layer MLP "
+            "(Linear(n_hidden, n_hidden) -> SiLU -> Linear(n_hidden, "
+            "surface_output_dim)) that runs in parallel to self.surface_out "
+            "and is summed as a residual contribution. Output linear is "
+            "zero-init so identity at step 0; ~265K params matched to "
+            "H102 width 1x->2x. NEW mechanism class: DECODER ENSEMBLE / "
+            "PARALLEL DIVERSITY -- tests whether two independently-trained "
+            "decoder paths summed beat a single wider decoder at matched "
+            "cost (functional diversity vs representational capacity)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +320,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_surface_out_parallel_mlp_residual=config.use_surface_out_parallel_mlp_residual,
     )
 
 
@@ -773,7 +786,12 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # H108 surface_out_parallel_mlp is gated on surface_hidden being
+            # non-empty (N_S > 0); volume-only views (N_S = 0) skip the
+            # parallel-MLP residual, leaving its params with no gradient
+            # on those ranks. Same DDP unused-param hazard as the surf->vol
+            # xattn above, so the same find_unused_parameters fix applies.
+            if config.use_surf_to_vol_xattn or config.use_surface_out_parallel_mlp_residual:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

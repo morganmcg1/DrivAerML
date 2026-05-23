@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_surface_out_parallel_mlp_residual: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_surface_out_parallel_mlp_residual = use_surface_out_parallel_mlp_residual
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,35 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Wave 33 H108: parallel 2-layer MLP residual on the surface decoder
+        # output. NEW mechanism class: DECODER ENSEMBLE / PARALLEL DIVERSITY.
+        # A second independently-initialized Linear(n_hidden, n_hidden) ->
+        # SiLU -> Linear(n_hidden, surface_output_dim) MLP runs in parallel
+        # to self.surface_out and is summed as a residual contribution.
+        # The output linear is zero-init so the residual is exactly zero
+        # at step 0 (identity preservation); the model learns to use
+        # ensemble-style decoder diversity from warmup onward.
+        #
+        # Contrast with H102 (LEADER, surface_out width 1x->2x) which widens
+        # the SAME MLP path. H108 keeps both paths at original width and
+        # adds a SECOND complete path -- tests whether functional diversity
+        # (two independent function approximators summed) beats capacity
+        # (single wider function approximator) at matched ~265K param cost.
+        if use_surface_out_parallel_mlp_residual:
+            self.surface_out_parallel_mlp = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden),
+                nn.SiLU(),
+                nn.Linear(n_hidden, self.surface_output_dim),
+            )
+            # Normal init for the first linear (matching surface_out's init
+            # pattern), then zero-init the OUTPUT linear so the residual
+            # contribution is exactly zero at step 0 (identity preservation).
+            self.surface_out_parallel_mlp.apply(_init_linear)
+            nn.init.zeros_(self.surface_out_parallel_mlp[-1].weight)
+            nn.init.zeros_(self.surface_out_parallel_mlp[-1].bias)
+        else:
+            self.surface_out_parallel_mlp = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -622,7 +653,18 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            # Wave 33 H108: add parallel-MLP residual. Zero at step 0
+            # (identity preservation); learns a diverse second decoder
+            # mapping during training. Gated on surface_hidden being
+            # non-empty so volume-only views (N_S = 0) skip the residual;
+            # DDP find_unused_parameters handles that case from train.py.
+            if (
+                self.surface_out_parallel_mlp is not None
+                and surface_hidden.shape[1] > 0
+            ):
+                surface_preds = surface_preds + self.surface_out_parallel_mlp(surface_hidden)
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
