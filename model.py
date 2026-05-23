@@ -382,6 +382,8 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        surface_out_width_factor: float = 1.0,
+        use_geom_residual_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +398,8 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.surface_out_width_factor = surface_out_width_factor
+        self.use_geom_residual_decoder = use_geom_residual_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -481,10 +485,14 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
+            # Wave 34 H110 (H102 mechanism): widen surface_out hidden by factor.
+            # factor=1.0 is byte-identical to canonical; factor=2.0 doubles
+            # the hidden dim to 1024 (matching H102 closed B PARTIAL).
+            surf_hidden_width = int(round(n_hidden * surface_out_width_factor))
             self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
+                nn.Linear(n_hidden, surf_hidden_width),
                 nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
+                nn.Linear(surf_hidden_width, self.surface_output_dim),
             )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
@@ -518,6 +526,20 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
+
+        # Wave 34 H110 (H101 mechanism): zero-init geometric residual projection
+        # from raw xyz position into n_hidden, added to surface_hidden before
+        # surface_out, followed by LayerNorm. Identity at init (zero residual).
+        # Restores fine-grained spatial discrimination lost in the 128-slice
+        # attention bottleneck. Closed B PARTIAL in PR #1266 (nezuko).
+        if use_geom_residual_decoder:
+            self.geom_residual_proj = nn.Linear(space_dim, n_hidden)
+            nn.init.zeros_(self.geom_residual_proj.weight)
+            nn.init.zeros_(self.geom_residual_proj.bias)
+            self.geom_residual_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        else:
+            self.geom_residual_proj = None
+            self.geom_residual_norm = None
 
     def _encode_group(
         self,
@@ -622,6 +644,15 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
+            # Wave 34 H110 (H101 mechanism): zero-init geom residual from raw
+            # xyz positions, applied to surface_hidden then post-fusion LayerNorm.
+            # Mirrors PR #1266 (nezuko H101 closure) exactly.
+            if self.use_geom_residual_decoder:
+                surface_xyz = surface_x[..., : self.space_dim]
+                geom_residual = self.geom_residual_proj(surface_xyz)
+                geom_residual = _apply_token_mask(geom_residual, surface_mask)
+                surface_hidden = self.geom_residual_norm(surface_hidden + geom_residual)
+                surface_hidden = _apply_token_mask(surface_hidden, surface_mask)
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
