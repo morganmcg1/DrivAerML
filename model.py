@@ -381,6 +381,7 @@ class SurfaceTransolver(nn.Module):
         pos_encoding_mode: str = "sincos",
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
+        use_deeper_surface_mlp: bool = False,
         use_aux_decoder_heads: bool = True,
     ):
         super().__init__()
@@ -395,6 +396,7 @@ class SurfaceTransolver(nn.Module):
         self.pos_encoding_mode = pos_encoding_mode
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
+        self.use_deeper_surface_mlp = use_deeper_surface_mlp
         self.use_aux_decoder_heads = use_aux_decoder_heads
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
@@ -481,11 +483,21 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
+            # H99: optional 3-layer surface_out mirroring volume_out depth.
+            if use_deeper_surface_mlp:
+                self.surface_out = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, n_hidden // 2),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden // 2, self.surface_output_dim),
+                )
+            else:
+                self.surface_out = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, self.surface_output_dim),
+                )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),
