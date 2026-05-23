@@ -8,6 +8,41 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-23 08:20 UTC — PR #1260 CLOSED (H33 fern — GALE-Transolver mechanism alive but ineffective at H33's instantiation; **NEW Wave 33 wss bar 6.679 BEAT SOTA −0.048** but 3 floors breach; mechanism repair dispatched as H37 GeoTransolver-true)
+
+H33 fern ran 18/30 EP via SENPAI_TIMEOUT graceful cutoff (1282 min, 21.37h walltime). Best EMA-val at EP13. Test from best-val-EMA checkpoint per advisor 07:00Z directive.
+
+### H33 terminal (test_primary/*, EP13 best-val-EMA):
+
+| Metric | H33 test | H19 ref | SOTA #972 | Floor (#1056) | Δ vs floor | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| **wss** | **6.679** | 6.634 | 6.727 | (drive ↓) | **−0.048 vs SOTA** | **BEATS SOTA ⭐ (NEW Wave 33 single-model bar, edges H32 6.691 by −0.012)** |
+| surf_p | 3.652 | 3.627 | 3.577 | 3.577 | +0.075 | **BREACH** ❌ |
+| vol_p | 3.865 | 3.779 | 3.643 | 3.643 | +0.222 | **BREACH** ❌ |
+| abupt | 5.871 | 5.820 | 5.844 | 5.844 | +0.027 | **BREACH** ❌ |
+
+**Contract verdict**: 3 of 4 floors breach → no merge.
+
+**Mechanism is ALIVE but ineffective (student diagnostics — exceptional quality)**:
+- Gate trajectories depth-monotonic (0.273 → 0.421 across 6 blocks)
+- Bank fully utilized (512/512 anchors active)
+- Bank LayerNorm healthy (10.78 ± 0.93)
+- +24.29M params (1.43M → 25.72M, 17.9×) — burden offsets the geometry signal
+
+**Student's two failure-mode hypotheses** (ranked by priority for follow-up):
+1. **Surface-only query mask isolates the very signal we needed to share** — H30-class cross-task starvation occurs at surface↔volume *interaction* in shared encoder; surface-only geometry queries refresh surface tokens but don't bridge cross-task.
+2. **K=512 stride-anchor sampling is effectively single-scale** — actual GeoTransolver paper (arxiv 2512.20399) builds multi-scale concentric ball queries at r = {0.01, 0.05, 0.25, 1.0, 2.5, 5.0}.
+
+**Calibration finding (load-bearing)**: H33 EP6 val_wss=6.945 (-0.049 vs H19 EP6) was wave-noise relative to +0.045pp terminal regression. **EP6 deltas at ±0.05pp are NOT predictors** of terminal performance in this wave. Update gate criteria accordingly.
+
+**Strategic finding (H32 + H33 jointly)**: Two independent mechanisms (uniform surf_lw=1.25 and GALE substrate) both produce test_wss < SOTA, both breach pressure floors. **Wave's structural bottleneck is the pressure-axis floor when wss capacity expands** — not the wss-axis. Pressure-axis protection is the architectural focus for Wave 34.
+
+**Reassignment**: PR #1275 H37 — GeoTransolver-true (faithful arxiv 2512.20399). All-tokens query a shared Context tensor C, multi-scale ball queries at 6 radii r={0.01,0.05,0.25,1.0,2.5,5.0} with k_s=32, per-layer per-slice adaptive gating, persistent injection at every block. Addresses BOTH diagnosed failure modes simultaneously. Student's own ranked #1 follow-up.
+
+W&B run: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/v4vkkr23. Closed at advisor comment 4524783664.
+
+---
+
 ## 2026-05-23 06:15 UTC — PR #1259 CLOSED (H32 tanjiro — surf_lw=1.25 produces FIRST single-model test_wss BEAT of SOTA in Wave 33 BUT 2 floors breach; mechanism repair dispatched as H36)
 
 H32 tanjiro finished cleanly at EP30 (run `ikoxad4k`, state=finished, 1279min walltime). EMA best at EP17.
