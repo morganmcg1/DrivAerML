@@ -14,7 +14,7 @@
 | **1** | **H107 thorfinn** (self-context residual) | **6.254%** | 52,528 | +262K | −0.064 strong |
 | 2 | H110 tanjiro compound (H102+H101) | 6.309% | 43,466 | +268K | −0.018 decelerating |
 | 3 | H108 nezuko (parallel-MLP residual) | 6.324% | 48,902 | +265K | TBD |
-| 4 | H106 frieren (volume-info residual) | 6.327% | 52,528 | +2.5K | −0.044 moderate |
+| 4 | H106 frieren (volume-info residual) | **6.296%** | **56,154** | +2.5K | −0.044→−0.009 decaying |
 | 5 | H109 alphonse (encoder-skip residual) | 6.431% | 43,466 | +263K | TBD |
 | 6 | H112 edward (DropPath stochastic) | 6.598% | 38,030 | 0 | TBD |
 | 7 | H111 askeladd (LayerScale γ) | 6.651% | 38,030 | +5K | TBD |
