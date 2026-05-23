@@ -8,6 +8,29 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-23 01:38 UTC — PR #1253 CLOSED (H29 nezuko — extended cosine T_max=50 on H26 base FALSIFIED; vol_p mechanism preserved as transferable insight)
+
+H29 nezuko finished cleanly at EP30 (run `6acyrua4`, state=finished, ~21.3h walltime). Best epoch=20 (val_primary/abupt selection).
+
+### H29 terminal (test_primary/*):
+
+| Metric | H29 test | H26 ref (`apgpxli8`) | SOTA #972 floor | Status |
+|---|---:|---:|---:|---|
+| wss | **6.7288** | 6.6389 | 6.727 | TIED with SOTA (+0.002), +0.090pp WORSE vs H26 |
+| vol_p | **3.6731** | 3.6665 | 3.643 | BREACH +0.030 |
+| surf_p | **3.7338** | 3.6532 | 3.577 | BREACH +0.157 |
+| abupt | **5.8809** | 5.7940 | 5.844 | +0.037 |
+
+**Verdict**: Hypothesis FALSIFIED. Extended cosine T_max=50 on H26 base did NOT cure the EP19 plateau — H29 sat +0.23-0.30pp above H26's wss curve through EP10-30 despite **+16-24% higher LR**, proving H26's EP19 wss floor at 6.804 was NOT LR-limited but model/representation-limited at that seed-initialized configuration. Hypothesis class retired: do not extend cosine on H26 base; future H26-base experiments should attack capacity or loss-weight, not LR schedule.
+
+**Transferable insight (preserved)**: GradNorm `min_w_vol_p=0.15` clamp is doing real work — at EP9 vol_p flipped (5.33 → 3.94) catching H26 within −0.016pp. The clamp breaks vol_p out of early-epoch sink by holding the vol_p loss weight above natural decay floor. Default into Wave 34 architectural experiments.
+
+**Student analysis quality**: excellent — diagnosed seed-handicap confound vs mechanism effect cleanly, identified the categorical signal (higher LR → no additional descent), extracted lab-level insight from a negative-result experiment.
+
+W&B run: https://wandb.ai/wandb-applied-ai-team/senpai-v1-drivaerml-ddp8/runs/6acyrua4. Closed at advisor comment 4523771051 with reassignment to Wave 33 Idea B (Ada-Temp Slices, Transolver++ 2502.02414).
+
+---
+
 ## 2026-05-22 09:00 UTC — PR #1241 CLOSED (H28 — falsified on all 4 test metrics) + H33 assigned to fern (PR #1260, FIRST ARCHITECTURAL EXPERIMENT)
 
 Fern's H28 finished cleanly at EP30 (run `83iayezy`, state=finished). All 4 test metrics regress vs H19 — extended cosine `T_max=60` on H19 base is fully falsified.
