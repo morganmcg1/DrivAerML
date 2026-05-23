@@ -1,3 +1,68 @@
+## 2026-05-23 ~01:30 — PR #1261: H96 WSS-DEDICATED-DECODER-HEAD (fern, CLOSED) — **D NEGATIVE**
+
+- **Branch**: `fern/h96-wss-dedicated-decoder-head` (closed at ~01:30Z 2026-05-23)
+- **W&B run**: `lw1591cw` (rank 0), terminal at step 70,666 / 70,664 = 100%, runtime 14.40h (843.8 min training + ~24 min eval + test).
+- **Hypothesis**: Split the shared `surface_out` 2-layer MLP into two parallel decoder heads — one for surface_pressure (1 channel) and one for wall_shear_stress (3 channels). Each gets its own dedicated 2-layer MLP trunk, separating SP and WSS representations. +263K params (17.40M → 17.68M total).
+
+### Terminal results
+
+| Channel | Validation (EP13 best EMA) | Test | Canonical (test) | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.2840%** | **6.0721%** | 5.844% | **+0.228pp regress** |
+| surface_pressure | 4.1371% | 3.8514% | 3.5957% | +0.256pp regress (plateau) |
+| volume_pressure | 3.6955% | 3.6417% | 3.643% (floor) | −0.001pp (ties floor, within numerical noise) |
+| wall_shear | 7.1176% | 6.9971% | 6.727% (goal) | **+0.270pp regress** |
+| wall_shear_x | 6.2141% | 6.2243% | 5.975% | +0.249pp regress |
+| wall_shear_y | 7.7694% | 7.5938% | 7.274% | +0.320pp regress |
+| wall_shear_z | 9.6041% | 9.0492% | 8.753% (binding) | +0.296pp regress |
+
+- Gate: val_abupt 6.284% **MISS** gate 6.126 by +0.158pp.
+- Test floors: NONE crossed (test_VP −0.001pp ties floor within numerical noise; SP/WSS regress).
+
+### Verdict: D NEGATIVE
+Both D NEGATIVE conditions met:
+1. val_abupt 6.284% > 6.20% threshold.
+2. test_WSS +0.270pp regress > +0.10pp threshold on target axis.
+
+### Mechanism reading
+
+Per-head loss decomposition at terminal (step 70,652):
+| Loss term | Value | Share of surface_loss | Slope (pp/1k steps) |
+|---|---:|---:|---:|
+| train/surface_loss_cp | 6.78e−4 | ~27% | −3.59e−6 |
+| train/surface_loss_wss | 1.87e−3 | ~73% | −3.86e−5 |
+
+WSS-head contribution dominates surface loss 2.75× (3-channel target + higher near-wall variance); its slope is 10.7× steeper than cp-head — confirming the dedicated WSS-trunk continued absorbing gradient until terminal. Both heads logged cleanly throughout.
+
+val_WSS_y slope late-cosine was 2× canonical (−0.0121 vs canonical ~−0.006/1k) — the dedicated WSS-trunk WAS engaging on its design objective on val. But the WSS_y advantage did NOT survive to test; test_WSS_y is the worst test axis at +0.320pp regress.
+
+val→test deltas (H79 diagnostic):
+| Channel | Δ (test − val) |
+|---|---:|
+| abupt | −0.212pp |
+| surface_pressure | −0.286pp |
+| volume_pressure | −0.054pp |
+| wall_shear | −0.121pp |
+| wall_shear_x | +0.010pp |
+| wall_shear_y | −0.176pp |
+| wall_shear_z | −0.555pp |
+
+All channels canonical-range generalization slope; no test-set anomaly. The val_WSS_y advantage genuinely didn't translate to test → the split-head learned a val-specific WSS_y representation that didn't generalize.
+
+### Wave-level finding
+
+H96's D NEG closure with +263K dedicated WSS-trunk params adds evidence to the emerging Wave 33 hypothesis: **decoder bottleneck is INFORMATIONAL, not CAPACITY-bound**. Compare:
+- H96: +263K params split-head decoder capacity → D NEG.
+- H86 (Wave 32): +mlp_ratio 4→6 = +600K capacity at shared decoder → D NEG.
+- H101 (in-flight, +1.5K params): raw position residual at decoder input → currently competing with +1M param H97 bidir-xattn at matched mid-cosine phase.
+
+Capacity allocation between or within decoder heads is NOT the binding constraint. The next test (H105) extends the information-axis attack: raw normals at decoder input.
+
+### Reassignment
+fern → **H105 SURFACE-NORMAL-RESIDUAL-DECODER (PR #1271)** — zero-init linear projection from `surface_x[..., 3:6]` (normals, 3D unit vectors) to n_hidden=512, added as residual to surface_hidden before surface_out. Same shape as H101 (positions) but using normals — the differential operator argument for τ = μ ∂u/∂n. +1.5K params.
+
+---
+
 ## 2026-05-22 ~21:00 — PR #1267: H98v2 SURFACE-LATE-LAYER-SPLIT v2 (askeladd, CLOSED) — **INFEASIBLE-WITHIN-BUDGET** — O(N²) self-attention on N=65,536 surface tokens hits 0.385 it/s vs baseline 1.25 it/s; only ~2.3 epochs feasible in 18.3h timeout. Mechanism preserved via H103 VOLUME-CONTEXT-FILM-DECODER (PR #1270).
 
 - **Branch**: `askeladd/h98-surface-late-layer-split-v2` (closed at ~21:00Z 2026-05-22)

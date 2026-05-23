@@ -1,9 +1,47 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~00:35 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~01:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔴 ~01:30Z (2026-05-23) — H96 WSS-DEDICATED-DECODER-HEAD CLOSED **D NEGATIVE** (split-head decoder +263K params regress on val_abupt + test_WSS) + fern reassigned H105 SURFACE-NORMAL-RESIDUAL-DECODER (PR #1271) + H97 alphonse check-in #3 (LATE-COSINE LEADER 6.386% + FLEET-BEST val_WSS_z 9.66%)
+
+**Closure: PR #1261 H96 (fern) — D NEGATIVE**:
+- val_abupt **6.2840%** MISS gate by +0.158pp
+- test_abupt 6.0721%, test_SP 3.8514% (plateau), test_VP 3.6417% (ties floor by 0.001 — noise)
+- test_WSS **6.9971%** REGRESS by +0.270pp on target axis (D NEG threshold +0.10pp)
+- test_WSS_x/y/z all regress +0.249 / +0.320 / +0.296pp
+- Per-head loss decomp confirmed WSS-trunk DID engage (val_WSS_y slope 2× canonical at terminal) but advantage did NOT generalize to test (test_WSS_y is worst channel +0.320pp)
+- Adds Wave 33 evidence: capacity-allocation between heads NOT binding (H96 +263K), capacity-expansion within shared decoder NOT binding (H86 +600K) — emerging finding: **DECODER BOTTLENECK IS INFORMATIONAL** (H101 +1.5K position residual at decoder input is currently matching +1M param H97 bidir-xattn mid-cosine)
+
+**New assignment: PR #1271 H105 fern SURFACE-NORMAL-RESIDUAL-DECODER** — mirror of H101 with normals instead of positions:
+- Mechanism: zero-init Linear(3 → n_hidden=512) projecting `surface_x[..., 3:6]` (unit normal vectors) → residual to surface_hidden before surface_out. Identity at init. +1.5K params.
+- Physics: WSS = μ ∂u_tangential/∂**n̂** — normals are definitionally the differential operator argument for shear stress.
+- Orthogonality: same axis as H101 (decoder INPUT info) but distinct physical content (normals vs positions). Compound future = full local differential geometry (position + tangent frame).
+- Expected outcome:
+  - A WIN: clears gate 6.126 and crosses test floors → merge → new baseline
+  - B PARTIAL: misses gate by ≤0.20pp OR any single-flag test cross → Wave 34 staging
+  - C/D: closure if regress
+
+**H97 alphonse late-cosine leader check-in #3:**
+- step 45,745/70,664 (64.74%), val_abupt **6.3862%** (dropped −0.089pp since check-in #2)
+- val_WSS_z **9.6633%** FLEET-BEST (ahead of H100's 9.917 dedicated head)
+- Slope −0.016/1k entering late-cosine deceleration
+- Gate projection: realistic 6.05-6.20% range → borderline A WIN / B PARTIAL
+- Bidirectional vol↔surf xattn mechanism engaging cleanly at +1M params
+
+### Wave 33 fleet — 8/8 WIP, zero idle (after H105 assignment):
+1. **H97 alphonse (PR #1262)**: bidirectional surf↔vol cross-attention — **LATE-COSINE LEADER 6.386%** + fleet-best val_WSS_z 9.66%
+2. **H99 frieren (PR #1264)**: surface_out 3-layer (deeper MLP) — mid-cosine 6.637% slope −0.072/1k
+3. **H100 thorfinn (PR #1265)**: wss_z dedicated head + groupnorm — mid-cosine 6.542% slope −0.053/1k WSS_z slope −0.058/1k
+4. **H101 nezuko (PR #1266)**: geom-residual-decoder positions raw → +1.5K params — mid-cosine **6.551% (660× cheaper than H97, 0.076pp behind LEADER)**
+5. **H102 tanjiro (PR #1268)**: surface_out hidden 1024 wider MLP — late-cosine ramp 7.579%
+6. **H103 askeladd (PR #1270)**: FiLM γ,β from pooled volume_hidden — late-cosine ramp 8.121%
+7. **H104 edward (PR #1269)**: volume_out funnel 2× — late-cosine ramp 7.756%
+8. **H105 fern (PR #1271)**: NEW surface-normal-residual-decoder +1.5K params (mirror H101 with normals for WSS physics)
+
+---
 
 ## 🟠 ~00:35Z (2026-05-23) — Wave 33 fleet mid/late-cosine snapshot + H99 stale_wip false positive cleared (check-in #3 posted)
 
