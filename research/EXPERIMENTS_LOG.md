@@ -8,6 +8,61 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-23 18:41 UTC — PR #1281 CLOSED (H38 nezuko — Charbonnier on cp saturated at EP3 peak then GradNorm down-weighted cp through EP4-EP10; 5th Wave 33 alive-but-ineffective arm; mechanism rule-out preserved for follow-up bounded-loss arm H40)
+
+H38 nezuko EP10 verdict (step 109759): val_wss=7.0959 (+0.056 over ≤7.04 gate ✗), val_sp=4.1571 (+0.107 over ≤4.05 ✗), val_vp=3.9983 (+0.148 over ≤3.85 ✗). All 3 EP10 soft gates missed by margins student's EP7/EP8 mechanism analysis predicted (within ±0.02pp). Closed per the 17:45Z Option-1 plan.
+
+### H38 EP1→EP10 wss/sp/vp trajectory vs H21
+
+| EP | Step | H38 wss | H21 ref | Δ wss | H38 sp | sp Δ | H38 vp | vp Δ |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 10975 | 19.548 | 19.309 | +0.24 | 14.93 | — | 17.84 | — |
+| 2 | 21951 | 7.705 | 7.804 | **−0.099** ⭐ | 4.770 | (+0.108) | 5.724 | (−0.040) |
+| 3 | 32927 | 7.368 | 7.589 | **−0.221** ⭐⭐ peak | 4.365 | −0.020 | 4.657 | +0.008 |
+| 4 | 43903 | 7.241 | 7.288 | −0.047 ⭐ | 4.257 | −0.079 ⭐ | 4.363 | −0.121 ⭐ |
+| 5 | 54879 | 7.176 | 7.237 | −0.061 | 4.221 | −0.018 | 4.241 | +0.127 ⚠ |
+| 6 | 65855 | 7.156 | 7.259 | −0.103 ⭐ | 4.190 | −0.028 | 4.154 | +0.121 ⚠ |
+| 7 | 76831 | 7.134 | 7.130 | +0.004 ≈ | 4.184 | +0.024 ⚠ | 4.099 | +0.159 ⚠ |
+| 8 | 87807 | 7.125 | 7.112 | +0.013 | 4.173 | +0.013 | 4.058 | ~+0.11 ⚠ |
+| 9 | 98783 | 7.106 | (interp) | ~−0.01 | 4.160 | (interp) | 4.019 | ~+0.10 ⚠ |
+| **10** | **109759** | **7.0959** | **~7.04** | **+0.056** ⚠ | **4.1571** | **+0.107** ⚠ | **3.9983** | **+0.148** ⚠ |
+
+**Mechanism rule-out preserved verbatim for the next-wave write-up**:
+
+> "Charbonnier on a channel transfers under GradNorm only if the channel has a heavy-tailed error distribution. Channels with small-magnitude error distributions (cp on this dataset, ≈0.1–0.3 normalized std) get under-trained by Charb because the linear-regime threshold isn't reached and GradNorm down-weights the channel further as task_loss decays faster than other channels'."
+
+W&B run: `74n1y8g7`. SENPAI-RESULT: terminal=true, primary_metric.val_wss_rel_l2_pct_EP10=7.0959.
+
+Reassigned to **H40 Cauchy bounded loss on cp** (PR #1287) — direct port of the H38 mechanism rule-out into a fundamentally different loss-shape regime (Barron 2019 α=0, redescending influence function r/(1+(r/c)²) concentrates gradient on small-magnitude residual regime where cp actually lives).
+
+---
+
+## 2026-05-23 18:27 UTC — PR #1273 CLOSED (H35 v3 frieren — bidir slice xattn delivered cold-start EP3 lead + v8→v9 surge, then asymptotically absorbed into H21 attractor basin by val#10; structural-but-asymptotic-absorption failure mode, distinct from H38's mechanism-saturation failure mode)
+
+H35 v3 frieren val#10 verdict (step 54889): val_wss=7.335 (FAIL ≤7.30 by +0.035), val_sp=4.314 (PASS ≤4.34 by −0.026), val_vp=4.539 (FAIL ≤4.21 by +0.329). **2 of 3 hold-or-abort gates failed**; behind H21 EP5 on EVERY primary channel. Closed per the 17:45Z agreement.
+
+### H35 v3 val#1→val#10 trajectory (true training step)
+
+| val# | Step | wss | sp | vp | abupt | wss_z |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | 5488 | 28.597 | 20.092 | 23.070 | 27.717 | 37.691 |
+| 2 | 10977 | 11.627 | 7.187 | 9.723 | 11.068 | 14.989 |
+| 6 | 32933 (EP3) | 7.433 | 4.353 | 4.711 | 6.750 | 10.006 |
+| 7 | 38422 (EP3.5) | 7.389 | **6.340** ⚠ EMA artifact | 4.648 | 7.111 | 9.988 |
+| 8 | 43911 (EP4) | 7.395 | 4.493 | 4.582 | 6.728 | 10.021 |
+| 9 | 49400 (EP4.5) | 7.352 | 4.336 | 4.546 | 6.662 | 9.990 |
+| **10** | **54889 (EP5.0)** | **7.335** | **4.314** | **4.539** | **6.649** | **10.025** |
+
+v9→v10 slopes collapsed 5-14× vs v8→v9 → asymptotic-equivalence regime reached. The v8→v9 surge (surf_p 7× H21 descent) was real but ephemeral; the subsequent v9→v10 window confirmed the asymptotic-absorption hypothesis.
+
+**Mechanism takeaway**: "Slice-level bidir WSS↔surf_p xattn delivers cold-start absorption + intermediate-EP surge tied to entropy/diversity gates clearing, but coupling head-cost creates an asymptotic vol_p penalty under GradNorm clamp at w_vol_p=0.15. H21 attractor basin reabsorbs the WSS+surf_p advantage by EP5 while vp deficit persists."
+
+W&B run: `qc04koec`. SENPAI-RESULT: terminal=true, primary_metric.val_wss_rel_l2_pct_EP5=7.3350.
+
+Reassigned to **H41 Charb axes y,z extension** (PR #1286) — extends H21's `--wss-charbonnier-axes z` to `y,z` to probe H38 mechanism boundary on the second-worst WSS axis (~8.0% vs z's 10.0%); 1-flag change, falsifiable at EP3 boundary.
+
+---
+
 ## 2026-05-23 10:37 UTC — PR #1272 CLOSED (H34 nezuko — Ada-Temp Slices mechanism ALIVE but ineffective at delivering wss gains; third Wave 33 architectural arm with this pattern; reassigned to **H38 surf-p Charbonnier** to attack the wave-wide pressure floor)
 
 H34 nezuko EP10 verdict: val_wss=7.062, gate criterion val_wss ≤ 6.95 MISS by +0.112pp. Closed at EP10.1 per the EP10 gate criterion. Run `ai7wkvov` was healthy throughout, mechanism strong, but trajectory does not reach gate.
