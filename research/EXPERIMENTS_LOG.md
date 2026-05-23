@@ -1,3 +1,54 @@
+## 2026-05-23 ~11:00 — PR #1268: H102 SURFACE-OUT-WIDER-MLP (tanjiro, CLOSED) — **B PARTIAL** (val gate CLEARED −0.008pp, test_VP CROSSED −0.100pp; test_SP 11th plateau + test_WSS regress → NOT MERGEABLE, AND-gate fails 2/3 test floors; WIDTH AXIS DEFINITIVELY DOMINATES DEPTH)
+
+- **Branch**: `tanjiro/h102-surface-out-wider-mlp` (closed at ~11:00Z 2026-05-23)
+- **W&B run**: `n14qwfg4` (rank 0), 13 epochs completed, runtime 14.04h (842.2 min), all 70,664 steps.
+- **Hypothesis**: Widen `surface_out` MLP hidden layer 512 → 1024 (`surface_out_width_factor=2.0`). Tests whether surface decoder MLP is WIDTH-bound. +264.7K params.
+
+### Terminal results
+
+| Channel | Validation (EP13 EMA best-ckpt) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.1183%** ✅ | **5.9395%** | 5.844% | **+0.096pp regress** |
+| surface_pressure | 4.0050% | 3.7242% | 3.577 (floor) | **+0.147pp MISS floor** — **11th independent plateau** (3.70-3.95% range) |
+| volume_pressure | 3.6101% | **3.5432%** | 3.643 (floor) | **−0.100pp CROSS floor** ✓ (strong, architecturally attributable to wider decoder) |
+| wall_shear | 6.9323% | 6.8584% | 6.727 (goal) | **+0.131pp MISS goal** |
+| wall_shear_x | 6.0549% | 6.0899% | — | +0.128pp slight regress |
+| wall_shear_y | 7.5238% | 7.4513% | — | ~match |
+| wall_shear_z | 9.3979% | **8.8889%** | 8.945 (canonical test) | **−0.056pp BELOW canonical** ✓ |
+
+- Gate: val_abupt 6.1183% **CLEARS gate 6.126 by −0.008pp** — FIRST SINGLE-MECHANISM VAL GATE CLEAR OF WAVE 33.
+- Test AND-gate: **FAILS 2/3** (test_VP ✓ cross; test_SP ❌ +0.147pp; test_WSS ❌ +0.131pp).
+- test_abupt 5.940% REGRESSES canonical 5.844 by +0.096pp — primary test metric regresses.
+- val→test slopes: abupt −0.179pp (shallow), VP −0.067pp (very tight), SP −0.281pp (canonical), WSS_x +0.035pp REVERSE (minor), WSS_z **−0.510pp (steep — width helps z-shear generalization)**.
+
+### Why NOT merged despite val gate clear
+
+Strict AND-gate = val_abupt < 6.126 AND test_VP ≤ 3.643 AND test_SP ≤ 3.577 AND test_WSS ≤ 6.727. H102 fails 2/4 conditions. Per program.md "Final claims must be from test_primary/*" — test_abupt regresses +0.096pp. Merging would degrade SP (3.724 vs 3.577 canonical) and WSS floors, hiding regressions behind val gate clear.
+
+### WIDTH AXIS DOMINATES DEPTH AXIS — cleanest decoder-capacity comparison of Wave 33
+
+| Run | Mechanism | Δ Params | val_abupt | test_VP | test_SP | test_WSS | test_WSS_z |
+|---|---|---:|---:|---:|---:|---:|---:|
+| H99 frieren (depth) | 3-layer MLP | +250K | 6.327% | 3.637% | 3.804% | 7.009% | 9.088% |
+| **H102 tanjiro (width)** | **MLP hidden 1×→2×** | **+265K** | **6.118%** | **3.543%** | **3.724%** | **6.858%** | **8.889%** |
+| H102 − H99 | — | — | **−0.208pp** | **−0.094pp** | **−0.080pp** | **−0.150pp** | **−0.199pp** |
+
+H102 dominates H99 on EVERY channel at near-matched param cost. **Width is the productive decoder-capacity axis. Depth is inferior.** 
+
+### 11th SP plateau confirmation — SP plateau may be approaching Bayes optimum
+
+The canonical test_SP IS the floor (3.577%). After 11 independent mechanism misses (3.70-3.95% range), including H102 which DOUBLED the surface_out hidden dim, the SP plateau may be a **dataset-distribution Bayes-optimal limit** rather than a model-capacity bottleneck. Only H108 (parallel-MLP residual) and H110 (compound width+positions) remain as potential SP crackers from decoder-trunk modifications.
+
+### Wave 34 compound launch
+
+H102 + H101 are the two strongest validated Wave 33 mechanisms with **non-overlapping test improvements** and **compatible val→test slopes**:
+- H102 (width +265K): val 6.118%, test_VP −0.100pp, WSS_z −0.056pp, WSS_z slope −0.510pp
+- H101 (raw positions +3K): val 6.213%, test_VP −0.129pp, WSS_z tied, WSS_z slope −0.603pp
+
+tanjiro reassigned to **H110 WAVE 34 COMPOUND H102+H101** (PR #1280) — FIRST WAVE 34 LAUNCH. +268K total params. Predicted: val < 6.10%, test_VP −0.20pp+, possible test_SP plateau crack if axes compound additively.
+
+---
+
 ## 2026-05-23 ~10:25 — PR #1262: H97 BIDIRECTIONAL-XATTN (alphonse, CLOSED) — **B PARTIAL** (mechanism CONFIRMED on val_WSS_z binding axis but did NOT crack test floors; +0.45pp val→test REVERSE slope on binding axis)
 
 - **Branch**: `alphonse/h97-bidirectional-xattn` (closed at ~10:25Z 2026-05-23)

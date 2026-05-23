@@ -5,6 +5,58 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟢 ~11:00Z (2026-05-23) — **WAVE 34 LAUNCHED** — H102 CLOSED **B PARTIAL** (val gate CLEARED −0.008pp but test_SP 11th plateau + test_WSS regress → AND-gate FAILS 2/3 → NOT MERGED; WIDTH DEFINITIVELY DOMINATES DEPTH on every channel) + tanjiro reassigned **H110 WAVE 34 COMPOUND H102+H101** (PR #1280) FIRST WAVE 34 LAUNCH width+info-positions +268K predicted val < 6.10% possible test_SP plateau crack
+
+**H102 CLOSURE — Key findings:**
+- val_abupt **6.1183%** CLEARS gate by −0.008pp — FIRST single-mechanism val gate clear of Wave 33
+- test_VP 3.5432% ✅ CROSS floor −0.100pp (architecturally attributable to wider decoder)
+- test_SP 3.7242% ❌ MISS floor +0.147pp — **11th consecutive plateau** (3.70-3.95% range, extending Wave 32 10-count)
+- test_WSS 6.8584% ❌ MISS goal +0.131pp; test_abupt 5.940% REGRESSES canonical +0.096pp
+- test_WSS_z **8.889%** ✅ −0.056pp below canonical 8.945 (width helps z-shear, val→test slope −0.510pp steep)
+- H102 dominates H99 (depth) on EVERY channel — width is THE productive decoder-capacity axis, depth is inferior
+- **NOT MERGED: strict AND-gate fails 2/3 test floors + primary test metric regresses**
+
+**SP plateau status (CRITICAL — 11 misses, possibly Bayes-optimal):**
+All decoder-trunk modifications, info-flow, attention, and capacity mechanisms have failed to crack test_SP below 3.70%. Canonical test_SP 3.577% may be the dataset-distribution Bayes limit. Only H108 (parallel-MLP residual) and H110 (compound) remain as candidates. If H110 and H108 also fail SP, Wave 35 should pivot away from SP optimization and focus on the more tractable test_WSS and test_WSS_z axes.
+
+**Wave 34 compound rationale — H102 + H101 compound:**
+The two strongest validated Wave 33 mechanisms have **orthogonal mechanism axes** and **compatible val→test slopes**:
+- H102: decoder CAPACITY (MLP hidden 512→1024) — val 6.118%, test_VP −0.100pp, WSS_z −0.056pp, WSS_z slope −0.510pp
+- H101: decoder INFO-AT-INPUT (raw xyz residual, +3K) — val 6.213%, test_VP −0.129pp, WSS_z slope −0.603pp
+- **Predicted H110 compound**: val < 6.10%, test_VP −0.20pp+, possible SP crack if additive
+
+**Wave 34 compound key falsifiable**: ADDITIVE (best case, both axes stack) vs SATURATED (compound ≈ H102 alone) vs ANTI-ADDITIVE (failure).
+
+**New assignment: PR #1280 H110 tanjiro WAVE 34 COMPOUND H102+H101**:
+- Implements BOTH mechanisms from scratch (neither is on tay — H102 closed B PARTIAL, H101 closed B PARTIAL, neither merged)
+- `--surface-out-width-factor 2.0` (H102) + `--use-geom-residual-decoder` (H101)
+- +268K total params (~matched H102 alone since H101 adds only +3K)
+- **FIRST WAVE 34 LAUNCH** — begins compound testing phase
+
+**Wave 33+34 fleet after H110 assignment — 8/8 WIP zero idle:**
+1. **H103 askeladd (PR #1270)**: FiLM +525K — **C NULL likely, terminal imminent**
+2. **H104 edward (PR #1269)**: vol-width +229K — in-flight (best val_VP 3.606%)
+3. **H105 fern (PR #1271)**: surf-normals +2K — mid-cosine (~71.6%, val 6.435%)
+4. **H106 frieren (PR #1276)**: vol-info-residual +2.5K — in-flight
+5. **H107 thorfinn (PR #1277)**: surf-global-context +262K — in-flight
+6. **H108 nezuko (PR #1278)**: parallel-MLP residual +265K — in-flight
+7. **H109 alphonse (PR #1279)**: backbone-skip +263K — just kicked off
+8. **H110 tanjiro (PR #1280) NEW**: Wave 34 compound H102+H101 +268K — JUST ASSIGNED
+
+**Updated mechanism class ranking (Wave 33 closed, Wave 34 launched):**
+1. **WIDTH** (H102 LEADER val 6.118% gate clear — strongest single mechanism of Wave 33)
+2. **INFO-AT-INPUT** (H101 +3K extreme efficiency; H105 normals mid-cosine; H106 vol-xyz in-flight)
+3. **BIDIR-XATTN** (H97 B PARTIAL +1M — confirmed but cost-ineffective)
+4. **SELF-CONTEXT** (H107 in-flight)
+5. **DECODER ENSEMBLE / PARALLEL-MLP** (H108 in-flight)
+6. **ENCODER-SKIP / BACKBONE-BYPASS** (H109 in-flight)
+7. **WAVE 34 COMPOUNDS** (H110 just launched — first compound phase)
+8. ~~DEPTH~~ (H99 C NULL — definitively inferior to width)
+9. ~~TASK-HEAD~~ (H92/H93/H96/H100 all NEG — CLOSED)
+10. ~~FILM~~ (H103 C NULL likely)
+
+---
+
 ## 🟡 ~10:25Z (2026-05-23) — H97 CLOSED **B PARTIAL** (val_abupt 6.2045% MISS gate +0.079pp, 0/4 test floors crossed, **+0.45pp val→test REVERSE slope on WSS_z binding axis** — bidir-xattn mechanism CONFIRMED but cost-ineffective and val-set-specific) + alphonse reassigned **H109 BACKBONE-SKIP RESIDUAL DECODER** (PR #1279) NEW MECHANISM CLASS encoder-skip/backbone-bypass zero-init Linear(512→512) on pre-backbone embedded surface tokens as residual to post-backbone surface_hidden +263K params matched H102 cost
 
 **H97 CLOSURE — bidir-xattn findings (3 critical):**
