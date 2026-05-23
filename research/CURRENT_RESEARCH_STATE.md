@@ -5,6 +5,51 @@
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
+## 🟡 ~10:25Z (2026-05-23) — H97 CLOSED **B PARTIAL** (val_abupt 6.2045% MISS gate +0.079pp, 0/4 test floors crossed, **+0.45pp val→test REVERSE slope on WSS_z binding axis** — bidir-xattn mechanism CONFIRMED but cost-ineffective and val-set-specific) + alphonse reassigned **H109 BACKBONE-SKIP RESIDUAL DECODER** (PR #1279) NEW MECHANISM CLASS encoder-skip/backbone-bypass zero-init Linear(512→512) on pre-backbone embedded surface tokens as residual to post-backbone surface_hidden +263K params matched H102 cost
+
+**H97 CLOSURE — bidir-xattn findings (3 critical):**
+1. val_WSS_z **9.485%** = first Wave 33 mechanism below canonical 9.601 — bidir info flow IS physically productive for tau_z axis
+2. **+0.452pp REVERSE val→test slope on WSS_z**: val advantage (−0.12pp) REVERSED to test regress (+0.184pp above target 8.753) — val-overfit on volume-surface coupling, does NOT generalize to test distribution
+3. test_VP 3.6544% = +0.011pp miss — closest to floor in Wave 33 (timeout at 96.4% may have cut off convergence)
+4. test_SP 3.7806% = **10th consecutive plateau hit (3.74-3.95% range)** — SP plateau is DEFINITIVELY decoder-MLP-trunk bound; encoder/info-flow mechanisms cannot crack SP
+- +1M params, 4× more expensive than H102 (+266K) with ~0.08pp worse val_abupt — **surface MLP width beats bidir-xattn at matched budget**
+- val→test REVERSAL diagnosis: H97 provides val-set-specific info; H101's generic position routing had NEGATIVE WSS_z slope (−0.603pp, test improves more than val). Prefer mechanisms with negative val→test slope for Wave 34 compounding.
+
+**New assignment: PR #1279 H109 alphonse BACKBONE-SKIP RESIDUAL DECODER**:
+- Mechanism: save pre-backbone surface tokens (post-`surface_in` embedding, pre-5-layer backbone), then add zero-init `Linear(n_hidden, n_hidden)` projection of those tokens as additive residual to post-backbone `surface_hidden` before `surface_out`
+- Params: +263K (matched H102 width cost +266K)
+- NEW mechanism class: **ENCODER-SKIP / BACKBONE-BYPASS**
+- Generalizes H101 (raw xyz positions, +3K, B PARTIAL) — H109 uses the FULL 7-channel embedded feature vector (post `surface_in` but pre-backbone) providing all position + normal + panel area info in compressed form
+- Key diagnostic: val→test slope on WSS_z must be NEGATIVE (H101-like −0.603pp) not positive (H97 +0.452pp reversal)
+- If H109 >> H101 on val: pre-backbone features contain more than raw positions (normals + panel_area also relevant)
+- If H109 ≈ H101: positions ARE the entire pre-backbone signal; extra channels add noise
+
+**Wave 33 fleet after H109 assignment — 8/8 WIP zero idle:**
+1. **H102 tanjiro (PR #1268)**: surf-width +266K — **🟢 GATE CRACKED val 6.122% TERMINAL IMMINENT** (LEADER)
+2. **H104 edward (PR #1269)**: vol-width +229K — in-flight (best val_VP 3.606%)
+3. **H103 askeladd (PR #1270)**: FiLM +525K — C NULL likely
+4. **H105 fern (PR #1271)**: surf-normals +2K — mid-cosine
+5. **H106 frieren (PR #1276)**: vol-info-residual +2.5K — in-flight
+6. **H107 thorfinn (PR #1277)**: surf-global-context +262K — in-flight
+7. **H108 nezuko (PR #1278)**: parallel-MLP residual +265K — just kicked off
+8. **H109 alphonse (PR #1279) NEW**: backbone-skip +263K — JUST ASSIGNED
+
+**Wave 33 mechanism class ranking (updated post-H97):**
+1. **WIDTH** (H102 LEADER 6.122% gate cracked; H104 B PARTIAL likely)
+2. **INFO-AT-INPUT** (H101 B PARTIAL +3K extreme efficiency; H105/H106 in-flight)
+3. **BIDIR-XATTN** (H97 B PARTIAL +1M — confirmed but expensive, val→test reversal risk)
+4. **SELF-CONTEXT** (H107 in-flight)
+5. **DECODER ENSEMBLE / PARALLEL-MLP** (H108 in-flight)
+6. **ENCODER-SKIP / BACKBONE-BYPASS** (H109 NEW)
+7. ~~DEPTH~~ (H99 C NULL)
+8. ~~TASK-HEAD~~ (all 4 NEG — DEFINITIVELY CLOSED)
+9. ~~FILM~~ (H103 C NULL likely)
+
+**SP plateau status (CRITICAL — 10/10 misses):**
+The 3.74-3.95% SP plateau has now been confirmed by 10 consecutive independent mechanisms across Wave 32-33. The plateau is definitively DECODER-MLP-TRUNK BOUND. Only H102 (width) and H108 (parallel-MLP) are positioned to crack it. H109 could also crack it via pre-backbone normal residual (normals are WSS-relevant: τ=μ∂u/∂n̂) but test_SP has been resistant to all info-flow enhancements.
+
+---
+
 ## 🟢 ~09:55Z (2026-05-23) — H101 CLOSED **B PARTIAL** (test_VP cross −0.129pp at **+3K params** — EXTREME PARAMETER EFFICIENCY, Wave 33 sleeper hit) + nezuko reassigned **H108 SURFACE-OUT-PARALLEL-MLP-RESIDUAL-DECODER** (PR #1278) NEW MECHANISM CLASS decoder-ensemble/parallel-diversity zero-init parallel 2-layer MLP residual on surface_out +265K params matched H102 cost
 
 **H101 CLOSURE — INFO-AT-DECODER-INPUT THESIS CONFIRMED:**

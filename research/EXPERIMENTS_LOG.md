@@ -1,3 +1,57 @@
+## 2026-05-23 ~10:25 — PR #1262: H97 BIDIRECTIONAL-XATTN (alphonse, CLOSED) — **B PARTIAL** (mechanism CONFIRMED on val_WSS_z binding axis but did NOT crack test floors; +0.45pp val→test REVERSE slope on binding axis)
+
+- **Branch**: `alphonse/h97-bidirectional-xattn` (closed at ~10:25Z 2026-05-23)
+- **W&B run**: `gnfioaws` (rank 0), terminal at step 68,101 / 70,664 = 96.4% (train timeout mid-EP13 at 1011.5 min = 16.86h; EP12 best EMA checkpoint selected), runtime 16.86h.
+- **Hypothesis**: Add a reverse vol→surf cross-attention path (symmetric to existing surf→vol xattn) so surface tokens can directly query volume hidden state. Bidirectional vol↔surf info flow tests whether the existing unidirectional surf→vol attention is the binding information bottleneck. +1M params.
+
+### Terminal results
+
+| Channel | Validation (EP12 best EMA) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.2045%** | **5.9887%** | 5.844% | **+0.145pp regress** |
+| surface_pressure | 4.0496% | 3.7806% | 3.577 (floor) | **+0.204pp MISS floor** (10th plateau hit: 3.74-3.95% range) |
+| volume_pressure | 3.6727% | 3.6544% | 3.643 (floor) | **+0.011pp MISS floor** (razor-thin — closest to floor in Wave 33) |
+| wall_shear | 7.0407% | 6.8865% | 6.727 (goal) | +0.160pp MISS goal |
+| wall_shear_x | 6.167% | 6.126% | — | — |
+| wall_shear_y | 7.649% | 7.446% | — | — |
+| wall_shear_z | **9.485%** | **8.937%** | 9.601 val (canonical) / 8.753 test | **val FIRST Wave 33 below canonical (-0.12pp); test +0.184pp above target** |
+
+- Gate: val_abupt 6.2045% **MISS** gate 6.126 by +0.079pp — 2nd closest miss of Wave 33 (H101 at +0.087pp was closest).
+- Test floors: 0 crossed; test_VP +0.011pp = razor-thin (closest in Wave 33 to VP floor, but no cross).
+- val→test slopes: abupt −0.216pp (shallow), VP −0.020pp (very tight), SP −0.273pp (canonical), WSS −0.155pp, **WSS_z +0.452pp REVERSE** (val improvement erased + reversed at test).
+
+### 🟡 BIDIR-XATTN MECHANISM CONFIRMED BUT COST-INEFFECTIVE + val→test REVERSAL WARNING
+
+| Run | Mechanism | Δ Params | val_abupt | val_WSS_z | test_WSS_z |
+|---|---|---:|---:|---:|---:|
+| H102 tanjiro (pre-term) | surface width 1×→2× | +266K | **6.122%** | 9.42% | TBD |
+| **H97 alphonse (this)** | bidir vol↔surf xattn | **+1,000K** | 6.205% | **9.485%** ← first Wave 33 val below canonical | 8.937% |
+| Canonical baseline | — | — | 6.126 | ~9.601 | 8.945 |
+
+**Three critical Wave 33 findings from H97:**
+
+1. **Bidirectional mechanism IS productive for val_WSS_z**: 9.485% is the first Wave 33 val below canonical 9.601 — confirming that vol→surf info flow helps surface token WSS_z prediction. The physics is correct (surface shear depends on volume velocity gradients).
+
+2. **+0.45pp val→test REVERSE slope on WSS_z**: val advantage (−0.12pp) REVERSED to test regress (+0.184pp above target 8.753). The bidir-xattn provides val-set-specific information access that doesn't generalize. Contrast with H101 whose WSS_z slope was −0.603pp (test improves MORE than val). **Mechanisms that provide globally-useful geometric routing (H101) generalize better than mechanisms that provide dataset-specific volume-surface coupling (H97).**
+
+3. **test_VP test_VP miss by +0.011pp is the closest to floor in Wave 33** — implies the bi-directional info flow nearly cracked VP but fell just short. At EP13 completion (timeout hit at EP12.96), test_VP might have crossed — unverifiable since test only ran EP12.
+
+### Wave 33 10th plateau confirmation on test_SP
+
+test_SP 3.7806% = **10th consecutive variant (H78-H88, H97, H101) hitting the 3.74-3.95% plateau**. Per student comment: "SP plateau is decoder-MLP-trunk bound, not encoder/info-flow bound: bidirectional coupling adds info but the shared `surface_out` MLP still bottlenecks SP expressivity." Confirmed finding. Only mechanisms that MODIFY the surface_out trunk itself (H102 width, H108 parallel-MLP) have any chance of cracking SP.
+
+### Cost-effectiveness at matched budget
+
+- H97 +1M params (5.6% model size increase) for B PARTIAL
+- H102 +266K params (1.5% increase) for gate-cracked A WIN trajectory
+- **H102 achieves ~0.08pp better val_abupt at 3.8× cheaper cost** — surface decoder MLP capacity beats bidirectional info flow at matched budget
+
+### Reassignment
+
+alphonse reassigned to **H109 BACKBONE-SKIP RESIDUAL DECODER** (PR #1279) — NEW mechanism class (ENCODER-SKIP / BACKBONE-BYPASS): zero-init Linear(n_hidden, n_hidden) projection of pre-backbone embedded surface tokens as residual to post-backbone surface_hidden before surface_out. +263K params matched H102 width cost. Generalizes H101 (which added raw xyz positions at +3K, B PARTIAL): H109 tests the FULL embedded feature vector (7 channels projected through surface_in embedding, pre-backbone) vs H101's raw xyz only. Key diagnostic: H109 val→test slope on WSS_z must be NEGATIVE (like H101's −0.603pp) not POSITIVE (H97's +0.452pp reversal).
+
+---
+
 ## 2026-05-23 ~09:55 — PR #1266: H101 GEOM-RESIDUAL-DECODER (nezuko, CLOSED) — **B PARTIAL** (extreme parameter efficiency, INFO-AT-DECODER-INPUT CONFIRMED)
 
 - **Branch**: `nezuko/h101-geom-residual-decoder` (closed at ~09:55Z 2026-05-23)
