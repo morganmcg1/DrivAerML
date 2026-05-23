@@ -141,6 +141,7 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     use_wss_cp_xattn: bool = False
     wss_cp_xattn_heads: int = 4
+    wss_cp_xattn_num_slices: int = 128
     wss_cp_xattn_entropy_n_sample: int = 256
     wss_cp_xattn_telemetry_every: int = 50
 
@@ -284,6 +285,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_curvature_attention_bias=config.use_curvature_attention_bias,
         use_wss_cp_xattn=config.use_wss_cp_xattn,
         wss_cp_xattn_heads=config.wss_cp_xattn_heads,
+        wss_cp_xattn_num_slices=config.wss_cp_xattn_num_slices,
         wss_cp_xattn_entropy_n_sample=config.wss_cp_xattn_entropy_n_sample,
         wss_cp_xattn_telemetry_every=config.wss_cp_xattn_telemetry_every,
     )

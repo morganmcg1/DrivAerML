@@ -344,6 +344,7 @@ class SurfaceTransolver(nn.Module):
         curvature_dim: int = 3,
         use_wss_cp_xattn: bool = False,
         wss_cp_xattn_heads: int = 4,
+        wss_cp_xattn_num_slices: int = 128,
         wss_cp_xattn_entropy_n_sample: int = 256,
         wss_cp_xattn_telemetry_every: int = 50,
     ):
@@ -403,20 +404,35 @@ class SurfaceTransolver(nn.Module):
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
-        # H35 Wave 33 Idea C — bidirectional WSS<->surf_p decoder cross-attention.
-        # Replaces the single shared surface_out projection with two independent
-        # heads coupled by a single bidirectional cross-attention step.
+        # H35 Wave 33 Idea C — slice-level bidirectional WSS<->surf_p decoder
+        # cross-attention. Replaces the single shared surface_out projection
+        # with two head-specific slice projections, a bidirectional cross-
+        # attention step at slice resolution (S=128, not N_s=65k), and two
+        # independent per-point linear heads.
         self.use_wss_cp_xattn = use_wss_cp_xattn
         self.wss_cp_xattn_heads = wss_cp_xattn_heads
+        self.wss_cp_xattn_num_slices = wss_cp_xattn_num_slices
         self.wss_cp_xattn_entropy_n_sample = wss_cp_xattn_entropy_n_sample
         self.wss_cp_xattn_telemetry_every = wss_cp_xattn_telemetry_every
         # CPU-side step counter — using a Python int instead of a buffer avoids
         # a GPU↔CPU sync (`.item()`) on every training step, which was
-        # serialising DDP overlap and dominating step time at N_s=65k.
+        # serialising DDP overlap.
         self._xattn_step_count: int = 0
         if use_wss_cp_xattn:
             self.wss_norm = nn.LayerNorm(n_hidden, eps=1e-6)
             self.cp_norm = nn.LayerNorm(n_hidden, eps=1e-6)
+            # Head-specific slice projections: points → S-dim slice-membership
+            # logits. Each head learns its own slice abstraction so the two
+            # streams enter the cross-attention with differentiated semantics
+            # even at step 0 (LayerNorm starts ≈ identity, but the slice
+            # projections have independent random init).
+            self.wss_slice_proj = LinearProjection(n_hidden, wss_cp_xattn_num_slices)
+            self.cp_slice_proj = LinearProjection(n_hidden, wss_cp_xattn_num_slices)
+            self.wss_slice_temp = nn.Parameter(torch.tensor(0.5))
+            self.cp_slice_temp = nn.Parameter(torch.tensor(0.5))
+            # Bidirectional cross-attention at slice resolution (S=128 — full
+            # need_weights=True attention is cheap, ~17k entries vs 4.3B at
+            # the point level).
             self.wss_to_cp_xattn = nn.MultiheadAttention(
                 embed_dim=n_hidden,
                 num_heads=wss_cp_xattn_heads,
@@ -429,11 +445,11 @@ class SurfaceTransolver(nn.Module):
                 batch_first=True,
                 bias=True,
             )
-            # Zero-init the output projection so the cross-attention starts as a
-            # no-op residual passthrough — matches the CurvatureAttentionBias
-            # convention and the LLaMA-Adapter zero-init pattern. Both heads
-            # therefore equal the shared backbone output at step 0; any
-            # divergence is acquired through gradient descent.
+            # Zero-init the cross-attention output projection so the residual
+            # paths start as exact no-ops (LLaMA-Adapter / CurvatureAttentionBias
+            # convention). The slice projections still differentiate the two
+            # streams from step 0; only the cross-task coupling is gated to
+            # ramp up through gradient descent.
             nn.init.zeros_(self.wss_to_cp_xattn.out_proj.weight)
             nn.init.zeros_(self.wss_to_cp_xattn.out_proj.bias)
             nn.init.zeros_(self.cp_to_wss_xattn.out_proj.weight)
@@ -558,158 +574,131 @@ class SurfaceTransolver(nn.Module):
         surface_hidden: torch.Tensor,
         surface_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Bidirectional WSS<->surf_p decoder cross-attention (Wave 33 Idea C).
+        """Slice-level bidirectional WSS<->surf_p decoder cross-attention.
 
         ``surface_hidden`` is the post-backbone, post-norm surface stream
-        ``[B, N_s, D]``. Two independent LayerNorms project it into a WSS
-        stream and a cp stream; a single bidirectional cross-attention step
-        couples them via residual additions; independent linear heads then
-        produce ``cp_pred [B, N_s, 1]`` and ``wss_pred [B, N_s, 3]``.
+        ``[B, N_s, D]``. The decoder maps it through two head-specific
+        slice projections to head-specific slice tensors
+        ``wss_slice``, ``cp_slice`` of shape ``[B, S, D]`` (S=128 by
+        default), applies one bidirectional cross-attention step between
+        them at slice resolution, then projects back to per-point
+        predictions via the per-head slice weights and linear heads.
 
-        The PR's literal design uses ``nn.MultiheadAttention(num_heads=4,
-        batch_first=True)`` per direction. We call them with
-        ``need_weights=False`` so PyTorch can dispatch to flash-attention and
-        avoid materialising an ``N_s x N_s`` attention matrix (catastrophic at
-        ``N_s = 65k``). Attention entropy telemetry is computed manually on a
-        downsampled subset of queries via the MHA's projection weights.
+        Why slice-level (not point-level): a point-level
+        ``N_s × N_s`` cross-attention at N_s=65k is ~4.3B attention
+        entries per direction and was measured at ~10.7 s/step on DDP8
+        (20 GPU-days for 30 epochs). The slice latent (128 tokens) is
+        Transolver's natural physics-primitive abstraction, so cross-
+        task coupling at this resolution preserves the Wave 33 hypothesis
+        while making the run feasible in the 24h envelope.
 
         Returns ``(surface_preds, xattn_telemetry)`` where ``surface_preds``
         preserves the model contract ``surface_preds[..., 0]=cp,
         surface_preds[..., 1:4]=wss``.
         """
-        h_wss_pre = self.wss_norm(surface_hidden)
-        h_cp_pre = self.cp_norm(surface_hidden)
+        S = self.wss_cp_xattn_num_slices
+        mask_f = surface_mask.unsqueeze(-1).to(dtype=surface_hidden.dtype)
 
-        kp_mask = ~surface_mask.bool() if surface_mask is not None else None
-        kp_mask_for_mha = None
-        if kp_mask is not None and kp_mask.any():
-            kp_mask_for_mha = kp_mask
+        # Pre-norms separate the two streams while sharing the backbone trunk
+        h_wss_pts = self.wss_norm(surface_hidden)
+        h_cp_pts = self.cp_norm(surface_hidden)
 
-        # wss queries from cp (residual)
-        h_wss_aug, _ = self.wss_to_cp_xattn(
-            query=h_wss_pre,
-            key=h_cp_pre,
-            value=h_cp_pre,
-            key_padding_mask=kp_mask_for_mha,
-            need_weights=False,
+        # Head-specific slice projections: points → slice-membership logits
+        # [B, N_s, S]. Softmax over S; padded points zeroed via mask_f.
+        wss_logits = self.wss_slice_proj(h_wss_pts) / self.wss_slice_temp
+        cp_logits = self.cp_slice_proj(h_cp_pts) / self.cp_slice_temp
+        wss_slice_w = F.softmax(wss_logits, dim=-1) * mask_f
+        cp_slice_w = F.softmax(cp_logits, dim=-1) * mask_f
+
+        # Pool points → slices: [B, S, D]
+        # slice_d = sum_n (w[b,n,s] * h[b,n,d]) / sum_n w[b,n,s]
+        wss_slice = torch.einsum("bns,bnd->bsd", wss_slice_w, h_wss_pts)
+        wss_norm_denom = wss_slice_w.sum(dim=1).unsqueeze(-1)  # [B, S, 1]
+        wss_slice = wss_slice / (wss_norm_denom + 1e-5)
+        cp_slice = torch.einsum("bns,bnd->bsd", cp_slice_w, h_cp_pts)
+        cp_norm_denom = cp_slice_w.sum(dim=1).unsqueeze(-1)
+        cp_slice = cp_slice / (cp_norm_denom + 1e-5)
+
+        # Telemetry-cadence gate determines whether to request attention
+        # weights from MultiheadAttention. At S=128 the full attention
+        # matrix is ~17k entries — cheap — but PyTorch's flash-attention
+        # fast path still requires `need_weights=False`, so we only opt in
+        # on logging steps.
+        log_entropy = (
+            self.training
+            and self.wss_cp_xattn_telemetry_every > 0
+            and self._xattn_step_count % self.wss_cp_xattn_telemetry_every == 0
         )
-        h_wss = h_wss_pre + h_wss_aug
 
-        # cp queries from updated h_wss (re-normalised via wss_norm)
-        h_wss_renorm = self.wss_norm(h_wss)
-        h_cp_aug, _ = self.cp_to_wss_xattn(
-            query=h_cp_pre,
-            key=h_wss_renorm,
-            value=h_wss_renorm,
-            key_padding_mask=kp_mask_for_mha,
-            need_weights=False,
+        # Bidirectional cross-attention at slice level. Order matches the
+        # advisor's directive: wss_slice queries cp_slice first, then
+        # cp_slice queries the *updated* wss_slice (sequential coupling).
+        wss_slice_aug, attn_wss_to_cp = self.wss_to_cp_xattn(
+            query=wss_slice,
+            key=cp_slice,
+            value=cp_slice,
+            need_weights=log_entropy,
+            average_attn_weights=True,
         )
-        h_cp = h_cp_pre + h_cp_aug
+        wss_slice_new = wss_slice + wss_slice_aug
 
-        wss_pred = self.wss_head(h_wss)
-        cp_pred = self.cp_head(h_cp)
+        cp_slice_aug, attn_cp_to_wss = self.cp_to_wss_xattn(
+            query=cp_slice,
+            key=wss_slice_new,
+            value=wss_slice_new,
+            need_weights=log_entropy,
+            average_attn_weights=True,
+        )
+        cp_slice_new = cp_slice + cp_slice_aug
+
+        # Project slices → per-point via the head-specific slice weights.
+        # h_per_point[b, n, d] = sum_s wss_slice_w[b, n, s] * wss_slice[b, s, d]
+        wss_per_point = torch.einsum("bsd,bns->bnd", wss_slice_new, wss_slice_w)
+        cp_per_point = torch.einsum("bsd,bns->bnd", cp_slice_new, cp_slice_w)
+
+        # Per-point linear heads
+        wss_pred = self.wss_head(wss_per_point)
+        cp_pred = self.cp_head(cp_per_point)
         surface_preds = torch.cat([cp_pred, wss_pred], dim=-1)
-        surface_preds = surface_preds * surface_mask.unsqueeze(-1).to(surface_preds.dtype)
+        surface_preds = surface_preds * mask_f
 
         xattn_telemetry: dict[str, torch.Tensor] = {}
         if self.training:
-            step = self._xattn_step_count
             self._xattn_step_count += 1
-            log_entropy = (
-                self.wss_cp_xattn_telemetry_every > 0
-                and step % self.wss_cp_xattn_telemetry_every == 0
-            )
             with torch.no_grad():
-                # head_cos_sim is cheap — log every step (tensor only, no .item())
-                mask_f = surface_mask.unsqueeze(-1).to(dtype=h_wss.dtype)
-                h_wss_masked = h_wss * mask_f
-                h_cp_masked = h_cp * mask_f
-                cos_per_token = F.cosine_similarity(h_wss_masked, h_cp_masked, dim=-1)
-                cos_per_token = cos_per_token * surface_mask.to(dtype=cos_per_token.dtype)
-                denom = surface_mask.to(dtype=cos_per_token.dtype).sum().clamp_min(1.0)
-                xattn_telemetry["xattn_head_cos_sim"] = (
-                    cos_per_token.sum() / denom
-                ).to(dtype=torch.float32)
+                # Cross-head cosine similarity at slice level (post-augmentation).
+                # Mean over S; bounded [0.05, 0.95] is the engagement signal
+                # confirming the two streams are differentiating.
+                cos_per_slice = F.cosine_similarity(
+                    wss_slice_new, cp_slice_new, dim=-1
+                )
+                xattn_telemetry["xattn_head_cos_sim"] = cos_per_slice.mean().to(
+                    dtype=torch.float32
+                )
 
                 if log_entropy:
-                    wss_to_cp_entropy, log_n_keys = self._xattn_entropy_subset(
-                        q_pre=h_wss_pre,
-                        kv_pre=h_cp_pre,
-                        mha=self.wss_to_cp_xattn,
-                        key_padding_mask=kp_mask,
-                        surface_mask=surface_mask,
-                    )
-                    cp_to_wss_entropy, _ = self._xattn_entropy_subset(
-                        q_pre=h_cp_pre,
-                        kv_pre=h_wss_renorm,
-                        mha=self.cp_to_wss_xattn,
-                        key_padding_mask=kp_mask,
-                        surface_mask=surface_mask,
-                    )
-                    xattn_telemetry["xattn_wss_to_cp_entropy"] = wss_to_cp_entropy.to(
+                    eps = 1e-9
+                    # attn_*_to_* shape: [B, S_query, S_key] (heads averaged).
+                    ent_wss_to_cp = -(
+                        attn_wss_to_cp * (attn_wss_to_cp + eps).log()
+                    ).sum(dim=-1).mean()
+                    ent_cp_to_wss = -(
+                        attn_cp_to_wss * (attn_cp_to_wss + eps).log()
+                    ).sum(dim=-1).mean()
+                    xattn_telemetry["xattn_wss_to_cp_entropy"] = ent_wss_to_cp.to(
                         dtype=torch.float32
                     )
-                    xattn_telemetry["xattn_cp_to_wss_entropy"] = cp_to_wss_entropy.to(
+                    xattn_telemetry["xattn_cp_to_wss_entropy"] = ent_cp_to_wss.to(
                         dtype=torch.float32
                     )
-                    xattn_telemetry["xattn_log_n_keys"] = log_n_keys.to(
-                        dtype=torch.float32
+                    # Slice count is fixed across the run, so log(S) is
+                    # constant — log it anyway so the downstream
+                    # entropy_norm = entropy/log_n_keys ratio is computed
+                    # in train.py without conditionals.
+                    xattn_telemetry["xattn_log_n_keys"] = torch.tensor(
+                        math.log(S),
+                        device=surface_hidden.device,
+                        dtype=torch.float32,
                     )
 
         return surface_preds, xattn_telemetry
-
-    def _xattn_entropy_subset(
-        self,
-        *,
-        q_pre: torch.Tensor,
-        kv_pre: torch.Tensor,
-        mha: nn.MultiheadAttention,
-        key_padding_mask: torch.Tensor | None,
-        surface_mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute per-step attention entropy on a downsampled query subset.
-
-        Returns ``(mean_entropy, log_n_keys)`` where ``log_n_keys`` is the log
-        of the per-batch-element effective key count (i.e. the uniform-attention
-        entropy upper bound), so the gate ``entropy < 0.85 * log_n_keys`` can
-        be evaluated downstream from the logged values.
-
-        Avoids materialising the full ``N_s x N_s`` attention matrix by
-        sampling ``n_sample`` query positions (default 256) and projecting only
-        the sampled queries through ``mha.in_proj_weight``.
-        """
-        B, N, D = q_pre.shape
-        H = mha.num_heads
-        head_dim = D // H
-        n_sample = min(self.wss_cp_xattn_entropy_n_sample, N)
-
-        if n_sample <= 0 or N <= 0:
-            zero = q_pre.new_zeros(())
-            return zero, zero
-
-        idx = torch.randperm(N, device=q_pre.device)[:n_sample]
-        q_sub = q_pre[:, idx, :]  # [B, n_sample, D]
-
-        in_w = mha.in_proj_weight  # [3D, D]
-        in_b = mha.in_proj_bias  # [3D]
-        w_q, w_k, _ = in_w.split(D, dim=0)
-        b_q, b_k, _ = in_b.split(D, dim=0)
-
-        q_proj = F.linear(q_sub, w_q, b_q).to(dtype=torch.float32)
-        k_proj = F.linear(kv_pre, w_k, b_k).to(dtype=torch.float32)
-        q_proj = q_proj.view(B, n_sample, H, head_dim).transpose(1, 2)
-        k_proj = k_proj.view(B, N, H, head_dim).transpose(1, 2)
-
-        scores = (q_proj @ k_proj.transpose(-1, -2)) / math.sqrt(head_dim)
-        if key_padding_mask is not None:
-            scores = scores.masked_fill(
-                key_padding_mask[:, None, None, :], float("-inf")
-            )
-        attn = F.softmax(scores, dim=-1)
-        entropy_per_query = -(attn * (attn + 1e-9).log()).sum(dim=-1)
-        mean_entropy = entropy_per_query.mean()
-
-        n_keys_per_batch = surface_mask.to(dtype=torch.float32).sum(dim=-1).clamp_min(1.0)
-        log_n_keys = n_keys_per_batch.log().mean()
-
-        return mean_entropy, log_n_keys
