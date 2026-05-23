@@ -33,6 +33,32 @@ def _apply_token_mask(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tenso
     return x * mask.unsqueeze(-1).to(device=x.device, dtype=x.dtype)
 
 
+class DropPath(nn.Module):
+    """Per-sample Stochastic Depth (Huang et al. 2016).
+
+    Drops entire residual branches with probability ``drop_prob`` during
+    training, with 1/keep_prob rescaling so expected magnitude is preserved.
+    Identity at eval, so adds zero inference cost. Broadcasting over the
+    sample dimension means each sample in a batch is independently kept/dropped.
+    """
+
+    def __init__(self, drop_prob: float = 0.0):
+        super().__init__()
+        self.drop_prob = drop_prob
+
+    def extra_repr(self) -> str:
+        return f"drop_prob={self.drop_prob:.4f}"
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.training or self.drop_prob == 0.0:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+        random_tensor.floor_()
+        return x.div(keep_prob) * random_tensor
+
+
 class LinearProjection(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, bias: bool = True):
         super().__init__()
@@ -303,6 +329,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        drop_path_prob: float = 0.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -316,12 +343,14 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        self.drop_path_attn = DropPath(drop_path_prob)
+        self.drop_path_mlp = DropPath(drop_path_prob)
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        x = x + self.drop_path_attn(self.attention(self.norm1(x), attn_mask=attn_mask))
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.drop_path_mlp(self.mlp(self.norm2(x)))
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -336,8 +365,14 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        drop_path_max: float = 0.0,
     ):
         super().__init__()
+        if depth > 1:
+            drop_path_probs = [drop_path_max * i / (depth - 1) for i in range(depth)]
+        else:
+            drop_path_probs = [0.0]
+        self.drop_path_probs = drop_path_probs
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -347,8 +382,9 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    drop_path_prob=drop_path_probs[i],
                 )
-                for _ in range(depth)
+                for i in range(depth)
             ]
         )
 
@@ -382,6 +418,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        drop_path_max: float = 0.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +433,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.drop_path_max = drop_path_max
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +510,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            drop_path_max=drop_path_max,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
