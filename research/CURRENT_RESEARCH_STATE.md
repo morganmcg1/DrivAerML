@@ -1,9 +1,40 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~01:30 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~06:50 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔵 ~06:50Z (2026-05-23) — Wave 33 fleet pre-terminal snapshot: H102 LEADER **6.1755%** (0.05pp from gate) + H97/H101/H104 all <6.25%, A WIN ZONE EXPANDING + H100 dedicated-head finishing FOURTH on val_WSS_z (refuting task-head hypothesis) + H99 frontier terminal in ~0.5h
+
+**Fleet snapshot (step/%total/val_abupt/val_WSS_z, sorted by completion):**
+```
+H99/frieren     66288  93.8%  6.3309%  9.7376%   ← TERMINAL imminent (~0.5h ETA, likely C NULL miss gate)
+H100/thorfinn   64712  91.6%  6.2982%  9.6853%   ← 4th on val_WSS_z (worst of viable mechanisms)
+H101/nezuko     63220  89.5%  6.2308%  9.5587%   ← borderline A WIN, +1.5K params(!)
+H97/alphonse    61970  87.7%  6.2266%  9.4789%   ← 3rd val_WSS_z, borderline A WIN
+H102/tanjiro    59772  84.6%  6.1755%  9.4369%   ← LEADER, FLEET-BEST val_WSS_z, A WIN trajectory
+H104/edward     58120  82.2%  6.2425%  9.5293%   ← borderline A WIN
+H103/askeladd   58028  82.1%  6.4401%  9.8013%   ← C NULL likely (FiLM weakest mechanism)
+H105/fern       33368  47.2%  6.8340%  10.2136%  ← early-cosine, ~7h remaining
+```
+
+**Wave 33 program finding (crystallizing):**
+- **H100 dedicated-task-head FAILS its own task-axis competition** — val_WSS_z 9.6853% is FOURTH behind H97 (9.479), H102 (9.437), H104 (9.529), H101 (9.559). General decoder enhancement beats WSS_z-specific architecture by 0.15-0.25pp at matched or lower param cost.
+- **Decoder enhancement productive direction confirmed**: 5/8 runs in A WIN/borderline zone with mechanisms spanning capacity (H102 width +266K), info-at-input (H101 positions +1.5K), bidirectional context (H97 +1M), volume-side capacity (H104 +229K)
+- **Mechanism class ranking emerging**: width(H102) > bidir-xattn(H97) > info-residual-positions(H101) > volume-width(H104) > depth(H99) > task-head(H100) > FiLM(H103) >> split-head(H96 closed D NEG)
+
+**Terminal sequence expected (next 7h):**
+1. H99 frieren ~07:15Z (depth axis, miss gate)
+2. H100 thorfinn ~07:35Z (task-head, miss gate)
+3. H101 nezuko ~08:05Z (borderline A WIN — 1.5K params!)
+4. H97 alphonse ~08:20Z (borderline A WIN — bidir +1M)
+5. H102 tanjiro ~08:50Z **PRIMARY A WIN CANDIDATE** (width +266K)
+6. H104 edward ~09:10Z (borderline A WIN — vol width)
+7. H103 askeladd ~09:15Z (FiLM, miss gate)
+8. H105 fern ~14:00Z (normals residual)
+
+If H102 lands A WIN: merge → new baseline → rebase all 7 in-flight PRs. Wave 34 compound priorities: H102+H101 (capacity+info), H102+H104 (symmetric width), H102+H97 (capacity+xattn), H101+H105 (full local geometry: positions+normals).
 
 ## 🔴 ~01:30Z (2026-05-23) — H96 WSS-DEDICATED-DECODER-HEAD CLOSED **D NEGATIVE** (split-head decoder +263K params regress on val_abupt + test_WSS) + fern reassigned H105 SURFACE-NORMAL-RESIDUAL-DECODER (PR #1271) + H97 alphonse check-in #3 (LATE-COSINE LEADER 6.386% + FLEET-BEST val_WSS_z 9.66%)
 
