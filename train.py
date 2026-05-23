@@ -139,6 +139,11 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    # H34 Ada-Temp Slices (Transolver++ arxiv 2502.02414)
+    use_ada_temp: bool = False
+    ada_temp_gamma_min: float = 0.5
+    ada_temp_gamma_max: float = 2.0
+    ada_temp_log_every: int = 200
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -278,7 +283,60 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
+        use_ada_temp=config.use_ada_temp,
+        ada_temp_gamma_min=config.ada_temp_gamma_min,
+        ada_temp_gamma_max=config.ada_temp_gamma_max,
     )
+
+
+def collect_ada_temp_metrics(model: nn.Module) -> dict[str, float]:
+    """Per-layer γ statistics from the cached Ada-Temp tensors.
+
+    Walks ``model.backbone.blocks`` and reads ``attention._last_gamma`` (set
+    in :class:`TransolverAttention.create_slices` when ``use_ada_temp=True``).
+    Returns an empty dict if Ada-Temp is disabled or the cache is unpopulated.
+    """
+    metrics: dict[str, float] = {}
+    backbone = getattr(model, "backbone", None)
+    if backbone is None:
+        return metrics
+    blocks = getattr(backbone, "blocks", None)
+    if blocks is None:
+        return metrics
+    layer_gamma_means: list[float] = []
+    layer_gamma_stds: list[float] = []
+    for i, block in enumerate(blocks):
+        attn = getattr(block, "attention", None)
+        if attn is None or not getattr(attn, "use_ada_temp", False):
+            continue
+        gamma = getattr(attn, "_last_gamma", None)
+        if gamma is None:
+            continue
+        with torch.no_grad():
+            g_flat = gamma.flatten().float()
+            g_mean = float(g_flat.mean().item())
+            g_std = float(g_flat.std().item())
+            g_min = float(g_flat.min().item())
+            g_max = float(g_flat.max().item())
+            g_p05 = float(torch.quantile(g_flat, 0.05).item())
+            g_p95 = float(torch.quantile(g_flat, 0.95).item())
+        metrics[f"ada_temp/layer_{i}/gamma_mean"] = g_mean
+        metrics[f"ada_temp/layer_{i}/gamma_std"] = g_std
+        metrics[f"ada_temp/layer_{i}/gamma_min"] = g_min
+        metrics[f"ada_temp/layer_{i}/gamma_max"] = g_max
+        metrics[f"ada_temp/layer_{i}/gamma_p05"] = g_p05
+        metrics[f"ada_temp/layer_{i}/gamma_p95"] = g_p95
+        layer_gamma_means.append(g_mean)
+        layer_gamma_stds.append(g_std)
+    if layer_gamma_means:
+        means_t = torch.tensor(layer_gamma_means)
+        stds_t = torch.tensor(layer_gamma_stds)
+        metrics["ada_temp/global/gamma_mean_across_layers"] = float(means_t.mean().item())
+        metrics["ada_temp/global/gamma_std_across_layers"] = float(stds_t.mean().item())
+        metrics["ada_temp/global/n_layers_with_std_gt_0p05"] = float(
+            int((stds_t > 0.05).sum().item())
+        )
+    return metrics
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -1027,6 +1085,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        if (
+                            config.use_ada_temp
+                            and config.ada_temp_log_every > 0
+                            and global_step % config.ada_temp_log_every == 0
+                        ):
+                            train_log.update(collect_ada_temp_metrics(base_model))
 
                 if skip_step:
                     nonfinite_skip_count += 1

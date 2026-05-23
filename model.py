@@ -210,7 +210,16 @@ class UpActDownMlp(nn.Module):
 
 
 class TransolverAttention(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        dropout: float = 0.0,
+        use_ada_temp: bool = False,
+        ada_temp_gamma_min: float = 0.5,
+        ada_temp_gamma_max: float = 2.0,
+    ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError("hidden_dim must be divisible by num_heads")
@@ -228,11 +237,37 @@ class TransolverAttention(nn.Module):
         self.proj = LinearProjection(hidden_dim, hidden_dim)
         self.proj_dropout = nn.Dropout(dropout)
 
+        # H34 Ada-Temp Slices (Transolver++ arxiv 2502.02414): per-point per-head
+        # learned multiplicative scale γ on the slice softmax. Bounded
+        # γ ∈ [γ_min, γ_max] via sigmoid; zero-init → γ = γ_min + 0.5 * (γ_max - γ_min)
+        # so init is a small departure from the baseline fixed temperature.
+        self.use_ada_temp = use_ada_temp
+        self.ada_temp_gamma_min = ada_temp_gamma_min
+        self.ada_temp_gamma_max = ada_temp_gamma_max
+        if use_ada_temp:
+            self.slice_temp_proj = nn.Linear(hidden_dim, num_heads, bias=True)
+            nn.init.zeros_(self.slice_temp_proj.weight)
+            nn.init.zeros_(self.slice_temp_proj.bias)
+        else:
+            self.slice_temp_proj = None
+        # Cache of the last γ tensor for layerwise diagnostic logging; populated
+        # only when use_ada_temp is True. Not used inside the graph — detached.
+        self._last_gamma: torch.Tensor | None = None
+
     def create_slices(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         slice_logits = self.in_project_slice(x_mid) / self.temperature
+        if self.use_ada_temp and self.slice_temp_proj is not None:
+            # [B, N, H] → [B, H, N, 1]; γ is multiplicative on top of the
+            # fixed 1/T sharpening so init (γ ≈ midpoint) ≈ baseline behavior.
+            log_gamma = self.slice_temp_proj(x)
+            gamma_range = self.ada_temp_gamma_max - self.ada_temp_gamma_min
+            gamma = self.ada_temp_gamma_min + gamma_range * torch.sigmoid(log_gamma)
+            gamma = gamma.permute(0, 2, 1).unsqueeze(-1)
+            slice_logits = slice_logits * gamma
+            self._last_gamma = gamma.detach()
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -268,6 +303,9 @@ class TransformerBlock(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_ada_temp: bool = False,
+        ada_temp_gamma_min: float = 0.5,
+        ada_temp_gamma_max: float = 2.0,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -277,6 +315,9 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             num_slices=num_slices,
             dropout=dropout,
+            use_ada_temp=use_ada_temp,
+            ada_temp_gamma_min=ada_temp_gamma_min,
+            ada_temp_gamma_max=ada_temp_gamma_max,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
@@ -299,6 +340,9 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_ada_temp: bool = False,
+        ada_temp_gamma_min: float = 0.5,
+        ada_temp_gamma_max: float = 2.0,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -309,6 +353,9 @@ class Transformer(nn.Module):
                     mlp_expansion_factor=mlp_expansion_factor,
                     num_slices=num_slices,
                     dropout=dropout,
+                    use_ada_temp=use_ada_temp,
+                    ada_temp_gamma_min=ada_temp_gamma_min,
+                    ada_temp_gamma_max=ada_temp_gamma_max,
                 )
                 for _ in range(depth)
             ]
@@ -342,6 +389,9 @@ class SurfaceTransolver(nn.Module):
         pe_init_sigmas: list[float] | None = None,
         use_curvature_attention_bias: bool = False,
         curvature_dim: int = 3,
+        use_ada_temp: bool = False,
+        ada_temp_gamma_min: float = 0.5,
+        ada_temp_gamma_max: float = 2.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -354,6 +404,9 @@ class SurfaceTransolver(nn.Module):
         self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
         self.use_curvature_attention_bias = use_curvature_attention_bias
         self.curvature_dim = curvature_dim
+        self.use_ada_temp = use_ada_temp
+        self.ada_temp_gamma_min = ada_temp_gamma_min
+        self.ada_temp_gamma_max = ada_temp_gamma_max
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -395,6 +448,9 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            use_ada_temp=use_ada_temp,
+            ada_temp_gamma_min=ada_temp_gamma_min,
+            ada_temp_gamma_max=ada_temp_gamma_max,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
