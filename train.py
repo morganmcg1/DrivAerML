@@ -156,16 +156,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         ),
         "wss_charbonnier_axes": (
             "Which WSS channels the supplementary Charbonnier loss applies to. "
-            "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b)."
+            "'all' = tau_x, tau_y, tau_z (H10 default). 'z' = tau_z only (H10b). "
+            "Comma-separated subsets are also accepted, e.g. 'y,z' (H41)."
         ),
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
         ),
     }
-    choices_text = {
-        "wss_charbonnier_axes": ["all", "z"],
-    }
+    choices_text: dict[str, list[str]] = {}
     for field in fields(Config):
         value = getattr(defaults, field.name)
         arg_name = f"--{field.name.replace('_', '-')}"
@@ -447,6 +446,7 @@ def train_loss(
         # Channels 1-3 of surface_preds/target are tau_x, tau_y, tau_z (idx 0 is cp).
         # With axes="z", restrict to channel 3 (tau_z) — the axis with the
         # largest val→test gap in H10, while letting τ_x/τ_y keep H9's MSE.
+        # H41: comma-separated subsets (e.g. "y,z") select multiple axes.
         if wss_charbonnier_weight > 0.0:
             if wss_charbonnier_axes == "z":
                 pred_wss = out["surface_preds"][..., 3:4]
@@ -455,9 +455,25 @@ def train_loss(
                 pred_wss = out["surface_preds"][..., 1:4]
                 target_wss = surface_target[..., 1:4]
             else:
-                raise ValueError(
-                    f"Unknown wss_charbonnier_axes={wss_charbonnier_axes}"
+                axis_map = {"x": 1, "y": 2, "z": 3}
+                indices: list[int] = []
+                for axis in wss_charbonnier_axes.split(","):
+                    axis = axis.strip()
+                    if axis not in axis_map:
+                        raise ValueError(
+                            f"Unknown wss_charbonnier_axes={wss_charbonnier_axes!r} "
+                            f"(axis {axis!r} not in {list(axis_map)})"
+                        )
+                    indices.append(axis_map[axis])
+                if not indices:
+                    raise ValueError(
+                        f"Empty wss_charbonnier_axes={wss_charbonnier_axes!r}"
+                    )
+                indices_t = torch.tensor(
+                    indices, device=out["surface_preds"].device, dtype=torch.long
                 )
+                pred_wss = out["surface_preds"].index_select(-1, indices_t)
+                target_wss = surface_target.index_select(-1, indices_t)
             loss_wss_charb = masked_charbonnier(
                 pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
             )
@@ -807,11 +823,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     if "loss_wss_charb_unweighted" in batch_loss_metrics:
                         # H10b diagnostics: key suffix follows --wss-charbonnier-axes
                         # so dashboards can compare "wss" (all-axes) vs "tau_z" (z-only).
-                        wss_axes_label = (
-                            "tau_z"
-                            if config.wss_charbonnier_axes == "z"
-                            else "wss"
-                        )
+                        # H41: subsets like "y,z" → "tau_y_z".
+                        if config.wss_charbonnier_axes == "z":
+                            wss_axes_label = "tau_z"
+                        elif config.wss_charbonnier_axes == "all":
+                            wss_axes_label = "wss"
+                        else:
+                            parts = [p.strip() for p in config.wss_charbonnier_axes.split(",")]
+                            wss_axes_label = "tau_" + "_".join(parts)
                         target_mse = batch_loss_metrics["loss_wss_charb_target_mse"]
                         charb_unw = batch_loss_metrics["loss_wss_charb_unweighted"]
                         charb_w = batch_loss_metrics["loss_wss_charb_weighted"]
