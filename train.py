@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_heteroscedastic_loss: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_heteroscedastic_loss": (
+            "Wave 33 H113: Kendall, Gal & Cipolla 2018 heteroscedastic "
+            "uncertainty weighting on the 3 regression tasks {SP, WSS, VP}. "
+            "Adds 3 learnable scalar log_sigma_sq parameters; total loss "
+            "becomes sum_k exp(-log_sigma_sq_k) * L_k + 0.5 * log_sigma_sq_k. "
+            "Identity at init: log_sigma_sq=0 -> precision=1, regularization=0, "
+            "so the total matches the static-weighted baseline composition. "
+            "log_sigma_sq is clamped to [-8, +8] for numerical stability."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +286,33 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_heteroscedastic_metrics(model: nn.Module) -> dict[str, float]:
+    """H113 diagnostic — current value of each learnable log_sigma_sq scalar
+    plus the derived sigma and precision-weight, for tasks {SP, WSS, VP}.
+
+    The precision weight is `exp(-log_sigma_sq)` clamped to the same range as
+    the loss path (clamp=[-8, +8]) so the W&B trace matches what the
+    optimiser actually sees during the heteroscedastic combination.
+    """
+    metrics: dict[str, float] = {}
+    if not getattr(model, "use_heteroscedastic_loss", False):
+        return metrics
+    clamp = HETEROSCEDASTIC_LOG_SIGMA_CLAMP
+    for task in ("sp", "wss", "vp"):
+        param = getattr(model, f"log_sigma_sq_{task}", None)
+        if param is None:
+            continue
+        ls = float(param.detach().float().clamp(-clamp, clamp).item())
+        ls_raw = float(param.detach().float().item())
+        sigma = math.exp(0.5 * ls)
+        precision = math.exp(-ls)
+        metrics[f"train/log_sigma_sq/{task}"] = ls
+        metrics[f"train/log_sigma_sq_raw/{task}"] = ls_raw
+        metrics[f"train/sigma/{task}"] = sigma
+        metrics[f"train/precision_weight/{task}"] = precision
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,7 +345,11 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_heteroscedastic_loss=config.use_heteroscedastic_loss,
     )
+
+
+HETEROSCEDASTIC_LOG_SIGMA_CLAMP = 8.0
 
 
 def train_loss(
@@ -321,6 +362,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    heteroscedastic_params: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,27 +374,89 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
+        # Per-channel masked MSE diagnostics (used by both paths and by the
+        # heteroscedastic split).
+        surface_preds = out["surface_preds"]
+        sp_mse = masked_mse(surface_preds[..., 0:1], surface_target[..., 0:1], batch.surface_mask)
+        taux_mse = masked_mse(surface_preds[..., 1:2], surface_target[..., 1:2], batch.surface_mask)
+        tauy_mse = masked_mse(surface_preds[..., 2:3], surface_target[..., 2:3], batch.surface_mask)
+        tauz_mse = masked_mse(surface_preds[..., 3:4], surface_target[..., 3:4], batch.surface_mask)
+        vp_mse = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+
         if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
-                batch.surface_mask,
-                surface_channel_weights,
-            )
+            chan_w = surface_channel_weights.to(device=sp_mse.device, dtype=sp_mse.dtype)
+            w_sp = chan_w[0]
+            w_taux = chan_w[1]
+            w_tauy = chan_w[2]
+            w_tauz = chan_w[3]
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
-        volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
+            w_sp = w_taux = w_tauy = w_tauz = sp_mse.new_tensor(1.0)
+        # Baseline surface_loss = mean over (B,N,C) of w_c * sq_err_c
+        #   = (w_sp*sp + w_taux*taux + w_tauy*tauy + w_tauz*tauz) / 4
+        # so each per-channel contribution to weighted_surface_loss is
+        #   surface_loss_weight * w_c * c_mse / 4.
+        surface_loss = (
+            w_sp * sp_mse
+            + w_taux * taux_mse
+            + w_tauy * tauy_mse
+            + w_tauz * tauz_mse
+        ) / 4.0
+        volume_loss = vp_mse
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
-        loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
-        "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
-        "surface_loss": float(surface_loss.detach().cpu().item()),
-        "volume_loss": float(volume_loss.detach().cpu().item()),
-        "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
-        "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
-    }
+
+        metrics: dict[str, float] = {
+            "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
+            "surface_loss": float(surface_loss.detach().cpu().item()),
+            "volume_loss": float(volume_loss.detach().cpu().item()),
+            "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
+            "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
+            "loss_sp_unweighted": float(sp_mse.detach().cpu().item()),
+            "loss_tau_x_unweighted": float(taux_mse.detach().cpu().item()),
+            "loss_tau_y_unweighted": float(tauy_mse.detach().cpu().item()),
+            "loss_tau_z_unweighted": float(tauz_mse.detach().cpu().item()),
+            "loss_vp_unweighted": float(vp_mse.detach().cpu().item()),
+        }
+
+        if heteroscedastic_params is None:
+            loss = weighted_surface_loss + weighted_volume_loss
+        else:
+            # H113 Kendall, Gal & Cipolla 2018 heteroscedastic uncertainty
+            # weighting on K=3 regression tasks. The per-task partial losses
+            # are scaled so that their sum equals weighted_surface_loss +
+            # weighted_volume_loss; at log_sigma_sq=0 the heteroscedastic
+            # formula reduces to that sum exactly (identity at init).
+            ls_sp_p, ls_wss_p, ls_vp_p = heteroscedastic_params
+            ls_sp = ls_sp_p.clamp(
+                -HETEROSCEDASTIC_LOG_SIGMA_CLAMP, HETEROSCEDASTIC_LOG_SIGMA_CLAMP
+            ).float()
+            ls_wss = ls_wss_p.clamp(
+                -HETEROSCEDASTIC_LOG_SIGMA_CLAMP, HETEROSCEDASTIC_LOG_SIGMA_CLAMP
+            ).float()
+            ls_vp = ls_vp_p.clamp(
+                -HETEROSCEDASTIC_LOG_SIGMA_CLAMP, HETEROSCEDASTIC_LOG_SIGMA_CLAMP
+            ).float()
+
+            l_sp = (surface_loss_weight * w_sp * sp_mse / 4.0).float()
+            l_wss = (
+                surface_loss_weight
+                * (w_taux * taux_mse + w_tauy * tauy_mse + w_tauz * tauz_mse)
+                / 4.0
+            ).float()
+            l_vp = (volume_loss_weight * vp_mse).float()
+
+            weighted_sp = (-ls_sp).exp() * l_sp + 0.5 * ls_sp
+            weighted_wss = (-ls_wss).exp() * l_wss + 0.5 * ls_wss
+            weighted_vp = (-ls_vp).exp() * l_vp + 0.5 * ls_vp
+            loss = (weighted_sp + weighted_wss + weighted_vp).reshape(())
+            metrics["het/L_sp_partial"] = float(l_sp.detach().cpu().item())
+            metrics["het/L_wss_partial"] = float(l_wss.detach().cpu().item())
+            metrics["het/L_vp_partial"] = float(l_vp.detach().cpu().item())
+            metrics["het/loss_weighted_sp"] = float(weighted_sp.detach().cpu().item())
+            metrics["het/loss_weighted_wss"] = float(weighted_wss.detach().cpu().item())
+            metrics["het/loss_weighted_vp"] = float(weighted_vp.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -777,8 +881,25 @@ def main(argv: Iterable[str] | None = None) -> None:
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)
+        heteroscedastic_params: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None
+        if config.use_heteroscedastic_loss:
+            ls_sp = getattr(base_model, "log_sigma_sq_sp", None)
+            ls_wss = getattr(base_model, "log_sigma_sq_wss", None)
+            ls_vp = getattr(base_model, "log_sigma_sq_vp", None)
+            if ls_sp is None or ls_wss is None or ls_vp is None:
+                raise RuntimeError(
+                    "--use-heteroscedastic-loss requires model.log_sigma_sq_{sp,wss,vp} "
+                    "parameters; the SurfaceTransolver does not expose them."
+                )
+            heteroscedastic_params = (ls_sp, ls_wss, ls_vp)
         if state.is_main:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
+            if config.use_heteroscedastic_loss:
+                print(
+                    "Heteroscedastic uncertainty weighting ENABLED (Kendall, Gal & "
+                    "Cipolla 2018): 3 learnable log_sigma_sq scalars on tasks "
+                    "{SP, WSS, VP}; clamp=[-8, +8]; identity at log_sigma_sq=0."
+                )
 
         optimizer = build_optimizer(base_model, config)
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
@@ -786,6 +907,11 @@ def main(argv: Iterable[str] | None = None) -> None:
 
         balancer: GradNormBalancer | None = None
         gradnorm_shared_params: list[nn.Parameter] = []
+        if config.use_gradnorm and config.use_heteroscedastic_loss:
+            raise ValueError(
+                "--use-gradnorm and --use-heteroscedastic-loss both balance "
+                "the multi-task loss and cannot be combined."
+            )
         if config.use_gradnorm:
             if config.gradnorm_mode == "full" and config.compile_model:
                 raise ValueError(
@@ -1030,6 +1156,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        heteroscedastic_params=heteroscedastic_params,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1197,27 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key in (
+                        "loss_sp_unweighted",
+                        "loss_tau_x_unweighted",
+                        "loss_tau_y_unweighted",
+                        "loss_tau_z_unweighted",
+                        "loss_vp_unweighted",
+                    ):
+                        if key in batch_loss_metrics:
+                            train_log[f"train/{key}"] = batch_loss_metrics[key]
+                    for key in (
+                        "het/L_sp_partial",
+                        "het/L_wss_partial",
+                        "het/L_vp_partial",
+                        "het/loss_weighted_sp",
+                        "het/loss_weighted_wss",
+                        "het/loss_weighted_vp",
+                    ):
+                        if key in batch_loss_metrics:
+                            train_log[f"train/{key}"] = batch_loss_metrics[key]
+                if config.use_heteroscedastic_loss:
+                    train_log.update(collect_heteroscedastic_metrics(base_model))
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 
@@ -1262,6 +1410,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_heteroscedastic_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

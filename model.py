@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_heteroscedastic_loss: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,19 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_heteroscedastic_loss = use_heteroscedastic_loss
+        if use_heteroscedastic_loss:
+            # Kendall, Gal & Cipolla 2018 — learnable per-task observation
+            # log-variance for the 3 regression tasks {SP, WSS, VP}. log_sigma_sq=0
+            # gives sigma=1, precision_weight=exp(0)=1, regularization=0 → identity
+            # at init when the per-task losses sum to the baseline composition.
+            self.log_sigma_sq_sp = nn.Parameter(torch.zeros(1))
+            self.log_sigma_sq_wss = nn.Parameter(torch.zeros(1))
+            self.log_sigma_sq_vp = nn.Parameter(torch.zeros(1))
+        else:
+            self.log_sigma_sq_sp = None
+            self.log_sigma_sq_wss = None
+            self.log_sigma_sq_vp = None
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -632,6 +646,22 @@ class SurfaceTransolver(nn.Module):
         else:
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
+
+        if self.use_heteroscedastic_loss:
+            # Anchor the log_sigma_sq parameters into the forward autograd
+            # graph so DDP's find_unused_parameters tracer (enabled by the
+            # surf->vol xattn) sees them as "used in forward". Without this,
+            # the heteroscedastic combination in train_loss() fires gradient
+            # hooks for params that DDP already marked ready as unused -> the
+            # "marked ready twice" crash. The contribution is identically
+            # zero so model outputs are unchanged.
+            anchor = (
+                self.log_sigma_sq_sp.sum()
+                + self.log_sigma_sq_wss.sum()
+                + self.log_sigma_sq_vp.sum()
+            ) * 0.0
+            surface_preds = surface_preds + anchor.to(surface_preds.dtype)
+            volume_preds = volume_preds + anchor.to(volume_preds.dtype)
 
         return {
             "surface_preds": surface_preds,
