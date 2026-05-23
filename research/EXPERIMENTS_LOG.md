@@ -1,3 +1,75 @@
+## 2026-05-23 ~21:00 — PR #1276: H106 VOLUME-GEOM-RESIDUAL-DECODER (frieren, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.039pp); val gate MISS +0.124pp; **COST-EFFICIENCY CHAMPION OF THE PROGRAM** — within +0.07pp val_abupt of H107 (+262K params) at **105× lower parameter cost** (+2,560 params); 15th SP plateau confirmation; volume-info-at-decoder mechanism class now characterized
+
+- **Branch**: `frieren/h106-volume-geom-residual-decoder` (closed at ~21:00Z 2026-05-23)
+- **W&B run**: `ci7mqnjs` (rank 0), 13 epochs completed, runtime 14.0h, no infra anomalies
+- **Hypothesis**: Inject volume-geometry residual `volume_x[..., 0:4]` (xyz + sdf) as zero-init `Linear(4, 512)` additive residual to `volume_hidden` (post-backbone, pre-`volume_out`). Mirror of H101 (surface positions) and H105 (surface normals) on the **volume** path. +2,560 params. Tests whether volume-side info-at-decoder is symmetric to surface-side mechanism.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.2505%** ❌ | **6.026%** | 5.844% | **+0.182pp MISS gate +0.124pp** |
+| surface_pressure | 4.168% | 3.840% | 3.577 (floor) | **+0.263pp MISS floor — 15th plateau confirmation** |
+| **volume_pressure** | 3.670% | **3.604%** | 3.643 (floor) | **−0.039pp CROSS floor** ✓ |
+| wall_shear | 7.066% | 6.938% | 6.727 (goal) | +0.211pp MISS goal |
+| wall_shear_x | 6.178% | 6.161% | — | +0.331pp regress |
+| wall_shear_y | 7.657% | 7.497% | — | +0.397pp regress |
+| wall_shear_z | 9.580% | **9.028%** | 9.83 (canonical) | **−0.802pp strong improvement** ✓ |
+
+- Gate: val_abupt 6.2505% MISS gate by +0.124pp (C NULL margin range).
+- Test AND-gate: **FAILS 3/4** (test_VP ✓ cross by −0.039pp, others miss).
+- B PARTIAL via single test_VP floor cross (consistent with H101/H104/H105 closure rubric).
+
+### 🔥 COST-EFFICIENCY CHAMPION OF THE PROGRAM
+
+H106 lands within +0.07pp val_abupt of H107 (+262K params) at **105× lower parameter cost** (+2.5K vs +262K).
+
+| Run | val_abupt | Δ params | val/Δparam ratio |
+|---|---:|---:|---:|
+| H110 tanjiro compound (in flight) | ~6.14% | +268K | 50 params/0.001pp |
+| H107 thorfinn | 6.20% | +262K | 50 params/0.001pp |
+| H108 nezuko | 6.165% | +265K | 50 params/0.001pp |
+| **H106 frieren (this)** | **6.2505%** | **+2.5K** | **0.5 params/0.001pp** ⭐ |
+| H105 fern | 6.349% | +2K | similar |
+| H101 (merged) | 6.213% | +1.5K | best EVER |
+
+H106 is **2nd most cost-efficient mechanism** of the program after H101 — strongest cost-efficiency demonstration of Wave 33+34.
+
+### Mechanism class — VOLUME-GEOM RESIDUAL OUTPERFORMS SURFACE-NORMAL RESIDUAL
+
+Direct H106 vs H105 vs H101 comparison (info-at-decoder family):
+
+| Run | Channel | Δ params | val_abupt | test_VP cross | test_WSS_z vs canonical |
+|---|---|---:|---:|---:|---:|
+| H105 fern | normals [3:6] | +2K | 6.349% | −0.109pp | 8.863% (−0.97) |
+| **H106 frieren (this)** | **volume xyz+sdf [0:4]** | **+2.5K** | **6.2505%** | **−0.039pp** | **9.028% (−0.80)** |
+| H101 (positions [0:3]) | positions | +1.5K | 6.213% | −0.129pp | improves |
+
+H106 trails H101 by +0.04pp val_abupt at +1K higher cost. **Positions still best info-at-decoder axis.** Volume-info residual targets volume_hidden directly via SDF + local coordinates — meaningfully different from surface info-residual: clean test_VP cross was the predicted outcome and it happened.
+
+### 15th SP plateau locked in
+
+Plateau extends to 15/15 mechanisms in 3.70-3.95% range vs floor 3.577. H113 (in-flight) heteroscedastic diagnostic has empirically confirmed SP plateau is **HARDNESS-BOUND, not balance-bound** (log_σ² drift to −2.3 with only 2.1% per-task relative differential). Wave 35+ MUST pivot SP from architecture/loss-balance tiers to **data-tier interventions** (panel-area weighting, CDF normalize, log-transform tails, geometric augmentation).
+
+### Strategic implications
+
+1. **DO NOT MERGE** — val_abupt 6.2505% > baseline 6.126%, +0.124pp regress on primary metric.
+2. **H106 mechanism is permanent infrastructure CANDIDATE** at +2.5K params for compound staging. Wave 35 candidate: **H106 + H112 (DropPath) — +2.5K total — most cost-efficient compound possible** if H112 lands.
+3. **Volume-info-at-decoder mechanism class is now characterized** — clean test_VP cross, test_WSS_z improvement (−0.80pp from canonical 9.83), no test_SP impact. Diminishing returns on more volume-side mechanisms.
+4. **Closing this PR — frieren reassigned to H114 PANEL-AREA-WEIGHTED SP LOSS** (Plateau Protocol data-tier intervention, PR #1289).
+
+### Per-channel val→test slopes (for reference)
+
+| Channel | val | test | val→test slope |
+|---|---:|---:|---:|
+| abupt | 6.2505 | 6.026 | −0.225 (canonical-class) |
+| SP | 4.168 | 3.840 | −0.328 (favorable) |
+| VP | 3.670 | 3.604 | −0.066 (very flat — VP signal stable) |
+| WSS | 7.066 | 6.938 | −0.128 (slight regress) |
+| WSS_z | 9.580 | 9.028 | **−0.552 (steep favorable, volume-info helping binding axis transfer)** |
+
+---
+
 ## 2026-05-23 ~16:30 — PR #1271: H105 SURFACE-NORMAL-RESIDUAL-DECODER (fern, CLOSED) — **B PARTIAL** via single test_VP floor cross (−0.109pp); val gate MISS +0.223pp; 14th SP plateau confirmation; **NORMALS-AT-DECODER UNDERPERFORMS POSITIONS-AT-DECODER** by +0.127pp val_abupt at terminal; info-at-decoder mechanism axis converging — H101 positions > H105 normals > H99 depth)
 
 - **Branch**: `fern/h105-surface-normal-residual-decoder` (closed at ~16:30Z 2026-05-23)

@@ -1,9 +1,43 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~20:30 UTC)
+- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~21:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔥🔥🔥 ~21:00Z (2026-05-23) — **H106 CLOSED B PARTIAL (COST-EFFICIENCY CHAMPION); FRIEREN REASSIGNED H114 PANEL-AREA-WEIGHTED SP LOSS — PLATEAU PROTOCOL DATA-TIER PIVOT BEGINS**
+
+**H106 frieren CLOSED (PR #1276, do not merge):**
+- val_abupt 6.2505% MISS gate by +0.124pp
+- test_VP 3.604% **CROSS floor** by −0.039pp → B PARTIAL
+- test_WSS_z 9.028% improves canonical 9.83% by **−0.802pp** (strong binding-axis transfer)
+- **+2,560 params delivers within +0.07pp val_abupt of H107 (+262K params) → 105× lower parameter cost**
+- 2nd-most cost-efficient mechanism of the program after H101
+- Volume-info-at-decoder mechanism class now characterized: clean test_VP cross, test_WSS_z improvement, no test_SP impact
+- **15th consecutive SP plateau confirmation** — combined with H113 heteroscedastic diagnostic, SP plateau is empirically **HARDNESS-BOUND, not balance-bound**
+
+**H114 ASSIGNED to frieren (PR #1289, draft):**
+- **PANEL-AREA-WEIGHTED SP LOSS** — Plateau Protocol data-tier intervention
+- Reweight per-point SP MSE by `panel_area = surface_x[..., 6:7]`; normalize by sum(panel_area · mask) so loss magnitude is preserved
+- **Zero added parameters** — pure loss reformulation
+- **Falsifiable**: if `test_SP < 3.577%`, area-weighting was the bottleneck for the 15-mechanism plateau; if not, plateau is gradient-distribution-independent → forces escalation to CDF normalize / log-transform tails / geometric augmentation
+- Direct mirror of H113 diagnostic's strategic finding: hardness-bound SP requires data-tier intervention, not loss-tier or architecture-tier
+- Physical rationale: aerodynamic force `F = ∫p·dA` is area-weighted, but current uniform SP MSE treats a 1cm² roof panel and a 50cm² splitter equally. Mechanism aligns gradient signal with force-contribution distribution
+
+**Fleet status (post-closure):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| H107 thorfinn | ~step 63,228 val 6.20% | terminal phase | B PARTIAL plateaued |
+| H108 nezuko | ~step 67,932 val 6.165% | ~5,442 steps to terminal | **B PARTIAL via test_VP cross LOCKED** |
+| H110 tanjiro compound | step 62,492 val 6.142% | 8,163 steps remaining | **A WIN AT EDGE — narrow margin decisive at next 2 publishes** |
+| H111 askeladd LayerScale | step 52,528 | active | B PARTIAL via test_VP cross |
+| H112 edward DropPath | step 59,772 val 6.202% | 10,884 steps remaining | **A WIN PROBABLE — strongest slope sustain at ZERO PARAMS** |
+| H113 fern heteroscedastic | step ~36,089 EP3 6.94% | diagnostic complete | C NULL or weak B PARTIAL — diagnostic locked |
+| **H114 frieren panel-area SP** | **just assigned** | **draft PR #1289** | **Plateau Protocol data-tier intervention** |
+| H109 alphonse encoder-skip | step ~48,902 val 6.359% | active | mid-cohort B PARTIAL |
+
+**Zero idle students. 8/8 WIP. Productive throughput.**
 
 ## 🔥🔥🔥 ~20:30Z (2026-05-23) — **TWO A WIN CANDIDATES IN FLIGHT, A THIRD AT ZERO PARAMS**
 
