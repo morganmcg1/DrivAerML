@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_backbone_skip_residual_decoder: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_backbone_skip_residual_decoder": (
+            "Wave 33 H109: add zero-init Linear(n_hidden, n_hidden) "
+            "projection of pre-backbone embedded surface tokens as a "
+            "residual to surface_hidden BEFORE self.surface_out. Identity "
+            "at init (weight and bias zero) so baseline is preserved at "
+            "step 0. Param cost ~263K. NEW mechanism class "
+            "(encoder-skip / backbone-bypass): tests whether the 5-layer "
+            "backbone + slice-attention compression destroys per-point "
+            "info the decoder benefits from accessing directly. "
+            "Generalizes H101 (raw xyz positions, +3K B PARTIAL) to the "
+            "full embedded feature set."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +321,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_backbone_skip_residual_decoder=config.use_backbone_skip_residual_decoder,
     )
 
 
@@ -773,7 +787,13 @@ def main(argv: Iterable[str] | None = None) -> None:
             # at the gradient bucket allreduce. Enabling find_unused_parameters
             # whenever the cross-attention is on lets DDP synchronize unused
             # params across ranks, at a small per-step overhead.
-            if config.use_surf_to_vol_xattn:
+            # H109 backbone_skip_proj is also gated on surface tokens being
+            # present (volume-only views skip the residual injection); same
+            # DDP unused-param hazard as the surf->vol xattn block above.
+            if (
+                config.use_surf_to_vol_xattn
+                or config.use_backbone_skip_residual_decoder
+            ):
                 ddp_kwargs["find_unused_parameters"] = True
             model = DistributedDataParallel(model, **ddp_kwargs)
         base_model = unwrap_model(model)

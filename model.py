@@ -382,6 +382,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_backbone_skip_residual_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +397,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_backbone_skip_residual_decoder = use_backbone_skip_residual_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -519,6 +521,22 @@ class SurfaceTransolver(nn.Module):
             self.surf_to_vol_xattn = None
             self.surf_to_vol_xattn_norm = None
 
+        # Wave 33 H109: zero-init Linear(n_hidden, n_hidden) projection of
+        # pre-backbone embedded surface tokens, added as residual to
+        # post-backbone surface_hidden BEFORE self.surface_out. Identity at
+        # init via zero-init weight + bias.
+        # NEW mechanism class: ENCODER-SKIP / BACKBONE-BYPASS. Tests whether the
+        # 5-layer backbone (+ slice-attention compression) destroys per-point
+        # info that the decoder benefits from accessing directly. Generalizes
+        # H101 (raw xyz positions, +3K params B PARTIAL) to the full embedded
+        # feature representation post-surface_in projection but pre-backbone.
+        if use_backbone_skip_residual_decoder:
+            self.backbone_skip_proj = nn.Linear(n_hidden, n_hidden, bias=True)
+            nn.init.zeros_(self.backbone_skip_proj.weight)
+            nn.init.zeros_(self.backbone_skip_proj.bias)
+        else:
+            self.backbone_skip_proj = None
+
     def _encode_group(
         self,
         x: torch.Tensor,
@@ -565,19 +583,23 @@ class SurfaceTransolver(nn.Module):
         surface_tokens = 0
         volume_tokens = 0
 
+        pre_backbone_surface: torch.Tensor | None = None
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    surface_x,
-                    rff=self.surface_rff,
-                    string_sep=self.surface_string_sep,
-                    project_features=self.project_surface_features,
-                    bias=self.surface_bias,
-                    placeholder=self.surface_placeholder,
-                )
+            surface_encoded = self._encode_group(
+                surface_x,
+                rff=self.surface_rff,
+                string_sep=self.surface_string_sep,
+                project_features=self.project_surface_features,
+                bias=self.surface_bias,
+                placeholder=self.surface_placeholder,
             )
+            tokens.append(surface_encoded)
             masks.append(surface_mask)
+            # Wave 33 H109: capture pre-backbone embedded surface tokens for
+            # zero-init skip residual injected at the decoder input.
+            if self.backbone_skip_proj is not None and surface_tokens > 0:
+                pre_backbone_surface = surface_encoded
 
         if volume_x is not None:
             volume_tokens = volume_x.shape[1]
@@ -622,6 +644,18 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
+            # Wave 33 H109: add zero-init skip residual from pre-backbone
+            # embedded surface tokens to post-backbone surface_hidden BEFORE
+            # surface_out. Identity at step 0 (zero-init weight + bias) so
+            # baseline is preserved; model learns to use pre-backbone
+            # per-point info that may be diluted by the 5-layer backbone +
+            # slice-attention compression. surface_mask is applied to
+            # surface_preds below so masked positions have no downstream
+            # effect.
+            if pre_backbone_surface is not None:
+                surface_hidden = surface_hidden + self.backbone_skip_proj(
+                    pre_backbone_surface
+                )
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
