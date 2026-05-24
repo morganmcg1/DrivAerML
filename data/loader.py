@@ -269,12 +269,60 @@ def _three_column(value: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+_TANGENT_FRAME_DEBUG_PRINTS_REMAINING = 3
+
+
+def _tangent_frame_local_xyz(xyz: np.ndarray, normals: np.ndarray, case_id: str) -> np.ndarray:
+    # Surface-Intrinsic Tangent-Frame Input Encoding (PR #1302 / H-A).
+    # Replace world (x, y, z) with offset-from-centroid projected onto the
+    # per-point local tangent frame {t_hat_1, t_hat_2, n_hat} built from the
+    # existing surface normal. Output frame is unchanged.
+    global _TANGENT_FRAME_DEBUG_PRINTS_REMAINING
+    # Eval-time chunked views can produce an empty surface slice for the
+    # extra views that exist only to cover the larger volume view count;
+    # short-circuit so xyz.mean does not emit a noisy NaN warning.
+    if xyz.shape[0] == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    n_hat = normals.astype(np.float32, copy=False)
+    ref = np.tile(np.array([0.0, 0.0, 1.0], dtype=np.float32), (n_hat.shape[0], 1))
+    align_dot = np.einsum("ij,ij->i", n_hat, ref)
+    align_mask = np.abs(align_dot) > 0.95
+    ref[align_mask] = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    t1 = np.cross(n_hat, ref)
+    t1 /= np.linalg.norm(t1, axis=1, keepdims=True) + 1e-9
+    t2 = np.cross(n_hat, t1)
+    centroid = xyz.mean(axis=0, keepdims=True)
+    dp = xyz - centroid
+    xyz_local = np.stack(
+        [
+            np.einsum("ij,ij->i", dp, t1),
+            np.einsum("ij,ij->i", dp, t2),
+            np.einsum("ij,ij->i", dp, n_hat),
+        ],
+        axis=1,
+    ).astype(np.float32, copy=False)
+    if _TANGENT_FRAME_DEBUG_PRINTS_REMAINING > 0:
+        align_frac = float(align_mask.mean())
+        print(
+            f"[tangent-frame] case={case_id} N={xyz.shape[0]} "
+            f"centroid.shape={tuple(centroid.shape)} "
+            f"centroid={centroid.ravel().tolist()} "
+            f"align_mask_frac={align_frac:.4f} "
+            f"dp_t1_range=[{xyz_local[:, 0].min():.3f},{xyz_local[:, 0].max():.3f}] "
+            f"dp_n_range=[{xyz_local[:, 2].min():.3f},{xyz_local[:, 2].max():.3f}]",
+            flush=True,
+        )
+        _TANGENT_FRAME_DEBUG_PRINTS_REMAINING -= 1
+    return xyz_local
+
+
 def load_case(
     root: str | Path,
     case_id: str,
     *,
     surface_rows: np.ndarray | None = None,
     volume_rows: np.ndarray | None = None,
+    use_tangent_frame_input: bool = False,
 ) -> DrivAerMLCase:
     case_dir = _case_dir(Path(root), case_id)
     xyz = _load_npy_rows(case_dir / "surface_xyz.npy", surface_rows)
@@ -285,7 +333,11 @@ def load_case(
         _load_npy_rows(case_dir / "surface_wallshearstress.npy", surface_rows),
         "surface_wallshearstress.npy",
     )
-    surface_x = np.concatenate([xyz, normals, area], axis=1)
+    if use_tangent_frame_input:
+        xyz_input = _tangent_frame_local_xyz(xyz, normals, case_id)
+    else:
+        xyz_input = xyz
+    surface_x = np.concatenate([xyz_input, normals, area], axis=1)
     surface_y = np.concatenate([cp, wall_shear], axis=1)
     volume_x = np.concatenate(
         [
@@ -307,6 +359,17 @@ def load_case(
             "n_volume": int(volume_x.shape[0]),
         },
     )
+
+
+def reset_tangent_frame_debug_prints(remaining: int = 3) -> None:
+    """Re-enable the one-shot tangent-frame diagnostic prints.
+
+    Useful when a test wants to assert the print fires; production training
+    relies on the default 3-print quota set at module-import time.
+    """
+
+    global _TANGENT_FRAME_DEBUG_PRINTS_REMAINING
+    _TANGENT_FRAME_DEBUG_PRINTS_REMAINING = remaining
 
 
 def load_case_point_counts(root: str | Path, case_id: str) -> dict[str, int]:
@@ -338,8 +401,15 @@ class DrivAerMLCaseStore:
         *,
         surface_rows: np.ndarray | None = None,
         volume_rows: np.ndarray | None = None,
+        use_tangent_frame_input: bool = False,
     ) -> DrivAerMLCase:
-        return load_case(self.root, case_id, surface_rows=surface_rows, volume_rows=volume_rows)
+        return load_case(
+            self.root,
+            case_id,
+            surface_rows=surface_rows,
+            volume_rows=volume_rows,
+            use_tangent_frame_input=use_tangent_frame_input,
+        )
 
     def case_point_counts(self, case_id: str) -> dict[str, int]:
         cached = self._point_count_cache.get(case_id)
@@ -367,6 +437,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        use_tangent_frame_input: bool = False,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +447,7 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.use_tangent_frame_input = use_tangent_frame_input
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -444,6 +516,7 @@ class DrivAerMLSurfaceDataset(Dataset):
             view.case_id,
             surface_rows=None if surface_idx is None else surface_idx.numpy(),
             volume_rows=None if volume_idx is None else volume_idx.numpy(),
+            use_tangent_frame_input=self.use_tangent_frame_input,
         )
         metadata = dict(case.metadata)
         metadata["n_surface_full"] = int(counts["n_surface"])
@@ -544,6 +617,7 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    use_tangent_frame_input: bool = False,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +642,7 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        use_tangent_frame_input=use_tangent_frame_input,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(
@@ -576,6 +651,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            use_tangent_frame_input=use_tangent_frame_input,
         )
     }
     test_splits = {
@@ -585,6 +661,7 @@ def load_data(
             max_surface_points=eval_surface_points,
             max_volume_points=eval_volume_points,
             sampling_mode=eval_sampling,
+            use_tangent_frame_input=use_tangent_frame_input,
         )
     }
     stats = target_stats_from_normalizers(store)

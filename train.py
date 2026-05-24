@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_tangent_frame_input: bool = False
     drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
@@ -237,6 +238,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the attention and MLP branches with a linear schedule from "
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
+        ),
+        "use_tangent_frame_input": (
+            "H-A (PR #1302): Surface-Intrinsic Tangent-Frame Input Encoding. "
+            "Replace the three world (x, y, z) position channels in the "
+            "surface input with the per-case centroid offset projected onto "
+            "the local frame {t_hat_1, t_hat_2, n_hat} built from the existing "
+            "surface normal. Output frame is unchanged; the model still "
+            "predicts (tau_x, tau_y, tau_z) in world frame and loss is in "
+            "world frame. Shape (N, 7) is preserved. Reference axis is world-z "
+            "with world-y fallback where |n_hat . z| > 0.95. 0 added params."
         ),
     }
     for field in fields(Config):
@@ -693,6 +704,7 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        use_tangent_frame_input=getattr(old_ds, "use_tangent_frame_input", False),
     )
     train_sampler = None
     train_shuffle = True
