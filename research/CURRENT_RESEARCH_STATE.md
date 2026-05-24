@@ -1,9 +1,61 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~07:21 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~07:35 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🎯 PRIMARY OBJECTIVE (Morgan directive 2026-05-24T07:35Z)
+
+**test_WSS < 5.85% (Transolver-3 SOTA target).**
+
+Hard constraints (must not regress): test_VP ≤ 3.643%, test_SP ≤ 3.577%.
+
+Current best: test_WSS 6.752% (H112/PR #1283 DropPath, merged 2026-05-24 ~02:42Z) — slight regression from prior 6.727%. **Gap: 0.902pp on the primary metric.**
+
+**Critical implication**: val_abupt remains a steering metric, but **merge decisions must prioritize test_WSS improvement** over pure val_abupt gains. Capacity-axis dominance (H121/H120/H118) is valuable IF it translates to WSS — must verify val_WSS axis at EP3+ before committing to H122 capacity stack.
+
+**Fleet val_WSS LEADERBOARD (most recent publish):**
+| Rank | Hyp | val_WSS | val_abupt | Mechanism notes |
+|---|---|---:|---:|---|
+| **1** | **H116 nezuko (Y-mirror EP4)** | **7.305%** | 6.720% | Symmetry-aware aug — τ_y/τ_z paired reflection is **architecturally WSS-aligned** |
+| 2 | H115 thorfinn (Huber EP4) | 7.524% | 6.663% | SP-focused, indirect WSS effect |
+| 3 | H118 tanjiro (slices-192 EP3) | 7.884% | 6.936% | Slice capacity, mild WSS benefit |
+| 4 | H120 askeladd (depth-6 EP2) | 8.602% | 7.589% | Pre-EP3, mid-cosine |
+| 5 | H119 edward (compound EP2) | 8.819% | 7.773% | Decoder-width helps WSS marginally |
+| 6 | H117 alphonse (compound EP2) | 8.909% | 8.088% | SP-target reshape, hurts WSS too |
+| 7 | H121 frieren (hidden-576 EP1) | 26.040% | 23.860% | Pre-EP2, EP1 only |
+
+**Strategic re-prioritization (H122+ backlog):**
+1. **H123 WSS-specific tangent-frame projection decoder head** — MOVED TO TOP for fern reassignment
+2. **H125 multi-scale slice attention** — texture-pattern features for WSS
+3. **H122 capacity stack REFRAMED** — must include WSS-specific decoder head, not pure capacity
+4. **H126 SDF-conditioned volume cross-attention** — secondary (helps VP not WSS)
+5. **H124 SP-specific loss weighting** — DEPRIORITIZED (orthogonal to WSS)
+
+## ~07:35Z (2026-05-24) — H113 FERN AT STEP 70665 TERMINAL, AWAITING SENPAI-RESULT POST
+
+**Snapshot (8/8 students working, 0 idle, no review-ready PRs):**
+
+| Slot | Step / % | Runtime | val_abupt | val_WSS | Status |
+|---|---:|---:|---:|---:|---|
+| H113 fern heteroscedastic | 70,665 / 100.0% | 14.13h | 6.389% | 7.222% | **TERMINAL** — awaiting student SENPAI-RESULT post |
+| H115 thorfinn Huber SP | 42,734 / 60.5% | 6.83h | 6.663% (EP4) | 7.524% | EP5 ~15 min |
+| H116 nezuko Y-mirror | 39,706 / 56.2% | 6.24h | 6.720% (EP4) | **7.305%** ← WSS LEAD | EP5 ~45 min |
+| H117 alphonse compound | 27,357 / 38.7% | 4.16h | 8.088% (EP2) | 8.909% | EP3 ~1.0h kill-or-confirm |
+| H118 tanjiro slices 192 | 33,992 / 48.1% | 5.60h | 6.936% (EP3) | 7.884% | EP4 ~50 min |
+| H119 edward compound | 29,301 / 41.5% | 4.48h | 7.773% (EP2) | 8.819% | EP3 ~40 min |
+| H120 askeladd depth 6 | 23,543 / 33.3% | 4.10h | 7.589% (EP2) | 8.602% | EP3 ~1.5h |
+| H121 frieren hidden 576 | 18,586 / 26.3% | 3.68h | 23.860% (EP1) | 26.040% | EP2 ~50 min |
+
+### H113 fern TERMINAL TRAJECTORY (val_abupt 6.389%):
+- val_abupt 6.389% vs merge gate **6.1358% = +0.253pp OVER** → **NOT A WIN on val_abupt**
+- val_VP 3.779% vs test_VP floor 3.643% → +0.136pp over val; with -0.282pp val→test slope, test_VP ≈ **3.50%** ✓ **CROSSES floor (B PARTIAL eligible)**
+- val_SP 4.210% vs test_SP floor 3.577% → +0.633pp over val; test_SP ≈ 3.93% → DOES NOT cross
+- val_WSS 7.222% vs test_WSS floor 6.727% → +0.495pp over val; test_WSS ≈ **6.94%** → DOES NOT cross (REGRESSES from H112)
+- **Expected verdict: B PARTIAL** (test_VP cross only) or **C NULL** (if test_VP doesn't actually cross)
+
+**Fern reassignment plan**: Once H113 closes, assign fern to **H123 WSS tangent-frame projection decoder head** (highest priority WSS-axis attack). This is the architecturally most-aligned single-mechanism attack on test_WSS.
 
 ## ~07:21Z (2026-05-24) — CAPACITY-AXIS DOMINANCE CONFIRMED: H121 LEADS EP1, H120 LEADS EP2, H118 LEADS EP3; H117 SIGNED-SQRT REGRESSING; H113 TERMINAL ~5MIN
 
