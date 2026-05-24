@@ -104,6 +104,7 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_swiglu_mlp: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -238,6 +239,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_swiglu_mlp": (
+            "H128: Replace each TransformerBlock's dense Up->GELU->Down "
+            "MLP (UpActDownMlp) with a Llama-style SwiGLU gated MLP "
+            "(SwiGluMlp): Down(SiLU(Gate(x)) * Value(x)). Three bias-free "
+            "Linear projections (gate, value, down). down_proj.weight is "
+            "zero-initialised so the block is residual-stream identity "
+            "at step 0. Keeps mlp_ratio unchanged, adding ~30% MLP params "
+            "(~5M for 5 blocks at hidden=512, mlp_ratio=4)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -285,6 +295,31 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_swiglu_gate_metrics(model: nn.Module) -> dict[str, float]:
+    """Aggregate per-block SwiGLU gate diagnostics recorded during eval()."""
+    from model import SwiGluMlp
+
+    metrics: dict[str, float] = {}
+    block_stats: list[dict[str, float]] = []
+    for idx, module in enumerate(model.modules()):
+        if not isinstance(module, SwiGluMlp):
+            continue
+        stats = dict(getattr(module, "_last_stats", {}) or {})
+        if not stats:
+            continue
+        block_idx = len(block_stats)
+        block_stats.append(stats)
+        for key, value in stats.items():
+            metrics[f"swiglu/block_{block_idx}/{key}"] = value
+    if block_stats:
+        keys = block_stats[0].keys()
+        for key in keys:
+            values = [bs[key] for bs in block_stats if key in bs]
+            if values:
+                metrics[f"swiglu/mean/{key}"] = float(sum(values) / len(values))
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -318,6 +353,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_swiglu_mlp=config.use_swiglu_mlp,
     )
 
 
@@ -905,6 +941,18 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"DropPath (H112): per-block schedule "
                         f"(attn=mlp) = {drop_path_schedule}"
                     )
+            total_params = sum(p.numel() for p in base_model.parameters())
+            trainable_params = sum(
+                p.numel() for p in base_model.parameters() if p.requires_grad
+            )
+            wandb.summary["model/total_params"] = total_params
+            wandb.summary["model/trainable_params"] = trainable_params
+            wandb.summary["model/use_swiglu_mlp"] = bool(config.use_swiglu_mlp)
+            print(
+                f"Model param count: total={total_params:,d} "
+                f"trainable={trainable_params:,d} "
+                f"use_swiglu_mlp={config.use_swiglu_mlp}"
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1284,6 +1332,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_swiglu_gate_metrics(base_model))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
