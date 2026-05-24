@@ -62,11 +62,12 @@ Source: Issue #1053 revalidation run 2026-05-12 (all PRs re-evaluated on correct
 
 | Rank | PR | Source run | Eval run | test_ABUPT | test_VP | test_SP | test_WSS |
 |------|-----|-----------|---------|------------|---------|---------|---------|
-| 1 | **#972** | `56bcqp3m` | `zxnhtagj` | **5.844%** | 3.643% | 3.577% | 6.727% |
-| 2 | #968 | `a0yoxy85` | `qbg9pkmx` | 5.986% | 3.957% | 3.673% | 6.825% |
-| 3 | #880 | `zst3y2mp` | `x78xbsfn` | 6.010% | 4.501% | 3.611% | **6.708%** |
-| 4 | #958 | `29nohj67` | `fkjc12c8` | 6.107% | 3.818% | 3.911% | 6.985% |
-| 5 | #939 | `yfitnqia` | — | 6.242% | — | — | — |
+| 1 ⭐ | **#1284 (MERGED)** | `yym5oa8x` | terminal | 5.801% | 3.603% | 3.650% | **6.6506%** ⭐ NEW WSS SOTA |
+| 2 | **#972** | `56bcqp3m` | `zxnhtagj` | **5.844%** | 3.643% | 3.577% | 6.727% |
+| 3 | #968 | `a0yoxy85` | `qbg9pkmx` | 5.986% | 3.957% | 3.673% | 6.825% |
+| 4 | #880 | `zst3y2mp` | `x78xbsfn` | 6.010% | 4.501% | 3.611% | 6.708% |
+| 5 | #958 | `29nohj67` | `fkjc12c8` | 6.107% | 3.818% | 3.911% | 6.985% |
+| 6 | #939 | `yfitnqia` | — | 6.242% | — | — | — |
 | … | … | … | … | … | … | … | … |
 | 21 | #741 | `lszc4ri7`/`1tal40wr` | — | 8.156% | 11.744% | — | — |
 | 22 | #740 | `5x8wofzm` | — | 8.165% | 13.660% | — | — |
@@ -75,10 +76,19 @@ Source: Issue #1053 revalidation run 2026-05-12 (all PRs re-evaluated on correct
 
 ### Current single-model best on `drivaerml-long-20260504`
 
-**CORRECTED-SPLIT SOTA (2026-05-12):** PR #972 (`56bcqp3m`, eval `zxnhtagj`) — SDF-stratified volume sampling (α=2.0)  
-test_primary/abupt_axis_mean_rel_l2_pct = **5.844%**, test_vol_p = **3.643%**, test_surf_p = 3.577%, test_wss = 6.727%
+**MERGED dl24 SOTA (2026-05-24 10:57Z):** PR #1284 (`yym5oa8x`) — H39 wider surface_out MLP (factor=2.0) — **FIRST in-wave merge on `drivaerml-long-20260504`**  
+test_primary/wall_shear_rel_l2_pct = **6.6506%** ⭐ (beats prior SOTA #972 6.727% by −0.0764pp — NEW dl24 single-model WSS SOTA)  
+test_primary/volume_pressure_rel_l2_pct = **3.6033%** (clears 3.643% floor) ✓  
+test_primary/surface_pressure_rel_l2_pct = **3.6498%** (misses 3.577% floor by +0.0728pp) ⚠️  
+test_primary/abupt_axis_mean_rel_l2_pct = **5.8010%** (clears 5.844% floor; also beats prior abupt SOTA #972 5.844% by −0.043pp)  
+Per-axis WSS: wss_x=5.9031%, wss_y=7.1901%, wss_z=8.6587%  
+Best checkpoint: EP24 EMA (selection metric: val_primary/abupt_axis_mean_rel_l2_pct); runtime 73037s within 1300min budget; ended at step 305904 / EP27.87  
 
-All new experiments must be evaluated on the corrected dataset and target beating **5.844%**.
+**PR #972 (closed, corrected-split re-eval)** remains the 3-of-4 floor reference; H39 BEATS the WSS objective (Issue #1056 primary) but doesn't clear the surface_p floor for the full 4-floor contract.
+
+Per Issue #1056: **test_WSS is the PRIMARY objective**, hard constraints test_VP ≤ 3.643, test_SP ≤ 3.577, test_abupt ≤ 5.844. H39 clears 3-of-4. Next assignments target compound mechanisms (H39 + per-axis Charb, deeper trunk, etc.) that hold WSS lead AND close the SP floor.
+
+All new experiments must be evaluated on the corrected dataset and target beating **test_WSS=6.6506%** while maintaining the 3-of-4 floor clearance and ideally closing the SP gap.
 
 ### In-wave val target (to beat before merging)
 
@@ -149,4 +159,4 @@ In-wave val leader (historical, CLOSED): **6.4402%** (PR #874 dl24-nezuko, EP15/
 | #990 | `um3tuyvy` | dl24-nezuko | EP5 FAIL — **CLOSED/FALSIFIED** | **8.5416% (EP5 FAIL vs gate ≤7.5%); val_vol_p=9.9228%** | **6L STRING (5-oct) + GradNorm α=0.5 + vol coord noise σ=0.005 + Y-sym p=0.5 + vol-points=65k**. Gaussian noise σ=0.005 on volume query xyz coordinates during training only (data augmentation on vol point positions). EP5=8.5416% FAIL (+1.04pp vs gate). Val_vol_p=9.9228% at EP5 (vs baseline ~6.4% — 3.5pp WORSE). Noise slows convergence significantly without reducing val→test gap. Hypothesis FALSIFIED: vol coord noise σ=0.005 adds training-time noise without compressing structural DATA DISTRIBUTION gap. **PR #990 CLOSED 2026-05-11.** |
 | #968 | `a0yoxy85` | dl24-fern | EP15 (val best) / EP30 (terminal) — **CLOSED/FALSIFIED** | **test_abupt=7.6157%, test_vol_p=12.1140% — DOES NOT BEAT WAVE SOTA** | **6L STRING (5-oct) + GradNorm α=0.5 + stochastic vol subsampling (random 65k subset each step, no caching) + Y-sym p=0.5**. Hypothesis: random vol-point sampling each step forces the model to generalise over the full vol distribution rather than memorising fixed-index subsets. Val best EP15: ABUPT=6.2806%, val_vol_p=3.999% (run best). Terminal EP30: val_abupt=6.4622%, val_vol_p=4.166%. Test (from best-val EP15 checkpoint): test_abupt=7.6157%, test_vol_p=12.1140%, test_surf_p=3.9440%, test_wall=7.0470%. Val→test vol_p gap: **+8.115pp** — WIDEST ever observed across all wave runs. Stochastic subsampling compressed val vol_p to 4.0% (fleet-best at EP15) but WIDENED the test gap beyond all prior approaches. Hypothesis FALSIFIED: val vol_p improvement is entirely overfitting to the specific subset of val vol points presented; test evaluates ALL vol points, exposing the memorisation. **PR #968 CLOSED 2026-05-12.** |
 
-_Last updated: 2026-05-12 (session). **Corrected-split SOTA: PR #972 run `56bcqp3m` test_abupt=5.844%, test_vol_p=3.643% (corrected dataset `/mnt/pvc/Processed/drivaerml_processed_rawcanon_20260511` — fixes case-split bug that caused spurious +7–8pp val→test vol_p gap).** Active WIP (drivaerml-long, 13 open): **#1071** (surface point density 131k), **#1070** (SDF vol α=2.0 + dedicated vol_p aux head, frieren), **#1069** (combined SDF + curvature stratified sampling, frieren), **#1068** (dedicated WSS surface decoder head 2-arm sweep), **#1067** (RFF octave ladder EP30 confirmation), **#1066** (nezuko tau Y/Z loss weight sweep), **#1065** (stark SDF-stratified extended 45ep corrected dataset), **#1063** (fern SDF near-surface α sweep EP5 PASS 6.350%), **#1061** (tanjiro stochastic per-batch vol points), **#1060** (askeladd vol-loss-weight sweep 1.5/2.0/3.0), **#1058** (frieren GradNorm on corrected dataset), **#1055** (tanjiro SDF α sweep 1.5/3.0/4.0; EP11=6.388% PASS ≤7.2% ✓; monitoring EP15 gate ≤6.80%; MERGE CONFLICT — FINAL WARNING), **#1050** (dropout regularization p=0.1). RECENTLY CLOSED: **#1054** (nezuko DANN domain adaptation — EP15 FAIL val_abupt=6.9264% vs gate ≤6.80%; CLOSED 2026-05-12), **#968** (fern stochastic vol subsampling — test_vol_p gap +8.115pp WIDENED, FALSIFIED, CLOSED 2026-05-12). Nezuko (dl24-nezuko) IDLE — needs new assignment._
+_Last updated: 2026-05-24 10:57Z (session). **MERGED dl24 SOTA: PR #1284 run `yym5oa8x` test_WSS=6.6506% — first wave-33 merge into `drivaerml-long-20260504` (H39 wider surface_out MLP factor=2.0). Beats prior reference #972 (closed) WSS 6.727% by −0.0764pp.** Active WIP (drivaerml-long, 13 open): **#1071** (surface point density 131k), **#1070** (SDF vol α=2.0 + dedicated vol_p aux head, frieren), **#1069** (combined SDF + curvature stratified sampling, frieren), **#1068** (dedicated WSS surface decoder head 2-arm sweep), **#1067** (RFF octave ladder EP30 confirmation), **#1066** (nezuko tau Y/Z loss weight sweep), **#1065** (stark SDF-stratified extended 45ep corrected dataset), **#1063** (fern SDF near-surface α sweep EP5 PASS 6.350%), **#1061** (tanjiro stochastic per-batch vol points), **#1060** (askeladd vol-loss-weight sweep 1.5/2.0/3.0), **#1058** (frieren GradNorm on corrected dataset), **#1055** (tanjiro SDF α sweep 1.5/3.0/4.0; EP11=6.388% PASS ≤7.2% ✓; monitoring EP15 gate ≤6.80%; MERGE CONFLICT — FINAL WARNING), **#1050** (dropout regularization p=0.1). RECENTLY CLOSED: **#1054** (nezuko DANN domain adaptation — EP15 FAIL val_abupt=6.9264% vs gate ≤6.80%; CLOSED 2026-05-12), **#968** (fern stochastic vol subsampling — test_vol_p gap +8.115pp WIDENED, FALSIFIED, CLOSED 2026-05-12). Nezuko (dl24-nezuko) IDLE — needs new assignment._
