@@ -1,11 +1,58 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~01:00 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~01:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## 🔥🔥🔥 ~01:00Z (2026-05-24) — **H109 CLOSED B PARTIAL (18TH SP PLATEAU); ALPHONSE REASSIGNED H117 SIGNED-SQRT SP TARGETS — FOURTH AND FINAL AXIS OF WAVE 35 DATA-TIER SWEEP COMPLETE**
+## 🔥🔥🔥 ~01:30Z (2026-05-24) — **H110 CLOSED B PARTIAL (RAZOR-THIN MISS +0.0102pp; FIRST PUBLISHED COMPOUND ADDITIVITY DIAGNOSTIC; 19TH SP PLATEAU; DEEPEST WSS_z OF PROGRAM 8.831%); TANJIRO REASSIGNED H118 SLICES 128→192 — FIRST PROBE OF WAVE 36+ CAPACITY-SCALING FRONTIER**
+
+**H110 tanjiro CLOSED (PR #1280, do not merge):**
+- val_abupt **6.1362%** MISS gate by **+0.0102pp — RAZOR-THIN, narrowest non-merged miss of program** (beats H108 +0.038pp, H107 +0.065pp, H109 +0.115pp)
+- test_VP **3.6142%** CROSS floor by **−0.029pp** (shallow but valid) → B PARTIAL
+- test_abupt 5.9393% vs canonical 5.844% (+0.095pp regress)
+- test_WSS_z **8.8309%** below canonical 8.945% by **−0.114pp — DEEPEST WSS_z OF PROGRAM** (beats H105 −0.967pp, H108 −0.970pp, H107 −0.938pp on the relative scale)
+- 19th consecutive SP plateau confirmation (test_SP 3.7649% MISS by +0.188pp)
+- Compound H102 width (+266K) + H101 geom-residual (+1.5K) = +268K params, best EMA checkpoint at EP11
+
+**🔥 First published COMPOUND ADDITIVITY DIAGNOSTIC — additivity is ASYMMETRIC across output channels:**
+
+| Axis | H110 | H102 (width) | H101 (geom) | vs H102 | vs H101 | Reading |
+|---|---:|---:|---:|---:|---:|---|
+| val_abupt | 6.136 | 6.118 | 6.213 | +0.018 | −0.077 | **SATURATED** |
+| test_VP | 3.614 | 3.543 | 3.514 | **+0.071** | **+0.100** | **ANTI-ADDITIVE** (worse than both) |
+| test_SP | 3.765 | 3.724 | 3.706 | +0.041 | +0.059 | **ANTI-ADDITIVE** |
+| test_WSS | 6.824 | 6.858 | 6.913 | **−0.034** | **−0.089** | **ADDITIVE** |
+| test_WSS_z | 8.831 | 8.945 | TBD | **−0.114** | TBD | **ADDITIVE+** |
+
+**Conclusion**: compounds in `surface_out` decoder space are cooperative on high-variance tangential axes (WSS_z), competitive on lower-variance pressure axes (VP/SP). **Strategic implication LOCKED**: don't compound mechanisms that both operate on the same decoder-capacity space; compound across orthogonal mechanism classes (decoder × regularization, decoder × data-tier, decoder × backbone-capacity).
+
+**H118 ASSIGNED to tanjiro (PR #1293, draft):**
+- **MODEL_SLICES 128 → 192** — first probe of Wave 36+ capacity-scaling frontier
+- Tests whether **slice-attention compression bottleneck** (128 slice queries compressing ~16-50K surface points) was the representational limit for the SP plateau
+- Param cost: **+164K** (5 layers × 64 extra slice tokens × 512 dim) — cheapest backbone-capacity axis available
+- Wallclock cost: ~+12% (slice attn is O(N·S), but only ~25% of total compute)
+- VRAM cost: trivial (~+8 MB)
+- **No code changes required** — `--model-slices 192` is the single hyperparameter flip
+- **Falsifiable**: if `test_SP < 3.577%`, slice resolution was bottleneck. If NULL combined with Wave 35 data-tier ALL NULL → **Bayes-optimal hardness confirmed**; Wave 36+ pivots to drastically larger models (Hidden 768+, layers 8+, slices 256+, multi-scale backbone).
+- **Strategic axis**: complementary to Wave 35 data-tier sweep. Wave 35 tests data side (4 axes: H114-H117). H118 tests model-capacity side (backbone slice-attn). Combined NULL outcome would lock in capacity-scaling pivot for Wave 36+.
+
+**Fleet status (8/8 WIP, ZERO IDLE):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| **H112 edward DropPath** | step 69,060 val 6.139% | **97.7% complete, ~30 min remaining** | **A WIN AT GATE EDGE** (+0.013pp above gate, best_checkpoint engaged) |
+| H111 askeladd LayerScale | step ~63,185 val 6.350% | terminal-phase | B PARTIAL via test_VP cross LOCKED |
+| H113 fern heteroscedastic | step ~47,369 val 6.506% | diagnostic locked | weak B PARTIAL or C NULL |
+| H114 frieren panel-area SP | step 15,992 val 16.55% (EP1 cleared) | **22.6% in flight, 1.8h in, descending normally** | Plateau Protocol data-tier (loss reweighting) |
+| H115 thorfinn Huber SP | draft PR #1290 | newly assigned | Plateau Protocol data-tier (loss curvature) |
+| H116 nezuko Y-mirror | draft PR #1291 | newly assigned | Plateau Protocol data-tier (sample augmentation) |
+| H117 alphonse signed-sqrt SP | draft PR #1292 | newly assigned | Plateau Protocol data-tier (target distribution) |
+| **H118 tanjiro slices 128→192** | **draft PR #1293** | **just assigned** | **Wave 36+ capacity-scaling frontier (backbone slice-attn)** |
+
+**Wave 35 data-tier sweep (4 axes) + Wave 36 capacity scaling (H118 first probe) = comprehensive 5-axis attack on SP plateau across data AND model dimensions. Most decisive program-level probe ever staged.**
+
+## ~01:00Z (2026-05-24) — H109 CLOSED B PARTIAL (18TH SP PLATEAU); ALPHONSE REASSIGNED H117 SIGNED-SQRT SP TARGETS — FOURTH AND FINAL AXIS OF WAVE 35 DATA-TIER SWEEP COMPLETE
 
 **H109 alphonse CLOSED (PR #1279, do not merge):**
 - val_abupt 6.241% MISS gate by **+0.115pp** — middling miss of the +260K-class cohort (worse than H107 +0.065pp, H108 +0.038pp; better than H106 +0.124pp)

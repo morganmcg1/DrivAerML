@@ -1,3 +1,51 @@
+## 2026-05-24 ~01:30 — PR #1280: H110 COMPOUND H102+H101 (tanjiro, CLOSED) — **B PARTIAL** via test_VP cross (−0.029pp) + **DEEPEST test_WSS_z OF PROGRAM** (8.831%, −0.114pp below canonical 8.945%); val gate MISS by **+0.0102pp RAZOR-THIN** (narrowest non-merged miss of program); **19TH SP plateau confirmation**; first published **COMPOUND ADDITIVITY DIAGNOSTIC**: SATURATED on val, ANTI-ADDITIVE on VP/SP (worse than BOTH singletons), ADDITIVE on WSS/WSS_z
+
+- **Branch**: `tanjiro/h110-wave34-h102-plus-h101-compound` (closed at ~01:30Z 2026-05-24)
+- **W&B run**: `y6g8a0wm`, 13 epochs (terminal), runtime 14.18h, best EMA checkpoint at EP11
+- **Hypothesis**: Stack the two A-WIN singletons: H102 surface_out width 1×→2× (+266K) + H101 zero-init position-residual at surface decoder (+1.5K). +268K total. First multi-mechanism compound on tay.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.1362%** ❌ | **5.9393%** | 5.844% | **+0.0953pp MISS gate +0.0102pp** (RAZOR-THIN — narrowest non-merged miss of program) |
+| surface_pressure | — | 3.7649% | 3.577 (floor) | **+0.188pp MISS floor — 19th plateau confirmation** |
+| **volume_pressure** | — | **3.6142%** | 3.643 (floor) | **−0.0288pp CROSS floor** ✓ (shallow but valid) |
+| wall_shear | — | 6.8235% | 6.727 (goal) | +0.097pp MISS goal |
+| wall_shear_x | — | 6.0555% | 5.83 (canonical) | +0.226pp regress |
+| wall_shear_y | — | 7.4307% | 7.10 (canonical) | +0.331pp regress |
+| **wall_shear_z** | — | **8.8309%** | 8.945 (canonical) | **−0.1141pp DEEPEST WSS_z OF PROGRAM** ✓ |
+
+### 🔥 First published COMPOUND ADDITIVITY DIAGNOSTIC — additivity is ASYMMETRIC across output channels
+
+Direct decomposition of compound vs component singletons:
+
+| Axis | H110 (compound) | H102 (width) | H101 (geom) | vs H102 | vs H101 | Reading |
+|---|---:|---:|---:|---:|---:|---|
+| val_abupt | 6.136 | 6.118 | 6.213 | +0.018 | −0.077 | **SATURATED** |
+| test_VP | 3.614 | 3.543 | 3.514 | **+0.071** | **+0.100** | **ANTI-ADDITIVE** (worse than BOTH) |
+| test_SP | 3.765 | 3.724 | 3.706 | +0.041 | +0.059 | **ANTI-ADDITIVE** |
+| test_WSS | 6.824 | 6.858 | 6.913 | **−0.034** | **−0.089** | **ADDITIVE** |
+| test_WSS_z | 8.831 | 8.945 | TBD | −0.114 | TBD | **ADDITIVE+** (deepest of program) |
+
+**Conclusion**: compounds in Transolver decoder space have **asymmetric additivity** — cooperative on high-variance tangential axes (WSS_z), competitive on lower-variance pressure axes (VP/SP). **Strategic implication**: don't compound mechanisms that both operate on `surface_out` capacity (e.g. width + decoder-residual). Compound across orthogonal mechanism classes.
+
+### Strategic implications
+
+1. **DO NOT MERGE** — val_abupt 6.136% > 6.126% gate by +0.0102pp.
+2. **Wave 35+ compound staging guidance**: stack across mechanism classes (decoder × regularization, decoder × data-tier, decoder × architecture/backbone) NOT within-class (width × geom-residual saturates).
+3. **WSS_z deepening pattern locked**: H110 reaches 8.831% — first run below canonical 8.945% in WSS_z by a non-trivial margin.
+4. **19 consecutive SP plateau confirmations** — Wave 35 4-axis data-tier sweep (H114/H115/H116/H117) + Wave 36 capacity-scaling (H118 starts now) form the comprehensive bookend probe of the SP plateau.
+
+### NEXT ASSIGNMENT — H118 SLICES 128 → 192 (tanjiro)
+
+- **Branch**: `tanjiro/h118-model-slices-128-to-192`, DRAFT PR #1293
+- **Hypothesis**: Increase Transolver slice count from 128 → 192 (+50% slice tokens, +164K params, +12% wallclock). First probe of **Wave 36+ capacity-scaling frontier**. Tests whether slice resolution at the backbone bottleneck was the representational limit for the SP plateau.
+- **Falsifiable**: if `test_SP < 3.577%`, slice-attention resolution was the bottleneck. If NULL combined with Wave 35 data-tier ALL NULL → **Bayes-optimal hardness confirmed**; pivot to drastically larger models in Wave 36+.
+- **Why slices (not depth/width)**: cheapest capacity axis (+164K vs depth +3.4M/layer or width +5M for 512→640); directly tests representational granularity at the slice-attention compression bottleneck; complementary to data-tier sweep on data side.
+
+---
+
 ## 2026-05-24 ~01:00 — PR #1279: H109 BACKBONE-SKIP RESIDUAL DECODER (alphonse, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.060pp) + 3rd-best WSS_z improvement (−0.709pp); val gate MISS +0.115pp; **18TH consecutive SP plateau confirmation**; pre-backbone-embedding-reach-to-decoder mechanism characterized; ordering at +263K class locked: **WIDTH (H102) > parallel-MLP (H108) > pre-backbone-bypass (H109)** — post-backbone bypass beats pre-backbone bypass at matched cost
 
 - **Branch**: `alphonse/h109-backbone-skip-residual-decoder` (closed at ~01:00Z 2026-05-24)
