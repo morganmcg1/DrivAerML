@@ -104,6 +104,7 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_wss_tangent_projection: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -238,6 +239,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_wss_tangent_projection": (
+            "H123 (PR #1299) Option A: hard tangent-plane projection of the "
+            "predicted wall-shear vector inside the surface decoder, applied "
+            "in PHYSICAL space. After surface_preds = self.surface_out(...), "
+            "tau_norm is denormalized to physical units via the surface_y "
+            "mean/std buffers (registered at build_model time from loader "
+            "stats), projected onto the local tangent plane via "
+            "tau_tangent_phys = tau_phys - (tau_phys . n_hat) n_hat, then "
+            "renormalized back. n_hat is the per-point surface normal taken "
+            "from surface_x[..., 3:6]. Zero added parameters; enforces "
+            "tau_phys . n_hat = 0 (no-penetration / boundary-layer "
+            "constraint) as a hard inductive bias instead of asking the MLP "
+            "to learn it. Physical-space projection chosen over "
+            "normalized-space because per-channel std spread (86.4 pct) and "
+            "non-zero tau_x mean make the latter geometrically non-physical."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -303,7 +320,22 @@ def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     return metrics
 
 
-def build_model(config: Config) -> SurfaceTransolver:
+def build_model(
+    config: Config,
+    stats: dict[str, torch.Tensor] | None = None,
+) -> SurfaceTransolver:
+    tau_phys_mean = None
+    tau_phys_std = None
+    if config.use_wss_tangent_projection:
+        if stats is None:
+            raise ValueError(
+                "build_model needs stats={'surface_y_mean', 'surface_y_std'} "
+                "when use_wss_tangent_projection=True (H123 Option A "
+                "physical-space projection)."
+            )
+        # surface_y layout is [cp, tau_x, tau_y, tau_z]; slice 1:4 = tau.
+        tau_phys_mean = stats["surface_y_mean"][1:4].detach().clone()
+        tau_phys_std = stats["surface_y_std"][1:4].detach().clone()
     return SurfaceTransolver(
         n_layers=config.model_layers,
         n_hidden=config.model_hidden_dim,
@@ -318,6 +350,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_wss_tangent_projection=config.use_wss_tangent_projection,
+        tau_phys_mean=tau_phys_mean,
+        tau_phys_std=tau_phys_std,
     )
 
 
@@ -356,13 +391,18 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    diag = out.get("wss_tangent_diag") if isinstance(out, dict) else None
+    if diag is not None:
+        for key, tensor in diag.items():
+            metrics[f"wss_tangent/{key}"] = float(tensor.detach().cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -756,7 +796,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             volume_y_std=stats["volume_y_std"].to(device),
         )
 
-        model: nn.Module = build_model(config).to(device)
+        model: nn.Module = build_model(config, stats=stats).to(device)
         n_params = sum(param.numel() for param in model.parameters())
         # Surface targets are [cp, tau_x, tau_y, tau_z] — channels 2 and 3 carry
         # the largest gap to AB-UPT, so we expose per-channel weights here.
@@ -1092,6 +1132,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for key, value in batch_loss_metrics.items():
+                        if key.startswith("wss_tangent/"):
+                            train_log[f"train/{key}"] = value
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

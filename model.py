@@ -419,6 +419,9 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_wss_tangent_projection: bool = False,
+        tau_phys_mean: torch.Tensor | None = None,
+        tau_phys_std: torch.Tensor | None = None,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +437,32 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_wss_tangent_projection = use_wss_tangent_projection
+        if use_wss_tangent_projection:
+            # H123 PR #1299 Option A (per advisor #1299#issuecomment 2026-05-24T08:33Z):
+            # project tau onto the tangent plane in PHYSICAL space, not
+            # normalized space. The per-channel surface_y normalizer has
+            # tau_x mean -1.20 std 2.08, tau_y mean +0.00 std 1.36, tau_z
+            # mean -0.07 std 1.11, so (tau_pred_norm * std + mean) . n = 0
+            # is the physically faithful no-penetration constraint, while
+            # tau_pred_norm . n = 0 imposes a non-physical sigma-rescaled
+            # one. Mean/std are stored as buffers so they ride checkpoints
+            # and move with the model under .to(device).
+            if tau_phys_mean is None or tau_phys_std is None:
+                raise ValueError(
+                    "use_wss_tangent_projection=True requires "
+                    "tau_phys_mean and tau_phys_std (3-element tensors "
+                    "of surface_y_mean[1:4] and surface_y_std[1:4])."
+                )
+            tau_mean_t = torch.as_tensor(tau_phys_mean, dtype=torch.float32).reshape(-1)
+            tau_std_t = torch.as_tensor(tau_phys_std, dtype=torch.float32).reshape(-1)
+            if tau_mean_t.numel() != 3 or tau_std_t.numel() != 3:
+                raise ValueError(
+                    f"tau_phys_mean/std must each have 3 elements, "
+                    f"got {tau_mean_t.numel()}/{tau_std_t.numel()}"
+                )
+            self.register_buffer("tau_phys_mean", tau_mean_t)
+            self.register_buffer("tau_phys_std", tau_std_t)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -660,8 +689,50 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = self.surf_to_vol_xattn_norm(volume_hidden + xattn_out)
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
+        wss_tangent_diag: dict[str, torch.Tensor] | None = None
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.use_wss_tangent_projection and surface_preds.shape[-1] >= 4:
+                # H123 PR #1299 Option A: hard tangent-plane projection of
+                # predicted WSS in PHYSICAL space. surface_x layout
+                # (data/loader.py:288) is xyz(3) + normals(3) + area(1).
+                # Renormalize normals defensively — the loader can emit
+                # non-unit magnitudes due to mesh smoothing; padded rows
+                # have zero normals which stay zero after the clamp.
+                surface_normals = surface_x[:, :, 3:6]
+                surface_normals = surface_normals / (
+                    surface_normals.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+                )
+                cp_norm = surface_preds[..., 0:1]
+                tau_norm = surface_preds[..., 1:4]
+                # Denormalize → project → renormalize. Cast buffers to the
+                # autocast dtype of tau_norm so this stays mixed-precision-safe.
+                tau_phys_mean = self.tau_phys_mean.to(dtype=tau_norm.dtype)
+                tau_phys_std = self.tau_phys_std.to(dtype=tau_norm.dtype)
+                tau_phys = tau_norm * tau_phys_std + tau_phys_mean
+                tau_dot_n_pre_phys = (tau_phys * surface_normals).sum(dim=-1, keepdim=True)
+                tau_tangent_phys = tau_phys - tau_dot_n_pre_phys * surface_normals
+                tau_tangent_norm = (tau_tangent_phys - tau_phys_mean) / tau_phys_std
+                surface_preds = torch.cat([cp_norm, tau_tangent_norm], dim=-1) * surface_mask.unsqueeze(-1)
+                # Per-batch diagnostics restricted to real (non-padded) points
+                # via surface_mask. Computed in PHYSICAL space — the physically
+                # meaningful coordinates. Hoped-for trajectory: pre_proj_rel
+                # decreases over training (model learns to predict tangent tau
+                # natively); post_proj_abs stays ~0 (sanity that projection holds).
+                mask_f = surface_mask.to(dtype=tau_phys.dtype)
+                mask_sum = mask_f.sum().clamp(min=1.0)
+                tau_dot_n_pre_abs = tau_dot_n_pre_phys.squeeze(-1).abs() * mask_f
+                pre_proj_abs_mean = tau_dot_n_pre_abs.sum() / mask_sum
+                tau_phys_norm_pre = tau_phys.norm(dim=-1).clamp(min=1e-8)
+                pre_proj_rel = (tau_dot_n_pre_phys.squeeze(-1).abs() / tau_phys_norm_pre) * mask_f
+                pre_proj_rel_mean = pre_proj_rel.sum() / mask_sum
+                tau_dot_n_post = (tau_tangent_phys * surface_normals).sum(dim=-1).abs() * mask_f
+                post_proj_abs_mean = tau_dot_n_post.sum() / mask_sum
+                wss_tangent_diag = {
+                    "pre_proj_normal_component_abs_mean_phys": pre_proj_abs_mean.detach(),
+                    "pre_proj_normal_component_rel_mean_phys": pre_proj_rel_mean.detach(),
+                    "post_proj_normal_component_abs_mean_phys": post_proj_abs_mean.detach(),
+                }
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
@@ -672,10 +743,13 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if wss_tangent_diag is not None:
+            out["wss_tangent_diag"] = wss_tangent_diag
+        return out
