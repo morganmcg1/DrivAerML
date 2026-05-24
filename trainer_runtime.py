@@ -286,6 +286,8 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        use_area_weighted_sampling=getattr(config, "use_area_weighted_sampling", False),
+        area_sampling_temperature=getattr(config, "area_sampling_temperature", 1.0),
     )
     train_sampler = None
     train_shuffle = True

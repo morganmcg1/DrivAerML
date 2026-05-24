@@ -255,6 +255,30 @@ def _npy_row_count(path: Path) -> int:
     return int(arr.shape[0])
 
 
+def _compute_inverse_area_weights(area_arr: np.ndarray, temperature: float) -> np.ndarray:
+    """Compute inverse-panel-area sampling weights normalized to sum to 1.
+
+    H126: weight_i ∝ (1 / area_i)^(1/T). Small panels (auto-mesh refined at
+    high-curvature regions) get higher probability than large flat panels.
+
+    Fast path for T=1.0 skips log/exp (weights = 1/area, normalized). For
+    other T we use the log/exp formulation with max-subtraction for
+    numerical stability. 1e-12 floor on area protects against log(0).
+    """
+    area_safe = np.maximum(area_arr.astype(np.float32, copy=False), 1e-12)
+    if abs(float(temperature) - 1.0) < 1e-6:
+        weights = (1.0 / area_safe).astype(np.float32)
+    else:
+        temp_safe = max(float(temperature), 1e-9)
+        log_w = -np.log(area_safe) / temp_safe
+        log_w = log_w - log_w.max()
+        weights = np.exp(log_w).astype(np.float32)
+    total = float(weights.sum())
+    if not np.isfinite(total) or total <= 0.0:
+        return np.full_like(area_safe, 1.0 / area_safe.shape[0], dtype=np.float32)
+    return (weights / total).astype(np.float32)
+
+
 def _column(value: np.ndarray) -> np.ndarray:
     arr = np.asarray(value, dtype=np.float32)
     return arr[:, None] if arr.ndim == 1 else arr
@@ -367,6 +391,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        use_area_weighted_sampling: bool = False,
+        area_sampling_temperature: float = 1.0,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +402,12 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.use_area_weighted_sampling = bool(use_area_weighted_sampling)
+        self.area_sampling_temperature = float(area_sampling_temperature)
+        # H126: per-case cumulative distribution cache for inverse-area sampling.
+        # Built lazily on first access per (case_id, N). float32 tensor of size N.
+        # ~33MB per case * ~50 cases/rank = ~1.65GB per worker; cleared on fork copy.
+        self._cdf_cache: dict[str, torch.Tensor] = {}
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -414,25 +446,69 @@ class DrivAerMLSurfaceDataset(Dataset):
         view: PointView,
         *,
         group_view_count: int,
+        cdf: torch.Tensor | None = None,
     ) -> torch.Tensor | None:
         if view.view_index >= group_view_count:
             return torch.empty(0, dtype=torch.long)
         if count <= 0 or total <= count:
             return None if view.view_index == 0 else torch.empty(0, dtype=torch.long)
         if view.sampling_mode == "train_random":
+            if cdf is not None:
+                u = torch.rand(count, dtype=cdf.dtype)
+                idx = torch.searchsorted(cdf, u)
+                idx.clamp_(max=cdf.numel() - 1)
+                return idx.to(torch.long).sort().values
             return torch.randint(total, (count,), dtype=torch.long).sort().values
         if view.sampling_mode == "eval_chunk":
             return torch.arange(view.view_index, total, group_view_count, dtype=torch.long)
         return None
 
+    def _get_inverse_area_cdf(self, case_id: str, expected_total: int) -> torch.Tensor:
+        """Cached cumulative distribution for inverse-area sampling.
+
+        Loads `surface_area.npy` and builds an inverse-area CDF once per case
+        per dataset instance (per DataLoader worker, since workers fork the
+        dataset). Subsequent calls return the cached tensor. float32 keeps
+        memory at ~4*N bytes (~33MB for a 8M-point case) while preserving
+        enough precision for searchsorted at K=65536 samples per call.
+        """
+        cdf = self._cdf_cache.get(case_id)
+        if cdf is None or cdf.numel() != expected_total:
+            case_dir = _case_dir(self.store.root, case_id)
+            area_arr = np.asarray(
+                np.load(_resolve_artifact_path(case_dir / "surface_area.npy")),
+                dtype=np.float32,
+            ).reshape(-1)
+            if area_arr.shape[0] != expected_total:
+                raise ValueError(
+                    f"surface_area.npy length {area_arr.shape[0]} does not match "
+                    f"surface_xyz row count {expected_total} for case {case_id!r}"
+                )
+            weights = _compute_inverse_area_weights(area_arr, self.area_sampling_temperature)
+            cdf_np = np.cumsum(weights, dtype=np.float32)
+            cdf_np[-1] = np.float32(1.0)
+            cdf = torch.from_numpy(cdf_np)
+            self._cdf_cache[case_id] = cdf
+        return cdf
+
     def __getitem__(self, idx: int) -> DrivAerMLCase:
         view = self.views[idx]
         counts = self.store.case_point_counts(view.case_id)
+        surface_cdf: torch.Tensor | None = None
+        if (
+            self.use_area_weighted_sampling
+            and view.sampling_mode == "train_random"
+            and self.max_surface_points > 0
+            and counts["n_surface"] > self.max_surface_points
+            and view.view_index < view.surface_view_count
+        ):
+            surface_cdf = self._get_inverse_area_cdf(view.case_id, counts["n_surface"])
         surface_idx = self._indices(
             counts["n_surface"],
             self.max_surface_points,
             view,
             group_view_count=view.surface_view_count,
+            cdf=surface_cdf,
         )
         volume_idx = self._indices(
             counts["n_volume"],
@@ -544,6 +620,8 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    use_area_weighted_sampling: bool = False,
+    area_sampling_temperature: float = 1.0,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +646,8 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        use_area_weighted_sampling=use_area_weighted_sampling,
+        area_sampling_temperature=area_sampling_temperature,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(
