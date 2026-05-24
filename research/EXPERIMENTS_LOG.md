@@ -1,3 +1,41 @@
+## 2026-05-24 ~14:15 — PR #1299: H123 WSS-TANGENT-FRAME-PROJECTION (fern, **CLOSED C NULL** — terminated step 33,297, EP3 confirms hopeless trajectory; **TANGENCY-IMPOSITION CLASS FULLY EXHAUSTED — 4th consecutive failure**)
+
+- **Branch**: `fern/h123-wss-tangent-frame-projection` (CLOSED, not merged)
+- **W&B run**: `80maak4j`
+- **Hypothesis**: Hard tangent-plane projection of predicted WSS vector — `τ_tangent = τ − (τ · n̂) n̂` applied in physical space (Option A, confirmed by advisor). Zero added parameters. Falsifiable prediction: test_WSS improves, biggest gain on τ_z (horizontal panels with large n_z).
+
+### Terminal metrics (EP3 best checkpoint, post-mortem eval)
+
+| Metric | H123 (EP3) | H112 baseline | Δ vs H112 | Verdict |
+|---|---:|---:|---:|---|
+| test_abupt | 11.148% | 5.839% | +5.31pp | massive regression |
+| **test_WSS** | **15.262%** | 6.752% | **+8.51pp** | massive floor breach |
+| test_WSS_z | 16.653% | 8.720% | +7.93pp | targeted bottleneck gets WORSE |
+| test_VP | 3.980% | 3.421% | +0.56pp | floor breach |
+| test_SP | 4.357% | 3.695% | +0.66pp | floor breach |
+
+**EP3 apple-to-apple vs H112 EP3**: val_abupt +4.44pp, val_WSS +7.44pp — monotone-divergent trajectory. Gap unrecoverable within budget.
+
+### Diagnostic locked — tangency-imposition class failure mechanism
+
+**Physical-space projection was implemented correctly.** EP1 passed cleanly (26.348%, within H112 EP1 range). The failure is architectural, not implementational:
+
+1. **Gradient pathology**: Hard projection zeros the gradient for the normal component of τ: `∂τ_tangent/∂(model params) = 0` for any parameter that only affects the normal component. Model has no learning signal to predict tangent vectors natively.
+2. **Confirmed**: `pre_proj_normal_rel_mean_phys` held at **~0.34 throughout training** (EP1 0.38-0.42, stable). The model never learned to reduce its ~34% normal component. Completely unlike the hoped-for "learns to be tangent before projection" trajectory.
+3. **Same failure class as PR #713** (soft penalty `λ·|ws·n̂|²`): both interventions cause model to "satisfy the constraint by sacrificing τ accuracy" — either via zero-gradient (hard) or capacity redirection (soft).
+
+**Kill-threshold step-skew bug re-confirmed** (fern caught this): gate `32594:...` silently skipped because `global_step=32592 < 32594`. **Use 32592, not 32594.** Advisor memory `feedback_kill_thresholds_step_indexed.md` updated.
+
+### Strategic consequence
+
+Tangency-imposition class is PERMANENTLY DEPRIORITIZED (4 consecutive failures: PR #351, #680, #713, #1299). WSS-axis attack must come from data-augmentation tier (H116 Y-mirror, working marginally) or capacity tier (H120 depth-6, strong), NOT geometric-constraint tier.
+
+### Successor
+
+H125 (PR #1301, fern) assigned: Backbone depth 5→7, extends H120 capacity-axis dominance. Single change: `--model-layers 7`.
+
+---
+
 ## 2026-05-24 ~07:55 — PR #1285: H113 HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING (fern, **CLOSED C NULL** — terminal at step 70,664, all four AND-gate axes miss; **DIAGNOSTIC LOCKED** — SP plateau is hardness-bound, not balance-bound)
 
 - **Branch**: `fern/h113-heteroscedastic-uncertainty-weighting` (CLOSED, not merged)

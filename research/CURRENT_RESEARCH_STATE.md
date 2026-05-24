@@ -68,7 +68,51 @@ Late-cosine slope (steps 38,030 → 48,902, EP4→EP8, 10,872 steps):
 
 **These mechanisms are orthogonal** — depth scales backbone capacity, Y-mirror augments data with bilateral symmetry constraint. Strong candidates for compound at H122+ (depth-6 × Y-mirror) once both terminal.
 
-## ~07:55Z (2026-05-24) — H113 CLOSED C NULL (DIAGNOSTIC LOCKED), H123 WSS TANGENT-FRAME PROJECTION ASSIGNED TO FERN
+## ~14:15Z (2026-05-24) — H123 CLOSED C NULL (TANGENCY-CLASS EXHAUSTED), H125 DEPTH-7 ASSIGNED TO FERN, FLEET PROJECTING 3 MERGE CANDIDATES
+
+**Fleet state**: 8/8 students working (fern assigned H125), 0 idle, 0 review-ready PRs. First terminal results expected ~14:30Z (H115 thorfinn, ~H117 alphonse, ~H119 edward).
+
+**🔴 H123 CLOSED C NULL — TANGENCY-IMPOSITION CLASS FULLY EXHAUSTED (4 documented failures)**
+
+H123 fern (PR #1299) terminated manually at step 33,297 after EP3 confirmed hopeless trajectory:
+- val_WSS 15.343% at EP3 (vs H112 baseline 7.901%) — +7.44pp regression
+- test_WSS 15.262% (vs floor 6.727%) — massive floor breach
+- **Failure mode**: model never learned to predict tangent vectors natively (pre_proj_normal_rel ~0.34 flat throughout). Hard projection zeros gradients on normal component → no learning signal. Same pathology as prior soft penalty (PR #713): "penalty enforces tangency but τ_y/τ_z errors get WORSE — model sacrifices accuracy to satisfy constraint."
+
+**TANGENCY-IMPOSITION CLASS VERDICT: PERMANENTLY DEPRIORITIZED**
+All 4 attempts fail for the same reason: constraint-enforcement removes gradient signal, model sacrifices WSS accuracy to satisfy the geometric constraint.
+| PR | Mechanism | Result |
+|---|---|---|
+| #351 | Target tangent-projection | Train/eval asymmetry catastrophe |
+| #680 | Target projection v2 | Same failure |
+| #713 | Soft penalty `λ·|ws·n̂|²` | Enforces tangency BUT τ_y/τ_z get worse (accuracy→constraint tradeoff) |
+| **#1299 H123** | **Hard physical projection** | **Model never learns tangent (~34% normal component); zero gradient pathology** |
+
+**🔔 CRITICAL RECIPE BUG CONFIRMED (re-documented)**: Kill-threshold `32594:...` silently skips at EP3 because `global_step=32592` < 32594 threshold. H123 burned ~5h past a failed gate. **Use 10862/32592 (not 10864/32594) in all future recipes.** Memory updated.
+
+**H125 ASSIGNED (PR #1301, fern)**: Backbone DEPTH 5→7 — extend capacity-axis dominance 2 layers beyond H120. Tests whether depth axis has ceiling at 6 or continues to help. Single change: `--model-layers 7`. ETA terminal ~05:00Z (2026-05-25, ~15h runtime).
+
+**H117 alphonse MAJOR RECOVERY**: EP2 "worst-in-fleet at 8.088%" → step 57,221 val_abupt 6.275%, val_WSS 7.039% — cohort-tied with H120. Largest cosine recovery in fleet (−1.813pp from EP2). Projects A WIN + B PARTIAL test_WSS. Lesson: compound mechanisms (signed-sqrt × DropPath) have non-linear EP2-suppression then cosine recovery.
+
+**Updated FLEET LEADERBOARD (latest publishes, ~14:00Z):**
+| Rank | Hyp | %Done | val_abupt | val_WSS | A WIN candidate | test_WSS projection |
+|---|---|---:|---:|---:|---|---|
+| 1 | **H120 askeladd (depth-6)** | 73% | **6.214%** | **7.053%** | ✅ yes | ~6.66-6.71% ← **B PARTIAL** |
+| 2 | **H117 alphonse (signed-sqrt+DP)** | 81% | **6.275%** | **7.039%** | ✅ borderline | ~6.68-6.71% ← **B PARTIAL** |
+| 3 | **H121 frieren (hidden-576)** | 57% | 6.502% | 7.348% | ✅ borderline | ~6.76-6.81% ← marginal MISS |
+| 4 | H119 edward (DP+surface_out 2x) | 82% | 6.336% | 7.213% | ❌ | ~6.90% ← MISS |
+| 5 | **H116 nezuko (Y-mirror)** | 92% | 6.495% | **7.041%** | ❌ | ~6.73-6.75% ← **RAZOR-THIN** |
+| 6 | H118 tanjiro (slices-192) | 85% | 6.411% | 7.281% | ❌ | ~6.99% ← MISS |
+| 7 | H115 thorfinn (Huber SP) | 94% | 6.379% | 7.202% | ❌ | ~6.89% ← MISS |
+| 8 | H125 fern (depth-7) | 0% | — | — | TBD | TBD |
+
+**🎯 WSS-PRIMARY STRATEGIC PICTURE**:
+- H120 and H117 both project test_WSS ~6.68-6.71% ← **CROSS floor 6.727%** → B PARTIAL merge candidates on Morgan's primary objective
+- H116 Y-mirror projects test_WSS ~6.73-6.75% ← **RAZOR-THIN**, depends on final slope
+- Three potential merges this wave; starting with H116 (WSS axis), then H120 (A WIN + WSS B PARTIAL)
+- H125 depth-7 tests whether the depth capacity advantage compounds further
+
+## ~07:55Z (2026-05-24) — H113 CLOSED C NULL (DIAGNOSTIC LOCKED), H123 WSS TANGENT-FRAME PROJECTION ASSIGNED TO FERN (SUPERSEDED)
 
 **Fleet state**: 8/8 students working, 0 idle, 0 review-ready PRs. H113 fern closed as C NULL — all four AND-gate axes regress vs H112 SOTA. Diagnostic answer locked: **SP plateau is HARDNESS-BOUND, not balance-bound** (3 free scalars found 2.1% relative log_σ² spread over 13 epochs → loss-balancing mechanisms falsified for DrivAerML).
 
