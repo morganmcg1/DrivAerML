@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~07:55 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~09:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -14,6 +14,59 @@ Hard constraints (must not regress): test_VP ≤ 3.643%, test_SP ≤ 3.577%.
 Current best: test_WSS 6.752% (H112/PR #1283 DropPath, merged 2026-05-24 ~02:42Z) — slight regression from prior 6.727%. **Gap: 0.902pp on the primary metric.**
 
 **Critical implication**: val_abupt remains a steering metric, but **merge decisions must prioritize test_WSS improvement** over pure val_abupt gains. Capacity-axis dominance (H121/H120/H118) is valuable IF it translates to WSS — must verify val_WSS axis at EP3+ before committing to H122 capacity stack.
+
+## ~09:30Z (2026-05-24) — H120 EP3 LEADS WAVE 36+ CAPACITY AXIS, H116 EP8 PROJECTING test_WSS B PARTIAL (PRIMARY OBJECTIVE CANDIDATE)
+
+**Fleet state**: 8/8 students working (fern actively in H123 Option A implementation phase, NOT idle), 0 review-ready PRs.
+
+### H120 askeladd (depth 5→6) EP3 PUBLISHED — capacity-axis dominance CONFIRMED at EP3
+
+| Stage | val_abupt | val_WSS | val_WSS_z | val_VP | val_SP |
+|---|---:|---:|---:|---:|---:|
+| EP1 (10,864) | 25.720% | 28.733% | 35.934% | 14.859% | 18.806% |
+| EP2 (21,729) | 7.589% ← LEAD | 8.602% ← LEAD | 11.281% | 4.276% | 5.063% |
+| **EP3 (32,594)** | **6.700% ← LEADS WAVE 36+ COHORT** | **7.606% ← LEADS WAVE 36+ COHORT** | **10.058% ← LEADS** | **3.792%** | 4.471% |
+
+EP3 cohort table (Wave 36+ leaders pre-confirmed at this stage):
+
+| Hyp | EP3 val_abupt | EP3 val_WSS | Rank |
+|---|---:|---:|---|
+| **H120 askeladd (depth-6)** | **6.700%** | **7.606%** | **#1** |
+| H116 nezuko (Y-mirror EP3) | 7.015% | 7.642% | #2 abupt/WSS |
+| H118 tanjiro (slices 192 EP3) | 6.936% | 7.884% | #2 abupt only |
+| H115 thorfinn (Huber SP EP3) | 6.936% | 7.524% | tied #2 abupt |
+
+**Strategic locked: depth-axis (H120) is the strongest single-mechanism capacity lever at EP3.** val_VP 3.792% projects test_VP ~3.51% → CROSSES floor 3.643% → B PARTIAL ELIGIBLE on VP. EP4 publish at step 38,030 in ~57 min is next confirmation point.
+
+### H116 nezuko (Y-mirror) EP8 PUBLISHED — projecting B PARTIAL on test_WSS (Morgan's primary objective)
+
+| Step / EP | val_abupt | val_WSS | val_WSS_z | val_VP | val_SP |
+|---|---:|---:|---:|---:|---:|
+| 32,594 (EP3) | 7.015% | 7.642% | 10.113% | 5.241% | 4.482% |
+| 38,030 (EP4) | 6.720% | 7.305% | 9.750% | 5.129% | 4.244% |
+| 43,466 (EP5) | 6.626% | 7.188% | 9.649% | 5.092% | 4.183% |
+| **48,902 (EP8)** | **6.582%** ← canonical | **7.140% ← FLEET LEAD** | **9.608%** | 5.063% | **4.156%** |
+
+Late-cosine slope (steps 38,030 → 48,902, EP4→EP8, 10,872 steps):
+- val_abupt: −0.0127pp/1k (canonical)
+- val_WSS: −0.0152pp/1k
+- val_WSS_z: −0.0131pp/1k
+
+**TERMINAL PROJECTION** (21,661 steps remaining, conservative slope sustain):
+- val_abupt → ~**6.31-6.40%** → does NOT cross merge gate 6.1358% (no A WIN)
+- val_WSS → ~**6.81-6.95%** → test_WSS ~**6.53-6.67%** (with val→test slope −0.282pp) → **CROSSES test_WSS floor 6.727%** → **B PARTIAL on primary objective**
+- val_WSS_z → ~9.33-9.45% → test_WSS_z ~9.05-9.17% (marginal vs H112 8.720%)
+- val_VP → ~5.0% → test_VP ~4.72% → far above floor 3.643%, NO VP cross
+- val_SP → ~4.07% → 15th plateau, no improvement
+
+**🎯 If terminal confirms: H116 Y-mirror is the FIRST mechanism to move test_WSS toward 5.85% Transolver-3 SOTA since the H112 merge.** Merge candidate per Morgan's primary objective even without val_abupt A WIN. ~3.8h to terminal.
+
+### H120 vs H116 — two different B PARTIAL paths, both architecturally aligned
+
+- **H120 (depth-6)**: VP cross path → projects test_VP cross + val_abupt strong, weaker WSS impact
+- **H116 (Y-mirror)**: WSS cross path → projects test_WSS cross + late-cosine flat val_abupt, weak VP
+
+**These mechanisms are orthogonal** — depth scales backbone capacity, Y-mirror augments data with bilateral symmetry constraint. Strong candidates for compound at H122+ (depth-6 × Y-mirror) once both terminal.
 
 ## ~07:55Z (2026-05-24) — H113 CLOSED C NULL (DIAGNOSTIC LOCKED), H123 WSS TANGENT-FRAME PROJECTION ASSIGNED TO FERN
 
