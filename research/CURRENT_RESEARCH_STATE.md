@@ -132,14 +132,28 @@
 
 6. **The vol_p floor breach is now SMALL (+0.136pp on H19)** — 4× smaller than H10b. Adding clamp=0.15 on top of H19 should close the remaining gap by 3× more vol_p gradient mass.
 
-## Active Experiments (2026-05-22 09:00 UTC — Wave 33 fleet — all 4 GPUs busy)
+## Active Experiments (2026-05-24 23:45Z — H39 base capacity-axis sweep — all 4 GPUs busy)
 
 | Student | PR | Hypothesis | Status | Terminal ETA |
 |---------|-----|-----------|--------|--------------|
-| **dl24-fern** | **#1260** | **H33: GALE-Transolver — persistent geometry cross-attention at every Transolver block (Idea A, FIRST ARCHITECTURAL EXPERIMENT)** | PR just created 09:00Z; awaiting fern pickup. ~200-300 LoC architectural change to model.py | ~30h after launch (~mid-May 23 if launched immediately; depends on implementation time) |
-| **dl24-frieren** | **#1256** | H31: H21 + lighter wss-Charb-z (0.1→0.05) — attack surf_p via cp budget release | EP3 gate posted 08:01Z, val_wss=7.423 (−0.166pp vs H21 ⭐), training continuing | ~02:00Z May 23 |
-| **dl24-nezuko** | **#1253** | H29: H26 recipe + extended cosine T_max=50 (cure H26 EP19 plateau) | Active May 22 morning (T_max=50 may extend wallclock beyond H26's 21.5h) | ~01:30Z May 23 |
-| **dl24-tanjiro** | **#1259** | H32: H21 base + surface-loss-weight 1.0→1.25 — calibrate the vol_p sweet spot between H21 (1.0) and H26 (1.5) | Just assigned 08:15Z May 22 | ~05:30Z May 23 |
+| **dl24-fern** | **#1298** | H117: Charbonnier on ALL 3 wss axes (x,y,z) — extend H41v2 mechanism | EP21 plateau-window 7.027±0.003 (EP18-21), terminal at EP30 likely null result | ~01:30Z 2026-05-25 |
+| **dl24-tanjiro** | **#1304** | H123: H39 + backbone hidden_dim 512→640 — trunk capacity-axis probe | EP7 lead narrowing to -0.0035pp vs H39 ref ⚠️ — z-axis FIRST regression, EP10 critical decision pending | ~02:18Z 2026-05-25 (EP10 checkpoint) |
+| **dl24-frieren** | **#1313** | H132: H39 + backbone depth 6→7 — trunk DEPTH-axis probe (orthogonal to H123 width) | Pre-EP1 step 3358/10976; awaiting first val measurement ~00:00Z | ~04:30Z 2026-05-25 |
+| **dl24-nezuko** | **#1314** | H133: H39 + base LR 1e-4→7e-5 — LR-axis probe (slower convergence) | Pre-EP1 step 6395/10976; awaiting first val measurement ~23:55Z | ~04:00Z 2026-05-25 |
+
+**Recently closed (this loop)**:
+- **H115 (#1294, al8klcpw) — DEFINITIVELY FALSIFIED**: terminal test_WSS=6.7734% (+0.1228pp WORSE), 0-of-4 floors cleared. Volume-side decoder widening ruled out on H39 base.
+- **H124 (#1309) — EP5 CLOSED**: val_wss=7.0775 ≥ 7.05 criterion, y-axis Charbonnier extension mechanism falsified (y-axis itself +0.0492pp WORSE despite extension).
+
+**Capacity-axis sweep on H39 base — synthesis after this loop**:
+| Axis | Probe | Status |
+|------|-------|--------|
+| Encoder capacity | H122 (NULL) | Ruled out |
+| Volume-decoder width | H115 (FALSIFIED) | Ruled out |
+| Loss-shape Charb yz/xyz | H41v2/H117 (NULL trajectory) | Likely ruled out |
+| Trunk WIDTH | H123 (lead narrowing, z-regression) | Marginal at EP7 |
+| Trunk DEPTH | H132 (pre-EP1) | In flight |
+| Base LR | H133 (pre-EP1) | In flight |
 
 ## Wave 33 Architectural Pipeline (researcher-agent ideas)
 
