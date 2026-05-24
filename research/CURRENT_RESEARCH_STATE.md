@@ -1,9 +1,105 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~17:15 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~18:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~18:15Z (2026-05-24) — H119 + H-A DUAL-CLOSURE, H-A2 + H-B BOTH ASSIGNED (NON-DESTRUCTIVE WSS-REP TIER + AUX-MAGNITUDE-HEAD)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H119 edward (COMPOUND H102 wider × H112 DropPath) CLOSED — B PARTIAL test_VP only, no A WIN, test_WSS regresses
+
+Terminal run `lm8aflyv`, EMA EP13:
+- val_abupt 6.213% (+0.077pp gate miss)
+- test_abupt 5.860% (+0.021pp regression)
+- **test_WSS 6.777% (+0.025pp regression on primary objective)** — DOES NOT clear primary-objective merge bar
+- test_VP **3.398% (−0.023pp ✓ CROSSES H112's 3.421%)** — only positive
+- test_SP 3.701% (+0.006pp flat)
+- test_WSS_z 8.802% (+0.082pp **LOST H112 prog-best**)
+
+**MAJOR PROGRAM FINDING — student's compound additivity refinement (LOCKED)**:
+
+> **Compound additivity is necessary but NOT sufficient at the orthogonal-class level. Per-channel topology matters.**
+> - decoder-capacity × decoder-capacity (H110: H102+H101) → anti-additive on VP/SP, additive on WSS_z
+> - decoder-capacity × backbone-regularization (H119: H102+H112) → VP-stabilizing, **anti-additive on WSS_z**
+
+**WSS_z specifically rejects `decoder × regularization` compounding** while accepting `decoder × decoder`. Mechanism (working hypothesis): DropPath's per-token stochastic skip prevents the wider decoder from exploiting consistent neighborhoods that WSS_z prediction depends on (high spatial frequency in vertical-shear channel).
+
+**VP-stabilization finding banked**: H102 × DropPath ELIMINATES H102's standalone VP over-fit. Test_VP 3.398% < H112's 3.421%. Mechanism confirmed but secondary axis behind WSS.
+
+**Strategic verdict**: n_hidden=512 decoder-capacity axis is largely exhausted for compounds with regularization/geometry. Standalone wider decoder (H127 tanjiro in flight) is the right test of pure decoder-capacity. If H127 succeeds, next compound is decoder × backbone (H127 × H120 depth-6), NOT decoder × regularization.
+
+### H-A thorfinn (Surface-Intrinsic Tangent-Frame Input Encoding, DESTRUCTIVE swap) CLOSED — C NULL by EP1 kill-fence
+
+Terminal run `nkf6gro9`, EP1 step 10864:
+- val_abupt **40.22%** vs gate <35.0% (+5.22pp fence breach)
+- val_surface_loss 2.13× H112 canonical, train_loss ~6.3× — model actively re-fitting a less-coherent input field
+
+**Student's two-mechanism diagnostic** (pinned):
+1. **Loss of global spatial structure** — World (x,y,z) gives "this point is at front-top of car"; tangent-frame `(δp·t̂₁, δp·t̂₂, δp·n̂)` gives only "X meters along local panel from centroid". Adjacent points across hood-windshield edge have O(1) different local coords; RFF/StringSeparable PE (sigma-tuned on world xyz) sees a much higher-frequency input field.
+2. **t̂₁ direction discontinuity** at `|n̂·ẑ|=0.95` reference-flip boundary — `t̂₁ = normalize(cross(n̂, ref))` flips orientation discontinuously where ref switches from ẑ to ŷ, creating O(1) coordinate jumps across the band.
+
+Implementation correctness gates all passed (centroid per-case ✓, fallback mask 16-22% ✓, coord ranges bounded ✓, shape (N,7) preserved ✓) — the rep change was correctly implemented; the destructive-swap formulation is what failed.
+
+**Hypothesis class NOT closed**: input-tier representation as **additive auxiliary** info has never been tested. The tangency-imposition class (output-tier, 4 failures #351/#680/#713/#1299) and the destructive input swap (this PR) are NOT the same class as concat-tangent-frame.
+
+### H-A2 thorfinn ASSIGNED — PR #1306 (Concat both frames, non-destructive)
+
+**Single change**: surface input `(N, 7) → (N, 10)`. World (x,y,z) channels preserved + 3 new tangent-frame channels (δp·t̂₁, δp·t̂₂, δp·n̂) added as auxiliary. Model gets a separate `surface_tangent_proj` linear layer that maps the new 3 channels → n_hidden, added residually to the surface token embedding.
+
+**Why this addresses mechanism (1) directly**: world-frame channels carry global spatial structure unchanged → RFF/StringSeparable PE on (x,y,z) is identical to H112 → zero risk of cold-start failure → model learns to attend to auxiliary tangent channels gradually as cosine descends.
+
+**Zero-init `surface_tangent_proj.weight`** so model behaves like H112 at step 0. EP1 fence cleared by construction.
+
+**Falsifiable**: test_WSS ≥ 0.10pp improvement (6.752% → ≤6.65%); val_WSS_z improves more than val_WSS_x. Falsifying signature: ±0.05pp of H112 canonical → entire input-rep class closed (this would be the third class-exhausting datapoint after output-tangency and destructive-input).
+
+**Code path**: `target/data/loader.py:280-288` loader edit + `target/model.py:523-528` surface_tangent_proj + flag plumbing ~60 lines.
+
+ETA terminal: ~08:30Z 2026-05-25.
+
+### H-B edward ASSIGNED — PR #1307 (Auxiliary log-magnitude head)
+
+**Single change**: add a parallel auxiliary prediction head on the surface decoder that predicts `log(1 + ||τ||)` per surface point, supervised by an auxiliary MSE loss term with weight λ_aux=0.1.
+
+**Mechanism**: WSS_z is the worst-performing channel (val_WSS_z 9.375% vs val_WSS_x 6.092%, 1.5× ratio). Hypothesis: vertical shear magnitude is geometrically constrained (proportional to vertical velocity gradient near floor/roof) but its DIRECTION in world frame depends on panel orientation. Decoupling magnitude as an auxiliary prediction target shapes backbone features to separate "where is high shear" from "which direction shear flows" — predicts differential improvement on WSS_z.
+
+**Non-destructive**: at λ_aux=0 this reduces to canonical H112 exactly. Zero-init final linear in aux head → aux loss contribution near zero at step 0 → cold-start fence cleared.
+
+**Why this is class-distinct from everything else in flight**:
+- NOT loss-form change on existing decoder (loss-form class CLOSED for SP)
+- NOT output-tier tangency (CLOSED, 4 failures)
+- NOT input-tier rep change (PR #1306 H-A2 parallel concat test)
+- NOT target reparameterization replacing existing decoder (PR #1292 H117 signed-sqrt SP)
+- IS auxiliary regularization head: parallel head + parallel loss term, mechanistically interpretable
+
+**Falsifiable**: test_WSS ≥0.10pp improvement; val_WSS_z improves more than val_WSS_x. Falsifying signature: aux_loss plateaus near zero within EP2 → backbone already encodes magnitude → aux head structurally inert.
+
+**Code path**: `target/model.py:523-528` aux head construction + `target/train.py` loss block aux_loss term + flag plumbing ~40 lines.
+
+ETA terminal: ~08:30Z 2026-05-25.
+
+### Fleet leaderboard (refined)
+
+| Hyp | Student | Progress | val_abupt | Verdict tracking | Class |
+|---|---|---:|---:|---|---|
+| **H120 depth-6** | askeladd | 92.8% | **6.039%** | **🎯 A WIN + B PARTIAL test_WSS confirmed** terminal ~1h | capacity (depth) |
+| H117 signed-sqrt+DP | alphonse | 95.7% | 6.204% | MARGINAL A WIN + B PARTIAL test_WSS | regularization+SP-transform |
+| H121 hidden-576 | frieren | 76.6% | 6.249% | MARGINAL A WIN, still descending | capacity (width) |
+| H125 depth-7 | fern | 15.7% | cold-start | terminal ~07:30Z 2026-05-25 | capacity extension |
+| H126 inverse-area | nezuko | 2.9% | cold-start | terminal ~07:30Z 2026-05-25 | WSS-sampling tier |
+| H127 wider decoder | tanjiro | 0% | — | terminal ~07:30Z 2026-05-25 | decoder-width standalone |
+| **H-A2 concat-tangent** | thorfinn | 0% (NEW) | — | terminal ~08:30Z 2026-05-25 | WSS-rep tier (non-destructive) |
+| **H-B aux-log-magnitude** | edward | 0% (NEW) | — | terminal ~08:30Z 2026-05-25 | WSS-magnitude-direction (aux head) |
+
+**Wave 36+ portfolio at a glance**: 3 capacity-axis probes in flight (H120 depth-6, H121 width-576, H125 depth-7) + 2 WSS-representation tier (H-A2 concat-tangent, H126 inverse-area sampling) + 1 SP-transform (H117) + 1 decoder-width standalone (H127) + 1 WSS-magnitude-decoupling (H-B). All 8 students productive.
+
+**Strategic decision tree for next 24h**:
+- H120 terminal-imminent — likely first multi-floor improvement on tay if test_WSS ~6.49-6.53% as projected
+- If H120 wins → next compound H120 × H127 (depth × wider decoder, architecturally orthogonal)
+- If H120 + H-A2 both win → triple compound H120 × H127 × H-A2 (depth × decoder × input-rep)
+- If H120 only marginal → keep capacity-axis exploration with H125 depth-7
 
 ## ~17:15Z (2026-05-24) — H118 CLOSED C NULL (SLICE-AXIS EXHAUSTED), H127 ASSIGNED TO TANJIRO (WIDER SURFACE DECODER STANDALONE — CROSS-TRACK VALIDATION)
 

@@ -1,3 +1,86 @@
+## 2026-05-24 ~18:15 — PR #1295: H119 COMPOUND H102-WIDER × H112-DROPPATH (edward, **CLOSED B PARTIAL test_VP only** — primary objective regresses, MAJOR program finding on compound additivity topology)
+
+- **Branch**: `edward/h119-compound-droppath-wider-surface-decoder` (CLOSED, not merged)
+- **W&B run**: `lm8aflyv`
+- **Hypothesis**: orthogonal-class compound — DropPath (H112 backbone-regularization) × wider surface_out 2× (H102 decoder-capacity) → additive across compound mechanism classes per H110 locked rule.
+
+### Terminal metrics (run lm8aflyv, EMA EP13)
+
+| Metric | H119 | H112 baseline / floor | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.213% | 6.1358% gate | +0.077pp | ❌ A WIN missed |
+| test_abupt | 5.860% | 5.839% (H112) | +0.021pp | ❌ regression |
+| **test_WSS** | **6.777%** | 6.752% (H112) | **+0.025pp** | ❌ **primary objective regresses** |
+| test_VP | 3.398% | 3.421% (H112) | **−0.023pp** | ✅ **B PARTIAL** |
+| test_SP | 3.701% | 3.695% (H112) | +0.006pp | flat |
+| test_WSS_z | 8.802% | 8.720% (H112 prog-best) | +0.082pp | ❌ **LOST H112 prog-best** |
+
+### MAJOR PROGRAM FINDING — compound additivity refinement LOCKED (student diagnostic)
+
+> **Compound additivity is necessary but NOT sufficient at the orthogonal-class level. Per-channel topology matters.**
+>
+> Two datapoints:
+> - decoder-capacity × decoder-capacity (H110: H102+H101) → anti-additive on VP/SP, **additive+ on WSS_z**
+> - decoder-capacity × backbone-regularization (H119: H102+H112) → VP-stabilizing, **anti-additive on WSS_z**
+
+**WSS_z specifically rejects `decoder × regularization` compounding** while accepting `decoder × decoder`. Mechanism (working hypothesis): DropPath's per-token stochastic skip prevents the wider decoder from exploiting consistent neighborhoods that WSS_z prediction depends on (high spatial frequency in vertical-shear channel).
+
+### Secondary finding — VP-channel stabilization
+
+- val_VP at parity with H112 throughout cosine (3.59% terminal)
+- test_VP **3.398% < H112's 3.421%** by −0.023pp — first sub-H112-floor test_VP on tay
+- **H102's standalone VP over-fit signature is eliminated by DropPath** — regularization-stabilization thesis on VP confirmed
+- Not load-bearing for WSS-axis primary objective; banked for future VP-targeted hypotheses
+
+### Successor experiment
+
+edward → H-B (Auxiliary log-magnitude head, PR #1307) — non-destructive magnitude/direction decoupling on WSS, mechanistically distinct from compound-axis approach.
+
+### Strategic verdict
+
+n_hidden=512 decoder-capacity axis is largely exhausted for compounds with regularization/geometry. Standalone wider decoder (H127 tanjiro in flight) is the right test of pure decoder-capacity. If H127 succeeds, next compound is decoder × backbone (H127 × H120 depth-6), NOT decoder × regularization.
+
+---
+
+## 2026-05-24 ~18:15 — PR #1302: H-A SURFACE-INTRINSIC TANGENT-FRAME INPUT ENCODING (thorfinn, **CLOSED C NULL** — destructive-swap formulation killed at EP1 cold-start fence; input-rep class NOT closed, redirected to H-A2 non-destructive concat)
+
+- **Branch**: `thorfinn/h-a-surface-intrinsic-tangent-frame` (CLOSED, not merged)
+- **W&B run**: `nkf6gro9`
+- **Hypothesis**: per-point local tangent frame (t̂₁, t̂₂, n̂) from existing surface normals replaces world (x,y,z) at the surface input → ≥0.15pp test_WSS improvement via frame-aligned inductive bias for surface vector fields.
+
+### Terminal metrics (EP1 kill-fence trip at step 10864)
+
+| Metric | H-A EP1 | H112/H115 canonical EP1 | Δ |
+|---|---:|---:|---:|
+| **val_abupt** | **40.22%** | 27.53% | **+12.68pp** ❌ fence breach (gate <35%) |
+| val_WSS | 45.66% | — | — |
+| val_surface_loss | 0.193 | 0.091 | **+0.102 (2.13×)** |
+| train_loss EP1 epoch_avg | 0.571 | ~0.09 (H115) | **~6.3×** |
+
+Run terminated cleanly via `early_stop.triggered=1`, no NaN/OOM/crash.
+
+### Pinned diagnostic — two mechanisms (student)
+
+**(1) Loss of global spatial structure** — world (x,y,z) encodes "this point is at front-top of car"; tangent-frame `(δp·t̂₁, δp·t̂₂, δp·n̂)` only encodes "X meters along local panel from per-case centroid in locally-defined tangent direction". Two physically-adjacent points across a curvature feature (hood-windshield edge) have O(1) different local-frame coords — RFF/StringSeparable PE (sigma-tuned on world xyz) sees a much higher-frequency input field.
+
+**(2) t̂₁ direction discontinuity at |n̂·ẑ|=0.95 reference-flip boundary** — `t̂₁ = normalize(cross(n̂, ref))` flips orientation discontinuously where ref switches from ẑ to ŷ, creating O(1) coordinate jumps across the band.
+
+Both consistent with train_loss ~6.3× higher at EP1 — model wasn't slower to learn, it was actively re-fitting a less-coherent input field.
+
+### Implementation correctness
+
+All 4 PR-required diagnostic gates passed: centroid per-case ✓ (centroid_x varied 1.367..1.655), fallback mask 16-22% on full meshes ✓, coord ranges bounded ✓, shape (N,7) preserved ✓.
+
+### Hypothesis class — NOT closed
+
+The output-tier tangency-imposition class (#351/#680/#713/#1299, 4 failures) and the input-tier destructive-swap (this PR) are NOT the same class. Input-representation as **additive auxiliary** info has never been tested.
+
+### Successor experiment
+
+thorfinn → H-A2 (concat both frames, PR #1306) — surface input (N,7)→(N,10), world (x,y,z) preserved + tangent-frame channels added with zero-init residual projection. Directly addresses mechanism (1) by being non-destructive.
+
+---
+
 ## 2026-05-24 ~17:15 — PR #1293: H118 SLICE-COUNT 128→192 (tanjiro, **CLOSED C NULL** — slice-axis capacity exhausted at 13ep budget; **CAPACITY-AXIS ORDERING depth > hidden > slices LOCKED**)
 
 - **Branch**: `tanjiro/h118-model-slices-128-to-192` (CLOSED, not merged)
