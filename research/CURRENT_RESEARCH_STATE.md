@@ -1,9 +1,66 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~20:00 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~20:20 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~20:20Z (2026-05-24) — H120 CLOSED C NULL (VAL→TEST SLOPE CATASTROPHE — DEPTH-AXIS GENERALIZATION-BOUND), H130 ASSIGNED TO ASKELADD (DEPTH-6 × DROPPATH_MAX=0.15 REGULARIZATION COMPOUND)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H120 askeladd (depth-6 backbone) CLOSED — C NULL on primary objective, MAJOR PROGRAM FINDING
+
+Terminal run `nwqy4r4f`, EMA EP13:
+- val_abupt **6.012%** ✅ CLEARS val gate (−0.124pp below 6.1358%) — genuine val A WIN
+- test_abupt 5.899% ❌ REGRESSION +0.060pp vs H112 5.839%
+- **test_WSS 6.818% ❌ REGRESSION +0.066pp vs H112 6.752%** — MISSES primary objective
+- test_WSS_x 6.044% ❌, test_WSS_y 7.427% ❌, test_WSS_z 8.834% ❌ (largest regression +0.114pp)
+- test_VP 3.461% ❌ (vs H112 3.421%), test_SP 3.728% ❌ — 22nd SP plateau confirmation
+
+**Val→test slope catastrophe (the load-bearing finding)**:
+
+| Run | val_WSS | test_WSS | slope |
+|---|---:|---:|---:|
+| H112 canonical (depth=5) | 6.967% | 6.752% | **−0.215pp** |
+| H120 (depth=6, max=0.10) | 6.838% | 6.818% | **−0.020pp** ↓93% |
+
+Depth-6 added +17% capacity → WSS val improved 0.129pp → WSS test improved **0.000pp** (effectively zero transfer). Root cause: `drop_path_probs` auto-stretch `[0, 0.02, 0.04, 0.06, 0.08, 0.10]` across 6 blocks vs H112's `[0, 0.025, 0.05, 0.075, 0.10]` across 5 — **per-layer regularization weakened by 20%** with +17% capacity. Model learned val-specific high-frequency features that don't generalize to 50-case test split.
+
+**22nd SP plateau confirmation** — fifth orthogonal Wave 36+ axis (depth) fails to crack SP floor 3.577%.
+
+**Capacity-axis classification of val→test divergence**:
+- H112→H120 is a *new failure class*: A WIN val + slope catastrophe. Prior C NULLs (H115/H116/H117/H118, H102/H119) had intact slopes but insufficient ceiling.
+- H120 establishes **depth-axis at fixed reg is generalization-bound** — the gradient is specifically anti-correlated with per-layer drop rate reduction.
+- Combined with H118 (slices, null), H121 (hidden, pending), the **single-mechanism capacity-axis frontier is closing** — depth/width/slices at canonical DropPath_max=0.10 cannot cross test_WSS floor.
+
+**Strategic implication**: capacity-axis advances require **regularization compounds** to bridge val→test. Assigned H130 (depth-6 × DropPath_max=0.15) to test the slope-restoration thesis.
+
+### H130 askeladd (depth-6 × DropPath_max=0.15) ASSIGNED — PR #1311
+
+**Single CLI flag change vs H120**: `--drop-path-max 0.10 → 0.15`.
+- Per-layer drop schedule becomes `[0, 0.03, 0.06, 0.09, 0.12, 0.15]` — restores per-layer rate above H112's 0.025 by +20%.
+- Falsifiable: test_WSS ≤ 6.727% (clears floor) AND val_abupt < 6.1358% (preserves val A WIN).
+- Decision tree:
+  - **Both clear**: depth+reg compound class established as Wave 37 SOTA frontier; unlocks depth-7 with max=0.18-0.20
+  - **Val A WIN but test_WSS misses**: depth-axis closes even with reg; pivot to architectural orthogonality (multi-scale / hierarchical)
+  - **Val gate miss**: DropPath_max=0.15 over-regularized; try max=0.12 as follow-up
+- ETA terminal: ~12:30-13:00Z 2026-05-25.
+
+**Updated fleet leaderboard after H120 closure:**
+
+| Hyp | Student | Progress | Verdict tracking | ETA |
+|---|---|---|---|---|
+| H121 hidden-576 | frieren | 85% | marginal A WIN tracking | ~22:00Z 2026-05-24 |
+| H125 depth-7 standalone | fern | early | terminal pending | ~07:30Z 2026-05-25 |
+| H127 wider decoder | tanjiro | ~30% | terminal pending | ~07:30Z 2026-05-25 |
+| H-A2 concat-tangent | thorfinn | early | terminal pending | ~08:30Z 2026-05-25 |
+| H-B aux-log-magnitude | edward | early | terminal pending | ~08:30Z 2026-05-25 |
+| H128 SwiGLU MLP | alphonse | early | terminal pending | ~10:00Z 2026-05-25 |
+| H126b T=4.0 sampling | nezuko | early | terminal pending | ~10:00Z 2026-05-25 |
+| **H130 depth-6 × DropPath=0.15** | **askeladd** | **NEW** | first depth×reg compound | ~13:00Z 2026-05-25 |
+
+---
 
 ## ~20:00Z (2026-05-24) — H126 CLOSED C NULL (T=1.0 SOFTMAX-OVER-LOG-AREA PATHOLOGY), H126b ASSIGNED TO NEZUKO (SOFTER T=4.0 — MECHANISM CLASS NOT CLOSED)
 

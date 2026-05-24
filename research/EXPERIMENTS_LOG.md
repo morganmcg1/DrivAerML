@@ -1,3 +1,67 @@
+## 2026-05-24 ~20:20 — PR #1296: H120 BACKBONE DEPTH 5→6 (askeladd, **CLOSED C NULL** — val A WIN but val→test slope catastrophe; **MAJOR PROGRAM FINDING: DEPTH-AXIS GENERALIZATION-BOUND AT FIXED REGULARIZATION**)
+
+- **Branch**: `askeladd/h120-backbone-depth-6` (CLOSED, not merged)
+- **W&B run**: `nwqy4r4f`
+- **Hypothesis**: Extending backbone depth from 5 to 6 layers (+17% params, +2.96M) improves capacity for high-frequency WSS features in Wave 36+.
+
+### Terminal metrics (run nwqy4r4f, EMA EP13)
+
+| Metric | H120 (depth=6) | H112 canonical (depth=5) | Δ | Gate / Floor | Verdict |
+|---|---:|---:|---:|---|---|
+| **val_abupt** | **6.0122%** | 6.1358% | **−0.124pp** | gate 6.1358% | ✅ **CLEARS val gate** |
+| **test_abupt** | 5.8990% | 5.8391% | **+0.060pp** | — | ❌ REGRESSION |
+| test_VP | 3.4614% | 3.4213% | +0.040pp | floor 3.421% | ❌ vs H112; ✅ crosses pre-H112 |
+| test_SP | 3.7280% | 3.6947% | +0.033pp | floor 3.577% | ❌ **22nd plateau confirmation** |
+| **test_WSS** | **6.8180%** | **6.7523%** | **+0.066pp** | floor 6.727% | ❌ **REGRESSION on primary objective** |
+| test_WSS_x | 6.0444% | 5.9989% | +0.045pp | — | ❌ |
+| test_WSS_y | 7.4265% | 7.3602% | +0.066pp | — | ❌ |
+| test_WSS_z | 8.8345% | 8.7201% | +0.114pp | — | ❌ (largest regression) |
+
+**Param count**: 20.37M (H112: 17.41M, +2.96M = +17.0%)
+**Best checkpoint**: EMA EP13 | **Peak VRAM**: 95.43 GB / 97.9 GB (2.47 GB headroom)
+**Total wallclock**: 972.6 min = 16.21h
+
+### Val trajectory (H120 led every epoch)
+
+| Stage | Step | val_abupt | H112 EP val | Δ |
+|---|---:|---:|---:|---:|
+| EP1 (gate <35%) | 10,864 | 25.720% | ~26.7% | −1.0pp |
+| EP2 | 21,729 | 7.589% | ~7.92% | −0.33pp |
+| EP3 (gate <8.5%) | 32,594 | 6.700% | ~7.05% | −0.35pp |
+| EP6 | 48,902 | 6.214% | ~6.39% | −0.18pp |
+| **EP13 terminal** | 70,652 | **6.012%** | 6.136% | **−0.124pp** |
+
+H120 led H112 at every checkpoint — but **none of the val improvement transferred to test**.
+
+### Val→test slope collapse (primary diagnostic)
+
+| Run | val_abupt | test_abupt | abupt slope | val_WSS | test_WSS | WSS slope |
+|---|---:|---:|---:|---:|---:|---:|
+| H112 canonical | 6.136% | 5.839% | **−0.297pp** | 6.967% | 6.752% | **−0.215pp** |
+| H120 (depth=6) | 6.012% | 5.899% | **−0.113pp** ↓62% | 6.838% | 6.818% | **−0.020pp** ↓93% |
+
+**WSS val→test slope flattened by 93%** — catastrophic. Root cause: DropPath schedule auto-stretches `[max·i/(depth−1)]` → depth-6 with `max=0.10` weakens per-layer drop rate from 0.025 (H112) to 0.020 (H120) = −20%. +17% capacity with −20% per-layer regularization → model overfits val-specific high-frequency features.
+
+### Strategic conclusions
+
+1. **Depth-axis at fixed DropPath_max is generalization-bound** — val improves, test does not. This is a *new failure class* distinct from all prior H115/H116/H117/H118 C NULLs (which had intact slopes but insufficient ceiling).
+2. **22nd SP plateau confirmation** — 5th orthogonal Wave 36+ axis fails against SP floor 3.577%.
+3. **Capacity-axis closing** — combined with H118 (slices null), H102/H110 (decoder-width), the standalone capacity-axis frontier is exhausted at canonical DropPath_max.
+4. **Depth × regularization compound is the path forward** — H130 (depth-6 × DropPath_max=0.15) assigned to test slope-restoration thesis.
+
+### Student diagnostic (banked)
+
+- DropPath auto-adapts as `[max·i/(depth−1)]` — per-layer rate is **proportional to max**, not fixed. Deeper nets with same max have weaker per-layer drop.
+- Predicted fix: raise max proportionally with depth to maintain per-layer floor (max=0.15 for depth-6 restores per-layer rate from 0.020 to 0.030, above H112's 0.025).
+- val_VP improved −0.087pp but test_VP REGRESSED +0.040pp — strongest per-channel divergence signal.
+- Peak VRAM 95.43 GB at depth-6: depth-7 requires activation checkpointing (3 GB headroom would be exhausted).
+
+### Successor experiment
+
+askeladd → H130 (PR #1311): depth-6 × DropPath_max=0.15. Single flag change `--drop-path-max 0.15`. ETA ~13:00Z 2026-05-25.
+
+---
+
 ## 2026-05-24 ~20:00 — PR #1303: H126 T=1.0 INVERSE-AREA STRATIFIED SAMPLING (nezuko, **CLOSED C NULL** — EP1 kill-fence at val_abupt 43.84%, "softmax over log-area" pathology; **MECHANISM CLASS NOT CLOSED**, refined H126b at T=4.0 assigned)
 
 - **Branch**: `nezuko/h126-area-weighted-sampling` (CLOSED, not merged)
