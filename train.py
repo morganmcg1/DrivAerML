@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "drop_path_max": (
+            "H112: Maximum DropPath (stochastic depth, Huang et al. 2016) "
+            "probability applied to the final backbone block's residual "
+            "branches. Each TransformerBlock has independent DropPath on "
+            "the attention and MLP branches with a linear schedule from "
+            "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
+            "at eval so adds zero inference cost. 0.0 disables (default)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -308,6 +317,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        drop_path_max=config.drop_path_max,
     )
 
 
@@ -883,6 +893,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            backbone = getattr(base_model, "backbone", None)
+            if backbone is not None and hasattr(backbone, "blocks"):
+                drop_path_schedule = [
+                    float(blk.drop_path_attn.drop_prob) for blk in backbone.blocks
+                ]
+                wandb.summary["drop_path/max"] = config.drop_path_max
+                wandb.summary["drop_path/schedule"] = drop_path_schedule
+                if config.drop_path_max > 0.0:
+                    print(
+                        f"DropPath (H112): per-block schedule "
+                        f"(attn=mlp) = {drop_path_schedule}"
+                    )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
