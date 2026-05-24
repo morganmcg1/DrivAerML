@@ -1,9 +1,57 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:45 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~03:55Z (2026-05-24) — H117 TIMING-COLLISION RESOLVED OPTION A (CONTINUE COMPOUND); SCIENTIFIC FRAMING SWITCHED — H117+H112 IS NOW THE EXPLICIT COMPOUND TEST
+
+**H117 alphonse — timing-collision summary:**
+- ~01:42Z: alphonse launched H117 on pre-H112 baseline (run `h117-signed-sqrt-sp`, drop_path_max=None)
+- 02:42Z: H112 MERGED into tay
+- 03:13Z: Advisor rebase guidance posted
+- ~03:21Z: alphonse killed pre-H112 run (SIGTERM at step 11,113, 1.65h sunk)
+- ~03:25Z: alphonse rebased + relaunched as `h117-signed-sqrt-sp-droppath` with `--drop-path-max 0.10`
+- 03:25:26Z: Advisor retraction posted ("don't rebase, continue as-is") — 26 seconds AFTER alphonse's relaunch
+- 03:33Z: alphonse posted timing-collision summary, asked Option A (continue compound) or B (kill+restart H117-alone) with 04:00Z default deadline
+- **03:55Z: Advisor decision = OPTION A** — continue current compound, do not kill again
+
+**Decision rationale (Option A):**
+1. H112 is now MERGED baseline — every Wave 36+ experiment should compound on H112 by default
+2. The compound test is the HIGHEST-VALUE question now: "does signed-sqrt SP target reshape add to DropPath SOTA?"
+3. Cohort consistency is recoverable: val→test slope diagnostic is robust to small baseline shift (+0.010pp val gate)
+4. Sunk cost trivial (~26 min); forward information value exceeds cohort-uniformity cost
+5. Avoids damaging student trust in advisor instructions (third kill-restart cycle would do exactly that)
+
+**H117 SCIENTIFIC FRAMING SWITCH (locked):**
+- Was: "signed-sqrt SP target transform on pre-H112 baseline"
+- Now: "**H117 + H112 compound — signed-sqrt SP target transform ON TOP of DropPath SOTA**"
+- Falsifiable outcomes:
+  - **A WIN compound**: `test_SP < 3.577%` AND `val_abupt < 6.1358%` → new SOTA + additivity confirmed across orthogonal mechanism classes (data-tier × regularization)
+  - **B PARTIAL compound**: at least one test floor crossed (most likely test_SP given the targeted nature)
+  - **C NULL compound**: H117 mechanism doesn't add to DropPath — could be saturation OR mechanism failure
+- Label swap: `status:review` → `status:wip` (PR was prematurely marked review by alphonse to flag the timing-collision)
+
+**Live fleet picture (8/8 students, 0 idle):**
+
+| Slot | Run | Step / % | Runtime | State |
+|---|---|---:|---:|---|
+| **H112 edward** | **MERGED** | — | — | NEW SINGLE-MODEL SOTA |
+| H113 fern heteroscedastic | 56,532 / 80% | 9.95h | late-cosine, ~2.5h to terminal |
+| H115 thorfinn Huber SP | 19,490 / 27.6% | 2.88h | mid-cosine, pre-EP3 (pre-H112 baseline) |
+| H116 nezuko Y-mirror | 15,471 / 21.9% | 2.29h | mid-cosine, pre-EP3 (pre-H112 baseline) |
+| **H117 alphonse compound** | **2,830 / 4.0%** | **0.43h** | early-EP1 (POST-H112 + DropPath baseline) |
+| H118 tanjiro slices 192 | 10,211 / 14.5% | 1.65h | pre-EP1 |
+| H119 edward compound | 3,451 / 4.9% | 0.52h | early-EP1 (post-H112 baseline) |
+| H120 askeladd depth 6 | 883 / 1.2% | 0.15h | just launched |
+| **H121 frieren width 576** | **draft PR #1297** | — | not launched |
+
+**Baseline split tracking (for cohort retrospective):**
+- **Pre-H112 baseline runs** (val gate 6.126%): H113, H115, H116
+- **Post-H112 baseline runs** (val gate 6.1358%, DropPath included): H117 compound, H118, H119, H120, H121
+
+The Wave 35 cohort comparison (data-tier interventions) needs the +0.010pp gate shift correction when comparing H115/H116 (pre-H112) against H117 (post-H112). The Wave 36+ capacity sweep is all post-H112, fully cohort-consistent.
 
 ## ~03:45Z (2026-05-24) — H114 CLOSED C NULL (EP3 KILL-THRESHOLD TRIGGERED, FIRST WAVE 35 NULL); FRIEREN REASSIGNED H121 BACKBONE HIDDEN-DIM 512→576 — FOURTH ORTHOGONAL CAPACITY AXIS COMPLETING COMPREHENSIVE WAVE 36+ BACKBONE SWEEP
 
