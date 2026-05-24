@@ -1,9 +1,54 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:25 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~03:45Z (2026-05-24) — H114 CLOSED C NULL (EP3 KILL-THRESHOLD TRIGGERED, FIRST WAVE 35 NULL); FRIEREN REASSIGNED H121 BACKBONE HIDDEN-DIM 512→576 — FOURTH ORTHOGONAL CAPACITY AXIS COMPLETING COMPREHENSIVE WAVE 36+ BACKBONE SWEEP
+
+**H114 frieren CLOSED (PR #1289, C NULL):**
+- Run terminated at step **32,651 / 70,664 (46.2%)** by EP3 kill threshold `32594:val_abupt<8.5%`
+- val_abupt at termination: **11.7685%** (MISS gate 8.5% by +3.27pp)
+- Slope at termination: −0.0544pp/1k → **~4× slower than canonical ~−0.2pp/1k mid-cosine descent**
+- Mechanism failure mode: panel-area distribution heavy-tailed (~0.5% of points = ~40% of area, ~80× per-point weight differential); optimizer found spurious attractor on dominant panels and **neglected small-panel stagnation/wheel-arch regions** that drive per-point validation
+
+**Strategic lesson (LOCKED for retrospective)**: SP-axis interventions that heavily reweight gradient magnitude based on intrinsic mesh structure (panel_area, normal_mag, sdf-proximity) create spurious attractors that beat *modified* loss but lose on *per-point* validation. **Loss curvature changes (Huber H115) and target-space reshaping (signed-sqrt H117) are safer** — they preserve relative per-point weighting while only changing loss-surface shape in small-vs-large residual regions. Prediction: H115/H116/H117 more likely to engage productively than H114 did.
+
+**H121 ASSIGNED to frieren (PR #1297, draft):**
+- **BACKBONE HIDDEN-DIM 512→576** (`--model-hidden-dim 576`, ~+2.5M params, ~+15% wallclock)
+- **FOURTH orthogonal Wave 36+ capacity axis** — completes the comprehensive backbone sweep:
+  - **H118 tanjiro**: slice granularity (`--model-slices 192`, +164K, +12% wallclock)
+  - **H119 edward**: decoder-width × DropPath compound (`--surface-out-width-factor 2.0`, +266K)
+  - **H120 askeladd**: sequential depth (`--model-layers 6`, +3.2M, +18% wallclock)
+  - **H121 frieren**: parallel feature width (`--model-hidden-dim 576`, +2.5M, +15% wallclock) ← THIS
+- VRAM concern flagged ((576/512)² = 1.27× scaling) — smoke test BEFORE full launch; fallback to `--model-hidden-dim 552` if peak >92GB
+- Includes `--drop-path-max 0.10` to test width-scaling ON TOP of MERGED SOTA
+
+**Comprehensive multi-axis attack on SP plateau (Wave 35 + Wave 36+):**
+
+If H121 WINS or B PARTIAL → width is productive Wave 36+ capacity axis; recommend H122+ compounds (depth × width, depth × slices × width).
+
+If **all 4 capacity axes NULL AND all 3 remaining data-tier axes NULL** (H115 Huber, H116 Y-mirror, H117 signed-sqrt) → **definitive Bayes-optimal hardness confirmation**. Program pivots to drastically larger models (hidden 768+, layers 8+, slices 256+, multi-scale backbone, full model rewrite).
+
+**Live fleet picture (since last invocation, lots of activity):**
+
+| Slot | Run | Step / % | Runtime | State |
+|---|---|---:|---:|---|
+| **H112 edward DropPath** | **MERGED** | — | — | NEW SINGLE-MODEL SOTA |
+| H113 fern heteroscedastic | 56,532 / 80% | 9.95h | late-cosine, ~2.5h to terminal | needs_rebase cosmetic only |
+| **H114 frieren panel-area SP** | **CLOSED C NULL** | KILL EP3 | 3.68h | **first Wave 35 NULL** |
+| H115 thorfinn Huber SP | 19,490 / 27.6% | 2.88h | EP1 cleared 27.534% | data-tier loss curvature |
+| H116 nezuko Y-mirror | 15,471 / 21.9% | 2.29h | EP1 cleared 27.323% | data-tier sample aug |
+| H117 alphonse signed-sqrt+DropPath | **1,395 / 2.0%** | 0.21h | **RELAUNCHED** on post-H112 baseline | compound H117+H112 (data-tier × regularization) |
+| H118 tanjiro slices 192 | 10,211 / 14.5% | 1.65h | pre-EP1 | Wave 36 slice granularity |
+| H119 edward compound | 3,451 / 4.9% | 0.52h | early-cosine | DropPath × surface_out 1024 |
+| H120 askeladd depth 6 | **883 / 1.2%** | 0.15h | just launched | Wave 36 sequential depth |
+| **H121 frieren width 576** | **draft PR #1297** | not launched | — | **just assigned** |
+
+**STATE CORRECTION**: H117 alphonse DID rebase and relaunch with `--drop-path-max 0.10` after seeing the rebase comment. New run `alphonse/h117-signed-sqrt-sp-droppath-rank0` at step 1,395 (2.0% in 0.21h). This is now a CLEAN COMPOUND TEST: signed-sqrt SP × DropPath. Better experiment than original plan.
+
+**Fleet status: 10 hypothesis slots, 8 students, 1 closing pending fresh assignment (frieren just assigned).** Comprehensive multi-axis attack on SP plateau is the most thorough in program history — 4 capacity axes × 3 remaining data-tier axes × 1 compound = 8 active hypotheses targeting the 21-confirmation SP plateau.
 
 ## ~03:25Z (2026-05-24) — H117 ALPHONSE ALREADY LAUNCHED 1.65H AGO ON PRE-H112 BASELINE — REBASE GUIDANCE RETRACTED; H113/H115/H116/H118 ALL HEALTHY STALE_WIP FALSE POSITIVES
 

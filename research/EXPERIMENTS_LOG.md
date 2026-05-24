@@ -1,3 +1,47 @@
+## 2026-05-24 ~03:45 — PR #1289: H114 PANEL-AREA-WEIGHTED SP MSE (frieren, **CLOSED C NULL** — EP3 kill-threshold triggered) — first NULL of Wave 35 data-tier sweep; mechanism failure mode = mid-cosine descent stall via spurious large-panel attractor
+
+- **Branch**: `frieren/h114-panel-area-weighted-sp-loss` (CLOSED, not merged)
+- **W&B run**: `jity0d6x`, **TERMINATED EARLY at step 32,651 (46.2% complete)**, runtime 3.68h
+- **Hypothesis**: per-point SP MSE reweighted by `panel_area / sum(panel_area * mask)` to combat under-weighting of large panels in stagnation regions.
+
+### Why TERMINATED at step 32,651
+
+- Kill threshold: `32594:val_primary/abupt_axis_mean_rel_l2_pct<8.5`
+- val_abupt at step 32,651: **11.7685%** → MISS by +3.27pp → kill trigger fired
+- Slope at termination: **−0.0544pp/1k** vs canonical ~−0.2pp/1k → **~4× slower descent**
+
+### Val publish history
+
+| Step | val_abupt | Note |
+|---:|---:|---|
+| 10,880 | 18.997% | **EP1 gate 35% CLEARED by +16pp** ✅ |
+| 13,600 | 16.551% | Check-in #1 |
+| 32,651 | **11.7685%** | **EP3 gate 8.5% MISSED — KILL TRIGGER** ❌ |
+
+### Mechanism failure mode
+
+Panel-area distribution on DrivAerML is heavy-tailed: ~0.5% of points cover ~40% of total area (front/rear bumper, A-pillars, roof). After normalization to `sum(area * mask)`, the per-point weight on these ~150-500 large panels is ~80× higher than median.
+
+**The optimizer found a spurious attractor**: fit the *easy* low-frequency low-residual SP on dominant panels first, *neglect* small-panel stagnation/wheel-arch regions that drive validation. Result: area-weighted training loss descended, but per-point validation metric (the canonical scoring contract) crawled.
+
+### Strategic lesson
+
+SP-axis interventions that heavily reweight gradient magnitude based on intrinsic mesh structure (panel_area, normal_magnitude, sdf_proximity) create spurious attractors that beat the *modified* objective but lose on per-point validation. **Loss curvature changes** (Huber H115) and **target-space reshaping** (signed-sqrt H117) are safer — they preserve relative per-point weighting while only changing loss-surface shape in small vs large residual regions. **Prediction: H115/H116/H117 more likely to engage productively than H114 did.**
+
+### NEXT ASSIGNMENT — H121 BACKBONE HIDDEN-DIM 512→576 (frieren)
+
+- **Branch**: `frieren/h121-backbone-hidden-576`, DRAFT PR #1297
+- **Hypothesis**: parallel-feature-width within backbone (`--model-hidden-dim 576`, +2.5M params, +15% wallclock)
+- **Strategic role**: FOURTH orthogonal Wave 36+ capacity-scaling axis, completing the comprehensive backbone capacity sweep:
+  - H118 tanjiro: slice granularity (`--model-slices 192`)
+  - H119 edward: decoder-width compound (DropPath × surface_out 1024)
+  - H120 askeladd: sequential depth (`--model-layers 6`)
+  - **H121 frieren: parallel feature width (`--model-hidden-dim 576`)** ← fourth axis
+- VRAM concern flagged — smoke test BEFORE full launch; fallback to `--model-hidden-dim 552` if peak >92GB
+- Includes `--drop-path-max 0.10` to test width-scaling ON TOP of MERGED SOTA
+
+---
+
 ## 2026-05-24 ~03:15 — PR #1282: H111 LAYERSCALE-IN-BACKBONE (askeladd, **CLOSED B PARTIAL**) — narrow test_VP cross −0.021pp; γ-depth pattern firmly engaged (γ_mlp 0.95→1.40 monotonic) but stochastic regularization dominated cohort head-to-head; 21st SP plateau confirmation
 
 - **Branch**: `askeladd/h111-layerscale-in-backbone` (CLOSED, not merged)
