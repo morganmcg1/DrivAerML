@@ -1,3 +1,55 @@
+## 2026-05-24 ~16:10 — PR #1291: H116 Y-MIRROR DATA AUG (nezuko, **CLOSED C NULL** — inverse val→test on test_WSS, MAJOR test_VP regression; **DATA-AUG TIER FIRST CLEAN FALSIFICATION ON DRIVAERML**)
+
+- **Branch**: `nezuko/h116-y-mirror-augmentation` (CLOSED, not merged)
+- **W&B run**: `95jd18kv`
+- **Hypothesis**: longitudinal Y-mirror data augmentation on bilateral car symmetry — `apply_y_mirror(prob=0.5)` flips y → -y, n_y → -n_y, τ_y → -τ_y. Falsifiable: val_abupt < 6.126% AND test_SP < 3.577% → NULL otherwise.
+
+### Terminal metrics (run 95jd18kv, EMA EP13)
+
+| Metric | H116 | H112 baseline | Δ | Floor / Gate | Verdict |
+|---|---:|---:|---:|---|---|
+| val_abupt | **6.354%** | 6.126% | +0.228pp | gate 6.1358% | ❌ A WIN missed |
+| test_abupt | 6.118% | 5.839% | +0.279pp | merge gate 5.839% | ❌ regression |
+| **test_WSS** | **6.888%** | 6.752% | **+0.136pp vs 6.727% floor** | floor 6.727% | ❌ MISS by +0.161pp |
+| test_tau_y (PR aux prediction) | 7.451% | 7.10% | +0.351pp | — | ❌ **falsifies "balanced tau_y exposure improves tau_y" claim** |
+| **test_VP** | **4.314%** | 3.421% | **+0.893pp** | floor 3.643% | ❌ **MAJOR regression +0.671pp vs floor** |
+| test_SP | 3.744% | 3.695% | +0.049pp | floor 3.577% | ❌ MISS — **18th SP plateau confirmation** |
+
+Late-cosine slope dampened MORE aggressively than advisor's pre-terminal projection (predicted test_WSS ~6.74%, actual 6.888%).
+
+### Three-reason post-mortem (nezuko's diagnostic, banked)
+
+1. **"Free 2× augmentation" framing was misleading.** Training loader already uses `torch.randint(N_surface, (65536,))` per view → ~65K of 8.8M points per epoch with massive stochastic richness. Y-mirror is a single deterministic transformation on top of an already-stochastic sampling distribution orders of magnitude richer. Effective data multiplicity was barely changed.
+
+2. **Asymmetric flow-disturbing features matter more than surface-area suggests.** Side mirrors / exhaust / antenna / license plate <1% surface area but DISPROPORTIONATELY influential on pressure/wake patterns. Model must "split the difference" between real and mirrored targets → systematic label bias globally, not local.
+
+3. **`string_separable` PE is NOT y-equivariant** (PR #823 backbone). Per-axis learnable RFF log-frequencies + slice-attention on absolute coord signatures. Under y → -y, encoded features change. Model spends capacity learning two RFF embeddings should produce the same output. **CLEANEST mechanistic explanation.**
+
+Reasons 2+3 alone are sufficient to predict the measured regression. Compound effect explains why test_VP regression is catastrophic: the volume side learning is downstream of surface→volume cross-attention, which is downstream of the equivariance-broken surface PE.
+
+### Strategic class verdict — Data-tier joint-closure
+
+| Class | Mechanism | Outcome |
+|---|---|---|
+| H113 fern (loss-balance) | 3 free log_σ² scalars | C NULL — SP plateau hardness-bound, not balance-bound |
+| H114 (panel-area loss) | per-panel area weighting | C NULL — 4× slowed descent |
+| H115 thorfinn (loss-curvature) | fixed-δ Huber | C NULL — degenerated to MSE |
+| **H116 nezuko (data-aug Y-mirror)** | bilateral symmetry exposure | **C NULL — inverse val→test correlation** |
+
+Combined: **loss-tier (H113/H114/H115) AND val-correlated data-aug tier (H116) are jointly closed for SP on this model+dataset**. Plateau Protocol pivots Wave 36+ to:
+- **Input representation tier** (H-A thorfinn tangent-frame, IN FLIGHT)
+- **Sampling distribution tier** (H126 nezuko inverse-area, IN FLIGHT, refined H-C)
+- **Architectural symmetry tier** (Wave 37+ candidate: y-mirror equivariant encoder per nezuko's reason 3)
+
+### Banked lessons
+
+1. **Data augmentation can produce inverse val→test correlation on DrivAerML** when (a) the augmentation is downstream of a non-equivariant PE, OR (b) it asks the model to reconcile asymmetric flow-disturbing features. First clean falsification of "free 2× data aug" hypothesis class.
+2. **Volume regression** in H116 (test_VP +0.671pp vs floor) demonstrates that surface-side data-distribution changes propagate to volume through surf→vol cross-attention. Any future surface-side data-distribution-shift hypotheses must consider this coupling.
+3. **`string_separable` PE non-equivariance** is now a confirmed friction-source for any surface-side transformations. Wave 37+ should attack this with a y-mirror equivariant encoder (use `cos(2π f·|y|)` on y-axis).
+4. **Successor experiment**: nezuko → H126 (Inverse-Panel-Area Stratified Sampling, PR #1303) — sampling-distribution change at WSS-variance regions, NOT data-distribution shift.
+
+---
+
 ## 2026-05-24 ~14:45 — PR #1290: H115 HUBER-LOSS-SP (thorfinn, **CLOSED C NULL** — Huber degenerated to MSE for ~90% of training; **LOSS-FORM CLASS EXHAUSTED FOR SP**)
 
 - **Branch**: `thorfinn/h115-sp-huber-loss` (CLOSED, not merged)

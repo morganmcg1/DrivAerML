@@ -1,9 +1,55 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~14:45 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~16:10 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~16:10Z (2026-05-24) — H116 CLOSED C NULL (Y-MIRROR DATA-AUG FAILED — INVERSE val→test ON test_WSS, MAJOR test_VP REGRESSION), H126 ASSIGNED TO NEZUKO (REFINED H-C SAMPLING)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H116 nezuko (Y-mirror data aug) CLOSED C NULL — PR #1291
+
+Terminal run `95jd18kv`: val_abupt **6.354%** (+0.228pp gate miss), test_abupt **6.118%** (+0.279pp regression), **test_WSS 6.888%** (+0.161pp floor miss), **test_VP 4.314%** (+0.671pp MAJOR regression vs floor), test_SP 3.744% (+0.167pp — 18th plateau confirmation). Late-cosine slope dampened more aggressively than projected (predicted test_WSS ~6.74%, actual 6.888%).
+
+**Three-reason post-mortem (nezuko's diagnostic, locked)**:
+1. **"Free 2× augmentation" framing was misleading** — training loader already uses `torch.randint(N_surface, (65536,))` per view, drawing ~65K of 8.8M points per epoch. Y-mirror adds a single deterministic transformation on top of already-rich stochastic sampling.
+2. **Asymmetric flow-disturbing features** (side mirrors, exhaust, antenna) are <1% surface area but disproportionately influential on pressure/wake. Model has to "split the difference" between real and mirrored targets → systematic label bias.
+3. **`string_separable` PE is NOT y-equivariant** — under y → -y, encoded features change. Model spends capacity learning two RFF embeddings should produce the same output. CLEANEST mechanistic explanation.
+
+**Strategic verdict locked — Plateau Protocol Tier 3 lesson**: Y-mirror is FIRST clean falsification of "data-augmentation as free 2×" on this dataset. Combined with H113/H114/H115 (loss-tier exhausted), **the loss-tier AND val-correlated data-aug tier are jointly closed for SP**. Wave 36+ pivots to **representation tier** (H-A tangent-frame thorfinn, H126 inverse-area sampling nezuko) and **architectural symmetry tier** (Wave 37+ candidate: y-mirror equivariant encoder per nezuko's reason 3).
+
+### H126 nezuko (Inverse-Panel-Area Stratified Sampling) ASSIGNED — PR #1303
+
+**Refined H-C**: SDF-gradient-based weighting (original H-C from `RESEARCH_IDEAS_2026-05-24_12:30.md`) is infeasible because surface points have NO SDF data (`SURFACE_X_DIM = 7`: xyz + normals + area). Refined to **inverse-panel-area** as analogous geometric WSS-variance proxy.
+
+**Mechanism**: replace uniform `torch.randint` with `torch.multinomial` weighted by `1/area + temperature`. Drivaerml mesh has inverse-area panel size correlation with curvature (auto-meshing refines near high-curvature features) — same regions where WSS has largest spatial gradients. Eval/test path UNCHANGED (only `view.sampling_mode == "train_random"` engages weighting).
+
+**Why NOT H116-class data-distribution-shift**: same coordinate system / same PE (no equivariance friction), same input data / same target labels (no asymmetric-feature reconciliation), training sampler stochasticity is the **mechanism** being modified not layered on top.
+
+**Falsifiable prediction**: test_WSS improves ≥0.08pp (6.752% → ≤6.67%); val_WSS_z gains > val_WSS_x (wheel-arch/vertical-panel regions are small-panel oversampling targets).
+
+**Literature**: Weng 2022 importance-weighted PINN collocation; DoMINO 2024 (Nvidia) multi-scale CFD sampling; adaptive collocation Deshpande 2024.
+
+**Code path**: `target/data/loader.py:_indices()` line 423, new flags `--use-area-weighted-sampling --area-sampling-temperature 1.0`. ~30 lines.
+
+ETA terminal: ~06:00Z 2026-05-25 (~14h).
+
+### Fleet leaderboard — refined verdict tracking
+
+| Hyp | Student | Progress | val_abupt | Verdict tracking | Class |
+|---|---|---:|---:|---|---|
+| **H120 depth-6** | askeladd | 83.6% | **6.113%** | **🎯 A WIN + multi-floor B PARTIAL test_WSS** | strongest |
+| **H117 signed-sqrt+DP** | alphonse | 92.1% | 6.219% | A WIN MARGINAL + B PARTIAL test_WSS (6.62-6.66%) | SURPRISE RECOVERY −1.813pp |
+| H121 hidden-576 | frieren | 72.8% | 6.299% | A WIN candidate (terminal ~3h) | capacity (width) |
+| H119 compound | edward | 92.1% | 6.254% | B PARTIAL test_VP only, no A WIN, anti-additive | orthogonal-class compound |
+| H118 slices-192 | tanjiro | 95.0% | 6.394% | C NULL likely | capacity (slices, weakest of 3) |
+| H125 depth-7 | fern | 8.8% | — | terminal ~06:00Z 2026-05-25 | capacity extension |
+| H-A tangent-frame | thorfinn | 0.8% | — | terminal ~06:00Z 2026-05-25 | WSS-rep tier |
+| H126 inverse-area-sampling | nezuko | 0% (NEW) | — | terminal ~06:00Z 2026-05-25 | WSS-sampling tier |
+
+**Capacity-axis ordering confirmed at 13ep budget**: depth > hidden_dim > slices. H118 already plateaued val_WSS at 7.267% (slope +0.0002pp/1k); H120 still descending strongly (−0.0089pp/1k val_WSS). The slice-count lever extracts least capacity per fixed budget — banked.
 
 ## ~14:45Z (2026-05-24) — H115 CLOSED C NULL (LOSS-FORM CLASS EXHAUSTED FOR SP), H-A ASSIGNED TO THORFINN (WSS-REPRESENTATION ATTACK)
 
