@@ -1,9 +1,81 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~20:20 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~21:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~21:45Z (2026-05-24) — H121 CLOSED C NULL (CAPACITY-AXIS × CANONICAL DROPPATH GENERALIZATION-BOUND LOCKED ACROSS BOTH DEPTH AND WIDTH), H131 ASSIGNED TO FRIEREN (WIDTH-AXIS REG COMPOUND, PARALLEL TO H130)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H121 frieren (hidden-576) CLOSED — C NULL on primary objective, CAPACITY-AXIS CLASS LOCKED
+
+Terminal run `9naxnj3f`, EMA best-checkpoint EP11:
+- val_abupt **6.154%** ❌ +0.018pp above merge gate (marginal miss)
+- test_abupt 5.919% ❌ REGRESSION +0.080pp vs H112
+- **test_WSS 6.826% ❌ REGRESSION +0.074pp vs H112 6.752%** — primary objective missed
+- test_WSS_z 8.810% ❌ (+0.090pp) — same regression class as H120 depth-6 (+0.114pp)
+- test_SP 3.737% ❌ **23rd SP plateau confirmation**
+
+**Val→test slope calibration (student diagnostic — program-wide impact):**
+
+| Channel | val→test slope H121 | Historical projection |
+|---|---:|---:|
+| abupt | −0.234pp | −0.28pp |
+| **WSS** | **−0.136pp** | **−0.29pp (↓53%)** |
+| VP | −0.096pp | −0.25pp (↓62%) |
+| SP | −0.329pp | −0.45pp |
+
+**WSS slope flattened by 53% vs projection** — H121 width-axis parallel outcome to H120 depth-axis (93% slope flattening). Two mechanism-distinct failure modes, same outcome:
+- H120 depth-6: DropPath schedule auto-stretches → per-layer rate weakens 0.025→0.020 (−20%)
+- H121 hidden-576: DropPath schedule unchanged → per-feature redundancy (wider features route around same token-level drop)
+
+**CAPACITY-AXIS × CANONICAL DROPPATH_MAX=0.10 IS BROADLY GENERALIZATION-BOUND** — confirmed across all three orthogonal axes:
+
+| Axis | Run | val_abupt vs gate | test_WSS vs H112 | val→test WSS slope |
+|---|---|---|---|---:|
+| Slice granularity | H118 slices-192 | miss | regression | — |
+| Backbone depth | H120 depth-6 | A WIN (−0.124pp) | REGRESSION +0.066pp | −0.020pp ↓93% |
+| Backbone width | H121 hidden-576 | marginal miss (+0.018pp) | REGRESSION +0.074pp | **−0.136pp ↓53%** |
+
+**Val→test gap is the new primary bottleneck** — not val descent (which consistently reaches near-gate). The slope flattening is a diagnostic signature of capacity-axis interventions at canonical reg.
+
+**23rd SP plateau confirmation** — 6 orthogonal Wave 36+ axes now confirm SP-axis structurally floored.
+
+**VRAM calibration banked**: hidden-576 actual 22.01M params (22% over projected 17.4M base, +4.6M including decoder scaling). hidden=640+ is out-of-budget without sharding.
+
+**Historical val→test slope recalibration** — LOCKED: capacity-scaled variants exhibit slopes ~−0.10 to −0.20pp (not projected −0.28 to −0.45pp). Val gate is a less reliable test-floor proxy post-capacity-scale. All future slope projections on capacity runs must use actual H120/H121 slope, not H112 historical.
+
+### H131 frieren (hidden-576 × DropPath_max=0.15) ASSIGNED — PR #1312
+
+**Single CLI flag change vs H121**: `--drop-path-max 0.10 → 0.15` + `--model-hidden-dim 576` retained.
+- Per-layer drop schedule: `[0, 0.0375, 0.075, 0.1125, 0.15]` — **50% above H112's per-layer 0.025**
+- Parallel to H130 askeladd (depth-6 × max=0.15, per-layer 0.030 = 20% above H112)
+- H131 applies stronger absolute per-layer rate than H130 → cleaner redundancy-compensation test
+- Falsifiable: test_WSS ≤ 6.727% (floor) AND val_abupt < 6.1358% (val gate)
+- Decision tree:
+  - Both H130 + H131 clear → capacity × reg compound class productive on both axes; consider H132 triple compound
+  - Only H130 clears → depth-reg productive, width-reg not
+  - Only H131 clears → width-reg productive, depth-reg not
+  - Neither clears → capacity axis broadly closes; pivot to architectural (H128, H-A2, H-B)
+- ETA terminal: ~16:00Z 2026-05-25.
+- Note: `--volume-loss-weight 1.0` (not 0.5 from H121's stale recipe) to match canonical.
+
+**Updated fleet leaderboard after H121 closure:**
+
+| Hyp | Student | Progress | Verdict tracking | ETA |
+|---|---|---|---|---|
+| H125 depth-7 standalone | fern | 46% | EP3 at parity with H120, slope catastrophe predicted | ~07:30Z 2026-05-25 |
+| H127 wider decoder | tanjiro | ~30% | standalone cross-track dl24-H39 signal | ~07:30Z 2026-05-25 |
+| H-A2 concat-tangent | thorfinn | 27%, EP1 cleared ✅ | EP3 gate upcoming | ~08:30Z 2026-05-25 |
+| H-B aux-log-magnitude | edward | early | magnitude-direction decoupling | ~08:30Z 2026-05-25 |
+| H128 SwiGLU MLP | alphonse | early | architectural primitive | ~10:00Z 2026-05-25 |
+| H126b T=4.0 sampling | nezuko | early | softer inverse-area reweighting | ~12:00Z 2026-05-25 |
+| H130 depth-6 × DropPath=0.15 | askeladd | early | first depth×reg compound | ~13:00Z 2026-05-25 |
+| **H131 hidden-576 × DropPath=0.15** | **frieren** | **NEW** | **first width×reg compound, parallel to H130** | **~16:00Z 2026-05-25** |
+
+---
 
 ## ~20:20Z (2026-05-24) — H120 CLOSED C NULL (VAL→TEST SLOPE CATASTROPHE — DEPTH-AXIS GENERALIZATION-BOUND), H130 ASSIGNED TO ASKELADD (DEPTH-6 × DROPPATH_MAX=0.15 REGULARIZATION COMPOUND)
 

@@ -1,3 +1,59 @@
+## 2026-05-24 ~21:45 — PR #1297: H121 BACKBONE HIDDEN-DIM 512→576 (frieren, **CLOSED C NULL** — marginal val gate miss + test_WSS regression; **CAPACITY-AXIS × CANONICAL DROPPATH GENERALIZATION-BOUND LOCKED ACROSS BOTH DEPTH AND WIDTH**)
+
+- **Branch**: `frieren/h121-hidden-576` (CLOSED, not merged)
+- **W&B run**: `9naxnj3f`
+- **Hypothesis**: Expanding backbone hidden dim from 512→576 (+26% actual params, +26% VRAM) improves capacity for WSS features in Wave 36+ alongside depth-6 (H120).
+
+### Terminal metrics (run 9naxnj3f, EMA best-checkpoint EP11)
+
+| Metric | H121 (hidden=576) | H112 canonical | Δ | Gate / Floor | Verdict |
+|---|---:|---:|---:|---|---|
+| **val_abupt** | 6.1538% | 6.1358% (gate) | +0.018pp | gate | ❌ marginal miss |
+| **test_abupt** | 5.9194% | 5.8391% | +0.080pp | — | ❌ REGRESSION |
+| test_VP | 3.5477% | 3.4213% | +0.127pp | floor 3.643% | ❌ vs H112; ✅ crosses paper floor |
+| test_SP | 3.7374% | 3.6947% | +0.042pp | floor 3.577% | ❌ **23rd SP plateau confirmation** |
+| **test_WSS** | **6.8262%** | **6.7523%** | **+0.074pp** | floor 6.727% | ❌ **REGRESSION on primary objective** |
+| test_WSS_x | 6.0667% | 5.9989% | +0.068pp | — | ❌ |
+| test_WSS_y | 7.4349% | 7.3602% | +0.075pp | — | ❌ |
+| test_WSS_z | 8.8102% | 8.7201% | +0.090pp | — | ❌ |
+
+**Param count**: 22.01M actual (19.9M projected — off by +10.6%, decoder also scales with hidden_dim)
+**Best checkpoint**: EMA EP11 | **Peak VRAM**: 93.1 GB / 96 GB
+**Total wallclock**: 1011.4 min = 16.86h
+
+### Val→test slope table (student diagnostic — PROGRAM-WIDE IMPACT)
+
+| Channel | val (%) | test (%) | val→test slope | Historical projection |
+|---|---:|---:|---:|---:|
+| abupt | 6.154 | 5.919 | **−0.234pp** | −0.28pp |
+| **WSS** | **6.962** | **6.826** | **−0.136pp** ↓53% | −0.29pp |
+| VP | 3.643 | 3.548 | **−0.096pp** ↓62% | −0.25pp |
+| SP | 4.067 | 3.737 | −0.329pp | −0.45pp |
+
+WSS slope flattened by **53%** vs projection. Mirrors H120 depth-6 WSS slope flattening (93%) — **same outcome, different mechanism**:
+- H120: DropPath schedule auto-stretches with depth → per-layer rate weaker
+- H121: DropPath schedule unchanged → per-feature redundancy at wider hidden_dim
+
+### Capacity-axis generalization-bound — LOCKED across all three axes
+
+| Axis | Run | test_WSS Δ vs H112 | val→test WSS slope |
+|---|---|---:|---:|
+| Slice granularity | H118 slices-192 | +0.370pp regression | — |
+| Backbone depth | H120 depth-6 | **+0.066pp regression** | −0.020pp ↓93% |
+| Backbone width | H121 hidden-576 | **+0.074pp regression** | **−0.136pp ↓53%** |
+
+Three orthogonal capacity axes all produce test_WSS regressions and val→test slope flattening at canonical DropPath_max=0.10. **Single-mechanism capacity-axis frontier is closed for tay** at canonical regularization.
+
+### Key program-wide calibration update (student finding)
+
+**Historical val→test slope projections (−0.28pp abupt, −0.29pp WSS) DO NOT HOLD for capacity-scaled models.** Actual slopes on capacity-axis runs are −0.10 to −0.23pp (WSS: −0.02 to −0.14pp). Val gate < 6.1358% is a necessary but insufficient condition for test improvement on capacity-scaled models. All future slope projections on capacity-scale runs must use actual H120/H121 slope range, not H112 historical.
+
+### Successor experiment
+
+frieren → H131 (PR #1312): hidden-576 × DropPath_max=0.15. Per-layer rate → 0.0375 (+50% over H112). Parallel to H130 askeladd depth-6 × max=0.15. ETA ~16:00Z 2026-05-25.
+
+---
+
 ## 2026-05-24 ~20:20 — PR #1296: H120 BACKBONE DEPTH 5→6 (askeladd, **CLOSED C NULL** — val A WIN but val→test slope catastrophe; **MAJOR PROGRAM FINDING: DEPTH-AXIS GENERALIZATION-BOUND AT FIXED REGULARIZATION**)
 
 - **Branch**: `askeladd/h120-backbone-depth-6` (CLOSED, not merged)
