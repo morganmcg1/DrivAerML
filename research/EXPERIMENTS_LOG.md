@@ -1,3 +1,63 @@
+## 2026-05-24 ~20:00 — PR #1303: H126 T=1.0 INVERSE-AREA STRATIFIED SAMPLING (nezuko, **CLOSED C NULL** — EP1 kill-fence at val_abupt 43.84%, "softmax over log-area" pathology; **MECHANISM CLASS NOT CLOSED**, refined H126b at T=4.0 assigned)
+
+- **Branch**: `nezuko/h126-area-weighted-sampling` (CLOSED, not merged)
+- **W&B run**: `eatpu111`
+- **Hypothesis**: T=1.0 inverse-panel-area sampling biases training toward small/curvy panels → improves WSS prediction in high-curvature regions (wheel arches, A-pillars) where WSS variance is highest.
+
+### Terminal metrics (EP1 kill-fence trip at step 10864)
+
+| Metric | H126 EP1 | H112 EP1 | Δ |
+|---|---:|---:|---:|
+| **val_abupt** | **43.84%** | 25.87% | **+17.97pp** ❌ fence breach (gate <35%) |
+| val_WSS | 49.89% | 28.95% | +20.94pp |
+| val_WSS_x | 43.75% | 25.73% | +18.02pp |
+| val_WSS_y | 59.81% | 34.11% | +25.70pp |
+| val_WSS_z | 59.88% | 34.54% | +25.34pp |
+| val_SP | 36.19% | 19.37% | +16.82pp |
+| val_VP | 19.55% | 15.58% | +3.97pp |
+
+Run terminated cleanly via `early_stop.triggered=1`, no NaN/OOM/crash.
+
+### Pinned student diagnostic — "softmax over log-area" pathology
+
+| Diagnostic | Value | Interpretation |
+|---|---:|---|
+| `area/min_mean` | 7.85e-09 m² | smallest panels — wheel arch / A-pillar fillet tier |
+| `area/p50_mean` | 7.22e-07 m² | median panel ≈ 100× smallest |
+| `area/max_mean` | 1.08e-04 m² | largest flat panels ≈ 15,000× smallest |
+| `ratio/max_mean` | **24.5×** | most-oversampled point per case (mean) |
+| `ratio/skew_max_over_p50` | **94.9×** | smallest panels 95× over median |
+| `ratio/max_p99_acrosscases` | **37.4×** | worst-case extreme |
+
+Root cause: at T=1.0, σ_log≈9.5 of panel-area distribution → softmax collapses onto extremes → ~50% of batch concentrates on <1% of surface area. Model never sees enough dominant large-panel regions to learn them; eval-time uniform coverage catastrophically fails on un-learned regions.
+
+### Comparison to H-A (PR #1302) — same failure family
+
+| EP1 metric | H-A (#1302) | H126 (this PR) | H112 baseline |
+|---|---:|---:|---:|
+| val_abupt | 40.22% (+12.68pp) | **43.84% (+17.97pp)** | 25.87% |
+| Class | input-rep destructive swap | sampling-distribution shift | — |
+
+Both fail by the same mechanism family: training-distribution shifts far enough from canonical eval distribution that one epoch can't bridge the gap.
+
+### Strategic class verdict — NOT closed, parameter pathology
+
+What's falsified: T=1.0 raw-inverse-area at this mesh.
+What's NOT closed: hypothesis class. Soft-T, quantile-rank, capped-ratio, warmup-ramp variants untested.
+
+### Banked positives
+
+- `data/area_weighted_sampling/*` instrumentation (production-ready diagnostic) — preserved
+- `torch.searchsorted` on per-case cached CDF (~0.53 s/step, **FASTER than H112 baseline ~0.75 s/step**) — no perf debt
+- Per-case CDF cache (~33 MB/case × ~50/rank ≈ 1.65 GB/worker) — within VRAM budget
+- Default-off flag preservation — canonical recipes unchanged
+
+### Successor experiment
+
+nezuko → H126b T=4.0 (PR #1310) — softer reweighting, re-uses H126 loader code, expects max/median skew ~3× (vs T=1.0's 95×).
+
+---
+
 ## 2026-05-24 ~18:45 — PR #1292: H117 SIGNED-SQRT SP TARGET TRANSFORM × DROPPATH (alphonse, **CLOSED C NULL** — TIES H112 within ±0.03pp on all WSS channels, **22ND SP-PLATEAU CONFIRMATION**, **SP-AXIS DATA-TIER CLOSURE LOCKED**)
 
 - **Branch**: `alphonse/h117-sp-target-signed-power-transform` (CLOSED, not merged)

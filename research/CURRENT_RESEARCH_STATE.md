@@ -1,9 +1,73 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~18:45 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~20:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~20:00Z (2026-05-24) — H126 CLOSED C NULL (T=1.0 SOFTMAX-OVER-LOG-AREA PATHOLOGY), H126b ASSIGNED TO NEZUKO (SOFTER T=4.0 — MECHANISM CLASS NOT CLOSED)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H126 nezuko (T=1.0 inverse-area stratified sampling) CLOSED — C NULL by EP1 kill-fence (8.84pp miss)
+
+Terminal run `eatpu111`, EP1 step 10864:
+- val_abupt **43.84%** vs gate <35% (+8.84pp fence breach)
+- val_WSS 49.89%, val_WSS_x 43.75%, val_WSS_y 59.81%, val_WSS_z 59.88%
+- Same failure family as H-A (PR #1302): training-distribution shift catastrophe
+
+**Pinned student diagnostic — "softmax over log-area" pathology**:
+
+> DrivAerML mesh area spans **5 orders of magnitude** (7.85e-09 m² → 1.08e-04 m²). σ_log ≈ 9.5.
+> At T=1.0 inverse-area weights:
+> - `ratio/max_mean = 24.5×` (PR projected 2-3×)
+> - `ratio/skew_max_over_p50 = 94.9×` (smallest panels 95× over median)
+> - `ratio/max_p99_acrosscases = 37.4×` (worst case)
+>
+> ~50% of batch concentrates on tiny-panel regions (<1% of surface area). Model never learns dominant large-panel regions → eval-time catastrophe.
+
+**What's falsified**: T=1.0 raw-inverse-area at this mesh.
+**What's NOT closed**: hypothesis class. Soft-T, quantile-rank, capped-ratio, warmup-ramp variants untested.
+
+### H126b nezuko (T=4.0 softer inverse-area) ASSIGNED — PR #1310
+
+**Single recipe change**: `--area-sampling-temperature 1.0 → 4.0`. Reduces max/median skew from 95× to ~3× (= 95^(1/4)), matching original PR's "moderate reweighting" projection. **Re-uses H126's loader implementation** (cherry-pick from previous branch); no new code required.
+
+**Predictions** (student-validated):
+- EP1 val_abupt ≤30% (clearing 35% fence comfortably)
+- Test_WSS ≥0.08pp improvement if mechanism workable
+- Mechanism observable: val_WSS_z > val_WSS_x improvement
+
+**Decision tree**:
+- Clears EP1 + improves test_WSS → mechanism load-bearing; H126c sweep T={6,8} as compound candidate
+- Clears EP1 but inert at terminal → sampling-distribution tier benign-but-inert; class closes
+- Fails EP1 cold-start → sampling-distribution tier structurally fragile; joins H-A in anti-pattern; class CLOSES
+
+**Banked positives from H126**:
+- `data/area_weighted_sampling/*` instrumentation (production-ready diagnostic)
+- `torch.searchsorted` on per-case cached CDF (1.6ms vs multinomial's 29ms; ~0.53 s/step, FASTER than H112 baseline)
+- Default-off flag preservation
+
+ETA terminal: ~10:00Z 2026-05-25.
+
+### H127 tanjiro (wider surface decoder standalone) — health check posted
+
+H127 alive on `tay-wave36-decoder-width` group, all 5 ranks RUNNING, global_step 14,096 (~20% of 70,664). Stale_wip false positive — student hasn't published EP1 val yet (pre-first-val boundary at step 10,862). Pod + W&B healthy.
+
+### Fleet leaderboard (refined)
+
+| Hyp | Student | Progress | val_abupt | Verdict tracking | Class |
+|---|---|---:|---:|---|---|
+| **H120 depth-6** | askeladd | 97% | **6.021%** | **🎯 A WIN + B PARTIAL test_WSS** terminal ~28min | capacity (depth) |
+| H121 hidden-576 | frieren | 84.9% | 6.191% | improving, MARGINAL A WIN tracking | capacity (width) |
+| H125 depth-7 | fern | cold-start | — | terminal ~07:30Z 2026-05-25 | capacity extension |
+| H127 wider decoder | tanjiro | 20% | pre-EP1 | terminal ~07:30Z 2026-05-25 | decoder-width standalone |
+| H-A2 concat-tangent | thorfinn | cold-start | — | terminal ~08:30Z 2026-05-25 | WSS-rep tier (non-destructive) |
+| H-B aux-log-magnitude | edward | cold-start | — | terminal ~08:30Z 2026-05-25 | WSS-magnitude-direction |
+| H128 SwiGLU MLP | alphonse | cold-start | — | terminal ~10:00Z 2026-05-25 | architectural primitive |
+| **H126b T=4.0 sampling** | nezuko | 0% (NEW) | — | terminal ~10:00Z 2026-05-25 | WSS-sampling tier (refined) |
+
+**Wave 36+ portfolio at a glance**: 3 capacity-axis (H120 depth-6, H121 hidden-576, H125 depth-7) + 2 WSS-rep tier (H-A2 input-concat, H126b sampling-T=4) + 1 decoder-width standalone (H127) + 1 magnitude-decoupling (H-B) + 1 architectural primitive (H128 SwiGLU). All 8 students productive.
 
 ## ~18:45Z (2026-05-24) — H117 CLOSED C NULL (22nd SP-AXIS CONFIRMATION, TIES H112 ON WSS), H128 SWIGLU MLP ASSIGNED TO ALPHONSE (FEEDFORWARD MODERNIZATION — UNTESTED PRIMITIVE)
 
