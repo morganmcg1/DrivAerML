@@ -5,11 +5,13 @@
 
 **Current best dl24 test_WSS ever:** H39 (`yym5oa8x`, PR #1284 MERGED 10:57Z) = **6.6506%** ⭐ NEW dl24 single-model SOTA. **MERGED 2026-05-24 10:57Z** (commit ba2cae5) — **FIRST in-wave merge on `drivaerml-long-20260504`**. Beats prior reference PR #972 (closed) test_WSS 6.727% by −0.0764pp. 3-of-4 floors cleared (test_vp 3.6033 / test_abupt 5.8010 / test_wss 6.6506; test_sp 3.6498 misses 3.577 floor by +0.073pp). BASELINE.md updated. Target remains test_WSS < 5.850% (Transolver-3 SOTA, gap = 0.8006pp).
 
-**Wave 34 fleet (active on dl24, 4 students, zero idle, zero review-ready as of 11:05Z):**
-- **#1300 H122 tanjiro** — H39 (wider surface_out f=2.0) + model-slices 128→192 compound (NEW, dispatched 11:05Z post-merge; first Wave 34 capacity-scaling probe on H39 base)
-- **#1298 H117 fern** — Charb on ALL 3 wss axes (x,y,z); EP4 confirms +0.059pp BEHIND H41 v2 on net wss; informative-null trajectory; CONTINUE to EP30 for definitive 3-axis vs 2-axis falsification
-- **#1294 H115 nezuko** — wider volume_out MLP; EP11 wss lead narrowed to -0.054pp, vp gap WIDENED to +0.193pp (volume side does NOT compound); H116 compound DEAD; continue to EP30 for diagnostic
-- **#1286 H41 v2 frieren** — Charb on (y,z); EP15 wss lead -0.027pp (degraded from peak -0.060pp at EP9); running to EP30
+**Wave 34 fleet (active on dl24, 4 students, zero idle, zero review-ready as of 16:25Z):**
+- **#1300 H122 tanjiro** (EP6 of 30) — H39 + slices 128→192. **Gap to H39 trajectory re-widened EP5+0.103→EP6+0.147pp**, 2-of-3 transitions regressed (EP4, EP6). EP7 gate (≤6.95) projects ~7.04 → likely miss. **Bail decision at EP7-EP8** unless trajectory inflects. Reading: slices_192 adds cold-start cost without late-cosine payoff on H39 base.
+- **#1298 H117 fern** (EP11 of 30) — Charb on x,y,z. Gap vs H41v2 narrowed EP10+0.043→EP11+0.017pp (partly H41v2 plateau, partly H117 acceleration). **z-axis lead grew to −0.072pp** confirming Charb-x's GradNorm budget redirects helpfully to z. Net wss still loss. Continue to EP15 for definitive structural verdict.
+- **#1294 H115 nezuko** (EP19 of 30) — wider volume_out. **Plateau confirmed EP15-EP19 (0.015pp band)**. Vs-H41v2 lead collapsed to −0.002pp (was −0.015). **vp drift accelerating (3 consecutive regressions; test_VP floor breach near-certain)**. Clean null forming. Continue to terminal, close after final test eval.
+- **#1286 H41 v2 frieren** (EP27 of 30) — Charb on y,z. Plateau band EP20-EP27 [7.0239, 7.0391] = 0.015pp range; EP27 = new band max. **Terminal projection test_WSS ~6.92-6.94% = +0.27pp behind H39 SOTA — confirmed null on primary objective.** Test_SP and test_abupt floors will also breach. Terminal at EP30 in ~30-40 min (~17:00Z). **NEXT ASSIGNMENT for frieren ready: H39 + Charb-y added (clean stack of yz Charb on H39's existing z-only Charb).**
+
+**Wave 34 strategic state:** H39 baseline (depth-6, hidden-512, slices-128, surface_out f=2.0, Charb-z) is the merged SOTA. **Single-mechanism Charb-axis explorations are exhausted** (H41v2 yz vs H117 xyz — both null vs H39). **Volume-side capacity is exhausted** (H115 wider volume_out — null + vp floor breach). **Slice-axis encoder capacity is in flight** (H122 — early evidence weak). **Next axes to probe** (queued in priority order): (1) Charb-y addition to H39 base (H39 already has Charb-z) — **frieren's next assignment**; (2) wider hidden_dim 512→768 — orthogonal width axis; (3) depth 6→7 — extend tay's H120 depth-6 success; (4) optimizer / LR schedule variants on H39 base.
 
 ---
 
