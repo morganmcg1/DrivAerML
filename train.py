@@ -54,6 +54,7 @@ from trainer_runtime import (
     is_valid_primary_metric,
     loader_kwargs,
     make_loaders,
+    masked_huber,
     masked_mse,
     metric_namespace,
     weighted_channel_mse,
@@ -138,6 +139,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_huber_sp_loss: bool = False
+    huber_delta_sp: float = 1.0
     debug: bool = False
 
 
@@ -228,6 +231,25 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_huber_sp_loss": (
+            "Replace MSE with Huber loss for the SP (surface_pressure) channel "
+            "only. Huber transitions from L2 to L1 at |r|=delta, bounding the "
+            "gradient contribution of outlier residuals. Falsifiable Plateau "
+            "Protocol intervention: if test_SP < 3.577%, MSE's quadratic outlier "
+            "amplification was the missing bottleneck for the 16-mechanism SP "
+            "plateau. Zero added params; SP only -- tau_x/tau_y/tau_z/VP loss "
+            "computation unchanged. Surface loss is recombined as "
+            "(sp_huber + 3*tau_weighted_mse)/4 to preserve the original "
+            "4-channel-average normalisation when Huber degenerates to MSE."
+        ),
+        "huber_delta_sp": (
+            "Transition threshold for Huber SP loss. Below |r|=delta the loss "
+            "is 0.5*r^2 (canonical Huber, half of MSE in the quadratic regime); "
+            "above delta it is delta*(|r|-0.5*delta). For normalised SP targets, "
+            "default 1.0 treats roughly the top 30% of error magnitudes as "
+            "outliers (linear regime). Smaller delta = more aggressive outlier "
+            "dampening. Unused if --use-huber-sp-loss is off."
         ),
     }
     for field in fields(Config):
@@ -321,6 +343,8 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_huber_sp_loss: bool = False,
+    huber_delta_sp: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -332,27 +356,82 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
-            surface_loss = weighted_channel_mse(
-                out["surface_preds"],
-                surface_target,
+        huber_diagnostics: dict[str, float] = {}
+        if use_huber_sp_loss:
+            # Split surface loss: Huber on SP (channel 0), existing MSE on tau (1:4).
+            # Combine as (sp + 3*tau)/4 to preserve the 4-channel-average
+            # normalisation of weighted_channel_mse when Huber degenerates to MSE.
+            surface_pred = out["surface_preds"]
+            sp_pred = surface_pred[..., 0:1]
+            sp_target = surface_target[..., 0:1]
+            sp_loss = masked_huber(
+                sp_pred,
+                sp_target,
                 batch.surface_mask,
-                surface_channel_weights,
+                delta=huber_delta_sp,
             )
+            tau_pred = surface_pred[..., 1:4]
+            tau_target = surface_target[..., 1:4]
+            if surface_channel_weights is not None:
+                tau_weights = surface_channel_weights[1:].to(
+                    device=tau_pred.device, dtype=tau_pred.dtype
+                )
+                tau_loss = weighted_channel_mse(
+                    tau_pred, tau_target, batch.surface_mask, tau_weights
+                )
+            else:
+                tau_loss = masked_mse(tau_pred, tau_target, batch.surface_mask)
+            surface_loss = (sp_loss + 3.0 * tau_loss) / 4.0
+            # MSE-equivalent SP loss for direct A/B comparison vs the canonical baseline.
+            sp_loss_mse_equiv = masked_mse(sp_pred, sp_target, batch.surface_mask).detach()
+            # Fraction of SP residuals in the Huber linear regime (|r| > delta).
+            sp_diff = (sp_pred - sp_target).detach()
+            sp_abs = sp_diff.abs()
+            sp_mask_expanded = batch.surface_mask.to(
+                device=sp_abs.device, dtype=sp_abs.dtype
+            ).unsqueeze(-1)
+            valid_points = sp_mask_expanded.sum().clamp_min(1.0)
+            linear_regime_frac = (
+                (sp_abs > huber_delta_sp).to(dtype=sp_abs.dtype) * sp_mask_expanded
+            ).sum() / valid_points
+            masked_abs = sp_abs * sp_mask_expanded
+            sp_abs_mean = masked_abs.sum() / valid_points
+            if masked_abs.numel() > 0:
+                sp_abs_max = masked_abs.max()
+            else:
+                sp_abs_max = torch.zeros((), device=sp_abs.device, dtype=sp_abs.dtype)
+            huber_diagnostics = {
+                "huber/sp_loss_raw": float(sp_loss.detach().cpu().item()),
+                "huber/sp_loss_mse_equiv": float(sp_loss_mse_equiv.cpu().item()),
+                "huber/tau_loss_raw": float(tau_loss.detach().cpu().item()),
+                "huber/sp_linear_regime_frac": float(linear_regime_frac.detach().cpu().item()),
+                "huber/sp_abs_residual_mean": float(sp_abs_mean.detach().cpu().item()),
+                "huber/sp_abs_residual_max": float(sp_abs_max.detach().cpu().item()),
+            }
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            if surface_channel_weights is not None:
+                surface_loss = weighted_channel_mse(
+                    out["surface_preds"],
+                    surface_target,
+                    batch.surface_mask,
+                    surface_channel_weights,
+                )
+            else:
+                surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    metrics.update(huber_diagnostics)
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -852,6 +931,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.use_huber_sp_loss:
+                print(
+                    f"Huber SP loss enabled: delta={config.huber_delta_sp} "
+                    f"(canonical 0.5*r^2 in quadratic regime, delta*(|r|-0.5*delta) "
+                    f"in linear regime). Surface loss = (sp_huber + 3*tau_mse)/4."
+                )
 
         run = init_wandb_run(
             config=config,
@@ -883,6 +968,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/use_huber_sp_loss"] = bool(config.use_huber_sp_loss)
+            wandb.summary["loss/huber_delta_sp"] = float(config.huber_delta_sp)
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1030,6 +1117,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_huber_sp_loss=config.use_huber_sp_loss,
+                        huber_delta_sp=config.huber_delta_sp,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1070,6 +1159,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    for huber_key in (
+                        "huber/sp_loss_raw",
+                        "huber/sp_loss_mse_equiv",
+                        "huber/tau_loss_raw",
+                        "huber/sp_linear_regime_frac",
+                        "huber/sp_abs_residual_mean",
+                        "huber/sp_abs_residual_max",
+                    ):
+                        if huber_key in batch_loss_metrics:
+                            train_log[f"train/{huber_key}"] = batch_loss_metrics[huber_key]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

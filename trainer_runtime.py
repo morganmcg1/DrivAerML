@@ -837,6 +837,31 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def masked_huber(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    delta: float = 1.0,
+) -> torch.Tensor:
+    """Huber (smooth-L1) loss reduced over a mask. Mirrors masked_mse signature.
+
+    For |r| <= delta: 0.5 * r^2  (canonical Huber, half of MSE in the quadratic regime)
+    For |r| >  delta: delta * (|r| - 0.5*delta)  (linear tail; gradient capped at +/- delta)
+
+    pred / target: [B, N, C]; mask: [B, N]. Returns a scalar mean over valid
+    (point x channel) entries, matching masked_mean's normalisation so balance
+    weights against other tasks stay on the same scale as masked_mse(per-channel).
+    """
+    if pred.numel() == 0:
+        return pred.sum() * 0.0
+    diff = pred - target
+    abs_diff = diff.abs()
+    quadratic = 0.5 * diff * diff
+    linear = delta * (abs_diff - 0.5 * delta)
+    elementwise = torch.where(abs_diff <= delta, quadratic, linear)
+    return masked_mean(elementwise, mask)
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
