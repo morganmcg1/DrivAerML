@@ -1,9 +1,58 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~09:30 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~14:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~14:45Z (2026-05-24) — H115 CLOSED C NULL (LOSS-FORM CLASS EXHAUSTED FOR SP), H-A ASSIGNED TO THORFINN (WSS-REPRESENTATION ATTACK)
+
+**Fleet state**: 8/8 students working, 0 idle, 0 review-ready, fleet projecting 3 merge candidates pending terminal results (H116, H117, H120).
+
+### H115 thorfinn (Huber SP loss) CLOSED C NULL — PR #1290
+
+Run `x6o14wwm`, EMA EP13 terminal:
+- val_abupt **6.367%** (+0.241pp gate miss)
+- test_abupt 6.110% (+0.266pp regression)
+- test_SP **3.954%** (+0.377pp — **17th SP plateau confirmation**)
+- test_VP 3.658% (+0.015pp marginal miss)
+- **test_WSS 7.026%** (+0.299pp regression vs H112)
+
+**Pinned diagnostic**: Huber degenerated to MSE for ~90% of training. `train/huber/sp_linear_regime_frac` collapsed from 0.86% at step 7,112 → 0.0% by step 14,149 → flat through terminal. δ=1.0 was calibrated for **early-training residual scale** (mean 0.71, max 7.77 at step 1) but residuals shrank to mean ~0.02 / max ~1.0 by EP3+. **The experiment did not test the hypothesis it was designed to test** — it tested "MSE + tail-bounded gradients during the first 10% of steps" (before SP plateau even emerges).
+
+**Strategic class verdict — loss-form on SP comprehensively dead**: 3rd falsification (H113 balance / H114 panel-area / H115 curvature). Combined with 14 prior SP plateau hits on diverse architectures, **the loss-form lever class is exhausted for the standard masked-loss family on normalized SP targets**. Future SP attacks must work at the **data tier** (CDF-normalize SP targets, log-transform high-error tails) or **representation tier** (per-point uncertainty heads), not the loss tier. Banked thorfinn's adaptive-δ suggestion as REJECTED (reintroduces scale-coupling pathology H114-class).
+
+### H-A thorfinn (Surface-Intrinsic Tangent-Frame Input Encoding) ASSIGNED — PR #1302
+
+Per-point local orthonormal frame {t̂₁, t̂₂, n̂} from existing surface normals; replace world (x, y, z) position offset with (δp·t̂₁, δp·t̂₂, δp·n̂) in the 7-channel surface input. **Input-representation change, NOT output constraint** — gradients flow freely. Model still predicts τ in world frame; loss in world frame.
+
+**Why this is NOT tangency-imposition class** (PRs #351, #680, #713, #1299 — 4 C NULLs):
+- No output projection / soft penalty
+- Pure linear basis change of input position channels
+- All τ_x, τ_y, τ_z still supervised in world frame
+
+**Falsifiable prediction**: test_WSS improves ≥0.15pp (6.752% → ≤6.60%), with `val_WSS_z` showing larger gain than `val_WSS_x` (mechanism observable — τ_z on near-horizontal panels is most entangled with normal direction in world frame, most decoupled in tangent frame).
+
+**Literature**: Dalton 2022 (arXiv 2212.05023) SE(3)-equivariant WSS 7.6% vs 34% non-equivariant on hemodynamic surfaces. Sharp 2024 (arXiv 2406.09648) Intrinsic Vector Heat Networks.
+
+**Code path**: `target/data/loader.py:280-288` in `load_case()`, new CLI flag `--use-tangent-frame-input`. ~50 lines total (data loader + argparse plumbing). Volume-side inputs unchanged.
+
+ETA terminal: ~05:00Z 2026-05-25 (canonical 13ep ~14h).
+
+### Fleet leaderboard — 3 simultaneous merge candidates pending terminal
+
+| Hyp | Student | EP3 val_abupt | Projection | Class |
+|---|---|---:|---|---|
+| **H120 depth-6** | askeladd | 6.700% | A WIN + B PARTIAL test_WSS | strongest |
+| **H117 signed-sqrt+DP** | alphonse | 8.088% → 6.275% step 57,221 | A WIN + B PARTIAL test_WSS | SURPRISE RECOVERY (−1.813pp) |
+| **H116 Y-mirror** | nezuko | 7.015% → EP8 6.582% | B PARTIAL test_WSS, razor-thin A WIN | data-aug aligned to WSS |
+| H118 slices-192 | tanjiro | 6.936% | C NULL likely | capacity |
+| H121 hidden-576 | frieren | TBD | A WIN candidate | capacity (parallel feature width) |
+| H125 depth-7 | fern | TBD | capacity-axis extension | depth beyond H120 |
+| H119 compound | edward | TBD | DP × wider surface_out | orthogonal-compound |
+| H-A tangent-frame | thorfinn | TBD | test_WSS representation | NEW (just assigned) |
+
+
 
 ## 🎯 PRIMARY OBJECTIVE (Morgan directive 2026-05-24T07:35Z)
 

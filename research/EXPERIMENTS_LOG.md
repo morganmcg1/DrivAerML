@@ -1,3 +1,55 @@
+## 2026-05-24 ~14:45 — PR #1290: H115 HUBER-LOSS-SP (thorfinn, **CLOSED C NULL** — Huber degenerated to MSE for ~90% of training; **LOSS-FORM CLASS EXHAUSTED FOR SP**)
+
+- **Branch**: `thorfinn/h115-sp-huber-loss` (CLOSED, not merged)
+- **W&B run**: `x6o14wwm`
+- **Hypothesis**: Replace MSE on SP targets with Huber(δ=1.0) to bound outlier gradient magnitudes during the test_SP plateau period; falsifiable test_SP cross below 3.577% floor.
+
+### Terminal metrics (run x6o14wwm, EMA EP13)
+
+| Metric | H115 | H112 baseline | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | **6.367%** | 6.126% | +0.241pp | ❌ A WIN missed |
+| test_abupt | 6.110% | 5.839% | +0.266pp | regression |
+| test_VP | 3.658% | 3.421% | +0.015pp vs 3.643% floor | ❌ marginal miss |
+| test_SP | **3.954%** | 3.695% | +0.377pp vs 3.577% floor | ❌ **17th plateau confirmation** |
+| **test_WSS** | **7.026%** | 6.752% | **+0.299pp vs 6.727% floor** | ❌ regression |
+| test_WSS_z | 9.091% | 8.720% | +0.20pp | regression |
+
+### Pinned diagnostic — Huber degenerated to MSE
+
+Per-step `train/huber/sp_linear_regime_frac` (% of SP points with |residual| > δ=1.0):
+
+| Step | Linear-regime frac | sp_abs_residual_mean | Huber state |
+|---:|---:|---:|---|
+| 7,112 | 0.86% | 0.142 | Huber active (early cold-start) |
+| 14,149 | **0.0%** | 0.000 | already MSE-equivalent |
+| 21,123 | 0.0% | 0.000 | MSE-equivalent |
+| 42,662 | 0.0023% | 0.028 | trace |
+| 70,664 (term) | 0.0008% | 0.0188 | effectively MSE |
+
+**δ=1.0 was calibrated for early-training residual scale (mean 0.71, max 7.77 at step 1).** By step 14k, residuals had collapsed to mean ~0.02 / max ~1.0 — Huber was numerically MSE × 0.5 for ~90% of optimization. The experiment did NOT test the hypothesis it was designed to test (it tested "MSE + tail-bounded gradients during first 10% of steps" — before SP plateau exists).
+
+### Strategic class verdict — SP loss-form CLOSED
+
+3rd falsification of loss-side intervention on SP:
+- **H113 fern**: SP plateau is HARDNESS-bound, not balance-bound (3 log_sigma_sq scalars, 2.1% relative spread over 13ep)
+- **H114** (advisor reference): panel-area weighting; 4× slowed descent
+- **H115 thorfinn** (this): fixed-δ Huber curvature → MSE degeneracy
+
+Combined with 14 prior SP plateau hits on diverse architectures, **the loss-form lever class is exhausted for the standard masked-loss family on normalized SP targets**. Future SP attacks must work at the **data tier** (CDF-normalize SP targets, log-transform tails) or **representation tier** (per-point uncertainty heads), NOT the loss tier.
+
+### thorfinn's adaptive-δ suggestion — REJECTED
+
+Adaptive `δ_t = c · running_median(|r|_t)` would technically engage Huber at the plateau, but reintroduces **scale-coupling pathology** (loss-form changes its own statistics as a function of optimization state — H114-class spurious-attractor failure). Not productive use of GPU on a metric whose plateau we believe is hardness-bound (H113 verdict).
+
+### Banked lessons
+
+1. **Fixed-δ Huber with δ calibrated to early-training residuals cannot probe late-training plateaus**. Loss-form interventions on collapsing residual distributions must use adaptive δ — but adaptive δ couples to optimization state.
+2. **SP plateau confirmed 17th time** across loss-form (H113, H114, H115), capacity (H102, H103, H104, H113), data-aug (H116), and curvature interventions. Plateau is **structural** within current model+target representation.
+3. **Successor experiment**: thorfinn → H-A (Surface-Intrinsic Tangent-Frame Encoding, PR #1302) — Morgan's WSS-primary directive, NOT another SP attack.
+
+---
+
 ## 2026-05-24 ~14:15 — PR #1299: H123 WSS-TANGENT-FRAME-PROJECTION (fern, **CLOSED C NULL** — terminated step 33,297, EP3 confirms hopeless trajectory; **TANGENCY-IMPOSITION CLASS FULLY EXHAUSTED — 4th consecutive failure**)
 
 - **Branch**: `fern/h123-wss-tangent-frame-projection` (CLOSED, not merged)
