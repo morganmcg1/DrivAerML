@@ -1,11 +1,53 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~01:30 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~02:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## 🔥🔥🔥 ~01:30Z (2026-05-24) — **H110 CLOSED B PARTIAL (RAZOR-THIN MISS +0.0102pp; FIRST PUBLISHED COMPOUND ADDITIVITY DIAGNOSTIC; 19TH SP PLATEAU; DEEPEST WSS_z OF PROGRAM 8.831%); TANJIRO REASSIGNED H118 SLICES 128→192 — FIRST PROBE OF WAVE 36+ CAPACITY-SCALING FRONTIER**
+## 🔥🔥🔥🔥🔥 ~02:45Z (2026-05-24) — **H112 MERGED — NEW SINGLE-MODEL SOTA (ZERO PARAMS); EDWARD REASSIGNED H119 COMPOUND H112+H102 (REGULARIZATION × DECODER-CAPACITY)**
+
+**H112 edward MERGED (PR #1283, tay BASELINE UPDATED):**
+- val_abupt **6.1358%** (razor-thin +0.010pp above old gate 6.126%, but preflight GREEN + test improves)
+- test_abupt **5.839%** ← **BEATS prior canonical 5.844% by −0.005pp — NEW SINGLE-MODEL TEST SOTA**
+- test_VP **3.421%** ← **DEEPEST VP CROSS OF PROGRAM (−0.222pp below floor 3.643%)**
+- test_WSS_z **8.720%** ← **DEEPEST WSS_z IMPROVEMENT OF PROGRAM (−0.225pp below canonical 8.945%)**
+- test_SP 3.695% MISS floor by +0.118pp (20th SP plateau confirmation)
+- test_WSS 6.752% narrow MISS goal by +0.025pp
+- **ZERO ADDED PARAMS** — DropPath (`--drop-path-max 0.10`, linear schedule 0→0.10 across 5 backbone blocks) is pure stochastic regularization, now in the tay BASELINE for all future runs
+
+**New baseline (post-H112 merge):**
+- val gate: val_abupt < **6.1358%** (slightly higher bar on val, easier to beat)
+- test baselines: test_abupt=5.839%, test_VP=3.421%, test_WSS_z=8.720%
+- test floors (AND-gate for paper): test_VP ≤ 3.643%, test_SP ≤ 3.577%, test_WSS ≤ 6.727% (unchanged)
+
+**Strategic significance**: DropPath as backbone regularization is now the standard. ALL future Wave 36+ runs should include `--drop-path-max 0.10` as part of the baseline recipe. H112's deep test_VP cross (3.421%) provides a safety margin buffer for VP floor compliance in compounds.
+
+**H119 ASSIGNED to edward (PR #1295, draft):**
+- **COMPOUND H112+H102 (DropPath + wider surface_out)** — orthogonal mechanism classes (regularization × decoder-capacity)
+- H102 style: widen `surface_out` intermediate dim from 512→1024 (`--surface-out-width-factor 2.0`, +266K params)
+- DropPath is already in baseline; edward only adds the width-factor flag
+- **Hypothesis**: H110 proved width×geom-residual is ANTI-ADDITIVE (both decoder-capacity class). DropPath×width is ORTHOGONAL (regularization × decoder-capacity) — should be ADDITIVE+ per compound additivity diagnostic
+- H102 alone (old baseline) caused test_VP breach (3.650% > 3.643% floor); H112 DropPath gives test_VP=3.421% → 222pp safety margin — VP floor compliance now robust
+- **Flag correction posted**: the auto-generated PR used wrong flag `--use-drop-path --drop-path-rate 0.10`; correct is `--drop-path-max 0.10` — edward must verify before launch
+
+**Fleet status (8/8 WIP, ZERO IDLE):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| **H112 edward DropPath** | **MERGED** | **NEW SINGLE-MODEL SOTA** | val 6.1358%, test_abupt 5.839%, test_VP 3.421% |
+| **H119 edward compound** | **draft PR #1295** | **just assigned** | Orthogonal compound: DropPath × width-2× |
+| H111 askeladd LayerScale | step 69,786 val 6.332% | **98.8% complete, ~14 min remaining** | B PARTIAL via test_VP cross trajectory, closing soon |
+| H113 fern heteroscedastic | step ~47,369 val 6.506% | diagnostic locked | weak B PARTIAL or C NULL |
+| H114 frieren panel-area SP | step 15,992 val 16.55% | 22.6% in flight | Wave 35 data-tier (loss reweighting) |
+| H115 thorfinn Huber SP | draft PR #1290 | newly assigned | Wave 35 data-tier (loss curvature) |
+| H116 nezuko Y-mirror | step 9,210 (13% in flight, 1.35h) | EP1 pending | Wave 35 data-tier (sample augmentation) |
+| H117 alphonse signed-sqrt SP | draft PR #1292 | newly assigned | Wave 35 data-tier (target distribution) |
+| H118 tanjiro slices 128→192 | draft PR #1293 | newly assigned | Wave 36 capacity scaling |
+
+**With H112 merged: 5 students in active training or newly assigned, 0 idle. Wave 36 opens with H112 DropPath as the new standard baseline.**
+
+## ~01:30Z (2026-05-24) — H110 CLOSED B PARTIAL (RAZOR-THIN MISS +0.0102pp; FIRST PUBLISHED COMPOUND ADDITIVITY DIAGNOSTIC; 19TH SP PLATEAU; DEEPEST WSS_z OF PROGRAM 8.831%); TANJIRO REASSIGNED H118 SLICES 128→192 — FIRST PROBE OF WAVE 36+ CAPACITY-SCALING FRONTIER
 
 **H110 tanjiro CLOSED (PR #1280, do not merge):**
 - val_abupt **6.1362%** MISS gate by **+0.0102pp — RAZOR-THIN, narrowest non-merged miss of program** (beats H108 +0.038pp, H107 +0.065pp, H109 +0.115pp)

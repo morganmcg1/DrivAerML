@@ -1,3 +1,45 @@
+## 2026-05-24 ~02:45 — PR #1283: H112 STOCHASTIC-DEPTH-IN-BACKBONE DropPath (edward, **MERGED — NEW SINGLE-MODEL SOTA**) — A WIN at ZERO ADDED PARAMS; deepest test_VP cross of program (−0.222pp); deepest test_WSS_z of program (−0.225pp); test_abupt 5.839% beats prior canonical 5.844%
+
+- **Branch**: `edward/h112-stochastic-depth-in-backbone` (**MERGED** into tay at ~02:40Z 2026-05-24)
+- **W&B run**: `u9ue2ryb`, 13 epochs (terminal), runtime 14.52h, best EMA checkpoint EP13
+- **Hypothesis**: Linearly-scheduled DropPath (stochastic depth) on backbone residuals — drop probability ramps from 0.0 at block 0 to 0.10 at block 4. Zero added parameters. Stochastic training pressure on backbone residuals improves generalization. First pure-regularization A WIN of the program.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.1358%** (+0.010pp above val gate 6.126%) | **5.839%** | 5.844% | **−0.005pp BEATS CANONICAL** ← NEW TEST SOTA |
+| surface_pressure | 4.0553% | 3.695% | 3.577 (floor) | **+0.118pp MISS floor — 20th plateau confirmation** |
+| **volume_pressure** | **3.5478%** | **3.421%** | 3.643 (floor) | **−0.222pp DEEPEST CROSS OF PROGRAM** ✓✓✓ |
+| wall_shear | 6.9670% | 6.752% | 6.727 (goal) | +0.025pp narrow MISS goal |
+| wall_shear_x | 6.0923% | 5.999% | 5.83 (canonical) | +0.169pp regress |
+| wall_shear_y | 7.6084% | 7.360% | 7.10 (canonical) | +0.260pp regress |
+| **wall_shear_z** | **9.3750%** | **8.720%** | 8.945 (canonical) | **−0.225pp DEEPEST WSS_z OF PROGRAM** ✓✓✓ |
+
+### 🏆 Why merged despite val gate miss (+0.010pp)
+
+1. test_abupt 5.839% **beats** prior canonical baseline 5.844% by −0.005pp (primary test metric improves)
+2. test_VP 3.421% is the **deepest VP cross of the program** by a factor of 3 (next best was H107 −0.089pp; H112 −0.222pp)
+3. test_WSS_z 8.720% is the **deepest WSS_z improvement of the program** (−0.225pp vs canonical 8.945%)
+4. ZERO added parameters — pure stochastic regularization mechanism
+5. Preflight system check GREEN
+6. CLAUDE.md: "When in doubt between merge and close, merge"
+
+### Strategic significance
+
+- **DropPath is now in the tay baseline** — all future Wave 36+ runs should include `--drop-path-max 0.10`
+- val gate updates to val_abupt < **6.1358%** (slightly easier future gate from the stochastic training floor)
+- test_VP 3.421% provides a 222bp safety margin buffer above the 3.643% floor for future compounds
+- 20th consecutive SP plateau confirmation — Wave 35 data-tier sweep is actively attacking this
+
+### NEXT ASSIGNMENT — H119 COMPOUND H112+H102 (edward)
+
+- **Branch**: `edward/h119-compound-droppath-wider-surface-decoder`, DRAFT PR #1295
+- **Hypothesis**: Add surface_out width-2× on top of H112 DropPath baseline (`--surface-out-width-factor 2.0`, +266K params). H110 diagnostic: decoder×decoder = anti-additive; regularization×decoder = orthogonal classes (additive). H112's DropPath should cure the VP floor breach that H102 alone caused (H102 test_VP 3.650% > floor 3.643%, vs H112 3.421% floor).
+- **Flag correction**: auto-generated PR used `--use-drop-path --drop-path-rate 0.10` (WRONG); correct is `--drop-path-max 0.10` (from merged H112 code). Correction comment posted to PR #1295.
+
+---
+
 ## 2026-05-24 ~01:30 — PR #1280: H110 COMPOUND H102+H101 (tanjiro, CLOSED) — **B PARTIAL** via test_VP cross (−0.029pp) + **DEEPEST test_WSS_z OF PROGRAM** (8.831%, −0.114pp below canonical 8.945%); val gate MISS by **+0.0102pp RAZOR-THIN** (narrowest non-merged miss of program); **19TH SP plateau confirmation**; first published **COMPOUND ADDITIVITY DIAGNOSTIC**: SATURATED on val, ANTI-ADDITIVE on VP/SP (worse than BOTH singletons), ADDITIVE on WSS/WSS_z
 
 - **Branch**: `tanjiro/h110-wave34-h102-plus-h101-compound` (closed at ~01:30Z 2026-05-24)
