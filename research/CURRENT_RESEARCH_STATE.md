@@ -1,9 +1,46 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:55 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~04:05 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~04:05Z (2026-05-24) — FLEET SNAPSHOT — 9 ACTIVE RUNS HEALTHY; H121 FRIEREN LAUNCHED; H113 FERN APPROACHING TERMINAL
+
+**Snapshot (8/8 students working, 0 idle, no review-ready PRs, no new human messages since 18:54Z 2026-05-23):**
+
+| Slot | Run name | Step / % | Runtime | Last val | Baseline |
+|---|---|---:|---:|---:|---|
+| **H112 edward** | **MERGED SOTA** | — | — | val=6.1358%, test=5.839% | post-H112 |
+| H113 fern heteroscedastic | fern/h113-heteroscedastic-uncertainty-weighting | 59,291 / 83.9% | 10.62h | **val=6.399%** | pre-H112 |
+| H115 thorfinn Huber SP | thorfinn/h115-sp-huber-loss | 22,316 / 31.6% | 3.31h | val=7.787% (EP2-zone) | pre-H112 |
+| H116 nezuko Y-mirror | nezuko/h116-y-mirror-augmentation | 18,459 / 26.1% | 2.73h | val=27.323% (EP1) | pre-H112 |
+| **H117 alphonse compound** | alphonse/h117-signed-sqrt-sp-droppath | 4,242 / 6.0% | 0.64h | pre-EP1 | post-H112 + DropPath |
+| H118 tanjiro slices 192 | tanjiro/h118-model-slices-128-to-192 | 12,782 / 18.1% | 2.08h | val=26.649% (EP1) | pre-H112 |
+| H119 edward compound | edward/h119-compound-droppath-wider-surface-decoder | 6,307 / 8.9% | 0.96h | pre-EP1 | post-H112 + DropPath |
+| H120 askeladd depth 6 | askeladd/h120-backbone-depth-6 | 3,370 / 4.8% | 0.58h | pre-EP1 | post-H112 + DropPath |
+| **H121 frieren width 576** | **frieren/h121-hidden-576** | **795 / 1.1%** | **0.16h** | **just launched** | post-H112 + DropPath |
+
+**Frieren launched H121 successfully** (post smoke-test pass — `h121-smoke` crashed at step 3 as expected for the VRAM check). Frieren is now on the post-H112 baseline with `--drop-path-max 0.10 --model-hidden-dim 576`.
+
+**Trajectory updates since last invocation:**
+- **H113 fern**: val 6.399% at step 59,291 → still well above gate 6.126%. Late-cosine slope shallow; B PARTIAL or C NULL trajectory locked. Terminal in ~1.6h.
+- **H115 thorfinn**: descended from 27.5% (EP1) → 7.787% (between EP2/EP3 publishes) → healthy canonical descent, should clear EP3 gate <8.5% at step 32,594 (~1.4h away).
+- **H116 nezuko**: showing only EP1 publish (27.323%) at step 18,459 — between EP1 and EP2 publishes. Will see EP2 val at step ~21,729 (~1h away).
+- **H118 tanjiro**: EP1 val 26.649% — slightly higher than canonical (slice count 192 vs 128 should not dramatically affect EP1 descent). Watch EP3 closely.
+
+**No PRs require advisor action this cycle** beyond H113 needs_rebase (already addressed at 03:26Z — cosmetic, run continuing to terminal). All other in-flight runs are pre-EP3 publish; nothing to review, nothing to assign.
+
+**Next decision point**: H113 fern terminal results in ~1.6h. Expected outcome: B PARTIAL or C NULL on val gate (val ~6.38-6.40% terminal, +0.25-0.27pp above gate). Then fern goes idle and needs a new hypothesis.
+
+**Open hypothesis backlog** (for fern's next assignment after H113 terminal):
+- **H122**: Compound H121 width × H120 depth (if BOTH show promise at EP3 — backbone capacity sweep)
+- **H123**: WSS-specific tangent-frame projection decoder head (WSS plateau attack, separate from SP)
+- **H124**: SP CHANNEL-SPECIFIC LOSS WEIGHTING (separate `--sp-loss-weight 4.0` flag) — direct surgical attack
+- **H125**: Multi-scale slice attention (slices at 32+128+256 resolutions combined)
+- **H126**: SDF-conditioned volume cross-attention (volume-decoder uses SDF as auxiliary key)
+
+Will draft a fresh hypothesis when H113 terminates.
 
 ## ~03:55Z (2026-05-24) — H117 TIMING-COLLISION RESOLVED OPTION A (CONTINUE COMPOUND); SCIENTIFIC FRAMING SWITCHED — H117+H112 IS NOW THE EXPLICIT COMPOUND TEST
 
