@@ -1,9 +1,61 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~00:00 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~00:30 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔥🔥🔥 ~00:30Z (2026-05-24) — **H108 CLOSED B PARTIAL (NARROWEST NON-COMPOUND MISS; WIDTH>DIVERSITY FALSIFIED); NEZUKO REASSIGNED H116 Y-MIRROR — THIRD ORTHOGONAL PLATEAU PROTOCOL DATA-TIER INTERVENTION**
+
+**H108 nezuko CLOSED (PR #1278, do not merge):**
+- val_abupt 6.164% MISS gate by **+0.038pp — NARROWEST non-compound miss of cohort** (beating H107's +0.065pp)
+- test_VP 3.583% **CROSS floor** by −0.060pp → B PARTIAL
+- test_WSS_z 8.857% improves canonical 9.83% by **−0.97pp** (rivals H107's −0.94pp)
+- 17th consecutive SP plateau confirmation
+- **STRONGEST FALSIFIABLE NEGATIVE OF WAVE 33**: at matched +265K param cost, H102 (width) beats H108 (diversity) by +0.040pp val_abupt → **WIDTH > DIVERSITY** for surface_out at this param budget
+- "Delayed-engagement" mechanism signature characterized (slope acceleration EP3→EP6 then late-cosine plateau)
+
+**H116 ASSIGNED to nezuko (PR #1291, draft):**
+- **LONGITUDINAL Y-MIRROR AUGMENTATION** — third orthogonal Plateau Protocol data-tier intervention (sample-augmentation axis)
+- 50% probability per training sample: negate `y` coord, `normal_y`, `tau_y` target; eval pipeline unchanged
+- DrivAerML cars are approximately longitudinally symmetric (sedans, SUVs); asymmetric features (mirrors, exhaust) are ~1% of surface — Y-mirror provides free 2× data augmentation
+- **Zero added parameters** — pure data augmentation
+- **Falsifiable**: if `test_SP < 3.577%`, sample-size was the bottleneck for the 17-mechanism SP plateau; if `val_abupt < 6.126%` but `test_SP ≥ 3.577%`, augmentation helps general generalization but not SP specifically; if neither, plateau is sample-size-independent → forces **Bayes-optimal hardness conclusion** combined with H114+H115 NULL outcomes
+- Secondary expectation: **test_tau_y improvement** (current worst surface channel at 7.10%) via balanced ±tau_y training
+- The H114+H115+H116 trio comprehensively tests the data-tier intervention space across orthogonal axes:
+  - H114: per-point gradient distribution (panel-area weighting)
+  - H115: per-point loss curvature (Huber transition L2→L1)
+  - H116: sample distribution (Y-mirror augmentation)
+- Combined NULL outcomes across all three would be definitive evidence that the SP plateau is Bayes-optimal hardness at the dataset's spatial resolution
+
+**Wave 35 candidate matrix updated (post-H108 closure, H110/H112 still in flight):**
+
+| Compound Priority | Combination | Δ Params | Rationale |
+|---|---|---:|---|
+| ⭐ TOP | H110 (compound) + H112 (DropPath) | +268K | Two A WIN-trajectory mechanisms stacked |
+| ⭐ TOP | H107 + H112 (self-context + DropPath) | +262K | Best non-compound + zero-param regularization |
+| ⭐ TOP | H106 + H112 (volume-info + DropPath) | +2.5K | Most cost-efficient compound possible |
+| 2nd | H107 + H101 (global + local surface info) | +263.5K | Surface info-at-decoder full stack |
+| 2nd | H107 + H106 (global surface + volume info) | +265K | Both info-at-decoder paths |
+| 2nd | H110 + H107 (compound H102+H101+H107) | +530K | 3-mechanism stack |
+| 2nd | H102 + (any small mechanism) | varies | Width dominates diversity per H108 verdict |
+| Wave 35+ | DATA-TIER for SP plateau (H114 panel-area, H115 Huber, H116 Y-mirror) | n/a | Comprehensive 3-axis attack |
+| 3rd | H108 + H112 (parallel-MLP + DropPath) | +265K | Architectural + stochastic reg (de-prioritized given width>diversity verdict) |
+
+**Fleet status (post-closure):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| H110 tanjiro compound | step 62,492 val 6.142% | 8,163 steps remaining | **A WIN AT EDGE** |
+| H111 askeladd LayerScale | step 63,185 val 6.350% | ~7,479 steps remaining | B PARTIAL via test_VP cross LOCKED |
+| H112 edward DropPath | step 59,772 val 6.202% | 10,884 steps remaining | **A WIN PROBABLE** zero params |
+| H113 fern heteroscedastic | step ~36,089 EP3 6.94% | diagnostic complete | C NULL or weak B PARTIAL |
+| **H114 frieren panel-area SP** | draft PR #1289 | assigned | Plateau Protocol data-tier (loss reweighting) |
+| **H115 thorfinn Huber SP** | draft PR #1290 | assigned | Plateau Protocol data-tier (loss-form) |
+| **H116 nezuko Y-mirror** | **just assigned** | **draft PR #1291** | **Plateau Protocol data-tier (sample augmentation)** |
+| H109 alphonse encoder-skip | step ~48,902 val 6.359% | active | mid-cohort B PARTIAL |
+
+**Zero idle students. 8/8 WIP. H114 + H115 + H116 form the comprehensive three-axis data-tier attack on the SP plateau.**
 
 ## 🔥🔥🔥 ~00:00Z (2026-05-24) — **H107 CLOSED B PARTIAL (STRONGEST NON-COMPOUND SINGLE MECHANISM); THORFINN REASSIGNED H115 HUBER LOSS FOR SP — PLATEAU PROTOCOL LOSS-FORM DATA-TIER INTERVENTION**
 

@@ -1,3 +1,65 @@
+## 2026-05-24 ~00:30 — PR #1278: H108 SURFACE-OUT-PARALLEL-MLP-RESIDUAL-DECODER (nezuko, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.060pp); val gate MISS +0.038pp (**NARROWEST non-compound miss of cohort**); test_WSS_z 8.857% improves canonical by −0.97pp; **STRONGEST FALSIFIABLE NEGATIVE OF WAVE 33: WIDTH > DIVERSITY at matched +265K** (H102 6.124% beats H108 6.164% by +0.040pp); 17th SP plateau confirmation; "delayed-engagement" mechanism signature characterized
+
+- **Branch**: `nezuko/h108-surface-out-parallel-mlp-residual-decoder` (closed at ~00:30Z 2026-05-24)
+- **W&B run**: `f4w8nw56`, 13 epochs completed, runtime 14.46h, peak GPU ~78.2 GB across 8 ranks
+- **Hypothesis**: Add zero-init parallel branch `Linear(512, 512) → SiLU → Linear(512, 4)` summed with main `surface_out` MLP at output. Tests implicit-ensemble / decoder-diversity vs width at matched +265K param cost. +265,112 params.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.164%** ❌ | **5.924%** | 5.844% | **+0.080pp MISS gate +0.038pp** (NARROWEST non-compound miss of cohort) |
+| surface_pressure | 4.064% | 3.761% | 3.577 (floor) | **+0.184pp MISS floor — 17th plateau confirmation** |
+| **volume_pressure** | 3.632% | **3.583%** | 3.643 (floor) | **−0.060pp CROSS floor** ✓ |
+| wall_shear | 6.974% | 6.808% | 6.727 (goal) | +0.081pp MISS goal narrowly |
+| wall_shear_x | 6.082% | 6.040% | — | +0.210pp regress |
+| wall_shear_y | 7.617% | 7.380% | — | +0.280pp regress |
+| wall_shear_z | 9.428% | **8.857%** | 9.83 (canonical) | **−0.970pp strong improvement** ✓ |
+
+- B PARTIAL via test_VP cross (rubric-aligned with H101/H104/H105/H106/H107).
+
+### 🔥 STRONGEST FALSIFIABLE NEGATIVE OF WAVE 33: WIDTH > DIVERSITY at matched +265K
+
+Direct head-to-head with H102 (merged baseline, surface_out width 1×→2×) at matched param cost:
+
+| Run | Mechanism | Δ Params | val_abupt | Verdict |
+|---|---|---:|---:|---|
+| **H102 tanjiro (MERGED)** | surface_out width 1×→2× | +266K | **6.124%** | A WIN baseline |
+| **H108 nezuko (this)** | parallel-MLP residual on surface_out | +265K | **6.164%** | B PARTIAL via test_VP |
+
+H108 trails H102 by **+0.040pp val_abupt** at matched param cost. **The implicit-ensemble / decoder-diversity hypothesis is FALSIFIED as a strict win over width**. Two implications:
+1. Gradient coupling > orthogonal subspace decomposition (zero-init second branch takes ~3 epochs to engage productively).
+2. Future Wave 35+ decoder mechanisms should explore WIDENING or DEPTHENING before parallel-stream ensembling.
+
+### Mechanism class verdict — "delayed-engagement" signature characterized
+
+Full arc:
+- Step 21,729 EP2: 7.846% (weakest +265K-class)
+- Step 32,594 EP3: 6.866% (still 3rd-weakest)
+- Step 38,030: 6.491% (**steepest late-cosine slope of cohort**, −0.069pp/1k)
+- Step 70,664 TERMINAL: 6.164% (2nd-best non-compound)
+
+Parallel-MLP mechanism class needs ~3 epochs to find productive orthogonal subspace because zero-init second head must overcome trained first head's residual error budget. The recovery is the strongest "delayed-engagement" signature of Wave 33.
+
+### Strategic implications
+
+1. **DO NOT MERGE** — val_abupt 6.164% > baseline 6.126%, +0.038pp regress (narrowest non-compound miss).
+2. **WIDTH > DIVERSITY decision locked in** for future Wave 35+ decoder mechanism design.
+3. **17th consecutive SP plateau confirmation** — Wave 35 data-tier attack on SP is now 3-mechanism deep (H114 panel-area, H115 Huber, H116 Y-mirror just assigned).
+4. **Closing this PR — nezuko reassigned to H116 LONGITUDINAL Y-MIRROR AUGMENTATION** (PR #1291) — third orthogonal Plateau Protocol data-tier intervention (sample-augmentation axis).
+
+### Per-channel val→test slopes (for reference)
+
+| Channel | val | test | val→test slope |
+|---|---:|---:|---:|
+| abupt | 6.164 | 5.924 | −0.240 (canonical-class) |
+| SP | 4.064 | 3.761 | −0.303 (favorable) |
+| VP | 3.632 | 3.583 | −0.049 (very flat) |
+| WSS | 6.974 | 6.808 | −0.166 (slight favorable) |
+| WSS_z | 9.428 | 8.857 | **−0.571 (steep favorable, parallel-MLP boosting binding-axis transfer)** |
+
+---
+
 ## 2026-05-24 ~00:00 — PR #1277: H107 SURFACE-GLOBAL-CONTEXT-RESIDUAL-DECODER (thorfinn, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.089pp); val gate MISS +0.065pp (narrowest non-compound miss of cohort); **STRONGEST NON-COMPOUND SINGLE MECHANISM OF Wave 33+34** — best test_abupt 5.9545% of any single-mechanism PR in cohort; 16th SP plateau confirmation; self-context residual mechanism class characterized — orthogonal to H101 (positions), H105 (normals), H106 (volume info); permanent compound infrastructure CANDIDATE
 
 - **Branch**: `thorfinn/h107-surface-global-context-residual-decoder` (closed at ~00:00Z 2026-05-24)
