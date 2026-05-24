@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -33,6 +34,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import DrivAerMLSurfaceDataset
+from data.loader import _compute_inverse_area_weights, _resolve_artifact_path, _case_dir
 from model import SurfaceTransolver
 from trainer_runtime import (
     EMA,
@@ -131,6 +133,8 @@ class Config:
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
     vol_points_schedule: str = ""
+    use_area_weighted_sampling: bool = False
+    area_sampling_temperature: float = 1.0
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
     gradnorm_alpha: float = 1.5
@@ -161,6 +165,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "epoch onwards (inclusive) until the next breakpoint. Empty "
             "string disables the curriculum and `--train-volume-points` is "
             "used unchanged. Example: '0:16384:3:32768:6:49152:9:65536'."
+        ),
+        "use_area_weighted_sampling": (
+            "H126: Replace uniform train surface point sampling with inverse "
+            "panel-area weighted sampling. Probability per point is "
+            "(1 / area_i)^(1/T), normalized per case. Small auto-meshed "
+            "panels (high-curvature regions: wheel arches, A-pillar, hood-roof "
+            "junction) get oversampled relative to large flat panels. Only "
+            "applies during training (`train_random` mode); eval is unchanged. "
+            "Volume sampling is unchanged. Surface area is read from "
+            "surface_area.npy per case (no new data dependency). Default off."
+        ),
+        "area_sampling_temperature": (
+            "H126: Sharpness temperature T for inverse-area weights. "
+            "weight_i ∝ (1/area_i)^(1/T). T=1.0 (default) is the canonical "
+            "inverse-area. T<1.0 sharpens (more oversampling of small panels); "
+            "T>1.0 softens (closer to uniform). Only applies when "
+            "--use-area-weighted-sampling is enabled."
         ),
         "use_gradnorm": (
             "Enable GradNorm dynamic per-task loss balancing (Chen et al., "
@@ -669,6 +690,84 @@ def vol_points_for_epoch(
     return current
 
 
+def compute_area_sampling_diagnostics(
+    train_dataset: DrivAerMLSurfaceDataset,
+    *,
+    n_cases: int | None = None,
+) -> dict[str, float | list[float]]:
+    """H126: aggregate inverse-area sampling diagnostics across training cases.
+
+    Returns per-case-averaged statistics on:
+      * panel area distribution (min / median / max)
+      * effective sampling ratio (weight_i / (1/N_i)) — i.e. how many times
+        more likely each point is sampled vs uniform.
+      * extreme ratio: max_weight_ratio (most-oversampled point per case)
+        and min_weight_ratio (least-oversampled point per case).
+    """
+    if not getattr(train_dataset, "use_area_weighted_sampling", False):
+        return {}
+    case_ids = list(train_dataset.case_ids)
+    if n_cases is not None:
+        case_ids = case_ids[:n_cases]
+    temperature = float(train_dataset.area_sampling_temperature)
+    area_min: list[float] = []
+    area_p25: list[float] = []
+    area_p50: list[float] = []
+    area_p75: list[float] = []
+    area_max: list[float] = []
+    ratio_min: list[float] = []
+    ratio_p25: list[float] = []
+    ratio_p50: list[float] = []
+    ratio_p75: list[float] = []
+    ratio_max: list[float] = []
+    point_counts: list[int] = []
+    for case_id in case_ids:
+        case_dir = _case_dir(train_dataset.store.root, case_id)
+        area_arr = np.asarray(
+            np.load(_resolve_artifact_path(case_dir / "surface_area.npy")),
+            dtype=np.float32,
+        ).reshape(-1)
+        n = int(area_arr.shape[0])
+        point_counts.append(n)
+        area_min.append(float(area_arr.min()))
+        area_p25.append(float(np.percentile(area_arr, 25)))
+        area_p50.append(float(np.percentile(area_arr, 50)))
+        area_p75.append(float(np.percentile(area_arr, 75)))
+        area_max.append(float(area_arr.max()))
+        weights = _compute_inverse_area_weights(area_arr, temperature)
+        ratio = weights * float(n)
+        ratio_min.append(float(ratio.min()))
+        ratio_p25.append(float(np.percentile(ratio, 25)))
+        ratio_p50.append(float(np.percentile(ratio, 50)))
+        ratio_p75.append(float(np.percentile(ratio, 75)))
+        ratio_max.append(float(ratio.max()))
+
+    def _mean(values: list[float]) -> float:
+        return float(np.mean(values)) if values else float("nan")
+
+    return {
+        "n_cases_analyzed": len(case_ids),
+        "n_points_min": int(min(point_counts)) if point_counts else 0,
+        "n_points_median": int(np.median(point_counts)) if point_counts else 0,
+        "n_points_max": int(max(point_counts)) if point_counts else 0,
+        "area/min_mean": _mean(area_min),
+        "area/p25_mean": _mean(area_p25),
+        "area/p50_mean": _mean(area_p50),
+        "area/p75_mean": _mean(area_p75),
+        "area/max_mean": _mean(area_max),
+        "ratio/min_mean": _mean(ratio_min),
+        "ratio/p25_mean": _mean(ratio_p25),
+        "ratio/p50_mean": _mean(ratio_p50),
+        "ratio/p75_mean": _mean(ratio_p75),
+        "ratio/max_mean": _mean(ratio_max),
+        "ratio/max_p99_acrosscases": float(np.percentile(ratio_max, 99)) if ratio_max else float("nan"),
+        "ratio/skew_max_over_p50": _mean(
+            [r_max / max(r_p50, 1e-12) for r_max, r_p50 in zip(ratio_max, ratio_p50)]
+        ),
+        "temperature": temperature,
+    }
+
+
 def rebuild_train_loader_with_vol_points(
     config: Config,
     old_train_loader: DataLoader,
@@ -693,6 +792,8 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        use_area_weighted_sampling=config.use_area_weighted_sampling,
+        area_sampling_temperature=config.area_sampling_temperature,
     )
     train_sampler = None
     train_shuffle = True
@@ -893,6 +994,19 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            if config.use_area_weighted_sampling:
+                diag = compute_area_sampling_diagnostics(train_loader.dataset, n_cases=20)
+                if diag:
+                    print(
+                        f"H126 inverse-area sampling: T={diag['temperature']:.3f}, "
+                        f"n_cases={diag['n_cases_analyzed']}, "
+                        f"area_p50_mean={diag['area/p50_mean']:.4g}, "
+                        f"ratio_p50_mean={diag['ratio/p50_mean']:.4f}, "
+                        f"ratio_max_mean={diag['ratio/max_mean']:.4f}, "
+                        f"ratio_skew(max/p50)={diag['ratio/skew_max_over_p50']:.2f}"
+                    )
+                    for key, value in diag.items():
+                        wandb.summary[f"data/area_weighted_sampling/{key}"] = value
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [
