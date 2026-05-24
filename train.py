@@ -140,6 +140,7 @@ class Config:
     wss_charbonnier_axes: str = "all"
     vol_p_charbonnier_weight: float = 0.0
     vol_p_charbonnier_eps: float = 1e-3
+    volume_out_width_factor: float = 1.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -279,6 +280,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_num_features=config.pe_num_features,
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
+        volume_out_width_factor=config.volume_out_width_factor,
     )
 
 

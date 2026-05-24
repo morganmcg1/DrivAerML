@@ -342,6 +342,7 @@ class SurfaceTransolver(nn.Module):
         pe_init_sigmas: list[float] | None = None,
         use_curvature_attention_bias: bool = False,
         curvature_dim: int = 3,
+        volume_out_width_factor: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -398,7 +399,12 @@ class SurfaceTransolver(nn.Module):
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
-        self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+        vol_hidden_width = int(n_hidden * volume_out_width_factor)
+        self.volume_out = nn.Sequential(
+            nn.Linear(n_hidden, vol_hidden_width),
+            nn.GELU(),
+            nn.Linear(vol_hidden_width, self.volume_output_dim),
+        )
 
     def _encode_group(
         self,
