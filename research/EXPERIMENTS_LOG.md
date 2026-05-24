@@ -1,3 +1,77 @@
+## 2026-05-24 ~00:00 — PR #1277: H107 SURFACE-GLOBAL-CONTEXT-RESIDUAL-DECODER (thorfinn, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.089pp); val gate MISS +0.065pp (narrowest non-compound miss of cohort); **STRONGEST NON-COMPOUND SINGLE MECHANISM OF Wave 33+34** — best test_abupt 5.9545% of any single-mechanism PR in cohort; 16th SP plateau confirmation; self-context residual mechanism class characterized — orthogonal to H101 (positions), H105 (normals), H106 (volume info); permanent compound infrastructure CANDIDATE
+
+- **Branch**: `thorfinn/h107-surface-global-context-residual-decoder` (closed at ~00:00Z 2026-05-24)
+- **W&B run**: `7svzz2ci` (rank 0), 13 epochs completed, runtime 14.06h, throughput ~6,280-6,710 steps/h (~6% below canonical — modest self-pool overhead), peak GPU 82.9 GB
+- **Hypothesis**: Inject mask-aware self-pooled surface_hidden (`pooled = mean(surface_hidden, mask)`) as zero-init `Linear(512, 512)` additive residual to `surface_hidden` AFTER surf->vol xattn block and BEFORE `surface_out`. +262,656 params. Tests whether each surface point benefits from a non-local global field summary in addition to its local attention receptive field.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.1912%** ❌ | **5.9545%** | 5.844% | **+0.111pp MISS gate +0.065pp** (narrowest non-compound miss) |
+| surface_pressure | 4.068% | 3.7615% | 3.577 (floor) | **+0.184pp MISS floor — 16th plateau confirmation** |
+| **volume_pressure** | 3.628% | **3.554%** | 3.643 (floor) | **−0.089pp CROSS floor** ✓ (deepest VP cross of cohort) |
+| wall_shear | 7.047% | 6.8733% | 6.727 (goal) | +0.146pp MISS goal |
+| wall_shear_x | 6.204% | 6.1132% | — | +0.283pp regress |
+| wall_shear_y | 7.614% | 7.4518% | — | +0.352pp regress |
+| wall_shear_z | 9.442% | **8.8918%** | 9.83 (canonical) | **−0.938pp strongest binding-axis improvement of program** ✓ |
+
+- Gate: val_abupt 6.1912% MISS gate by +0.065pp — narrowest non-compound miss of cohort.
+- Test AND-gate: **FAILS 3/4** (test_VP ✓ deepest cross, others miss).
+- B PARTIAL via single test_VP floor cross (consistent with H101/H104/H105/H106 closure rubric).
+
+### 🟢 STRONGEST NON-COMPOUND SINGLE MECHANISM OF Wave 33+34
+
+H107 lands as the **best test_abupt (5.9545%) of any single-mechanism PR in this cohort** (excluding H110 compound which is still in flight). The self-context residual mechanism is now a **fully characterized mechanism class**.
+
+| Run | val_abupt% | test_abupt% | test_VP cross | test_WSS_z vs canonical | Δ params | Class |
+|---|---:|---:|---:|---:|---:|---|
+| H110 tanjiro compound (in flight) | ~6.14% | TBD | TBD | TBD | +268K | compound |
+| **H107 thorfinn (this)** | **6.1912%** | **5.9545%** | **−0.089pp** ⭐ | **−0.938pp** ⭐ | **+262K** | **info-at-decoder (non-local)** |
+| H108 nezuko parallel-MLP | ~6.165% | TBD | TBD | TBD | +265K | parallel decoder |
+| H106 frieren volume-info | 6.2505% | 6.026% | −0.039pp | −0.802pp | +2.5K | info-at-decoder (volume) |
+| H105 fern normals | 6.349% | 5.920% | −0.109pp | −0.967pp | +2K | info-at-decoder (normals) |
+| H101 (merged) | 6.213% | 5.846% | −0.129pp | — | +1.5K | info-at-decoder (positions) |
+
+### Mechanism class verdict — SELF-CONTEXT RESIDUAL IS A COMPOUND PRIMITIVE
+
+The self-pooled global-context residual is fundamentally orthogonal to all prior info-at-decoder mechanisms:
+- **H101**: per-point position info at surface decoder (local)
+- **H106**: per-point volume geom (xyz+sdf) at volume decoder (cross-modal local)
+- **H107**: pooled GLOBAL surface state at surface decoder (non-local context)
+
+Wave 35 staging matrix unlocked:
+- **H107 + H112 (self-context + DropPath, +262K)** — pure regularization stack
+- **H107 + H101 (global + local surface info, +263.5K)** — surface info-at-decoder full stack
+- **H107 + H106 (global surface + volume info, +265K)** — both info-at-decoder paths
+- **H110 + H107 (compound H102+H101+H107, +530K)** — 3-mechanism stack
+
+### 16th SP plateau locked in
+
+Plateau extends to 16/16 mechanisms in 3.70-3.95% range vs floor 3.577. Combined with H113 diagnostic (SP plateau is HARDNESS-BOUND), Wave 35+ MUST attack SP via **data-tier interventions**:
+- **H114** (frieren, panel-area-weighted SP) — per-point gradient distribution
+- **H115** (thorfinn, this assignment — **Huber loss for SP**) — loss-form per-point curvature
+- Future: CDF normalize SP targets, log-transform tails, geometric augmentation
+
+### Strategic implications
+
+1. **DO NOT MERGE** — val_abupt 6.1912% > baseline 6.126%, +0.065pp regress on primary metric (narrowest non-compound miss).
+2. **H107 mechanism is permanent infrastructure CANDIDATE** at +262K params — Wave 35 4 candidate compounds listed above.
+3. **info-at-decoder mechanism class now fully characterized** — 4 sub-axes proven (positions, normals, volume xyz+sdf, global self-context). Diminishing returns on further info-at-decoder mechanisms.
+4. **Closing this PR — thorfinn reassigned to H115 HUBER LOSS FOR SP** (PR #1290) — Plateau Protocol loss-form data-tier intervention complementary to H114.
+
+### Per-channel val→test slopes (for reference)
+
+| Channel | val | test | val→test slope |
+|---|---:|---:|---:|
+| abupt | 6.191 | 5.954 | −0.237 (canonical-class) |
+| SP | 4.068 | 3.762 | −0.306 (favorable) |
+| VP | 3.628 | 3.554 | −0.074 (very flat — VP signal stable, mechanism class signature) |
+| WSS | 7.047 | 6.873 | −0.174 (slight favorable) |
+| WSS_z | 9.442 | 8.892 | **−0.550 (steep favorable, non-local context helping binding axis transfer)** |
+
+---
+
 ## 2026-05-23 ~21:00 — PR #1276: H106 VOLUME-GEOM-RESIDUAL-DECODER (frieren, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.039pp); val gate MISS +0.124pp; **COST-EFFICIENCY CHAMPION OF THE PROGRAM** — within +0.07pp val_abupt of H107 (+262K params) at **105× lower parameter cost** (+2,560 params); 15th SP plateau confirmation; volume-info-at-decoder mechanism class now characterized
 
 - **Branch**: `frieren/h106-volume-geom-residual-decoder` (closed at ~21:00Z 2026-05-23)

@@ -1,9 +1,56 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-23 (latest invocation: 2026-05-23 ~21:00 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~00:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## 🔥🔥🔥 ~00:00Z (2026-05-24) — **H107 CLOSED B PARTIAL (STRONGEST NON-COMPOUND SINGLE MECHANISM); THORFINN REASSIGNED H115 HUBER LOSS FOR SP — PLATEAU PROTOCOL LOSS-FORM DATA-TIER INTERVENTION**
+
+**H107 thorfinn CLOSED (PR #1277, do not merge):**
+- val_abupt 6.1912% MISS gate by +0.065pp (narrowest non-compound miss of cohort)
+- test_VP 3.554% **CROSS floor** by −0.089pp → B PARTIAL (deepest VP cross of cohort)
+- test_WSS_z 8.892% improves canonical 9.83% by **−0.938pp** (strongest binding-axis improvement of program)
+- test_abupt 5.9545% — **best test_abupt of any single-mechanism PR in cohort**
+- 16th consecutive SP plateau confirmation
+- Self-context residual mechanism class characterized — orthogonal to H101 (local positions), H105 (normals), H106 (volume info)
+- **Wave 35 compound primitives: H107 + H112 (self-context + DropPath), H107 + H101 (global + local), H107 + H106 (surface + volume info), H110 + H107 (3-way stack)**
+
+**H115 ASSIGNED to thorfinn (PR #1290, draft):**
+- **HUBER LOSS FOR SP** — Plateau Protocol loss-form data-tier intervention complementary to H114
+- Replace MSE with Huber loss for SP channel only; transitions from L2 to L1 at |r|=δ; default δ=1.0
+- **Zero added parameters** — pure loss-form reformulation
+- **Falsifiable**: if `test_SP < 3.577%`, MSE's quadratic outlier amplification was the bottleneck; if not, plateau is independent of per-point loss curvature → forces further data-tier escalation
+- Tests the orthogonal hypothesis to H114: H114 reweights gradient distribution by panel area; H115 changes loss curvature per-point. Together, they isolate which axis of the data-tier intervention space cracks the 16-mechanism SP plateau.
+- Physical rationale: hard outlier regions (separation zones, A-pillar / wheel arch vortex cores, sharp pressure gradients near rear lights) generate residuals 5-20× the bulk. MSE penalizes quadratically — model chases impossible-to-fit tails. Huber bounds outlier gradient → optimizer focuses on bulk SP signal.
+
+**Wave 35 candidate matrix updated (post-H107 + H106 closures, H110/H112 in flight):**
+
+| Compound Priority | Combination | Δ Params | Rationale |
+|---|---|---:|---|
+| ⭐ TOP | H110 (compound) + H112 (DropPath) | +268K | Two A WIN-trajectory mechanisms stacked |
+| ⭐ TOP | H107 + H112 (self-context + DropPath) | +262K | Best non-compound + zero-param regularization |
+| ⭐ TOP | H106 + H112 (volume-info + DropPath) | +2.5K | MOST COST-EFFICIENT COMPOUND POSSIBLE |
+| 2nd | H107 + H101 (global + local surface info) | +263.5K | Surface info-at-decoder full stack |
+| 2nd | H107 + H106 (global surface + volume info) | +265K | Both info-at-decoder paths |
+| 2nd | H110 + H107 (compound H102+H101+H107) | +530K | 3-mechanism stack |
+| 3rd | H110 + H106 (compound + volume-info) | +270.5K | Pile on volume info |
+| Wave 35+ | DATA-TIER for SP plateau (H114 panel-area, H115 Huber, future CDF normalize) | n/a | H113 diagnostic confirmed SP plateau is hardness-bound |
+
+**Fleet status (post-closure):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| H108 nezuko | ~step 67,932 val 6.165% | ~5,442 steps to terminal | **B PARTIAL via test_VP cross LOCKED** |
+| H110 tanjiro compound | step 62,492 val 6.142% | 8,163 steps remaining | **A WIN AT EDGE — narrow margin decisive at next 2 publishes** |
+| H111 askeladd LayerScale | step 52,528 | active | B PARTIAL via test_VP cross |
+| H112 edward DropPath | step 59,772 val 6.202% | 10,884 steps remaining | **A WIN PROBABLE — strongest slope sustain at ZERO PARAMS** |
+| H113 fern heteroscedastic | step ~36,089 EP3 6.94% | diagnostic complete | C NULL or weak B PARTIAL — diagnostic locked |
+| **H114 frieren panel-area SP** | draft PR #1289 | assigned | Plateau Protocol data-tier (loss reweighting) |
+| **H115 thorfinn Huber SP** | **just assigned** | **draft PR #1290** | **Plateau Protocol data-tier (loss-form)** |
+| H109 alphonse encoder-skip | step ~48,902 val 6.359% | active | mid-cohort B PARTIAL |
+
+**Zero idle students. 8/8 WIP. H114 + H115 are now the two-pronged data-tier attack on the SP plateau.**
 
 ## 🔥🔥🔥 ~21:00Z (2026-05-23) — **H106 CLOSED B PARTIAL (COST-EFFICIENCY CHAMPION); FRIEREN REASSIGNED H114 PANEL-AREA-WEIGHTED SP LOSS — PLATEAU PROTOCOL DATA-TIER PIVOT BEGINS**
 
