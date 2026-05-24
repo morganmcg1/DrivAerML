@@ -1,9 +1,42 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:15 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:25 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~03:25Z (2026-05-24) — H117 ALPHONSE ALREADY LAUNCHED 1.65H AGO ON PRE-H112 BASELINE — REBASE GUIDANCE RETRACTED; H113/H115/H116/H118 ALL HEALTHY STALE_WIP FALSE POSITIVES
+
+**H117 alphonse run state (W&B `h117` group):**
+- step **11,128 / 70,664 (15.7% complete)**, runtime **1.65h**, all 8 ranks healthy
+- Launched BEFORE rebase comment posted at 03:13Z — running on pre-H112 baseline (no `--drop-path-max 0.10`)
+- **Retraction posted** (#1292 comment): killing now wastes 1.65h compute; let H117 run to terminal as-is. Pre-H112 baseline is still a valid mechanism characterization of signed-sqrt SP target transform. Compare against val gate 6.126% (pre-H112), test floors 3.643/3.577/6.727 (unchanged). Compound H117+H112 becomes a separable future Wave 36+ experiment if H117 produces clean test_SP cross alone.
+- **Scientific framing**: H117 alone tests "does signed-sqrt SP transform improve over pre-H112 baseline?" — falsifiable if `test_SP < 3.577%` (cracks 21-confirmation plateau independently). H117 NULL with no test_SP cross weakens the data-tier hypothesis regardless of DropPath.
+- `needs_rebase` label is cosmetic — does not affect run validity
+
+**4 stale_wip check-ins posted (all false positives):**
+- **H113 fern PR #1285**: step 56,532 (80.0%, 9.95h) — late-cosine, ~2.5h to terminal; diagnostic-locked weak B PARTIAL or C NULL trajectory
+- **H115 thorfinn PR #1290**: step 17,836 (25.2%, 2.64h) — EP1 cleared at 27.534%; next val EP3 ~2.0h away
+- **H116 nezuko PR #1291**: step 13,823 (19.6%, 2.05h) — EP1 cleared at 27.323%; next val EP3 ~2.6h away
+- **H118 tanjiro** (not stale this cycle): step 8,671 (12.3%, 1.40h) — pre-EP1, healthy
+
+**No new human research directives** (last issue #1056 update 2026-05-23 18:54Z — Morgan's evening check-in, both fleets reported status)
+
+**Fleet status (9 slots, 8 students, 0 idle):**
+
+| Slot | Run | Step / % | Trajectory |
+|---|---|---:|---|
+| **H112 edward DropPath** | **MERGED** | — | **NEW SINGLE-MODEL SOTA** (val 6.1358%, test 5.839%) |
+| H113 fern heteroscedastic | 56,532 / 80.0% | late-cosine, ~2.5h to terminal | weak B PARTIAL or C NULL |
+| H114 frieren panel-area SP | ~mid-cosine | (last check ~22.6%) | data-tier loss reweighting |
+| H115 thorfinn Huber SP | 17,836 / 25.2% | EP1 cleared 27.534% | data-tier loss curvature |
+| H116 nezuko Y-mirror | 13,823 / 19.6% | EP1 cleared 27.323% | data-tier sample aug |
+| H117 alphonse signed-sqrt SP | 11,128 / 15.7% | pre-EP1, healthy | data-tier target transform |
+| H118 tanjiro slices 192 | 8,671 / 12.3% | pre-EP1, healthy | Wave 36 capacity (slice granularity) |
+| H119 edward compound | PR #1295 | not yet launched | Compound: DropPath × surface_out 1024 |
+| H120 askeladd depth 6 | PR #1296 | not yet launched | Wave 36 capacity (sequential depth) |
+
+**Wave 35 4-axis data-tier sweep IN FULL FLIGHT** (H114-H117, all running). **Wave 36+ capacity-scaling frontier OPEN** with 3 orthogonal axes queued (H118 slices in flight + H119 compound + H120 depth draft PRs).
 
 ## ~03:15Z (2026-05-24) — H111 CLOSED B PARTIAL (γ-DEPTH PATTERN ENGAGED, NARROW test_VP CROSS, 21st SP PLATEAU); ASKELADD REASSIGNED H120 BACKBONE DEPTH 5→6 — THIRD ORTHOGONAL CAPACITY AXIS (DEPTH × SLICES × DECODER-WIDTH COMPOUND)
 
