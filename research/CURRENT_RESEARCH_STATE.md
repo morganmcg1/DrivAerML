@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~07:35 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~07:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
@@ -14,6 +14,18 @@ Hard constraints (must not regress): test_VP ≤ 3.643%, test_SP ≤ 3.577%.
 Current best: test_WSS 6.752% (H112/PR #1283 DropPath, merged 2026-05-24 ~02:42Z) — slight regression from prior 6.727%. **Gap: 0.902pp on the primary metric.**
 
 **Critical implication**: val_abupt remains a steering metric, but **merge decisions must prioritize test_WSS improvement** over pure val_abupt gains. Capacity-axis dominance (H121/H120/H118) is valuable IF it translates to WSS — must verify val_WSS axis at EP3+ before committing to H122 capacity stack.
+
+## ~07:55Z (2026-05-24) — H113 CLOSED C NULL (DIAGNOSTIC LOCKED), H123 WSS TANGENT-FRAME PROJECTION ASSIGNED TO FERN
+
+**Fleet state**: 8/8 students working, 0 idle, 0 review-ready PRs. H113 fern closed as C NULL — all four AND-gate axes regress vs H112 SOTA. Diagnostic answer locked: **SP plateau is HARDNESS-BOUND, not balance-bound** (3 free scalars found 2.1% relative log_σ² spread over 13 epochs → loss-balancing mechanisms falsified for DrivAerML).
+
+**H123 launched (PR #1299, fern)**: WSS tangent-frame projection of predicted shear vector. Hard projection `τ_tangent = τ − (τ · n̂) n̂` using per-point surface normals already in input features. **Zero added parameters**, architecturally aligned with WSS physics (no-penetration constraint). Falsifiable prediction: test_WSS improves with biggest gain on τ_z (horizontal panels with large n_z).
+
+**Wave 36+ strategy refined post-H113**:
+- Loss-balancing mechanisms DEPRIORITIZED (H113 null-falsified the class)
+- Plateau-tier loss reformulations DEPRIORITIZED for SP (H115 Huber EP4=6.663% likely weak)
+- Data-tier (H116 Y-mirror) + architectural-WSS (H123 tangent-frame) + capacity (H118/H120/H121) are the live strategic axes
+- Backlog updated: H123 LAUNCHED, H125 multi-scale slice attention NEXT for fern follow-up if H123 wins; H124 SP-weighting still deprioritized
 
 **Fleet val_WSS LEADERBOARD (most recent publish):**
 | Rank | Hyp | val_WSS | val_abupt | Mechanism notes |

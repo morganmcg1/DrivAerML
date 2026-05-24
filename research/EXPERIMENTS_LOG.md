@@ -1,3 +1,56 @@
+## 2026-05-24 ~07:55 — PR #1285: H113 HETEROSCEDASTIC-UNCERTAINTY-WEIGHTING (fern, **CLOSED C NULL** — terminal at step 70,664, all four AND-gate axes miss; **DIAGNOSTIC LOCKED** — SP plateau is hardness-bound, not balance-bound)
+
+- **Branch**: `fern/h113-heteroscedastic-uncertainty-weighting` (CLOSED, not merged)
+- **W&B run**: `v5m2w16v` (group `wave33_h113_heteroscedastic_loss`)
+- **Hypothesis**: Kendall+Gal 2018 multi-task heteroscedastic uncertainty weighting — 3 learnable log_σ² scalars on (SP, VP, WSS) tasks; loss = Σ (0.5·exp(−log_σ²)·L_i + 0.5·log_σ²). Designed as Plateau Protocol strategy-tier shift #1 to falsify the SP plateau hypothesis.
+
+### Terminal metrics
+
+| Metric | H113 terminal | H112 SOTA / floor | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.3864% | 6.1358% (merge gate) | +0.251pp | MISS |
+| test_abupt | 6.0689% | 5.839% canonical | +0.230pp regress | regress |
+| test_VP | 3.7167% | 3.643% floor | +0.074pp | **MISS** (no cross — broke fern's H101-H105 streak) |
+| test_SP | 3.8551% | 3.577% floor | +0.278pp | MISS — **15th plateau** |
+| test_WSS | 6.9470% | 6.727% floor | +0.220pp | MISS |
+| test_WSS_z | 9.0396% | 8.945% canonical | +0.095pp regress | regress |
+
+All four AND-gate criteria miss. Strictly worse than fern's prior H105 (`t6b1i2yk`) on every axis. **Confirms heteroscedastic loss reformulation regresses vs prior info-at-decoder mechanism class.**
+
+### Diagnostic answer (the value of this null)
+
+H113 was the first **Plateau Protocol strategy-tier shift** experiment. It posed the falsifiable question: *"Is the persistent SP plateau driven by undertrained SP loss term (loss-balancing) OR Bayes-optimal hardness (data/representation-bound)?"*
+
+The log_σ² trajectory answered definitively:
+
+| Step | log_σ²_sp | log_σ²_vp | log_σ²_wss | spread | precision_wt | val_abupt |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 0 | 0 | 0 | 0 | 1.00× | — |
+| 10,864 (EP1) | −0.044 | −0.038 | −0.038 | 0.007 | 1.05× | 29.08% |
+| 32,594 (EP3) | −1.900 | −1.894 | −1.879 | 0.021 | 6.69× | 6.94% |
+| 48,902 (EP6) | −3.189 | −3.183 | −3.168 | 0.021 | 24.3× | 6.47% |
+| 70,664 (terminal) | −3.990 | −3.983 | −3.969 | **0.021** | **54.0×** | 6.39% |
+
+The optimizer was given 3 free scalars and found ZERO meaningful per-task imbalance (2.1% relative spread throughout). Instead it exploited the unbounded `0.5·log_σ²` regularizer to amplify total loss magnitude ~54×.
+
+**Empirical verdict: SP plateau is HARDNESS-BOUND, not balance-bound.** Per-task aleatoric noise in DrivAerML is small. The SP plateau (15 consecutive misses, range 3.70-3.95%) is a representation/data ceiling.
+
+### Strategic consequences
+
+- **Loss-balancing mechanisms DEPRIORITIZED** (gradient-norm balancing, PCGrad, uncertainty weighting — same direction, falsified)
+- **Plateau-tier loss reformulations DEPRIORITIZED** for SP — H115 Huber descending canonically but EP4 6.663% does not look like it will deliver A WIN; loss-curvature changes are likely weak
+- **Wave 36+ direction confirmed**: data-tier / SP-specific architecture / WSS-aligned decoder heads — fern reassigned to **H123 WSS tangent-frame projection** (PR #1299)
+
+### Implementation cost
+
++3 learnable scalar parameters (effectively 0 vs 17.41M total). Code: model.py (+30 lines), train.py (+181 lines: CLI flag, threading, het-loss path, 12 diagnostic W&B metrics). DDP integrates cleanly without `find_unused_parameters`. Numerically safe (log_σ² clamp [−8,+8]). 839.4 min wall clock, ~76 GB GPU peak.
+
+### Quote-worthy
+
+> "The mechanism is well-engineered and well-engaged — finite, no NaN, gradients flowing on all three scalars. It's doing exactly what the math says it should do; the math just doesn't help on this dataset." — fern, terminal SENPAI-RESULT, 2026-05-24T07:52Z
+
+---
+
 ## 2026-05-24 ~03:45 — PR #1289: H114 PANEL-AREA-WEIGHTED SP MSE (frieren, **CLOSED C NULL** — EP3 kill-threshold triggered) — first NULL of Wave 35 data-tier sweep; mechanism failure mode = mid-cosine descent stall via spurious large-panel attractor
 
 - **Branch**: `frieren/h114-panel-area-weighted-sp-loss` (CLOSED, not merged)
