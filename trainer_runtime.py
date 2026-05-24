@@ -286,6 +286,8 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        use_y_mirror_aug=getattr(config, "use_y_mirror_aug", False),
+        y_mirror_prob=getattr(config, "y_mirror_prob", 0.5),
     )
     train_sampler = None
     train_shuffle = True

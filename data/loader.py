@@ -269,6 +269,46 @@ def _three_column(value: np.ndarray, name: str) -> np.ndarray:
     return arr
 
 
+def apply_y_mirror(case: DrivAerMLCase, prob: float = 0.5) -> DrivAerMLCase:
+    """Stochastic longitudinal Y-mirror augmentation for one training sample.
+
+    DrivAerML is approximately longitudinally symmetric (y -> -y). Under this
+    transformation only the y-axis quantities flip sign:
+      - surface_x[..., 1] (y coord)        -> negate
+      - surface_x[..., 4] (normal_y)       -> negate
+      - surface_y[..., 2] (tau_y target)   -> negate
+      - volume_x[..., 1] (y coord)         -> negate
+      - everything else (SP, VP, tau_x, tau_z, panel_area, sdf, normals_x/z)
+        is unchanged
+
+    `prob` is the per-sample probability of applying the mirror. With
+    probability (1 - prob) the input case is returned unchanged.
+    """
+
+    if prob <= 0.0 or torch.rand(1).item() >= prob:
+        return case
+
+    surface_x = case.surface_x.clone()
+    surface_y = case.surface_y.clone()
+    volume_x = case.volume_x.clone()
+
+    surface_x[..., 1].neg_()  # y coord
+    surface_x[..., 4].neg_()  # normal_y
+    surface_y[..., 2].neg_()  # tau_y target
+    volume_x[..., 1].neg_()  # volume y coord
+
+    metadata = dict(case.metadata)
+    metadata["y_mirror_applied"] = True
+    return DrivAerMLCase(
+        case_id=case.case_id,
+        surface_x=surface_x,
+        surface_y=surface_y,
+        volume_x=volume_x,
+        volume_y=case.volume_y,
+        metadata=metadata,
+    )
+
+
 def load_case(
     root: str | Path,
     case_id: str,
@@ -367,6 +407,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        use_y_mirror_aug: bool = False,
+        y_mirror_prob: float = 0.5,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +418,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.use_y_mirror_aug = bool(use_y_mirror_aug)
+        self.y_mirror_prob = float(y_mirror_prob)
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -457,7 +501,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         metadata["volume_view_count"] = int(view.volume_view_count)
         metadata["volume_sampling_mode"] = view.sampling_mode
         metadata["joint_view_count"] = int(view.view_count)
-        return DrivAerMLCase(
+        metadata["y_mirror_applied"] = False
+        case_out = DrivAerMLCase(
             case_id=case.case_id,
             surface_x=case.surface_x,
             surface_y=case.surface_y,
@@ -465,6 +510,12 @@ class DrivAerMLSurfaceDataset(Dataset):
             volume_y=case.volume_y,
             metadata=metadata,
         )
+        # Y-mirror is a training-only augmentation. Defense-in-depth: guard on
+        # both the explicit opt-in flag and the train sampling mode so eval
+        # datasets cannot accidentally apply the mirror.
+        if self.use_y_mirror_aug and self.sampling_mode == "train_random":
+            case_out = apply_y_mirror(case_out, prob=self.y_mirror_prob)
+        return case_out
 
 
 def pad_collate(samples: list[DrivAerMLCase]) -> SurfaceBatch:
@@ -544,6 +595,8 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    use_y_mirror_aug: bool = False,
+    y_mirror_prob: float = 0.5,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -568,6 +621,8 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        use_y_mirror_aug=use_y_mirror_aug,
+        y_mirror_prob=y_mirror_prob,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(

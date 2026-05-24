@@ -138,6 +138,8 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    use_y_mirror_aug: bool = False
+    y_mirror_prob: float = 0.5
     debug: bool = False
 
 
@@ -228,6 +230,21 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "weight and bias are zero-initialised so the layer is identity "
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
+        ),
+        "use_y_mirror_aug": (
+            "Enable longitudinal Y-mirror data augmentation in the training "
+            "data loader (NOT eval). With probability `y_mirror_prob`, each "
+            "training sample's y-coordinates, y-normals, and tau_y targets "
+            "are negated (y -> -y). This is a free 2x data augmentation "
+            "exploiting DrivAerML's approximate longitudinal symmetry. "
+            "Plateau Protocol data-tier intervention (H116) testing whether "
+            "the SP plateau is sample-size-bound."
+        ),
+        "y_mirror_prob": (
+            "Probability of applying Y-mirror per training sample (independent "
+            "per sample in batch). 0.5 = balanced augmentation, 1.0 = always "
+            "mirror, 0.0 = effectively disable. Default 0.5. Unused if "
+            "--use-y-mirror-aug is off."
         ),
     }
     for field in fields(Config):
@@ -683,6 +700,8 @@ def rebuild_train_loader_with_vol_points(
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        use_y_mirror_aug=getattr(old_ds, "use_y_mirror_aug", False),
+        y_mirror_prob=getattr(old_ds, "y_mirror_prob", 0.5),
     )
     train_sampler = None
     train_shuffle = True
@@ -851,6 +870,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 print(
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
+                )
+            if config.use_y_mirror_aug:
+                print(
+                    f"Y-mirror augmentation: enabled on train loader only, "
+                    f"prob={config.y_mirror_prob} (negates y, normal_y, tau_y, "
+                    f"volume y)"
                 )
 
         run = init_wandb_run(
