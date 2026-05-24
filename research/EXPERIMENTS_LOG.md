@@ -1,3 +1,55 @@
+## 2026-05-24 ~18:45 — PR #1292: H117 SIGNED-SQRT SP TARGET TRANSFORM × DROPPATH (alphonse, **CLOSED C NULL** — TIES H112 within ±0.03pp on all WSS channels, **22ND SP-PLATEAU CONFIRMATION**, **SP-AXIS DATA-TIER CLOSURE LOCKED**)
+
+- **Branch**: `alphonse/h117-sp-target-signed-power-transform` (CLOSED, not merged)
+- **W&B run**: `kjm7k7gd`
+- **Hypothesis**: signed-sqrt power transform `y' = sign(y)|y|^0.5` on SP targets compresses heavy-tail distribution → SP-plateau crack via tail-residual normalization.
+
+### Terminal metrics (run kjm7k7gd, EMA EP13)
+
+| Metric | H117+DP | H112 SOTA | Δ | Verdict |
+|---|---:|---:|---:|---|
+| val_abupt | 6.185% | 6.1358% | +0.049pp | ❌ A WIN missed (4.9bp) |
+| test_abupt | 5.930% | 5.839% | +0.091pp | ❌ regression (9.1bp) |
+| **test_WSS** | **6.7555%** | 6.752% | **+0.003pp** | ❌ **TIES H112, no merge** |
+| test_WSS_x | **5.9916%** | 5.999% | −0.007pp | TIE (banked: first sub-6% on tay) |
+| test_WSS_y | 7.365% | 7.360% | +0.005pp | TIE |
+| test_WSS_z | 8.751% | 8.720% | +0.031pp | TIE |
+| test_VP | 3.533% | 3.421% | +0.112pp | ❌ regression vs H112; CROSSES pre-H112 floor 3.643% (inherited) |
+| **test_SP** | **4.010%** | 3.695% | **+0.315pp** | ❌ **22nd SP-plateau confirmation** |
+
+### Pinned student diagnostic — SP-gap-closure trajectory fingerprint
+
+| EP | H117+DP val_SP | H112 val_SP | SP gap | Δ gap |
+|---|---:|---:|---:|---:|
+| 1 | 22.196% | 19.368% | +2.83pp | — |
+| 2 | 5.936% | 5.361% | +0.58pp | −2.25 |
+| 3 | 4.980% | 4.663% | +0.32pp | −0.26 |
+| 4 | 4.682% | 4.380% | +0.30pp | −0.02 |
+| 13 | 4.326% | 4.055% | **+0.27pp** | saturated |
+
+SP gap never closed below +0.25pp. Signed-power inverse Jacobian `0.5·|y|^{-0.5}` permanently attenuates gradient signal on heavy-tail residuals (wheel-arch, stagnation regions) — anti-mechanism for SP plateau.
+
+### Strategic class verdict — SP-AXIS DATA-TIER CLOSURE LOCKED (5th rejection)
+
+Data-tier SP attacks now have **5 consecutive C NULL** rejections plus 17 prior plateau hits = **22 consecutive SP-axis confirmations**:
+1. H113 fern free log_sigma_sq (balance) — C NULL
+2. H114 panel-area weighting — C NULL
+3. H115 thorfinn Huber curvature — C NULL (Huber→MSE degeneration)
+4. H116 nezuko Y-mirror data-aug — C NULL (PE non-equivariance)
+5. **H117 alphonse signed-sqrt SP target transform — C NULL (inverse-Jacobian attenuation)**
+
+**Data-tier and loss-form interventions on SP are EXHAUSTED on this model+dataset.** Student's "SP-decoder probe" suggestion (dedicated SP head with own LR/width/depth) banked as Wave 38+ candidate.
+
+### Banked observation — test_WSS_x sub-6%
+
+test_WSS_x 5.9916% is the **first sub-6% test_WSS_x on tay** (H112 5.999%). −0.007pp is within run-to-run noise but if H128 SwiGLU or future architectural change replicates with tighter margin, that's a frontier worth attribution. Banked, not pursued separately.
+
+### Successor experiment
+
+alphonse → H128 SwiGLU MLP (PR #1308) — architectural primitive feedforward modernization (Llama/Gemma/PaLM/Mistral best practice).
+
+---
+
 ## 2026-05-24 ~18:15 — PR #1295: H119 COMPOUND H102-WIDER × H112-DROPPATH (edward, **CLOSED B PARTIAL test_VP only** — primary objective regresses, MAJOR program finding on compound additivity topology)
 
 - **Branch**: `edward/h119-compound-droppath-wider-surface-decoder` (CLOSED, not merged)

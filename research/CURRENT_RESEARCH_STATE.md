@@ -1,9 +1,86 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~18:15 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~18:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~18:45Z (2026-05-24) — H117 CLOSED C NULL (22nd SP-AXIS CONFIRMATION, TIES H112 ON WSS), H128 SWIGLU MLP ASSIGNED TO ALPHONSE (FEEDFORWARD MODERNIZATION — UNTESTED PRIMITIVE)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H117 alphonse (signed-sqrt SP target transform × DropPath) CLOSED — C NULL, TIES H112 within ±0.03pp on all WSS channels
+
+Terminal run `kjm7k7gd`, EMA EP13:
+- val_abupt 6.185% (+0.049pp gate miss, 4.9bp marginal)
+- test_abupt 5.930% (+0.091pp regression, 9.1bp)
+- **test_WSS 6.7555% (+0.003pp TIE on primary objective)** — does NOT improve baseline
+- test_WSS_x 5.9916% (−0.007pp TIE H112 — **first sub-6% test_WSS_x on tay**, banked)
+- test_VP 3.5331% (+0.112pp regression vs H112, but CROSSES pre-H112 floor 3.643% inherited)
+- **test_SP 4.0095% (+0.315pp, 22nd SP-plateau confirmation)**
+
+**Pinned student diagnostic — SP-gap-closure trajectory fingerprint**:
+
+> EP1 +2.83pp → EP2 +0.58pp → EP3 +0.32pp → EP4 +0.30pp → terminal **+0.27pp**
+> SP gap **never closed** below +0.25pp. Mechanism saturates at a permanent ~0.27pp deficit.
+
+Signed-power inverse Jacobian `0.5·|y|^{-0.5}` permanently attenuates gradient signal on heavy-tail residuals (wheel-arch, stagnation regions) — exactly the regions that are the SP diagnostic feature. Anti-mechanism for SP plateau.
+
+**Strategic verdict — SP-AXIS DATA-TIER CLOSURE LOCKED (5th rejection)**:
+
+Combined data-tier rejections on SP:
+- H113 fern free log_sigma_sq (balance) — C NULL
+- H114 panel-area weighting — C NULL
+- H115 thorfinn Huber curvature — C NULL (Huber→MSE degeneration)
+- H116 nezuko Y-mirror data-aug — C NULL (PE non-equivariance)
+- **H117 alphonse signed-sqrt SP target transform — C NULL (inverse-Jacobian attenuation)**
+
+Plus 17 prior plateau hits. **22 consecutive SP-axis confirmations.** Data-tier and loss-form interventions are EXHAUSTED on this model+dataset. Student's "SP-decoder probe" suggestion banked as Wave 38+ candidate; SP-axis re-attack DEFERRED until WSS-axis closes.
+
+**Banked**: first sub-6% test_WSS_x in program (H117 5.9916% vs H112 5.999%) — banked as future-attribution-target.
+
+### H128 alphonse (SwiGLU MLP replacement) ASSIGNED — PR #1308
+
+**Mechanism**: replace Transolver's dense `UpActDownMlp` (GELU activation, 2-Linear) with SwiGLU `(Swish-Gated Linear Unit, 3-Linear)`:
+- Current: `Down(GELU(Up(x)))` — 2 Linear layers
+- SwiGLU: `Down(SiLU(Gate(x)) ⊙ Value(x))` — 3 Linear layers with multiplicative gating
+
+**Why this is class-distinct**:
+- NOT capacity-axis (H120/H121/H125 touch model size only at same activation)
+- NOT WSS-rep tier (H-A2/H-B touch input/output reps)
+- NOT loss-form / target-reparam (CLOSED for SP)
+- IS an architectural primitive — modern transformer best practice (Llama, Gemma, PaLM, Mistral, DeepSeek all use SwiGLU)
+
+**Mechanistic prediction**: gated MLP's multiplicative structure better suited for "select-then-aggregate" — gate path learns "is this high-shear region", value path learns "in which direction does shear flow", multiplied for WSS prediction. Stronger inductive bias for tangential vector field regression than dense GELU.
+
+**Implementation footprint**: ~50 lines (new SwiGluMlp class + TransformerBlock branch + Config flag). Drop-in at `mlp_ratio=4` (no other changes). Zero-init `down_proj.weight` for cold-start safety. Confounded test (activation × +30% MLP params) but canonical drop-in pattern; clean attribution via follow-up H129 mlp_ratio=3 param-parity if H128 succeeds.
+
+**Falsifiable**: test_WSS ≥0.05pp improvement; expected uniform improvement across all channels (gated MLP is per-token primitive, not WSS-specific). Falsifying signature: val_abupt within ±0.02pp of H112 → gating mechanism inert at 17M-class scale.
+
+**Param impact**: 17.4M → ~22.7M (+30%). Peak VRAM expected 80-85GB/GPU (was 78GB). Wall-clock +5-10% (~15-16h).
+
+ETA terminal: ~10:00Z 2026-05-25.
+
+### Fleet leaderboard (refined)
+
+| Hyp | Student | Progress | val_abupt | Verdict tracking | Class |
+|---|---|---:|---:|---|---|
+| **H120 depth-6** | askeladd | 94.5% | **6.039%** | **🎯 A WIN + B PARTIAL test_WSS** terminal <1h | capacity (depth) |
+| H121 hidden-576 | frieren | 76.6% | 6.249% | MARGINAL A WIN candidate | capacity (width) |
+| H125 depth-7 | fern | 15.7% | cold-start | terminal ~07:30Z 2026-05-25 | capacity extension |
+| H126 inverse-area | nezuko | 2.9% | cold-start | terminal ~07:30Z 2026-05-25 | WSS-sampling tier |
+| H127 wider decoder | tanjiro | 0% | — | terminal ~07:30Z 2026-05-25 | decoder-width standalone |
+| H-A2 concat-tangent | thorfinn | 0% | — | terminal ~08:30Z 2026-05-25 | WSS-rep tier (non-destructive) |
+| H-B aux-log-magnitude | edward | 0% | — | terminal ~08:30Z 2026-05-25 | WSS-magnitude-direction |
+| **H128 SwiGLU MLP** | alphonse | 0% (NEW) | — | terminal ~10:00Z 2026-05-25 | architectural primitive |
+
+**Wave 36+ portfolio at a glance**: 3 capacity-axis (H120 depth, H121 width, H125 depth-7) + 2 WSS-rep tier (H-A2 input-concat, H126 sampling) + 1 decoder-width standalone (H127) + 1 magnitude-decoupling (H-B) + 1 architectural primitive (H128 SwiGLU). All 8 students productive.
+
+**Strategic decision tree post-H120 terminal**:
+- H120 likely first multi-floor improvement on tay
+- If H120 wins → next compound H120 × H127 (depth × wider decoder)
+- If H128 SwiGLU also wins → triple-axis compound H120 × H127 × H128 (architecture × decoder × activation)
+- If H-A2 also wins → quad-axis compound, hitting both representational tiers
 
 ## ~18:15Z (2026-05-24) — H119 + H-A DUAL-CLOSURE, H-A2 + H-B BOTH ASSIGNED (NON-DESTRUCTIVE WSS-REP TIER + AUX-MAGNITUDE-HEAD)
 
