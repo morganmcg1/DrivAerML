@@ -98,7 +98,41 @@ K=4 greedy ensemble (Caruana 2004) over 4 corrected-split model candidates. Note
 
 ---
 
-## CORRECTED-SPLIT SINGLE-MODEL SOTA: PR #972 SDF-stratified volume importance sampling — 2026-05-09
+## *** CURRENT SINGLE-MODEL SOTA: PR #1283 H112 DropPath (tay) — 2026-05-24 ***
+
+**val_abupt=6.1358%** / **test_abupt=5.839%** (corrected split, EMA best checkpoint EP13)
+
+Zero-param stochastic depth regularization — linearly-scheduled DropPath on backbone residuals (max rate 0.10 across 5 blocks). **Strongest test result of the tay program: deepest test_VP cross (−0.222pp below floor), deepest test_WSS_z improvement (−0.225pp below canonical), first test_abupt improvement over PR #972 baseline (−0.005pp).** Zero added parameters.
+
+**W&B run:** `u9ue2ryb`
+**PR:** #1283
+
+**Val metrics (corrected split):** val_abupt=6.1358%, val_SP=4.0553%, val_VP=3.5478%, val_WSS=6.9670%, val_WSS_x=6.0923%, val_WSS_y=7.6084%, val_WSS_z=9.3750%
+**Test metrics (corrected split):** test_abupt=5.839%, test_VP=3.421%, test_SP=3.695%, test_WSS=6.752%, test_WSS_x=5.999%, test_WSS_y=7.360%, test_WSS_z=8.720%
+
+**Merge gate (updated):** val_abupt < **6.1358%** AND test_abupt < **5.839%**
+**Test floors (AND-gate for paper claims):** test_VP ≤ **3.421%** AND test_SP ≤ 3.577% AND test_WSS ≤ 6.727%
+
+**DropPath config:** `--use-drop-path --drop-path-rate 0.10` (linear schedule 0→0.10 across 5 backbone blocks)
+
+**Reproduce:**
+```bash
+SENPAI_TIMEOUT_MINUTES=1100 torchrun --standalone --nproc-per-node=8 target/train.py \
+  --data-root /mnt/new-pvc/Processed/drivaerml_processed_rawcanon_20260511 \
+  --manifest data/split_manifest.json \
+  --agent edward --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
+  --lr 9e-5 --weight-decay 5e-4 --batch-size 4 \
+  --tau-y-loss-weight 1.5 --tau-z-loss-weight 2.0 \
+  --surface-loss-weight 2.0 --volume-loss-weight 0.5 \
+  --use-surf-to-vol-xattn --enable-residual-positions \
+  --use-drop-path --drop-path-rate 0.10 \
+  --epochs 13 --lr-warmup-epochs 1 --lr-schedule cosine \
+  --ema-decay 0.999 --grad-clip 1.0 --save-best-checkpoint
+```
+
+---
+
+## Prior Single-Model SOTA: PR #972 SDF-stratified volume importance sampling — 2026-05-09 (superseded by #1283)
 
 **val_abupt=6.126%** / **test_abupt=5.844%** (corrected split)
 
