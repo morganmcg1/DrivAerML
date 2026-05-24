@@ -1,9 +1,51 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~04:05 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~05:40 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~05:40Z (2026-05-24) — FLEET SNAPSHOT — H115 EP3 CLEARED 7.033% CANONICAL; H117 COMPOUND EP1 SLOWER THAN H120 CAPACITY (+0.71pp); H113 FERN TERMINAL ~1H AWAY
+
+**Snapshot (8/8 students working, 0 idle, no review-ready PRs, no new human messages since 18:54Z 2026-05-23):**
+
+| Slot | Step / % | Runtime | Last val | Baseline | Notes |
+|---|---:|---:|---:|---|---|
+| **H112 edward** | **MERGED SOTA** | — | val=6.1358%, test=5.839% | post-H112 | DropPath baseline |
+| H113 fern heteroscedastic | 64,955 / 91.9% | 12.28h | **val=6.386%** (+0.25pp over gate) | pre-H112 | Terminal ~1h; B PARTIAL/C NULL locked |
+| H115 thorfinn Huber SP | 33,189 / 47.0% | 4.95h | **val=7.033%** (EP3 CLEARED, -1.47pp) | pre-H112 | Canonical descent, NO H114 failure mode |
+| H116 nezuko Y-mirror | 29,747 / 42.1% | 4.40h | val=7.893% (EP2) VP elevated 5.70% | pre-H112 | EP3 publish in ~0.6h |
+| **H117 alphonse compound** | 15,257 / 21.6% | 2.32h | **val=26.434%** (EP1) | post-H112 + DropPath | +0.71pp slower than H120 EP1 |
+| H118 tanjiro slices 192 | 23,103 / 32.7% | 3.76h | val=7.884% (EP2) | pre-H112 | Canonical, on track |
+| H119 edward compound | 17,281 / 24.5% | 2.64h | pre-EP1 | post-H112 + DropPath | First publish ~step 21,729 |
+| H120 askeladd depth 6 | 12,982 / 18.4% | 2.26h | val=25.720% (EP1) | post-H112 + DropPath | Best EP1 of Wave 36+ cohort |
+| H121 frieren hidden 576 | 9,333 / 13.2% | 1.84h | pre-EP1 | post-H112 + DropPath | First publish ~step 10,864 (imminent) |
+
+**H115 EP3 publish CLEARED** (val 7.033%, gate <8.5%, cleared by -1.47pp): Huber loss curvature mechanism does NOT replicate H114's spurious-attractor failure mode. Strategic lesson confirmed — SAFE-class loss-form interventions (curvature only, preserves relative per-point weighting) descend canonically.
+
+**H117 compound EP1 SIGNAL (first):** val 26.434% at step ~10,864 vs H120 depth-scaling EP1 of 25.720% — compound (signed-sqrt SP × DropPath) is descending **+0.71pp slower** than pure capacity scaling (depth 6 × DropPath). Both on same post-H112+DropPath baseline so direct comparison valid. Early signal that signed-sqrt SP target reshape may have a slower early-cosine, will become diagnostic at EP3 (step 32,594).
+
+**Wave 35 cohort EP3 status (pre-H112 baseline, gate <8.5%):**
+- H114 panel-area: KILLED at EP3 (val 11.77%, +3.27pp over)
+- H115 thorfinn Huber: **CLEARED** EP3 at 7.033% (canonical)
+- H116 nezuko Y-mirror: EP3 publish ~0.6h, projected ~7.5% based on slope
+- H118 tanjiro slices-192 (Wave 36+): EP3 publish ~0.4h, projected ~7.0% based on EP2 slope
+
+**Next decision points:**
+1. **H113 fern terminal ~1h** — close as B PARTIAL/C NULL, then reassign fern from backlog (H122-H126)
+2. **H121 frieren EP1 publish imminent** (~0.5h) — first capacity-width cohort signal
+3. **H118 tanjiro EP3 publish** (~0.4h) — slice scaling vs Huber/Y-mirror comparison at first tight gate
+4. **H116 nezuko EP3** (~0.6h) — VP elevation resolution check (5.702% at EP2)
+5. **H119 edward EP1** (~0.8h) — compound DropPath × decoder-width first signal
+
+**Open hypothesis backlog** (for fern's next assignment after H113 terminal):
+- **H122**: Compound H121 width × H120 depth (if BOTH show promise at EP3 — backbone capacity sweep)
+- **H123**: WSS-specific tangent-frame projection decoder head (WSS plateau attack, separate from SP)
+- **H124**: SP CHANNEL-SPECIFIC LOSS WEIGHTING (separate `--sp-loss-weight 4.0` flag) — direct surgical attack
+- **H125**: Multi-scale slice attention (slices at 32+128+256 resolutions combined)
+- **H126**: SDF-conditioned volume cross-attention (volume-decoder uses SDF as auxiliary key)
+
+Will draft a fresh hypothesis when H113 terminates.
 
 ## ~04:05Z (2026-05-24) — FLEET SNAPSHOT — 9 ACTIVE RUNS HEALTHY; H121 FRIEREN LAUNCHED; H113 FERN APPROACHING TERMINAL
 
