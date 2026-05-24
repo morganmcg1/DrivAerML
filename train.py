@@ -104,6 +104,8 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_aux_log_magnitude_head: bool = False
+    aux_log_magnitude_loss_weight: float = 0.1
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -238,6 +240,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_aux_log_magnitude_head": (
+            "H-B (PR #1307): enable an auxiliary log-magnitude prediction "
+            "head on the surface decoder. The head is a 2-layer MLP "
+            "(n_hidden -> n_hidden//2 -> 1) supervised by MSE on "
+            "log(1 + ||tau||) per surface point, weighted by "
+            "--aux-log-magnitude-loss-weight. Non-destructive: final "
+            "linear is initialised with std=1e-3 so aux gradients ramp "
+            "in smoothly and the primary 4-channel decoder is unchanged "
+            "at step 0. Hypothesis: decouples magnitude from direction "
+            "for the shared backbone features, helping WSS_z disproportionately."
+        ),
+        "aux_log_magnitude_loss_weight": (
+            "H-B (PR #1307): scalar weight on the auxiliary log-magnitude "
+            "loss term added to the total training loss. Default 0.1 is "
+            "small enough to keep the primary decoder gradient dominant. "
+            "Unused unless --use-aux-log-magnitude-head is set."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -318,6 +337,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_aux_log_magnitude_head=config.use_aux_log_magnitude_head,
     )
 
 
@@ -331,6 +351,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    aux_log_magnitude_loss_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -356,13 +377,33 @@ def train_loss(
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+        aux_log_mag_loss: torch.Tensor | None = None
+        if aux_log_magnitude_loss_weight > 0.0 and "aux_log_mag" in out:
+            # H-B (PR #1307): auxiliary log-magnitude head loss.
+            # Target = log(1 + ||tau||) in NORMALISED tau space (matches
+            # how the primary surface loss is computed). The decoupling
+            # thesis is on shared backbone features, so the operating
+            # space is the normalised regression space.
+            tau_target = surface_target[..., 1:4]
+            log_mag_target = torch.log1p(torch.norm(tau_target, dim=-1, keepdim=True))
+            aux_log_mag_loss = masked_mse(
+                out["aux_log_mag"], log_mag_target, batch.surface_mask
+            )
+            loss = loss + aux_log_magnitude_loss_weight * aux_log_mag_loss
+    metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if aux_log_mag_loss is not None:
+        aux_loss_value = float(aux_log_mag_loss.detach().cpu().item())
+        metrics["aux_log_mag_loss"] = aux_loss_value
+        metrics["aux_log_mag_loss_weighted"] = (
+            aux_log_magnitude_loss_weight * aux_loss_value
+        )
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -905,6 +946,24 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"DropPath (H112): per-block schedule "
                         f"(attn=mlp) = {drop_path_schedule}"
                     )
+            wandb.summary["aux_log_magnitude_head/enabled"] = bool(
+                config.use_aux_log_magnitude_head
+            )
+            wandb.summary["aux_log_magnitude_head/loss_weight"] = (
+                config.aux_log_magnitude_loss_weight
+                if config.use_aux_log_magnitude_head
+                else 0.0
+            )
+            if config.use_aux_log_magnitude_head:
+                aux_head = getattr(base_model, "aux_log_mag_head", None)
+                if aux_head is not None:
+                    aux_params = sum(p.numel() for p in aux_head.parameters())
+                    wandb.summary["aux_log_magnitude_head/n_params"] = aux_params
+                    print(
+                        f"H-B aux log-magnitude head enabled: "
+                        f"{aux_params:,d} params, "
+                        f"loss_weight={config.aux_log_magnitude_loss_weight}"
+                    )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -1052,6 +1111,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        aux_log_magnitude_loss_weight=(
+                            config.aux_log_magnitude_loss_weight
+                            if config.use_aux_log_magnitude_head
+                            else 0.0
+                        ),
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1092,6 +1156,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "aux_log_mag_loss" in batch_loss_metrics:
+                        train_log["train/aux_log_mag_loss"] = batch_loss_metrics[
+                            "aux_log_mag_loss"
+                        ]
+                        train_log["train/aux_log_mag_loss_weighted"] = batch_loss_metrics[
+                            "aux_log_mag_loss_weighted"
+                        ]
+                        train_log["train/aux_log_magnitude_loss_weight"] = (
+                            config.aux_log_magnitude_loss_weight
+                        )
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

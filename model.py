@@ -419,6 +419,7 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_aux_log_magnitude_head: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +435,7 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_aux_log_magnitude_head = use_aux_log_magnitude_head
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -537,6 +539,23 @@ class SurfaceTransolver(nn.Module):
         else:
             self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        # H-B (PR #1307): auxiliary log-magnitude head on WSS.
+        # Parallel 1-channel head predicts log(1 + ||tau||) per surface point;
+        # supervised by a separate aux loss term in train.py. Non-destructive:
+        # final linear initialised with small std so aux gradients ramp in
+        # smoothly without perturbing primary decoder at step 0.
+        if use_aux_log_magnitude_head:
+            self.aux_log_mag_head = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden // 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden // 2, 1),
+            )
+            self.aux_log_mag_head.apply(_init_linear)
+            nn.init.normal_(self.aux_log_mag_head[-1].weight, std=1e-3)
+            nn.init.zeros_(self.aux_log_mag_head[-1].bias)
+        else:
+            self.aux_log_mag_head = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -662,9 +681,20 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            if self.aux_log_mag_head is not None:
+                aux_log_mag = (
+                    self.aux_log_mag_head(surface_hidden) * surface_mask.unsqueeze(-1)
+                )
+            else:
+                aux_log_mag = None
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
+            aux_log_mag = (
+                volume_hidden.new_zeros(batch_size, 0, 1)
+                if self.aux_log_mag_head is not None
+                else None
+            )
 
         if volume_x is not None:
             volume_preds = self.volume_out(volume_hidden) * volume_mask.unsqueeze(-1)
@@ -672,10 +702,13 @@ class SurfaceTransolver(nn.Module):
             batch_size = surface_x.shape[0]
             volume_preds = surface_hidden.new_zeros(batch_size, 0, self.volume_output_dim)
 
-        return {
+        out: dict[str, torch.Tensor] = {
             "surface_preds": surface_preds,
             "volume_preds": volume_preds,
             "hidden": hidden,
             "surface_hidden": surface_hidden,
             "volume_hidden": volume_hidden,
         }
+        if aux_log_mag is not None:
+            out["aux_log_mag"] = aux_log_mag
+        return out
