@@ -38,6 +38,7 @@ from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
     TargetTransform,
+    apply_sp_signed_power_forward,
     autocast_context,
     build_lr_scheduler,
     check_kill_thresholds,
@@ -104,6 +105,8 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_signed_power_transform_sp: bool = False
+    signed_power_transform_p: float = 0.5
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -238,6 +241,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_signed_power_transform_sp": (
+            "H117: apply y' = sign(y) * |y|^p to the surface_pressure (SP) "
+            "channel of the standard-normalized surface target before the "
+            "training loss, and invert SP predictions at eval before "
+            "computing the published *_axis_mean_rel_l2_pct metrics. "
+            "Strictly monotone, sign-preserving, invertible. Compresses the "
+            "heavy-tail mass before MSE applies and amplifies the bulk-gradient "
+            "signal at small |y|. Zero added parameters. Applies only to the "
+            "SP (channel 0) of surface_y; tau_x/tau_y/tau_z and volume_pressure "
+            "are untouched."
+        ),
+        "signed_power_transform_p": (
+            "H117: power exponent for the signed power transform on SP "
+            "targets. Default 0.5 (signed sqrt). Predictions are inverted "
+            "at eval with y_hat = sign(y_hat') * |y_hat'|^(1/p)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -331,10 +350,16 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    use_signed_power_transform_sp: bool = False,
+    signed_power_transform_p: float = 0.5,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if use_signed_power_transform_sp:
+        surface_target = apply_sp_signed_power_forward(
+            surface_target, signed_power_transform_p
+        )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -374,6 +399,9 @@ def per_task_train_losses(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    *,
+    use_signed_power_transform_sp: bool = False,
+    signed_power_transform_p: float = 0.5,
 ) -> list[torch.Tensor]:
     """Compute the 5 per-axis task losses used by GradNorm.
 
@@ -386,6 +414,10 @@ def per_task_train_losses(
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    if use_signed_power_transform_sp:
+        surface_target = apply_sp_signed_power_forward(
+            surface_target, signed_power_transform_p
+        )
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -905,6 +937,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                         f"DropPath (H112): per-block schedule "
                         f"(attn=mlp) = {drop_path_schedule}"
                     )
+            wandb.summary["h117/use_signed_power_transform_sp"] = float(
+                config.use_signed_power_transform_sp
+            )
+            wandb.summary["h117/signed_power_transform_p"] = float(
+                config.signed_power_transform_p
+            )
 
         best_val = float("inf")
         best_metrics: dict[str, float] = {}
@@ -961,7 +999,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                 gradnorm_metrics: dict[str, float] = {}
                 if balancer is not None:
                     per_task_losses = per_task_train_losses(
-                        model, batch, transform, device, config.amp_mode
+                        model,
+                        batch,
+                        transform,
+                        device,
+                        config.amp_mode,
+                        use_signed_power_transform_sp=config.use_signed_power_transform_sp,
+                        signed_power_transform_p=config.signed_power_transform_p,
                     )
                     synced_losses = synced_per_task_tensor(
                         [t.detach() for t in per_task_losses], state=state, device=device
@@ -1052,6 +1096,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        use_signed_power_transform_sp=config.use_signed_power_transform_sp,
+                        signed_power_transform_p=config.signed_power_transform_p,
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1255,6 +1301,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                         device,
                         amp_mode=config.amp_mode,
                         distributed_state=state,
+                        use_signed_power_transform_sp=config.use_signed_power_transform_sp,
+                        signed_power_transform_p=config.signed_power_transform_p,
                     )
                     for name, loader in val_loaders.items()
                 }
@@ -1269,6 +1317,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                     device,
                     amp_mode=config.amp_mode,
                     distributed_state=state,
+                    use_signed_power_transform_sp=config.use_signed_power_transform_sp,
+                    signed_power_transform_p=config.signed_power_transform_p,
                 )
                 for name, loader in val_loaders.items()
             }

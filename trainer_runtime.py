@@ -165,6 +165,35 @@ class StridedDistributedSampler(Sampler[int]):
         return (len(self.dataset) - 1 - self.rank) // self.num_replicas + 1
 
 
+def signed_power_transform(y: torch.Tensor, p: float) -> torch.Tensor:
+    """H117 forward transform: y' = sign(y) * |y|^p, sign-preserving and invertible."""
+    return torch.sign(y) * torch.abs(y).pow(p)
+
+
+def signed_power_inverse(y_transformed: torch.Tensor, p: float) -> torch.Tensor:
+    """H117 inverse transform: y = sign(y') * |y'|^(1/p). Computed in float32 for stability."""
+    return torch.sign(y_transformed) * torch.abs(y_transformed).pow(1.0 / p)
+
+
+def apply_sp_signed_power_forward(surface_target_norm: torch.Tensor, p: float) -> torch.Tensor:
+    """In-place style: returns a tensor where channel 0 (SP) is signed-power transformed.
+
+    Always promotes through float32 for the SP channel to avoid precision loss in pow().
+    """
+    sp = surface_target_norm[..., 0:1]
+    sp_t = signed_power_transform(sp.float(), p).to(surface_target_norm.dtype)
+    other = surface_target_norm[..., 1:]
+    return torch.cat([sp_t, other], dim=-1)
+
+
+def apply_sp_signed_power_inverse(surface_pred_norm: torch.Tensor, p: float) -> torch.Tensor:
+    """Invert the SP channel (channel 0) of model output; other channels untouched."""
+    sp_t = surface_pred_norm[..., 0:1]
+    sp = signed_power_inverse(sp_t.float(), p).to(surface_pred_norm.dtype)
+    other = surface_pred_norm[..., 1:]
+    return torch.cat([sp, other], dim=-1)
+
+
 class TargetTransform:
     def __init__(
         self,
@@ -960,6 +989,8 @@ def accumulate_eval_batch(
     transform: TargetTransform,
     device: torch.device,
     amp_mode: str,
+    use_signed_power_transform_sp: bool = False,
+    signed_power_transform_p: float = 0.5,
 ) -> None:
     batch = batch.to(device)
     surface_target_norm = transform.apply_surface(batch.surface_y)
@@ -974,6 +1005,10 @@ def accumulate_eval_batch(
         )
     surface_pred_norm = out["surface_preds"].float()
     volume_pred_norm = out["volume_preds"].float()
+    if use_signed_power_transform_sp:
+        surface_pred_norm = apply_sp_signed_power_inverse(
+            surface_pred_norm, signed_power_transform_p
+        )
     surface_sse, surface_count = _masked_sse_count(surface_pred_norm, surface_target_norm, batch.surface_mask)
     volume_sse, volume_count = _masked_sse_count(volume_pred_norm, volume_target_norm, batch.volume_mask)
     accumulator.surface_loss_sse += surface_sse
@@ -1126,6 +1161,8 @@ def evaluate_split(
     *,
     amp_mode: str = "none",
     distributed_state: DistributedState | None = None,
+    use_signed_power_transform_sp: bool = False,
+    signed_power_transform_p: float = 0.5,
 ) -> dict[str, float]:
     model.eval()
     accumulator = EvalAccumulator()
@@ -1137,6 +1174,8 @@ def evaluate_split(
             transform=transform,
             device=device,
             amp_mode=amp_mode,
+            use_signed_power_transform_sp=use_signed_power_transform_sp,
+            signed_power_transform_p=signed_power_transform_p,
         )
     if distributed_state is not None and distributed_state.enabled:
         gathered: list[EvalAccumulator | None] = [None for _ in range(distributed_state.world_size)]
@@ -1471,7 +1510,15 @@ def run_final_evaluation(
     )
 
     full_val_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_signed_power_transform_sp=getattr(config, "use_signed_power_transform_sp", False),
+            signed_power_transform_p=getattr(config, "signed_power_transform_p", 0.5),
+        )
         for name, loader in final_val_loaders.items()
     }
     full_val_log: dict[str, object] = {
@@ -1491,7 +1538,15 @@ def run_final_evaluation(
     print_metrics("full_val", full_val_metrics["val_surface"])
 
     test_metrics = {
-        name: evaluate_split(model, loader, transform, device, amp_mode=config.amp_mode)
+        name: evaluate_split(
+            model,
+            loader,
+            transform,
+            device,
+            amp_mode=config.amp_mode,
+            use_signed_power_transform_sp=getattr(config, "use_signed_power_transform_sp", False),
+            signed_power_transform_p=getattr(config, "signed_power_transform_p", 0.5),
+        )
         for name, loader in final_test_loaders.items()
     }
     test_log: dict[str, object] = {
