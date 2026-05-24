@@ -1,9 +1,70 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~02:45 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~03:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~03:15Z (2026-05-24) — H111 CLOSED B PARTIAL (γ-DEPTH PATTERN ENGAGED, NARROW test_VP CROSS, 21st SP PLATEAU); ASKELADD REASSIGNED H120 BACKBONE DEPTH 5→6 — THIRD ORTHOGONAL CAPACITY AXIS (DEPTH × SLICES × DECODER-WIDTH COMPOUND)
+
+**H111 askeladd CLOSED (PR #1282, do not merge):**
+- val_abupt **6.3282%** MISS gate by **+0.202pp** — too large to merge despite mechanism engagement
+- test_VP **3.6218%** CROSS floor by **−0.021pp** (narrowest cross of program) → B PARTIAL
+- test_WSS_z **8.9468%** ≈ TIE canonical (+0.002pp vs projected −0.39pp)
+- test_SP 3.7873% MISS floor by +0.210pp — **21st CONSECUTIVE SP PLATEAU CONFIRMATION**
+- test_abupt 5.984% +0.140pp vs canonical 5.844%
+
+**γ-engagement diagnostic — LayerScale FIRMLY ENGAGED, NOT a no-op:**
+- γ_mlp monotonic depth-amplification: block 0 mean 0.95 → block 4 mean **1.40** (40% amplification of late-MLP residuals)
+- γ_attn uniformly suppressed: all 5 blocks mean ~0.85 (attention residuals universally damped)
+- Some block-0 γ_attn channels partial-gated to 0.37 — no full pruning anywhere
+- Mechanism produced the cleanest depth-pattern diagnostic of any Wave 33+34 mechanism BUT the shallowest test_VP cross — **mechanism engagement ≠ test improvement**
+
+**🔥 DEFINITIVE COHORT VERDICT ON REGULARIZATION ARM (LOCKED):**
+
+| Mechanism | Params | val_abupt | test_abupt | test_VP cross | Verdict |
+|---|---:|---:|---:|---:|---|
+| **H112 DropPath (stochastic)** | **0** | **6.1358%** | **5.839%** | **−0.222pp** | **A WIN MERGED** |
+| **H111 LayerScale (deterministic)** | **+5K** | **6.3282%** | **5.984%** | **−0.021pp** | **B PARTIAL CLOSED** |
+
+**Stochastic residual diversity (DropPath, 0 params) DOMINATES deterministic per-channel γ (LayerScale, +5K params) on DrivAerML.** Cohort crossed at step 38,030 and H112's lead widened monotonically.
+
+**Strategic implication**: regularization arm of Wave 33+34 is now fully characterized — stochastic wins, deterministic per-channel γ is at best B PARTIAL. H111+H112 compound (LayerScale + DropPath) is a logged but lower-priority follow-up since H119 (DropPath × decoder-width, edward in flight) already tests orthogonal mechanism-class compound first.
+
+**H120 ASSIGNED to askeladd (PR #1296, draft):**
+- **BACKBONE DEPTH 5→6 LAYERS** (`--model-layers 6`, +3.2M params, ~+18% wallclock)
+- Third orthogonal probe of Wave 36+ capacity-scaling frontier alongside H118 slices (granularity) and H119 decoder compound (width)
+- Tests whether **sequential transformation depth** was the SP-plateau bottleneck
+- Three capacity axes now in flight or queued:
+  - **H118 tanjiro**: slices 128→192 (slice-attention granularity, +164K, ~+12% wallclock)
+  - **H119 edward**: compound DropPath × surface_out 512→1024 (decoder capacity × regularization, +266K)
+  - **H120 askeladd**: layers 5→6 (sequential depth, +3.2M, ~+18% wallclock) ← **third axis**
+- **Pre-launch concern**: VRAM may exceed 96GB H100 limit — gradient checkpointing or batch-size reduction likely required; PR body includes smoke-test instructions before full launch
+- Rebase onto current `tay` (post-H112 merge) + include `--drop-path-max 0.10` so H120 tests depth-scaling ON TOP of MERGED SOTA
+
+**H117 alphonse PR #1292 rebase guidance posted:**
+- Alphonse's pre-H112-merge launch command lacked `--drop-path-max 0.10`
+- Posted comment: rebase onto current `tay`, add `--drop-path-max 0.10`, keep `--volume-loss-weight 0.5` (matches H110/H111 cohort recipe; BASELINE.md's 1.0 was older)
+- H117 now tests **signed-sqrt SP target transform ON TOP of H112 DropPath baseline** — cleanest test of orthogonal mechanism class compound in Wave 35 sweep
+- Falsifiable: `test_SP < 3.577%` cracks the 21-confirmation plateau
+
+**3-axis Wave 36+ capacity sweep + Wave 35 4-axis data-tier sweep = the most comprehensive single-period multi-axis attack on the SP plateau in the program's history.**
+
+**Fleet status (8/8 WIP, ZERO IDLE):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| **H112 edward DropPath** | **MERGED** | **NEW SINGLE-MODEL SOTA** | val 6.1358%, test_abupt 5.839%, test_VP 3.421% |
+| H113 fern heteroscedastic | step ~47,369 val 6.506% | diagnostic locked | weak B PARTIAL or C NULL |
+| H114 frieren panel-area SP | step 15,992 val 16.55% | 22.6% in flight | Wave 35 data-tier (loss reweighting) |
+| H115 thorfinn Huber SP | step 16,018 (14.7%) | healthy, just-launched | Wave 35 data-tier (loss curvature) |
+| H116 nezuko Y-mirror | step 12,089 (11.1%) | healthy, EP1 pending | Wave 35 data-tier (sample augmentation) |
+| H117 alphonse signed-sqrt SP | PR #1292 rebase posted | pre-launch | Wave 35 data-tier (target distribution) |
+| H118 tanjiro slices 128→192 | step 7,179 (6.6%) | early, LR low (warmup expected) | Wave 36 capacity (slice granularity) |
+| **H119 edward compound** | **draft PR #1295** | newly assigned | Compound: DropPath × surface_out width-2× |
+| **H120 askeladd backbone depth** | **draft PR #1296** | **just assigned** | Wave 36 capacity (sequential depth) |
+
+**Total: 9 hypothesis slots, 8 students, 0 idle. H112 MERGED, all 8 student GPUs running or just-assigned.**
 
 ## 🔥🔥🔥🔥🔥 ~02:45Z (2026-05-24) — **H112 MERGED — NEW SINGLE-MODEL SOTA (ZERO PARAMS); EDWARD REASSIGNED H119 COMPOUND H112+H102 (REGULARIZATION × DECODER-CAPACITY)**
 

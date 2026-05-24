@@ -1,3 +1,79 @@
+## 2026-05-24 ~03:15 — PR #1282: H111 LAYERSCALE-IN-BACKBONE (askeladd, **CLOSED B PARTIAL**) — narrow test_VP cross −0.021pp; γ-depth pattern firmly engaged (γ_mlp 0.95→1.40 monotonic) but stochastic regularization dominated cohort head-to-head; 21st SP plateau confirmation
+
+- **Branch**: `askeladd/h111-layerscale-in-backbone` (CLOSED, not merged)
+- **W&B run**: `z7ip68eo`, 13 epochs (terminal), runtime 14.8h, throughput ~1.75 steps/s (~5-9% below canonical due to γ broadcast overhead)
+- **Hypothesis**: CaiT-style learnable per-channel scale γ on backbone residuals (γ_attn, γ_mlp per block, init=1.0). +5,120 params total (5K = 2 × 512 × 5).
+
+### Terminal results
+
+| Channel | Validation | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.3282%** (+0.202pp above val gate 6.126%) | 5.9840% | 5.844% | +0.140pp MISS |
+| surface_pressure | 4.171% | 3.7873% | 3.577 (floor) | **+0.210pp MISS floor — 21st plateau** |
+| **volume_pressure** | 3.7444% | **3.6218%** | 3.643 (floor) | **−0.021pp CROSS (narrow)** ✓ |
+| wall_shear | 7.1608% | 6.8749% | 6.727 (floor) | +0.148pp MISS |
+| **wall_shear_z** | 9.7208% | **8.9468%** | 8.945 (canonical) | +0.002pp ≈ TIE |
+| wall_shear_x | 6.0866% | — | — | — |
+| wall_shear_y | 7.4775% | — | — | — |
+
+### γ-engagement diagnostic — LayerScale FIRMLY ENGAGED (no-op falsified)
+
+| Block | γ_attn mean (init=1.0 → terminal) | γ_mlp mean (init=1.0 → terminal) |
+|---|---:|---:|
+| 0 (shallowest) | **0.7740** (range [0.371, 1.164]) | **0.9469** (range [0.696, 1.179]) |
+| 1 | 0.8380 | 1.0550 |
+| 2 | 0.8456 | 1.2255 |
+| 3 | 0.8705 | 1.3388 |
+| 4 (deepest) | 0.8492 | **1.3990** (range [1.037, **1.926**], std 0.186) |
+
+- **γ_mlp monotonic depth-amplification**: 0.95 (block 0) → 1.40 (block 4) — optimizer found late-block MLP residuals need amplification, early-block MLP need dampening
+- **γ_attn uniformly suppressed** across all 5 blocks (mean ~0.85) — attention residuals are universally damped
+- **Partial gating** (not full pruning) — some block-0 γ_attn channels dropped to 0.37
+- γ-as-no-op outcome **firmly FALSIFIED** — +5K params doing real per-channel depth-dependent work
+
+### Why B PARTIAL not merged
+
+- val gate MISS by +0.202pp — too large to merge
+- BUT narrow test_VP cross is real (−0.021pp) → B PARTIAL classification (per program convention: at least one test floor crossed cleanly)
+- test_WSS_z effectively tied canonical (+0.002pp vs projected −0.39pp) — γ mechanism stalled on tangential variance
+
+### Cohort head-to-head verdict (DEFINITIVE on regularization arm)
+
+| Mechanism | Params | Val | test_abupt | test_VP cross | Verdict |
+|---|---:|---:|---:|---:|---|
+| **H112 DropPath** | **0** | **6.1358%** | **5.839%** | **−0.222pp** | **A WIN MERGED** |
+| **H111 LayerScale** | **+5K** | **6.3282%** | **5.984%** | **−0.021pp** | **B PARTIAL CLOSED** |
+
+**Stochastic regularization (DropPath, 0 params, zero engineering) DOMINATES deterministic per-channel γ (LayerScale, +5K params, well-engineered) on DrivAerML.** The cohort crossed at step 38,030 and H112's lead widened monotonically to terminal (+0.18pp+).
+
+### Mechanism characterization (LOCKED for retrospective)
+
+- LayerScale γ engages richly but deterministically per-channel; once optimizer fixes γ values, further gains require structural changes
+- DropPath introduces stochastic residual diversity in late cosine that γ cannot replicate
+- DrivAerML rewards **residual-path diversity** over **per-channel residual rescaling**
+- Mechanism engagement diagnostic (γ depth pattern) ≠ test improvement — γ pattern was the best of any Wave 33+34 mechanism, but produced the shallowest test_VP cross
+
+### Suggested follow-ups (logged but lower-priority given H112 dominance)
+
+1. γ init=1e-4 (CaiT recipe) — γ grows from zero, may engage residuals more selectively
+2. **H111+H112 LayerScale+DropPath compound** — stochastic + deterministic, +5K params, different mechanism classes
+3. γ_mlp only (drop γ_attn) — cuts 5K → 2.5K, isolates productive mechanism
+4. Block-0 γ_attn collapse investigation — Lion weight-decay interaction?
+
+### Strategic implication
+
+- **Regularization arm of Wave 33+34 is fully characterized**: stochastic wins (DropPath A WIN MERGED), deterministic per-channel γ is B PARTIAL territory
+- 21st SP plateau confirmation — Wave 35 data-tier (H114-H117) + Wave 36 capacity-scaling (H118 slices, H119 compound, H120 depth) is the comprehensive multi-axis attack
+
+### NEXT ASSIGNMENT — H120 BACKBONE DEPTH 5→6 (askeladd)
+
+- **Branch**: `askeladd/h120-backbone-depth-6`, DRAFT PR #1296
+- **Hypothesis**: +1 backbone layer (~+3.2M params, ~+18% wallclock) — third orthogonal capacity-scaling axis. Tests whether sequential representational DEPTH was the bottleneck (vs H118 slice GRANULARITY, vs H119 decoder WIDTH compound)
+- **Pre-launch concern**: VRAM may exceed 96GB H100 limit — gradient checkpointing or batch-size reduction may be required. PR body includes the smoke-test instructions
+- Rebase onto current `tay` (post-H112 merge) and include `--drop-path-max 0.10` so H120 tests depth-scaling ON TOP of MERGED SOTA, not against pre-H112 baseline
+
+---
+
 ## 2026-05-24 ~02:45 — PR #1283: H112 STOCHASTIC-DEPTH-IN-BACKBONE DropPath (edward, **MERGED — NEW SINGLE-MODEL SOTA**) — A WIN at ZERO ADDED PARAMS; deepest test_VP cross of program (−0.222pp); deepest test_WSS_z of program (−0.225pp); test_abupt 5.839% beats prior canonical 5.844%
 
 - **Branch**: `edward/h112-stochastic-depth-in-backbone` (**MERGED** into tay at ~02:40Z 2026-05-24)
