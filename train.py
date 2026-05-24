@@ -103,6 +103,7 @@ class Config:
     pos_encoding_mode: str = "sincos"
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
+    use_layer_scale: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -229,6 +230,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "at init (preserves baseline at epoch 0). embed_dim follows "
             "--model-hidden-dim and num_heads follows --model-heads."
         ),
+        "use_layer_scale": (
+            "H111: Add learnable per-channel gamma scalars to both residual "
+            "branches of each TransformerBlock (CaiT-style LayerScale, "
+            "Touvron et al. 2021). Init at 1.0 so the model is identity to "
+            "the canonical residual at step 0; optimizer can drive each "
+            "channel up (amplify) or down (suppress / prune) under weight "
+            "decay. Param cost: 2 * hidden_dim * n_layers."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -276,6 +285,35 @@ def parse_rff_init_sigmas(spec: str) -> list[float] | None:
     return sigmas
 
 
+def collect_layer_scale_metrics(model: nn.Module) -> dict[str, float]:
+    """H111: per-block gamma stats for the LayerScale residual rescalers.
+
+    Returns mean, std, min, max for each block's gamma_attn and gamma_mlp,
+    plus a fraction-near-zero diagnostic (|gamma|<0.05) per channel vector.
+    Returns empty dict when LayerScale is disabled or the backbone is absent.
+    """
+    backbone = getattr(model, "backbone", None)
+    if backbone is None:
+        return {}
+    blocks = getattr(backbone, "blocks", None)
+    if blocks is None:
+        return {}
+    metrics: dict[str, float] = {}
+    for i, blk in enumerate(blocks):
+        for tag in ("gamma_attn", "gamma_mlp"):
+            gamma = getattr(blk, tag, None)
+            if gamma is None:
+                continue
+            g = gamma.detach().float()
+            prefix = f"layer_scale/block{i}_{tag}"
+            metrics[f"{prefix}_mean"] = float(g.mean().item())
+            metrics[f"{prefix}_std"] = float(g.std().item())
+            metrics[f"{prefix}_min"] = float(g.min().item())
+            metrics[f"{prefix}_max"] = float(g.max().item())
+            metrics[f"{prefix}_frac_near_zero"] = float((g.abs() < 0.05).float().mean().item())
+    return metrics
+
+
 def collect_string_sep_metrics(model: nn.Module) -> dict[str, float]:
     metrics: dict[str, float] = {}
     for attr in ("surface_string_sep", "volume_string_sep"):
@@ -308,6 +346,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_layer_scale=config.use_layer_scale,
     )
 
 
@@ -1262,6 +1301,17 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
                 log_metrics.update(collect_string_sep_metrics(base_model))
+                log_metrics.update(collect_layer_scale_metrics(base_model))
+                if getattr(base_model, "use_layer_scale", False):
+                    ls_blocks = getattr(getattr(base_model, "backbone", None), "blocks", [])
+                    for i, blk in enumerate(ls_blocks):
+                        for tag in ("gamma_attn", "gamma_mlp"):
+                            gamma = getattr(blk, tag, None)
+                            if gamma is None:
+                                continue
+                            log_metrics[f"layer_scale_hist/block{i}_{tag}"] = wandb.Histogram(
+                                gamma.detach().float().cpu().numpy()
+                            )
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,

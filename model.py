@@ -303,6 +303,7 @@ class TransformerBlock(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_layer_scale: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -316,12 +317,26 @@ class TransformerBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        if use_layer_scale:
+            # H111: per-channel learnable residual rescaling (CaiT, Touvron et al. 2021).
+            # Init at 1.0 so the block is an exact identity to the canonical residual at step 0.
+            self.gamma_attn = nn.Parameter(torch.ones(hidden_dim))
+            self.gamma_mlp = nn.Parameter(torch.ones(hidden_dim))
+        else:
+            self.gamma_attn = None
+            self.gamma_mlp = None
 
     def forward(self, x: torch.Tensor, attn_mask: torch.Tensor | None = None) -> torch.Tensor:
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.attention(self.norm1(x), attn_mask=attn_mask)
+        attn_out = self.attention(self.norm1(x), attn_mask=attn_mask)
+        if self.gamma_attn is not None:
+            attn_out = attn_out * self.gamma_attn
+        x = x + attn_out
         x = _apply_token_mask(x, attn_mask)
-        x = x + self.mlp(self.norm2(x))
+        mlp_out = self.mlp(self.norm2(x))
+        if self.gamma_mlp is not None:
+            mlp_out = mlp_out * self.gamma_mlp
+        x = x + mlp_out
         x = _apply_token_mask(x, attn_mask)
         return x
 
@@ -336,6 +351,7 @@ class Transformer(nn.Module):
         num_slices: int,
         dropout: float = 0.0,
         use_qk_norm: bool = False,
+        use_layer_scale: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -347,6 +363,7 @@ class Transformer(nn.Module):
                     num_slices=num_slices,
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
+                    use_layer_scale=use_layer_scale,
                 )
                 for _ in range(depth)
             ]
@@ -382,6 +399,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_layer_scale: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -396,6 +414,7 @@ class SurfaceTransolver(nn.Module):
         self.use_qk_norm = use_qk_norm
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
+        self.use_layer_scale = use_layer_scale
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -472,6 +491,7 @@ class SurfaceTransolver(nn.Module):
             num_slices=slice_num,
             dropout=dropout,
             use_qk_norm=use_qk_norm,
+            use_layer_scale=use_layer_scale,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
