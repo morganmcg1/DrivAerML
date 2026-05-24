@@ -1,3 +1,58 @@
+## 2026-05-24 ~01:00 — PR #1279: H109 BACKBONE-SKIP RESIDUAL DECODER (alphonse, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.060pp) + 3rd-best WSS_z improvement (−0.709pp); val gate MISS +0.115pp; **18TH consecutive SP plateau confirmation**; pre-backbone-embedding-reach-to-decoder mechanism characterized; ordering at +263K class locked: **WIDTH (H102) > parallel-MLP (H108) > pre-backbone-bypass (H109)** — post-backbone bypass beats pre-backbone bypass at matched cost
+
+- **Branch**: `alphonse/h109-backbone-skip-residual-decoder` (closed at ~01:00Z 2026-05-24)
+- **W&B run**: `77tfuj6i`, 13 epochs completed (terminal), runtime ~14h
+- **Hypothesis**: Zero-init `Linear(512, 512)` projection of pre-backbone embedded surface tokens (post-`surface_in`, post-RFF/STRING, post-`surface_bias`, post-placeholder add) added as residual to post-backbone `surface_hidden` BEFORE `surface_out`. Gives decoder a 1-hop shortcut to ALL pre-backbone abstractions. +262,656 params.
+
+### Terminal results
+
+| Channel | Validation (terminal) | Test | Canonical/Floor | Δ test vs canonical |
+|---|---:|---:|---:|---:|
+| **abupt_axis_mean** | **6.2414%** ❌ | **6.0949%** | 5.844% | **+0.251pp MISS gate +0.115pp** |
+| surface_pressure | 4.065% | 3.780% | 3.577 (floor) | **+0.203pp MISS floor — 18th plateau confirmation** |
+| **volume_pressure** | 3.604% | **3.583%** | 3.643 (floor) | **−0.060pp CROSS floor** ✓ |
+| wall_shear | 7.147% | 7.106% | 6.727 (goal) | +0.379pp MISS goal |
+| wall_shear_x | 6.320% | 6.373% | — | +0.543pp regress |
+| wall_shear_y | 7.699% | 7.617% | — | +0.517pp regress |
+| **wall_shear_z** | 9.518% | **9.121%** | 9.83 (canonical) | **−0.709pp strong improvement** ✓ |
+
+- B PARTIAL via test_VP cross + WSS_z improvement (dual signature shared with H107/H108).
+- val→test slopes ALL negative or near-zero → no val-overfit signature.
+
+### Mechanism class — "pre-backbone-embedding-reach-to-decoder" characterized
+
+H109 implements a learnable bypass channel from the pre-backbone surface token embedding directly to the decoder via a full-hidden-dim residual projection. Unlike H101 (positions, +1.5K) or H105/H106 (small-add, +2K), this is at FULL HIDDEN DIM giving the decoder a 1-hop shortcut to all encoded geometry abstractions.
+
+Mechanism ordering at +263K class (post-H102 / H108 / H109 comparison):
+
+| Run | Mechanism | val_abupt | test_WSS_z |
+|---|---|---:|---:|
+| H102 tanjiro (MERGED) | surface_out width 1×→2× | **6.124%** | TBD |
+| H108 nezuko | parallel-MLP on surface_out | 6.164% | **8.857%** |
+| H109 alphonse (this) | pre-backbone-embedding bypass | 6.241% | 9.121% |
+
+**Conclusion**: at matched +263K cost, **width > post-backbone bypass > pre-backbone bypass**. The pre-backbone bypass has to traverse the full encoder representation distance, while H108's parallel-MLP operated directly on the already-decoded post-backbone state.
+
+### Strategic implications
+
+1. **DO NOT MERGE** — val_abupt 6.241% > 6.126% gate by +0.115pp.
+2. **18 consecutive SP plateau confirmations** locked in across the entire +260K-class decoder cohort.
+3. Wave 35 4-axis data-tier sweep now complete in flight:
+   - H114 frieren: panel-area-weighted SP loss (loss reweighting)
+   - H115 thorfinn: Huber loss on SP (loss curvature)
+   - H116 nezuko: Y-mirror augmentation (sample distribution)
+   - **H117 alphonse: signed-sqrt SP targets (target distribution) — NEW ASSIGNMENT**
+4. Suggested "H109-narrow" (normals-only bypass) DEFERRED to Wave 36+.
+
+### NEXT ASSIGNMENT — H117 SIGNED POWER TRANSFORM ON SP TARGETS (alphonse)
+
+- **Branch**: `alphonse/h117-sp-target-signed-power-transform`, DRAFT PR #1292
+- **Hypothesis**: Apply `y' = sign(y) * |y|^0.5` (signed-sqrt) to SP targets after normalization; compresses heavy-tail mass before MSE applies; invert predictions at eval. Zero params, pure target reshape.
+- **Falsifiable**: if `test_SP < 3.577%` plateau cracked → target distribution shape was bottleneck. If NULL + H114/H115/H116 NULL → **definitive Bayes-optimal hardness evidence** for SP plateau; Wave 36 should pivot to capacity scaling.
+- **Why orthogonal to H115**: Huber bends the *loss* into L1 at large residuals; H117 bends the *target* into compressed scale where L2 acts more uniformly. Mathematically dual.
+
+---
+
 ## 2026-05-24 ~00:30 — PR #1278: H108 SURFACE-OUT-PARALLEL-MLP-RESIDUAL-DECODER (nezuko, CLOSED) — **B PARTIAL** via clean test_VP cross (−0.060pp); val gate MISS +0.038pp (**NARROWEST non-compound miss of cohort**); test_WSS_z 8.857% improves canonical by −0.97pp; **STRONGEST FALSIFIABLE NEGATIVE OF WAVE 33: WIDTH > DIVERSITY at matched +265K** (H102 6.124% beats H108 6.164% by +0.040pp); 17th SP plateau confirmation; "delayed-engagement" mechanism signature characterized
 
 - **Branch**: `nezuko/h108-surface-out-parallel-mlp-residual-decoder` (closed at ~00:30Z 2026-05-24)

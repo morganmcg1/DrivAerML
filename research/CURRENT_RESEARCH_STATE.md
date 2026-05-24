@@ -1,11 +1,57 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~00:30 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~01:00 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
 
-## 🔥🔥🔥 ~00:30Z (2026-05-24) — **H108 CLOSED B PARTIAL (NARROWEST NON-COMPOUND MISS; WIDTH>DIVERSITY FALSIFIED); NEZUKO REASSIGNED H116 Y-MIRROR — THIRD ORTHOGONAL PLATEAU PROTOCOL DATA-TIER INTERVENTION**
+## 🔥🔥🔥 ~01:00Z (2026-05-24) — **H109 CLOSED B PARTIAL (18TH SP PLATEAU); ALPHONSE REASSIGNED H117 SIGNED-SQRT SP TARGETS — FOURTH AND FINAL AXIS OF WAVE 35 DATA-TIER SWEEP COMPLETE**
+
+**H109 alphonse CLOSED (PR #1279, do not merge):**
+- val_abupt 6.241% MISS gate by **+0.115pp** — middling miss of the +260K-class cohort (worse than H107 +0.065pp, H108 +0.038pp; better than H106 +0.124pp)
+- test_VP 3.583% **CROSS floor** by −0.060pp (matches H108 depth exactly) → B PARTIAL
+- test_WSS_z 9.121% improves canonical 9.83% by **−0.709pp** — solid 3rd-best WSS_z of cohort
+- 18th consecutive SP plateau confirmation (test_SP 3.780%)
+- val→test slopes ALL negative or near-zero → genuine generalizer (no val-overfit signature)
+- Pre-backbone-embedding-reach-to-decoder mechanism characterized: zero-init `Linear(512, 512)` projection of pre-backbone embedded surface tokens added as residual to post-backbone `surface_hidden` before `surface_out`. +262,656 params (matches H107 +262K).
+- **+263K class mechanism ordering LOCKED**: width (H102 6.124%) > parallel-MLP (H108 6.164%) > pre-backbone-bypass (H109 6.241%) — post-backbone bypass beats pre-backbone bypass at matched cost; pre-backbone bypass has to traverse the full encoder representation distance while H108's parallel-MLP operated directly on the already-decoded post-backbone state
+
+**H117 ASSIGNED to alphonse (PR #1292, draft):**
+- **SIGNED POWER TRANSFORM ON SP TARGETS** — fourth and final orthogonal Plateau Protocol data-tier intervention (target distribution axis), completing the comprehensive Wave 35 4-axis sweep
+- Apply `y' = sign(y) * |y|^0.5` (signed-sqrt) to SP targets after standard normalization; invert predictions at evaluation time; strictly monotone, invertible, sign-preserving
+- Compresses heavy-tail mass before MSE applies (sqrt-compressed scale at large |y|), amplifies bulk gradient signal at small |y|
+- **Zero added parameters** — pure target reshape
+- **Mathematically dual to H115 Huber**: Huber bends the *loss function* into L1 at large residuals; H117 bends the *target distribution* into compressed scale where L2 acts more uniformly. Orthogonal in mechanism even if both target the same plateau.
+- **Falsifiable**: if `test_SP < 3.577%`, target distribution shape was the bottleneck. If H114/H115/H116/H117 ALL NULL → **definitive Bayes-optimal hardness conclusion** for SP plateau; Wave 36+ should pivot to capacity scaling (deeper backbone, more slices, larger hidden) rather than further data-tier interventions.
+- Literature: Yeo & Johnson 2000 (signed Box-Cox-style power transforms); Brimicombe 2017 (geostatistics review for heavy-tailed pressure fields). 5-20% reported improvement on heavy-tailed regression in geophysics/meteorology literature.
+
+**Wave 35 4-AXIS DATA-TIER SWEEP — COMPREHENSIVE PROBE STAGED:**
+
+| Axis | Hypothesis | Mechanism | Run | PR |
+|---|---|---|---|---|
+| 1: per-point loss reweighting | H114 frieren | panel-area-weighted SP MSE | in flight | #1289 |
+| 2: per-point loss curvature | H115 thorfinn | Huber loss on SP (δ=1.0) | in flight | #1290 |
+| 3: sample distribution | H116 nezuko | Y-mirror augmentation (p=0.5) | in flight | #1291 |
+| **4: target distribution shape** | **H117 alphonse** | **signed-sqrt SP targets** | **just assigned** | **#1292** |
+
+**The combined NULL outcome is the most strategically important possible result of Wave 35.** It locks in Bayes-optimal hardness interpretation and forces Wave 36+ to pivot to capacity scaling.
+
+**Fleet status (8/8 WIP, ZERO IDLE):**
+
+| Slot | Run | Status | Trajectory |
+|---|---|---|---|
+| H110 tanjiro compound | step 62,492 val 6.142% | 8,163 steps remaining | **A WIN AT EDGE** |
+| H111 askeladd LayerScale | step 63,185 val 6.350% | ~7,479 steps remaining | B PARTIAL via test_VP cross LOCKED |
+| H112 edward DropPath | step 59,772 val 6.202% | 10,884 steps remaining | **A WIN PROBABLE** zero params |
+| H113 fern heteroscedastic | step ~47,369 val 6.506% | diagnostic locked | weak B PARTIAL or C NULL |
+| H114 frieren panel-area SP | draft PR #1289 | assigned | Plateau Protocol data-tier (loss reweighting) |
+| H115 thorfinn Huber SP | draft PR #1290 | assigned | Plateau Protocol data-tier (loss curvature) |
+| H116 nezuko Y-mirror | draft PR #1291 | assigned | Plateau Protocol data-tier (sample augmentation) |
+| **H117 alphonse signed-sqrt SP** | **draft PR #1292** | **just assigned** | **Plateau Protocol data-tier (target distribution)** |
+
+**Wave 35 4-axis data-tier sweep is now COMPLETE. The fleet is staged for the most decisive single-wave probe of the program: ZERO PARAMS across all 4 axes, comprehensive coverage of the data-tier intervention space.**
+
+## ~00:30Z (2026-05-24) — H108 CLOSED B PARTIAL (NARROWEST NON-COMPOUND MISS; WIDTH>DIVERSITY FALSIFIED); NEZUKO REASSIGNED H116 Y-MIRROR — THIRD ORTHOGONAL PLATEAU PROTOCOL DATA-TIER INTERVENTION
 
 **H108 nezuko CLOSED (PR #1278, do not merge):**
 - val_abupt 6.164% MISS gate by **+0.038pp — NARROWEST non-compound miss of cohort** (beating H107's +0.065pp)
