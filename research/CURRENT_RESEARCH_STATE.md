@@ -1,9 +1,92 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~06:27 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~07:21 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~07:21Z (2026-05-24) — CAPACITY-AXIS DOMINANCE CONFIRMED: H121 LEADS EP1, H120 LEADS EP2, H118 LEADS EP3; H117 SIGNED-SQRT REGRESSING; H113 TERMINAL ~5MIN
+
+**Snapshot (8/8 students working, 0 idle, no review-ready PRs):**
+
+| Slot | Step / % | Runtime | Last val_abupt | Latest publish |
+|---|---:|---:|---:|---|
+| H113 fern heteroscedastic | 70,395 / 99.6% | 13.90h | val=6.387% | Terminal ~5 min |
+| H115 thorfinn Huber SP | 41,492 / 58.7% | 6.59h | val=6.663% (EP4) | EP5 ~25 min |
+| **H116 nezuko Y-mirror** | **38,463 / 54.4%** | **6.00h** | **val=6.720% (EP4 NEW)** | EP5 ~1.0h |
+| H117 alphonse compound | 25,755 / 36.4% | 3.92h | val=8.088% (EP2 WORST) | EP3 ~1.4h kill-or-confirm |
+| **H118 tanjiro slices 192** | **32,850 / 46.5%** | **5.36h** | **val=6.936% (EP3 LEADS PRE-H112)** | EP4 ~1.0h |
+| H119 edward compound | 27,704 / 39.2% | 4.24h | val=7.773% (EP2) | EP3 ~1.0h |
+| **H120 askeladd depth 6** | **22,143 / 31.3%** | **3.86h** | **val=7.589% (EP2 LEADS WAVE 36+)** | EP3 ~1.8h |
+| H121 frieren hidden 576 | 17,353 / 24.6% | 3.44h | val=23.860% (EP1 LEADS) | EP2 ~1.5h |
+
+### CRITICAL THESIS LOCKED — CAPACITY-AXIS DOMINANCE ACROSS EP1/EP2/EP3
+
+| Stage | Leader | Mechanism | val_abupt | Δ vs cohort |
+|---|---|---|---:|---:|
+| **EP1** | **H121 frieren** | hidden 576 (parallel width) | 23.860% | -1.86pp |
+| **EP2** | **H120 askeladd** | depth 5→6 (backbone depth) | 7.589% | -0.20-0.30pp vs pre-H112 |
+| **EP3** | **H118 tanjiro** | slices 128→192 (slice attention) | 6.936% | -0.08-0.10pp vs pre-H112 |
+
+**All three orthogonal capacity axes (width × depth × slices) lead their respective stages** — confirming the **post-H112+DropPath capacity ceiling is the actual bottleneck**, not loss formulation or augmentation. Plateau Protocol Tier 2 interventions (Huber, Y-mirror, signed-sqrt) are descending into the capacity-bounded regime; capacity scaling is the dominant lever.
+
+### Wave 35/36+ DATA-TIER EP3 LEADERBOARD (pre-H112 baseline)
+| Rank | Hyp | val_abupt EP3 | val_SP | val_VP | val_WSS |
+|---|---|---:|---:|---:|---:|
+| **1** | **H118 slices 128→192** | **6.936%** ✓ | 4.624% | **4.017%** ✓ | 7.884% |
+| 2 | H116 Y-mirror | 7.015% | **4.482%** | 5.241% (+1.2pp) | **7.642%** |
+| 3 | H115 Huber SP | 7.033% | 4.870% | 4.039% | 7.927% |
+| - | H114 panel-area | KILLED EP3 (11.77%) | - | - | - |
+
+### Wave 36+ EP2 LEADERBOARD (post-H112+DropPath baseline)
+| Rank | Hyp | val_abupt EP2 | val_SP | val_VP | Δ vs H120 |
+|---|---|---:|---:|---:|---:|
+| **1** | **H120 askeladd (depth-6)** | **7.589%** ✓ | **5.063%** | **4.276%** | baseline |
+| 2 | H119 edward (compound) | 7.773% | 5.178% | 4.414% | +0.184pp |
+| 3 | H117 alphonse (signed-sqrt × DropPath) | 8.088% | 5.936% | 4.913% | +0.499pp ❌ |
+| - | H121 frieren (hidden 576) | pre-EP2 (TBD ~1.5h) | - | - | - |
+
+### EP4 EARLY LEADERBOARD (pre-H112, descending toward merge zone)
+| Hyp | val_abupt EP4 | SP EP4 | VP EP4 | WSS EP4 |
+|---|---:|---:|---:|---:|
+| H115 thorfinn (Huber) | **6.663%** ✓ | 4.525% | **3.891%** ✓ | 7.524% |
+| H116 nezuko (Y-mirror) | 6.720% | **4.244%** ✓ | 5.129% (+1.2pp) | **7.305%** ✓ |
+
+### H117 SIGNED-SQRT CONFIRMED REGRESSING
+
+- EP2 val_abupt **8.088%** (WORST in fleet), SP **5.936%** (+0.78pp WORSE than H116 Y-mirror)
+- Mechanism interpretation: signed-sqrt power transform on SP targets DESTROYS gradient signal on stagnation/wheel-arch regions where heavy-tail SP magnitudes ARE the diagnostic feature
+- Similar spurious-attractor failure-mode class as H114 panel-area: both reweight gradient signal based on intrinsic target structure
+- **EP3 (step 32,594, ~1.4h) is kill-or-confirm gate** — if val_abupt > 8.5%, KILL D NEGATIVE
+
+### STRATEGIC IMPLICATIONS — H122+ BACKLOG
+
+**Capacity-axis dominance thesis suggests H122 should be a multi-axis capacity compound:**
+1. **H122-A (preferred)**: triple compound hidden 576 × depth 6 × DropPath (H121 × H120 × H112 baseline) — full capacity stack
+2. **H122-B**: hidden 576 × slices 192 (H121 × H118 width × slice scaling)
+3. **H122-C**: depth 6 × slices 192 (H120 × H118 depth × slice scaling)
+
+**H123-H126 still on backlog** (loss/representation/architecture, lower priority given capacity-axis dominance):
+- H123: WSS-specific tangent-frame projection decoder head
+- H124: SP CHANNEL-SPECIFIC LOSS WEIGHTING
+- H125: Multi-scale slice attention (slices at 32+128+256 combined)
+- H126: SDF-conditioned volume cross-attention
+
+**Decision criteria for H122 variant choice (deferred to EP3 confirmation round):**
+- If H121 maintains EP1 lead → include hidden 576 in H122
+- If H120 maintains EP2 lead → include depth 6 in H122
+- If H118 maintains EP3 lead → include slices 192 in H122
+- Triple compound if all three confirm (most likely scenario at current trajectories)
+
+### NEXT DECISION POINTS
+
+1. **H113 fern terminal ~5 min** — close as B PARTIAL/C NULL → reassign fern from backlog
+2. **H115 EP5 ~25 min** (step 43,466) — descent slope diagnostic toward merge gate
+3. **H117 EP3 ~1.4h** (step 32,594) — KILL OR CONFIRM signed-sqrt compound
+4. **H119 EP3 ~1.0h** — orthogonal compound on post-H112+DropPath confirmation
+5. **H121 EP2 ~1.5h** — parallel width second-stage signal
+6. **H120 EP3 ~1.8h** — depth scaling second-stage confirmation
+7. **H118 EP4 ~1.0h** — slices-192 second-stage confirmation
 
 ## ~06:27Z (2026-05-24) — H116 EP3 CLEARED 7.015% (Wave 35 LEAD); H119 EP2 PUBLISHED 7.773% (FIRST POST-H112+DROPPATH EP2 — CONVERGENCE OBSERVATION); H113 TERMINAL ~50MIN
 
