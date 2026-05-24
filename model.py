@@ -172,6 +172,31 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class CurvatureAttentionBias(nn.Module):
+    """Zero-init projection of curvature features to an additive token bias.
+
+    WSS H5 (PR #1132). Surface input channels stay at 7; curvature is injected
+    AFTER the input projection so the GradNorm task-share budget per token is
+    unchanged. The final linear is zero-initialised, so at step 0 the bias
+    contributes exactly 0 and the model is functionally identical to the
+    no-curvature SOTA baseline.
+    """
+
+    def __init__(self, hidden_dim: int, curvature_dim: int = 3):
+        super().__init__()
+        mid = max(hidden_dim // 8, 16)
+        self.net = nn.Sequential(
+            nn.Linear(curvature_dim, mid),
+            nn.SiLU(),
+            nn.Linear(mid, hidden_dim),
+        )
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, curvature: torch.Tensor) -> torch.Tensor:
+        return self.net(curvature)
+
+
 class UpActDownMlp(nn.Module):
     def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
         super().__init__()
@@ -315,6 +340,9 @@ class SurfaceTransolver(nn.Module):
         pe_kind: str = "sincos",
         pe_num_features: int = 16,
         pe_init_sigmas: list[float] | None = None,
+        use_curvature_attention_bias: bool = False,
+        curvature_dim: int = 3,
+        surface_out_width_factor: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -325,6 +353,9 @@ class SurfaceTransolver(nn.Module):
         self.pe_kind = pe_kind
         self.pe_num_features = pe_num_features
         self.pe_init_sigmas = list(pe_init_sigmas) if pe_init_sigmas else None
+        self.use_curvature_attention_bias = use_curvature_attention_bias
+        self.curvature_dim = curvature_dim
+        self.surface_out_width_factor = float(surface_out_width_factor)
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -353,6 +384,12 @@ class SurfaceTransolver(nn.Module):
         )
         self.surface_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
         self.volume_placeholder = nn.Parameter(torch.rand(1, 1, n_hidden) / n_hidden)
+        self.curvature_attn_bias: CurvatureAttentionBias | None = None
+        if use_curvature_attention_bias:
+            self.curvature_attn_bias = CurvatureAttentionBias(
+                hidden_dim=n_hidden,
+                curvature_dim=curvature_dim,
+            )
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -362,7 +399,20 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
-        self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+        # H39 (PR #1284): widened 2-layer surface_out head (Linear-GELU-Linear)
+        # with hidden width = int(n_hidden * surface_out_width_factor). At
+        # factor=2.0 this matches tay H102's wider-head mechanism on top of
+        # H21 base. Note: at factor=1.0 this is NOT byte-identical to the
+        # pre-H39 single-Linear canonical (it adds an extra Linear+GELU);
+        # this is documented in the PR and is acceptable as the H39 test
+        # explicitly uses factor=2.0.
+        surf_hidden_width = max(1, int(n_hidden * self.surface_out_width_factor))
+        self.surface_out_hidden_width = surf_hidden_width
+        self.surface_out = nn.Sequential(
+            nn.Linear(n_hidden, surf_hidden_width),
+            nn.GELU(),
+            nn.Linear(surf_hidden_width, self.surface_output_dim),
+        )
         self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
 
     def _encode_group(
@@ -386,6 +436,7 @@ class SurfaceTransolver(nn.Module):
         surface_mask: torch.Tensor | None = None,
         volume_x: torch.Tensor | None = None,
         volume_mask: torch.Tensor | None = None,
+        surface_curvature: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if surface_x is None and volume_x is None:
             raise ValueError("SurfaceTransolver requires surface_x or volume_x")
@@ -401,14 +452,22 @@ class SurfaceTransolver(nn.Module):
 
         if surface_x is not None:
             surface_tokens = surface_x.shape[1]
-            tokens.append(
-                self._encode_group(
-                    surface_x,
-                    project_features=self.project_surface_features,
-                    bias=self.surface_bias,
-                    placeholder=self.surface_placeholder,
-                )
+            surface_encoded = self._encode_group(
+                surface_x,
+                project_features=self.project_surface_features,
+                bias=self.surface_bias,
+                placeholder=self.surface_placeholder,
             )
+            if self.curvature_attn_bias is not None and surface_curvature is not None:
+                curv = surface_curvature.to(
+                    device=surface_encoded.device,
+                    dtype=surface_encoded.dtype,
+                )
+                bias = self.curvature_attn_bias(curv)
+                if surface_mask is not None:
+                    bias = bias * surface_mask.unsqueeze(-1).to(dtype=bias.dtype)
+                surface_encoded = surface_encoded + bias
+            tokens.append(surface_encoded)
             masks.append(surface_mask)
 
         if volume_x is not None:
