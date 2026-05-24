@@ -1,3 +1,44 @@
+## 2026-05-24 ~17:15 — PR #1293: H118 SLICE-COUNT 128→192 (tanjiro, **CLOSED C NULL** — slice-axis capacity exhausted at 13ep budget; **CAPACITY-AXIS ORDERING depth > hidden > slices LOCKED**)
+
+- **Branch**: `tanjiro/h118-model-slices-128-to-192` (CLOSED, not merged)
+- **W&B run**: `tdmo2i9h`
+- **Hypothesis**: slice count 128→192 → finer surface feature partition in stagnation regions → test_SP and test_WSS_z improve.
+
+### Terminal metrics (run tdmo2i9h, EMA EP11 best)
+
+| Metric | H118 | H112 baseline / #972 | Δ | Floor / Gate | Verdict |
+|---|---:|---:|---:|---|---|
+| val_abupt | **6.394%** | 6.126% | +0.268pp | gate 6.1358% | ❌ A WIN missed |
+| test_abupt | 6.143% | 5.839% | +0.304pp | merge gate 5.839% | ❌ regression |
+| **test_WSS** | **7.127%** | 6.752% (H112) | **+0.400pp** | floor 6.727% | ❌ MISS primary objective |
+| test_WSS_x | 6.357% | 5.83% (#972) | +0.527pp | — | ❌ regression |
+| test_WSS_y | 7.666% | 7.10% (#972) | +0.566pp | — | ❌ regression |
+| **test_WSS_z** | **9.220%** | 9.83% (#972) | **−0.610pp** | — | ✓ ONLY directional positive |
+| test_VP | 3.600% | 3.643% floor | −0.043pp | floor 3.643% | ✓ CROSSES (incidental) |
+| test_SP | 3.872% | 3.577% floor | +0.295pp | floor 3.577% | ❌ MISS — **18th SP plateau confirmation** |
+
+### Pinned diagnostic (student)
+
+EP2 lead → EP3 reversal → uniform regression. Slice-resolution warmup advantage burns off in early cosine; extra slices need MORE gradient steps than 13ep budget provides. Param cost +60K (cheap), throughput cost +5-7% (within prediction).
+
+### Strategic class verdict — capacity-axis ordering LOCKED
+
+Combined with H120 depth-6 (val_abupt 6.089% at 88.2%, leading fleet) and H121 hidden-576 (6.249% at 76.6%, still descending):
+
+**depth > hidden_dim > slices** at 13ep budget.
+
+Future capacity-axis attacks compound depth + hidden, NOT slice expansion. Slice reduction to 64 deferred (counter-test of bottleneck hypothesis, low priority).
+
+### Banked niche observation
+
+H118's lone **test_WSS_z improvement (−0.610pp vs #972 SOTA)** suggests slice attention has a specific tau_z relationship distinct from slice-axis capacity effects. Possible mechanism: more slices = finer partition of horizontal panels (roof/floor where tau_z dominates) → improved spatial discrimination for vertical WSS. **Niche, not load-bearing** — overall test_WSS still regressed +0.400pp. Not pursuing unless a future hypothesis specifically targets the tau_z-slice-panel-orientation interaction.
+
+### Successor experiment
+
+tanjiro → H127 (Wider Surface Output Decoder STANDALONE, PR #1305) — cross-track validation of dl24-H39's test_WSS 6.6506% finding, filling the missing clean standalone data point (H119 edward currently testing the COMPOUND with DropPath, anti-additive late-cosine).
+
+---
+
 ## 2026-05-24 ~16:10 — PR #1291: H116 Y-MIRROR DATA AUG (nezuko, **CLOSED C NULL** — inverse val→test on test_WSS, MAJOR test_VP regression; **DATA-AUG TIER FIRST CLEAN FALSIFICATION ON DRIVAERML**)
 
 - **Branch**: `nezuko/h116-y-mirror-augmentation` (CLOSED, not merged)

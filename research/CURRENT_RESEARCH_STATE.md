@@ -1,9 +1,64 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~16:10 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~17:15 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~17:15Z (2026-05-24) — H118 CLOSED C NULL (SLICE-AXIS EXHAUSTED), H127 ASSIGNED TO TANJIRO (WIDER SURFACE DECODER STANDALONE — CROSS-TRACK VALIDATION)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H118 tanjiro (slice count 128→192) CLOSED C NULL — PR #1293
+
+Terminal run `tdmo2i9h`, EMA EP11 (best):
+- val_abupt **6.394%** (+0.268pp gate miss)
+- test_abupt 6.143% (+0.299pp regression)
+- **test_WSS 7.127%** (+0.400pp regression on primary objective)
+- test_WSS_x 6.357% (+0.527pp), test_WSS_y 7.666% (+0.566pp)
+- test_WSS_z **9.220% (−0.610pp vs #972 SOTA)** — lone directional positive
+- test_VP **3.600% (−0.043pp ✓ CROSSES floor)** — incidental, not hypothesized axis
+- test_SP 3.872% (+0.295pp — **18th plateau confirmation**)
+
+**Pinned diagnostic** (student): EP2 lead (−3.24pp val_abupt warmup) → complete EP3 reversal (+0.22pp) → uniform +0.30pp regression. Over-parameterization at slice axis under current curriculum — extra slices need more gradient steps than 13ep budget provides.
+
+**Strategic verdict locked**: capacity-axis ordering at 13ep budget is **depth > hidden_dim > slices**. Slice-axis is OFF the active capacity-frontier. Future capacity-axis attacks should compound depth + hidden, NOT slice expansion. Slice reduction to 64 (counter-test of bottleneck hypothesis from other side) is a low-priority deferred probe.
+
+**Banked niche observation**: H118's lone test_WSS_z improvement suggests slice attention has a specific tau_z relationship distinct from slice-axis capacity effects — possible mechanism via finer partition of horizontal panels (roof/floor where tau_z dominates). Not load-bearing; banked.
+
+### H127 tanjiro (Wider Surface Output Decoder STANDALONE) ASSIGNED — PR #1305
+
+**Cross-track validation**: dl24 fleet reportedly achieved test_WSS **6.6506%** with `surface_out_width_factor=2.0` (per advisor's check-human-issues comment #96 on Issue #1056). This is ~1.5pp below our tay test_WSS 6.752% (H112). H119 edward is currently testing the COMPOUND (DropPath × wider decoder 2×) with **anti-additive late-cosine signature** — we need the STANDALONE baseline for clean attribution.
+
+**Mechanism**: surface output decoder is currently `Linear(512, 512) → SiLU → Linear(512, 4)` — symmetric hidden dim. Re-add `--surface-out-width-factor` flag, widen inner dim to `Linear(512, 1024) → SiLU → Linear(1024, 4)`. ~+264K params (17.40M → 17.66M).
+
+**Why standalone matters**: H119 anti-additive shows DropPath × wider decoder is functionally entangled in late-cosine optimization. The pure wider-decoder mechanism has NEVER been cleanly tested on tay (H102 was the Wave-33 origin but the flag was removed when merged; current model.py has hardcoded `n_hidden → n_hidden`).
+
+**Falsifiable**: test_WSS improves ≥0.05pp (target 6.6506% matching dl24-H39). Mechanism prediction: all 3 τ channels improve proportionally (no specific axis bias from uniform width change); val_SP also benefits (decoder bottleneck shared).
+
+**Decision tree post-H127**:
+- H127 succeeds (test_WSS ≤6.70%) → wider decoder is mechanism-load-bearing → compound H127 × H120 depth-6 (architecturally orthogonal: decoder × backbone capacity)
+- H127 fails → dl24-H39 cross-track signal is recipe-coupled, NOT mechanism-transferable; banks negative finding
+- H127 lands between H119 and H112 → standalone wider decoder is the dominant signal in H119 compound; DropPath component is competitive in late cosine
+
+**Code path**: `target/train.py` Config + `target/model.py:523-528` surface_out construction. ~15 lines.
+
+ETA terminal: ~07:30Z 2026-05-25.
+
+### Fleet leaderboard (refined)
+
+| Hyp | Student | Progress | val_abupt | Verdict tracking | Class |
+|---|---|---:|---:|---|---|
+| **H120 depth-6** | askeladd | 88.2% | **6.089%** | **🎯 A WIN + multi-floor B PARTIAL test_WSS** | capacity (depth) |
+| H117 signed-sqrt+DP | alphonse | 95.7% | 6.204% | MARGINAL A WIN + B PARTIAL test_WSS | regularization+SP-transform |
+| H119 compound | edward | 96.9% | 6.224% | B PARTIAL test_VP only, no A WIN, anti-additive | DropPath × wider decoder |
+| H121 hidden-576 | frieren | 76.6% | 6.249% | MARGINAL A WIN, still descending | capacity (width) |
+| H125 depth-7 | fern | 15.7% | cold-start | terminal ~07:30Z 2026-05-25 | capacity extension |
+| H-A tangent-frame | thorfinn | 10.2% | cold-start | terminal ~07:30Z 2026-05-25 | WSS-rep tier (input) |
+| H126 inverse-area | nezuko | 2.9% | cold-start | terminal ~07:30Z 2026-05-25 | WSS-sampling tier |
+| H127 wider decoder | tanjiro | 0% (NEW) | — | terminal ~07:30Z 2026-05-25 | decoder-width |
+
+**Wave 36+ portfolio at a glance**: 4 capacity-axis probes (H120 depth-6, H121 width-576, H125 depth-7, H127 decoder-2x) + 2 WSS-representation tier (H-A tangent-frame, H126 inverse-area sampling) + 1 SP-transform (H117) + 1 orthogonal compound (H119). When H120 terminals as A WIN candidate, the natural next compound is H120 × H127 (architecturally orthogonal: backbone depth × decoder width). If H-A also succeeds, triple compound H120 × H127 × H-A would test capacity + decoder + representation jointly.
 
 ## ~16:10Z (2026-05-24) — H116 CLOSED C NULL (Y-MIRROR DATA-AUG FAILED — INVERSE val→test ON test_WSS, MAJOR test_VP REGRESSION), H126 ASSIGNED TO NEZUKO (REFINED H-C SAMPLING)
 
