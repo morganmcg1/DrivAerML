@@ -1,9 +1,57 @@
 # SENPAI Research State
 
-- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~05:40 UTC)
+- **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~05:55 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
 - **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~05:55Z (2026-05-24) — FLEET SNAPSHOT — H119 EP1 25.218pct LEADS WAVE 36+ COHORT; H121 EP1 IMMINENT; H113 TERMINAL ~45MIN; STALE_WIP H121+H113 FALSE POSITIVES
+
+**Snapshot (8/8 students working, 0 idle, no review-ready PRs, no new human messages since 18:54Z 2026-05-23):**
+
+| Slot | Step / % | Runtime | Last val | Baseline | Status |
+|---|---:|---:|---:|---|---|
+| H113 fern heteroscedastic | 65,365 / 92.5% | 12.42h | val=6.391% | pre-H112 | Terminal ~45min; B PARTIAL/C NULL locked |
+| H115 thorfinn Huber SP | 34,002 / 48.1% | 5.11h | val=7.033% (EP3 CLEARED -1.47pp) | pre-H112 | Canonical descent |
+| H116 nezuko Y-mirror | 30,573 / 43.3% | 4.52h | val=7.893% (EP2) VP 5.702 elevated | pre-H112 | EP3 ~0.5h |
+| H117 alphonse compound | 16,089 / 22.8% | 2.45h | val=26.434% (EP1) | post-H112 + DropPath | +0.71pp slower vs H120 |
+| H118 tanjiro slices 192 | 23,881 / 33.8% | 3.88h | val=7.884% (EP2) | pre-H112 | Canonical |
+| **H119 edward compound** | **18,094 / 25.6%** | **2.76h** | **val=25.218% (EP1 LEADS COHORT)** | post-H112 + DropPath | -0.50pp better than H120 |
+| H120 askeladd depth 6 | 13,706 / 19.4% | 2.39h | val=25.720% (EP1) | post-H112 + DropPath | 2nd cohort |
+| H121 frieren hidden 576 | 9,969 / 14.1% | 1.96h | pre-EP1 (~10 min away) | post-H112 + DropPath | First publish imminent |
+
+**Wave 36+ capacity-scaling EP1 LEADERBOARD (post-H112+DropPath baseline, ranked by val_abupt):**
+| Rank | Hypothesis | Mechanism | val_abupt EP1 | val_SP | val_VP | Δ vs H120 |
+|---|---|---|---:|---:|---:|---:|
+| 1 | **H119 edward** | DropPath × decoder-width 1024 (orthogonal compound) | **25.218%** | 18.469% | 15.695% | **-0.50pp BEST** |
+| 2 | H120 askeladd | depth 5→6 (capacity) | 25.720% | 18.806% | 14.859% | baseline |
+| 3 | H117 alphonse | signed-sqrt SP × DropPath (compound) | 26.434% | 22.196% | 17.182% | +0.71pp slower |
+| - | H121 frieren | hidden 512→576 (parallel width) | pre-EP1 | — | — | TBD ~10 min |
+
+**Critical finding — H119 EP1 LEADS cohort:** Compound DropPath × decoder-width 1024 (regularization × decoder-capacity, **orthogonal mechanism classes**) is descending **fastest** of the post-H112 cohort. Confirms hypothesis: **orthogonal mechanism class compounds are additive** in early-cosine descent. H110 first-compound diagnostic predicted this (regularization × decoder-capacity additive, SP/VP anti-additive, WSS/WSS_z additive). H119 EP1 lower than pure-depth H120 supports the additivity finding.
+
+**Wave 35 (data-tier) status:**
+- H114 panel-area: KILLED EP3 (val 11.77%, spurious-attractor failure mode)
+- H115 thorfinn Huber SP: EP3 CLEARED 7.033% (canonical) — SAFE-class loss-form intervention confirmed
+- H116 nezuko Y-mirror: EP2 7.893%, VP elevated 5.702% (canonical ~4.5%) — EP3 critical (~0.5h)
+- H118 tanjiro slices-192 (Wave 36+): EP2 7.884% (canonical) — EP3 ~0.4h
+
+**Two stale_wip false positives this loop (H121 + H113) — both check-ins posted, runs healthy.**
+
+**Next decision points:**
+1. **H121 frieren EP1 ~10 min** — completes Wave 36+ 4-axis cohort comparison
+2. **H113 fern terminal ~45 min** — close as B PARTIAL (test_VP cross likely) / C NULL → reassign fern from backlog
+3. **H118 + H116 EP3 ~25-35 min** — Wave 35/36+ first-gate publishes
+4. Fern reassignment backlog: H122-H126 (priority TBD on H119 vs H120 vs H121 EP3 comparison)
+
+**Open hypothesis backlog** (for fern's next assignment after H113 terminal):
+- **H122**: Compound H121 width × H120 depth (if BOTH show promise at EP3 — backbone capacity sweep)
+- **H123**: WSS-specific tangent-frame projection decoder head (WSS plateau attack, separate from SP)
+- **H124**: SP CHANNEL-SPECIFIC LOSS WEIGHTING (separate `--sp-loss-weight 4.0` flag) — direct surgical attack
+- **H125**: Multi-scale slice attention (slices at 32+128+256 resolutions combined)
+- **H126**: SDF-conditioned volume cross-attention (volume-decoder uses SDF as auxiliary key)
+
+If H119 maintains its EP1 lead through EP3 and beyond, **H122 should likely be H119 compound × H120 depth (DropPath × decoder-width × depth-6, triple compound)** — testing whether the orthogonal-class additivity extends to capacity-axis stacking.
 
 ## ~05:40Z (2026-05-24) — FLEET SNAPSHOT — H115 EP3 CLEARED 7.033% CANONICAL; H117 COMPOUND EP1 SLOWER THAN H120 CAPACITY (+0.71pp); H113 FERN TERMINAL ~1H AWAY
 
