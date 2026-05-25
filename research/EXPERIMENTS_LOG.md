@@ -1,5 +1,62 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-25 21:50 — PR #1333 H143 RELAUNCHED: hyperparameter drift discovered + Wave 35 fleet-wide wd-drift cross-cut
+
+- `dl24-nezuko/h143-lookahead-lion-v2`, run `mzk2tpu7` (rank-0, 8 DDP ranks)
+- Group: `h143-lookahead-lion` (shared with killed `uih9w1sj`)
+- Hypothesis: Lookahead optimizer wrapping Lion (k=5, α=0.5; Zhang et al. 2019, arxiv 1907.08610)
+
+### What happened
+
+Student dl24-nezuko discovered at 21:29Z that the first H143 run `uih9w1sj` had silently inherited new `train.py` defaults `batch_size=2` (H39 reference: 1) and `weight_decay=0.0001` (H39 reference: 0.005), because the launch command passed neither flag explicitly. The drifted run completed EP0.5-equivalent training showing val_WSS=28.87%, val_VP=27.21%, val_SP=20.96% — not a valid Lookahead-vs-H39 datapoint.
+
+Student autonomously killed `uih9w1sj` at step 7307 and relaunched as `mzk2tpu7` with `--batch-size 1 --weight-decay 0.005` explicit. New W&B config verified to match H39 + Lookahead delta. Iter rate 4.27 it/s steady-state (~6% Lookahead overhead vs H39's 4.53 it/s). Lookahead outer-step firing verified: `[H143] #1 fired at step 5 / #2 at 10 / #3 at 15`.
+
+### Advisor verification (21:45Z)
+
+- H39 SOTA `yym5oa8x` W&B config confirmed: `batch_size=1, weight_decay=0.005, lr=1e-4, optimizer=lion`. Student's drift identification is correct.
+- New run `mzk2tpu7` config verified to match H39 exactly with `use_lookahead=True, lookahead_k=5, lookahead_alpha=0.5` as the only delta. State=running, step=4142 at 21:44Z (0.27h into corrected run). EP1 ETA ~22:14Z.
+- Advisor ACK posted to PR #1333 approving the autonomous kill-and-relaunch decision.
+
+### Cross-cut wd-drift discovered (fleet-wide)
+
+W&B audit of all 4 active dl24 Wave 35 runs reveals the same `weight_decay=0.0001` drift on three other runs that predate the discovery:
+
+| Run | PR | wd | bs | Note |
+|-----|----|----|----|------|
+| `uhf5c8md` (H134 fern GALE) | #1316 | **0.0001** ❌ | 1 ✓ | Started 18:30Z, EP2 |
+| `4m8f7rme` (H138 frieren curv-Charb-z) | #1324 | **0.0001** ❌ | 1 ✓ | Started ~13:00Z, EP12 (strongest signal) |
+| `jtyglnxu` (H140 tanjiro z-coord WSS) | #1329 | **0.0001** ❌ | 1 ✓ | Started ~18:00Z, EP5.4 |
+| `mzk2tpu7` (H143 nezuko Lookahead, relaunched) | #1333 | **0.005** ✓ | 1 ✓ | Started 21:29Z, EP0.4 |
+
+Same root cause as H143-old: PR repro commands never explicitly set `--weight-decay 0.005`, and the `train.py` default was lowered from 0.005 to 0.0001 sometime between H39 dispatch and Wave 35 launches.
+
+### Decision: continue H134/H138/H140 to terminal
+
+Killing now would waste 8.8h (H138), 3.9h (H140), 3.3h (H134) of useful mechanism data — and H138 is the strongest in-program positive signal of the entire wave (`val_WSS=6.7715%` at EP12). The drift is a confound, not a corruption: the runs are still informative about whether their intended mechanisms (curvature-weighted Charb-z, GALE persistent geometry context, z-coord WSS weighting) produce signal.
+
+Wd-drift flag posted to PR #1316/#1324/#1329 with explicit merge-time interpretation note: any terminal result that beats H39 SOTA must be re-verified with a clean H<N>-v2 follow-up `--weight-decay 0.005` to disentangle the intended mechanism from the wd axis before merge.
+
+### Memory update
+
+Added `feedback_drivaerml_weight_decay_default.md`: "Every DrivAerML PR repro command MUST include `--batch-size 1 --weight-decay 0.005` — train.py defaults drift and silently change optimizer regime." This is the second silent-default-drift incident in Wave 35 after the batch_size=2 drift documented in `feedback_drivaerml_batch_size_default.md`. Same root cause family.
+
+### Schedule for H143 `mzk2tpu7` (corrected step convention)
+
+| EP | Step | ETA | Gate |
+|----|------|-----|------|
+| 1 | 10,976 | ~22:14Z | sanity 17.40-18.40% |
+| 3 | 32,927 | ~23:30Z | hard-abort ≤7.30% |
+| 6 | 65,855 | ~02:04Z (+1d) | ≤7.00% |
+| 15 | 164,640 | ~08:25Z | ≤6.90% |
+| 30 | 329,280 | ~18:30Z | terminal |
+
+### Conclusion
+
+H143 is now the only clean (no-drift) ACTIVE experimental run in Wave 35. Mechanism is firing correctly. H138 remains the strongest in-program positive signal but its terminal-merge eligibility now hinges on a clean v2 confirmation.
+
+---
+
 ## 2026-05-25 19:20 — PR #1328 CLOSED: H141 SWA (process failure, NOT mechanism failure — see post-mortem)
 
 - `dl24-nezuko/h141-swa`, run group rank-0=`y9qf09ch` (8 DDP ranks, started 17:28Z)
