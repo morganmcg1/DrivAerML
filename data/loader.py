@@ -79,6 +79,35 @@ class PointView:
     sampling_mode: str
 
 
+def _compute_surface_curvature_weights(
+    xyz: np.ndarray, normals: np.ndarray, k: int = 8
+) -> np.ndarray:
+    """Local normal-variance curvature proxy used by ``surf_curv_stratified``.
+
+    Returns ``κ_i = mean_j(1 - dot(n̂_i, n̂_j))`` over the k nearest surface
+    neighbors of each point. κ_i is bounded in [0, 2]: 0 on flat patches,
+    growing with local angular divergence of normals. Used as an importance
+    weight for training-time surface sampling (H133).
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    n = int(xyz.shape[0])
+    if n <= k + 1:
+        return np.ones(n, dtype=np.float32)
+
+    # 3D kd_tree is materially faster than ball_tree on car surface meshes.
+    # n_jobs=2 avoids CPU contention when DDP workers compute concurrently.
+    nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="kd_tree", n_jobs=2).fit(xyz)
+    _, indices = nbrs.kneighbors(xyz)
+    neighbor_indices = indices[:, 1:]  # drop self
+    center_n = normals[:, np.newaxis, :]
+    neighbor_n = normals[neighbor_indices]
+    dots = (center_n * neighbor_n).sum(axis=-1)
+    dots = np.clip(dots, -1.0, 1.0)
+    weights = (1.0 - dots).mean(axis=-1)
+    return weights.astype(np.float32)
+
+
 @dataclass
 class SurfaceBatch:
     case_ids: list[str]
@@ -328,6 +357,31 @@ class DrivAerMLCaseStore:
         self.root = _resolve_case_root(self.manifest, override_root=root)
         self.normalizers_path = self.root / "normalizers.json"
         self._point_count_cache: dict[str, dict[str, int]] = {}
+        self._curvature_weights_cache: dict[str, np.ndarray] = {}
+
+    def curvature_weights(self, case_id: str, *, k: int = 8) -> np.ndarray:
+        cached = self._curvature_weights_cache.get(case_id)
+        if cached is not None:
+            return cached
+        case_dir = _case_dir(self.root, case_id)
+        # Prefer the on-disk precomputed normal-variance proxy. The dataset
+        # ships surface_curvature_k16.npy = mean_j(1-dot(n_i,n_j)) over k=16
+        # nearest surface neighbors, identical formulation to
+        # _compute_surface_curvature_weights at k=16 (verified bitwise-equal).
+        # Avoids the ~30s/case sklearn-NearestNeighbors compute that triggered
+        # NCCL collective timeouts on the first attempt.
+        cached_path = case_dir / "surface_curvature_k16.npy"
+        if cached_path.exists():
+            weights = np.asarray(np.load(cached_path), dtype=np.float32)
+            # surface_curvature_k16.npy contains a tiny number of negative
+            # values from FP noise (min ~-1.4e-7); clamp to non-negative.
+            weights = np.clip(weights, 0.0, None)
+        else:
+            xyz = _load_npy_rows(case_dir / "surface_xyz.npy")
+            normals = _load_npy_rows(case_dir / "surface_normals.npy")
+            weights = _compute_surface_curvature_weights(xyz, normals, k=k)
+        self._curvature_weights_cache[case_id] = weights
+        return weights
 
     def case_ids(self, split: str) -> list[str]:
         return list(self.manifest["surface_splits"][split])
@@ -367,6 +421,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         max_surface_points: int = 0,
         max_volume_points: int = 0,
         sampling_mode: str = "full",
+        surf_sampling_temp: float = 0.5,
+        surf_curv_k: int = 8,
     ):
         self.store = store or DrivAerMLCaseStore(manifest_path=manifest_path, root=root)
         self.case_ids = list(case_ids)
@@ -376,6 +432,8 @@ class DrivAerMLSurfaceDataset(Dataset):
         self.max_surface_points = max_surface_points
         self.max_volume_points = max_volume_points
         self.sampling_mode = sampling_mode
+        self.surf_sampling_temp = float(surf_sampling_temp)
+        self.surf_curv_k = int(surf_curv_k)
         self.views = self._build_views()
 
     def __len__(self) -> int:
@@ -407,6 +465,20 @@ class DrivAerMLSurfaceDataset(Dataset):
                 )
         return views
 
+    def _curvature_sample_indices(self, total: int, count: int, case_id: str) -> torch.Tensor:
+        weights = self.store.curvature_weights(case_id, k=self.surf_curv_k)
+        if weights.shape[0] != total:
+            raise ValueError(
+                f"curvature weights length {weights.shape[0]} != n_surface {total} for {case_id}"
+            )
+        # torch RNG is per-worker-seeded by DataLoader; numpy RNG is not.
+        logits = torch.from_numpy(weights).to(torch.float32) / max(self.surf_sampling_temp, 1e-6)
+        if not torch.isfinite(logits).all():
+            return torch.randint(total, (count,), dtype=torch.long).sort().values
+        probs = torch.softmax(logits, dim=0)
+        sampled = torch.multinomial(probs, num_samples=count, replacement=True)
+        return sampled.sort().values
+
     def _indices(
         self,
         total: int,
@@ -414,11 +486,16 @@ class DrivAerMLSurfaceDataset(Dataset):
         view: PointView,
         *,
         group_view_count: int,
+        flavor: str = "surface",
     ) -> torch.Tensor | None:
         if view.view_index >= group_view_count:
             return torch.empty(0, dtype=torch.long)
         if count <= 0 or total <= count:
             return None if view.view_index == 0 else torch.empty(0, dtype=torch.long)
+        if view.sampling_mode == "surf_curv_stratified":
+            if flavor == "surface":
+                return self._curvature_sample_indices(total, count, view.case_id)
+            return torch.randint(total, (count,), dtype=torch.long).sort().values
         if view.sampling_mode == "train_random":
             return torch.randint(total, (count,), dtype=torch.long).sort().values
         if view.sampling_mode == "eval_chunk":
@@ -433,12 +510,14 @@ class DrivAerMLSurfaceDataset(Dataset):
             self.max_surface_points,
             view,
             group_view_count=view.surface_view_count,
+            flavor="surface",
         )
         volume_idx = self._indices(
             counts["n_volume"],
             self.max_volume_points,
             view,
             group_view_count=view.volume_view_count,
+            flavor="volume",
         )
         case = self.store.load_case(
             view.case_id,
@@ -544,6 +623,9 @@ def load_data(
     train_volume_points: int = 40_000,
     eval_volume_points: int = 40_000,
     debug: bool = False,
+    surface_sampling: str = "train_random",
+    surf_sampling_temp: float = 0.5,
+    surf_curv_k: int = 8,
 ) -> tuple[DrivAerMLSurfaceDataset, dict[str, DrivAerMLSurfaceDataset], dict[str, DrivAerMLSurfaceDataset], dict[str, torch.Tensor]]:
     """Return train, validation, test datasets and target normalization stats."""
 
@@ -560,7 +642,13 @@ def load_data(
         train_volume_points = min(train_volume_points, 8_192)
         eval_volume_points = min(eval_volume_points, 8_192)
 
-    train_sampling = "train_random" if train_surface_points > 0 or train_volume_points > 0 else "full"
+    has_train_views = train_surface_points > 0 or train_volume_points > 0
+    if has_train_views and surface_sampling == "surf_curv_stratified":
+        train_sampling = "surf_curv_stratified"
+    elif has_train_views:
+        train_sampling = "train_random"
+    else:
+        train_sampling = "full"
     eval_sampling = "eval_chunk" if eval_surface_points > 0 or eval_volume_points > 0 else "full"
     train_ds = DrivAerMLSurfaceDataset(
         train_ids,
@@ -568,6 +656,8 @@ def load_data(
         max_surface_points=train_surface_points,
         max_volume_points=train_volume_points,
         sampling_mode=train_sampling,
+        surf_sampling_temp=surf_sampling_temp,
+        surf_curv_k=surf_curv_k,
     )
     val_splits = {
         "val_surface": DrivAerMLSurfaceDataset(

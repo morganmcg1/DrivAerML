@@ -139,6 +139,9 @@ class Config:
     gradnorm_log_clip: float = 4.0
     gradnorm_ema_beta: float = 0.9
     gradnorm_min_weight: float = 0.0
+    surface_sampling: str = "train_random"
+    surf_sampling_temp: float = 0.5
+    surf_curv_k: int = 8
     debug: bool = False
 
 
@@ -237,6 +240,26 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "the attention and MLP branches with a linear schedule from "
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
+        ),
+        "surface_sampling": (
+            "H133: Training-time surface sampling strategy. 'train_random' "
+            "(default) draws surface points uniformly at random per view. "
+            "'surf_curv_stratified' draws each point with probability "
+            "softmax(κ_i / T) where κ_i is the local normal-variance "
+            "curvature proxy over k nearest surface neighbors. Higher κ "
+            "= sharper local geometry (wheel arches, mirrors, A-pillars) "
+            "= more frequent sampling. Eval/test always use eval_chunk."
+        ),
+        "surf_sampling_temp": (
+            "H133: Temperature T for the curvature softmax in "
+            "'surf_curv_stratified'. Smaller T concentrates sampling on "
+            "high-curvature points; larger T approaches uniform. Default "
+            "0.5 gives ~2.7x weight ratio between sharpest and flat points "
+            "on car geometry (κ bounded [0, 2], practical range [0, 0.5])."
+        ),
+        "surf_curv_k": (
+            "H133: Number of nearest surface neighbors used to compute "
+            "the local normal-variance curvature proxy. Default 8."
         ),
     }
     for field in fields(Config):
@@ -684,15 +707,21 @@ def rebuild_train_loader_with_vol_points(
     """
 
     old_ds = old_train_loader.dataset
-    sampling_mode = (
-        "train_random" if (config.train_surface_points > 0 or n_points > 0) else "full"
-    )
+    has_train_views = config.train_surface_points > 0 or n_points > 0
+    if has_train_views and getattr(old_ds, "sampling_mode", "") == "surf_curv_stratified":
+        sampling_mode = "surf_curv_stratified"
+    elif has_train_views:
+        sampling_mode = "train_random"
+    else:
+        sampling_mode = "full"
     train_ds = DrivAerMLSurfaceDataset(
         old_ds.case_ids,
         store=old_ds.store,
         max_surface_points=config.train_surface_points,
         max_volume_points=n_points,
         sampling_mode=sampling_mode,
+        surf_sampling_temp=getattr(old_ds, "surf_sampling_temp", 0.5),
+        surf_curv_k=getattr(old_ds, "surf_curv_k", 8),
     )
     train_sampler = None
     train_shuffle = True

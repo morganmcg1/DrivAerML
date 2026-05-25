@@ -286,6 +286,9 @@ def make_loaders(
         train_volume_points=config.train_volume_points,
         eval_volume_points=config.eval_volume_points,
         debug=config.debug,
+        surface_sampling=getattr(config, "surface_sampling", "train_random"),
+        surf_sampling_temp=getattr(config, "surf_sampling_temp", 0.5),
+        surf_curv_k=getattr(config, "surf_curv_k", 8),
     )
     train_sampler = None
     train_shuffle = True
