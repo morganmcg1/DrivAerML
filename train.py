@@ -141,6 +141,9 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
+    use_gale_geometry_bank: bool = False
+    gale_radii: str = "0.01,0.05,0.25,1.0,2.5,5.0"
+    gale_k_neighbors: int = 32
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -285,6 +288,9 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
         surface_out_width_factor=config.surface_out_width_factor,
+        use_gale_geometry_bank=config.use_gale_geometry_bank,
+        gale_radii=[float(r) for r in config.gale_radii.split(",")],
+        gale_k_neighbors=config.gale_k_neighbors,
     )
 
 
