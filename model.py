@@ -210,7 +210,16 @@ class UpActDownMlp(nn.Module):
 
 
 class TransolverAttention(nn.Module):
-    def __init__(self, hidden_dim: int, num_heads: int, num_slices: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        num_slices: int,
+        dropout: float = 0.0,
+        use_ada_temp_slices: bool = False,
+        ada_temp_init: float = 1.0,
+        use_gumbel_softmax: bool = False,
+    ):
         super().__init__()
         if hidden_dim % num_heads != 0:
             raise ValueError("hidden_dim must be divisible by num_heads")
@@ -219,8 +228,23 @@ class TransolverAttention(nn.Module):
         self.dim_head = hidden_dim // num_heads
         self.num_slices = num_slices
         self.dropout = dropout
+        self.use_ada_temp_slices = use_ada_temp_slices
+        self.use_gumbel_softmax = use_gumbel_softmax
 
         self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
+        # H135 Ada-Temp: per-point learned softmax temperature.
+        # tau_head is zero-initialised so tau_i = tau0 at step 0 (uniform).
+        # Final tau_i is clamped to [0.1, 10.0] AFTER multiplication by tau0
+        # (PR comment had bug — clamping pre-mul allowed tau0 drift to escape
+        # the intended bound).
+        if use_ada_temp_slices:
+            self.tau_head = nn.Linear(hidden_dim, 1)
+            nn.init.zeros_(self.tau_head.weight)
+            nn.init.zeros_(self.tau_head.bias)
+            self.tau0 = nn.Parameter(torch.full((1,), float(ada_temp_init)))
+        # Diagnostic buffers populated each forward pass for W&B logging.
+        self.register_buffer("last_tau_mean", torch.zeros(()), persistent=False)
+        self.register_buffer("last_tau_std", torch.zeros(()), persistent=False)
         self.in_project_x = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_fx = LinearProjection(hidden_dim, hidden_dim)
         self.in_project_slice = LinearProjection(self.dim_head, num_slices)
@@ -232,7 +256,38 @@ class TransolverAttention(nn.Module):
         batch_size, num_tokens, _ = x.shape
         fx_mid = self.in_project_fx(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
         x_mid = self.in_project_x(x).view(batch_size, num_tokens, self.num_heads, self.dim_head).permute(0, 2, 1, 3)
-        slice_logits = self.in_project_slice(x_mid) / self.temperature
+        slice_logits_raw = self.in_project_slice(x_mid)  # [B, H, N, S]
+        if self.use_ada_temp_slices:
+            # Per-point softmax temperature: tau_i = tau0 * exp(linear(x))
+            # tau_head outputs [B, N, 1]; squeeze → [B, N]; broadcast over heads
+            # and slices via [B, 1, N, 1].
+            tau_raw = self.tau_head(x).squeeze(-1)  # [B, N]
+            tau_i = (self.tau0 * torch.exp(tau_raw)).clamp(0.1, 10.0)
+            tau_i_b = tau_i.unsqueeze(1).unsqueeze(-1)  # [B, 1, N, 1]
+            if self.use_gumbel_softmax and self.training:
+                # Compute Gumbel noise in fp32 to avoid bf16 underflow on eps.
+                with torch.amp.autocast(device_type="cuda", enabled=False):
+                    logits32 = slice_logits_raw.float()
+                    u = torch.rand_like(logits32)
+                    gumbel_noise = -torch.log(-torch.log(u + 1e-6) + 1e-6)
+                    slice_logits = (logits32 + gumbel_noise) / tau_i_b.float()
+                slice_logits = slice_logits.to(slice_logits_raw.dtype)
+            else:
+                slice_logits = slice_logits_raw / tau_i_b
+            with torch.no_grad():
+                if attn_mask is not None:
+                    m = attn_mask.to(device=tau_i.device, dtype=tau_i.dtype)
+                    denom = m.sum().clamp_min(1.0)
+                    tau_mean = (tau_i * m).sum() / denom
+                    tau_var = (((tau_i - tau_mean) ** 2) * m).sum() / denom
+                    tau_std = tau_var.clamp_min(0.0).sqrt()
+                else:
+                    tau_mean = tau_i.mean()
+                    tau_std = tau_i.std()
+                self.last_tau_mean.copy_(tau_mean.detach().float())
+                self.last_tau_std.copy_(tau_std.detach().float())
+        else:
+            slice_logits = slice_logits_raw / self.temperature
         slice_weights = F.softmax(slice_logits, dim=-1)
         if attn_mask is not None:
             slice_weights = slice_weights * attn_mask[:, None, :, None].to(
@@ -268,6 +323,9 @@ class TransformerBlock(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_ada_temp_slices: bool = False,
+        ada_temp_init: float = 1.0,
+        use_gumbel_softmax: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -277,6 +335,9 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             num_slices=num_slices,
             dropout=dropout,
+            use_ada_temp_slices=use_ada_temp_slices,
+            ada_temp_init=ada_temp_init,
+            use_gumbel_softmax=use_gumbel_softmax,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
         self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
@@ -299,6 +360,9 @@ class Transformer(nn.Module):
         mlp_expansion_factor: int | float,
         num_slices: int,
         dropout: float = 0.0,
+        use_ada_temp_slices: bool = False,
+        ada_temp_init: float = 1.0,
+        use_gumbel_softmax: bool = False,
     ):
         super().__init__()
         self.blocks = nn.ModuleList(
@@ -309,6 +373,9 @@ class Transformer(nn.Module):
                     mlp_expansion_factor=mlp_expansion_factor,
                     num_slices=num_slices,
                     dropout=dropout,
+                    use_ada_temp_slices=use_ada_temp_slices,
+                    ada_temp_init=ada_temp_init,
+                    use_gumbel_softmax=use_gumbel_softmax,
                 )
                 for _ in range(depth)
             ]
@@ -343,6 +410,9 @@ class SurfaceTransolver(nn.Module):
         use_curvature_attention_bias: bool = False,
         curvature_dim: int = 3,
         surface_out_width_factor: float = 1.0,
+        use_ada_temp_slices: bool = False,
+        ada_temp_init: float = 1.0,
+        use_gumbel_softmax: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -390,6 +460,9 @@ class SurfaceTransolver(nn.Module):
                 hidden_dim=n_hidden,
                 curvature_dim=curvature_dim,
             )
+        self.use_ada_temp_slices = use_ada_temp_slices
+        self.ada_temp_init = float(ada_temp_init)
+        self.use_gumbel_softmax = use_gumbel_softmax
         self.backbone = Transformer(
             depth=n_layers,
             hidden_dim=n_hidden,
@@ -397,6 +470,9 @@ class SurfaceTransolver(nn.Module):
             mlp_expansion_factor=mlp_ratio,
             num_slices=slice_num,
             dropout=dropout,
+            use_ada_temp_slices=use_ada_temp_slices,
+            ada_temp_init=ada_temp_init,
+            use_gumbel_softmax=use_gumbel_softmax,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         # H39 (PR #1284): widened 2-layer surface_out head (Linear-GELU-Linear)

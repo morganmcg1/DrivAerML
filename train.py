@@ -141,6 +141,10 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
+    use_ada_temp_slices: bool = False
+    ada_temp_init: float = 1.0
+    use_gumbel_softmax: bool = False
+    ada_temp_log_every: int = 250
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -285,7 +289,44 @@ def build_model(config: Config) -> SurfaceTransolver:
         pe_init_sigmas=parse_pe_init_sigmas(config.pe_init_sigmas),
         use_curvature_attention_bias=config.use_curvature_attention_bias,
         surface_out_width_factor=config.surface_out_width_factor,
+        use_ada_temp_slices=config.use_ada_temp_slices,
+        ada_temp_init=config.ada_temp_init,
+        use_gumbel_softmax=config.use_gumbel_softmax,
     )
+
+
+def collect_ada_temp_metrics(model: nn.Module) -> dict[str, float]:
+    """Read per-block tau_i mean/std diagnostic buffers populated by
+    TransolverAttention during the most recent forward pass.
+
+    Buffers are populated only when `use_ada_temp_slices=True`; otherwise the
+    zeros are skipped. Also logs the global tau0 scalar per block for drift
+    tracking.
+    """
+    base = unwrap_model(model)
+    backbone = getattr(base, "backbone", None)
+    if backbone is None:
+        return {}
+    out: dict[str, float] = {}
+    means: list[float] = []
+    stds: list[float] = []
+    for idx, block in enumerate(backbone.blocks):
+        attn = getattr(block, "attention", None)
+        if attn is None or not getattr(attn, "use_ada_temp_slices", False):
+            continue
+        m = float(attn.last_tau_mean.detach().cpu().item())
+        s = float(attn.last_tau_std.detach().cpu().item())
+        out[f"ada_temp/block_{idx}/tau_mean"] = m
+        out[f"ada_temp/block_{idx}/tau_std"] = s
+        if hasattr(attn, "tau0"):
+            out[f"ada_temp/block_{idx}/tau0"] = float(attn.tau0.detach().cpu().item())
+        means.append(m)
+        stds.append(s)
+    if means:
+        out["ada_temp/tau_mean_avg"] = float(sum(means) / len(means))
+        out["ada_temp/tau_std_avg"] = float(sum(stds) / len(stds))
+        out["ada_temp/tau_std_min"] = float(min(stds))
+    return out
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -1032,6 +1073,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                         if should_log_gradients and not skip_step
                         else {}
                     )
+                    should_log_ada_temp = (
+                        config.use_ada_temp_slices
+                        and should_log_model_telemetry
+                        and config.ada_temp_log_every > 0
+                        and global_step % config.ada_temp_log_every == 0
+                        and not skip_step
+                    )
+                    ada_temp_metrics = (
+                        collect_ada_temp_metrics(model) if should_log_ada_temp else {}
+                    )
                     if skip_step:
                         optimizer.zero_grad(set_to_none=True)
                     else:
@@ -1051,6 +1102,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                         n_batches += 1
                         train_log.update(gradient_metrics)
                         train_log.update(weight_metrics)
+                        train_log.update(ada_temp_metrics)
 
                 if skip_step:
                     nonfinite_skip_count += 1
