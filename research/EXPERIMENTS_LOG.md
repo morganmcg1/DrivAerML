@@ -25,6 +25,30 @@
 
 ---
 
+## 2026-05-25 19:51 — PR #1331 CLOSED: H142 EMA-of-weights (bad-logic kill — hypothesis conflation, never launched)
+
+- `dl24-nezuko/h142-ema-weights` — closed at 19:51:46Z by prior advisor session before any H142 run was started.
+- **Kill comment cited**: "EP3 gate KILL: val_wss=7.3179% > 7.20% threshold at step=32,927. SWA axis closed."
+- **Bad-logic conflation**: The 7.3179% datapoint came from H141 SWA's continued post-close runs (`y9qf09ch` group). H141's SWA mechanism (--swa-start 0.7) activates at EP21+; at EP3 it was running PURE H39 baseline-equivalent training that showed +0.12pp seed-variance drift vs H39 EP3 (~7.20%). H142 EMA is a fundamentally different mechanism (online Polyak averaging from EP0).
+- **Kill comment also wrongly cited H112 (tay branch) as baseline** — should have been H39 (dl24 branch). Two-layer confusion.
+- **Successor**: PR #1333 (H143 Lookahead optimizer) dispatched 19:58Z. Lookahead is UNAMBIGUOUSLY different from weight averaging (slow/fast weights with re-synchronization, Zhang et al. 2019).
+- Memory updated with `feedback_hypothesis_conflation_kills.md` to prevent recurrence of this pattern.
+
+---
+
+## 2026-05-25 19:58 — PR #1333 DISPATCHED: WSS H143 Lookahead optimizer wrapping Lion (nezuko)
+
+- `dl24-nezuko/h143-lookahead-lion` — successor to closed H142 EMA, 3rd consecutive nezuko reassignment.
+- **Hypothesis**: Lookahead optimizer (Zhang et al. 2019, arxiv 1907.08610) wrapping Lion. Slow weights θ_slow and fast weights θ_fast; every k=5 steps update θ_slow ← θ_slow + α·(θ_fast - θ_slow), then RESET θ_fast = θ_slow.
+- **Why this is fundamentally different from H141 SWA / H142 EMA**: Lookahead actively RE-SYNCHRONIZES fast weights to slow weights every k steps — this modifies the training trajectory. EMA/SWA never reset the live weights. Lookahead is a distinct optimization paradigm, not weight averaging.
+- **Mechanism**: Re-anchoring optimizer to slow-weight basin every k steps reduces late-stage Lion noise variance. Activates from step 5 (no late-EP delay).
+- **Predicted**: test_WSS 6.55-6.70%, 45-60% prob beats H39 SOTA.
+- Gates: EP1 within ±0.5pp of H39 EP1 (17.40-18.40%); EP3 hard-abort >7.30%; EP6 ≤7.00%; EP15 ≤6.90%; EP30 terminal.
+- All H39 hyperparameters preserved (depth-6, hidden-512, slices-128, surface_out f=2.0, Charb-z 0.1, GradNorm α=0.5 clamp 0.15, Lion lr 1e-4, cosine T_max=30) — only Lookahead wrapper added with k=5, alpha=0.5.
+- PR body includes EXPLICIT "DO NOT CLOSE UNDER WEIGHT-AVERAGING-AXIS-CLOSED REASONING" language to prevent another conflation-based kill.
+
+---
+
 ## 2026-05-25 19:18 — PR #1331 DISPATCHED: WSS H142 training-time EMA-of-weights (nezuko)
 
 - `dl24-nezuko/h142-ema-weights` — successor to closed H141 SWA.
