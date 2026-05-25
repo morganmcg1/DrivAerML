@@ -95,6 +95,7 @@ class Config:
     model_hidden_dim: int = 192
     model_heads: int = 3
     model_mlp_ratio: int = 4
+    use_swiglu_mlp: bool = False
     model_slices: int = 96
     model_dropout: float = 0.0
     rff_num_features: int = 0
@@ -238,6 +239,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_swiglu_mlp": (
+            "H134: Replace the GELU UpActDownMlp in each TransformerBlock "
+            "with a SwiGLU MLP (down(SiLU(gate(x)) * value(x))). Per-block "
+            "param count becomes 3 * d_model * mlp_hidden_dim (vs 2 * d * h "
+            "for GELU), so pair with --model-mlp-ratio 3 for near-parity "
+            "with the GELU mlp_ratio=4 baseline. down_proj is zero-initialised "
+            "so the residual stream is identity at step 0."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -318,6 +327,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_swiglu_mlp=config.use_swiglu_mlp,
     )
 
 
@@ -893,6 +903,8 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["model/use_swiglu_mlp"] = config.use_swiglu_mlp
+            wandb.summary["model/mlp_ratio"] = config.model_mlp_ratio
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [

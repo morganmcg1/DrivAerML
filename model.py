@@ -252,6 +252,30 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class SwiGluMlp(nn.Module):
+    """SwiGLU MLP: down_proj(SiLU(gate_proj(x)) * value_proj(x)).
+
+    Drop-in for UpActDownMlp matching its (hidden_dim, mlp_hidden_dim) signature.
+    Per-block param count is 3 * hidden_dim * mlp_hidden_dim, so use mlp_ratio=3
+    for near-parity with the GELU mlp_ratio=4 baseline (8 -> 9 d_model**2).
+    down_proj weight is zero-initialised so the residual stream is identity at
+    init, matching the safe cold-start pattern used elsewhere in this model.
+    """
+
+    def __init__(self, hidden_dim: int, mlp_hidden_dim: int):
+        super().__init__()
+        self.gate_proj = nn.Linear(hidden_dim, mlp_hidden_dim, bias=False)
+        self.value_proj = nn.Linear(hidden_dim, mlp_hidden_dim, bias=False)
+        self.down_proj = nn.Linear(mlp_hidden_dim, hidden_dim, bias=False)
+        self.act = nn.SiLU()
+        _init_linear(self.gate_proj)
+        _init_linear(self.value_proj)
+        nn.init.zeros_(self.down_proj.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down_proj(self.act(self.gate_proj(x)) * self.value_proj(x))
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -330,6 +354,7 @@ class TransformerBlock(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_prob: float = 0.0,
+        use_swiglu_mlp: bool = False,
     ):
         super().__init__()
         mlp_hidden_dim = int(math.ceil(hidden_dim * mlp_expansion_factor))
@@ -342,7 +367,10 @@ class TransformerBlock(nn.Module):
             use_qk_norm=use_qk_norm,
         )
         self.norm2 = nn.LayerNorm(hidden_dim, eps=1e-6)
-        self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        if use_swiglu_mlp:
+            self.mlp = SwiGluMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
+        else:
+            self.mlp = UpActDownMlp(hidden_dim=hidden_dim, mlp_hidden_dim=mlp_hidden_dim)
         self.drop_path_attn = DropPath(drop_path_prob)
         self.drop_path_mlp = DropPath(drop_path_prob)
 
@@ -366,6 +394,7 @@ class Transformer(nn.Module):
         dropout: float = 0.0,
         use_qk_norm: bool = False,
         drop_path_max: float = 0.0,
+        use_swiglu_mlp: bool = False,
     ):
         super().__init__()
         if depth > 1:
@@ -383,6 +412,7 @@ class Transformer(nn.Module):
                     dropout=dropout,
                     use_qk_norm=use_qk_norm,
                     drop_path_prob=drop_path_probs[i],
+                    use_swiglu_mlp=use_swiglu_mlp,
                 )
                 for i in range(depth)
             ]
@@ -419,6 +449,7 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_swiglu_mlp: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +465,7 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_swiglu_mlp = use_swiglu_mlp
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -511,6 +543,7 @@ class SurfaceTransolver(nn.Module):
             dropout=dropout,
             use_qk_norm=use_qk_norm,
             drop_path_max=drop_path_max,
+            use_swiglu_mlp=use_swiglu_mlp,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
         if use_aux_decoder_heads:
