@@ -3191,3 +3191,53 @@ Terminal results will be appended here as students post SENPAI-RESULT markers.
 - **Key insight:** Per-axis WSS decomposition reveals **tau_y=7.36% and tau_z=8.75%** dominate WSS error (tau_x=5.97%). Cross-flow shear components are the bottleneck — directly validates H1/H2 WSS hypothesis focus.
 - **Conclusion:** EMA(0.999) does not close the 0.11pp gap to SOTA on SDF α=0.25 stack. The gap likely comes from a config difference vs PR #972 (SDF monkey-patch was no-op; #972 wins from stack, not SDF). EMA is a useful training tool but not the SOTA delta source.
 - **CLOSED 2026-05-14.**
+
+## 2026-05-25 07:40 — Capacity-axis sweep wrap-up (4 closes)
+
+### PR #1298 — H117: Charbonnier on ALL 3 wss axes (x,y,z) — TERMINAL FALSIFIED
+- dl24-fern/h117-wss-charb-xyz
+- Hypothesis: extending Charbonnier sub-quadratic loss shape to all 3 wss axes (x,y,z) compounds the H41v2 y/z extension mechanism
+- Terminal results table (best-EMA EP24 checkpoint, run `jmzd8s37`):
+
+| Metric | H117 | H39 SOTA | Δ vs H39 | Floor | Status |
+|--------|------|----------|----------|-------|--------|
+| test_WSS | **6.7934** | 6.6506 | **+0.1428pp WORSE** | <6.6506 (PRIMARY) | **MISS** |
+| test_VP | 3.5967 | 3.6033 | -0.0066pp BETTER | ≤3.643 | PASS |
+| test_SP | 3.7710 | 3.6498 | +0.1212pp | ≤3.577 | BREACH +0.194 |
+| test_abupt | 5.9146 | 5.8010 | +0.1136pp | ≤5.844 | BREACH +0.071 |
+
+- Conclusion: Multi-axis Charbonnier fragments GradNorm bounded-loss budget across all 3 wss tasks, starving each axis. H39's restriction of Charb to z-axis only is precisely calibrated to GradNorm's budget structure. The hypothesis that broader Charb application would compound benefits is definitively false. **Charbonnier is fundamentally a single-axis mechanism under GradNorm.**
+
+### PR #1313 — H132: H39 + backbone depth 6→7 — EP9 EARLY CLOSED, FALSIFIED
+- dl24-frieren/h132-depth-6-to-7
+- Hypothesis: depth-7 trunk extension provides extra sequential refinement steps for z-axis (load-bearing) extraction
+- Mid-trajectory results (rank-0 run `y019u2zc`):
+
+| EP | H132 val_wss | H39 ref | Δ vs H39 |
+|----|--------------|---------|----------|
+| 1 | 17.6300 | 17.8972 | -0.267 ✅ |
+| 3 | 7.1962 | 7.2016 | -0.005 ✅ |
+| 5 | 7.0491 | 7.0129 | +0.036 (cross) |
+| 6 | 7.0562 | 6.9458 | +0.110 |
+| 9 | 6.9778 | 6.8631 | **+0.115** ⚠️ stable plateau |
+
+- Conclusion: Cold-start advantage (-0.267pp EP1) did NOT persist past EP3. Trajectory crossed zero at EP4 and stabilized at +0.10-0.12pp behind from EP6-9. Depth axis joins width-axis (H123 marginal) as falsified directions. Closed early at EP9 to save 21 EPs of compute.
+
+### PR #1314 — H133: H39 + base LR 1e-4→7e-5 — EP11 EARLY CLOSED, FALSIFIED
+- dl24-nezuko/h133-lr-7e-5
+- Hypothesis: slower LR (7e-5) produces smoother trajectory with lower terminal val_wss
+- Mid-trajectory results (rank-0 run `hxrpvb1b`):
+
+| EP | H133 val_wss | H39 ref | Δ vs H39 |
+|----|--------------|---------|----------|
+| 1 | 20.9738 | 17.8972 | +3.077 ⚠️ massive cold-start deficit |
+| 3 | 7.2874 | 7.2016 | +0.086 |
+| 7 | 7.1053 | 6.9177 | +0.188 |
+| 11 | 7.0718 | 6.8400 | **+0.232** narrowing -0.012/EP, too slow |
+
+- Conclusion: Massive cold-start deficit (+3.08pp EP1) didn't recover. Narrowing rate ~-0.012pp/EP cannot catch H39 by EP30 (would only reach ~tie). H39's LR 1e-4 is already near-optimal for the Lion + cosine + warmup config. EMA crystallizes terminal smoothness, NOT slow LR. Closed early at EP11.
+
+### Capacity-axis sweep DEFINITIVELY EXHAUSTED on H39 base — all 6 axes falsified or null
+
+Pivoting to architectural changes per Plateau Protocol.
+

@@ -132,28 +132,33 @@
 
 6. **The vol_p floor breach is now SMALL (+0.136pp on H19)** — 4× smaller than H10b. Adding clamp=0.15 on top of H19 should close the remaining gap by 3× more vol_p gradient mass.
 
-## Active Experiments (2026-05-24 23:45Z — H39 base capacity-axis sweep — all 4 GPUs busy)
+## Active Experiments (2026-05-25 07:40Z — Capacity-axis sweep EXHAUSTED — pivot to architectural changes)
 
 | Student | PR | Hypothesis | Status | Terminal ETA |
 |---------|-----|-----------|--------|--------------|
-| **dl24-fern** | **#1298** | H117: Charbonnier on ALL 3 wss axes (x,y,z) — extend H41v2 mechanism | EP21 plateau-window 7.027±0.003 (EP18-21), terminal at EP30 likely null result | ~01:30Z 2026-05-25 |
-| **dl24-tanjiro** | **#1304** | H123: H39 + backbone hidden_dim 512→640 — trunk capacity-axis probe | EP7 lead narrowing to -0.0035pp vs H39 ref ⚠️ — z-axis FIRST regression, EP10 critical decision pending | ~02:18Z 2026-05-25 (EP10 checkpoint) |
-| **dl24-frieren** | **#1313** | H132: H39 + backbone depth 6→7 — trunk DEPTH-axis probe (orthogonal to H123 width) | Pre-EP1 step 3358/10976; awaiting first val measurement ~00:00Z | ~04:30Z 2026-05-25 |
-| **dl24-nezuko** | **#1314** | H133: H39 + base LR 1e-4→7e-5 — LR-axis probe (slower convergence) | Pre-EP1 step 6395/10976; awaiting first val measurement ~23:55Z | ~04:00Z 2026-05-25 |
+| **dl24-tanjiro** | **#1304** | H123: H39 + backbone hidden_dim 512→640 — trunk WIDTH-axis probe | EP16+ stable ~+0.005-0.025pp BEHIND H39 (lead crossed zero EP8) — marginal NULL, continuing to terminal for documentation | ~10:00Z 2026-05-25 |
+| **dl24-fern** | TBD | (idle — new arch assignment pending researcher-agent) | Awaiting new hypothesis | — |
+| **dl24-frieren** | TBD | (idle — new arch assignment pending) | Awaiting new hypothesis | — |
+| **dl24-nezuko** | TBD | (idle — new arch assignment pending) | Awaiting new hypothesis | — |
 
 **Recently closed (this loop)**:
-- **H115 (#1294, al8klcpw) — DEFINITIVELY FALSIFIED**: terminal test_WSS=6.7734% (+0.1228pp WORSE), 0-of-4 floors cleared. Volume-side decoder widening ruled out on H39 base.
-- **H124 (#1309) — EP5 CLOSED**: val_wss=7.0775 ≥ 7.05 criterion, y-axis Charbonnier extension mechanism falsified (y-axis itself +0.0492pp WORSE despite extension).
+- **H115 (#1294, al8klcpw) — DEFINITIVELY FALSIFIED**: terminal test_WSS=6.7734% (+0.1228pp WORSE), 0-of-4 floors. Volume-decoder widening ruled out on H39 base.
+- **H124 (#1309) — EP5 CLOSED**: val_wss=7.0775 ≥ 7.05 criterion, y-axis Charbonnier extension mechanism falsified.
+- **H117 (#1298, jmzd8s37) — TERMINAL TEST DONE — MISS**: test_WSS=6.7934% (+0.1428pp WORSE), 1-of-4 floors (VP only). Charbonnier-xyz ruled out — multi-axis Charb fragments GradNorm budget.
+- **H132 (#1313, y019u2zc) — EARLY CLOSED EP9**: trajectory +0.115pp behind H39 by EP6-9, depth-axis FALSIFIED. Cold-start advantage (-0.267pp at EP1) did NOT persist past EP3.
+- **H133 (#1314, hxrpvb1b) — EARLY CLOSED EP11**: trajectory +0.232pp behind H39 by EP8-11, narrowing -0.012pp/EP too slow. LR-axis FALSIFIED.
 
-**Capacity-axis sweep on H39 base — synthesis after this loop**:
-| Axis | Probe | Status |
-|------|-------|--------|
-| Encoder capacity | H122 (NULL) | Ruled out |
-| Volume-decoder width | H115 (FALSIFIED) | Ruled out |
-| Loss-shape Charb yz/xyz | H41v2/H117 (NULL trajectory) | Likely ruled out |
-| Trunk WIDTH | H123 (lead narrowing, z-regression) | Marginal at EP7 |
-| Trunk DEPTH | H132 (pre-EP1) | In flight |
-| Base LR | H133 (pre-EP1) | In flight |
+**Capacity-axis sweep on H39 base — DEFINITIVELY EXHAUSTED**:
+| Axis | Probe | Terminal/EP status | Conclusion |
+|------|-------|-------|---|
+| Encoder capacity | H122 | NULL | Ruled out |
+| Volume-decoder width | H115 | test_WSS 6.7734 (+0.12pp) | FALSIFIED |
+| Loss-shape multi-axis | H41v2 / H117 | test_WSS 6.7934 (+0.14pp) | FALSIFIED |
+| Trunk WIDTH | H123 | EP16+ stable +0.005-0.025pp behind | Marginal NULL (in flight to terminal) |
+| Trunk DEPTH | H132 | EP9 +0.115pp behind | FALSIFIED |
+| Base LR | H133 | EP11 +0.232pp behind | FALSIFIED |
+
+**Strategic pivot per Plateau Protocol**: All scalar/loss-weight/capacity perturbations exhausted on H39 base. Now moving to architectural changes — researcher-agent generating 3 fresh hypotheses prioritizing: (a) GALE-Transolver geometry-conditioning xattn, (b) Multi-task gradient surgery (PCGrad/CAGrad/IMTL-G) replacing GradNorm, (c) physics-informed losses or knowledge distillation from larger model.
 
 ## Wave 33 Architectural Pipeline (researcher-agent ideas)
 
