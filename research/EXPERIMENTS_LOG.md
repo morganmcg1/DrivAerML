@@ -8,6 +8,44 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-25 10:55 UTC — PR #1318 CLOSED (H136 nezuko — IMTL-G informative null + valuable mechanism falsification at EP3)
+
+- branch: `dl24-nezuko/h136-imtl-g`
+- W&B Rank-0 run: `l7q4tumh` (terminal=EP3, student stopped per AND-gate decision rule)
+- hypothesis: Replace GradNorm with IMTL-G (closed-form gradient surgery, equal-projection multi-task weighting) to avoid the bounded-loss budget redistribution pathology observed in H114/H117/H41v2.
+
+### Results table
+
+| EP | val_WSS | H39 ref | Δ vs H39 | val_SP | val_VP |
+|----|---------|---------|----------|--------|--------|
+| 1  | 18.5595 | 17.8972 | +0.6623 | 11.2188 | 20.1632 |
+| 2  | 7.7018  | 7.4818  | +0.2200 | 4.3064  | 5.3527 |
+| 3  | **7.3159** | 7.2016 | **+0.1143** | 4.0905 | 4.3200 |
+
+EP3 hard-abort AND-gate breach: val_WSS=7.3159 > 7.05 ✓ AND val_SP=4.0905 > 3.8 ✓ → student closed per advisor rule.
+
+### IMTL-G task-weight equilibrium at EP3 (mechanism diagnostic)
+
+| Weight | H136 IMTL-G | H39 GradNorm ref | Verdict |
+|--------|-------------|------------------|---------|
+| w_wss (Σ tau) | **0.2535** | ~1.85 | **7.3× SUPPRESSED** |
+| w_tau_z | 0.1205 | dominant | collapsed |
+| w_vol_p | 0.0310 | clamped 0.15 floor | **below floor (5×)** |
+| w_cp    | **0.7156** | ~0.3-0.5 | surged (2-2.5×) |
+| w_surf_p| **0.7156** | ~0.3-0.5 | surged (2-2.5×) |
+
+### Analysis
+
+Mechanism IS firing — IMTL-G produces fundamentally different task-weight equilibrium than GradNorm — but **in the wrong direction**. Equal-projection property favors well-conditioned tasks (cp, surf_p) and SUPPRESSES high-residual noisy tasks (WSS-z especially).
+
+**Falsifies a key program assumption**: that GradNorm's tendency to UPweight high-residual axes (the H114/H117/H41v2 "bounded-loss redistribution pathology") was a bug to fix. It is NOT a bug — it is structurally aligned with the WSS-first objective. GradNorm's rate-balancing is the productive mechanism.
+
+### Strategic implication
+
+Future gradient-surgery experiments should aim for OBJECTIVE-WEIGHTED projection (favor WSS axes), not equal-projection. Candidates: PCGrad with task priority, CAGrad α≥0.7, GradVac with WSS-priority weighting, IMTL-W (weighted IMTL).
+
+---
+
 ## 2026-05-23 18:41 UTC — PR #1281 CLOSED (H38 nezuko — Charbonnier on cp saturated at EP3 peak then GradNorm down-weighted cp through EP4-EP10; 5th Wave 33 alive-but-ineffective arm; mechanism rule-out preserved for follow-up bounded-loss arm H40)
 
 H38 nezuko EP10 verdict (step 109759): val_wss=7.0959 (+0.056 over ≤7.04 gate ✗), val_sp=4.1571 (+0.107 over ≤4.05 ✗), val_vp=3.9983 (+0.148 over ≤3.85 ✗). All 3 EP10 soft gates missed by margins student's EP7/EP8 mechanism analysis predicted (within ±0.02pp). Closed per the 17:45Z Option-1 plan.
