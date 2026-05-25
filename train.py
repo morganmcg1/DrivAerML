@@ -133,6 +133,9 @@ class Config:
     gradnorm_alpha: float = 1.0
     gradnorm_lr: float = 1e-3
     gradnorm_min_w_vol_p: float = 0.0
+    use_pcgrad: bool = False
+    pcgrad_eps: float = 1e-12
+    pcgrad_log_every: int = 25
     use_curvature_attention_bias: bool = False
     wss_charbonnier_weight: float = 0.0
     wss_charbonnier_eps: float = 1e-3
@@ -216,6 +219,55 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
         return None
     sigmas = [float(s) for s in spec.split(",") if s.strip()]
     return sigmas or None
+
+
+def _flatten_grads(
+    grads: tuple[torch.Tensor | None, ...] | list[torch.Tensor | None],
+    params: list[nn.Parameter],
+) -> torch.Tensor:
+    """Flatten ``autograd.grad`` output into a single 1-D float32 tensor.
+
+    Missing gradients (``None``) become zeros so the result always has length
+    ``sum(p.numel() for p in params)``. Output is on the first param's device.
+    """
+    parts: list[torch.Tensor] = []
+    for g, p in zip(grads, params):
+        if g is None:
+            parts.append(torch.zeros(p.numel(), device=p.device, dtype=torch.float32))
+        else:
+            parts.append(g.detach().to(torch.float32).flatten())
+    return torch.cat(parts)
+
+
+def pcgrad_project(
+    grads: list[torch.Tensor],
+    eps: float = 1e-12,
+    rng: random.Random | None = None,
+) -> list[torch.Tensor]:
+    """PCGrad (Yu et al. 2020, arxiv 2001.06782) pairwise projection.
+
+    For each task ``i``, iterate over other tasks ``j`` in a random order and,
+    whenever the dot product ``g_i · g_j < 0``, subtract the conflicting
+    component ``(g_i·g_j / ||g_j||^2) g_j`` from ``g_i``. Projection uses the
+    *original* gradients of the conflicting peers, matching the reference impl
+    (https://github.com/WeiChengTseng/Pytorch-PCGrad). Pass an explicit ``rng``
+    to keep DDP ranks in sync (the random module's global state diverges).
+    """
+    n = len(grads)
+    projected = [g.clone() for g in grads]
+    indices = list(range(n))
+    shuffler = (rng.shuffle if rng is not None else random.shuffle)
+    for i in range(n):
+        shuffler(indices)
+        for j in indices:
+            if i == j:
+                continue
+            g_i = projected[i]
+            g_j = grads[j]
+            dot = torch.dot(g_i, g_j)
+            if dot.item() < 0.0:
+                projected[i] = g_i - (dot / (g_j.pow(2).sum() + eps)) * g_j
+    return projected
 
 
 class GradNormWeights(nn.Module):
@@ -357,7 +409,12 @@ def train_loss(
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
     tau_z_loss_weight: float = 1.0,
-) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
+) -> tuple[
+    torch.Tensor,
+    dict[str, float],
+    torch.Tensor | None,
+    torch.Tensor | None,
+]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
     if surface_curvature is not None:
@@ -506,7 +563,14 @@ def train_loss(
     }
     metrics.update(charb_metrics)
     metrics.update(vol_p_charb_metrics)
-    return loss, metrics, task_losses
+    # H137: also return the unweighted WSS Charbonnier tensor so the PCGrad
+    # path can compute its gradient separately (it is an additive term in
+    # ``loss`` outside the GradNorm-weighted ``task_losses`` sum).
+    if wss_charbonnier_weight > 0.0:
+        loss_wss_charb_out = loss_wss_charb  # type: ignore[has-type]
+    else:
+        loss_wss_charb_out = None
+    return loss, metrics, task_losses, loss_wss_charb_out
 
 
 def run_eval_only(config: Config, state) -> None:
@@ -655,6 +719,16 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"GradNorm enabled: alpha={config.gradnorm_alpha}, "
                     f"n_tasks={gradnorm_n_tasks}, lr={config.gradnorm_lr}"
                 )
+        if config.use_pcgrad and not config.use_gradnorm:
+            raise ValueError(
+                "--use-pcgrad requires --use-gradnorm (H137 design: PCGrad "
+                "projects per-task gradients then GradNorm reweights them)."
+            )
+        if config.use_pcgrad and state.is_main:
+            print(
+                f"PCGrad enabled: eps={config.pcgrad_eps}, "
+                f"log_every={config.pcgrad_log_every}"
+            )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -734,7 +808,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 aug_log: dict[str, int] = {}
-                loss, batch_loss_metrics, task_losses = train_loss(
+                loss, batch_loss_metrics, task_losses, loss_wss_charb_t = train_loss(
                     model,
                     batch,
                     transform,
@@ -873,6 +947,46 @@ def main(argv: Iterable[str] | None = None) -> None:
                     optimizer.zero_grad(set_to_none=True)
                 else:
                     gradnorm_log: dict[str, float] = {}
+                    # H137: when PCGrad is active, hoist the per-task gradient
+                    # computation out of the GradNorm block so the same five
+                    # backward passes serve both GradNorm (norm-of-trunk-norm
+                    # slice) and PCGrad (full per-task gradient vectors).
+                    # Without this fusion, PCGrad+GradNorm would cost ~11
+                    # backward passes per step (5 GradNorm proxy + 5 PCGrad
+                    # full + 1 Charb) vs the baseline's ~6 — roughly 1.8×
+                    # slowdown that would overrun the 2000-minute budget.
+                    pcgrad_planning_active = bool(
+                        config.use_pcgrad
+                        and gradnorm_weights is not None
+                        and task_losses is not None
+                        and bool(torch.isfinite(task_losses.detach()).all().item())
+                    )
+                    pcgrad_per_task_grads_flat: list[torch.Tensor] | None = None
+                    pcgrad_all_params: list[nn.Parameter] | None = None
+                    pcgrad_norm_slice: tuple[int, int] | None = None
+                    if pcgrad_planning_active:
+                        pcgrad_all_params = [
+                            p for p in base_model.parameters() if p.requires_grad
+                        ]
+                        # Locate the shared LayerNorm weight slice (used by
+                        # GradNorm as its trunk-norm proxy parameter).
+                        cumsum = 0
+                        for p in pcgrad_all_params:
+                            if p is base_model.norm.weight:
+                                pcgrad_norm_slice = (cumsum, cumsum + p.numel())
+                                break
+                            cumsum += p.numel()
+                        pcgrad_per_task_grads_flat = []
+                        for ti in range(gradnorm_n_tasks):
+                            gs = torch.autograd.grad(
+                                task_losses[ti],
+                                pcgrad_all_params,
+                                retain_graph=True,
+                                allow_unused=True,
+                            )
+                            pcgrad_per_task_grads_flat.append(
+                                _flatten_grads(gs, pcgrad_all_params)
+                            )
                     if (
                         gradnorm_weights is not None
                         and gradnorm_opt is not None
@@ -886,19 +1000,32 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 gradnorm_L0 = task_losses.detach().clone()
                             shared_param = base_model.norm.weight
                             c_per_task: list[torch.Tensor] = []
-                            for i in range(gradnorm_n_tasks):
-                                g_i = torch.autograd.grad(
-                                    task_losses[i],
-                                    shared_param,
-                                    retain_graph=True,
-                                    allow_unused=True,
-                                )[0]
-                                if g_i is None:
+                            if (
+                                pcgrad_per_task_grads_flat is not None
+                                and pcgrad_norm_slice is not None
+                            ):
+                                # Reuse the per-task grads already computed for
+                                # PCGrad: c_i is the L2 norm of the slice that
+                                # corresponds to base_model.norm.weight.
+                                s0, s1 = pcgrad_norm_slice
+                                for ti in range(gradnorm_n_tasks):
                                     c_per_task.append(
-                                        torch.zeros((), device=device, dtype=torch.float32)
+                                        pcgrad_per_task_grads_flat[ti][s0:s1].norm(2)
                                     )
-                                else:
-                                    c_per_task.append(g_i.detach().float().norm(2))
+                            else:
+                                for i in range(gradnorm_n_tasks):
+                                    g_i = torch.autograd.grad(
+                                        task_losses[i],
+                                        shared_param,
+                                        retain_graph=True,
+                                        allow_unused=True,
+                                    )[0]
+                                    if g_i is None:
+                                        c_per_task.append(
+                                            torch.zeros((), device=device, dtype=torch.float32)
+                                        )
+                                    else:
+                                        c_per_task.append(g_i.detach().float().norm(2))
                             c_tensor = torch.stack(c_per_task)  # [n_tasks]
                             with torch.no_grad():
                                 w_now = gradnorm_weights.weights
@@ -997,7 +1124,192 @@ def main(argv: Iterable[str] | None = None) -> None:
                                     )
                     if gradnorm_log:
                         train_log.update(gradnorm_log)
-                    loss.backward()
+                    pcgrad_log: dict[str, float] = {}
+                    pcgrad_active = pcgrad_planning_active
+                    pcgrad_log_this_step = (
+                        pcgrad_active
+                        and config.pcgrad_log_every > 0
+                        and (global_step % config.pcgrad_log_every == 0 or global_step <= 5)
+                    )
+                    if pcgrad_active:
+                        # H137: PCGrad on top of H39 GradNorm. Per-task local
+                        # flat gradients were computed above and consumed by
+                        # GradNorm (rank-local norms preserve H39 semantics).
+                        # Now: (1) all-reduce each per-task gradient across
+                        # DDP ranks so every rank projects the SAME full-batch
+                        # per-task gradient (per CAGrad's DDP convention and
+                        # PCGrad's mathematical definition — projecting
+                        # rank-local gradients with different random shuffle
+                        # orders and then averaging gives a biased estimator);
+                        # (2) project with a synced RNG so all ranks pick the
+                        # same pair-shuffle; (3) apply (synced) GradNorm
+                        # weights and sum; (4) add the all-reduced additive
+                        # WSS-z Charbonnier gradient; (5) assign manually to
+                        # ``p.grad``. We deliberately skip
+                        # ``loss.backward()``: autograd.grad does not trigger
+                        # DDP's hooks and a stray backward would overwrite the
+                        # projected trunk grads.
+                        assert pcgrad_per_task_grads_flat is not None
+                        assert pcgrad_all_params is not None
+                        all_params = pcgrad_all_params
+                        param_numels = [p.numel() for p in all_params]
+                        per_task_grads_flat = pcgrad_per_task_grads_flat
+                        # All-reduce per-task gradients BEFORE projection so
+                        # every rank operates on the true full-batch gradient.
+                        if state.enabled:
+                            for ti in range(gradnorm_n_tasks):
+                                torch.distributed.all_reduce(
+                                    per_task_grads_flat[ti],
+                                    op=torch.distributed.ReduceOp.SUM,
+                                )
+                                per_task_grads_flat[ti].div_(state.world_size)
+                        # Stats BEFORE projection (on rank-averaged gradients)
+                        pre_norms = torch.stack(
+                            [g.norm() for g in per_task_grads_flat]
+                        )
+                        n_conflict = 0
+                        n_pairs = 0
+                        cosines_before: list[float] = []
+                        for ai in range(gradnorm_n_tasks):
+                            for aj in range(ai + 1, gradnorm_n_tasks):
+                                gi = per_task_grads_flat[ai]
+                                gj = per_task_grads_flat[aj]
+                                dot = torch.dot(gi, gj)
+                                denom = (gi.norm() * gj.norm()).clamp_min(1e-12)
+                                cosines_before.append(float((dot / denom).item()))
+                                if dot.item() < 0.0:
+                                    n_conflict += 1
+                                n_pairs += 1
+                        # Pairwise projection with a rank-synced RNG so every
+                        # rank performs the SAME projection on the (now
+                        # identical) per-task gradients.
+                        pcg_rng = random.Random(global_step)
+                        projected = pcgrad_project(
+                            per_task_grads_flat,
+                            eps=config.pcgrad_eps,
+                            rng=pcg_rng,
+                        )
+                        post_norms = torch.stack([g.norm() for g in projected])
+                        proj_mags: list[float] = []
+                        for ti in range(gradnorm_n_tasks):
+                            orig = float(pre_norms[ti].item())
+                            # PR spec: projection_magnitude = ||g - g_projected|| / ||g||.
+                            diff_norm = float(
+                                (per_task_grads_flat[ti] - projected[ti])
+                                .norm()
+                                .item()
+                            )
+                            proj_mags.append(
+                                diff_norm / orig if orig > 0 else 0.0
+                            )
+                        cosines_after: list[float] = []
+                        for ai in range(gradnorm_n_tasks):
+                            for aj in range(ai + 1, gradnorm_n_tasks):
+                                pi = projected[ai]
+                                pj = projected[aj]
+                                denom = (pi.norm() * pj.norm()).clamp_min(1e-12)
+                                cosines_after.append(
+                                    float((torch.dot(pi, pj) / denom).item())
+                                )
+                        # Project-then-weight: gradnorm_weights.log_weights are
+                        # all-reduced at the end of the GradNorm block above,
+                        # so ``w_detached`` is identical across ranks here.
+                        w_detached = gradnorm_weights.weights.detach().to(
+                            dtype=torch.float32
+                        )
+                        merged_flat = torch.zeros_like(projected[0])
+                        for ti in range(gradnorm_n_tasks):
+                            merged_flat = (
+                                merged_flat + w_detached[ti] * projected[ti]
+                            )
+                        # Additive WSS Charbonnier (H10b / H39): NOT a GradNorm
+                        # task; add its raw gradient unweighted-by-PCGrad on
+                        # top so the H39 baseline behaviour is preserved.
+                        # All-reduce the Charbonnier flat tensor too so every
+                        # rank sees the same final p.grad.
+                        charb_tauz_cosine: float | None = None
+                        if (
+                            loss_wss_charb_t is not None
+                            and config.wss_charbonnier_weight > 0.0
+                        ):
+                            charb_term = (
+                                config.wss_charbonnier_weight * loss_wss_charb_t
+                            )
+                            charb_grads = torch.autograd.grad(
+                                charb_term,
+                                all_params,
+                                retain_graph=False,
+                                allow_unused=True,
+                            )
+                            charb_flat = _flatten_grads(charb_grads, all_params)
+                            if state.enabled:
+                                torch.distributed.all_reduce(
+                                    charb_flat,
+                                    op=torch.distributed.ReduceOp.SUM,
+                                )
+                                charb_flat.div_(state.world_size)
+                            if pcgrad_log_this_step:
+                                tau_z_idx = 3  # cp, tau_x, tau_y, tau_z, vol_p
+                                tau_z_g = per_task_grads_flat[tau_z_idx]
+                                denom = (
+                                    charb_flat.norm() * tau_z_g.norm()
+                                ).clamp_min(1e-12)
+                                charb_tauz_cosine = float(
+                                    (torch.dot(charb_flat, tau_z_g) / denom).item()
+                                )
+                            merged_flat = merged_flat + charb_flat
+                        # Assign manually to .grad. merged_flat is identical
+                        # across ranks by construction (per-task grads and
+                        # charb_flat were all-reduced; gradnorm_weights are
+                        # DDP-synced at the end of the GradNorm block; the
+                        # PCGrad shuffle uses the same seed everywhere).
+                        idx = 0
+                        for p, numel in zip(all_params, param_numels):
+                            grad_slice = (
+                                merged_flat[idx : idx + numel]
+                                .view(p.shape)
+                                .to(p.dtype)
+                            )
+                            p.grad = grad_slice
+                            idx += numel
+                        if pcgrad_log_this_step:
+                            pcgrad_log["pcgrad/conflict_count"] = float(n_conflict)
+                            pcgrad_log["pcgrad/n_pairs"] = float(n_pairs)
+                            pcgrad_log["pcgrad/conflict_rate"] = (
+                                float(n_conflict) / max(n_pairs, 1)
+                            )
+                            avg_cos_pre = sum(cosines_before) / max(
+                                len(cosines_before), 1
+                            )
+                            avg_cos_post = sum(cosines_after) / max(
+                                len(cosines_after), 1
+                            )
+                            # PR spec key.
+                            pcgrad_log["pcgrad/avg_cosine"] = avg_cos_pre
+                            pcgrad_log["pcgrad/avg_cosine_pre"] = avg_cos_pre
+                            pcgrad_log["pcgrad/avg_cosine_post"] = avg_cos_post
+                            for ti, name in enumerate(gradnorm_task_names):
+                                # PR-spec keys (grad_norm_pre_project / _post_project).
+                                pcgrad_log[
+                                    f"pcgrad/grad_norm_pre_project_{name}"
+                                ] = float(pre_norms[ti].item())
+                                pcgrad_log[
+                                    f"pcgrad/grad_norm_post_project_{name}"
+                                ] = float(post_norms[ti].item())
+                                pcgrad_log[
+                                    f"pcgrad/projection_magnitude_{name}"
+                                ] = float(proj_mags[ti])
+                            # H137 diagnostic: cosine(charb_grad, tau_z_grad)
+                            # validates the researcher-flagged assumption that
+                            # the additive Charbonnier auxiliary does not
+                            # significantly conflict with the tau_z task.
+                            if charb_tauz_cosine is not None:
+                                pcgrad_log[
+                                    "pcgrad/charb_tauz_cosine"
+                                ] = charb_tauz_cosine
+                            train_log.update(pcgrad_log)
+                    else:
+                        loss.backward()
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
                             base_model.parameters(),
