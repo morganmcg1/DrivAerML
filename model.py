@@ -231,17 +231,20 @@ class TransolverAttention(nn.Module):
         self.use_ada_temp_slices = use_ada_temp_slices
         self.use_gumbel_softmax = use_gumbel_softmax
 
-        self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         # H135 Ada-Temp: per-point learned softmax temperature.
+        # When Ada-Temp is OFF, the H39 fixed per-head temperature is used.
+        # When Ada-Temp is ON, tau_i = tau0 * exp(linear(x)), clamped to
+        # [0.1, 10.0] AFTER multiplication by tau0. We do NOT register the
+        # fixed `temperature` in the Ada-Temp branch: it would never appear
+        # in the loss graph, triggering DDP's unused-parameter check.
         # tau_head is zero-initialised so tau_i = tau0 at step 0 (uniform).
-        # Final tau_i is clamped to [0.1, 10.0] AFTER multiplication by tau0
-        # (PR comment had bug — clamping pre-mul allowed tau0 drift to escape
-        # the intended bound).
         if use_ada_temp_slices:
             self.tau_head = nn.Linear(hidden_dim, 1)
             nn.init.zeros_(self.tau_head.weight)
             nn.init.zeros_(self.tau_head.bias)
             self.tau0 = nn.Parameter(torch.full((1,), float(ada_temp_init)))
+        else:
+            self.temperature = nn.Parameter(torch.full((1, num_heads, 1, 1), 0.5))
         # Diagnostic buffers populated each forward pass for W&B logging.
         self.register_buffer("last_tau_mean", torch.zeros(()), persistent=False)
         self.register_buffer("last_tau_std", torch.zeros(()), persistent=False)
