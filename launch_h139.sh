@@ -21,7 +21,7 @@ exec torchrun --standalone --nproc-per-node=8 train.py \
     --weight-decay 5e-4 --grad-clip-norm 0.5 \
     --optimizer lion --lion-beta1 0.9 --lion-beta2 0.99 \
     --amp-mode bf16 --no-compile-model \
-    --kill-thresholds "10864:val_primary/abupt_axis_mean_rel_l2_pct<35,32594:val_primary/abupt_axis_mean_rel_l2_pct<8.5,65228:val_primary/abupt_axis_mean_rel_l2_pct<6.7" \
+    --kill-thresholds "10862:val_primary/abupt_axis_mean_rel_l2_pct<35.0,32592:val_primary/abupt_axis_mean_rel_l2_pct<8.5,48897:val_primary/abupt_axis_mean_rel_l2_pct<7.0" \
     --wandb-name tanjiro/h139-charb-tau-z \
     --wandb-group wss_h139_charb_tau_z \
     --agent tanjiro
