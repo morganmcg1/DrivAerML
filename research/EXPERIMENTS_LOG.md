@@ -1,5 +1,74 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-25 23:40 — PR #1333 H143 CLOSED: Lookahead(k=5,α=0.5) EP3 hard-abort gate miss
+
+- `dl24-nezuko/h143-lookahead-lion-v2`, run `mzk2tpu7` (8 DDP ranks)
+- Hypothesis: Lookahead optimizer wrapping Lion (k=5, α=0.5) from step 1 (Zhang et al. 2019)
+
+### Gate data
+
+| EP | Step | val_WSS | Gate | Verdict |
+|----|------|---------|------|---------|
+| 1 | 10,975 | 23.1229% | 17.40-18.40% (sanity) | MISS (+4.72pp) |
+| 2 | 21,951 | 8.0000% | — | reference |
+| **3** | **32,927** | **7.4430%** | **≤7.30% (hard-abort)** | **KILL** |
+
+### Mechanism diagnosis
+
+Student EP1 analysis identified that Lookahead(k=5, α=0.5) **halves effective parameter displacement per step**: outer update `θ_slow ← θ_slow + 0.5·(θ_fast - θ_slow)` means 5 inner steps accumulate only 2.5× delta (vs 5× for raw Lion). At EP3 (32,927 real steps), effective training progress ≈ H39 EP1.5. Val_WSS=7.443% is consistent with this "slow learner" interpretation.
+
+The mechanism fired correctly (2647 outer updates at EP3, perfect k=5 cadence), but is **net negative** under these hyperparameters: re-anchoring to θ_slow interrupts Lion's productive early-epoch descent without recovering the lost progress late.
+
+**Verdict**: Lookahead k=5/α=0.5 from step 1 is net-negative on H39 regime. The mechanism logic is sound, but current hyperparameters are too aggressive (α=0.5 = too much anchoring, k=5 = too frequent). Future variants: k=20/α=0.5, or late-activation (apply only from EP10+).
+
+### Wave 35 optimization-time axis verdict
+- SWA (H141, closed process failure): mechanism untested
+- EMA-of-weights (H142, closed bad-logic): ongoing as **H144** (fern, PR #1335)
+- Lookahead k=5/α=0.5 (H143): **net negative** (mechanism active, gates failed)
+
+---
+
+## 2026-05-25 23:35 — PR #1316 H134 CLOSED: GALE-Transolver decisive negative (3 stabilization failures)
+
+- `dl24-fern/h134-gale-transolver`, run `uhf5c8md` (rank-0, 8 DDP ranks)
+- Hypothesis: GALE persistent geometry context bank cross-attention at every Transolver block
+
+### Failure history (3 runs)
+
+| Run | Failure | Root cause |
+|-----|---------|------------|
+| `shtce8gt` | Grad explosion EP2 (gn 1.09e14) | PR-spec Xavier out_proj injecting noise into residual |
+| `v9d2j25u` | Dead gradient EP2 (geo_gate grad=0) | Zero-init out_proj killed MHA gradient |
+| `uhf5c8md` | LayerScale escape EP3 (val_WSS 91%, gn 612k) | Unconstrained `nn.Parameter` LayerScale grew 20,000× (1e-4 → ~2.0) under Lion sign-updates |
+
+**Root cause pattern**: GALE cross-attention residual under Lion+lr=1e-4 has no stable equilibrium with bounded-by-default mechanisms. AdamW's per-parameter adaptive scaling provides natural damping for unbounded learnable scales; Lion's sign-based `±lr` updates remove this implicit bound.
+
+### Decision
+
+Three sequential failures with autonomous stabilization fixes each surfacing a new failure mode. Option B (tanh-bounded LayerScale) declined to avoid 4th iteration on a stalling line. **Decisive negative result preserved**: GeoTransolver's recipe (depth-20, AdamW, 500 epochs) is not portable to H39 capacity+Lion+30ep regime.
+
+**Informative result**: future architecture experiments on H39 should pre-specify Lion-compatible stability budget (tanh-bounded or hard-clipped gates from initialization, no unbounded learnable residual scales).
+
+---
+
+## 2026-05-25 23:40 — H144 DISPATCHED to dl24-fern: EMA-of-weights (PR #1335)
+
+- Hypothesis: Online Polyak averaging (decay=0.999) shadow model from EP0. Dual val logging: `val_primary/*` + `val_ema/*`. EMA checkpoint vs live checkpoint at terminal.
+- Context: H142 EMA-of-weights (same hypothesis) was closed in error by bad-logic conflation with H141 SWA. H142 NEVER launched. This is first execution.
+- PR #1335: `dl24-fern/h144-ema-weights`
+- Predicted test_WSS: < 6.60% (beats H39 SOTA 6.6506%)
+
+---
+
+## 2026-05-25 23:40 — H145 DISPATCHED to dl24-nezuko: Curv-Charb-z clean (wd=0.005) disentanglement (PR #1336)
+
+- Hypothesis: H138's curvature-weighted Charbonnier-z mechanism repeated with explicit `--weight-decay 0.005` (H39 reference value), to disentangle the curvature mechanism signal from the wd-drift confound in H138 (`4m8f7rme`, wd=0.0001).
+- H138 context: EP14.58 val_WSS=6.7582% (strongest in-program signal). Has wd=0.0001 drift. If terminal beats SOTA, H145 determines whether to attribute the gain to curvature mechanism or to the wd reduction.
+- PR #1336: `dl24-nezuko/h145-curv-charb-z-wd005`
+- Predicted test_WSS: < 6.65% (beats H39 SOTA) if curvature mechanism is responsible
+
+---
+
 ## 2026-05-25 21:50 — PR #1333 H143 RELAUNCHED: hyperparameter drift discovered + Wave 35 fleet-wide wd-drift cross-cut
 
 - `dl24-nezuko/h143-lookahead-lion-v2`, run `mzk2tpu7` (rank-0, 8 DDP ranks)
