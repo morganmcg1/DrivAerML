@@ -1,5 +1,36 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-25 16:25 — PR #1304 CLOSED: WSS H123 hidden_dim 512→640 (terminal NULL — capacity-axis falsification)
+
+- `dl24-tanjiro/h123-hidden-dim-640`, run `a9c5akny`
+- Hypothesis: H39 + trunk hidden_dim 512→640 (+25%, ~25-28M params) tests trunk per-token feature capacity as orthogonal to H39's decoder-side surface_out widening. Predicted: if H123 wins, trunk-width is productive and W35 compounds hidden_dim × depth × Charb-y.
+- **Closed by student at EP25** (early termination — plateau definitively confirmed).
+
+| EP | val_WSS | vs H39 | per-axis (x/y/z) |
+|---|---|---|---|
+| 1 cold-start | 15.78 | **-2.118pp AHEAD** ⭐ | uniform ahead all axes |
+| 3 | 7.109 | -0.093pp ahead | z lead WIDENED to -0.104 |
+| 5 | 6.963 | -0.050pp ahead | continuing structural lead |
+| 8 | 6.883 | +0.004 BEHIND (lead crossed zero) | |
+| 10 | 6.855 | +0.010 behind | |
+| 15 | 6.811 | +0.015 behind | |
+| 17-25 | [6.784, 6.799] | +0.025-0.029pp behind | **9-EP PLATEAU** |
+| EP30 projection | ~6.783 | +0.133pp behind H39 SOTA terminal | |
+
+**Mechanism analysis** (student terminal verdict at 16:18Z):
+- Cold-start advantage (EP1 -2.12pp ahead, EP3-5 -0.05 to -0.09pp ahead) was structurally real — wider trunk absorbs training signal faster.
+- **BUT** lead eroded by EP8 (crossed zero) and converged to flat-plateau +0.025pp behind H39 from EP17-EP25.
+- Hidden_640 hit the same capacity ceiling as H39 baseline — the additional 25% trunk capacity got absorbed by volume targets (vol_p continued improving) rather than surface WSS objective.
+- This is the **same pattern as H115** (wider volume_out): structural capacity adds to non-primary objective.
+
+**Conclusions**:
+- **Trunk-width is NOT a productive capacity axis for WSS optimization on H39 base** — converges to same WSS ceiling as H39, doesn't escape the 6.78% val plateau.
+- **5/5 H39-base capacity axes now CLOSED** as null/falsified: encoder slices (H122), volume-decoder width (H115), loss-shape Charb-axis (H41v2 yz, H117 xyz, H124 +y), trunk hidden_dim (H123 now), trunk depth (H132), base LR (H133).
+- **Capacity-axis sweep on H39 base = DEFINITIVELY EXHAUSTED.** This is a high-information null result — narrows W36+ to NON-capacity mechanisms.
+- **Cold-start advantage was misleading**: -2.12pp at EP1 → null at terminal. Lesson for future hypotheses: do not trust cold-start signals alone; need EP15+ trajectory data before confidence.
+
+---
+
 ## 2026-05-25 16:25 — PR #1323 CLOSED: WSS H137 PCGrad + H39 GradNorm (informative null — mechanism falsification)
 
 - `dl24-nezuko/h137-pcgrad-gradnorm`, run `dsnn61ne`
