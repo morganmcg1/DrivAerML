@@ -1,5 +1,42 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-25 19:20 — PR #1328 CLOSED: H141 SWA (process failure, NOT mechanism failure — see post-mortem)
+
+- `dl24-nezuko/h141-swa`, run group rank-0=`y9qf09ch` (8 DDP ranks, started 17:28Z)
+- Hypothesis: Stochastic Weight Averaging at EP21+ (70% of 30 EPs) for flat-basin OOD transfer; --swa-lr 5e-6 --swa-start 0.7 --swa-epochs 2 (or equivalent).
+- **Closed by prior advisor session at 19:08Z** after dual escalation (18:15Z, 18:58Z) when no W&B run ID was posted to the PR.
+- **Post-mortem (19:18Z)**: W&B query revealed 8 ranks WERE running productively. Trajectory:
+
+| Step | EP | val_WSS | vs H39 |
+|------|-----|---------|--------|
+| 10975 | 1.00 | 17.5728% | **−0.33pp ahead** |
+| 21951 | 2.00 | 7.6674% | +0.37pp behind |
+
+**Root cause**: dl24-nezuko student Claude session ran training but failed to post W&B run ID to PR within 30-min window. Pod was productive; PR-commenting layer was broken.
+
+**Why not revived**:
+- SWA mechanism doesn't activate until EP21 (70% of 30); at EP2.5 only baseline-equivalent training had run.
+- H141 already trailing H39 by +0.37pp at EP2, baseline-equivalent trajectory was marginally worse.
+- H142 EMA-of-weights (PR #1331) tests the same parameter-averaging hypothesis but applies the averaging from EP0 (full trajectory, not just last 30%) — strictly more informative.
+
+**Process improvement**: Advisor memory updated with "always query W&B run group before closing PR for non-response". Saved as `feedback_dl24_check_wandb_before_close.md`.
+
+**Conclusion**: Process failure (premature close), not mechanism falsification. SWA hypothesis remains untested. Subsumed by H142.
+
+---
+
+## 2026-05-25 19:18 — PR #1331 DISPATCHED: WSS H142 training-time EMA-of-weights (nezuko)
+
+- `dl24-nezuko/h142-ema-weights` — successor to closed H141 SWA.
+- **Hypothesis**: Online Polyak averaging of all model weights with decay=0.999 suppresses Lion sign-momentum noise around the loss minimum, yielding a "wider-basin" representation that transfers better val→test.
+- Mechanism: maintain `θ_ema ← 0.999·θ_ema + 0.001·θ_live` after every optimizer step. At validation, evaluate both live model and EMA model. Choose lower val_WSS for terminal test eval.
+- **Why now**: Wave 35 falsified two multi-task-weighting hypotheses (H136 IMTL-G active failure, H137 PCGrad passive failure). H138 is showing strong loss-shaping signal but optimization-axis remains untested. H39's "EP24 EMA" best-checkpoint result suggests EMA matters; H142 extends EMA from val-only to training-time.
+- **Predicted**: EMA val_WSS lower than live val_WSS by 0.05-0.15pp at terminal; test_WSS < 6.65% (50-60% prob beats H39 SOTA).
+- Gates: EP1 sanity ±0.5pp of H39 (17.90%); EP3 hard-abort >7.50%; EP6 gate EMA starts to outperform live; EP15 EMA ≤6.85%; EP30 terminal report both metrics.
+- All H39 hyperparameters preserved (depth-6, hidden-512, slices-128, surface_out f=2.0, Charb-z 0.1, GradNorm α=0.5 clamp 0.15, Lion lr 1e-4, cosine T_max=30) — only EMA tracking added.
+
+---
+
 ## 2026-05-25 16:25 — PR #1304 CLOSED: WSS H123 hidden_dim 512→640 (terminal NULL — capacity-axis falsification)
 
 - `dl24-tanjiro/h123-hidden-dim-640`, run `a9c5akny`
