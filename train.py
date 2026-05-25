@@ -50,6 +50,7 @@ from trainer_runtime import (
     init_distributed,
     init_wandb_run,
     is_valid_primary_metric,
+    load_curvature_stats,
     make_loaders,
     masked_mse,
     metric_namespace,
@@ -141,6 +142,8 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
+    use_curvature_weighted_charb: bool = False
+    curvature_weight_alpha: float = 1.0
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -161,6 +164,17 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
+        ),
+        "use_curvature_weighted_charb": (
+            "H138/H145: weight the WSS Charbonnier loss by per-point curvature. "
+            "Requires --use-curvature-attention-bias (to load curvature data). "
+            "w_i = 1 + alpha * kappa_mag_norm where kappa_mag_norm is the per-point "
+            "curvature magnitude scaled to [0, 1] using raw_max from curvature_proxy_stats."
+        ),
+        "curvature_weight_alpha": (
+            "H138/H145: curvature weighting strength. w_i = 1 + alpha * kappa_mag_norm. "
+            "alpha=0 reduces to uniform Charbonnier; alpha=1.0 gives high-curvature "
+            "points up to 2x weight."
         ),
     }
     choices_text = {
@@ -272,6 +286,53 @@ def masked_charbonnier(
     return weighted.sum() / (n_pts * n_ch)
 
 
+def compute_curvature_weights(
+    surface_curvature_normed: torch.Tensor,
+    kappa_mag_mean: float,
+    kappa_mag_std: float,
+    kappa_mag_raw_max: float,
+    alpha: float,
+) -> torch.Tensor:
+    """H138/H145: per-point Charbonnier-loss weights derived from kappa_mag.
+
+    ``surface_curvature_normed`` is the z-scored curvature tensor of shape
+    ``[B, N, 3]`` already attached to the batch (channels ``kappa_H``,
+    ``kappa_G``, ``kappa_mag``). We undo the z-score on the third channel,
+    min-max normalise into ``[0, 1]`` using ``raw_max`` (``raw_min`` is 0 for
+    ``kappa_mag``), then form ``w_i = 1 + alpha * kappa_norm`` so that
+    high-curvature points get up to ``1 + alpha`` weight while padded /
+    zero-curvature points get exactly 1.
+    """
+    z_kappa_mag = surface_curvature_normed[..., 2]  # [B, N]
+    kappa_raw = z_kappa_mag * kappa_mag_std + kappa_mag_mean
+    denom = max(float(kappa_mag_raw_max), 1e-6)
+    kappa_norm = (kappa_raw / denom).clamp(min=0.0, max=1.0)
+    return 1.0 + alpha * kappa_norm  # [B, N]
+
+
+def masked_curvature_weighted_charbonnier(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor,
+    curvature_weights: torch.Tensor,
+    eps: float = 1e-3,
+) -> torch.Tensor:
+    """H138/H145: per-point curvature-weighted Charbonnier loss.
+
+    ``curvature_weights`` is shape ``[B, N]`` (one positive scalar per surface
+    point). Reduces to :func:`masked_charbonnier` when all weights are equal.
+    """
+    mask_f = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    delta = pred - target
+    values = torch.sqrt(eps * eps + delta * delta) - eps  # [B, N, C]
+    w = curvature_weights.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)  # [B, N, 1]
+    w_mask = w * mask_f  # [B, N, 1]
+    weighted = values * w_mask  # [B, N, C]
+    n_ch = float(pred.shape[-1])
+    denom = w_mask.sum().clamp_min(1.0) * n_ch
+    return weighted.sum() / denom
+
+
 def build_model(config: Config) -> SurfaceTransolver:
     return SurfaceTransolver(
         n_layers=config.model_layers,
@@ -357,6 +418,11 @@ def train_loss(
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
     tau_z_loss_weight: float = 1.0,
+    use_curvature_weighted_charb: bool = False,
+    curvature_weight_alpha: float = 1.0,
+    curvature_kappa_mag_mean: float = 0.0,
+    curvature_kappa_mag_std: float = 1.0,
+    curvature_kappa_mag_raw_max: float = 1.0,
 ) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
@@ -458,9 +524,30 @@ def train_loss(
                 raise ValueError(
                     f"Unknown wss_charbonnier_axes={wss_charbonnier_axes}"
                 )
-            loss_wss_charb = masked_charbonnier(
-                pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
-            )
+            # H138/H145: per-point curvature-weighted Charbonnier. Requires the
+            # batch to carry `surface_curvature` (z-scored kappa_H / kappa_G /
+            # kappa_mag); falls back to uniform Charbonnier otherwise so the
+            # flag is safe to toggle even if the curvature data path is mis-wired.
+            curv_weights: torch.Tensor | None = None
+            if use_curvature_weighted_charb and surface_curvature is not None:
+                curv_weights = compute_curvature_weights(
+                    surface_curvature,
+                    kappa_mag_mean=curvature_kappa_mag_mean,
+                    kappa_mag_std=curvature_kappa_mag_std,
+                    kappa_mag_raw_max=curvature_kappa_mag_raw_max,
+                    alpha=curvature_weight_alpha,
+                )
+                loss_wss_charb = masked_curvature_weighted_charbonnier(
+                    pred_wss,
+                    target_wss,
+                    batch.surface_mask,
+                    curv_weights,
+                    eps=wss_charbonnier_eps,
+                )
+            else:
+                loss_wss_charb = masked_charbonnier(
+                    pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
+                )
             loss_wss_mse_diag = masked_mse(pred_wss, target_wss, batch.surface_mask)
             loss = loss + wss_charbonnier_weight * loss_wss_charb
             charb_metrics = {
@@ -474,6 +561,22 @@ def train_loss(
                     loss_wss_mse_diag.detach().cpu().item()
                 ),
             }
+            if curv_weights is not None:
+                mask_bool = batch.surface_mask.to(dtype=torch.bool)
+                w_masked = curv_weights.detach()[mask_bool]
+                if w_masked.numel() > 0:
+                    charb_metrics["curv_w_mean"] = float(w_masked.mean().cpu().item())
+                    charb_metrics["curv_w_max"] = float(w_masked.max().cpu().item())
+                    charb_metrics["curv_w_min"] = float(w_masked.min().cpu().item())
+                    charb_metrics["curv_w_p50"] = float(
+                        torch.median(w_masked).cpu().item()
+                    )
+                    charb_metrics["curv_w_p99"] = float(
+                        torch.quantile(w_masked.float(), 0.99).cpu().item()
+                    )
+                    charb_metrics["curv_w_above_1p5_frac"] = float(
+                        (w_masked > 1.5).float().mean().cpu().item()
+                    )
         else:
             charb_metrics = {}
         # H19: vol_p Charbonnier — under GradNorm, the Charb tensor is already
@@ -623,6 +726,36 @@ def main(argv: Iterable[str] | None = None) -> None:
             volume_y_std=stats["volume_y_std"].to(device),
         )
 
+        # H138/H145: load curvature mean/std/raw_max for the per-point
+        # Charbonnier weighting. The CurvatureAugmentedCaseStore already
+        # z-scores batch.surface_curvature using these constants; here we
+        # resurrect the raw kappa_mag scale so we can min-max normalise into
+        # [0, 1].
+        curv_kappa_mag_mean = 0.0
+        curv_kappa_mag_std = 1.0
+        curv_kappa_mag_raw_max = 1.0
+        if config.use_curvature_weighted_charb:
+            if not config.use_curvature_attention_bias:
+                raise ValueError(
+                    "--use-curvature-weighted-charb requires "
+                    "--use-curvature-attention-bias (curvature data is loaded "
+                    "via CurvatureAugmentedCaseStore which is gated by that "
+                    "flag)."
+                )
+            curv_stats_full = load_curvature_stats()
+            # Channel ordering: ["kappa_H", "kappa_G", "kappa_mag"] — kappa_mag is idx 2.
+            curv_kappa_mag_mean = float(curv_stats_full["mean"][2])
+            curv_kappa_mag_std = float(curv_stats_full["std"][2])
+            curv_kappa_mag_raw_max = float(curv_stats_full["raw_max"][2])
+            if state.is_main:
+                print(
+                    f"H138/H145 curvature-weighted Charb: "
+                    f"alpha={config.curvature_weight_alpha}, "
+                    f"kappa_mag mean={curv_kappa_mag_mean:.4f}, "
+                    f"std={curv_kappa_mag_std:.4f}, "
+                    f"raw_max={curv_kappa_mag_raw_max:.4f}"
+                )
+
         model: nn.Module = build_model(config).to(device)
         n_params = sum(param.numel() for param in model.parameters())
         if config.compile_model:
@@ -752,6 +885,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     vol_p_charbonnier_weight=config.vol_p_charbonnier_weight,
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
                     tau_z_loss_weight=config.tau_z_loss_weight,
+                    use_curvature_weighted_charb=config.use_curvature_weighted_charb,
+                    curvature_weight_alpha=config.curvature_weight_alpha,
+                    curvature_kappa_mag_mean=curv_kappa_mag_mean,
+                    curvature_kappa_mag_std=curv_kappa_mag_std,
+                    curvature_kappa_mag_raw_max=curv_kappa_mag_raw_max,
                 )
                 if (
                     config.use_y_symmetry_aug
@@ -834,6 +972,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                                 f"train/loss_{wss_axes_label}_charb_weighted_to_mse_ratio": weighted_ratio,
                             }
                         )
+                        # H138/H145: log per-point curvature-weight diagnostics
+                        # so we can sanity-check the weighting distribution.
+                        if "curv_w_mean" in batch_loss_metrics:
+                            train_log.update(
+                                {
+                                    "train/curv_charb/w_mean": batch_loss_metrics["curv_w_mean"],
+                                    "train/curv_charb/w_max": batch_loss_metrics["curv_w_max"],
+                                    "train/curv_charb/w_min": batch_loss_metrics["curv_w_min"],
+                                    "train/curv_charb/w_p50": batch_loss_metrics["curv_w_p50"],
+                                    "train/curv_charb/w_p99": batch_loss_metrics["curv_w_p99"],
+                                    "train/curv_charb/w_above_1p5_frac": batch_loss_metrics[
+                                        "curv_w_above_1p5_frac"
+                                    ],
+                                    "train/curv_charb/alpha": config.curvature_weight_alpha,
+                                }
+                            )
                     if "loss_vol_p_charb_unweighted" in batch_loss_metrics:
                         vol_p_target_mse = batch_loss_metrics["loss_vol_p_charb_target_mse"]
                         vol_p_charb_unw = batch_loss_metrics["loss_vol_p_charb_unweighted"]
