@@ -842,6 +842,7 @@ def weighted_channel_mse(
     target: torch.Tensor,
     mask: torch.Tensor,
     weights: torch.Tensor,
+    charb_tau_z_eps: float | None = None,
 ) -> torch.Tensor:
     """Per-channel weighted masked MSE with a single mean over all entries.
 
@@ -852,6 +853,13 @@ def weighted_channel_mse(
     and only changes the relative gradient budget across channels — it does NOT
     decompose into per-channel means (which would double-weight the smaller
     channels and was the failure mode of PR #353).
+
+    H139: when ``charb_tau_z_eps`` is not None, the per-element error on the
+    last channel (tau_z, index 3 for the 4-channel surface output) is replaced
+    by the Charbonnier residual ``sqrt(r**2 + eps**2) - eps`` instead of
+    squared error. All other channels and the weighting/denominator structure
+    are unchanged so the relative gradient budget across channels stays at the
+    weighted level set by ``weights``.
     """
     if pred.numel() == 0:
         return pred.sum() * 0.0
@@ -860,9 +868,22 @@ def weighted_channel_mse(
         raise ValueError(
             f"weights last-dim {weights_dev.shape[-1]} must equal pred last-dim {pred.shape[-1]}"
         )
-    sq_err = (pred - target).square()
+    residual = pred - target
+    if charb_tau_z_eps is not None:
+        if pred.shape[-1] < 4:
+            raise ValueError(
+                f"Charbonnier tau_z requires last-dim >= 4, got {pred.shape[-1]}"
+            )
+        eps = float(charb_tau_z_eps)
+        eps_sq = eps * eps
+        sq_err_base = residual[..., :3].square()
+        z_res = residual[..., 3:]
+        charb_z = torch.sqrt(z_res.square() + eps_sq) - eps
+        elem_err = torch.cat([sq_err_base, charb_z], dim=-1)
+    else:
+        elem_err = residual.square()
     mask_dev = mask.to(device=pred.device, dtype=pred.dtype).unsqueeze(-1)
-    weighted = sq_err * weights_dev * mask_dev
+    weighted = elem_err * weights_dev * mask_dev
     valid_points = mask_dev.sum()
     denominator = (valid_points * pred.shape[-1]).clamp_min(1.0)
     if bool(valid_points.detach().cpu().item() > 0):

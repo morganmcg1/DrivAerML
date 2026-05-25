@@ -106,6 +106,8 @@ class Config:
     drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    use_charb_tau_z: bool = False
+    charb_tau_z_eps: float = 1e-3
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -331,6 +333,7 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    charb_tau_z_eps: float | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
@@ -348,6 +351,7 @@ def train_loss(
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
+                charb_tau_z_eps=charb_tau_z_eps,
             )
         else:
             surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
@@ -766,7 +770,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             dtype=torch.float32,
         )
         use_channel_weights = bool(
-            (config.tau_y_loss_weight != 1.0) or (config.tau_z_loss_weight != 1.0)
+            (config.tau_y_loss_weight != 1.0)
+            or (config.tau_z_loss_weight != 1.0)
+            or config.use_charb_tau_z
         )
         if config.compile_model:
             model = torch.compile(model)
@@ -893,6 +899,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/use_charb_tau_z"] = config.use_charb_tau_z
+            wandb.summary["loss/charb_tau_z_eps"] = config.charb_tau_z_eps
+            if config.use_charb_tau_z:
+                print(
+                    f"H139 Charbonnier tau_z: eps={config.charb_tau_z_eps} "
+                    f"(replaces squared error on channel 3 within "
+                    f"weighted_channel_mse; tau_z_loss_weight="
+                    f"{config.tau_z_loss_weight} preserved)"
+                )
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [
@@ -1052,6 +1067,9 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        charb_tau_z_eps=(
+                            config.charb_tau_z_eps if config.use_charb_tau_z else None
+                        ),
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
