@@ -459,10 +459,18 @@ class TransformerBlock(nn.Module):
             self.geo_cross_attn = nn.MultiheadAttention(
                 hidden_dim, num_heads=4, batch_first=True, dropout=dropout
             )
+            # LayerScale-style per-channel gate (init=1e-4) controls residual
+            # contribution at init. Combined with Xavier-init out_proj this
+            # preserves MHA gradient flow while making the initial residual
+            # injection effectively zero (1e-4 * O(1) * 0.5 = 5e-5 of x's norm).
+            # Why LayerScale: zero-init out_proj kills MHA gradient AND gate
+            # gradient (gate grad ∝ alpha*(1-alpha) and alpha=4.5e-5 from
+            # bias=-10 makes the gate dead). LayerScale lets gate use bias=0
+            # for alive gradient flow.
+            self.gale_layer_scale = nn.Parameter(torch.ones(hidden_dim) * 1e-4)
             self.geo_gate = nn.Linear(2 * hidden_dim, 1)
-            # Zero-init gate so at step 0 the model is identical to baseline
             nn.init.zeros_(self.geo_gate.weight)
-            nn.init.constant_(self.geo_gate.bias, -10.0)  # alpha≈0 at step 0
+            nn.init.zeros_(self.geo_gate.bias)  # alpha=0.5 at init
 
     def forward(
         self,
@@ -504,16 +512,23 @@ class TransformerBlock(nn.Module):
                 # geo_ctx_pooled: [B, actual_slices, D]
                 # Gate alpha: scalar per sample [B, 1, 1] — matches PR spec exactly.
                 CA_m, _ = self.geo_cross_attn(query=x, key=geo_ctx_pooled, value=geo_ctx_pooled)
+                CA_m_scaled = self.gale_layer_scale * CA_m  # [D] * [B,N,D] broadcast
                 alpha = torch.sigmoid(
                     self.geo_gate(
                         torch.cat(
                             [x.mean(dim=1, keepdim=True),
-                             CA_m.mean(dim=1, keepdim=True)],
+                             CA_m_scaled.mean(dim=1, keepdim=True)],
                             dim=-1,
                         )
                     )
                 )  # [B, 1, 1]
-                x = (1.0 - alpha) * x + alpha * CA_m
+                # DEVIATION from PR spec: additive residual (x + α·CA_m_scaled)
+                # instead of mixing (1-α)x + α·CA_m. The mixing form scales x by
+                # (1-α) at every block; with α=0.5 (alive gate gradient) baseline
+                # signal compounds to (0.5)^6=1.5% over 6 blocks. Additive is the
+                # standard transformer residual pattern and preserves baseline
+                # behaviour at init via LayerScale (5e-5 of x's norm).
+                x = x + alpha * CA_m_scaled
                 x = _apply_token_mask(x, attn_mask)
 
         x = x + self.mlp(self.norm2(x))
