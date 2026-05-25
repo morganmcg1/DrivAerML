@@ -28,6 +28,7 @@ import torch.nn as nn
 import wandb
 import yaml
 from torch.nn.parallel import DistributedDataParallel
+from torch.optim.swa_utils import AveragedModel, SWALR
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
@@ -36,6 +37,7 @@ from trainer_runtime import (
     EMA,
     MetricSlopeTracker,
     TargetTransform,
+    assert_required_finite_metrics,
     autocast_context,
     build_lr_scheduler,
     check_kill_thresholds,
@@ -53,6 +55,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    numeric_metric_items,
     parse_kill_thresholds,
     primary_metric_log,
     print_metrics,
@@ -141,6 +144,9 @@ class Config:
     vol_p_charbonnier_eps: float = 1e-3
     tau_z_loss_weight: float = 1.0
     surface_out_width_factor: float = 1.0
+    use_swa: bool = False
+    swa_start_epoch: int = 25
+    swa_lr: float = 5e-5
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Config:
@@ -161,6 +167,20 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         "surface_out_width_factor": (
             "Width multiplier for surface_out hidden layer (H39 PR #1284). "
             "1.0 = matched-width 2-layer head; 2.0 = wider head (Linear(h, 2h)->GELU->Linear(2h, 4))."
+        ),
+        "use_swa": (
+            "Enable Stochastic Weight Averaging (SWA, Izmailov et al. 2018) over "
+            "the final epochs. Maintains an independent AveragedModel that uniformly "
+            "averages base_model weights at every epoch >= --swa-start-epoch."
+        ),
+        "swa_start_epoch": (
+            "0-indexed first epoch at which SWA averaging begins. For a 30-epoch "
+            "run, swa_start_epoch=25 averages over the last 5 epochs (indices 25-29)."
+        ),
+        "swa_lr": (
+            "Constant LR applied via SWALR (anneal_epochs=0) once epoch >= "
+            "--swa-start-epoch. Override the cosine schedule's terminal LR with a "
+            "small steady value (e.g. 5e-5) to keep iterates exploring the flat basin."
         ),
     }
     choices_text = {
@@ -640,6 +660,31 @@ def main(argv: Iterable[str] | None = None) -> None:
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
+        swa_model: AveragedModel | None = None
+        swa_scheduler: SWALR | None = None
+        swa_update_count = 0
+        if config.use_swa:
+            assert not isinstance(base_model, DistributedDataParallel), (
+                "AveragedModel must wrap the unwrapped base_model, not the DDP handle"
+            )
+            swa_model = AveragedModel(base_model)
+            saved_optimizer_lr = optimizer.param_groups[0]["lr"]
+            swa_scheduler = SWALR(
+                optimizer,
+                swa_lr=config.swa_lr,
+                anneal_epochs=0,
+                anneal_strategy="cos",
+            )
+            for group in optimizer.param_groups:
+                group["lr"] = saved_optimizer_lr
+            swa_module_params = sum(p.numel() for p in swa_model.module.parameters())
+            if state.is_main:
+                print(
+                    f"SWA enabled: start_epoch={config.swa_start_epoch} (0-indexed), "
+                    f"swa_lr={config.swa_lr:g}, anneal_epochs=0, "
+                    f"avg_module_params={swa_module_params / 1e6:.2f}M"
+                )
+
         gradnorm_weights: GradNormWeights | None = None
         gradnorm_opt: torch.optim.Optimizer | None = None
         gradnorm_L0: torch.Tensor | None = None
@@ -766,7 +811,14 @@ def main(argv: Iterable[str] | None = None) -> None:
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
-                scheduled_lr = scheduler.get_last_lr()[0]
+                in_swa_phase = (
+                    swa_scheduler is not None
+                    and epoch >= config.swa_start_epoch
+                )
+                if in_swa_phase:
+                    scheduled_lr = swa_scheduler.get_last_lr()[0]
+                else:
+                    scheduled_lr = scheduler.get_last_lr()[0]
                 current_lr = step_warmup_lr(config, scheduled_lr, global_step)
                 loss_is_nonfinite = not bool(torch.isfinite(loss.detach()).item())
                 loss_skip_step = distributed_any(state, loss_is_nonfinite, device)
@@ -1105,7 +1157,19 @@ def main(argv: Iterable[str] | None = None) -> None:
                         )
                     break
 
-            scheduler.step()
+            if swa_scheduler is not None and epoch >= config.swa_start_epoch:
+                swa_scheduler.step()
+                if swa_model is not None:
+                    swa_model.update_parameters(base_model)
+                    swa_update_count += 1
+                    if state.is_main:
+                        n_avg_value = int(swa_model.n_averaged.item())
+                        print(
+                            f"[SWA] epoch {epoch + 1} update_count={swa_update_count} "
+                            f"n_averaged={n_avg_value} swa_lr={swa_scheduler.get_last_lr()[0]:g}"
+                        )
+            else:
+                scheduler.step()
             epoch_train_loss = train_loss_sum / max(n_batches, 1)
             dt = time.time() - t0
             peak_gb = torch.cuda.max_memory_allocated(device) / 1e9 if torch.cuda.is_available() else 0.0
@@ -1116,13 +1180,22 @@ def main(argv: Iterable[str] | None = None) -> None:
                 or (timeout_hit and n_batches > 0)
             )
 
+            if swa_scheduler is not None and epoch >= config.swa_start_epoch:
+                epoch_end_lr = swa_scheduler.get_last_lr()[0]
+            else:
+                epoch_end_lr = scheduler.get_last_lr()[0]
             log_metrics: dict[str, object] = {
                 "train/epoch_loss": epoch_train_loss,
-                "train/lr": scheduler.get_last_lr()[0],
-                "lr": scheduler.get_last_lr()[0],
+                "train/lr": epoch_end_lr,
+                "lr": epoch_end_lr,
                 "epoch_time_s": dt,
                 "global_step": global_step,
             }
+            if swa_model is not None:
+                log_metrics["swa/active"] = 1.0 if epoch >= config.swa_start_epoch else 0.0
+                log_metrics["swa/update_count"] = float(swa_update_count)
+                log_metrics["swa/n_averaged"] = float(swa_model.n_averaged.item())
+                log_metrics["swa/lr"] = float(swa_scheduler.get_last_lr()[0])
             if early_stop_reason is not None:
                 log_metrics["early_stop/triggered"] = 1.0
                 wandb.log(log_metrics)
@@ -1181,6 +1254,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                 for name, loader in val_loaders.items()
             }
 
+            swa_val_metrics: dict[str, dict[str, float]] = {}
+            if swa_model is not None and epoch >= config.swa_start_epoch:
+                swa_val_metrics = {
+                    name: evaluate_split(
+                        swa_model.module,
+                        loader,
+                        transform,
+                        device,
+                        amp_mode=config.amp_mode,
+                        distributed_state=state,
+                    )
+                    for name, loader in val_loaders.items()
+                }
+
             if state.is_main:
                 if raw_val_metrics is not None:
                     raw_surface = raw_val_metrics["val_surface"]
@@ -1191,6 +1278,12 @@ def main(argv: Iterable[str] | None = None) -> None:
                 log_metrics.update(primary_metric_log("val_primary", val_metrics["val_surface"]))
                 for split_name, metrics in val_metrics.items():
                     log_metrics.update(metric_namespace("val", split_name, metrics))
+                if swa_val_metrics:
+                    log_metrics.update(
+                        primary_metric_log("val_swa_primary", swa_val_metrics["val_surface"])
+                    )
+                    for split_name, metrics in swa_val_metrics.items():
+                        log_metrics.update(metric_namespace("val_swa", split_name, metrics))
                 log_metrics.update(
                     val_slope_tracker.update(
                         global_step=global_step,
@@ -1233,6 +1326,13 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"val_abupt_axis_rel_l2_pct={primary_val:.4f}{tag}"
                 )
                 print_metrics("val_surface", val_metrics["val_surface"])
+                if swa_val_metrics:
+                    primary_swa_val = swa_val_metrics["val_surface"]["abupt_axis_mean_rel_l2_pct"]
+                    print(
+                        f"           SWA val_abupt_axis_rel_l2_pct={primary_swa_val:.4f} "
+                        f"(n_averaged={int(swa_model.n_averaged.item())})"
+                    )
+                    print_metrics("val_swa_surface", swa_val_metrics["val_surface"])
             else:
                 wandb.log(log_metrics)
             if ema is not None:
@@ -1297,6 +1397,104 @@ def main(argv: Iterable[str] | None = None) -> None:
             global_step=global_step,
             total_minutes=total_minutes,
         )
+        if swa_model is not None and swa_update_count > 0:
+            swa_model_path = output_dir / "swa_checkpoint.pt"
+            torch.save(
+                {
+                    "model": swa_model.module.state_dict(),
+                    "config": asdict(config),
+                    "epoch": max_epochs,
+                    "swa_n_averaged": int(swa_model.n_averaged.item()),
+                    "swa_update_count": swa_update_count,
+                    "checkpoint_source": "swa",
+                },
+                swa_model_path,
+            )
+            print(
+                f"\nSWA terminal eval: n_averaged={int(swa_model.n_averaged.item())}, "
+                f"update_count={swa_update_count}"
+            )
+            swa_full_val_metrics = {
+                name: evaluate_split(
+                    swa_model.module,
+                    loader,
+                    transform,
+                    device,
+                    amp_mode=config.amp_mode,
+                )
+                for name, loader in final_val_loaders.items()
+            }
+            swa_full_val_log: dict[str, object] = {
+                "global_step": global_step,
+                **primary_metric_log(
+                    "full_val_swa_primary", swa_full_val_metrics["val_surface"]
+                ),
+            }
+            for split_name, metrics in swa_full_val_metrics.items():
+                swa_full_val_log.update(
+                    metric_namespace("full_val_swa", split_name, metrics)
+                )
+            try:
+                assert_required_finite_metrics(swa_full_val_log, "full_val_swa_primary")
+            except RuntimeError as exc:
+                wandb.summary.update(
+                    {
+                        "swa_run_invalid": 1.0,
+                        "swa_run_invalid/reason": str(exc),
+                    }
+                )
+                raise
+            wandb.log(swa_full_val_log)
+            wandb.summary.update(numeric_metric_items(swa_full_val_log))
+            print_metrics("full_val_swa", swa_full_val_metrics["val_surface"])
+
+            swa_test_metrics = {
+                name: evaluate_split(
+                    swa_model.module,
+                    loader,
+                    transform,
+                    device,
+                    amp_mode=config.amp_mode,
+                )
+                for name, loader in final_test_loaders.items()
+            }
+            swa_test_log: dict[str, object] = {
+                "global_step": global_step,
+                **primary_metric_log("test_swa_primary", swa_test_metrics["test_surface"]),
+            }
+            for split_name, metrics in swa_test_metrics.items():
+                swa_test_log.update(metric_namespace("test_swa", split_name, metrics))
+            try:
+                assert_required_finite_metrics(swa_test_log, "test_swa_primary")
+            except RuntimeError as exc:
+                wandb.summary.update(
+                    {
+                        "swa_run_invalid": 1.0,
+                        "swa_run_invalid/reason": str(exc),
+                    }
+                )
+                raise
+            wandb.log(swa_test_log)
+            wandb.summary.update(numeric_metric_items(swa_test_log))
+            wandb.summary.update(
+                {
+                    "swa/n_averaged": int(swa_model.n_averaged.item()),
+                    "swa/update_count": swa_update_count,
+                    "swa/start_epoch": config.swa_start_epoch,
+                    "swa/swa_lr": float(config.swa_lr),
+                }
+            )
+            print_metrics("test_swa", swa_test_metrics["test_surface"])
+            ema_test_wss = wandb.run.summary.get(
+                "test_primary/wall_shear_rel_l2_pct"
+            )
+            swa_test_wss = swa_test_metrics["test_surface"]["wall_shear_rel_l2_pct"]
+            if ema_test_wss is not None:
+                print(
+                    f"SWA vs EMA test_WSS: SWA={swa_test_wss:.4f}% "
+                    f"EMA={float(ema_test_wss):.4f}% "
+                    f"delta={swa_test_wss - float(ema_test_wss):+.4f}pp"
+                )
         wandb.finish()
     finally:
         cleanup_distributed(state)
