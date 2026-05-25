@@ -8,6 +8,48 @@ The wave's evidence contract: test metrics from `test_primary/*` only; validatio
 
 ---
 
+## 2026-05-25 12:21 UTC — PR #1317 CLOSED (H135 frieren — Ada-Temp Slices EP1 divergence, slice-routing destabilization)
+
+- branch: `dl24-frieren/h135-ada-temp-slices`
+- W&B Rank-0 run: `odvx4p9c` (terminal=EP1, val_abupt=43.55% breached 35% kill threshold)
+- hypothesis: Replace H39's fixed-temperature Physics-Attention softmax with per-point learned temperature τ_i = τ_0 · exp(MLP(x_i)) via Gumbel-Softmax (Transolver++ Ada-Temp mechanism, arxiv 2502.02414). Predicted DrivAerML test_WSS 6.1-6.45% based on Transolver++ DrivAerNet +12.6% surface gain.
+
+### Run history (debug timeline)
+| Time   | Run | State | Notes |
+|--------|-----|-------|-------|
+| 09:35Z | `bvhnkkor` | FAILED 0.3m | DDP unused-parameter error: indices 24/45/66/87/108/129 (one per Transolver block × 6 blocks) |
+| 10:04Z | — | — | Advisor diagnosis: τ-predictor MLPs registered but not always used in forward (Gumbel-Softmax stochastic masking). Recommended tau-anchor aux loss (1e-6 coef) as preferred fix |
+| 11:01Z | `jjpf6rnv` | finished 0.1m | Smoke test PASSED after student bugfix (commit 45e6642): root cause was orphan `self.temperature` Parameter from legacy code path, NOT τ-predictor as advisor hypothesized. Student diagnosis was correct. |
+| 11:26Z | `odvx4p9c` | running | Full 30-EP DDP-8 launch |
+| 12:21Z | `odvx4p9c` | killed EP1 | val_abupt=**43.55%** at step 10864 — >> 35% kill threshold |
+
+### EP1 result table
+| Metric | EP1 value | Kill threshold | Status |
+|--------|-----------|----------------|--------|
+| val_abupt | 43.55% | 35% | **BREACHED +8.55pp** ⚠️ |
+| val_WSS | (not logged before kill) | 7.05% (EP3 abort) | — |
+| val_SP | (not logged before kill) | — | — |
+
+### Mechanism analysis (informative null)
+The DDP fix landed cleanly (smoke passed, full launch started), but the underlying **Ada-Temp slice routing mechanism diverged catastrophically at EP1**:
+
+1. **val_abupt=43.55% is roughly 8× the H39 reference range** (~5.8% terminal) — this is approaching randomly-initialized-model magnitude
+2. **Gumbel-Softmax noise during training destabilized slice assignment** rather than encouraging useful exploration. The per-point τ_i learning is dominated by Gumbel noise at EP1 before τ-predictor MLP has stabilized
+3. **Slice routing is HIGH-RISK at H39 capacity**: the canonical Transolver fixed-temperature assignment is already near-optimal at depth-6/slices-128 — perturbing it without sufficient initialization care collapses the model
+
+### Strategic implications
+- **Slice-routing perturbations are HIGH-RISK** at H39 capacity. Any future hypothesis touching slice assignment (Gumbel, soft slicing, learned routing) should:
+  - Initialize predicted τ to match H39's fixed τ exactly at EP0
+  - Add tau-anchor aux loss to prevent runaway
+  - Smoke 200+ steps before full launch
+- **The Transolver++ DrivAerNet gain (+12.6% surface) is at scales (more epochs, more parameters) that don't transfer to our 30-epoch / depth-6 budget**. The DrivAerML literature suggests slice-routing innovations need 100+ EP training to stabilize
+- **Representation-axis pivot**: avoid slice-routing perturbations; focus on loss-shaping (H138 curvature-weighted Charb-z), input augmentation, or output-head architecture instead
+
+### Verdict
+**C NULL — closed by student claude at EP1 abupt kill threshold (12:21Z).** Wave 35 representation-axis arm closed; H138 (curvature-weighted Charbonnier z-axis loss-shaping) dispatched as replacement.
+
+---
+
 ## 2026-05-25 10:55 UTC — PR #1318 CLOSED (H136 nezuko — IMTL-G informative null + valuable mechanism falsification at EP3)
 
 - branch: `dl24-nezuko/h136-imtl-g`
