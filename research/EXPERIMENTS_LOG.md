@@ -1,5 +1,31 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-25 16:25 — PR #1323 CLOSED: WSS H137 PCGrad + H39 GradNorm (informative null — mechanism falsification)
+
+- `dl24-nezuko/h137-pcgrad-gradnorm`, run `dsnn61ne`
+- Hypothesis: PCGrad's conflicting-component projection (Yu et al. 2020) ON TOP OF H39 GradNorm preserves H39's task-weight equilibrium while resolving inter-task gradient conflicts (predicted test_WSS 6.45-6.62%, 60-70% prob beats H39 SOTA).
+- Student EP2-mid mechanism diagnostic (15:24Z) — PCGrad mechanism PASSIVELY FAILS:
+
+| Phase | Steps | Mean conflict_rate | % zero-conflict steps |
+|---|---|---|---|
+| Warmup | 1-975 | 0.175 | 43% |
+| Late warmup | 1000-5475 | 0.011 | **93%** |
+| EP1 post-warmup | 5500-10950 | 0.010 | **95%** |
+| EP2 | 10975-12775 | 0.017 | **89%** |
+
+- Post-warmup avg cosine_pre between 5 GradNorm tasks: 0.43-0.48 (strongly POSITIVE alignment). PCGrad projects on negative cosines → effectively no-op for 90%+ of steps.
+- Projection magnitude (relative L2): mean 0.4-0.6% of gradient norm = numerical no-op.
+- H39 GradNorm dynamics PRESERVED (w_tau_z 1.30 at step 12.5k, w_vol_p 0.15 clamped) — PCGrad doesn't break H39 but doesn't help either.
+- 4× wallclock penalty (1.13 it/s vs baseline 4.0 it/s) → only EP12-13 reachable in 33h budget.
+- **Structural reason for null**: (1) trunk-shared gradients across 5 tasks push into same low-rank geometry feature space → positive cosines after warmup; (2) GradNorm already scale-matches per-task magnitudes BEFORE they hit trunk → negative-cosine events PCGrad would correct are eliminated upstream.
+
+**Conclusions**:
+- **Combined H136 + H137 = double-falsification on gradient-surgery axis**: H136 IMTL-G fails ACTIVELY (equal-projection collapses w_tau_z 7.3×), H137 PCGrad fails PASSIVELY (mechanism never activates on positively-correlated trunk gradients). Both falsifications point to the same root: H39 GradNorm-with-clamps is a near-optimal task-weighting on this model class.
+- Any MTL surgery operating on (a) equal projection (IMTL-G), (b) negative cosines (PCGrad/GradVac), or (c) any mechanism activated AFTER GradNorm's magnitude balancing is structurally dominated by H39.
+- **Wave 36+ pivot direction**: if MTL surgery is still the lever, mechanism must operate on something OTHER than negative cosines or equal projection. Candidates: Nash-MTL (Pareto-stationary projection), GradDrop (per-coordinate sign-disagreement), Hutchinson Hessian-based weighting.
+
+---
+
 Single-model long DDP8 validation wave; started 2026-05-04.
 
 This log is appended in reverse-chronological order as PRs are reviewed. Each entry should include: PR number/title, student branch, hypothesis, results table (with W&B run IDs and test metrics), and brief commentary.
