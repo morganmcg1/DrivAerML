@@ -99,6 +99,9 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    use_lookahead: bool = False
+    lookahead_k: int = 5
+    lookahead_alpha: float = 0.5
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -637,6 +640,23 @@ def main(argv: Iterable[str] | None = None) -> None:
             print(f"Model: SurfaceTransolver grouped surface+volume ({n_params / 1e6:.2f}M params)")
 
         optimizer = build_optimizer(base_model, config)
+        if config.use_lookahead:
+            # H143: wrap base optimizer with Lookahead (Zhang et al. 2019).
+            # Lookahead shares `param_groups` with the base optimizer by
+            # reference, so the LR scheduler, GradNorm, and per-group LR
+            # setters all see the same groups transparently.
+            from torch_lookahead import Lookahead
+
+            optimizer = Lookahead(
+                optimizer,
+                k=config.lookahead_k,
+                alpha=config.lookahead_alpha,
+            )
+            if state.is_main:
+                print(
+                    f"[H143] Lookahead wrapping {config.optimizer}: "
+                    f"k={config.lookahead_k}, alpha={config.lookahead_alpha}"
+                )
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
@@ -1036,7 +1056,20 @@ def main(argv: Iterable[str] | None = None) -> None:
                         optimizer.zero_grad(set_to_none=True)
                     else:
                         set_optimizer_lr(optimizer, current_lr)
+                        if config.use_lookahead:
+                            prev_outer = optimizer.outer_step_counter
                         optimizer.step()
+                        if config.use_lookahead:
+                            outer_now = optimizer.outer_step_counter
+                            lookahead_fired = 1.0 if outer_now > prev_outer else 0.0
+                            train_log["train/lookahead/outer_step_counter"] = float(outer_now)
+                            train_log["train/lookahead/step_counter"] = float(optimizer.step_counter)
+                            train_log["train/lookahead/fired_this_step"] = lookahead_fired
+                            if state.is_main and outer_now > prev_outer and outer_now <= 3:
+                                print(
+                                    f"[H143] Lookahead outer step #{outer_now} "
+                                    f"fired at inner step {optimizer.step_counter}"
+                                )
                         if ema is not None:
                             ema.update(base_model)
                         weight_metrics = (
