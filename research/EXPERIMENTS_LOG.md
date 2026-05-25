@@ -9819,3 +9819,33 @@ All four are orthogonal axes (target transform / target rescaling / regularizati
 - **PR #665** (frieren): Cross-slice attention over Transolver slice tokens — global inter-slice MHA layer
 - **PR #666** (thorfinn): Depth scaling L=6 at full hidden=512 (corrects the confound in PR #660)
 - **PR #667** (fern): Weight decay sweep {1e-4, 5e-4, 1e-3} for Lion optimizer
+
+---
+
+## 2026-05-25 05:30Z — PR #1301: H125 BACKBONE DEPTH 5→7 (fern)
+
+- **Branch**: fern/h125-backbone-depth-5-to-7
+- **W&B run**: `7qsjzv8w` (state=failed, OOM at EP10 step 0; EP9 EMA-best recovered via eval_test_only.py)
+- **Hypothesis**: Extend depth-axis beyond H120 (depth-6) by scaling backbone 5→7 layers. Tests if depth capacity advantage continues to compound at depth-7. Single-flag change `--model-layers 7` from H112 baseline.
+
+| Metric | H125 EP9-EMA-best | H112 baseline | Δ vs H112 | H120 EP13 terminal | Δ vs H120 |
+|---|---:|---:|---:|---:|---:|
+| val_primary/abupt | 6.0169% | 6.1358% | **−0.119pp (A WIN)** | 6.0122% | +0.005pp |
+| test_primary/abupt | 5.924% | 5.839% | +0.085pp REGRESS | 5.899% | +0.025pp |
+| **test_WSS (Morgan)** | **6.842%** | **6.752%** | **+0.090pp REGRESS** | 6.818% | +0.024pp |
+| test_WSS_x | 6.083% | — | — | — | — |
+| test_WSS_y | 7.431% | — | — | — | — |
+| test_WSS_z | 8.847% | — | — | — | — |
+| test_VP | 3.495% | 3.421% | +0.074pp regress | 3.461% | +0.034pp |
+| test_SP | 3.762% | 3.695% | +0.067pp regress | 3.728% | +0.034pp |
+
+**Val→test WSS slope: +0.010pp (flat-to-regressive). Same catastrophe as H120 (−0.020pp). Structural.**
+
+**Decision: CLOSED C NULL.** Val A WIN (−0.119pp below merge gate) but test C NULL — regresses Morgan primary test_WSS by 0.090pp. All three test floors fail. val→test slope catastrophe is structural, replicated from H120.
+
+**Key findings:**
+1. **Depth-axis test-ceiling at depth-5 LOCKED** — two-point confirmation (H120 depth-6 + H125 depth-7), both with flat-or-positive val→test WSS slope. H112 depth-5 is the unambiguous test optimum on the depth axis.
+2. **Capacity-axis cohort closure confirmed** — H118 (slices), H120 (depth-6), H121 (width-576), H125 (depth-7) all regress test_WSS by +0.066-0.090pp vs H112 under canonical DropPath_max=0.10. The bottleneck is generalization, not capacity.
+3. **H125 EP9 val correctly led H120 throughout** (peak −0.081pp at EP6, consolidated −0.063-0.068pp at EP7-EP9), confirming depth-7 > depth-6 on val — but the val gains do not transfer to test. H112's steep negative val→test slope (−0.215pp) is a depth-5-specific generalization property, not a universal feature of this architecture.
+4. **OOM recovery banked** — EP9 EMA-best extracted from crashed run via `eval_test_only.py`. Memory headroom notes for future depth-7+ launches: `--eval-volume-points 49152` or `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`.
+5. **Next experiment (H132):** depth-5 × DropPath_max=0.15 — the missing reg-axis cell. Tests whether DropPath_max=0.15 helps at canonical capacity independently of capacity compound.

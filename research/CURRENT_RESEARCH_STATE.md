@@ -1,5 +1,93 @@
 # SENPAI Research State
 
+- **Date:** 2026-05-25 (latest invocation: 2026-05-25 ~05:30 UTC)
+- **Branch:** tay
+- **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
+- **Thread share note:** Issue #1056 is shared with another advisor ("dl24") running a parallel fleet on `drivaerml-long-20260504`. The dl24-prefixed students are real but **NOT under tay advisorship** — visible context for cross-pollination only.
+
+## ~05:30Z (2026-05-25) — H125 CLOSED C NULL (DEPTH-AXIS TEST-CEILING CONFIRMED AT DEPTH-5 — STRUCTURAL, TWO-POINT), H132 ASSIGNED TO FERN (DEPTH-5 × DROPPATH_MAX=0.15 PURE REG-AXIS CELL)
+
+**Fleet state**: 8/8 students working, 0 idle.
+
+### H125 fern (depth-7 backbone) CLOSED — C NULL on primary objective, DEPTH-AXIS TEST-CEILING LOCKED
+
+OOM crash at EP10 step 0, EP9 EMA-best recovered via `eval_test_only.py` DDP post-mortem. W&B run `7qsjzv8w`, state=failed at step 59780.
+
+**EP9 EMA-best test eval:**
+- val_abupt **6.017%** ✅ A WIN (−0.119pp below 6.1358% merge gate)
+- test_abupt 5.924% ❌ REGRESSION +0.085pp vs H112
+- **test_WSS 6.842% ❌ REGRESSION +0.090pp vs H112 6.752%** — primary objective missed
+- test_WSS_x 6.083%, test_WSS_y 7.431%, test_WSS_z 8.847%
+- test_VP 3.495%, test_SP 3.762% — all three test floors fail
+
+**Val→test WSS slope: +0.010pp — same flat-slope catastrophe as H120, structural not a fluke.**
+
+**DEPTH-AXIS TEST-CEILING LOCKED — three-run confirmation:**
+
+| Run | Config | val_WSS | test_WSS | val→test slope |
+|---|---|---:|---:|---:|
+| H112 (SOTA) | depth-5 × DP=0.10 | 6.97% | **6.752%** | **−0.215pp** (steep) |
+| H120 (closed) | depth-6 × DP=0.10 | 6.838% | 6.818% | **−0.020pp** (flat, ↓93%) |
+| **H125 (closed)** | **depth-7 × DP=0.10** | **6.832%** | **6.842%** | **+0.010pp** (regressive) |
+
+**Depth-axis val→test slope degrades monotonically with depth scaling.** H112 depth-5 is the unambiguous test optimum for the depth-only axis at canonical DropPath_max=0.10. H125 correctly led H120 on val at every EP gate (peak −0.081pp at EP6, consolidated −0.063-0.068pp at EP7-EP9), but neither depth-6 nor depth-7 shows any test transfer.
+
+**H125 also confirms capacity-axis cohort closure across all four standalone interventions:**
+
+| Axis | Run | test_WSS Δ vs H112 |
+|---|---|---:|
+| Slice granularity | H118 slices-192 | +0.074pp |
+| Depth | H120 depth-6 | +0.066pp |
+| **Depth** | **H125 depth-7** | **+0.090pp** |
+| Width | H121 hidden-576 | +0.074pp |
+
+**All four standalone capacity interventions regress test_WSS by +0.066-0.090pp under canonical DropPath_max=0.10. Capacity-axis path to Morgan SOTA (test_WSS < 5.85%) is CLOSED. The bottleneck is generalization, not capacity.**
+
+**OOM at EP10 step 0:** 94.82/94.97 GiB peak GPU memory on re-entry to training mode after EP9's 65k-vol-points validation pass. Memory headroom notes for future depth-7+ launches: (1) `--eval-volume-points 49152`, (2) `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, (3) `--batch-size 3` as last resort.
+
+### H132 fern ASSIGNED — depth-5 × DropPath_max=0.15 (pure reg-axis cell), PR #1315
+
+**The missing cell in the DropPath compound study:** H130 (depth-6 × max=0.15) is in-flight and tracking strongly positive. But is the gain because of the depth-reg compound, or because max=0.15 is productive at any capacity? H132 tests this at canonical depth-5 capacity — single flag change `--drop-path-max 0.10 → 0.15` from H112 baseline.
+
+**Per-layer rates at depth-5 × max=0.15:** [0.000, 0.0375, 0.0750, 0.1125, 0.1500] — 50% stronger than H112 at every layer.
+
+**Falsifiable decision tree:**
+- H132 test_WSS < 6.752%: pure reg-axis productive at canonical capacity → max=0.15 becomes new baseline setting
+- H132 test_WSS ≥ 6.752%: DropPath_max=0.15 requires depth-6 compound to activate; H130 mechanism is depth×reg compound-specific
+
+ETA terminal: ~13-14h from launch (~18:00-19:00Z 2026-05-25).
+
+### Current fleet leaderboard (~05:30Z 2026-05-25)
+
+| Hyp | Student | Status | Terminal ETA | Latest reading |
+|---|---|---|---|---|
+| H132 DP-max=0.15 canonical | fern | NEW | ~18:00Z | — |
+| H127 wider decoder | tanjiro | ~85% | ~07:30Z | EP8 val_abupt 6.222%, proj 6.10-6.13% A WIN |
+| H-B aux log-mag | edward | ~85% | ~07:36Z | val#7 6.268%, WSS_z mild lead |
+| H-A2 concat-tangent | thorfinn | ~75% | ~08:30-09:00Z | EP7 6.304%, z−x Δ frozen = mechanism FALSIFIED |
+| H128 SwiGLU MLP | alphonse | ~60% | ~10:00Z | EP5 6.482%, gating healthy |
+| H126b T=4.0 sampling | nezuko | ~70% | ~12:00Z | EP5 6.946%, sampling diagnostics stable |
+| H130 depth-6 × DP=0.15 | askeladd | ~55% | ~13:00Z | step 38030 6.539%, AHEAD of H120 at all steps |
+| H131 hidden-576 × DP=0.15 | frieren | ~40% | ~16:00Z | EP2 +0.447pp vs canonical, likely INERT |
+
+**High-density terminal window: ~07:00-10:00Z (H127, H-B, H-A2, H128 all land within 3h window).**
+
+### Current program state summary
+
+**Single-model SOTA:** H112 DropPath_max=0.10 (val_abupt 6.1358%, test_WSS 6.752%), PR #1283.
+
+**Primary objective:** test_WSS < 5.85% (Morgan directive, Issue #1056). Gap = 0.902pp. Gap is not closing via capacity-axis.
+
+**Strategy as of ~05:30Z 2026-05-25:**
+1. **Capacity-axis: CLOSED** — four standalone experiments (H118, H120, H121, H125) all regress test_WSS. The depth-axis test ceiling is at depth-5 (H112). Generalization bottleneck confirmed.
+2. **Reg-axis (primary open direction):** H130 depth-6 × DP=0.15 tracking positive (methodology-corrected reading); H132 depth-5 × DP=0.15 newly assigned — pure reg-axis cell. H131 width × DP=0.15 likely inert.
+3. **Novel mechanisms (tracking, mostly benign):** H127 decoder-width, H-B aux-log-mag, H-A2 concat-tangent all converging at val_abupt 6.20-6.30% (H121-class capacity expansion, no mechanism-specific differential improvement on test_WSS expected).
+4. **Architecture (H128 SwiGLU):** Gating healthy at EP5, mechanism class-distinct from capacity/reg. First architectural primitive test; if positive, unlocks MLP-architecture axis.
+5. **Sampling distribution (H126b):** Novel train-val mismatch mechanism; outcome depends entirely on val→test slope behavior, cannot be predicted from val alone.
+6. **SP-axis: CLOSED** — 23rd+ SP plateau confirmation across all experiments. SP structurally floored at ~3.577%.
+
+---
+
 - **Date:** 2026-05-24 (latest invocation: 2026-05-24 ~21:45 UTC)
 - **Branch:** tay
 - **W&B project:** wandb-applied-ai-team/senpai-v1-drivaerml-ddp8
