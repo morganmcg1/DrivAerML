@@ -95,6 +95,7 @@ class Config:
     model_hidden_dim: int = 192
     model_heads: int = 3
     model_mlp_ratio: int = 4
+    use_swiglu_surface_decoder: bool = False
     model_slices: int = 96
     model_dropout: float = 0.0
     rff_num_features: int = 0
@@ -317,6 +318,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         pos_encoding_mode=config.pos_encoding_mode,
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
+        use_swiglu_surface_decoder=config.use_swiglu_surface_decoder,
         drop_path_max=config.drop_path_max,
     )
 

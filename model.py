@@ -252,6 +252,22 @@ class UpActDownMlp(nn.Module):
         return self.fc2(self.act(self.fc1(x)))
 
 
+class SwiGluMlpDecoder(nn.Module):
+    """SwiGLU decoder head: down_proj(SiLU(gate_proj(x)) * value_proj(x)).
+    Drop-in for surface_out Sequential. Same interface: Linear(in_dim -> out_dim)."""
+
+    def __init__(self, in_dim: int, hidden_dim: int, out_dim: int):
+        super().__init__()
+        self.gate_proj = nn.Linear(in_dim, hidden_dim, bias=False)
+        self.value_proj = nn.Linear(in_dim, hidden_dim, bias=False)
+        self.down_proj = nn.Linear(hidden_dim, out_dim)
+        self.act = nn.SiLU()
+        self.apply(_init_linear)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down_proj(self.act(self.gate_proj(x)) * self.value_proj(x))
+
+
 class TransolverAttention(nn.Module):
     def __init__(
         self,
@@ -418,6 +434,7 @@ class SurfaceTransolver(nn.Module):
         use_qk_norm: bool = False,
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
+        use_swiglu_surface_decoder: bool = False,
         drop_path_max: float = 0.0,
     ):
         super().__init__()
@@ -520,12 +537,21 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
-            self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
-                nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
-            )
-            self.surface_out.apply(_init_linear)
+            if use_swiglu_surface_decoder:
+                # H135: SwiGLU gating in the surface decoder head only.
+                # +1.5% param overhead vs baseline (+262K / ~17.4M total).
+                self.surface_out = SwiGluMlpDecoder(
+                    in_dim=n_hidden,
+                    hidden_dim=n_hidden,
+                    out_dim=self.surface_output_dim,
+                )
+            else:
+                self.surface_out = nn.Sequential(
+                    nn.Linear(n_hidden, n_hidden),
+                    nn.SiLU(),
+                    nn.Linear(n_hidden, self.surface_output_dim),
+                )
+                self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden // 2),
                 nn.SiLU(),
