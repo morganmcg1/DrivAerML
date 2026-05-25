@@ -56,6 +56,7 @@ from trainer_runtime import (
     make_loaders,
     masked_mse,
     metric_namespace,
+    signed_log1p,
     weighted_channel_mse,
     parse_kill_thresholds,
     primary_metric_log,
@@ -106,6 +107,8 @@ class Config:
     drop_path_max: float = 0.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
+    use_tau_z_log_reparam: bool = False
+    tau_z_log_reparam_scale: float = 0.0
     amp_mode: str = "bf16"
     num_workers: int = -1
     pin_memory: bool = True
@@ -238,6 +241,23 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_tau_z_log_reparam": (
+            "H140: Apply a signed-log1p reparameterisation to the tau_z "
+            "channel when computing the training loss. The model output for "
+            "tau_z remains in normalised raw space; the loss inverts the "
+            "normalisation and computes MSE against signed_log1p(tau_z_raw, "
+            "scale). This compresses the heavy tail of tau_z so gradient "
+            "mass is not dominated by wheel-arch/underbody outliers. The "
+            "validation/test metric path is unchanged because predictions "
+            "are still inverted via the existing mean/std transform. "
+            "Requires --tau-z-log-reparam-scale > 0."
+        ),
+        "tau_z_log_reparam_scale": (
+            "Scale parameter for the signed-log1p transform on tau_z. "
+            "Recommended: p95 of |tau_z| over the training split. For the "
+            "current DrivAerML processed split, p95 of |tau_z| measured on "
+            "40 train cases is approximately 2.27 (Pa)."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -249,7 +269,19 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
         else:
             parser.add_argument(arg_name, type=type(value), default=value, help=help_value)
     namespace = parser.parse_args(argv)
-    return Config(**vars(namespace))
+    cfg = Config(**vars(namespace))
+    if cfg.use_tau_z_log_reparam and cfg.tau_z_log_reparam_scale <= 0.0:
+        raise ValueError(
+            "--use-tau-z-log-reparam requires --tau-z-log-reparam-scale > 0 "
+            "(recommended: p95 of |tau_z| over the training split; "
+            "current DrivAerML estimate ~2.27)."
+        )
+    if cfg.use_tau_z_log_reparam and cfg.use_gradnorm:
+        raise ValueError(
+            "--use-tau-z-log-reparam is not implemented for the GradNorm "
+            "per-task path (`per_task_train_losses`). Disable one of them."
+        )
+    return cfg
 
 
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
@@ -331,10 +363,12 @@ def train_loss(
     surface_loss_weight: float = 1.0,
     volume_loss_weight: float = 1.0,
     surface_channel_weights: torch.Tensor | None = None,
+    tau_z_log_reparam_scale: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch = batch.to(device)
     surface_target = transform.apply_surface(batch.surface_y)
     volume_target = transform.apply_volume(batch.volume_y)
+    tau_z_loss_log: torch.Tensor | None = None
     with autocast_context(device, amp_mode):
         out = model(
             surface_x=batch.surface_x,
@@ -342,27 +376,56 @@ def train_loss(
             volume_x=batch.volume_x,
             volume_mask=batch.volume_mask,
         )
-        if surface_channel_weights is not None:
+        surface_pred = out["surface_preds"]
+        if tau_z_log_reparam_scale > 0.0:
+            # H140: keep cp/tau_x/tau_y in normalized-MSE space; for tau_z,
+            # invert the prediction back to raw, then compute MSE in
+            # signed-log1p space. The model output still lives in normalized
+            # raw space (eval/metric path unaffected).
+            weights = (
+                surface_channel_weights
+                if surface_channel_weights is not None
+                else torch.ones(4, device=surface_pred.device, dtype=surface_pred.dtype)
+            )
+            base_loss = weighted_channel_mse(
+                surface_pred[..., :3],
+                surface_target[..., :3],
+                batch.surface_mask,
+                weights[:3],
+            )
+            std_z = transform.surface_y_std.to(surface_pred.device)[3]
+            mean_z = transform.surface_y_mean.to(surface_pred.device)[3]
+            pred_z_raw = surface_pred[..., 3:4] * std_z + mean_z
+            target_z_raw = batch.surface_y[..., 3:4]
+            pred_z_log = signed_log1p(pred_z_raw, tau_z_log_reparam_scale)
+            target_z_log = signed_log1p(target_z_raw, tau_z_log_reparam_scale)
+            z_loss = masked_mse(pred_z_log, target_z_log, batch.surface_mask)
+            tau_z_loss_log = z_loss.detach()
+            surface_loss = (3.0 * base_loss + weights[3] * z_loss) / 4.0
+        elif surface_channel_weights is not None:
             surface_loss = weighted_channel_mse(
-                out["surface_preds"],
+                surface_pred,
                 surface_target,
                 batch.surface_mask,
                 surface_channel_weights,
             )
         else:
-            surface_loss = masked_mse(out["surface_preds"], surface_target, batch.surface_mask)
+            surface_loss = masked_mse(surface_pred, surface_target, batch.surface_mask)
         volume_loss = masked_mse(out["volume_preds"], volume_target, batch.volume_mask)
         weighted_surface_loss = surface_loss_weight * surface_loss
         weighted_volume_loss = volume_loss_weight * volume_loss
         loss = weighted_surface_loss + weighted_volume_loss
         base_mse_loss = surface_loss + volume_loss
-    return loss, {
+    metrics: dict[str, float] = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
         "volume_loss": float(volume_loss.detach().cpu().item()),
         "surface_loss_weighted": float(weighted_surface_loss.detach().cpu().item()),
         "volume_loss_weighted": float(weighted_volume_loss.detach().cpu().item()),
     }
+    if tau_z_loss_log is not None:
+        metrics["tau_z_loss_log"] = float(tau_z_loss_log.cpu().item())
+    return loss, metrics
 
 
 GRADNORM_TASK_NAMES = ("sp", "tau_x", "tau_y", "tau_z", "vp")
@@ -862,6 +925,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                     f"Surface channel weights: cp=1.0 tau_x=1.0 "
                     f"tau_y={config.tau_y_loss_weight} tau_z={config.tau_z_loss_weight}"
                 )
+            if config.use_tau_z_log_reparam:
+                print(
+                    f"H140: signed-log1p reparam ENABLED for tau_z, "
+                    f"scale={config.tau_z_log_reparam_scale}"
+                )
 
         run = init_wandb_run(
             config=config,
@@ -893,6 +961,10 @@ def main(argv: Iterable[str] | None = None) -> None:
             wandb.summary["model/string_sep_init_sigmas"] = init_sigmas_for_log
             wandb.summary["loss/tau_y_loss_weight"] = config.tau_y_loss_weight
             wandb.summary["loss/tau_z_loss_weight"] = config.tau_z_loss_weight
+            wandb.summary["loss/use_tau_z_log_reparam"] = bool(config.use_tau_z_log_reparam)
+            wandb.summary["loss/tau_z_log_reparam_scale"] = float(
+                config.tau_z_log_reparam_scale if config.use_tau_z_log_reparam else 0.0
+            )
             backbone = getattr(base_model, "backbone", None)
             if backbone is not None and hasattr(backbone, "blocks"):
                 drop_path_schedule = [
@@ -1052,6 +1124,11 @@ def main(argv: Iterable[str] | None = None) -> None:
                         surface_loss_weight=config.surface_loss_weight,
                         volume_loss_weight=config.volume_loss_weight,
                         surface_channel_weights=surface_channel_weights if use_channel_weights else None,
+                        tau_z_log_reparam_scale=(
+                            config.tau_z_log_reparam_scale
+                            if config.use_tau_z_log_reparam
+                            else 0.0
+                        ),
                     )
                 optimizer.zero_grad(set_to_none=True)
                 global_step += 1
@@ -1092,6 +1169,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                             "train/tau_z_loss_weight": config.tau_z_loss_weight,
                         }
                     )
+                    if "tau_z_loss_log" in batch_loss_metrics:
+                        train_log["train/tau_z_loss_log"] = batch_loss_metrics["tau_z_loss_log"]
                 if gradnorm_metrics:
                     train_log.update(gradnorm_metrics)
 

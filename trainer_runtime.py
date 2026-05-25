@@ -837,6 +837,20 @@ def masked_mse(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> 
     return masked_mean((pred - target).square(), mask)
 
 
+def signed_log1p(x: torch.Tensor, scale: float) -> torch.Tensor:
+    """Variance-stabilising transform: sign(x) * log1p(|x| / scale).
+
+    Compresses heavy tails (large |x| -> ~log) while staying near-linear for
+    |x| << scale. The inverse is :func:`signed_expm1`.
+    """
+    return x.sign() * torch.log1p(x.abs() / scale)
+
+
+def signed_expm1(x: torch.Tensor, scale: float) -> torch.Tensor:
+    """Inverse of :func:`signed_log1p`: sign(x) * (exp(|x|) - 1) * scale."""
+    return x.sign() * torch.expm1(x.abs()) * scale
+
+
 def weighted_channel_mse(
     pred: torch.Tensor,
     target: torch.Tensor,
