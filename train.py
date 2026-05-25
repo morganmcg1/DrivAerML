@@ -129,10 +129,9 @@ class Config:
     y_symmetry_aug_prob: float = 0.5
     eval_only: bool = False
     eval_checkpoint: str = ""
-    use_gradnorm: bool = False
-    gradnorm_alpha: float = 1.0
-    gradnorm_lr: float = 1e-3
-    gradnorm_min_w_vol_p: float = 0.0
+    use_imtl_g: bool = False
+    imtl_g_eps: float = 1e-4
+    imtl_g_clamp_negative: bool = True
     use_curvature_attention_bias: bool = False
     wss_charbonnier_weight: float = 0.0
     wss_charbonnier_eps: float = 1e-3
@@ -218,22 +217,85 @@ def parse_pe_init_sigmas(spec: str) -> list[float] | None:
     return sigmas or None
 
 
-class GradNormWeights(nn.Module):
-    """Learnable per-task GradNorm weights (Chen et al. 2018, arXiv:1711.02257).
+def imtl_g_weights(
+    grads: list[torch.Tensor],
+    *,
+    eps: float = 1e-4,
+    clamp_negative: bool = True,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Closed-form IMTL-G weights (Liu et al. 2021, arXiv:2108.01547).
 
-    Stores log-weights so the multiplicative weight ``w = exp(log_w)`` is
-    always positive. Weights are renormalised externally to satisfy
-    ``sum(w) = n_tasks``.
+    The "impartial" gradient direction makes the combined gradient project
+    equally onto each unit-normalised task gradient. Uses the reference-task
+    offset system (eq. 8 of the paper) which is the canonical formulation.
+
+    Args:
+        grads: list of T flattened gradient tensors (each shape ``[P]``) of the
+            per-task losses w.r.t. a shared backbone parameter.
+        eps: Tikhonov regularisation added to the diagonal of the (T-1)x(T-1)
+            offset Gram matrix before solving.
+        clamp_negative: clamp negative weights to 0 and renormalise. The paper
+            does not clamp, but clamping is widely used in practice to avoid
+            anti-correlated task subtraction destabilising early training.
+
+    Returns:
+        (alpha, diag) where alpha is a [T,] tensor summing to 1, non-negative
+        if ``clamp_negative``; diag is a metrics dict (cond, alpha_min,
+        alpha_max, neg_count, solve_failed).
     """
+    T = len(grads)
+    device = grads[0].device
+    dtype = torch.float32
+    diag: dict[str, float] = {
+        "imtl_g/solve_failed": 0.0,
+        "imtl_g/neg_count": 0.0,
+    }
+    if T < 2:
+        alpha = torch.ones(T, device=device, dtype=dtype) / max(T, 1)
+        diag["imtl_g/cond_number"] = 1.0
+        return alpha, diag
 
-    def __init__(self, n_tasks: int):
-        super().__init__()
-        self.n_tasks = n_tasks
-        self.log_weights = nn.Parameter(torch.zeros(n_tasks))
+    G = torch.stack([g.detach().to(dtype) for g in grads])  # [T, P]
+    g_norms = G.norm(dim=1, keepdim=True).clamp_min(1e-8)
+    U = G / g_norms                                          # unit gradients [T, P]
 
-    @property
-    def weights(self) -> torch.Tensor:
-        return torch.exp(self.log_weights)
+    # Reference-task offset system (task 0 is reference)
+    D = G[0:1] - G[1:]                                       # [T-1, P]
+    U_diff = U[0:1] - U[1:]                                  # [T-1, P]
+
+    M = D @ U_diff.T                                          # [T-1, T-1]
+    M_reg = M + eps * torch.eye(T - 1, device=device, dtype=dtype)
+
+    # Condition diagnostic (used for fallback)
+    try:
+        cond = float(torch.linalg.cond(M_reg).item())
+    except Exception:
+        cond = float("inf")
+    diag["imtl_g/cond_number"] = cond
+
+    proj = (G[0] @ U_diff.T).unsqueeze(-1)                    # [T-1, 1]
+    try:
+        alpha_rest = torch.linalg.solve(M_reg, proj).squeeze(-1)  # [T-1]
+        if not torch.isfinite(alpha_rest).all():
+            raise RuntimeError("non-finite alpha")
+    except Exception:
+        diag["imtl_g/solve_failed"] = 1.0
+        alpha = torch.ones(T, device=device, dtype=dtype) / T
+        diag["imtl_g/alpha_min"] = float(alpha.min().item())
+        diag["imtl_g/alpha_max"] = float(alpha.max().item())
+        return alpha, diag
+
+    alpha_0 = 1.0 - alpha_rest.sum()
+    alpha = torch.cat([alpha_0.unsqueeze(0), alpha_rest])     # [T]
+
+    diag["imtl_g/neg_count"] = float((alpha < 0).sum().item())
+    if clamp_negative:
+        alpha = alpha.clamp(min=0.0)
+    s = alpha.sum().clamp_min(1e-8)
+    alpha = alpha / s
+    diag["imtl_g/alpha_min"] = float(alpha.min().item())
+    diag["imtl_g/alpha_max"] = float(alpha.max().item())
+    return alpha, diag
 
 
 def per_channel_masked_mse(
@@ -350,14 +412,19 @@ def train_loss(
     use_y_symmetry_aug: bool = False,
     y_symmetry_aug_prob: float = 0.5,
     aug_log: dict | None = None,
-    gradnorm_weights: GradNormWeights | None = None,
+    use_imtl_g: bool = False,
     wss_charbonnier_weight: float = 0.0,
     wss_charbonnier_eps: float = 1e-3,
     wss_charbonnier_axes: str = "all",
     vol_p_charbonnier_weight: float = 0.0,
     vol_p_charbonnier_eps: float = 1e-3,
     tau_z_loss_weight: float = 1.0,
-) -> tuple[torch.Tensor, dict[str, float], torch.Tensor | None]:
+) -> tuple[
+    torch.Tensor | None,
+    dict[str, float],
+    torch.Tensor | None,
+    torch.Tensor | None,
+]:
     surface_curvature = getattr(batch, "surface_curvature", None)
     batch = batch.to(device)
     if surface_curvature is not None:
@@ -402,41 +469,41 @@ def train_loss(
         else:
             loss_vol_p_charb = None
             loss_vol_p_mse_diag = None
-        if gradnorm_weights is not None:
-            # H26: scale per-task losses by surface_loss_weight / volume_loss_weight
-            # BEFORE concatenation. L0 (captured from task_losses on the first
-            # step) absorbs the scaling so r-ratios cancel; the lever then acts
-            # through gradient magnitudes (c_per_task / G_bar) and the total
-            # backward signal, not through r-renormalisation.
+        if use_imtl_g:
+            # H136: IMTL-G uses task_losses as input to the closed-form
+            # weighting (computed outside train_loss). We preserve the same
+            # 5-task structure used by H39's GradNorm (cp, tau_x, tau_y, tau_z,
+            # vol_p) so the gradient-balance failure mode is visible per axis.
             surface_per_ch = per_channel_masked_mse(
                 out["surface_preds"], surface_target, batch.surface_mask
             ) * surface_loss_weight  # [4]: cp, tau_x, tau_y, tau_z
-            # H36: Asymmetric tau_z boost. Multiply ONLY index 3 (tau_z) by
-            # tau_z_loss_weight. Same pre-GradNorm injection point as H26 —
-            # L0 absorbs the scaling so the lever acts through gradient
-            # magnitudes (c_tau_z / G_bar) and the total backward signal,
-            # without disturbing cp/tau_x/tau_y budgets.
+            # H36: Asymmetric tau_z boost (same injection point as H26/GradNorm
+            # variant — IMTL-G then balances tasks impartially around this base
+            # scaling).
             tau_z_scale = surface_per_ch.new_tensor(
                 [1.0, 1.0, 1.0, tau_z_loss_weight]
             )
             surface_per_ch = surface_per_ch * tau_z_scale
             if loss_vol_p_charb is not None:
                 # H19 advisor fix: vol_p slot carries the Charbonnier tensor
-                # so GradNorm's L0 anchor and per-task gradient norms reflect
-                # the reshape. The Charb contribution to the total loss is
-                # now w_vol_p * Charb_vol_p via the weighted sum below —
-                # adding a separate `vol_p_charb_weight * Charb` term would
-                # double-count.
+                # so IMTL-G's per-task gradient reflects the reshaped landscape.
+                # The Charb contribution to the total loss is now
+                # alpha_vol_p * Charb_vol_p via the weighted sum the caller
+                # forms — no separate additive term to avoid double-count.
                 volume_per_ch = loss_vol_p_charb.unsqueeze(0) * volume_loss_weight  # [1]
             else:
                 volume_per_ch = per_channel_masked_mse(
                     out["volume_preds"], volume_target, batch.volume_mask
                 ) * volume_loss_weight  # [1]: vol_p MSE
             task_losses = torch.cat([surface_per_ch, volume_per_ch])  # [5]
-            w_detached = gradnorm_weights.weights.detach()
-            loss = (w_detached * task_losses).sum()
-            weighted_surface_loss = (w_detached[:4] * surface_per_ch).sum()
-            weighted_volume_loss = w_detached[4] * volume_per_ch[0]
+            # The caller (training loop) will compute alpha from per-task
+            # gradients and form weighted_loss = sum(alpha_detached * task_losses).
+            # We return loss=None to signal that.
+            loss = None
+            # Metrics: surface/volume aggregates using uniform task weight
+            # (alpha not yet known; logged values reflect raw per-task levels).
+            weighted_surface_loss = surface_per_ch.sum()
+            weighted_volume_loss = volume_per_ch.sum()
         else:
             task_losses = None
             weighted_surface_loss = surface_loss_weight * surface_loss
@@ -447,6 +514,10 @@ def train_loss(
         # Channels 1-3 of surface_preds/target are tau_x, tau_y, tau_z (idx 0 is cp).
         # With axes="z", restrict to channel 3 (tau_z) — the axis with the
         # largest val→test gap in H10, while letting τ_x/τ_y keep H9's MSE.
+        # Supplementary additive WSS Charbonnier (H10b). Kept as an additive
+        # term (separate from IMTL-G task list) to preserve H39 baseline
+        # behaviour: the supplementary acts as a fixed extra gradient pull on
+        # tau_z on top of whatever IMTL-G balances across the 5 base tasks.
         if wss_charbonnier_weight > 0.0:
             if wss_charbonnier_axes == "z":
                 pred_wss = out["surface_preds"][..., 3:4]
@@ -462,28 +533,33 @@ def train_loss(
                 pred_wss, target_wss, batch.surface_mask, eps=wss_charbonnier_eps
             )
             loss_wss_mse_diag = masked_mse(pred_wss, target_wss, batch.surface_mask)
-            loss = loss + wss_charbonnier_weight * loss_wss_charb
+            supplementary_loss = wss_charbonnier_weight * loss_wss_charb
             charb_metrics = {
                 "loss_wss_charb_unweighted": float(
                     loss_wss_charb.detach().cpu().item()
                 ),
                 "loss_wss_charb_weighted": float(
-                    (wss_charbonnier_weight * loss_wss_charb).detach().cpu().item()
+                    supplementary_loss.detach().cpu().item()
                 ),
                 "loss_wss_charb_target_mse": float(
                     loss_wss_mse_diag.detach().cpu().item()
                 ),
             }
         else:
+            supplementary_loss = None
             charb_metrics = {}
-        # H19: vol_p Charbonnier — under GradNorm, the Charb tensor is already
-        # in task_losses[4] above, contributing w_vol_p * Charb_vol_p to the
-        # weighted sum. Adding an extra additive term would double-count.
-        # Without GradNorm we fall back to the additive form (loss += w * Charb)
-        # so the mechanism still fires.
+        # H19: vol_p Charbonnier behaviour.
+        # - With IMTL-G: the Charb tensor is already task_losses[4], contributing
+        #   alpha_vol_p * Charb_vol_p to the weighted sum the caller forms.
+        #   Adding an extra additive term would double-count.
+        # - Without IMTL-G: fall back to additive form so the mechanism fires.
         if loss_vol_p_charb is not None:
-            if gradnorm_weights is None:
-                loss = loss + vol_p_charbonnier_weight * loss_vol_p_charb
+            if not use_imtl_g:
+                add = vol_p_charbonnier_weight * loss_vol_p_charb
+                if supplementary_loss is None:
+                    supplementary_loss = add
+                else:
+                    supplementary_loss = supplementary_loss + add
             vol_p_charb_metrics = {
                 "loss_vol_p_charb_unweighted": float(
                     loss_vol_p_charb.detach().cpu().item()
@@ -497,6 +573,8 @@ def train_loss(
             }
         else:
             vol_p_charb_metrics = {}
+        if loss is not None and supplementary_loss is not None:
+            loss = loss + supplementary_loss
     metrics = {
         "base_mse_loss": float(base_mse_loss.detach().cpu().item()),
         "surface_loss": float(surface_loss.detach().cpu().item()),
@@ -506,7 +584,7 @@ def train_loss(
     }
     metrics.update(charb_metrics)
     metrics.update(vol_p_charb_metrics)
-    return loss, metrics, task_losses
+    return loss, metrics, task_losses, supplementary_loss
 
 
 def run_eval_only(config: Config, state) -> None:
@@ -640,21 +718,14 @@ def main(argv: Iterable[str] | None = None) -> None:
         scheduler = build_lr_scheduler(optimizer, config, max_epochs)
         ema = EMA(base_model, decay=config.ema_decay, start_step=config.ema_start_step) if config.use_ema else None
 
-        gradnorm_weights: GradNormWeights | None = None
-        gradnorm_opt: torch.optim.Optimizer | None = None
-        gradnorm_L0: torch.Tensor | None = None
-        gradnorm_n_tasks = 5  # cp, tau_x, tau_y, tau_z, vol_p
-        gradnorm_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p")
-        if config.use_gradnorm:
-            gradnorm_weights = GradNormWeights(n_tasks=gradnorm_n_tasks).to(device)
-            gradnorm_opt = torch.optim.Adam(
-                gradnorm_weights.parameters(), lr=config.gradnorm_lr
+        imtl_g_n_tasks = 5  # cp, tau_x, tau_y, tau_z, vol_p
+        imtl_g_task_names = ("cp", "tau_x", "tau_y", "tau_z", "vol_p")
+        if config.use_imtl_g and state.is_main:
+            print(
+                "IMTL-G enabled: closed-form impartial gradient surgery "
+                f"(Liu et al. 2021), n_tasks={imtl_g_n_tasks}, "
+                f"eps={config.imtl_g_eps}, clamp_neg={config.imtl_g_clamp_negative}"
             )
-            if state.is_main:
-                print(
-                    f"GradNorm enabled: alpha={config.gradnorm_alpha}, "
-                    f"n_tasks={gradnorm_n_tasks}, lr={config.gradnorm_lr}"
-                )
         total_estimated_steps = max(1, max_epochs * max(len(train_loader), 1))
         if kill_thresholds and state.is_main:
             print("Kill thresholds:", "; ".join(threshold.describe() for threshold in kill_thresholds))
@@ -734,7 +805,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                 disable=not state.is_main,
             ):
                 aug_log: dict[str, int] = {}
-                loss, batch_loss_metrics, task_losses = train_loss(
+                loss, batch_loss_metrics, task_losses, supplementary_loss = train_loss(
                     model,
                     batch,
                     transform,
@@ -745,7 +816,7 @@ def main(argv: Iterable[str] | None = None) -> None:
                     use_y_symmetry_aug=config.use_y_symmetry_aug,
                     y_symmetry_aug_prob=config.y_symmetry_aug_prob,
                     aug_log=aug_log,
-                    gradnorm_weights=gradnorm_weights,
+                    use_imtl_g=config.use_imtl_g,
                     wss_charbonnier_weight=config.wss_charbonnier_weight,
                     wss_charbonnier_eps=config.wss_charbonnier_eps,
                     wss_charbonnier_axes=config.wss_charbonnier_axes,
@@ -753,6 +824,81 @@ def main(argv: Iterable[str] | None = None) -> None:
                     vol_p_charbonnier_eps=config.vol_p_charbonnier_eps,
                     tau_z_loss_weight=config.tau_z_loss_weight,
                 )
+                # === H136 IMTL-G: closed-form impartial gradient surgery ===
+                # When use_imtl_g, train_loss returns loss=None with task_losses
+                # tensor still attached to the autograd graph; compute alpha
+                # from per-task gradients on a shared backbone parameter, then
+                # form the weighted total loss for the backward pass.
+                imtl_g_log: dict[str, float] = {}
+                if config.use_imtl_g and task_losses is not None:
+                    task_losses_finite = bool(
+                        torch.isfinite(task_losses.detach()).all().item()
+                    )
+                    if task_losses_finite:
+                        shared_param = base_model.norm.weight
+                        per_task_grads: list[torch.Tensor] = []
+                        for i in range(imtl_g_n_tasks):
+                            g_i = torch.autograd.grad(
+                                task_losses[i],
+                                shared_param,
+                                retain_graph=True,
+                                allow_unused=True,
+                            )[0]
+                            if g_i is None:
+                                per_task_grads.append(
+                                    torch.zeros_like(shared_param).flatten().float()
+                                )
+                            else:
+                                per_task_grads.append(g_i.detach().flatten().float())
+                        alpha, imtl_diag = imtl_g_weights(
+                            per_task_grads,
+                            eps=config.imtl_g_eps,
+                            clamp_negative=config.imtl_g_clamp_negative,
+                        )
+                        # DDP: average alpha across ranks for global consistency
+                        if state.enabled:
+                            torch.distributed.all_reduce(
+                                alpha, op=torch.distributed.ReduceOp.SUM
+                            )
+                            alpha.div_(state.world_size)
+                        weighted_task_loss = (alpha.detach() * task_losses).sum()
+                        if supplementary_loss is not None:
+                            loss = weighted_task_loss + supplementary_loss
+                        else:
+                            loss = weighted_task_loss
+                        # Logging
+                        alpha_cpu = alpha.detach().cpu()
+                        tl_cpu = task_losses.detach().float().cpu()
+                        for ti, name in enumerate(imtl_g_task_names):
+                            imtl_g_log[f"imtl_g/w_{name}"] = float(
+                                alpha_cpu[ti].item()
+                            )
+                            imtl_g_log[f"imtl_g/task_loss_{name}"] = float(
+                                tl_cpu[ti].item()
+                            )
+                            imtl_g_log[f"imtl_g/grad_norm_{name}"] = float(
+                                per_task_grads[ti].norm().item()
+                            )
+                        # Aggregates for advisor EP5 diagnostic (PR uses
+                        # 4-task naming w_wss/w_vol_p/w_surf_p/w_abupt; we
+                        # preserve H39's 5-task structure and derive these).
+                        imtl_g_log["imtl_g/w_wss"] = float(
+                            alpha_cpu[1:4].sum().item()
+                        )
+                        imtl_g_log["imtl_g/w_surf_p"] = float(
+                            alpha_cpu[0].item()
+                        )
+                        imtl_g_log["imtl_g/w_vol_p"] = float(
+                            alpha_cpu[4].item()
+                        )
+                        imtl_g_log["imtl_g/w_abupt"] = float(
+                            alpha_cpu.mean().item()
+                        )
+                        imtl_g_log.update(imtl_diag)
+                    else:
+                        # Non-finite task losses: propagate to skip_step
+                        # by setting loss to a non-finite scalar.
+                        loss = task_losses.sum()
                 if (
                     config.use_y_symmetry_aug
                     and state.is_main
@@ -872,131 +1018,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 if skip_step:
                     optimizer.zero_grad(set_to_none=True)
                 else:
-                    gradnorm_log: dict[str, float] = {}
-                    if (
-                        gradnorm_weights is not None
-                        and gradnorm_opt is not None
-                        and task_losses is not None
-                    ):
-                        task_losses_finite = bool(
-                            torch.isfinite(task_losses.detach()).all().item()
-                        )
-                        if task_losses_finite:
-                            if gradnorm_L0 is None:
-                                gradnorm_L0 = task_losses.detach().clone()
-                            shared_param = base_model.norm.weight
-                            c_per_task: list[torch.Tensor] = []
-                            for i in range(gradnorm_n_tasks):
-                                g_i = torch.autograd.grad(
-                                    task_losses[i],
-                                    shared_param,
-                                    retain_graph=True,
-                                    allow_unused=True,
-                                )[0]
-                                if g_i is None:
-                                    c_per_task.append(
-                                        torch.zeros((), device=device, dtype=torch.float32)
-                                    )
-                                else:
-                                    c_per_task.append(g_i.detach().float().norm(2))
-                            c_tensor = torch.stack(c_per_task)  # [n_tasks]
-                            with torch.no_grad():
-                                w_now = gradnorm_weights.weights
-                                G_per_task = w_now * c_tensor  # [n_tasks]
-                                G_bar = G_per_task.mean()
-                                L_ratio = (
-                                    task_losses.detach().float()
-                                    / gradnorm_L0.float().clamp_min(1e-12)
-                                )
-                                r = L_ratio / L_ratio.mean().clamp_min(1e-12)
-                                target = G_bar * r.pow(config.gradnorm_alpha)
-                                diff = G_per_task - target
-                                # d L_grad / d log_w_i = sign(diff_i) * G_per_task_i
-                                log_w_grad = torch.sign(diff) * G_per_task
-                                # safety: zero out non-finite components
-                                log_w_grad = torch.where(
-                                    torch.isfinite(log_w_grad),
-                                    log_w_grad,
-                                    torch.zeros_like(log_w_grad),
-                                )
-                            gradnorm_opt.zero_grad(set_to_none=True)
-                            gradnorm_weights.log_weights.grad = log_w_grad
-                            gradnorm_opt.step()
-                            with torch.no_grad():
-                                # renormalise so weights sum to n_tasks
-                                lw = gradnorm_weights.log_weights.data
-                                lw_norm = lw - torch.logsumexp(lw, dim=0) + math.log(
-                                    float(gradnorm_n_tasks)
-                                )
-                                gradnorm_weights.log_weights.data.copy_(lw_norm)
-                                # H9: hard floor on vol_p task weight to prevent
-                                # GradNorm starvation (root cause of vol_p breach
-                                # in H1/H2/H3/H5). Indices: cp, tau_x, tau_y,
-                                # tau_z, vol_p.
-                                w_vol_p_clamp_active = False
-                                if config.gradnorm_min_w_vol_p > 0.0:
-                                    w_curr = gradnorm_weights.weights.detach()
-                                    vol_p_idx = 4
-                                    min_w = config.gradnorm_min_w_vol_p
-                                    if w_curr[vol_p_idx].item() < min_w:
-                                        w_vol_p_clamp_active = True
-                                        other_idx = torch.tensor(
-                                            [0, 1, 2, 3], device=w_curr.device
-                                        )
-                                        deficit = min_w - w_curr[vol_p_idx].item()
-                                        other_sum = w_curr[other_idx].sum().item()
-                                        scale = max(
-                                            (other_sum - deficit) / max(other_sum, 1e-12),
-                                            0.01,
-                                        )
-                                        new_w = w_curr.clone()
-                                        new_w[vol_p_idx] = min_w
-                                        new_w[other_idx] = w_curr[other_idx] * scale
-                                        gradnorm_weights.log_weights.data.copy_(
-                                            new_w.clamp_min(1e-12).log()
-                                        )
-                                # DDP: average log_weights across ranks for sync
-                                if state.enabled:
-                                    torch.distributed.all_reduce(
-                                        gradnorm_weights.log_weights.data,
-                                        op=torch.distributed.ReduceOp.SUM,
-                                    )
-                                    gradnorm_weights.log_weights.data.div_(
-                                        state.world_size
-                                    )
-                                w_post = gradnorm_weights.weights.detach().cpu()
-                                c_cpu = c_tensor.detach().cpu()
-                                G_cpu = G_per_task.detach().cpu()
-                                tl_cpu = task_losses.detach().float().cpu()
-                                r_cpu = r.detach().cpu()
-                                for ti, name in enumerate(gradnorm_task_names):
-                                    gradnorm_log[f"gradnorm/w_{name}"] = float(
-                                        w_post[ti].item()
-                                    )
-                                    gradnorm_log[f"gradnorm/grad_norm_{name}"] = float(
-                                        c_cpu[ti].item()
-                                    )
-                                    gradnorm_log[f"gradnorm/G_{name}"] = float(
-                                        G_cpu[ti].item()
-                                    )
-                                    gradnorm_log[f"gradnorm/task_loss_{name}"] = float(
-                                        tl_cpu[ti].item()
-                                    )
-                                    gradnorm_log[f"gradnorm/r_{name}"] = float(
-                                        r_cpu[ti].item()
-                                    )
-                                gradnorm_log["gradnorm/G_bar"] = float(
-                                    G_bar.detach().cpu().item()
-                                )
-                                if config.gradnorm_min_w_vol_p > 0.0:
-                                    gradnorm_log["gradnorm/w_vol_p_clamp_active"] = float(
-                                        w_vol_p_clamp_active
-                                    )
-                                    gradnorm_log["gradnorm/min_w_vol_p"] = float(
-                                        config.gradnorm_min_w_vol_p
-                                    )
-                    if gradnorm_log:
-                        train_log.update(gradnorm_log)
+                    if imtl_g_log:
+                        train_log.update(imtl_g_log)
                     loss.backward()
                     if config.grad_clip_norm > 0.0:
                         grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
