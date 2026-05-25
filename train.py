@@ -104,6 +104,7 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    surface_out_width_factor: float = 1.0
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -238,6 +239,14 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "surface_out_width_factor": (
+            "H127: Widening factor for the surface_out MLP inner hidden "
+            "dim (when use_aux_decoder_heads=True). At 1.0 (default) the "
+            "decoder is Linear(n_hidden, n_hidden) -> SiLU -> "
+            "Linear(n_hidden, surface_output_dim). At factor=2.0 the inner "
+            "hidden dim becomes 2*n_hidden. Surface decoder only; volume "
+            "head and backbone unchanged."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -318,6 +327,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        surface_out_width_factor=config.surface_out_width_factor,
     )
 
 

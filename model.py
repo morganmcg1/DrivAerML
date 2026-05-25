@@ -419,6 +419,7 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        surface_out_width_factor: float = 1.0,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +435,7 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.surface_out_width_factor = surface_out_width_factor
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -520,10 +522,11 @@ class SurfaceTransolver(nn.Module):
             # n_hidden -> n_hidden//2 -> n_hidden//4 -> volume_output_dim with SiLU.
             # Default for current training; older checkpoints (PR #823 era,
             # e.g. ghh0s4ne) set this False to load LinearProjection heads.
+            surface_out_hidden = int(n_hidden * self.surface_out_width_factor)
             self.surface_out = nn.Sequential(
-                nn.Linear(n_hidden, n_hidden),
+                nn.Linear(n_hidden, surface_out_hidden),
                 nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
+                nn.Linear(surface_out_hidden, self.surface_output_dim),
             )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
