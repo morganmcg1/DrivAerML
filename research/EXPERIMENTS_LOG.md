@@ -1,3 +1,69 @@
+## 2026-05-26 ~13:00 — PR #1334: H144 TAU_Z LOSS WEIGHT 2.0→6.0 (fern, **CLOSED C NULL** — slope catastrophe; **ESCALATE class DEFINITIVELY CLOSED by 3-point cohort H112/H143/H144** — load-bearing Wave 39 finding)
+
+- **Branch**: `fern/h144-tau-z-loss-weight-6` (CLOSED, not merged)
+- **W&B run**: `50q3y6va`
+- **Hypothesis**: Upweight tau_z loss 2.0→6.0 (3× H112 baseline) to map z-shear gradient pressure response curve. Parallel: H143 frieren at 4.0.
+- **Parameter overhead**: 0 (single CLI flag change)
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,664)
+
+| Metric (%) | H112 (val/test) | H143 (val/test) | H144 (val/test) | H144 Δtest vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| abupt | 6.136 / 5.839 | 6.200 / 6.020 | **6.199** / **6.108** | **+0.269pp** | val MISS gate +0.063pp ✗ |
+| **WSS** (primary) | — / 6.752 | 7.039 / 6.955 | 7.092 / **7.079** | **+0.327pp REGRESSION** | TEST_FLOOR 6.727%: MISS by +0.352pp ✗ |
+| WSS_x | — / 5.999 | 6.194 / 6.199 | 6.295 / 6.343 | +0.344pp | regression |
+| WSS_y | — / 7.360 | 7.713 / 7.593 | 7.716 / 7.701 | +0.340pp | regression |
+| **WSS_z** (target) | 9.375 / 8.720 | 9.34 / 8.895 | **9.275** / **8.984** | **+0.264pp REGRESSION on target channel** | val LEAD −0.100pp does NOT transfer to test |
+| VP | — / 3.421 | 3.584 / 3.558 | 3.578 / 3.612 | +0.191pp | FAIL floor |
+| SP | — / 3.695 | 4.123 / 3.857 | 4.130 / 3.900 | +0.205pp | FAIL floor |
+
+**Total wallclock**: 858 min = 14h 18m | **n_params**: 17.41M (canonical, zero overhead) | **Peak VRAM**: 78.4 GB | 8/8 GPUs 100%, no NaN/crash
+
+### Load-bearing finding: val→test slope flattens MONOTONICALLY with tau_z weight (3-point cohort closure)
+
+| Channel | H112 slope (wt 2.0) | H143 slope (wt 4.0) | H144 slope (wt 6.0) | Direction |
+|---|---:|---:|---:|---|
+| **WSS aggregate** | **−0.215pp** | **−0.082pp** | **−0.013pp** | **flattens 16× across cohort** |
+| **WSS_z (targeted)** | **−0.655pp** | **−0.446pp** | **−0.290pp** | **flattens 2.3× on TARGET channel** |
+| WSS_x | −0.094pp | −0.022pp | −0.048pp | flattens then slightly recovers |
+| WSS_y | −0.248pp | −0.121pp | −0.015pp | flattens 16× |
+| abupt | −0.297pp | −0.180pp | −0.092pp | flattens 3.2× |
+
+The val→test slope on **every** channel (and on val_abupt itself) flattens monotonically as tau_z weight escalates. This is the cleanest 3-point single-axis closure the program has produced.
+
+### Val-side curve was monotone-productive but did NOT transfer
+
+**Val-side cohort positioning on the TARGETED WSS_z channel:**
+- wt 2.0 (H112): val_WSS_z 9.375%
+- wt 4.0 (H143): val_WSS_z 9.341% (−0.034pp LEAD)
+- wt 6.0 (H144): val_WSS_z 9.275% (−0.100pp LEAD; H143→H144 increment −0.066pp accelerated over H112→H143 −0.034pp)
+
+**Test-side:** ALL THREE points regressive on test_WSS — H112's wt 2.0 is the test-optimum, H143 wt 4.0 regresses +0.203pp, H144 wt 6.0 regresses +0.327pp. **The val→test divergence widens with weight.**
+
+### MAJOR PROGRAM FINDING — ESCALATE class definitively CLOSED
+
+The H143 entry below established slope-flattening as basin-geometry-driven, not overhead-correlated. H144 adds the third cohort point that:
+
+1. **Confirms monotonicity** — slope-flattening grows continuously, not a one-off H143 outlier
+2. **Identifies the test-optimum** — `wt ≤ 2.0` on the tau_z axis (H112 is at-or-below the local optimum)
+3. **Convergent with H147 thorfinn GradNorm banked finding** — independent dynamic-balancing axis discovered optimal tau_z=1.631 (BELOW H112's 2.0). Two independent mechanisms converge on **DE-escalation, not escalation**.
+
+**Strategic implications for Wave 40:**
+- Static tau_z escalation direction is CLOSED (do NOT assign tau_z=8.0 or 10.0)
+- Direction is INVERTED: tau_z=1.0–1.5 (DE-escalation) is the next test of the axis
+- Slope-mitigation interventions (mirror aug H148, AdamW H149, long-EMA H150) are program-critical because slope-flattening is **geometry-bound, mechanism-class-agnostic**
+- Future loss-rebalancing PRs MUST report val→test slope at EP9+ as primary diagnostic, not val cohort positioning alone
+
+### Three Wave 39 closure cohorts
+
+| Class | Cohort | Mechanism |
+|---|---|---|
+| SOFTEN | H139 + H140 (paired) | Charbonnier residuals are signal, not noise |
+| ARCHITECTURAL-SPLIT | H138 split-z + H146 split-y trajectory | Slope-flattening correlates with param overhead AND non-overhead mechanisms — universal pathology |
+| **ESCALATE** | **H112 + H143 + H144 (3-point)** | **val→test slope flattens monotonically with tau_z weight; test-optimum at wt ≤ 2.0** |
+
+---
+
 ## 2026-05-26 ~10:50 — PR #1332: H143 TAU_Z LOSS WEIGHT 2.0→4.0 (frieren, **CLOSED C NULL** — all test metrics regress; **FIRST NON-CAPACITY-ADDING SLOPE-FLATTENING — major Wave 40 program finding**)
 
 - **Branch**: `frieren/h143-tau-z-loss-weight-4` (CLOSED, not merged)

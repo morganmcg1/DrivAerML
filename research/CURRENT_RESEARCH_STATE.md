@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~10:55Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~13:10Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -15,17 +15,19 @@ Merge gate: val_abupt < 6.1358%, test_WSS ≤ 6.727%, test_VP ≤ 3.421%, test_S
 
 ---
 
-## Wave 38 Final Closure (as of 2026-05-26)
+## Wave 38+39 Final Closure (as of 2026-05-26 ~13:10Z)
 
-### THE PROGRAM-WIDE FINDING
+### THE PROGRAM-WIDE FINDING — slope-flattening is geometry-bound and mechanism-class-agnostic
 
-**Any perturbation off the H112 operating point causes slope-flattening — NOT JUST CAPACITY ADDITIONS (H143 update 2026-05-26 10:55Z).**
+**Any perturbation off the H112 operating point causes slope-flattening — capacity, architecture, AND loss-weight (H144 update 2026-05-26 13:10Z).**
 
-**MAJOR UPDATE from H143 terminal C NULL (2026-05-26 10:55Z)**: H143 tau_z=4.0 loss-weight escalation (zero parameter overhead) produces SAME slope-flattening pathology as 3% overhead architecture changes. **The pathology is basin-geometry-driven, not overhead-driven.** Per-channel slope flattening was −0.130pp on WSS aggregate (H138 with 3% overhead: −0.135pp). All channels flattened, including non-escalated ones.
+**LOAD-BEARING H144 update (2026-05-26 13:10Z)**: H144 tau_z=6.0 terminal C NULL completes the **3-point ESCALATE cohort H112/H143/H144**. val→test slope flattens MONOTONICALLY with tau_z weight: WSS aggregate −0.215 → −0.082 → −0.013pp (**16× flattening**); WSS_z (target) −0.655 → −0.446 → −0.290pp (**2.3× flattening on target channel**). test_WSS REGRESSES monotonically: 6.752 → 6.955 → 7.079%. **The val→test divergence WIDENS with weight magnitude.** H112's wt 2.0 is the test-optimum on this axis — direction is INVERTED.
+
+**Convergent with H147 thorfinn GradNorm (independent dynamic-balancing axis)**: GradNorm-discovered optimal tau_z = 1.631 at step 33,082 — BELOW H112's 2.0. **Two independent mechanisms converge on tau_z DE-escalation, not escalation.**
 
 **Original Wave 38 finding (kept for history)**: Any capacity addition at canonical 17.5M recipe val-overfits.
 
-All six Wave 38 mechanism classes exhausted:
+All seven Wave 38+39 mechanism classes exhausted:
 
 | Class | Experiments | Verdict | Mechanism |
 |---|---|---|---|
@@ -35,6 +37,7 @@ All six Wave 38 mechanism classes exhausted:
 | Architectural-split | H138 (WSS_z decoder), H146 (WSS_y decoder trending) | CLOSED | Slope-flattening pathology — param overhead correlated. **H146 EP6 (corrected by student edward 11:30Z)**: val_abupt **+0.078pp LAG** vs H112 raw same-step (my 11:12Z W&B query used wrong baseline 7.111% vs actual 6.374%). H146 trajectory tracks H138 exactly — paired-class confirmed. WSS_y deficit smallest among channels (+0.033pp, real specialization) but +525K overhead drags everything. |
 | Aux-head | H-B, H-B2 | CLOSED | Gradient-flow degradation; detached strictly worse |
 | SOFTEN (loss) | H139 (Charbonnier), H140 (signed-log) | CLOSED | Anti-aligned with WSS_z goals; heavy-tail residuals ARE the signal |
+| **ESCALATE (loss-weight)** | **H112 (wt 2.0 SOTA), H143 (wt 4.0), H144 (wt 6.0)** | **CLOSED DEFINITIVELY by 3-point cohort** | **val→test slope flattens monotonically with tau_z weight; test-optimum at wt ≤ 2.0; convergent with H147 GradNorm optimal=1.631** |
 
 **Param overhead correlates with slope flattening magnitude** (H132 null → H135 −0.10pp → H138 −0.135pp → H120/H121 −0.20pp). Slope catastrophe is overhead-driven, not mechanism-specific.
 
@@ -42,12 +45,12 @@ All six Wave 38 mechanism classes exhausted:
 
 ---
 
-## Wave 39 Active Fleet (2026-05-26 ~11:00Z)
+## Wave 39 Active Fleet (2026-05-26 ~13:10Z)
 
 | Student | PR | Hypothesis | Status | Priority |
 |---|---|---|---|---|
 | frieren | #1332 | H143 tau_z=4.0 ESCALATE | **CLOSED C NULL** (test_WSS_z +0.175pp REGRESSION; first non-overhead slope-flattening) | reassigned to H164 SWA |
-| fern | #1334 | H144 tau_z=6.0 ESCALATE | WIP step 65,851 (93%) terminal ~12:30Z. val_WSS_z LEAD −0.084pp at step 65,212; all other channels regress (val_abupt +0.083pp, val_WSS +0.139pp, val_WSS_x +0.209pp). Identical cross-channel pattern to H143; HIGH RISK of slope flattening on test transfer. | Awaiting terminal; ESCALATE class verdict-pending |
+| fern | #1334 | H144 tau_z=6.0 ESCALATE | **CLOSED C NULL** (terminal 13:00Z). test_WSS +0.327pp REGRESSION on primary objective; test_WSS_z +0.264pp REGRESSION on target channel. Val-side wt curve monotone-productive on WSS_z (LEAD −0.100pp) but val→test slope flattens 16× across cohort. **3-point ESCALATE class closure**: H112/H143/H144 monotone-regressive on test_WSS as tau_z escalates. | reassigning to Wave 40 tau_z DE-escalation |
 | alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP EP8/13; EP7 (10:39Z) val_WSS_y LEAD coin-flip at terminal (sub-bp); val_abupt MISS gate +22bp; terminal ~15:00Z | C NULL trending; banked: tau_y direction productive but 2× insufficient magnitude |
 | edward | #1338 | H146 split WSS_y decoder | WIP EP7/13 step ~49,200 (70%). **Corrected EP6 reading (edward 11:30Z)**: val_abupt +0.078pp LAG, val_WSS_y +0.033pp LAG (smallest channel deficit — specialization real), val_WSS_z +0.166pp LAG vs H112 raw same-step. Tracks H138 trajectory exactly. Terminal ~13:30Z. | Trending C NULL — paired-class to H138 confirmed. Bank: split decoder specializes target channel but +525K overhead drags model. Architectural-split class CLOSED at +525K overhead. |
 | thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
@@ -62,12 +65,11 @@ All six Wave 38 mechanism classes exhausted:
 
 These are the ONLY mechanism families with unexhausted potential. **Zero capacity increase for any of them.**
 
-### 1. ESCALATE class (H143/H144/H145) — H143 CLOSED, H144 HIGH RISK, H145 trending C NULL
+### 1. ESCALATE class (H143/H144/H145) — DEFINITIVELY CLOSED by 3-point cohort
 - **H143 tau_z=4.0 CLOSED C NULL** (2026-05-26 10:55Z): test_WSS +0.203pp, test_WSS_z +0.175pp REGRESSION on target channel. val→test slope flattened 33% on WSS_z (basin-geometry pathology, not overhead-driven).
-- **H144 fern (tau_z=6.0) HIGH RISK of identical pathology**: mid-train val signal was strong (LEAD −0.114pp at EP9) but val→test slope for H143 invalidated this projection. Terminal ~11:00Z is the verdict — likely C NULL given H143 precedent.
-- **H145 alphonse (tau_y=3.0) trending C NULL**: 7-checkpoint mechanism alive on val_WSS_y but magnitude decaying geometrically (~50%/epoch). Terminal val_WSS_y ≈ 7.607-7.608% (coin-flip on banked-partial). val_abupt MISS by ~22bp projected.
-- Mechanism: ESCALATE direction was hypothesized to push gradient pressure on hard channels. But static per-axis escalation produces basin-geometry pathology — same root cause as capacity/architecture interventions.
-- **If H144 also closes C NULL, the entire ESCALATE class is exhausted.** Wave 40 frontier shifts decisively to basin-geometry-targeting mechanisms.
+- **H144 tau_z=6.0 CLOSED C NULL** (2026-05-26 13:00Z): test_WSS +0.327pp REGRESSION on primary objective; test_WSS_z +0.264pp REGRESSION on target channel. **val→test slope flattens MONOTONICALLY with tau_z weight: −0.215 → −0.082 → −0.013pp on WSS aggregate (16× flattening across cohort).** Val-side curve monotone-productive on the targeted WSS_z channel up to wt 6.0 (9.375 → 9.341 → 9.275%) but val→test divergence WIDENS with weight magnitude.
+- **H145 alphonse (tau_y=3.0) trending C NULL**: 7-checkpoint mechanism alive on val_WSS_y but magnitude decaying geometrically (~50%/epoch). Terminal val_WSS_y ≈ 7.607-7.608% (coin-flip on banked-partial). val_abupt MISS by ~22bp projected. Terminal ~15:00Z.
+- **Strategic conclusion**: ESCALATE direction is INVERTED — H112's wt 2.0 is the test-optimum on the tau_z axis, with monotone test_WSS regression from wt 2.0 upward. **Convergent with H147 GradNorm-discovered optimal tau_z = 1.631** (BELOW 2.0). Wave 40 frontier shifts to **tau_z DE-escalation** (priority 7 below) and basin-geometry-targeting mechanisms.
 
 ### 2. GradNorm dynamic weighting (H147 thorfinn) — EP3 binding diagnostic 12:00Z REVEALS TWO MAJOR FINDINGS
 - **Finding 1 — H143 basin-geometry pathology applies to GradNorm too**: WSS_z LEAD-FLIP between EP2 (−0.105pp LEAD) and EP3 (+0.047pp LAG) on the most aggressively upweighted channel. All-WSS LEADs compressed 50-66%. Smooth weight evolution does NOT sidestep the slope-flattening trap.
@@ -100,17 +102,20 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - Implementation: `torch.optim.swa_utils.AveragedModel` wrapper + SWALR scheduler activated at EP9 onward
 - **Compounds with H157**: SWA over warm-restart cycles is the canonical basin-discovery combination
 
-### 7. NEW Wave 40 hypothesis directly enabled by H147 EP3 — static tau_z DE-escalation
-- **Hypothesis**: GradNorm-discovered optimal tau_z ≈ 1.6 plateau (H147 step 33,082 auto-weight 1.631) suggests the gradient-aligned optimum is BELOW H112's static 2.0. Try static tau_z=1.5 (single-flag DE-escalation).
-- **Mechanism class**: pure loss-weight axis, but BELOW H112 baseline (qualitatively different from H143-H145 ESCALATE)
-- **Falsifiability clean**: if alive at terminal, the entire H143/H144/H145 ESCALATE wave searched the wrong half of the magnitude space
+### 7. Wave 40 PRIORITY HYPOTHESIS — static tau_z DE-escalation (now ASSIGNED to fern post-H144 closure)
+- **Hypothesis**: GradNorm-discovered optimal tau_z = 1.631 (H147 step 33,082) + H143/H144 monotone test_WSS regression from wt 2.0 upward → gradient-aligned optimum is BELOW H112's static 2.0. Static tau_z=1.5 single-flag DE-escalation, zero overhead, single recipe delta from H112 SOTA.
+- **Mechanism class**: pure loss-weight axis, BELOW H112 baseline (qualitatively different from CLOSED ESCALATE class)
+- **Two independent confirmations**: (1) H147 dynamic balancer converges to 1.6; (2) H112/H143/H144 cohort slope monotone-flattening as wt increases — extrapolation toward wt < 2.0 is the unexplored half-line
+- **Falsifiability clean**: if alive at terminal, entire H143/H144/H145 wave searched the wrong half of the magnitude space
 - **Zero-overhead**, single CLI flag change. Compatible with all other Wave 40 mechanisms.
-- **Priority**: Wave 40 HIGH — direct test of H147's most important banked finding.
+- **Priority**: Wave 40 HIGH — direct test of H147 banked finding + H143/H144 closure direction.
+- **Status (2026-05-26 13:10Z)**: fern PR being assigned post-H144 closure.
 
-### 8. Wave 40 contingency cascade (depends on H144 terminal)
-- **H144 A WIN**: H144 × H145 joint escalation; H144 × H147 (escalate + GradNorm); continue magnitude curve to tau_z=8.0
-- **H144 A TIED** (val PASS, test marginal MISS): H144 × H148 mirror compound; H144 × H147 GradNorm
-- **H144 slope catastrophe** (most likely per H143 precedent): ESCALATE class DEAD. Pivot to: tau_z DE-escalation (priority 7), H149 AdamW (terminal pending), H157 cosine warm restarts, H164 SWA (frieren launched 12:02Z), fresh mechanism families. H150 EMA 0.9999 CLOSED — incompatible with 13-epoch training.
+### 8. Wave 40 frontier post H144 closure
+- **ESCALATE class CLOSED DEFINITIVELY** (H112+H143+H144 3-point cohort)
+- **Active priorities**: tau_z=1.5 DE-escalation (fern Wave 40 assignment, this section), H147 GradNorm (thorfinn terminal ~20:34Z), H148 mirror aug (askeladd terminal ~16:30Z), H149 AdamW (tanjiro graceful ~20:58Z), H157 cosine warm restarts (nezuko ~25% complete), H164 SWA (frieren freshly launched)
+- **H150 long-EMA**: paused, may revisit only if a winning Wave 40 mechanism completes — incompatible with 13-epoch training in isolation
+- **H145 alphonse terminal ~15:00Z**: pending; even if A TIED on val_WSS_y banked-partial, ESCALATE class is closed by 3-point cohort regardless. H145's role now is to ROUND OUT axis-cohort (test whether tau_y ESCALATE also exhibits monotone test regression — provides cross-axis validation of basin-geometry conclusion).
 
 ### Cross-channel bleed under Lion — 2-class confirmed (H148 EP2 reference error corrected)
 Bidirectionally symmetric under Lion sign-only updates:
