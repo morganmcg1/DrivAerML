@@ -104,6 +104,7 @@ class Config:
     use_qk_norm: bool = False
     use_surf_to_vol_xattn: bool = False
     drop_path_max: float = 0.0
+    use_split_wss_y_decoder: bool = False
     tau_y_loss_weight: float = 1.0
     tau_z_loss_weight: float = 1.0
     amp_mode: str = "bf16"
@@ -238,6 +239,16 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
             "0.0 at block 0 to drop_path_max at block (depth-1). Identity "
             "at eval so adds zero inference cost. 0.0 disables (default)."
         ),
+        "use_split_wss_y_decoder": (
+            "H146: Split out tau_y (channel index 2 in [sp, tau_x, tau_y, "
+            "tau_z]) into a dedicated wider decoder head. The shared "
+            "surface_out drops tau_y and predicts only [sp, tau_x, tau_z]; "
+            "a new wss_y_out = Linear(n_hidden, 2*n_hidden) -> SiLU -> "
+            "Linear(2*n_hidden, 1) head produces tau_y. Outputs are "
+            "concatenated to restore the 4-channel contract. Mirrors the "
+            "H138 split-wss-z-decoder mechanism for the tau_y channel. "
+            "~+262K params (+1.5 pct). Disabled by default."
+        ),
     }
     for field in fields(Config):
         value = getattr(defaults, field.name)
@@ -318,6 +329,7 @@ def build_model(config: Config) -> SurfaceTransolver:
         use_qk_norm=config.use_qk_norm,
         use_surf_to_vol_xattn=config.use_surf_to_vol_xattn,
         drop_path_max=config.drop_path_max,
+        use_split_wss_y_decoder=config.use_split_wss_y_decoder,
     )
 
 

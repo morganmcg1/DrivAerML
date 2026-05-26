@@ -419,6 +419,7 @@ class SurfaceTransolver(nn.Module):
         use_surf_to_vol_xattn: bool = False,
         use_aux_decoder_heads: bool = True,
         drop_path_max: float = 0.0,
+        use_split_wss_y_decoder: bool = False,
     ):
         super().__init__()
         self.space_dim = space_dim
@@ -434,6 +435,7 @@ class SurfaceTransolver(nn.Module):
         self.use_surf_to_vol_xattn = use_surf_to_vol_xattn
         self.use_aux_decoder_heads = use_aux_decoder_heads
         self.drop_path_max = drop_path_max
+        self.use_split_wss_y_decoder = use_split_wss_y_decoder
         surface_extra_dim = max(0, self.surface_input_dim - space_dim)
         volume_extra_dim = max(0, self.volume_input_dim - space_dim)
 
@@ -513,6 +515,14 @@ class SurfaceTransolver(nn.Module):
             drop_path_max=drop_path_max,
         )
         self.norm = nn.LayerNorm(n_hidden, eps=1e-6)
+        # When split_wss_y is on, the shared surface_out predicts only 3 channels
+        # [sp, tau_x, tau_z]; the dedicated wss_y_out head predicts tau_y.
+        # The 4-channel output [sp, tau_x, tau_y, tau_z] is reconstructed in forward.
+        main_surface_output_dim = (
+            self.surface_output_dim - 1
+            if use_split_wss_y_decoder
+            else self.surface_output_dim
+        )
         if use_aux_decoder_heads:
             # PR #958: dedicated vol_p auxiliary decoder head.
             # Surface head is a 2-layer MLP (cp, tau_x, tau_y, tau_z).
@@ -523,7 +533,7 @@ class SurfaceTransolver(nn.Module):
             self.surface_out = nn.Sequential(
                 nn.Linear(n_hidden, n_hidden),
                 nn.SiLU(),
-                nn.Linear(n_hidden, self.surface_output_dim),
+                nn.Linear(n_hidden, main_surface_output_dim),
             )
             self.surface_out.apply(_init_linear)
             self.volume_out = nn.Sequential(
@@ -535,8 +545,22 @@ class SurfaceTransolver(nn.Module):
             )
             self.volume_out.apply(_init_linear)
         else:
-            self.surface_out = LinearProjection(n_hidden, self.surface_output_dim)
+            self.surface_out = LinearProjection(n_hidden, main_surface_output_dim)
             self.volume_out = LinearProjection(n_hidden, self.volume_output_dim)
+
+        if use_split_wss_y_decoder:
+            # H146: dedicated wider head for tau_y (wall shear in spanwise/y direction).
+            # Mirrors H138's wss_z_out pattern but applied to channel index 2.
+            # The shared surface_out drops tau_y so [sp, tau_x, tau_z] flow through it;
+            # wss_y_out predicts tau_y independently from the same post-norm hidden.
+            self.wss_y_out = nn.Sequential(
+                nn.Linear(n_hidden, n_hidden * 2),
+                nn.SiLU(),
+                nn.Linear(n_hidden * 2, 1),
+            )
+            self.wss_y_out.apply(_init_linear)
+        else:
+            self.wss_y_out = None
 
         # Surface->volume cross-attention (PR #823): single MHA sublayer where
         # volume hidden states (Q) attend to surface hidden states (K/V).
@@ -661,7 +685,21 @@ class SurfaceTransolver(nn.Module):
             volume_hidden = _apply_token_mask(volume_hidden, volume_mask)
 
         if surface_x is not None:
-            surface_preds = self.surface_out(surface_hidden) * surface_mask.unsqueeze(-1)
+            surface_preds = self.surface_out(surface_hidden)
+            if self.use_split_wss_y_decoder:
+                # surface_preds here is [B, N, 3] = [sp, tau_x, tau_z].
+                # Reconstruct [sp, tau_x, tau_y, tau_z] by splicing in the
+                # dedicated tau_y prediction at channel index 2.
+                wss_y_pred = self.wss_y_out(surface_hidden)
+                surface_preds = torch.cat(
+                    [
+                        surface_preds[..., 0:2],  # sp, tau_x
+                        wss_y_pred,                # tau_y from dedicated head
+                        surface_preds[..., 2:3],  # tau_z from main head
+                    ],
+                    dim=-1,
+                )
+            surface_preds = surface_preds * surface_mask.unsqueeze(-1)
         else:
             batch_size = volume_x.shape[0]
             surface_preds = volume_hidden.new_zeros(batch_size, 0, self.surface_output_dim)
