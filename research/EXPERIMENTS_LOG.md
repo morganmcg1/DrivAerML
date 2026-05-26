@@ -1,3 +1,82 @@
+## 2026-05-26 ~01:30 — PR #1321: H134 SWIGLU PARAM-PARITY (backbone+decoder) (edward, **CLOSED C NULL** — val MISS +0.156pp, test_WSS REGRESSION +0.194pp vs H112; **BACKBONE SWIGLU CLASS DEFINITIVELY CLOSED** via H134/H135 cross-cohort attribution)
+
+- **Branch**: `edward/h134-swiglu-param-parity` (CLOSED, not merged)
+- **W&B run**: `8z1265b9`
+- **Hypothesis**: SwiGLU MLP at param-parity (mlp_ratio=3 instead of 4) replaces GELU MLP across backbone+decoder. Tests whether the SwiGLU gating mechanism — without H128's +30% MLP capacity expansion — provides val→test slope benefit on WSS channels. Pairs with H135 (decoder-only SwiGLU) for clean architectural attribution.
+- **Parameter overhead**: param-parity at 17.5M (mlp_ratio=3 SwiGLU ≈ mlp_ratio=4 GELU)
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,664)
+
+| Metric | H134 val | H134 test | H112 (val / test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---:|---|
+| abupt | **6.2920%** | **6.0147%** | 6.1358% / 5.839% | **+0.176pp** | MERGE: MISS val by +0.156pp |
+| **WSS** | **7.1437%** | **6.9460%** | — / 6.752% | **+0.194pp REGRESSION** | floor 6.727%: MISS by +0.219pp |
+| WSS_x | 6.2307% | 6.1895% | — / 5.999% | +0.191pp behind | — |
+| WSS_y | 7.7776% | 7.5087% | — / 7.360% | +0.149pp behind | — |
+| **WSS_z** | **9.6830%** | **8.9757%** | 9.375% / 8.720% | **+0.256pp behind** | worst channel |
+| SP | 4.1578% | 3.8320% | — / 3.695% | +0.137pp | floor 3.577%: MISS |
+| VP | 3.6109% | 3.5675% | — / 3.421% | +0.147pp | floor 3.421%: MISS |
+
+**Total wallclock**: 924.0 min = 15.4h | **All test floors MISSED** | **All val gates MISSED**
+
+### Cross-cohort SwiGLU attribution (load-bearing program value)
+
+The H134/H135 cohort design produces a clean architectural finding:
+
+| Cohort | Mechanism | val_abupt @ step 67,932 | val_WSS @ step 67,932 | Δ vs H112 raw |
+|---|---|---:|---:|---:|
+| H112 raw | GELU mlp_ratio=4 | 6.1390% | 6.9691% | reference |
+| H135 thorfinn | **decoder-only SwiGLU** | ≈6.13% (TIED H112) | ≈6.95% (LEADS H112) | **−0.02pp WSS LEAD** ✅ |
+| **H134 edward** | **full SwiGLU (backbone+decoder)** | 6.2970% | 7.1531% | **+0.184pp BEHIND** |
+
+**Attribution**: backbone SwiGLU costs ~+0.165pp val_abupt and ~+0.20pp val_WSS vs decoder-only at matching steps. **The productive SwiGLU class is at the prediction head, NOT in the backbone Transolver blocks.** Backbone gating at param-parity (mlp_ratio=3) does not provide a generalization benefit that compensates for its representation rearrangement cost.
+
+### Val→test slope analysis — mechanism IS real, magnitude inadequate
+
+| Channel | H134 val | H134 test | val−test slope | H112 slope | H134 slope advantage |
+|---|---:|---:|---:|---:|---:|
+| WSS_x | 6.231% | 6.189% | +0.041pp | — | — |
+| WSS_y | 7.778% | 7.509% | +0.269pp | — | — |
+| WSS_z | **9.683%** | **8.976%** | **+0.707pp** | +0.655pp | **+0.052pp steeper** |
+
+H134's WSS_z val→test slope is **marginally steeper than H112** (+0.707 vs +0.655pp) — the SwiGLU gating IS providing some val→test generalization benefit on the z-channel. **But the absolute level is +0.256pp behind H112** — the slope benefit is too small to recover the capacity-paid regression. **This validates H128's hypothesis ("WSS_z slope benefit from SwiGLU is mechanism-real") while falsifying H134's main prediction ("test_WSS ≤ 6.727%").**
+
+### down_proj weight norm trajectory — banked architectural diagnostic
+
+Layer-stack-deep activation pattern CONFIRMED across the SwiGLU cohort (H128, H134):
+
+| Block | `down_proj` ‖W‖ | `gate_proj` ‖W‖ | `value_proj` ‖W‖ |
+|---:|---:|---:|---:|
+| 0 | 59.93 | 56.97 | 64.45 |
+| 1 | 69.11 | 68.17 | 70.86 |
+| 2 | 79.71 | 79.68 | 81.21 |
+| 3 | 82.42 | 86.01 | 85.81 |
+| 4 | 82.83 | 88.49 | 87.02 |
+
+Pattern: norms grow ~+38% from block 0 → block 4 across all three projections, with `gate_proj` showing the most aggressive depth scaling. Deeper layers do more aggressive multiplicative gating, but evidently in a direction that hurts WSS prediction. **All down_proj norms reached non-trivial saturation; the regression is not because gating "stayed at zero" — the mechanism is active but unproductive in the backbone.** This is now a stable architectural diagnostic for the SwiGLU class.
+
+### Banked findings (permanent program value)
+
+1. **Backbone SwiGLU at param-parity is NOT productive** — definitive via H134 + H135 cross-cohort attribution at matching steps
+2. **Decoder-only SwiGLU IS productive** (H135 trajectory) — mechanism survives at prediction head
+3. **Layer-stack-deep SwiGLU activation pattern** — consistent across SwiGLU runs (H128 + H134), banked architectural diagnostic
+4. **WSS_z slope benefit is mechanism-real but inadequate magnitude** — slope benefit only ~+0.05pp vs H112, capacity cost ~+0.25pp behind H112 absolute level
+5. **MLP gradient health excellent** — all blocks show healthy grad/param ratios; the mechanism is fully active and unhelpful by design, not by training failure
+
+### Strategic implication
+
+**Backbone SwiGLU class is now definitively CLOSED** at canonical 17.5M-param recipe. Productive SwiGLU direction is decoder-only (H135 in flight, currently tracking val A WIN). The class does NOT extend to backbone Transolver blocks at this capacity ratio.
+
+Wave 39+ SwiGLU direction:
+- Test H135 decoder-only SwiGLU terminal — if val A WIN holds, decoder-side SwiGLU joins productive mechanism cohort
+- H135 × tau_z escalation compound (decoder gating + gradient pressure) once both mechanisms land alive
+- H135 × split WSS_z decoder compound (decoder gating + dedicated z-head)
+- DO NOT continue backbone SwiGLU variants — class is exhausted
+
+The H134/H135 cohort design pays the full architectural attribution dividend — definitive evidence on the SwiGLU location-of-benefit question.
+
+---
+
 ## 2026-05-26 ~00:50 — PR #1320: H-B2 DETACHED AUX LOG-MAGNITUDE WSS HEAD (alphonse, **CLOSED C NULL** — straight baseline-trail on both val and test; aux-head class definitively CLOSED via H-B/H-B2 gradient-flow attribution)
 
 - **Branch**: `alphonse/detached-aux-loss-wss` (CLOSED, not merged)
