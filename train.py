@@ -130,6 +130,9 @@ class Config:
     optimizer: str = "adamw"
     lion_beta1: float = 0.9
     lion_beta2: float = 0.99
+    use_lookahead: bool = False
+    lookahead_k: int = 5
+    lookahead_alpha: float = 0.5
     vol_points_schedule: str = ""
     use_gradnorm: bool = False
     gradnorm_mode: str = "ema_proxy"
@@ -252,25 +255,121 @@ def parse_args(argv: Iterable[str] | None = None) -> Config:
     return Config(**vars(namespace))
 
 
+class Lookahead(torch.optim.Optimizer):
+    """Lookahead optimizer wrapper (Zhang et al. 2019, https://arxiv.org/abs/1907.08610).
+
+    Keeps fast weights updated by the inner optimizer every step and slow weights
+    that are pulled toward the fast weights every k steps via
+    ``slow := slow + alpha * (fast - slow)``; fast weights are then reset to slow.
+
+    Subclasses ``torch.optim.Optimizer`` purely so ``isinstance`` checks in
+    ``torch.optim.lr_scheduler`` pass. All state (param_groups, defaults, base
+    optimizer state) is delegated to the inner optimizer via properties so that
+    LR schedulers, grad clipping, EMA, and DDP work transparently.
+    """
+
+    def __init__(
+        self,
+        base_optimizer: torch.optim.Optimizer,
+        k: int = 5,
+        alpha: float = 0.5,
+    ) -> None:
+        if k < 1:
+            raise ValueError(f"Lookahead k must be >= 1, got {k}")
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError(f"Lookahead alpha must be in (0, 1], got {alpha}")
+        self.base_optimizer = base_optimizer
+        self.k = int(k)
+        self.alpha = float(alpha)
+        self._lookahead_step_count = 0
+        self._slow_weights: dict[int, torch.Tensor] = {}
+
+    @property
+    def param_groups(self):
+        return self.base_optimizer.param_groups
+
+    @param_groups.setter
+    def param_groups(self, value):
+        self.base_optimizer.param_groups = value
+
+    @property
+    def defaults(self):
+        return self.base_optimizer.defaults
+
+    @defaults.setter
+    def defaults(self, value):
+        self.base_optimizer.defaults = value
+
+    @property
+    def state(self):
+        return self.base_optimizer.state
+
+    @state.setter
+    def state(self, value):
+        self.base_optimizer.state = value
+
+    def add_param_group(self, param_group):
+        return self.base_optimizer.add_param_group(param_group)
+
+    def zero_grad(self, set_to_none: bool = True):
+        self.base_optimizer.zero_grad(set_to_none=set_to_none)
+
+    @torch.no_grad()
+    def _slow_weight_pullback(self) -> None:
+        for group in self.base_optimizer.param_groups:
+            for fast in group["params"]:
+                key = id(fast)
+                slow = self._slow_weights.get(key)
+                if slow is None:
+                    slow = fast.detach().clone()
+                    self._slow_weights[key] = slow
+                # slow := slow + alpha * (fast - slow); fast := slow
+                slow.add_(fast.detach() - slow, alpha=self.alpha)
+                fast.data.copy_(slow)
+
+    def step(self, closure=None):
+        loss = self.base_optimizer.step(closure)
+        self._lookahead_step_count += 1
+        if self._lookahead_step_count % self.k == 0:
+            self._slow_weight_pullback()
+        return loss
+
+    def state_dict(self):
+        return {
+            "base_state": self.base_optimizer.state_dict(),
+            "lookahead_step_count": self._lookahead_step_count,
+            "k": self.k,
+            "alpha": self.alpha,
+        }
+
+    def load_state_dict(self, state_dict):
+        self.base_optimizer.load_state_dict(state_dict["base_state"])
+        self._lookahead_step_count = int(state_dict.get("lookahead_step_count", 0))
+
+
 def build_optimizer(model: nn.Module, config: Config) -> torch.optim.Optimizer:
     optimizer_name = config.optimizer.lower()
     if optimizer_name == "adamw":
-        return torch.optim.AdamW(
+        base = torch.optim.AdamW(
             model.parameters(),
             lr=config.lr,
             weight_decay=config.weight_decay,
         )
-    if optimizer_name == "lion":
+    elif optimizer_name == "lion":
         from lion_pytorch import Lion
 
-        return Lion(
+        base = Lion(
             model.parameters(),
             lr=config.lr,
             weight_decay=config.weight_decay,
             betas=(config.lion_beta1, config.lion_beta2),
             use_triton=False,
         )
-    raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+    else:
+        raise ValueError(f"Unknown optimizer '{config.optimizer}'. Supported: adamw, lion.")
+    if config.use_lookahead:
+        return Lookahead(base, k=config.lookahead_k, alpha=config.lookahead_alpha)
+    return base
 
 
 def parse_rff_init_sigmas(spec: str) -> list[float] | None:
