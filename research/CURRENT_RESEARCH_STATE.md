@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~18:00Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~19:05Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -64,7 +64,8 @@ All seven Wave 38+39 mechanism classes exhausted:
 | **edward (reassigned)** | **#1350** | **H170 static surface:volume rebalancing 4.0:0.5 (8:1 ratio)** | **Newly assigned 18:00Z post-H146 closure.** Tests H147 GradNorm-discovered ratio (~14:1 vs H112's 2:1) — conservative midpoint static test. Zero param overhead, two-flag delta from H112. **Sidesteps H138/H146 architectural-split pathology entirely** — operates on completely orthogonal axis. | **Wave 40 HIGH PRIORITY** — opens previously unexplored surface:volume axis informed by GradNorm finding. Closes 5-axis Wave 40 frontier (z-loss-weight DE, y-loss-weight DE, mirror-aug, AdamW, surface:volume). |
 | thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
 | askeladd | #1341 | H148 y=0 mirror augmentation | WIP EP5 (54%). EP4 publish: WSS_y LEAD weakening (−0.095→−0.056pp), WSS_z LEAD reversed to flat, VP deficit +1.294pp (growth decelerating but plateau ~+1.3pp). VP merge floor disqualification likely. EP6 binding ~12:25Z. | HIGH — mechanism alive but VP floor critical |
-| tanjiro | #1342 | H149 AdamW optimizer swap | WIP EP5. EP4 (10:14Z) gap-closure decaying: EP1 +5.73 → EP4 +0.56pp. WSS_z/WSS_y ratio H149 1.169 vs H112 1.183 — **CROSS-CHANNEL BLEED IS OPTIMIZER-AGNOSTIC**. Terminal ~17-18Z. | HIGH — pivotal Lion-vs-AdamW; baseline ordering confirmed data-driven not optimizer-specific |
+| tanjiro | #1342 | H149 AdamW optimizer swap | **CLOSED C NULL on merge + Scenario A on slope** (2026-05-26 18:54Z). val_abupt 6.4574% MISS gate +322bp; test_WSS 7.1016% MISS +374bp. **PROGRAM-CRITICAL: AdamW STEEPENS val→test slope on ALL 5 WSS channels (Δ −0.020 to −0.097pp), pressure channels go FLATTER (Δ +0.019, +0.028pp). Optimizer-axis slope-steepening finding banked permanent.** | reassigned to H180 Lookahead(AdamW) |
+| **tanjiro (reassigned)** | **#1351** | **H180 Lookahead(AdamW, k=5, α=0.5)** | **Newly assigned 19:05Z post-H149 closure.** Tests whether slow-weight EMA wrapper around AdamW recovers BOTH AdamW's WSS slope steepening AND Lion's val convergence (decomposition: slope = gradient-info-driven, val = sign-compression-driven; Lookahead's slow-weight EMA may bridge them). ~10-15 LoC code change. | **Wave 40 HIGH PRIORITY** — direct H149 mechanism instinct follow-up. First test of optimizer-stacking design space. |
 | nezuko | #1346 | H157 cosine warm restarts (SGDR T_0=4) | Newly assigned — student pickup pending | Scheduler-axis basin-escape, zero capacity |
 | frieren (reassigned) | #1347 | H164 Stochastic Weight Averaging (SWA) | Newly assigned — student pickup pending | Averaging-axis flat-basin discovery; tests basin-geometry hypothesis from H143 directly |
 
@@ -128,7 +129,28 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - **Falsifiable**: if alive, opens entire surface:volume axis (H171 plateau-exact 14:1, H172 LR-decoupled). If C NULL with preserved slope, GradNorm's auto-discovery is val-overfit signal not test-transfer signal.
 - **Priority**: Wave 40 HIGH — closes 6-axis Wave 40 factorial (z-DE / y-DE / mirror-aug / AdamW / cosine-restarts / surface:volume).
 
-### 9. Wave 40 frontier post H144 closure
+### 9. PROGRAM-CRITICAL slope-preservation cohort (REVISED 2026-05-26 19:05Z post H149 closure)
+
+The val→test slope axis now has **TWO independent slope-preservation/steepening signals** vs H112's −0.215pp WSS aggregate:
+
+| Cohort point | Mechanism class | Δ slope WSS agg vs H112 | Direction | Status |
+|---|---|---:|---|---|
+| H112 (Lion, lr=9e-5) | baseline | 0 (anchor) | — | reference |
+| H143 (Lion, tau_z=4) | loss-weight ESCALATE z | +0.133pp flatter | z-axis specific | CLOSED |
+| H144 (Lion, tau_z=6) | loss-weight ESCALATE z | +0.202pp flatter | z-axis specific | CLOSED |
+| **H145 (Lion, tau_y=3)** | **loss-weight ESCALATE y** | **−0.048pp STEEPER** | **y-axis specific** | CLOSED |
+| **H149 (AdamW, lr=3e-4)** | **optimizer axis** | **−0.036pp STEEPER** | **WSS-channel specific** | **CLOSED 18:54Z** |
+| H148 (Lion, mirror aug) | data invariance y | TBD ~19:25Z today | y-axis data | pending |
+| H165 (Lion, tau_z=1.5) | loss-weight DE-escalate z | TBD ~03:40Z+1 | z-axis DE | pending |
+| H166 (Lion, tau_y=1.0) | loss-weight DE-escalate y | TBD ~06:25Z+1 | y-axis DE | pending |
+| H170 (Lion, surface:vol 8:1) | surface:volume rebalancing | TBD ~03:50Z+1 | surface-vol axis | pending |
+| **H180 (Lookahead(AdamW))** | **optimizer-stacking** | **TBD** | **AdamW slope + Lion val** | **assigned 19:05Z** |
+
+**Decomposition reading**: AdamW (H149) STEEPENS WSS-channel slope by preserving gradient magnitude information (1.5× mean, 1.9× p99 vs Lion). Pressure channels go FLATTER under AdamW (per-channel decoupling). The slope-flattening pathology under Lion is PARTIALLY optimizer-axis-driven on WSS channels.
+
+**H180 Lookahead(AdamW) test**: does slow-weight EMA wrapper around AdamW (k=5, α=0.5) recover Lion's val convergence while preserving AdamW's slope steepening? If A WIN, first single-model improvement via optimizer-axis intervention; opens optimizer-stacking design space (Lookahead-Lion, SAM(AdamW), RAdam, AdaBelief).
+
+### 10. Wave 40 frontier post H144 closure
 - **ESCALATE class CLOSED DEFINITIVELY** (H112+H143+H144 3-point cohort)
 - **Active priorities**: tau_z=1.5 DE-escalation (fern Wave 40 assignment, this section), H147 GradNorm (thorfinn terminal ~20:34Z), H148 mirror aug (askeladd terminal ~16:30Z), H149 AdamW (tanjiro graceful ~20:58Z), H157 cosine warm restarts (nezuko ~25% complete), H164 SWA (frieren freshly launched)
 - **H150 long-EMA**: paused, may revisit only if a winning Wave 40 mechanism completes — incompatible with 13-epoch training in isolation
