@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~19:25Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~21:15Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -62,7 +62,8 @@ All seven Wave 38+39 mechanism classes exhausted:
 | alphonse | #1337 | H145 tau_y=3.0 axis-extension | **CLOSED C NULL** (2026-05-26 16:00Z). val_abupt 6.296% MISS +160bp; test_WSS 6.909% MISS +18bp. **PROGRAM-CRITICAL: val→test slope PRESERVED (−0.263pp WSS agg, STEEPER than H112; +0.085pp gain on WSS_x). Slope-flattening is z-axis specific, not universal ESCALATE.** test_WSS_y +0.064pp = smallest cohort regression. | reassigned to H166 tau_y=1.0 DE-escalation |
 | edward | #1338 | H146 split WSS_y decoder | **CLOSED C NULL** (2026-05-26 17:55Z). val_abupt 6.2277% MISS gate +92bp; test_WSS 6.9257% MISS +199bp; **test_WSS_y +0.144pp REGRESSION on target channel — mechanism FALSIFIED**. Paired y/z confirmation with H138. | reassigned to H170 surface:volume rebalancing (PR #1350) |
 | **edward (reassigned)** | **#1350** | **H170 static surface:volume rebalancing 4.0:0.5 (8:1 ratio)** | **Newly assigned 18:00Z post-H146 closure.** Tests H147 GradNorm-discovered ratio (~14:1 vs H112's 2:1) — conservative midpoint static test. Zero param overhead, two-flag delta from H112. **Sidesteps H138/H146 architectural-split pathology entirely** — operates on completely orthogonal axis. | **Wave 40 HIGH PRIORITY** — opens previously unexplored surface:volume axis informed by GradNorm finding. Closes 5-axis Wave 40 frontier (z-loss-weight DE, y-loss-weight DE, mirror-aug, AdamW, surface:volume). |
-| thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
+| thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | **CLOSED C NULL 21:05Z** (PR #1340 closed). All gates FAIL. Slope FLATTER on all 7 channels including WSS_x invariant control. **PROGRAM-INVERTING: GradNorm joins FLATTENING cohort #3. tau_z ceiling at [1.65,1.70], 16.6% BELOW H112's 2.0. Dynamic loss balancing CLOSED permanently.** | CLOSED — reassigned to H171 |
+| **thorfinn (reassigned)** | **#1353** | **H171 plateau-exact static recipe** | **Newly assigned 21:15Z post-H147 closure.** 3-flag delta from H112: `--volume-loss-weight 0.5 --tau-y-loss-weight 1.30 --tau-z-loss-weight 1.67`. Tests values-vs-dynamics: if H171 slope-FLATTENS like H147, perturbation-itself-is-issue framework LOCKED (z-axis perturbation in any form breaks basin). If H171 slope-PRESERVES or A WIN, static values produce the gradient-aligned result that dynamic adaptation could not (major finding). | **HIGH — closes dynamic-axis mechanism class OR reveals new A WIN operating point** |
 | askeladd | #1341 | H148 y=0 mirror augmentation | **CLOSED C NULL on merge + SCENARIO A LOCKED across ALL 7 channels** (2026-05-26 19:09Z). val_abupt 6.2186% MISS gate +83bp; test_WSS 6.7750% MISS +48bp. **PROGRAM-CRITICAL: STEEPEST val→test slope of y-axis cohort on WSS aggregate (−0.296pp vs H112 −0.215pp, H145 −0.263pp). All 7 channels STEEPER. WSS_x invariant control −0.166pp (1.8× H112), TIES H145 within 12bp. test side TIES H112 within EMA noise on 5/7 channels; test_VP IMPROVES −5bp.** | reassigned to H181 H148 + ema=0.9999 |
 | **askeladd (reassigned)** | **#1352** | **H181 H148 + ema=0.9999** | **Newly assigned 19:25Z post-H148 closure.** Single-flag delta: ema-decay 0.999 → 0.9999 (10× longer averaging window). Closes parallel-offset val noise floor (~83bp), preserves slope mechanism (gradient-reallocation is upstream of EMA wrapper). **Projected: val_abupt closes to ≤ 6.1358% + slope preserved → test_WSS ≤ 6.671% — FIRST SINGLE-MODEL SOTA via Wave 40+ slope-preservation path.** | **Wave 40 HIGHEST PRIORITY — path to first SOTA** |
 | tanjiro | #1342 | H149 AdamW optimizer swap | **CLOSED C NULL on merge + Scenario A on slope** (2026-05-26 18:54Z). val_abupt 6.4574% MISS gate +322bp; test_WSS 7.1016% MISS +374bp. **PROGRAM-CRITICAL: AdamW STEEPENS val→test slope on ALL 5 WSS channels (Δ −0.020 to −0.097pp), pressure channels go FLATTER (Δ +0.019, +0.028pp). Optimizer-axis slope-steepening finding banked permanent.** | reassigned to H180 Lookahead(AdamW) |
@@ -82,12 +83,13 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - **H145 alphonse (tau_y=3.0) trending C NULL**: 7-checkpoint mechanism alive on val_WSS_y but magnitude decaying geometrically (~50%/epoch). Terminal val_WSS_y ≈ 7.607-7.608% (coin-flip on banked-partial). val_abupt MISS by ~22bp projected. Terminal ~15:00Z.
 - **Strategic conclusion**: ESCALATE direction is INVERTED — H112's wt 2.0 is the test-optimum on the tau_z axis, with monotone test_WSS regression from wt 2.0 upward. **Convergent with H147 GradNorm-discovered optimal tau_z = 1.631** (BELOW 2.0). Wave 40 frontier shifts to **tau_z DE-escalation** (priority 7 below) and basin-geometry-targeting mechanisms.
 
-### 2. GradNorm dynamic weighting (H147 thorfinn) — EP3 binding diagnostic 12:00Z REVEALS TWO MAJOR FINDINGS
-- **Finding 1 — H143 basin-geometry pathology applies to GradNorm too**: WSS_z LEAD-FLIP between EP2 (−0.105pp LEAD) and EP3 (+0.047pp LAG) on the most aggressively upweighted channel. All-WSS LEADs compressed 50-66%. Smooth weight evolution does NOT sidestep the slope-flattening trap.
-- **Finding 2 — GradNorm-discovered optimal tau_z = ~1.6, NOT > 2.0**: auto-weight plateaued at 1.631 by step 33,082, well BELOW H112's static 2.0. This DIRECTLY FALSIFIES the H143/H144/H145 ESCALATE direction. The gradient-aligned optimum is in the [1.5, 1.7] range, NOT above 2.0. **NEW Wave 40 hypothesis directly enabled: static tau_z=1.5 DE-escalation experiment.**
-- **Operational risk**: terminal ETA ~01:00Z next day exceeds SENPAI_TIMEOUT_MINUTES=1100 (22:04Z hard timeout). Recommended Option A: early-stop at step 60,000 (EP10) with test eval on EP10 EMA checkpoint.
-- VP auto-weight = 0.324 dragging val_VP toward terminal projection ~3.85% → test_VP FAILS floor 3.421%.
-- Banked findings program-positive regardless of merge: dynamic balancing falsifies static ESCALATE hypothesis.
+### 2. GradNorm dynamic weighting (H147 thorfinn) — **CLOSED C NULL 21:05Z — PROGRAM-INVERTING FINDING**
+- **Terminal result (PR #1340, W&B `4t2bd5xf`, EP9-EMA at train_timeout 20:34Z)**: C NULL. All merge gates FAIL. All test floors FAIL (test_VP +0.397pp, test_SP +0.322pp). **GradNorm joins SLOPE-FLATTENING cohort #3 (with H143/H144).** thorfinn reassigned to H171 plateau-exact (PR #1353).
+- **PROGRAM-INVERTING finding #1**: Slope-flattening pathology generalizes to DYNAMIC balancing. Static (H143/H144) AND dynamic (H147) z-axis perturbations both break basin geometry. Perturbation discreteness is irrelevant — **perturbation itself is the issue**.
+- **PROGRAM-INVERTING finding #2**: GradNorm auto-discovered tau_z ceiling at [1.65, 1.70] — **16.6% BELOW H112's static 2.0** (terminal weight 1.669, plateau-stable 24k+ steps). **The ESCALATE direction (H143/H144) was searching the wrong half of magnitude space.**
+- **Auto-discovered task hierarchy** (banked ground truth): tau_z (1.67) > tau_y (1.30) > tau_x (1.14) > sp (0.60) > vp (0.30)
+- **Dynamic loss balancing CLOSED permanently**: PCGrad/MGDA/IMTL variants excluded from Wave 40+. Zero further dynamic-balancing experiments.
+- **H171 plateau-exact** (PR #1353, thorfinn): 3-flag delta from H112 replicating GradNorm's terminal plateau values (volume=0.5, tau_y=1.30, tau_z=1.67). Tests values-vs-dynamics mechanism axis. If slope-flattens like H147, perturbation-itself-is-issue framework LOCKED definitively.
 
 ### 3. Mirror augmentation (H148 — just assigned)
 - Zero params, zero architecture change
@@ -142,11 +144,13 @@ The val→test slope axis now has **THREE independent slope-preservation/steepen
 | **H145 (Lion, tau_y=3)** | **loss-weight ESCALATE y** | **−0.048pp STEEPER** | **−0.178pp (1.9× H112)** | **y-axis specific** | CLOSED |
 | **H149 (AdamW, lr=3e-4)** | **optimizer axis** | **−0.036pp STEEPER** | **−0.119pp (1.3× H112)** | **WSS-channel specific** | CLOSED |
 | **H148 (Lion, mirror aug)** | **data invariance y-axis** | **−0.081pp STEEPER (largest)** | **−0.166pp (1.8× H112)** | **y-axis class generalization** | **CLOSED 19:09Z** |
-| H165 (Lion, tau_z=1.5) | loss-weight DE-escalate z | TBD ~03:40Z+1 | TBD | z-axis DE | pending |
-| H166 (Lion, tau_y=1.0) | loss-weight DE-escalate y | TBD ~06:25Z+1 | TBD | y-axis DE | pending |
-| H170 (Lion, surface:vol 8:1) | surface:volume rebalancing | TBD ~03:50Z+1 | TBD | surface-vol axis | pending |
-| H180 (Lookahead(AdamW)) | optimizer-stacking | TBD | TBD | AdamW slope + Lion val | assigned 19:05Z |
-| **H181 (mirror aug + ema=0.9999)** | **noise floor closure** | **target ≤ −0.215pp (preserved)** | **target ≤ −0.166pp** | **path to first SOTA** | **assigned 19:25Z** |
+| **H147 (GradNorm dynamic)** | **dynamic loss balancing** | **+0.105pp FLATTER** | **+0.078pp FLATTER (invariant also flat)** | **z-axis FLATTENING #3** | **CLOSED C NULL 21:05Z** |
+| H165 (Lion, tau_z=1.5) | loss-weight DE-escalate z | TBD ~03:40Z+1 | TBD | z-axis DE | active |
+| H166 (Lion, tau_y=1.0) | loss-weight DE-escalate y | TBD ~06:25Z+1 | TBD | y-axis DE | active |
+| H170 (Lion, surface:vol 8:1) | surface:volume rebalancing | TBD ~03:50Z+1 | TBD | surface-vol axis | active |
+| H171 (Lion, plateau-exact static) | static replication of GradNorm plateau | TBD ~04:00Z+1 | TBD | values-vs-dynamics test | **assigned 21:15Z PR #1353** |
+| H180 (Lookahead(AdamW)) | optimizer-stacking | TBD | TBD | AdamW slope + Lion val | active |
+| **H181 (mirror aug + ema=0.9999)** | **noise floor closure** | **target ≤ −0.215pp (preserved)** | **target ≤ −0.166pp** | **path to first SOTA** | **active** |
 
 **WSS_x invariant-control CONVERGENCE — the strongest mechanism-isolation evidence the program has produced**: H145 (loss-weight) and H148 (data-invariance) **TIE each other within 12bp** on WSS_x slope, both ~1.8× steeper than H112. The invariant channel inheriting slope-steepening from y-axis interventions proves the mechanism is **gradient reallocation, channel-uniform, reproducible across independent intervention classes**.
 

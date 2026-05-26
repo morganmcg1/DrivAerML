@@ -1,3 +1,66 @@
+## 2026-05-26 ~21:05 — PR #1340: H147 GRADNORM DYNAMIC TASK-WEIGHT BALANCING (thorfinn, **CLOSED C NULL + slope FLATTENING cohort #3 — PROGRAM-INVERTING: tau_z gradient-optimum at 1.67, 16.6% BELOW H112's 2.0**)
+
+- **Branch**: `thorfinn/h147-gradnorm-full` (CLOSED, not merged)
+- **W&B run**: `4t2bd5xf` (DDP8 rank0)
+- **Hypothesis**: GradNorm dynamic task-weight balancing (alpha=1.5, full mode) discovers optimal per-channel loss weights automatically, bypassing manual ESCALATE/DE-ESCALATE search and adapting to training dynamics.
+- **Parameter overhead**: 0 (GradNorm is auxiliary loss mechanism, same forward graph); ~16% wallclock overhead (extra backward pass for gradient norms)
+- **Step landing**: 56,996 (EP9-EMA at train_timeout 20:34Z, full 13 epochs blocked by timeout; EP9-EMA checkpoint used as terminal)
+
+### Terminal metrics + val→test slope decomposition (EP9-EMA checkpoint, step ~57k)
+
+| Channel | H147 val% | H112 val% | val Δ | H147 test% | H112 test% | test Δ | H147 slope | H112 slope | **Δ slope** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **abupt** | 6.3038 | 6.1358 | +0.168 | 6.0952 | 5.839 | +0.256 | −0.209 | −0.297 | **+0.088 FLATTER** |
+| **WSS** | 7.0434 | 6.9670 | +0.076 | 6.9332 | 6.752 | +0.181 | −0.110 | −0.215 | **+0.105 FLATTER** |
+| WSS_x (invariant) | 6.1252 | 6.0923 | +0.033 | 6.1101 | 5.999 | +0.111 | −0.015 | −0.093 | **+0.078 FLATTER** |
+| WSS_y | 7.7412 | 7.6084 | +0.133 | 7.6020 | 7.360 | +0.242 | −0.139 | −0.248 | **+0.109 FLATTER** |
+| **WSS_z** | 9.5081 | 9.3750 | +0.133 | 9.0468 | 8.720 | +0.327 | **−0.461** | **−0.655** | **+0.194 FLATTER (peak)** |
+| SP | 4.2290 | 4.0553 | +0.174 | 3.8990 | 3.695 | +0.204 | −0.330 | −0.360 | +0.030 FLATTER |
+| VP | 3.9157 | 3.5478 | +0.368 | 3.8182 | 3.421 | +0.397 | −0.097 | −0.127 | +0.030 FLATTER |
+
+All merge gates FAIL. All test floors FAIL (test_VP +0.397pp, test_SP +0.322pp most severe).
+
+**Caveat**: H147 is EP9-EMA (57k steps) vs H112's full EP13 (71k steps) — step-mismatch biases slope magnitudes toward H147. The directional signal (slope-flatter ALL channels) is robust; the magnitude bias favours H112 (more convergence time). An apples-to-apples EP9 comparison for H112 is unavailable.
+
+### GradNorm auto-discovered weight trajectory — program-critical findings
+
+| Step (EP) | sp | tau_x | tau_y | tau_z | vp |
+|---|---:|---:|---:|---:|---:|
+| 10,864 (EP1) | 0.757 | 0.965 | 1.303 | 1.515 | 0.460 |
+| 32,592 (EP3) | 0.536 | 1.106 | 1.426 | 1.582 | 0.351 |
+| 48,901 (EP6) | 0.537 | 1.134 | 1.360 | 1.649 | 0.320 |
+| 52,527 (EP7) | 0.562 | 1.118 | 1.334 | **1.679 (PEAK)** | 0.306 |
+| 56,259 (EP8) | 0.580 | 1.144 | 1.345 | 1.638 | 0.294 |
+| **Terminal** | **0.599** | **1.135** | **1.298** | **1.669** | **0.299** |
+
+**Auto-discovered optimum**: tau_z ceiling at [1.65, 1.70] — **16.6% BELOW H112's static 2.0**. GradNorm never pushes tau_z above 1.70 across 24k-step stable plateau. vp heavily downweighted to 0.30 (H147 effective vp = 0.5 × 0.30 = 0.15). Effective surface:volume ratio in GradNorm = 14:1 vs H112's 2:1.
+
+### 8 banked program-critical findings
+
+1. **Slope-flattening pathology generalizes to dynamic balancing** — not specific to static ESCALATE. Dynamic + static perturbation off H112 prior in z-axis direction BOTH break basin geometry.
+2. **tau_z gradient-aligned optimum is in DE-escalate region [1.65, 1.70]** — ESCALATE direction (H143/H144/H145) was searching wrong half of magnitude space. GradNorm auto-discovers the optimum WITHOUT manual ESCALATE.
+3. **z-axis perturbation in BOTH directions may break slope** — ESCALATE (H143) confirmed + dynamic at gradient-optimum (H147) confirmed. H165 fern tau_z=1.5 static (terminal pending) will lock bilateral picture.
+4. **GradNorm effective surface:volume ratio = 14:1** (vp=0.15 effective) vs H112 2:1. H170 edward testing 4:0.5=8:1 midpoint.
+5. **Auto-discovered task-difficulty ranking ground truth**: tau_z (1.67) > tau_y (1.30) > tau_x (1.14) > sp (0.60) > vp (0.30) — gradient-aligned difficulty hierarchy for the DrivAerML WSS objective.
+6. **Mid-train LEAD signature was NON-prognostic** — EP3-EP8 WSS aggregate LEAD (−0.020 to −0.084pp) turned to +0.076pp LAG at terminal. Step-mismatch artifact: H147 stopped at EP9 while H112 continued EP9→EP13. Mid-train EMA-vs-baseline-EP-mismatch misleads.
+7. **Pressure-channel regression compounds basin shift** — vp 85% downweighted → test_VP +0.397pp. Aggressive pressure downweight confirmed harmful.
+8. **Dynamic loss balancing CLOSED as mechanism class** — PCGrad/MGDA/IMTL/H147 variants excluded from Wave 40+.
+
+### Updated slope-pathology cohort table
+
+| Mechanism | Run | Δ slope WSS agg | Class |
+|---|---|---:|---|
+| Static z-axis ESCALATE (tau_z=4.0) | H143 | +0.115pp FLATTER | FLATTENING |
+| Static z-axis ESCALATE (tau_z=6.0) | H144 | +0.180pp FLATTER | FLATTENING |
+| **Dynamic GradNorm (tau_z auto-discovered 1.67)** | **H147** | **+0.105pp FLATTER** | **FLATTENING** |
+| Loss-weight y-axis (tau_y=3.0) | H145 | −0.048pp STEEPER | PRESERVATION |
+| Optimizer axis (AdamW) | H149 | −0.036pp STEEPER | PRESERVATION |
+| Mirror-aug y-axis data invariance | H148 | −0.081pp STEEPER | PRESERVATION |
+
+**Cohort discriminator**: y-axis interventions PRESERVE slope. z-axis interventions FLATTEN slope. **thorfinn reassigned to H171 plateau-exact (PR #1353) — static replication of GradNorm's terminal plateau values (3-flag delta: volume=0.5, tau_y=1.30, tau_z=1.67) to test values-vs-dynamics mechanism axis.**
+
+---
+
 ## 2026-05-26 ~19:09 — PR #1341: H148 MIRROR-AUGMENTATION DATA INVARIANCE (askeladd, **CLOSED C NULL on merge + SCENARIO A LOCKED across ALL 7 channels** — **single most program-significant slope finding of Wave 39+**)
 
 - **Branch**: `askeladd/h148-mirror-augmentation` (CLOSED, not merged)
