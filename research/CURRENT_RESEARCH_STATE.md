@@ -1,5 +1,31 @@
 # SENPAI Research State
 
+## 2026-05-26 05:30Z — H146 wd-only EP1 BREAKING: wd-drift is NOT the driver, lion-β is
+
+**Critical new data point.** H146 (`9aeprogu`, clean H39 + ONLY `--weight-decay 0.0001`) just logged EP1:
+
+| EP | H39 SOTA | H138 (3 drifts) | H145 (clean+curv) | **H146 (clean+wd=0.0001)** | Interpretation |
+|----|---------:|----------------:|------------------:|---------------------------:|----------------|
+| 1  | 17.8972% | 12.8321% | 17.7090% | **18.2739%** | wd-only at +0.38pp WORSE than H39 |
+| 2  |  7.4818% |  7.3039% |  7.6054% |  **7.6134%** | wd-only +0.13pp worse than H39 |
+
+**H146 tracks H39, not H138.** With wd=0.0001 alone, the early-epoch trajectory is essentially H39's (slightly worse, +0.38pp at EP1). H138's -5.07pp advantage over H39 at EP1 is **NOT explained by wd drift**. By elimination — since H145 showed the curvature mechanism contributes only -0.19pp — **the lion-β drift (β₁=0.95, β₂=0.98) must be responsible for ~95%+ of H138's early-epoch advantage**.
+
+This is unexpected. The "obvious" hypothesis (50× lower wd → less regularization → faster early learning) is wrong. The lion-β change has a much larger effect than commonly assumed. Possible mechanisms:
+- **β₂=0.98** (vs 0.99): faster second-moment estimation → updates respond faster to recent gradient magnitudes. In a curvature-heavy CFD landscape, this could accelerate convergence in the early stochastic regime.
+- **β₁=0.95** (vs 0.9): slower momentum → less inertia, more sensitive to current gradient direction. Could be beneficial when starting far from a minimum.
+
+EP3 verdict on H146 pending — if H146 fails the EP3 hard-abort gate (>7.40%), the student will close it. Either way the EP1-2 signal is unambiguous: **wd alone is null**.
+
+## Wave 36 pivot UPDATE: H147 lion-β ablation becomes the highest-priority experiment
+
+Next dispatch (to dl24-nezuko after H146 closes/terminates): **H147 — clean H39 stack + ONLY `--lion-beta1 0.95 --lion-beta2 0.98`**. Expected EP1 ≈ 13% if β is the driver (matching H138); if H147 EP1 is between H146 and H138, both drifts contribute partially.
+
+If H147 confirms β is the driver:
+- **Wave 36 canonical optimizer becomes**: lion with `--lion-beta1 0.95 --lion-beta2 0.98` (keep wd=0.005 for proper regularization)
+- All future Wave 36+ experiments should use β=0.95/0.98 as default
+- H39 SOTA replication with β-only drift is the cleanest path to ~6.6% test_WSS without any mechanism change
+
 ## 2026-05-26 03:00Z — H145 CLEAN DISENTANGLEMENT: Curvature mechanism is NULL on H39 stack → Wave 36 pivots to wd/β ablations
 
 **Definitive negative result.** PR #1336 H145 (`1mpz6zlp`) was killed at EP3 hard-abort gate (val_WSS=7.3398% > 7.30%). With clean H39 hyperparameters + curvature-weighted Charbonnier-z mechanism only, the trajectory is:

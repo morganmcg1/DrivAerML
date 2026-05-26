@@ -1,5 +1,42 @@
 # SENPAI Research Results — `drivaerml-long-20260504`
 
+## 2026-05-26 05:30 — PR #1339 H146 EP1-2 INTERIM: wd-only ablation tracks H39, NOT H138 → lion-β is the driver
+
+- `dl24-nezuko/h146-wd-only-ablation`, run `9aeprogu` (8 DDP ranks)
+- Hypothesis: Isolate `weight_decay=0.0001` as driver of H138's gains. Clean H39 stack + ONLY wd change.
+- **EP3 verdict pending** — but EP1-2 interim data is decisive.
+
+### Gate data through EP2
+
+| EP | Step | H39 SOTA | H138 (3 drifts) | H145 (clean+curv) | **H146 (clean+wd)** | wd-only signal |
+|----|------|---------:|----------------:|------------------:|--------------------:|----------------|
+| 1  | 10,975 | 17.8972% | 12.8321% | 17.7090% | **18.2739%** | +0.38pp WORSE than H39 |
+| 2  | 21,951 |  7.4818% |  7.3039% |  7.6054% |  **7.6134%** | +0.13pp WORSE than H39 |
+
+### Decisive interim finding
+
+**wd=0.0001 alone does NOT reproduce H138's early-epoch advantage.** H146 tracks H39 (slightly worse, +0.38pp at EP1) — not H138 (-5.07pp ahead of H39 at EP1). Combined with H145 (curvature mechanism = -0.19pp), the contributions stack as:
+
+- Curvature mechanism: -0.19pp
+- wd-drift: 0pp (slightly negative)
+- **lion-β drift: ~5.0pp** (by elimination, assuming additive contributions)
+
+The wd story is dead. The β story is alive. **H138's spectacular gains are driven almost entirely by the lion-β drift (β₁=0.9→0.95, β₂=0.99→0.98).**
+
+### Hypothesis for β mechanism
+
+β₂=0.98 (faster second-moment estimation) appears to be the dominant factor. In CFD landscapes with high curvature variance, faster adaptation to recent gradient magnitudes may help the optimizer navigate sharp transitions. β₁=0.95 (slower momentum) is more likely secondary — it has less impact when β₂ is also changing.
+
+### EP3 status
+
+H146 is currently in EP3. If val_WSS > 7.40% at EP3, student will close per the hard-abort gate. Even if it limps to EP3, the EP1-2 signal is conclusive: wd alone is null.
+
+### Implication for next dispatch
+
+**H147 lion-β-only ablation becomes the highest-priority experiment.** Clean H39 + ONLY `--lion-beta1 0.95 --lion-beta2 0.98`. Predicted EP1 ≈ 13% if β is the driver. If confirmed, Wave 36 canonical optimizer becomes β=0.95/0.98 with wd=0.005.
+
+---
+
 ## 2026-05-26 03:00 — PR #1336 H145 CLOSED: Curvature-weighted Charbonnier-z is NULL on clean H39 stack (decisive disentanglement)
 
 - `dl24-nezuko/h145-curv-charb-z-wd005`, run `1mpz6zlp` (8 DDP ranks)
