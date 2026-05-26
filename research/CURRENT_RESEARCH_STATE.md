@@ -69,12 +69,12 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - Mechanism: ESCALATE direction was hypothesized to push gradient pressure on hard channels. But static per-axis escalation produces basin-geometry pathology — same root cause as capacity/architecture interventions.
 - **If H144 also closes C NULL, the entire ESCALATE class is exhausted.** Wave 40 frontier shifts decisively to basin-geometry-targeting mechanisms.
 
-### 2. GradNorm dynamic weighting (H147 thorfinn)
-- Task names: `("sp", "tau_x", "tau_y", "tau_z", "vp")`
-- Alpha=1.5, tau_y=1.0/tau_z=1.0 balanced starting point
-- **Validated**: autonomously discovered tau_z > tau_y > tau_x > sp > vp weight hierarchy. Effective tau_z weight (1.45 × base 2.0 = 2.9) sits BETWEEN H112 (2.0) and H143 (4.0).
-- If alive: dynamic loss-weighting sidesteps static ESCALATE search-space problem
-- Requires `--no-compile-model` for `full` mode
+### 2. GradNorm dynamic weighting (H147 thorfinn) — EP3 binding diagnostic 12:00Z REVEALS TWO MAJOR FINDINGS
+- **Finding 1 — H143 basin-geometry pathology applies to GradNorm too**: WSS_z LEAD-FLIP between EP2 (−0.105pp LEAD) and EP3 (+0.047pp LAG) on the most aggressively upweighted channel. All-WSS LEADs compressed 50-66%. Smooth weight evolution does NOT sidestep the slope-flattening trap.
+- **Finding 2 — GradNorm-discovered optimal tau_z = ~1.6, NOT > 2.0**: auto-weight plateaued at 1.631 by step 33,082, well BELOW H112's static 2.0. This DIRECTLY FALSIFIES the H143/H144/H145 ESCALATE direction. The gradient-aligned optimum is in the [1.5, 1.7] range, NOT above 2.0. **NEW Wave 40 hypothesis directly enabled: static tau_z=1.5 DE-escalation experiment.**
+- **Operational risk**: terminal ETA ~01:00Z next day exceeds SENPAI_TIMEOUT_MINUTES=1100 (22:04Z hard timeout). Recommended Option A: early-stop at step 60,000 (EP10) with test eval on EP10 EMA checkpoint.
+- VP auto-weight = 0.324 dragging val_VP toward terminal projection ~3.85% → test_VP FAILS floor 3.421%.
+- Banked findings program-positive regardless of merge: dynamic balancing falsifies static ESCALATE hypothesis.
 
 ### 3. Mirror augmentation (H148 — just assigned)
 - Zero params, zero architecture change
@@ -100,10 +100,17 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - Implementation: `torch.optim.swa_utils.AveragedModel` wrapper + SWALR scheduler activated at EP9 onward
 - **Compounds with H157**: SWA over warm-restart cycles is the canonical basin-discovery combination
 
-### 5. Wave 40 contingency cascade (depends on H144 terminal)
-- **H144 A WIN**: H144 × H145 joint escalation (tau_z=6.0 + tau_y=3.0); H144 × H147 (escalate + GradNorm); continue magnitude curve to tau_z=8.0
+### 7. NEW Wave 40 hypothesis directly enabled by H147 EP3 — static tau_z DE-escalation
+- **Hypothesis**: GradNorm-discovered optimal tau_z ≈ 1.6 plateau (H147 step 33,082 auto-weight 1.631) suggests the gradient-aligned optimum is BELOW H112's static 2.0. Try static tau_z=1.5 (single-flag DE-escalation).
+- **Mechanism class**: pure loss-weight axis, but BELOW H112 baseline (qualitatively different from H143-H145 ESCALATE)
+- **Falsifiability clean**: if alive at terminal, the entire H143/H144/H145 ESCALATE wave searched the wrong half of the magnitude space
+- **Zero-overhead**, single CLI flag change. Compatible with all other Wave 40 mechanisms.
+- **Priority**: Wave 40 HIGH — direct test of H147's most important banked finding.
+
+### 8. Wave 40 contingency cascade (depends on H144 terminal)
+- **H144 A WIN**: H144 × H145 joint escalation; H144 × H147 (escalate + GradNorm); continue magnitude curve to tau_z=8.0
 - **H144 A TIED** (val PASS, test marginal MISS): H144 × H148 mirror compound; H144 × H147 GradNorm
-- **H144 slope catastrophe**: pivot harder to H149 AdamW, H157 cosine warm restarts, fresh mechanism families (H150 EMA 0.9999 CLOSED — incompatible with 13-epoch training)
+- **H144 slope catastrophe** (most likely per H143 precedent): ESCALATE class DEAD. Pivot to: tau_z DE-escalation (priority 7), H149 AdamW (terminal pending), H157 cosine warm restarts, H164 SWA (frieren launched 12:02Z), fresh mechanism families. H150 EMA 0.9999 CLOSED — incompatible with 13-epoch training.
 
 ### Cross-channel bleed under Lion — 2-class confirmed (H148 EP2 reference error corrected)
 Bidirectionally symmetric under Lion sign-only updates:
