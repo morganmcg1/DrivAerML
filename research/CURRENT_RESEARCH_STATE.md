@@ -50,7 +50,8 @@ All seven Wave 38+39 mechanism classes exhausted:
 | Student | PR | Hypothesis | Status | Priority |
 |---|---|---|---|---|
 | frieren | #1332 | H143 tau_z=4.0 ESCALATE | **CLOSED C NULL** (test_WSS_z +0.175pp REGRESSION; first non-overhead slope-flattening) | reassigned to H164 SWA |
-| fern | #1334 | H144 tau_z=6.0 ESCALATE | **CLOSED C NULL** (terminal 13:00Z). test_WSS +0.327pp REGRESSION on primary objective; test_WSS_z +0.264pp REGRESSION on target channel. Val-side wt curve monotone-productive on WSS_z (LEAD −0.100pp) but val→test slope flattens 16× across cohort. **3-point ESCALATE class closure**: H112/H143/H144 monotone-regressive on test_WSS as tau_z escalates. | reassigning to Wave 40 tau_z DE-escalation |
+| fern | #1334 | H144 tau_z=6.0 ESCALATE | **CLOSED C NULL** (terminal 13:00Z). test_WSS +0.327pp REGRESSION on primary objective; test_WSS_z +0.264pp REGRESSION on target channel. Val-side wt curve monotone-productive on WSS_z (LEAD −0.100pp) but val→test slope flattens 16× across cohort. **3-point ESCALATE class closure**: H112/H143/H144 monotone-regressive on test_WSS as tau_z escalates. | reassigned to H165 |
+| fern (reassigned) | #1348 | **H165 tau_z=1.5 DE-escalation** | Newly assigned 13:15Z post-H144 closure. Direct test of H147 GradNorm-discovered optimal tau_z=1.631 + H143/H144 monotone test regression → DE-escalation half-line. Single-flag delta from fern's H144 verified recipe (only `--tau-z-loss-weight 6.0 → 1.5`). | **Wave 40 HIGH PRIORITY** — only experiment directly testing inverted ESCALATE-axis direction |
 | alphonse | #1337 | H145 tau_y=3.0 axis-extension | WIP EP8/13; EP7 (10:39Z) val_WSS_y LEAD coin-flip at terminal (sub-bp); val_abupt MISS gate +22bp; terminal ~15:00Z | C NULL trending; banked: tau_y direction productive but 2× insufficient magnitude |
 | edward | #1338 | H146 split WSS_y decoder | WIP EP7/13 step ~49,200 (70%). **Corrected EP6 reading (edward 11:30Z)**: val_abupt +0.078pp LAG, val_WSS_y +0.033pp LAG (smallest channel deficit — specialization real), val_WSS_z +0.166pp LAG vs H112 raw same-step. Tracks H138 trajectory exactly. Terminal ~13:30Z. | Trending C NULL — paired-class to H138 confirmed. Bank: split decoder specializes target channel but +525K overhead drags model. Architectural-split class CLOSED at +525K overhead. |
 | thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
@@ -102,14 +103,15 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - Implementation: `torch.optim.swa_utils.AveragedModel` wrapper + SWALR scheduler activated at EP9 onward
 - **Compounds with H157**: SWA over warm-restart cycles is the canonical basin-discovery combination
 
-### 7. Wave 40 PRIORITY HYPOTHESIS — static tau_z DE-escalation (now ASSIGNED to fern post-H144 closure)
+### 7. Wave 40 PRIORITY HYPOTHESIS — static tau_z DE-escalation (H165 fern ASSIGNED 13:15Z PR #1348)
 - **Hypothesis**: GradNorm-discovered optimal tau_z = 1.631 (H147 step 33,082) + H143/H144 monotone test_WSS regression from wt 2.0 upward → gradient-aligned optimum is BELOW H112's static 2.0. Static tau_z=1.5 single-flag DE-escalation, zero overhead, single recipe delta from H112 SOTA.
 - **Mechanism class**: pure loss-weight axis, BELOW H112 baseline (qualitatively different from CLOSED ESCALATE class)
 - **Two independent confirmations**: (1) H147 dynamic balancer converges to 1.6; (2) H112/H143/H144 cohort slope monotone-flattening as wt increases — extrapolation toward wt < 2.0 is the unexplored half-line
 - **Falsifiability clean**: if alive at terminal, entire H143/H144/H145 wave searched the wrong half of the magnitude space
 - **Zero-overhead**, single CLI flag change. Compatible with all other Wave 40 mechanisms.
 - **Priority**: Wave 40 HIGH — direct test of H147 banked finding + H143/H144 closure direction.
-- **Status (2026-05-26 13:10Z)**: fern PR being assigned post-H144 closure.
+- **Status (2026-05-26 13:15Z)**: H165 fern PR #1348 (draft, status:wip, base tay) awaiting student pickup. Reproduce command uses fern's verified H144 recipe form with only `--tau-z-loss-weight 6.0 → 1.5` delta.
+- **Mechanism diagnostic**: at EP9 publish, val→test slope hypothesized to STEEPEN vs H112's −0.215pp (more transfer, less val-overfit). If slope steepens, direction confirmed mechanistically even if absolute test_WSS doesn't improve.
 
 ### 8. Wave 40 frontier post H144 closure
 - **ESCALATE class CLOSED DEFINITIVELY** (H112+H143+H144 3-point cohort)
