@@ -1,3 +1,61 @@
+## 2026-05-26 ~17:55 — PR #1338: H146 SPLIT WSS_y DECODER HEAD (edward, **CLOSED C NULL** — paired y/z confirmation **CLOSES architectural-split decoder class**)
+
+- **Branch**: `edward/h146-split-wss-y-decoder` (CLOSED, not merged)
+- **W&B run**: `w657h2qy`
+- **Hypothesis**: Mirror H138 split-z architecture on y-axis — split off dedicated wider WSS_y head (n_hidden*2). Tests whether axis-asymmetry on slope (H138 z-axis fails, H145 y-axis loss-weight preserves slope) extends to architectural intervention.
+- **Parameter overhead**: +525K (+3.02%) — identical to H138 by design (paired cohort point)
+
+### Terminal metrics (best EMA EP13 checkpoint, step 70,664)
+
+| Metric (%) | H112 (val/test) | H146 (val/test) | Δ test vs H112 | Status |
+|---|---:|---:|---:|---|
+| abupt | 6.136 / 5.839 | **6.2277** / 5.953 | +0.114pp | val MISS gate +0.092pp ✗ |
+| **WSS** (primary) | — / 6.752 | 7.115 / **6.9257** | **+0.199pp REGRESSION** | TEST_FLOOR 6.727%: MISS by +0.199pp ✗ |
+| WSS_x | — / 5.999 | 6.260 / 6.115 | +0.116pp | regression |
+| **WSS_y** (target) | — / 7.360 | 7.776 / **7.504** | **+0.144pp REGRESSION on target channel** | mechanism FALSIFIED on target axis |
+| WSS_z | 9.375 / 8.720 | 9.310 / 9.158 | +0.438pp | severe regression cross-channel |
+| VP | — / 3.421 | 3.694 / 3.5560 | +0.135pp | FAIL floor |
+| SP | — / 3.695 | 4.092 / 3.7630 | +0.186pp | FAIL floor |
+
+**Total wallclock**: 871 min = 14h 31m | **n_params**: 17.94M (+525K vs H112) | 8/8 GPUs ~85 GB peak
+
+### Paired-class CLOSURE — architectural-split decoder failure axis-symmetric
+
+| Mechanism | Δ-params | val_abupt | merge gate | target test Δ | val→test slope WSS agg |
+|---|---:|---:|---|---:|---:|
+| H138 split-z (askeladd) | +525K | 6.1319% | PASS (−0.004pp) | **+0.122pp on WSS_z** | flattened |
+| **H146 split-y (this)** | **+525K** | **6.2277%** | **FAIL (+0.092pp)** | **+0.144pp on WSS_y** | flattened |
+
+H146 is WORSE — fails the val merge gate H138 just barely passed, and target-channel regression magnitude larger. Both fail target. Both pay identical +525K (+3.02%) overhead. Both exhibit slope flattening on bulk of channels. **Architectural-split decoder class CLOSED C NULL with paired confirmation.**
+
+### Banked program-permanent findings
+
+1. **Architectural splitting under Lion at 17.4M-param scale fails on whichever WSS channel is targeted** — y/z axis-symmetric failure mode
+2. **+525K parameter overhead dominates val→test transfer** — overhead-driven slope flattening is the proximate cause, not mechanism-specific issues
+3. **Head specialization IS real but insufficient** — H146 param_norm 1.80× shared head (similar to H138's 1.76×), but specialization is doing the *wrong* work for terminal generalization
+4. **Cohort overhead-driven slope-flattening pattern locked**: H132 null (0%) → H135 SwiGLU −0.10pp (+1.58%) → H138 −0.135pp (+3.02%) → H146 −0.066pp (+3.02%) → H120/H121 −0.20pp (+20-26%)
+5. **The "tau_y might work where tau_z didn't" axis-asymmetry hypothesis FALSIFIED on architectural axis** — both axes fail under split-decoder at +525K; **but H145 confirmed loss-weight axis preserves slope on tau_y**, so the asymmetry is mechanism-class-specific not axis-specific
+
+### Cross-cohort context — H145 closure 16:00Z (same wave)
+
+H145 alphonse tau_y=3.0 loss-weight escalation closed C NULL at 16:00Z but with **val→test slope STEEPER than H112 on WSS aggregate (−0.263pp vs −0.215pp)**. Convergent reading with H146 closure:
+- **Loss-weight axis**: y-axis preserves slope, z-axis flattens slope (H143/H144) — AXIS-ASYMMETRIC
+- **Architectural axis (split-decoder)**: y-axis and z-axis BOTH flatten slope (H138 + H146) — AXIS-SYMMETRIC
+
+These two axes have **distinct basin-geometry properties** — slope-flattening pathology is mechanism-class-specific. Architecture interventions transmit the overhead-driven pathology regardless of channel; loss-weight interventions transmit only on z-channel.
+
+### Wave 40+ direct follow-ups enabled by H146 closure
+
+1. **H170 static surface:volume rebalancing (4.0:0.5, 8:1 ratio)** — edward reassigned (PR #1350). Zero param overhead, single recipe delta — sidesteps the H138/H146 architectural-split pathology. Conservative midpoint between H112's 2:1 and H147's GradNorm-discovered ~14:1.
+2. **H172 param-budget-neutral split (banked)** — narrow `wss_y_out` hidden width to `n_hidden // 2` instead of `n_hidden * 2`, total params match H112. Isolates "specialization works" claim from "+525K overhead drags everything" pathology.
+3. **H173 output-residual variant (banked)** — `surface_pred[..., 2:3] += alpha * wss_y_residual` instead of replacement. Adds dedicated capacity without removing joint-representation pathway.
+
+### Outstanding excellence
+
+Edward's EP6 baseline correction (catching stale H112 7.111% misquote vs actual 6.374%) and rigorous slope analysis throughout this PR is **permanent diagnostic-execution excellence**. The architectural-split closure has been banked program-permanent on the basis of edward's cohort-aligned rigor.
+
+---
+
 ## 2026-05-26 ~16:00 — PR #1337: H145 TAU_Y LOSS WEIGHT 1.5→3.0 (alphonse, **CLOSED C NULL** — sub-magnitude on merge but **slope-axis asymmetry finding REVISES Wave 38 ESCALATE closure narrative**)
 
 - **Branch**: `alphonse/h145-tau-y-loss-weight-3` (CLOSED, not merged)

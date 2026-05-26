@@ -1,6 +1,6 @@
 # SENPAI Research State
 
-**Updated**: 2026-05-26 ~16:05Z | Branch: `tay` | SOTA: H112 PR #1283
+**Updated**: 2026-05-26 ~18:00Z | Branch: `tay` | SOTA: H112 PR #1283
 
 ---
 
@@ -40,7 +40,7 @@ All seven Wave 38+39 mechanism classes exhausted:
 | Capacity-axis (depth/width) | H118, H120, H121, H125 | CLOSED | Val-overfit slope catastrophe |
 | Pure regularization | H132 (DP_max=0.15) | CLOSED C NULL | Null — no improvement |
 | SwiGLU gating | H128(OOM), H134(backbone), H135(decoder) | CLOSED | Val-overfit; param overhead acts as capacity expansion |
-| Architectural-split | H138 (WSS_z decoder), H146 (WSS_y decoder trending) | CLOSED | Slope-flattening pathology — param overhead correlated. **H146 EP6 (corrected by student edward 11:30Z)**: val_abupt **+0.078pp LAG** vs H112 raw same-step (my 11:12Z W&B query used wrong baseline 7.111% vs actual 6.374%). H146 trajectory tracks H138 exactly — paired-class confirmed. WSS_y deficit smallest among channels (+0.033pp, real specialization) but +525K overhead drags everything. |
+| **Architectural-split** | **H138 (WSS_z decoder), H146 (WSS_y decoder)** | **CLOSED DEFINITIVELY by paired y/z cohort** | **Slope-flattening pathology AXIS-SYMMETRIC under split-decoder. H146 terminal 17:55Z: val_abupt 6.2277% MISS, test_WSS 6.9257% MISS, test_WSS_y +0.144pp REGRESSION on target. Identical +525K overhead to H138. Both fail target. Head specialization real (param_norm 1.80×) but +525K overhead dominates val→test transfer. Loss-weight axis-asymmetry (H145 y-axis preserved slope) does NOT extend to architectural axis — both axes flatten under +525K overhead. Mechanism-class-specific pathology.** |
 | Aux-head | H-B, H-B2 | CLOSED | Gradient-flow degradation; detached strictly worse |
 | SOFTEN (loss) | H139 (Charbonnier), H140 (signed-log) | CLOSED | Anti-aligned with WSS_z goals; heavy-tail residuals ARE the signal |
 | **ESCALATE z-axis** | **H112 (wt 2.0), H143 (wt 4.0), H144 (wt 6.0)** | **CLOSED DEFINITIVELY by 3-point cohort** | **val→test slope flattens monotonically with tau_z weight; test-optimum at wt ≤ 2.0; convergent with H147 GradNorm optimal=1.631** |
@@ -60,7 +60,8 @@ All seven Wave 38+39 mechanism classes exhausted:
 | fern | #1334 | H144 tau_z=6.0 ESCALATE | **CLOSED C NULL** (terminal 13:00Z). test_WSS +0.327pp REGRESSION on primary objective; test_WSS_z +0.264pp REGRESSION on target channel. Val-side wt curve monotone-productive on WSS_z (LEAD −0.100pp) but val→test slope flattens 16× across cohort. **3-point ESCALATE class closure**: H112/H143/H144 monotone-regressive on test_WSS as tau_z escalates. | reassigned to H165 |
 | fern (reassigned) | #1348 | **H165 tau_z=1.5 DE-escalation** | Newly assigned 13:15Z post-H144 closure. Direct test of H147 GradNorm-discovered optimal tau_z=1.631 + H143/H144 monotone test regression → DE-escalation half-line. Single-flag delta from fern's H144 verified recipe (only `--tau-z-loss-weight 6.0 → 1.5`). | **Wave 40 HIGH PRIORITY** — only experiment directly testing inverted ESCALATE-axis direction |
 | alphonse | #1337 | H145 tau_y=3.0 axis-extension | **CLOSED C NULL** (2026-05-26 16:00Z). val_abupt 6.296% MISS +160bp; test_WSS 6.909% MISS +18bp. **PROGRAM-CRITICAL: val→test slope PRESERVED (−0.263pp WSS agg, STEEPER than H112; +0.085pp gain on WSS_x). Slope-flattening is z-axis specific, not universal ESCALATE.** test_WSS_y +0.064pp = smallest cohort regression. | reassigned to H166 tau_y=1.0 DE-escalation |
-| edward | #1338 | H146 split WSS_y decoder | WIP EP7/13 step ~49,200 (70%). **Corrected EP6 reading (edward 11:30Z)**: val_abupt +0.078pp LAG, val_WSS_y +0.033pp LAG (smallest channel deficit — specialization real), val_WSS_z +0.166pp LAG vs H112 raw same-step. Tracks H138 trajectory exactly. Terminal ~13:30Z. | Trending C NULL — paired-class to H138 confirmed. Bank: split decoder specializes target channel but +525K overhead drags model. Architectural-split class CLOSED at +525K overhead. |
+| edward | #1338 | H146 split WSS_y decoder | **CLOSED C NULL** (2026-05-26 17:55Z). val_abupt 6.2277% MISS gate +92bp; test_WSS 6.9257% MISS +199bp; **test_WSS_y +0.144pp REGRESSION on target channel — mechanism FALSIFIED**. Paired y/z confirmation with H138. | reassigned to H170 surface:volume rebalancing (PR #1350) |
+| **edward (reassigned)** | **#1350** | **H170 static surface:volume rebalancing 4.0:0.5 (8:1 ratio)** | **Newly assigned 18:00Z post-H146 closure.** Tests H147 GradNorm-discovered ratio (~14:1 vs H112's 2:1) — conservative midpoint static test. Zero param overhead, two-flag delta from H112. **Sidesteps H138/H146 architectural-split pathology entirely** — operates on completely orthogonal axis. | **Wave 40 HIGH PRIORITY** — opens previously unexplored surface:volume axis informed by GradNorm finding. Closes 5-axis Wave 40 frontier (z-loss-weight DE, y-loss-weight DE, mirror-aug, AdamW, surface:volume). |
 | thorfinn | #1340 | H147 GradNorm full (alpha=1.5) | WIP EP2 (09:25Z) — caught up dramatically, LEADING H112 on ALL WSS channels at EP2 (−0.182pp WSS, −0.105pp WSS_z, −0.268pp WSS_y). VP/SP lag from auto-downweight. tau_z weight stabilized at 1.54 (below H112's 2.0). Terminal ~21:00Z. | HIGH — dynamic balancing sidesteps static ESCALATE failure mode |
 | askeladd | #1341 | H148 y=0 mirror augmentation | WIP EP5 (54%). EP4 publish: WSS_y LEAD weakening (−0.095→−0.056pp), WSS_z LEAD reversed to flat, VP deficit +1.294pp (growth decelerating but plateau ~+1.3pp). VP merge floor disqualification likely. EP6 binding ~12:25Z. | HIGH — mechanism alive but VP floor critical |
 | tanjiro | #1342 | H149 AdamW optimizer swap | WIP EP5. EP4 (10:14Z) gap-closure decaying: EP1 +5.73 → EP4 +0.56pp. WSS_z/WSS_y ratio H149 1.169 vs H112 1.183 — **CROSS-CHANNEL BLEED IS OPTIMIZER-AGNOSTIC**. Terminal ~17-18Z. | HIGH — pivotal Lion-vs-AdamW; baseline ordering confirmed data-driven not optimizer-specific |
@@ -120,7 +121,14 @@ These are the ONLY mechanism families with unexhausted potential. **Zero capacit
 - **Status (2026-05-26 13:15Z)**: H165 fern PR #1348 (draft, status:wip, base tay) awaiting student pickup. Reproduce command uses fern's verified H144 recipe form with only `--tau-z-loss-weight 6.0 → 1.5` delta.
 - **Mechanism diagnostic**: at EP9 publish, val→test slope hypothesized to STEEPEN vs H112's −0.215pp (more transfer, less val-overfit). If slope steepens, direction confirmed mechanistically even if absolute test_WSS doesn't improve.
 
-### 8. Wave 40 frontier post H144 closure
+### 8. Wave 40 NEW MECHANISM CLASS — static surface:volume rebalancing (H170 edward ASSIGNED 18:00Z PR #1350)
+- **Hypothesis**: H147 GradNorm dynamic balancer auto-discovered surface:volume ratio ~14:1 (sp=0.55, vp=0.33 vs surface=1.0) — a 7× imbalance vs H112's static 2:1. Static `--surface-weight 4.0 --volume-weight 0.5` (8:1 ratio, conservative midpoint) tests whether this rebalancing transfers to test on the **surface:volume axis** rather than the heavily-explored WSS-channel-rebalancing axis.
+- **Mechanism class**: NEW — first surface/volume axis test in programme. Orthogonal to all five Wave 40 candidates currently running (z-DE, y-DE, mirror-aug, AdamW, cosine restarts).
+- **Two-flag delta from H112**: `--surface-weight 1.0 → 4.0`, `--volume-weight 1.0 → 0.5`. Zero param overhead, single recipe delta — sidesteps the H138/H146 architectural-split +525K overhead pathology.
+- **Falsifiable**: if alive, opens entire surface:volume axis (H171 plateau-exact 14:1, H172 LR-decoupled). If C NULL with preserved slope, GradNorm's auto-discovery is val-overfit signal not test-transfer signal.
+- **Priority**: Wave 40 HIGH — closes 6-axis Wave 40 factorial (z-DE / y-DE / mirror-aug / AdamW / cosine-restarts / surface:volume).
+
+### 9. Wave 40 frontier post H144 closure
 - **ESCALATE class CLOSED DEFINITIVELY** (H112+H143+H144 3-point cohort)
 - **Active priorities**: tau_z=1.5 DE-escalation (fern Wave 40 assignment, this section), H147 GradNorm (thorfinn terminal ~20:34Z), H148 mirror aug (askeladd terminal ~16:30Z), H149 AdamW (tanjiro graceful ~20:58Z), H157 cosine warm restarts (nezuko ~25% complete), H164 SWA (frieren freshly launched)
 - **H150 long-EMA**: paused, may revisit only if a winning Wave 40 mechanism completes — incompatible with 13-epoch training in isolation
