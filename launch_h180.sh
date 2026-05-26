@@ -22,7 +22,7 @@ exec torchrun --standalone --nproc-per-node=8 train.py \
     --optimizer adamw \
     --use-lookahead --lookahead-k 5 --lookahead-alpha 0.5 \
     --amp-mode bf16 --no-compile-model \
-    --kill-thresholds "10862:val_primary/abupt_axis_mean_rel_l2_pct<33.0,32592:val_primary/abupt_axis_mean_rel_l2_pct<10.0,48897:val_primary/abupt_axis_mean_rel_l2_pct<7.5" \
-    --wandb-name tanjiro/h180-lookahead-adamw \
+    --kill-thresholds "32592:val_primary/abupt_axis_mean_rel_l2_pct<13.0,48897:val_primary/abupt_axis_mean_rel_l2_pct<9.0" \
+    --wandb-name tanjiro/h180-lookahead-adamw-v2 \
     --wandb-group h180-lookahead-adamw \
     --agent tanjiro
