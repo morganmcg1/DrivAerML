@@ -117,6 +117,7 @@ class Config:
     eval_raw_vs_ema: bool = False
     lr_warmup_epochs: int = 0
     lr_cosine_t_max: int = 0
+    lr_cosine_t_mult: int = 1  # T_mult for CosineAnnealingWarmRestarts; 1 = fixed-period restarts, 2 = doubling periods
     lr_min: float = 1e-6
     grad_clip_norm: float = 1.0
     gradient_log_every: int = 250
